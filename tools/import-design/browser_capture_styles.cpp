@@ -219,7 +219,6 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
     if (!snapshot.isObject()) return std::nullopt;
 
     CapturedStyleIndex index;
-    index.document_canvas_paint_ = detail::extract_document_canvas_paint(snapshot);
 
     // Without the request order the style rows cannot be read at all: entry N
     // is meaningless on its own. Refusing here is what keeps an older capture
@@ -363,7 +362,6 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
         if (paint_orders.isArray() && i < paint_orders.size())
             index.layout_paint_order_[i] = json_int(paint_orders[at], -1);
         if (node < 0) continue;
-        index.node_to_layout_[node] = at;
         index.layout_to_node_[i] = node;
     }
 
@@ -392,6 +390,20 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
             box.height = entry[3].getWithDefault<double>(0.0);
             index.layout_bounds_[i] = box;
         }
+    }
+
+    for (size_t at = 0; at < index.layout_to_node_.size(); ++at) {
+        const int node = index.layout_to_node_[at];
+        if (node < 0) continue;
+        const auto has_area = [&](size_t row) {
+            const auto& box = index.layout_bounds_[row];
+            return box.width > 0.0 && box.height > 0.0;
+        };
+        const auto [current, inserted] =
+            index.node_to_layout_.try_emplace(node, static_cast<int>(at));
+        if (!inserted && has_area(at) &&
+            !has_area(static_cast<size_t>(current->second)))
+            current->second = static_cast<int>(at);
     }
 
     // Text fragments. `includeDOMRects` is what makes Chrome emit these, and a
@@ -530,6 +542,10 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
     }
 
     if (index.style_rows_.empty()) return std::nullopt;
+    // The canvas proof classifies each layout row against the node's own row,
+    // so it runs once that table exists.
+    index.document_canvas_paint_ =
+        detail::extract_document_canvas_paint(snapshot, index);
     return index;
 }
 
@@ -640,7 +656,7 @@ std::vector<CapturedTextBox> coalesce_text_line_fragments(
     return lines;
 }
 
-std::optional<int> CapturedStyleIndex::layout_for_node(int node_index) const {
+std::optional<int> CapturedStyleIndex::own_layout_row(int node_index) const {
     const auto it = node_to_layout_.find(node_index);
     if (it == node_to_layout_.end()) return std::nullopt;
     return it->second;
@@ -666,7 +682,7 @@ std::optional<CapturedBox> CapturedStyleIndex::bounds_for(
     int backend_node_id) const {
     const auto node = backend_to_node_.find(backend_node_id);
     if (node == backend_to_node_.end()) return std::nullopt;
-    const auto layout = layout_for_node(node->second);
+    const auto layout = own_layout_row(node->second);
     if (!layout) return std::nullopt;
     return layout_bounds_[static_cast<size_t>(*layout)];
 }
@@ -741,7 +757,7 @@ CapturedStyleIndex::inherited_type_scale(int node_index) const {
     int cursor = parent_of(node_index);
     for (size_t steps = 0; steps < parent_index_.size() && cursor >= 0;
          ++steps, cursor = parent_of(cursor)) {
-        const auto layout = layout_for_node(cursor);
+        const auto layout = own_layout_row(cursor);
         if (!layout) continue;
         const auto styles = styles_for_layout(*layout);
         const auto it = styles.find("transform");
@@ -905,7 +921,7 @@ std::map<std::string, std::string> CapturedStyleIndex::styles_for(
             break;
         }
     }
-    if (!chosen) chosen = layout_for_node(node->second);
+    if (!chosen) chosen = own_layout_row(node->second);
     if (!chosen) return computed;
 
     const auto& row = style_rows_[static_cast<size_t>(*chosen)];

@@ -470,6 +470,21 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual([node.tag for node in result["missing"]], ["::before"])
         self.assertLess(result["score"], LAB.PROMOTION_THRESHOLDS["structural"])
 
+    def test_own_layout_rows_agree_with_the_cpp_reader_fixture(self) -> None:
+        # test_browser_capture_ir.cpp asserts CapturedStyleIndex::own_layout_row
+        # against the same expected rows, so the two readers share one rule.
+        fixture = REPO / "test/fixtures/browser-capture-layout-rows"
+        snapshot = json.loads((fixture / "dom-snapshot.json").read_text())
+        expected = json.loads((fixture / "expected-own-rows.json").read_text())
+        rows = LAB.principal_layout_rows(snapshot["documents"][0]["layout"])
+        self.assertEqual({str(node): row for node, row in rows.items()},
+                         expected["own_rows"])
+        bounds = snapshot["documents"][0]["layout"]["bounds"]
+        browser = {node.index: node.bounds for node in LAB.browser_nodes(snapshot)}
+        for node in (4, 5):
+            self.assertEqual(browser[node],
+                             tuple(float(v) for v in bounds[expected["own_rows"][str(node)]]))
+
     def test_an_all_empty_node_still_reports_its_first_row(self) -> None:
         rows = LAB.principal_layout_rows({
             "nodeIndex": [0, 1, 1],
@@ -1635,6 +1650,21 @@ class GeometryGateTests(unittest.TestCase):
 
     def test_placement_within_half_pixel_passes(self) -> None:
         self.assertTrue(self.build(recorded_shift=0.4, html_shift=-0.4)["gate"]["ok"])
+
+    def test_split_inline_root_reads_its_own_row_not_a_continuation(self) -> None:
+        # An inline authored root broken across lines carries one layout row
+        # per line box. The placement proof must read the same row as the
+        # browser node it is matched to; a continuation row starts at the
+        # next line's left edge and would fail a correctly placed panel.
+        snapshot = surface_snapshot(self.FRAME, [self.CHILD])
+        layout = snapshot["documents"][0]["layout"]
+        root_row = layout["nodeIndex"].index(3)
+        layout["nodeIndex"].insert(root_row + 1, 3)
+        layout["bounds"].insert(root_row + 1, [0.0, 240.0, 64.0, 18.0])
+        surface = LAB.dom_authored_surface(snapshot)
+        self.assertEqual(surface["bounds"], self.FRAME)
+        browser = {node.index: node for node in LAB.browser_nodes(snapshot)}
+        self.assertEqual(surface["bounds"], browser[surface["index"]].bounds)
 
     def test_missing_dom_authored_root_fails_closed(self) -> None:
         placement = LAB.frame_placement_check({"documents": []}, {}, {}, [])

@@ -751,6 +751,36 @@ TEST_CASE("an empty pseudo-element's generated row keeps the document canvas",
                                 "root-canvas-repeated-pseudo"));
 }
 
+TEST_CASE("a node's own layout row is its first row with area",
+          "[import-design][browser-capture][ir][layout-rows]") {
+    // The same snapshot and expected rows pin the differential lab's Python
+    // reader (test/test_importer_differential_lab.py), so the two languages
+    // cannot drift onto different rules.
+    const fs::path root = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) / "browser-capture-layout-rows";
+    const auto index = pulp::import_design::CapturedStyleIndex::load(root / "dom-snapshot.json");
+    REQUIRE(index);
+    std::ifstream input(root / "expected-own-rows.json", std::ios::binary);
+    const std::string text{std::istreambuf_iterator<char>(input), {}};
+    const auto parsed = choc::json::parse(text);
+    const auto expected = parsed["own_rows"];
+    REQUIRE(expected.size() == 6);
+    for (int node = 0; node < index->node_count(); ++node) {
+        INFO("node " << node);
+        const auto key = std::to_string(node);
+        if (expected.hasObjectMember(key)) {
+            REQUIRE(index->own_layout_row(node));
+            CHECK(*index->own_layout_row(node) == expected[key].getWithDefault<int>(-1));
+        } else {
+            CHECK_FALSE(index->own_layout_row(node));
+        }
+    }
+    // The split inline's lookups read its own fragment, not a continuation.
+    const auto span = index->bounds_for(6);
+    REQUIRE(span);
+    CHECK(span->left == 20.0);
+    CHECK(span->top == 58.0);
+}
+
 namespace {
 
 // The frozen root-canvas capture plus one `<canvas>` (backend 9002) inside its

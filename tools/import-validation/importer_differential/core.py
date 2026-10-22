@@ -825,10 +825,9 @@ def dom_authored_surface(snapshot: dict[str, Any]) -> dict[str, Any] | None:
     parents = raw_nodes.get("parentIndex", [])
     types = raw_nodes.get("nodeType", [])
     names = raw_nodes.get("nodeName", [])
-    layout_by_node = {
-        node_index: layout_index
-        for layout_index, node_index in enumerate(layout.get("nodeIndex", []))
-    }
+    # The same own-box rule browser_nodes reads, so the proof's root box is
+    # the box the matched browser node carries, not a later continuation row.
+    layout_by_node = principal_layout_rows(layout)
     raw_bounds = layout.get("bounds", [])
     body = next((index for index, node_type in enumerate(types)
                  if node_type == 1

@@ -150,6 +150,20 @@ class CapturedStyleIndex {
     /// The box Chrome laid the element out at, in page coordinates.
     std::optional<CapturedBox> bounds_for(int backend_node_id) const;
 
+    /// The layout row that carries a DOM node's own box, or nullopt when the
+    /// node produced no layout object.
+    ///
+    /// Chromium can emit several layout rows for one node: a pseudo-element's
+    /// box is followed by a zero-size row for its generated content, a list
+    /// marker by its paint record, and a split inline by one row per line box.
+    /// The own row is the first with positive area; a node whose rows are all
+    /// empty keeps its first row. Every per-node lookup in this index and the
+    /// document-canvas proof read this one rule. The differential lab's
+    /// `principal_layout_rows` (tools/import-validation/importer_differential/
+    /// snapshot.py) is its Python twin; test/fixtures/browser-capture-layout-rows
+    /// pins both to the same answer.
+    std::optional<int> own_layout_row(int node_index) const;
+
     /// The inline line boxes Chrome broke one layout node's text across, in
     /// document order.
     ///
@@ -261,7 +275,6 @@ class CapturedStyleIndex {
 
   private:
     std::optional<detail::DocumentCanvasPaint> document_canvas_paint_;
-    std::optional<int> layout_for_node(int node_index) const;
     bool is_descendant(int node_index, int ancestor_index) const;
     std::string string_at(int index) const;
 
@@ -277,7 +290,7 @@ class CapturedStyleIndex {
     std::unordered_map<int, std::string> control_theme_;  ///< node → verdict
     std::unordered_map<int, int> backend_to_node_;
     std::vector<int> node_to_backend_;               ///< node index → backend
-    std::unordered_map<int, int> node_to_layout_;
+    std::unordered_map<int, int> node_to_layout_;    ///< node → own row
     std::vector<int> layout_to_node_;                ///< layout index → node
     std::vector<int> layout_text_;                   ///< layout index → string
     /// Text with only browser-omitted, same-line collapsible whitespace

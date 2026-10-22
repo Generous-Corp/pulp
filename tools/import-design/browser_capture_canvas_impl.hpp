@@ -2,6 +2,7 @@
 
 // Private implementation: included only by the style loader translation unit.
 #include "browser_capture_canvas.hpp"
+#include "browser_capture_styles.hpp"
 
 #include <choc/containers/choc_Value.h>
 
@@ -22,8 +23,12 @@ namespace pulp::import_design::detail {
 
 // This is an optional paint proof, not snapshot validation. Unsupported or
 // incomplete evidence must preserve the importer's existing output.
+//
+// `captured` is the index parsed from the same snapshot; its `own_layout_row` is
+// the rule that says which of a node's layout rows is the node's own box.
 inline std::optional<DocumentCanvasPaint>
-extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
+extract_document_canvas_paint(const choc::value::ValueView& snapshot,
+                              const CapturedStyleIndex& captured) {
     try {
         const auto member = [](const choc::value::ValueView& value, const char* key) {
             return value.isObject() && value.hasObjectMember(key) ? value[key]
@@ -136,7 +141,6 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
             layout_nodes.size() != rows.size() || rows.size() != bounds.size())
             return std::nullopt;
         std::map<std::string, std::string> html_style, body_style;
-        std::unordered_set<int> laid_out;
         std::map<int, int> marker_rows;
         std::map<int, int> generated_rows;
         int html_row = -1;
@@ -158,14 +162,15 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
                                       ? strings[tag_index].toString()
                                       : std::string{};
             const bool repeated_marker = tag_name == "::marker";
-            // A ::before/::after with empty generated content is followed by a
-            // zero-size row for that content. It adds no paint and is valid
-            // evidence; any repeated row that has area is still a conflict.
+            // A ::before/::after with empty generated content has a
+            // zero-size row for that content beside its own box. It adds no
+            // paint and is valid evidence; any other row with area that is not
+            // the node's own is still a conflict.
             const bool empty_generated_row =
                 tag_name.rfind("::", 0) == 0 && !repeated_marker && box.isArray() &&
                 box.size() == 4 && number(box[2]) == 0 && number(box[3]) == 0;
-            const bool first_row = node >= 0 && laid_out.insert(node).second;
-            if (node < 0 || (!first_row && !repeated_marker && !empty_generated_row) ||
+            const bool own_row = node >= 0 && captured.own_layout_row(node) == at;
+            if (node < 0 || (!own_row && !repeated_marker && !empty_generated_row) ||
                 !row.isArray() ||
                 (row.size() != names.size() && !(number(types[node]) == 9 && row.size() == 0)) ||
                 !box.isArray() || box.size() != 4)
@@ -182,11 +187,11 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot) {
                                   : body_style)[names[static_cast<int>(j)].toString()] =
                         strings[value].toString();
             }
-            if (node == html)
+            if (node == html && own_row)
                 html_row = at;
             if (repeated_marker && ++marker_rows[node] > 2)
                 return std::nullopt;
-            if (!repeated_marker && !first_row && ++generated_rows[node] > 1)
+            if (!repeated_marker && !own_row && ++generated_rows[node] > 1)
                 return std::nullopt;
         }
         if (html_row < 0 || body_style.empty())
