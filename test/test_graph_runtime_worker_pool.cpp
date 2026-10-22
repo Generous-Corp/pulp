@@ -13,6 +13,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <iterator>
 #include <mutex>
 #include <numeric>
 #include <thread>
@@ -834,30 +835,44 @@ TEST_CASE("WorkerPool rapid back-to-back batches from a separate thread are race
     // process_parallel fires several run() calls in quick succession (one per
     // level) within a single audio block; mimic that exactly: start on this
     // thread, then a driver fires 3 tiny back-to-back batches per "block", many
-    // times. width(8) < workers(16) leaves participant 0 + even workers with
-    // empty ranges, matching the wide-level partition.
+    // times. Widths below the 16 participants leave participant 0 and several
+    // workers with empty ranges, matching the wide-level partition.
+    //
+    // Each level has its own width and context. A participant still reading one
+    // batch when the next is published runs a range of the wrong width against
+    // the wrong context, so the barrier is checked by run counts rather than
+    // only by TSan: every run() must have run its own level's tasks exactly
+    // once by the time it returns, and no level may gain a run afterwards.
+    //
+    // The driver fires a fixed number of blocks and the test joins it, so
+    // progress is proved by completion rather than by a deadline: a starved
+    // host only makes the test slower. A pool that stops progressing never
+    // completes, which the ctest timeout reports.
     GraphRuntimeWorkerPool pool;
     REQUIRE(pool.start(16));
-    SquareCtx ctx;
-    ctx.out.assign(8, 0);
-    std::atomic<bool> stop{false};
-    std::atomic<std::uint64_t> blocks{0};
-    Signal progressed;
+    constexpr std::uint32_t kBlocks = 200;
+    constexpr std::uint32_t kLevelWidths[] = {8, 3, 13};
+    constexpr std::size_t kLevels = std::size(kLevelWidths);
+    SquareCtx levels[kLevels];
+    for (std::size_t level = 0; level < kLevels; ++level)
+        levels[level].out.assign(kLevelWidths[level], 0xFFFFFFFFu);
+    std::uint32_t miscounted_batches = 0;
     std::thread driver([&] {
-        while (!stop.load(std::memory_order_relaxed)) {
-            pool.run(8, square_task, &ctx);
-            pool.run(8, square_task, &ctx);
-            pool.run(8, square_task, &ctx);
-            blocks.fetch_add(1, std::memory_order_relaxed);
-            progressed.publish();
+        for (std::uint32_t block = 0; block < kBlocks; ++block) {
+            for (std::size_t level = 0; level < kLevels; ++level) {
+                auto& ctx = levels[level];
+                const auto before = ctx.runs.load(std::memory_order_relaxed);
+                pool.run(kLevelWidths[level], square_task, &ctx);
+                if (ctx.runs.load(std::memory_order_relaxed) - before != kLevelWidths[level])
+                    ++miscounted_batches;
+            }
         }
     });
-    // The first block includes the first batch: every one of the 15 workers
-    // must be scheduled to acknowledge the workgroup and then to join each of
-    // three barriers. On a loaded host that alone can take more than ten
-    // seconds, so this waits on the first-batch hang guard.
-    CHECK(progressed.wait(kFirstBatchTimeout));
-    CHECK(blocks.load() > 0);
-    stop.store(true, std::memory_order_relaxed);
     driver.join();
+    CHECK(miscounted_batches == 0);
+    for (std::size_t level = 0; level < kLevels; ++level) {
+        CHECK(levels[level].runs.load() == kBlocks * kLevelWidths[level]);
+        for (std::uint32_t i = 0; i < kLevelWidths[level]; ++i)
+            CHECK(levels[level].out[i] == i * i);
+    }
 }
