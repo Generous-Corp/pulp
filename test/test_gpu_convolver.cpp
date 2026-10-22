@@ -10,6 +10,7 @@
 
 #include "detail/gpu_convolver_test_access.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include "support/shared_io_loss_provider.hpp"
 

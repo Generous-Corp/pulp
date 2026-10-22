@@ -191,6 +191,9 @@ class GpuAudioTransport {
     GpuAudioCapabilityReport capability_report() const noexcept;
 
   private:
+    // Undo the worker-pipelining opt-in prepare() bound, if any. Host thread,
+    // no worker running.
+    void release_pipeline_hosting() noexcept;
     using TrialDeliveryFn = void (*)(void*, std::uint64_t, std::uint8_t, std::uint64_t,
                                      std::uint64_t, std::uint64_t) noexcept;
     friend bool configure_gpu_audio_transport_trial_observer(GpuAudioTransport&, void*,

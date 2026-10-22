@@ -48,7 +48,6 @@ class GpuConvolver;
 namespace detail {
 struct RealtimeGpuHealth;
 struct GpuConvolverTestAccess;
-bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept;
 struct SharedIoProviderIdentity;
 struct GpuConvolverTrialConfig;
 struct SharedIoTraceRecord;
@@ -363,6 +362,9 @@ class GpuConvolver : public GpuAudioNode {
     // non-finite readback), else None. A single late block latches nothing.
     // Any thread; the public status accessor reads it.
     GpuAudioRecoveryReason staged_latched_reason() const noexcept;
+    // The transport's worker-pipelining opt-in, bound through
+    // bind_realtime_path(); `self` is the GpuConvolver.
+    static bool set_staged_pipeline_hosting(void* self, bool hosted) noexcept;
     friend bool
     detail::configure_gpu_convolver_trial(GpuConvolver&,
                                           const detail::GpuConvolverTrialConfig&) noexcept;
@@ -373,7 +375,6 @@ class GpuConvolver : public GpuAudioNode {
         GpuConvolver&, std::vector<detail::SharedIoTraceAdmission>&) noexcept;
     friend std::uint64_t detail::gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
     friend struct detail::GpuConvolverTestAccess;
-    friend bool detail::set_worker_pipeline_hosting(GpuAudioNode*, bool) noexcept;
 
     struct SharedIoState;
 

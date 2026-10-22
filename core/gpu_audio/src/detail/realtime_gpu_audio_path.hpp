@@ -93,6 +93,7 @@ struct RealtimeGpuNodePath {
 };
 
 using RealtimeGpuIdentityFn = SharedIoProviderIdentity (*)(const void*) noexcept;
+using RealtimeGpuPipelineHostingFn = bool (*)(void*, bool hosted) noexcept;
 
 // What a node tells the transport about its realtime path. Filled by
 // GpuAudioNode::bind_realtime_path(), so the transport never names node types.
@@ -104,6 +105,10 @@ struct RealtimeGpuNodeBinding {
     // Non-RT: the identity reported by the provider the node prepared.
     const void* identity_context = nullptr;
     RealtimeGpuIdentityFn identity = nullptr;
+    // Control thread, no worker running: the transport's worker-pipelining
+    // opt-in (see worker_pipeline_hosting.hpp). Null for a node without one.
+    void* pipeline_context = nullptr;
+    RealtimeGpuPipelineHostingFn pipeline_hosting = nullptr;
 };
 
 RealtimeGpuNodeBinding realtime_gpu_node_binding(GpuAudioNode* node) noexcept;

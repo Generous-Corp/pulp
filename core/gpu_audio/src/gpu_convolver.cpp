@@ -790,6 +790,8 @@ detail::SharedIoProviderIdentity GpuConvolver::provider_identity_for_diagnostics
 }
 
 bool GpuConvolver::bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept {
+    binding.pipeline_context = this;
+    binding.pipeline_hosting = &GpuConvolver::set_staged_pipeline_hosting;
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     binding.identity_context = this;
     binding.identity = [](const void* self) noexcept {
@@ -803,11 +805,8 @@ bool GpuConvolver::bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) n
                         .delivered = &GpuConvolver::complete_realtime_shared_io,
                         .next_sequence = &GpuConvolver::next_realtime_shared_io_sequence,
                         .health = &GpuConvolver::realtime_shared_io_health};
-    return true;
-#else
-    (void)binding;
-    return false;
 #endif
+    return true;
 }
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
@@ -1443,10 +1442,9 @@ void GpuConvolver::configure_staged_pipeline() {
     staged.pending_id = 0;
 }
 
-namespace detail {
-bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
-    auto* convolver = dynamic_cast<GpuConvolver*>(node);
-    if (convolver == nullptr || !convolver->staged_readback_)
+bool GpuConvolver::set_staged_pipeline_hosting(void* self, bool hosted) noexcept {
+    auto* convolver = static_cast<GpuConvolver*>(self);
+    if (!convolver->staged_readback_)
         return false;
     auto& staged = *convolver->staged_readback_;
     if (staged.transport_hosted == hosted)
@@ -1463,7 +1461,6 @@ bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
     }
     return true;
 }
-} // namespace detail
 
 std::uint64_t GpuConvolver::staged_gpu_blocks() const noexcept {
     return staged_readback_->gpu_blocks;

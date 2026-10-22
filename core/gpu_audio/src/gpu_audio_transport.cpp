@@ -4,7 +4,6 @@
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
-#include "detail/worker_pipeline_hosting.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -58,6 +57,11 @@ struct GpuAudioTransportDiagnostics {
     // Host-written at prepare/release, callback-read: the prepared node's
     // primary path is its CPU model, so a CPU-delivered block is not a miss.
     bool cpu_primary = false;
+    // Host-only, prepare/release: the worker-pipelining hook a hosted node
+    // bound at prepare(), so release() undoes exactly that opt-in without
+    // dispatching on the node again. Null when the node does not pipeline.
+    void* pipeline_context = nullptr;
+    RealtimeGpuPipelineHostingFn pipeline_hosting = nullptr;
 };
 
 } // namespace detail
@@ -108,6 +112,14 @@ void GpuAudioTransport::publish_prepared_configuration() noexcept {
     }
 }
 
+void GpuAudioTransport::release_pipeline_hosting() noexcept {
+    auto& d = *diagnostics_;
+    if (d.pipeline_hosting != nullptr)
+        (void)d.pipeline_hosting(d.pipeline_context, false);
+    d.pipeline_context = nullptr;
+    d.pipeline_hosting = nullptr;
+}
+
 bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     release();
     if (node == nullptr)
@@ -117,15 +129,22 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     // node that pipelines declares worker_pipeline_blocks only while hosted.
     // Undone here, while the node is known alive, if preparation fails or the
     // node does not pipeline; release() undoes it only for a pipelining node.
-    detail::set_worker_pipeline_hosting(node, true);
+    {
+        const auto binding = detail::realtime_gpu_node_binding(node);
+        if (binding.pipeline_hosting != nullptr &&
+            binding.pipeline_hosting(binding.pipeline_context, true)) {
+            diagnostics_->pipeline_context = binding.pipeline_context;
+            diagnostics_->pipeline_hosting = binding.pipeline_hosting;
+        }
+    }
     struct HostingGuard {
-        GpuAudioNode* node;
+        GpuAudioTransport& transport;
         bool keep = false;
         ~HostingGuard() {
             if (!keep)
-                detail::set_worker_pipeline_hosting(node, false);
+                transport.release_pipeline_hosting();
         }
-    } hosting{node};
+    } hosting{*this};
 
     // The descriptor is the single source of truth for channels/block/latency.
     const GpuAudioNodeDescriptor desc = node->descriptor(); // host thread — may allocate
@@ -330,10 +349,10 @@ void GpuAudioTransport::release() noexcept {
     rejected_input_ptrs_.clear();
     rejected_output_ptrs_.clear();
     // The worker has stopped: return a pipelining node to block-in,
-    // block-out use. Only such a node is touched here; it must outlive this
-    // call (documented on GpuConvolver). Any other node may already be gone.
-    if (pipeline_hosted_ && node_ != nullptr)
-        detail::set_worker_pipeline_hosting(node_, false);
+    // block-out use. Only such a node is touched here; any other node may
+    // already be gone.
+    if (pipeline_hosted_)
+        release_pipeline_hosting();
     pipeline_hosted_ = false;
     node_ = nullptr;
     realtime_gpu_context_ = nullptr;

@@ -693,16 +693,6 @@ class RealtimeHookNode : public GpuAudioNode {
 
 } // namespace pulp::gpu_audio::test_detail
 
-namespace pulp::gpu_audio::detail {
-
-// This suite links the transport without the GPU nodes; none of its nodes
-// takes part in worker pipelining.
-bool set_worker_pipeline_hosting(GpuAudioNode*, bool) noexcept {
-    return false;
-}
-
-} // namespace pulp::gpu_audio::detail
-
 TEST_CASE("GpuAudioTransport capability report is an honest staged snapshot",
           "[gpu_audio][transport][capability]") {
     constexpr uint32_t BS = 32;
