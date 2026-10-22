@@ -408,7 +408,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             ),
         }
         for include, fingerprint in [
-            ("pulp/signal/compressor.hpp", "sha256:9bf4c81430a11eedaae9e69b19dd8c5ce9fd5c50191e111fe86c3cada3e73fb3"),
+            ("pulp/signal/compressor.hpp", "sha256:cebb468e5290b1d2f019cf0b2e256a57e6028f1e48981abc1e26bb52aa73a907"),
             ("pulp/signal/diode_bridge_compressor.hpp", "sha256:2384a18231c9cfcff6b8823613050334776113aac5e6c7de76f6f3cd44e942a3"),
             ("pulp/signal/feedforward_compressor.hpp", "sha256:afcd1e63df356725f2256c0b449900c894e1120f016ac511512cc94b11263524"),
             ("pulp/signal/fet_compressor.hpp", "sha256:45e9524c1ca8d7a5e5a3c7e18c997710e0d5a13b05a5c3c2717f7640c5dd03ee"),
@@ -773,7 +773,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:0819835609a2b5287293638d869edac03e2e9d916d90ca98bb77e5b94289e9be",
+        "fingerprint": "sha256:20be67408b047261a5ae3c472cf08b5283b2bb53e205b3580d5d4caab95b567a",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -784,7 +784,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/ladder_filter.hpp",
-        "fingerprint": "sha256:1c586ff41aceec5c574002dbb5d9ae8b7d4a052c5e605a5fd27988fc7d7a7399",
+        "fingerprint": "sha256:a8171956549c9c2f1991c8a92c6f4d668a822d14df96d1f6850f0657e233d957",
         "disposition": "capability_support",
         "capability_keys": ["signal.drum-tom-voice"],
         "rationale": (
@@ -804,7 +804,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:938e359bcd792fb4b8d4205d94ec5ab2db6684ec99ea1f927a417539cb09c55b",
+        "fingerprint": "sha256:4f436966a7378ef4e5e18716657ee66f4556bdf0e6a7f0fa6815c9d1c1600398",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
@@ -856,7 +856,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:429d4f7631c77db36e446bb91359d053059dd767f123d9e45dffd96efa4105e5",
+        "fingerprint": "sha256:605bf3df3ea2937f290f83e8430baf9ef7f3c605faf08cfdbb5b7db206cea736",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1438,6 +1438,63 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "latency reporting. A bounded DSP primitive a processor drives from its own "
             "process(), documented in the signal guide; it makes no installed agent "
             "capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/processor_duplicator.hpp",
+        "fingerprint": "sha256:33de816a4f93227ff63d3e78e95cb43c3a40731a113548622a98e4653f177298",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Runs one mono processor instance per channel and dispatches to a processor's "
+            "block path when it has one. Composition infrastructure for multichannel use of "
+            "existing DSP rather than a generator surface; it makes no installed agent "
+            "capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/svf.hpp",
+        "fingerprint": "sha256:bf48e17653601e28d7f0cf8b0a452323dc9904675f1455b7860d4608176dad7d",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Trapezoidal state-variable filter with lowpass/highpass/bandpass/notch modes, a "
+            "pure design() for its coefficients, and a register-resident block path. A "
+            "bounded DSP primitive documented in the signal guide; it makes no installed "
+            "agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/tpt_filter.hpp",
+        "fingerprint": "sha256:9b9ed303b512f4471d79768fc55e5329005ca9366475091efee30445c4b725bc",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "First-order topology-preserving-transform lowpass/highpass/allpass with "
+            "per-sample and block paths. A bounded DSP primitive documented in the signal "
+            "guide; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/ladder_bank.hpp",
+        "fingerprint": "sha256:f7d0a33997de0505a28b5d94b70c76ecf94422692937f660d1116bb8c3b75585",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Runs N ladder-filter voices in lockstep structure-of-arrays lanes, each voice "
+            "bit-identical to LadderFilter. A voice-processing primitive for polyphonic "
+            "processors; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/svf_bank.hpp",
+        "fingerprint": "sha256:816cf8858943dff7de341276ddd5eaf1dd2439bf41dca203d62ce2ddb02871cf",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Runs N state-variable-filter voices in lockstep structure-of-arrays lanes with a "
+            "per-voice mode, each voice bit-identical to Svf. A voice-processing primitive for "
+            "polyphonic processors; it makes no installed agent capability claim of its own."
         ),
     },
 ]
