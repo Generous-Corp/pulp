@@ -14,6 +14,7 @@ import {
   authorizeInput,
   hostResolverRules,
   installNetworkGuard,
+  maskSecretText,
   normalizeDeclaredHttpsOrigins,
   resolvePublicHttpsOrigins,
   sanitizeCaptureError,
@@ -1909,6 +1910,9 @@ async function runCapture(options) {
       includeBlendedBackgroundColors: true,
       includeTextColorOpacities: true,
     });
+    // Before anything reads it: every sidecar below and the persisted bytes
+    // (and so their hash binding) see masked strings, never the secret.
+    maskSecretText(snapshot, COMPUTED_STYLES);
     // Canvas paint is captured after the final presented browser frame below;
     // the DOMSnapshot already provides its stable backend-node identities.
     let canvasAssets = [];

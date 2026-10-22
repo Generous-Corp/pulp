@@ -141,6 +141,34 @@ export function semanticExpression(snapshotClickableIndexes = []) {
     ['switch', 'toggle'],
     ['textbox', 'text_input']
   ]);
+  // Chromium paints text under -webkit-text-security (a password field's UA
+  // style included) as one mask glyph per character. A name read from the
+  // DOM masks the same characters instead of reporting the clear string.
+  const maskGlyphs = { disc: '\u2022', circle: '\u25E6', square: '\u25A0' };
+  const maskGlyph = element => {
+    if (!element) return null;
+    const security = getComputedStyle(element).webkitTextSecurity;
+    return security && security !== 'none' ?
+      (maskGlyphs[security] || '\u2022') : null;
+  };
+  const nameText = element => {
+    const parts = [];
+    let masked = false;
+    const visit = (node, glyph) => {
+      for (const child of node.childNodes || []) {
+        if (child.nodeType === 3) {
+          if (glyph) masked = true;
+          const data = String(child.data || '');
+          parts.push(glyph ? glyph.repeat(data.length) : data);
+        } else if (child.nodeType === 1) {
+          visit(child, maskGlyph(child));
+        }
+      }
+    };
+    visit(element, maskGlyph(element));
+    return masked ? parts.join('') :
+      (element.innerText || element.textContent || '');
+  };
   const nativeKind = element => {
     const tag = element.tagName.toLowerCase();
     const type = (element.getAttribute('type') || '').toLowerCase();
@@ -931,7 +959,7 @@ export function semanticExpression(snapshotClickableIndexes = []) {
     }
     const name = element.getAttribute('aria-label') ||
       element.getAttribute('title') ||
-      (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim()
+      nameText(element).replace(/\\s+/g, ' ').trim()
         .slice(0, 200);
     // A component class is as declarative as an ARIA role -- the author named
     // the control -- so it scores alongside one rather than falling to the
