@@ -169,12 +169,21 @@ void reset_cache(bool enabled) {
     cache.set_enabled(enabled);
 }
 
+// Re-enables the process-wide cache however a test case exits, so a SKIP or
+// a failed REQUIRE cannot leave later cases running uncached.
+struct CacheEnabledRestore {
+    ~CacheEnabledRestore() {
+        canvas::ImageFileCache::instance().set_enabled(true);
+    }
+};
+
 constexpr int kFrames = 6;
 
 } // namespace
 
 TEST_CASE("Keyed inline image bytes build once and hit on later Graphite frames",
           "[gpu][skia][image-cache][inline-image]") {
+    CacheEnabledRestore restore_cache;
     auto f = make_fixture(256, 256);
     if (!usable(f))
         SKIP("Dawn/Graphite unavailable on this host.");
@@ -207,13 +216,14 @@ TEST_CASE("Keyed inline image bytes build once and hit on later Graphite frames"
         INFO("frame " << frame);
         CHECK(max_channel_delta(reference, cached) == 0);
     }
-    const auto stats = canvas::ImageFileCache::instance().stats();
+    const auto stats = canvas::ImageFileCache::instance().inline_stats();
     CHECK(stats.builds == 1);
     CHECK(stats.hits == kFrames - 1);
 }
 
 TEST_CASE("Disabling the image cache rebuilds keyed inline bytes every Graphite frame",
           "[gpu][skia][image-cache][inline-image]") {
+    CacheEnabledRestore restore_cache;
     // Planted negative for the counters above: with caching off the same keyed
     // draws must report one build per draw and no hits.
     auto f = make_fixture(256, 256);
@@ -229,14 +239,14 @@ TEST_CASE("Disabling the image cache rebuilds keyed inline bytes every Graphite 
             }))
             SKIP("GPU frame failed (no adapter).");
     }
-    const auto stats = canvas::ImageFileCache::instance().stats();
+    const auto stats = canvas::ImageFileCache::instance().inline_stats();
     CHECK(stats.builds == kFrames);
     CHECK(stats.hits == 0);
-    canvas::ImageFileCache::instance().set_enabled(true);
 }
 
 TEST_CASE("ImageView data URI decodes once across Graphite paints and matches the uncached frame",
           "[gpu][skia][image-cache][inline-image][image-view]") {
+    CacheEnabledRestore restore_cache;
     auto f = make_fixture(200, 120);
     if (!usable(f))
         SKIP("Dawn/Graphite unavailable on this host.");
@@ -258,7 +268,7 @@ TEST_CASE("ImageView data URI decodes once across Graphite paints and matches th
         REQUIRE(paint_frame(f, [&](canvas::Canvas& c) { image.paint(c); }, &cached));
         CHECK(max_channel_delta(reference, cached) == 0);
     }
-    auto stats = canvas::ImageFileCache::instance().stats();
+    auto stats = canvas::ImageFileCache::instance().inline_stats();
     CHECK(stats.builds == 1);
     CHECK(stats.hits == kFrames - 1);
 
@@ -267,13 +277,14 @@ TEST_CASE("ImageView data URI decodes once across Graphite paints and matches th
     image.set_image_source(data_uri(other));
     std::vector<uint8_t> swapped;
     REQUIRE(paint_frame(f, [&](canvas::Canvas& c) { image.paint(c); }, &swapped));
-    stats = canvas::ImageFileCache::instance().stats();
+    stats = canvas::ImageFileCache::instance().inline_stats();
     CHECK(stats.builds == 2);
     CHECK(max_channel_delta(reference, swapped) > 100);
 }
 
 TEST_CASE("SceneImage encoded bytes decode once across Graphite paints",
           "[gpu][skia][image-cache][inline-image][scene]") {
+    CacheEnabledRestore restore_cache;
     auto f = make_fixture(128, 128);
     if (!usable(f))
         SKIP("Dawn/Graphite unavailable on this host.");
@@ -296,13 +307,14 @@ TEST_CASE("SceneImage encoded bytes decode once across Graphite paints",
         REQUIRE(paint_frame(f, [&](canvas::Canvas& c) { node.paint_geometry(c); }, &cached));
         CHECK(max_channel_delta(reference, cached) == 0);
     }
-    const auto stats = canvas::ImageFileCache::instance().stats();
+    const auto stats = canvas::ImageFileCache::instance().inline_stats();
     CHECK(stats.builds == 1);
     CHECK(stats.hits == kFrames - 1);
 }
 
 TEST_CASE("Inline image paint cost per Graphite frame, cached and uncached",
           "[gpu][skia][image-cache][inline-image][bench]") {
+    CacheEnabledRestore restore_cache;
     // A 2x-retina backdrop drawn by an ImageView with a data URI, the shape of
     // an imported panel's inline background. CPU wall time per frame covers the
     // paint, the Graphite recording snap and submit, and a readback that waits
@@ -351,8 +363,7 @@ TEST_CASE("Inline image paint cost per Graphite frame, cached and uncached",
     const auto direct = run(false, true);
     const auto uncached = run(false);
     const auto cached = run(true);
-    const auto stats = canvas::ImageFileCache::instance().stats();
-    canvas::ImageFileCache::instance().set_enabled(true);
+    const auto stats = canvas::ImageFileCache::instance().inline_stats();
     if (direct.empty() || uncached.empty() || cached.empty())
         SKIP("GPU frame failed (no adapter).");
     std::printf("inline PNG %ux%u (%zu bytes): unkeyed draw median %.3f ms/frame, keyed with "

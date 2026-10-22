@@ -1072,12 +1072,12 @@ bool SkiaCanvas::draw_image_from_static_data_rect(const uint8_t* data, size_t si
 
 sk_sp<SkImage> SkiaCanvas::image_from_keyed_data_cached(const std::string& content_key,
                                                         const uint8_t* data, size_t size) const {
-    // A leading NUL keeps this key from aliasing a filesystem path or the
-    // static-data keys. The byte count rides along as a cheap extra guard.
+    // Inline bytes live in their own byte-budgeted pool. The byte count rides
+    // along with the digest as a cheap extra guard.
     const std::string key =
         std::string("\0inline-sha256:", 15) + content_key + ":" + std::to_string(size);
-    return ImageFileCache::instance().get_or_build(
-        key, image_cache_backend_key(), [&]() -> sk_sp<SkImage> {
+    return ImageFileCache::instance().get_or_build_inline(
+        key, image_cache_backend_key(), size, [&]() -> sk_sp<SkImage> {
             // The cached image can outlive the caller's buffer, and a raster
             // canvas keeps the decode deferred, so own a copy of the bytes.
             auto bytes = SkData::MakeWithCopy(data, size);
