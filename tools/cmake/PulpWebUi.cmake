@@ -169,6 +169,7 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_options.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_scope.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_resolver.cpp
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/font_tables.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_registry_stubs.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_flight_recorder.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/bundled_fonts.cpp

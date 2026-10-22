@@ -926,7 +926,7 @@ TEST_CASE("Label places a captured baseline from the browser's measured ascent",
     constexpr float kTop = 2.0f;
     REQUIRE(std::abs(std::round(prepared.typographic_ascent()) - kAscent) > 0.5f);
 
-    auto paint_baseline = [&](bool recorded, float box_h, float top = kTop) {
+    auto paint_baseline = [&](bool recorded, float box_h, float top) {
         Label label("Measured");
         label.set_font_family("Inter");
         label.set_font_size(kSize);
@@ -942,8 +942,8 @@ TEST_CASE("Label places a captured baseline from the browser's measured ascent",
     };
 
     // The recorded ascent wins over the derived one.
-    const float with_metrics = paint_baseline(true, kAscent + kDescent);
-    const float derived = paint_baseline(false, kAscent + kDescent);
+    const float with_metrics = paint_baseline(true, kAscent + kDescent, kTop);
+    const float derived = paint_baseline(false, kAscent + kDescent, kTop);
     CHECK(with_metrics == Catch::Approx(kTop + kAscent).margin(0.001f));
     CHECK(std::abs(derived - (kTop + kAscent)) > 0.25f);
 
