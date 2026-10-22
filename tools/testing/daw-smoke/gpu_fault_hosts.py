@@ -241,20 +241,6 @@ def positive_control_expectation(snapshots: dict[str, dict]) -> tuple[bool, str]
     return True, f"GPU delivered {gpu} of {total} quanta; {fallback} fallback"
 
 
-def applied_capture_sample(capture: Any, applied_host_time_ns: int | None) -> int | None:
-    """G3: the project sample at which the provider fault took effect, from
-    the capture itself: the first played record whose callback started at or
-    after the interposer applied the fault (both on the plug-in's steady
-    clock). The event's own project_sample is the service thread's 2 ms poll
-    and can only be later than this."""
-    if capture is None or not applied_host_time_ns:
-        return None
-    for rec in getattr(capture, "records", None) or []:
-        if rec.get("position", -1) >= 0 and rec.get("host_time_ns", 0) >= applied_host_time_ns:
-            return int(rec["position"])
-    return None
-
-
 def loss_status_problem(snapshots: dict[str, dict]) -> str:
     """G2: with Batch A under test, a lost provider is reported as such by the
     transport's own status: provider_state=unavailable and
@@ -373,24 +359,16 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
             problem = loss_status_problem(base["health"]["snapshots"])
             if problem:
                 mismatches.append(problem)
-        # G3: the takeover deadline is measured from the capture record the
-        # fault actually landed in, not from the service thread's poll.
+        # G3: WP-h1's evaluate_run measures the takeover from the capture
+        # record the interposer's host_time_ns lands in (applied_project_sample)
+        # and falls back to the service thread's poll without it. A fault
+        # cell may not rest on that fallback.
         applied_ns = (applied or {}).get("host_time_ns")
-        mapped = applied_capture_sample(capture, applied_ns)
-        if mapped is None:
+        if not (isinstance(applied_ns, int) and applied_ns > 0) or capture is None or \
+                gfc.applied_project_sample(capture, {"host_time_ns": applied_ns}) is None:
             preconditions.append("provider_fault_applied has no host_time_ns that maps to a "
                                  "capture record (G3)")
-        elif capture is not None:
-            prepared = gfc.first_event(events, "prepared") or {}
-            delivery = gfc.delivery_analysis(
-                capture, fault=fault, fault_sample=fault_sample, applied_sample=mapped,
-                quantum=int(prepared.get("quantum", 0) or 0) or 1,
-                lead_blocks=int(prepared.get("lead_blocks", 0) or 0), window_post=window_post)
-            delivery = dict(delivery, applied_sample_from="capture_host_time",
-                            applied_sample=mapped)
-            if not delivery.get("met"):
-                preconditions.append(f"per-block delivery from the applied record (G3): "
-                                     f"{delivery.get('note')}")
+
     # The stricter of WP-h1's verdict and this one.
     base_verdict, base_reasons = base["verdict"], list(base["verdict_reasons"])
     capture_only = (host.get("id") not in REALTIME_RENDER_HOSTS and
@@ -423,14 +401,17 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         if PLANTED_NEGATIVES.get(planted) == "fail":
             # Fired and applied, bound, and the FAIL is the corrupted audio
             # alone: a null failing from the fault sample on, nothing else.
+            # The plug-in arms the corruption in the quantum that contains the
+            # fault sample, so it may begin at that quantum's start (WP-h1, G1).
             plugin = base["nulls"]["plugin"]
+            quantum = int((base.get("plugin_identity") or {}).get("quantum") or 0)
             negative_proved = bool(
                 bound and took_effect and verdict == "fail" and len(base_reasons) == 1 and
                 base_reasons[0].startswith(("plugin null failed",
                                             "host realtime render null failed")) and
                 plugin is not None and not plugin["passed"] and
                 plugin["first_deviating_sample"] is not None and
-                plugin["first_deviating_sample"] >= fault_sample)
+                plugin["first_deviating_sample"] >= fault_sample - quantum)
         else:
             # gpu_off: fired, bound, and only the GPU-off consequences kept the
             # run from passing.

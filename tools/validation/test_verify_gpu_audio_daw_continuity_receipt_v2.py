@@ -92,16 +92,21 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
             if event["event"] == "fault_armed":
                 event = dict(event, planted_negative=planted, gpu_off=planted == "gpu_off",
                              input="internal" if internal else "host")
-            if event["event"] == "provider_fault_applied" and applied_time:
+            if event["event"] == "provider_fault_applied" and not applied_time:
+                event = {k: v for k, v in event.items() if k != "host_time_ns"}
+            elif event["event"] == "provider_fault_applied" and "host_time_ns" not in event:
                 # The interposer's own timestamp, on the capture's clock
                 # (synthesize_run stamps record k at k * 20833 ns, 4 blocks
                 # of lead-in before project sample 0).
                 event = dict(event, host_time_ns=(event["project_sample"] + 512) * 20833)
             if (event["event"] == "health" and event["phase"] == "after" and
-                    fault in gfc.LOSS_FAULTS and loss_reported):
-                # Batch A names the loss in the transport's status (G2).
-                event = dict(event, status=dict(event["status"], provider_state="unavailable",
-                                                recovery_reason="provider-lost"))
+                    fault in gfc.LOSS_FAULTS):
+                # Batch A names the loss in the transport's status (G2); the
+                # negative shape is a status that still says all is well.
+                event = dict(event, status=dict(
+                    event["status"],
+                    provider_state="unavailable" if loss_reported else "ready",
+                    recovery_reason="provider-lost" if loss_reported else "none"))
             out.append(event)
         return out
 
@@ -287,12 +292,11 @@ class V2Receipt(unittest.TestCase):
     def test_g3_the_applied_sample_comes_from_the_capture_clock(self):
         run = self.run_dir("g3")
         receipt = make_run(run)
+        self.assertEqual(self.verify(receipt, run), ("pass", "pass"))
         applied = receipt["fault"]["provider_fault_applied"]
-        self.assertEqual(receipt["delivery"]["applied_sample_from"], "capture_host_time")
-        # The record the interposer's timestamp falls in, block-aligned.
-        mapped = receipt["delivery"]["applied_sample"]
+        mapped = gfc.applied_project_sample(gfc.read_capture(run / "capture.bin"), applied)
         self.assertLessEqual(abs(mapped - applied["project_sample"]), 128)
-        self.assertGreaterEqual(mapped, FAULT)
+        self.assertGreaterEqual(mapped, FAULT - 128)
         run2 = self.run_dir("g3-missing")
         receipt2 = make_run(run2, applied_time=False)
         self.assertEqual(self.verify(receipt2, run2)[0], "inconclusive")
@@ -467,6 +471,20 @@ class V2Receipt(unittest.TestCase):
         self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], FAULT - 500)
         self.assertEqual(len(receipt["verdict_reasons"]), 1)
         self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
+    def test_a_planted_negative_may_start_in_the_fault_quantum(self):
+        # G1: the plug-in arms the corruption for the whole quantum holding the
+        # fault sample, so a deviation up to one quantum early still counts.
+        run = self.run_dir("negative-fault-quantum")
+        receipt = make_run(run, kind="planted_negative", break_fallback=True)
+        quantum = receipt["plugin_identity"]["quantum"]
+        rewrite_capture(run, outputs=lambda pos, v: 0.0 if FAULT - quantum // 2 <= pos < FAULT
+                        else v)
+        receipt = receipt_for(run, kind="planted_negative", fault="force_loss_before",
+                              mode="auhostingservice_arrow")
+        self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"],
+                         FAULT - quantum // 2)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_proved"))
 
     def test_a_planted_negative_with_another_unmet_precondition_is_not_proved(self):
         run = self.run_dir("negative-refused")
