@@ -1,10 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/biquad.hpp>
+#include "support/denormal_tail.hpp"
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <limits>
+#include <vector>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
@@ -334,5 +338,129 @@ TEST_CASE("Biquad edge frequencies produce finite impulse responses",
         std::array<float, 8> impulse{{1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}};
         filter.process(impulse.data(), static_cast<int>(impulse.size()));
         require_all_finite(impulse);
+    }
+}
+
+namespace {
+
+// Continuously excited signal (two tones plus LCG noise) that keeps every
+// recursive state far above the 1e-15 snap threshold, so the block and sample
+// paths must agree to the bit.
+std::vector<float> busy_signal(std::size_t n) {
+    std::vector<float> s(n);
+    std::uint32_t lcg = 0x2468aceu;
+    for (std::size_t i = 0; i < n; ++i) {
+        lcg = lcg * 1664525u + 1013904223u;
+        const float noise = static_cast<float>(lcg >> 8) / 16777216.0f - 0.5f;
+        const float t = static_cast<float>(i) / kSampleRate;
+        s[i] = 0.5f * std::sin(6.2831853f * 220.0f * t) + 0.3f * std::sin(6.2831853f * 3150.0f * t) +
+               0.2f * noise;
+    }
+    return s;
+}
+
+// Uneven block lengths covering 1, chunk-boundary neighbours, and long blocks.
+std::vector<int> split_schedule(std::size_t total) {
+    static constexpr int kPattern[] = {1, 63, 64, 65, 7, 128, 333, 1024, 2, 512, 31};
+    std::vector<int> blocks;
+    std::size_t done = 0;
+    for (std::size_t k = 0; done < total; ++k) {
+        const int b = static_cast<int>(std::min<std::size_t>(
+            static_cast<std::size_t>(kPattern[k % std::size(kPattern)]), total - done));
+        blocks.push_back(b);
+        done += static_cast<std::size_t>(b);
+    }
+    return blocks;
+}
+
+}  // namespace
+
+TEST_CASE("Biquad block path is bit-identical to the sample path across split blocks",
+          "[signal][biquad][determinism]") {
+    const std::array<BiquadCase, 6> cases{{
+        {Biquad::Type::lowpass, 1000.0f, 0.7071f, 0.0f},
+        {Biquad::Type::highpass, 40.0f, 0.7071f, 0.0f},
+        {Biquad::Type::peaking, 100.0f, 10.0f, 12.0f},
+        {Biquad::Type::low_shelf, 30.0f, 0.7071f, -9.0f},
+        {Biquad::Type::bandpass, 2500.0f, 4.0f, 0.0f},
+        {Biquad::Type::notch, 12000.0f, 2.0f, 0.0f},
+    }};
+    const auto input = busy_signal(8192);
+    const auto schedule = split_schedule(input.size());
+
+    for (const auto& c : cases) {
+        Biquad sample_filter;
+        Biquad block_filter;
+        sample_filter.set_coefficients(c.type, c.freq_hz, c.q, kSampleRate, c.gain_db);
+        block_filter.set_coefficients(c.type, c.freq_hz, c.q, kSampleRate, c.gain_db);
+
+        auto expected = input;
+        for (float& sample : expected)
+            sample = sample_filter.process(sample);
+
+        auto actual = input;
+        std::size_t pos = 0;
+        for (int block : schedule) {
+            block_filter.process(actual.data() + pos, block);
+            pos += static_cast<std::size_t>(block);
+        }
+        REQUIRE(std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)) == 0);
+    }
+}
+
+TEST_CASE("Biquad block path flushes a decaying tail without subnormal residency",
+          "[signal][biquad][denormal]") {
+    using namespace pulp::test::denormal_tail;
+    if (flush_to_zero_active())
+        SKIP("this thread flushes subnormals to zero; the tail counts would be vacuous");
+
+    constexpr std::size_t kTotal = std::size_t{1} << 18;
+
+    // Negative control: the same coefficients in a DF2T with no snap. A 20 Hz
+    // lowpass has its poles close enough to |z| = 1 that the float tail rounds
+    // into a subnormal limit cycle and never reaches zero. If this stops
+    // happening the stimulus no longer exercises the hazard.
+    Biquad slow;
+    slow.set_coefficients(Biquad::Type::lowpass, 20.0f, 0.7071f, kSampleRate);
+    const auto k = slow.coefficients();
+    float s1 = 0.0f;
+    float s2 = 0.0f;
+    const auto control = impulse_tail(
+        [&](float* x, int n) {
+            for (int i = 0; i < n; ++i) {
+                const float out = k.b0 * x[i] + s1;
+                s1 = k.b1 * x[i] - k.a1 * out + s2;
+                s2 = k.b2 * x[i] - k.a2 * out;
+                x[i] = out;
+            }
+        },
+        kTotal, 512);
+    REQUIRE(control.subnormal_outputs > kTotal / 2);
+    REQUIRE(control.nonzero_end == kTotal);
+
+    for (std::size_t block : {std::size_t{1}, std::size_t{63}, std::size_t{64}, std::size_t{4096}, kTotal}) {
+        INFO("block " << block);
+        Biquad filter;
+        filter.set_coefficients(Biquad::Type::lowpass, 20.0f, 0.7071f, kSampleRate);
+        const auto tail = impulse_tail([&](float* x, int n) { filter.process(x, n); }, kTotal, block);
+        REQUIRE(tail.subnormal_outputs == 0);
+        REQUIRE(tail.nonzero_end > 0);
+        // A one-sample block snaps every sample, as the sample path does; the
+        // chunked snap must still bring the tail to exact zero.
+        if (block > 1)
+            REQUIRE(tail.nonzero_end < kTotal / 8);
+    }
+
+    // Poles at |z| ~= 0.41: the one regime where a state can fall from above
+    // the snap threshold into the subnormal range inside a single chunk. The
+    // tail must still reach exact zero, with at most one chunk of subnormal
+    // output.
+    for (std::size_t block : {std::size_t{64}, kTotal}) {
+        INFO("block " << block);
+        Biquad filter;
+        filter.set_coefficients(Biquad::Type::lowpass, kSampleRate / 4.0f, 0.7071f, kSampleRate);
+        const auto tail = impulse_tail([&](float* x, int n) { filter.process(x, n); }, kTotal, block);
+        REQUIRE(tail.subnormal_outputs <= static_cast<std::size_t>(Biquad::kStateSnapInterval));
+        REQUIRE(tail.nonzero_end < 1024);
     }
 }

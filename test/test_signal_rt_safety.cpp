@@ -303,6 +303,7 @@ TEST_CASE("Scalar signal helpers are allocation-free after configuration",
         mixer64.process(dry64.data(), wet64.data(), mixed64.data(),
                         static_cast<int>(mixed64.size()));
         biquad64.process(samples64.data(), static_cast<int>(samples64.size()));
+        biquad.process(samples.data(), static_cast<int>(samples.size()));
         svf.process(samples.data(), static_cast<int>(samples.size()));
         phaser.process(samples.data(), static_cast<int>(samples.size()));
         shaper.process(samples.data(), static_cast<int>(samples.size()));
@@ -912,6 +913,9 @@ TEST_CASE("Dynamics and filter signal helpers are allocation-free after configur
         (void)tpt.process_lowpass(0.1f);
         (void)tpt.process_highpass(0.1f);
         (void)tpt.process_allpass(0.1f);
+        tpt.process_lowpass(signal.data(), static_cast<int>(signal.size()));
+        tpt.process_highpass(signal.data(), static_cast<int>(signal.size()));
+        tpt.process_allpass(signal.data(), static_cast<int>(signal.size()));
         compressor.reset();
         limiter.reset();
         gate.reset();
