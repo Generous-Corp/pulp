@@ -12,38 +12,40 @@ test asserted the same rule of thumb the code used.
 
 ## The one rule: half-leading has a single reference
 
-CSS puts the baseline of a line box at:
+A captured line's baseline comes from `captured_baseline()` in
+`pulp/view/text_line_metrics.hpp`, a pure function; `Label` only gathers its
+inputs. CSS puts the baseline at:
 
 ```
-baseline_y = line_box.y + (line_box.height - ink_height) / 2 + ascent
-             where ink_height = ascent + descent
+baseline_y = line_box.y + (line_box.height - (ascent + descent)) / 2 + ascent
 ```
 
-The surplus you divide **must be measured against the same ink you then descend
-by**. Measuring the surplus against the em box (`font_size`) and then descending
-by a real face ascent double-counts the difference between those two references,
-and paints every line low by exactly that gap.
+and the surplus you divide **must be measured against the same ascent +
+descent you then descend by**. Which pair that is matters:
 
-Worked example, the bug that shipped:
+- The browser's **measured** line metrics (`LineMetrics`, recorded by the
+  capture from canvas `fontBoundingBox*`) win whenever present. They carry
+  Blink's rounding and its per-face macOS adjustments (Times / Helvetica /
+  Courier), which no font table states.
+- Otherwise the face's **typographic** ascent/descent
+  (`PreparedText::font_ascent()`), never the clip-safe glyph bounding box
+  (`ascent()`), which put Georgia Bold 32px 1.58px low.
+- A box exactly `ascent + descent` tall IS the text fragment: its baseline is
+  the (rounded, when derived) ascent below the top, which is what Chromium
+  reports. Inter 12px in a 15px box: baseline 12.0, not the unrounded 11.87.
 
-| quantity | value |
-|---|---|
-| captured line box height | 15.0 |
-| `font_size` | 12.0 |
-| Inter's real ascent at 12px | 13.294921875 (≈1.108 em) |
-| Inter's real ink (ascent+descent) at 12px | 17.162109 (≈1.43 em) |
-| **buggy** `max(0,(15−12)/2) + 13.2949` | **14.794922** |
-| **correct** `(15−17.1621)/2 + 13.2949` | **12.213867** |
+**Negative half-leading is legal and must not be clamped.** A content area
+taller than the box overflows it evenly, top and bottom.
 
-**Negative half-leading is legal and must not be clamped.** A face whose ink
-exceeds the captured line box has negative leading, and CSS lets the glyphs
-overflow the box evenly, top and bottom. Clamping at 0 silently reintroduces the
-line-height dependence the captured branch exists to remove — the 15px box above
-carries −1.081 of leading, and clamping it is precisely the old bug.
+## Captured baselines snap on the captured frame's grid
 
-`1.5 + 0.85 * font_size` is the rule of thumb this replaced. If you see `0.85`
-anywhere near a baseline, it is measuring an em box while descending by a real
-ascent. It is wrong even when the test agrees with it.
+Chromium paints each captured line with its baseline on a whole CSS px of the
+page. `captured_baseline()` takes the grid's origin as `root_y`: the label's
+offset from its **captured frame**, the nearest ancestor with
+`subpixel_layout()` set (every import lane sets it on the import root). Never
+sum offsets up to the application root: an import mounted at y=10.5, or under
+a scaled or animating host, then snaps against the host's grid and its text
+moves by a pixel. Native, non-captured text is not snapped at all.
 
 ## Measure and paint must resolve the SAME font family
 
