@@ -1149,11 +1149,11 @@ plus the out-of-crate files it compiles in (`PULP_RS_EXTERNAL_INPUTS`:
 `include_str!`/`include_bytes!` targets and `build.rs` `rerun-if-changed`
 inputs, kept honest by a test that scans the crate) and the hand-listed files
 its tests open at run time (`PULP_RS_TEST_TIME_INPUTS`, the stated coverage
-boundary) → `pulp-rust-cli-{cargo,doc}-tests`,
+boundary) → every `pulp-rust-*` test,
 because cargo, not a CMake target, builds that crate, so the projection never
 reaches it and a Rust failure otherwise surfaces only in the merge group; it is
 a required family, so a leg that stops registering those tests fails the step).
-Direct edges are added even when
+A test is tied to a target when any path its command names is that target's artifact or a bundle directory (`.clap`, `.vst3`, `.app`, ...) holding it, including the value of `-D<VAR>=`, `--flag=` or `NAME=` assignments and `|`/`;` lists (`changed_surface_inventory.command_path_refs`): exact-argument matching alone missed every CMake-script test that takes its binary as `-DCLI=`, so they ran only in the merge group. Direct edges are added even when
 the projection is too wide or the diff is docs-only: tests whose declared inputs
 (`test/ctest_script_inputs.json`) the diff touches, script tests the gates.sh
 rules select, the tests running a program whose own source changed, and the

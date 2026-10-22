@@ -334,6 +334,75 @@ class SelectorRules(unittest.TestCase):
         self.assertEqual(sel.total_tests, 0)
 
 
+class CommandPathReferences(unittest.TestCase):
+    """A test names a build output in more forms than a bare argument; each
+    must tie the test to the target that produces it."""
+
+    def setUp(self) -> None:
+        self.fx = Fixture()
+        self.addCleanup(self.fx.close)
+        build, root = self.fx.build, self.fx.root
+        extra = [
+            {"name": "cli-help", "command": ["/usr/bin/cmake", f"-DCLI={build}/tools/cli/pulp-cli",
+                                             "-P", str(root / "test/cmake/run_cli.cmake")]},
+            {"name": "cli-typed", "command": ["/usr/bin/cmake",
+                                              f"-DPULP_CLI:FILEPATH={build}/tools/cli/pulp-cli"]},
+            {"name": "gain-validator", "command": ["/opt/pluginval", "--validate",
+                                                   f"{build}/CLAP/Gain.clap"]},
+            {"name": "gain-flag", "command": ["/usr/bin/probe",
+                                              f"--plugin={build}/CLAP/Gain.clap"]},
+            {"name": "gain-image-list", "command": [
+                "/usr/bin/cmake",
+                f"-DIMAGES={build}/CLAP/Gain.clap/Contents/MacOS/Gain|{build}/test/pulp-test-knob"]},
+            {"name": "env-target-dir", "command": ["/usr/bin/cmake", "-E", "env",
+                                                   f"PULP_CLI_PATH={build}/tools/cli/pulp-cli",
+                                                   "/usr/bin/true"]},
+            # Negative control: the build directory itself is no target's output.
+            {"name": "whole-build-reader", "command": ["/usr/bin/cmake", f"-DPULP_BUILD_DIR={build}",
+                                                       "-P", str(root / "test/cmake/scan.cmake")]},
+        ]
+        self.inventory = self.fx.inventory + at.projection_ctest_entries(extra)
+
+    def select(self, changed: list[str]) -> at.Selection:
+        return at.project_affected(self.fx.model, changed, [], None, self.inventory, 1.0)
+
+    def test_assigned_values_and_lists_are_path_references(self) -> None:
+        refs = at.command_path_refs(["cmake", "-DA=/b/x", "--flag=/b/y", "NAME=/b/z",
+                                     "-DL=/b/p|/b/q;/b/r", "-DT:FILEPATH=/b/t"])
+        for path in ("/b/x", "/b/y", "/b/z", "/b/p", "/b/q", "/b/r", "/b/t"):
+            self.assertIn(path, refs)
+
+    def test_a_cli_passed_as_a_cmake_define_is_selected_by_its_source(self) -> None:
+        sel = self.select(["tools/cli/cmd_build.cpp"])
+        for name in ("cli-help", "cli-typed", "env-target-dir"):
+            self.assertIn(name, sel.tests)
+
+    def test_a_bundle_directory_or_a_listed_image_selects_its_plugin_tests(self) -> None:
+        sel = self.select(["examples/gain/gain.cpp"])
+        for name in ("gain-validator", "gain-flag", "gain-image-list"):
+            self.assertIn(name, sel.tests)
+
+    def test_control_the_build_directory_reaches_no_target(self) -> None:
+        for changed in (["tools/cli/cmd_build.cpp"], ["examples/gain/gain.cpp"],
+                        ["core/view/src/widgets.cpp"]):
+            with self.subTest(changed=changed):
+                self.assertNotIn("whole-build-reader", self.select(changed).tests)
+
+    def test_control_an_unrelated_source_reaches_none_of_them(self) -> None:
+        sel = self.select(["core/runtime/src/log.cpp"])
+        for name in ("cli-help", "gain-validator", "gain-flag", "gain-image-list"):
+            self.assertNotIn(name, sel.tests)
+
+    def test_a_source_file_passed_as_a_define_selects_the_test(self) -> None:
+        extra = at.projection_ctest_entries([{
+            "name": "script-define", "command": [
+                "/usr/bin/cmake", f"-DMANIFEST={self.fx.root}/tools/ci/guard.json",
+                "-P", str(self.fx.root / "test/cmake/run.cmake")]}])
+        sel = at.project_affected(self.fx.model, ["tools/ci/guard.json"], [], None,
+                                  self.inventory + extra, 1.0)
+        self.assertIn("script-define", sel.tests)
+
+
 class DependencyDatabase(unittest.TestCase):
     def test_ninja_deps_resolve_relative_to_build_dir(self) -> None:
         text = (
