@@ -3,6 +3,7 @@
 #include <pulp/view/design_ir.hpp>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::view {
@@ -44,11 +45,38 @@ std::vector<DesignSlot> classify_design_slots(const IRNode& node);
 // caller cannot reuse a stale native view or binding. Binding names themselves
 // remain mutable values and do not force recreation.
 
+// Updates apply in emission order to a mutable child vector that starts as
+// the old children. `removed` erases `old_index`. `inserted` inserts at
+// `new_index`. `moved` erases `old_index` and then inserts at `new_index`.
+// Both are positions in the vector at the moment the update applies, so a
+// materializer can apply them directly; after the last update the vector
+// equals the new children. `retained` changes nothing and records the
+// child's index in the old and new child lists.
 struct DesignChildUpdate {
     DesignUpdateKind kind = DesignUpdateKind::retained;
     std::string key;
     std::size_t old_index = 0;
     std::size_t new_index = 0;
+};
+
+enum class DesignKeyDiagnosticReason {
+    // No child on this side carries a stable anchor; one entry per side.
+    missing,
+    // The anchor repeats an earlier sibling's anchor; one entry per repeat.
+    duplicate,
+    // This child has no anchor while some siblings on the same side do.
+    mixed,
+};
+
+// Why a sibling set could not be planned by key. Present only when the plan
+// falls back to a wholesale replace, so an author can find the child to fix.
+struct DesignKeyDiagnostic {
+    DesignKeyDiagnosticReason reason = DesignKeyDiagnosticReason::missing;
+    std::string key;
+    std::size_t index = 0;
+    bool old_side = false;
+
+    friend bool operator==(const DesignKeyDiagnostic&, const DesignKeyDiagnostic&) = default;
 };
 
 struct DesignUpdateBlock {
@@ -76,10 +104,17 @@ struct DesignChildUpdatePlan {
     // Deterministic work census for import/runtime observability. These counts
     // are derived from updates in emission order and are independent of the
     // unordered IR attribute storage used by the compatibility checks.
+    // `moved` is minimal: survivors that keep their relative order (a longest
+    // increasing subsequence of old positions, after trimming the common
+    // prefix and suffix) stay in place and only the rest move.
     DesignUpdateWorkCounters work;
+    // Ordered old side first, then by index; empty for a keyed plan.
+    std::vector<DesignKeyDiagnostic> key_diagnostics;
     bool keyed = false;
     bool ambiguous_keys = false;
 };
+
+std::string_view to_string(DesignKeyDiagnosticReason reason) noexcept;
 DesignChildUpdatePlan plan_design_child_updates(std::span<const IRNode> old_children,
                                                 std::span<const IRNode> new_children);
 } // namespace pulp::view
