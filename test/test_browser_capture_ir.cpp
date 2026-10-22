@@ -882,8 +882,13 @@ TEST_CASE("unsupported document canvas facts preserve complete legacy lowering",
     auto snapshot = choc::json::toString(choc::json::parse(root_canvas_snapshot()), false);
     auto capture = root_canvas_envelope(pulp::runtime::sha256_hex(png));
     bool native = true;
+    bool expect_body_only_background = false;
     SECTION("faithful capture is unchanged") {
         native = false;
+    }
+    SECTION("body-only color") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        expect_body_only_background = true;
     }
     SECTION("nonfinite color") {
         replace_canvas_fact(snapshot, "rgb(16, 21, 34)", "rgb(nan, 21, 34)");
@@ -1046,7 +1051,14 @@ TEST_CASE("unsupported document canvas facts preserve complete legacy lowering",
     INFO(result.error);
     REQUIRE(baseline);
     REQUIRE(result);
-    CHECK_FALSE(result.design_ir->root.style.background_color);
+    if (expect_body_only_background) {
+        REQUIRE(result.design_ir->root.style.background_color);
+        CHECK(*result.design_ir->root.style.background_color == "rgb(16, 21, 34)");
+    } else {
+        CHECK_FALSE(result.design_ir->root.style.background_color);
+    }
+    if (expect_body_only_background)
+        result.design_ir->root.style.background_color.reset();
     CHECK(pulp::view::serialize_design_ir(*result.design_ir) ==
           pulp::view::serialize_design_ir(*baseline.design_ir));
 }

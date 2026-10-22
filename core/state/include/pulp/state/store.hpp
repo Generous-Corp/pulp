@@ -94,6 +94,53 @@ struct ConditionalParameterApplyResult {
     std::uint64_t current_identity = 0;
 };
 
+/// Pre-resolved audio-thread read handle for one parameter's base value.
+///
+/// `StateStore::get_value()` looks the ID up in a hash map on every call.
+/// A processor that reads the same parameters every block can resolve them
+/// once — typically in `prepare()` — and read through the handle instead:
+/// `get()` is an inline relaxed atomic load with no lookup and no call.
+///
+/// The handle stays valid while the store it came from exists, even if more
+/// parameters are registered afterwards (it holds the store and an index,
+/// not a pointer to the value). Registration must still not run
+/// concurrently with `get()` — the same rule as for `get_value()` — and the
+/// handle dangles once its StateStore is destroyed. A default-constructed
+/// handle, or one resolved from an unknown ID, reads 0.0f — the same result
+/// as `get_value()` for an unknown ID.
+///
+/// @code
+/// void prepare(const PrepareContext&) override {
+///     gain_ = state().param_reader(kGain);
+/// }
+/// void process(...) override {
+///     const float gain = gain_.get();
+///     ...
+/// }
+/// @endcode
+class ParamReader {
+  public:
+    ParamReader() = default;
+
+    /// Current base value (lock-free, relaxed ordering), or 0.0f if unbound.
+    /// This is the value get_value() returns; it does not include the
+    /// per-buffer modulation offset that get_modulated() adds.
+    float get() const noexcept;
+
+    /// True if this handle refers to a registered parameter.
+    bool valid() const noexcept {
+        return store_ != nullptr;
+    }
+
+  private:
+    friend class StateStore;
+    ParamReader(const StateStore* store, std::size_t index) noexcept
+        : store_(store), index_(index) {}
+
+    const StateStore* store_ = nullptr;
+    std::size_t index_ = 0;
+};
+
 /// Centralized parameter storage with lock-free value access.
 ///
 /// StateStore is the single source of truth for all plugin parameters.
@@ -129,6 +176,12 @@ public:
     /// Read a parameter's base value (lock-free).
     /// @note Safe to call from the audio thread.
     float get_value(ParamID id) const;
+
+    /// Resolve a read handle for a parameter's base value. Call off the
+    /// audio thread (e.g. in prepare()); the returned handle's get() is
+    /// cheaper than get_value() because the ID lookup is already done.
+    /// An unknown ID yields an unbound handle that reads 0.0f.
+    ParamReader param_reader(ParamID id) const;
 
     /// Read a parameter's modulated value: base + mod_offset (lock-free).
     /// @note Safe to call from the audio thread.
@@ -585,7 +638,14 @@ public:
     /// state.
     void copy_state_migrations_from(const StateStore& source);
 
-private:
+  private:
+    friend class ParamReader;
+
+    /// Base value of the parameter registered at @p index (ParamReader::get).
+    float value_at_index_(std::size_t index) const noexcept {
+        return values_[index].get();
+    }
+
     // Member ORDER is load-bearing for the RT->main listener path. The
     // parameter storage (id_to_index_ + values_) MUST be declared before
     // registry_ so that, on destruction (reverse declaration order),
@@ -718,6 +778,10 @@ public:
         deferred_gesture_releases_.clear();
     }
 };
+
+inline float ParamReader::get() const noexcept {
+    return store_ != nullptr ? store_->value_at_index_(index_) : 0.0f;
+}
 
 // ─── Template definitions ──────────────────────────────────────────────────
 

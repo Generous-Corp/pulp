@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .geometry_gate import geometry_gate_failures, geometry_gate_ok
@@ -127,22 +128,77 @@ def classify_gaps(
     return result
 
 
+OBSERVER_COUNTER_SCHEMA = "pulp-design-ir-observer-counters-v1"
+
+
+def work_counter_gate(render_receipt: dict[str, Any]) -> dict[str, Any]:
+    """Judge the observer's own work counters for this render.
+
+    The counters come from the digest-bound render receipt, so they describe
+    the exact native render that was scored. A receipt without them, a tree
+    that outlived its teardown, or a read-back of the painted tree that staled
+    a cache without requesting a repaint each blocks threshold eligibility.
+    Build and first-frame mutations are reported but not gated: until a frame
+    has been painted there is no painted state to stale. The observer paints
+    one frame, so this gate proves complete teardown and a side-effect-free
+    read-back only; steady-state update behaviour is measured by the
+    benchmark's interactive phase, not here.
+    """
+    counters = render_receipt.get("counters")
+    if not isinstance(counters, dict) or counters.get("schema") != OBSERVER_COUNTER_SCHEMA:
+        return {"status": "absent", "counters": None,
+                "failures": ["observer receipt carries no work counters"]}
+    failures: list[str] = []
+
+    def count(value: Any) -> int:
+        # Counts are non-negative JSON integers; bool, float and string are
+        # malformed, not coercible.
+        if type(value) is not int or value < 0:
+            raise ValueError(value)
+        return value
+
+    try:
+        constructed = count(counters["views_constructed"])
+        destroyed = count(counters["views_destroyed"])
+        live = count(counters["live_views_after_teardown"])
+        for phase in ("build", "first_frame", "readback"):
+            for name in ("layout_passes", "damage_requests", "unmarked_paint_mutations"):
+                count(counters[phase][name])
+        unmarked = counters["readback"]["unmarked_paint_mutations"]
+    except (KeyError, TypeError, ValueError):
+        return {"status": "absent", "counters": counters,
+                "failures": ["observer work counters are malformed"]}
+    if constructed <= 0:
+        failures.append("observer built no views")
+    if live != 0 or destroyed != constructed:
+        failures.append(
+            f"{constructed - destroyed} of {constructed} views outlived teardown")
+    if unmarked != 0:
+        failures.append(f"{unmarked} unmarked paint mutations after the first frame")
+    return {"status": "fail" if failures else "pass", "counters": counters,
+            "failures": failures}
+
+
 def promotion_recommendation(
     unsupported: list[str],
     structural: dict[str, Any],
     geometry: dict[str, Any],
     typography: dict[str, Any],
     visual: dict[str, Any],
-    boundaries: list[dict[str, Any]] | None = None,
+    work_counters: dict[str, Any] | None = None,
+    support_boundaries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Advisory classification. Support boundaries never change a score.
+
+    `work_counters` is `work_counter_gate`'s verdict on the observer's render;
+    anything but a pass, including no verdict at all, blocks eligibility.
 
     A support boundary is content Pulp's renderer cannot reproduce from the
     capture (for example a control the native theme paints). It makes the
     fixture browser-required and ineligible, while every score — including the
     residual the boundary explains — stays reported and counted.
     """
-    boundaries = boundaries or []
+    boundaries = support_boundaries or []
     registered_visual = visual.get("registered_visual")
     visual_gate_score = (
         registered_visual["score"] if registered_visual else visual["score"])
@@ -152,13 +208,21 @@ def promotion_recommendation(
         "typography": typography["score"],
         "visual": visual_gate_score,
     }
+    # `not (score >= threshold)` so a NaN score fails rather than passing a
+    # `<` comparison that is false for NaN.
     failed = [
         name for name, threshold in PROMOTION_THRESHOLDS.items()
-        if name != "geometry" and scores[name] < threshold
+        if name != "geometry"
+        and not (math.isfinite(scores[name]) and scores[name] >= threshold)
     ]
     geometry_failures = geometry_gate_failures(geometry)
     if not geometry_gate_ok(geometry):
-        failed.insert(1 if "structural" in failed else 0, "geometry")
+        at = 1 if "structural" in failed else 0
+        failed.insert(at, "geometry")
+        # Page-space geometry gates inside the geometry gate; named on its own
+        # as well so the reason reads in the lens's own terms.
+        if "page_space_mean" in geometry_failures:
+            failed.insert(at, "geometry_page_space")
     full_frame_classification = (
         visual.get("full_frame_classification") or {}).get(
             "classification", "unclassified")
@@ -168,17 +232,24 @@ def promotion_recommendation(
     def failure_reason(name: str) -> str:
         if name == "geometry":
             return f"geometry gate failed: {', '.join(geometry_failures)}"
+        if name == "geometry_page_space":
+            return f"geometry score below {PROMOTION_THRESHOLDS['geometry']:.3f}"
         if name == "full_frame":
             return (f"full-frame visual {visual['score']:.3f} below "
                     f"{PROMOTION_THRESHOLDS['visual']:.3f} and classified "
                     f"{full_frame_classification}")
         return f"{name} score below {PROMOTION_THRESHOLDS[name]:.3f}"
 
-    threshold_eligible = not unsupported and not failed and not boundaries
+    work_counters = work_counters or {}
+    counter_failures = (
+        [] if work_counters.get("status") == "pass"
+        else list(work_counters.get("failures") or ["work counters not evaluated"]))
+    threshold_eligible = (not unsupported and not failed and not counter_failures
+                          and not boundaries)
     # A boundary that reclassifies a fixture whose every numeric gate passed is
     # a decision, not a measurement, so it is named as one in the report.
     boundary_overrides_passing_gates = bool(
-        boundaries and not unsupported and not failed)
+        boundaries and not unsupported and not failed and not counter_failures)
     if unsupported or boundaries:
         classification = "browser-required"
         reasons = []
@@ -195,12 +266,12 @@ def promotion_recommendation(
                 f"{boundary['control_count']} control(s), "
                 f"{boundary['foreground_error_share'] * 100:.1f}% of scored "
                 "foreground error")
-        reasons += [failure_reason(name) for name in failed]
+        reasons += [failure_reason(name) for name in failed] + counter_failures
     else:
         classification = "native-with-browser-validation"
         reasons = (
-            [failure_reason(name) for name in failed]
-            if failed else
+            [failure_reason(name) for name in failed] + counter_failures
+            if failed or counter_failures else
             ["threshold-eligible, but production promotion is disabled until "
              "a candidate-only classifier passes a frozen holdout corpus"])
     return {
@@ -222,6 +293,7 @@ def promotion_recommendation(
              "foreground_error_share": b["foreground_error_share"]}
             for b in boundaries],
         "numeric_gates_pass": not failed,
+        "work_counters_ok": not counter_failures,
         "boundary_overrides_passing_gates": boundary_overrides_passing_gates,
         "reasons": reasons,
     }

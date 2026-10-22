@@ -3,11 +3,14 @@
 
 #include <pulp/audio/analysis/audio_spectrum.hpp>
 #include <pulp/signal/oversampling.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -499,4 +502,476 @@ TEST_CASE("Pristine float decimator keeps stopband energy below its numeric floo
     const double rms_db = 10.0 * std::log10(energy / (frames - 1025));
     INFO("pristine float stopband RMS dBFS=" << rms_db);
     REQUIRE(rms_db < -120.0);
+}
+
+// ── polyphase_iir lane ───────────────────────────────────────────────────────
+
+namespace {
+
+using pulp::test::audio::fit_tone;
+
+// Injected-tone rejection for the polyphase lane with an explicit settle
+// window: a minimum-phase lane reports zero latency, but its poles still need
+// time to ring down to the measurement floor. `tone` = false injects silence,
+// which is the analyzer's own floor (the negative control).
+// The measurement itself, over any x2-or-higher round trip `step(input,
+// callback)`: inject a unit tone at `oversampled_frequency` inside the
+// callback, let the poles ring down, and report how far the output RMS sits
+// below the tone's. `tone` = false injects silence (the analyzer's own floor).
+template <typename Step>
+double injected_rejection_db(Step&& step, double oversampled_frequency, bool tone = true) {
+    constexpr std::size_t frames = 8192;
+    constexpr std::size_t settled = 2048;
+    std::size_t callback_frame = 0;
+    double energy = 0.0;
+    for (std::size_t i = 0; i < frames; ++i) {
+        const double output = step(0.0, [&](double) {
+            const double value = tone ? std::sin(2.0 * kPi * oversampled_frequency *
+                                                 static_cast<double>(callback_frame))
+                                      : 0.0;
+            ++callback_frame;
+            return value;
+        });
+        if (i >= settled)
+            energy += output * output;
+    }
+    const double mean_square = energy / static_cast<double>(frames - settled);
+    return 10.0 * std::log10(0.5 / (mean_square + 1e-300));
+}
+
+double polyphase_rejection_db(Oversampler64::Quality quality, Oversampler64::Factor factor,
+                              double frequency, bool tone = true) {
+    Oversampler64 oversampler;
+    oversampler.set_kind(Oversampler64::Kind::polyphase_iir);
+    oversampler.set_quality(quality);
+    oversampler.set_factor(factor);
+    return injected_rejection_db(
+        [&](double input, auto&& callback) { return oversampler.process(input, callback); },
+        frequency / static_cast<double>(factor), tone);
+}
+
+// The same x2 round trip the oversampler runs, wired from a bare half-band
+// stage so a test can hand it a design the oversampler would never choose.
+double halfband_x2_rejection_db(const pulp::signal::HalfBandIirDesign& design, double frequency) {
+    pulp::signal::detail::HalfBandIirStage<double> stage;
+    stage.configure(design);
+    return injected_rejection_db(
+        [&](double input, auto&& callback) {
+            double up[2];
+            stage.upsample(&input, up, 1);
+            up[0] = callback(up[0]);
+            up[1] = callback(up[1]);
+            double out = 0.0;
+            stage.downsample(up, &out, 1);
+            return out;
+        },
+        frequency / 2.0);
+}
+
+// Phase (radians) of a unit sine at `frequency` after the identity round trip.
+double round_trip_phase(Oversampler64& oversampler, double frequency) {
+    oversampler.reset();
+    constexpr std::size_t frames = 8192;
+    std::vector<double> output(frames);
+    for (std::size_t i = 0; i < frames; ++i)
+        output[i] = oversampler.process(std::sin(2.0 * kPi * frequency * static_cast<double>(i)),
+                                        [](double sample) { return sample; });
+    const auto fit = fit_tone(std::span<const double>(output).subspan(4096), frequency);
+    // The fit runs on samples [4096, frames), so its n = 0 is absolute index 4096.
+    return std::atan2(fit.cos_gain, fit.sin_gain) - 2.0 * kPi * frequency * 4096.0;
+}
+
+constexpr std::array<Oversampler64::Factor, 4> kFactors = {
+    Oversampler64::Factor::x2, Oversampler64::Factor::x4, Oversampler64::Factor::x8,
+    Oversampler64::Factor::x16};
+
+} // namespace
+
+TEST_CASE("Polyphase IIR stage designs meet their analytic floors",
+          "[signal][oversampling][polyphase_iir][stopband]") {
+    for (const auto quality :
+         {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
+        const bool pristine = quality == Oversampler64::Quality::pristine;
+        for (int stage = 0; stage < 4; ++stage) {
+            const auto design = Oversampler64::polyphase_stage_design(quality, stage);
+            REQUIRE(design.valid());
+            // Every stage keeps the same absolute base band: 0.42 Fs / 0.45 Fs.
+            const double rate = static_cast<double>(1 << (stage + 1));
+            REQUIRE_THAT(design.passband_edge * rate, WithinAbs(pristine ? 0.45 : 0.42, 1e-12));
+            const double stop = pulp::signal::halfband_iir_stopband_db(design);
+            INFO("quality=" << pristine << " stage=" << stage << " stopband=" << stop << " dB");
+            REQUIRE(stop < (pristine ? -146.0 : -94.8));
+        }
+    }
+}
+
+TEST_CASE("Polyphase IIR rejects callback content folding into the base band at every stage",
+          "[signal][oversampling][polyphase_iir][stopband]") {
+    // Stage s decimates from 2^(s+1) Fs, and its stopband in base units starts at
+    // 2^s - edge, where edge is the base passband (0.42 / 0.45). Content there
+    // folds onto the base band through that stage alone, so one window per stage
+    // pins every stage independently. Offsets crowd toward the stopband edge,
+    // where an equiripple design is no better than anywhere else but where a
+    // mis-designed one is weakest.
+    constexpr std::array<double, 8> kOffsets = {0.0005, 0.003, 0.01, 0.03, 0.08, 0.15, 0.25, 0.4};
+    for (const auto quality :
+         {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
+        const bool pristine = quality == Oversampler64::Quality::pristine;
+        const double edge = pristine ? 0.45 : 0.42;
+        const double floor_db = pristine ? 140.0 : 94.0;
+        for (const auto factor : kFactors) {
+            double worst = 1e9;
+            double worst_frequency = 0.0;
+            for (int stage = 0; (1 << stage) < static_cast<int>(factor); ++stage) {
+                for (const double offset : kOffsets) {
+                    if (offset >= edge)
+                        continue;
+                    const double frequency = static_cast<double>(1 << stage) - edge + offset;
+                    const double rejection = polyphase_rejection_db(quality, factor, frequency);
+                    if (rejection < worst) {
+                        worst = rejection;
+                        worst_frequency = frequency;
+                    }
+                }
+            }
+            INFO("pristine=" << pristine << " factor=" << static_cast<int>(factor)
+                             << " worst rejection=" << worst << " dB at " << worst_frequency
+                             << " Fs (floor " << floor_db << ")");
+            REQUIRE(worst > floor_db);
+        }
+    }
+}
+
+TEST_CASE("Polyphase IIR rejection gate sits above the analyzer floor and below a weak filter",
+          "[signal][oversampling][polyphase_iir][stopband]") {
+    // Negative control: identical measurement, nothing injected. The reading
+    // must sit far beyond the pristine gate (140 dB) or that gate is grading
+    // the analyzer, not the filter.
+    const double silent = polyphase_rejection_db(Oversampler64::Quality::pristine,
+                                                 Oversampler64::Factor::x2, 0.6, false);
+    INFO("analyzer floor reading=" << silent << " dB");
+    REQUIRE(silent > 250.0);
+    // Planted near-miss through the same measurement: one section short of the
+    // pristine stage-0 design (10 instead of 11 at the same 0.225 edge, an
+    // equiripple floor near -133 dB) must fail the 140 dB gate somewhere in
+    // the window that gate scans. The hand-wired stage is first shown to read
+    // what the oversampler reads with the production design, so the near-miss
+    // is measured by the same instrument rather than a lookalike.
+    {
+        constexpr std::array<double, 8> kEdgeOffsets = {0.0005, 0.003, 0.01, 0.03,
+                                                        0.08,   0.15,  0.25, 0.4};
+        const auto production =
+            Oversampler64::polyphase_stage_design(Oversampler64::Quality::pristine, 0);
+        const auto near_miss = pulp::signal::design_halfband_iir(10, 0.225);
+        double production_worst = 1e9;
+        double near_miss_worst = 1e9;
+        for (const double offset : kEdgeOffsets) {
+            const double frequency = 1.0 - 0.45 + offset;
+            const double via_oversampler = polyphase_rejection_db(
+                Oversampler64::Quality::pristine, Oversampler64::Factor::x2, frequency);
+            const double via_stage = halfband_x2_rejection_db(production, frequency);
+            REQUIRE_THAT(via_stage, WithinAbs(via_oversampler, 1e-6));
+            production_worst = std::min(production_worst, via_stage);
+            near_miss_worst =
+                std::min(near_miss_worst, halfband_x2_rejection_db(near_miss, frequency));
+        }
+        INFO("production worst=" << production_worst << " dB, near-miss worst=" << near_miss_worst
+                                 << " dB");
+        REQUIRE(production_worst > 140.0);
+        REQUIRE(near_miss_worst < 140.0);
+        REQUIRE(near_miss_worst > 125.0); // a near miss, not a broken filter
+    }
+    // Positive control: a passband tone injected in the callback comes straight
+    // back, so the same instrument reads ~0 dB rather than a flattering number.
+    const double passband =
+        polyphase_rejection_db(Oversampler64::Quality::standard, Oversampler64::Factor::x2, 0.2);
+    REQUIRE_THAT(passband, WithinAbs(0.0, 0.01));
+    // The biquad lane's ~9 dB at the same kind of probe shows the gate fails on
+    // a filter that does not reject.
+    REQUIRE(injected_tone_rejection_db(Oversampler64::Kind::fir_biquad,
+                                       Oversampler64::Quality::standard, Oversampler64::Factor::x2,
+                                       0.6) < 30.0);
+}
+
+TEST_CASE("Polyphase IIR interpolator rejects base-band images by its design floor",
+          "[signal][oversampling][polyphase_iir][stopband]") {
+    // A base tone f appears in the oversampled stream at f and at k*Fs +/- f.
+    // Project each image by least squares and compare to the tone itself.
+    for (const auto quality :
+         {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
+        const bool pristine = quality == Oversampler64::Quality::pristine;
+        for (const auto factor : {Oversampler64::Factor::x2, Oversampler64::Factor::x4}) {
+            for (const double frequency : {0.05, 0.2, pristine ? 0.449 : 0.419}) {
+                Oversampler64 oversampler;
+                oversampler.set_kind(Oversampler64::Kind::polyphase_iir);
+                oversampler.set_quality(quality);
+                oversampler.set_factor(factor);
+                const int f = static_cast<int>(factor);
+                std::vector<double> stream;
+                stream.reserve(8192u * static_cast<std::size_t>(f));
+                for (std::size_t i = 0; i < 8192; ++i)
+                    static_cast<void>(oversampler.process(
+                        0.5 * std::sin(2.0 * kPi * frequency * static_cast<double>(i)),
+                        [&](double sample) {
+                            stream.push_back(sample);
+                            return sample;
+                        }));
+                // Fit the tone, subtract it, then fit each image in the residual.
+                // A single-tone fit at an image frequency would otherwise pick up
+                // the 0 dB tone's finite-window leakage (about -90 dB).
+                const auto tail = std::span<const double>(stream).subspan(2048u * f);
+                const auto main = fit_tone(tail, frequency / f);
+                std::vector<double> residual(tail.begin(), tail.end());
+                for (std::size_t n = 0; n < residual.size(); ++n) {
+                    const double phase = 2.0 * kPi * frequency / f * static_cast<double>(n);
+                    residual[n] -=
+                        main.sin_gain * std::sin(phase) + main.cos_gain * std::cos(phase);
+                }
+                double worst_db = -1e9;
+                for (int k = 1; k < f; ++k) {
+                    for (const double image : {k - frequency, k + frequency}) {
+                        if (image >= 0.5 * f)
+                            continue;
+                        worst_db = std::max(
+                            worst_db, 20.0 * std::log10(fit_tone(residual, image / f).amplitude /
+                                                            main.amplitude +
+                                                        1e-300));
+                    }
+                }
+                INFO("pristine=" << pristine << " factor=" << f << " f=" << frequency
+                                 << " worst image=" << worst_db << " dB");
+                REQUIRE(worst_db < (pristine ? -140.0 : -94.0));
+            }
+        }
+    }
+}
+
+TEST_CASE("Polyphase IIR passband is flat to its advertised edge",
+          "[signal][oversampling][polyphase_iir][passband]") {
+    for (const auto quality :
+         {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
+        const double edge = quality == Oversampler64::Quality::pristine ? 0.45 : 0.42;
+        for (const auto factor : kFactors) {
+            for (const double frequency : {0.01, 0.1, 0.3, edge - 0.001}) {
+                Oversampler64 oversampler;
+                oversampler.set_kind(Oversampler64::Kind::polyphase_iir);
+                oversampler.set_quality(quality);
+                oversampler.set_factor(factor);
+                std::vector<double> output(8192);
+                for (std::size_t i = 0; i < output.size(); ++i)
+                    output[i] = oversampler.process(
+                        0.5 * std::sin(2.0 * kPi * frequency * static_cast<double>(i)),
+                        [](double sample) { return sample; });
+                const double gain = tone_gain_db(settled_tail(output, 2048), frequency, 0.5);
+                INFO("edge=" << edge << " factor=" << static_cast<int>(factor) << " f=" << frequency
+                             << " gain=" << gain << " dB");
+                REQUIRE(std::abs(gain) < 1e-4);
+            }
+        }
+    }
+}
+
+TEST_CASE("Oversampler group delay function matches the measured round trip",
+          "[signal][oversampling][latency]") {
+    // Group delay is the slope of the measured phase across a narrow frequency
+    // pair. A pure function that disagreed with the audio would be a sealed
+    // stage someone re-derives wrong; this pins them together for both
+    // minimum-phase lanes and the linear-phase one.
+    for (const auto kind : {Oversampler64::Kind::polyphase_iir, Oversampler64::Kind::fir_biquad,
+                            Oversampler64::Kind::linear_phase_fir}) {
+        for (const auto factor : {Oversampler64::Factor::x2, Oversampler64::Factor::x8}) {
+            Oversampler64 oversampler;
+            oversampler.set_kind(kind);
+            oversampler.set_factor(factor);
+            for (const double frequency : {0.02, 0.15, 0.35}) {
+                // The biquad lane rejects images by only ~7-20 dB, so near Nyquist
+                // the decimator folds the tone's own image back onto it and the
+                // round trip stops being LTI; its group delay only describes the
+                // band where images are negligible.
+                if (kind == Oversampler64::Kind::fir_biquad && frequency > 0.2)
+                    continue;
+                constexpr double delta = 0.0005;
+                double dphi = round_trip_phase(oversampler, frequency + delta) -
+                              round_trip_phase(oversampler, frequency - delta);
+                dphi = std::remainder(dphi, 2.0 * kPi);
+                const double measured = -dphi / (2.0 * kPi * 2.0 * delta);
+                const double predicted = oversampler.group_delay_samples(frequency);
+                INFO("kind=" << static_cast<int>(kind) << " factor=" << static_cast<int>(factor)
+                             << " f=" << frequency << " measured=" << measured
+                             << " predicted=" << predicted);
+                REQUIRE_THAT(measured, WithinAbs(predicted, 0.01));
+            }
+        }
+    }
+    // Pin the standard x2 DC delay so a design change that moves it is a
+    // deliberate, reviewed edit: 2 * 3.16 / 2 - 1/2 base samples.
+    Oversampler64 x2;
+    x2.set_kind(Oversampler64::Kind::polyphase_iir);
+    REQUIRE_THAT(x2.group_delay_samples(1e-6), WithinAbs(2.66, 0.01));
+}
+
+TEST_CASE("Block processing is identical to per-sample processing for every kind",
+          "[signal][oversampling][block]") {
+    std::vector<float> input(3001);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = 0.8f * std::sin(static_cast<float>(2.0 * kPi * 0.0371 * i)) +
+                   0.3f * std::sin(static_cast<float>(2.0 * kPi * 0.411 * i));
+    auto shaper = [](float sample) { return std::tanh(2.0f * sample); };
+    for (const auto kind : {Oversampler::Kind::fir_biquad, Oversampler::Kind::polyphase_iir,
+                            Oversampler::Kind::linear_phase_fir}) {
+        for (const auto factor :
+             {Oversampler::Factor::x2, Oversampler::Factor::x4, Oversampler::Factor::x16}) {
+            Oversampler per_sample;
+            per_sample.set_kind(kind);
+            per_sample.set_factor(factor);
+            std::vector<float> expected(input.size());
+            for (std::size_t i = 0; i < input.size(); ++i)
+                expected[i] = per_sample.process(input[i], shaper);
+            for (const std::size_t block : {1u, 5u, 64u, 1000u, 3001u}) {
+                Oversampler blocked;
+                blocked.set_kind(kind);
+                blocked.set_factor(factor);
+                std::vector<float> actual = input; // in place
+                for (std::size_t offset = 0; offset < actual.size(); offset += block) {
+                    const std::size_t count = std::min(block, actual.size() - offset);
+                    blocked.process_block(actual.data() + offset, actual.data() + offset, count,
+                                          shaper);
+                }
+                INFO("kind=" << static_cast<int>(kind) << " factor=" << static_cast<int>(factor)
+                             << " block=" << block);
+                REQUIRE(actual == expected);
+            }
+        }
+    }
+}
+
+TEST_CASE("Polyphase IIR float build holds its stopband against rounding",
+          "[signal][oversampling][polyphase_iir][precision]") {
+    for (const auto quality : {Oversampler::Quality::standard, Oversampler::Quality::pristine}) {
+        Oversampler oversampler;
+        oversampler.set_kind(Oversampler::Kind::polyphase_iir);
+        oversampler.set_quality(quality);
+        oversampler.set_factor(Oversampler::Factor::x2);
+        const bool pristine = quality == Oversampler::Quality::pristine;
+        const double frequency = pristine ? 0.56 : 0.59; // just past each stopband edge
+        std::size_t callback_frame = 0;
+        double energy = 0.0;
+        constexpr std::size_t frames = 8192;
+        for (std::size_t i = 0; i < frames; ++i) {
+            const float output = oversampler.process(0.0f, [&](float) {
+                const float value =
+                    static_cast<float>(std::sin(2.0 * kPi * frequency / 2.0 * callback_frame));
+                ++callback_frame;
+                return value;
+            });
+            if (i >= 2048)
+                energy += static_cast<double>(output) * output;
+        }
+        const double rms_db = 10.0 * std::log10(energy / (frames - 2048) / 0.5 + 1e-300);
+        INFO("pristine=" << pristine << " float stopband reading=" << rms_db << " dB");
+        REQUIRE(rms_db < (pristine ? -135.0 : -94.0));
+    }
+}
+
+namespace {
+
+// Clears flush-to-zero for the scope, so a test sees the arithmetic a host
+// without FTZ (offline renders, x86 defaults) would run.
+class FlushToZeroOff {
+  public:
+    FlushToZeroOff() {
+#if defined(PULP_FLUSH_DENORMALS_X86)
+        saved_ = _mm_getcsr();
+        _mm_setcsr(saved_ & ~pulp::signal::detail::kMxcsrFtz);
+#elif defined(PULP_FLUSH_DENORMALS_ARM64)
+        saved_ = pulp::signal::detail::read_fpcr();
+        pulp::signal::detail::write_fpcr(saved_ & ~pulp::signal::detail::kFpcrFz);
+#endif
+    }
+    ~FlushToZeroOff() {
+#if defined(PULP_FLUSH_DENORMALS_X86)
+        _mm_setcsr(static_cast<unsigned int>(saved_));
+#elif defined(PULP_FLUSH_DENORMALS_ARM64)
+        pulp::signal::detail::write_fpcr(saved_);
+#endif
+    }
+    FlushToZeroOff(const FlushToZeroOff&) = delete;
+    FlushToZeroOff& operator=(const FlushToZeroOff&) = delete;
+
+  private:
+#if defined(PULP_FLUSH_DENORMALS_X86)
+    unsigned int saved_ = 0;
+#else
+    std::uint64_t saved_ = 0;
+#endif
+};
+
+// Drive a saturated tone, then silence; return the index (into the silence)
+// one past the last nonzero output, or -1 if the output never reached zero.
+template <typename OS, typename Sample>
+long samples_to_exact_zero(typename OS::Kind kind, typename OS::Quality quality,
+                           typename OS::Factor factor, std::size_t& subnormal_outputs) {
+    OS oversampler;
+    oversampler.set_kind(kind);
+    oversampler.set_quality(quality);
+    oversampler.set_factor(factor);
+    std::vector<Sample> block(512);
+    auto shaper = [](Sample x) { return std::tanh(Sample{3} * x); };
+    for (int b = 0; b < 20; ++b) {
+        for (std::size_t i = 0; i < block.size(); ++i)
+            block[i] = Sample(0.9) * std::sin(Sample(0.1) * static_cast<Sample>(b * 512 + i));
+        oversampler.process_block(block.data(), block.data(), block.size(), shaper);
+    }
+    long last_nonzero = -1;
+    subnormal_outputs = 0;
+    constexpr int kSilentBlocks = 128;
+    for (int b = 0; b < kSilentBlocks; ++b) {
+        std::fill(block.begin(), block.end(), Sample{0});
+        oversampler.process_block(block.data(), block.data(), block.size(), shaper);
+        for (std::size_t i = 0; i < block.size(); ++i) {
+            if (block[i] != Sample{0})
+                last_nonzero = static_cast<long>(b * 512 + i);
+            if (std::fpclassify(block[i]) == FP_SUBNORMAL)
+                ++subnormal_outputs;
+        }
+    }
+    return last_nonzero + 1 < kSilentBlocks * 512 ? last_nonzero + 1 : -1;
+}
+
+} // namespace
+
+TEST_CASE("Polyphase IIR output decays to exact zero on silence without flush-to-zero",
+          "[signal][oversampling][polyphase_iir][denormal]") {
+    // An allpass recurrence fed silence settles into a subnormal limit cycle
+    // that never reaches zero: nonzero output forever and, without FTZ, a
+    // heavy per-sample cost. The stages flush tiny state at block ends, so the
+    // output must hit exact zero within a few thousand samples.
+    FlushToZeroOff no_ftz;
+    REQUIRE_FALSE(pulp::signal::denormals_are_flushed());
+    REQUIRE(std::fpclassify(std::numeric_limits<float>::min() / 4.0f) == FP_SUBNORMAL);
+    // Measured on M3 Ultra: float reaches zero by 768 (standard) / 1664
+    // (pristine) samples; double, whose flush threshold sits ~600 dB lower, by
+    // 6528 / 15744. The bounds leave room without letting a limit cycle pass.
+    constexpr long kBound = 4096;
+    constexpr long kBound64 = 32768;
+    for (const auto quality : {Oversampler::Quality::standard, Oversampler::Quality::pristine}) {
+        for (const auto factor :
+             {Oversampler::Factor::x2, Oversampler::Factor::x4, Oversampler::Factor::x16}) {
+            std::size_t subnormals = 0;
+            const long zero_at = samples_to_exact_zero<Oversampler, float>(
+                Oversampler::Kind::polyphase_iir, quality, factor, subnormals);
+            std::size_t subnormals64 = 0;
+            const long zero_at64 = samples_to_exact_zero<Oversampler64, double>(
+                Oversampler64::Kind::polyphase_iir, static_cast<Oversampler64::Quality>(quality),
+                static_cast<Oversampler64::Factor>(factor), subnormals64);
+            INFO("quality=" << static_cast<int>(quality) << " factor=" << static_cast<int>(factor)
+                            << " float zero at " << zero_at << " (" << subnormals
+                            << " subnormal outputs), double zero at " << zero_at64);
+            REQUIRE(zero_at >= 0);
+            REQUIRE(zero_at <= kBound);
+            REQUIRE(subnormals == 0);
+            REQUIRE(zero_at64 >= 0);
+            REQUIRE(zero_at64 <= kBound64);
+        }
+    }
 }

@@ -969,9 +969,8 @@ private:
     struct FaceMetrics {
         float ascent = 0.0f;
         float descent = 0.0f;
-        // Typographic ascent / descent: what CSS splits half-leading against.
-        float font_ascent = 0.0f;
-        float font_descent = 0.0f;
+        // fDescent; see PreparedText::typographic_descent().
+        float typographic_descent = 0.0f;
         bool real = false;
     };
     FaceMetrics face_metrics(const std::string& family, float font_size,

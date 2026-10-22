@@ -570,6 +570,60 @@ TEST_CASE("GPU audio trace records require ordered timestamps and preserve unava
     REQUIRE_FALSE(late_gpu_delivery.valid());
 }
 
+TEST_CASE("GPU audio trace records refuse callback timing that cannot be emitted signed",
+          "[gpu_audio][trace]") {
+    constexpr auto max_signed =
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    SharedIoTraceRecorder recorder(config(1));
+
+    // Positive controls sit exactly on each refused boundary.
+    auto boundary = raw_delivery(0);
+    boundary.callback_start_ns = max_signed - 2;
+    boundary.callback_end_ns = max_signed - 1;
+    boundary.result_visible_ns = max_signed;
+    REQUIRE(boundary.valid());
+    REQUIRE(recorder.publish_callback(boundary));
+    auto equal_timing = raw_delivery(1);
+    equal_timing.callback_end_ns = equal_timing.callback_start_ns;
+    equal_timing.result_visible_ns = equal_timing.callback_end_ns;
+    REQUIRE(equal_timing.valid());
+    REQUIRE(recorder.publish_callback(equal_timing));
+    auto ingress = record(2);
+    ingress.callback_ingress_ns = max_signed;
+    REQUIRE(ingress.valid());
+    REQUIRE(recorder.publish_worker(ingress));
+    // Unavailable callback timing carries no claim, so stale values are inert.
+    auto unavailable = raw_delivery(3);
+    unavailable.callback_timing_available = false;
+    unavailable.callback_end_ns = 0;
+    unavailable.result_visible_ns = std::numeric_limits<std::uint64_t>::max();
+    REQUIRE(unavailable.valid());
+    REQUIRE(recorder.publish_callback(unavailable));
+
+    // Each planted negative differs from a positive control by one field.
+    auto wrapped_visible = boundary;
+    wrapped_visible.result_visible_ns = max_signed + 1;
+    auto end_before_start = equal_timing;
+    end_before_start.callback_end_ns = end_before_start.callback_start_ns - 1;
+    auto visible_before_end = equal_timing;
+    visible_before_end.result_visible_ns = visible_before_end.callback_end_ns - 1;
+    auto wrapped_ingress = ingress;
+    wrapped_ingress.callback_ingress_ns = max_signed + 1;
+    REQUIRE_FALSE(wrapped_visible.valid());
+    REQUIRE_FALSE(end_before_start.valid());
+    REQUIRE_FALSE(visible_before_end.valid());
+    REQUIRE_FALSE(wrapped_ingress.valid());
+    REQUIRE_FALSE(recorder.publish_callback(wrapped_visible));
+    REQUIRE_FALSE(recorder.publish_callback(end_before_start));
+    REQUIRE_FALSE(recorder.publish_callback(visible_before_end));
+    REQUIRE_FALSE(recorder.publish_worker(wrapped_ingress));
+
+    const auto stats = recorder.stats();
+    REQUIRE(stats.attempted == 8);
+    REQUIRE(stats.enqueued == 4);
+    REQUIRE(stats.invalid == 4);
+}
+
 TEST_CASE("GPU audio trace samples successes but keeps every anomaly", "[gpu_audio][trace]") {
     SharedIoTraceRecorder recorder(config(4));
     REQUIRE(recorder.enabled());
@@ -1140,6 +1194,61 @@ TEST_CASE("diagnostic overflow never refuses physical session submissions", "[gp
     REQUIRE(fixture.session.trace_stats().invalid == 0);
 }
 
+TEST_CASE("observer-backed session release validates the closing telemetry receipt",
+          "[gpu_audio][trace][observer][telemetry]") {
+    ProductTraceFixture fixture;
+    fixture.prepare();
+    SessionObserverSink sink;
+    const SharedIoTraceDrainObserver observer{.context = &sink,
+                                              .record = &SessionObserverSink::record,
+                                              .admission = &SessionObserverSink::admission};
+    REQUIRE(fixture.session.set_trace_observer(&observer));
+    drive_two_deliveries(fixture);
+    // Negative control: a drain while producers may still run defers.
+    const auto live = fixture.session.drain_trace();
+    CHECK_FALSE(live.telemetry_valid);
+    CHECK(live.telemetry_error == SharedIoTelemetryError::TelemetryValidationDeferred);
+
+    REQUIRE(fixture.session.release());
+    const auto closed = fixture.session.last_close_trace_drain();
+    CHECK(closed.recording_enabled);
+    CHECK(closed.telemetry_valid);
+    CHECK(closed.telemetry_error == SharedIoTelemetryError::None);
+}
+
+TEST_CASE("session close without an observer drains every row into the closed census",
+          "[gpu_audio][trace][telemetry]") {
+    ProductTraceFixture fixture;
+    fixture.prepare();
+    drive_two_deliveries(fixture);
+    REQUIRE(fixture.session.release());
+    REQUIRE_FALSE(fixture.session.last_closed_trace_retention_overflow());
+    const auto closed = fixture.session.last_close_trace_drain();
+    CHECK(closed.telemetry_valid);
+    CHECK(closed.telemetry_error == SharedIoTelemetryError::None);
+    const auto admissions = fixture.session.take_last_closed_trace_admissions();
+    const auto records = fixture.session.take_last_closed_trace_records();
+    REQUIRE(admissions.size() == 2);
+    REQUIRE(records.size() == 6);
+    for (std::uint64_t sequence = 0; sequence < 2; ++sequence) {
+        for (const auto kind : {Kind::Terminal, Kind::Eligible, Kind::Delivery}) {
+            CHECK(std::count_if(records.begin(), records.end(), [&](const auto& r) {
+                      return r.kind == kind && r.sequence == sequence &&
+                             (kind != Kind::Terminal || r.admission_identity_matched);
+                  }) == 1);
+        }
+    }
+
+    // A one-row retention bound keeps a bounded prefix and reports the loss.
+    ProductTraceFixture bounded;
+    bounded.prepare(1);
+    drive_two_deliveries(bounded);
+    REQUIRE(bounded.session.release());
+    CHECK(bounded.session.last_closed_trace_retention_overflow());
+    CHECK(bounded.session.take_last_closed_trace_records().size() == 1);
+    CHECK(bounded.session.take_last_closed_trace_admissions().size() == 1);
+}
+
 TEST_CASE("trial retention drains fixed queues without dropping a long census",
           "[gpu_audio][trace][retention]") {
     constexpr std::uint64_t submissions = SharedIoTraceRecorder::capacity + 512;
@@ -1273,6 +1382,12 @@ TEST_CASE("GPU audio trace persists authoritative positive and planted invalid c
             event.sequence = 0;
             recorder.publish_callback(event);
             drain_shared_io_trace(recorder, {}, 256);
+            // Planted impossible quiescent counters: more retirements than
+            // submissions must surface as an invalid_telemetry issue.
+            SharedIoTelemetrySnapshot forged;
+            forged.retired_failure = 1;
+            REQUIRE(drain_shared_io_trace(recorder, forged, 0, nullptr, true).telemetry_error ==
+                    SharedIoTelemetryError::RetirementsExceedSubmissions);
             for (std::uint64_t sequence = 1000;
                  sequence < 1000 + SharedIoTraceRecorder::capacity + 44; ++sequence) {
                 terminal = record(sequence);
@@ -1286,6 +1401,32 @@ TEST_CASE("GPU audio trace persists authoritative positive and planted invalid c
         REQUIRE(stopped.ok);
         REQUIRE(stopped.trace_bytes > 0);
     }
+}
+
+TEST_CASE("trace drain marks impossible telemetry receipts invalid",
+          "[gpu_audio][trace][telemetry][negative]") {
+    SharedIoTraceRecorder recorder(config());
+    // Positive control: a coherent quiescent snapshot validates through the
+    // same drain, so the rejection below is caused by the forged counters.
+    SharedIoTelemetrySnapshot coherent;
+    coherent.admitted_blocks = 1;
+    coherent.submitted_blocks = 1;
+    coherent.retired_failure = 1;
+    const auto accepted = drain_shared_io_trace(recorder, coherent, 0, nullptr, true);
+    CHECK(accepted.telemetry_valid);
+    CHECK(accepted.telemetry_error == SharedIoTelemetryError::None);
+
+    SharedIoTelemetrySnapshot forged;
+    forged.submitted_blocks = 0;
+    forged.retired_failure = 1;
+
+    const auto result = drain_shared_io_trace(recorder, forged, 0, nullptr, true);
+    CHECK_FALSE(result.telemetry_valid);
+    CHECK(result.telemetry_error == SharedIoTelemetryError::RetirementsExceedSubmissions);
+
+    const auto live = drain_shared_io_trace(recorder, forged, 0);
+    CHECK_FALSE(live.telemetry_valid);
+    CHECK(live.telemetry_error == SharedIoTelemetryError::TelemetryValidationDeferred);
 }
 
 TEST_CASE("session trace producers preserve identities across callback and service threads",

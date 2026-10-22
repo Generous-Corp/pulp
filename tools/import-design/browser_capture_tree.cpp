@@ -255,7 +255,8 @@ std::string describe(const CapturedStyleIndex& index, int node_index) {
 /// anchor built from the key follows the node where an ordinal would stay with
 /// the position. Only element nodes can carry one.
 std::string declared_key(const CapturedStyleIndex& index, int node_index) {
-    if (index.node_type_of(node_index) != kElementNode) return {};
+    if (index.node_type_of(node_index) != kElementNode)
+        return {};
     return index.attribute(node_index, "data-pulp-key");
 }
 
@@ -273,6 +274,10 @@ struct SiblingIdentity {
     /// Each (parent node, key) declared by more than one child. Those
     /// siblings fall back to positions.
     std::vector<std::pair<int, std::string>> duplicates;
+    /// Each (parent node, signature) whose children include both a keyed
+    /// sibling and a positional one. The positional ordinals there skip the
+    /// keyed siblings, so adding or removing a key renumbers them.
+    std::vector<std::pair<int, std::string>> mixed;
 };
 
 /// Computed over the WHOLE document rather than over the painted set: an
@@ -292,26 +297,36 @@ SiblingIdentity sibling_identity(const CapturedStyleIndex& index) {
     std::map<std::pair<int, std::string>, int> declared;
     for (int node = 0; node < count; ++node) {
         auto key = declared_key(index, node);
-        if (!key.empty()) ++declared[{index.parent_of(node), std::move(key)}];
+        if (!key.empty())
+            ++declared[{index.parent_of(node), std::move(key)}];
     }
     for (const auto& [parent_and_key, uses] : declared) {
-        if (uses > 1) identity.duplicates.push_back(parent_and_key);
+        if (uses > 1)
+            identity.duplicates.push_back(parent_and_key);
     }
 
     // DOMSnapshot lists nodes in document order, so a single forward pass
     // visits every parent's children in order and the running tally per
     // (parent, signature) is the ordinal.
     std::map<std::pair<int, std::string>, int> seen;
+    std::set<std::pair<int, std::string>> keyed_groups;
     for (int node = 0; node < count; ++node) {
         const int parent = index.parent_of(node);
         auto key = declared_key(index, node);
         if (!key.empty() && declared[{parent, key}] == 1) {
             identity.key[static_cast<size_t>(node)] = std::move(key);
             ++identity.keyed;
+            keyed_groups.insert({parent, describe(index, node)});
             continue;
         }
-        identity.ordinal[static_cast<size_t>(node)] =
-            seen[{parent, describe(index, node)}]++;
+        identity.ordinal[static_cast<size_t>(node)] = seen[{parent, describe(index, node)}]++;
+    }
+    // An edit stored on a positional sibling's ordinal moves to a different
+    // node when a neighbour gains or loses a key, and the anchor it lands on
+    // still looks valid, so the mix is reported rather than left to be found.
+    for (const auto& group : keyed_groups) {
+        if (!group.second.empty() && seen.count(group) != 0)
+            identity.mixed.push_back(group);
     }
     return identity;
 }
@@ -326,25 +341,21 @@ SiblingIdentity sibling_identity(const CapturedStyleIndex& index) {
 /// it was captured. A node with a usable author key spells its segment
 /// `tag[key=<key>]` instead, which the escaped `[` of any author text keeps
 /// distinct from every ordinal segment.
-std::string anchor_path(const CapturedStyleIndex& index,
-                        const SiblingIdentity& identity,
+std::string anchor_path(const CapturedStyleIndex& index, const SiblingIdentity& identity,
                         int node_index) {
     std::vector<std::string> segments;
     walk_ancestry(index, node_index, [&](int node) {
         const auto signature = describe(index, node);
         if (!signature.empty()) {
-            const bool known = node >= 0 &&
-                               node < static_cast<int>(identity.key.size());
-            const std::string* key =
-                known ? &identity.key[static_cast<size_t>(node)] : nullptr;
+            const bool known = node >= 0 && node < static_cast<int>(identity.key.size());
+            const std::string* key = known ? &identity.key[static_cast<size_t>(node)] : nullptr;
             if (key && !key->empty()) {
-                segments.push_back(escape_segment(signature) + "[key=" +
-                                   escape_segment(*key) + "]");
+                segments.push_back(escape_segment(signature) + "[key=" + escape_segment(*key) +
+                                   "]");
             } else {
-                const int position =
-                    known ? identity.ordinal[static_cast<size_t>(node)] : 0;
-                segments.push_back(escape_segment(signature) + "[" +
-                                   std::to_string(position) + "]");
+                const int position = known ? identity.ordinal[static_cast<size_t>(node)] : 0;
+                segments.push_back(escape_segment(signature) + "[" + std::to_string(position) +
+                                   "]");
             }
         }
         return true;
@@ -1117,9 +1128,13 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     counts.keyed_anchors = identity.keyed;
     for (const auto& [parent, key] : identity.duplicates) {
         counts.duplicate_keys.push_back(
-            (parent >= 0 ? anchor_path(index, identity, parent)
-                         : std::string("capture:")) +
-            " data-pulp-key=\"" + key + "\"");
+            (parent >= 0 ? anchor_path(index, identity, parent) : std::string("capture:")) +
+            " data-pulp-key=\"" + escape_segment(key) + "\"");
+    }
+    for (const auto& [parent, signature] : identity.mixed) {
+        counts.mixed_keyed_siblings.push_back(
+            (parent >= 0 ? anchor_path(index, identity, parent) : std::string("capture:")) + " " +
+            escape_segment(signature));
     }
     // Slots in Chrome's paint order (ties already broken by document order),
     // and the reverse map that turns DOM parentage into tree parentage.
@@ -1550,8 +1565,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             if (auto key = declared_key(index, node.node_index); !key.empty())
                 lowered.attributes["pulp_key"] = std::move(key);
             if (index.node_type_of(node.node_index) == kElementNode) {
-                if (auto id = index.attribute(node.node_index, "data-pulp-id");
-                    !id.empty())
+                if (auto id = index.attribute(node.node_index, "data-pulp-id"); !id.empty())
                     lowered.attributes["pulp_id"] = std::move(id);
             }
         }

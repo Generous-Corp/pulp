@@ -69,6 +69,12 @@ on a real PR. Do them in order.
      One edit can owe BOTH events. A committed event whose rationale is still
      the `<REPLACE: ...>` placeholder also fails here, because CI accepts it.
 
+   - **node ABI virtual order** (`node_abi_gate.py`) — the append-only check
+     covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
+     surface. New GPU-audio virtual hooks belong at the end of that class;
+     inserting one in the middle shifts existing slots even though the SDK
+     remains source-rebuild oriented.
+
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
    on its own for just the Vellum verdict.
@@ -4447,6 +4453,14 @@ Need Windows on a specific branch before the nightly:
 ghapp workflow run build.yml --ref <branch>
 ```
 
+A `build.yml` dispatch always includes the macOS leg, so it also spends a macOS
+gate VM. When only Windows matters, dispatch the nightly with `windows_only=true`
+instead. To prove a self-hosted Windows runner (the Mac Pro Windows x64 slot), also
+pass `windows_runner_selector_json` with that slot's labels. The schedule has no
+inputs, so the nightly stays on `windows-latest`. A run with either input set skips
+`tracking-issues`, so a red result on a new runner never files or closes the main
+tracking issue. Read where the job actually ran from the job's `runner_name`.
+
 **Before "fixing" this by putting Windows back on merge_group**, note the trade was
 explicit: up to ~24 h of latency on a Windows regression, bought with merge-queue
 capacity. Revisit only if Windows parity becomes an active workstream rather than a
@@ -4671,11 +4685,14 @@ bisectable.
 - **Parallel source coverage needs both an LLVM merge pool and a tolerant final merge.** `LLVM_PROFILE_FILE=...%Nm...` must use a pool at least as large as bounded CTest parallelism; plain `%m` is a one-file pool and parallel Linux exits have corrupted its header. In `scripts/run_coverage.sh`, never add `%p`: one profile per test process put tens of thousands of shards on disk at once and filled the hosted Linux runner's root volume mid-suite (75 GB free to 6 GB in about eleven minutes); `%8m` bounds the count at binaries x 8. The pool is keyed by `%m` (module signature), so binaries never share one; `run_coverage.sh` fails a full run closed when the pools cover fewer than half its test binaries, the signature of profiles colliding and being dropped. `tools/scripts/local_diff_cover.sh` keeps `%p-%m`: it has no module-count guard, and an earlier `%Nm` pool there left 7 files for hundreds of binaries. A killed/timed-out test can still truncate one pooled shard, so both hosted and local/SSH scripts merge with `llvm-profdata --failure-mode=all` but fail closed when invalid shards exceed both 25 files and 5% of the pool. Do not revert either half to a single `%m` file or default `failure-mode=any`: one bad shard then blackholes every otherwise-valid report.
 - **Native Linux apt dependencies have one owner.** Workflows that compile native Pulp use `.github/actions/install-linux-build-deps`, backed by `tools/ci/install_linux_build_deps.py` and capability profiles in `tools/ci/linux_build_deps.json`. Toolchains and lane-specific utilities are explicit `extra-packages`; do not add a workflow-named profile. `linux_build_deps_workflows.json` enumerates adopters and intentional direct-apt exclusions, and `test_install_linux_build_deps.py` fails workflow-lint when a new apt workflow is unclassified or an adopter copies canonical packages. Add a shared native dependency to the manifest once; add a one-lane tool at that lane's action call.
 - **`control-shipping-native.yml` proves real installed-SDK artifacts.** Its
-  path-scoped, advisory four-leg matrix builds production-stripped plug-ins on
-  macOS universal, Linux x64/arm64, and Windows x64, then preserves and
-  consolidates canonical scanner evidence. AAX proof is allowed only on a
-  protected-`main` push with the external SDK secret; PRs must report it as
-  unavailable rather than weakening the native matrix. Keep
+  path-scoped, advisory five-leg matrix builds production-stripped plug-ins on
+  macOS universal, Linux x64/arm64, and Windows x64/arm64, then preserves and
+  consolidates canonical scanner evidence. The Windows ARM leg uses the
+  `windows-11-arm` runner and `-A ARM64`; its scanner architecture is
+  `arm64-win`. This is installed-SDK format/architecture evidence with GPU
+  disabled, not Spectr Skia/Dawn, DAW, audio, or Perfetto acceptance. AAX proof
+  is allowed only on a protected-`main` push with the external SDK secret; PRs
+  must report it as unavailable rather than weakening the native matrix. Keep
   `test_control_shipping_native_workflow.py` and
   `test_verify_control_shipping_native_evidence.py` wired into
   `workflow-lint.yml` when changing this contract.

@@ -755,30 +755,43 @@ TEST_CASE("Label honors Chromium captured vertical line positions",
     REQUIRE(zero_fills.size() == 1);
     CHECK(fills[0].f[1] - zero_fills[0].f[1] == Catch::Approx(3.0f));
 
-    // Chromium splits the 4px difference between a 16px line box and the
-    // 12px font em evenly. Native paint must retain the 2px top half-leading;
-    // otherwise compact controls look high even though their boxes match.
-    Label em_height("CENTERED");
-    em_height.set_font_family("Inter");
-    em_height.set_font_size(12.0f);
-    em_height.set_bounds({0, 0, 100, 40});
-    em_height.set_cached_line_boxes(
-        {{7, 3, 58, 12, 0, 8}}, 100.0f, face, false);
-    RecordingCanvas em_canvas;
-    em_height.paint(em_canvas);
-    const auto em_fills = commands_of(em_canvas, DrawCommand::Type::fill_text);
-    REQUIRE(em_fills.size() == 1);
-    CHECK(fills[0].f[1] - em_fills[0].f[1] == Catch::Approx(2.0f));
+    // Chromium's run rect is round(fAscent) + round(fDescent) tall, plus an
+    // ascent adjustment Blink applies to faces such as Times, Helvetica and
+    // Courier, and the baseline sits round(fDescent) above its bottom. A box
+    // grown at the top by that adjustment (here 2px: top 1, height 18, same
+    // bottom) must paint on the same baseline, not 1px lower as centring the
+    // ink in the box would.
+    Label adjusted("CENTERED");
+    adjusted.set_font_family("Inter");
+    adjusted.set_font_size(12.0f);
+    adjusted.set_bounds({0, 0, 100, 40});
+    adjusted.set_cached_line_boxes({{7, 1, 58, 18, 0, 8}}, 100.0f, face, false);
+    RecordingCanvas adjusted_canvas;
+    adjusted.paint(adjusted_canvas);
+    const auto adjusted_fills = commands_of(adjusted_canvas, DrawCommand::Type::fill_text);
+    REQUIRE(adjusted_fills.size() == 1);
+    CHECK(adjusted_fills[0].f[1] == Catch::Approx(fills[0].f[1]));
+
+    // The selection band covers the captured rect, not the worst-case glyph
+    // extent hanging from the baseline.
+    adjusted.set_selection_policy(Label::SelectionPolicy::always);
+    RecordingCanvas selection_canvas;
+    adjusted.paint(selection_canvas);
+    const auto layout = adjusted.selectable_layout();
+    REQUIRE(layout.measured);
+    REQUIRE(layout.lines.size() == 1);
+    CHECK(layout.lines[0].top == Catch::Approx(1.0f));
+    CHECK(layout.lines[0].height == Catch::Approx(18.0f));
 }
 
-TEST_CASE("Label places a captured baseline from the face's typographic ascent",
+TEST_CASE("Label places a captured baseline from the face's typographic metrics",
           "[view][widget][label-cache][alignment][typography]") {
-    // Chromium's text line box is the content area: the face's typographic
-    // ascent + descent, with the line-height surplus split evenly around it.
-    // Its baseline therefore sits `ascent` below the top of a box exactly
-    // that tall. The shaper's clip-safe ascent()/descent() carry the glyph
-    // bounding box instead, which for most faces is taller; descending by it
-    // paints every captured line low by half the gap, growing with size.
+    // Chromium's text run rect is the content area, the face's typographic
+    // ascent + descent rounded to whole px, whatever the line-height, and its
+    // baseline sits the rounded descent above the rect's bottom. The shaper's
+    // clip-safe ascent()/descent() carry the glyph bounding box instead,
+    // which for most faces is taller; placing the baseline from them paints
+    // every captured line off by part of the gap, growing with size.
     constexpr float kSize = 32.0f;
     const auto prepared =
         global_text_shaper().prepare(" ", "Inter", kSize, 400, 0);
@@ -786,8 +799,8 @@ TEST_CASE("Label places a captured baseline from the face's typographic ascent",
     if (face.empty() || !prepared.metrics_are_real()) {
         SKIP("Inter does not resolve to a real face on this host");
     }
-    const float typo_ascent = prepared.font_ascent();
-    const float typo_descent = prepared.font_descent();
+    const float typo_ascent = prepared.typographic_ascent();
+    const float typo_descent = prepared.typographic_descent();
     REQUIRE(typo_ascent > 0.0f);
     REQUIRE(typo_descent > 0.0f);
     // Control: the two metric pairs must actually disagree, or the
@@ -798,7 +811,7 @@ TEST_CASE("Label places a captured baseline from the face's typographic ascent",
         prepared.ascent();
     REQUIRE(std::abs(clip_safe_baseline - typo_ascent) > 0.5f);
 
-    const float content_h = typo_ascent + typo_descent;
+    const float content_h = std::round(typo_ascent) + std::round(typo_descent);
     constexpr float kTop = 5.0f;
     Label label("Analog character");
     label.set_font_family("Inter");
@@ -812,22 +825,23 @@ TEST_CASE("Label places a captured baseline from the face's typographic ascent",
     label.paint(canvas);
     const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
     REQUIRE(fills.size() == 1);
-    CHECK(fills[0].f[1] == Catch::Approx(kTop + typo_ascent).margin(0.01f));
+    CHECK(fills[0].f[1] ==
+          Catch::Approx(kTop + std::round(typo_ascent)).margin(0.01f));
 
-    // A line-height surplus still splits evenly: a box 8px taller moves the
-    // baseline down by exactly 4px.
-    Label leaded("Analog character");
-    leaded.set_font_family("Inter");
-    leaded.set_font_size(kSize);
-    leaded.set_bounds({0, 0, 400, 60});
-    leaded.set_cached_line_boxes(
-        {{0, kTop, 300, content_h + 8.0f, 0, 16}}, 400.0f, face, false);
-    RecordingCanvas leaded_canvas;
-    leaded.paint(leaded_canvas);
-    const auto leaded_fills =
-        commands_of(leaded_canvas, DrawCommand::Type::fill_text);
-    REQUIRE(leaded_fills.size() == 1);
-    CHECK(leaded_fills[0].f[1] - fills[0].f[1] == Catch::Approx(4.0f).margin(0.01f));
+    // A rect grown at the top, as Blink grows it for faces it adjusts, keeps
+    // its baseline the same rounded descent above the bottom.
+    Label grown("Analog character");
+    grown.set_font_family("Inter");
+    grown.set_font_size(kSize);
+    grown.set_bounds({0, 0, 400, 60});
+    grown.set_cached_line_boxes(
+        {{0, kTop - 4.0f, 300, content_h + 4.0f, 0, 16}}, 400.0f, face, false);
+    RecordingCanvas grown_canvas;
+    grown.paint(grown_canvas);
+    const auto grown_fills =
+        commands_of(grown_canvas, DrawCommand::Type::fill_text);
+    REQUIRE(grown_fills.size() == 1);
+    CHECK(grown_fills[0].f[1] == Catch::Approx(fills[0].f[1]).margin(0.01f));
 }
 
 TEST_CASE("Label puts a captured text fragment's baseline a rounded ascent below its top",
@@ -844,8 +858,8 @@ TEST_CASE("Label puts a captured text fragment's baseline a rounded ascent below
     if (face.empty() || !prepared.metrics_are_real()) {
         SKIP("Inter does not resolve to a real face on this host");
     }
-    const float a = prepared.font_ascent();
-    const float d = prepared.font_descent();
+    const float a = prepared.typographic_ascent();
+    const float d = prepared.typographic_descent();
     const float fragment_h = std::round(a) + std::round(d);
     // Control: the unrounded split must land somewhere else, or this
     // assertion could not tell the two rules apart.
@@ -917,15 +931,15 @@ TEST_CASE("Label places a captured baseline from the browser's measured ascent",
     constexpr float kAscent = 13.0f;
     constexpr float kDescent = 7.0f;
     constexpr float kTop = 2.0f;
-    REQUIRE(std::abs(std::round(prepared.font_ascent()) - kAscent) > 0.5f);
+    REQUIRE(std::abs(std::round(prepared.typographic_ascent()) - kAscent) > 0.5f);
 
-    auto paint_baseline = [&](bool recorded, float box_h) {
+    auto paint_baseline = [&](bool recorded, float box_h, float top = kTop) {
         Label label("Measured");
         label.set_font_family("Inter");
         label.set_font_size(kSize);
         label.set_bounds({0, 0, 200, 40});
         label.set_cached_line_boxes(
-            {{0, kTop, 120, box_h, 0, 8}}, 200.0f, face, false);
+            {{0, top, 120, box_h, 0, 8}}, 200.0f, face, false);
         if (recorded) label.set_cached_line_metrics({kAscent, kDescent});
         RecordingCanvas canvas;
         label.paint(canvas);
@@ -940,35 +954,39 @@ TEST_CASE("Label places a captured baseline from the browser's measured ascent",
     CHECK(with_metrics == Catch::Approx(kTop + kAscent).margin(0.001f));
     CHECK(std::abs(derived - (kTop + kAscent)) > 0.25f);
 
-    // A taller box carries leading, which CSS splits evenly around the same
-    // content area: the measured metrics still decide where the baseline is.
-    const float leaded = paint_baseline(true, kAscent + kDescent + 4.0f);
-    const float leaded_derived = paint_baseline(false, kAscent + kDescent + 4.0f);
-    CHECK(leaded == Catch::Approx(kTop + 2.0f + kAscent).margin(0.001f));
-    CHECK(std::abs(leaded_derived - (kTop + 2.0f + kAscent)) > 0.25f);
+    // A rect grown at the top keeps its baseline the measured descent above
+    // the bottom: the measured metrics still decide where the baseline is.
+    const float grown = paint_baseline(true, kAscent + kDescent + 4.0f, kTop - 4.0f);
+    const float grown_derived = paint_baseline(false, kAscent + kDescent + 4.0f, kTop - 4.0f);
+    CHECK(grown == Catch::Approx(kTop + kAscent).margin(0.001f));
+    CHECK(std::abs(grown_derived - (kTop + kAscent)) > 0.25f);
 }
 
 TEST_CASE("captured_baseline places and snaps a captured line",
           "[view][widget][label-cache][alignment][typography]") {
     const LineMetrics measured{13.0f, 7.0f};
-    // A box exactly the measured content area: the measured ascent down.
-    CHECK(captured_baseline_offset(20.0f, 99.0f, 99.0f, measured) == 13.0f);
-    // A taller box splits its surplus evenly around the measured content area.
-    CHECK(captured_baseline_offset(24.0f, 99.0f, 99.0f, measured) == 15.0f);
-    // Nothing measured: a box exactly the rounded content area takes the
-    // rounded ascent; any other height splits against the unrounded pair.
-    CHECK(captured_baseline_offset(20.0f, 16.469f, 4.117f, std::nullopt) == 16.0f);
-    CHECK(captured_baseline_offset(30.0f, 16.469f, 4.117f, std::nullopt) ==
-          Catch::Approx((30.0f - 20.586f) * 0.5f + 16.469f).margin(1e-4f));
+    // The measured descent above the rect's bottom, whatever the face says.
+    CHECK(captured_baseline_offset(20.0f, 99.0f, measured) == 13.0f);
+    // A rect grown at the top keeps the baseline that far above the bottom.
+    CHECK(captured_baseline_offset(24.0f, 99.0f, measured) == 17.0f);
+    // Nothing measured: the face's descent rounded to a whole CSS px.
+    CHECK(captured_baseline_offset(20.0f, 4.117f, std::nullopt) == 16.0f);
+    CHECK(captured_baseline_offset(21.0f, 4.6f, std::nullopt) == 16.0f);
+    // The fallback is approximate wherever the browser's descent is not the
+    // file's: Arial 16px under `descent-override: 40%` gives Chromium a 20px
+    // rect with its baseline 14px down, but the file's fDescent (3.39) puts
+    // this rule at 17. Only measured metrics place such a face correctly.
+    CHECK(captured_baseline_offset(20.0f, 3.390625f, std::nullopt) == 17.0f);
+    CHECK(captured_baseline_offset(20.0f, 3.390625f, LineMetrics{14.0f, 6.0f}) == 14.0f);
 
     // Snapped to a whole CSS px measured from the captured frame, returned
     // in the label's own coordinates.
-    CHECK(captured_baseline(2.0f, 20.0f, 0, 0, measured, 0.0f) == 15.0f);
+    CHECK(captured_baseline(2.0f, 13.0f, 0.0f) == 15.0f);
     // root 10.375 + local 2.25 + 13 = 25.625 -> 26, i.e. local 15.625.
-    CHECK(captured_baseline(2.25f, 20.0f, 0, 0, measured, 10.375f) ==
+    CHECK(captured_baseline(2.25f, 13.0f, 10.375f) ==
           Catch::Approx(15.625f).margin(1e-4f));
     // root 10.125 + local 2.25 + 13 = 25.375 -> 25, i.e. local 14.875.
-    CHECK(captured_baseline(2.25f, 20.0f, 0, 0, measured, 10.125f) ==
+    CHECK(captured_baseline(2.25f, 13.0f, 10.125f) ==
           Catch::Approx(14.875f).margin(1e-4f));
 }
 

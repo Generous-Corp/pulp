@@ -2076,16 +2076,36 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         if (!tree.duplicate_keys.empty()) {
             std::string joined;
             for (const auto& duplicate : tree.duplicate_keys) {
-                if (!joined.empty()) joined += ",";
+                if (!joined.empty())
+                    joined += ",";
                 joined += duplicate;
             }
             ir.root.attributes["native_keyed_duplicate_keys"] = joined;
             for (const auto& duplicate : tree.duplicate_keys) {
+                result.warnings.push_back("duplicate sibling key under " + duplicate +
+                                          ": those siblings keep positional anchors, so a reorder "
+                                          "does not carry their edits. Give each sibling a "
+                                          "distinct data-pulp-key.");
+            }
+        }
+        // Positional ordinals beside keyed siblings count only the unkeyed
+        // ones, so a key added or removed there hands a stored edit to a
+        // different node whose anchor still resolves. Reported so the drift
+        // is findable instead of silent.
+        if (!tree.mixed_keyed_siblings.empty()) {
+            std::string joined;
+            for (const auto& mixed : tree.mixed_keyed_siblings) {
+                if (!joined.empty())
+                    joined += ",";
+                joined += mixed;
+            }
+            ir.root.attributes["native_keyed_mixed_siblings"] = joined;
+            for (const auto& mixed : tree.mixed_keyed_siblings) {
                 result.warnings.push_back(
-                    "duplicate sibling key under " + duplicate +
-                    ": those siblings keep positional anchors, so a reorder "
-                    "does not carry their edits. Give each sibling a "
-                    "distinct data-pulp-key.");
+                    "keyed and unkeyed siblings mixed under " + mixed +
+                    ": the unkeyed ones are numbered without the keyed ones, so "
+                    "adding or removing a key moves their stored edits to another "
+                    "node. Give every sibling a data-pulp-key, or none.");
             }
         }
     }

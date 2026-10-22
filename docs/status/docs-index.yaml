@@ -637,6 +637,11 @@ docs:
     kind: reference
     summary: All subsystems with status and key headers
 
+  - slug: oversampling-and-real-fft
+    path: reference/oversampling-and-real-fft.md
+    kind: reference
+    summary: Oversampler filter kinds, rejection and delay, the elliptic half-band design functions, and the half-spectrum real FFT
+
   - slug: fir-design
     path: reference/fir-design.md
     kind: reference

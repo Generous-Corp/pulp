@@ -9,6 +9,7 @@ through `DomSnapshot` and each of those rules lives here once.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .model import BrowserNode, LabError
@@ -255,3 +256,86 @@ def browser_nodes(snapshot: DomSnapshot | dict[str, Any]) -> list[BrowserNode]:
             svg_viewport=svg_viewport_of(index) if tag != "svg" else None,
         ))
     return result
+
+
+# Styles under which Chromium composites the root or body differently from a
+# flat fill of its background colour. The importer's own canvas rule refuses
+# the same set (browser_capture_canvas_impl.hpp).
+CANVAS_NEUTRAL_STYLES = {
+    "opacity": "1",
+    "filter": "none",
+    "backdrop-filter": "none",
+    "transform": "none",
+    "clip-path": "none",
+    "mask-image": "none",
+    "mix-blend-mode": "normal",
+    "background-image": "none",
+}
+
+
+def document_canvas_background(
+    snapshot: DomSnapshot | dict[str, Any], capture: dict[str, Any],
+) -> dict[str, Any]:
+    """Resolve the colour Chromium paints across the page canvas.
+
+    CSS propagates the root element's background to the canvas, and the
+    body's when the root's is transparent. Only a flat, fully opaque colour on
+    a box Chromium composites as a plain fill is resolved. Anything else --
+    translucency, an image, a filter or blend, or two transparent boxes
+    (whose UA canvas colour depends on the page's own color-scheme, which the
+    capture does not record) -- is reported unresolved rather than
+    approximated, so the observer leaves the page uncovered and the residual
+    stays visible.
+    """
+    def unresolved(reason: str) -> dict[str, Any]:
+        return {"status": "unresolved", "reason": reason, "color": None}
+
+    snap = DomSnapshot.coerce(snapshot)
+    if not snap.has_document:
+        return unresolved("snapshot has no document")
+
+    def element(tag: str, parent: int | None) -> dict[str, str] | None:
+        for index in range(len(snap.types)):
+            # Element nodes only: the doctype is also named "html".
+            if snap.node_type(index) != 1 or snap.tag(index) != tag:
+                continue
+            if parent is not None and snap.parent(index) != parent:
+                continue
+            if snap.own_row(index) is None:
+                return None
+            styles = snap.styles(index)
+            if not styles:
+                return None
+            styles["__index"] = str(index)
+            return styles
+        return None
+
+    html = element("html", None)
+    body = element("body", int(html["__index"])) if html else None
+    if html is None or body is None:
+        return unresolved("snapshot lacks a laid-out html/body pair")
+
+    def flat_color(styles: dict[str, str]) -> tuple[str, float] | None:
+        if any(styles.get(name, neutral) != neutral
+               for name, neutral in CANVAS_NEUTRAL_STYLES.items()):
+            return None
+        match = re.fullmatch(
+            r"rgba?\((\d+), (\d+), (\d+)(?:, ([0-9.]+))?\)",
+            styles.get("background-color", ""))
+        if not match:
+            return None
+        alpha = float(match.group(4)) if match.group(4) is not None else 1.0
+        return f"rgb({match.group(1)}, {match.group(2)}, {match.group(3)})", alpha
+
+    for label, styles in (("html", html), ("body", body)):
+        resolved = flat_color(styles)
+        if resolved is None:
+            return unresolved(f"{label} is not a plain flat-colour fill")
+        color, alpha = resolved
+        if alpha == 1.0:
+            return {"status": "resolved", "source": f"{label}-background",
+                    "color": color}
+        if alpha != 0.0:
+            return unresolved(f"{label} background is translucent")
+    return unresolved("html and body are transparent; the UA canvas colour "
+                      "depends on a color-scheme the capture does not record")

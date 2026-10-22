@@ -23,6 +23,40 @@ complex_slot_bytes(const SharedIoConvolutionPipeline::Config& config) noexcept {
     return static_cast<std::size_t>(floats) * sizeof(float);
 }
 
+// Copies drained rows into session-owned vectors while drain_shared_io_trace
+// emits them, so retained and closed rows still reach the Perfetto edge once.
+// A non-zero retention bounds the combined row count; reaching it, or failing
+// to append, marks the census incomplete instead of dropping rows silently.
+struct TraceRowSink {
+    std::vector<SharedIoTraceRecord>& records;
+    std::vector<SharedIoTraceAdmission>& admissions;
+    bool& overflow;
+    std::uint32_t retention = 0;
+
+    template <class Row> void append(std::vector<Row>& rows, const Row& row) noexcept {
+        if (retention != 0 && rows.size() >= retention) {
+            overflow = true;
+            return;
+        }
+        try {
+            rows.push_back(row);
+        } catch (...) {
+            overflow = true;
+        }
+    }
+    SharedIoTraceDrainObserver observer() noexcept {
+        return {this,
+                [](void* context, std::uint64_t, const SharedIoTraceRecord& record) noexcept {
+                    auto& self = *static_cast<TraceRowSink*>(context);
+                    self.append(self.records, record);
+                },
+                [](void* context, std::uint64_t, const SharedIoTraceAdmission& admission) noexcept {
+                    auto& self = *static_cast<TraceRowSink*>(context);
+                    self.append(self.admissions, admission);
+                },
+                nullptr};
+    }
+};
 } // namespace
 
 SharedIoConvolutionSession::~SharedIoConvolutionSession() {
@@ -104,11 +138,12 @@ bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
     return true;
 }
 
-SharedIoTraceDrainResult SharedIoConvolutionSession::drain_trace(std::uint32_t budget) noexcept {
+SharedIoTraceDrainResult
+SharedIoConvolutionSession::drain_trace(std::uint32_t budget, bool telemetry_quiescent) noexcept {
     if (!trace_recorder_)
         return {};
     return drain_shared_io_trace(*trace_recorder_, trace_telemetry_.snapshot(), budget,
-                                 trace_observer_);
+                                 trace_observer_, telemetry_quiescent);
 }
 
 void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
@@ -116,7 +151,7 @@ void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
         return;
     for (std::uint32_t attempt = 0; attempt < 4; ++attempt) {
         const auto before = trace_recorder_->stats();
-        (void)drain_trace(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity));
+        (void)drain_trace(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity), true);
         const auto after = trace_recorder_->stats();
         if (after.enqueued == after.drained &&
             after.admissions_enqueued == after.admissions_drained)
@@ -140,36 +175,35 @@ void SharedIoConvolutionSession::drain_trace_to_retention() noexcept {
     }
     if (trace_template_.retention_capacity == 0)
         return;
-    const auto limit = static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity);
-    const auto retention = trace_template_.retention_capacity;
-    (void)trace_recorder_->drain_worker_records(limit, [&](const SharedIoTraceRecord& record) {
-        if (retained_trace_records_.size() >= retention) {
-            trace_retention_overflow_ = true;
-            return;
-        }
-        retained_trace_records_.push_back(record);
-    });
-    (void)trace_recorder_->drain_admissions(limit, [&](const SharedIoTraceAdmission& admission) {
-        if (retained_trace_admissions_.size() >= retention) {
-            trace_retention_overflow_ = true;
-            return;
-        }
-        retained_trace_admissions_.push_back(admission);
-    });
+    // The vectors are reserved to the retention bound at preparation, so the
+    // sink never reallocates on this worker path.
+    TraceRowSink sink{retained_trace_records_, retained_trace_admissions_,
+                      trace_retention_overflow_, trace_template_.retention_capacity};
+    const auto observer = sink.observer();
+    // Twice the queue capacity keeps the previous per-pass throughput: up to
+    // one full queue of records and one of admissions.
+    (void)drain_shared_io_trace(*trace_recorder_, trace_telemetry_.snapshot(),
+                                static_cast<std::uint32_t>(2 * SharedIoTraceRecorder::capacity),
+                                &observer);
 }
 
 void SharedIoConvolutionSession::close_trace_generation() noexcept {
+    last_close_trace_drain_ = {};
     last_closed_trace_records_.clear();
     last_closed_trace_admissions_.clear();
     last_closed_trace_retention_overflow_ = trace_retention_overflow_;
+    bool closed_through_drain = false;
     if (trace_recorder_) {
         if (trace_observer_) {
             // Streaming campaign sinks own the rows after each bounded worker
             // drain. Do not copy them into the session vectors as a second
             // unbounded retention path; close only the records still queued.
+            // release() has stopped every producer, so this final drain can
+            // validate the counters receipt instead of deferring it.
             for (;;) {
                 const auto before = trace_recorder_->stats();
-                (void)drain_trace(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity));
+                last_close_trace_drain_ =
+                    drain_trace(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity), true);
                 const auto after = trace_recorder_->stats();
                 if (after.drained == before.drained &&
                     after.admissions_drained == before.admissions_drained)
@@ -192,30 +226,27 @@ void SharedIoConvolutionSession::close_trace_generation() noexcept {
                 last_closed_trace_admissions_.reserve(
                     last_closed_trace_admissions_.size() +
                     (retention != 0 ? retention : SharedIoTraceRecorder::capacity));
+                // Close through the sole Perfetto drain edge so a capture that
+                // spans release still receives every remaining lifecycle row;
+                // the sink copies the same rows into the closed vectors.
+                TraceRowSink sink{last_closed_trace_records_, last_closed_trace_admissions_,
+                                  last_closed_trace_retention_overflow_, retention};
+                const auto observer = sink.observer();
                 for (;;) {
-                    const auto drained = trace_recorder_->drain_admissions(
-                        static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
-                        [&](const SharedIoTraceAdmission& admission) {
-                            if (retention == 0 || last_closed_trace_admissions_.size() < retention)
-                                last_closed_trace_admissions_.push_back(admission);
-                            else
-                                last_closed_trace_retention_overflow_ = true;
-                        });
-                    if (drained < SharedIoTraceRecorder::capacity)
+                    const auto before = trace_recorder_->stats();
+                    last_close_trace_drain_ = drain_shared_io_trace(
+                        *trace_recorder_, trace_telemetry_.snapshot(),
+                        static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity), &observer,
+                        true);
+                    const auto after = trace_recorder_->stats();
+                    if (after.drained == before.drained &&
+                        after.admissions_drained == before.admissions_drained)
+                        break;
+                    if (after.enqueued == after.drained &&
+                        after.admissions_enqueued == after.admissions_drained)
                         break;
                 }
-                for (;;) {
-                    const auto drained = drain_trace_records(
-                        static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
-                        [&](const SharedIoTraceRecord& record) {
-                            if (retention == 0 || last_closed_trace_records_.size() < retention)
-                                last_closed_trace_records_.push_back(record);
-                            else
-                                last_closed_trace_retention_overflow_ = true;
-                        });
-                    if (drained < SharedIoTraceRecorder::capacity)
-                        break;
-                }
+                closed_through_drain = true;
                 std::vector<bool> admission_used(last_closed_trace_admissions_.size(), false);
                 for (auto& record : last_closed_trace_records_) {
                     const auto stats = trace_recorder_->stats();
@@ -247,7 +278,9 @@ void SharedIoConvolutionSession::close_trace_generation() noexcept {
             }
         }
     }
-    if (!trace_observer_)
+    // The close drain above already emitted the final quiescent receipt; this
+    // only covers a close that failed before reaching it.
+    if (!trace_observer_ && !closed_through_drain)
         drain_trace_until_empty();
     if (trace_recorder_) {
         const auto stats = trace_recorder_->stats();
@@ -267,6 +300,7 @@ void SharedIoConvolutionSession::close_trace_generation() noexcept {
 void SharedIoConvolutionSession::trace_admit(SharedIoSlotLedger::SlotToken token) noexcept {
     if (!trace_recorder_ || token.slot >= trace_slots_.size())
         return;
+    trace_telemetry_.record_admission();
     auto& slot = trace_slots_[token.slot];
     slot = {};
     slot.token = token;

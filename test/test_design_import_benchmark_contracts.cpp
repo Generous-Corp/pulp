@@ -10,6 +10,14 @@
 
 #define main pulp_design_import_benchmark_main_for_test
 #include "../tools/import-design/design_import_benchmark.cpp"
+
+namespace {
+Config lane_config(std::string lane) {
+    Config config;
+    config.lane = std::move(lane);
+    return config;
+}
+} // namespace
 #undef main
 
 namespace {
@@ -234,10 +242,10 @@ TEST_CASE("design-import benchmark argument parser rejects orphaned values",
 
 TEST_CASE("design-import benchmark fixture and phase helpers fail closed",
           "[design-import][benchmark]") {
-    REQUIRE(make_fixture("not-a-lane") == nullptr);
+    REQUIRE(make_fixture(lane_config("not-a-lane")) == nullptr);
 
     CountingFixture fixture;
-    auto idle = run_phase(fixture, 0, 0, false);
+    auto idle = run_phase(fixture, 0, std::nullopt, 0, false);
     REQUIRE(idle.duration_ms == 0);
     REQUIRE(idle.samples == 0);
     REQUIRE(idle.paint_commands_last == 0);
@@ -271,7 +279,7 @@ TEST_CASE("design-import benchmark JSON report contains escaped config and metri
     interactive.cpu_ms = 4.5;
     interactive.js_evaluations = 7;
 
-    auto json = make_json(config, startup, idle, interactive);
+    auto json = make_json(config, std::nullopt, startup, idle, interactive, TeardownMetrics{});
     REQUIRE(json.find("\"schema\": \"pulp-design-import-benchmark-v1\"") != std::string::npos);
     REQUIRE(json.find("\"lane\": \"lane\\\"x\"") != std::string::npos);
     REQUIRE(json.find("\"target_fps\": 144") != std::string::npos);
@@ -314,7 +322,7 @@ TEST_CASE("design-import benchmark JSON report includes complete phase fields",
     interactive.paint_commands_last = 88;
     interactive.js_evaluations = 14;
 
-    auto json = make_json(config, startup, idle, interactive);
+    auto json = make_json(config, std::nullopt, startup, idle, interactive, TeardownMetrics{});
     REQUIRE(json.find("\"lane\": \"baked-native\"") != std::string::npos);
     REQUIRE(json.find("\"fixture\": \"phase5-imported-plugin-panel\"") != std::string::npos);
     REQUIRE(json.find("\"host\": \"") != std::string::npos);
@@ -437,9 +445,9 @@ TEST_CASE("design-import benchmark baked IR fixture carries expected controls",
 
 TEST_CASE("design-import benchmark fixture factory and render path are deterministic",
           "[design-import][benchmark]") {
-    REQUIRE(make_fixture("missing") == nullptr);
+    REQUIRE(make_fixture(lane_config("missing")) == nullptr);
 
-    auto fixture = make_fixture("baked-cpp");
+    auto fixture = make_fixture(lane_config("baked-cpp"));
     REQUIRE(fixture != nullptr);
     REQUIRE(fixture->root().id() == "bench-root");
 
@@ -453,7 +461,7 @@ TEST_CASE("design-import benchmark fixture factory and render path are determini
 
 TEST_CASE("design-import benchmark fixture factory creates the baked-native lane",
           "[design-import][benchmark]") {
-    auto baked_native = make_fixture("baked-native");
+    auto baked_native = make_fixture(lane_config("baked-native"));
     REQUIRE(baked_native != nullptr);
     REQUIRE(baked_native->root().id() == "bench-root");
     REQUIRE(render_frame(baked_native->root()) > 0);
@@ -463,7 +471,7 @@ TEST_CASE("design-import benchmark fixture factory creates the baked-native lane
 
 TEST_CASE("design-import benchmark fixture factory creates the rebuild control lane",
           "[design-import][benchmark]") {
-    auto rebuild = make_fixture("baked-native-rebuild");
+    auto rebuild = make_fixture(lane_config("baked-native-rebuild"));
     REQUIRE(rebuild != nullptr);
     REQUIRE(rebuild->root().id() == "bench-root");
     REQUIRE(render_frame(rebuild->root()) > 0);
@@ -475,20 +483,20 @@ TEST_CASE("design-import benchmark run_phase records idle and interactive contra
           "[design-import][benchmark]") {
     CountingFixture fixture;
 
-    const auto zero = run_phase(fixture, 0, 60, true);
+    const auto zero = run_phase(fixture, 0, std::nullopt, 60, true);
     REQUIRE(zero.duration_ms == 0);
     REQUIRE(zero.samples == 0);
     REQUIRE(zero.cpu_ms == 0.0);
     REQUIRE(zero.paint_commands_last == 0);
     REQUIRE(fixture.steps == 0);
 
-    const auto idle = run_phase(fixture, 2, 10000, false);
+    const auto idle = run_phase(fixture, 2, std::nullopt, 10000, false);
     REQUIRE(idle.duration_ms == 2);
     REQUIRE(idle.samples > 0);
     REQUIRE(idle.js_evaluations == 10);
     REQUIRE(fixture.steps == 0);
 
-    const auto interactive = run_phase(fixture, 2, 10000, true);
+    const auto interactive = run_phase(fixture, 2, std::nullopt, 10000, true);
     REQUIRE(interactive.duration_ms == 2);
     REQUIRE(interactive.samples > 0);
     REQUIRE(fixture.steps == interactive.samples);
@@ -548,7 +556,8 @@ TEST_CASE("design-import benchmark JSON report carries tail, allocation, and RSS
     interactive.allocations_per_frame_median = 269.0;
     interactive.allocations_per_frame_p95 = 271.0;
 
-    const auto json = make_json(config, StartupMetrics{}, PhaseMetrics{}, interactive, 22511616);
+    const auto json = make_json(config, std::nullopt, StartupMetrics{}, PhaseMetrics{}, interactive,
+                                TeardownMetrics{}, 22511616);
     CHECK(json.find("\"rss_high_water_bytes\": 22511616") != std::string::npos);
     CHECK(json.find("\"warmup_frames\": 60") != std::string::npos);
     CHECK(json.find("\"frame_ms_p95\": 1.2500") != std::string::npos);
@@ -562,7 +571,7 @@ TEST_CASE("design-import benchmark JSON report carries tail, allocation, and RSS
 TEST_CASE("design-import benchmark run_phase excludes warmup frames from samples",
           "[design-import][benchmark]") {
     CountingFixture fixture;
-    const auto interactive = run_phase(fixture, 5, 10000, true, 3);
+    const auto interactive = run_phase(fixture, 5, std::nullopt, 10000, true, 3);
     REQUIRE(fixture.steps > 3);
     CHECK(interactive.warmup_frames == 3);
     CHECK(interactive.samples == fixture.steps - 3);
@@ -572,8 +581,8 @@ TEST_CASE("design-import benchmark run_phase counts per-frame allocations",
           "[design-import][benchmark]") {
     AllocatingFixture quiet(0);
     AllocatingFixture busy(8);
-    const auto quiet_metrics = run_phase(quiet, 5, 10000, true);
-    const auto busy_metrics = run_phase(busy, 5, 10000, true);
+    const auto quiet_metrics = run_phase(quiet, 5, std::nullopt, 10000, true);
+    const auto busy_metrics = run_phase(busy, 5, std::nullopt, 10000, true);
     REQUIRE(quiet_metrics.samples > 1);
     REQUIRE(busy_metrics.samples > 1);
     // The empty root's render allocates the same amount in both runs, so the
@@ -587,7 +596,7 @@ TEST_CASE("design-import benchmark run_phase counts per-frame allocations",
 
 TEST_CASE("design-import benchmark excludes warmup frames from cumulative counters",
           "[design-import][benchmark]") {
-    auto fixture = make_fixture("baked-cpp");
+    auto fixture = make_fixture(lane_config("baked-cpp"));
     REQUIRE(fixture != nullptr);
     // Per-frame cost of the idle panel, measured on one frame: its paint
     // commands and how many layout passes one render asks for.
@@ -598,7 +607,7 @@ TEST_CASE("design-import benchmark excludes warmup frames from cumulative counte
     REQUIRE(layouts_per_frame > 0);
 
     constexpr int kWarmup = 3;
-    const auto idle = run_phase(*fixture, 5, 10000, false, kWarmup);
+    const auto idle = run_phase(*fixture, 5, std::nullopt, 10000, false, kWarmup);
     REQUIRE(idle.samples > 0);
     const auto sampled = static_cast<std::uint64_t>(idle.samples);
     // Every frame repeats the same work, so a counter that included the
@@ -608,13 +617,13 @@ TEST_CASE("design-import benchmark excludes warmup frames from cumulative counte
     CHECK(idle.layout_passes == sampled * layouts_per_frame);
 
     // Control: without warmup every rendered frame is counted.
-    const auto all = run_phase(*fixture, 5, 10000, false, 0);
+    const auto all = run_phase(*fixture, 5, std::nullopt, 10000, false, 0);
     REQUIRE(all.samples > 0);
     CHECK(all.paint_calls == static_cast<std::uint64_t>(all.samples));
     CHECK(all.layout_passes == static_cast<std::uint64_t>(all.samples) * layouts_per_frame);
 
     // A phase that never leaves warmup counts nothing.
-    const auto warmup_only = run_phase(*fixture, 1, 10000, false, 1000000);
+    const auto warmup_only = run_phase(*fixture, 1, std::nullopt, 10000, false, 1000000);
     CHECK(warmup_only.samples == 0);
     CHECK(warmup_only.paint_calls == 0);
     CHECK(warmup_only.paint_commands_total == 0);
@@ -644,7 +653,7 @@ TEST_CASE("design-import benchmark rebuild lane preserves the meter peak",
     const float expected_peak =
         std::strtof(std::to_string(std::max(0.0f, output - 0.18f)).c_str(), nullptr);
 
-    auto rebuild = make_fixture("baked-native-rebuild");
+    auto rebuild = make_fixture(lane_config("baked-native-rebuild"));
     REQUIRE(rebuild != nullptr);
     rebuild->step(frame);
     auto* meter = dynamic_cast<Meter*>(find_by_id(rebuild->root(), "output"));
@@ -654,10 +663,141 @@ TEST_CASE("design-import benchmark rebuild lane preserves the meter peak",
     // Without the peak attribute the materializer falls back to the level.
     CHECK(meter->display_peak() != Catch::Approx(meter->display_rms()));
 
-    auto baked = make_fixture("baked-native");
+    auto baked = make_fixture(lane_config("baked-native"));
     REQUIRE(baked != nullptr);
     baked->step(frame);
     auto* baked_meter = dynamic_cast<Meter*>(find_by_id(baked->root(), "output"));
     REQUIRE(baked_meter != nullptr);
     CHECK(baked_meter->display_peak() == Catch::Approx(meter->display_peak()).margin(1e-6));
+}
+
+namespace {
+// A two-slot importer-shaped DesignIR written to a temp file, so the IR-bound
+// lanes run against real serialized bytes rather than an in-memory tree.
+std::filesystem::path write_slot_ir(const std::string& name) {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = 200.0f;
+    ir.root.style.height = 80.0f;
+    for (const char* anchor : {"title", "subtitle"}) {
+        IRNode text;
+        text.type = "text";
+        text.stable_anchor_id = anchor;
+        text.text_content = anchor;
+        text.style.font_size = 14.0f;
+        ir.root.children.push_back(text);
+    }
+    const auto path = std::filesystem::temp_directory_path() / name;
+    std::ofstream(path) << serialize_design_ir(ir);
+    return path;
+}
+} // namespace
+
+TEST_CASE("design-import benchmark IR-bound retained lane keeps keyed slots",
+          "[design-import][benchmark][retained]") {
+    const auto path = write_slot_ir("pulp-bench-retained.ir.json");
+    Config config = lane_config("baked-native");
+    config.ir_path = path;
+    auto fixture = make_fixture(config);
+    REQUIRE(fixture != nullptr);
+    const auto phase = run_phase(*fixture, 0, 5, 60, true);
+    CHECK(phase.samples == 5);
+    CHECK(phase.views_constructed == 0);
+    CHECK(phase.views_destroyed == 0);
+    CHECK(phase.slot_identity_changes == 0);
+    CHECK(phase.slot_text_mismatches == 0);
+    CHECK(phase.unmarked_paint_mutations == 0);
+    // Every keyed write marks its own damage.
+    CHECK(phase.invalidation_requests >= 2 * 5);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("design-import benchmark IR-bound rebuild lane is the identity control",
+          "[design-import][benchmark][retained]") {
+    const auto path = write_slot_ir("pulp-bench-rebuild.ir.json");
+    Config config = lane_config("baked-native-rebuild");
+    config.ir_path = path;
+    auto fixture = make_fixture(config);
+    REQUIRE(fixture != nullptr);
+    const auto phase = run_phase(*fixture, 0, 5, 60, true);
+    // Rematerializing rebinds every slot on every step, which is exactly what
+    // the identity counter has to be able to see.
+    CHECK(phase.slot_identity_changes == 2 * 5);
+    CHECK(phase.slot_text_mismatches == 0);
+    CHECK(phase.views_constructed > 0);
+    CHECK(phase.views_constructed == phase.views_destroyed);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("design-import benchmark IR binding and teardown fail closed",
+          "[design-import][benchmark][retained]") {
+    const auto path = write_slot_ir("pulp-bench-binding.ir.json");
+    // Lanes that cannot be built from a DesignIR refuse one.
+    CHECK_FALSE(parse_args_vec({"bench", "--lane=live", "--ir=" + path.string()}).has_value());
+    CHECK_FALSE(parse_args_vec({"bench", "--lane=baked-cpp", "--ir=" + path.string()}).has_value());
+    CHECK_FALSE(parse_args_vec({"bench", "--lane=baked-native", "--frames=-1"}).has_value());
+
+    const auto output = std::filesystem::temp_directory_path() / "pulp-bench-binding.json";
+    REQUIRE(run_benchmark_main({"bench", "--lane=baked-native", "--ir=" + path.string(),
+                                "--frames=3", "--output=" + output.string()}) == 0);
+    std::ifstream in(output);
+    const std::string json{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    CHECK(json.find("\"pacing\": \"fixed-frames\"") != std::string::npos);
+    CHECK(json.find("\"text_slots\": 2") != std::string::npos);
+    CHECK(json.find("\"live_views_after_teardown\": 0") != std::string::npos);
+    // A design with no widget palette materializes with a warning, never
+    // silently: the receipt names it.
+    CHECK(json.find("\"materialization_warnings\": [\"design-token-unmapped\"]") !=
+          std::string::npos);
+
+    // Planted negative: a view leaked past teardown fails the run.
+    REQUIRE(run_benchmark_main({"bench", "--lane=baked-native", "--ir=" + path.string(),
+                                "--frames=1", "--plant-leak", "--output=" + output.string()}) == 3);
+    // A plant that cannot be placed fails rather than reporting a clean run.
+    DesignIR lone;
+    lone.root.type = "text";
+    lone.root.stable_anchor_id = "only";
+    lone.root.text_content = "only";
+    const auto lone_path = std::filesystem::temp_directory_path() / "pulp-bench-lone.ir.json";
+    std::ofstream(lone_path) << serialize_design_ir(lone);
+    CHECK(run_benchmark_main({"bench", "--lane=baked-native", "--ir=" + lone_path.string(),
+                              "--frames=1", "--plant-leak", "--output=" + output.string()}) == 2);
+    std::filesystem::remove(lone_path);
+    std::filesystem::remove(output);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("design-import benchmark retained lane sees a rebound slot",
+          "[design-import][benchmark][retained]") {
+    // Planted negative: swap one slot's Label for a new View under the same
+    // anchor. A check that only re-read the Label it resolved at build would
+    // keep reporting zero.
+    const auto path = write_slot_ir("pulp-bench-rebind.ir.json");
+    Config config = lane_config("baked-native");
+    config.ir_path = path;
+    auto fixture = make_fixture(config);
+    auto* bound = dynamic_cast<IrBoundFixture*>(fixture.get());
+    REQUIRE(bound != nullptr);
+    View* original = nullptr;
+    const auto find = [&](auto& self, View& view) -> void {
+        if (view.anchor_id() == "title")
+            original = &view;
+        for (std::size_t i = 0; i < view.child_count(); ++i)
+            self(self, *view.child_at(i));
+    };
+    find(find, bound->tree());
+    REQUIRE(original != nullptr);
+    View* parent = original->parent();
+    REQUIRE(parent != nullptr);
+    // Hold the original so the retained lane's write through it stays valid.
+    auto held = parent->remove_child(original);
+    auto replacement = std::make_unique<Label>("title");
+    replacement->set_anchor_id("title");
+    parent->add_child(std::move(replacement));
+
+    const auto phase = run_phase(*fixture, 0, 1, 60, true);
+    CHECK(phase.slot_identity_changes == 1);
+    CHECK(phase.slot_text_mismatches == 1);
+    std::filesystem::remove(path);
 }

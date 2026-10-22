@@ -487,7 +487,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         zbuf[oc] = acc;
     }
     for (var c = 0u; c < C; c = c + 1u) {
-        let tg = tanh(zbuf[c]);
+        // WGSL tanh may return NaN for large |x| (Metal does); float tanh is
+        // already exactly +-1 at |x| = 15, so the clamp changes no finite result.
+        let tg = tanh(clamp(zbuf[c], -15.0, 15.0));
         let sg = 1.0 / (1.0 + exp(-zbuf[C + c]));
         gbuf[c] = tg * sg;
     }
@@ -617,11 +619,13 @@ fn main(@builtin(workgroup_id) wid : vec3u,
     workgroupBarrier();
     // Phase 2 — activation, one lane per channel c.
     if (p.gated == 0u) {
-        for (var c = lane; c < C; c = c + WG) { abuf[c] = tanh(zbuf[c]); }
+        // WGSL tanh may return NaN for large |x| (Metal does); float tanh is
+        // already exactly +-1 at |x| = 15, so the clamp changes no finite result.
+        for (var c = lane; c < C; c = c + WG) { abuf[c] = tanh(clamp(zbuf[c], -15.0, 15.0)); }
     } else {
         for (var c = lane; c < C; c = c + WG) {
             let g = 1.0 / (1.0 + exp(-zbuf[C + c]));
-            abuf[c] = tanh(zbuf[c]) * g;
+            abuf[c] = tanh(clamp(zbuf[c], -15.0, 15.0)) * g;
         }
     }
     workgroupBarrier();
@@ -930,7 +934,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     for (var i = 0u; i < p.in_dim; i = i + 1u) {
         acc = acc + w[base + i] * x[i];
     }
-    out[j] = tanh(acc);
+    // WGSL tanh may return NaN for large |x| (Metal does); float tanh is
+    // already exactly +-1 at |x| = 15, so the clamp changes no finite result.
+    out[j] = tanh(clamp(acc, -15.0, 15.0));
 }
 )wgsl";
 

@@ -1143,10 +1143,7 @@ Label::FaceMetrics Label::face_metrics(const std::string& family,
     if (prepared.metrics_are_real() && prepared.ascent() > 0.0f) {
         m.ascent = prepared.ascent();
         m.descent = prepared.descent();
-        m.font_ascent = prepared.font_ascent() > 0.0f ? prepared.font_ascent()
-                                                       : m.ascent;
-        m.font_descent = prepared.font_ascent() > 0.0f ? prepared.font_descent()
-                                                        : m.descent;
+        m.typographic_descent = prepared.typographic_descent();
         m.real = true;
     } else {
         // No Skia, or the family did not resolve. Keep the historic
@@ -1154,8 +1151,7 @@ Label::FaceMetrics Label::face_metrics(const std::string& family,
         // so, since callers gate the correction on `real`.
         m.ascent = font_size * 0.85f;
         m.descent = font_size * 0.15f;
-        m.font_ascent = m.ascent;
-        m.font_descent = m.descent;
+        m.typographic_descent = m.descent;
         m.real = false;
     }
     face_metrics_family_ = family;
@@ -1977,9 +1973,12 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
     // Captured lines are placed and snapped by captured_baseline(); these
     // carry its inputs from the first line to the rest.
     float captured_root_y = 0.0f;
-    float captured_line_height = 0.0f;
-    float captured_css_ascent = 0.0f;
-    float captured_css_descent = 0.0f;
+    float captured_offset = 0.0f;
+    // Where a selection band sits relative to the baseline. A captured line
+    // overrides both with the run rect Chromium reported, so the band covers
+    // the box the text was laid out in rather than the worst-case glyph extent.
+    float selection_ascent = first_line_ascent;
+    float selection_height = single_line_text_height;
     switch (vertical_align_) {
         case canvas::TextVerticalAlign::top:
             baseline_y = pad.top + first_half_leading + first_line_ascent;
@@ -2005,45 +2004,43 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
     if (captured_cache_usable && shaped_layout != nullptr &&
         !shaped_layout->lines.empty()) {
         // A cached browser line box already resolved padding, line-height and
-        // vertical-align. CSS distributes the line box's extra leading above
-        // and below the font em box; using only `top + ascent` drops that
-        // half-leading and paints compact button captions visibly high. Keep
-        // Chromium's captured top, add its half-leading, then the active face
-        // ascent. Do not center the complete owner bounds a second time.
+        // vertical-align, so the owner bounds are not centred a second time.
+        // The box is the rect Chromium gave the text run: its content area,
+        // round(fAscent) + round(fDescent) tall plus any ascent adjustment
+        // Blink applies to particular faces, with the baseline round(fDescent)
+        // above its bottom. Reading the baseline off the bottom keeps it right
+        // whatever the ascent side holds. Descending from the top by the
+        // worst-case extents `first_line_ascent` carries (fTop) painted faces
+        // whose tallest glyph rises above fAscent a device pixel or more high.
+        // Without real face metrics, fall back to centring the ink in the box
+        // (unclamped: negative leading lets glyphs overflow evenly).
         const auto& first_line = shaped_layout->lines.front();
-        // One reference, not two. Half-leading is the surplus of the line BOX
-        // over the content area it carries, so it has to be measured against
-        // the same ascent + descent the baseline then descends by. And the
-        // captured box is Chromium's content area, which is built from the
-        // face's TYPOGRAPHIC ascent and descent, not its glyph bounding box:
-        // descending by the clip-safe bbox ascent paints every line low by
-        // half the gap between the two pairs, a gap that grows with the font
-        // size. Unclamped for the same reason the native branch above is: a
-        // face whose content area exceeds the captured box has negative
-        // leading and CSS lets its glyphs overflow evenly, top and bottom.
-        float css_ascent = first_line_ascent;
-        float css_descent = single_line_text_height - first_line_ascent;
+        // A descent the capture measured outranks the face's own: it already
+        // carries Chromium's rounding and any per-face adjustment.
+        std::optional<float> css_descent;
         if (has_attributed_) {
-            if (attributed_prepare_cache_.font_ascent() > 0.0f) {
-                css_ascent = attributed_prepare_cache_.font_ascent();
-                css_descent = attributed_prepare_cache_.font_descent();
-            }
+            if (attributed_prepare_cache_.typographic_descent() > 0.0f)
+                css_descent = attributed_prepare_cache_.typographic_descent();
         } else {
             const auto fm = face_metrics(family, effective_font_size,
                                          effective_font_weight(), font_style_);
-            if (fm.real) {
-                css_ascent = fm.font_ascent;
-                css_descent = fm.font_descent;
-            }
+            if (fm.real) css_descent = fm.typographic_descent;
+        }
+        if (cached_line_metrics_ || css_descent) {
+            captured_offset = captured_baseline_offset(
+                first_line.height, css_descent.value_or(0.0f),
+                cached_line_metrics_);
+        } else {
+            captured_offset =
+                (first_line.height - single_line_text_height) * 0.5f +
+                first_line_ascent;
         }
         captured_root_y = captured_frame_y(*this) +
                           (has_own_text_box() ? own_text_box().y : 0.0f);
-        captured_line_height = first_line.height;
-        captured_css_ascent = css_ascent;
-        captured_css_descent = css_descent;
-        baseline_y = captured_baseline(first_line.y, first_line.height,
-                                       css_ascent, css_descent,
-                                       cached_line_metrics_, captured_root_y);
+        baseline_y = captured_baseline(first_line.y, captured_offset,
+                                       captured_root_y);
+        selection_ascent = baseline_y - first_line.y;
+        selection_height = first_line.height;
     }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared
@@ -2124,8 +2121,8 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         if (draw_text != display_text && selectable_line.ends_with(kEllipsis)) {
             selectable_line.resize(selectable_line.size() - std::string_view(kEllipsis).size());
         }
-        paint_selection_line_(canvas, selectable_line, draw_x, baseline_y - first_line_ascent,
-                              single_line_text_height,
+        paint_selection_line_(canvas, selectable_line, draw_x, baseline_y - selection_ascent,
+                              selection_height,
                               /*source_start=*/0, text_color, vertical);
         canvas.fill_text(draw_text, draw_x, baseline_y);
         decorate_plain(draw_text, draw_x, baseline_y,
@@ -2168,10 +2165,8 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                     line.append("\xe2\x80\xa6");
                 }
                 const float line_baseline = captured_cache_usable
-                    ? captured_baseline(shaped_line.y, captured_line_height,
-                                        captured_css_ascent,
-                                        captured_css_descent,
-                                        cached_line_metrics_, captured_root_y)
+                    ? captured_baseline(shaped_line.y, captured_offset,
+                                        captured_root_y)
                     : y;
                 // Map the shaped line back to its origin in `display_text`.
                 // The shaper drops the whitespace it broke at, so byte spans
@@ -2185,8 +2180,9 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                     const int src =
                         static_cast<int>(found == std::string::npos ? source_cursor : found);
                     paint_selection_line_(canvas, shaped_line.text, x + shaped_line.x_offset,
-                                          line_baseline - first_line_ascent, lh, src, text_color,
-                                          vertical);
+                                          line_baseline - selection_ascent,
+                                          captured_cache_usable ? shaped_line.height : lh, src,
+                                          text_color, vertical);
                     source_cursor = static_cast<std::size_t>(src) + shaped_line.text.size();
                 }
                 canvas.fill_text(line, x + shaped_line.x_offset, line_baseline);

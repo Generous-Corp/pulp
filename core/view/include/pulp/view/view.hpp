@@ -875,6 +875,16 @@ public:
         return layout_pass_count_.load(std::memory_order_relaxed);
     }
 
+    /// Views constructed and destroyed since process start. A lifetime seam:
+    /// a measurement that builds a tree and tears it down must leave the two
+    /// advanced by the same amount, which no memory reading can prove.
+    static std::uint64_t constructed_count() noexcept {
+        return constructed_count_.load(std::memory_order_relaxed);
+    }
+    static std::uint64_t destroyed_count() noexcept {
+        return destroyed_count_.load(std::memory_order_relaxed);
+    }
+
     /// Mark layout as needing recalculation (auto-invalidation)
     void invalidate_layout() {
         layout_dirty_ = true;
@@ -2996,6 +3006,8 @@ private:
     static std::atomic<std::uint64_t> layout_pass_count_;
     static std::atomic<std::uint64_t> damage_request_count_;
     static std::atomic<std::uint64_t> unmarked_paint_mutation_count_;
+    static std::atomic<std::uint64_t> constructed_count_;
+    static std::atomic<std::uint64_t> destroyed_count_;
     /// Clears scene-cache validity up the ancestor chain without counting an
     /// unmarked paint mutation (the repaint requests use it: they mark).
     void stale_subtree_caches_up();

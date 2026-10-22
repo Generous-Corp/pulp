@@ -10,32 +10,99 @@ that design import feeds it. It exists because four separate bugs in this area
 all shared one shape: **the number was wrong but nothing failed**, because the
 test asserted the same rule of thumb the code used.
 
-## The one rule: half-leading has a single reference
+## Captured boxes: read the baseline off the BOTTOM
 
-A captured line's baseline comes from `captured_baseline()` in
-`pulp/view/text_line_metrics.hpp`, a pure function; `Label` only gathers its
-inputs. CSS puts the baseline at:
+A captured line's baseline comes from `captured_baseline_offset()` and
+`captured_baseline()` in `pulp/view/text_line_metrics.hpp`, pure functions;
+`Label` only gathers their inputs.
+
+`TextShaper` / `PreparedText::ascent()` and `descent()` are the face's
+**worst-case glyph extents** (the larger of fTop/fAscent, fBottom/fDescent).
+That is right for sizing a box that must never clip a glyph and wrong for
+placing a CSS baseline. A captured line box is the rect Chromium gave the text
+run, its content area: `round(fAscent) + round(fDescent)` tall **whatever the
+line-height**, plus an ascent adjustment Blink applies on macOS to Times,
+Helvetica and Courier (Times 16px: 12 + 4 + 2 = 18), with the baseline the
+descent above the rect's bottom. So the captured branch places the baseline at
 
 ```
-baseline_y = line_box.y + (line_box.height - (ascent + descent)) / 2 + ascent
+baseline_y = box.bottom - descent
+             descent = measured LineMetrics descent, else round(typographic_descent())
 ```
-
-and the surplus you divide **must be measured against the same ascent +
-descent you then descend by**. Which pair that is matters:
 
 - The browser's **measured** line metrics (`LineMetrics`, recorded by the
   capture from canvas `fontBoundingBox*`) win whenever present. They carry
-  Blink's rounding and its per-face macOS adjustments (Times / Helvetica /
-  Courier), which no font table states.
-- Otherwise the face's **typographic** ascent/descent
-  (`PreparedText::font_ascent()`), never the clip-safe glyph bounding box
-  (`ascent()`), which put Georgia Bold 32px 1.58px low.
-- A box exactly `ascent + descent` tall IS the text fragment: its baseline is
-  the (rounded, when derived) ascent below the top, which is what Chromium
-  reports. Inter 12px in a 15px box: baseline 12.0, not the unrounded 11.87.
+  Blink's rounding and its per-face macOS adjustments, which no font table
+  states.
+- Otherwise the face's **typographic** descent
+  (`PreparedText::typographic_descent()`, fDescent), rounded to a whole CSS px,
+  never the clip-safe glyph bounding box.
+- With no real face metrics either, the ink is centred in the box (unclamped).
 
-**Negative half-leading is legal and must not be clamped.** A content area
-taller than the box overflows it evenly, top and bottom.
+This is measured, not derived. Two independent probes agree:
+
+- a zero-size `vertical-align: baseline` probe captured through the importer:
+  Arial, Arial Bold, Inter, Georgia, Verdana, Times, Helvetica, Courier, the
+  default serif, 11-32px, `line-height: normal` and explicit;
+- a CDP probe at emulated DPR 2 (Chrome 151), 216 cases: Arial, Inter,
+  Georgia, Verdana, Times, Helvetica, Courier, `serif`, `system-ui` at 11, 13,
+  16, 17, 22 and 32px, line-height `normal`, `1.0`, `1.5` and `40px`. The text
+  range's client rect was exactly canvas `fontBoundingBoxAscent + Descent`
+  tall in 216/216, and the baseline sat the measured descent above its bottom
+  in 216/216. A line-height never makes the rect taller, so a half-leading
+  split inside the rect has nothing to split. That probe cannot tell the
+  measured rules apart (bottom minus measured descent and top plus measured
+  ascent coincide there); it does discriminate the fallbacks. With the faces'
+  CoreText fAscent/fDescent and no measured metrics, `bottom - round(fDescent)`
+  was exact in 192/192 cases (Inter excluded: it is not installed
+  system-wide, so CoreText substitutes Helvetica), while the old
+  rounded-ascent/half-leading fallback was exact in 96/192 and up to 2.86 px
+  high on Times, Helvetica, Courier and `serif`.
+- The fallback is wrong where Chromium's descent is not the file's: Arial
+  16px under `@font-face { descent-override: 40% }` gives a 20px rect with its
+  baseline 14px down, while `bottom - round(fDescent)` puts it at 17.
+  `captured_baseline_offset`'s test pins both that miss and the measured fix.
+
+Rules that look equivalent are not:
+
+| rule | Arial / Georgia / Verdana | Times, Helvetica, Courier |
+|---|---|---|
+| `top + round(fAscent) + half-leading` | right | **1-2px high** |
+| `top + worst-case ascent` (the old code) | 1px high (Arial Bold 24) | high |
+| `bottom - round(fDescent)` | right | right |
+| `bottom - measured descent` | right | right |
+
+Worked example, Inter 12px in a captured 15px box:
+
+| quantity | value |
+|---|---|
+| captured line box height | 15.0 |
+| `font_size` | 12.0 |
+| Inter's worst-case glyph ascent (fTop) at 12px | 13.294921875 (≈1.108 em) |
+| Inter's worst-case ink at 12px | 17.162109 (≈1.43 em) |
+| Inter's typographic ascent / descent (fAscent / fDescent) at 12px | 11.625 / 2.906 |
+| **buggy** `max(0,(15−12)/2) + 13.2949` | **14.794922** |
+| **still wrong** `(15−17.1621)/2 + 13.2949` (worst-case extents) | **12.213867** |
+| **Chromium** `15 − round(2.906)` (bottom minus rounded fDescent) | **12.0** |
+
+The rounding is in CSS px even at DPR 2 (Arial Bold 24px gives a 27px rect;
+device-px rounding would give 26.5). Known limits, all measured on macOS
+Chromium: Linux Blink moves a unit from ascent to descent when the descent
+rounds down under subpixel positioning; an `@font-face` with
+`descent-override`/`size-adjust` makes Chromium's descent the override value
+while the label still reads the file's `fDescent` when nothing was measured.
+Measure before extending the rule to those cases. The native (uncaptured)
+branch is different: it has no box from Chromium and still centres the real
+ink, and its half-leading surplus must be measured against the same ink it
+then descends by.
+
+**Negative half-leading is legal and must not be clamped.** A face whose ink
+exceeds the box has negative leading, and CSS lets the glyphs overflow the box
+evenly, top and bottom.
+
+`1.5 + 0.85 * font_size` is the rule of thumb the native branch replaced. If
+you see `0.85` anywhere near a baseline, it is measuring an em box while
+descending by a real ascent. It is wrong even when the test agrees with it.
 
 ## Captured baselines snap on the captured frame's grid
 
@@ -164,6 +231,20 @@ captured line where Chromium put it` and `Label re-centres a retyped captured
 line on the captured box` in `test/test_widgets_label.cpp`.
 
 ## Gotchas
+
+- **`SkiaCanvas::fill_text` must land the baseline exactly on `y`, and
+  SkParagraph rounds it.** SkParagraph draws a line's glyphs `round(ascent)`
+  below the paragraph's top, regardless of `ParagraphStyle`'s rounding hack,
+  while `getAlphabeticBaseline()` reports the unrounded ascent. Painting the
+  top at `y - getAlphabeticBaseline()` therefore put every fillText up to half
+  a unit off `y` — low when the ascent rounds up, high when it rounds down —
+  so a correct `baseline_y` from Label still painted a device pixel off for
+  some face/size pairs and not others. `make_paragraph` returns the rounded
+  value; `test_canvas_fonts.cpp` "fill_text places the alphabetic baseline at
+  y" pins both directions. When a baseline looks off by a pixel, sweep the
+  label's top in 1/16 px steps and read where the glyph rows switch: a switch
+  that is not at the half-pixel is an offset between the requested and drawn
+  baseline, not a metrics bug.
 
 - **`white-space` is inherited, and wrapping is `soft_wraps()`, not
   `multi_line()`.** The React and DOM importers stamp `white-space: normal` on

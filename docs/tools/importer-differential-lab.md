@@ -75,7 +75,28 @@ Every report has `schema: "pulp-importer-differential-report-v1"` and records
 source hash, browser provenance, source recognition, dynamic blockers, timings,
 layer scores, likely root causes with confidence, an `observability` receipt,
 and an opt-in `timing_budget` verdict,
-and an advisory promotion classification. The receipt paths are relative to
+and an advisory promotion classification. The observer places the
+panel-local native import, unmodified, at the authored-frame origin both
+captures sign (`comparison.geometry.registration`) inside an observer-only
+page node, so its render and layout are page-space like Chromium's. The
+full-frame visual score and `comparison.geometry.score` compare the two in
+page space. The registered scores move both sides back into the panel's own
+frame: geometry by subtracting that origin from Chromium's boxes and from the
+native layout, the authored-frame visual by cropping the frame from both PNGs
+at the same page rect. For a panel with page around it, that node
+carries the canvas colour Chromium paints, resolved from the verified DOM
+snapshot by CSS background propagation (`comparison.page_background`); a
+colour the rule cannot resolve is left unpainted and reported `unresolved`. A
+panel that covers the whole page owns its canvas (`importer-owned`), so a
+dropped document colour shows up as a residual instead of being supplied.
+The render receipt records the placement it applied, and the lab rejects a
+receipt whose placement differs from what it requested.
+`comparison.work_counters` judges the observer's own counters from the
+digest-bound render receipt: a tree that outlives its teardown, or a paint
+mutation after the first frame that requested no repaint, makes the fixture
+ineligible. `integrity.*_snapshot_semantic_sha256` hashes each DOM snapshot
+with only its capture-local CDP frame ID removed, which is the digest to
+compare across repeated runs. The receipt paths are relative to
 each fixture output, so they can be copied under `/tmp/pulp-p0a-8458/receipts/`
 without exposing machine-local paths.
 
@@ -349,8 +370,8 @@ provenance, source recognition, and deterministic three-run receipts pass.
 | P1 | Reset and reconcile the workstream | **DONE** | Fresh branch `plan/importer-reset-20261018` from `origin/main` `4cbf6f9a845f081fb5fc5fe6f21d758389e64fe0`; old `measure/fixture11-viewport-20261015` is reference-only because its lineage SHA mismatches its head. |
 | P2 | Validate the evidence contract and instruments | **DONE** | 214 Python controls pass; three-run cold benchmark determinism is `pass`; authenticated Skia render receipts, DPR 2 checks, blank-render and planted-defect controls pass; frozen baseline manifest is `test/fixtures/import-differential/reset-manifest-20261018.json`. |
 | P3 | Prove native correctness | **NOT PASSED — P3a/P3b/P3c COMPLETE; P3d OPEN FOR FORM CHROME** | Final cold corpus at `3450a14c8d` (Chrome 151.0.7922.47, DPR 2, one ARM64 host), with three-run determinism passing on all 16 completed fixtures: on the frozen 14-fixture in-scope denominator, 12 meet every gate (structure >=0.99, frame placement plus registered geometry, typography >=0.98, registered visual >=0.995). Two fail the visual gate: held-out `08-form-controls` (registered visual 0.762539) and `18-keyed-list-panel` (0.947144), with the residual located inside UA-theme-painted control boxes; that support boundary was stated after the held-out failure, so it does not redraw this denominator and may be proposed as an exclusion only for the next frozen manifest. Held-out 01, 03, and 06 pass every gate. Gate coverage over the 16 completed fixtures: structure 16/16, geometry 16/16, typography 14/16 (the excluded Canvas2D controls), registered visual 14/16. |
-| P4 | Compare baked-native and retained typed-plan paths | **DONE — NO QUALIFYING WIN** | An isolated retained typed plan (experiment branch `plan/importer-next-20261021-p4`, commit `169d06f977`, not landed) matched a fresh rebuild at all 600 trace steps, at six Skia PNG checkpoints, and detected a planted dropped meter update. Across seven interleaved separate-process Release reps on the synthetic benchmark IR, update-plus-frame median was 0.0892 ms against baked-native 0.0825 ms (1.08x) and p95 0.2003 ms against 0.1620 ms (1.24x), versus the pre-registered <=0.80x; allocations were equal (269 per frame) and peak RSS was within noise (+32 KB). It beat only the full-rebuild control (about 4.5x on median), which does not qualify. Layout and paint, shared by every lane, dominate the frame. The host was contended (load about 45 on 28 cores), so absolute times are noisy, but the ratios are far from the criterion. |
-| P5 | Decide promotion or deferment | **DONE — DEFERRED** | The retained plan does not meet the pre-registered performance criterion, so baked-native remains authoritative and the retained plan stays an isolated experiment branch. The generic benchmark instrumentation (p95, warmup exclusion, per-frame allocation counts, RSS high-water) is retained as infrastructure. |
+| P4 | Compare baked-native and retained typed-plan paths | **DONE — NO QUALIFYING WIN** | An isolated retained typed plan (experiment branch `plan/importer-next-20261021-p4`, commit `169d06f977`, not landed) matched a fresh rebuild at all 600 trace steps, at six Skia PNG checkpoints, and detected a planted dropped meter update. Across seven interleaved separate-process Release reps on the synthetic benchmark IR, update-plus-frame median was 0.0892 ms against baked-native 0.0825 ms (1.08x) and p95 0.2003 ms against 0.1620 ms (1.24x), versus the pre-registered <=0.80x; allocations were equal (269 per frame) and peak RSS was within noise (+32 KB). It beat only the full-rebuild control (about 4.5x on median), which does not qualify. Layout and paint, shared by every lane, dominate the frame. The host was contended (load about 45 on 28 cores), so absolute times are noisy, but the ratios are far from the criterion. Separately, `main` landed (PR 10640, merge `e6da6d9816`) IR-bound retained and rebuild benchmark lanes (`--ir`, `--frames`, slot identity and text-mismatch counters, teardown readback). On importer-produced held-out IR its retained lane builds no views, rebinds no slots and records no unmarked mutations, while the rebuild control rebinds every slot every frame, and teardown leaves 0 live views. Those are structural and lifetime results, and that record makes no wall-clock claim. Combined: the retained path is behaviourally sound and keeps identity, and it has no qualifying wall-time or resource win on the one host measured. |
+| P5 | Decide promotion or deferment | **DONE — DEFERRED** | The retained plan does not meet the pre-registered performance criterion, so baked-native remains authoritative and the retained plan stays an isolated experiment branch. The generic benchmark instrumentation (p95, warmup exclusion, per-frame allocation counts, RSS high-water) is retained as infrastructure, alongside `main`'s IR-bound lanes and lifetime counters, which landed independently and stay as landed. |
 | P6 | Code-health follow-ups | **ADVISORY** | Narrow `DocumentCanvasPaint` exposure, unify duplicate snapshot parsing, split the oversized browser-capture test unit, and add the direct benchmark peak assertion. These do not substitute for P0-P5 evidence. |
 
 Phase 0 residual decomposition, the 29/29 focused Python tests, the merged
@@ -507,7 +528,8 @@ contains an authored frame, the lab also emits a registered authored-frame
 score and overlays. The frame metadata is hash-bound through the capture
 receipt; it is evidence metadata, not an independent attestation. Registration
 requires the native layout snapshot to prove that the imported DesignIR root
-has the declared size and the observer viewport root is at origin. The
+has the declared size and that its panel root sits at the placement origin
+the render receipt records. The
 registered score is eligible for the P3 visual threshold;
 the full-frame score and outside-frame residual are always reported so panel
 placement, background, overflow, and shadow defects remain visible. Missing or
@@ -654,6 +676,89 @@ neutered). Deferred items: the RTL caret in `text_x_for_byte`, paragraph-path
 lookup of the system UI font by its private name, non-rendered text outside
 form controls keeping its value in the snapshot, and the native-DPR text-layout
 deviation of up to one device pixel per line.
+
+**Parallel `main` record (2026-10-21 to 2026-10-22).** `main` landed an
+independent version of this work in PR 10640 (merge `e6da6d9816`) and its
+follow-ups, plus keyed anchors in PR 10658. Its record, kept here as written:
+the observer places the panel-local import in page space rigidly, inside an
+observer-only page node that carries the canvas colour resolved from the DOM
+snapshot, and the receipt records that placement; captured text baselines
+follow Chromium's run rect, `bottom - round(fDescent)`, checked with a
+`vertical-align: baseline` probe across 9 faces at 11-32 px; `fill_text` lands
+its baseline on `y`; the observer's render receipt carries work counters and a
+teardown readback that gate eligibility; IR-bound retained and rebuild
+benchmark lanes. Held-out page-space visual at that head: basic-card
+0.991 -> 0.999986, css-variables 0.992 -> 1.000000, flex-controls 0.999421,
+grid-meter 0.999954, with typography across the corpus 0.596 -> 0.807. Its
+planted negatives (registration omitted, double translation, missing or wrong
+page background, lowered threshold, leaked view, malformed counters, NaN
+scores) were all blocked, and a thermo-nuclear review, three adversarial
+reviews and an independent Fable check completed.
+
+**Reconciliation of the two records (2026-10-22).** One implementation is kept
+per fix:
+
+- Captured baselines: the two rules contradicted each other. This branch split
+  half-leading inside a rect taller than its content area, and `main` read the
+  baseline off the bottom. A CDP probe on Chrome 151 at emulated DPR 2 settled
+  it: 216 cases (Arial, Inter, Georgia, Verdana, Times, Helvetica, Courier,
+  `serif` and `system-ui` at 11-32 px, line-height `normal`, `1.0`, `1.5` and
+  `40px`). The text rect was exactly the canvas-measured ascent plus descent
+  in all 216, so a line-height never makes it taller, and the baseline sat
+  the measured descent above its bottom in all 216. The merged rule is
+  `main`'s bottom rule. It still prefers this branch's measured `LineMetrics`
+  and keeps the whole-CSS-px snap on the captured frame's grid
+  (`captured_baseline_offset` / `captured_baseline`). This branch's
+  half-leading assertions were rewritten to the measured rule. The probe
+  cannot tell the two measured rules apart, so the fallback (no measured
+  metrics) was scored on its own. It used the faces' CoreText fAscent and
+  fDescent. `bottom - round(fDescent)` was exact in 192/192 cases (Inter is
+  excluded because CoreText substitutes Helvetica for it). The old
+  rounded-ascent/half-leading fallback was exact in 96/192, and up to 2.86 px
+  high on Times, Helvetica, Courier and `serif`. The bottom rule won. Its
+  negative control is a `descent-override: 40%` Arial at 16px: Chromium puts
+  the baseline 14 px down a 20 px rect, and the fallback puts it at 17, so the
+  fallback is approximate for faces whose browser descent differs from the
+  file's, and a test pins that. Probe receipts:
+  `/tmp/pulp-importer-team/reconcile/probe/` (`rows.csv`, `analyze.py`,
+  `ct.csv`, `fallback.py`, `fallback-result.txt`, `override.csv`).
+- `fill_text`: this branch's hinting-aware painted baseline was kept, because
+  it is equal to `main`'s rounding whenever hinting is on. Both raster tests
+  pass.
+- Typographic metrics: `main`'s `typographic_ascent()` / `typographic_descent()`
+  names were kept, and this branch's `font_ascent()` was folded into them.
+- Settle digest scrub: `main`'s top-level IR `settle_rounds` exclusion was
+  added to this branch's envelope-only `provenance.settle` rule.
+- Semantic snapshot digest: `main`'s `*_snapshot_semantic_sha256` names were
+  kept, with this branch's implementation, which also normalises `loaderId`.
+- Keyed anchors: `main`'s implementation, with its mixed-sibling report, was
+  kept.
+- Benchmark: `main`'s IR-bound lanes, fixed-frame pacing, verification
+  exclusion and teardown readback were kept. This branch's warmup exclusion,
+  p95, per-frame allocation counts and RSS high-water were added on top.
+- Page-space placement and geometry: `main`'s observer placement, page
+  background, receipt placement check and work-counter gate were kept. This
+  branch's frame-placement proof and registered geometry gate now read native
+  checks moved to the page-space observer. The native root must sit at the
+  DOM authored origin and `html` at the page origin, with nothing
+  subtracted. Registered geometry moves both sides back by the placement
+  origin, so per-node deltas equal the page-space ones and only the
+  relative-error denominators differ. The registered visual crops both PNGs
+  at the authored frame, and the panel-translation shift control still runs
+  whenever the two crop boxes differ. Ruling (team lead, Fable concurring):
+  geometry passes only when this branch's gate (frame placement, registered
+  mean, 1.0 CSS px per node, coverage floor) and `main`'s page-space mean
+  (`comparison.geometry.score >= 0.98`, now the gate's `page_space_mean`
+  check) both pass. A geometry result with no evaluated gate fails closed.
+  Merged-artifact controls on `06-absolute-overlay`, which has its origin at
+  (20, 20): baseline passes. IR origin +3, native `html` rect +3 and native
+  root +3 fail frame placement. +3, -3 and +1.2 px on the farthest node and
+  -10% width fail the per-node bound. +0.9 px passes. Visual controls on `02`:
+  calibration 0.999421, planted 41x41 magenta 0.947643, blank render
+  0.556867, 2 px shift 0.874403, all below 0.995 except the calibration.
+  Dropping `06`'s stage backdrop scores registered 0.951346, against 0.999905
+  for an unmodified re-render. A dropped backdrop that equals the page colour
+  stays masked by the observer page node, which is a known limit.
 
 ### Stop and continuation rules
 

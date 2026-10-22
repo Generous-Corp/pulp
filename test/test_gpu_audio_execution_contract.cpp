@@ -1,6 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <cstdint>
+#include <limits>
+#include <thread>
+
 #include "detail/shared_io_execution_contract.hpp"
+#include "support/thread_progress.hpp"
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
 using namespace pulp::gpu_audio;
@@ -37,40 +43,6 @@ TEST_CASE("shared IO contract separates logical capacity from physical provider 
             SharedIoContractError::MissingAlgorithmicLead);
 }
 
-TEST_CASE("shared IO contract rejects unknown backend-neutral enum values",
-          "[gpu_audio][shared_io]") {
-    const auto valid_contract = [] {
-        return SharedIoExecutionContract{
-            .channels = 2,
-            .block_size = 32,
-            .sample_rate = 48000,
-            .algorithmic_lead_blocks = 1,
-            .pipeline_depth = 2,
-            .provider_slots = 1,
-            .requested_path = SharedIoRequest::RequireSharedHostPointer,
-            .active_path = SharedIoPath::SharedHostPointer,
-            .shared_host_pointer_capable = true,
-            .cpu_fallback_prepared = true,
-        };
-    };
-
-    auto contract = valid_contract();
-    contract.active_path = static_cast<SharedIoPath>(0xfe);
-    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
-
-    contract = valid_contract();
-    contract.requested_path = static_cast<SharedIoRequest>(0xfe);
-    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
-
-    contract = valid_contract();
-    contract.miss_policy = static_cast<MissPolicy>(0xfe);
-    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
-
-    contract = valid_contract();
-    contract.fallback_reason = static_cast<SharedIoFallbackReason>(0xfe);
-    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
-}
-
 TEST_CASE("shared IO depth lead policy bounds multi-flight admission",
           "[gpu_audio][shared_io][p4]") {
     constexpr SharedIoDepthLeadPolicy policy{4, 8, 4};
@@ -99,6 +71,38 @@ TEST_CASE("shared IO depth lead policy bounds multi-flight admission",
     contract.max_inflight = 0;
     REQUIRE(validate_shared_io_contract(contract).error ==
             SharedIoContractError::InvalidMaxInflight);
+}
+
+TEST_CASE("shared IO contract rejects unknown backend-neutral enum values",
+          "[gpu_audio][shared_io]") {
+    const auto valid_contract = [] {
+        return SharedIoExecutionContract{
+            .channels = 2,
+            .block_size = 32,
+            .sample_rate = 48000,
+            .algorithmic_lead_blocks = 1,
+            .pipeline_depth = 2,
+            .provider_slots = 1,
+            .requested_path = SharedIoRequest::RequireSharedHostPointer,
+            .active_path = SharedIoPath::SharedHostPointer,
+            .shared_host_pointer_capable = true,
+            .cpu_fallback_prepared = true,
+        };
+    };
+
+    auto contract = valid_contract();
+    CHECK(validate_shared_io_contract(contract).accepted());
+    contract.active_path = static_cast<SharedIoPath>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
+    contract = valid_contract();
+    contract.requested_path = static_cast<SharedIoRequest>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
+    contract = valid_contract();
+    contract.miss_policy = static_cast<MissPolicy>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
+    contract = valid_contract();
+    contract.fallback_reason = static_cast<SharedIoFallbackReason>(0xfe);
+    CHECK(validate_shared_io_contract(contract).error == SharedIoContractError::InvalidEnumValue);
 }
 
 TEST_CASE("shared IO contract fails closed for unavailable paths and fallback",
@@ -161,7 +165,26 @@ TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing expl
     REQUIRE(before_gpu_timing.pre_submit_delay_ns == 324695);
     REQUIRE(before_gpu_timing.submit_to_completion_ns == 721250);
     REQUIRE(before_gpu_timing.scheduled_to_completion_ns == 1045945);
+    REQUIRE(before_gpu_timing.completion_timing_valid);
     REQUIRE_FALSE(before_gpu_timing.gpu_elapsed_available);
+
+    telemetry.record_completion_timing(std::numeric_limits<std::uint64_t>::max() - 1, 1);
+    const auto boundary_timing = telemetry.snapshot();
+    REQUIRE(boundary_timing.completion_timing_valid);
+    REQUIRE(boundary_timing.scheduled_to_completion_ns ==
+            std::numeric_limits<std::uint64_t>::max());
+
+    telemetry.record_completion_timing(std::numeric_limits<std::uint64_t>::max(), 1);
+    const auto overflowed_timing = telemetry.snapshot();
+    REQUIRE_FALSE(overflowed_timing.completion_timing_valid);
+    REQUIRE(overflowed_timing.scheduled_to_completion_ns == 0);
+    REQUIRE(overflowed_timing.pre_submit_delay_ns == std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(overflowed_timing.submit_to_completion_ns == 1);
+
+    telemetry.record_completion_timing(10, 20);
+    const auto repaired_timing = telemetry.snapshot();
+    REQUIRE(repaired_timing.completion_timing_valid);
+    REQUIRE(repaired_timing.scheduled_to_completion_ns == 30);
 
     telemetry.record_gpu_elapsed_ns(42);
     telemetry.record_gpu_busy_counter(7);
@@ -175,4 +198,217 @@ TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing expl
     REQUIRE(telemetry.snapshot().configured_pipeline_depth == 0);
     REQUIRE(telemetry.snapshot().configured_available_inflight == 0);
     REQUIRE_FALSE(telemetry.snapshot().gpu_elapsed_available);
+    REQUIRE(telemetry.snapshot().completion_timing_valid);
+}
+
+TEST_CASE("shared IO telemetry completion timing snapshots stay coherent under concurrent updates",
+          "[gpu_audio][shared_io]") {
+    // Normal samples satisfy submit == 2 * pre + 1 (odd); overflow samples carry
+    // pre == max and an even submit; reset() publishes all zeros. A snapshot
+    // that mixes fields from different updates matches none of these shapes.
+    constexpr int kSnapshots = 200000;
+    constexpr std::uint64_t kMinOverlappingUpdates = 1000;
+    constexpr auto kMax = std::numeric_limits<std::uint64_t>::max();
+    SharedIoTelemetry telemetry;
+    std::atomic<std::uint64_t> published{0};
+    std::atomic<std::uint64_t> resets{0};
+    std::atomic<bool> stop{false};
+    std::thread recorder([&] {
+        std::uint64_t i = 0;
+        while (!stop.load(std::memory_order_relaxed)) {
+            ++i;
+            const bool sample_published = i % 8 == 0
+                                              ? telemetry.record_completion_timing(kMax, 2 * i)
+                                              : telemetry.record_completion_timing(i, 2 * i + 1);
+            if (sample_published)
+                published.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+    std::thread resetter([&] {
+        while (!stop.load(std::memory_order_relaxed)) {
+            telemetry.reset();
+            resets.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+    });
+    // Require a publication that actually won the guard while reset() was
+    // contending for it, not merely a recorder call that dropped its sample.
+    const bool writers_started = pulp::test::wait_for_condition([&] {
+        return published.load(std::memory_order_relaxed) != 0 &&
+               resets.load(std::memory_order_relaxed) != 0;
+    });
+
+    std::uint64_t incoherent = 0;
+    const auto check_snapshot = [&] {
+        const auto s = telemetry.snapshot();
+        const bool zero = s.pre_submit_delay_ns == 0 && s.submit_to_completion_ns == 0 &&
+                          s.scheduled_to_completion_ns == 0;
+        bool coherent = false;
+        if (s.completion_timing_valid) {
+            coherent = zero || (s.submit_to_completion_ns == 2 * s.pre_submit_delay_ns + 1 &&
+                                s.scheduled_to_completion_ns ==
+                                    s.pre_submit_delay_ns + s.submit_to_completion_ns);
+        } else {
+            // Invalid is either an overflow sample or the fail-closed contended
+            // read, which carries no timing values.
+            coherent =
+                zero || (s.pre_submit_delay_ns == kMax && s.scheduled_to_completion_ns == 0 &&
+                         s.submit_to_completion_ns != 0 && s.submit_to_completion_ns % 2 == 0);
+        }
+        if (!coherent)
+            ++incoherent;
+    };
+    const auto published_before = published.load(std::memory_order_relaxed);
+    const auto resets_before = resets.load(std::memory_order_relaxed);
+    for (int n = 0; writers_started && n < kSnapshots; ++n)
+        check_snapshot();
+    // Keep reading until both writers have advanced during the read phase, so
+    // the coherence check cannot pass without overlapping concurrent updates.
+    // Each predicate evaluation takes a snapshot first, so overlap is never
+    // accepted without a checked read taken after the baseline.
+    const bool overlapped =
+        writers_started && pulp::test::pump_until(
+                               [&] {
+                                   check_snapshot();
+                                   return published.load(std::memory_order_relaxed) >
+                                              published_before + kMinOverlappingUpdates &&
+                                          resets.load(std::memory_order_relaxed) >
+                                              resets_before + kMinOverlappingUpdates;
+                               },
+                               [] { std::this_thread::yield(); });
+    stop.store(true, std::memory_order_relaxed);
+    recorder.join();
+    resetter.join();
+
+    REQUIRE(writers_started);
+    REQUIRE(overlapped);
+    REQUIRE(incoherent == 0);
+
+    REQUIRE(telemetry.record_completion_timing(5, 11));
+    const auto settled = telemetry.snapshot();
+    REQUIRE(settled.completion_timing_valid);
+    REQUIRE(settled.scheduled_to_completion_ns == 16);
+}
+
+TEST_CASE("shared IO telemetry validates quiescent admission and delivery bounds",
+          "[gpu_audio][shared_io][telemetry]") {
+    SharedIoTelemetry telemetry;
+    telemetry.configure_depth_lead({2, 4, 2});
+    telemetry.record_callback_block(false);
+    telemetry.record_admission();
+    telemetry.record_submit();
+    telemetry.record_retired(true);
+    telemetry.record_delivery(true, false);
+    telemetry.observe_in_flight(2);
+
+    const auto valid = telemetry.snapshot();
+    CHECK(validate_shared_io_telemetry(valid).accepted());
+
+    auto forged = valid;
+    forged.configured_available_inflight = 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::InvalidDepthConfiguration);
+
+    forged = valid;
+    forged.in_flight_high_water = 5;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::OccupancyExceedsPipelineDepth);
+
+    forged = valid;
+    forged.in_flight_high_water = 3;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::OccupancyExceedsMaxInflight);
+
+    forged = valid;
+    forged.submitted_blocks = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::SubmittedExceedsAdmissions);
+
+    forged = valid;
+    forged.retired_success = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::SuccessfulRetirementsExceedSubmissions);
+
+    forged = valid;
+    forged.retired_failure = 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::RetirementsExceedAdmissions);
+
+    forged = valid;
+    forged.delivered_blocks = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::DeliveredExceedsCallbacks);
+
+    forged = valid;
+    forged.deadline_misses = forged.callback_blocks + 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::DeadlineMissesExceedCallbacks);
+
+    forged = valid;
+    forged.late_completions = forged.retired_success + forged.retired_failure + 1;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::LateCompletionsExceedRetirements);
+
+    forged = valid;
+    forged.fallback_blocks = 2;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::FallbacksExceedDelivered);
+
+    // A wrapped scheduled-to-completion sum must never be accepted as a
+    // healthy timing receipt. This is a deterministic negative control for
+    // providers that report very large nanosecond samples.
+    forged = valid;
+    forged.pre_submit_delay_ns = UINT64_MAX;
+    forged.submit_to_completion_ns = 1;
+    forged.scheduled_to_completion_ns = 0;
+    CHECK(validate_shared_io_telemetry(forged).error ==
+          SharedIoTelemetryError::ScheduledCompletionBeforeComponents);
+
+    // Controller-only producers from older snapshots use submitted_blocks as
+    // their admission boundary and leave the optional admission counter zero.
+    auto legacy = valid;
+    legacy.admitted_blocks = 0;
+    CHECK(validate_shared_io_telemetry(legacy).accepted());
+
+    // A legacy receipt has no separate admission counter, so all terminal
+    // outcomes still must be bounded by the provider submissions it reports.
+    legacy = {};
+    legacy.submitted_blocks = 0;
+    legacy.retired_failure = 1;
+    CHECK(validate_shared_io_telemetry(legacy).error ==
+          SharedIoTelemetryError::RetirementsExceedSubmissions);
+
+    constexpr SharedIoTelemetrySnapshot unconfigured{};
+    STATIC_REQUIRE(validate_shared_io_telemetry(unconfigured).accepted());
+}
+
+TEST_CASE("shared IO telemetry validation rejects producer-invalid completion timing first",
+          "[gpu_audio][shared_io][telemetry]") {
+    // Positive control: zeroed timing that the producer marks valid is an
+    // ordinary empty receipt.
+    SharedIoTelemetrySnapshot zero_valid{};
+    zero_valid.completion_timing_valid = true;
+    CHECK(validate_shared_io_telemetry(zero_valid).accepted());
+
+    // Planted negative: the same zeroed triple marked invalid passes every
+    // component comparison, so only the validity bit can reject it.
+    auto zero_invalid = zero_valid;
+    zero_invalid.completion_timing_valid = false;
+    CHECK(validate_shared_io_telemetry(zero_invalid).error ==
+          SharedIoTelemetryError::CompletionTimingInvalid);
+
+    // The validity bit is checked before any counter relation.
+    auto also_inconsistent = zero_invalid;
+    also_inconsistent.delivered_blocks = 1;
+    CHECK(validate_shared_io_telemetry(also_inconsistent).error ==
+          SharedIoTelemetryError::CompletionTimingInvalid);
+
+    // The real producer path: an overflowing sample is published as invalid
+    // and rejected; the next representable sample is accepted again.
+    SharedIoTelemetry telemetry;
+    telemetry.record_completion_timing(UINT64_MAX, 1);
+    CHECK(validate_shared_io_telemetry(telemetry.snapshot()).error ==
+          SharedIoTelemetryError::CompletionTimingInvalid);
+    telemetry.record_completion_timing(10, 20);
+    CHECK(validate_shared_io_telemetry(telemetry.snapshot()).accepted());
 }

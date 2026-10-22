@@ -355,10 +355,10 @@ producing a derivative. Hold the repo's independent line.
 
 Non-obvious things that cost real time when you don't know them:
 
-- **`OversamplerT`'s default `Kind` is `fir_biquad` — only ~7 dB worst-case alias
-  rejection.** Any anti-aliasing measurement that doesn't explicitly pin
-  `Kind::linear_phase_fir` (96 dB standard / 140 dB pristine) or `polyphase_iir`
-  is measuring the filter, not your DSP.
+- **Name the oversampler `Kind` in every anti-aliasing measurement.** Default
+  `polyphase_iir` gives 94.8 dB (frequency-dependent delay); `linear_phase_fir`
+  96/140 dB at constant latency. `fir_biquad` has only ~7 dB worst-case alias
+  rejection, so a measurement that selects it is measuring the filter, not your DSP.
 - **Deep-dynamic-range measurement is a window problem most windows cannot solve.**
   The `Window` enum ships **six** members (rectangular, hann, hamming, blackman,
   flat_top, kaiser), first side lobes −14/−31/−41/−57/−93/−124 dB. **flat_top buys

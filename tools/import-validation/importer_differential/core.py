@@ -23,12 +23,14 @@ from .geometry_gate import (
     FRAME_PLACEMENT_TOLERANCE_PX,
     GEOMETRY_MAX_ABS_DELTA_PX,
     NATIVE_HTML_ANCHOR,
+    authenticated_authored_origin,
     dom_authored_surface,
     frame_placement_check,
     geometry_gate_failures,
     geometry_gate_ok,
     geometry_metrics,
     geometry_metrics_with_registration,
+    native_nodes_in_panel_space,
     register_browser_nodes_to_native_frame,
     relative_error,
     verify_native_authored_frame,
@@ -44,13 +46,21 @@ from .model import (
 from .recognition import source_recognition, unsupported_features
 from .reports import format_summary
 from .snapshot import (
+    CANVAS_NEUTRAL_STYLES,
     LEGACY_COMPUTED_STYLES,
     DomSnapshot,
     browser_nodes,
     decode_string,
+    document_canvas_background,
     principal_layout_rows,
 )
-from .verdicts import ROOT_CAUSE_ORDER, classify_gaps, promotion_recommendation
+from .verdicts import (
+    OBSERVER_COUNTER_SCHEMA,
+    ROOT_CAUSE_ORDER,
+    classify_gaps,
+    promotion_recommendation,
+    work_counter_gate,
+)
 from .visual import (
     classify_full_frame,
     full_frame_ok,
@@ -193,12 +203,13 @@ def canonical_json_sha256(source: Path | bytes) -> str:
     Those fields must not make an otherwise identical campaign appear
     nondeterministic. Browser-capture envelopes also omit their exact snapshot
     binding here: CDP frame IDs vary per capture. Each raw binding is verified
-    separately; `semantic_dom_sha256` covers the snapshot's content.
+    separately; `snapshot_semantic_sha256` covers the snapshot's content.
     They also omit the settle loop's iteration counters
-    (`provenance.settle.rounds` and `stable_rounds`): how many polls the page
-    took to go quiet depends on host load, not on what was captured. Only
-    those two counters are scrubbed, and only in capture envelopes; every
-    other settle field and every content field still enters the digest.
+    (`provenance.settle.rounds` and `stable_rounds`, and an IR's top-level
+    `settle_rounds`): how many polls the page took to go quiet depends on host
+    load, not on what was captured. Only those counters are scrubbed (the
+    settle record's only in capture envelopes); every other settle field and
+    every content field still enters the digest.
     """
     volatile_keys = {"elapsed_ms", "imported_at"}
     document = json.loads(source if isinstance(source, bytes) else source.read_bytes())
@@ -218,6 +229,7 @@ def canonical_json_sha256(source: Path | bytes) -> str:
                 if key not in volatile_keys
                 and not (document_entry and key == "snapshot_sha256")
                 and not (settle_record and key in SETTLE_COUNTER_KEYS)
+                and not (path == () and key == "settle_rounds")
             }
         if isinstance(value, list):
             return [scrub(item, (*path, index)) for index, item in enumerate(value)]
@@ -231,7 +243,7 @@ def canonical_json_sha256(source: Path | bytes) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def semantic_dom_sha256(snapshot_bytes: bytes) -> str:
+def snapshot_semantic_sha256(snapshot_bytes: bytes) -> str:
     """Hash a DOM snapshot with only its capture-local CDP identifiers fixed.
 
     `canonical_json_sha256` drops a capture envelope's snapshot binding because
@@ -681,6 +693,18 @@ def capture_logical_size(capture: dict[str, Any]) -> tuple[int, int]:
     return width, height
 
 
+def panel_covers_page(capture: dict[str, Any]) -> bool:
+    """Whether the authored frame is the whole captured page."""
+    width, height = capture_logical_size(capture)
+    try:
+        frame = capture["reference"]["authored_frame"]
+        x, y = float(frame["x"]), float(frame["y"])
+        w, h = float(frame["width"]), float(frame["height"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return x <= 0 and y <= 0 and x + w >= width and y + h >= height
+
+
 def import_lane_args(
     importer: Path,
     source_args: list[str],
@@ -903,6 +927,11 @@ class LaneOutputs:
     source_sha256: str
     capture_size: tuple[int, int]
     viewport_dpr: dict[str, Any]
+    # Where the observer placed the panel-local native import (the signed
+    # authored origin, which its receipt records) and the page colour it
+    # painted around it.
+    placement_origin: tuple[float, float]
+    page_background: dict[str, Any]
 
 
 @dataclass
@@ -917,6 +946,7 @@ class Scores:
     form_controls: dict[str, Any]
     classifications: list[dict[str, Any]]
     promotion: dict[str, Any]
+    work_counters: dict[str, Any]
 
 
 def run_lanes(
@@ -999,13 +1029,27 @@ def run_lanes(
     browser_snapshot_binding, browser_snapshot_bytes = verify_capture_snapshot_binding(capture, evidence)
     native_snapshot_binding, native_snapshot_bytes = verify_capture_snapshot_binding(native_capture, native_evidence)
     capture_width, capture_height = capture_logical_size(capture)
+    authored_x, authored_y = authenticated_authored_origin(capture, native_capture)
+    page_background = document_canvas_background(
+        json.loads(browser_snapshot_bytes), capture)
+    if page_background["status"] == "resolved" and panel_covers_page(capture):
+        # A panel that is the whole page owns its canvas: the importer stamps
+        # the document colour on its root. Supplying it here would paint a
+        # backdrop the import may have dropped.
+        page_background = {"status": "importer-owned", "color": None,
+                           "reason": "the authored frame covers the page; the "
+                                     "importer's root carries the document canvas",
+                           "resolved": page_background}
     render_args = [
         str(observer), "--input", str(native_ir),
         "--render", str(native_render), "--layout", str(native_layout),
         "--width", str(capture_width), "--height", str(capture_height),
         "--scale", str(capture["reference"]["device_scale_factor"]),
         "--backend", "skia", "--render-receipt", str(native_receipt),
+        "--origin", f"{authored_x},{authored_y}",
     ]
+    if page_background["status"] == "resolved":
+        render_args.extend(["--page-background", page_background["color"]])
     render_run = run_command(render_args, timeout_seconds)
     write_json(native_dir / "render-command.json", command_record(render_run))
     if render_run.returncode != 0:
@@ -1019,6 +1063,19 @@ def run_lanes(
             or render_receipt.get("backend_used") != "skia"
             or render_receipt.get("ok") is not True):
         raise LabError("native render receipt did not prove a successful Skia render")
+    # The receipt records how the observer placed the panel; it must be the
+    # placement this comparison asked for, or the render was registered by
+    # something other than the authenticated authored frame.
+    placement = render_receipt.get("placement")
+    expected_background = (page_background["color"]
+                           if page_background["status"] == "resolved" else "")
+    if (not isinstance(placement, dict)
+            or not math.isclose(float(placement.get("origin_x", math.nan)), authored_x,
+                                abs_tol=1e-4)
+            or not math.isclose(float(placement.get("origin_y", math.nan)), authored_y,
+                                abs_tol=1e-4)
+            or placement.get("page_background") != expected_background):
+        raise LabError("native render receipt does not record the requested placement")
     render_command = command_record(render_run)
 
     try:
@@ -1048,6 +1105,7 @@ def run_lanes(
         native_snapshot_bytes=native_snapshot_bytes,
         render_receipt=render_receipt, source_sha256=source_sha256,
         capture_size=(capture_width, capture_height), viewport_dpr=viewport_dpr,
+        placement_origin=(authored_x, authored_y), page_background=page_background,
     )
 
 
@@ -1164,28 +1222,43 @@ def score_lanes(lanes: LaneOutputs, source: Path) -> Scores:
     browser_snapshot = DomSnapshot(json.loads(lanes.browser_snapshot_bytes))
     native_layout_doc = json.loads(lanes.native_layout.read_text(encoding="utf-8"))
     browser_flat_raw = browser_nodes(browser_snapshot)
-    native_flat = native_nodes(lanes.native_doc, native_layout_doc)
+    # The observer laid the panel out at the placement origin, so its layout
+    # is page-space like Chromium's. The registered comparison moves both
+    # sides back into the panel's own frame; page-space stays a diagnostic.
+    native_flat_page = native_nodes(lanes.native_doc, native_layout_doc)
+    native_flat = native_nodes_in_panel_space(native_flat_page, lanes.placement_origin)
     browser_flat, geometry_registration = register_browser_nodes_to_native_frame(
         browser_flat_raw, capture, native_capture)
     comparison = structural_comparison(browser_flat, native_flat)
     matches = comparison["matches"]
     structural = structural_report(comparison, browser_flat, native_flat)
     # Registered panel geometry is gated together with a frame placement
-    # proof, so registration cannot hide a misplaced panel. Raw page-space
+    # proof, so registration cannot hide a misplaced panel. Page-space
     # geometry stays reported as an ungated diagnostic.
-    raw_comparison = structural_comparison(browser_flat_raw, native_flat)
+    raw_comparison = structural_comparison(browser_flat_raw, native_flat_page)
     frame_placement = frame_placement_check(
         browser_snapshot, lanes.native_doc, native_layout_doc, matches, capture)
+    placed_x, placed_y = lanes.placement_origin
+    placement = {
+        "x": round(placed_x, 6), "y": round(placed_y, 6),
+        "source": "authenticated-authored-frame",
+        "applied_to": "native-render-and-layout",
+        # Capture snaps box paint edges in panel-local CSS px. Moved by a
+        # fractional origin they no longer equal Chromium's page-space snap,
+        # so edge residuals on such a panel are partly registration.
+        "integral_origin": float(placed_x).is_integer() and float(placed_y).is_integer(),
+    }
     geometry = geometry_metrics_with_registration(
         raw_comparison["matches"], matches, geometry_registration, frame_placement,
-        reference_node_count=len(browser_flat))
+        reference_node_count=len(browser_flat), placement=placement)
     typography = typography_metrics(matches)
     authored_frame = capture.get("reference", {}).get("authored_frame")
     native_authored_frame = native_capture.get("reference", {}).get("authored_frame")
     if authored_frame != native_authored_frame:
         raise LabError("browser/native authored-frame metadata disagrees for visual comparison")
     native_frame_registration = verify_native_authored_frame(
-        lanes.native_doc, native_layout_doc, authored_frame)
+        lanes.native_doc, native_layout_doc, authored_frame,
+        placement_origin=lanes.placement_origin)
     scale = capture["reference"]["device_scale_factor"]
     capture_width, capture_height = lanes.capture_size
     visual = visual_metrics(
@@ -1195,6 +1268,7 @@ def score_lanes(lanes: LaneOutputs, source: Path) -> Scores:
         (round(capture_width * scale), round(capture_height * scale)),
         authored_frame,
         scale,
+        lanes.placement_origin,
     )
     visual["registration"]["native_layout"] = native_frame_registration
     if visual.get("registered_visual"):
@@ -1206,14 +1280,15 @@ def score_lanes(lanes: LaneOutputs, source: Path) -> Scores:
     classifications = classify_gaps(
         recognition, structural, geometry, typography, visual,
         form_control_report)
+    work_counters = work_counter_gate(lanes.render_receipt)
     recommendation = promotion_recommendation(
-        blockers, structural, geometry, typography, visual,
-        form_control_report["support_boundaries"])
+        blockers, structural, geometry, typography, visual, work_counters,
+        support_boundaries=form_control_report["support_boundaries"])
     return Scores(
         recognition=recognition, blockers=blockers, structural=structural,
         geometry=geometry, typography=typography, visual=visual,
         form_controls=form_control_report, classifications=classifications,
-        promotion=recommendation)
+        promotion=recommendation, work_counters=work_counters)
 
 
 def timings_record(lanes: LaneOutputs) -> dict[str, Any]:
@@ -1254,8 +1329,10 @@ def integrity_record(
         "native_capture_canonical_sha256": canonical_json_sha256(lanes.native_capture_bytes),
         # The snapshot's own content, which the canonical capture digests
         # cannot see: only per-session CDP identifiers are normalised.
-        "browser_dom_semantic_sha256": semantic_dom_sha256(lanes.browser_snapshot_bytes),
-        "native_dom_semantic_sha256": semantic_dom_sha256(lanes.native_snapshot_bytes),
+        "browser_snapshot_semantic_sha256": snapshot_semantic_sha256(
+            lanes.browser_snapshot_bytes),
+        "native_snapshot_semantic_sha256": snapshot_semantic_sha256(
+            lanes.native_snapshot_bytes),
         "browser_screenshot_sha256": sha256_file(lanes.browser_dir / "browser.png"),
         "native_render_sha256": sha256_file(lanes.native_render),
         "native_layout_sha256": sha256_file(lanes.native_layout),
@@ -1400,6 +1477,8 @@ def compare_one(
             "visual": scores.visual,
             "viewport_dpr_audit": lanes.viewport_dpr,
             "form_controls": scores.form_controls,
+            "page_background": lanes.page_background,
+            "work_counters": scores.work_counters,
         },
         "classifications": scores.classifications,
         "promotion": scores.promotion,

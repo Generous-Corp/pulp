@@ -66,7 +66,8 @@ class VisualRegistrationTests(unittest.TestCase):
         geometry = {"score": 1.0}
         typography = {"score": 1.0}
         full = {"score": 1.0, "registered_visual": {"score": 0.9}}
-        result = promotion_recommendation([], structural, geometry, typography, full)
+        result = promotion_recommendation(
+            [], structural, geometry, typography, full, {"status": "pass", "failures": []})
         self.assertFalse(result["threshold_eligible"])
         self.assertEqual(result["visual_gate_score"], 0.9)
 

@@ -1,4 +1,5 @@
 import copy
+import io
 import importlib.util
 import unittest
 import json
@@ -77,6 +78,32 @@ class P5ReceiptVerifierTests(unittest.TestCase):
         self.assert_rejected(lambda value: value.update(expected_admissions=True))
         self.assert_rejected(lambda value: value["disposition_census"].update(completed=True))
 
+    def test_census_zero_entries_must_name_known_dispositions(self):
+        accepted = receipt()
+        accepted["disposition_census"]["cpu_fallback"] = 0
+        self.assertEqual(MODULE.verify_receipt(accepted)["disposition_census"], {"completed": 2})
+        self.assert_rejected(lambda value: value["disposition_census"].update(forged=0))
+
+    def run_cli_receipt(self, text):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            path.write_text(text, encoding="utf-8")
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                code = MODULE.main([str(path)])
+            return code, json.loads(stdout.getvalue())
+
+    def test_cli_receipt_uses_strict_json(self):
+        code, result = self.run_cli_receipt(json.dumps(receipt()))
+        self.assertEqual((code, result["verdict"]), (0, "PASS"))
+        # A duplicate key would otherwise let the last census silently win.
+        forged = json.dumps(receipt())[:-1] + ', "disposition_census": {"completed": 2}}'
+        code, result = self.run_cli_receipt(forged)
+        self.assertEqual((code, result["verdict"]), (1, "FAIL"))
+        self.assertIn("duplicate JSON key disposition_census", result["reason"])
+        code, result = self.run_cli_receipt(json.dumps(receipt()).replace('"rows"', '"x": NaN, "rows"', 1))
+        self.assertEqual((code, result["verdict"]), (1, "FAIL"))
+        self.assertIn("non-finite JSON constant NaN", result["reason"])
+
     def test_strict_json_rejects_duplicate_and_nonfinite(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bad.json"
@@ -148,6 +175,18 @@ class P5ReceiptVerifierTests(unittest.TestCase):
 
     def test_artifact_fixture_positive_reconciles_raw_and_trace(self):
         self.assertEqual(self.verify_fixture()["verdict"], "PASS")
+
+    def test_artifact_manifest_missing_or_mistyped_fields_fail_closed(self):
+        # The positive fixture above supplies every field; each mutation must
+        # surface as a ReceiptError verdict rather than an uncaught exception.
+        for field, value in (("raw_sha256", 7), ("trace_sha256", None)):
+            with self.subTest(field=field):
+                self.assert_artifacts_rejected(
+                    "run manifest is missing required identity or artifact digest",
+                    lambda f, field=field, value=value: f["manifest"].update({field: value}))
+        self.assert_artifacts_rejected(
+            "run manifest process/session identity is required",
+            lambda f: f["manifest"].pop("upid"))
 
     def test_artifact_fixture_rejects_unflushed_trace(self):
         self.assert_artifacts_rejected(

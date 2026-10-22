@@ -119,6 +119,13 @@ REQUIRED_FILES_BY_TYPE = {
 
 _VAR_PATTERN = re.compile(r"\{\{([A-Z_][A-Z0-9_]*)\}\}")
 _LOAD_SCRIPT = re.compile(r"\bload_script\s*\(")
+# Audio-thread idioms a scaffolded processor must not demonstrate: a hashed
+# parameter lookup per read, a std::span rebuilt per sample, and a meter
+# reduction written as one serial add chain.
+_GET_VALUE = re.compile(r"\bget_value\s*\(")
+_SPAN_SUBSCRIPT = re.compile(r"\.channel\s*\([^()]*\)\s*\[")
+_DECLARE_METER = re.compile(r"\bdeclare_meter\s*\(")
+_MEASURE_PEAK_RMS = re.compile(r"\bmeasure_peak_rms\s*\(")
 _SCRIPT_SUFFIXES = (".js", ".jsx", ".mjs", ".ts", ".tsx", ".html")
 _SOURCE_SUFFIXES = _SCRIPT_SUFFIXES + (".cpp", ".hpp", ".h", ".mm", ".m", ".in")
 
@@ -127,6 +134,26 @@ def _logical_suffix(path: Path) -> str:
     """`main.js.template` is a `.js` file once materialized."""
     name = path.name[:-len(".template")] if path.name.endswith(".template") else path.name
     return Path(name).suffix
+
+
+def _check_processor_idioms(type_name: str, rel: Path, code: str) -> list[str]:
+    """Flag slow audio-thread idioms in a processor template."""
+    failures: list[str] = []
+    for m in _GET_VALUE.finditer(code):
+        failures.append(
+            f"[{type_name}] {rel}:{line_of(code, m.start())}: calls get_value "
+            "-- resolve a StateStore::param_reader() in prepare() and read "
+            "it in process()")
+    for m in _SPAN_SUBSCRIPT.finditer(code):
+        failures.append(
+            f"[{type_name}] {rel}:{line_of(code, m.start())}: subscripts "
+            "channel(ch)[i] -- take channel_ptr(ch) once outside the sample "
+            "loop")
+    if _DECLARE_METER.search(code) and not _MEASURE_PEAK_RMS.search(code):
+        failures.append(
+            f"[{type_name}] {rel}: declares a meter but does not measure it "
+            "with buffer_ops::measure_peak_rms")
+    return failures
 
 
 def check_realtime_patterns(type_name: str, dir_path: Path) -> list[str]:
@@ -149,6 +176,8 @@ def check_realtime_patterns(type_name: str, dir_path: Path) -> list[str]:
                 "WidgetBridge::dispatch_native_message or bind a value "
                 "channel with bindMeter (view-bridge skill, \"Realtime "
                 "scripted editors\")")
+        if path.name.startswith("processor"):
+            failures.extend(_check_processor_idioms(type_name, rel, code))
         if suffix in _SCRIPT_SUFFIXES:
             for finding in check_realtime(text):
                 failures.append(

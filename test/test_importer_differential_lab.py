@@ -52,6 +52,20 @@ from importer_differential import cli as LAB_CLI  # noqa: E402
 from importer_differential import form_controls as FORM_CONTROLS  # noqa: E402
 
 
+def observer_placement(argv: list[str]) -> dict[str, object]:
+    """The placement block the real observer records for these arguments."""
+    x, y = (float(v) for v in argv[argv.index("--origin") + 1].split(","))
+    background = (argv[argv.index("--page-background") + 1]
+                  if "--page-background" in argv else "")
+    return {"origin_x": x, "origin_y": y, "page_background": background}
+
+
+def observer_root_rect(argv: list[str], width: float, height: float) -> dict[str, float]:
+    """The panel root's layout rect: the real observer lays it out at --origin."""
+    placement = observer_placement(argv)
+    return {"x": placement["origin_x"], "y": placement["origin_y"], "w": width, "h": height}
+
+
 class DifferentialLabTests(unittest.TestCase):
     def test_source_recognition_records_dynamic_blockers(self) -> None:
         recognition = LAB.source_recognition("""
@@ -955,12 +969,13 @@ class DifferentialLabTests(unittest.TestCase):
                     Path(argv[argv.index("--layout") + 1]).write_text(
                         json.dumps({"views": [], "nodes": [{
                             "id": "browser:root",
-                            "rect": {"x": 0, "y": 0, "w": 1, "h": 1},
+                            "rect": observer_root_rect(argv, 1, 1),
                         }]}), encoding="utf-8")
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
-                                    "ok": True}), encoding="utf-8")
+                                    "ok": True,
+                                    "placement": observer_placement(argv)}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
                     output.write_text(json.dumps({"root": {
@@ -1035,7 +1050,7 @@ class DifferentialLabTests(unittest.TestCase):
                 0, "main", -1, "", {}, (0.25, 0.25, 0.5, 0.5), {}, 10)
             native = LAB.NativeNode(
                 "panel", "frame", "main", "", None, {}, (0, 0, 0.5, 0.5), 10)
-            with patch.object(LAB, "run_command", side_effect=fake_run), \
+            with patch.object(LAB, "run_command", side_effect=fake_run) as offset_run, \
                     patch.object(LAB, "find_browser_evidence", return_value=evidence), \
                     patch.object(LAB, "browser_nodes", return_value=[browser]), \
                     patch.object(LAB, "native_nodes", return_value=[native]):
@@ -1044,20 +1059,54 @@ class DifferentialLabTests(unittest.TestCase):
                     "claude", Path("chrome"),
                     fixture_metadata={"viewport": {"width": 1, "height": 1},
                                       "browser_interactions": "plan.json"})
+            render_argv = next(call.args[0] for call in offset_run.call_args_list
+                               if "--render" in call.args[0])
+            # The observer receives the signed origin; the lab never shifts the
+            # browser nodes as well, so a native panel that did not move stays
+            # a page-space placement error.
+            self.assertEqual(render_argv[render_argv.index("--origin") + 1], "0.25,0.25")
+            # An empty snapshot proves no page canvas, so none is invented.
+            self.assertNotIn("--page-background", render_argv)
+            self.assertEqual(offset_report["comparison"]["page_background"]["status"],
+                             "unresolved")
             geometry = offset_report["comparison"]["geometry"]
-            self.assertLess(geometry["score"], geometry["registered_geometry"]["score"])
-            self.assertEqual(geometry["registered_geometry"]["score"], 1.0)
+            self.assertLess(geometry["score"], 1.0)
+            # The fake native panel sits at the native origin although the
+            # observer was told to place it at 0.25,0.25: the unplaced panel
+            # is an error page-space and registered alike.
+            self.assertLess(geometry["registered_geometry"]["score"], 1.0)
             self.assertEqual(geometry["registration_applied"]["x"], -0.25)
+            self.assertEqual(geometry["registration"]["x"], 0.25)
+            self.assertEqual(geometry["registration"]["applied_to"], "native-render-and-layout")
             # The snapshot has no DOM authored root, so frame placement fails
-            # closed and the perfect registered score cannot promote.
+            # closed as well.
             self.assertFalse(
                 geometry["gate"]["checks"]["frame_placement"]["checks"]
                 ["dom_authored_root_found"]["ok"])
-            self.assertIn("geometry gate failed: frame_placement",
-                          offset_report["promotion"]["reasons"])
+            self.assertIn("geometry score below 0.980", offset_report["promotion"]["reasons"])
+            self.assertIn("geometry gate failed: page_space_mean, frame_placement, "
+                          "registered_mean", offset_report["promotion"]["reasons"])
             summary = (root / "out-offset/comparison/summary.md").read_text()
-            self.assertIn("Geometry gate: fail (frame_placement)", summary)
-            self.assertIn("Geometry raw page-space score (diagnostic, not gated)", summary)
+            self.assertIn("Geometry gate: fail (page_space_mean, frame_placement", summary)
+            self.assertIn("Page-space geometry (gated)", summary)
+            # A receipt that records a different placement than was requested
+            # means the render was registered by something else.
+            def misplaced_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
+                result = fake_run(argv, timeout_seconds)
+                if "--render" in argv:
+                    receipt = Path(argv[argv.index("--render-receipt") + 1])
+                    data = json.loads(receipt.read_text(encoding="utf-8"))
+                    data["placement"]["origin_x"] += 24.0
+                    receipt.write_text(json.dumps(data), encoding="utf-8")
+                return result
+            with patch.object(LAB, "run_command", side_effect=misplaced_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    self.assertRaisesRegex(LAB.LabError, "requested placement"):
+                LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-misplaced", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
             with patch.object(
                 LAB, "viewport_dpr_audit",
                 return_value={"ok": False, "checks": {"planted_negative": False}},
@@ -1122,12 +1171,13 @@ class DifferentialLabTests(unittest.TestCase):
                     Path(argv[argv.index("--layout") + 1]).write_text(
                         json.dumps({"views": [], "nodes": [{
                             "id": "browser:root",
-                            "rect": {"x": 0, "y": 0, "w": 1, "h": 1},
+                            "rect": observer_root_rect(argv, 1, 1),
                         }]}), encoding="utf-8")
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
-                                    "ok": True}), encoding="utf-8")
+                                    "ok": True,
+                                    "placement": observer_placement(argv)}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
                     output.write_text(json.dumps({"root": {
@@ -1231,26 +1281,26 @@ class DifferentialLabTests(unittest.TestCase):
                     {"node_index": 0, "theme": theme}]},
             }).encode()
 
-        baseline = LAB.semantic_dom_sha256(snapshot("F" * 32, "native"))
+        baseline = LAB.snapshot_semantic_sha256(snapshot("F" * 32, "native"))
         # Per-session CDP identifiers do not move it.
-        self.assertEqual(baseline, LAB.semantic_dom_sha256(
+        self.assertEqual(baseline, LAB.snapshot_semantic_sha256(
             snapshot("A" * 32, "native", loader="L2")))
         # Content inside the snapshot does, where the canonical capture digest
         # (which drops the snapshot binding) cannot.
-        self.assertNotEqual(baseline, LAB.semantic_dom_sha256(
+        self.assertNotEqual(baseline, LAB.snapshot_semantic_sha256(
             snapshot("F" * 32, "author")))
         changed = json.loads(snapshot("F" * 32, "native"))
         changed["strings"][2] = "SELECT"
-        self.assertNotEqual(baseline, LAB.semantic_dom_sha256(
+        self.assertNotEqual(baseline, LAB.snapshot_semantic_sha256(
             json.dumps(changed).encode()))
         # Key order and whitespace are not content.
-        self.assertEqual(baseline, LAB.semantic_dom_sha256(json.dumps(
+        self.assertEqual(baseline, LAB.snapshot_semantic_sha256(json.dumps(
             json.loads(snapshot("F" * 32, "native")), indent=2,
             sort_keys=True).encode()))
 
     def test_semantic_dom_digests_are_determinism_fields(self) -> None:
-        self.assertIn("browser_dom_semantic_sha256", LAB_CLI.DETERMINISM_FIELDS)
-        self.assertIn("native_dom_semantic_sha256", LAB_CLI.DETERMINISM_FIELDS)
+        self.assertIn("browser_snapshot_semantic_sha256", LAB_CLI.DETERMINISM_FIELDS)
+        self.assertIn("native_snapshot_semantic_sha256", LAB_CLI.DETERMINISM_FIELDS)
 
     def test_canonical_digest_preserves_same_named_fields_outside_capture_document(self) -> None:
         for document in (
@@ -1299,21 +1349,135 @@ class DifferentialLabTests(unittest.TestCase):
     def test_promotion_is_conservative_and_advisory(self) -> None:
         perfect = {"score": 1.0}
         geometry = {"score": 1.0, "gate": {"ok": True, "failed": []}}
+        counted = {"status": "pass", "failures": []}
         result = LAB.promotion_recommendation(
-            ["canvas"], perfect, geometry, perfect, perfect)
+            ["canvas"], perfect, geometry, perfect, perfect, counted)
         self.assertEqual(result["classification"], "browser-required")
         self.assertTrue(result["advisory_only"])
         result = LAB.promotion_recommendation(
-            [], perfect, geometry, perfect, perfect)
+            [], perfect, geometry, perfect, perfect, counted)
         self.assertEqual(
             result["classification"], "native-with-browser-validation")
         self.assertTrue(result["threshold_eligible"])
         self.assertFalse(result["production_promotion_enabled"])
         # A geometry result without an evaluated gate is a failure.
         result = LAB.promotion_recommendation(
-            [], perfect, perfect, perfect, perfect)
+            [], perfect, perfect, perfect, perfect, counted)
         self.assertFalse(result["threshold_eligible"])
         self.assertIn("geometry gate failed: gate not evaluated", result["reasons"])
+
+    def test_promotion_thresholds_are_pinned(self) -> None:
+        # Every other test reads PROMOTION_THRESHOLDS symbolically, so a lowered
+        # threshold would pass them all. The values are policy: changing one
+        # must be a deliberate edit here, not a side effect.
+        self.assertEqual(LAB.PROMOTION_THRESHOLDS, {
+            "structural": 0.99,
+            "geometry": 0.98,
+            "typography": 0.98,
+            "visual": 0.995,
+        })
+        perfect = {"score": 1.0}
+        gated = {"score": 1.0, "gate": {"ok": True, "failed": []}}
+        counted = {"status": "pass", "failures": []}
+        just_below = LAB.promotion_recommendation(
+            [], perfect, gated, perfect, {"score": 0.994999}, counted)
+        self.assertFalse(just_below["threshold_eligible"])
+        at_threshold = LAB.promotion_recommendation(
+            [], perfect, gated, perfect, {"score": 0.995}, counted)
+        self.assertTrue(at_threshold["threshold_eligible"])
+        # A geometry score without its evaluated gate never passes.
+        gateless = LAB.promotion_recommendation(
+            [], perfect, perfect, perfect, {"score": 0.995}, counted)
+        self.assertFalse(gateless["threshold_eligible"])
+        self.assertIn("geometry gate failed: gate not evaluated", gateless["reasons"])
+        for bad in (float("nan"), float("inf")):
+            with self.subTest(score=bad):
+                result = LAB.promotion_recommendation(
+                    [], perfect, gated, perfect, {"score": bad}, counted)
+                self.assertFalse(result["threshold_eligible"])
+
+    def test_work_counters_gate_threshold_eligibility(self) -> None:
+        perfect = {"score": 1.0}
+        clean = {"schema": LAB.OBSERVER_COUNTER_SCHEMA, "views_constructed": 9,
+                 "views_destroyed": 9, "live_views_after_teardown": 0,
+                 "build": {"layout_passes": 0, "damage_requests": 4,
+                           "unmarked_paint_mutations": 83},
+                 "first_frame": {"layout_passes": 1, "damage_requests": 0,
+                                 "unmarked_paint_mutations": 7},
+                 "readback": {"layout_passes": 0, "damage_requests": 0,
+                              "unmarked_paint_mutations": 0}}
+        self.assertEqual(LAB.work_counter_gate({"counters": clean})["status"], "pass")
+        planted = {
+            "no counters": {},
+            "wrong schema": {"counters": {**clean, "schema": "other"}},
+            "leaked view": {"counters": {**clean, "views_destroyed": 8,
+                                         "live_views_after_teardown": 1}},
+            "unmarked mutation": {"counters": {**clean, "readback": {
+                **clean["readback"], "unmarked_paint_mutations": 2}}},
+            "empty tree": {"counters": {**clean, "views_constructed": 0,
+                                        "views_destroyed": 0}},
+            "incomplete": {"counters": {"schema": LAB.OBSERVER_COUNTER_SCHEMA}},
+            "bool counts": {"counters": {**clean, "views_constructed": True,
+                                         "views_destroyed": True,
+                                         "live_views_after_teardown": False}},
+            "fractional mutation": {"counters": {**clean, "readback": {
+                **clean["readback"], "unmarked_paint_mutations": 0.9}}},
+            "negative count": {"counters": {**clean, "views_destroyed": -1}},
+            "string count": {"counters": {**clean, "views_constructed": "9"}},
+            "missing readback field": {"counters": {**clean, "readback": {
+                "unmarked_paint_mutations": 0}}},
+        }
+        for name, receipt in planted.items():
+            with self.subTest(name):
+                gate = LAB.work_counter_gate(receipt)
+                self.assertNotEqual(gate["status"], "pass")
+                result = LAB.promotion_recommendation(
+                    [], perfect, perfect, perfect, perfect, gate)
+                self.assertFalse(result["threshold_eligible"])
+                self.assertTrue(result["reasons"])
+
+    def test_only_a_cropped_panel_borrows_the_page_colour(self) -> None:
+        def capture(x: float, y: float, w: float, h: float) -> dict[str, object]:
+            return {"reference": {"logical_width": 480, "logical_height": 320,
+                                  "authored_frame": {"x": x, "y": y, "width": w, "height": h}}}
+        # A whole-page panel's importer root owns the document canvas.
+        self.assertTrue(LAB.panel_covers_page(capture(0, 0, 480, 320)))
+        self.assertTrue(LAB.panel_covers_page(capture(0, 0, 480, 400)))
+        # Anything smaller or offset leaves page around it for the lab to fill.
+        self.assertFalse(LAB.panel_covers_page(capture(24, 24, 362, 97)))
+        self.assertFalse(LAB.panel_covers_page(capture(0, 0, 480, 300)))
+        self.assertFalse(LAB.panel_covers_page({"reference": {"logical_width": 480,
+                                                              "logical_height": 320}}))
+
+    def test_canonical_digest_ignores_only_settle_poll_counts(self) -> None:
+        def capture(rounds: int, stable: int, color: str) -> bytes:
+            return json.dumps({"schema": "pulp-browser-capture-v1",
+                               "provenance": {"settle": {"rounds": rounds,
+                                                         "stable_rounds": stable,
+                                                         "elapsed_ms": 900}},
+                               "reference": {"color": color}}).encode("utf-8")
+        self.assertEqual(LAB.canonical_json_sha256(capture(14, 12, "red")),
+                         LAB.canonical_json_sha256(capture(15, 13, "red")))
+        self.assertNotEqual(LAB.canonical_json_sha256(capture(14, 12, "red")),
+                            LAB.canonical_json_sha256(capture(14, 12, "blue")))
+        ir = lambda rounds, text: json.dumps(
+            {"settle_rounds": rounds, "root": {"text": text}}).encode("utf-8")
+        self.assertEqual(LAB.canonical_json_sha256(ir(14, "a")),
+                         LAB.canonical_json_sha256(ir(15, "a")))
+        # Only the top-level IR field: a node property of that name still counts.
+        self.assertNotEqual(
+            LAB.canonical_json_sha256(json.dumps({"root": {"settle_rounds": 1}}).encode()),
+            LAB.canonical_json_sha256(json.dumps({"root": {"settle_rounds": 2}}).encode()))
+
+    def test_semantic_snapshot_digest_ignores_only_the_frame_id(self) -> None:
+        def snapshot(frame: str, text: str) -> bytes:
+            return json.dumps({"strings": ["#document", frame, text],
+                               "documents": [{"frameId": 1, "nodes": {"nodeValue": [2]}}]}
+                              ).encode("utf-8")
+        self.assertEqual(LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signal")),
+                         LAB.snapshot_semantic_sha256(snapshot("BBBB", "Signal")))
+        self.assertNotEqual(LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signal")),
+                            LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signals")))
 
     def test_corpus_aggregation_ranks_repeated_impact(self) -> None:
         report = {
@@ -1656,15 +1820,22 @@ class GeometryGateTests(unittest.TestCase):
             "browser_authored_frame_x": f"{self.FRAME[0] + recorded_shift:.6f}",
             "browser_authored_frame_y": f"{self.FRAME[1]:.6f}",
         }}}
-        child = native_child or self.local_child()
-        root_box = (0.0, 0.0, self.FRAME[2], self.FRAME[3])
+        # The observer lays the panel-local import out at the authored origin,
+        # so every native rect below is page-space: the panel-local box plus
+        # that origin.
+        ox, oy = self.FRAME[0], self.FRAME[1]
+        local = native_child or self.local_child()
+        child = (local[0] + ox, local[1] + oy, local[2], local[3])
+        root_box = (ox, oy, self.FRAME[2], self.FRAME[3])
         layout = {"nodes": [
-            {"id": "browser:root", "rect": {"x": 0.0, "y": 0.0, "w": 1280, "h": 800}},
+            {"id": "observer:page", "rect": {"x": 0.0, "y": 0.0, "w": 1280, "h": 800}},
+            {"id": "browser:root", "rect": {"x": ox, "y": oy, "w": 420, "h": 220}},
             {"id": "capture:html[0]", "rect": {
-                "x": -self.FRAME[0] + html_shift, "y": -self.FRAME[1],
-                "w": 1280, "h": 260}},
+                "x": html_shift, "y": 0.0, "w": 1280, "h": 260}},
+            # A root shift moves only the layout rect the placement proof
+            # reads, so it is caught there and nowhere else.
             {"id": self.ROOT_ANCHOR, "rect": dict(zip("xywh", (
-                root_shift, 0.0, root_box[2], root_box[3])))},
+                ox + root_shift, oy, self.FRAME[2], self.FRAME[3])))},
             {"id": self.CHILD_ANCHOR, "rect": dict(zip("xywh", child))},
         ]}
         browser_raw = [
@@ -1673,12 +1844,13 @@ class GeometryGateTests(unittest.TestCase):
         ]
         registered_browser, registration = LAB.register_browser_nodes_to_native_frame(
             browser_raw, capture, capture)
-        native = [
+        native_page = [
             LAB.NativeNode(self.ROOT_ANCHOR, "frame", "main", "", None, {}, root_box, 3),
             LAB.NativeNode(self.CHILD_ANCHOR, "frame", "span", "", None, {}, child, 4),
         ]
+        native = LAB.native_nodes_in_panel_space(native_page, (ox, oy))
         registered = list(zip(registered_browser, native, [100.0, 100.0]))
-        raw = list(zip(browser_raw, native, [100.0, 100.0]))
+        raw = list(zip(browser_raw, native_page, [100.0, 100.0]))
         placement = (LAB.frame_placement_check(snapshot, ir, layout, registered, capture)
                      if provide_placement else None)
         return LAB.geometry_metrics_with_registration(
@@ -1689,10 +1861,10 @@ class GeometryGateTests(unittest.TestCase):
         geometry = self.build()
         self.assertTrue(geometry["gate"]["ok"], geometry["gate"])
         self.assertEqual(geometry["gate"]["matched_bounds"], 2)
-        # The panel translation keeps raw page-space below the threshold; it
-        # is reported and ungated.
-        self.assertLess(geometry["score"], 0.98)
-        self.assertEqual(geometry["role"], "diagnostic-raw-page-space")
+        # The observer placed the panel, so page-space geometry passes too.
+        self.assertGreaterEqual(geometry["score"], 0.98)
+        self.assertTrue(geometry["gate"]["checks"]["page_space_mean"]["ok"])
+        self.assertEqual(geometry["role"], "page-space-gated")
 
     def test_registration_without_placement_proof_fails(self) -> None:
         geometry = self.build(provide_placement=False)
@@ -1703,19 +1875,19 @@ class GeometryGateTests(unittest.TestCase):
         self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
         checks = geometry["gate"]["checks"]["frame_placement"]["checks"]
         self.assertFalse(checks["design_ir_origin_matches_dom"]["ok"])
-        self.assertTrue(checks["native_html_layout_at_negative_dom_origin"]["ok"])
+        self.assertTrue(checks["native_html_layout_at_page_origin"]["ok"])
 
     def test_native_html_rect_shift_fails(self) -> None:
         geometry = self.build(html_shift=3.0)
         self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
         checks = geometry["gate"]["checks"]["frame_placement"]["checks"]
-        self.assertFalse(checks["native_html_layout_at_negative_dom_origin"]["ok"])
+        self.assertFalse(checks["native_html_layout_at_page_origin"]["ok"])
 
     def test_native_root_layout_off_panel_origin_fails(self) -> None:
         geometry = self.build(root_shift=3.0)
         self.assertEqual(geometry["gate"]["failed"], ["frame_placement"])
         checks = geometry["gate"]["checks"]["frame_placement"]["checks"]
-        self.assertFalse(checks["native_root_layout_at_panel_origin"]["ok"])
+        self.assertFalse(checks["native_root_layout_at_dom_origin"]["ok"])
 
     def test_placement_within_half_pixel_passes(self) -> None:
         self.assertTrue(self.build(recorded_shift=0.4, html_shift=-0.4)["gate"]["ok"])
@@ -1753,10 +1925,11 @@ class GeometryGateTests(unittest.TestCase):
                              ["violations"][0])
                 self.assertEqual(violation["native_anchor"], self.CHILD_ANCHOR)
                 self.assertAlmostEqual(violation["signed_delta"]["x"], dx)
-        # Raw page-space rewards a shift toward the page origin, which is why
-        # it is a diagnostic and not the gate.
-        self.assertGreater(self.build(native_child=self.local_child(dx=3.0))["score"],
-                           self.build()["score"])
+        # Page-space geometry cannot see a 3 px shift this far from the page
+        # origin either, which is why it gates beside the per-node bound and
+        # never replaces it.
+        self.assertGreaterEqual(
+            self.build(native_child=self.local_child(dx=3.0))["score"], 0.98)
 
     def test_ten_percent_narrow_box_fails(self) -> None:
         geometry = self.build(native_child=self.local_child(dw_scale=0.9))
@@ -1812,7 +1985,7 @@ class GeometryGateTests(unittest.TestCase):
             report(self.build(native_child=self.local_child(dx=3.0)))])
         self.assertEqual(aggregate["gate_summary"]["geometry"]["pass_count"], 1)
         raw = aggregate["diagnostics"]["raw_page_space_geometry"]
-        self.assertEqual(raw["role"], "diagnostic")
+        self.assertEqual(raw["role"], "gated-within-geometry-gate")
         self.assertEqual(raw["fixture_count"], 2)
 
 
@@ -2021,7 +2194,8 @@ class FormControlBoundaryTests(unittest.TestCase):
                      "controls": ["button", "input[type=range]"],
                      "foreground_error_share": 0.9}]
         result = LAB.promotion_recommendation(
-            [], perfect, perfect, perfect, visual, boundary)
+            [], perfect, perfect, perfect, visual, {"status": "pass", "failures": []},
+            support_boundaries=boundary)
         self.assertEqual(result["classification"], "browser-required")
         self.assertFalse(result["threshold_eligible"])
         self.assertEqual(result["visual_gate_score"], 0.71)
@@ -2036,7 +2210,8 @@ class FormControlBoundaryTests(unittest.TestCase):
         # boundary, and the report says the boundary, not a score, decided it.
         gated = {"score": 1.0, "gate": {"ok": True, "failed": []}}
         result = LAB.promotion_recommendation(
-            [], perfect, gated, perfect, perfect, boundary)
+            [], perfect, gated, perfect, perfect, {"status": "pass", "failures": []},
+            support_boundaries=boundary)
         self.assertTrue(result["numeric_gates_pass"])
         self.assertFalse(result["threshold_eligible"])
         self.assertTrue(result["boundary_overrides_passing_gates"])
@@ -2046,7 +2221,8 @@ class FormControlBoundaryTests(unittest.TestCase):
         # Without the boundary the same scores are eligible: the override is
         # the boundary's alone.
         result = LAB.promotion_recommendation(
-            [], perfect, gated, perfect, perfect, [])
+            [], perfect, gated, perfect, perfect, {"status": "pass", "failures": []},
+            support_boundaries=[])
         self.assertTrue(result["threshold_eligible"])
         self.assertFalse(result["boundary_overrides_passing_gates"])
         recognition = LAB.source_recognition("<!doctype html><html></html>")
@@ -2117,7 +2293,8 @@ class FullFrameClassificationTests(unittest.TestCase):
     def promote(self, visual):
         perfect = {"score": 1.0}
         geometry = {"score": 1.0, "gate": {"ok": True, "failed": []}}
-        return LAB.promotion_recommendation([], perfect, geometry, perfect, visual)
+        return LAB.promotion_recommendation(
+            [], perfect, geometry, perfect, visual, {"status": "pass", "failures": []})
 
     def test_panel_translation_is_measured_and_promotes(self) -> None:
         visual = self.classify()
@@ -2230,7 +2407,8 @@ class FullFrameClassificationTests(unittest.TestCase):
                      "controls": ["input[type=range]"],
                      "foreground_error_share": 0.5}]
         result = LAB.promotion_recommendation(
-            [], perfect, geometry, perfect, self.classify(blob), boundary)
+            [], perfect, geometry, perfect, self.classify(blob), {"status": "pass", "failures": []},
+            support_boundaries=boundary)
         self.assertEqual(result["classification"], "browser-required")
         self.assertFalse(result["threshold_eligible"])
         self.assertTrue(any(reason.startswith("support boundary ua-default-form-chrome")

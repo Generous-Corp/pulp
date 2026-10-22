@@ -120,12 +120,14 @@ def classify_full_frame(
 ) -> dict[str, Any]:
     """Say whether a full-frame residual is exactly the panel translation.
 
-    Shift control: the native root renders the panel at native origin, while
-    Chromium paints it at the authored origin. Translate the native render by
-    the browser crop offset and fill the vacated margin with the native
-    render's own outside-frame background. If the full-frame residual is only
-    that translation, the shifted render reproduces the browser PNG and no
-    outside-frame pixel differs.
+    Shift control, for a native render that draws the panel somewhere other
+    than Chromium's authored origin (an unplaced panel-local render puts it at
+    the native origin): translate the native render by the difference of the
+    two crop boxes and fill the vacated margin with the native render's own
+    outside-frame background. If the full-frame residual is only that
+    translation, the shifted render reproduces the browser PNG and no
+    outside-frame pixel differs. A render the observer already placed at the
+    authored origin has no translation left to explain a residual.
     """
     from PIL import Image, ImageChops
 
@@ -135,8 +137,9 @@ def classify_full_frame(
     if not registered:
         return {"classification": "unexplained", "threshold": threshold,
                 "reason": "no authored frame to test a panel translation"}
-    offset = (registration["browser_crop_px"][0], registration["browser_crop_px"][1])
     native_box = tuple(registration["native_crop_px"])
+    offset = (registration["browser_crop_px"][0] - native_box[0],
+              registration["browser_crop_px"][1] - native_box[1])
     outside_native = [
         pixel for index, pixel in enumerate(candidate.get_flattened_data())
         if not (native_box[0] <= index % candidate.width < native_box[2]
@@ -147,8 +150,9 @@ def classify_full_frame(
                 "residual_locus": (
                     ["in-frame"] if full["registered_visual"]["score"] < threshold
                     else ["outside-frame"]),
-                "reason": "residual is not a panel translation: the panel "
-                          "is not offset or has no outside-frame area"}
+                "reason": "residual is not a panel translation: the native "
+                          "render already draws the panel at the authored "
+                          "origin, or there is no outside-frame area"}
     fill = Counter(outside_native).most_common(1)[0][0]
     shifted = Image.new("RGBA", candidate.size, fill)
     shifted.paste(candidate, offset)
@@ -206,7 +210,13 @@ def visual_metrics(
     expected_size: tuple[int, int] | None = None,
     authored_frame: dict[str, Any] | None = None,
     device_scale_factor: float = 1.0,
+    native_origin: tuple[float, float] = (0.0, 0.0),
 ) -> dict[str, Any]:
+    """Score the full frame and the authored frame cropped from both renders.
+
+    `native_origin` is where the native render drew the panel, in CSS px: the
+    observer's placement origin, or (0, 0) for a panel-local render.
+    """
     try:
         from PIL import Image
     except ImportError as exc:
@@ -254,7 +264,10 @@ def visual_metrics(
         if crop_width <= 0 or crop_height <= 0:
             raise LabError("authored frame visual registration crop is empty")
         ref_box = (ref_left, ref_top, ref_right, ref_bottom)
-        candidate_box = (0, 0, crop_width, crop_height)
+        native_left = round(float(native_origin[0]) * scale)
+        native_top = round(float(native_origin[1]) * scale)
+        candidate_box = (native_left, native_top,
+                         native_left + crop_width, native_top + crop_height)
         if ref_box[2] > reference.width or ref_box[3] > reference.height:
             raise LabError("authored frame visual registration exceeds browser PNG")
         if candidate_box[2] > candidate.width or candidate_box[3] > candidate.height:

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <pulp/audio/buffer_ops.hpp>
 #include <pulp/format/processor.hpp>
+#include <algorithm>
 #include <cmath>
 
 // {{PLUGIN_NAME}} — {{DESCRIPTION}}
@@ -38,6 +40,9 @@ public:
 
     void prepare(const pulp::format::PrepareContext& ctx) override {
         sample_rate_ = ctx.sample_rate;
+        // Resolve parameter handles once, off the audio thread; reading one
+        // in process() is a single atomic load with no ID lookup.
+        mix_ = state().param_reader(kMix);
     }
 
     void process(
@@ -47,19 +52,31 @@ public:
         pulp::midi::MidiBuffer& /*midi_out*/,
         const pulp::format::ProcessContext& /*ctx*/) override
     {
-        float mix = state().get_value(kMix) / 100.0f;
+        const float mix = mix_.get() / 100.0f;
 
-        for (std::size_t ch = 0; ch < output.num_channels(); ++ch) {
-            for (std::size_t i = 0; i < output.num_samples(); ++i) {
-                float dry = input.channel(ch)[i];
-                float wet = dry; // TODO: replace with your effect processing
-                output.channel(ch)[i] = dry * (1.0f - mix) + wet * mix;
-            }
+        // Take each channel's raw pointers once, outside the sample loop.
+        // map_samples() runs the per-sample function in order and vectorizes
+        // whether the host hands us separate buffers or processes in place.
+        // An effect that needs neighbouring samples or per-channel state can
+        // loop over the two pointers itself instead.
+        const std::size_t n = output.num_samples();
+        const std::size_t channels = std::min(output.num_channels(), input.num_channels());
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            pulp::audio::buffer_ops::map_samples(
+                input.channel_ptr(ch), output.channel_ptr(ch), n, [mix](float dry) {
+                    const float wet = dry; // TODO: replace with your effect processing
+                    return dry * (1.0f - mix) + wet * mix;
+                });
         }
+        // Output channels with no matching input channel are silenced rather
+        // than left holding whatever the host's buffer contained.
+        for (std::size_t ch = channels; ch < output.num_channels(); ++ch)
+            std::fill_n(output.channel_ptr(ch), n, 0.0f);
     }
 
 private:
     double sample_rate_ = 48000.0;
+    pulp::state::ParamReader mix_;
 };
 
 inline std::unique_ptr<pulp::format::Processor> create_{{FACTORY_NAME}}() {

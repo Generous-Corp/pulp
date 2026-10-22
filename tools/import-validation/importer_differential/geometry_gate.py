@@ -1,8 +1,11 @@
 """The geometry lens: registered panel geometry gated on a placement proof.
 
-Raw page-space bounds are reported as a diagnostic. The gate is registered
-panel geometry together with a proof, from three independent sources, that
-the panel-local native root sits at Chromium's authored origin.
+The observer places the panel-local native import at the authenticated
+authored origin, so its render and layout are page-space like Chromium's.
+The gate requires page-space geometry and registered panel geometry, both
+sides moved back by that origin, together with a proof, from three
+independent sources, that the panel-local native root sits at Chromium's
+authored origin.
 """
 
 from __future__ import annotations
@@ -16,11 +19,60 @@ from .model import PROMOTION_THRESHOLDS, BrowserNode, LabError, NativeNode
 from .snapshot import DomSnapshot
 
 
+def authenticated_authored_origin(
+    capture: dict[str, Any], native_capture: dict[str, Any],
+) -> tuple[float, float]:
+    """Return the page-space origin of the authored panel both captures sign.
+
+    Browser-backed native imports emit a panel-local root when the authored
+    surface is smaller than the viewport, while Chromium's screenshot and DOM
+    snapshot are page-space. The observer places the native panel at this
+    origin so both sides are compared in page space. Only the authored-frame
+    metadata carried by both captures is used, never a shift inferred from
+    pixels or from an observed residual, and the two must agree.
+    """
+    try:
+        authored = capture["reference"]["authored_frame"]
+        native_authored = native_capture["reference"]["authored_frame"]
+        frame_x = float(authored["x"])
+        frame_y = float(authored["y"])
+        native_frame_x = float(native_authored["x"])
+        native_frame_y = float(native_authored["y"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LabError("capture is missing authenticated authored-frame metadata") from exc
+    if not all(math.isfinite(value) for value in
+               (frame_x, frame_y, native_frame_x, native_frame_y)):
+        raise LabError("authored-frame metadata is non-finite")
+    if abs(frame_x - native_frame_x) > 1e-6 or abs(frame_y - native_frame_y) > 1e-6:
+        raise LabError("browser/native authored-frame metadata disagrees")
+    return frame_x, frame_y
+
+
+def native_nodes_in_panel_space(
+    nodes: list[NativeNode], placement_origin: tuple[float, float],
+) -> list[NativeNode]:
+    """Move page-placed native layout boxes back into the panel's own frame."""
+    dx, dy = placement_origin
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        return nodes
+    return [
+        replace(node, bounds=(
+            (node.bounds[0] - dx, node.bounds[1] - dy, node.bounds[2], node.bounds[3])
+            if node.bounds is not None else None))
+        for node in nodes
+    ]
+
+
 def verify_native_authored_frame(
     ir: dict[str, Any], layout: dict[str, Any], authored_frame: dict[str, Any],
     tolerance: float = 1e-3,
+    placement_origin: tuple[float, float] = (0.0, 0.0),
 ) -> dict[str, Any]:
-    """Prove that the native authored panel is panel-local before cropping."""
+    """Prove that the native authored panel is panel-local before cropping.
+
+    `placement_origin` is where the observer placed the panel, as its render
+    receipt records; the panel root's layout rect must sit exactly there.
+    """
     root = ir.get("root")
     if not isinstance(root, dict):
         raise LabError("native DesignIR has no authored panel root")
@@ -33,9 +85,9 @@ def verify_native_authored_frame(
                     float(authored_frame["height"]))
     except (KeyError, TypeError, ValueError) as exc:
         raise LabError("native authored panel root has invalid style bounds") from exc
-    # The native observer lays the imported DesignIR root at panel origin. Its
-    # layout snapshot still provides the viewport root, which we require as a
-    # provenance check before accepting that panel-local contract.
+    # The imported DesignIR root is panel-local; the observer lays it out at
+    # the placement origin. Its layout snapshot provides the panel root's
+    # rect, required as a provenance check before accepting that contract.
     viewport_root = next((node for node in layout.get("nodes", [])
                           if node.get("id") == "browser:root"), None)
     if not isinstance(viewport_root, dict) or not isinstance(viewport_root.get("rect"), dict):
@@ -49,12 +101,14 @@ def verify_native_authored_frame(
         viewport = tuple(float(viewport_rect[key]) for key in ("x", "y", "w", "h"))
     except (KeyError, TypeError, ValueError) as exc:
         raise LabError("native viewport root has invalid bounds") from exc
-    if abs(viewport[0]) > tolerance or abs(viewport[1]) > tolerance:
-        raise LabError("native viewport root is not at origin")
+    if (abs(viewport[0] - placement_origin[0]) > tolerance
+            or abs(viewport[1] - placement_origin[1]) > tolerance):
+        raise LabError("native viewport root is not at the placement origin")
     return {
         "anchor": str(root.get("stable_anchor_id") or "browser:root"),
         "rect": list(actual),
         "viewport_rect": list(viewport),
+        "placement_origin": list(placement_origin),
         "tolerance": tolerance,
         "origin_contract": "design-ir-root-at-panel-origin",
     }
@@ -214,7 +268,11 @@ def frame_placement_check(
     capture: dict[str, Any] | None = None,
     tolerance: float = FRAME_PLACEMENT_TOLERANCE_PX,
 ) -> dict[str, Any]:
-    """Prove the panel-local native root sits at Chromium's authored origin.
+    """Prove the observed native root sits at Chromium's authored origin.
+
+    The observer places the panel-local import in page space, so the native
+    layout is read as it was laid out: nothing is subtracted, and a panel the
+    observer failed to move sits at the page origin and fails.
 
     Three sources must agree, and any missing source fails closed:
 
@@ -222,8 +280,8 @@ def frame_placement_check(
       first occupying element child);
     - DesignIR: the origin recorded on the imported root;
     - native layout: the rect of the node matched to the authored root, which
-      must be at panel origin, and the rect of the html element, which must
-      sit at minus the Chromium origin.
+      must be at the Chromium origin, and the rect of the html element, which
+      must sit at the page origin.
 
     The capture envelope's authored frame is reported for context but is not
     part of the proof: DesignIR copies it, so comparing the two is
@@ -286,9 +344,9 @@ def frame_placement_check(
     anchor = native_root.anchor if native_root else None
     checks["dom_authored_root_matched"] = {
         "ok": native_root is not None, "native_anchor": anchor}
-    compare("native_root_layout_at_panel_origin", (0.0, 0.0), layout_origin(anchor))
-    compare("native_html_layout_at_negative_dom_origin",
-            (-dom_origin[0], -dom_origin[1]) if dom_origin else None,
+    compare("native_root_layout_at_dom_origin", dom_origin, layout_origin(anchor))
+    compare("native_html_layout_at_page_origin",
+            (0.0, 0.0) if dom_origin else None,
             layout_origin(NATIVE_HTML_ANCHOR))
 
     frame = ((capture or {}).get("reference") or {}).get("authored_frame")
@@ -315,15 +373,19 @@ def geometry_metrics_with_registration(
     max_abs_delta: float = GEOMETRY_MAX_ABS_DELTA_PX,
     *,
     reference_node_count: int,
+    placement: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return raw page-space geometry and the registered geometry gate.
 
-    The native root is panel-local, so raw page-space bounds differ from
-    Chromium by the authored-frame origin on every node. Under the relative
-    error score that translation dominates and is not monotone in defect
-    size, so ``score`` (raw page-space) is reported as a diagnostic and does
-    not gate. ``gate`` is the geometry contract, and every part is required:
+    ``score`` is page-space geometry: Chromium's boxes against the native
+    layout as the observer placed it (``placement``, recorded as
+    ``registration``). Its relative error divides by the page coordinate, so
+    it is not monotone in defect size; it gates beside the registered checks
+    rather than in place of them. ``gate`` is the geometry contract, and every
+    part is required:
 
+    - page-space mean: ``score`` at or above the geometry threshold, a
+      non-finite score failing;
     - frame placement: ``frame_placement_check`` proves the panel origin from
       the DOM snapshot, DesignIR, and native layout;
     - registered mean score at or above the geometry threshold;
@@ -343,8 +405,8 @@ def geometry_metrics_with_registration(
     Registration alone can never pass: a missing frame placement result fails.
     """
     geometry = geometry_metrics(raw_matches)
-    geometry["role"] = "diagnostic-raw-page-space"
-    geometry["registration"] = {"x": 0.0, "y": 0.0, "source": "page-space"}
+    geometry["role"] = "page-space-gated"
+    geometry["registration"] = placement or {"x": 0.0, "y": 0.0, "source": "page-space"}
     registered = geometry_metrics(registered_matches)
     geometry["registered_geometry"] = registered
     geometry["registration_applied"] = registration
@@ -363,6 +425,11 @@ def geometry_metrics_with_registration(
         frame_placement = {"ok": False, "reason": "not evaluated"}
     threshold = PROMOTION_THRESHOLDS["geometry"]
     checks = {
+        "page_space_mean": {
+            "ok": math.isfinite(geometry["score"]) and geometry["score"] >= threshold,
+            "score": geometry["score"],
+            "threshold": threshold,
+        },
         "frame_placement": frame_placement,
         "registered_mean": {
             "ok": registered["score"] >= threshold,
@@ -409,24 +476,10 @@ def register_browser_nodes_to_native_frame(
     authored-frame metadata carried by both captures; never infer a shift from
     pixels or from the observed residual.
     """
-    try:
-        authored = capture["reference"]["authored_frame"]
-        native_authored = native_capture["reference"]["authored_frame"]
-        frame_x = float(authored["x"])
-        frame_y = float(authored["y"])
-        native_frame_x = float(native_authored["x"])
-        native_frame_y = float(native_authored["y"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise LabError("capture is missing authenticated authored-frame metadata") from exc
-    if not all(math.isfinite(value) for value in
-               (frame_x, frame_y, native_frame_x, native_frame_y)):
-        raise LabError("authored-frame metadata is non-finite")
-    if abs(frame_x - native_frame_x) > 1e-6 or abs(frame_y - native_frame_y) > 1e-6:
-        raise LabError("browser/native authored-frame metadata disagrees")
-    # The observer is explicitly invoked with the full document extent but
-    # the imported native root is panel-local at origin (the importer records
-    # the authored frame for consumers, it does not place the panel in the
-    # observer canvas).  Register page-space DOM bounds into that origin.
+    frame_x, frame_y = authenticated_authored_origin(capture, native_capture)
+    # The imported native root is panel-local at origin; the lab reads the
+    # observer's page-placed layout back into that frame
+    # (`native_nodes_in_panel_space`). Register page-space DOM bounds into it.
     dx = -frame_x
     dy = -frame_y
     if abs(dx) < 1e-9 and abs(dy) < 1e-9:

@@ -8,27 +8,25 @@
 
 namespace pulp::view {
 
-/// Where the baseline of a captured line sits below the top of its line box,
-/// for a box `line_height` CSS px tall. `css_ascent` / `css_descent` are the
-/// face's own typographic metrics, used only when `measured` is absent.
+/// Where the baseline of a captured line sits below the top of its run rect,
+/// for a rect `line_height` CSS px tall. `css_descent` is the face's own
+/// typographic descent, used only when `measured` is absent.
 ///
-/// The box's surplus over the content area is split evenly above and below it
-/// (half-leading). A box exactly as tall as the content area is the text
-/// fragment itself: then the baseline sits the measured ascent below the top,
-/// or, with nothing measured, the face's ascent rounded to a whole CSS px, as
-/// Chromium rounds it when it builds the fragment.
-float captured_baseline_offset(float line_height, float css_ascent,
-                               float css_descent,
+/// Chromium's run rect is the text's content area whatever the line-height:
+/// round(fAscent) + round(fDescent), plus an ascent adjustment Blink applies to
+/// some faces on macOS (Times, Helvetica, Courier). Its baseline sits the
+/// descent above the rect's bottom: the measured descent when the capture
+/// recorded one, otherwise the face's descent rounded to a whole CSS px, as
+/// Chromium rounds it.
+float captured_baseline_offset(float line_height, float css_descent,
                                const std::optional<LineMetrics>& measured);
 
-/// The baseline of a captured line whose box top is at `line_top` in the
-/// label's coordinates, snapped to a whole CSS px the way Chromium paints it.
-/// `root_y` is the label's y offset from the captured frame, the grid the
-/// snap is measured on, so an embed offset, scroll or transform outside the
-/// frame never moves it. Returns label-local coordinates.
-float captured_baseline(float line_top, float line_height, float css_ascent,
-                        float css_descent,
-                        const std::optional<LineMetrics>& measured,
-                        float root_y);
+/// The baseline of a captured line whose rect top is at `line_top` in the
+/// label's coordinates and whose baseline sits `offset` below that top,
+/// snapped to a whole CSS px the way Chromium paints it. `root_y` is the
+/// label's y offset from the captured frame, the grid the snap is measured
+/// on, so an embed offset, scroll or transform outside the frame never moves
+/// it. Returns label-local coordinates.
+float captured_baseline(float line_top, float offset, float root_y);
 
 }  // namespace pulp::view

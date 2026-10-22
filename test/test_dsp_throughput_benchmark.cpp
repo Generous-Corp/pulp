@@ -401,6 +401,22 @@ void run_processors(int B) {
         });
     }
     {
+        Fft f(1024);
+        std::vector<std::complex<float>> spectrum(513);
+        std::vector<float> frame(1024);
+        int acc = 0;
+        bench("fft.1024 real half forward+inverse float hop1024", B, [&](int n) {
+            acc += n;
+            if (acc >= 1024) {
+                acc -= 1024;
+                feed.fill(frame.data(), 1024);
+                f.forward_real_half(frame.data(), spectrum.data());
+                f.inverse_real_half(spectrum.data(), frame.data());
+                clobber(frame.data());
+            }
+        });
+    }
+    {
         Fft64 f(1024);
         std::vector<std::complex<double>> spectrum(1024);
         std::vector<double> frame(1024);

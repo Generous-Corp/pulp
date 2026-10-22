@@ -9,6 +9,65 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v010000"></a>
+## [0.1000.0] - 2026-10-22
+
+- release/version bump ([#10672](https://github.com/Generous-Corp/pulp/pull/10672))
+
+<a id="v09990"></a>
+## [0.999.0] - 2026-10-22
+
+- release/version bump ([#10653](https://github.com/Generous-Corp/pulp/pull/10653))
+- docs/gpu audio docs truth 20261022 ([#10651](https://github.com/Generous-Corp/pulp/pull/10651))
+- feature/cross platform windows selector ([#10649](https://github.com/Generous-Corp/pulp/pull/10649))
+- perf/dsp integration 20261021 ([#10646](https://github.com/Generous-Corp/pulp/pull/10646))
+- release/version bump ([#10647](https://github.com/Generous-Corp/pulp/pull/10647))
+- feature/importer p3c parity 20261021 ([#10640](https://github.com/Generous-Corp/pulp/pull/10640))
+- codex/refactor roadmap pointer 20261021 ([#10644](https://github.com/Generous-Corp/pulp/pull/10644))
+
+<a id="v09980"></a>
+## [0.998.0] - 2026-10-22
+
+- release/version bump ([#10643](https://github.com/Generous-Corp/pulp/pull/10643))
+- ci/gpu audio node abi gate 20261022 ([#10641](https://github.com/Generous-Corp/pulp/pull/10641))
+- codex/g2h protected 20261021 ([#10623](https://github.com/Generous-Corp/pulp/pull/10623))
+
+<a id="v09972"></a>
+## [0.997.2] - 2026-10-22
+
+- release/version bump ([#10639](https://github.com/Generous-Corp/pulp/pull/10639))
+- perf/oversampling fft 20261021 ([#10634](https://github.com/Generous-Corp/pulp/pull/10634))
+- feature/gpu audio telemetry stack replay 20261022 ([#10633](https://github.com/Generous-Corp/pulp/pull/10633))
+
+<a id="v09971"></a>
+## [0.997.1] - 2026-10-22
+
+- release/version bump ([#10636](https://github.com/Generous-Corp/pulp/pull/10636))
+- fix/gpu wgsl tanh saturation 20261021 ([#10635](https://github.com/Generous-Corp/pulp/pull/10635))
+
+<a id="v09970"></a>
+## [0.997.0] - 2026-10-22
+
+- release/version bump ([#10632](https://github.com/Generous-Corp/pulp/pull/10632))
+- feature/gpu audio daw continuity 20261021 ([#10626](https://github.com/Generous-Corp/pulp/pull/10626))
+- feature/gpu audio controller ticket 20261021 ([#10631](https://github.com/Generous-Corp/pulp/pull/10631))
+- codex/windows current 20261021 ([#10620](https://github.com/Generous-Corp/pulp/pull/10620))
+
+<a id="v09962"></a>
+## [0.996.2] - 2026-10-22
+
+- release/version bump ([#10629](https://github.com/Generous-Corp/pulp/pull/10629))
+- feature/gpu audio fault injection controls 20261021 ([#10627](https://github.com/Generous-Corp/pulp/pull/10627))
+- fix/nonuniform convolver alias 20261021 ([#10625](https://github.com/Generous-Corp/pulp/pull/10625))
+- feature/gpu audio telemetry snapshot overflow 20261021 ([#10622](https://github.com/Generous-Corp/pulp/pull/10622))
+- feature/gpu audio receipt health hardening 20261021 ([#10621](https://github.com/Generous-Corp/pulp/pull/10621))
+
+<a id="v09961"></a>
+## [0.996.1] - 2026-10-21
+
+- release/version bump ([#10616](https://github.com/Generous-Corp/pulp/pull/10616))
+- codex/pulp e gpu observer 20261016 ([#10425](https://github.com/Generous-Corp/pulp/pull/10425))
+
 <a id="v09960"></a>
 ## [0.996.0] - 2026-10-21
 
@@ -11166,6 +11225,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.1000.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1000.0
+[0.999.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.999.0
+[0.998.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.998.0
+[0.997.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.997.2
+[0.997.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.997.1
+[0.997.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.997.0
+[0.996.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.996.2
+[0.996.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.996.1
 [0.996.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.996.0
 [0.995.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.995.1
 [0.995.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.995.0

@@ -20,6 +20,22 @@ The rebuild control must replay the complete fixture state, including secondary
 meter state such as the `peak` value; matching only a primary value changes the
 rendered workload and invalidates retained-versus-rebuild comparisons.
 
+To measure importer output rather than the built-in panel, pass
+`--ir=<design.ir.json>` (baked-native and baked-native-rebuild only; `live`
+and `baked-cpp` refuse it because neither can be built from a DesignIR) with
+`--frames=N`. Fixed frames are what make the counters comparable run to run;
+wall-clock pacing changes the frame count and every counter with it. Anchored
+text nodes become keyed slots: the retained lane writes through the Label each
+anchor resolved to at build, the rebuild lane rematerializes a copy of the IR.
+The receipt binds the IR's sha256 and adds per-phase views constructed and
+destroyed, slot identity changes and slot text mismatches, plus a terminal
+`teardown` readback; a run that leaves live views exits 3. On the held-out
+corpus the retained lane builds no views, rebinds no slots and records no
+unmarked mutations, while the rebuild control rebinds every slot every frame
+and records thousands of unmarked mutations. If the control ever reports zero
+identity changes, the counter is blind, not the plan retained. `--plant-leak`
+holds one subtree past the fixture's destruction to prove the readback fails.
+
 `--warmup-frames` excludes warmup frames from every statistic, the cumulative
 counters (`paint_calls`, `paint_commands_total`, `layout_passes`, bridge and
 invalidation counts) included: they start at the first sampled frame.
@@ -627,6 +643,23 @@ knowing before you touch that file:
   The raw values ride along as `pulp_key` / `pulp_id` node attributes;
   `data-pulp-id` is the page-wide source id the materialized lane maps, and it
   does NOT change the anchor.
+- **Anchors change for documents that already declare `data-pulp-key`, and
+  there is no ordinal-to-key alias.** Every keyed node, and every node under
+  one, gets a new anchor. A stored edit (`pulp-tweaks.json`) on the old
+  ordinal path finds no node and surfaces as an `orphaned-tweak` drift; re-store
+  it against the new path once. An alias is deliberately not offered: an
+  ordinal named a SLOT at the time the edit was stored, and nothing records
+  which keyed node held that slot then, so the alias would guess, which is the
+  misapplied edit keys exist to prevent. The one case that does not orphan: in
+  a parent that mixes keyed and unkeyed same-signature siblings, the unkeyed
+  ones renumber over the unkeyed set only, so an old `li[0]` edit that belonged
+  to a keyed row now resolves onto the first UNKEYED row. Every such parent is
+  reported on the IR root (`native_keyed_mixed_siblings`, as
+  `<parent anchor> <signature>`) and as an import warning; re-check stored edits
+  under each one by hand. A duplicated key makes its siblings positional, so a
+  duplicate beside a usable key is reported in both lists. The update planner treats `pulp_key` and
+  `pulp_id` as immutable contract attributes (they start with `pulp`), so the
+  same anchor whose `data-pulp-id` changed is rebuilt, not retained.
 
 - When improving the offline/native HTML importer, use the development-only
   Importer Differential Lab rather than changing the authoritative browser
@@ -639,6 +672,41 @@ knowing before you touch that file:
   test/fixtures/import-differential/manifest.json --output <dir>`.
   Production native promotion is disabled; `threshold_eligible` is advisory
   evidence only. See `docs/tools/importer-differential-lab.md`.
+
+  **Page-space gotcha:** a browser-backed native import is panel-local, while
+  Chromium's screenshot and DOM snapshot are page-space. The lab passes the
+  signed authored-frame origin to `pulp-design-ir-observe --origin`, which
+  wraps the importer's panel root, untouched, in an observer-only page node and
+  positions it there. The captured `browser_box_paint_*_px` rects move with it
+  (the painter validates them against a view's absolute position, so leaving
+  them behind makes it reject every snapped rect and fractional edges
+  reappear). `captured_raster_origin_*_px` does NOT move: the sprite pass crops
+  it from the full-page screenshot, so it is page-space already. The page node,
+  never the panel root, carries `--page-background`, which the lab resolves
+  from the verified DOM snapshot by CSS canvas propagation (html, else body;
+  both transparent is `unresolved`, since the UA colour follows a
+  color-scheme the capture does not record) and supplies only for a panel with
+  page around it. A whole-page panel owns its canvas: the importer stamps it on
+  the root, and filling underneath would hide a dropped stamp. Page-space
+  comparisons must not translate the browser nodes as well; that registers the
+  panel twice. The registered geometry gate instead moves BOTH sides back into
+  the panel frame (Chromium's boxes by `register_browser_nodes_to_native_frame`,
+  the native layout by `native_nodes_in_panel_space` with the receipt's
+  placement origin), and `frame_placement_check` and
+  `verify_native_authored_frame` read native rects relative to that origin.
+
+  **Counter gotcha:** the observer's render receipt carries its own work
+  counters (`pulp-design-ir-observer-counters-v1`), phased as `build`,
+  `first_frame` and `readback`, plus views constructed/destroyed and a
+  terminal `live_views_after_teardown` read after the tree is destroyed. The
+  lab gates eligibility on a zero teardown residue and zero unmarked paint
+  mutations in `readback` only: materialization and the first layout set
+  paint state on views that have never been drawn (~80 "unmarked" mutations on
+  an 8-view card), which stales nothing. Gating those would block every
+  fixture for a non-defect; ungating `readback` would let a read-back that
+  mutates the painted tree pass. Raw DOM-snapshot hashes differ per capture
+  only by the CDP frame ID, so compare `*_snapshot_semantic_sha256` across
+  runs, not the raw binding.
 
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
   evidence. The differential matcher must join captured elements by

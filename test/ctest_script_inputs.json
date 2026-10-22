@@ -251,7 +251,8 @@
     "test/test_browser_capture_tree.cpp"
    ],
    "inputs": [
-    "test/fixtures/browser-capture-*"
+    "test/fixtures/browser-capture-*",
+    "test/fixtures/import-differential/18-keyed-list-panel.identity.json"
    ],
    "kind": "compiled",
    "sources": [
@@ -2562,6 +2563,7 @@
   "pulp-test-golden",
   "pulp-test-golden-effect",
   "pulp-test-gpu-audio-execution-controller",
+  "pulp-test-gpu-audio-plugin-boundary-continuity",
   "pulp-test-gpu-audio-trace",
   "pulp-test-gpu-audio-transport",
   "pulp-test-gpu-compute",
@@ -7790,11 +7792,15 @@
     "core/view",
     "core/view/audio",
     "core/view/audio/include",
+    "core/view/cmake",
     "core/view/cmake/PulpViewJsPreludes.cmake",
     "core/view/include",
     "core/view/include/pulp/view/host_surfaces.hpp",
     "core/view/include/pulp/view/widgets.hpp",
+    "core/view/js",
     "core/view/js/embed_js.py",
+    "core/view/src/design_adherence.cpp",
+    "core/view/src/design_import_legacy_registry.cpp",
     "core/view/src/inspector.cpp",
     "core/view/src/inspector_facts.cpp",
     "core/view/src/reload_exports.cpp",
@@ -9711,6 +9717,7 @@
     "core/format/src/validation_harness.cpp",
     "core/format/src/view_bridge.cpp",
     "core/format/src/vst3_adapter.cpp",
+    "core/gpu_audio/include/pulp/gpu_audio/gpu_audio_node.hpp",
     "core/graph/include/pulp/graph/graph_runtime_buffer_assignment.hpp",
     "core/graph/include/pulp/graph/graph_runtime_levelization.hpp",
     "core/graph/include/pulp/graph/graph_runtime_plan.hpp",
@@ -10538,6 +10545,7 @@
     "core/format/src/validation_harness.cpp",
     "core/format/src/view_bridge.cpp",
     "core/format/src/vst3_adapter.cpp",
+    "core/gpu_audio/include/pulp/gpu_audio/gpu_audio_node.hpp",
     "core/graph/include/pulp/graph/graph_runtime_buffer_assignment.hpp",
     "core/graph/include/pulp/graph/graph_runtime_levelization.hpp",
     "core/graph/include/pulp/graph/graph_runtime_plan.hpp",

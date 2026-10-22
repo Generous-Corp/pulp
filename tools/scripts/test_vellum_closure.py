@@ -5,6 +5,7 @@ import subprocess
 import unittest
 import unittest.mock
 import json
+import shutil
 import tempfile
 from pathlib import Path
 from argparse import Namespace
@@ -1121,6 +1122,19 @@ class ClosureMentionTests(unittest.TestCase):
         self.assertTrue(self.scan('LINK_FLAGS "-framework CoreAudio"\n'))
         self.assertEqual(self.scan("# the plug-in adapter targets\n"), [])
 
+    def test_design_import_comments_are_negative_controls(self):
+        """The design-import closure must reject ownership-shaped comments too."""
+        self.assertEqual(
+            self.scan("// the format parser is pulp::format::detail::parse_double_c_locale\n",
+                      "core/view/src/design_adherence.cpp"),
+            ["mirror-product-symbol mention core/view/src/design_adherence.cpp:1: pulp::format"],
+        )
+        self.assertEqual(
+            self.scan("// written by register_audio_widgets during editor setup\n",
+                      "core/view/src/design_import_legacy_registry.cpp"),
+            ["mirror-pulp-kept-symbol mention core/view/src/design_import_legacy_registry.cpp:1: register_audio_widgets"],
+        )
+
     def test_files_without_a_code_suffix_are_scanned(self):
         for name in ("tools/run", "docs/notes.md", "tools/x.sh", "tools/x.ps1", "ui/x.ts", "ui/x.tsx",
                      "ci/x.yaml", "ci/x.yml", "core/x/CMakeLists.txt"):
@@ -1273,6 +1287,8 @@ class ClosureMentionTests(unittest.TestCase):
 
 class GeneratedDigestTests(unittest.TestCase):
     BUILD_INFO = "@build/core/runtime/generated/Release/pulp/runtime/build_info.hpp"
+    PRELUDE_CPP = "@build/core/view/web_compat_preludes_gen.cpp"
+    PRELUDE_HPP = "@build/core/view/web_compat_preludes_gen.hpp"
 
     def build_info(self, td, stamp, dirty="false"):
         path = Path(td) / f"build_info_{stamp}_{dirty}.hpp"
@@ -1303,6 +1319,208 @@ class GeneratedDigestTests(unittest.TestCase):
             built = generated_digest(rel, out, REPO_ROOT)
             self.assertEqual(missing, built)
             self.assertEqual(missing["sha256"], __import__("hashlib").sha256(out.read_bytes()).hexdigest())
+
+    def test_view_prelude_digests_reproduce_without_build_outputs(self):
+        from vellum_closure import generated_digest, mirrorable_generated_source, prelude_inputs
+        import hashlib
+        inputs = prelude_inputs(REPO_ROOT)
+        self.assertIsNotNone(inputs)
+        with tempfile.TemporaryDirectory() as recipe_td:
+            recipe_output = Path(recipe_td) / "web_compat_preludes_gen.cpp"
+            subprocess.run(
+                [__import__("sys").executable, str(REPO_ROOT / "core/view/js/embed_js.py"),
+                 str(recipe_output), *map(str, inputs)], check=True,
+            )
+            expected_cpp = hashlib.sha256(recipe_output.read_bytes()).hexdigest()
+        names = [input_path.stem.replace("-", "_") for input_path in inputs]
+        expected_hpp_text = (
+            "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n"
+            "namespace pulp::view::preludes {\n\n"
+            + "".join(f"extern const char* const {name};\n" for name in names)
+            + "\n}  // namespace pulp::view::preludes\n"
+        )
+        expected_hpp = hashlib.sha256(expected_hpp_text.encode("utf-8")).hexdigest()
+        with tempfile.TemporaryDirectory() as td:
+            missing = Path(td) / "never-built.cpp"
+            cpp = generated_digest(self.PRELUDE_CPP, missing, REPO_ROOT)
+            hpp = generated_digest(self.PRELUDE_HPP, Path(td) / "never-built.hpp", REPO_ROOT)
+            stale = Path(td) / "stale.cpp"
+            stale.write_text("stale output", encoding="utf-8")
+            rebuilt = generated_digest(self.PRELUDE_CPP, stale, REPO_ROOT)
+        self.assertEqual(cpp["sha256"], expected_cpp)
+        self.assertEqual(hpp["sha256"], expected_hpp)
+        self.assertEqual(cpp, rebuilt)
+        self.assertTrue(mirrorable_generated_source(self.PRELUDE_CPP))
+        self.assertFalse(mirrorable_generated_source("@build/core/view/other.cpp"))
+
+    def test_view_prelude_digest_fails_closed_when_producer_is_incomplete(self):
+        from vellum_closure import generated_digest
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td)
+            (source / "core/view/cmake").mkdir(parents=True)
+            (source / "core/view/js").mkdir(parents=True)
+            (source / "core/view/cmake/PulpViewJsPreludes.cmake").write_text(
+                "set(PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/missing.js\n)\n", encoding="utf-8")
+            (source / "core/view/js/embed_js.py").write_text("", encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            self.assertIsNone(generated_digest("@build/core/view/unsupported.cpp", source / "out.cpp", source))
+
+    def test_view_prelude_producer_rejects_unbound_or_duplicate_inputs(self):
+        from vellum_closure import generated_digest
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td)
+            (source / "core/view/cmake").mkdir(parents=True)
+            shutil.copytree(REPO_ROOT / "core/view/js", source / "core/view/js")
+            shutil.copy(REPO_ROOT / "core/view/cmake/PulpViewJsPreludes.cmake", source / "core/view/cmake")
+            shutil.copy(REPO_ROOT / "core/view/js/embed_js.py", source / "core/view/js")
+            producer = source / "core/view/cmake/PulpViewJsPreludes.cmake"
+            original = producer.read_text(encoding="utf-8")
+            expected_cpp = generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"]
+            closing = "\n)"
+            valid = original.replace(closing, "\n    # ${CMAKE_CURRENT_SOURCE_DIR}/js/commented.js\n)", 1)
+            producer.write_text(valid, encoding="utf-8")
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"], expected_cpp)
+            inline_comment = original.replace(
+                "target_sources(pulp-view-script PRIVATE ${PULP_JS_EMBEDDED_SOURCE})",
+                "target_sources(pulp-view-script PRIVATE ${PULP_JS_EMBEDDED_SOURCE}) # trailing comment",
+                1,
+            )
+            producer.write_text(inline_comment, encoding="utf-8")
+            baseline = generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)
+            self.assertIsNotNone(baseline)
+            self.assertEqual(baseline["sha256"], generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"])
+            producer.write_text(original.replace(closing, "\n    ${CMAKE_CURRENT_SOURCE_DIR}/js/extra-valid.js\n)", 1), encoding="utf-8")
+            (source / "core/view/js/extra-valid.js").write_text("const extraValid = true;\n", encoding="utf-8")
+            self.assertIsNotNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            producer.write_text(original, encoding="utf-8")
+            separator_comment = original.replace(
+                ")\nset(PULP_JS_EMBEDDED_HEADER",
+                ") # separator\nset(PULP_JS_EMBEDDED_HEADER", 1,
+            )
+            producer.write_text(separator_comment, encoding="utf-8")
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"], expected_cpp)
+            producer.write_bytes(original.replace("\n", "\r\n").encode("utf-8"))
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"], expected_cpp)
+            producer.write_text(original.rstrip("\n"), encoding="utf-8")
+            self.assertEqual(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source)["sha256"], expected_cpp)
+            for extra in ("    js/unbound.js\n", "    ${OTHER}/js/unbound.js\n", "    ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js\n"):
+                producer.write_text(original.replace(closing, "\n" + extra + ")", 1), encoding="utf-8")
+                self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), extra)
+            for mutation in (
+                "\nlist(APPEND PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js)\n",
+                "\nset(PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js)\n",
+                "\nLIST ( REMOVE_AT PULP_JS_PRELUDES 0 )\n",
+                "\nlist ( POP_FRONT PULP_JS_PRELUDES )\n",
+                "\nlist ( TRANSFORM PULP_JS_PRELUDES PREPEND nope )\n",
+                "\nunset ( PULP_JS_PRELUDES )\n",
+                "\nSET ( PULP_JS_PRELUDES ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
+                "\nset ( \"PULP_JS_PRELUDES\" ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
+                "\nset ( [[PULP_JS_PRELUDES]] ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n",
+                "\nunset ( \"PULP_JS_PRELUDES\" )\n",
+                "\nstring ( APPEND PULP_JS_PRELUDES \";replaced\" )\n",
+            ):
+                producer.write_text(original + mutation, encoding="utf-8")
+                self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), mutation)
+            producer.write_text(original + "\nSET ( pulp_js_preludes ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js )\n", encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            blocked = original.replace("set(PULP_JS_PRELUDES", "#[[\nset(PULP_JS_PRELUDES", 1)
+            blocked = blocked.replace("\n)\n", "\n)\n]]\n", 1)
+            producer.write_text(blocked, encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            producer.write_text("if(FALSE)\n" + original + "endif()\n", encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            producer.write_text(original.replace("extern const char* const ${_prelude_var};", "extern const unsigned char* ${_prelude_var};"), encoding="utf-8")
+            self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
+            adversarial_mutations = (
+                ("NAME_WE -> NAME", original.replace("\"${_prelude}\" NAME_WE", "\"${_prelude}\" NAME", 1)),
+                ("duplicate APPEND", original.replace(
+                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")',
+                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")\n'
+                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")', 1)),
+                ("changed header prelude", original.replace("#pragma once\\n", "#pragma changed\\n", 1)),
+                ("extra custom output", original.replace(
+                    "OUTPUT ${PULP_JS_EMBEDDED_SOURCE}",
+                    "OUTPUT ${PULP_JS_EMBEDDED_SOURCE} ${CMAKE_CURRENT_BINARY_DIR}/extra.cpp", 1)),
+                ("duplicate foreach input", original.replace(
+                    "foreach(_prelude ${PULP_JS_PRELUDES})",
+                    "foreach(_prelude ${PULP_JS_PRELUDES} ${PULP_JS_PRELUDES})", 1)),
+                ("entire producer block comment", "#[[\n" + original + "\n]]\n"),
+                ("entire equals-delimited block comment", "#[=[\n" + original + "\n]=]\n"),
+                ("trailing raw text", original + "\nnot_a_cmake_command\n"),
+                ("leading raw text", "EVIL\\n" + original),
+                ("unterminated quoted argument", original + '\nset(foo "unterminated\n'),
+                ("unterminated bracket comment", original + "\n#[=[ unterminated\n"),
+                ("unterminated bracket argument", original + "\nset(foo [=[# not closed\n"),
+                ("NBSP is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set\u00a0(PULP_JS_PRELUDES", 1)),
+                ("vertical tab is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set\v(PULP_JS_PRELUDES", 1)),
+                ("form feed is not CMake whitespace", original.replace("set(PULP_JS_PRELUDES", "set(PULP_JS_PRELUDES\f", 1)),
+                ("consecutive commands without whitespace", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ")set(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("consecutive commands separated by spaces", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ") set(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("consecutive commands separated by tabs", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ")\tset(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("bracket comment command separator", original.replace(
+                    ")\nset(PULP_JS_EMBEDDED_HEADER",
+                    ")#[[x]]set(PULP_JS_EMBEDDED_HEADER", 1)),
+                ("newline before command opening parenthesis", original.replace(
+                    "set(PULP_JS_PRELUDES",
+                    "set\n(PULP_JS_PRELUDES", 1)),
+                ("bracket comment before command opening parenthesis", original.replace(
+                    "set(PULP_JS_PRELUDES",
+                    "set#[[x]](PULP_JS_PRELUDES", 1)),
+            )
+            for description, mutation in adversarial_mutations:
+                producer.write_text(mutation, encoding="utf-8")
+                self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source), description)
+
+    def test_target_manifest_only_exposes_the_supported_prelude_source(self):
+        from vellum_closure import target_manifest
+        with tempfile.TemporaryDirectory() as td:
+            build = Path(td)
+            (build / "core/view").mkdir(parents=True)
+            (build / "vellum-unit-headers.txt").write_text("", encoding="utf-8")
+            (build / "core/view/web_compat_preludes_gen.cpp").write_text("generated", encoding="utf-8")
+            (build / "core/view/web_compat_preludes_gen.hpp").write_text("generated", encoding="utf-8")
+            sources = [
+                {"path": str(build / "core/view/web_compat_preludes_gen.cpp")},
+                {"path": str(build / "core/view/unsupported.cpp")},
+            ]
+            target = {"name": "pulp-view-script", "type": "STATIC_LIBRARY", "sources": sources,
+                      "sourceGroups": [{"sourceIndexes": [0, 1]}], "compileGroups": [], "dependencies": []}
+            with unittest.mock.patch("vellum_closure.codemodel", return_value=({"name": "Release"}, {"id": target})):
+                manifest = target_manifest(REPO_ROOT, build, ["pulp-view-script"])
+        selected = manifest["targets"][0]["sources"]
+        self.assertIn(self.PRELUDE_CPP, selected)
+        self.assertNotIn("@build/core/view/unsupported.cpp", selected)
+        prelude_sources = {
+            path for path in manifest["files"]
+            if path.startswith("core/view/js/") and path.endswith(".js")
+        }
+        self.assertEqual(len(prelude_sources), 26)
+        self.assertEqual(
+            prelude_sources,
+            {
+                str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+                for path in __import__("vellum_closure").prelude_inputs(REPO_ROOT)
+            },
+        )
+
+    def test_target_manifest_refuses_unparseable_prelude_producer(self):
+        from vellum_closure import target_manifest
+        with tempfile.TemporaryDirectory() as td:
+            build = Path(td)
+            (build / "core/view").mkdir(parents=True)
+            target = {"name": "pulp-view-script", "type": "STATIC_LIBRARY",
+                      "sources": [], "sourceGroups": [], "compileGroups": [], "dependencies": []}
+            with unittest.mock.patch("vellum_closure.codemodel", return_value=({"name": "Release"}, {"id": target})), \
+                 unittest.mock.patch("vellum_closure.unit_header_manifests", return_value={}), \
+                 unittest.mock.patch("vellum_closure.prelude_inputs", return_value=None):
+                with self.assertRaisesRegex(SystemExit, "prelude producer could not be parsed"):
+                    target_manifest(REPO_ROOT, build, ["pulp-view-script"])
 
     def test_export_refuses_a_generated_input_without_a_reproducible_digest(self):
         from vellum_closure import exportable_closure

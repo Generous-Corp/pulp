@@ -22,14 +22,19 @@
 #include "tools/import-design/browser_capture_tree.hpp"
 
 #include <pulp/view/design_ir_io.hpp>
+#include <pulp/view/design_update.hpp>
+
+#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -2087,9 +2092,8 @@ namespace {
 ///
 /// strings: 0 #document 1 HTML 2 BODY 3 OL 4 LI 5 data-pulp-key
 ///          6 drive 7 tone 8 mix 9 background-image 10 none 11 display
-///          12 block 13 data-pulp-id 14 item-drive
-LoweredSnapshot lower_list(const std::string& item_attributes,
-                           const std::string& name) {
+///          12 block 13 data-pulp-id 14 item-drive 15 t"o/ne
+LoweredSnapshot lower_list(const std::string& item_attributes, const std::string& name) {
     return lower_snapshot(
         {
             .node_names = "[0,1,2,3,4,4,4]",
@@ -2105,7 +2109,7 @@ LoweredSnapshot lower_list(const std::string& item_attributes,
             .paint_orders = "[0,1,1,2,3,4,5]",
             .strings = R"("#document","HTML","BODY","OL","LI","data-pulp-key",)"
                        R"("drive","tone","mix","background-image","none",)"
-                       R"("display","block","data-pulp-id","item-drive")",
+                       R"("display","block","data-pulp-id","item-drive","t\"o/ne")",
         },
         name);
 }
@@ -2115,7 +2119,8 @@ std::vector<const IRNode*> list_items(const IRNode& root) {
     const auto* list = find_named(root, "ol");
     REQUIRE(list != nullptr);
     std::vector<const IRNode*> items;
-    for (const auto& child : list->children) items.push_back(&child);
+    for (const auto& child : list->children)
+        items.push_back(&child);
     return items;
 }
 
@@ -2124,7 +2129,7 @@ std::string key_of(const IRNode& node) {
     return found == node.attributes.end() ? std::string{} : found->second;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("a keyed list item keeps its anchor when the list is reordered",
           "[browser-capture][native-lowering][anchor]") {
@@ -2144,8 +2149,7 @@ TEST_CASE("a keyed list item keeps its anchor when the list is reordered",
         anchor_before[key_of(*item)] = item->stable_anchor_id.value_or("");
         top_before[key_of(*item)] = item->style.top.value_or(-1.0f);
     }
-    CHECK(anchor_before.at("drive") ==
-          "capture:html[0]/body[0]/ol[0]/li[key=drive]");
+    CHECK(anchor_before.at("drive") == "capture:html[0]/body[0]/ol[0]/li[key=drive]");
 
     const auto items_after = list_items(after.root);
     REQUIRE(items_after.size() == 3);
@@ -2176,10 +2180,9 @@ TEST_CASE("an unkeyed list keeps positional anchors",
         CHECK(item->attributes.count("pulp_key") == 0);
         got.push_back(item->stable_anchor_id.value_or(""));
     }
-    CHECK(got == std::vector<std::string>{
-                     "capture:html[0]/body[0]/ol[0]/li[0]",
-                     "capture:html[0]/body[0]/ol[0]/li[1]",
-                     "capture:html[0]/body[0]/ol[0]/li[2]"});
+    CHECK(got == std::vector<std::string>{"capture:html[0]/body[0]/ol[0]/li[0]",
+                                          "capture:html[0]/body[0]/ol[0]/li[1]",
+                                          "capture:html[0]/body[0]/ol[0]/li[2]"});
 }
 
 TEST_CASE("a duplicated sibling key is reported and falls back to positions",
@@ -2190,17 +2193,15 @@ TEST_CASE("a duplicated sibling key is reported and falls back to positions",
     const auto lowered = lower_list("[5,6],[5,7],[5,7]", "duplicate-key");
     CHECK(lowered.counts.keyed_anchors == 1);
     CHECK(lowered.counts.duplicate_keys ==
-          std::vector<std::string>{
-              "capture:html[0]/body[0]/ol[0] data-pulp-key=\"tone\""});
+          std::vector<std::string>{"capture:html[0]/body[0]/ol[0] data-pulp-key=\"tone\""});
     std::vector<std::string> got;
     for (const auto* item : list_items(lowered.root))
         got.push_back(item->stable_anchor_id.value_or(""));
     // Ordinals count only the siblings without a usable key, so the unique
     // key does not shift the colliding pair's numbering.
-    CHECK(got == std::vector<std::string>{
-                     "capture:html[0]/body[0]/ol[0]/li[key=drive]",
-                     "capture:html[0]/body[0]/ol[0]/li[0]",
-                     "capture:html[0]/body[0]/ol[0]/li[1]"});
+    CHECK(got == std::vector<std::string>{"capture:html[0]/body[0]/ol[0]/li[key=drive]",
+                                          "capture:html[0]/body[0]/ol[0]/li[0]",
+                                          "capture:html[0]/body[0]/ol[0]/li[1]"});
     // The collision does not erase what the author wrote.
     CHECK(key_of(*list_items(lowered.root)[1]) == "tone");
 
@@ -2208,6 +2209,136 @@ TEST_CASE("a duplicated sibling key is reported and falls back to positions",
     // layer require of them.
     const auto all = anchors(lowered.root);
     CHECK(std::set<std::string>(all.begin(), all.end()).size() == all.size());
+}
+
+namespace {
+
+/// The `<ol>` children of a lowered list, as the update planner receives them.
+std::span<const IRNode> list_children(const LoweredSnapshot& lowered) {
+    const auto* list = find_named(lowered.root, "ol");
+    REQUIRE(list != nullptr);
+    return list->children;
+}
+
+/// The key order the keyed-list differential fixture declares, before and
+/// after its Reorder button runs.
+std::pair<std::vector<std::string>, std::vector<std::string>> keyed_fixture_orders() {
+    std::ifstream in(fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) / "import-differential" /
+                     "18-keyed-list-panel.identity.json");
+    REQUIRE(in.good());
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto identity = choc::json::parse(text);
+    const auto read = [&](const char* member) {
+        std::vector<std::string> keys;
+        const auto list = identity[member];
+        for (uint32_t i = 0; i < list.size(); ++i)
+            keys.emplace_back(list[i].getString());
+        return keys;
+    };
+    return {read("keys"), read("reordered_keys")};
+}
+
+/// `lower_list` attribute rows that declare `keys` in document order.
+std::string keyed_rows(const std::vector<std::string>& keys) {
+    // String-table indices of the keys `lower_list` knows how to spell.
+    const std::map<std::string, int> spelled{{"drive", 6}, {"tone", 7}, {"mix", 8}};
+    std::string rows;
+    for (const auto& key : keys) {
+        REQUIRE(spelled.count(key) == 1);
+        if (!rows.empty())
+            rows += ",";
+        rows += "[5," + std::to_string(spelled.at(key)) + "]";
+    }
+    return rows;
+}
+
+} // namespace
+
+TEST_CASE("a keyed list reorder plans moves, not rewrites",
+          "[browser-capture][native-lowering][anchor][update]") {
+    // Fixture 18's Reorder button reverses a keyed list. Planned over the two
+    // lowered child lists, every row must be found again by its anchor and
+    // moved: a rewrite (removed + inserted) would tear down Drive's view and
+    // rebuild it from scratch, and a retain-in-place would leave Mix's view
+    // showing Drive's content.
+    const auto [keys, reordered] = keyed_fixture_orders();
+    REQUIRE(keys.size() == 3);
+    REQUIRE(reordered == std::vector<std::string>(keys.rbegin(), keys.rend()));
+    const auto before = lower_list(keyed_rows(keys), "fixture-18-before");
+    const auto after = lower_list(keyed_rows(reordered), "fixture-18-after");
+
+    const auto old_children = list_children(before);
+    const auto new_children = list_children(after);
+    const auto plan = pulp::view::plan_design_child_updates(old_children, new_children);
+    REQUIRE(plan.keyed);
+    CHECK_FALSE(plan.ambiguous_keys);
+    // Reversing three rows keeps at most one in place, so two moves is the
+    // least work that reaches the new order; nothing is rebuilt.
+    CHECK(plan.work == pulp::view::DesignUpdateWorkCounters{1, 2, 0, 0});
+    for (const auto& update : plan.updates)
+        CHECK(update.key.find("/li[key=") != std::string::npos);
+
+    // Applying the plan to the old anchors reproduces the new order exactly.
+    std::vector<std::string> working;
+    for (const auto& child : old_children)
+        working.push_back(child.stable_anchor_id.value_or(""));
+    for (const auto& update : plan.updates) {
+        REQUIRE(update.kind != pulp::view::DesignUpdateKind::inserted);
+        REQUIRE(update.kind != pulp::view::DesignUpdateKind::removed);
+        const auto at = std::find(working.begin(), working.end(), update.key);
+        REQUIRE(at != working.end());
+        auto value = *at;
+        working.erase(at);
+        working.insert(working.begin() + static_cast<std::ptrdiff_t>(update.new_index),
+                       std::move(value));
+    }
+    std::vector<std::string> expected;
+    for (const auto& child : new_children)
+        expected.push_back(child.stable_anchor_id.value_or(""));
+    CHECK(working == expected);
+}
+
+TEST_CASE("an unkeyed list reorder plans rewrites, not moves",
+          "[browser-capture][native-lowering][anchor][update]") {
+    // Planted negative for the keyed case above: the same reorder with Drive
+    // marked only by `data-pulp-id`, which does not change the anchor. Every
+    // anchor is positional, so the planner cannot see that Drive moved. It
+    // reports no move at all; the slot Drive left and the slot it arrived in
+    // are both rebuilt, because their identity attributes differ.
+    const auto before = lower_list("[13,14],[],[]", "unkeyed-before");
+    const auto after = lower_list("[],[],[13,14]", "unkeyed-after");
+    const auto plan =
+        pulp::view::plan_design_child_updates(list_children(before), list_children(after));
+    REQUIRE(plan.keyed);
+    CHECK(plan.work.moved == 0);
+    CHECK(plan.work == pulp::view::DesignUpdateWorkCounters{1, 0, 2, 2});
+}
+
+TEST_CASE("a list mixing keyed and unkeyed siblings is reported",
+          "[browser-capture][native-lowering][anchor]") {
+    // Drive is keyed and its two neighbours are not, so they are numbered
+    // li[0] and li[1] over the unkeyed set. Before Drive had its key they were
+    // li[1] and li[2]: an edit stored on li[0] for Drive now resolves onto
+    // Tone, and that anchor still looks valid. The mix is reported so the
+    // moved edit is findable.
+    const auto mixed = lower_list("[5,6],[],[]", "mixed");
+    CHECK(mixed.counts.keyed_anchors == 1);
+    CHECK(mixed.counts.mixed_keyed_siblings ==
+          std::vector<std::string>{"capture:html[0]/body[0]/ol[0] li"});
+
+    // Controls: a fully keyed list and a fully unkeyed list carry no
+    // positional sibling beside a keyed one, so neither is reported.
+    CHECK(lower_list("[5,6],[5,7],[5,8]", "all-keyed").counts.mixed_keyed_siblings.empty());
+    CHECK(lower_list("[],[],[]", "unkeyed").counts.mixed_keyed_siblings.empty());
+}
+
+TEST_CASE("a duplicated sibling key is reported escaped",
+          "[browser-capture][native-lowering][anchor]") {
+    // The raw key is author text. Reported verbatim, a quote in it would end
+    // the quoted value early and the report would name a different key.
+    const auto lowered = lower_list("[5,15],[5,15],[5,8]", "escaped-duplicate");
+    CHECK(lowered.counts.duplicate_keys ==
+          std::vector<std::string>{R"(capture:html[0]/body[0]/ol[0] data-pulp-key="t\"o\/ne")"});
 }
 
 TEST_CASE("hiding a middle sibling misapplies no stored edit",

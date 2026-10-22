@@ -169,6 +169,11 @@ class SharedIoConvolutionSession {
     bool last_closed_trace_retention_overflow() const noexcept {
         return last_closed_trace_retention_overflow_;
     }
+    // Result of the final quiescent drain that closed the last generation;
+    // its telemetry_error is the release receipt's validation verdict.
+    SharedIoTraceDrainResult last_close_trace_drain() const noexcept {
+        return last_close_trace_drain_;
+    }
     std::vector<SharedIoTraceRecord> take_last_closed_trace_records() noexcept {
         return std::exchange(last_closed_trace_records_, {});
     }
@@ -179,7 +184,8 @@ class SharedIoConvolutionSession {
         return trace_recorder_ != nullptr && trace_recorder_->enabled();
     }
     // Exactly one serialized diagnostic consumer, stopped before any lifetime/epoch operation.
-    SharedIoTraceDrainResult drain_trace(std::uint32_t budget = 256) noexcept;
+    SharedIoTraceDrainResult drain_trace(std::uint32_t budget = 256,
+                                         bool telemetry_quiescent = false) noexcept;
     // Private campaign sink. The observer is called only by the serialized
     // non-RT drain consumer and must outlive the session's final release.
     bool set_trace_observer(const SharedIoTraceDrainObserver* observer) noexcept {
@@ -254,6 +260,7 @@ class SharedIoConvolutionSession {
     std::vector<SharedIoTraceAdmission> retained_trace_admissions_;
     bool trace_retention_overflow_ = false;
     bool last_closed_trace_retention_overflow_ = false;
+    SharedIoTraceDrainResult last_close_trace_drain_{};
     std::uint64_t provider_starved_ = 0;
     std::optional<SharedIoConvolutionPipeline::Lease> pending_ingress_;
     std::vector<float> terminal_;

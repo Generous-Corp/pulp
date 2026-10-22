@@ -27,7 +27,7 @@ def format_summary(report: dict[str, Any]) -> str:
     lines += [
         f"- {name.title()} score: {comparison[name]['score']:.3f}"
         if name != "geometry" else
-        f"- Geometry raw page-space score (diagnostic, not gated): "
+        f"- Page-space geometry (gated): "
         f"{comparison[name]['score']:.3f}"
         for name in ("structural", "geometry", "typography", "visual")
     ]
@@ -121,7 +121,7 @@ def format_corpus_summary(aggregate: dict[str, Any]) -> str:
     raw_geometry = aggregate.get("diagnostics", {}).get("raw_page_space_geometry", {})
     if raw_geometry.get("fixture_count"):
         lines.append(
-            f"- Raw page-space geometry (diagnostic): mean "
+            f"- Page-space geometry (gated): mean "
             f"{raw_geometry['mean_score']:.3f}, minimum {raw_geometry['min_score']:.3f}")
     gate_summary = aggregate.get("gate_summary", {})
     if gate_summary:

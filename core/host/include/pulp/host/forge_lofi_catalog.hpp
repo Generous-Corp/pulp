@@ -335,7 +335,7 @@ CustomNodeType make_reverb_node();
 // node, so a makeup knob here would be clutter.
 //
 // RT-safe: prepare() sets the sample rate (lookahead stays 0, so no allocation);
-// process() only copies the Params struct and runs the scalar per-sample path.
+// process() only copies the Params struct and runs the compressor's buffer path.
 struct CompressorInstance {
     signal::Compressor comp;
 };

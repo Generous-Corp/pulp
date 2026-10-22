@@ -158,6 +158,31 @@ TEST_CASE("NonUniformPartitionedConvolver matches direct convolution on noise",
     }
 }
 
+TEST_CASE("NonUniformPartitionedConvolver in-place processing matches direct convolution",
+          "[signal][convolver][non-uniform]") {
+    constexpr std::size_t kBlock = 64;
+    constexpr std::size_t kIrLen = 800;
+    constexpr std::size_t kTotalLen = 24 * kBlock;
+
+    auto ir = make_decaying_ir(kIrLen, 0.003f);
+    auto input = make_random_block(kTotalLen, /*seed=*/7);
+
+    NonUniformPartitionedConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), kBlock, /*K=*/4);
+    REQUIRE(conv.tail_block() > 0); // the tail stage must be in play
+
+    // The same buffer is both input and output, as most hosts deliver it.
+    std::vector<float> buffer = input;
+    for (std::size_t i = 0; i < kTotalLen; i += kBlock)
+        conv.process(buffer.data() + i, buffer.data() + i, kBlock);
+
+    const auto ref = direct_convolve(input, ir, kTotalLen);
+    for (std::size_t i = 0; i < kTotalLen; ++i) {
+        INFO("i = " << i);
+        REQUIRE_THAT(buffer[i], WithinAbs(ref[i], 1e-3f));
+    }
+}
+
 TEST_CASE("NonUniformPartitionedConvolver matches uniform PartitionedConvolver",
           "[signal][convolver][non-uniform]") {
     constexpr std::size_t kBlock = 32;

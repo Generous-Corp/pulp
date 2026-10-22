@@ -13,6 +13,14 @@ evidence, review rulings, held-out contamination list, release blockers, and
 deferred items, is the phase table and "Review decisions" in
 `docs/tools/importer-differential-lab.md`.
 
+`main` landed a parallel version of this work (PR 10640, merge `e6da6d9816`,
+and keyed anchors in PR 10658): page-space observer placement, text baselines
+read off the bottom of the run rect, work counters, and IR-bound retained and
+rebuild benchmark lanes. The two were reconciled on 2026-10-22, and that
+record, with the evidence for each kept implementation, is "Parallel `main`
+record" and "Reconciliation of the two records" under "Review decisions" in
+the same document.
+
 ## Objective
 
 Determine, with authenticated evidence, whether bounded responsive HTML/CSS

@@ -111,8 +111,9 @@ def aggregate_reports(
     ]
     gate_values: dict[str, list[float]] = {
         "structural": [float(r["comparison"]["structural"]["score"]) for r in reports],
-        # The geometry gate scores registered panel geometry; raw page-space
-        # is reported under diagnostics. A report without a gate scores 0.
+        # The geometry gate's score is registered panel geometry; the gate
+        # also requires page-space geometry, summarised beside it. A report
+        # without a gate scores 0.
         "geometry": [
             float((r["comparison"]["geometry"].get("gate") or {}).get("score", 0.0))
             for r in reports],
@@ -174,7 +175,7 @@ def aggregate_reports(
         },
         "diagnostics": {
             "raw_page_space_geometry": {
-                "role": "diagnostic",
+                "role": "gated-within-geometry-gate",
                 "fixture_count": len(raw_geometry_values),
                 "min_score": round(min(raw_geometry_values), 6)
                 if raw_geometry_values else None,

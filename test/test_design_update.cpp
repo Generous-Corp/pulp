@@ -1,7 +1,15 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
+#include <cstdio>
+#include <functional>
+#include <numeric>
 #include <pulp/view/design_update.hpp>
+#include <random>
+#include <string>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 using namespace pulp::view;
 namespace {
@@ -670,5 +678,328 @@ TEST_CASE("same-anchor shape changes recreate instead of reusing stale controls"
         require_recreated(plan_design_child_updates(std::span<const IRNode>(&old_node, 1),
                                                     std::span<const IRNode>(&new_node, 1)),
                           "control");
+    }
+}
+
+namespace {
+using Keys = std::vector<std::string>;
+
+Keys sequential_keys(std::size_t count) {
+    Keys keys;
+    for (std::size_t i = 0; i < count; ++i)
+        keys.push_back("k" + std::to_string(i));
+    return keys;
+}
+
+std::vector<IRNode> keyed_nodes(const Keys& keys) {
+    std::vector<IRNode> nodes;
+    nodes.reserve(keys.size());
+    for (const auto& key : keys)
+        nodes.push_back(node(key.c_str()));
+    return nodes;
+}
+
+// Applies the plan to the old keys exactly as a materializer would and
+// returns the resulting order.
+Keys apply_plan(const DesignChildUpdatePlan& plan, Keys working) {
+    for (const auto& update : plan.updates) {
+        if (update.kind == DesignUpdateKind::removed) {
+            REQUIRE(update.old_index < working.size());
+            REQUIRE(working[update.old_index] == update.key);
+            working.erase(working.begin() + static_cast<std::ptrdiff_t>(update.old_index));
+        } else if (update.kind == DesignUpdateKind::inserted) {
+            REQUIRE(update.new_index <= working.size());
+            working.insert(working.begin() + static_cast<std::ptrdiff_t>(update.new_index),
+                           update.key);
+        } else if (update.kind == DesignUpdateKind::moved) {
+            REQUIRE(update.old_index < working.size());
+            REQUIRE(working[update.old_index] == update.key);
+            auto value = std::move(working[update.old_index]);
+            working.erase(working.begin() + static_cast<std::ptrdiff_t>(update.old_index));
+            REQUIRE(update.new_index <= working.size());
+            working.insert(working.begin() + static_cast<std::ptrdiff_t>(update.new_index),
+                           std::move(value));
+        }
+    }
+    return working;
+}
+
+// Reference minimum for an all-compatible keyed update: survivors minus the
+// longest increasing run of their old positions taken in new order, computed
+// by quadratic dynamic programming independently of the planner.
+std::size_t minimum_moves(const Keys& old_keys, const Keys& new_keys) {
+    std::unordered_map<std::string, std::size_t> old_position;
+    for (std::size_t i = 0; i < old_keys.size(); ++i)
+        old_position.emplace(old_keys[i], i);
+    std::vector<std::size_t> sequence;
+    for (const auto& key : new_keys) {
+        if (const auto it = old_position.find(key); it != old_position.end())
+            sequence.push_back(it->second);
+    }
+    std::vector<std::size_t> longest(sequence.size(), 1);
+    std::size_t best = 0;
+    for (std::size_t i = 0; i < sequence.size(); ++i) {
+        for (std::size_t j = 0; j < i; ++j) {
+            if (sequence[j] < sequence[i])
+                longest[i] = std::max(longest[i], longest[j] + 1);
+        }
+        best = std::max(best, longest[i]);
+    }
+    return sequence.size() - best;
+}
+
+struct KeyedMutation {
+    const char* name;
+    std::function<Keys(const Keys&)> mutate;
+    std::size_t expected_moved;
+};
+
+Keys rotate_left(Keys keys, std::size_t count) {
+    std::rotate(keys.begin(), keys.begin() + static_cast<std::ptrdiff_t>(count), keys.end());
+    return keys;
+}
+
+Keys rotate_right(Keys keys, std::size_t count) {
+    std::rotate(keys.rbegin(), keys.rbegin() + static_cast<std::ptrdiff_t>(count), keys.rend());
+    return keys;
+}
+
+// Named keyed-list mutations from the uibench tree suite, over 50 children.
+// Expected move counts are the proven minimum for each shape.
+std::vector<KeyedMutation> uibench_mutations() {
+    return {
+        {"no_change", [](const Keys& k) { return k; }, 0},
+        {"moveFromStartToEnd(1)", [](const Keys& k) { return rotate_left(k, 1); }, 1},
+        {"moveFromStartToEnd(2)", [](const Keys& k) { return rotate_left(k, 2); }, 2},
+        {"moveFromEndToStart(1)", [](const Keys& k) { return rotate_right(k, 1); }, 1},
+        {"moveFromEndToStart(2)", [](const Keys& k) { return rotate_right(k, 2); }, 2},
+        {"swap(1,n-2)",
+         [](Keys k) {
+             std::swap(k[1], k[k.size() - 2]);
+             return k;
+         },
+         2},
+        {"reverse",
+         [](Keys k) {
+             std::reverse(k.begin(), k.end());
+             return k;
+         },
+         49},
+        {"react_worst_case",
+         [](const Keys& k) {
+             Keys middle(k.begin() + 1, k.end() - 1);
+             return rotate_right(middle, 1);
+         },
+         1},
+        {"kivi_worst_case",
+         [](const Keys& k) {
+             Keys middle(k.begin() + 1, k.end() - 1);
+             std::reverse(middle.begin(), middle.end());
+             return middle;
+         },
+         47},
+        {"insertFirst(1)",
+         [](Keys k) {
+             k.insert(k.begin(), "new");
+             return k;
+         },
+         0},
+        {"insertLast(1)",
+         [](Keys k) {
+             k.push_back("new");
+             return k;
+         },
+         0},
+        {"removeFirst(1)",
+         [](Keys k) {
+             k.erase(k.begin());
+             return k;
+         },
+         0},
+        {"removeLast(1)",
+         [](Keys k) {
+             k.pop_back();
+             return k;
+         },
+         0},
+        {"shuffle(seed 7)",
+         [](Keys k) {
+             std::mt19937 random(7);
+             std::shuffle(k.begin(), k.end(), random);
+             return k;
+         },
+         0},
+        {"shuffle(seed 1234)",
+         [](Keys k) {
+             std::mt19937 random(1234);
+             std::shuffle(k.begin(), k.end(), random);
+             return k;
+         },
+         0},
+    };
+}
+
+std::size_t survivors_of(const Keys& old_keys, const Keys& new_keys) {
+    return static_cast<std::size_t>(std::count_if(new_keys.begin(), new_keys.end(), [&](auto& key) {
+        return std::find(old_keys.begin(), old_keys.end(), key) != old_keys.end();
+    }));
+}
+
+void require_minimal_plan(const Keys& old_keys, const Keys& new_keys) {
+    const auto plan = plan_design_child_updates(keyed_nodes(old_keys), keyed_nodes(new_keys));
+    REQUIRE(plan.keyed);
+    CHECK(plan.key_diagnostics.empty());
+    const auto survivors = survivors_of(old_keys, new_keys);
+    CHECK(plan.work.moved == minimum_moves(old_keys, new_keys));
+    CHECK(plan.work.retained + plan.work.moved == survivors);
+    CHECK(plan.work.inserted == new_keys.size() - survivors);
+    CHECK(plan.work.removed == old_keys.size() - survivors);
+    CHECK(plan.work.total() == plan.updates.size());
+    CHECK(apply_plan(plan, old_keys) == new_keys);
+}
+} // namespace
+
+TEST_CASE("keyed mutation corpus moves only children outside the longest increasing run",
+          "[view][import][update][keyed]") {
+    const auto old_keys = sequential_keys(50);
+    for (const auto& mutation : uibench_mutations()) {
+        INFO(mutation.name);
+        const auto new_keys = mutation.mutate(old_keys);
+        const auto plan = plan_design_child_updates(keyed_nodes(old_keys), keyed_nodes(new_keys));
+        require_minimal_plan(old_keys, new_keys);
+        // Shuffles have no closed-form minimum; the reference above covers them.
+        if (std::string_view(mutation.name).rfind("shuffle", 0) != 0)
+            CHECK(plan.work.moved == mutation.expected_moved);
+    }
+}
+
+TEST_CASE("keyed planner trims a shared prefix and suffix as retained",
+          "[view][import][update][keyed]") {
+    const Keys old_keys{"a", "b", "c", "d", "e", "f"};
+    const Keys new_keys{"a", "b", "d", "c", "e", "f"};
+    const auto plan = plan_design_child_updates(keyed_nodes(old_keys), keyed_nodes(new_keys));
+    REQUIRE(plan.updates.size() == 6);
+    CHECK(plan.work == DesignUpdateWorkCounters{5, 1, 0, 0});
+    for (const auto index : {0u, 1u, 4u, 5u}) {
+        CHECK(plan.updates[index].kind == DesignUpdateKind::retained);
+        CHECK(plan.updates[index].old_index == index);
+        CHECK(plan.updates[index].new_index == index);
+    }
+    CHECK(apply_plan(plan, old_keys) == new_keys);
+}
+
+TEST_CASE("seeded random keyed permutations match the reference minimum",
+          "[view][import][update][keyed]") {
+    std::mt19937 random(0x5eed);
+    for (int round = 0; round < 300; ++round) {
+        const auto count = std::uniform_int_distribution<std::size_t>(0, 200)(random);
+        const auto old_keys = sequential_keys(count);
+        auto new_keys = old_keys;
+        std::shuffle(new_keys.begin(), new_keys.end(), random);
+        // Drop and add a random share of children so removals, inserts and
+        // moves interleave.
+        std::bernoulli_distribution drop(round % 3 == 0 ? 0.0 : 0.2);
+        std::erase_if(new_keys, [&](const std::string&) { return drop(random); });
+        const auto inserts = std::uniform_int_distribution<std::size_t>(0, round % 4)(random);
+        for (std::size_t i = 0; i < inserts; ++i) {
+            const auto at = std::uniform_int_distribution<std::size_t>(0, new_keys.size())(random);
+            new_keys.insert(new_keys.begin() + static_cast<std::ptrdiff_t>(at),
+                            "n" + std::to_string(i));
+        }
+        INFO("round " << round << " old " << old_keys.size() << " new " << new_keys.size());
+        require_minimal_plan(old_keys, new_keys);
+    }
+}
+
+TEST_CASE("recreated keyed children leave the move minimum to compatible survivors",
+          "[view][import][update][keyed]") {
+    const Keys old_keys{"a", "b", "c", "d"};
+    const Keys new_keys{"d", "b", "c", "a"};
+    auto old_children = keyed_nodes(old_keys);
+    auto new_children = keyed_nodes(new_keys);
+    new_children[1].audio_widget = AudioWidgetType::knob;
+    const auto plan = plan_design_child_updates(old_children, new_children);
+    REQUIRE(plan.keyed);
+    // b is recreated; of the survivors d, c, a only one ordered pair stays.
+    CHECK(plan.work == DesignUpdateWorkCounters{1, 2, 1, 1});
+    CHECK(apply_plan(plan, old_keys) == new_keys);
+}
+
+TEST_CASE("ambiguous keys report the reason and location of each offender",
+          "[view][import][update][keyed]") {
+    const auto require_replaced = [](const DesignChildUpdatePlan& plan, std::size_t old_count,
+                                     std::size_t new_count) {
+        CHECK_FALSE(plan.keyed);
+        CHECK(plan.ambiguous_keys);
+        CHECK(plan.work == DesignUpdateWorkCounters{0, 0, new_count, old_count});
+    };
+
+    SECTION("duplicate") {
+        const auto plan =
+            plan_design_child_updates(keyed_nodes({"a", "b", "a", "a"}), keyed_nodes({"a", "b"}));
+        require_replaced(plan, 4, 2);
+        REQUIRE(plan.key_diagnostics == std::vector<DesignKeyDiagnostic>{
+                                            {DesignKeyDiagnosticReason::duplicate, "a", 2, true},
+                                            {DesignKeyDiagnosticReason::duplicate, "a", 3, true},
+                                        });
+        CHECK(to_string(plan.key_diagnostics.front().reason) == "duplicate");
+    }
+
+    SECTION("missing") {
+        std::vector<IRNode> unkeyed(3);
+        const auto plan = plan_design_child_updates(keyed_nodes({"a", "b"}), unkeyed);
+        require_replaced(plan, 2, 3);
+        REQUIRE(plan.key_diagnostics == std::vector<DesignKeyDiagnostic>{
+                                            {DesignKeyDiagnosticReason::missing, "", 0, false},
+                                        });
+    }
+
+    SECTION("mixed") {
+        auto new_children = keyed_nodes({"a", "b", "c"});
+        new_children[1].stable_anchor_id.reset();
+        const auto plan = plan_design_child_updates(keyed_nodes({"a", "b", "c"}), new_children);
+        require_replaced(plan, 3, 3);
+        REQUIRE(plan.key_diagnostics == std::vector<DesignKeyDiagnostic>{
+                                            {DesignKeyDiagnosticReason::mixed, "", 1, false},
+                                        });
+        CHECK(to_string(plan.key_diagnostics.front().reason) == "mixed");
+    }
+
+    SECTION("unique keys carry no diagnostics") {
+        const auto plan =
+            plan_design_child_updates(keyed_nodes({"a", "b"}), keyed_nodes({"b", "a"}));
+        CHECK(plan.keyed);
+        CHECK(plan.key_diagnostics.empty());
+    }
+}
+
+TEST_CASE("keyed planner cost over large keyed lists", "[view][import][update][keyed][bench]") {
+    for (const std::size_t count : {500u, 1000u}) {
+        Keys old_keys = sequential_keys(count);
+        const auto old_children = keyed_nodes(old_keys);
+        for (const auto& mutation : uibench_mutations()) {
+            const auto new_keys = mutation.mutate(old_keys);
+            const auto new_children = keyed_nodes(new_keys);
+            constexpr int repetitions = 20;
+            DesignChildUpdatePlan plan;
+            Keys applied;
+            using clock = std::chrono::steady_clock;
+            clock::duration planning{};
+            clock::duration applying{};
+            for (int i = 0; i < repetitions; ++i) {
+                const auto start = clock::now();
+                plan = plan_design_child_updates(old_children, new_children);
+                const auto planned = clock::now();
+                applied = apply_plan(plan, old_keys);
+                planning += planned - start;
+                applying += clock::now() - planned;
+            }
+            const auto micros = [](clock::duration total) {
+                return std::chrono::duration<double, std::micro>(total).count() / repetitions;
+            };
+            std::printf("keyed-planner n=%zu %-24s moved=%zu plan=%.1f us apply=%.1f us\n", count,
+                        mutation.name, plan.work.moved, micros(planning), micros(applying));
+            CHECK(applied == new_keys);
+        }
     }
 }
