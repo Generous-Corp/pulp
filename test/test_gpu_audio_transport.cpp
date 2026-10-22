@@ -135,6 +135,176 @@ TEST_CASE("GpuAudioStatus v2 positional prefix still aggregate-initializes",
     CHECK(descriptor.worker_pipeline_blocks == 0);
 }
 
+namespace {
+
+GpuAudioStatus ready_gpu_status() {
+    GpuAudioStatus status;
+    status.requested_engine = GpuAudioEngine::Gpu;
+    status.selected_engine = GpuAudioEngine::Gpu;
+    status.provider_state = GpuAudioProviderState::Ready;
+    status.provider = GpuAudioProvider::Dawn;
+    status.fallback_policy = MissPolicy::CpuFallback;
+    status.fallback_available = true;
+    status.sample_rate = 48000;
+    status.block_size = 64;
+    status.produced_blocks = 10;
+    status.fallback_blocks = 2;
+    status.terminal_counts[1] = 10; // GpuDelivered
+    status.terminal_counts[2] = 2;  // CpuFallback
+    status.epoch = 1;
+    status.delivery_epoch_active = true;
+    status.gpu_kernel_available = true;
+    return status;
+}
+
+GpuAudioStatusError status_error(const GpuAudioStatus& status) {
+    return validate_gpu_audio_status(status).error;
+}
+
+} // namespace
+
+TEST_CASE("validate_gpu_audio_status accepts coherent v3 states", "[gpu_audio][status]") {
+    STATIC_REQUIRE(validate_gpu_audio_status(GpuAudioStatus{}).accepted());
+    CHECK(validate_gpu_audio_status(ready_gpu_status()).accepted());
+
+    auto cpu_family = ready_gpu_status();
+    cpu_family.selected_engine = GpuAudioEngine::Cpu;
+    cpu_family.provider = GpuAudioProvider::Cpu;
+    cpu_family.gpu_kernel_available = false;
+    cpu_family.epoch = 0;
+    cpu_family.delivery_epoch_active = false;
+    std::fill(std::begin(cpu_family.terminal_counts), std::end(cpu_family.terminal_counts), 0u);
+    CHECK(validate_gpu_audio_status(cpu_family).accepted());
+
+    auto lost = ready_gpu_status();
+    lost.provider_state = GpuAudioProviderState::Unavailable;
+    lost.selected_engine = GpuAudioEngine::Unknown;
+    lost.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
+    lost.recovery_sequence = 7;
+    CHECK(validate_gpu_audio_status(lost).accepted());
+    lost.recovery_reason = GpuAudioRecoveryReason::ProviderUnresponsive;
+    CHECK(validate_gpu_audio_status(lost).accepted());
+
+    auto sustained = ready_gpu_status();
+    sustained.provider_state = GpuAudioProviderState::Degraded;
+    sustained.selected_engine = GpuAudioEngine::Cpu;
+    sustained.recovery_reason = GpuAudioRecoveryReason::SustainedDeadlineMisses;
+    sustained.recovery_sequence = 9;
+    CHECK(validate_gpu_audio_status(sustained).accepted());
+
+    auto shadowed = ready_gpu_status();
+    shadowed.shadow_mode = GpuAudioShadowMode::Worker;
+    shadowed.shadow_delivered_blocks = 3;
+    shadowed.shadow_late_blocks = 1;
+    shadowed.shadow_double_miss_blocks = 1;
+    shadowed.shadow_inline_cost_pct = 4.5f;
+    CHECK(validate_gpu_audio_status(shadowed).accepted());
+}
+
+TEST_CASE("validate_gpu_audio_status rejects each planted v3 violation", "[gpu_audio][status]") {
+    using Error = GpuAudioStatusError;
+
+    auto status = ready_gpu_status();
+    status.schema_version = 2;
+    CHECK(status_error(status) == Error::SchemaVersionMismatch);
+
+    status = ready_gpu_status();
+    status.shadow_mode = static_cast<GpuAudioShadowMode>(7);
+    CHECK(status_error(status) == Error::InvalidEnumValue);
+    status = ready_gpu_status();
+    status.recovery_reason = static_cast<GpuAudioRecoveryReason>(10);
+    status.recovery_sequence = 1;
+    CHECK(status_error(status) == Error::InvalidEnumValue);
+
+    // recovery_sequence == UINT64_MAX iff no recovery reason.
+    status = ready_gpu_status();
+    status.recovery_reason = GpuAudioRecoveryReason::ProviderFailure;
+    CHECK(status_error(status) == Error::RecoverySequenceMismatch);
+    status = ready_gpu_status();
+    status.recovery_sequence = 3;
+    CHECK(status_error(status) == Error::RecoverySequenceMismatch);
+
+    status = GpuAudioStatus{};
+    status.sample_rate = 48000;
+    CHECK(status_error(status) == Error::UninitializedStateHasPreparation);
+    status = GpuAudioStatus{};
+    status.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
+    status.recovery_sequence = 1;
+    CHECK(status_error(status) == Error::UninitializedStateHasRecovery);
+
+    status = ready_gpu_status();
+    status.block_size = 0;
+    CHECK(status_error(status) == Error::PreparedShapeMissing);
+
+    status = ready_gpu_status();
+    status.selected_engine = GpuAudioEngine::Unknown;
+    CHECK(status_error(status) == Error::ReadyWithoutEngine);
+
+    status = ready_gpu_status();
+    status.provider = GpuAudioProvider::Cpu;
+    status.gpu_kernel_available = false;
+    status.epoch = 0;
+    CHECK(status_error(status) == Error::GpuEngineWithoutProvider);
+
+    // Degraded or Unavailable never selects the GPU engine.
+    status = ready_gpu_status();
+    status.provider_state = GpuAudioProviderState::Degraded;
+    CHECK(status_error(status) == Error::DegradedOrUnavailableOnGpu);
+    status.provider_state = GpuAudioProviderState::Unavailable;
+    CHECK(status_error(status) == Error::DegradedOrUnavailableOnGpu);
+
+    // ProviderLost / ProviderUnresponsive imply Unavailable.
+    status = ready_gpu_status();
+    status.provider_state = GpuAudioProviderState::Degraded;
+    status.selected_engine = GpuAudioEngine::Unknown;
+    status.recovery_reason = GpuAudioRecoveryReason::ProviderUnresponsive;
+    status.recovery_sequence = 4;
+    CHECK(status_error(status) == Error::LostProviderNotUnavailable);
+    status.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
+    CHECK(status_error(status) == Error::LostProviderNotUnavailable);
+
+    // SustainedDeadlineMisses implies Degraded.
+    status = ready_gpu_status();
+    status.provider_state = GpuAudioProviderState::Unavailable;
+    status.selected_engine = GpuAudioEngine::Unknown;
+    status.recovery_reason = GpuAudioRecoveryReason::SustainedDeadlineMisses;
+    status.recovery_sequence = 4;
+    CHECK(status_error(status) == Error::SustainedMissesNotDegraded);
+
+    // A CPU provider has no GPU kernel and no GPU delivery epoch.
+    status = ready_gpu_status();
+    status.selected_engine = GpuAudioEngine::Cpu;
+    status.provider = GpuAudioProvider::Cpu;
+    status.epoch = 0;
+    CHECK(status_error(status) == Error::CpuProviderWithGpuState);
+    status.gpu_kernel_available = false;
+    status.epoch = 2;
+    CHECK(status_error(status) == Error::CpuProviderWithGpuState);
+
+    // No shadow means no shadow accounting.
+    status = ready_gpu_status();
+    status.shadow_late_blocks = 1;
+    CHECK(status_error(status) == Error::ShadowCountsWithoutShadow);
+    status = ready_gpu_status();
+    status.shadow_inline_cost_pct = 1.0f;
+    CHECK(status_error(status) == Error::ShadowCountsWithoutShadow);
+
+    // Terminal counts stay within the delivery counters and do not overflow.
+    status = ready_gpu_status();
+    status.terminal_counts[1] = status.produced_blocks + 1;
+    CHECK(status_error(status) == Error::TerminalCountsInconsistent);
+    status = ready_gpu_status();
+    status.terminal_counts[2] = status.fallback_blocks + 1;
+    CHECK(status_error(status) == Error::TerminalCountsInconsistent);
+    status = ready_gpu_status();
+    status.terminal_counts[3] = UINT64_MAX;
+    CHECK(status_error(status) == Error::TerminalCountsInconsistent);
+
+    status = ready_gpu_status();
+    status.fallback_available = false;
+    CHECK(status_error(status) == Error::FallbackUnavailable);
+}
+
 TEST_CASE("GPU audio contract enums append without renumbering", "[gpu_audio][status]") {
     CHECK(static_cast<int>(GpuAudioRecoveryReason::InvalidCallback) == 6);
     CHECK(static_cast<int>(GpuAudioRecoveryReason::ProviderUnresponsive) == 7);

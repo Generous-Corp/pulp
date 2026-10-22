@@ -41,6 +41,9 @@ enum class GpuAudioTerminalDisposition : std::uint8_t {
 static_assert(static_cast<std::uint32_t>(GpuAudioTerminalDisposition::kCount) ==
                   GpuAudioStatus::kTerminalDispositionCount,
               "GpuAudioStatus::terminal_counts must cover every terminal disposition");
+static_assert(static_cast<std::uint32_t>(GpuAudioTerminalDisposition::GpuDelivered) == 1 &&
+                  static_cast<std::uint32_t>(GpuAudioTerminalDisposition::CpuFallback) == 2,
+              "validate_gpu_audio_status indexes terminal_counts by these values");
 
 /// Why a prepared program descriptor was rejected. Validation is constexpr so
 /// providers and SDK consumers can use the same fail-closed rules without

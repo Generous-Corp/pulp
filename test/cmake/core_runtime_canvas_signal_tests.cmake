@@ -1155,3 +1155,12 @@ pulp_test_spawns(pulp-test-group-core-platform NONE REASON "dlopens the system l
 pulp_test_spawns(pulp-test-group-core-runtime-http NONE REASON "runs /bin/echo, /bin/sh, /bin/pwd and powershell, nothing the tree builds")
 pulp_test_spawns(pulp-test-streaming-model-contract NONE REASON "forks itself without exec and loads nothing the tree builds")
 pulp_test_spawns(pulp-test-group-core-gpu-audio-private NONE REASON "forks itself without exec and loads nothing the tree builds")
+
+# One translation unit per GPU-audio contract header, each including that
+# header first, so an include-order dependence between them fails to compile.
+pulp_add_test_suite(pulp-test-gpu-audio-header-standalone
+    SOURCES test_gpu_audio_header_standalone_status.cpp
+            test_gpu_audio_header_standalone_capability.cpp
+            test_gpu_audio_header_standalone_node.cpp
+            test_gpu_audio_header_standalone_program.cpp
+    GROUP pulp-test-group-core-gpu-audio-private)
