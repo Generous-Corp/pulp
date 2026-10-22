@@ -671,6 +671,18 @@ def geometry_metrics(
     return result
 
 
+def panel_covers_page(capture: dict[str, Any]) -> bool:
+    """Whether the authored frame is the whole captured page."""
+    width, height = capture_logical_size(capture)
+    try:
+        frame = capture["reference"]["authored_frame"]
+        x, y = float(frame["x"]), float(frame["y"])
+        w, h = float(frame["width"]), float(frame["height"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return x <= 0 and y <= 0 and x + w >= width and y + h >= height
+
+
 def authenticated_authored_origin(
     capture: dict[str, Any], native_capture: dict[str, Any],
 ) -> tuple[float, float]:
@@ -1474,6 +1486,14 @@ def compare_one(
     authored_x, authored_y = authenticated_authored_origin(capture, native_capture)
     page_background = document_canvas_background(
         json.loads(browser_snapshot_bytes), capture)
+    if page_background["status"] == "resolved" and panel_covers_page(capture):
+        # A panel that is the whole page owns its canvas: the importer stamps
+        # the document colour on its root. Supplying it here would paint a
+        # backdrop the import may have dropped.
+        page_background = {"status": "importer-owned", "color": None,
+                           "reason": "the authored frame covers the page; the "
+                                     "importer's root carries the document canvas",
+                           "resolved": page_background}
     render_args = [
         str(observer), "--input", str(native_ir),
         "--render", str(native_render), "--layout", str(native_layout),

@@ -1117,6 +1117,19 @@ class DifferentialLabTests(unittest.TestCase):
                 self.assertFalse(result["threshold_eligible"])
                 self.assertTrue(result["reasons"])
 
+    def test_only_a_cropped_panel_borrows_the_page_colour(self) -> None:
+        def capture(x: float, y: float, w: float, h: float) -> dict[str, object]:
+            return {"reference": {"logical_width": 480, "logical_height": 320,
+                                  "authored_frame": {"x": x, "y": y, "width": w, "height": h}}}
+        # A whole-page panel's importer root owns the document canvas.
+        self.assertTrue(LAB.panel_covers_page(capture(0, 0, 480, 320)))
+        self.assertTrue(LAB.panel_covers_page(capture(0, 0, 480, 400)))
+        # Anything smaller or offset leaves page around it for the lab to fill.
+        self.assertFalse(LAB.panel_covers_page(capture(24, 24, 362, 97)))
+        self.assertFalse(LAB.panel_covers_page(capture(0, 0, 480, 300)))
+        self.assertFalse(LAB.panel_covers_page({"reference": {"logical_width": 480,
+                                                              "logical_height": 320}}))
+
     def test_canonical_digest_ignores_only_settle_poll_counts(self) -> None:
         def capture(rounds: int, stable: int, color: str) -> bytes:
             return json.dumps({"schema": "pulp-browser-capture-v1",
