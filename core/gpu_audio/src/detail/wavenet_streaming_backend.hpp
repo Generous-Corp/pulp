@@ -48,6 +48,9 @@ class WaveNetStreamingBackend final : public StreamingBackend {
     }
     bool quiesce() noexcept override;
     bool release() noexcept override;
+    bool device_lost() const noexcept override {
+        return lost_;
+    }
 
     /// True when the channels are authenticated GpuWaveNetSession providers
     /// rather than an injected test seam.
@@ -79,6 +82,7 @@ class WaveNetStreamingBackend final : public StreamingBackend {
         bool late = false;
     };
     Slot* find(std::uint64_t sequence) noexcept;
+    bool any_channel_lost() const noexcept;
     void fail_all_pending() noexcept;
     bool release_channels() noexcept;
 
@@ -96,6 +100,7 @@ class WaveNetStreamingBackend final : public StreamingBackend {
     std::uint64_t all_channels_mask_ = 0;
     std::uint32_t block_size_ = 0;
     bool prepared_ = false;
+    bool lost_ = false; // worker only; latched until release()
 };
 
 } // namespace pulp::gpu_audio::detail

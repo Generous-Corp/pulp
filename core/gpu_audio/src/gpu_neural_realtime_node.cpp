@@ -102,12 +102,21 @@ struct GpuNeuralRealtimeNode::Impl {
     std::uint64_t cpu_next_sequence = 0;
     std::atomic<std::uint64_t> cpu_blocks{0};
     std::atomic<detail::SharedIoRecoveryReason> cpu_recovery{detail::SharedIoRecoveryReason::None};
+    // GPU loss and hang detection, as in GpuWaveNetRealtimeNode. The device
+    // flag is written by the worker and read by host status reads. The
+    // callback publishes the sequence after the last callback that finished
+    // consuming its output; the watchdog counts silence in those blocks.
+    std::atomic<bool> device_lost{false};
+    std::atomic<std::uint64_t> callback_next{0};
+    std::uint64_t watchdog_limit = 0, completion_mark = 0; // worker only
     std::atomic<std::uint64_t> cpu_recovery_sequence{std::numeric_limits<std::uint64_t>::max()};
 
     bool prepared = false;
     PrepareError last_error = PrepareError::None;
     // Non-finite input samples replaced with zero, counted once per callback.
     std::atomic<std::uint64_t> sanitized_samples{0};
+    // CPU-only path: invalid or out-of-sequence callbacks observed.
+    std::atomic<std::uint64_t> contract_violations{0};
 
     // Shadow placement. `shadow_mode` is the policy in effect; only prepare(),
     // release() and the offline fence change it, each with the callback idle.
@@ -398,6 +407,10 @@ struct GpuNeuralRealtimeNode::Impl {
         }
         pending_head = pending_count = 0;
         next_input = sequence;
+        callback_next.store(sequence, std::memory_order_relaxed);
+        watchdog_limit = c.watchdog_blocks != 0 ? c.watchdog_blocks : c.capacity - 1;
+        completion_mark = sequence;
+        device_lost.store(false, std::memory_order_relaxed);
         telemetry.reset();
         bridge->set_trace(nullptr, &telemetry);
         return true;
@@ -412,29 +425,64 @@ struct GpuNeuralRealtimeNode::Impl {
         return nullptr;
     }
 
-    std::uint32_t collect(std::uint64_t deadline) noexcept {
+    // The block the provider has not delivered: the oldest in flight, or the
+    // next to be admitted when nothing is in flight.
+    std::uint64_t first_undelivered() const noexcept {
+        return pending_count != 0 ? pending_ring[pending_head].stamp.sequence : next_input;
+    }
+    void latch_loss(std::uint64_t at) noexcept {
+        device_lost.store(true, std::memory_order_release);
+        fail(detail::SharedIoRecoveryReason::ProviderLost, at);
+    }
+    // Device loss is the root cause of the failures and silence it produces,
+    // so once observed it replaces those latched symptoms. Independent causes
+    // (a sequence gap, an invalid callback) stay first.
+    detail::SharedIoRecoveryReason recovery() const noexcept {
+        using Recovery = detail::SharedIoRecoveryReason;
+        const auto latched =
+            bridge ? bridge->recovery_reason() : cpu_recovery.load(std::memory_order_acquire);
+        if (device_lost.load(std::memory_order_acquire) &&
+            (latched == Recovery::ProviderFailure || latched == Recovery::ProviderUnresponsive))
+            return Recovery::ProviderLost;
+        return latched;
+    }
+
+    std::uint32_t collect(std::uint64_t deadline, bool* progressed = nullptr) noexcept {
         auto& backend = *model->backend;
-        (void)backend.service_until(deadline);
+        if (backend.service_until(deadline) != 0 && progressed != nullptr)
+            *progressed = true;
+        // Loss outranks the failed completions it causes, so it is latched
+        // before any of this pass's terminals can latch ProviderFailure.
+        if (backend.device_lost() && !device_lost.load(std::memory_order_relaxed))
+            latch_loss(first_undelivered());
+        const auto failure = device_lost.load(std::memory_order_relaxed)
+                                 ? detail::SharedIoRecoveryReason::ProviderLost
+                                 : detail::SharedIoRecoveryReason::ProviderFailure;
         detail::StreamingTerminal terminal;
         while (backend.receive(terminal)) {
             auto* pending = find_pending(terminal.stamp);
             if (pending == nullptr) {
-                fail(detail::SharedIoRecoveryReason::ProviderFailure, terminal.stamp.sequence);
+                fail(failure, terminal.stamp.sequence);
                 continue;
             }
             pending->done = true;
             pending->disposition = terminal.disposition;
             if (terminal.disposition == Terminal::ProviderFailed)
-                fail(detail::SharedIoRecoveryReason::ProviderFailure, terminal.stamp.sequence);
+                fail(failure, terminal.stamp.sequence);
             else if (terminal.disposition == Terminal::DeviceLost)
-                fail(detail::SharedIoRecoveryReason::ProviderLost, terminal.stamp.sequence);
+                latch_loss(terminal.stamp.sequence);
         }
         std::uint32_t produced = 0;
         while (pending_count != 0) {
             auto& pending = pending_ring[pending_head];
             if (!pending.done)
                 break;
-            if (pending.disposition == Terminal::Completed &&
+            // Late is a stream-position fact: the callback that would consume
+            // this block has finished, so publishing it would only fill the
+            // egress ring with a result nobody can take.
+            const bool consumer_passed = callback_next.load(std::memory_order_acquire) >
+                                         pending.stamp.sequence + config.lead_blocks;
+            if (pending.disposition == Terminal::Completed && !consumer_passed &&
                 bridge->delivery_epoch() == pending.stamp.epoch) {
                 const auto publication = bridge->publish_output(
                     {.epoch = pending.stamp.epoch, .sequence = pending.stamp.sequence},
@@ -449,6 +497,27 @@ struct GpuNeuralRealtimeNode::Impl {
             --pending_count;
         }
         return produced;
+    }
+
+    // A provider is unresponsive when it completes nothing for
+    // `watchdog_limit` callback blocks while work is in flight. Silence counts
+    // from the later of the last completion and the oldest in-flight
+    // admission, so an idle stretch never counts against it, and a provider
+    // that keeps completing, however late, is slow rather than unresponsive.
+    void watch_provider(bool progressed) noexcept {
+        const auto position = callback_next.load(std::memory_order_acquire);
+        if (progressed) {
+            completion_mark = position;
+            return;
+        }
+        if (pending_count == 0 || bridge->delivery_epoch() == 0)
+            return;
+        // The oldest in-flight block was admitted after its own callback.
+        const auto since = std::max(completion_mark, first_undelivered() + 1);
+        // A preempted callback can leave the position behind; never wrap.
+        const auto silent = position > since ? position - since : 0;
+        if (silent >= watchdog_limit)
+            fail(detail::SharedIoRecoveryReason::ProviderUnresponsive, first_undelivered());
     }
 };
 
@@ -613,6 +682,7 @@ bool GpuNeuralRealtimeNode::prepare() {
                 s.fail(detail::SharedIoRecoveryReason::ProviderFailure, s.sequence);
         }
         s.sanitized_samples.store(0, std::memory_order_relaxed);
+        s.contract_violations.store(0, std::memory_order_relaxed);
         s.prepared = true;
         return true;
     } catch (...) {
@@ -744,6 +814,10 @@ bool GpuNeuralRealtimeNode::fenced() const noexcept {
     return impl_->bridge && impl_->bridge->delivery_epoch() == 0;
 }
 
+std::uint64_t GpuNeuralRealtimeNode::callback_contract_violations() const noexcept {
+    return impl_->contract_violations.load(std::memory_order_relaxed);
+}
+
 std::uint64_t GpuNeuralRealtimeNode::sanitized_input_samples() const noexcept {
     return impl_->sanitized_samples.load(std::memory_order_relaxed);
 }
@@ -760,9 +834,7 @@ GpuAudioProvider GpuNeuralRealtimeNode::transport_provider() const noexcept {
 }
 
 GpuAudioRecoveryReason GpuNeuralRealtimeNode::recovery_reason() const noexcept {
-    if (impl_->bridge)
-        return public_reason(impl_->bridge->recovery_reason());
-    return public_reason(impl_->cpu_recovery.load(std::memory_order_acquire));
+    return public_reason(impl_->recovery());
 }
 
 std::uint64_t GpuNeuralRealtimeNode::recovery_sequence() const noexcept {
@@ -891,12 +963,11 @@ std::uint8_t GpuNeuralRealtimeNode::process(void* self, const audio::BufferView<
             if (replaced != 0)
                 s.sanitized_samples.fetch_add(replaced, std::memory_order_relaxed);
         }
-        if (!shape_ok)
-            s.fail(detail::SharedIoRecoveryReason::InvalidCallback, sequence);
-        else if (sequence < s.cpu_next_sequence)
-            s.fail(detail::SharedIoRecoveryReason::InvalidCallback, sequence);
-        else if (sequence > s.cpu_next_sequence)
-            s.fail(detail::SharedIoRecoveryReason::SequenceGap, sequence);
+        // Nothing is fenced on this path and the CPU model keeps delivering,
+        // so a contract violation is counted rather than latched as a
+        // recovery that would leave the node Degraded for good.
+        if (!shape_ok || sequence != s.cpu_next_sequence)
+            s.contract_violations.fetch_add(1, std::memory_order_relaxed);
         if (sequence >= s.cpu_next_sequence && sequence < Bridge::kSequenceLimit)
             s.cpu_next_sequence = sequence + 1;
         return detail::kRealtimeGpuMissed;
@@ -915,6 +986,8 @@ std::uint8_t GpuNeuralRealtimeNode::process(void* self, const audio::BufferView<
     }
     s.callback = s.bridge->begin_callback(s.callback_input, sequence, start);
     const auto delivery = s.bridge->consume_output(s.callback, s.callback_output, nullptr, true);
+    // Consumption is over: the watchdog may count this block.
+    s.callback_next.store(sequence + 1, std::memory_order_release);
     // The Worker shadow's result for the slot this callback emits, if any.
     const bool worker = s.worker_fed() && sequence >= s.first_sequence + s.config.lead_blocks;
     const bool substitute = s.shadow_mode.load(std::memory_order_relaxed) == ShadowPolicy::Worker;
@@ -947,7 +1020,10 @@ std::uint32_t GpuNeuralRealtimeNode::service(void* self, std::uint64_t) noexcept
     const auto pump_now = now_ns();
     const auto wait_ns = s.config.completion_service_wait_ns;
     const auto deadline = wait_ns != 0 && pump_now <= UINT64_MAX - wait_ns ? pump_now + wait_ns : 0;
-    auto produced = s.collect(deadline);
+    // Collect before watching, so this pump's completions count as progress.
+    bool progressed = false;
+    auto produced = s.collect(deadline, &progressed);
+    s.watch_provider(progressed);
     if (!s.bridge->begin_worker_admission())
         return produced;
     bool admitted = false;
@@ -981,7 +1057,10 @@ std::uint32_t GpuNeuralRealtimeNode::service(void* self, std::uint64_t) noexcept
             // A rejected block carries no backend terminal; retire it here.
             pending.done = true;
             pending.disposition = Terminal::ProviderFailed;
-            s.fail(detail::SharedIoRecoveryReason::ProviderFailure, stamp.sequence);
+            if (s.model->backend->device_lost())
+                s.latch_loss(stamp.sequence);
+            else
+                s.fail(detail::SharedIoRecoveryReason::ProviderFailure, stamp.sequence);
         } else {
             admitted = true;
         }
@@ -989,10 +1068,12 @@ std::uint32_t GpuNeuralRealtimeNode::service(void* self, std::uint64_t) noexcept
         ++s.pending_count;
     }
     s.bridge->end_worker_admission();
-    if (deadline != 0 && admitted)
-        produced += s.collect(deadline);
-    else
-        produced += s.collect(0);
+    // A completion seen only in this tail pass is progress too: the next
+    // pump's watchdog check must count silence from it.
+    progressed = false;
+    produced += s.collect(deadline != 0 && admitted ? deadline : 0, &progressed);
+    if (progressed)
+        s.watch_provider(true);
     return produced;
 }
 
@@ -1023,6 +1104,7 @@ bool GpuNeuralRealtimeNode::health(const void* self, detail::RealtimeGpuHealth& 
     out.recovery_sequence = node.recovery_sequence();
     out.epoch = node.epoch();
     out.delivery_epoch_active = out.epoch != 0;
+    out.device_lost = node.impl_->device_lost.load(std::memory_order_acquire);
     if (node.impl_->prepared)
         node.impl_->fill_shadow(out);
     return true;

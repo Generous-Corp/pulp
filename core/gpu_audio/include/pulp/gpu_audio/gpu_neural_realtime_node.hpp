@@ -76,6 +76,10 @@ GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept;
 /// authoritative shadow counts; the transport's CpuFallbackDelivered label
 /// means only that the fallback path ran, which can be a silent double miss.
 ///
+/// On the GPU path the node detects device loss (the provider's loss query,
+/// which outranks the failed completions it causes) and a hung provider (a
+/// completion watchdog in callback blocks); both report Unavailable.
+///
 /// Recovery is manual: any latched cause, including a single invalid
 /// callback, fences GPU delivery until the host prepares the node again. The
 /// shadow carries the stream meanwhile. Automatic re-acquire is future work.
@@ -173,6 +177,13 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
         /// Borrowed os_workgroup_t of the host's audio thread. The Worker
         /// shadow thread joins it; without one it runs at USER_INTERACTIVE.
         void* shadow_audio_workgroup = nullptr;
+        /// GPU watchdog budget in callback blocks: a provider that completes
+        /// nothing for this many blocks while work is in flight latches
+        /// ProviderUnresponsive. Zero selects `capacity - 1`, which fires
+        /// before the ingress ring saturates while the worker keeps up with
+        /// the callback. A provider that keeps completing, however late, is
+        /// never unresponsive.
+        std::uint32_t watchdog_blocks = 0;
     };
 
     /// Host thread only.
@@ -211,6 +222,11 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
     /// prepare(). The GPU submission and the CPU shadow both see the
     /// replacement, so they stay comparable.
     std::uint64_t sanitized_input_samples() const noexcept;
+    /// Invalid or out-of-sequence callbacks observed on the CPU-only path.
+    /// They are counted, not latched: nothing is fenced there and the CPU
+    /// model keeps delivering. On the GPU path the same violation fences GPU
+    /// delivery and is reported as the recovery reason.
+    std::uint64_t callback_contract_violations() const noexcept;
     NeuralFamily family() const noexcept;
     /// True only while a GPU backend for this family is prepared and has not
     /// been quiesced by an offline fence.
