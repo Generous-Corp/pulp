@@ -25,7 +25,8 @@ with the Shipyard changed-surface families), plus these rules:
     budget is spent, and every test that did not run is listed as skipped;
   * merge-only checks (selected because the diff changes their declared
     inputs, adds or edits their registration, or by a path family) run first,
-    then the tests built from the sources the diff edits. If the budget still pushes one
+    then the Catch2 cases whose lines the diff adds or edits, then the tests
+    built from the sources the diff edits. If the budget still pushes one
     out, the step fails, because nothing else runs it before the merge group.
     An ordinary affected test the budget pushes out is deferred to the merge
     queue, which runs the full suite, and the step stays neutral.
@@ -104,6 +105,18 @@ PATH_FAMILIES = (
     ("no-editor-link-floor",
      re.compile(r"^test/fixtures/no_editor_link_floor/"),
      re.compile(r"^no-editor-plugin-link-floor-artifacts$")),
+    # The sync primitives are included by most of the tree, so an edit to one
+    # selects thousands of tests and the budget reaches their own concurrency
+    # hammers only by luck. The hammers are the one proof those edits did not
+    # break publication ordering, so they run first.
+    ("runtime-sync-hammers",
+     re.compile(r"^core/runtime/include/pulp/runtime/(triple_buffer|seqlock|spsc_queue)\.hpp$"),
+     re.compile(r"^(TripleBuffer|SeqLock|SpscQueue)\b.*\bhammer\b")),
+    # Same shape: buffer_ops.hpp reaches every processor, and its own cases
+    # (named `buffer_ops...`) are what check the helpers it declares.
+    ("audio-buffer-ops",
+     re.compile(r"^core/audio/(include/pulp/audio/buffer_ops\.hpp|src/buffer_ops\.cpp)$"),
+     re.compile(r"^buffer_ops\b")),
 )
 
 
@@ -216,6 +229,48 @@ def script_input_tests(paths: list[str], root: Path = REPO_ROOT) -> list[str]:
         if any(p == i or p.startswith(i + "/") for p in paths for i in inputs):
             picked.append(name)
     return picked
+
+
+# A Catch2 case header and its name. Discovery registers each case as a ctest
+# of that name, optionally behind a TEST_PREFIX.
+_CATCH_CASE = re.compile(
+    r'\b(?:TEST_CASE|TEST_CASE_METHOD|SCENARIO|TEMPLATE_TEST_CASE)\s*\('
+    r'(?:\s*\w+\s*,)?\s*"((?:[^"\\]|\\.)*)"')
+_CATCH_SOURCE_EXTENSIONS = (".cpp", ".cc", ".cxx", ".mm")
+
+
+def edited_case_tests(paths: list[str], names: dict[str, set[str]],
+                      changes: dict[str, tuple[set[int], list[str]]] | None,
+                      root: Path = REPO_ROOT) -> list[str]:
+    """Ctests for the Catch2 cases whose lines the diff adds or edits.
+
+    A test the pull request writes or rewrites is the one most likely to fail
+    on its head, but a header edit can make the projection select thousands of
+    tests, and the budget then reaches it only by luck. Each case spans from
+    its TEST_CASE line to the next one; a touched line inside that span selects
+    the ctest of that name (or one that ends with it, for a TEST_PREFIX).
+    """
+    if not changes:
+        return []
+    wanted: set[str] = set()
+    for rel in paths:
+        if not rel.startswith("test/") or not rel.endswith(_CATCH_SOURCE_EXTENSIONS):
+            continue
+        touched = changes.get(rel, (set(), []))[0]
+        if not touched:
+            continue
+        try:
+            text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        starts = [(text.count("\n", 0, m.start()) + 1, m.group(1))
+                  for m in _CATCH_CASE.finditer(text)]
+        for index, (line, case) in enumerate(starts):
+            end = starts[index + 1][0] if index + 1 < len(starts) else text.count("\n") + 2
+            if any(line <= t < end for t in touched):
+                wanted.add(case)
+    return sorted(n for n in names
+                  if n in wanted or any(n.endswith(": " + case) for case in wanted))
 
 
 def own_tests(build: Path, root: Path, paths: list[str]) -> list[str]:
@@ -454,6 +509,9 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     registered = registration_tests(build, paths, root, changes)
     plan["registrations"] = len(registered)
     chosen.extend(registered)
+    edited_cases = edited_case_tests(paths, names, changes, root)
+    plan["edited_cases"] = len(edited_cases)
+    chosen.extend(edited_cases)
     if all(is_non_test_path(p) for p in paths):
         plan["reason"] = "docs, skills, workflows or planning only"
     else:
@@ -487,9 +545,15 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     tests = [t for t in chosen if t in names and PR_FAST_LABEL not in names[t]
              and not (t in seen or seen.add(t))]
     plan["merge_only"] = [t for t in tests if t in merge_only]
-    own_first = [t for t in tests if t in set(own) and t not in merge_only]
-    plan["tests"] = plan["merge_only"] + own_first + [
-        t for t in tests if t not in merge_only and t not in set(own)]
+    # The cases the diff itself writes come next, then the tests built from the
+    # sources it edits, then the wider projection.
+    first = set(merge_only)
+    cases_first = [t for t in tests if t in set(edited_cases) and t not in first]
+    first |= set(cases_first)
+    own_first = [t for t in tests if t in set(own) and t not in first]
+    first |= set(own_first)
+    plan["tests"] = plan["merge_only"] + cases_first + own_first + [
+        t for t in tests if t not in first]
     return plan
 
 

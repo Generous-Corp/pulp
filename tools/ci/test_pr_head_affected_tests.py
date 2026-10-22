@@ -39,14 +39,23 @@ NAMES = {
     "pulp-gpu-dawn-shared-io-provider-probe": set(), "pulp-gpu-compute-unrelated": set(),
     "cmake-ios-auv3-control-shipping": set(),
     "pulp-test-cli-migration-index": set(),
+    "TripleBuffer hammer: writer + reader for 500ms": set(),
+    "SeqLock hammer: 1 writer + 2 readers for 500ms": set(),
+    "SpscQueue hammer: producer + consumer for 500ms": set(),
+    "TripleBuffer<MeterFrame> never tears a frame under a 2-thread hammer": set(),
+    "TripleBuffer basic read/write": set(),
+    "buffer_ops::apply_gain scales every sample in a span": set(),
+    "buffer_ops SIMD-equivalence: clip matches scalar baseline": set(),
 }
 
 
 class SelectionTests(unittest.TestCase):
     def plan(self, paths: list[str], projected: step.inventory.Selection,
              *, scripts: list[str] = (), inputs: list[str] = (), own: list[str] = (),
-             rebuilt: list[str] = (), registered: list[str] = ()) -> dict:
+             rebuilt: list[str] = (), registered: list[str] = (),
+             cases: list[str] = ()) -> dict:
         with mock.patch.object(step, "project", return_value=projected) as project, \
+                mock.patch.object(step, "edited_case_tests", return_value=list(cases)), \
                 mock.patch.object(step, "script_reference_tests", return_value=list(scripts)), \
                 mock.patch.object(step, "script_input_tests", return_value=list(inputs)), \
                 mock.patch.object(step, "own_tests", return_value=list(own)), \
@@ -106,6 +115,30 @@ class SelectionTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = self.plan([path], selection("all", []))
                 self.assertIn("cmake-ios-auv3-control-shipping", plan["tests"])
+
+    def test_a_sync_primitive_header_runs_its_hammers_first(self) -> None:
+        for header in ("triple_buffer", "seqlock", "spsc_queue"):
+            with self.subTest(header=header):
+                plan = self.plan([f"core/runtime/include/pulp/runtime/{header}.hpp"],
+                                 selection("focused", ["unit-a", "TripleBuffer basic read/write"]))
+                hammers = sorted(n for n in NAMES if "hammer" in n)
+                self.assertEqual(sorted(plan["merge_only"]), hammers)
+                self.assertEqual(sorted(plan["tests"][:len(hammers)]), hammers)
+
+    def test_buffer_ops_runs_its_own_cases_first(self) -> None:
+        for path in ("core/audio/include/pulp/audio/buffer_ops.hpp",
+                     "core/audio/src/buffer_ops.cpp"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("focused", ["unit-a"]))
+                cases = sorted(n for n in NAMES if n.startswith("buffer_ops"))
+                self.assertEqual(sorted(plan["merge_only"]), cases)
+                self.assertEqual(plan["tests"][-1], "unit-a")
+
+    def test_control_other_runtime_and_audio_files_do_not_reach_them(self) -> None:
+        plan = self.plan(["core/runtime/include/pulp/runtime/simd.hpp",
+                          "core/audio/src/buffer.cpp"], selection("focused", ["unit-a"]))
+        self.assertEqual(plan["merge_only"], [])
+        self.assertEqual(plan["tests"], ["unit-a"])
 
     def test_no_editor_fixture_reaches_its_artifact_probe(self) -> None:
         plan = self.plan(["test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake"],
@@ -203,6 +236,17 @@ class SelectionTests(unittest.TestCase):
                          own=["unit-a"], inputs=["sample-region-compat-baseline"])
         self.assertEqual(plan["tests"], ["sample-region-compat-baseline", "unit-a", "unit-b"])
 
+    def test_edited_cases_run_after_merge_only_checks_and_before_the_projection(self) -> None:
+        # A header edit can make the projection select thousands of tests; the
+        # cases the diff itself writes must not depend on the budget reaching
+        # them in projection order.
+        plan = self.plan(["core/x/a.hpp", "test/test_a.cpp"],
+                         selection("focused", ["unit-a", "other", "unit-b"]),
+                         inputs=["sample-region-compat-baseline"], cases=["unit-b"])
+        self.assertEqual(plan["tests"],
+                         ["sample-region-compat-baseline", "unit-b", "unit-a", "other"])
+        self.assertEqual(plan["edited_cases"], 1)
+
     def test_control_a_plan_without_merge_only_checks_keeps_its_order(self) -> None:
         plan = self.plan(["core/x/a.cpp"], selection("focused", ["unit-a"]), rebuilt=["unit-b"])
         self.assertEqual(plan["merge_only"], [])
@@ -241,6 +285,51 @@ if(_arm_only)
     add_test(NAME arm-control COMMAND pulp-probe --arm)
 endif()
 """
+
+
+class EditedCaseTests(unittest.TestCase):
+    SOURCE = (
+        '#include <catch2/catch_test_macros.hpp>\n'   # 1
+        '\n'                                         # 2
+        'TEST_CASE("first case", "[x]") {\n'         # 3
+        '    REQUIRE(true);\n'                       # 4
+        '}\n'                                        # 5
+        '\n'                                         # 6
+        'TEST_CASE("second \\"quoted\\" case",\n'  # 7
+        '          "[x]") {\n'                       # 8
+        '    REQUIRE(1 == 1);\n'                     # 9
+        '}\n'                                        # 10
+    )
+    NAMES = {"first case": set(), 'second \\"quoted\\" case': set(),
+             'gain: second \\"quoted\\" case': set(), "unrelated": set()}
+
+    def cases(self, rel: str, touched: set[int]) -> list[str]:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "test").mkdir()
+            (root / "test" / "test_x.cpp").write_text(self.SOURCE, encoding="utf-8")
+            return step.edited_case_tests([rel], self.NAMES, {rel: (touched, [])}, root)
+
+    def test_a_touched_line_selects_the_case_that_contains_it(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {9}),
+                         ['gain: second \\"quoted\\" case', 'second \\"quoted\\" case'])
+
+    def test_a_touched_case_header_selects_that_case(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {3}), ["first case"])
+
+    def test_control_lines_before_the_first_case_select_nothing(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {1, 2}), [])
+
+    def test_control_a_non_test_path_selects_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "core").mkdir()
+            (root / "core" / "x.cpp").write_text(self.SOURCE, encoding="utf-8")
+            self.assertEqual(step.edited_case_tests(
+                ["core/x.cpp"], self.NAMES, {"core/x.cpp": ({3, 9}, [])}, root), [])
+
+    def test_control_no_line_changes_selects_nothing(self) -> None:
+        self.assertEqual(step.edited_case_tests(["test/test_x.cpp"], self.NAMES, None), [])
 
 
 class RegistrationImpactTests(unittest.TestCase):
