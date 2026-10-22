@@ -235,11 +235,17 @@ def canonical_json_sha256(source: Path | bytes) -> str:
             # equivalence. Retain and verify raw snapshot bindings separately.
             document_entry = (capture_envelope and len(path) == 2
                               and path[0] == "documents" and isinstance(path[1], int))
+            # The settle loop polls until the DOM stops changing; how many
+            # polls that took depends on host load, like elapsed_ms, while
+            # the settled DOM itself is covered by the snapshot digests.
+            settle_entry = path == ("provenance", "settle")
             return {
                 key: scrub(item, (*path, key))
                 for key, item in value.items()
                 if key not in volatile_keys
                 and not (document_entry and key == "snapshot_sha256")
+                and not (settle_entry and key in {"rounds", "stable_rounds"})
+                and not (path == () and key == "settle_rounds")
             }
         if isinstance(value, list):
             return [scrub(item, (*path, index)) for index, item in enumerate(value)]

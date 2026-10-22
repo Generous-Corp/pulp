@@ -1089,6 +1089,26 @@ class DifferentialLabTests(unittest.TestCase):
                 self.assertFalse(result["threshold_eligible"])
                 self.assertTrue(result["reasons"])
 
+    def test_canonical_digest_ignores_only_settle_poll_counts(self) -> None:
+        def capture(rounds: int, stable: int, color: str) -> bytes:
+            return json.dumps({"schema": "pulp-browser-capture-v1",
+                               "provenance": {"settle": {"rounds": rounds,
+                                                         "stable_rounds": stable,
+                                                         "elapsed_ms": 900}},
+                               "reference": {"color": color}}).encode("utf-8")
+        self.assertEqual(LAB.canonical_json_sha256(capture(14, 12, "red")),
+                         LAB.canonical_json_sha256(capture(15, 13, "red")))
+        self.assertNotEqual(LAB.canonical_json_sha256(capture(14, 12, "red")),
+                            LAB.canonical_json_sha256(capture(14, 12, "blue")))
+        ir = lambda rounds, text: json.dumps(
+            {"settle_rounds": rounds, "root": {"text": text}}).encode("utf-8")
+        self.assertEqual(LAB.canonical_json_sha256(ir(14, "a")),
+                         LAB.canonical_json_sha256(ir(15, "a")))
+        # Only the top-level IR field: a node property of that name still counts.
+        self.assertNotEqual(
+            LAB.canonical_json_sha256(json.dumps({"root": {"settle_rounds": 1}}).encode()),
+            LAB.canonical_json_sha256(json.dumps({"root": {"settle_rounds": 2}}).encode()))
+
     def test_semantic_snapshot_digest_ignores_only_the_frame_id(self) -> None:
         def snapshot(frame: str, text: str) -> bytes:
             return json.dumps({"strings": ["#document", frame, text],
