@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "event_id": "20261022-importer-p3c-parity",
+  "kind": "change",
+  "created_at": "2026-10-22T01:29:33Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); fill_text and stroke_text painted the paragraph top at y minus the unrounded getAlphabeticBaseline() while SkParagraph draws glyphs round(ascent) below that top, so every Canvas2D baseline landed up to half a unit off y; make_paragraph now returns the rounded baseline. PreparedText gains typographic_ascent() and typographic_descent() (fAscent/fDescent, not widened to fTop/fBottom) so Label's captured branch can reproduce Chromium's bottom-minus-round(fDescent) baseline. The Pulp canvas target has not adopted a Vellum package. No API is removed and no design-import, Chromium, rendering-backend, packaging, or source-authority boundary moves.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-browser-capture-ir",
+    "ctest --test-dir build -R pulp-test-canvas-fonts",
+    "ctest --test-dir build -R pulp-test-design-import-benchmark-contracts",
+    "ctest --test-dir build -R pulp-test-design-import-codegen-layout-text",
+    "ctest --test-dir build -R pulp-test-view-lifecycle-contract",
+    "ctest --test-dir build -R pulp-test-widgets-label",
+    "python3 test/test_importer_differential_lab.py",
+    "python3 tools/import-validation/test_diff_against_reference.py"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}
