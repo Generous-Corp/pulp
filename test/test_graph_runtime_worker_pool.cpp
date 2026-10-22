@@ -232,6 +232,11 @@ TEST_CASE("WorkerPool receipt binds static ready frontiers to worker admission",
     GraphRuntimeWorkerPool pool;
     SchedulingReceiptProbe probe;
     pool.set_scheduling_receipt_hook_for_test(record_scheduling_receipt, &probe);
+    // A worker that sees no batch for the hot idle window parks, and run() then
+    // executes inline by design. On a loaded host the caller can be descheduled
+    // for longer than that window between batches, so admission is only
+    // deterministic when parking is suppressed.
+    pool.keep_workers_hot_for_test();
     pool.set_audio_workgroup(nullptr);
     REQUIRE(pool.start(4));
 

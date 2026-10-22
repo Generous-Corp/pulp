@@ -467,7 +467,7 @@ void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
                 worker_backoff_count_.fetch_add(1, std::memory_order_relaxed);
                 spins = 0;
                 const auto now = std::chrono::steady_clock::now();
-                if (now < hot_until ||
+                if (now < hot_until || keep_workers_hot_for_test_ ||
                     reheat_requested_.load(std::memory_order_acquire)) {
                     std::this_thread::yield();
                 } else {
