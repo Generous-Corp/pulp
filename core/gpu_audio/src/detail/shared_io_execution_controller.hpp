@@ -116,7 +116,9 @@ class SharedIoExecutionController {
     // Generation of the current (or most recent) preparation; zero means the
     // controller was never prepared. release() does not reset it, so a
     // provider completion deferred across release()/prepare() names a stale
-    // generation and cannot retire a sequence of the next stream.
+    // generation and cannot retire a sequence of the next stream. Providers
+    // must capture it when the submission is admitted, never when the
+    // completion runs.
     std::uint64_t generation() const noexcept {
         return generation_;
     }
@@ -143,8 +145,11 @@ class SharedIoExecutionController {
     SharedIoAdmission admit_submission(std::uint64_t sequence) noexcept {
         if (!prepared_)
             return SharedIoAdmission::NotPrepared;
-        if (sequence == kLastSequence)
+        if (sequence == kLastSequence) {
+            if (telemetry_)
+                telemetry_->record_resync_drop();
             return SharedIoAdmission::SequenceExhausted;
+        }
         if (sequence != next_admission_sequence_.load(std::memory_order_acquire)) {
             if (telemetry_)
                 telemetry_->record_resync_drop();
@@ -263,8 +268,11 @@ class SharedIoExecutionController {
         if (telemetry_)
             telemetry_->record_callback_block(false);
         // Accepting the terminal sequence value would wrap the callback epoch
-        // to zero and silently re-enter priming on the next callback.
+        // to zero and silently re-enter priming on the next callback. Latch the
+        // timeline at the terminal value so every later callback is a gap.
         if (callback_sequence == kLastSequence) {
+            callback_started_ = true;
+            next_callback_sequence_ = kLastSequence;
             result.path = fallback_path();
             result.fallback_reason = SharedIoFallbackReason::SequenceGap;
             if (telemetry_) {

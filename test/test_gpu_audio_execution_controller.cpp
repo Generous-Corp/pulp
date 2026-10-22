@@ -592,6 +592,27 @@ TEST_CASE("execution controller refuses to wrap the sequence epoch",
     REQUIRE(receipt.callback_blocks == 5);
     REQUIRE(receipt.delivered_blocks == 5);
     REQUIRE(receipt.fallback_blocks == 3);
+    // gap, exhausted admission, refused wrap admission, terminal, wrapped.
+    REQUIRE(receipt.resync_drops == 5);
+}
+
+TEST_CASE("a terminal first callback cannot re-enter priming",
+          "[gpu_audio][shared_io][controller][fault-injection][negative]") {
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(contract()));
+
+    const auto terminal = controller.deliver(std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(terminal.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(terminal.fallback_reason == SharedIoFallbackReason::SequenceGap);
+
+    const auto wrapped = controller.deliver(0);
+    REQUIRE(wrapped.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(wrapped.fallback_reason == SharedIoFallbackReason::SequenceGap);
+
+    // Positive control: a fresh preparation primes from zero.
+    controller.release();
+    REQUIRE(controller.prepare(contract()));
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
 }
 
 TEST_CASE("lost provider callbacks keep their budget while callbacks stay continuous",
