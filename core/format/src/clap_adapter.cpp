@@ -363,6 +363,54 @@ static void publish_latency_changed(PulpClapPlugin* self) {
     if (ext && ext->changed) ext->changed(self->host);
 }
 
+static uint32_t clap_warm_event_count(const clap_input_events_t*) { return 0; }
+static const clap_event_header_t* clap_warm_event_get(const clap_input_events_t*, uint32_t) {
+    return nullptr;
+}
+
+// Runs the adapter's per-block path once on silence at activation so the
+// host's first real block is not charged for cold code and buffers. The run
+// stops before the Processor and before anything host-visible, and the
+// transport diff is restored so the first real block still reports a start.
+static void clap_warm_render_path(const clap_plugin_t* plugin, PulpClapPlugin* self) {
+    const int frames = std::min(self->max_buffer_size, 64);
+    if (frames <= 0) return;
+    std::vector<std::vector<float>> storage;
+    std::vector<std::vector<float*>> pointers;
+    storage.reserve(kMaxChannels * (kMaxInputBuses + kMaxOutputBuses));
+    pointers.reserve(kMaxInputBuses + kMaxOutputBuses);
+    auto make = [&](uint32_t count, const auto& widths, std::vector<clap_audio_buffer_t>& out) {
+        out.assign(count, clap_audio_buffer_t{});
+        for (uint32_t b = 0; b < count; ++b) {
+            const int channels = std::clamp(widths[b], 0, kMaxChannels);
+            auto& ptrs = pointers.emplace_back();
+            for (int ch = 0; ch < channels; ++ch)
+                ptrs.push_back(storage.emplace_back(static_cast<std::size_t>(frames), 0.0f).data());
+            out[b].channel_count = static_cast<uint32_t>(channels);
+            out[b].data32 = channels > 0 ? ptrs.data() : nullptr;
+        }
+    };
+    std::vector<clap_audio_buffer_t> inputs, outputs;
+    make(std::min<uint32_t>(self->declared_input_bus_count, kMaxInputBuses),
+         self->declared_input_channels, inputs);
+    make(std::min<uint32_t>(self->declared_output_bus_count, kMaxOutputBuses),
+         self->declared_output_channels, outputs);
+    clap_input_events_t no_events{nullptr, clap_warm_event_count, clap_warm_event_get};
+    clap_process_t process{};
+    process.steady_time = -1;
+    process.frames_count = static_cast<uint32_t>(frames);
+    process.audio_inputs = inputs.empty() ? nullptr : inputs.data();
+    process.audio_inputs_count = static_cast<uint32_t>(inputs.size());
+    process.audio_outputs = outputs.empty() ? nullptr : outputs.data();
+    process.audio_outputs_count = static_cast<uint32_t>(outputs.size());
+    process.in_events = &no_events;
+    const auto playhead = self->playhead_prev;
+    self->warming_render_path = true;
+    (void)clap_process(plugin, &process);
+    self->warming_render_path = false;
+    self->playhead_prev = playhead;
+}
+
 bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t max_frames) {
     auto* self = get_self(plugin);
     self->sample_rate = sr;
@@ -492,6 +540,7 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     }
 
     self->is_active = true;
+    clap_warm_render_path(plugin, self);
     return true;
 }
 
@@ -1947,6 +1996,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
 
     auto all_params = self->store.all_params();
     clap_phase_snapshot_params(self, all_params);
+    if (self->warming_render_path) return CLAP_PROCESS_CONTINUE;
 
     // Prove no state.load is installing underneath this block. state.load is a
     // main-thread call that hosts may make while the plug-in is active, and

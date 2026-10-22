@@ -601,6 +601,7 @@ public:
     float store_only_value = 0.0f;
     float value_0 = 0.25f;             // exactly representable in float+double
     float value_1 = 0.75f;
+    int process_calls = 0;
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -624,6 +625,7 @@ public:
                  midi::MidiBuffer&,
                  midi::MidiBuffer& midi_out,
                  const ProcessContext&) override {
+        ++process_calls;
         if (push_events) {
             push_output_param_event(kParamId, value_0, 0);
             push_output_param_event(kParamId, value_1, 16);
@@ -2879,6 +2881,25 @@ TEST_CASE("CLAP store-only param change still emits a single event at time 0",
     REQUIRE(params[0]->header.time == 0);
     REQUIRE(params[0]->param_id == OutputParamProcessor::kParamId);
     REQUIRE(params[0]->value == 0.625);
+}
+
+TEST_CASE("CLAP activation warm-up never reaches the Processor or the transport diff",
+          "[clap][activation][rt-safety]") {
+    // clap_activate() runs the per-block path once on silence so the host's
+    // first block is not charged for cold code. That run must stop before the
+    // Processor and leave the transport diff at "no previous block".
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_output_param);
+    REQUIRE(g_output_param != nullptr);
+    REQUIRE(g_output_param->process_calls == 0);
+    REQUIRE_FALSE(h.plugin.playhead_prev.has_previous);
+    REQUIRE_FALSE(h.plugin.warming_render_path);
+
+    InputEventList events;
+    OutputEventList out;
+    REQUIRE(h.run(events, &out) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_output_param->process_calls == 1);
 }
 
 TEST_CASE("CLAP reports a store-only change once and stays quiet on idle blocks",

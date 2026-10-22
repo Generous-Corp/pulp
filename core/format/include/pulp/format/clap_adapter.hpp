@@ -294,6 +294,11 @@ struct PulpClapPlugin {
     // Default-constructed (no previous block) so the first process() call after
     // activation reports no changes.
     detail::PlayheadSnapshot playhead_prev{};
+    // Set while clap_activate() runs the per-block path once on silence (see
+    // clap_warm_render_path()); clap_process() then stops before the state-
+    // restore gate, so the Processor, sidecars, triggers and host output are
+    // never touched.
+    bool warming_render_path = false;
 
     // clap_reset() is delivered while processing is stopped. The Processor API
     // exposes reset as a one-block ProcessContext signal rather than a virtual
