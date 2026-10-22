@@ -27,6 +27,7 @@ using namespace pulp;
 using namespace pulp::gpu_audio;
 using namespace pulp::gpu_audio::neural_test;
 using Policy = GpuNeuralRealtimeNode::ShadowPolicy;
+using Mode = GpuAudioShadowMode;
 
 namespace {
 
@@ -60,7 +61,14 @@ struct Options {
     NeuralFamily family = NeuralFamily::WaveNet;
     float gpu_gain = 1.0f;
     std::uint32_t queue_blocks = 16;
+    bool fail_backend = false;
 };
+
+/// The node's public status, checked against the shared status contract.
+GpuAudioStatus validated(const GpuAudioStatus& status) {
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::None);
+    return status;
+}
 
 struct Rig {
     Options options;
@@ -87,7 +95,8 @@ struct Rig {
             request.channel_kernels = seams;
         }
         if (o.gpu_backend)
-            request.backend = make_fake_wavenet_backend(plan, shape, kChannels, kBlock);
+            request.backend =
+                make_fake_wavenet_backend(plan, shape, kChannels, kBlock, 1, o.fail_backend);
         auto build = detail::make_neural_model(std::move(request));
         REQUIRE(build);
         model = build.model;
@@ -106,6 +115,14 @@ struct Rig {
 
     bool prepare() {
         return node->prepare() && transport.prepare(node.get(), {});
+    }
+
+    GpuAudioStatus status() const {
+        validated(transport.status_snapshot());
+        return validated(node->status_snapshot());
+    }
+    Mode mode() const {
+        return node->status_snapshot().shadow_mode;
     }
 
     std::uint64_t calls_in_callback() const {
@@ -157,7 +174,8 @@ struct Rig {
     // Real-thread Worker: wait (bounded) until the shadow caught up, so slot
     // timing matches the explicit-pump tests.
     void wait_for_shadow() {
-        if (node->shadow_status().active != Policy::Worker)
+        const auto mode = node->status_snapshot().shadow_mode;
+        if (mode != Mode::Worker && mode != Mode::None)
             return;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         while (detail::NeuralRealtimeTestAccess::shadow_processed(*node) < frame / kBlock &&
@@ -197,19 +215,48 @@ float block_error(const Rig& rig, const std::array<std::vector<float>, kChannels
 
 } // namespace
 
-TEST_CASE("Auto picks Inline at or below the cost threshold and Worker above it",
+TEST_CASE("Auto picks Inline when the total inline cost is within the threshold",
           "[gpu_audio][neural][shadow-policy]") {
+    // Two channels: Auto compares twice the per-channel cost.
     const auto threshold = GpuNeuralRealtimeNode::kAutoInlineMaxCostPct;
     for (const auto [cost, expected] :
-         {std::pair{threshold, Policy::Inline}, std::pair{threshold + 0.01f, Policy::Worker},
-          std::pair{1.0f, Policy::Inline}, std::pair{60.0f, Policy::Worker}}) {
+         {std::pair{threshold / 2, Mode::Inline}, std::pair{threshold / 2 + 0.01f, Mode::Worker},
+          std::pair{1.0f, Mode::Inline}, std::pair{30.0f, Mode::Worker}}) {
         CAPTURE(cost);
         Rig rig({.policy = Policy::Auto, .injected_cost = cost});
         REQUIRE(rig.prepare());
-        const auto status = rig.node->shadow_status();
-        CHECK(status.requested == Policy::Auto);
-        CHECK(status.active == expected);
-        CHECK(status.inline_cost_pct == cost);
+        const auto diagnostics = rig.node->shadow_status();
+        CHECK(diagnostics.requested == Policy::Auto);
+        CHECK(diagnostics.inline_cost_per_channel_pct == cost);
+        CHECK(diagnostics.inline_cost_total_pct == cost * kChannels);
+        const auto status = rig.status();
+        CHECK(status.shadow_mode == expected);
+        CHECK(status.shadow_inline_cost_pct == cost * kChannels);
+    }
+    SECTION("an 8-channel node at 14% per channel costs 112% inline, so Worker") {
+        constexpr std::uint32_t wide = 8;
+        for (const auto [cost, expected] :
+             {std::pair{14.0f, Mode::Worker}, std::pair{threshold / wide, Mode::Inline}}) {
+            CAPTURE(cost);
+            FamilyFixture fixture(NeuralFamily::WaveNet, wide, kBlock);
+            ChannelPlan plan;
+            WaveNetShape shape;
+            auto request = fixture.request();
+            request.backend = make_fake_wavenet_backend(plan, shape, wide, kBlock);
+            auto build = detail::make_neural_model(std::move(request));
+            REQUIRE(build);
+            GpuNeuralRealtimeNode node({.family = NeuralFamily::WaveNet,
+                                        .model = build.model,
+                                        .channels = wide,
+                                        .lead_blocks = kLead,
+                                        .capacity = kLead + 3});
+            detail::NeuralRealtimeTestAccess::inject_shadow_cost(node, cost);
+            detail::NeuralRealtimeTestAccess::manual_shadow(node, true);
+            REQUIRE(node.prepare());
+            const auto status = validated(node.status_snapshot());
+            CHECK(status.shadow_mode == expected);
+            CHECK(status.shadow_inline_cost_pct == cost * wide);
+        }
     }
     SECTION("families without a GPU backend stay inline at any cost") {
         Rig rig({.policy = Policy::Auto,
@@ -217,15 +264,17 @@ TEST_CASE("Auto picks Inline at or below the cost threshold and Worker above it"
                  .gpu_backend = false,
                  .family = NeuralFamily::Lstm});
         REQUIRE(rig.prepare());
-        CHECK(rig.node->shadow_status().active == Policy::Inline);
+        CHECK(rig.mode() == Mode::Inline);
         Rig worker({.policy = Policy::Worker, .gpu_backend = false, .family = NeuralFamily::Lstm});
         REQUIRE(worker.prepare());
-        CHECK(worker.node->shadow_status().active == Policy::Inline);
+        CHECK(worker.mode() == Mode::Inline);
+        rig.render(4);
+        CHECK(rig.status().shadow_delivered_blocks == 4);
     }
     SECTION("without injection the cost is measured") {
         Rig rig({.policy = Policy::Auto});
         REQUIRE(rig.prepare());
-        CHECK(rig.node->shadow_status().inline_cost_pct > 0.0f);
+        CHECK(rig.node->shadow_status().inline_cost_per_channel_pct > 0.0f);
     }
 }
 
@@ -236,17 +285,18 @@ TEST_CASE("each shadow policy nulls against the reference across a provider faul
     CAPTURE(static_cast<int>(policy), manual);
     Rig rig({.policy = policy, .manual = manual});
     REQUIRE(rig.prepare());
-    REQUIRE(rig.node->shadow_status().active == policy);
+    REQUIRE(rig.mode() == (policy == Policy::Inline ? Mode::Inline : Mode::Worker));
     rig.render(12);
     rig.plan.fail_completions = true;
     rig.render(20);
     const auto ref = reference(NeuralFamily::WaveNet, 32ull * kBlock);
     CHECK(block_error(rig, ref, 0, 32, 1.0f) == 0.0f);
-    const auto status = rig.node->shadow_status();
-    CHECK(status.shadow_delivered > 0);
-    CHECK(status.shadow_double_miss == 0);
+    const auto status = rig.status();
+    CHECK(status.shadow_delivered_blocks > 0);
+    CHECK(status.shadow_double_miss_blocks == 0);
+    CHECK(status.fallback_blocks == status.shadow_delivered_blocks);
     CHECK(rig.transport.delivery_snapshot().gpu_blocks > 0);
-    CHECK(rig.transport.status_snapshot().fallback_blocks == status.shadow_delivered);
+    CHECK(rig.transport.status_snapshot().fallback_blocks == status.shadow_delivered_blocks);
     CHECK(rig.callback_allocations == 0);
     if (policy == Policy::Worker) {
         // Copy only: the model never ran inside the callback.
@@ -259,31 +309,40 @@ TEST_CASE("each shadow policy nulls against the reference across a provider faul
     }
 }
 
-TEST_CASE("None policy plays the GPU and is silent on a miss",
+TEST_CASE("None policy plays the GPU and is silent on a realtime miss",
           "[gpu_audio][neural][shadow-policy]") {
     Rig rig({.policy = Policy::None, .gpu_gain = 2.0f});
     REQUIRE(rig.prepare());
-    CHECK(rig.node->descriptor().miss_policy == MissPolicy::Silence);
-    CHECK_FALSE(rig.node->cpu_fallback_prepared());
-    CHECK(rig.node->shadow_status().active == Policy::None);
+    CHECK(rig.mode() == Mode::None);
     rig.render(10);
     rig.plan.fail_completions = true;
     rig.render(10);
     const auto ref = reference(NeuralFamily::WaveNet, 20ull * kBlock);
     CHECK(block_error(rig, ref, kLead, 10, 2.0f) == 0.0f);
-    // After the fault every block is a miss, and None has nothing to offer.
+    // After the fault every block is a miss, and None substitutes nothing.
     CHECK(block_error(rig, ref, 13, 20, 0.0f) == 0.0f);
+    // The model stays primed off the audio thread for an offline render.
     CHECK(rig.calls_in_callback() == 0);
+    CHECK(rig.kernels[1].calls == 20);
+    const auto status = rig.status();
+    CHECK(status.shadow_delivered_blocks == 0);
+    CHECK(status.shadow_double_miss_blocks == 0);
+    CHECK(status.shadow_inline_cost_pct == 0.0f);
 
-    SECTION("None needs a GPU backend") {
-        for (const bool backend : {true, false}) {
-            CAPTURE(backend);
-            Rig cpu({.policy = Policy::None, .gpu_backend = backend});
-            CHECK(cpu.node->prepare() == backend); // positive control: with a backend
-            if (!backend)
-                CHECK(cpu.node->last_prepare_error() ==
-                      GpuNeuralRealtimeNode::PrepareError::ShadowRequired);
-        }
+    SECTION("None needs a family with a GPU kernel") {
+        Rig cpu({.policy = Policy::None, .gpu_backend = false, .family = NeuralFamily::Lstm});
+        CHECK_FALSE(cpu.node->prepare());
+        CHECK(cpu.node->last_prepare_error() ==
+              GpuNeuralRealtimeNode::PrepareError::ShadowRequired);
+    }
+    SECTION("a GPU family whose provider is unavailable runs inline anyway") {
+        Rig degraded({.policy = Policy::None, .fail_backend = true});
+        REQUIRE(degraded.prepare());
+        CHECK(degraded.mode() == Mode::Inline);
+        degraded.render(8);
+        const auto ref8 = reference(NeuralFamily::WaveNet, 8ull * kBlock);
+        CHECK(block_error(degraded, ref8, 0, 8, 1.0f) == 0.0f);
+        CHECK(degraded.status().provider_state == GpuAudioProviderState::Degraded);
     }
 }
 
@@ -300,9 +359,9 @@ TEST_CASE("a starved Worker shadow drops late blocks and stays silent on a doubl
     // The stalled backlog is then late for its slots and must not shift later.
     rig.render(10);
     const auto ref = reference(NeuralFamily::WaveNet, 23ull * kBlock);
-    const auto status = rig.node->shadow_status();
-    CHECK(status.shadow_double_miss == 4);
-    CHECK(status.shadow_late == 4);
+    const auto status = rig.status();
+    CHECK(status.shadow_double_miss_blocks == 4);
+    CHECK(status.shadow_late_blocks == 4);
     CHECK(block_error(rig, ref, 0, 10, 1.0f) == 0.0f);
     CHECK(block_error(rig, ref, 10, 14, 0.0f) == 0.0f); // the declared silence
     CHECK(block_error(rig, ref, 14, 23, 1.0f) == 0.0f); // aligned again
@@ -343,7 +402,8 @@ TEST_CASE("an offline render moves a Worker shadow inline on the same timeline",
     const auto ref = reference(NeuralFamily::WaveNet, 16ull * kBlock);
     CHECK(block_error(rig, ref, kLead, 6, 2.0f) == 0.0f); // GPU, marked
     CHECK(block_error(rig, ref, 6, 16, 1.0f) == 0.0f);    // shadow, continuous
-    CHECK(rig.node->shadow_status().active == Policy::Inline);
+    CHECK(rig.mode() == Mode::Inline);
+    rig.status();
 }
 
 TEST_CASE("a different shadow model is reported and must match the stream shape",
@@ -353,7 +413,7 @@ TEST_CASE("a different shadow model is reported and must match the stream shape"
     REQUIRE(build);
     Rig rig({.policy = Policy::Worker}, build.model);
     REQUIRE(rig.prepare());
-    CHECK(rig.node->shadow_status().shadow_model_differs);
+    CHECK(rig.status().shadow_model_differs);
     rig.plan.fail_completions = true;
     rig.render(12);
     // The substitutes are the lite model's, not the GPU model's.
@@ -369,7 +429,7 @@ TEST_CASE("a different shadow model is reported and must match the stream shape"
           GpuNeuralRealtimeNode::PrepareError::ShadowModelMismatch);
     Rig same({.policy = Policy::Worker});
     REQUIRE(same.prepare());
-    CHECK_FALSE(same.node->shadow_status().shadow_model_differs);
+    CHECK_FALSE(same.status().shadow_model_differs);
 }
 
 // Measurement, not a gate. Callback CPU per channel for a NAM-standard-sized
@@ -424,44 +484,74 @@ TEST_CASE("neural shadow callback cost by policy", "[.][neural-shadow-cost]") {
             }
             std::sort(samples.begin(), samples.end());
             const double period_us = 1e6 * block / 48000.0;
-            const auto status = node.shadow_status();
+            const auto status = node.status_snapshot();
             std::printf(
                 "  block %3u  %-6s gpu %-6s callback median %8.2f us  p99 %8.2f us  %6.2f%%  "
                 "delivered %llu late %llu double-miss %llu\n",
                 block, policy == Policy::Inline ? "inline" : "worker", gpu_failed ? "failed" : "ok",
                 samples[samples.size() / 2], samples[samples.size() * 99 / 100],
                 100.0 * samples[samples.size() / 2] / period_us,
-                static_cast<unsigned long long>(status.shadow_delivered),
-                static_cast<unsigned long long>(status.shadow_late),
-                static_cast<unsigned long long>(status.shadow_double_miss));
+                static_cast<unsigned long long>(status.shadow_delivered_blocks),
+                static_cast<unsigned long long>(status.shadow_late_blocks),
+                static_cast<unsigned long long>(status.shadow_double_miss_blocks));
         }
     }
 }
 
-TEST_CASE("None renders offline as silence", "[gpu_audio][neural][shadow-policy]") {
-    Rig rig({.policy = Policy::None});
+TEST_CASE("an offline bounce under None continues the stream through the CPU model",
+          "[gpu_audio][neural][shadow-policy]") {
+    const auto manual = GENERATE(true, false);
+    CAPTURE(manual);
+    Rig rig({.policy = Policy::None, .manual = manual, .gpu_gain = 2.0f});
     REQUIRE(rig.prepare());
     rig.render(6);
     std::array<std::vector<float>, kChannels> in, out;
     std::array<const float*, kChannels> in_ptrs{};
     std::array<float*, kChannels> out_ptrs{};
-    float loudest = 0.0f;
-    for (std::uint32_t b = 0; b < 6; ++b) {
+    for (std::uint32_t b = 0; b < 10; ++b) {
         for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
-            in[ch].assign(kBlock, 0.5f);
-            out[ch].assign(kBlock, 1.0f);
+            in[ch].resize(kBlock);
+            out[ch].assign(kBlock, 0.0f);
+            for (std::uint32_t i = 0; i < kBlock; ++i)
+                in[ch][i] = stimulus(ch, rig.frame + i);
             in_ptrs[ch] = in[ch].data();
             out_ptrs[ch] = out[ch].data();
         }
         audio::BufferView<const float> input(in_ptrs.data(), kChannels, kBlock);
         audio::BufferView<float> result(out_ptrs.data(), kChannels, kBlock);
         rig.transport.process_offline(input, result, kBlock);
-        for (const auto& channel : out)
-            for (const float y : channel)
-                loudest = std::max(loudest, std::abs(y));
+        for (std::uint32_t ch = 0; ch < kChannels; ++ch)
+            rig.output[ch].insert(rig.output[ch].end(), out[ch].begin(), out[ch].end());
+        rig.frame += kBlock;
     }
-    // Documented limitation: no shadow, and the offline fence stops the GPU.
-    CHECK(loudest == 0.0f);
+    const auto ref = reference(NeuralFamily::WaveNet, 16ull * kBlock);
+    CHECK(block_error(rig, ref, kLead, 6, 2.0f) == 0.0f); // realtime: the GPU, marked
+    CHECK(block_error(rig, ref, 6, 16, 1.0f) == 0.0f);    // offline: the CPU model, continuous
+    CHECK(rig.mode() == Mode::Inline);
+    rig.status();
+}
+
+TEST_CASE("the Worker shadow keeps delivering after a fence with no GPU ingress",
+          "[gpu_audio][neural][shadow-policy]") {
+    const auto manual = GENERATE(true, false);
+    CAPTURE(manual);
+    Rig rig({.policy = Policy::Worker, .manual = manual});
+    REQUIRE(rig.prepare());
+    rig.render(4);
+    rig.plan.fail_completions = true;
+    rig.render(4); // the first failed completion fences the GPU
+    REQUIRE(rig.node->fenced());
+    const auto submissions = rig.plan.submissions;
+    const auto delivered = rig.status().shadow_delivered_blocks;
+    rig.render(16);
+    // No block reached the GPU after the fence, yet every slot was covered.
+    CHECK(rig.plan.submissions == submissions);
+    CHECK(rig.node->epoch() == 0);
+    const auto status = rig.status();
+    CHECK(status.shadow_delivered_blocks == delivered + 16);
+    CHECK(status.shadow_double_miss_blocks == 0);
+    const auto ref = reference(NeuralFamily::WaveNet, 24ull * kBlock);
+    CHECK(block_error(rig, ref, 0, 24, 1.0f) == 0.0f);
 }
 
 TEST_CASE("a full Worker input queue drops blocks and restarts the shadow state",
@@ -474,11 +564,12 @@ TEST_CASE("a full Worker input queue drops blocks and restarts the shadow state"
     // takes inputs 8..11 and drops 12..14 (14 arrives before the first pump).
     rig.render(6, true, false);
     rig.render(10);
-    const auto status = rig.node->shadow_status();
-    CHECK(status.shadow_input_dropped == 3);
-    CHECK(status.shadow_resyncs == 1);
-    CHECK(status.shadow_late == 4);
-    CHECK(status.shadow_double_miss == 7);
+    const auto diagnostics = rig.node->shadow_status();
+    CHECK(diagnostics.shadow_input_dropped == 3);
+    CHECK(diagnostics.shadow_resyncs == 1);
+    const auto status = rig.status();
+    CHECK(status.shadow_late_blocks == 4);
+    CHECK(status.shadow_double_miss_blocks == 7);
     const auto ref = reference(NeuralFamily::WaveNet, 24ull * kBlock);
     CHECK(block_error(rig, ref, 0, 10, 1.0f) == 0.0f);
     CHECK(block_error(rig, ref, 10, 17, 0.0f) == 0.0f);
@@ -495,10 +586,10 @@ TEST_CASE("a lagging shadow under a healthy GPU is not counted late",
     rig.render(6);
     rig.render(4, true, false); // the shadow lags; the GPU covers every slot
     rig.render(6);
-    const auto status = rig.node->shadow_status();
-    CHECK(status.shadow_late == 0);
-    CHECK(status.shadow_double_miss == 0);
-    CHECK(status.shadow_delivered == 0);
+    const auto status = rig.status();
+    CHECK(status.shadow_late_blocks == 0);
+    CHECK(status.shadow_double_miss_blocks == 0);
+    CHECK(status.shadow_delivered_blocks == 0);
     const auto ref = reference(NeuralFamily::WaveNet, 16ull * kBlock);
     CHECK(block_error(rig, ref, 0, 16, 1.0f) == 0.0f);
 }

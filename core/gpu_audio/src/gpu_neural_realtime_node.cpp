@@ -133,6 +133,13 @@ struct GpuNeuralRealtimeNode::Impl {
             shadow_model.reset();
     }
 
+    // Worker and None both keep the model primed on the shadow thread; only
+    // Worker substitutes its results for realtime GPU misses.
+    bool worker_fed() const noexcept {
+        const auto mode = shadow_mode.load(std::memory_order_relaxed);
+        return mode == ShadowPolicy::Worker || mode == ShadowPolicy::None;
+    }
+
     const GpuNeuralModel& shadow_source() const noexcept {
         return shadow_model ? *shadow_model : *model;
     }
@@ -444,9 +451,10 @@ GpuAudioNodeDescriptor GpuNeuralRealtimeNode::descriptor() const {
             .block_size = impl_->block_size(),
             .sample_rate = impl_->model ? impl_->model->sample_rate : 0,
             .latency_blocks = c.lead_blocks,
-            .miss_policy = c.shadow_policy == ShadowPolicy::None ? MissPolicy::Silence
-                                                                 : MissPolicy::CpuFallback,
-            .supports_cpu_fallback = c.shadow_policy != ShadowPolicy::None};
+            // CpuFallback for every policy: the transport must keep feeding the
+            // model and call back on a miss even when None answers silence.
+            .miss_policy = MissPolicy::CpuFallback,
+            .supports_cpu_fallback = true};
 }
 
 bool GpuNeuralRealtimeNode::prepare() {
@@ -480,7 +488,6 @@ bool GpuNeuralRealtimeNode::prepare() {
         }
         s.shadow_model_owner = true;
     }
-    const bool want_shadow = s.config.shadow_policy != ShadowPolicy::None;
     try {
         const auto n = s.block_size();
         const auto channels = s.config.channels;
@@ -488,11 +495,11 @@ bool GpuNeuralRealtimeNode::prepare() {
         s.shadow_due.assign(static_cast<std::size_t>(channels) * n, 0.0f);
         s.shadow_input.assign(n, 0.0f);
         s.shadow_cursor = 0;
-        s.shadow_published = want_shadow;
+        s.shadow_published = true;
         s.inline_cost_pct = -1.0f;
         ++s.shadow_epoch;
         const auto& source = s.shadow_source();
-        for (std::uint32_t ch = 0; want_shadow && ch < channels; ++ch) {
+        for (std::uint32_t ch = 0; ch < channels; ++ch) {
             auto& model = *source.channel_models[ch];
             auto processor = std::make_unique<detail::NeuralProcessor>(model);
             if (!processor->prepare(
@@ -507,7 +514,7 @@ bool GpuNeuralRealtimeNode::prepare() {
         }
         // The shadow is the miss policy, so a node without a published shadow
         // must not reach the transport.
-        if (want_shadow && !cpu_fallback_prepared())
+        if (!cpu_fallback_prepared())
             return fail(PrepareError::ShadowUnpublished);
 
         if (s.model->backend) {
@@ -527,26 +534,24 @@ bool GpuNeuralRealtimeNode::prepare() {
         // A GPU family whose provider could not be prepared runs on the CPU,
         // and says why. Latched once the CPU path is reset below.
         const bool gpu_unavailable = s.model->backend && !s.backend_active;
-        if (!want_shadow && !s.backend_active)
-            return fail(PrepareError::ShadowRequired);
-
-        // Without a GPU backend the CPU model is the output, so it runs inline.
-        if (want_shadow && !s.measure_inline_cost())
+        if (!s.measure_inline_cost())
             return fail(PrepareError::ShadowPrepareFailed);
+        // Without a GPU backend the CPU model is the output, so it runs
+        // inline whatever was requested. Auto weighs the whole callback: one
+        // channel's cost times the channel count.
         const auto requested = s.config.shadow_policy;
-        if (!want_shadow)
-            s.shadow_mode = ShadowPolicy::None;
-        else if (!s.backend_active || requested == ShadowPolicy::Inline)
+        const float total_cost = s.inline_cost_pct.load() * static_cast<float>(channels);
+        if (!s.backend_active || requested == ShadowPolicy::Inline)
             s.shadow_mode = ShadowPolicy::Inline;
-        else if (requested == ShadowPolicy::Worker)
-            s.shadow_mode = ShadowPolicy::Worker;
+        else if (requested == ShadowPolicy::Worker || requested == ShadowPolicy::None)
+            s.shadow_mode = requested;
         else
-            s.shadow_mode = s.inline_cost_pct <= kAutoInlineMaxCostPct ? ShadowPolicy::Inline
-                                                                       : ShadowPolicy::Worker;
+            s.shadow_mode =
+                total_cost <= kAutoInlineMaxCostPct ? ShadowPolicy::Inline : ShadowPolicy::Worker;
 
         // Silent prewarm runs through the shadow too, so its causal history
         // starts at the same stream position as the GPU history.
-        if (want_shadow && s.config.prewarm_blocks != 0) {
+        if (s.config.prewarm_blocks != 0) {
             std::vector<float> zero(n, 0.0f), discard(n, 0.0f);
             std::vector<const float*> inputs(channels, zero.data());
             std::vector<float*> outputs(channels, discard.data());
@@ -559,7 +564,7 @@ bool GpuNeuralRealtimeNode::prepare() {
         s.shadow_hit = false;
         s.shadow_delivered.store(0, std::memory_order_relaxed);
         s.shadow_double_miss.store(0, std::memory_order_relaxed);
-        if (s.shadow_mode == ShadowPolicy::Worker) {
+        if (s.worker_fed()) {
             s.shadow_take.assign(static_cast<std::size_t>(channels) * n, 0.0f);
             const auto period_ns =
                 static_cast<std::uint64_t>(1e9 * static_cast<double>(n) / s.model->sample_rate);
@@ -623,7 +628,7 @@ bool GpuNeuralRealtimeNode::release() noexcept {
 }
 
 bool GpuNeuralRealtimeNode::cpu_fallback_prepared() const noexcept {
-    return impl_->config.shadow_policy != ShadowPolicy::None && impl_->shadow_ready();
+    return impl_->shadow_ready();
 }
 
 void GpuNeuralRealtimeNode::prime_fallback(const audio::BufferView<const float>& input,
@@ -632,7 +637,7 @@ void GpuNeuralRealtimeNode::prime_fallback(const audio::BufferView<const float>&
     if (!s.prepared || n != s.block_size())
         return;
     const auto channels = s.config.channels;
-    if (s.shadow_mode == ShadowPolicy::Worker) {
+    if (s.worker_fed()) {
         // Copy only: the shadow thread runs the model.
         s.shadow_hit = false;
         const float* inputs[64];
@@ -785,8 +790,25 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
     status.epoch = epoch();
     status.delivery_epoch_active = epoch() != 0;
     status.gpu_kernel_available = gpu_kernel_available();
-    // The shadow always runs inline here.
-    status.shadow_mode = GpuAudioShadowMode::Inline;
+    switch (s.shadow_mode.load(std::memory_order_relaxed)) {
+    case ShadowPolicy::Worker:
+        status.shadow_mode = GpuAudioShadowMode::Worker;
+        break;
+    case ShadowPolicy::None:
+        status.shadow_mode = GpuAudioShadowMode::None;
+        break;
+    default:
+        status.shadow_mode = GpuAudioShadowMode::Inline;
+        break;
+    }
+    if (status.shadow_mode != GpuAudioShadowMode::None) {
+        status.shadow_inline_cost_pct =
+            std::max(0.0f, s.inline_cost_pct.load()) * static_cast<float>(s.config.channels);
+        status.shadow_delivered_blocks = s.shadow_delivered.load(std::memory_order_relaxed);
+        status.shadow_late_blocks = s.worker.late();
+        status.shadow_double_miss_blocks = s.shadow_double_miss.load(std::memory_order_relaxed);
+        status.shadow_model_differs = s.shadow_model != nullptr;
+    }
     // A model with a GPU kernel asked for the GPU; the others asked for CPU.
     status.requested_engine = s.model->backend ? GpuAudioEngine::Gpu : GpuAudioEngine::Cpu;
     if (!s.backend_active) {
@@ -800,7 +822,6 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
                 ? GpuAudioProviderState::Degraded
                 : GpuAudioProviderState::Ready;
         status.fallback_blocks = s.cpu_blocks.load(std::memory_order_relaxed);
-        status.shadow_delivered_blocks = status.fallback_blocks;
         return status;
     }
     const auto telemetry = s.telemetry.snapshot();
@@ -883,8 +904,8 @@ std::uint8_t GpuNeuralRealtimeNode::process(void* self, const audio::BufferView<
     s.callback = s.bridge->begin_callback(s.callback_input, sequence, start);
     const auto delivery = s.bridge->consume_output(s.callback, s.callback_output, nullptr, true);
     // The Worker shadow's result for the slot this callback emits, if any.
-    const bool worker = s.shadow_mode == ShadowPolicy::Worker &&
-                        sequence >= s.first_sequence + s.config.lead_blocks;
+    const bool worker = s.worker_fed() && sequence >= s.first_sequence + s.config.lead_blocks;
+    const bool substitute = s.shadow_mode.load(std::memory_order_relaxed) == ShadowPolicy::Worker;
     const detail::StreamingBlockStamp expected{
         .epoch = s.shadow_epoch, .sequence = worker ? sequence - s.config.lead_blocks : 0};
     if (delivery == Bridge::Delivery::Ready) {
@@ -898,8 +919,11 @@ std::uint8_t GpuNeuralRealtimeNode::process(void* self, const audio::BufferView<
         return detail::kRealtimeGpuPriming;
     // GPU miss: the shadow egress is consulted next; process_cpu_fallback()
     // copies the result or, on a double miss, stays silent.
-    if (worker)
+    // None keeps the egress drained but never substitutes in realtime.
+    if (worker && substitute)
         s.shadow_hit = s.worker.take_output(expected, s.shadow_take.data());
+    else if (worker)
+        s.worker.discard_through(expected);
     return detail::kRealtimeGpuMissed;
 }
 
@@ -964,7 +988,7 @@ bool GpuNeuralRealtimeNode::fence(void* self) noexcept {
     auto& s = *static_cast<GpuNeuralRealtimeNode*>(self)->impl_;
     // An offline render is synchronous; the asynchronous shadow cannot keep
     // up with it, so it continues inline from the same timeline.
-    if (s.shadow_mode == ShadowPolicy::Worker)
+    if (s.worker_fed())
         s.switch_worker_to_inline();
     if (!s.bridge || !s.backend_active)
         return true;
@@ -1007,16 +1031,14 @@ GpuNeuralRealtimeNode::ShadowStatus GpuNeuralRealtimeNode::shadow_status() const
     const auto& s = *impl_;
     ShadowStatus status;
     status.requested = s.config.shadow_policy;
-    status.active = s.prepared ? s.shadow_mode.load() : ShadowPolicy::None;
-    status.inline_cost_pct = s.inline_cost_pct.load();
-    status.shadow_delivered = s.shadow_delivered.load(std::memory_order_relaxed);
-    status.shadow_double_miss = s.shadow_double_miss.load(std::memory_order_relaxed);
-    status.shadow_late = s.worker.late();
+    const float per_channel = s.inline_cost_pct.load();
+    status.inline_cost_per_channel_pct = per_channel;
+    status.inline_cost_total_pct =
+        per_channel < 0.0f ? per_channel : per_channel * static_cast<float>(s.config.channels);
     const auto counters = s.worker.counters();
     status.shadow_input_dropped = counters.input_dropped;
     status.shadow_resyncs = counters.resyncs;
     status.workgroup_joined = counters.workgroup_joined;
-    status.shadow_model_differs = s.shadow_model != nullptr;
     return status;
 }
 
