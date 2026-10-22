@@ -62,9 +62,10 @@ GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept;
 /// dedicated non-realtime thread: the callback only copies its input in and,
 /// when the GPU misses, copies the shadow's stamped result out. A shadow
 /// result that is late for its slot is dropped, and a block both paths miss
-/// is silent. Auto times one block of the CPU model at prepare() and picks
-/// Inline when that costs at most kAutoInlineMaxCostPct of the block period
-/// per channel, otherwise Worker. Families without a GPU backend always run
+/// is silent. Auto times one block of the CPU model for one channel at
+/// prepare() and picks Inline when that costs at most kAutoInlineMaxCostPct of
+/// the block period, otherwise Worker. The threshold is per channel: an
+/// N-channel Inline node spends about N times that on the audio thread. Families without a GPU backend always run
 /// Inline, because the CPU model is their output.
 ///
 /// Recovery is manual: any latched cause, including a single invalid
@@ -86,6 +87,7 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
         Inline = 1,
         Worker = 2,
         /// No shadow: a GPU miss is silent. Requires a prepared GPU backend.
+        /// An offline render fences the GPU, so it renders silence.
         None = 3,
     };
     /// Auto selects Inline at or below this share of the block period.
@@ -102,12 +104,15 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
         float inline_cost_pct = -1.0f;
         /// Blocks substituted from the shadow.
         std::uint64_t shadow_delivered = 0;
-        /// Worker results that arrived after their slot and were dropped.
+        /// Worker results dropped because they arrived after a slot the GPU
+        /// had also missed.
         std::uint64_t shadow_late = 0;
         /// Blocks both the GPU and the Worker shadow missed (emitted silent).
         std::uint64_t shadow_double_miss = 0;
         /// Worker inputs dropped because the shadow queue was full.
         std::uint64_t shadow_input_dropped = 0;
+        /// Times the Worker restarted the model's state after a dropped input.
+        std::uint64_t shadow_resyncs = 0;
         /// True when the shadow runs a different model than the GPU.
         bool shadow_model_differs = false;
         bool workgroup_joined = false;

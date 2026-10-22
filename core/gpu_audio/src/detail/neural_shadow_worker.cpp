@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 
 #if defined(__APPLE__)
 #include <pthread/qos.h>
@@ -67,6 +68,8 @@ bool NeuralShadowWorker::start(const Config& config, void* context, StepFn step,
         return false;
     try {
         scratch_.assign(config.samples_per_block, 0.0f);
+        missed_slots_.assign(static_cast<std::size_t>(config.capacity) * 2,
+                             std::numeric_limits<std::uint64_t>::max());
     } catch (...) {
         return false;
     }
@@ -116,7 +119,14 @@ bool NeuralShadowWorker::push_input(StreamingBlockStamp stamp, const float* cons
     return true;
 }
 
+void NeuralShadowWorker::drop_front(StreamingBlockStamp stamp) noexcept {
+    output_.pop();
+    if (missed_slots_[stamp.sequence % missed_slots_.size()] == stamp.sequence)
+        late_.fetch_add(1, std::memory_order_relaxed);
+}
+
 bool NeuralShadowWorker::take_output(StreamingBlockStamp expected, float* output) noexcept {
+    missed_slots_[expected.sequence % missed_slots_.size()] = expected.sequence;
     StreamingBlockStamp stamp;
     while (const float* samples = output_.front(stamp)) {
         if (stamp.epoch == expected.epoch && stamp.sequence == expected.sequence) {
@@ -127,8 +137,7 @@ bool NeuralShadowWorker::take_output(StreamingBlockStamp expected, float* output
         if (stamp.epoch != expected.epoch || stamp.sequence > expected.sequence)
             return false;
         // Its slot has passed: a late result is dropped, never shifted later.
-        output_.pop();
-        late_.fetch_add(1, std::memory_order_relaxed);
+        drop_front(stamp);
     }
     return false;
 }
@@ -139,8 +148,9 @@ void NeuralShadowWorker::discard_through(StreamingBlockStamp expected) noexcept 
         if (stamp.epoch != expected.epoch || stamp.sequence > expected.sequence)
             return;
         if (stamp.sequence < expected.sequence)
-            late_.fetch_add(1, std::memory_order_relaxed);
-        output_.pop();
+            drop_front(stamp);
+        else
+            output_.pop();
     }
 }
 
@@ -159,7 +169,7 @@ std::size_t NeuralShadowWorker::pump(std::size_t max_blocks) noexcept {
         }
         float* output = output_.begin_push(stamp);
         const bool publish = output != nullptr;
-        step_(context_, input, publish ? output : scratch_.data());
+        step_(context_, input, publish ? output : scratch_.data(), stamp);
         if (publish)
             output_.commit_push();
         else

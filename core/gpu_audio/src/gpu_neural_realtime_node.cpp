@@ -111,8 +111,10 @@ struct GpuNeuralRealtimeNode::Impl {
 
     // Shadow placement. `shadow_mode` is the policy in effect; only prepare(),
     // release() and the offline fence change it, each with the callback idle.
-    ShadowPolicy shadow_mode = ShadowPolicy::None;
-    float inline_cost_pct = -1.0f;
+    // Atomic because shadow_status() may read them from a host or UI thread
+    // while an offline fence moves Worker to Inline.
+    std::atomic<ShadowPolicy> shadow_mode{ShadowPolicy::None};
+    std::atomic<float> inline_cost_pct{-1.0f};
     float injected_cost_pct = -1.0f; // test seam; negative measures
     bool manual_shadow = false;      // test seam; no thread, pumped explicitly
     GpuNeuralModelHandle shadow_model;
@@ -249,7 +251,8 @@ struct GpuNeuralRealtimeNode::Impl {
     }
 
     // Shadow side of the Worker: one planar block through every channel.
-    static void shadow_step(void* self, const float* input, float* output) noexcept {
+    static void shadow_step(void* self, const float* input, float* output,
+                            detail::StreamingBlockStamp stamp) noexcept {
         auto& s = *static_cast<Impl*>(self);
         const auto n = s.block_size();
         const float* inputs[64];
@@ -258,7 +261,7 @@ struct GpuNeuralRealtimeNode::Impl {
             inputs[ch] = input + static_cast<std::size_t>(ch) * n;
             outputs[ch] = output + static_cast<std::size_t>(ch) * n;
         }
-        s.run_shadow(inputs, s.config.channels, outputs, n, 0);
+        s.run_shadow(inputs, s.config.channels, outputs, n, stamp.sequence);
     }
     // Shadow side, after an input gap. The shadow thread owns the processors
     // exclusively in Worker mode, so restarting their state there is safe.
@@ -1004,13 +1007,14 @@ GpuNeuralRealtimeNode::ShadowStatus GpuNeuralRealtimeNode::shadow_status() const
     const auto& s = *impl_;
     ShadowStatus status;
     status.requested = s.config.shadow_policy;
-    status.active = s.prepared ? s.shadow_mode : ShadowPolicy::None;
-    status.inline_cost_pct = s.inline_cost_pct;
+    status.active = s.prepared ? s.shadow_mode.load() : ShadowPolicy::None;
+    status.inline_cost_pct = s.inline_cost_pct.load();
     status.shadow_delivered = s.shadow_delivered.load(std::memory_order_relaxed);
     status.shadow_double_miss = s.shadow_double_miss.load(std::memory_order_relaxed);
     status.shadow_late = s.worker.late();
     const auto counters = s.worker.counters();
     status.shadow_input_dropped = counters.input_dropped;
+    status.shadow_resyncs = counters.resyncs;
     status.workgroup_joined = counters.workgroup_joined;
     status.shadow_model_differs = s.shadow_model != nullptr;
     return status;

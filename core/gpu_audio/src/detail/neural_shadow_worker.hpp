@@ -48,7 +48,8 @@ class NeuralShadowRing {
 class NeuralShadowWorker {
   public:
     // Runs the model on one planar block. Called only on the shadow side.
-    using StepFn = void (*)(void* context, const float* input, float* output) noexcept;
+    using StepFn = void (*)(void* context, const float* input, float* output,
+                            StreamingBlockStamp stamp) noexcept;
     // Restarts the model's causal state after an input gap.
     using ResetFn = void (*)(void* context) noexcept;
 
@@ -56,7 +57,9 @@ class NeuralShadowWorker {
         std::uint32_t capacity = 16;
         std::size_t samples_per_block = 0;
         std::uint64_t poll_ns = 250'000;
-        // Borrowed os_workgroup_t; null selects USER_INTERACTIVE QoS.
+        // Borrowed os_workgroup_t. The thread joins it as a member that does
+        // at most the queued blocks per wake; without one it runs at
+        // USER_INTERACTIVE QoS.
         void* audio_workgroup = nullptr;
         // False leaves stepping to pump() (deterministic tests).
         bool spawn_thread = true;
@@ -88,11 +91,12 @@ class NeuralShadowWorker {
     // Callback. Copy only; false (and a counted drop) when the ring is full.
     bool push_input(StreamingBlockStamp stamp, const float* const* channels,
                     std::uint32_t channel_count, std::uint32_t frames) noexcept;
-    // Callback. Copies the result for `expected` into `output` if it is
-    // ready. Older results are dropped and counted late.
+    // Callback, on a GPU miss for `expected`. Copies the result for that slot
+    // into `output` if it is ready. Older results are dropped; a dropped
+    // result counts as late only if its own slot was a GPU miss.
     bool take_output(StreamingBlockStamp expected, float* output) noexcept;
-    // Callback. Drops results through `expected` without copying (the GPU
-    // delivered that slot). Older results are counted late.
+    // Callback, when the GPU delivered `expected`. Drops results through it
+    // without copying; late ones are counted as in take_output().
     void discard_through(StreamingBlockStamp expected) noexcept;
     // Callback/host. Consumer-side access to the oldest published result.
     const float* front(StreamingBlockStamp& stamp) const noexcept {
@@ -113,6 +117,7 @@ class NeuralShadowWorker {
 
   private:
     void loop() noexcept;
+    void drop_front(StreamingBlockStamp stamp) noexcept;
 
     NeuralShadowRing input_, output_;
     std::vector<float> scratch_;
@@ -127,6 +132,10 @@ class NeuralShadowWorker {
     std::atomic<std::uint64_t> processed_{0}, input_dropped_{0}, output_dropped_{0}, resyncs_{0},
         late_{0};
     std::atomic<bool> workgroup_joined_{false};
+    // Callback only: the sequences of recent slots the GPU missed, indexed by
+    // sequence modulo size. A result can trail its slot by at most the ring
+    // capacity, so twice that covers every result still queued.
+    std::vector<std::uint64_t> missed_slots_;
 };
 
 } // namespace pulp::gpu_audio::detail
