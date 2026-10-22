@@ -21,6 +21,7 @@
 
 set(PULP_DESIGN_IR_HEADERS
     include/pulp/view/design_ir.hpp
+    include/pulp/view/design_line_metrics.hpp
     include/pulp/view/design_source_types.hpp
 )
 

@@ -10,7 +10,7 @@
 /// asset collection, and interactive-frame promotion entry points are importer
 /// operations and live in design_ir_io.hpp (`pulp-design-import`).
 
-#include <pulp/view/text_line_metrics.hpp>
+#include <pulp/view/design_line_metrics.hpp>
 
 #include <cmath>
 #include <cstddef>
@@ -413,7 +413,7 @@ struct IRTextLayoutBasis {
     /// which makes the cache unusable rather than usable-on-trust.
     std::string resolved_face;
     /// The primary font's line metrics Chrome laid the lines out with, when
-    /// the capture measured them (see text_line_metrics.hpp).
+    /// the capture measured them (see design_line_metrics.hpp).
     std::optional<LineMetrics> line_metrics;
 };
 

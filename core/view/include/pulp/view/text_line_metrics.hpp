@@ -1,26 +1,12 @@
-// The line metrics a browser laid captured text out with.
+// Where captured text lines put their baselines, from the browser-measured
+// line metrics (design_line_metrics.hpp).
 #pragma once
 
-#include <cmath>
+#include <pulp/view/design_line_metrics.hpp>
+
 #include <optional>
 
 namespace pulp::view {
-
-/// A text run's primary-font ascent and descent in CSS px, as the browser
-/// rounded and adjusted them when it built the run's content area. A captured
-/// line box exactly ascent + descent tall is the text fragment itself, so its
-/// baseline sits `ascent` below the box top.
-struct LineMetrics {
-    float ascent = 0.0f;
-    float descent = 0.0f;
-
-    /// Finite, with a positive ascent and a non-negative descent. Every
-    /// producer and consumer of captured metrics gates on this one check.
-    bool valid() const {
-        return std::isfinite(ascent) && std::isfinite(descent) &&
-               ascent > 0.0f && descent >= 0.0f;
-    }
-};
 
 /// Where the baseline of a captured line sits below the top of its line box,
 /// for a box `line_height` CSS px tall. `css_ascent` / `css_descent` are the
