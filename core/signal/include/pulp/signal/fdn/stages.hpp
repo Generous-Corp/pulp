@@ -12,6 +12,7 @@
 
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/fast_math.hpp>
+#include <pulp/signal/detail/simd_lanes.hpp>
 #include <pulp/signal/fdn/config.hpp>
 #include <pulp/signal/fdn/frac_delay.hpp>
 #include <pulp/signal/fdn/modulation.hpp>
@@ -22,6 +23,8 @@
 #include <cmath>
 
 namespace pulp::signal::fdn {
+
+namespace lanes = signal::detail::lanes;
 
 // The loop saturator's curve. See signal::lipschitz_tanh for why it is this
 // one — 1-Lipschitz so it can never raise the loop gain, and bounded so a
@@ -151,39 +154,73 @@ public:
         process_block(&l, &r, 1);
     }
 
-    // In place, n <= kMaxBlockSamples.
+    // In place, n <= kMaxBlockSamples. The span is pushed first; then each
+    // sample's twelve taps (six per rail) are read back against that sample's
+    // own post-push position, all twelve per pass: one 16-byte tap load each
+    // (FracDelayT::taps_at) and the interpolation three taps-groups per
+    // vector. Same delays, fractions, taps, curve, and summation order as
+    // reading each tap with FracDelayT::read_hermite_at.
     void process_block(SampleType* l, SampleType* r, int n) {
+        static_assert(kNumEnsembleLfos == 6, "the tap grouping below is for six LFOs");
+        using lanes::D2;
+        using lanes::F4;
+        using lanes::I2;
         left_.push_block(l, n);
         right_.push_block(r, n);
-        // Each tap's delays for the whole span, read back against each
-        // sample's own post-push position (n - 1 behind the span's end).
-        double sin_delay[kNumEnsembleLfos][kMaxBlockSamples];
-        double cos_delay[kNumEnsembleLfos][kMaxBlockSamples];
-        const double base = base_samples_;
-        for (int k = 0; k < n; ++k) {
-            lfo_.tick();
-            for (int i = 0; i < kNumEnsembleLfos; ++i) {
-                sin_delay[i][k] = base + depth_samples_ * lfo_.sin(i);
-                // 90 degrees of phase between the rails: sin -> cos.
-                cos_delay[i][k] = base + depth_samples_ * lfo_.cos(i);
-            }
-        }
-        SampleType sum_l[kMaxBlockSamples] = {};
-        SampleType sum_r[kMaxBlockSamples] = {};
-        SampleType tap[kMaxBlockSamples];
-        for (int i = 0; i < kNumEnsembleLfos; ++i) {
-            left_.read_hermite_span(sin_delay[i], tap, n, n - 1);
-            for (int k = 0; k < n; ++k)
-                sum_l[k] += tap[k];
-            right_.read_hermite_span(cos_delay[i], tap, n, n - 1);
-            for (int k = 0; k < n; ++k)
-                sum_r[k] += tap[k];
-        }
+        const SampleType* rails[2] = {left_.taps_at(0), right_.taps_at(0)};
+        const I2 mask = lanes::splat_i(static_cast<std::int64_t>(left_.mask()));
+        const std::size_t end = left_.write_index();
+        const D2 base = lanes::splat(base_samples_);
+        const D2 depth = lanes::splat(depth_samples_);
+        const D2 lowest = lanes::splat(2.0);
+        const D2 highest = lanes::splat(static_cast<double>(left_.max_delay()));
+        const F4 half = lanes::splat(0.5f);
+        const F4 two_and_half = lanes::splat(2.5f);
+        const F4 two = lanes::splat(2.0f);
+        const F4 one_and_half = lanes::splat(1.5f);
+        const F4 one = lanes::splat(1.0f);
         constexpr auto dry = static_cast<SampleType>(1.0 - kEnsembleWetMix);
         constexpr auto wet = static_cast<SampleType>(kEnsembleWetMix / kNumEnsembleLfos);
         for (int k = 0; k < n; ++k) {
-            l[k] = l[k] * dry + sum_l[k] * wet;
-            r[k] = r[k] * dry + sum_r[k] * wet;
+            lfo_.tick();
+            // Taps 0-5 read the left rail at the sines, 6-11 the right rail at
+            // the cosines: 90 degrees of phase between the rails.
+            const I2 origin = lanes::splat_i(
+                static_cast<std::int64_t>(end - static_cast<std::size_t>(n - 1 - k)) - 2);
+            alignas(16) std::int64_t start[12];
+            D2 f[6];
+            for (int p = 0; p < 6; ++p) {
+                const int i = (2 * p) % kNumEnsembleLfos;
+                const D2 phase = p < 3 ? lanes::make(lfo_.sin(i), lfo_.sin(i + 1))
+                                       : lanes::make(lfo_.cos(i), lfo_.cos(i + 1));
+                const D2 d = lanes::clamp(base + depth * phase, lowest, highest);
+                const I2 whole = lanes::to_int(d);
+                f[p] = d - lanes::to_double(whole);
+                const I2 at = (origin - whole) & mask;
+                start[2 * p] = lanes::lane(at, 0);
+                start[2 * p + 1] = lanes::lane(at, 1);
+            }
+            F4 out[3];
+            for (int g = 0; g < 3; ++g) {
+                F4 ym1 = lanes::load(rails[(4 * g) / 6] + start[4 * g]);
+                F4 y0 = lanes::load(rails[(4 * g + 1) / 6] + start[4 * g + 1]);
+                F4 y1 = lanes::load(rails[(4 * g + 2) / 6] + start[4 * g + 2]);
+                F4 y2 = lanes::load(rails[(4 * g + 3) / 6] + start[4 * g + 3]);
+                lanes::transpose(ym1, y0, y1, y2);
+                const F4 t = one - lanes::narrow(f[2 * g], f[2 * g + 1]);
+                const F4 c1 = half * (y1 - ym1);
+                const F4 c2 = ym1 - two_and_half * y0 + two * y1 - half * y2;
+                const F4 c3 = half * (y2 - ym1) + one_and_half * (y0 - y1);
+                out[g] = ((c3 * t + c2) * t + c1) * t + y0;
+            }
+            SampleType sum_l = 0;
+            SampleType sum_r = 0;
+            for (int tap = 0; tap < kNumEnsembleLfos; ++tap)
+                sum_l += lanes::lane(out[tap / 4], tap % 4);
+            for (int tap = kNumEnsembleLfos; tap < 2 * kNumEnsembleLfos; ++tap)
+                sum_r += lanes::lane(out[tap / 4], tap % 4);
+            l[k] = l[k] * dry + sum_l * wet;
+            r[k] = r[k] * dry + sum_r * wet;
         }
     }
 
