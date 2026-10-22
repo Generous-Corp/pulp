@@ -17,19 +17,13 @@ using Catch::Matchers::WithinAbs;
 // Two parallel allpass paths (six sections per path = twelve allpass
 // sections total). Upsampler doubles the rate, downsampler halves it.
 //
-// Acceptance criteria from the macOS plan:
-//   * passband ripple < 0.1 dB up to 0.4*Nyquist of the half-band's
-//     input rate (i.e. 0.2*Fs in standalone use)
-//   * group delay ~ 6 samples
+// Acceptance criteria:
+//   * passband flat (< 0.1 dB) up to 0.42 of the half-band's own rate
+//     edge, i.e. 0.21 of the 2x rate
 //   * sample-rate-invariant by construction (coefficient set is
 //     normalized to Fs, no per-rate retuning)
-//   * stopband attenuation > 80 dB in the *deep stopband*, which the
-//     default coefficient set does NOT provide — see below (the
-//     transition-band edge at 0.6*Nyquist sits at ~ -25 dB with the
-//     default 6-per-path coefficients; deeper into the stopband
-//     attenuation grows. The header documents this trade-off and
-//     callers needing tighter transition-band attenuation can supply
-//     custom higher-order coefficients via the constructor).
+//   * stopband at or below -94.8 dB from 0.29 of the 2x rate with the
+//     default (closed-form elliptic, three sections per path) design
 //
 // Verification strategy — internal goldens, no SciPy / external
 // reference filter:
@@ -116,18 +110,126 @@ TEST_CASE("HalfBandAllpassSection allpass magnitude is unity for all freqs",
     }
 }
 
-TEST_CASE("HalfBandUpsampler2x default has 6 sections per path",
-          "[signal][halfband]") {
+TEST_CASE("HalfBandUpsampler2x default has 3 sections per path", "[signal][halfband]") {
     HalfBandUpsampler2x up;
-    REQUIRE(up.sections_a() == 6);
-    REQUIRE(up.sections_b() == 6);
+    REQUIRE(up.sections_a() == 3);
+    REQUIRE(up.sections_b() == 3);
 }
 
-TEST_CASE("HalfBandDownsampler2x default has 6 sections per path",
-          "[signal][halfband]") {
+TEST_CASE("HalfBandDownsampler2x default has 3 sections per path", "[signal][halfband]") {
     HalfBandDownsampler2x dn;
-    REQUIRE(dn.sections_a() == 6);
-    REQUIRE(dn.sections_b() == 6);
+    REQUIRE(dn.sections_a() == 3);
+    REQUIRE(dn.sections_b() == 3);
+}
+
+TEST_CASE("Default half-band literals are the closed-form design", "[signal][halfband]") {
+    const auto design = design_halfband_iir(6, 0.21);
+    REQUIRE(design.valid());
+    REQUIRE(design.path_a_count() == kDefaultCoefficientsA.size());
+    REQUIRE(design.path_b_count() == kDefaultCoefficientsB.size());
+    for (std::size_t i = 0; i < kDefaultCoefficientsA.size(); ++i)
+        REQUIRE(kDefaultCoefficientsA[i] == static_cast<float>(design.path_a(i)));
+    for (std::size_t i = 0; i < kDefaultCoefficientsB.size(); ++i)
+        REQUIRE(kDefaultCoefficientsB[i] == static_cast<float>(design.path_b(i)));
+}
+
+TEST_CASE("Half-band design is equiripple at the rejection its order predicts",
+          "[signal][halfband]") {
+    // An elliptic half-band's stopband floor falls by a fixed amount per added
+    // section at a given transition width. These pins come from evaluating the
+    // closed-form design; a wrong nome, theta series, or path split moves them
+    // by tens of dB, not fractions.
+    struct Case {
+        std::size_t count;
+        double edge;
+        double stop_db;
+    };
+    for (const Case c :
+         {Case{2, 0.21, -32.78}, Case{6, 0.21, -94.85}, Case{8, 0.21, -125.89},
+          Case{3, 0.105, -101.19}, Case{11, 0.225, -146.34}, Case{5, 0.1, -167.48}}) {
+        const auto design = design_halfband_iir(c.count, c.edge);
+        const double stop = halfband_iir_stopband_db(design);
+        INFO("count=" << c.count << " edge=" << c.edge << " stop=" << stop);
+        REQUIRE_THAT(stop, WithinAbs(c.stop_db, 0.05));
+        // Power complementarity: |H(f)|^2 + |H(0.5 - f)|^2 = 1, so the passband
+        // droop at the edge is the stopband floor squared, halved.
+        const double droop = halfband_iir_magnitude_db(design, c.edge);
+        REQUIRE(droop <= 0.0);
+        REQUIRE(droop > -0.01);
+        for (double f = 0.0; f <= c.edge; f += c.edge / 64.0) {
+            const double p = std::norm(halfband_iir_response(design, f));
+            const double s = std::norm(halfband_iir_response(design, 0.5 - f));
+            REQUIRE_THAT(p + s, WithinAbs(1.0, 1e-9));
+        }
+    }
+    REQUIRE_FALSE(design_halfband_iir(0, 0.2).valid());
+    REQUIRE_FALSE(design_halfband_iir(17, 0.2).valid());
+    REQUIRE_FALSE(design_halfband_iir(4, 0.25).valid());
+    REQUIRE_FALSE(design_halfband_iir(4, 0.0).valid());
+    REQUIRE_FALSE(design_halfband_iir(4, kHalfBandIirMinPassbandEdge / 2.0).valid());
+    const auto narrowest = design_halfband_iir(4, kHalfBandIirMinPassbandEdge);
+    REQUIRE(narrowest.valid());
+    for (std::size_t i = 0; i < narrowest.count; ++i)
+        REQUIRE(narrowest.coefficients[i] > 0.0);
+}
+
+TEST_CASE("Measured half-band upsampler image matches the design response", "[signal][halfband]") {
+    // Least-squares projection of the image a 2x interpolator leaves at
+    // 1 - f (in input-rate cycles) must equal |H| there to within a fraction
+    // of a dB, at a depth (-95 to -150 dB) only a double build can show.
+    const auto design = design_halfband_iir(6, 0.21);
+    std::array<double, 3> a{}, b{};
+    for (std::size_t i = 0; i < 3; ++i) {
+        a[i] = design.path_a(i);
+        b[i] = design.path_b(i);
+    }
+    HalfBandUpsampler2x64 up{std::span<const double>(a), std::span<const double>(b)};
+    for (const double f : {0.2, 0.3, 0.42}) {
+        constexpr std::size_t n = 8192;
+        std::vector<double> y(2 * n);
+        for (std::size_t i = 0; i < n; ++i)
+            up.process(std::sin(2.0 * std::numbers::pi * f * static_cast<double>(i)), y[2 * i],
+                       y[2 * i + 1]);
+        // Fit the passband tone and the image jointly. Fitting the image alone
+        // lets the 0 dB tone leak into it through the finite window (about
+        // -88 dB here), which would mask the -95 dB being measured.
+        const double image = 0.5 - f / 2.0; // at the 2x rate
+        const double tone = f / 2.0;
+        std::array<std::array<double, 4>, 4> m{};
+        std::array<double, 4> r{};
+        for (std::size_t i = 4096; i < y.size(); ++i) {
+            const double t = static_cast<double>(i);
+            const std::array<double, 4> basis = {std::sin(2.0 * std::numbers::pi * tone * t),
+                                                 std::cos(2.0 * std::numbers::pi * tone * t),
+                                                 std::sin(2.0 * std::numbers::pi * image * t),
+                                                 std::cos(2.0 * std::numbers::pi * image * t)};
+            for (std::size_t row = 0; row < 4; ++row) {
+                r[row] += basis[row] * y[i];
+                for (std::size_t col = 0; col < 4; ++col)
+                    m[row][col] += basis[row] * basis[col];
+            }
+        }
+        // Gaussian elimination on the 4x4 normal equations.
+        for (std::size_t p = 0; p < 4; ++p)
+            for (std::size_t row = p + 1; row < 4; ++row) {
+                const double k = m[row][p] / m[p][p];
+                for (std::size_t col = p; col < 4; ++col)
+                    m[row][col] -= k * m[p][col];
+                r[row] -= k * r[p];
+            }
+        std::array<double, 4> c{};
+        for (std::size_t p = 4; p-- > 0;) {
+            double acc = r[p];
+            for (std::size_t col = p + 1; col < 4; ++col)
+                acc -= m[p][col] * c[col];
+            c[p] = acc / m[p][p];
+        }
+        const double measured = 20.0 * std::log10(std::hypot(c[2], c[3]) / std::hypot(c[0], c[1]));
+        const double predicted = halfband_iir_magnitude_db(design, image);
+        INFO("f=" << f << " measured=" << measured << " predicted=" << predicted);
+        REQUIRE(predicted < -94.0);
+        REQUIRE_THAT(measured, WithinAbs(predicted, 0.5));
+    }
 }
 
 TEST_CASE("HalfBandUpsampler2x preserves DC", "[signal][halfband]") {
@@ -179,32 +281,28 @@ TEST_CASE("HalfBandDownsampler2x passband gain is flat to < 0.1 dB up to 0.4*Nyq
     }
 }
 
-TEST_CASE("HalfBandDownsampler2x rejects energy at 0.45*Fs by more than 40 dB",
+TEST_CASE("HalfBandDownsampler2x rejects energy past its stopband edge by its design floor",
           "[signal][halfband]") {
-    // Names the number this case actually asserts. The default
-    // 6-per-path coefficients do not reach 80 dB here and are not
-    // meant to: the class header puts this point at ~ -45 dB, with
-    // -60 dB only deep in the stopband, and 80 dB reachable solely by
-    // supplying a higher-order coefficient set. A case named for 80 dB
-    // while asserting 40 tells a reader the filter is 40 dB better
-    // than it is, which is exactly the kind of claim someone picking
-    // an oversampler acts on. (At the transition-band edge
-    // ~ 0.30*Fs_in the default coefficients give only ~25 dB.)
-    //
-    // The default 6-per-path design hits roughly -45 dB at 0.45*Fs
-    // and -60 dB at 0.49*Fs. We assert > 40 dB at 0.45*Fs as a
-    // conservative regression guard that catches sign errors / mis-
-    // wired paths without locking in a specific coefficient choice.
-    HalfBandDownsampler2x dn;
-    constexpr std::size_t kN = 8192;
-    const auto x = sine(0.45f, kN);
-    std::vector<float> y(kN / 2, 0.0f);
-    dn.process_block(x, y);
-    const float in_rms = trailing_rms(x, kN / 4);
-    const float out_rms = trailing_rms(y, kN / 8);
-    const float atten_db = to_db(out_rms / in_rms);
-    INFO("stopband atten at f=0.45*Fs = " << atten_db << " dB");
-    REQUIRE(atten_db < -40.0f);
+    // The default design is equiripple from 0.29 of the input rate at -94.8 dB.
+    // Float rounding of a unit sine through six sections sits well below that.
+    // The stimulus is computed in double: `sine()`'s float phase w*i jitters by
+    // ~1e-3 rad at i ~ 8000, which smears tone energy across the band at about
+    // -75 dB and would read as filter leakage.
+    for (const double f : {0.30, 0.37, 0.45, 0.49}) {
+        HalfBandDownsampler2x dn;
+        constexpr std::size_t kN = 8192;
+        std::vector<float> x(kN);
+        for (std::size_t i = 0; i < kN; ++i)
+            x[i] =
+                static_cast<float>(std::sin(2.0 * std::numbers::pi * f * static_cast<double>(i)));
+        std::vector<float> y(kN / 2, 0.0f);
+        dn.process_block(x, y);
+        const float in_rms = trailing_rms(x, kN / 4);
+        const float out_rms = trailing_rms(y, kN / 8);
+        const float atten_db = to_db(out_rms / in_rms);
+        INFO("stopband atten at f=" << f << " = " << atten_db << " dB");
+        REQUIRE(atten_db < -90.0f);
+    }
 }
 
 TEST_CASE("HalfBandUpsampler2x preserves passband sine amplitude",
@@ -345,4 +443,18 @@ TEST_CASE("HalfBandUpsampler2x rejects out-of-band images (white-noise check)",
     INFO("white-noise out/in RMS = " << gain_db << " dB");
     REQUIRE(gain_db < 1.0f);
     REQUIRE(gain_db > -1.0f);
+}
+
+TEST_CASE("An unconfigured half-band stage emits silence", "[signal][halfband]") {
+    pulp::signal::detail::HalfBandIirStage<float> stage; // count 0: no design
+    const std::array<float, 4> input = {1.0f, -0.5f, 0.25f, 0.75f};
+    std::array<float, 8> up;
+    up.fill(123.0f);
+    stage.upsample(input.data(), up.data(), input.size());
+    for (const float v : up)
+        REQUIRE(v == 0.0f);
+    std::array<float, 2> down = {7.0f, 7.0f};
+    stage.downsample(input.data(), down.data(), 2);
+    REQUIRE(down[0] == 0.0f);
+    REQUIRE(down[1] == 0.0f);
 }

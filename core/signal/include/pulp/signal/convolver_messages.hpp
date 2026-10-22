@@ -36,7 +36,9 @@ struct ConvolverInputHistoryT {
     int block_size = 0;
     int fft_size = 0;
 
-    /// Ring of forward FFTs of recent input blocks.
+    /// Ring of forward FFTs of recent input blocks. Only bins DC..Nyquist
+    /// (`fft_size / 2 + 1`) are written and read; the rest of each slot is
+    /// spare.
     ///
     /// `write_pos` is advanced once per processed block, after every IR has
     /// rendered, so it means two different things depending on when you look —
@@ -47,8 +49,9 @@ struct ConvolverInputHistoryT {
     ///   - BETWEEN blocks (where a swap happens), it is the slot the NEXT block
     ///     will occupy, so the most recently written block is at `write_pos - 1`.
     std::vector<std::vector<std::complex<SampleType>>> spectra;
-    /// Overlap-save buffer, `fft_size` long: lower half holds the previous
-    /// block, upper half the current one.
+    /// Overlap-save window: `fft_size` complex slots whose leading `fft_size`
+    /// scalars hold the real window, previous block first, then the current
+    /// one. Zero-filled is a valid cold start.
     std::vector<std::complex<SampleType>> overlap;
     std::size_t write_pos = 0;
 };
