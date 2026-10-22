@@ -9,6 +9,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v010080"></a>
+## [0.1008.0] - 2026-10-22
+
+- feature/fix workerpool rapid batches 20261022 ([#10738](https://github.com/Generous-Corp/pulp/pull/10738))
+- release/version bump ([#10743](https://github.com/Generous-Corp/pulp/pull/10743))
+- perf/gpu provider wavenet ring 20261022 ([#10736](https://github.com/Generous-Corp/pulp/pull/10736))
+- fix/render toolchain followups ([#10733](https://github.com/Generous-Corp/pulp/pull/10733))
+- feature/win ladder c2668 20261022 ([#10735](https://github.com/Generous-Corp/pulp/pull/10735))
+- feature/ux w2 u8 d1 20261022 ([#10730](https://github.com/Generous-Corp/pulp/pull/10730))
+- codex/windows followup 20261021 ([#10652](https://github.com/Generous-Corp/pulp/pull/10652))
+- feature/gpu audio wp q matched comparator 20261022 ([#10673](https://github.com/Generous-Corp/pulp/pull/10673))
+
 <a id="v010070"></a>
 ## [0.1007.0] - 2026-10-22
 
@@ -11298,6 +11310,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.1008.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1008.0
 [0.1007.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1007.0
 [0.1006.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1006.0
 [0.1005.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1005.0
