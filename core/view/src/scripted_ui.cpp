@@ -38,8 +38,10 @@ LogCallback default_log_callback() {
     };
 }
 
-std::unique_ptr<ScriptEngine> make_engine(LogCallback callback = {}) {
+std::unique_ptr<ScriptEngine> make_engine(std::size_t memory_limit_bytes,
+                                          LogCallback callback = {}) {
     auto engine = std::make_unique<ScriptEngine>();
+    engine->set_memory_limit(memory_limit_bytes);
     engine->set_log_callback(callback ? std::move(callback) : default_log_callback());
     return engine;
 }
@@ -108,6 +110,7 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, Scrip
     , hot_reload_enabled_(options.enable_hot_reload)
     , theme_reload_enabled_(options.enable_theme_reload)
     , runtime_import_enabled_(options.enable_runtime_import)
+    , js_memory_limit_bytes_(options.js_memory_limit_bytes)
     , value_channel_access_(
           options.value_channel_access
               ? std::move(options.value_channel_access)
@@ -726,7 +729,7 @@ bool ScriptedUiSession::rebuild_from_code(
         if (needs_probe) {
             PULP_TRACE_SCOPE_NAMED("js", "scripted_ui_probe_realm");
             ++probe_realm_evaluations_;
-            auto probe_engine = make_engine();
+            auto probe_engine = make_engine(js_memory_limit_bytes_);
             install_native_message_handlers(*probe_engine, true);
             check_deadline();
             View probe_root;
@@ -806,7 +809,7 @@ bool ScriptedUiSession::rebuild_from_code(
 
         root_.set_theme(theme_for_reload);
         check_deadline();
-        next_engine = make_engine(engine_log_callback());
+        next_engine = make_engine(js_memory_limit_bytes_, engine_log_callback());
         install_native_message_handlers(*next_engine, false);
         check_deadline();
         next_bridge = std::make_unique<WidgetBridge>(

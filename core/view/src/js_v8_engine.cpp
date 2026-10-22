@@ -47,6 +47,8 @@ static std::string_view v8_logging_level_name(choc::javascript::LoggingLevel lev
 
 class V8Engine final : public JsEngine {
 public:
+    // JsEngine::set_memory_limit is enforced by the QuickJS backend only; the
+    // CHOC V8 context exposes no heap-cap hook, so this realm stays unbounded.
     V8Engine()
         : context_(choc::javascript::createV8Context())
     {

@@ -270,6 +270,8 @@ static JSValueRef jsc_native_trampoline(
 
 class JscEngine final : public JsEngine {
 public:
+    // JsEngine::set_memory_limit is enforced by the QuickJS backend only; JSC
+    // exposes no per-context heap cap, so this realm stays unbounded.
     JscEngine() {
         @autoreleasepool {
             context_ = [[JSContext alloc] init];
