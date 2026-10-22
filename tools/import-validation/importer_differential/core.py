@@ -436,23 +436,6 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
     return result
 
 
-def translate_native_nodes(
-    nodes: list[NativeNode], dx: float, dy: float,
-) -> list[NativeNode]:
-    """Register panel-local native bounds into authenticated page-space."""
-    translated: list[NativeNode] = []
-    for node in nodes:
-        bounds = node.bounds
-        if bounds is not None:
-            bounds = (bounds[0] + dx, bounds[1] + dy, bounds[2], bounds[3])
-        translated.append(NativeNode(
-            anchor=node.anchor, node_type=node.node_type, name=node.name,
-            text=node.text, parent_anchor=node.parent_anchor,
-            style=node.style, bounds=bounds,
-            backend_node_id=node.backend_node_id))
-    return translated
-
-
 def node_match_score(browser: BrowserNode, native: NativeNode) -> float:
     score = 0.0
     if (browser.backend_node_id is not None
@@ -663,39 +646,17 @@ def geometry_metrics(
     return result
 
 
-def geometry_metrics_with_registration(
-    raw_matches: list[tuple[BrowserNode, NativeNode, float]],
-    registered_matches: list[tuple[BrowserNode, NativeNode, float]],
-    registration: dict[str, float],
-) -> dict[str, Any]:
-    """Return canonical page-space geometry plus an explicit diagnostic view.
+def authenticated_authored_origin(
+    capture: dict[str, Any], native_capture: dict[str, Any],
+) -> tuple[float, float]:
+    """Return the page-space origin of the authored panel both captures sign.
 
-    Promotion and aggregate scores must remain based on the raw page-space
-    comparison.  The registered view explains an authenticated panel-local
-    frame contract without allowing that registration to hide a placement
-    mismatch from callers consuming the canonical score.
-    """
-    raw_geometry = geometry_metrics(raw_matches)
-    raw_geometry["registration"] = {
-        "x": 0.0, "y": 0.0, "source": "page-space",
-    }
-    raw_geometry["registered_geometry"] = geometry_metrics(registered_matches)
-    raw_geometry["registration_applied"] = registration
-    return raw_geometry
-
-
-def register_browser_nodes_to_native_frame(
-    nodes: list[BrowserNode], capture: dict[str, Any],
-    native_capture: dict[str, Any],
-) -> tuple[list[BrowserNode], dict[str, float]]:
-    """Translate authenticated page-space bounds into the native panel frame.
-
-    Browser-backed native imports intentionally emit a panel-local root when
-    the authored surface is smaller than the viewport.  Chromium's DOM
-    snapshot still reports page-space bounds, so comparing those coordinates
-    directly creates a constant root-margin residual.  Use only the signed
-    authored-frame metadata carried by both captures; never infer a shift from
-    pixels or from the observed residual.
+    Browser-backed native imports emit a panel-local root when the authored
+    surface is smaller than the viewport, while Chromium's screenshot and DOM
+    snapshot are page-space. The observer places the native panel at this
+    origin so both sides are compared in page space. Only the authored-frame
+    metadata carried by both captures is used, never a shift inferred from
+    pixels or from an observed residual, and the two must agree.
     """
     try:
         authored = capture["reference"]["authored_frame"]
@@ -711,25 +672,96 @@ def register_browser_nodes_to_native_frame(
         raise LabError("authored-frame metadata is non-finite")
     if abs(frame_x - native_frame_x) > 1e-6 or abs(frame_y - native_frame_y) > 1e-6:
         raise LabError("browser/native authored-frame metadata disagrees")
-    # The observer is explicitly invoked with the full document extent but
-    # the imported native root is panel-local at origin (the importer records
-    # the authored frame for consumers, it does not place the panel in the
-    # observer canvas).  Register page-space DOM bounds into that origin.
-    dx = -frame_x
-    dy = -frame_y
-    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
-        return nodes, {"x": 0.0, "y": 0.0, "source": "authenticated-authored-frame"}
-    registered: list[BrowserNode] = []
-    for node in nodes:
-        bounds = node.bounds
-        if bounds is not None:
-            bounds = (bounds[0] + dx, bounds[1] + dy, bounds[2], bounds[3])
-        registered.append(BrowserNode(
-            index=node.index, tag=node.tag, parent=node.parent, text=node.text,
-            attributes=node.attributes, bounds=bounds, styles=node.styles,
-            backend_node_id=node.backend_node_id))
-    return registered, {"x": round(dx, 6), "y": round(dy, 6),
-                       "source": "authenticated-authored-frame"}
+    return frame_x, frame_y
+
+
+# Chromium's initial canvas colour when neither the root nor the body paints a
+# background, keyed by the captured color-scheme.
+UA_CANVAS_COLORS = {"light": "rgb(255, 255, 255)"}
+
+
+def document_canvas_background(
+    snapshot: dict[str, Any], capture: dict[str, Any],
+) -> dict[str, Any]:
+    """Resolve the colour Chromium paints across the page canvas.
+
+    CSS propagates the root element's background to the canvas, and the
+    body's when the root's is transparent; with neither, the UA canvas colour
+    for the captured color-scheme shows. Only a flat, fully opaque or fully
+    transparent colour on a box with no background image is resolved. Any
+    other shape is reported unresolved rather than approximated, so the
+    observer leaves the page uncovered and the residual stays visible.
+    """
+    def unresolved(reason: str) -> dict[str, Any]:
+        return {"status": "unresolved", "reason": reason, "color": None}
+
+    strings = snapshot.get("strings", [])
+    documents = snapshot.get("documents", [])
+    style_names = snapshot.get("computedStyleNames") or LEGACY_COMPUTED_STYLES
+    if not documents:
+        return unresolved("snapshot has no document")
+    document = documents[0]
+    nodes = document.get("nodes", {})
+    layout = document.get("layout", {})
+    names = nodes.get("nodeName", [])
+    types = nodes.get("nodeType", [])
+    parents = nodes.get("parentIndex", [])
+    layout_by_node = {
+        node: index for index, node in enumerate(layout.get("nodeIndex", []))}
+    raw_styles = layout.get("styles", [])
+
+    def element(tag: str, parent: int | None) -> dict[str, str] | None:
+        for index, name in enumerate(names):
+            # Element nodes only: the doctype is also named "html".
+            if index >= len(types) or types[index] != 1:
+                continue
+            if decode_string(strings, name).lower() != tag:
+                continue
+            if parent is not None and (index >= len(parents) or parents[index] != parent):
+                continue
+            layout_index = layout_by_node.get(index)
+            if layout_index is None or layout_index >= len(raw_styles):
+                return None
+            row = raw_styles[layout_index]
+            if len(row) != len(style_names):
+                raise LabError("snapshot style row does not match its property names")
+            styles = {name: decode_string(strings, value)
+                      for name, value in zip(style_names, row)}
+            styles["__index"] = str(index)
+            return styles
+        return None
+
+    html = element("html", None)
+    body = element("body", int(html["__index"])) if html else None
+    if html is None or body is None:
+        return unresolved("snapshot lacks a laid-out html/body pair")
+
+    def flat_color(styles: dict[str, str]) -> tuple[str, float] | None:
+        if styles.get("background-image", "none") != "none":
+            return None
+        match = re.fullmatch(
+            r"rgba?\((\d+), (\d+), (\d+)(?:, ([0-9.]+))?\)",
+            styles.get("background-color", ""))
+        if not match:
+            return None
+        alpha = float(match.group(4)) if match.group(4) is not None else 1.0
+        return f"rgb({match.group(1)}, {match.group(2)}, {match.group(3)})", alpha
+
+    for label, styles in (("html", html), ("body", body)):
+        resolved = flat_color(styles)
+        if resolved is None:
+            return unresolved(f"{label} background is not a flat colour")
+        color, alpha = resolved
+        if alpha == 1.0:
+            return {"status": "resolved", "source": f"{label}-background",
+                    "color": color}
+        if alpha != 0.0:
+            return unresolved(f"{label} background is translucent")
+    scheme = capture.get("provenance", {}).get("color_scheme")
+    if scheme in UA_CANVAS_COLORS:
+        return {"status": "resolved", "source": f"ua-canvas-{scheme}",
+                "color": UA_CANVAS_COLORS[scheme]}
+    return unresolved(f"no UA canvas colour for color-scheme {scheme!r}")
 
 
 def viewport_dpr_audit(
@@ -1347,14 +1379,9 @@ def compare_one(
     native_snapshot_binding, native_snapshot_bytes = verify_capture_snapshot_binding(native_capture, native_evidence)
     viewport = capture["provenance"]["viewport"]["resolved"]
     capture_width, capture_height = capture_logical_size(capture)
-    try:
-        authored_frame = native_capture["reference"]["authored_frame"]
-        authored_x = float(authored_frame["x"])
-        authored_y = float(authored_frame["y"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise LabError("native capture is missing authenticated authored-frame metadata") from exc
-    if not math.isfinite(authored_x) or not math.isfinite(authored_y):
-        raise LabError("native authored-frame origin is non-finite")
+    authored_x, authored_y = authenticated_authored_origin(capture, native_capture)
+    page_background = document_canvas_background(
+        json.loads(browser_snapshot_bytes), capture)
     render_args = [
         str(observer), "--input", str(native_ir),
         "--render", str(native_render), "--layout", str(native_layout),
@@ -1363,6 +1390,8 @@ def compare_one(
         "--backend", "skia", "--render-receipt", str(native_receipt),
         "--origin", f"{authored_x},{authored_y}",
     ]
+    if page_background["status"] == "resolved":
+        render_args.extend(["--page-background", page_background["color"]])
     render_run = run_command(render_args, timeout_seconds)
     write_json(native_dir / "render-command.json", command_record(render_run))
     if render_run.returncode != 0:
@@ -1405,13 +1434,16 @@ def compare_one(
     recognition = source_recognition(source.read_text(encoding="utf-8", errors="replace"))
     browser_snapshot = json.loads(browser_snapshot_bytes)
     native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
-    browser_flat_raw = browser_nodes(browser_snapshot)
-    # The observer's authenticated --origin registration shifts the rendered
-    # IR and its layout receipt into page-space together. Do not apply the
-    # authored-frame translation a second time here.
+    browser_flat = browser_nodes(browser_snapshot)
+    # The observer already placed the native render and its layout receipt at
+    # the authenticated origin, so both sides are page-space. Translating the
+    # browser nodes as well would register the panel twice.
     native_flat = native_nodes(native_doc, native_layout_doc)
-    browser_flat, geometry_registration = register_browser_nodes_to_native_frame(
-        browser_flat_raw, capture, native_capture)
+    geometry_registration = {
+        "x": round(authored_x, 6), "y": round(authored_y, 6),
+        "source": "authenticated-authored-frame",
+        "applied_to": "native-render-and-layout",
+    }
     comparison = structural_comparison(browser_flat, native_flat)
     matches = comparison["matches"]
     missing = comparison["missing"]
@@ -1456,12 +1488,8 @@ def compare_one(
             for browser, native, score in matches
         ],
     }
-    # Keep page-space geometry canonical. Registered panel-space geometry is a
-    # diagnostic view of the intentional panel-local contract and must never
-    # silently turn a placement mismatch into a promotion pass.
-    raw_comparison = structural_comparison(browser_flat_raw, native_flat)
-    geometry = geometry_metrics_with_registration(
-        raw_comparison["matches"], matches, geometry_registration)
+    geometry = geometry_metrics(matches)
+    geometry["registration"] = geometry_registration
     typography = typography_metrics(matches)
     visual = visual_metrics(
         browser_dir / "browser.png",
@@ -1614,6 +1642,7 @@ def compare_one(
             "typography": typography,
             "visual": visual,
             "viewport_dpr_audit": viewport_dpr,
+            "page_background": page_background,
         },
         "classifications": classifications,
         "promotion": recommendation,

@@ -32,9 +32,10 @@ from importer_differential.core import (  # noqa: E402
     BrowserNode,
     LabError,
     NativeNode,
-    geometry_metrics_with_registration,
+    authenticated_authored_origin,
+    document_canvas_background,
+    geometry_metrics,
     promotion_recommendation,
-    register_browser_nodes_to_native_frame,
 )
 
 
@@ -105,41 +106,32 @@ class HelperScoringTests(unittest.TestCase):
     def _capture(x: float, y: float) -> dict[str, object]:
         return {"reference": {"authored_frame": {"x": x, "y": y}}}
 
-    def test_authenticated_frame_registers_page_bounds_to_panel_origin(self) -> None:
-        node = BrowserNode(1, "main", -1, "", {}, (45.0, 81.0, 320.0, 18.0), {})
-        registered, metadata = register_browser_nodes_to_native_frame(
-            [node], self._capture(24.0, 24.0), self._capture(24.0, 24.0))
-        self.assertEqual(registered[0].bounds, (21.0, 57.0, 320.0, 18.0))
-        self.assertEqual(metadata["x"], -24.0)
-        self.assertEqual(metadata["y"], -24.0)
-
-    def test_zero_frame_is_identity(self) -> None:
-        nodes = [BrowserNode(1, "main", -1, "", {}, (0.0, 0.0, 320.0, 18.0), {})]
-        registered, metadata = register_browser_nodes_to_native_frame(
-            nodes, self._capture(0.0, 0.0), self._capture(0.0, 0.0))
-        self.assertIs(registered, nodes)
-        self.assertEqual(metadata["x"], 0.0)
+    def test_authenticated_origin_is_the_signed_authored_frame(self) -> None:
+        self.assertEqual(
+            authenticated_authored_origin(self._capture(24.0, 18.5), self._capture(24.0, 18.5)),
+            (24.0, 18.5))
 
     def test_authored_frame_disagreement_fails_closed(self) -> None:
         with self.assertRaises(LabError):
-            register_browser_nodes_to_native_frame(
-                [], self._capture(24.0, 24.0), self._capture(0.0, 0.0))
+            authenticated_authored_origin(self._capture(24.0, 24.0), self._capture(0.0, 0.0))
 
-    def test_registered_geometry_is_diagnostic_and_raw_geometry_stays_canonical(self) -> None:
+    def test_missing_or_nonfinite_authored_frame_fails_closed(self) -> None:
+        with self.assertRaises(LabError):
+            authenticated_authored_origin({"reference": {}}, self._capture(0.0, 0.0))
+        with self.assertRaises(LabError):
+            authenticated_authored_origin(
+                self._capture(float("nan"), 0.0), self._capture(float("nan"), 0.0))
+
+    def test_unregistered_panel_placement_lowers_page_space_geometry(self) -> None:
+        # A native panel left at the panel origin instead of its page-space
+        # rect must score as a placement error; nothing re-registers it.
         browser = BrowserNode(
             1, "main", -1, "", {}, (24.0, 24.0, 320.0, 18.0), {})
         native = NativeNode(
             "browser:main", "element", "main", "", None, {},
             (0.0, 0.0, 320.0, 18.0))
-        raw_match = [(browser, native, 1.0)]
-        registered_browser = BrowserNode(
-            1, "main", -1, "", {}, (0.0, 0.0, 320.0, 18.0), {})
-        registered = [(registered_browser, native, 1.0)]
-        geometry = geometry_metrics_with_registration(
-            raw_match, registered, {"x": -24.0, "y": -24.0})
+        geometry = geometry_metrics([(browser, native, 1.0)])
         self.assertLess(geometry["score"], 1.0)
-        self.assertEqual(geometry["registered_geometry"]["score"], 1.0)
-        self.assertEqual(geometry["registration_applied"]["x"], -24.0)
         recommendation = promotion_recommendation(
             [],
             {"score": 1.0},
@@ -149,6 +141,65 @@ class HelperScoringTests(unittest.TestCase):
         )
         self.assertFalse(recommendation["threshold_eligible"])
         self.assertFalse(recommendation["production_promotion_enabled"])
+
+    @staticmethod
+    def _canvas_snapshot(html: dict[str, str], body: dict[str, str]) -> dict[str, object]:
+        names = ["background-color", "background-image"]
+        strings = ["#document", "html", "HTML", "BODY"]
+
+        def row(styles: dict[str, str]) -> list[int]:
+            out = []
+            for name in names:
+                value = styles.get(name, "none" if name == "background-image" else "rgba(0, 0, 0, 0)")
+                if value not in strings:
+                    strings.append(value)
+                out.append(strings.index(value))
+            return out
+
+        rows = [row(html), row(body)]
+        return {
+            "strings": strings,
+            "computedStyleNames": names,
+            "documents": [{
+                # The doctype is also named "html" and is never laid out.
+                "nodes": {"nodeName": [0, 1, 2, 3], "nodeType": [9, 10, 1, 1],
+                          "parentIndex": [-1, 0, 0, 2]},
+                "layout": {"nodeIndex": [2, 3], "styles": rows},
+            }],
+        }
+
+    def _canvas(self, html: dict[str, str], body: dict[str, str],
+                scheme: str = "light") -> dict[str, object]:
+        return document_canvas_background(
+            self._canvas_snapshot(html, body), {"provenance": {"color_scheme": scheme}})
+
+    def test_canvas_takes_the_root_background_first(self) -> None:
+        result = self._canvas({"background-color": "rgb(1, 2, 3)"},
+                              {"background-color": "rgb(9, 9, 9)"})
+        self.assertEqual(result, {"status": "resolved", "source": "html-background",
+                                  "color": "rgb(1, 2, 3)"})
+
+    def test_canvas_propagates_the_body_background(self) -> None:
+        result = self._canvas({}, {"background-color": "rgb(16, 21, 34)"})
+        self.assertEqual(result["source"], "body-background")
+        self.assertEqual(result["color"], "rgb(16, 21, 34)")
+
+    def test_canvas_falls_back_to_the_ua_canvas_for_the_captured_scheme(self) -> None:
+        result = self._canvas({}, {})
+        self.assertEqual(result["source"], "ua-canvas-light")
+        self.assertEqual(result["color"], "rgb(255, 255, 255)")
+        self.assertEqual(self._canvas({}, {}, scheme="dark")["status"], "unresolved")
+
+    def test_canvas_refuses_shapes_it_cannot_reproduce(self) -> None:
+        for html, body in (
+            ({"background-image": "linear-gradient(red, blue)"}, {}),
+            ({}, {"background-color": "rgba(16, 21, 34, 0.5)"}),
+            ({"background-color": "hsl(0, 0%, 0%)"}, {}),
+        ):
+            with self.subTest(html=html, body=body):
+                result = self._canvas(html, body)
+                self.assertEqual(result["status"], "unresolved")
+                self.assertIsNone(result["color"])
 
     @staticmethod
     def _panel_pixels(*, shift: int = 0, fill: tuple[int, int, int] = (220, 220, 220),

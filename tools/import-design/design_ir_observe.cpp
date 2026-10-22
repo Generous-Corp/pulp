@@ -17,7 +17,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <iostream>
 #include <optional>
 
@@ -56,10 +55,60 @@ bool write_text(const std::filesystem::path& path, const std::string& text) {
     return static_cast<bool>(output);
 }
 
+// Moves a panel-local DesignIR to its browser page-space rect, for comparing
+// the render against a full-page Chromium screenshot. The translation is rigid:
+// every coordinate the IR carries relative to the panel origin moves with the
+// authored subtree, including the captured paint rects and raster origins the
+// painters validate against a view's absolute position. Translating the
+// children alone would leave those behind, and the painters would reject them
+// as stale and fall back to unsnapped geometry production never draws.
+//
+// The viewport root keeps exactly the background the importer gave it (the
+// document canvas, when the capture proved one); an absent background stays
+// absent, so a dropped page colour shows up as a page-space residual instead
+// of being borrowed from some descendant.
+void translate_to_page_space(pulp::view::IRNode& root, float dx, float dy) {
+    for (auto& child : root.children) {
+        child.style.left = child.style.left.value_or(0.0f) + dx;
+        child.style.top = child.style.top.value_or(0.0f) + dy;
+    }
+    const auto shift = [](pulp::view::IRNode& node, const char* key, double by) {
+        auto it = node.attributes.find(key);
+        if (it == node.attributes.end()) return;
+        try {
+            it->second = std::to_string(std::stod(it->second) + by);
+        } catch (const std::exception&) {
+            // Unparseable metadata is left for the painter to reject.
+        }
+    };
+    // Both attribute families are device pixels at their own recorded DPR.
+    const auto dpr_of = [](const pulp::view::IRNode& node, const char* key) {
+        auto it = node.attributes.find(key);
+        if (it == node.attributes.end()) return 0.0;
+        try { return std::stod(it->second); } catch (const std::exception&) {}
+        return 0.0;
+    };
+    const auto visit = [&](auto& self, pulp::view::IRNode& node) -> void {
+        if (const double dpr = dpr_of(node, "browser_box_paint_dpr"); dpr > 0.0) {
+            shift(node, "browser_box_paint_left_px", dx * dpr);
+            shift(node, "browser_box_paint_right_px", dx * dpr);
+            shift(node, "browser_box_paint_top_px", dy * dpr);
+            shift(node, "browser_box_paint_bottom_px", dy * dpr);
+        }
+        if (const double dpr = dpr_of(node, "captured_raster_dpr"); dpr > 0.0) {
+            shift(node, "captured_raster_origin_x_px", dx * dpr);
+            shift(node, "captured_raster_origin_y_px", dy * dpr);
+        }
+        for (auto& child : node.children) self(self, child);
+    };
+    visit(visit, root);
+}
+
 void usage() {
     std::cerr << "Usage: pulp-design-ir-observe --input <design.ir.json> "
                  "--render <png> --layout <json> --width <px> --height <px> "
-                 "[--scale <factor>] [--origin <x>,<y>] [--text-diagnostics <json>] [--set-value "
+                 "[--scale <factor>] [--origin <x>,<y>] [--page-background <css-color>] "
+                 "[--text-diagnostics <json>] [--set-value "
                  "<anchor>=<normalized>]... [--click <x>,<y>]... "
                  "[--drag <x1>,<y1>:<x2>,<y2>]... [--key <name>]... "
                  "[--interaction-log <json>] [--backend skia|gpu] "
@@ -540,6 +589,7 @@ int main(int argc, char** argv) {
     float origin_x = 0.0f;
     float origin_y = 0.0f;
     bool has_origin = false;
+    std::string page_background;
     std::vector<std::pair<std::string, float>> value_overrides;
     std::vector<InteractionStep> steps;
     std::filesystem::path interaction_log_path;
@@ -570,6 +620,9 @@ int main(int argc, char** argv) {
             origin_x = point->x;
             origin_y = point->y;
             has_origin = true;
+        }
+        else if (arg == "--page-background" && *value != '\0') {
+            page_background = value;
         }
         else if (arg == "--set-value") {
             auto parsed = parse_value_override(value);
@@ -661,37 +714,26 @@ int main(int argc, char** argv) {
         std::cerr << "Error: invalid DesignIR: " << error.what() << "\n";
         return 1;
     }
+    if (has_origin)
+        translate_to_page_space(ir.root, origin_x, origin_y);
+    if (!page_background.empty()) {
+        // The colour the caller resolved for the page canvas. A root that
+        // already carries the document canvas must agree with it; two
+        // authorities disagreeing is evidence of a binding error, not a
+        // choice for the observer to make.
+        if (ir.root.style.background_color &&
+            *ir.root.style.background_color != page_background) {
+            std::cerr << "Error: --page-background " << page_background
+                      << " disagrees with the imported document canvas "
+                      << *ir.root.style.background_color << "\n";
+            return 2;
+        }
+        ir.root.style.background_color = page_background;
+    }
     // The document's own directory is the search root for its manifest assets:
     // relative local_paths resolve against it, and a local_path that no longer
     // points at its bytes is recovered by content hash from the asset folders
     // beside it. Without this the tool depends on the process CWD.
-    if (has_origin) {
-        // render_to_png lays the root out at the viewport origin. Translate
-        // the authored document child by the authenticated frame origin so a
-        // cropped panel-local IR is painted at its browser page-space rect.
-        // This is diagnostic harness registration; the imported IR remains
-        // panel-local and production consumers do not pass --origin.
-        for (auto& child : ir.root.children) {
-            child.style.left = child.style.left.value_or(0.0f) + origin_x;
-            child.style.top = child.style.top.value_or(0.0f) + origin_y;
-        }
-        // The raster observer clears with a framework default. Carry the
-        // authenticated document/body background onto the viewport root so
-        // page-space pixels outside a cropped authored surface match the
-        // Chromium page rather than the observer's diagnostic clear color.
-        std::function<std::optional<std::string>(const pulp::view::IRNode&)> find_background;
-        find_background = [&find_background](const pulp::view::IRNode& node)
-            -> std::optional<std::string> {
-            if (node.style.background_color)
-                return node.style.background_color;
-            for (const auto& child : node.children)
-                if (auto color = find_background(child))
-                    return color;
-            return std::nullopt;
-        };
-        if (auto color = find_background(ir.root))
-            ir.root.style.background_color = std::move(*color);
-    }
     auto root = pulp::view::build_native_view_tree(
         ir, ir.asset_manifest,
         {.asset_base_directory = input_path.parent_path()});

@@ -75,7 +75,14 @@ Every report has `schema: "pulp-importer-differential-report-v1"` and records
 source hash, browser provenance, source recognition, dynamic blockers, timings,
 layer scores, likely root causes with confidence, an `observability` receipt,
 and an opt-in `timing_budget` verdict,
-and an advisory promotion classification. The receipt paths are relative to
+and an advisory promotion classification. All scores are page-space: the
+observer places the panel-local native import at the authored-frame origin
+both captures sign (`comparison.geometry.registration`), and fills the page
+around it with the canvas colour Chromium paints, resolved from the verified
+DOM snapshot by CSS background propagation (`comparison.page_background`). A
+page background the rule cannot resolve is left unpainted and reported
+`unresolved`, so it shows up as a residual instead of being guessed. The
+receipt paths are relative to
 each fixture output, so they can be copied under `/tmp/pulp-p0a-8458/receipts/`
 without exposing machine-local paths.
 

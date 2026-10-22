@@ -817,7 +817,7 @@ class DifferentialLabTests(unittest.TestCase):
                 0, "main", -1, "", {}, (0.25, 0.25, 0.5, 0.5), {}, 10)
             native = LAB.NativeNode(
                 "panel", "frame", "main", "", None, {}, (0, 0, 0.5, 0.5), 10)
-            with patch.object(LAB, "run_command", side_effect=fake_run), \
+            with patch.object(LAB, "run_command", side_effect=fake_run) as offset_run, \
                     patch.object(LAB, "find_browser_evidence", return_value=evidence), \
                     patch.object(LAB, "browser_nodes", return_value=[browser]), \
                     patch.object(LAB, "native_nodes", return_value=[native]):
@@ -826,10 +826,21 @@ class DifferentialLabTests(unittest.TestCase):
                     "claude", Path("chrome"),
                     fixture_metadata={"viewport": {"width": 1, "height": 1},
                                       "browser_interactions": "plan.json"})
+            render_argv = next(call.args[0] for call in offset_run.call_args_list
+                               if "--render" in call.args[0])
+            # The observer receives the signed origin; the lab never shifts the
+            # browser nodes as well, so a native panel that did not move stays
+            # a page-space placement error.
+            self.assertEqual(render_argv[render_argv.index("--origin") + 1], "0.25,0.25")
+            # An empty snapshot proves no page canvas, so none is invented.
+            self.assertNotIn("--page-background", render_argv)
+            self.assertEqual(offset_report["comparison"]["page_background"]["status"],
+                             "unresolved")
             geometry = offset_report["comparison"]["geometry"]
-            self.assertLess(geometry["score"], geometry["registered_geometry"]["score"])
-            self.assertEqual(geometry["registered_geometry"]["score"], 1.0)
-            self.assertEqual(geometry["registration_applied"]["x"], -0.25)
+            self.assertLess(geometry["score"], 1.0)
+            self.assertNotIn("registered_geometry", geometry)
+            self.assertEqual(geometry["registration"]["x"], 0.25)
+            self.assertEqual(geometry["registration"]["applied_to"], "native-render-and-layout")
             self.assertIn("geometry score below 0.980", offset_report["promotion"]["reasons"])
             with patch.object(
                 LAB, "viewport_dpr_audit",

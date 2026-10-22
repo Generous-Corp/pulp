@@ -558,6 +558,21 @@ knowing before you touch that file:
   Production native promotion is disabled; `threshold_eligible` is advisory
   evidence only. See `docs/tools/importer-differential-lab.md`.
 
+  **Page-space gotcha:** a browser-backed native import is panel-local, while
+  Chromium's screenshot and DOM snapshot are page-space. The lab passes the
+  signed authored-frame origin to `pulp-design-ir-observe --origin`, which
+  must move the panel RIGIDLY: the captured `browser_box_paint_*_px` rects and
+  `captured_raster_origin_*_px` are absolute device-pixel coordinates the
+  painters validate against a view's position, so shifting only the children
+  makes them reject every snapped paint rect (fractional box edges reappear)
+  and draws captured knob sprites at the old origin. The page outside the
+  panel is not part of the import: its colour comes from the verified DOM
+  snapshot by CSS canvas propagation (html, else body, else the UA canvas for
+  the captured color-scheme) via `--page-background`, and is reported
+  `unresolved` rather than borrowed from a descendant when that rule cannot
+  say. Never translate the browser nodes as well; that registers the panel
+  twice.
+
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
   evidence. The differential matcher must join captured elements by
   `backendNodeId` when both sides provide one and fail closed on a mismatch;
