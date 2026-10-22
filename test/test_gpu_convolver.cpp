@@ -487,13 +487,22 @@ TEST_CASE("GpuConvolver fallback is a correct continuation after hits", "[gpu_au
 TEST_CASE("GpuConvolver fallback latency matches reported PDC", "[gpu_audio][convolver]") {
     constexpr uint32_t CH = 2, BS = 64, SR = 48000;
     // Cover both engines the fixed-IR fallback can select, including the
-    // FFT engine's overlap-save history across the PDC delay ring.
+    // FFT engine's overlap-save history across the PDC delay ring. The short
+    // IR sits at the policy's direct-engine limit for this block size, so the
+    // test follows the measured table instead of a fixed length.
+    constexpr std::size_t kDirectLimit = pulp::signal::FixedIrConvolver::direct_fir_limit(BS);
+    constexpr int kShortIr = kDirectLimit > 0 ? static_cast<int>(kDirectLimit) : 150;
+    constexpr int kLongIr = 1025;
+    static_assert(kDirectLimit < static_cast<std::size_t>(kLongIr),
+                  "the long IR must select the FFT engine at this block size");
 #if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
     // Where the policy has a direct-engine range, the short IR exercises it.
-    REQUIRE(pulp::signal::FixedIrConvolver::choose_backend(150, BS) !=
-            pulp::signal::FixedIrConvolver::choose_backend(1025, BS));
+    REQUIRE(pulp::signal::FixedIrConvolver::choose_backend(kShortIr, BS) ==
+            pulp::signal::ConvolutionBackend::direct_fir);
+    REQUIRE(pulp::signal::FixedIrConvolver::choose_backend(kLongIr, BS) ==
+            pulp::signal::ConvolutionBackend::partitioned_fft);
 #endif
-    for (const int M : {150, 1025}) {
+    for (const int M : {kShortIr, kLongIr}) {
         INFO("IR length " << M);
         std::vector<float> ir(M);
         for (int i = 0; i < M; ++i)
