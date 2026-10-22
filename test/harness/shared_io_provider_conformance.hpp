@@ -3,15 +3,17 @@
 // Provider conformance kit for SharedIoArenaProvider.
 //
 // Every provider is driven through the production SharedIoArena, exactly as
-// the realtime dispatcher drives it, and judged only by what the seam can
-// observe: submit() results, terminal records, delivered output, device-loss
-// and resume facts, and inbox callbacks after a drain boundary. A provider
+// the realtime dispatcher drives it, and judged only by what the provider
+// itself controls: submit() results, the terminals it publishes and when,
+// delivered output, device-loss and resume facts, and inbox callbacks after
+// its drain boundary. Checks whose outcome is fixed by the arena, ledger or
+// inbox alone are not scenario evidence and are not counted. A provider
 // supplies a factory that builds a fresh instance with one kit-level fault
 // armed; the kit owns the program spec and its CPU reference.
 //
-// Each scenario returns a ScenarioResult instead of asserting, so a planted
-// violating provider can prove the kit turns red, and every run can be bound
-// into a `pulp.gpu-audio.provider-conformance.v1` receipt.
+// Each scenario returns a ScenarioResult instead of asserting, so a mutant
+// provider can prove the scenario turns red, and every run can be bound into
+// a `pulp.gpu-audio.provider-conformance.v1` receipt.
 
 #include "detail/shared_io_arena.hpp"
 #include "detail/shared_io_provider_identity.hpp"
@@ -64,10 +66,36 @@ enum class Fault : std::uint8_t {
     HoldTerminalBusy,
 };
 
-enum class ProviderKind : std::uint8_t { Fake, Real };
+// Derived from the provider's own identity, never declared by the caller:
+// a "fake" adapter backend is a fake, any other named backend is real, and
+// a provider that names no backend is unidentified and never admissible.
+enum class ProviderKind : std::uint8_t { Fake, Real, Unidentified };
+
+inline constexpr std::string_view kFakeBackend = "fake";
+
+inline ProviderKind kind_of(const SharedIoProviderIdentity& identity) noexcept {
+    if (identity.adapter_backend == kFakeBackend)
+        return ProviderKind::Fake;
+    if (!identity.adapter_backend.empty())
+        return ProviderKind::Real;
+    return ProviderKind::Unidentified;
+}
+
+inline std::string_view kind_name(ProviderKind kind) noexcept {
+    switch (kind) {
+    case ProviderKind::Fake:
+        return "fake";
+    case ProviderKind::Real:
+        return "real";
+    case ProviderKind::Unidentified:
+        return "unidentified";
+    }
+    return "unidentified";
+}
 
 // The program every provider runs through its ordinary submit(): an affine
-// map over float samples. The Dawn P1 provider program is 1.75x + 0.25.
+// map over float samples. The Dawn P1 provider program is 1.75x + 0.25. The
+// verifier pins these values; a receipt for another program is rejected.
 struct ProgramSpec {
     std::string name = "affine-1.75x+0.25";
     float scale = 1.75f;
@@ -93,7 +121,6 @@ struct CreateOutcome {
 
 struct ProviderUnderTest {
     std::string name;
-    ProviderKind kind = ProviderKind::Real;
     std::function<CreateOutcome(Fault)> make;
     // The backing the arena requests; it must match what the provider creates.
     SharedIoArenaProvider::StorageKind storage_kind =
@@ -102,8 +129,10 @@ struct ProviderUnderTest {
     // it the kit cannot prove the busy path ran and skips that scenario.
     std::function<std::uint64_t(const SharedIoArenaProvider&)> busy_retries;
     std::chrono::milliseconds completion_timeout{15000};
-    // How long a withheld or lost completion is observed before drain.
+    // How long withheld or lost work is serviced before the drain boundary.
     std::chrono::milliseconds quiet_window{30};
+    // How long inboxes are watched for callbacks after the final drain.
+    std::chrono::milliseconds post_drain_window{50};
 };
 
 enum class Verdict : std::uint8_t { Passed, Failed, Skipped };
@@ -132,11 +161,10 @@ enum class Scenario : std::uint8_t {
     TeardownQuiescence,
     DrainAfterLoss,
     StaleGenerationReplay,
-    ReceiptTruncation,
     DifferentialCpuReference,
 };
 
-inline constexpr std::array<Scenario, 13> kProviderScenarios = {
+inline constexpr std::array<Scenario, 12> kProviderScenarios = {
     Scenario::Nominal,
     Scenario::ForceLossBeforeSubmit,
     Scenario::ForceLossBetweenSubmitAndRegistration,
@@ -148,7 +176,6 @@ inline constexpr std::array<Scenario, 13> kProviderScenarios = {
     Scenario::TeardownQuiescence,
     Scenario::DrainAfterLoss,
     Scenario::StaleGenerationReplay,
-    Scenario::ReceiptTruncation,
     Scenario::DifferentialCpuReference,
 };
 
@@ -178,8 +205,6 @@ inline std::string_view scenario_name(Scenario scenario) noexcept {
         return "drain_after_loss";
     case Scenario::StaleGenerationReplay:
         return "stale_generation_replay";
-    case Scenario::ReceiptTruncation:
-        return "receipt_truncation";
     case Scenario::DifferentialCpuReference:
         return "differential_cpu_reference";
     }
@@ -205,9 +230,11 @@ struct ScenarioResult {
 // ---------------------------------------------------------------------------
 // Observation plumbing
 
-// Forwards every call to the provider under test and records each accepted
-// submission's token and inbox, so the kit can replay stale terminals and
-// watch an inbox after the provider's drain boundary. It adds no behaviour.
+// Forwards every call to the provider under test and records each submission's
+// token and inbox, so the kit can replay stale terminals and watch an inbox
+// after the provider's drain boundary. While `suppress_service` is set, poll()
+// and service_until() are not forwarded: the kit then sees only what drain()
+// itself published before returning.
 class RecordingProvider final : public SharedIoArenaProvider {
   public:
     explicit RecordingProvider(SharedIoArenaProvider& inner) : inner_(inner) {
@@ -246,10 +273,12 @@ class RecordingProvider final : public SharedIoArenaProvider {
         return accepted;
     }
     void poll() noexcept override {
-        inner_.poll();
+        if (!suppress_service)
+            inner_.poll();
     }
     void service_until(std::uint64_t deadline_ns) noexcept override {
-        inner_.service_until(deadline_ns);
+        if (!suppress_service)
+            inner_.service_until(deadline_ns);
     }
     std::uint64_t service_wait_ns() const noexcept override {
         return inner_.service_wait_ns();
@@ -276,9 +305,8 @@ class RecordingProvider final : public SharedIoArenaProvider {
     const std::vector<Submission>& submissions() const noexcept {
         return submissions_;
     }
-    SharedIoArenaProvider& inner() noexcept {
-        return inner_;
-    }
+
+    bool suppress_service = false;
 
   private:
     SharedIoArenaProvider& inner_;
@@ -346,6 +374,14 @@ inline void write_block(std::span<std::byte> bytes, std::uint32_t block,
     }
 }
 
+inline double sample_error(float actual, std::uint32_t block, std::uint32_t frame,
+                           const ProgramSpec& spec) noexcept {
+    if (!std::isfinite(actual))
+        return INFINITY;
+    const float expected = spec.reference(stimulus(block, frame, spec.frames));
+    return std::abs(static_cast<double>(actual) - expected);
+}
+
 inline double block_error(std::span<const std::byte> bytes, std::uint32_t block,
                           const ProgramSpec& spec) noexcept {
     if (bytes.size() < spec.bytes())
@@ -354,10 +390,7 @@ inline double block_error(std::span<const std::byte> bytes, std::uint32_t block,
     for (std::uint32_t frame = 0; frame < spec.frames; ++frame) {
         float actual = 0.0f;
         std::memcpy(&actual, bytes.data() + frame * sizeof(float), sizeof(float));
-        const float expected = spec.reference(stimulus(block, frame, spec.frames));
-        if (!std::isfinite(actual))
-            return INFINITY;
-        worst = std::max(worst, std::abs(static_cast<double>(actual) - expected));
+        worst = std::max(worst, sample_error(actual, block, frame, spec));
     }
     return worst;
 }
@@ -385,7 +418,7 @@ struct Run {
 
     ~Run() {
         // A failed scenario may leave work pinned; a bounded drain keeps the
-        // provider destructor from observing live slots.
+        // provider destructor from observing live slots where it can.
         if (arena.prepared())
             (void)arena.release();
     }
@@ -421,7 +454,15 @@ struct Run {
     }
 
     ScenarioResult failed(std::string reason) {
+        finish_counts();
         fail(std::move(reason));
+        return result;
+    }
+
+    ScenarioResult skipped(std::string reason) {
+        finish_counts();
+        result.verdict = Verdict::Skipped;
+        result.reason = std::move(reason);
         return result;
     }
 
@@ -482,19 +523,22 @@ struct Run {
         return terminals.count_for(token);
     }
 
-    // The dispatcher's retirement step: stop admission, cross the provider's
-    // drain boundary, consume every terminal it published.
+    // The dispatcher's retirement step: stop admission and cross the
+    // provider's drain boundary. Service is suppressed while consuming, so
+    // the log holds exactly what drain() published before it returned.
     bool retire_and_drain() {
         arena.begin_retirement();
         if (!recorder->drain())
             return fail("drain_failed");
+        recorder->suppress_service = true;
         service_once();
+        recorder->suppress_service = false;
         return true;
     }
 
-    // Shared teardown checks: release succeeds, then no callback reaches any
-    // inbox the provider was handed, across further service and a repeated
-    // drain barrier.
+    // Teardown: release succeeds, then no callback reaches any inbox the
+    // provider was handed, through the release's own drains, a watch window
+    // of further service, and one more drain barrier.
     bool release_and_verify_quiescence() {
         std::vector<std::shared_ptr<SharedIoTerminalInbox>> inboxes;
         for (const auto& submission : recorder->submissions()) {
@@ -502,15 +546,14 @@ struct Run {
                 std::find(inboxes.begin(), inboxes.end(), submission.inbox) == inboxes.end())
                 inboxes.push_back(submission.inbox);
         }
+        std::vector<std::uint64_t> baseline;
+        for (const auto& inbox : inboxes)
+            baseline.push_back(inbox->rejected_callbacks());
+        result.rejected_callbacks = arena.rejected_terminal_callbacks();
         if (!arena.release())
             return fail("release_failed");
-        std::vector<std::uint64_t> rejected;
-        for (const auto& inbox : inboxes) {
-            if (!inbox->quiescent())
-                return fail("inbox_not_quiescent_after_release");
-            rejected.push_back(inbox->rejected_callbacks());
-        }
-        for (int round = 0; round < 3; ++round) {
+        const auto deadline = Clock::now() + provider.post_drain_window;
+        while (Clock::now() < deadline) {
             recorder->poll();
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
@@ -518,10 +561,8 @@ struct Run {
             return fail("repeated_drain_failed");
         recorder->poll();
         for (std::size_t index = 0; index < inboxes.size(); ++index) {
-            SharedIoTerminalInbox::Record record;
-            if (inboxes[index]->try_pop(record))
-                return fail("terminal_published_after_drain");
-            if (inboxes[index]->rejected_callbacks() != rejected[index])
+            if (inboxes[index]->rejected_callbacks() != baseline[index] ||
+                !inboxes[index]->quiescent())
                 return fail("callback_after_drain");
         }
         return true;
@@ -530,8 +571,8 @@ struct Run {
     void finish_counts() {
         result.retired_success = terminals.successes();
         result.retired_failure = terminals.failures();
-        result.rejected_callbacks =
-            arena.prepared() ? arena.rejected_terminal_callbacks() : result.rejected_callbacks;
+        if (arena.prepared())
+            result.rejected_callbacks = arena.rejected_terminal_callbacks();
     }
 };
 
@@ -563,22 +604,24 @@ inline ScenarioResult nominal(const ProviderUnderTest& provider, const ProgramSp
         if (run.terminals.count_for(*token) != 1)
             return run.failed("terminal_not_exactly_once");
     }
-    run.finish_counts();
     run.result.max_abs_error = worst;
     if (worst > spec.tolerance)
         return run.failed("output_mismatch");
-    if (run.result.retired_failure != 0)
+    if (run.terminals.failures() != 0)
         return run.failed("unexpected_failed_terminal");
     if (run.arena.rejected_terminal_callbacks() != 0)
         return run.failed("stale_or_duplicate_callback");
     if (run.recorder->device_lost())
         return run.failed("device_lost_without_fault");
+    run.finish_counts();
     if (!run.release_and_verify_quiescence())
         return run.result;
     run.pass("exact_once_terminals_and_reference_output");
     return run.result;
 }
 
+// Lost work retires failed exactly once, and only at the drain boundary; the
+// provider then reports loss and refuses to resume.
 inline ScenarioResult force_loss(const ProviderUnderTest& provider, const ProgramSpec& spec,
                                  Scenario scenario) {
     Run run(provider, spec, scenario);
@@ -588,27 +631,23 @@ inline ScenarioResult force_loss(const ProviderUnderTest& provider, const Progra
     const auto token = run.submit_block(1, 0, accepted);
     if (!token)
         return run.failed("grant_failed");
+    (void)run.observe_quiet(*token);
     if (!accepted) {
         // A proven pre-submit refusal is legal; it must not publish a terminal.
-        (void)run.observe_quiet(*token);
         if (run.terminals.count != 0 || run.arena.rejected_terminal_callbacks() != 0)
             return run.failed("terminal_after_refusal");
-        if (!run.arena.discard(*token) && run.arena.available_slots() != spec.slots)
-            return run.failed("refused_slot_not_returned");
     } else {
-        (void)run.observe_quiet(*token);
         if (run.terminals.successes() != 0)
             return run.failed("success_after_loss");
-        if (run.arena.acquire_output(token->preparation_epoch, token->stream_sequence))
-            return run.failed("output_delivered_after_loss");
+        if (run.terminals.count_for(*token) != 0)
+            return run.failed("terminal_before_drain");
         if (!run.retire_and_drain())
-            return run.result;
+            return run.failed("drain_failed_after_loss");
         if (run.terminals.count_for(*token) != 1)
             return run.failed("lost_work_not_terminal_exactly_once");
         if (run.terminals.status_for(*token) != SharedIoTerminalStatus::RetiredFailed)
             return run.failed("success_after_loss");
-        if (!run.arena.discard(*token))
-            return run.failed("lost_slot_not_discardable");
+        (void)run.arena.discard(*token);
     }
     if (!run.recorder->device_lost())
         return run.failed("device_loss_not_reported");
@@ -646,11 +685,13 @@ inline ScenarioResult force_loss(const ProviderUnderTest& provider, const Progra
         if (retry_terminals.successes() != 0)
             return run.failed("success_after_loss_on_new_preparation");
     }
-    run.pass(accepted ? "accepted_work_retired_failed_and_not_resumable"
+    run.pass(accepted ? "lost_work_failed_at_drain_and_not_resumable"
                       : "refused_before_submit_and_not_resumable");
     return run.result;
 }
 
+// Work withheld past its delivery deadline retires exactly once at drain and
+// is never published twice.
 inline ScenarioResult late_completion(const ProviderUnderTest& provider, const ProgramSpec& spec) {
     Run run(provider, spec, Scenario::LateCompletion);
     if (!run.create(Fault::DelayCompletion) || !run.prepare(spec.slots))
@@ -665,25 +706,21 @@ inline ScenarioResult late_completion(const ProviderUnderTest& provider, const P
         return run.failed("expiry_rejected");
     if (run.observe_quiet(*token) != 0)
         return run.failed("delay_fault_not_honoured");
-    if (run.arena.available_slots() != spec.slots - 1)
-        return run.failed("expired_slot_not_pinned");
     if (!run.retire_and_drain())
         return run.result;
     if (run.terminals.count_for(*token) != 1)
         return run.failed("late_terminal_not_exactly_once");
-    if (run.arena.acquire_output(token->preparation_epoch, token->stream_sequence))
-        return run.failed("expired_output_delivered");
-    if (!run.arena.discard(*token))
-        return run.failed("late_slot_not_discardable");
-    run.finish_counts();
     if (run.arena.rejected_terminal_callbacks() != 0)
         return run.failed("stale_or_duplicate_callback");
+    (void)run.arena.discard(*token);
+    run.finish_counts();
     if (!run.release_and_verify_quiescence())
         return run.result;
-    run.pass("late_terminal_retired_once_without_delivery");
+    run.pass("late_terminal_retired_once_at_drain");
     return run.result;
 }
 
+// Work that never completes on service is forced terminal by drain().
 inline ScenarioResult missing_completion(const ProviderUnderTest& provider,
                                          const ProgramSpec& spec) {
     Run run(provider, spec, Scenario::MissingCompletion);
@@ -695,22 +732,17 @@ inline ScenarioResult missing_completion(const ProviderUnderTest& provider,
         return run.failed("submit_failed");
     if (run.observe_quiet(*token) != 0)
         return run.failed("delay_fault_not_honoured");
-    // With its only slot pinned the stream must saturate rather than reuse
-    // storage the GPU may still own; this is the InputSaturated signal.
-    if (run.arena.grant_write(2))
-        return run.failed("pinned_slot_reused");
     if (!run.arena.expire_delivery(*token))
         return run.failed("expiry_rejected");
     if (!run.retire_and_drain())
         return run.result;
     if (run.terminals.count_for(*token) != 1)
         return run.failed("drain_did_not_terminate_missing_work");
-    if (!run.arena.discard(*token))
-        return run.failed("missing_slot_not_discardable");
+    (void)run.arena.discard(*token);
     run.finish_counts();
     if (!run.release_and_verify_quiescence())
         return run.result;
-    run.pass("saturated_until_drain_forced_terminal");
+    run.pass("drain_forced_the_missing_terminal");
     return run.result;
 }
 
@@ -728,16 +760,16 @@ inline ScenarioResult refused_submission(const ProviderUnderTest& provider,
     if (accepted)
         return run.failed("refusal_fault_not_honoured");
     (void)run.observe_quiet(*token);
-    if (run.terminals.count != 0)
+    if (run.terminals.count != 0 || run.arena.rejected_terminal_callbacks() != 0)
         return run.failed("terminal_after_refusal");
-    if (run.arena.rejected_terminal_callbacks() != 0)
-        return run.failed("callback_after_refusal");
+    // A provider that published into the reserved cell leaves the arena's
+    // rollback pending and the slot pinned.
     if (run.arena.available_slots() != spec.slots)
         return run.failed("refused_slot_not_returned");
     run.finish_counts();
     if (!run.release_and_verify_quiescence())
         return run.result;
-    run.pass("refusal_published_nothing_and_returned_credit");
+    run.pass("refusal_published_nothing");
     return run.result;
 }
 
@@ -772,22 +804,32 @@ inline ScenarioResult terminal_busy_retry(const ProviderUnderTest& provider,
     return run.result;
 }
 
+// drain() publishes every in-flight terminal before it returns, and no
+// callback follows it.
 inline ScenarioResult teardown_quiescence(const ProviderUnderTest& provider,
                                           const ProgramSpec& spec) {
     Run run(provider, spec, Scenario::TeardownQuiescence);
     if (!run.create(Fault::None) || !run.prepare(spec.slots))
         return run.result;
-    // Leave every slot in flight and tear down without servicing first.
+    std::vector<SlotToken> inflight;
     for (std::uint32_t block = 0; block < spec.slots; ++block) {
         bool accepted = false;
         const auto token = run.submit_block(block + 1, block, accepted);
         if (!token || !accepted)
             return run.failed("submit_failed");
+        inflight.push_back(*token);
+    }
+    // Tear down without servicing first.
+    if (!run.retire_and_drain())
+        return run.result;
+    for (const auto& token : inflight) {
+        if (run.terminals.count_for(token) != 1)
+            return run.failed("terminal_after_drain_returned");
     }
     run.finish_counts();
     if (!run.release_and_verify_quiescence())
         return run.result;
-    run.pass("drain_returned_only_after_last_callback");
+    run.pass("drain_published_every_terminal_before_returning");
     return run.result;
 }
 
@@ -803,28 +845,21 @@ inline ScenarioResult drain_after_loss(const ProviderUnderTest& provider, const 
             return run.failed("grant_failed");
         if (accepted)
             inflight.push_back(*token);
-        else if (!run.arena.discard(*token) && run.arena.available_slots() == 0)
-            return run.failed("refused_slot_not_returned");
     }
     if (inflight.empty())
         return run.failed("no_work_accepted_before_loss");
-    // Lost work keeps its slots pinned: no terminal, failed or otherwise,
-    // returns storage until the dispatcher discards the exact generation.
     for (const auto& token : inflight)
         (void)run.observe_quiet(token);
-    if (run.arena.available_slots() != spec.slots - inflight.size())
-        return run.failed("lost_slots_not_pinned");
-    run.arena.begin_retirement();
-    if (!run.recorder->drain())
+    if (run.terminals.count != 0)
+        return run.failed("terminal_before_drain");
+    if (!run.retire_and_drain())
         return run.failed("drain_failed_after_loss");
-    run.service_once();
     for (const auto& token : inflight) {
         if (run.terminals.count_for(token) != 1)
             return run.failed("lost_work_not_terminal_exactly_once");
         if (run.terminals.status_for(token) != SharedIoTerminalStatus::RetiredFailed)
             return run.failed("success_after_loss");
-        if (!run.arena.discard(token))
-            return run.failed("lost_slot_not_discardable");
+        (void)run.arena.discard(token);
     }
     if (!run.recorder->device_lost())
         return run.failed("device_loss_not_reported");
@@ -839,6 +874,8 @@ inline ScenarioResult drain_after_loss(const ProviderUnderTest& provider, const 
     return run.result;
 }
 
+// After a clean drain, a provider that claims it can resume must accept the
+// next epoch and must never re-publish a previous epoch's terminal.
 inline ScenarioResult stale_generation_replay(const ProviderUnderTest& provider,
                                               const ProgramSpec& spec) {
     Run run(provider, spec, Scenario::StaleGenerationReplay);
@@ -854,25 +891,24 @@ inline ScenarioResult stale_generation_replay(const ProviderUnderTest& provider,
         return run.failed("submission_not_recorded");
     const auto stale = run.recorder->submissions().back();
 
-    // Re-prime the same arena: the inbox persists, the epoch advances.
-    run.arena.begin_retirement();
-    run.service_once();
+    // Re-prime the same arena after the drain boundary: the inbox persists,
+    // the epoch advances, and only an affirmative resume proof reopens it.
+    if (!run.retire_and_drain())
+        return run.result;
+    if (!run.recorder->can_resume_after_drain())
+        return run.skipped("provider_cannot_resume_after_drain");
     if (!run.arena.reset_when_quiescent())
         return run.failed("reprime_failed");
-    if (run.arena.preparation_epoch() <= old->preparation_epoch)
-        return run.failed("epoch_not_advanced");
 
     const auto current = run.submit_block(1, 1, accepted);
-    if (!current || !accepted)
-        return run.failed("submit_after_reprime_failed");
-    if (current->slot != old->slot)
-        return run.failed("replay_slot_mismatch");
+    if (!current)
+        return run.failed("grant_after_reprime_failed");
+    if (!accepted)
+        return run.failed("resume_claim_not_honoured");
     const auto before = run.arena.rejected_terminal_callbacks();
     if (stale.inbox->push(stale.token, SharedIoTerminalStatus::RetiredSuccess) !=
         SharedIoTerminalInbox::PushResult::Rejected)
         return run.failed("stale_terminal_retired");
-    if (run.arena.rejected_terminal_callbacks() != before + 1)
-        return run.failed("stale_terminal_not_counted");
     const auto error = run.await_output(*current, 1);
     if (!error)
         return run.failed("current_completion_missing");
@@ -881,15 +917,13 @@ inline ScenarioResult stale_generation_replay(const ProviderUnderTest& provider,
         return run.failed("output_mismatch");
     if (run.terminals.count_for(stale.token) != 1 || run.terminals.count_for(*current) != 1)
         return run.failed("terminal_not_exactly_once");
-    if (run.arena.acquire_output(old->preparation_epoch, old->stream_sequence))
-        return run.failed("old_epoch_output_visible");
-    // Exactly the one deliberate replay; the provider itself emitted none.
-    if (run.arena.rejected_terminal_callbacks() != 1)
+    // Exactly the kit's one deliberate replay; the provider emitted none.
+    if (run.arena.rejected_terminal_callbacks() != before + 1 || before != 0)
         return run.failed("provider_emitted_stale_callback");
     run.finish_counts();
     if (!run.release_and_verify_quiescence())
         return run.result;
-    run.pass("old_epoch_terminal_rejected");
+    run.pass("resumed_epoch_without_stale_terminals");
     return run.result;
 }
 
@@ -900,7 +934,7 @@ inline ScenarioResult differential_cpu(const ProviderUnderTest& provider, const 
     double worst = 0.0;
     std::uint32_t next_block = 0;
     std::vector<std::pair<SlotToken, std::uint32_t>> inflight;
-    // Keep every slot busy so the null also covers out-of-order retirement.
+    // Keep every slot busy so the null also covers overlapping retirement.
     while (next_block < spec.blocks || !inflight.empty()) {
         while (next_block < spec.blocks && inflight.size() < spec.slots) {
             bool accepted = false;
@@ -917,9 +951,9 @@ inline ScenarioResult differential_cpu(const ProviderUnderTest& provider, const 
         worst = std::max(worst, *error);
     }
     run.result.max_abs_error = worst;
-    run.finish_counts();
     if (worst > spec.tolerance)
         return run.failed("null_residual_exceeds_tolerance");
+    run.finish_counts();
     if (!run.release_and_verify_quiescence())
         return run.result;
     run.pass("provider_nulls_against_cpu_reference");
@@ -933,7 +967,6 @@ inline ScenarioResult differential_cpu(const ProviderUnderTest& provider, const 
 
 struct Receipt {
     std::string provider_name;
-    ProviderKind kind = ProviderKind::Real;
     SharedIoProviderIdentity identity;
     SharedIoProviderCapabilities capabilities;
     ProgramSpec program;
@@ -941,6 +974,9 @@ struct Receipt {
     std::size_t capacity = 32;
     std::size_t dropped_rows = 0;
 
+    ProviderKind kind() const noexcept {
+        return kind_of(identity);
+    }
     // Rows beyond capacity are counted, never silently lost; a truncated
     // receipt is inadmissible.
     void add(ScenarioResult row) {
@@ -954,7 +990,8 @@ struct Receipt {
         return dropped_rows != 0;
     }
     bool identity_admissible() const noexcept {
-        return kind == ProviderKind::Fake || identity.authenticated;
+        return kind() == ProviderKind::Fake ||
+               (kind() == ProviderKind::Real && identity.authenticated);
     }
     bool passed() const noexcept {
         if (truncated() || !identity_admissible() || rows.empty())
@@ -1023,7 +1060,7 @@ inline std::string Receipt::to_json() const {
     std::ostringstream out;
     out << "{\"schema\":" << json_string(kReceiptSchema) << ",\"kit_version\":" << kKitVersion
         << ",\"provider\":{\"name\":" << json_string(provider_name)
-        << ",\"kind\":" << json_string(kind == ProviderKind::Fake ? "fake" : "real")
+        << ",\"kind\":" << json_string(kind_name(kind()))
         << ",\"identity\":{\"authenticated\":" << json_bool(identity.authenticated)
         << ",\"provider_revision\":" << json_string(identity.provider_revision)
         << ",\"adapter_name\":" << json_string(identity.adapter_name)
@@ -1067,42 +1104,6 @@ inline std::string Receipt::to_json() const {
     return out.str();
 }
 
-namespace detail {
-
-// A receipt one row short of the kit's scenarios must flag itself truncated
-// and fail; the complete receipt must not.
-inline ScenarioResult receipt_truncation(const ProviderUnderTest& provider,
-                                         const ProgramSpec& spec) {
-    ScenarioResult result;
-    result.scenario = std::string(scenario_name(Scenario::ReceiptTruncation));
-    Receipt complete{.provider_name = provider.name, .kind = provider.kind, .program = spec};
-    complete.identity.authenticated = true;
-    Receipt clipped = complete;
-    complete.capacity = kProviderScenarios.size();
-    clipped.capacity = kProviderScenarios.size() - 1;
-    for (const auto scenario : kProviderScenarios) {
-        ScenarioResult row;
-        row.scenario = std::string(scenario_name(scenario));
-        row.verdict = Verdict::Passed;
-        complete.add(row);
-        clipped.add(row);
-    }
-    if (complete.truncated() || !complete.passed()) {
-        result.reason = "complete_receipt_rejected";
-        return result;
-    }
-    if (!clipped.truncated() || clipped.dropped_rows != 1 || clipped.passed() ||
-        clipped.to_json().find("\"truncated\":true") == std::string::npos) {
-        result.reason = "truncated_receipt_admitted";
-        return result;
-    }
-    result.verdict = Verdict::Passed;
-    result.reason = "truncation_flagged_and_rejected";
-    return result;
-}
-
-} // namespace detail
-
 // ---------------------------------------------------------------------------
 // Entry points
 
@@ -1129,16 +1130,14 @@ inline ScenarioResult run_scenario(Scenario scenario, const ProviderUnderTest& p
         return detail::drain_after_loss(provider, spec);
     case Scenario::StaleGenerationReplay:
         return detail::stale_generation_replay(provider, spec);
-    case Scenario::ReceiptTruncation:
-        return detail::receipt_truncation(provider, spec);
     case Scenario::DifferentialCpuReference:
         return detail::differential_cpu(provider, spec);
     }
     return {};
 }
 
-// Runs the same blocks through two providers and nulls their outputs against
-// each other. Both must also null against the CPU reference.
+// Runs the same blocks through two providers. Each must null against the CPU
+// reference, and the two must null against each other.
 inline ScenarioResult run_differential_pair(const ProviderUnderTest& first,
                                             const ProviderUnderTest& second,
                                             const ProgramSpec& spec) {
@@ -1189,6 +1188,7 @@ inline ScenarioResult run_differential_pair(const ProviderUnderTest& first,
                 return false;
             }
             result.submissions += 1;
+            result.retired_success += 1;
         }
         if (!run.arena.release()) {
             reason = "release_failed";
@@ -1196,42 +1196,56 @@ inline ScenarioResult run_differential_pair(const ProviderUnderTest& first,
         }
         return true;
     };
+    auto cpu_error = [&](const std::vector<float>& samples) {
+        double worst = 0.0;
+        for (std::size_t index = 0; index < samples.size(); ++index) {
+            const auto block = static_cast<std::uint32_t>(index / spec.frames);
+            const auto frame = static_cast<std::uint32_t>(index % spec.frames);
+            worst = std::max(worst, sample_error(samples[index], block, frame, spec));
+        }
+        return worst;
+    };
     std::vector<float> a;
     std::vector<float> b;
     std::string reason;
-    if (!collect(first, a, reason)) {
-        result.verdict = skipped ? Verdict::Skipped : Verdict::Failed;
-        result.reason = first.name + ":" + reason;
-        return result;
+    for (const auto* provider : {&first, &second}) {
+        auto& samples = provider == &first ? a : b;
+        if (!collect(*provider, samples, reason)) {
+            result.verdict = skipped ? Verdict::Skipped : Verdict::Failed;
+            result.reason = provider->name + ":" + reason;
+            return result;
+        }
     }
-    if (!collect(second, b, reason)) {
-        result.verdict = skipped ? Verdict::Skipped : Verdict::Failed;
-        result.reason = second.name + ":" + reason;
-        return result;
-    }
-    double worst = 0.0;
+    const double first_cpu = cpu_error(a);
+    const double second_cpu = cpu_error(b);
+    double pair = a.size() == b.size() ? 0.0 : INFINITY;
     for (std::size_t index = 0; index < a.size() && index < b.size(); ++index) {
         if (!std::isfinite(a[index]) || !std::isfinite(b[index])) {
-            worst = INFINITY;
+            pair = INFINITY;
             break;
         }
-        worst = std::max(worst, std::abs(static_cast<double>(a[index]) - b[index]));
+        pair = std::max(pair, std::abs(static_cast<double>(a[index]) - b[index]));
     }
+    const double worst = std::max({first_cpu, second_cpu, pair});
     result.max_abs_error = std::isfinite(worst) ? worst : -1.0;
-    if (a.size() != b.size() || !std::isfinite(worst) || worst > spec.tolerance) {
-        result.verdict = Verdict::Failed;
+    result.verdict = Verdict::Failed;
+    if (!(first_cpu <= spec.tolerance))
+        result.reason = first.name + ":null_residual_exceeds_tolerance";
+    else if (!(second_cpu <= spec.tolerance))
+        result.reason = second.name + ":null_residual_exceeds_tolerance";
+    else if (!(pair <= spec.tolerance))
         result.reason = "provider_pair_null_exceeds_tolerance";
-        return result;
+    else {
+        result.verdict = Verdict::Passed;
+        result.reason = first.name + "_and_" + second.name + "_null_against_cpu_and_each_other";
     }
-    result.verdict = Verdict::Passed;
-    result.reason = first.name + "_nulls_against_" + second.name;
     return result;
 }
 
 // Runs every provider scenario and binds the results, with the provider's own
 // identity, into a receipt. Identity is read from a fresh, unfaulted instance.
 inline Receipt run_suite(const ProviderUnderTest& provider, const ProgramSpec& spec) {
-    Receipt receipt{.provider_name = provider.name, .kind = provider.kind, .program = spec};
+    Receipt receipt{.provider_name = provider.name, .program = spec};
     if (auto created = provider.make(Fault::None); created.provider) {
         receipt.identity = created.provider->provider_identity();
         receipt.capabilities = created.provider->provider_capabilities();

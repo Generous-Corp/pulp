@@ -47,7 +47,8 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
 
     // Provider-visible faults with the same observable contract as the Dawn
     // provider's fault injection: loss makes every accepted submission retire
-    // failed and the provider non-resumable; DelayCompletion withholds the
+    // failed, only at the drain boundary, and leaves the provider
+    // non-resumable; DelayCompletion withholds the
     // fault slot from service until drain(); RejectBeforeSubmit refuses the
     // fault slot; HoldTerminalBusy makes the first terminal publication find
     // its inbox cell busy so it must be retained and retried.
@@ -61,18 +62,39 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
         HoldTerminalBusy,
     };
 
-    // Planted contract violations. A conformant kit must turn each of these
-    // red; none is reachable unless a test selects it.
+    // Planted contract violations (mutant providers). The conformance kit
+    // must turn each of these red; none is reachable unless a test selects it.
     enum class Violation : std::uint8_t {
         None,
-        CallbackAfterDrain,
+        // A second push for an already retired token.
+        DuplicateTerminal,
+        // Output is off by a scale factor.
+        ScaleError,
+        // Lost work retires failed on service, before the drain boundary.
+        EarlyFailedTerminal,
+        // Lost work retires successfully at drain.
         SuccessAfterLoss,
-        ResumeAfterLoss,
+        // drain() publishes the withheld terminal twice.
+        DuplicateLateTerminal,
+        // drain() returns true without retiring withheld work.
+        DrainSkipsWithheld,
+        // A refused submission still publishes a terminal.
         PushOnRefusal,
+        // A busy publication is dropped instead of retained.
         DropBusyTerminal,
+        // drain() returns before publishing its terminals; the next service
+        // publishes them.
+        DeferDrainTerminalToPoll,
+        // Service after a drain re-publishes a terminal it already retired.
+        CallbackAfterDrain,
+        // drain() returns true but leaves lost work pinned without a terminal.
+        PinLostWork,
+        // can_resume_after_drain() is true after device loss.
+        ResumeAfterLoss,
+        // can_resume_after_drain() is true, then the next epoch is refused.
+        FalseResumeClaim,
+        // A resubmission re-publishes the slot's previous token.
         ReplayStaleOnResubmit,
-        WrongOutput,
-        IgnoreDelay,
     };
 
     struct Allocation {
@@ -91,6 +113,7 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
         bool terminal = false;
         bool completion_pending = false;
         bool lost = false;
+        bool deferred_by_drain = false;
         SharedIoTerminalStatus completion_status = SharedIoTerminalStatus::RetiredFailed;
         const std::byte* input = nullptr;
         std::size_t input_size = 0;
@@ -308,8 +331,9 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
                         std::shared_ptr<SharedIoTerminalInbox> inbox,
                         bool apply_transform = true) noexcept {
         ++lifecycle_state->submits;
-        const bool refused =
-            !accept_submissions || (fault == Fault::RejectBeforeSubmit && token.slot == fault_slot);
+        const bool refused = !accept_submissions ||
+                             (fault == Fault::RejectBeforeSubmit && token.slot == fault_slot) ||
+                             (violation == Violation::FalseResumeClaim && drained_once_);
         if (refused) {
             if (hold_stale_claim_on_reject && inbox)
                 hold_rejected_claim(token, inbox);
@@ -346,9 +370,14 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
         };
         if (transform_at_submit)
             write_output(request);
-        if (complete_in_submit && !defer_terminals)
-            return complete(token.slot, terminal_status) ==
-                   SharedIoTerminalInbox::PushResult::Accepted;
+        if (complete_in_submit && !defer_terminals) {
+            if (complete(token.slot, terminal_status) ==
+                SharedIoTerminalInbox::PushResult::Accepted)
+                return true;
+            // A refusal must never push later: forget the record entirely.
+            request = Pending{};
+            return false;
+        }
         return true;
     }
 
@@ -358,6 +387,12 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
         if (violation == Violation::CallbackAfterDrain && drained_replay_) {
             (void)drained_replay_->inbox->push(drained_replay_->token,
                                                SharedIoTerminalStatus::RetiredSuccess);
+        }
+        for (std::size_t index = 0; index < pending.size(); ++index) {
+            if (pending[index].deferred_by_drain) {
+                pending[index].deferred_by_drain = false;
+                (void)complete(index, SharedIoTerminalStatus::RetiredFailed);
+            }
         }
         // Without complete_on_poll a test thread owns completion, so service
         // leaves every record (including a busy retry) to it and to drain().
@@ -372,8 +407,10 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
                     ++poll_busy_publications;
                 continue;
             }
-            if (fault == Fault::DelayCompletion && index == fault_slot &&
-                violation != Violation::IgnoreDelay)
+            if (fault == Fault::DelayCompletion && index == fault_slot)
+                continue;
+            // Lost work is certified only by the drain boundary.
+            if (request.lost && violation != Violation::EarlyFailedTerminal)
                 continue;
             if (complete(index, terminal_status) == SharedIoTerminalInbox::PushResult::Busy)
                 ++poll_busy_publications;
@@ -401,6 +438,7 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
         ++lifecycle_state->drains;
         if (force_drain_failure || !allow_drain)
             return false;
+        drained_once_ = true;
         bool published = true;
         for (std::size_t index = 0; index < pending.size(); ++index) {
             auto& request = pending[index];
@@ -411,6 +449,14 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
                     retry(index) == SharedIoTerminalInbox::PushResult::Accepted && published;
                 continue;
             }
+            const bool withheld = fault == Fault::DelayCompletion && index == fault_slot;
+            if ((violation == Violation::DrainSkipsWithheld && withheld) ||
+                (violation == Violation::PinLostWork && request.lost))
+                continue;
+            if (violation == Violation::DeferDrainTerminalToPoll) {
+                request.deferred_by_drain = true;
+                continue;
+            }
             const auto status =
                 drain_completes ? terminal_status : SharedIoTerminalStatus::RetiredFailed;
             const auto result = complete(index, status);
@@ -419,6 +465,8 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
                 published = false;
                 continue;
             }
+            if (violation == Violation::DuplicateLateTerminal && withheld)
+                (void)request.inbox->push(request.token, request.completion_status);
             if (violation == Violation::CallbackAfterDrain)
                 drained_replay_ = request;
         }
@@ -452,6 +500,8 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
             return SharedIoTerminalInbox::PushResult::Rejected;
         if (request.lost && violation != Violation::SuccessAfterLoss)
             status = SharedIoTerminalStatus::RetiredFailed;
+        if (request.lost && violation == Violation::SuccessAfterLoss)
+            status = SharedIoTerminalStatus::RetiredSuccess;
         if (status == SharedIoTerminalStatus::RetiredSuccess && !transform_at_submit)
             write_output(request);
         // Finish every access to Pending before publishing Ready: immediate
@@ -480,6 +530,8 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
             }
         } else if (result == SharedIoTerminalInbox::PushResult::Accepted) {
             ++lifecycle_state->retired;
+            if (violation == Violation::DuplicateTerminal)
+                (void)inbox->push(token, status);
         }
         return result;
     }
@@ -634,11 +686,10 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
             request.output[0] = std::byte{0x6b};
             return;
         }
-        float bias_value = bias;
-        if (violation == Violation::WrongOutput)
-            bias_value += 1.0f;
+        const float bias_value = bias;
+        const float scale_value = violation == Violation::ScaleError ? scale * 1.5f : scale;
         const auto bytes = request.input ? std::min(request.input_size, request.output_size) : 0;
-        if (scale == 1.0f && bias_value == 0.0f) {
+        if (scale_value == 1.0f && bias_value == 0.0f) {
             std::memcpy(request.output, request.input, bytes);
             return;
         }
@@ -646,7 +697,7 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
         for (std::size_t index = 0; index < values; ++index) {
             float sample = 0.0f;
             std::memcpy(&sample, request.input + index * sizeof(float), sizeof(float));
-            sample = sample * scale + bias_value;
+            sample = sample * scale_value + bias_value;
             std::memcpy(request.output + index * sizeof(float), &sample, sizeof(float));
         }
     }
@@ -690,6 +741,7 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
     }
 
     bool force_lost_ = false;
+    bool drained_once_ = false;
     bool busy_fault_consumed_ = false;
     std::optional<SharedIoTerminalInbox::CompletionClaim> held_busy_claim_;
     std::shared_ptr<SharedIoTerminalInbox> held_busy_inbox_;

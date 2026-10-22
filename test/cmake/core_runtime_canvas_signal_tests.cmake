@@ -833,7 +833,7 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-audio-provider-conformance-fake-receipt-verify
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/verify_gpu_audio_provider_conformance.py"
-            "${_provider_conformance_receipt}" --forbid-skips --require-pair)
+            "${_provider_conformance_receipt}" --forbid-skips --require-pair --require-kind fake)
     set_tests_properties(gpu-audio-provider-conformance-fake-receipt-verify PROPERTIES
         FIXTURES_REQUIRED pulp_gpu_audio_provider_conformance_fake_receipt
         TIMEOUT 30)

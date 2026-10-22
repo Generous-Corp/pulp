@@ -684,9 +684,11 @@
 
             # The provider conformance kit instantiated for the physical Dawn
             # provider (the fake instantiation runs on every lane). Its receipt
-            # must carry an authenticated identity, no skipped scenario and a
-            # Dawn imported/staged pair. Catch2 exits 4 when the device is
-            # unavailable and the case skips.
+            # must derive kind=real from an authenticated identity, skip no
+            # scenario and carry a Dawn imported/staged pair. Catch2 exits 4
+            # when the device is unavailable; that run deletes the receipt
+            # first, so the verify step then skips (77) instead of reading a
+            # stale file.
             add_executable(pulp-test-gpu-dawn-shared-io-provider-conformance
                 test_gpu_dawn_shared_io_provider_conformance.cpp)
             target_link_libraries(pulp-test-gpu-dawn-shared-io-provider-conformance PRIVATE
@@ -712,9 +714,11 @@
             add_test(NAME pulp-gpu-dawn-provider-conformance-receipt-verify
                 COMMAND "${Python3_EXECUTABLE}"
                     "${PROJECT_SOURCE_DIR}/tools/validation/verify_gpu_audio_provider_conformance.py"
-                    "${_pulp_gpu_dawn_conformance_receipt}" --forbid-skips --require-pair)
+                    "${_pulp_gpu_dawn_conformance_receipt}" --forbid-skips --require-pair
+                    --require-kind real --skip-if-missing)
             set_tests_properties(pulp-gpu-dawn-provider-conformance-receipt-verify PROPERTIES
                 FIXTURES_REQUIRED pulp_gpu_dawn_provider_conformance_receipt
+                SKIP_RETURN_CODE 77
                 TIMEOUT 30)
 
             # Bounded private one-stream WaveNet qualification. This probe is

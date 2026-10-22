@@ -13,16 +13,36 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
 
+COUNTERS = {
+    # name: (submissions, retired_success, retired_failure, rejected_callbacks)
+    "nominal": (4, 4, 0, 0),
+    "force_loss_before_submit": (1, 0, 1, 0),
+    "force_loss_between_submit_and_registration": (1, 0, 1, 0),
+    "force_loss_after_registration": (1, 0, 1, 0),
+    "late_completion": (1, 1, 0, 0),
+    "missing_completion": (1, 1, 0, 0),
+    "refused_submission": (0, 0, 0, 0),
+    "terminal_busy_retry": (1, 1, 0, 1),
+    "teardown_quiescence": (2, 2, 0, 0),
+    "drain_after_loss": (2, 0, 2, 0),
+    "stale_generation_replay": (2, 2, 0, 1),
+    "differential_cpu_reference": (32, 32, 0, 0),
+    "differential_provider_pair": (64, 64, 0, 0),
+}
+
+
+def row(name, verdict="passed"):
+    submissions, success, failure, rejected = COUNTERS[name]
+    return {"name": name, "verdict": verdict, "reason": "ok", "submissions": submissions,
+            "retired_success": success, "retired_failure": failure,
+            "rejected_callbacks": rejected,
+            "max_abs_error": 0.0 if name in MODULE.DIFFERENTIAL_SCENARIOS else None}
+
+
 def receipt(kind="real"):
     real = kind == "real"
-    rows = []
-    for name in MODULE.REQUIRED_SCENARIOS:
-        rows.append({"name": name, "verdict": "passed", "reason": "ok", "submissions": 1,
-                     "retired_success": 1, "retired_failure": 0, "rejected_callbacks": 0,
-                     "max_abs_error": 0.0 if name in MODULE.DIFFERENTIAL_SCENARIOS else None})
-    rows.append({"name": "differential_provider_pair", "verdict": "passed", "reason": "ok",
-                 "submissions": 32, "retired_success": 0, "retired_failure": 0,
-                 "rejected_callbacks": 0, "max_abs_error": 2.0e-7})
+    rows = [row(name) for name in MODULE.REQUIRED_SCENARIOS]
+    rows.append(row("differential_provider_pair"))
     return {
         "schema": MODULE.SCHEMA,
         "kit_version": 1,
@@ -35,7 +55,7 @@ def receipt(kind="real"):
                 "adapter_name": "Apple M3" if real else "fake-adapter",
                 "adapter_backend": "metal" if real else "fake",
                 "adapter_vendor_id": 4203 if real else 1,
-                "adapter_device_id": 1 if real else 1,
+                "adapter_device_id": 1,
                 "native_runtime_authenticated": real,
                 "native_runtime_name": "Apple M3" if real else "",
                 "native_runtime_backend": "metal" if real else "",
@@ -52,6 +72,10 @@ def receipt(kind="real"):
         "dropped_rows": 0,
         "verdict": "passed",
     }
+
+
+def named(value, name):
+    return next(item for item in value["scenarios"] if item["name"] == name)
 
 
 class ProviderConformanceVerifierTest(unittest.TestCase):
@@ -72,6 +96,46 @@ class ProviderConformanceVerifierTest(unittest.TestCase):
         value["provider"]["identity"]["native_runtime_authenticated"] = False
         self.assert_rejected(value, "authenticated SharedIoProviderIdentity")
 
+    def test_kind_is_derived_from_identity_not_the_label(self):
+        # A real provider labelled fake: its identity still derives "real".
+        value = receipt("real")
+        value["provider"]["kind"] = "fake"
+        self.assert_rejected(value, "disagrees with the kind its identity derives")
+        # A provider that names no backend cannot be admitted under any label.
+        for label in ("fake", "real"):
+            value = receipt("fake")
+            value["provider"]["kind"] = label
+            value["provider"]["identity"]["adapter_backend"] = ""
+            self.assert_rejected(value, "names no adapter backend")
+
+    def test_require_kind(self):
+        self.assertEqual(MODULE.verify_receipt(receipt("real"), require_kind="real")["kind"],
+                         "real")
+        self.assert_rejected(receipt("fake"), "real is required", require_kind="real")
+        self.assert_rejected(receipt("real"), "fake is required", require_kind="fake")
+
+    def test_program_is_pinned(self):
+        for key, bad in (("scale", 2.0), ("bias", 0.0), ("tolerance", 1.0e-3),
+                         ("name", "something-else")):
+            value = receipt()
+            value["program"][key] = bad
+            self.assert_rejected(value, f"program.{key}")
+
+    def test_counters_are_sanity_checked(self):
+        for name, field, bad in (("nominal", "submissions", 0),
+                                 ("nominal", "rejected_callbacks", 1),
+                                 ("force_loss_after_registration", "retired_success", 1),
+                                 ("drain_after_loss", "retired_failure", 0),
+                                 ("refused_submission", "retired_failure", 1),
+                                 ("late_completion", "rejected_callbacks", 1),
+                                 ("teardown_quiescence", "retired_success", 0),
+                                 ("stale_generation_replay", "rejected_callbacks", 2),
+                                 ("differential_cpu_reference", "submissions", 3),
+                                 ("differential_provider_pair", "submissions", 32)):
+            value = receipt()
+            named(value, name)[field] = bad
+            self.assert_rejected(value, f"scenario {name} passed with impossible counters")
+
     def test_unauthenticated_fake_provider_is_admitted(self):
         value = receipt("fake")
         value["provider"]["identity"]["authenticated"] = False
@@ -88,10 +152,10 @@ class ProviderConformanceVerifierTest(unittest.TestCase):
     def test_kind_and_backend_must_agree(self):
         value = receipt("real")
         value["provider"]["identity"]["adapter_backend"] = "fake"
-        self.assert_rejected(value, "cannot report a fake backend")
+        self.assert_rejected(value, "disagrees with the kind")
         value = receipt("fake")
         value["provider"]["identity"]["adapter_backend"] = "metal"
-        self.assert_rejected(value, "cannot claim a real backend")
+        self.assert_rejected(value, "disagrees with the kind")
 
     def test_native_authentication_requires_provider_authentication(self):
         value = receipt("fake")
@@ -128,7 +192,7 @@ class ProviderConformanceVerifierTest(unittest.TestCase):
 
     def test_failed_row_fails_even_when_writer_says_passed(self):
         value = receipt()
-        value["scenarios"][3]["verdict"] = "failed"
+        named(value, "force_loss_after_registration")["verdict"] = "failed"
         self.assert_rejected(value, "scenarios failed: force_loss_after_registration")
 
     def test_writer_verdict_must_agree(self):
@@ -140,18 +204,19 @@ class ProviderConformanceVerifierTest(unittest.TestCase):
         value = receipt()
         row = next(row for row in value["scenarios"]
                    if row["name"] == "differential_cpu_reference")
-        row["max_abs_error"] = 1.0e-3
+        row["max_abs_error"] = 2.0e-5
         self.assert_rejected(value, "residual within tolerance")
         row["max_abs_error"] = None
         self.assert_rejected(value, "residual within tolerance")
 
     def test_skips_are_typed_and_optional_to_forbid(self):
         value = receipt()
-        value["scenarios"][7]["verdict"] = "skipped"
-        value["scenarios"][7]["reason"] = "busy_retry_unobservable"
+        busy = named(value, "terminal_busy_retry")
+        busy["verdict"] = "skipped"
+        busy["reason"] = "busy_retry_unobservable"
         self.assertEqual(MODULE.verify_receipt(value)["skipped"], ["terminal_busy_retry"])
         self.assert_rejected(value, "was skipped", forbid_skips=True)
-        value["scenarios"][7]["reason"] = ""
+        busy["reason"] = ""
         self.assert_rejected(value, "must carry a reason")
 
     def test_require_pair(self):
@@ -185,6 +250,7 @@ class ProviderConformanceVerifierTest(unittest.TestCase):
                 MODULE.load_receipt(path)
             path.write_text(text, encoding="utf-8")
             self.assertEqual(MODULE.main([str(path), "--forbid-skips"]), 0)
+            self.assertEqual(MODULE.main([str(path), "--require-kind", "fake"]), 1)
             value = receipt()
             value["provider"]["identity"]["authenticated"] = False
             path.write_text(json.dumps(value), encoding="utf-8")
@@ -213,6 +279,18 @@ class ProviderConformanceVerifierTest(unittest.TestCase):
         self.assertFalse(validator.is_valid(missing_identity))
         self.assertEqual(list(MODULE.REQUIRED_SCENARIOS),
                          schema["properties"]["required_scenarios"]["const"])
+
+    def test_missing_receipt_skips_only_when_asked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            absent = Path(directory) / "absent.json"
+            self.assertEqual(MODULE.main([str(absent), "--skip-if-missing"]), MODULE.SKIP_EXIT)
+            # Without the flag an absent receipt is a failure, never a pass.
+            self.assertEqual(MODULE.main([str(absent)]), 1)
+            # The flag never excuses a receipt that is present but bad.
+            value = receipt("real")
+            value["provider"]["identity"]["authenticated"] = False
+            absent.write_text(json.dumps(value), encoding="utf-8")
+            self.assertEqual(MODULE.main([str(absent), "--skip-if-missing"]), 1)
 
 
 if __name__ == "__main__":

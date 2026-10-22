@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -49,7 +50,6 @@ DawnSharedIoProvider::Fault dawn_fault(Fault fault) {
 ProviderUnderTest dawn_provider(DawnSharedIoProvider::StorageKind storage, std::string name) {
     ProviderUnderTest provider;
     provider.name = std::move(name);
-    provider.kind = ProviderKind::Real;
     provider.storage_kind = storage;
     provider.make = [storage](Fault fault) {
         auto created = DawnSharedIoProvider::create(
@@ -70,7 +70,6 @@ ProviderUnderTest dawn_provider(DawnSharedIoProvider::StorageKind storage, std::
 ProviderUnderTest fake_reference() {
     ProviderUnderTest provider;
     provider.name = "fake";
-    provider.kind = ProviderKind::Fake;
     provider.make = [](Fault) {
         const conformance::ProgramSpec spec;
         auto fake = std::make_unique<pulp::test::FakeSharedIoProvider>();
@@ -79,6 +78,7 @@ ProviderUnderTest fake_reference() {
         fake->bias = spec.bias;
         fake->complete_on_poll = true;
         fake->drain_completes = true;
+        fake->identity = pulp::test::FakeSharedIoProvider::authenticated_fake_identity();
         return conformance::CreateOutcome{std::move(fake), {}};
     };
     return provider;
@@ -88,6 +88,11 @@ ProviderUnderTest fake_reference() {
 
 TEST_CASE("Dawn shared IO provider passes the provider conformance kit",
           "[gpu_audio][shared_io][conformance][dawn]") {
+    // A skipped run must leave no receipt, so the verify step skips rather
+    // than re-reading a previous run's file.
+    const char* receipt_path = std::getenv("PULP_PROVIDER_CONFORMANCE_RECEIPT");
+    if (receipt_path && *receipt_path)
+        std::remove(receipt_path);
     const auto imported =
         dawn_provider(DawnSharedIoProvider::StorageKind::ImportedHostPointer, "dawn");
     if (auto probe = imported.make(Fault::None); !probe.provider)
@@ -105,7 +110,8 @@ TEST_CASE("Dawn shared IO provider passes the provider conformance kit",
         CHECK(row.verdict == Verdict::Passed);
     }
 
-    // Two real providers: imported host pointers against staged copies.
+    // Two real providers: imported host pointers against staged copies. Each
+    // nulls against the CPU reference, so staged Dawn is checked too.
     const auto staged = dawn_provider(DawnSharedIoProvider::StorageKind::Staged, "dawn-staged");
     const auto dawn_pair = conformance::run_differential_pair(imported, staged, spec);
     INFO(dawn_pair.reason << " max_abs_error=" << dawn_pair.max_abs_error);
@@ -121,8 +127,9 @@ TEST_CASE("Dawn shared IO provider passes the provider conformance kit",
     INFO("identity authenticated=" << receipt.identity.authenticated
                                    << " revision=" << receipt.identity.provider_revision
                                    << " adapter=" << receipt.identity.adapter_name);
+    CHECK(receipt.kind() == ProviderKind::Real);
     CHECK(receipt.identity.authenticated);
     CHECK(receipt.passed());
-    if (const char* path = std::getenv("PULP_PROVIDER_CONFORMANCE_RECEIPT"); path && *path)
-        REQUIRE(receipt.write(path));
+    if (receipt_path && *receipt_path)
+        REQUIRE(receipt.write(receipt_path));
 }

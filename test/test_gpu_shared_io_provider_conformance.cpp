@@ -4,8 +4,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <set>
+#include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -16,6 +22,7 @@ using conformance::ProviderUnderTest;
 using conformance::Scenario;
 using conformance::Verdict;
 using pulp::test::FakeSharedIoProvider;
+using Violation = FakeSharedIoProvider::Violation;
 
 FakeSharedIoProvider::Fault fake_fault(Fault fault) {
     switch (fault) {
@@ -37,8 +44,10 @@ FakeSharedIoProvider::Fault fake_fault(Fault fault) {
     return FakeSharedIoProvider::Fault::None;
 }
 
-// The fake behaves like a GPU provider: work retires on service, a drain
-// retires whatever is still in flight, and a clean drain may resume.
+// The conformant fake behaves like the Dawn provider: work retires on
+// service, lost work retires failed only at the drain boundary, drain()
+// publishes everything still in flight before returning, and a clean drain
+// may resume.
 void configure(FakeSharedIoProvider& provider, const conformance::ProgramSpec& spec) {
     provider.transform = FakeSharedIoProvider::Transform::Affine;
     provider.scale = spec.scale;
@@ -50,17 +59,16 @@ void configure(FakeSharedIoProvider& provider, const conformance::ProgramSpec& s
     provider.capabilities.completion_service = true;
 }
 
-ProviderUnderTest
-fake_provider(FakeSharedIoProvider::Violation violation = FakeSharedIoProvider::Violation::None,
-              FakeSharedIoProvider::StorageKind storage =
-                  FakeSharedIoProvider::StorageKind::ImportedHostPointer,
-              std::string name = "fake") {
+ProviderUnderTest fake_provider(Violation violation = Violation::None,
+                                FakeSharedIoProvider::StorageKind storage =
+                                    FakeSharedIoProvider::StorageKind::ImportedHostPointer,
+                                std::string name = "fake") {
     ProviderUnderTest provider;
     provider.name = std::move(name);
-    provider.kind = ProviderKind::Fake;
     provider.storage_kind = storage;
     provider.completion_timeout = std::chrono::milliseconds(500);
     provider.quiet_window = std::chrono::milliseconds(5);
+    provider.post_drain_window = std::chrono::milliseconds(10);
     provider.make = [violation, storage](Fault fault) {
         auto fake = std::make_unique<FakeSharedIoProvider>();
         configure(*fake, conformance::ProgramSpec{});
@@ -75,6 +83,82 @@ fake_provider(FakeSharedIoProvider::Violation violation = FakeSharedIoProvider::
     return provider;
 }
 
+// One non-conformant provider per contract rule, and the scenarios that must
+// fail against it with the stated reason.
+struct Mutant {
+    Violation violation;
+    const char* name;
+    std::vector<std::pair<Scenario, const char*>> kills;
+};
+
+const std::vector<Mutant>& mutants() {
+    static const std::vector<Mutant> registry = {
+        {Violation::DuplicateTerminal,
+         "duplicate-terminal",
+         {{Scenario::Nominal, "stale_or_duplicate_callback"}}},
+        {Violation::ScaleError,
+         "scale-error",
+         {{Scenario::Nominal, "output_mismatch"},
+          {Scenario::DifferentialCpuReference, "null_residual_exceeds_tolerance"}}},
+        {Violation::EarlyFailedTerminal,
+         "early-failed-terminal",
+         {{Scenario::ForceLossBeforeSubmit, "terminal_before_drain"},
+          {Scenario::ForceLossBetweenSubmitAndRegistration, "terminal_before_drain"},
+          {Scenario::ForceLossAfterRegistration, "terminal_before_drain"},
+          {Scenario::DrainAfterLoss, "terminal_before_drain"}}},
+        {Violation::SuccessAfterLoss,
+         "success-after-loss",
+         {{Scenario::ForceLossBeforeSubmit, "success_after_loss"},
+          {Scenario::ForceLossBetweenSubmitAndRegistration, "success_after_loss"},
+          {Scenario::ForceLossAfterRegistration, "success_after_loss"},
+          {Scenario::DrainAfterLoss, "success_after_loss"}}},
+        {Violation::DuplicateLateTerminal,
+         "duplicate-late-terminal",
+         {{Scenario::LateCompletion, "stale_or_duplicate_callback"}}},
+        {Violation::DrainSkipsWithheld,
+         "drain-skips-withheld",
+         {{Scenario::LateCompletion, "late_terminal_not_exactly_once"},
+          {Scenario::MissingCompletion, "drain_did_not_terminate_missing_work"}}},
+        {Violation::PushOnRefusal,
+         "push-on-refusal",
+         {{Scenario::RefusedSubmission, "terminal_after_refusal"}}},
+        {Violation::DropBusyTerminal,
+         "drop-busy-terminal",
+         {{Scenario::TerminalBusyRetry, "busy_terminal_not_retried"}}},
+        {Violation::DeferDrainTerminalToPoll,
+         "terminal-after-drain-returns",
+         {{Scenario::TeardownQuiescence, "terminal_after_drain_returned"},
+          {Scenario::MissingCompletion, "drain_did_not_terminate_missing_work"}}},
+        {Violation::CallbackAfterDrain,
+         "callback-after-drain",
+         {{Scenario::TeardownQuiescence, "callback_after_drain"}}},
+        {Violation::PinLostWork,
+         "pin-lost-work",
+         {{Scenario::DrainAfterLoss, "lost_work_not_terminal_exactly_once"},
+          {Scenario::ForceLossAfterRegistration, "lost_work_not_terminal_exactly_once"}}},
+        {Violation::ResumeAfterLoss,
+         "resume-after-loss",
+         {{Scenario::DrainAfterLoss, "resume_claimed_after_loss"},
+          {Scenario::ForceLossBeforeSubmit, "resume_claimed_after_loss"}}},
+        {Violation::FalseResumeClaim,
+         "false-resume-claim",
+         {{Scenario::StaleGenerationReplay, "resume_claim_not_honoured"}}},
+        {Violation::ReplayStaleOnResubmit,
+         "replay-stale-on-resubmit",
+         {{Scenario::StaleGenerationReplay, "provider_emitted_stale_callback"}}},
+    };
+    return registry;
+}
+
+char cell(Verdict verdict) {
+    return verdict == Verdict::Passed ? 'P' : verdict == Verdict::Failed ? 'F' : 'S';
+}
+
+void remove_requested_receipt() {
+    if (const char* path = std::getenv("PULP_PROVIDER_CONFORMANCE_RECEIPT"); path && *path)
+        std::remove(path);
+}
+
 void write_receipt_if_requested(const conformance::Receipt& receipt) {
     const char* path = std::getenv("PULP_PROVIDER_CONFORMANCE_RECEIPT");
     if (path == nullptr || *path == '\0')
@@ -86,6 +170,7 @@ void write_receipt_if_requested(const conformance::Receipt& receipt) {
 
 TEST_CASE("fake shared IO provider passes the provider conformance kit",
           "[gpu_audio][shared_io][conformance][receipt]") {
+    remove_requested_receipt();
     const conformance::ProgramSpec spec;
     auto receipt = conformance::run_suite(fake_provider(), spec);
     REQUIRE(receipt.rows.size() == conformance::kProviderScenarios.size());
@@ -95,7 +180,8 @@ TEST_CASE("fake shared IO provider passes the provider conformance kit",
         CHECK(row.verdict == Verdict::Passed);
     }
 
-    // Two fake storage configurations are two providers: their outputs null.
+    // Two fake storage configurations are two providers; each nulls against
+    // the CPU reference and against the other.
     const auto pair = conformance::run_differential_pair(
         fake_provider(),
         fake_provider({}, FakeSharedIoProvider::StorageKind::Staged, "fake-staged"), spec);
@@ -105,93 +191,139 @@ TEST_CASE("fake shared IO provider passes the provider conformance kit",
     receipt.capacity += 1;
     receipt.add(pair);
 
+    CHECK(receipt.kind() == ProviderKind::Fake);
     CHECK(receipt.identity_admissible());
     CHECK_FALSE(receipt.truncated());
     CHECK(receipt.passed());
     write_receipt_if_requested(receipt);
 }
 
-TEST_CASE("provider conformance kit fails each planted provider violation",
-          "[gpu_audio][shared_io][conformance][negative]") {
-    using V = FakeSharedIoProvider::Violation;
-    struct Planted {
-        V violation;
-        Scenario scenario;
-        const char* reason;
-    };
-    const Planted planted[] = {
-        {V::CallbackAfterDrain, Scenario::TeardownQuiescence, "callback_after_drain"},
-        {V::SuccessAfterLoss, Scenario::ForceLossBeforeSubmit, "success_after_loss"},
-        {V::SuccessAfterLoss, Scenario::ForceLossBetweenSubmitAndRegistration,
-         "success_after_loss"},
-        {V::SuccessAfterLoss, Scenario::ForceLossAfterRegistration, "success_after_loss"},
-        {V::ResumeAfterLoss, Scenario::DrainAfterLoss, "resume_claimed_after_loss"},
-        {V::PushOnRefusal, Scenario::RefusedSubmission, "terminal_after_refusal"},
-        {V::DropBusyTerminal, Scenario::TerminalBusyRetry, "busy_terminal_not_retried"},
-        {V::ReplayStaleOnResubmit, Scenario::StaleGenerationReplay,
-         "provider_emitted_stale_callback"},
-        {V::WrongOutput, Scenario::DifferentialCpuReference, "null_residual_exceeds_tolerance"},
-        {V::IgnoreDelay, Scenario::MissingCompletion, "delay_fault_not_honoured"},
-        {V::IgnoreDelay, Scenario::LateCompletion, "delay_fault_not_honoured"},
-    };
+// The kit's mutation proof: every scenario fails against at least one
+// non-conformant provider and passes against the conformant one. The full
+// scenario x provider matrix is printed, and written to
+// PULP_PROVIDER_CONFORMANCE_MATRIX when that is set.
+TEST_CASE("every conformance scenario fails against its mutant provider",
+          "[gpu_audio][shared_io][conformance][negative][mutants]") {
     const conformance::ProgramSpec spec;
-    for (const auto& entry : planted) {
-        const auto name = conformance::scenario_name(entry.scenario);
-        // Positive control: the same scenario passes without the violation.
-        const auto clean = conformance::run_scenario(entry.scenario, fake_provider(), spec);
-        INFO(name << " clean: " << clean.reason);
-        CHECK(clean.verdict == Verdict::Passed);
 
-        const auto bad =
-            conformance::run_scenario(entry.scenario, fake_provider(entry.violation), spec);
-        INFO(name << " planted: " << bad.reason);
-        CHECK(bad.verdict == Verdict::Failed);
-        CHECK(bad.reason == entry.reason);
+    std::set<std::string> covered;
+    for (const auto& mutant : mutants())
+        for (const auto& [scenario, reason] : mutant.kills)
+            covered.insert(std::string(conformance::scenario_name(scenario)));
+    for (const auto scenario : conformance::kProviderScenarios) {
+        INFO(conformance::scenario_name(scenario) << " has no mutant that must fail it");
+        CHECK(covered.count(std::string(conformance::scenario_name(scenario))) == 1);
+    }
+
+    std::ostringstream matrix;
+    matrix << "scenario\tconformant";
+    for (const auto& mutant : mutants())
+        matrix << '\t' << mutant.name;
+    matrix << "\n";
+
+    std::vector<std::vector<conformance::ScenarioResult>> results(mutants().size());
+    std::vector<conformance::ScenarioResult> conformant;
+    for (const auto scenario : conformance::kProviderScenarios) {
+        conformant.push_back(conformance::run_scenario(scenario, fake_provider(), spec));
+        for (std::size_t index = 0; index < mutants().size(); ++index)
+            results[index].push_back(conformance::run_scenario(
+                scenario, fake_provider(mutants()[index].violation), spec));
+    }
+    for (std::size_t row = 0; row < conformance::kProviderScenarios.size(); ++row) {
+        const auto scenario = conformance::kProviderScenarios[row];
+        matrix << conformance::scenario_name(scenario) << '\t' << cell(conformant[row].verdict);
+        for (const auto& column : results)
+            matrix << '\t' << cell(column[row].verdict);
+        matrix << "\n";
+
+        INFO(conformance::scenario_name(scenario) << " conformant: " << conformant[row].reason);
+        CHECK(conformant[row].verdict == Verdict::Passed);
+    }
+    for (std::size_t index = 0; index < mutants().size(); ++index) {
+        for (const auto& [scenario, reason] : mutants()[index].kills) {
+            const auto row = static_cast<std::size_t>(
+                std::find(conformance::kProviderScenarios.begin(),
+                          conformance::kProviderScenarios.end(), scenario) -
+                conformance::kProviderScenarios.begin());
+            const auto& result = results[index][row];
+            INFO(mutants()[index].name << " x " << conformance::scenario_name(scenario) << ": "
+                                       << conformance::verdict_name(result.verdict) << " ("
+                                       << result.reason << ")");
+            CHECK(result.verdict == Verdict::Failed);
+            CHECK(result.reason == reason);
+        }
+    }
+
+    // The provider-pair differential against a scale mutant, on either side.
+    const auto pair_clean =
+        conformance::run_differential_pair(fake_provider(), fake_provider(), spec);
+    const auto pair_second = conformance::run_differential_pair(
+        fake_provider(), fake_provider(Violation::ScaleError, {}, "scaled"), spec);
+    const auto pair_first = conformance::run_differential_pair(
+        fake_provider(Violation::ScaleError, {}, "scaled"), fake_provider(), spec);
+    CHECK(pair_clean.verdict == Verdict::Passed);
+    CHECK(pair_second.verdict == Verdict::Failed);
+    CHECK(pair_second.reason == "scaled:null_residual_exceeds_tolerance");
+    CHECK(pair_first.verdict == Verdict::Failed);
+    CHECK(pair_first.reason == "scaled:null_residual_exceeds_tolerance");
+    matrix << conformance::kDifferentialPairScenario << '\t' << cell(pair_clean.verdict);
+    for (const auto& mutant : mutants())
+        matrix << '\t'
+               << (mutant.violation == Violation::ScaleError ? cell(pair_second.verdict) : '-');
+    matrix << "\n";
+
+    std::cout << "provider conformance matrix (P pass, F fail, S skip):\n" << matrix.str();
+    if (const char* path = std::getenv("PULP_PROVIDER_CONFORMANCE_MATRIX"); path && *path) {
+        std::ofstream out(path, std::ios::trunc);
+        out << matrix.str();
     }
 }
 
-TEST_CASE("provider pair differential fails a provider with the wrong program",
-          "[gpu_audio][shared_io][conformance][negative]") {
-    const conformance::ProgramSpec spec;
-    const auto clean = conformance::run_differential_pair(fake_provider(), fake_provider(), spec);
-    CHECK(clean.verdict == Verdict::Passed);
-
-    const auto bad = conformance::run_differential_pair(
-        fake_provider(), fake_provider(FakeSharedIoProvider::Violation::WrongOutput), spec);
-    CHECK(bad.verdict == Verdict::Failed);
-    CHECK(bad.reason == "provider_pair_null_exceeds_tolerance");
-    CHECK(bad.max_abs_error > 0.99);
-}
-
-TEST_CASE("provider conformance receipt rejects an unauthenticated real provider",
+TEST_CASE("provider conformance kit derives an unauthenticated real provider as inadmissible",
           "[gpu_audio][shared_io][conformance][receipt][negative]") {
     const conformance::ProgramSpec spec;
-    auto as_real = fake_provider();
-    as_real.name = "unauthenticated-real";
-    as_real.kind = ProviderKind::Real;
-    auto make = as_real.make;
-    as_real.make = [make](Fault fault) {
+    auto with_identity = [](bool authenticated) {
+        auto provider = fake_provider();
+        auto make = provider.make;
+        provider.make = [make, authenticated](Fault fault) {
+            auto created = make(fault);
+            auto& fake = static_cast<FakeSharedIoProvider&>(*created.provider);
+            fake.identity.adapter_backend = "metal";
+            fake.identity.authenticated = authenticated;
+            fake.identity.native_runtime_authenticated = false;
+            return created;
+        };
+        return provider;
+    };
+    const auto rejected = conformance::run_suite(with_identity(false), spec);
+    CHECK(rejected.kind() == ProviderKind::Real);
+    CHECK_FALSE(rejected.identity_admissible());
+    CHECK_FALSE(rejected.passed());
+    CHECK(rejected.to_json().find("\"kind\":\"real\"") != std::string::npos);
+    CHECK(rejected.to_json().find("\"verdict\":\"failed\"") != std::string::npos);
+
+    // Control: the same provider, authenticated, is admitted as real.
+    const auto admitted = conformance::run_suite(with_identity(true), spec);
+    CHECK(admitted.kind() == ProviderKind::Real);
+    CHECK(admitted.identity_admissible());
+    CHECK(admitted.passed());
+
+    // A provider that names no backend is unidentified, whatever it claims.
+    auto anonymous = fake_provider();
+    auto make = anonymous.make;
+    anonymous.make = [make](Fault fault) {
         auto created = make(fault);
         static_cast<FakeSharedIoProvider&>(*created.provider).identity = {};
         return created;
     };
-    const auto rejected = conformance::run_suite(as_real, spec);
-    CHECK_FALSE(rejected.identity.authenticated);
-    CHECK_FALSE(rejected.identity_admissible());
-    CHECK_FALSE(rejected.passed());
-    CHECK(rejected.to_json().find("\"verdict\":\"failed\"") != std::string::npos);
-
-    // Control: the same provider with its authenticated identity is admitted.
-    auto authenticated = fake_provider();
-    authenticated.kind = ProviderKind::Real;
-    const auto admitted = conformance::run_suite(authenticated, spec);
-    CHECK(admitted.identity.authenticated);
-    CHECK(admitted.identity_admissible());
-    CHECK(admitted.passed());
+    const auto unidentified = conformance::run_suite(anonymous, spec);
+    CHECK(unidentified.kind() == ProviderKind::Unidentified);
+    CHECK_FALSE(unidentified.passed());
 }
 
-TEST_CASE("provider conformance kit records unsupported faults as typed skips",
+TEST_CASE("provider conformance kit records unsupported and unprovable paths as typed skips",
           "[gpu_audio][shared_io][conformance]") {
+    const conformance::ProgramSpec spec;
     auto partial = fake_provider();
     auto make = partial.make;
     partial.make = [make](Fault fault) {
@@ -199,7 +331,6 @@ TEST_CASE("provider conformance kit records unsupported faults as typed skips",
             return conformance::CreateOutcome{nullptr, "fault_unsupported"};
         return make(fault);
     };
-    const conformance::ProgramSpec spec;
     const auto row = conformance::run_scenario(Scenario::TerminalBusyRetry, partial, spec);
     CHECK(row.verdict == Verdict::Skipped);
     CHECK(row.reason == "provider_unavailable:fault_unsupported");
@@ -208,25 +339,37 @@ TEST_CASE("provider conformance kit records unsupported faults as typed skips",
     const auto unobservable = conformance::run_scenario(Scenario::TerminalBusyRetry, partial, spec);
     CHECK(unobservable.verdict == Verdict::Skipped);
     CHECK(unobservable.reason == "busy_retry_unobservable");
+
+    // A provider that cannot resume after a clean drain is not re-primed.
+    auto non_resumable = fake_provider();
+    auto resumable_make = non_resumable.make;
+    non_resumable.make = [resumable_make](Fault fault) {
+        auto created = resumable_make(fault);
+        static_cast<FakeSharedIoProvider&>(*created.provider).resume_supported = false;
+        return created;
+    };
+    const auto stale =
+        conformance::run_scenario(Scenario::StaleGenerationReplay, non_resumable, spec);
+    CHECK(stale.verdict == Verdict::Skipped);
+    CHECK(stale.reason == "provider_cannot_resume_after_drain");
 }
 
 TEST_CASE("provider conformance receipt flags truncation and carries every row",
           "[gpu_audio][shared_io][conformance][receipt]") {
     const conformance::ProgramSpec spec;
-    const auto row = conformance::run_scenario(Scenario::ReceiptTruncation, fake_provider(), spec);
-    CHECK(row.verdict == Verdict::Passed);
-
     auto receipt = conformance::run_suite(fake_provider(), spec);
     const auto json = receipt.to_json();
     CHECK(json.find("\"schema\":\"pulp.gpu-audio.provider-conformance.v1\"") != std::string::npos);
+    CHECK(json.find("\"kind\":\"fake\"") != std::string::npos);
     CHECK(json.find("\"truncated\":false") != std::string::npos);
-    CHECK(json.find("\"row_count\":13") != std::string::npos);
+    CHECK(json.find("\"row_count\":12") != std::string::npos);
     for (const auto scenario : conformance::kProviderScenarios) {
         const auto quoted =
             "\"name\":\"" + std::string(conformance::scenario_name(scenario)) + "\"";
         INFO(quoted);
         CHECK(json.find(quoted) != std::string::npos);
     }
+    CHECK(receipt.passed());
 
     receipt.capacity = receipt.rows.size();
     receipt.add(receipt.rows.front());
