@@ -727,7 +727,7 @@ TEST_CASE("SkiaCanvas::fill_text rasterizes the baseline where it was asked",
         int last = -1;
         for (int y = 0; y < pm.height(); ++y)
             for (int x = 0; x < pm.width(); ++x)
-                if (SkColorGetR(pm.getColor(x, y)) < 160) { last = y; break; }
+                if (SkColorGetR(pm.getColor(x, y)) < 250) { last = y; break; }
         return last;
     };
 
@@ -828,6 +828,49 @@ TEST_CASE("SkiaCanvas::fill_text adds letter-spacing after each glyph",
         // The second glyph moves by exactly one spacing.
         CHECK(spaced_two.last - plain_two.last ==
               static_cast<int>(spacing));
+    }
+}
+
+// measure_text_full shapes letter-spaced text the way fill_text does, in the
+// canvas's direction. It used to shape left-to-right whatever the direction,
+// and the two directions place the tracking differently, so an RTL canvas
+// reported ink 4px left of what it drew here. The paint side needed a fix too:
+// an RTL paragraph aligned to its own right edge at infinite width, so RTL
+// text that went through the paragraph path drew nothing at all.
+TEST_CASE("measure_text_full's ink matches the paint in either direction",
+          "[canvas][skia][text][letter-spacing][rtl]") {
+    SkImageInfo info = SkImageInfo::Make(400, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    for (auto dir : {Canvas::TextDirection::ltr, Canvas::TextDirection::rtl}) {
+        INFO("direction " << (dir == Canvas::TextDirection::rtl ? "rtl" : "ltr"));
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        Canvas::TextMetrics m;
+        {
+            SkiaCanvas canvas(surface->getCanvas());
+            canvas.set_direction(dir);
+            canvas.set_font_full("Inter", 32.0f, 400, /*slant=*/0,
+                                 /*letter_spacing=*/8.0f);
+            canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_text("HH", 100.0f, 40.0f);
+            m = canvas.measure_text_full("HH");
+        }
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        int first = -1, last = -1;
+        for (int x = 0; x < pm.width(); ++x)
+            for (int y = 0; y < pm.height(); ++y)
+                if (SkColorGetR(pm.getColor(x, y)) < 250) {
+                    if (first < 0) first = x;
+                    last = x;
+                }
+        REQUIRE(first >= 0);
+        // Any ink at all, so the edge pixel is counted; a pixel of slack
+        // covers antialiasing, well under the 4px the directions differ by.
+        CHECK(std::abs(first - (100.0f - m.actual_bounding_box_left)) <= 1.0f);
+        CHECK(std::abs(last + 1 - (100.0f + m.actual_bounding_box_right)) <= 1.0f);
     }
 }
 

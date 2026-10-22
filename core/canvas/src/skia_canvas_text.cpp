@@ -131,6 +131,11 @@ PreparedParagraph make_paragraph(const std::string& text,
     skia::textlayout::ParagraphStyle pstyle;
     pstyle.setTextDirection(ltr ? skia::textlayout::TextDirection::kLtr
                                 : skia::textlayout::TextDirection::kRtl);
+    // The paragraph is laid out at infinite width and the caller aligns the
+    // run itself, so the line must start at the paragraph's left edge. Left to
+    // its default, `start`, an RTL line is aligned to the right edge, which is
+    // at infinity, and nothing it paints lands on the canvas.
+    pstyle.setTextAlign(skia::textlayout::TextAlign::kLeft);
     skia::textlayout::TextStyle tstyle;
     std::vector<SkString> families;
     // `family` can be a comma-separated CSS fallback list ("Inter,
@@ -859,7 +864,8 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
-                                        letter_spacing_, /*ltr=*/true,
+                                        letter_spacing_,
+                                        /*ltr=*/direction_ != TextDirection::rtl,
                                         stroke_paint, font_features_);
         if (prepared.paragraph) {
             float draw_x = x;
@@ -1015,7 +1021,8 @@ float SkiaCanvas::measure_text(const std::string& text) {
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
-                                        letter_spacing_, /*ltr=*/true,
+                                        letter_spacing_,
+                                        /*ltr=*/direction_ != TextDirection::rtl,
                                         std::nullopt, font_features_);
         if (prepared.paragraph) {
             return prepared.advance;
@@ -1134,7 +1141,8 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
-                                        letter_spacing_, /*ltr=*/true,
+                                        letter_spacing_,
+                                        /*ltr=*/direction_ != TextDirection::rtl,
                                         std::nullopt, font_features_);
         if (prepared.paragraph) {
             advance = prepared.advance;
