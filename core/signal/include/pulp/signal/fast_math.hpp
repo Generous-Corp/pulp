@@ -160,16 +160,15 @@ struct FastMath {
     ///   - odd: tanh_accurate(-x) == -tanh_accurate(x) exactly, -0 stays -0;
     ///   - unit slope at 0 and relative error below 3e-7 for small |x|, so the
     ///     small-signal loop gain of a resonant filter is unchanged;
-    ///   - bounded and finite for every input: +/-inf give +/-1 and NaN gives
-    ///     -1 instead of propagating;
+    ///   - bounded for every non-NaN input (+/-inf give +/-1); NaN propagates,
+    ///     as with std::tanh;
     ///   - monotone to within its error bound (float rounding can step down by
     ///     a few ulps near saturation);
     ///   - no branches or calls, so loops over it vectorize.
     /// About 2.4x the throughput of std::tanh inside a ladder recursion.
     static float tanh_accurate(float x) {
         // Clamping x^2 rather than x keeps the sign path short; past |x| = 9
-        // the ratio exceeds 1 and the output clamp saturates it, and a NaN
-        // becomes -1 there (fmax returns the non-NaN operand).
+        // the ratio exceeds 1 and the output clamp saturates it.
         const float u = std::fmin(x * x, 81.0f);
         const float u2 = u * u;
         // Both polynomials in Estrin form: shorter dependency chains than
@@ -178,7 +177,12 @@ struct FastMath {
                         u2 * ((0.00349475497f + u * 2.05960245e-05f) + u2 * 1.33379685e-08f);
         const float q = (1.0f + u * 0.467136322f) +
                         u2 * ((0.0258737793f + u * 0.000328429886f) + u2 * 7.7694232e-07f);
-        return std::fmin(std::fmax(x * p / q, -1.0f), 1.0f);
+        // Ordered compares rather than fmin/fmax: a NaN fails both and
+        // propagates, as std::tanh's does, instead of becoming a full-scale
+        // constant that hides the upstream fault.
+        const float r = x * p / q;
+        const float upper = r > 1.0f ? 1.0f : r;
+        return upper < -1.0f ? -1.0f : upper;
     }
 
     /// Fast sin approximation (Bhaskara-style, max error ~0.001 for any x).
@@ -303,9 +307,12 @@ public:
 ///
 /// - `exact`: std::tanh. The reference the others are measured against.
 /// - `accurate`: `FastMath::tanh_accurate`, within 3.0e-7 of std::tanh for
-///   every input. In the ladder that keeps the output within about -120 dBFS
-///   of the exact-saturator filter at any drive and resonance, including
-///   self-oscillation, at about a third of the cost. This is the default.
+///   every input. Against the exact-saturator ladder the output residual is
+///   at most -129 dBFS for input up to 0 dBFS, -115.6 dBFS at +10 dBFS drive
+///   and -113.9 dBFS at +20 dBFS (about -134 dB relative to the output);
+///   harmonic and alias levels match to 0.001 dB and resonant ringing
+///   frequency and decay are unchanged. About 2.4x the throughput of
+///   std::tanh. This is the default.
 /// - `realtime_efficient`: the Padé `FastMath::tanh`. Its hard clamp at
 ///   |x| = 4, where tanh is still climbing, changes the overdrive character
 ///   (about -63 dBFS pointwise, -69 dBFS in the filtered output at +10 dBFS
