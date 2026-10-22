@@ -162,7 +162,7 @@ class SelectionTests(unittest.TestCase):
     def test_the_pulp_rs_family_names_the_tests_the_crate_registers(self) -> None:
         # A rename of either ctest would leave the family selecting less.
         registered = re.findall(r"add_test\(NAME\s+(\S+)",
-                                (REPO / "experimental/pulp-rs/CMakeLists.txt").read_text())
+                                (REPO / "experimental/pulp-rs/CMakeLists.txt").read_text(encoding="utf-8"))
         test_re = next(t for f, _, t in step.PATH_FAMILIES if f == "pulp-rs-cargo")
         self.assertEqual(sorted(n for n in registered if test_re.search(n)), self.PULP_RS_TESTS)
 
