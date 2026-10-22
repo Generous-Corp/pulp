@@ -96,9 +96,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME import-validation-visual-residual-diagnostic-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_visual_residual_diagnostic.py")
     set_tests_properties(import-validation-visual-residual-diagnostic-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120 SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/import-validation")
-    add_test(NAME import-validation-importer-differential-lab-selftest COMMAND ${Python3_EXECUTABLE}
-        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_importer_differential_lab.py")
-    set_tests_properties(import-validation-importer-differential-lab-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME import-validation-importer-differential-registration-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_importer_differential_registration.py")
+    set_tests_properties(import-validation-importer-differential-registration-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     add_test(NAME import-validation-score-native-panel-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_score_native_panel.py")
     set_tests_properties(import-validation-score-native-panel-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)

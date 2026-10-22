@@ -6463,6 +6463,23 @@
    ],
    "kind": "python"
   },
+  "import-validation-importer-differential-registration-selftest": {
+   "entry": "tools/import-validation/test_importer_differential_registration.py",
+   "inputs": [
+    "tools/import-validation/importer_differential/aggregate.py",
+    "tools/import-validation/importer_differential/core.py",
+    "tools/import-validation/importer_differential/form_controls.py",
+    "tools/import-validation/importer_differential/geometry_gate.py",
+    "tools/import-validation/importer_differential/model.py",
+    "tools/import-validation/importer_differential/recognition.py",
+    "tools/import-validation/importer_differential/reports.py",
+    "tools/import-validation/importer_differential/snapshot.py",
+    "tools/import-validation/importer_differential/verdicts.py",
+    "tools/import-validation/importer_differential/visual.py",
+    "tools/import-validation/test_importer_differential_registration.py"
+   ],
+   "kind": "python"
+  },
   "import-validation-score-native-panel-selftest": {
    "entry": "tools/import-validation/test_score_native_panel.py",
    "inputs": [
