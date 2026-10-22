@@ -628,3 +628,59 @@ TEST_CASE("Biquad block path snaps a subnormal state within 64 samples",
     CHECK(subnormal > 0);
     CHECK(nonzero_end <= 64);
 }
+
+TEST_CASE("Biquad block and stereo paths under per-block and per-32-sample cutoff sweeps",
+          "[signal][biquad][modulation]") {
+    // Coefficients change at a block boundary on every path. The block form
+    // can switch at the pole-radius threshold mid-stream; both forms keep the
+    // same DF2T state, so the sweep must stay within the static tolerance of
+    // the sample path and stereo must stay bit-identical to mono.
+    const auto input = busy_signal(16384);
+    for (const int step : {32, 256}) {
+        INFO("retune every " << step << " samples");
+        Biquad by_sample, by_block, left, right, right_mono;
+        std::vector<float> a = input, b = input, l = input, r = input, rm = input;
+        for (float& x : r) x *= -0.5f;
+        rm = r;
+        double s1 = 0.0, s2 = 0.0, err_sample = 0.0, err_block = 0.0;
+        for (std::size_t pos = 0; pos < input.size(); pos += static_cast<std::size_t>(step)) {
+            // Sweep 30 Hz .. 12 kHz and back: crosses the 0.995 radius switch.
+            const float phase = static_cast<float>(pos) / static_cast<float>(input.size());
+            const float fc = 30.0f * std::pow(400.0f, 0.5f - 0.5f * std::cos(6.2831853f * 2.0f * phase));
+            for (Biquad* f : {&by_sample, &by_block, &left, &right, &right_mono})
+                f->set_coefficients(Biquad::Type::lowpass, fc, 0.9f, kSampleRate);
+            const auto c = by_sample.coefficients();
+            const std::size_t n = static_cast<std::size_t>(step);
+            for (std::size_t i = pos; i < pos + n; ++i) {
+                a[i] = by_sample.process(a[i]);
+                const double x = input[i];
+                const double y = static_cast<double>(c.b0) * x + s1;
+                s1 = static_cast<double>(c.b1) * x - static_cast<double>(c.a1) * y + s2;
+                s2 = static_cast<double>(c.b2) * x - static_cast<double>(c.a2) * y;
+                err_sample += (a[i] - y) * (a[i] - y);
+            }
+            by_block.process(b.data() + pos, step);
+            Biquad::process_stereo(left, right, l.data() + pos, r.data() + pos, step);
+            right_mono.process(rm.data() + pos, step);
+        }
+        // The block path's error against the exact filter on the same schedule.
+        Biquad replay;
+        double t1 = 0.0, t2 = 0.0;
+        for (std::size_t pos = 0; pos < input.size(); pos += static_cast<std::size_t>(step)) {
+            const float phase = static_cast<float>(pos) / static_cast<float>(input.size());
+            const float fc = 30.0f * std::pow(400.0f, 0.5f - 0.5f * std::cos(6.2831853f * 2.0f * phase));
+            replay.set_coefficients(Biquad::Type::lowpass, fc, 0.9f, kSampleRate);
+            const auto c = replay.coefficients();
+            for (std::size_t i = pos; i < pos + static_cast<std::size_t>(step); ++i) {
+                const double x = input[i];
+                const double y = static_cast<double>(c.b0) * x + t1;
+                t1 = static_cast<double>(c.b1) * x - static_cast<double>(c.a1) * y + t2;
+                t2 = static_cast<double>(c.b2) * x - static_cast<double>(c.a2) * y;
+                err_block += (b[i] - y) * (b[i] - y);
+            }
+        }
+        CHECK(10.0 * std::log10(err_block + 1e-300) <= 10.0 * std::log10(err_sample + 1e-300) + 3.0);
+        CHECK(std::memcmp(l.data(), b.data(), l.size() * sizeof(float)) == 0);
+        CHECK(std::memcmp(r.data(), rm.data(), r.size() * sizeof(float)) == 0);
+    }
+}

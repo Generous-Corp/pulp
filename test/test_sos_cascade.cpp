@@ -545,3 +545,37 @@ TEST_CASE("SosCascade stereo path matches two block calls bit for bit",
         CHECK(std::memcmp(ra.data(), re.data(), ra.size() * sizeof(float)) == 0);
     }
 }
+
+TEST_CASE("SosCascade block and stereo paths track coefficient sweeps bit for bit",
+          "[signal][sos][modulation]") {
+    // Retune with preserve_state every 32 and every 256 samples: the block,
+    // stereo and chained per-sample paths must agree exactly.
+    const auto input = cascade_busy_signal(8192);
+    for (const std::size_t step : {std::size_t{32}, std::size_t{256}}) {
+        INFO("retune every " << step);
+        SosCascadeT<float, 16> by_block, left, right;
+        for (auto* c : {&by_block, &left, &right}) REQUIRE(c->prepare(16));
+        std::vector<Biquad> chain(5);
+        auto a = input, l = input, r = input, expected = input;
+        for (std::size_t pos = 0; pos < input.size(); pos += step) {
+            const float scale = 0.5f + 0.5f * std::sin(6.2831853f * static_cast<float>(pos) / 8192.0f);
+            std::vector<BiquadCoefficients> bands;
+            for (int k = 0; k < 5; ++k) {
+                Biquad d;
+                d.set_coefficients(Biquad::Type::peaking, (0.6f + scale) * 120.0f * std::pow(2.0f, static_cast<float>(k)),
+                                   1.5f, 48000.0f, k % 2 ? -5.0f : 5.0f);
+                bands.push_back(d.coefficients());
+                chain[static_cast<std::size_t>(k)].set_coefficients(bands.back());
+            }
+            for (auto* c : {&by_block, &left, &right})
+                c->set_coefficients(std::span<const BiquadCoefficients>(bands), SosCascadeTransition::preserve_state);
+            for (std::size_t i = pos; i < pos + step; ++i)
+                for (auto& section : chain) expected[i] = section.process(expected[i]);
+            by_block.process(a.data() + pos, step);
+            SosCascadeT<float, 16>::process_stereo(left, right, l.data() + pos, r.data() + pos, step);
+        }
+        CHECK(std::memcmp(a.data(), expected.data(), a.size() * sizeof(float)) == 0);
+        CHECK(std::memcmp(l.data(), expected.data(), l.size() * sizeof(float)) == 0);
+        CHECK(std::memcmp(r.data(), expected.data(), r.size() * sizeof(float)) == 0);
+    }
+}
