@@ -34,8 +34,7 @@ namespace pulp::signal {
 ///
 /// RT contract: storage is fixed-size; every member function allocates no
 /// memory.
-template <typename SampleType = float, std::size_t Voices = 16>
-class SvfBankT {
+template <typename SampleType = float, std::size_t Voices = 16> class SvfBankT {
     static_assert(Voices > 0, "SvfBankT needs at least one voice");
 
   public:
@@ -53,7 +52,8 @@ class SvfBankT {
     /// (SvfT::configure()).
     void configure(std::size_t voice, Mode mode, SampleType sample_rate, SampleType frequency,
                    SampleType resonance) {
-        if (voice >= Voices) return;
+        if (voice >= Voices)
+            return;
         mode_[voice] = mode_index(mode);
         sample_rate_[voice] = sample_rate;
         frequency_[voice] = frequency;
@@ -62,28 +62,33 @@ class SvfBankT {
     }
 
     void set_sample_rate(std::size_t voice, SampleType sample_rate) {
-        if (voice >= Voices) return;
+        if (voice >= Voices)
+            return;
         sample_rate_[voice] = sample_rate;
         update(voice);
     }
     void set_frequency(std::size_t voice, SampleType hz) {
-        if (voice >= Voices) return;
+        if (voice >= Voices)
+            return;
         frequency_[voice] = hz;
         update(voice);
     }
     void set_resonance(std::size_t voice, SampleType q) {
-        if (voice >= Voices) return;
+        if (voice >= Voices)
+            return;
         resonance_[voice] = q;
         update(voice);
     }
     void set_mode(std::size_t voice, Mode mode) {
-        if (voice >= Voices) return;
+        if (voice >= Voices)
+            return;
         mode_[voice] = mode_index(mode);
     }
 
     /// The voice's coefficients (SvfT::design() for its current settings).
     typename Filter::Coefficients coefficients(std::size_t voice) const {
-        if (voice >= Voices) return {};
+        if (voice >= Voices)
+            return {};
         return {g_[voice], k_[voice], a1_[voice], a2_[voice], a3_[voice]};
     }
 
@@ -120,7 +125,8 @@ class SvfBankT {
     }
 
     void reset(std::size_t voice) {
-        if (voice >= Voices) return;
+        if (voice >= Voices)
+            return;
         ic1_[voice] = SampleType{0};
         ic2_[voice] = SampleType{0};
     }
@@ -135,10 +141,14 @@ class SvfBankT {
 
     static int mode_index(Mode mode) {
         switch (mode) {
-            case Mode::lowpass: return kLowpass;
-            case Mode::highpass: return kHighpass;
-            case Mode::bandpass: return kBandpass;
-            case Mode::notch: return kNotch;
+        case Mode::lowpass:
+            return kLowpass;
+        case Mode::highpass:
+            return kHighpass;
+        case Mode::bandpass:
+            return kBandpass;
+        case Mode::notch:
+            return kNotch;
         }
         return kLowpass;
     }
@@ -165,7 +175,6 @@ class SvfBankT {
     SampleType ic2_[Voices] = {};
 };
 
-template <std::size_t Voices = 16>
-using SvfBank = SvfBankT<float, Voices>;
+template <std::size_t Voices = 16> using SvfBank = SvfBankT<float, Voices>;
 
 } // namespace pulp::signal

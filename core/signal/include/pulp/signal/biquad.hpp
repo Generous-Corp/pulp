@@ -293,25 +293,57 @@ public:
                               std::size_t num_samples) noexcept {
         std::size_t first = 0;
         while (first < count) {
-            const std::size_t n = count - first < kChainSectionsPerPass ? count - first
-                                                                         : kChainSectionsPerPass;
+            const std::size_t n =
+                count - first < kChainSectionsPerPass ? count - first : kChainSectionsPerPass;
             switch (n) {
-                case 1: chain_pass<1>(sections + first, buffer, num_samples); break;
-                case 2: chain_pass<2>(sections + first, buffer, num_samples); break;
-                case 3: chain_pass<3>(sections + first, buffer, num_samples); break;
-                case 4: chain_pass<4>(sections + first, buffer, num_samples); break;
-                case 5: chain_pass<5>(sections + first, buffer, num_samples); break;
-                case 6: chain_pass<6>(sections + first, buffer, num_samples); break;
-                case 7: chain_pass<7>(sections + first, buffer, num_samples); break;
-                case 8: chain_pass<8>(sections + first, buffer, num_samples); break;
-                case 9: chain_pass<9>(sections + first, buffer, num_samples); break;
-                case 10: chain_pass<10>(sections + first, buffer, num_samples); break;
-                case 11: chain_pass<11>(sections + first, buffer, num_samples); break;
-                case 12: chain_pass<12>(sections + first, buffer, num_samples); break;
-                case 13: chain_pass<13>(sections + first, buffer, num_samples); break;
-                case 14: chain_pass<14>(sections + first, buffer, num_samples); break;
-                case 15: chain_pass<15>(sections + first, buffer, num_samples); break;
-                default: chain_pass<16>(sections + first, buffer, num_samples); break;
+            case 1:
+                chain_pass<1>(sections + first, buffer, num_samples);
+                break;
+            case 2:
+                chain_pass<2>(sections + first, buffer, num_samples);
+                break;
+            case 3:
+                chain_pass<3>(sections + first, buffer, num_samples);
+                break;
+            case 4:
+                chain_pass<4>(sections + first, buffer, num_samples);
+                break;
+            case 5:
+                chain_pass<5>(sections + first, buffer, num_samples);
+                break;
+            case 6:
+                chain_pass<6>(sections + first, buffer, num_samples);
+                break;
+            case 7:
+                chain_pass<7>(sections + first, buffer, num_samples);
+                break;
+            case 8:
+                chain_pass<8>(sections + first, buffer, num_samples);
+                break;
+            case 9:
+                chain_pass<9>(sections + first, buffer, num_samples);
+                break;
+            case 10:
+                chain_pass<10>(sections + first, buffer, num_samples);
+                break;
+            case 11:
+                chain_pass<11>(sections + first, buffer, num_samples);
+                break;
+            case 12:
+                chain_pass<12>(sections + first, buffer, num_samples);
+                break;
+            case 13:
+                chain_pass<13>(sections + first, buffer, num_samples);
+                break;
+            case 14:
+                chain_pass<14>(sections + first, buffer, num_samples);
+                break;
+            case 15:
+                chain_pass<15>(sections + first, buffer, num_samples);
+                break;
+            default:
+                chain_pass<16>(sections + first, buffer, num_samples);
+                break;
             }
             first += n;
         }
@@ -327,27 +359,59 @@ public:
 #if defined(__GNUC__) || defined(__clang__)
         std::size_t first = 0;
         while (first < count) {
-            const std::size_t n = count - first < kChainSectionsPerPass ? count - first
-                                                                         : kChainSectionsPerPass;
+            const std::size_t n =
+                count - first < kChainSectionsPerPass ? count - first : kChainSectionsPerPass;
             BiquadT* l = left + first;
             BiquadT* r = right + first;
             switch (n) {
-                case 1: chain_pair_pass<1>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 2: chain_pair_pass<2>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 3: chain_pair_pass<3>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 4: chain_pair_pass<4>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 5: chain_pair_pass<5>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 6: chain_pair_pass<6>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 7: chain_pair_pass<7>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 8: chain_pair_pass<8>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 9: chain_pair_pass<9>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 10: chain_pair_pass<10>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 11: chain_pair_pass<11>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 12: chain_pair_pass<12>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 13: chain_pair_pass<13>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 14: chain_pair_pass<14>(l, r, left_buffer, right_buffer, num_samples); break;
-                case 15: chain_pair_pass<15>(l, r, left_buffer, right_buffer, num_samples); break;
-                default: chain_pair_pass<16>(l, r, left_buffer, right_buffer, num_samples); break;
+            case 1:
+                chain_pair_pass<1>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 2:
+                chain_pair_pass<2>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 3:
+                chain_pair_pass<3>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 4:
+                chain_pair_pass<4>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 5:
+                chain_pair_pass<5>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 6:
+                chain_pair_pass<6>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 7:
+                chain_pair_pass<7>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 8:
+                chain_pair_pass<8>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 9:
+                chain_pair_pass<9>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 10:
+                chain_pair_pass<10>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 11:
+                chain_pair_pass<11>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 12:
+                chain_pair_pass<12>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 13:
+                chain_pair_pass<13>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 14:
+                chain_pair_pass<14>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            case 15:
+                chain_pair_pass<15>(l, r, left_buffer, right_buffer, num_samples);
+                break;
+            default:
+                chain_pair_pass<16>(l, r, left_buffer, right_buffer, num_samples);
+                break;
             }
             first += n;
         }
@@ -383,14 +447,13 @@ public:
     // Reset state (call on discontinuities)
     void reset() { s1_ = SampleType{0}; s2_ = SampleType{0}; }
 
-private:
-    template <bool FeedbackLast>
-    void process_block(SampleType* buffer, int num_samples) {
+  private:
+    template <bool FeedbackLast> void process_block(SampleType* buffer, int num_samples) {
         const SampleType b0 = b0_, b1 = b1_, b2 = b2_, a1 = a1_, neg_a1 = -a1_, a2 = a2_;
         SampleType s1 = s1_, s2 = s2_;
         for (int start = 0; start < num_samples; start += kStateSnapInterval) {
-            const int end = num_samples - start < kStateSnapInterval
-                ? num_samples : start + kStateSnapInterval;
+            const int end =
+                num_samples - start < kStateSnapInterval ? num_samples : start + kStateSnapInterval;
             for (int i = start; i < end; ++i) {
                 const SampleType input = buffer[i];
                 const SampleType output = b0 * input + s1;
@@ -425,8 +488,8 @@ private:
         const Pair a1 = {l.a1_, r.a1_}, neg_a1 = {-l.a1_, -r.a1_}, a2 = {l.a2_, r.a2_};
         Pair s1 = {l.s1_, r.s1_}, s2 = {l.s2_, r.s2_};
         for (int start = 0; start < num_samples; start += kStateSnapInterval) {
-            const int end = num_samples - start < kStateSnapInterval
-                ? num_samples : start + kStateSnapInterval;
+            const int end =
+                num_samples - start < kStateSnapInterval ? num_samples : start + kStateSnapInterval;
             for (int i = start; i < end; ++i) {
                 const Pair input = {lb[i], rb[i]};
                 const Pair output = b0 * input + s1;
@@ -455,7 +518,8 @@ private:
 #endif
 
     template <std::size_t Count>
-    static void chain_pass(BiquadT* sections, SampleType* buffer, std::size_t num_samples) noexcept {
+    static void chain_pass(BiquadT* sections, SampleType* buffer,
+                           std::size_t num_samples) noexcept {
         constexpr std::size_t kSnap = static_cast<std::size_t>(kStateSnapInterval);
         SampleType b0[Count], b1[Count], b2[Count], a1[Count], a2[Count], s1[Count], s2[Count];
         for (std::size_t k = 0; k < Count; ++k) {

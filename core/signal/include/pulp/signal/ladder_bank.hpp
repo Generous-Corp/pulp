@@ -39,8 +39,7 @@ namespace pulp::signal {
 ///
 /// RT contract: storage is fixed-size; every member function allocates no
 /// memory.
-template <typename SampleType = float, std::size_t Voices = 16>
-class LadderBankT {
+template <typename SampleType = float, std::size_t Voices = 16> class LadderBankT {
     static_assert(Voices > 0, "LadderBankT needs at least one voice");
 
   public:
@@ -59,22 +58,30 @@ class LadderBankT {
     }
 
     void set_frequency(std::size_t voice, SampleType hz) {
-        if (voice >= Voices) return;
+        if (voice >= Voices)
+            return;
         cutoff_[voice] = hz;
         update(voice);
     }
 
     void set_resonance(std::size_t voice, SampleType resonance) {
-        if (voice >= Voices) return;
+        if (voice >= Voices)
+            return;
         resonance_[voice] = std::clamp(resonance, SampleType{0.0f}, SampleType{1.0f});
         update(voice);
     }
 
-    SampleType frequency(std::size_t voice) const { return voice < Voices ? cutoff_[voice] : SampleType{}; }
-    SampleType resonance(std::size_t voice) const { return voice < Voices ? resonance_[voice] : SampleType{}; }
+    SampleType frequency(std::size_t voice) const {
+        return voice < Voices ? cutoff_[voice] : SampleType{};
+    }
+    SampleType resonance(std::size_t voice) const {
+        return voice < Voices ? resonance_[voice] : SampleType{};
+    }
 
     /// The voice's per-stage one-pole coefficient (Filter::stage_coefficient()).
-    SampleType stage_coefficient(std::size_t voice) const { return voice < Voices ? g_[voice] : SampleType{}; }
+    SampleType stage_coefficient(std::size_t voice) const {
+        return voice < Voices ? g_[voice] : SampleType{};
+    }
 
     /// Advance every voice by one sample: out[v] = voice v's output for in[v].
     /// `in` and `out` may be the same array.
@@ -114,7 +121,8 @@ class LadderBankT {
 
     /// Clear one voice's state.
     void reset(std::size_t voice) {
-        if (voice >= Voices) return;
+        if (voice >= Voices)
+            return;
         for (int i = 0; i < 4; ++i) {
             stage_[i][voice] = SampleType{0};
             saturated_stage_[i][voice] = SampleType{0};
@@ -144,7 +152,6 @@ class LadderBankT {
     SampleType saturated_stage_[4][Voices] = {};
 };
 
-template <std::size_t Voices = 16>
-using LadderBank = LadderBankT<float, Voices>;
+template <std::size_t Voices = 16> using LadderBank = LadderBankT<float, Voices>;
 
 } // namespace pulp::signal

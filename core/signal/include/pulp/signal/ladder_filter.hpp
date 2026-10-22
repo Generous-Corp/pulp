@@ -75,17 +75,15 @@ public:
     /// for the choices and their measured deviation from exact tanh).
     /// `LadderFilterT<double>` always uses libm: the float approximations do
     /// not reach double precision and it is not on a hot path.
-    template <LadderSaturation Saturation>
-    static SampleType saturate(SampleType x) {
+    template <LadderSaturation Saturation> static SampleType saturate(SampleType x) {
         if constexpr (std::is_same_v<SampleType, float>)
             return ladder_tanh_profiled<Saturation>(x);
         else
             return std::tanh(x);
     }
 
-private:
-    template <LadderSaturation Saturation>
-    SampleType process_with_profile(SampleType input) {
+  private:
+    template <LadderSaturation Saturation> SampleType process_with_profile(SampleType input) {
         // Non-linear feedback
         SampleType feedback =
             resonance_ * SampleType{4.0f} * (stage_[3] - input * SampleType{0.5f});
@@ -114,7 +112,9 @@ private:
     SampleType stage_[4] = {};
     SampleType saturated_stage_[4] = {};
 
-    void update() { g_ = stage_coefficient(cutoff_, sample_rate_); }
+    void update() {
+        g_ = stage_coefficient(cutoff_, sample_rate_);
+    }
 };
 
 using LadderFilter = LadderFilterT<float>;

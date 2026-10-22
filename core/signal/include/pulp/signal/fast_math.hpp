@@ -343,15 +343,13 @@ inline constexpr LadderSaturation kDefaultLadderSaturation =
                                          : LadderSaturation::accurate;
 #elif defined(PULP_SIGNAL_FAST_LADDER_TANH)
 inline constexpr LadderSaturation kDefaultLadderSaturation =
-    PULP_SIGNAL_FAST_LADDER_TANH ? LadderSaturation::realtime_efficient
-                                 : LadderSaturation::exact;
+    PULP_SIGNAL_FAST_LADDER_TANH ? LadderSaturation::realtime_efficient : LadderSaturation::exact;
 #else
 inline constexpr LadderSaturation kDefaultLadderSaturation = LadderSaturation::accurate;
 #endif
 
 /// The ladder's `float` saturator for an explicit choice.
-template <LadderSaturation Saturation>
-inline float ladder_tanh_profiled(float x) {
+template <LadderSaturation Saturation> inline float ladder_tanh_profiled(float x) {
     if constexpr (Saturation == LadderSaturation::realtime_efficient)
         return FastMath::tanh(x);
     else if constexpr (Saturation == LadderSaturation::accurate)
@@ -399,7 +397,6 @@ inline double lipschitz_tanh(double v) noexcept {
     return x * (27.0 + x2) / (27.0 + 9.0 * x2);
 }
 
-
 namespace detail {
 
 // Branch-free float log10 / exp10 for decibel conversions in per-sample
@@ -410,7 +407,6 @@ namespace detail {
 // domain, with or without fused multiply-add, which keeps a compressor's gain
 // within a few parts in 10^7 of the libm path, i.e. a residual below
 // -120 dBFS.
-
 
 /// log10(x) for finite, positive, normal x, within 4 ulps. Other inputs are
 /// outside the contract (callers clamp to a positive floor first).
@@ -433,8 +429,8 @@ inline float log10_float(float x) noexcept {
     const float ln_m = two_s * series + two_s;
     // log10(2) and 1/ln(10). The high part of log10(2) has few enough
     // significant bits that k * hi is exact for every float exponent.
-    constexpr float kLog10TwoHi = 0.30102539062f;   // 0x3e9a2000
-    constexpr float kLog10TwoLo = 4.6050390e-06f;   // log10(2) - hi
+    constexpr float kLog10TwoHi = 0.30102539062f; // 0x3e9a2000
+    constexpr float kLog10TwoLo = 4.6050390e-06f; // log10(2) - hi
     constexpr float kInvLn10 = 0.43429448190f;
     return k * kLog10TwoHi + (ln_m * kInvLn10 + k * kLog10TwoLo);
 }
@@ -453,8 +449,8 @@ inline float log10_float(float x) noexcept {
 /// over- or underflows naturally.
 inline float exp10_float(float x) noexcept {
     constexpr float kLog2Ten = 3.32192809489f;
-    constexpr float kLog10TwoHi = 0.30102539062f;  // 0x3e9a2000, 11 significant bits
-    constexpr float kLog10TwoLo = 4.6050390e-06f;  // log10(2) - hi
+    constexpr float kLog10TwoHi = 0.30102539062f; // 0x3e9a2000, 11 significant bits
+    constexpr float kLog10TwoLo = 4.6050390e-06f; // log10(2) - hi
     constexpr float kLnTen = 2.30258509299f;
     // Past 10^+/-75 (about 250 octaves) the result is inf or 0 anyway;
     // clamping there keeps |n| <= 250 (so n * hi stays exact) and each half
@@ -465,11 +461,10 @@ inline float exp10_float(float x) noexcept {
     const float t = d * kLnTen;
     const float p =
         1.0f +
-        t * (1.0f +
-             t * (0.5f +
-                  t * (1.0f / 6.0f +
-                       t * (1.0f / 24.0f +
-                            t * (1.0f / 120.0f + t * (1.0f / 720.0f + t * (1.0f / 5040.0f)))))));
+        t * (1.0f + t * (0.5f + t * (1.0f / 6.0f +
+                                     t * (1.0f / 24.0f +
+                                          t * (1.0f / 120.0f +
+                                               t * (1.0f / 720.0f + t * (1.0f / 5040.0f)))))));
     const std::int32_t e = static_cast<std::int32_t>(n);
     const std::int32_t e_half = e / 2;
     const float scale_a = std::bit_cast<float>(static_cast<std::uint32_t>(e_half + 127) << 23);

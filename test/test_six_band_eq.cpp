@@ -407,7 +407,8 @@ TEST_CASE("SixBandEq block processing matches the sample path through a transiti
             REQUIRE(by_sample.set_band(3, {2500.0f, 4.0f, 1.5f}));
         }
         REQUIRE(by_block.process_block(a.data() + start, 1000));
-        for (std::size_t i = start; i < start + 1000; ++i) b[i] = by_sample.process(b[i]);
+        for (std::size_t i = start; i < start + 1000; ++i)
+            b[i] = by_sample.process(b[i]);
     }
     CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
 }

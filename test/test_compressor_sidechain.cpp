@@ -248,8 +248,10 @@ std::vector<float> reference_compress(const std::vector<float>& input, const Com
         if (k.knee_db <= 0.0f)
             return in_db <= thr ? 0.0f : above;
         const float half = k.knee_db / 2.0f;
-        if (in_db < thr - half) return 0.0f;
-        if (in_db > thr + half) return above;
+        if (in_db < thr - half)
+            return 0.0f;
+        if (in_db > thr + half)
+            return above;
         const float x = in_db - thr + half;
         return slope * x * x / (2.0f * k.knee_db);
     };
@@ -284,7 +286,8 @@ TEST_CASE("Compressor block path is bit-identical to the sample path across spli
         configure(by_sample, k, 48000.0f);
         configure(by_block, k, 48000.0f);
         auto expected = input;
-        for (float& x : expected) x = by_sample.process(x);
+        for (float& x : expected)
+            x = by_sample.process(x);
         auto actual = input;
         std::size_t pos = 0;
         for (int block : uneven_blocks(input.size())) {
@@ -318,9 +321,7 @@ TEST_CASE("Compressor output stays within -120 dBFS of the libm conversions",
 
 TEST_CASE("Compressor ballistic coefficients follow parameter and rate changes",
           "[signal][compressor]") {
-    auto expected = [](float ms, float sr) {
-        return 1.0f - std::exp(-1.0f / (ms * 0.001f * sr));
-    };
+    auto expected = [](float ms, float sr) { return 1.0f - std::exp(-1.0f / (ms * 0.001f * sr)); };
     Compressor c;
     c.set_sample_rate(48000.0f);
     REQUIRE(c.attack_coefficient() == expected(5.0f, 48000.0f));
@@ -340,7 +341,6 @@ TEST_CASE("Compressor ballistic coefficients follow parameter and rate changes",
     p.attack_ms = 0.0f;
     c.set_params(p);
     REQUIRE(c.attack_coefficient() == 1.0f);
-
 }
 
 TEST_CASE("Compressor steady-state gain reduction follows the static curve",
@@ -372,8 +372,8 @@ TEST_CASE("Compressor steady-state gain reduction follows the static curve",
             }
             CHECK(std::abs(static_cast<double>(c.gain_reduction_db()) - expected) < 1.0e-4);
             CHECK(std::abs(static_cast<double>(dc.back()) -
-                           static_cast<double>(db_to_lin(level_db)) * std::pow(10.0, expected / 20.0)) <
-                  1.0e-6);
+                           static_cast<double>(db_to_lin(level_db)) *
+                               std::pow(10.0, expected / 20.0)) < 1.0e-6);
         }
     }
 }
@@ -388,11 +388,13 @@ TEST_CASE("Compressor block path rejects non-finite samples at the exact sample"
     configure(by_sample, kCompressorCases[4], 48000.0f);
     configure(by_block, kCompressorCases[4], 48000.0f);
     auto expected = input;
-    for (float& x : expected) x = by_sample.process(x);
+    for (float& x : expected)
+        x = by_sample.process(x);
     auto actual = input;
     by_block.process(actual.data(), static_cast<int>(actual.size()));
     REQUIRE(actual[100] == 0.0f);
     REQUIRE(actual[700] == 0.0f);
-    for (float x : actual) REQUIRE(std::isfinite(x));
+    for (float x : actual)
+        REQUIRE(std::isfinite(x));
     CHECK(std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)) == 0);
 }
