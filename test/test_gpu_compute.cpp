@@ -1631,6 +1631,49 @@ struct BatchNet {
 };
 }  // namespace
 
+TEST_CASE("GpuCompute wavenet_forward streams many blocks continuously against a reference",
+          "[render][gpu][compute]") {
+    // Streaming continuity across block boundaries: a block size that is not a
+    // power of two, dilations reaching several blocks back, and enough blocks
+    // that every layer's history storage wraps more than once. The whole stream
+    // is checked against the reference run over the concatenated input in one go.
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
+
+    for (const bool gated : {false, true}) {
+        INFO("gated " << gated);
+        const uint32_t C = 4, K = 3, L = 4, H = 1, B = 37, blocks = 24;
+        std::vector<uint32_t> dilations = {1, 8, 64, 3};
+        const uint32_t need = wavenet_single_array_len(C, K, L, H, gated);
+        std::vector<float> weights = wavenet_weight_blob(need);
+        for (auto& v : weights) v *= 12.0f;  // audible coupling through every layer
+        const float head_scale = 0.7f;
+
+        GpuCompute::WavenetLayerArraySpec spec;
+        spec.input_size = 1; spec.condition_size = 1; spec.channels = C; spec.kernel = K;
+        spec.head_size = H; spec.gated = gated ? 1 : 0; spec.head_bias = 0;
+        spec.dilations = dilations.data(); spec.num_layers = L;
+        REQUIRE(compute->prepare_wavenet(&spec, 1, weights.data(), need, B, head_scale));
+
+        std::vector<float> stream(static_cast<std::size_t>(B) * blocks), got(stream.size());
+        for (std::size_t i = 0; i < stream.size(); ++i)
+            stream[i] = 0.8f * std::sin(0.013f * i) * std::cos(0.0031f * i) + 0.1f * std::sin(1.7f * i);
+        for (uint32_t b = 0; b < blocks; ++b)
+            REQUIRE(compute->wavenet_forward(stream.data() + b * B, got.data() + b * B, B));
+
+        const std::vector<double> expect = wavenet_ref_single_array(
+            weights, C, K, L, dilations, H, gated, /*head_bias=*/false, head_scale, stream);
+        double peak = 0.0;
+        for (std::size_t i = 0; i < stream.size(); ++i) {
+            INFO("sample " << i << " (block " << i / B << ")");
+            REQUIRE(std::isfinite(got[i]));
+            REQUIRE(std::abs(got[i] - expect[i]) <= 1e-4 + 1e-4 * std::abs(expect[i]));
+            peak = std::max(peak, std::abs(expect[i]));
+        }
+        REQUIRE(peak > 1e-2);
+    }
+}
+
 TEST_CASE("GpuCompute wavenet_forward_batch matches per-instance forwards bit-for-bit",
           "[render][gpu][compute]") {
     // Batching only changes how the work is submitted and read back. Every
