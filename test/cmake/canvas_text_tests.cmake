@@ -279,6 +279,13 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         PROPERTIES RESOURCE_LOCK pulp_gpu
         LABELS bench)
 
+    # CSS gradient dithering on an offscreen Dawn/Graphite surface, read back
+    # and measured the same way as pulp-test-css-gradient-dither's raster
+    # cases. Soft-skips without an adapter.
+    pulp_add_test_suite(pulp-test-css-gradient-dither-gpu
+        LIBRARIES pulp::view pulp::canvas pulp::render
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
+
     # Persistent-scene mode — live-GPU cross-frame retention proof (FU-2).
     # Drives an offscreen Dawn+Skia surface with set_persistent_scene(true) for
     # a full frame then a clipped frame, and asserts the untouched content

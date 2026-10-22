@@ -280,6 +280,14 @@ if(PULP_HAS_SKIA)
         LIBRARIES pulp::view)
 endif()
 
+# CSS gradients are dithered as Chromium dithers them. Measures rows that are
+# not one colour, which an undithered vertical gradient never has; the
+# Graphite counterpart is pulp-test-css-gradient-dither-gpu.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-css-gradient-dither GROUP pulp-test-group-script-view
+        LIBRARIES pulp::view pulp::canvas)
+endif()
+
 # CG-degraded gradient + pattern cluster. Apple-only TU, registered only on
 # Apple: a grouped member whose file compiles to no test cases fails discovery. every
 # TEST_CASE drives CoreGraphics directly to prove the CoreGraphicsCanvas

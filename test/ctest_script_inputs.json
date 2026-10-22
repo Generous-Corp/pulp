@@ -2542,6 +2542,7 @@
   "pulp-test-create-template-instrument",
   "pulp-test-cross-platform-audio-golden",
   "pulp-test-crossfade",
+  "pulp-test-css-gradient-dither-gpu",
   "pulp-test-css-gradient-render",
   "pulp-test-css-translator-gaps-1434",
   "pulp-test-data-display-link-floor",
