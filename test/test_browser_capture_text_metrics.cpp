@@ -21,11 +21,13 @@
 #include "tools/import-design/browser_capture_styles.hpp"
 
 #include <pulp/canvas/text_shaper.hpp>
+#include <pulp/view/design_ir_io.hpp>
 
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <iostream>
 #include <algorithm>
@@ -941,4 +943,88 @@ TEST_CASE("the line-break basis is the face that shaped the text, not the first 
         CHECK(actual[i] != "LucidaGrande");
         CHECK_FALSE(actual[i].empty());
     }
+}
+
+TEST_CASE("measured line metrics reach the text basis and survive IR JSON",
+          "[browser-capture][native-lowering][text-metrics]") {
+    // A capture that measured each run's primary-font ascent and descent hands
+    // them to the line-box basis; one that did not leaves them absent rather
+    // than inventing a value. Same capture both times, differing ONLY in the
+    // sidecar's `line_metrics`, so the difference is the signal.
+    const auto source = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) /
+                        "browser-capture-text-wrap";
+    const auto copy = fs::temp_directory_path() /
+        ("pulp-line-metrics-" + std::to_string(std::rand()));
+    fs::create_directories(copy);
+    for (const auto& entry : fs::directory_iterator(source))
+        fs::copy(entry.path(), copy / entry.path().filename(),
+                 fs::copy_options::recursive);
+    {
+        std::ifstream in(copy / "platform-fonts.json", std::ios::binary);
+        REQUIRE(in);
+        std::string json((std::istreambuf_iterator<char>(in)),
+                         std::istreambuf_iterator<char>());
+        in.close();
+        // Every run object carries "layout_index"; give each one metrics.
+        std::string patched;
+        std::size_t at = 0;
+        int runs = 0;
+        for (;;) {
+            const auto next = json.find("\"layout_index\"", at);
+            if (next == std::string::npos) break;
+            patched.append(json, at, next - at);
+            patched += "\"line_metrics\": {\"ascent\": 12, \"descent\": 3}, ";
+            at = next;
+            ++runs;
+            patched.append(json, at, 1);
+            ++at;
+        }
+        patched.append(json, at, std::string::npos);
+        REQUIRE(runs > 0);
+        std::ofstream out(copy / "platform-fonts.json", std::ios::binary);
+        out << patched;
+    }
+
+    BrowserCaptureIrOptions options;
+    options.native_panel_lowering = true;
+    const auto measured =
+        lower_browser_capture_to_ir(copy / "capture.json", options);
+    const auto plain = lower_wrap_fixture();
+    fs::remove_all(copy);
+    REQUIRE(measured.design_ir);
+    REQUIRE(plain.design_ir);
+
+    int with_basis = 0;
+    std::function<void(const pulp::view::IRNode&, const pulp::view::IRNode&)>
+        compare = [&](const pulp::view::IRNode& m, const pulp::view::IRNode& p) {
+            if (m.text_layout_basis) {
+                REQUIRE(p.text_layout_basis);
+                ++with_basis;
+                REQUIRE(m.text_layout_basis->ascent.has_value());
+                REQUIRE(m.text_layout_basis->descent.has_value());
+                CHECK(*m.text_layout_basis->ascent == 12.0f);
+                CHECK(*m.text_layout_basis->descent == 3.0f);
+                CHECK_FALSE(p.text_layout_basis->ascent.has_value());
+                CHECK_FALSE(p.text_layout_basis->descent.has_value());
+            }
+            REQUIRE(m.children.size() == p.children.size());
+            for (std::size_t i = 0; i < m.children.size(); ++i)
+                compare(m.children[i], p.children[i]);
+        };
+    compare(measured.design_ir->root, plain.design_ir->root);
+    REQUIRE(with_basis > 0);
+
+    // The metrics are part of the basis on disk too.
+    const auto reparsed = pulp::view::parse_design_ir_json(
+        pulp::view::serialize_design_ir(*measured.design_ir));
+    std::function<int(const pulp::view::IRNode&)> count =
+        [&](const pulp::view::IRNode& node) {
+            int n = node.text_layout_basis && node.text_layout_basis->ascent &&
+                    *node.text_layout_basis->ascent == 12.0f &&
+                    node.text_layout_basis->descent &&
+                    *node.text_layout_basis->descent == 3.0f ? 1 : 0;
+            for (const auto& child : node.children) n += count(child);
+            return n;
+        };
+    CHECK(count(reparsed.root) == with_basis);
 }

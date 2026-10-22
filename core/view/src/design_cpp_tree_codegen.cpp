@@ -242,6 +242,11 @@ void emit_captured_text_layout(std::ostringstream& out,
                   float_expr(ctx, node.text_layout_basis->width) + ", " +
                   cpp_string_literal(node.text_layout_basis->resolved_face) +
                   ", " + (wrap_on_cache_miss ? "true" : "false") + ");");
+    if (node.text_layout_basis->ascent && node.text_layout_basis->descent)
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  std::string(var) + "->set_cached_line_metrics(" +
+                      float_expr(ctx, *node.text_layout_basis->ascent) + ", " +
+                      float_expr(ctx, *node.text_layout_basis->descent) + ");");
     if (!explicit_nowrap && node.text_line_boxes.size() > 1)
         emit_line(out, depth, ctx.opts.indent_spaces,
                   std::string(var) + "->set_multi_line(true);");

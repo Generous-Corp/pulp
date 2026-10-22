@@ -2282,6 +2282,11 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                     std::move(boxes), node.text_layout_basis->width,
                     node.text_layout_basis->resolved_face,
                     wrap_on_cache_miss);
+                if (node.text_layout_basis->ascent &&
+                    node.text_layout_basis->descent)
+                    label->set_cached_line_metrics(
+                        *node.text_layout_basis->ascent,
+                        *node.text_layout_basis->descent);
                 if (!explicit_nowrap && node.text_line_boxes.size() > 1)
                     label->set_multi_line(true);
             }

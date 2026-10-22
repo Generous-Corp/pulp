@@ -866,6 +866,55 @@ TEST_CASE("Label puts a captured text fragment's baseline a rounded ascent below
     CHECK(fills[0].f[1] == Catch::Approx(kTop + std::round(a)).margin(0.001f));
 }
 
+TEST_CASE("Label places a captured baseline from the browser's measured ascent",
+          "[view][widget][label-cache][alignment][typography]") {
+    // The browser can lay a face out with metrics its font file does not
+    // state: it rounds them, and on some platforms adjusts them per face
+    // first. When the capture measured the ascent and descent it used, and the
+    // captured box is exactly that content area, the baseline is the box top
+    // plus that ascent -- whatever this Label would derive from the face.
+    constexpr float kSize = 17.0f;
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    const auto prepared =
+        global_text_shaper().prepare(" ", "Inter", kSize, 400, 0);
+    if (face.empty() || !prepared.metrics_are_real()) {
+        SKIP("Inter does not resolve to a real face on this host");
+    }
+    // Deliberately not Inter's own rounded metrics, so only the recorded
+    // values can produce the expected baseline.
+    constexpr float kAscent = 13.0f;
+    constexpr float kDescent = 7.0f;
+    constexpr float kTop = 2.5f;
+    REQUIRE(std::abs(std::round(prepared.font_ascent()) - kAscent) > 0.5f);
+
+    auto paint_baseline = [&](bool recorded, float box_h) {
+        Label label("Measured");
+        label.set_font_family("Inter");
+        label.set_font_size(kSize);
+        label.set_bounds({0, 0, 200, 40});
+        label.set_cached_line_boxes(
+            {{0, kTop, 120, box_h, 0, 8}}, 200.0f, face, false);
+        if (recorded) label.set_cached_line_metrics(kAscent, kDescent);
+        RecordingCanvas canvas;
+        label.paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return fills[0].f[1];
+    };
+
+    // The recorded ascent wins over the derived one.
+    const float with_metrics = paint_baseline(true, kAscent + kDescent);
+    const float derived = paint_baseline(false, kAscent + kDescent);
+    CHECK(with_metrics == Catch::Approx(kTop + kAscent).margin(0.001f));
+    CHECK(std::abs(derived - (kTop + kAscent)) > 0.25f);
+
+    // A box of any other height is not the fragment those metrics built, so
+    // they are not trusted there.
+    const float other_box = paint_baseline(true, kAscent + kDescent + 4.0f);
+    const float other_box_derived = paint_baseline(false, kAscent + kDescent + 4.0f);
+    CHECK(other_box == Catch::Approx(other_box_derived).margin(0.001f));
+}
+
 TEST_CASE("Label keeps a retyped single captured line where Chromium put it",
           "[view][widget][label-cache][readout]") {
     // A modulated readout ("32 BANDS" playing "64 BANDS") changes its copy

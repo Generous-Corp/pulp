@@ -410,6 +410,13 @@ struct IRTextLayoutBasis {
     /// requested family. Empty when the capture recorded no platform font,
     /// which makes the cache unusable rather than usable-on-trust.
     std::string resolved_face;
+    /// The primary font's ascent and descent Chrome laid the lines out with,
+    /// in CSS px, when the capture measured them. A captured line box exactly
+    /// ascent + descent tall is the text fragment itself, so its baseline sits
+    /// `ascent` below its top; these carry the browser's own rounding and any
+    /// per-platform metric adjustment that the font file does not.
+    std::optional<float> ascent;
+    std::optional<float> descent;
 };
 
 struct IRTextRun {

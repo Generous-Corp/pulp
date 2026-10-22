@@ -467,6 +467,24 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
                     const int layout_index =
                         json_int(member(run, "layout_index"), -1);
                     if (layout_index < 0) continue;
+                    const auto metrics = member(run, "line_metrics");
+                    if (metrics.isObject()) {
+                        const auto ascent = member(metrics, "ascent");
+                        const auto descent = member(metrics, "descent");
+                        auto numeric = [](const choc::value::ValueView& v) {
+                            return v.isInt32() || v.isInt64() ||
+                                   v.isFloat32() || v.isFloat64();
+                        };
+                        if (numeric(ascent) && numeric(descent)) {
+                            CapturedLineMetrics m;
+                            m.ascent = ascent.getWithDefault<double>(0.0);
+                            m.descent = descent.getWithDefault<double>(0.0);
+                            if (std::isfinite(m.ascent) &&
+                                std::isfinite(m.descent) && m.ascent > 0.0 &&
+                                m.descent >= 0.0)
+                                index.layout_line_metrics_[layout_index] = m;
+                        }
+                    }
                     const auto resolved = member(run, "resolved");
                     if (!resolved.isArray() || resolved.size() == 0) continue;
                     // The face that shaped the MOST glyphs, not the first one
@@ -518,6 +536,13 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
 std::string CapturedStyleIndex::resolved_face_for_layout(int layout_index) const {
     const auto it = layout_resolved_face_.find(layout_index);
     return it == layout_resolved_face_.end() ? std::string{} : it->second;
+}
+
+std::optional<CapturedLineMetrics> CapturedStyleIndex::line_metrics_for_layout(
+    int layout_index) const {
+    const auto it = layout_line_metrics_.find(layout_index);
+    if (it == layout_line_metrics_.end()) return std::nullopt;
+    return it->second;
 }
 
 std::vector<CapturedTextBox> CapturedStyleIndex::text_boxes_for_layout(

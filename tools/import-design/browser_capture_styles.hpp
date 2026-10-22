@@ -34,6 +34,14 @@ struct CapturedBox {
 ///
 /// A box can also start to the right of its run's block when the run continues
 /// a line an earlier inline sibling began.
+/// The primary font's ascent and descent Blink laid a text run out with, in
+/// CSS px. A text fragment's box is exactly this content area, so its baseline
+/// sits `ascent` below the box top.
+struct CapturedLineMetrics {
+    double ascent = 0.0;
+    double descent = 0.0;
+};
+
 struct CapturedTextBox {
     CapturedBox bounds;
     int start = 0;
@@ -163,6 +171,11 @@ class CapturedStyleIndex {
     /// empty answer must be treated as "cannot validate" rather than "matches".
     std::string resolved_face_for_layout(int layout_index) const;
 
+    /// The line metrics Blink used for this run's primary font, or nullopt
+    /// when the capture did not measure them.
+    std::optional<CapturedLineMetrics> line_metrics_for_layout(
+        int layout_index) const;
+
     /// Every laid-out node, in Chrome's paint order, ties broken by document
     /// order. This is the set a native renderer has to draw.
     std::vector<CapturedPaintNode> painted_nodes() const;
@@ -279,6 +292,8 @@ class CapturedStyleIndex {
     /// layout index → the PostScript name Blink resolved, when the capture
     /// carried a platform-fonts sidecar.
     std::unordered_map<int, std::string> layout_resolved_face_;
+    /// layout index → the measured primary-font line metrics, when present.
+    std::unordered_map<int, CapturedLineMetrics> layout_line_metrics_;
 };
 
 /// Which half of an element's appearance to fold onto a node.

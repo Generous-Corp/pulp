@@ -894,6 +894,16 @@ static void parse_ir_text_line_boxes(IRNode& node,
             IRTextLayoutBasis parsed;
             parsed.width = get_float(basis, "width");
             parsed.resolved_face = get_string(basis, "resolvedFace");
+            if (basis.hasObjectMember("ascent") &&
+                basis.hasObjectMember("descent")) {
+                const float ascent = get_float(basis, "ascent");
+                const float descent = get_float(basis, "descent");
+                if (std::isfinite(ascent) && std::isfinite(descent) &&
+                    ascent > 0.0f && descent >= 0.0f) {
+                    parsed.ascent = ascent;
+                    parsed.descent = descent;
+                }
+            }
             node.text_layout_basis = std::move(parsed);
         }
     }
@@ -2076,6 +2086,12 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
                            node.text_layout_basis->width);
         write_string_member(out, basis_first, "resolvedFace",
                             node.text_layout_basis->resolved_face);
+        if (node.text_layout_basis->ascent && node.text_layout_basis->descent) {
+            write_float_member(out, basis_first, "ascent",
+                               *node.text_layout_basis->ascent);
+            write_float_member(out, basis_first, "descent",
+                               *node.text_layout_basis->descent);
+        }
         out << '}';
     }
 

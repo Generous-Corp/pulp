@@ -121,6 +121,7 @@ void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
     // missing platform face or malformed capture must reject the boxes, but a
     // caller that observed wrappable browser text still needs normal reflow.
     captured_wrap_fallback_ = wrap_on_cache_miss;
+    has_cached_line_metrics_ = false;
     if (boxes.empty() || boxes.size() > 4096 ||
         !std::isfinite(basis_width) || basis_width <= 0.0f ||
         basis_face.empty())
@@ -149,6 +150,15 @@ void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
     cached_line_basis_font_style_ = resolved.font_slant;
     cached_line_basis_letter_spacing_ = resolved.letter_spacing;
     shaped_cache_valid_ = false;
+}
+
+void Label::set_cached_line_metrics(float ascent, float descent) {
+    if (cached_line_boxes_.empty() || !std::isfinite(ascent) ||
+        !std::isfinite(descent) || ascent <= 0.0f || descent < 0.0f)
+        return;
+    has_cached_line_metrics_ = true;
+    cached_line_ascent_ = ascent;
+    cached_line_descent_ = descent;
 }
 
 /// Slice a UTF-8 string by a UTF-16 offset and length.
@@ -2018,6 +2028,14 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         if (std::abs(first_line.height -
                      (rounded_ascent + std::round(css_descent))) < 0.01f)
             baseline_y = first_line.y + rounded_ascent;
+        // The browser's own metrics outrank both derivations above: they
+        // already carry its rounding and any per-platform adjustment it made
+        // to the face, which this Label cannot reproduce from the font file.
+        // Only a box exactly that tall is known to be the fragment they built.
+        if (has_cached_line_metrics_ &&
+            std::abs(first_line.height -
+                     (cached_line_ascent_ + cached_line_descent_)) < 0.01f)
+            baseline_y = first_line.y + cached_line_ascent_;
     }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared

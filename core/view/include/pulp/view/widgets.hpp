@@ -494,9 +494,16 @@ class Label : public View, public SelectableText {
     /// at its current font metrics and bounds.
     void clear_cached_line_boxes() {
         cached_line_boxes_.clear();
+        has_cached_line_metrics_ = false;
         shaped_cache_valid_ = false;
         invalidate_layout();
     }
+    /// The primary font's ascent and descent the browser laid the cached lines
+    /// out with. A captured line box exactly ascent + descent tall is the text
+    /// fragment itself, and its baseline is then placed `ascent` below the box
+    /// top instead of from this Label's own reading of the face. Applies to the
+    /// boxes most recently set; setting new boxes forgets it.
+    void set_cached_line_metrics(float ascent, float descent);
     const std::vector<CachedLineBox>& cached_line_boxes() const {
         return cached_line_boxes_;
     }
@@ -920,6 +927,9 @@ private:
     mutable float measure_wrapped_height_ = -1.0f;
 
     float cached_line_basis_width_ = 0.0f;
+    bool has_cached_line_metrics_ = false;
+    float cached_line_ascent_ = 0.0f;
+    float cached_line_descent_ = 0.0f;
     std::string cached_line_basis_face_;
     std::string cached_line_basis_text_;
     // Set once the label's copy diverged from the captured basis; the boxes
