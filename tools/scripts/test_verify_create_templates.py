@@ -245,8 +245,10 @@ class TestRealtimePatterns(unittest.TestCase):
 
     def test_per_sample_span_subscript_is_flagged(self) -> None:
         self._flag_processor_edit(
-            "out[i] = in[i] * gain;",
-            "output.channel(ch)[i] = input.channel_ptr(ch)[i] * gain;",
+            "pulp::audio::buffer_ops::map_samples(",
+            "for (std::size_t i = 0; i < n; ++i)\n"
+            "                output.channel(ch)[i] *= gain;\n"
+            "            pulp::audio::buffer_ops::map_samples(",
             "subscripts channel(ch)[i]")
 
     def test_hand_rolled_meter_is_flagged(self) -> None:

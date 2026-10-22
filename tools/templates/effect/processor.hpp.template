@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/audio/buffer_ops.hpp>
 #include <pulp/format/processor.hpp>
 #include <algorithm>
 #include <cmath>
@@ -54,17 +55,18 @@ public:
         const float mix = mix_.get() / 100.0f;
 
         // Take each channel's raw pointers once, outside the sample loop.
-        // input and output may be the same buffer (in-place hosts).
+        // map_samples() runs the per-sample function in order and vectorizes
+        // whether the host hands us separate buffers or processes in place.
+        // An effect that needs neighbouring samples or per-channel state can
+        // loop over the two pointers itself instead.
         const std::size_t n = output.num_samples();
         const std::size_t channels = std::min(output.num_channels(), input.num_channels());
         for (std::size_t ch = 0; ch < channels; ++ch) {
-            const float* in = input.channel_ptr(ch);
-            float* out = output.channel_ptr(ch);
-            for (std::size_t i = 0; i < n; ++i) {
-                const float dry = in[i];
-                const float wet = dry; // TODO: replace with your effect processing
-                out[i] = dry * (1.0f - mix) + wet * mix;
-            }
+            pulp::audio::buffer_ops::map_samples(
+                input.channel_ptr(ch), output.channel_ptr(ch), n, [mix](float dry) {
+                    const float wet = dry; // TODO: replace with your effect processing
+                    return dry * (1.0f - mix) + wet * mix;
+                });
         }
         for (std::size_t ch = channels; ch < output.num_channels(); ++ch)
             std::fill_n(output.channel_ptr(ch), n, 0.0f);

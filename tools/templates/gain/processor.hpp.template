@@ -74,17 +74,15 @@ public:
         const bool bypassed = bypass_.get() >= 0.5f;
         const float gain = bypassed ? 1.0f : std::pow(10.0f, gain_db_.get() / 20.0f);
 
-        // Take each channel's raw pointers once, outside the sample loop, and
-        // keep the loop body free of member access so the compiler can
-        // vectorize it. input and output may be the same buffer (in-place
-        // hosts); this loop is correct either way.
+        // Take each channel's raw pointers once, outside the sample loop.
+        // map_samples() vectorizes whether the host hands us separate
+        // buffers or processes in place (input and output the same memory).
         const std::size_t n = output.num_samples();
         const std::size_t channels = std::min(output.num_channels(), input.num_channels());
         for (std::size_t ch = 0; ch < channels; ++ch) {
-            const float* in = input.channel_ptr(ch);
-            float* out = output.channel_ptr(ch);
-            for (std::size_t i = 0; i < n; ++i)
-                out[i] = in[i] * gain;
+            pulp::audio::buffer_ops::map_samples(
+                input.channel_ptr(ch), output.channel_ptr(ch), n,
+                [gain](float x) { return x * gain; });
         }
         for (std::size_t ch = channels; ch < output.num_channels(); ++ch)
             std::fill_n(output.channel_ptr(ch), n, 0.0f);

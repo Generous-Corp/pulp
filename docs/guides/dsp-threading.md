@@ -165,17 +165,20 @@ void process(audio::BufferView<float>& out, const audio::BufferView<const float>
     const std::size_t n = out.num_samples();
     const std::size_t channels = std::min(out.num_channels(), in.num_channels());
     for (std::size_t ch = 0; ch < channels; ++ch) {
-        const float* src = in.channel_ptr(ch);   // once per channel, not per sample
-        float* dst = out.channel_ptr(ch);
-        for (std::size_t s = 0; s < n; ++s)
-            dst[s] = src[s] * gain;               // vectorizes; in-place safe
+        // channel_ptr() once per channel, not per sample.
+        audio::buffer_ops::map_samples(in.channel_ptr(ch), out.channel_ptr(ch), n,
+                                       [gain](float x) { return x * gain; });
     }
 }
 ```
 
 Take `channel_ptr(ch)` outside the sample loop rather than indexing
 `out.channel(ch)[s]`, which rebuilds a `std::span` from the view on every
-sample. For a per-block UI meter, `audio::buffer_ops::measure_peak_rms()`
+sample. Hosts usually process in place, and a plain `dst[s] = src[s] * gain`
+loop then runs its scalar fallback: the compiler guards the vector loop with
+an overlap check that `dst == src` fails. `buffer_ops::map_samples()` gives
+the in-place case its own single-pointer loop, so both cases vectorize; write
+the same split yourself for a loop it does not fit. For a per-block UI meter, `audio::buffer_ops::measure_peak_rms()`
 returns peak and RMS in one vectorized pass; a hand-written
 `sum += x * x` loop is a single serial add chain and can cost more than the
 processing it measures. `pulp create` templates use all three.
