@@ -2,9 +2,11 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "pulp_gain.hpp"
 #include <pulp/format/clap_adapter.hpp>
+#include <pulp/format/clap_entry.hpp>
 #include <pulp/format/validation_assertions.hpp>
 #include <array>
 #include <cmath>
+#include <string>
 #include <vector>
 
 using namespace pulp;
@@ -364,4 +366,30 @@ TEST_CASE("PulpGain CLAP at 0 dB is bit-transparent, including after a round tri
     REQUIRE(out_l[1] != in_l[1]);
     run({0.0});
     require_null();
+}
+
+TEST_CASE("PulpGain CLAP parses back the text it shows for every parameter",
+          "[pulpgain][clap][params]") {
+    // A validator converts each parameter's value to text and back and
+    // expects the conversion to work for all parameters or none. Bypass, a
+    // Toggle with no labels shown as "0"/"1", must parse like the gains.
+    ClapGainFixture fx;
+    const auto& params = format::clap_generic::params_ext;
+    const auto* plugin = &fx.plugin->plugin;
+    const uint32_t count = params.count(plugin);
+    REQUIRE(count >= 3);
+    for (uint32_t i = 0; i < count; ++i) {
+        clap_param_info_t info{};
+        REQUIRE(params.get_info(plugin, i, &info));
+        INFO(info.name);
+        for (const double value : {info.min_value, info.default_value, info.max_value}) {
+            char shown[256]{};
+            REQUIRE(params.value_to_text(plugin, info.id, value, shown, sizeof(shown)));
+            double parsed = 0.0;
+            REQUIRE(params.text_to_value(plugin, info.id, shown, &parsed));
+            char reshown[256]{};
+            REQUIRE(params.value_to_text(plugin, info.id, parsed, reshown, sizeof(reshown)));
+            REQUIRE(std::string(reshown) == std::string(shown));
+        }
+    }
 }
