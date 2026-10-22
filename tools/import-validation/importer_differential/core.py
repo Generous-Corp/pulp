@@ -235,11 +235,17 @@ def canonical_json_sha256(source: Path | bytes) -> str:
             # equivalence. Retain and verify raw snapshot bindings separately.
             document_entry = (capture_envelope and len(path) == 2
                               and path[0] == "documents" and isinstance(path[1], int))
+            # The settle loop polls until the DOM stops changing; how many
+            # polls that took depends on host load, like elapsed_ms, while
+            # the settled DOM itself is covered by the snapshot digests.
+            settle_entry = path == ("provenance", "settle")
             return {
                 key: scrub(item, (*path, key))
                 for key, item in value.items()
                 if key not in volatile_keys
                 and not (document_entry and key == "snapshot_sha256")
+                and not (settle_entry and key in {"rounds", "stable_rounds"})
+                and not (path == () and key == "settle_rounds")
             }
         if isinstance(value, list):
             return [scrub(item, (*path, index)) for index, item in enumerate(value)]
@@ -250,6 +256,25 @@ def canonical_json_sha256(source: Path | bytes) -> str:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def snapshot_semantic_sha256(snapshot_bytes: bytes) -> str:
+    """Hash a DOM snapshot with only its capture-local CDP frame IDs removed.
+
+    Every other byte of the snapshot -- nodes, layout, styles, text -- is
+    covered, so three captures of one source agreeing here is evidence of a
+    deterministic DOM, which the raw binding (frame IDs differ per capture)
+    cannot show.
+    """
+    snapshot = json.loads(snapshot_bytes)
+    strings = list(snapshot.get("strings", []))
+    for document in snapshot.get("documents", []):
+        index = document.get("frameId")
+        if isinstance(index, int) and 0 <= index < len(strings):
+            strings[index] = "<capture-local-frame-id>"
+    snapshot["strings"] = strings
+    canonical = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
 
 
@@ -646,39 +671,29 @@ def geometry_metrics(
     return result
 
 
-def geometry_metrics_with_registration(
-    raw_matches: list[tuple[BrowserNode, NativeNode, float]],
-    registered_matches: list[tuple[BrowserNode, NativeNode, float]],
-    registration: dict[str, float],
-) -> dict[str, Any]:
-    """Return canonical page-space geometry plus an explicit diagnostic view.
-
-    Promotion and aggregate scores must remain based on the raw page-space
-    comparison.  The registered view explains an authenticated panel-local
-    frame contract without allowing that registration to hide a placement
-    mismatch from callers consuming the canonical score.
-    """
-    raw_geometry = geometry_metrics(raw_matches)
-    raw_geometry["registration"] = {
-        "x": 0.0, "y": 0.0, "source": "page-space",
-    }
-    raw_geometry["registered_geometry"] = geometry_metrics(registered_matches)
-    raw_geometry["registration_applied"] = registration
-    return raw_geometry
+def panel_covers_page(capture: dict[str, Any]) -> bool:
+    """Whether the authored frame is the whole captured page."""
+    width, height = capture_logical_size(capture)
+    try:
+        frame = capture["reference"]["authored_frame"]
+        x, y = float(frame["x"]), float(frame["y"])
+        w, h = float(frame["width"]), float(frame["height"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return x <= 0 and y <= 0 and x + w >= width and y + h >= height
 
 
-def register_browser_nodes_to_native_frame(
-    nodes: list[BrowserNode], capture: dict[str, Any],
-    native_capture: dict[str, Any],
-) -> tuple[list[BrowserNode], dict[str, float]]:
-    """Translate authenticated page-space bounds into the native panel frame.
+def authenticated_authored_origin(
+    capture: dict[str, Any], native_capture: dict[str, Any],
+) -> tuple[float, float]:
+    """Return the page-space origin of the authored panel both captures sign.
 
-    Browser-backed native imports intentionally emit a panel-local root when
-    the authored surface is smaller than the viewport.  Chromium's DOM
-    snapshot still reports page-space bounds, so comparing those coordinates
-    directly creates a constant root-margin residual.  Use only the signed
-    authored-frame metadata carried by both captures; never infer a shift from
-    pixels or from the observed residual.
+    Browser-backed native imports emit a panel-local root when the authored
+    surface is smaller than the viewport, while Chromium's screenshot and DOM
+    snapshot are page-space. The observer places the native panel at this
+    origin so both sides are compared in page space. Only the authored-frame
+    metadata carried by both captures is used, never a shift inferred from
+    pixels or from an observed residual, and the two must agree.
     """
     try:
         authored = capture["reference"]["authored_frame"]
@@ -694,25 +709,106 @@ def register_browser_nodes_to_native_frame(
         raise LabError("authored-frame metadata is non-finite")
     if abs(frame_x - native_frame_x) > 1e-6 or abs(frame_y - native_frame_y) > 1e-6:
         raise LabError("browser/native authored-frame metadata disagrees")
-    # The observer is explicitly invoked with the full document extent but
-    # the imported native root is panel-local at origin (the importer records
-    # the authored frame for consumers, it does not place the panel in the
-    # observer canvas).  Register page-space DOM bounds into that origin.
-    dx = -frame_x
-    dy = -frame_y
-    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
-        return nodes, {"x": 0.0, "y": 0.0, "source": "authenticated-authored-frame"}
-    registered: list[BrowserNode] = []
-    for node in nodes:
-        bounds = node.bounds
-        if bounds is not None:
-            bounds = (bounds[0] + dx, bounds[1] + dy, bounds[2], bounds[3])
-        registered.append(BrowserNode(
-            index=node.index, tag=node.tag, parent=node.parent, text=node.text,
-            attributes=node.attributes, bounds=bounds, styles=node.styles,
-            backend_node_id=node.backend_node_id))
-    return registered, {"x": round(dx, 6), "y": round(dy, 6),
-                       "source": "authenticated-authored-frame"}
+    return frame_x, frame_y
+
+
+# Styles under which Chromium composites the root or body differently from a
+# flat fill of its background colour. The importer's own canvas rule refuses
+# the same set (browser_capture_canvas_impl.hpp).
+CANVAS_NEUTRAL_STYLES = {
+    "opacity": "1",
+    "filter": "none",
+    "backdrop-filter": "none",
+    "transform": "none",
+    "clip-path": "none",
+    "mask-image": "none",
+    "mix-blend-mode": "normal",
+    "background-image": "none",
+}
+
+
+def document_canvas_background(
+    snapshot: dict[str, Any], capture: dict[str, Any],
+) -> dict[str, Any]:
+    """Resolve the colour Chromium paints across the page canvas.
+
+    CSS propagates the root element's background to the canvas, and the
+    body's when the root's is transparent. Only a flat, fully opaque colour on
+    a box Chromium composites as a plain fill is resolved. Anything else --
+    translucency, an image, a filter or blend, or two transparent boxes
+    (whose UA canvas colour depends on the page's own color-scheme, which the
+    capture does not record) -- is reported unresolved rather than
+    approximated, so the observer leaves the page uncovered and the residual
+    stays visible.
+    """
+    def unresolved(reason: str) -> dict[str, Any]:
+        return {"status": "unresolved", "reason": reason, "color": None}
+
+    strings = snapshot.get("strings", [])
+    documents = snapshot.get("documents", [])
+    style_names = snapshot.get("computedStyleNames") or LEGACY_COMPUTED_STYLES
+    if not documents:
+        return unresolved("snapshot has no document")
+    document = documents[0]
+    nodes = document.get("nodes", {})
+    layout = document.get("layout", {})
+    names = nodes.get("nodeName", [])
+    types = nodes.get("nodeType", [])
+    parents = nodes.get("parentIndex", [])
+    layout_by_node = {
+        node: index for index, node in enumerate(layout.get("nodeIndex", []))}
+    raw_styles = layout.get("styles", [])
+
+    def element(tag: str, parent: int | None) -> dict[str, str] | None:
+        for index, name in enumerate(names):
+            # Element nodes only: the doctype is also named "html".
+            if index >= len(types) or types[index] != 1:
+                continue
+            if decode_string(strings, name).lower() != tag:
+                continue
+            if parent is not None and (index >= len(parents) or parents[index] != parent):
+                continue
+            layout_index = layout_by_node.get(index)
+            if layout_index is None or layout_index >= len(raw_styles):
+                return None
+            row = raw_styles[layout_index]
+            if len(row) != len(style_names):
+                raise LabError("snapshot style row does not match its property names")
+            styles = {name: decode_string(strings, value)
+                      for name, value in zip(style_names, row)}
+            styles["__index"] = str(index)
+            return styles
+        return None
+
+    html = element("html", None)
+    body = element("body", int(html["__index"])) if html else None
+    if html is None or body is None:
+        return unresolved("snapshot lacks a laid-out html/body pair")
+
+    def flat_color(styles: dict[str, str]) -> tuple[str, float] | None:
+        if any(styles.get(name, neutral) != neutral
+               for name, neutral in CANVAS_NEUTRAL_STYLES.items()):
+            return None
+        match = re.fullmatch(
+            r"rgba?\((\d+), (\d+), (\d+)(?:, ([0-9.]+))?\)",
+            styles.get("background-color", ""))
+        if not match:
+            return None
+        alpha = float(match.group(4)) if match.group(4) is not None else 1.0
+        return f"rgb({match.group(1)}, {match.group(2)}, {match.group(3)})", alpha
+
+    for label, styles in (("html", html), ("body", body)):
+        resolved = flat_color(styles)
+        if resolved is None:
+            return unresolved(f"{label} is not a plain flat-colour fill")
+        color, alpha = resolved
+        if alpha == 1.0:
+            return {"status": "resolved", "source": f"{label}-background",
+                    "color": color}
+        if alpha != 0.0:
+            return unresolved(f"{label} background is translucent")
+    return unresolved("html and body are transparent; the UA canvas colour "
+                      "depends on a color-scheme the capture does not record")
 
 
 def viewport_dpr_audit(
@@ -999,12 +1095,64 @@ def classify_gaps(
     return result
 
 
+OBSERVER_COUNTER_SCHEMA = "pulp-design-ir-observer-counters-v1"
+
+
+def work_counter_gate(render_receipt: dict[str, Any]) -> dict[str, Any]:
+    """Judge the observer's own work counters for this render.
+
+    The counters come from the digest-bound render receipt, so they describe
+    the exact native render that was scored. A receipt without them, a tree
+    that outlived its teardown, or a read-back of the painted tree that staled
+    a cache without requesting a repaint each blocks threshold eligibility.
+    Build and first-frame mutations are reported but not gated: until a frame
+    has been painted there is no painted state to stale. The observer paints
+    one frame, so this gate proves complete teardown and a side-effect-free
+    read-back only; steady-state update behaviour is measured by the
+    benchmark's interactive phase, not here.
+    """
+    counters = render_receipt.get("counters")
+    if not isinstance(counters, dict) or counters.get("schema") != OBSERVER_COUNTER_SCHEMA:
+        return {"status": "absent", "counters": None,
+                "failures": ["observer receipt carries no work counters"]}
+    failures: list[str] = []
+
+    def count(value: Any) -> int:
+        # Counts are non-negative JSON integers; bool, float and string are
+        # malformed, not coercible.
+        if type(value) is not int or value < 0:
+            raise ValueError(value)
+        return value
+
+    try:
+        constructed = count(counters["views_constructed"])
+        destroyed = count(counters["views_destroyed"])
+        live = count(counters["live_views_after_teardown"])
+        for phase in ("build", "first_frame", "readback"):
+            for name in ("layout_passes", "damage_requests", "unmarked_paint_mutations"):
+                count(counters[phase][name])
+        unmarked = counters["readback"]["unmarked_paint_mutations"]
+    except (KeyError, TypeError, ValueError):
+        return {"status": "absent", "counters": counters,
+                "failures": ["observer work counters are malformed"]}
+    if constructed <= 0:
+        failures.append("observer built no views")
+    if live != 0 or destroyed != constructed:
+        failures.append(
+            f"{constructed - destroyed} of {constructed} views outlived teardown")
+    if unmarked != 0:
+        failures.append(f"{unmarked} unmarked paint mutations after the first frame")
+    return {"status": "fail" if failures else "pass", "counters": counters,
+            "failures": failures}
+
+
 def promotion_recommendation(
     unsupported: list[str],
     structural: dict[str, Any],
     geometry: dict[str, Any],
     typography: dict[str, Any],
     visual: dict[str, Any],
+    work_counters: dict[str, Any],
 ) -> dict[str, Any]:
     scores = {
         "structural": structural["score"],
@@ -1012,11 +1160,16 @@ def promotion_recommendation(
         "typography": typography["score"],
         "visual": visual["score"],
     }
+    # `not (score >= threshold)` so a NaN score fails rather than passing a
+    # `<` comparison that is false for NaN.
     failed = [
         name for name, threshold in PROMOTION_THRESHOLDS.items()
-        if scores[name] < threshold
+        if not (math.isfinite(scores[name]) and scores[name] >= threshold)
     ]
-    threshold_eligible = not unsupported and not failed
+    counter_failures = (
+        [] if work_counters.get("status") == "pass"
+        else list(work_counters.get("failures") or ["work counters not evaluated"]))
+    threshold_eligible = not unsupported and not failed and not counter_failures
     if unsupported:
         classification = "browser-required"
         reasons = [f"unsupported dynamic features: {', '.join(unsupported)}"]
@@ -1024,8 +1177,8 @@ def promotion_recommendation(
         classification = "native-with-browser-validation"
         reasons = (
             [f"{name} score below {PROMOTION_THRESHOLDS[name]:.3f}"
-             for name in failed]
-            if failed else
+             for name in failed] + counter_failures
+            if failed or counter_failures else
             ["threshold-eligible, but production promotion is disabled until "
              "a candidate-only classifier passes a frozen holdout corpus"])
     return {
@@ -1330,13 +1483,27 @@ def compare_one(
     native_snapshot_binding, native_snapshot_bytes = verify_capture_snapshot_binding(native_capture, native_evidence)
     viewport = capture["provenance"]["viewport"]["resolved"]
     capture_width, capture_height = capture_logical_size(capture)
+    authored_x, authored_y = authenticated_authored_origin(capture, native_capture)
+    page_background = document_canvas_background(
+        json.loads(browser_snapshot_bytes), capture)
+    if page_background["status"] == "resolved" and panel_covers_page(capture):
+        # A panel that is the whole page owns its canvas: the importer stamps
+        # the document colour on its root. Supplying it here would paint a
+        # backdrop the import may have dropped.
+        page_background = {"status": "importer-owned", "color": None,
+                           "reason": "the authored frame covers the page; the "
+                                     "importer's root carries the document canvas",
+                           "resolved": page_background}
     render_args = [
         str(observer), "--input", str(native_ir),
         "--render", str(native_render), "--layout", str(native_layout),
         "--width", str(capture_width), "--height", str(capture_height),
         "--scale", str(capture["reference"]["device_scale_factor"]),
         "--backend", "skia", "--render-receipt", str(native_receipt),
+        "--origin", f"{authored_x},{authored_y}",
     ]
+    if page_background["status"] == "resolved":
+        render_args.extend(["--page-background", page_background["color"]])
     render_run = run_command(render_args, timeout_seconds)
     write_json(native_dir / "render-command.json", command_record(render_run))
     if render_run.returncode != 0:
@@ -1350,6 +1517,19 @@ def compare_one(
             or render_receipt.get("backend_used") != "skia"
             or render_receipt.get("ok") is not True):
         raise LabError("native render receipt did not prove a successful Skia render")
+    # The receipt records how the observer placed the panel; it must be the
+    # placement this comparison asked for, or the render was registered by
+    # something other than the authenticated authored frame.
+    placement = render_receipt.get("placement")
+    expected_background = (page_background["color"]
+                           if page_background["status"] == "resolved" else "")
+    if (not isinstance(placement, dict)
+            or not math.isclose(float(placement.get("origin_x", math.nan)), authored_x,
+                                abs_tol=1e-4)
+            or not math.isclose(float(placement.get("origin_y", math.nan)), authored_y,
+                                abs_tol=1e-4)
+            or placement.get("page_background") != expected_background):
+        raise LabError("native render receipt does not record the requested placement")
 
     try:
         from PIL import Image
@@ -1379,10 +1559,20 @@ def compare_one(
     recognition = source_recognition(source.read_text(encoding="utf-8", errors="replace"))
     browser_snapshot = json.loads(browser_snapshot_bytes)
     native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
-    browser_flat_raw = browser_nodes(browser_snapshot)
+    browser_flat = browser_nodes(browser_snapshot)
+    # The observer already placed the native render and its layout receipt at
+    # the authenticated origin, so both sides are page-space. Translating the
+    # browser nodes as well would register the panel twice.
     native_flat = native_nodes(native_doc, native_layout_doc)
-    browser_flat, geometry_registration = register_browser_nodes_to_native_frame(
-        browser_flat_raw, capture, native_capture)
+    geometry_registration = {
+        "x": round(authored_x, 6), "y": round(authored_y, 6),
+        "source": "authenticated-authored-frame",
+        "applied_to": "native-render-and-layout",
+        # Capture snaps box paint edges in panel-local CSS px. Moved by a
+        # fractional origin they no longer equal Chromium's page-space snap,
+        # so edge residuals on such a panel are partly registration.
+        "integral_origin": float(authored_x).is_integer() and float(authored_y).is_integer(),
+    }
     comparison = structural_comparison(browser_flat, native_flat)
     matches = comparison["matches"]
     missing = comparison["missing"]
@@ -1427,12 +1617,8 @@ def compare_one(
             for browser, native, score in matches
         ],
     }
-    # Keep page-space geometry canonical. Registered panel-space geometry is a
-    # diagnostic view of the intentional panel-local contract and must never
-    # silently turn a placement mismatch into a promotion pass.
-    raw_comparison = structural_comparison(browser_flat_raw, native_flat)
-    geometry = geometry_metrics_with_registration(
-        raw_comparison["matches"], matches, geometry_registration)
+    geometry = geometry_metrics(matches)
+    geometry["registration"] = geometry_registration
     typography = typography_metrics(matches)
     visual = visual_metrics(
         browser_dir / "browser.png",
@@ -1446,8 +1632,9 @@ def compare_one(
     blockers = unsupported_features(recognition)
     classifications = classify_gaps(
         recognition, structural, geometry, typography, visual)
+    work_counters = work_counter_gate(render_receipt)
     recommendation = promotion_recommendation(
-        blockers, structural, geometry, typography, visual)
+        blockers, structural, geometry, typography, visual, work_counters)
     timings = {
         "browser_import_ms": browser_run.elapsed_ms,
         "native_import_ms": native_run.elapsed_ms,
@@ -1470,6 +1657,8 @@ def compare_one(
         "native_capture_sha256": hashlib.sha256(native_capture_bytes).hexdigest(),
         "browser_snapshot_binding": browser_snapshot_binding,
         "native_snapshot_binding": native_snapshot_binding,
+        "browser_snapshot_semantic_sha256": snapshot_semantic_sha256(browser_snapshot_bytes),
+        "native_snapshot_semantic_sha256": snapshot_semantic_sha256(native_snapshot_bytes),
         "browser_ir_canonical_sha256": canonical_json_sha256(browser_ir),
         "native_ir_canonical_sha256": canonical_json_sha256(native_ir),
         "browser_capture_canonical_sha256": canonical_json_sha256(capture_bytes),
@@ -1585,6 +1774,8 @@ def compare_one(
             "typography": typography,
             "visual": visual,
             "viewport_dpr_audit": viewport_dpr,
+            "page_background": page_background,
+            "work_counters": work_counters,
         },
         "classifications": classifications,
         "promotion": recommendation,

@@ -29,6 +29,14 @@ from importer_differential import core as LAB  # noqa: E402
 from importer_differential import cli as LAB_CLI  # noqa: E402
 
 
+def observer_placement(argv: list[str]) -> dict[str, object]:
+    """The placement block the real observer records for these arguments."""
+    x, y = (float(v) for v in argv[argv.index("--origin") + 1].split(","))
+    background = (argv[argv.index("--page-background") + 1]
+                  if "--page-background" in argv else "")
+    return {"origin_x": x, "origin_y": y, "page_background": background}
+
+
 class DifferentialLabTests(unittest.TestCase):
     def test_source_recognition_records_dynamic_blockers(self) -> None:
         recognition = LAB.source_recognition("""
@@ -744,7 +752,8 @@ class DifferentialLabTests(unittest.TestCase):
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
-                                    "ok": True}), encoding="utf-8")
+                                    "ok": True,
+                                    "placement": observer_placement(argv)}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
                     output.write_text(json.dumps({"root": {"type": "frame",
@@ -817,7 +826,7 @@ class DifferentialLabTests(unittest.TestCase):
                 0, "main", -1, "", {}, (0.25, 0.25, 0.5, 0.5), {}, 10)
             native = LAB.NativeNode(
                 "panel", "frame", "main", "", None, {}, (0, 0, 0.5, 0.5), 10)
-            with patch.object(LAB, "run_command", side_effect=fake_run), \
+            with patch.object(LAB, "run_command", side_effect=fake_run) as offset_run, \
                     patch.object(LAB, "find_browser_evidence", return_value=evidence), \
                     patch.object(LAB, "browser_nodes", return_value=[browser]), \
                     patch.object(LAB, "native_nodes", return_value=[native]):
@@ -826,11 +835,40 @@ class DifferentialLabTests(unittest.TestCase):
                     "claude", Path("chrome"),
                     fixture_metadata={"viewport": {"width": 1, "height": 1},
                                       "browser_interactions": "plan.json"})
+            render_argv = next(call.args[0] for call in offset_run.call_args_list
+                               if "--render" in call.args[0])
+            # The observer receives the signed origin; the lab never shifts the
+            # browser nodes as well, so a native panel that did not move stays
+            # a page-space placement error.
+            self.assertEqual(render_argv[render_argv.index("--origin") + 1], "0.25,0.25")
+            # An empty snapshot proves no page canvas, so none is invented.
+            self.assertNotIn("--page-background", render_argv)
+            self.assertEqual(offset_report["comparison"]["page_background"]["status"],
+                             "unresolved")
             geometry = offset_report["comparison"]["geometry"]
-            self.assertLess(geometry["score"], geometry["registered_geometry"]["score"])
-            self.assertEqual(geometry["registered_geometry"]["score"], 1.0)
-            self.assertEqual(geometry["registration_applied"]["x"], -0.25)
+            self.assertLess(geometry["score"], 1.0)
+            self.assertNotIn("registered_geometry", geometry)
+            self.assertEqual(geometry["registration"]["x"], 0.25)
+            self.assertEqual(geometry["registration"]["applied_to"], "native-render-and-layout")
             self.assertIn("geometry score below 0.980", offset_report["promotion"]["reasons"])
+            # A receipt that records a different placement than was requested
+            # means the render was registered by something else.
+            def misplaced_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
+                result = fake_run(argv, timeout_seconds)
+                if "--render" in argv:
+                    receipt = Path(argv[argv.index("--render-receipt") + 1])
+                    data = json.loads(receipt.read_text(encoding="utf-8"))
+                    data["placement"]["origin_x"] += 24.0
+                    receipt.write_text(json.dumps(data), encoding="utf-8")
+                return result
+            with patch.object(LAB, "run_command", side_effect=misplaced_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    self.assertRaisesRegex(LAB.LabError, "requested placement"):
+                LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-misplaced", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
             with patch.object(
                 LAB, "viewport_dpr_audit",
                 return_value={"ok": False, "checks": {"planted_negative": False}},
@@ -896,7 +934,8 @@ class DifferentialLabTests(unittest.TestCase):
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
-                                    "ok": True}), encoding="utf-8")
+                                    "ok": True,
+                                    "placement": observer_placement(argv)}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
                     output.write_text(json.dumps({"root": {"type": "frame",
@@ -1002,16 +1041,124 @@ class DifferentialLabTests(unittest.TestCase):
 
     def test_promotion_is_conservative_and_advisory(self) -> None:
         perfect = {"score": 1.0}
+        counted = {"status": "pass", "failures": []}
         result = LAB.promotion_recommendation(
-            ["canvas"], perfect, perfect, perfect, perfect)
+            ["canvas"], perfect, perfect, perfect, perfect, counted)
         self.assertEqual(result["classification"], "browser-required")
         self.assertTrue(result["advisory_only"])
         result = LAB.promotion_recommendation(
-            [], perfect, perfect, perfect, perfect)
+            [], perfect, perfect, perfect, perfect, counted)
         self.assertEqual(
             result["classification"], "native-with-browser-validation")
         self.assertTrue(result["threshold_eligible"])
         self.assertFalse(result["production_promotion_enabled"])
+
+    def test_promotion_thresholds_are_pinned(self) -> None:
+        # Every other test reads PROMOTION_THRESHOLDS symbolically, so a lowered
+        # threshold would pass them all. The values are policy: changing one
+        # must be a deliberate edit here, not a side effect.
+        self.assertEqual(LAB.PROMOTION_THRESHOLDS, {
+            "structural": 0.99,
+            "geometry": 0.98,
+            "typography": 0.98,
+            "visual": 0.995,
+        })
+        perfect = {"score": 1.0}
+        counted = {"status": "pass", "failures": []}
+        just_below = LAB.promotion_recommendation(
+            [], perfect, perfect, perfect, {"score": 0.994999}, counted)
+        self.assertFalse(just_below["threshold_eligible"])
+        at_threshold = LAB.promotion_recommendation(
+            [], perfect, perfect, perfect, {"score": 0.995}, counted)
+        self.assertTrue(at_threshold["threshold_eligible"])
+        for bad in (float("nan"), float("inf")):
+            with self.subTest(score=bad):
+                result = LAB.promotion_recommendation(
+                    [], perfect, perfect, perfect, {"score": bad}, counted)
+                self.assertFalse(result["threshold_eligible"])
+
+    def test_work_counters_gate_threshold_eligibility(self) -> None:
+        perfect = {"score": 1.0}
+        clean = {"schema": LAB.OBSERVER_COUNTER_SCHEMA, "views_constructed": 9,
+                 "views_destroyed": 9, "live_views_after_teardown": 0,
+                 "build": {"layout_passes": 0, "damage_requests": 4,
+                           "unmarked_paint_mutations": 83},
+                 "first_frame": {"layout_passes": 1, "damage_requests": 0,
+                                 "unmarked_paint_mutations": 7},
+                 "readback": {"layout_passes": 0, "damage_requests": 0,
+                              "unmarked_paint_mutations": 0}}
+        self.assertEqual(LAB.work_counter_gate({"counters": clean})["status"], "pass")
+        planted = {
+            "no counters": {},
+            "wrong schema": {"counters": {**clean, "schema": "other"}},
+            "leaked view": {"counters": {**clean, "views_destroyed": 8,
+                                         "live_views_after_teardown": 1}},
+            "unmarked mutation": {"counters": {**clean, "readback": {
+                **clean["readback"], "unmarked_paint_mutations": 2}}},
+            "empty tree": {"counters": {**clean, "views_constructed": 0,
+                                        "views_destroyed": 0}},
+            "incomplete": {"counters": {"schema": LAB.OBSERVER_COUNTER_SCHEMA}},
+            "bool counts": {"counters": {**clean, "views_constructed": True,
+                                         "views_destroyed": True,
+                                         "live_views_after_teardown": False}},
+            "fractional mutation": {"counters": {**clean, "readback": {
+                **clean["readback"], "unmarked_paint_mutations": 0.9}}},
+            "negative count": {"counters": {**clean, "views_destroyed": -1}},
+            "string count": {"counters": {**clean, "views_constructed": "9"}},
+            "missing readback field": {"counters": {**clean, "readback": {
+                "unmarked_paint_mutations": 0}}},
+        }
+        for name, receipt in planted.items():
+            with self.subTest(name):
+                gate = LAB.work_counter_gate(receipt)
+                self.assertNotEqual(gate["status"], "pass")
+                result = LAB.promotion_recommendation(
+                    [], perfect, perfect, perfect, perfect, gate)
+                self.assertFalse(result["threshold_eligible"])
+                self.assertTrue(result["reasons"])
+
+    def test_only_a_cropped_panel_borrows_the_page_colour(self) -> None:
+        def capture(x: float, y: float, w: float, h: float) -> dict[str, object]:
+            return {"reference": {"logical_width": 480, "logical_height": 320,
+                                  "authored_frame": {"x": x, "y": y, "width": w, "height": h}}}
+        # A whole-page panel's importer root owns the document canvas.
+        self.assertTrue(LAB.panel_covers_page(capture(0, 0, 480, 320)))
+        self.assertTrue(LAB.panel_covers_page(capture(0, 0, 480, 400)))
+        # Anything smaller or offset leaves page around it for the lab to fill.
+        self.assertFalse(LAB.panel_covers_page(capture(24, 24, 362, 97)))
+        self.assertFalse(LAB.panel_covers_page(capture(0, 0, 480, 300)))
+        self.assertFalse(LAB.panel_covers_page({"reference": {"logical_width": 480,
+                                                              "logical_height": 320}}))
+
+    def test_canonical_digest_ignores_only_settle_poll_counts(self) -> None:
+        def capture(rounds: int, stable: int, color: str) -> bytes:
+            return json.dumps({"schema": "pulp-browser-capture-v1",
+                               "provenance": {"settle": {"rounds": rounds,
+                                                         "stable_rounds": stable,
+                                                         "elapsed_ms": 900}},
+                               "reference": {"color": color}}).encode("utf-8")
+        self.assertEqual(LAB.canonical_json_sha256(capture(14, 12, "red")),
+                         LAB.canonical_json_sha256(capture(15, 13, "red")))
+        self.assertNotEqual(LAB.canonical_json_sha256(capture(14, 12, "red")),
+                            LAB.canonical_json_sha256(capture(14, 12, "blue")))
+        ir = lambda rounds, text: json.dumps(
+            {"settle_rounds": rounds, "root": {"text": text}}).encode("utf-8")
+        self.assertEqual(LAB.canonical_json_sha256(ir(14, "a")),
+                         LAB.canonical_json_sha256(ir(15, "a")))
+        # Only the top-level IR field: a node property of that name still counts.
+        self.assertNotEqual(
+            LAB.canonical_json_sha256(json.dumps({"root": {"settle_rounds": 1}}).encode()),
+            LAB.canonical_json_sha256(json.dumps({"root": {"settle_rounds": 2}}).encode()))
+
+    def test_semantic_snapshot_digest_ignores_only_the_frame_id(self) -> None:
+        def snapshot(frame: str, text: str) -> bytes:
+            return json.dumps({"strings": ["#document", frame, text],
+                               "documents": [{"frameId": 1, "nodes": {"nodeValue": [2]}}]}
+                              ).encode("utf-8")
+        self.assertEqual(LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signal")),
+                         LAB.snapshot_semantic_sha256(snapshot("BBBB", "Signal")))
+        self.assertNotEqual(LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signal")),
+                            LAB.snapshot_semantic_sha256(snapshot("AAAA", "Signals")))
 
     def test_corpus_aggregation_ranks_repeated_impact(self) -> None:
         report = {

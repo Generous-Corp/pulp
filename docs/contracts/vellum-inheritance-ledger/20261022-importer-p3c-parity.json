@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-importer-p3c-parity",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "When the Pulp canvas target adopts Vellum, Vellum's canvas kernel must place a Canvas2D fillText/strokeText baseline exactly at y by compensating SkParagraph's rounded drawn baseline, and expose the face's typographic (fAscent/fDescent) metrics on prepared text alongside the worst-case extents.",
+  "evidence": [
+    ".github/vellum-change-events/20261022-importer-p3c-parity.json",
+    "pulp-test-canvas-fonts: fill_text places the alphabetic baseline at y",
+    "pulp-test-widgets-label: Label honors Chromium captured vertical line positions"
+  ]
+}

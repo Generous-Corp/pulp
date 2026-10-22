@@ -220,7 +220,13 @@ PreparedParagraph make_paragraph(const std::string& text,
     // need the full advance, so keep whichever metric is wider.
     result.advance = std::max(paragraph->getLongestLine(),
                               paragraph->getMaxIntrinsicWidth());
-    result.alphabetic_baseline = paragraph->getAlphabeticBaseline();
+    // Callers paint the paragraph's top at `y - alphabetic_baseline` so its
+    // baseline lands on `y`. SkParagraph draws a line's glyphs a whole number
+    // of units below the paragraph top -- getAlphabeticBaseline() rounded --
+    // whatever ParagraphStyle's rounding hack says, so subtracting the
+    // unrounded value set every fillText up to half a unit off `y`, high or
+    // low depending on the face and size.
+    result.alphabetic_baseline = std::round(paragraph->getAlphabeticBaseline());
     result.paragraph = std::move(paragraph);
     return result;
 }
