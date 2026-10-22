@@ -10,6 +10,7 @@
 
 #include "detail/gpu_neural_realtime_test_access.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/realtime_gpu_health_mirror.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -858,4 +859,17 @@ TEST_CASE("a node whose release fails keeps its model bound", "[gpu_audio][neura
         CHECK(adopter.prepare() == release_ok);
         rig.plan.release_ok = true;
     }
+}
+
+TEST_CASE("the node's status projection keeps sustained deadline misses Degraded",
+          "[gpu_audio][neural][status]") {
+    // The node and the hosting transport both project health through this
+    // mapping; only provider loss or an unresponsive provider is Unavailable.
+    detail::RealtimeGpuHealth health;
+    health.recovery_reason = GpuAudioRecoveryReason::SustainedDeadlineMisses;
+    CHECK(detail::provider_state_for_health(health) == GpuAudioProviderState::Degraded);
+    health.recovery_reason = GpuAudioRecoveryReason::ProviderUnresponsive;
+    CHECK(detail::provider_state_for_health(health) == GpuAudioProviderState::Unavailable);
+    health.recovery_reason = GpuAudioRecoveryReason::None;
+    CHECK(detail::provider_state_for_health(health) == GpuAudioProviderState::Ready);
 }
