@@ -252,6 +252,8 @@ std::string_view recovery_name(pulp::gpu_audio::GpuAudioRecoveryReason reason) {
         return "provider_unresponsive";
     case R::ProviderReacquired:
         return "provider_reacquired";
+    case R::SustainedDeadlineMisses:
+        return "sustained_deadline_misses";
     }
     return "unknown";
 }
