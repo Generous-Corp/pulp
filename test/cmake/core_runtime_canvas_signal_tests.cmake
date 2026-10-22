@@ -719,6 +719,18 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-realtime-node
     LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Plug-in-boundary continuity: a GPU-audio effect driven through the real CLAP
+# adapter and HeadlessHost must null against a CPU reference across injected
+# provider failure/loss, worker starvation, reactivation, bypass, and state
+# restore. Uses the private provider seam, so it needs no Dawn or GPU device.
+if(PULP_HAS_CLAP)
+    pulp_add_test_suite(pulp-test-gpu-audio-daw-continuity
+        SOURCES test_gpu_audio_daw_continuity.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::gpu-audio pulp::format pulp::audio-analysis clap
+        COMPILE_DEFINITIONS PULP_CLAP_GUI=1
+        INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+endif()
+
 # Public one-stream WaveNet session boundary. The test exercises descriptor
 # and weight ownership on every platform; when Dawn is available it also
 # drives one authenticated shared block through the opaque SDK session.
