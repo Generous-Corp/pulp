@@ -1519,6 +1519,8 @@ tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
     // host re-reads latency and tail when it activates again anyway.
     // Start/stop the paced poll so a mid-stream change while active is
     // delivered without an incidental host query.
+    if (state && has_prepared_context_)
+        warm_render_path();
     if (state)
         schedule_host_notifications(InlineFallback::forbidden);
     if (poll_active_) {
@@ -2091,7 +2093,7 @@ bool PulpVst3Processor::process_maybe_bypass(
         // host raised this block must settle even though we short-circuited
         // before process(), or a panic/reset raised while bypassed would fire
         // late on the next non-bypassed block.
-        store_.reset_triggers_rt();
+        if (!warming_render_path_) store_.reset_triggers_rt();
         return true;
     }
     return false;
@@ -2699,7 +2701,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // negotiated layouts retain their existing paths.
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        if (native_f64) {
+        if (warming_render_path_) {
+            // Warm-up block: the Processor never runs, so nothing it owns moves.
+        } else if (native_f64) {
             processor_->process_f64(process_buffers64, midi_in_, midi_out_, ctx);
         } else {
             processor_->process(process_buffers, midi_in_, midi_out_, ctx);
@@ -2746,6 +2750,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             }
         }
     }
+    if (warming_render_path_) return kResultOk;
+
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. Done before the
     // output-change scan below so the host records the auto-reset as automation.
@@ -2761,6 +2767,52 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     write_midi_output(data, midi_out_);
 
     return kResultOk;
+}
+
+void PulpVst3Processor::warm_render_path() {
+    if (!processor_ || max_block_size_ <= 0 ||
+        processSetup.symbolicSampleSize != kSample32)
+        return;
+    const int frames = std::min(max_block_size_, 64);
+    std::vector<std::vector<float>> storage;
+    std::vector<std::vector<float*>> pointers;
+    // Reserved up front so the pointers handed to the host buffers stay valid.
+    storage.reserve(64);
+    pointers.reserve(64);
+    auto make_buses = [&](BusList& buses, std::vector<AudioBusBuffers>& out) {
+        out.assign(buses.size(), AudioBusBuffers{});
+        for (std::size_t b = 0; b < buses.size(); ++b) {
+            auto* bus = FCast<AudioBus>(buses.at(static_cast<int32>(b)));
+            int channels =
+                bus ? static_cast<int>(SpeakerArr::getChannelCount(bus->getArrangement())) : 0;
+            if (storage.size() + static_cast<std::size_t>(channels) > storage.capacity() ||
+                pointers.size() == pointers.capacity())
+                channels = 0;
+            auto& ptrs = pointers.emplace_back();
+            for (int ch = 0; ch < channels; ++ch)
+                ptrs.push_back(storage.emplace_back(static_cast<std::size_t>(frames), 0.0f).data());
+            out[b].numChannels = channels;
+            out[b].channelBuffers32 = channels > 0 ? ptrs.data() : nullptr;
+        }
+    };
+    std::vector<AudioBusBuffers> inputs, outputs;
+    make_buses(audioInputs, inputs);
+    make_buses(audioOutputs, outputs);
+    ProcessData data{};
+    data.processMode = processSetup.processMode;
+    data.symbolicSampleSize = kSample32;
+    data.numSamples = frames;
+    data.numInputs = static_cast<int32>(inputs.size());
+    data.numOutputs = static_cast<int32>(outputs.size());
+    data.inputs = inputs.empty() ? nullptr : inputs.data();
+    data.outputs = outputs.empty() ? nullptr : outputs.data();
+    const auto playhead = playhead_prev_;
+    warming_render_path_ = true;
+    process(data);
+    warming_render_path_ = false;
+    // The warm-up is not a block the Processor saw: the first host block must
+    // still diff its transport against "no previous block".
+    playhead_prev_ = playhead;
 }
 
 tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id, ParamValue value) {

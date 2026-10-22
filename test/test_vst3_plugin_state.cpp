@@ -1503,6 +1503,74 @@ TEST_CASE("VST3 declared-Bypass designation emits a toggle kIsBypass even on a "
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
+TEST_CASE("VST3 activation warm-up leaves the Processor, triggers and transport untouched",
+          "[vst3][activation][rt-safety]") {
+    // setActive(true) runs the adapter's per-block path once on silence so the
+    // first host block is not charged for cold code. That run must be
+    // invisible: the Processor is not called, a trigger the host raised before
+    // activation still reaches the first real block, and the first real block
+    // still reports a transport start.
+    for (bool bypassed : {false, true}) {
+        TestVst3Config config;
+        config.add_bypass_param = true;
+        config.add_reset_trigger_param = true;
+        reset_test_processor(config);
+
+        HostApp host_app;
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        auto* test_processor = TestVst3Processor::g_last_processor;
+        REQUIRE(test_processor != nullptr);
+
+        Steinberg::Vst::ProcessSetup setup{};
+        setup.processMode = Steinberg::Vst::kRealtime;
+        setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+        setup.maxSamplesPerBlock = 8;
+        setup.sampleRate = 48000.0;
+        REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+        test_processor->state().set_value(kBypassParamId, bypassed ? 1.0f : 0.0f);
+        test_processor->state().set_value(kResetParamId, 1.0f);
+        REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+        INFO("bypassed=" << bypassed);
+        REQUIRE(test_processor->process_count == 0);
+        REQUIRE_THAT(test_processor->state().get_value(kResetParamId),
+                     WithinAbs(1.0f, 1e-6f));
+
+        constexpr int kFrames = 8;
+        std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+        float* main_inputs[2] = {in_l.data(), in_r.data()};
+        float* main_outputs[2] = {out_l.data(), out_r.data()};
+        Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+        ab_in[0].numChannels = 2;
+        ab_in[0].channelBuffers32 = main_inputs;
+        Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+        ab_out[0].numChannels = 2;
+        ab_out[0].channelBuffers32 = main_outputs;
+        Steinberg::Vst::ProcessContext transport{};
+        transport.state = Steinberg::Vst::ProcessContext::kPlaying;
+        Steinberg::Vst::ProcessData data{};
+        data.numSamples = kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = ab_in;
+        data.outputs = ab_out;
+        data.processContext = &transport;
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+        if (!bypassed) {
+            REQUIRE(test_processor->process_count == 1);
+            REQUIRE(test_processor->last_context.transport_started);
+        }
+        // The trigger settles on the first REAL block, not during warm-up.
+        REQUIRE_THAT(test_processor->state().get_value(kResetParamId),
+                     WithinAbs(0.0f, 1e-6f));
+
+        REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+}
+
 TEST_CASE("VST3 trigger param raised on a bypassed block still auto-resets",
           "[vst3][param-designation][rt-safety]") {
     TestVst3Config config;

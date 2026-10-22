@@ -402,6 +402,14 @@ private:
     bool bus_channel_cache_valid_ = false;
     void refresh_bus_channel_cache();
 
+    // Runs the adapter's own per-block path once on silence at activation,
+    // without calling the Processor or publishing anything to the host, so
+    // the host's first real block does not pay to fault in cold code and
+    // buffers. While set, process() skips every Processor-, store- and
+    // host-visible side effect.
+    bool warming_render_path_ = false;
+    void warm_render_path();
+
     // ── Per-note expression (MPE) sidecar ───────────────────────────────────
     //
     // Mirrors the CLAP adapter's MPE wiring: inbound note events plus the MIDI
