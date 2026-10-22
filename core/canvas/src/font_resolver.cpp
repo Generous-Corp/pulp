@@ -12,6 +12,8 @@
 #include "pulp/canvas/bundled_fonts.hpp"
 #include "pulp/canvas/font_flight_recorder.hpp"
 
+#include <cctype>
+#include <cmath>
 #include <iterator>
 #include <list>
 #include <mutex>
@@ -27,6 +29,37 @@
 #endif
 
 namespace pulp::canvas {
+
+std::string platform_family_for_css_generic(const std::string& css_family) {
+#if defined(__APPLE__)
+    // Chromium's macOS defaults for each generic family, as reported by
+    // CSS.getPlatformFontsForNode. Keywords Chromium does not support on this
+    // platform (ui-monospace, ui-sans-serif, -apple-system, ...) are left
+    // unmapped so the list walk moves on to the next entry, as it does there.
+    struct Entry {
+        const char* keyword;
+        const char* family;
+    };
+    static constexpr Entry kGeneric[] = {
+        {"system-ui", ".AppleSystemUIFont"},
+        {"blinkmacsystemfont", ".AppleSystemUIFont"},
+        {"sans-serif", "Helvetica"},
+        {"serif", "Times"},
+        {"monospace", "Menlo"},
+        {"cursive", "Apple Chancery"},
+        {"fantasy", "Papyrus"},
+        {"math", "STIX Two Math"},
+    };
+    std::string lower = css_family;
+    for (auto& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (const auto& entry : kGeneric)
+        if (lower == entry.keyword) return entry.family;
+#else
+    (void)css_family;
+#endif
+    return {};
+}
 
 const char* to_string(FallbackOrigin o) noexcept {
     switch (o) {
@@ -179,7 +212,10 @@ ResolvedFont resolve_one_family(const std::string& family,
     // nothing. Trusting it here is what made every Label in the browser demo
     // invisible; the miss must fall through to the bundled last-resort below.
     if (mgr && platform_font_db_usable()) {
-        if (auto tf = mgr->matchFamilyStyle(family.c_str(), sk_style)) {
+        // A generic keyword names a platform family rather than being one.
+        const std::string generic = platform_family_for_css_generic(family);
+        const std::string& platform_family = generic.empty() ? family : generic;
+        if (auto tf = mgr->matchFamilyStyle(platform_family.c_str(), sk_style)) {
             SkString actual;
             tf->getFamilyName(&actual);
 
@@ -189,11 +225,15 @@ ResolvedFont resolve_one_family(const std::string& family,
             // can try the next family in the stack.
             std::string lo_a(actual.c_str(), actual.size());
             for (auto& c : lo_a) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            std::string lo_f = family;
+            std::string lo_f = platform_family;
             for (auto& c : lo_f) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            bool name_overlap = (lo_a == lo_f
+            // A generic's platform family can report a different name than
+            // the one it was asked by (".AppleSystemUIFont" answers ".SF NS"),
+            // and the mapping already says it is the right face.
+            bool name_overlap = !generic.empty()
+                                 || lo_a == lo_f
                                  || lo_a.find(lo_f) != std::string::npos
-                                 || lo_f.find(lo_a) != std::string::npos);
+                                 || lo_f.find(lo_a) != std::string::npos;
 
             // In Deterministic mode we refuse any platform face whose
             // name doesn't overlap the requested family — bug-compatible
@@ -328,7 +368,13 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
             float want = options.weight;
             if (want < wmin) want = wmin;
             if (want > wmax) want = wmax;
-            if (want != wdef) {
+            // A face the platform already matched at the requested weight
+            // (a named instance such as SF's Bold) needs no clone; cloning it
+            // renames it to a synthetic instance the browser never reports.
+            const bool already_at_weight =
+                std::abs(static_cast<float>(face->fontStyle().weight()) -
+                         want) < 0.5f;
+            if (want != wdef && !already_at_weight) {
                 coords.push_back({kWghtTag, want});
             }
         }

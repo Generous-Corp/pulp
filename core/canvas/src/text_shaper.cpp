@@ -794,7 +794,15 @@ struct TextShaper::Impl {
                                                    : comma - cursor);
             const size_t first = entry.find_first_not_of(" \t\n\r\f\v\"'");
             const size_t last = entry.find_last_not_of(" \t\n\r\f\v\"'");
-            if (first != std::string::npos && last != std::string::npos)
+            const size_t raw_first = entry.find_first_not_of(" \t\n\r\f\v");
+            const size_t raw_last = entry.find_last_not_of(" \t\n\r\f\v");
+            const std::string generic = raw_first == std::string::npos
+                ? std::string{}
+                : platform_family_for_css_generic(
+                      entry.substr(raw_first, raw_last - raw_first + 1));
+            if (!generic.empty())
+                families.emplace_back(generic.c_str());
+            else if (first != std::string::npos && last != std::string::npos)
                 families.emplace_back(entry.substr(first, last - first + 1).c_str());
             if (comma == std::string::npos) break;
             cursor = comma + 1;
@@ -908,6 +916,9 @@ struct TextShaper::Impl {
                     const size_t last = entry.find_last_not_of(" \t\n\r\f\v");
                     if (first != std::string::npos && last != std::string::npos) {
                         entry = entry.substr(first, last - first + 1);
+                        if (auto generic = platform_family_for_css_generic(entry);
+                            !generic.empty())
+                            entry = std::move(generic);
                         if (entry.size() >= 2 &&
                             (entry.front() == '\'' || entry.front() == '"') &&
                             entry.front() == entry.back()) {

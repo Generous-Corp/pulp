@@ -149,6 +149,11 @@ PreparedParagraph make_paragraph(const std::string& text,
             size_t hi = entry.find_last_not_of(" \t\n\r\f\v");
             if (lo != std::string::npos && hi != std::string::npos) {
                 entry = entry.substr(lo, hi - lo + 1);
+                // A generic keyword names a platform family the font
+                // collection cannot match by the keyword itself.
+                if (auto generic = platform_family_for_css_generic(entry);
+                    !generic.empty())
+                    entry = std::move(generic);
                 // Strip a single matching pair of single or double quotes.
                 if (entry.size() >= 2
                     && (entry.front() == '"' || entry.front() == '\'')

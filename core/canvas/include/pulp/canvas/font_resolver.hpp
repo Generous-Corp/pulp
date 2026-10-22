@@ -36,6 +36,18 @@ class SkTypeface;
 
 namespace pulp::canvas {
 
+/// The platform family a CSS generic family keyword stands for, matching the
+/// browser's defaults on this platform, or empty when `css_family` is not a
+/// generic keyword or the platform's font matcher resolves it on its own.
+///
+/// A generic keyword (`system-ui`, `sans-serif`, `monospace`, ...) is not a
+/// family name, and the macOS font manager matches none of them: asked for
+/// `system-ui` it returns nothing, so text falls through to whatever default
+/// the caller has, which is a different face from the one the browser drew.
+/// Pass the trimmed list entry WITH any quotes still on it: a quoted name is a
+/// family literally called that, never the keyword.
+std::string platform_family_for_css_generic(const std::string& css_family);
+
 #ifdef PULP_HAS_SKIA
 
 // ── AA / hinting policy ─────────────────────────────────────────────────

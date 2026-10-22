@@ -1575,4 +1575,51 @@ TEST_CASE("Painted text adds letter-spacing after every glyph",
     }
 }
 
+// ── CSS generic families resolve to the browser's platform faces ────────────
+//
+// `system-ui`, `sans-serif`, `monospace` ... are keywords, not family names,
+// and the macOS font manager matches none of them. Unmapped, Canvas text fell
+// back to Helvetica and paragraph text to the collection's default face, so a
+// panel styled `font-family: system-ui` drew in a face the browser never used.
+// Chromium's macOS defaults are the reference.
+TEST_CASE("CSS generic families resolve to the browser's platform faces",
+          "[canvas][skia][text][generic-family]") {
+#if !defined(__APPLE__)
+    SKIP("the generic-family table covers macOS");
+#else
+    CHECK(pulp::canvas::platform_family_for_css_generic("system-ui") ==
+          ".AppleSystemUIFont");
+    CHECK(pulp::canvas::platform_family_for_css_generic("Monospace") == "Menlo");
+    CHECK(pulp::canvas::platform_family_for_css_generic("serif") == "Times");
+    // A quoted name is a family literally called that, never the keyword.
+    CHECK(pulp::canvas::platform_family_for_css_generic("'serif'").empty());
+    // Keywords Chromium does not support here stay unmapped so the list walk
+    // moves on, as it does in the browser.
+    CHECK(pulp::canvas::platform_family_for_css_generic("ui-monospace").empty());
+    CHECK(pulp::canvas::platform_family_for_css_generic("Inter").empty());
+
+    // The identity a captured layout is validated against, for each weight.
+    CHECK(pulp::canvas::resolved_face_identity("system-ui, sans-serif", 400.0f) ==
+          ".SFNS-Regular");
+    // A named instance the platform matched at the requested weight keeps its
+    // own name rather than becoming a synthetic wght clone.
+    CHECK(pulp::canvas::resolved_face_identity("system-ui, sans-serif", 700.0f) ==
+          ".SFNS-Bold");
+    CHECK(pulp::canvas::resolved_face_identity("ui-monospace, monospace", 400.0f) ==
+          "Menlo-Regular");
+    CHECK(pulp::canvas::resolved_face_identity("sans-serif", 400.0f) == "Helvetica");
+
+    // The paragraph path shapes with the same face: a generic and its platform
+    // family measure identically, and differently from a face it is not.
+    auto& shaper = pulp::canvas::global_text_shaper();
+    const auto generic = shaper.prepare("Hamburgefons", "ui-monospace, monospace",
+                                        20.0f, 400, 0);
+    const auto platform = shaper.prepare("Hamburgefons", "Menlo", 20.0f, 400, 0);
+    const auto other = shaper.prepare("Hamburgefons", "Jost", 20.0f, 400, 0);
+    CHECK(generic.total_width() ==
+          Catch::Approx(platform.total_width()).margin(0.01));
+    CHECK(std::abs(other.total_width() - platform.total_width()) > 1.0f);
+#endif
+}
+
 #endif  // PULP_HAS_SKIA
