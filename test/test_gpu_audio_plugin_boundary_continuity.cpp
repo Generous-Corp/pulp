@@ -25,10 +25,11 @@
 // exactly the CPU reference.
 //
 // Scope. Faults enter at Pulp-owned seams: a provider completion reporting
-// failure, a refused submission, a starved worker, and a ProviderLost recovery
+// failure, a refused submission, a starved worker, a ProviderLost recovery
 // request on the bridge (the reason the Dawn convolution session raises on
-// device loss). None of this observes a real graphics device, a render owner,
-// or a DAW. Real render-owner loss, authenticated device callbacks, resource
+// device loss), a provider that reports its device lost, and a provider that
+// stops completing work. None of this observes a real graphics device, a render
+// owner, or a DAW. Real render-owner loss, authenticated device callbacks, resource
 // replay, teardown callback suppression, and end-to-end DAW continuity remain
 // gated on the Vellum render-owner seam.
 
@@ -117,6 +118,8 @@ std::uint32_t quantum_for(int max_buffer_size) {
 struct FaultPlan {
     bool fail_completions = false; // receive() reports ProviderFailed
     bool reject_submissions = false;
+    bool hang = false; // accepted work never completes
+    bool lost = false; // lost(); submissions refused, pending work fails
     bool sequence_gap_seen = false;
     std::uint64_t submissions = 0;
 };
@@ -131,7 +134,7 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
             slot.data.assign(quantum, 0.0f);
     }
     bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
-        if (plan_.reject_submissions)
+        if (plan_.reject_submissions || plan_.lost)
             return false;
         auto slot =
             std::find_if(slots_.begin(), slots_.end(), [](const Slot& s) { return !s.active; });
@@ -151,12 +154,14 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
     void service(std::uint64_t) noexcept override {}
     void service_until(std::uint64_t, std::uint64_t) noexcept override {}
     std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
+        if (plan_.hang && !plan_.lost)
+            return {};
         auto slot =
             std::find_if(slots_.begin(), slots_.end(), [](const Slot& s) { return s.active; });
         if (slot == slots_.end())
             return {};
         slot->active = false;
-        if (plan_.fail_completions)
+        if (plan_.fail_completions || plan_.lost)
             return GpuWaveNetBlockResult{slot->sequence, GpuWaveNetBlockStatus::ProviderFailed,
                                          false};
         std::copy_n(slot->data.begin(), output.size(), output.begin());
@@ -164,6 +169,9 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
     }
     bool release() noexcept override {
         return true;
+    }
+    bool lost() const noexcept override {
+        return plan_.lost;
     }
 
   private:
@@ -485,6 +493,8 @@ enum class Fault {
     FailCompletions, // the provider reports failed completions
     RejectSubmissions,
     ProviderLost, // the bridge recovery request the Dawn session uses on loss
+    LoseDevice,   // the provider reports its device lost, as Dawn's loss query does
+    HangProvider, // the provider accepts work and never completes it
 };
 
 /// Drives one plug-in through the real CLAP adapter the way a host would.
@@ -636,6 +646,12 @@ class ClapSession {
             detail::WaveNetRealtimeTestAccess::request_recovery(
                 *fx->node(), detail::SharedIoRecoveryReason::ProviderLost);
             break;
+        case Fault::LoseDevice:
+            fx->plan().lost = true;
+            break;
+        case Fault::HangProvider:
+            fx->plan().hang = true;
+            break;
         }
     }
 
@@ -765,8 +781,8 @@ TEST_CASE("GPU-audio plug-in nulls against the CPU reference while the GPU path 
 
 TEST_CASE("GPU-audio plug-in output stays continuous across simulated provider faults",
           "[gpu_audio][plugin-boundary-continuity][clap]") {
-    const auto fault =
-        GENERATE(Fault::FailCompletions, Fault::RejectSubmissions, Fault::ProviderLost);
+    const auto fault = GENERATE(Fault::FailCompletions, Fault::RejectSubmissions,
+                                Fault::ProviderLost, Fault::LoseDevice, Fault::HangProvider);
     CAPTURE(static_cast<int>(fault));
     ClapSession gpu(&make_gpu_effect), cpu(&make_cpu_effect);
     for (auto* s : {&gpu, &cpu}) {
@@ -791,9 +807,21 @@ TEST_CASE("GPU-audio plug-in output stays continuous across simulated provider f
     for (auto* s : {&gpu, &cpu})
         s->render(8 * 64, {64});
     CHECK(delivery(gpu).gpu_blocks == fenced_gpu_blocks);
-    CHECK(gpu.gpu()->node()->recovery_reason() == (fault == Fault::ProviderLost
-                                                       ? GpuAudioRecoveryReason::ProviderLost
-                                                       : GpuAudioRecoveryReason::ProviderFailure));
+    const auto expected_reason = fault == Fault::ProviderLost || fault == Fault::LoseDevice
+                                     ? GpuAudioRecoveryReason::ProviderLost
+                                 : fault == Fault::HangProvider
+                                     ? GpuAudioRecoveryReason::ProviderUnresponsive
+                                     : GpuAudioRecoveryReason::ProviderFailure;
+    CHECK(gpu.gpu()->node()->recovery_reason() == expected_reason);
+    const bool needs_new_provider = expected_reason != GpuAudioRecoveryReason::ProviderFailure;
+    const auto node_status = gpu.gpu()->node()->status_snapshot();
+    INFO("validate_gpu_audio_status error "
+         << static_cast<int>(validate_gpu_audio_status(node_status).error));
+    CHECK(validate_gpu_audio_status(node_status).accepted());
+    CHECK(node_status.provider_state == (needs_new_provider ? GpuAudioProviderState::Unavailable
+                                                            : GpuAudioProviderState::Degraded));
+    // Fenced with a primed CPU shadow: the CPU is the engine producing audio.
+    CHECK(node_status.selected_engine == GpuAudioEngine::Cpu);
     CHECK_FALSE(gpu.gpu()->plan().sequence_gap_seen);
     CHECK(gpu.callback_allocations() == 0);
     require_null(gpu, cpu);
@@ -859,7 +887,9 @@ TEST_CASE("GPU-audio plug-in stays continuous across reactivation with new rate 
     CHECK(gpu.gpu()->quantum() == 256);
     CHECK(gpu.latency() == cpu.latency());
     CHECK(gpu.latency() == (kLeadBlocks + 1) * 256);
-    CHECK(gpu.gpu()->transport().status_snapshot().sample_rate == 96000);
+    const auto transport_status = gpu.gpu()->transport().status_snapshot();
+    CHECK(validate_gpu_audio_status(transport_status).accepted());
+    CHECK(transport_status.sample_rate == 96000);
     CHECK_FALSE(gpu.gpu()->node()->fenced());
     CHECK(delivery(gpu).gpu_blocks > 0);
     CHECK(delivery(gpu).cpu_fallback_blocks == 0);

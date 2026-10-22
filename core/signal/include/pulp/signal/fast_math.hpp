@@ -458,7 +458,14 @@ inline constexpr LadderSaturation kDefaultLadderSaturation = LadderSaturation::a
 #endif
 
 /// The ladder's `float` saturator for an explicit choice.
-template <LadderSaturation Saturation> inline float ladder_tanh_profiled(float x) {
+///
+/// Both forms take an `auto` parameter constrained to its exact type. With a
+/// typed `LadderSaturation` parameter MSVC converts the argument `true` to the
+/// enumerator whose value is 1 (`accurate`) and reports the boolean call as
+/// ambiguous (C2668); Clang and GCC never consider that conversion.
+template <auto Saturation>
+    requires std::is_same_v<decltype(Saturation), LadderSaturation>
+inline float ladder_tanh_profiled(float x) {
     if constexpr (Saturation == LadderSaturation::realtime_efficient)
         return FastMath::tanh(x);
     else if constexpr (Saturation == LadderSaturation::accurate)
@@ -469,7 +476,8 @@ template <LadderSaturation Saturation> inline float ladder_tanh_profiled(float x
 
 /// The previous boolean form: true is the Padé saturator, false is exact
 /// std::tanh, as before LadderSaturation existed.
-template <bool RealtimeEfficient>
+template <auto RealtimeEfficient>
+    requires std::is_same_v<decltype(RealtimeEfficient), bool>
 [[deprecated("use ladder_tanh_profiled<LadderSaturation>")]]
 inline float ladder_tanh_profiled(float x) {
     return ladder_tanh_profiled<RealtimeEfficient ? LadderSaturation::realtime_efficient

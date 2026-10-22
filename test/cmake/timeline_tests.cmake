@@ -412,7 +412,8 @@ pulp_add_test_suite(pulp-test-timeline-replay-golden GROUP pulp-test-group-timel
 # and benefits from failing on its own.
 pulp_add_test_suite(pulp-test-timeline-offline-renderer
     SOURCES test_timeline_offline_renderer.cpp
-    LIBRARIES pulp::host pulp::sequence)
+    LIBRARIES pulp::host pulp::sequence
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 
 pulp_add_test_suite(pulp-test-timeline-graph-binding
     SOURCES test_timeline_graph_binding.cpp
@@ -427,7 +428,8 @@ pulp_add_test_suite(pulp-test-timeline-graph-binding
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::host pulp::sequence pulp::native-components ${CMAKE_DL_LIBS}
-    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 
 # MIDI controller -> parameter value scaling, and the DoD proof that a hardware
 # CC maps to any parameter with zero driver code. The routing/learn foundation

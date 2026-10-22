@@ -1,5 +1,6 @@
 #include <pulp/canvas/cg_canvas.hpp>
 #include <pulp/canvas/text_utf8.hpp>
+#include "../../src/coretext_text.hpp"
 #include <algorithm>
 #include <utility>
 
@@ -569,9 +570,28 @@ void CoreGraphicsCanvas::save_layer(float x, float y, float w, float h,
     ++save_depth_;
 }
 
+void CoreGraphicsCanvas::set_font_full(const std::string& family, float size, int weight, int slant,
+                                       float letter_spacing) {
+    (void)letter_spacing;
+    set_font(family, size);
+    font_weight_ = weight;
+    font_slant_ = slant;
+}
+
+void CoreGraphicsCanvas::set_font_features(std::vector<FontFeature> features) {
+    font_features_ = std::move(features);
+}
+
+void CoreGraphicsCanvas::clear_font_features() {
+    font_features_.clear();
+}
+
 void CoreGraphicsCanvas::set_font(const std::string& family, float size) {
     font_family_ = family;
     font_size_ = size;
+    // A legacy set_font() does not carry a previous weight or slant forward.
+    font_weight_ = 400;
+    font_slant_ = 0;
 }
 
 void CoreGraphicsCanvas::set_text_align(TextAlign align) {
@@ -593,21 +613,23 @@ static NSString* ns_string_never_nil(const std::string& s) {
     return ns ? ns : @"";
 }
 
-static CTFontRef create_font_with_fallback(const std::string& family, float size) {
-    NSString* ns_font = ns_string_never_nil(family);
-    CTFontRef font = CTFontCreateWithName((__bridge CFStringRef)ns_font, size, NULL);
-    if (!font) {
-        // Requested family not available — fall back to system font
-        font = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, size, NULL);
-    }
-    return font;
+// One resolution rule for paint and measurement: the registry of bundled and
+// registered faces first, then installed families, then the system UI font.
+// TextShaper's non-Skia path measures through the same function, so a label
+// is laid out with the face it is painted with.
+static CTFontRef create_font_with_fallback(const std::string& family, float size, int weight,
+                                           int slant,
+                                           const std::vector<Canvas::FontFeature>& features) {
+    return static_cast<CTFontRef>(
+        detail::coretext_create_font(family, size, weight, slant, features));
 }
 
 void CoreGraphicsCanvas::fill_text(const std::string& text, float x, float y) {
     @autoreleasepool {
         NSString* ns_text = ns_string_never_nil(text);
 
-        CTFontRef font = create_font_with_fallback(font_family_, font_size_);
+        CTFontRef font = create_font_with_fallback(font_family_, font_size_, font_weight_,
+                                                   font_slant_, font_features_);
         if (!font) return;
 
         NSDictionary* attrs = @{
@@ -697,7 +719,8 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
         if (text.empty()) return;
         NSString* ns_text = ns_string_never_nil(text);
 
-        CTFontRef font = create_font_with_fallback(font_family_, font_size_);
+        CTFontRef font = create_font_with_fallback(font_family_, font_size_, font_weight_,
+                                                   font_slant_, font_features_);
         if (!font) return;
 
         NSDictionary* attrs = @{
@@ -816,7 +839,8 @@ float CoreGraphicsCanvas::measure_text(const std::string& text) {
     @autoreleasepool {
         NSString* ns_text = ns_string_never_nil(text);
 
-        CTFontRef font = create_font_with_fallback(font_family_, font_size_);
+        CTFontRef font = create_font_with_fallback(font_family_, font_size_, font_weight_,
+                                                   font_slant_, font_features_);
         if (!font) return 0;
 
         NSDictionary* attrs = @{
@@ -839,7 +863,8 @@ Canvas::TextMetrics CoreGraphicsCanvas::measure_text_full(const std::string& tex
     @autoreleasepool {
         NSString* ns_text = ns_string_never_nil(text);
 
-        CTFontRef font = create_font_with_fallback(font_family_, font_size_);
+        CTFontRef font = create_font_with_fallback(font_family_, font_size_, font_weight_,
+                                                   font_slant_, font_features_);
         if (!font) return {};
 
         NSDictionary* attrs = @{

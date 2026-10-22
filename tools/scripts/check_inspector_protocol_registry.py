@@ -19,8 +19,13 @@ RAW_LITERAL = re.compile(
     r'R"(?P<delimiter>[^ ()\\\t\r\n]{0,16})\((?P<body>.*?)\)(?P=delimiter)"',
     re.DOTALL,
 )
-ADJACENT_LITERALS = re.compile(r'(?:"(?:\\.|[^"\\])*"\s*){2,}', re.DOTALL)
-STRING_TOKEN = re.compile(r'"((?:\\.|[^"\\])*)"')
+# An ordinary C++ string literal cannot contain an unescaped newline, so a
+# token stops at one. Without that, the closing quote of one #include and the
+# opening quote of the next read as a single "literal" spanning the lines
+# between them, and a framework header name in that span (CoreText.h) looks
+# like a wire name.
+ADJACENT_LITERALS = re.compile(r'(?:"(?:\\.|[^"\\\n])*"\s*){2,}')
+STRING_TOKEN = re.compile(r'"((?:\\.|[^"\\\n])*)"')
 SOURCE_SUFFIXES = {".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".mm", ".rs"}
 NON_PROTOCOL_LITERALS = {
     "A.clap", "AAX.h", "AGENTS.md", "Acme.clap", "App.tsx", "Array.prototype",
@@ -30,13 +35,14 @@ NON_PROTOCOL_LITERALS = {
     "Compressor.vst3", "DBusObjectPathVTable.message", "DEPENDENCIES.md",
     "DESIGN.md", "Date.now", "Foo.vst3", "GainStage.tsx", "HANDOFF.md",
     "HEAD.lock", "Info.plist", "JSON.h", "JSON.stringify", "KEYS.len", "KeyboardEvent.key", "LICENSE.md",
-    "Math.abs", "Math.random", "Math.sin", "My.clap", "MyPlugin.component", "NOTICE.md", "ObjBase.h",
-    "Number.isFinite", "Object.create", "Object.defineProperty", "Object.prototype",
+    "Math.abs", "Math.hypot", "Math.random", "Math.sin", "My.clap", "MyPlugin.component", "NOTICE.md", "ObjBase.h",
+    "Number.isFinite", "Object.create", "Object.defineProperty", "Object.keys",
+    "Object.prototype",
     "Promise.resolve", "Promise.then",
     "PulpAccessibility.kt", "PulpConfig.cmake", "PulpDelay.lv2", "PulpGain.clap",
     "PulpReverb.component", "PulpTargets.cmake", "PulpWobble.vst3", "README.md",
-    "ReactDOM.createRoot", "ReactDOM.flushSync", "SKILL.md", "Same.clap",
-    "Sparkle.framework", "StringUtilities.h", "TARGETS.join", "Three.js", "Tools.x86", "TransportBar.tsx",
+    "ReactDOM.createRoot", "ReactDOM.flushSync", "Reflect.ownKeys", "SKILL.md", "Same.clap",
+    "Sparkle.framework", "StringUtilities.h", "Symbol.iterator", "TARGETS.join", "Three.js", "Tools.x86", "TransportBar.tsx",
     "UIAutomation.h", "WebView2Loader.dll", "WheelEvent.deltaY", "Xcode.app",
     "Xft.dpi",
 }
@@ -156,6 +162,22 @@ def self_test() -> int:
         failures = unmapped_literals(root, registry)
         if len(failures) != 1 or failures[0][2] != "PhaseEight.unmapped":
             print("self-test failed to reject an adjacent C++ method", file=sys.stderr)
+            return 1
+        cpp_client_source.write_text(
+            'auto method = "PhaseEight."\n    "unmapped";\n', encoding="utf-8"
+        )
+        failures = unmapped_literals(root, registry)
+        if len(failures) != 1 or failures[0][2] != "PhaseEight.unmapped":
+            print("self-test failed to reject a multi-line adjacent C++ method", file=sys.stderr)
+            return 1
+        cpp_client_source.write_text(
+            '#include "a.hpp"\n\n#include "b.hpp"\n\n#import <CoreText/CoreText.h>\n'
+            '#import <Foundation/Foundation.h>\n'
+            'auto empty = "";\nauto other = "z";\n',
+            encoding="utf-8",
+        )
+        if unmapped_literals(root, registry):
+            print("self-test read include directives as one literal", file=sys.stderr)
             return 1
         cpp_client_source.write_text('auto method = "Runtime.app";\n', encoding="utf-8")
         failures = unmapped_literals(root, registry)

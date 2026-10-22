@@ -142,6 +142,10 @@ export type {
     PulpBridgeRuntimeImportGlobals,
 } from './bridge-globals.generated.js';
 
+// ── Typography length semantics ────────────────────────────────────
+export { setLengthDialect, resolveTypographyLength } from './prop-applier-typography.js';
+export type { LengthDialect } from './prop-applier-typography.js';
+
 // ── Re-export the mock bridge for downstream tests ─────────────────
 export { createMockBridge } from './bridge.js';
 export { appUpdatesClient, useAppUpdates, APP_UPDATES_UNAVAILABLE } from './app-updates.js';

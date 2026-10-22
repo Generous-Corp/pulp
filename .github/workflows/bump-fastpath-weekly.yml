@@ -1,0 +1,45 @@
+name: Bump fast-path weekly count
+
+# Counts how often the release bot's `release/version-bump` pull request and
+# merge groups took the gate's exact-generated-bump fast path in the last week,
+# and why the rest were refused, from the `bump-fast-path` notice build.yml's
+# classify job leaves (tools/scripts/bump_fastpath_report.py). Advisory and
+# read-only: it writes the job summary and gates nothing.
+
+on:
+  schedule:
+    - cron: '23 6 * * 1'  # Mondays 06:23 UTC
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Days to look back'
+        required: false
+        default: '7'
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: bump-fastpath-weekly
+  cancel-in-progress: false
+
+jobs:
+  count:
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Count bump fast-path outcomes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DAYS: ${{ inputs.days || '7' }}
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/bump_fastpath_report.py \
+            --repo "$GITHUB_REPOSITORY" --days "$DAYS" | tee -a "$GITHUB_STEP_SUMMARY"

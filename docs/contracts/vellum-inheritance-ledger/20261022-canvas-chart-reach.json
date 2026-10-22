@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-canvas-chart-reach",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "A shape-chart shader draw must pad its draw rect by the declared reach and refuse a glow/outer feather whose reach is under 3 sigma (the refusal covers the chart path only; draw_with_sksl still accepts a short reach), a widget chart draw must carry the feather declared with its shader geometry and fall through to its body shader when the chart is refused; chart coordinates must be available for the flat arc, segments, stadium and ring.",
+  "evidence": [
+    ".github/vellum-change-events/20261022-canvas-chart-reach.json",
+    "ctest --test-dir build -R 'SDF chart glow paints past the shape rect out to its reach'",
+    "ctest --test-dir build -R 'WidgetBridge knob chart glow paints outside the widget rect'"
+  ]
+}

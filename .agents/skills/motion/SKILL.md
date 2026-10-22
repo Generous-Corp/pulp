@@ -40,6 +40,7 @@ provenance work identically across surfaces.
 | C++ fixture code + a node id + a scalar / geometry of interest | **A — In-process trace** | `motion::Coordinator` / `MotionInspector` fixture APIs; an admitted exact T1 host may inject `ControlMotionExecutor` |
 | A `ScrollView` whose offset / visible rect / content size you need to observe | **A — Runtime trace (scroll)** | `Trace.scroll_geometry(name, scroll_view, props)` — emits `contentOffsetX/Y`, `visibleRect*`, `contentSize*`, `scrollableMax*`, `inset*` |
 | A captured frame sequence (no app instrumentation available) | **B — Visual analysis** | `tools/motion/visual/analyze_sequence.py` |
+| A captured frame sequence whose frames paint a frame-identity stamp | **B — Frame identity** | `tools/motion/visual/frame_stamp_decode.py` (exact %, held, skipped, judder; `-1` = unreadable) |
 | A previously recorded `.motion.jsonl` fixture | **C — Replay + assert** | `motion::replay_fixture` + `motion::assert_matches` |
 | An interaction that drives the suspect motion | **D — Input record + replay** | `motion::make_input_recorder` + `motion::replay_inputs` |
 | A fixture available to C++ host/test code (design review / CI triage) | **E — Timeline scrubber** | Direct `MotionScrubber` fixture load; canonical T1 scrub/play/pause is capped at 4,096 emitted events |
@@ -719,6 +720,7 @@ discovery.
 - `tools/motion/visual/capture_sim_frames.py` — motion-gated capture from macOS region or booted simulator
 - `tools/motion/visual/test_self_check.py` — pipeline self-check (baseline + claim-evidence assertions)
 - `tools/motion/visual/test_grid_overlay.py` — visual-plus self-check (grid, trim, affine)
+- `tools/motion/visual/frame_stamp_decode.py` — frame-identity decoder: which update each capture shows, exact %, held, skipped, judder (`test_frame_stamp_decode.py` is its self-check; `--cpp-frames` cross-checks PNGs the C++ painter in `test/support/frame_stamp.*` rendered)
 - `tools/motion/visual/test_capture_smoke.py` — gated-capture smoke (skip 3 without source)
 - `tools/motion/visual/requirements-optional.txt` — opt-in deps (opencv-python for full affine)
 - `tools/motion/visual/requirements.lock` — hash-pinned resolution of `requirements.txt` that CI installs; regenerate it (command in its header) whenever `requirements.txt` changes, or `test_visual_python_deps_step.py` fails
@@ -836,6 +838,18 @@ or set an override for deterministic tests.
 - Visual-analysis Python deps (numpy, Pillow, scikit-image) are intentionally
   not bundled in plugin/app artifacts. The CTest entry exits 3 (Skipped) when
   they are missing — that's expected on bare CI runners.
+- The CTest Python is whatever CMake's `find_package(Python3)` picked, not the
+  `python3` on your PATH. On a Homebrew Mac it can resolve to a framework
+  Python with no wheels, so every Pillow-backed visual test (including the
+  frame-stamp `--cpp-frames` cross-check) reports Skipped while the same
+  script passes from a shell. Read `_Python3_EXECUTABLE` in `CMakeCache.txt`
+  before trusting a skip, and `visual-python-deps-present` fails loudly on it.
+- A frame-identity stamp proves which update a capture shows only if the
+  capture keeps the stamp on its declared layout: a scaled, cropped or
+  colour-managed capture decodes every frame to `-1`. All-`-1` means the
+  instrument is blind, not that nothing presented. A frozen scene, by
+  contrast, decodes fine and reports `held` on every capture after the first;
+  that is the defect the stamp exists to catch, since similarity scores pass it.
 - Fixture schema is at version 2. The loader rejects unknown versions; v1
   fixtures are rejected outright (no v1 producer ships in the framework). Bumping
   the schema is a deliberate break — write a migration tool, don't silently

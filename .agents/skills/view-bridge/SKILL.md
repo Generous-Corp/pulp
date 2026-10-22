@@ -195,6 +195,11 @@ that opens the editor immediately after insert loses nothing. It removes the
 cold `script_compile` (~105–145 ms for a 1.6 MB runtime), the inline-script
 compiles (~20 ms) and `runtime_import_verify` (~24 ms) from the factory; it
 does not touch per-open work (`script_execute`, the bind, layout, frame 0).
+"Loses nothing" is relative to compiling on open: an editor opened right after
+insert still WAITS on the prewarm (65–80 ms of Spectr's fresh-process open sat
+in `script_bytecode_lookup`). Build-time bytecode (`pulp_add_js_bytecode()`,
+registered from `editor_prewarm()`; see the `engine` skill) removes that wait
+and the prewarm's own compile; Windows, where the prewarm is off, gains most.
 Rules: return static data (embedded assets) — the views must outlive the
 plug-in image; keep `editor_prewarm()` cheap (it runs on the host's
 instantiation thread); a request that is already cached costs a lookup. The

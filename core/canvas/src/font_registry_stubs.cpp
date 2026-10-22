@@ -11,9 +11,15 @@
 
 #include <pulp/canvas/bundled_fonts.hpp>
 
+#if !defined(PULP_HAS_SKIA) && defined(__APPLE__)
+#include "coretext_text.hpp"
+#endif
+
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <future>
 #include <string>
 #include <vector>
@@ -494,6 +500,54 @@ std::vector<std::size_t> line_break_opportunities(const std::string& text,
 
 namespace pulp::canvas {
 
+#if defined(__APPLE__)
+
+// Without Skia, Apple builds paint and measure text through CoreText, so a
+// registered face lands in the CoreText registry both sides read.
+namespace {
+std::atomic<std::uint64_t>& registration_generation() {
+    static std::atomic<std::uint64_t> generation{0};
+    return generation;
+}
+} // namespace
+
+bool register_font(const std::uint8_t* data, std::size_t size, const std::string& family_override) {
+    if (detail::coretext_register_font(data, size, family_override).empty())
+        return false;
+    bump_font_registration_generation();
+    return true;
+}
+
+bool register_font_file(const std::string& path, const std::string& family_override) {
+    if (path.empty())
+        return false;
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file.is_open())
+        return false;
+    const std::streamsize size = file.tellg();
+    if (size <= 0)
+        return false;
+    file.seekg(0, std::ios::beg);
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    if (!file.read(reinterpret_cast<char*>(bytes.data()), size))
+        return false;
+    return register_font(bytes.data(), bytes.size(), family_override);
+}
+
+bool is_font_registered(const std::string& family) {
+    return detail::coretext_has_registered_family(family);
+}
+
+std::uint64_t font_registration_generation() noexcept {
+    return registration_generation().load(std::memory_order_acquire);
+}
+
+void bump_font_registration_generation() noexcept {
+    registration_generation().fetch_add(1, std::memory_order_acq_rel);
+}
+
+#else
+
 bool register_font(const std::uint8_t*, std::size_t, const std::string&) {
     return false;
 }
@@ -501,6 +555,17 @@ bool register_font(const std::uint8_t*, std::size_t, const std::string&) {
 bool register_font_file(const std::string&, const std::string&) {
     return false;
 }
+
+bool is_font_registered(const std::string&) {
+    return false;
+}
+
+std::uint64_t font_registration_generation() noexcept {
+    return 0;
+}
+void bump_font_registration_generation() noexcept {}
+
+#endif // __APPLE__
 
 // Non-Skia register_font_url has no register_font implementation to land
 // on, so every URL resolves to Failed. Matches the contract of the
@@ -512,13 +577,6 @@ std::future<FontState> register_font_url(const std::string&,
     p.set_value(FontState::Failed);
     return p.get_future();
 }
-
-bool is_font_registered(const std::string&) {
-    return false;
-}
-
-std::uint64_t font_registration_generation() noexcept { return 0; }
-void bump_font_registration_generation() noexcept {}
 
 bool validate_font_bytes(const std::uint8_t* data, std::size_t size) {
     // Non-Skia builds accept any non-empty buffer; there is no font parser

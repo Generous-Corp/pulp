@@ -71,6 +71,10 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_p5_receipt.py")
 
+    add_test(NAME gpu-audio-daw-continuity-receipt-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py")
+
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include
@@ -1267,12 +1271,20 @@ if(Python3_Interpreter_FOUND)
     # else's unrelated PR, which is exactly the signal nobody attributes here.
     add_test(NAME gpu-test-resource-locks COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_test_resource_locks.py")
+    # Realtime worker-pool lock policy: a suite that starts a graph worker pool
+    # serializes on RESOURCE_LOCK pulp_realtime_worker_pool, because its
+    # workers spin at realtime priority and starve every normal-priority test
+    # running beside them. Manifest-only, like the GPU policy above.
+    add_test(NAME realtime-pool-resource-locks COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_realtime_pool_resource_locks.py")
     add_test(NAME gpu-audio-provider-identity-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_provider_identity.py")
     add_test(NAME gpu-audio-p2-campaign-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p2_campaign.py")
     add_test(NAME gpu-audio-p2-host-preflight-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p2_host_preflight.py")
+    add_test(NAME gpu-audio-comparator-v2-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_comparator_v2.py")
     add_test(NAME gpu-provenance-hydration-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_gpu_provenance_commits.py")
 
@@ -1558,6 +1570,20 @@ if(Python3_Interpreter_FOUND)
     # otherwise inherit. 3x the worst run observed on 2026-09-13, rounded up.
     set_tests_properties(version-at-land-selftest PROPERTIES
         TIMEOUT 180)
+
+    # The release bot's bump: build.yml's classify step reports whether the
+    # exact-generated-bump fast path was taken (run in Bash with a fake
+    # verifier), bump_fastpath_report.py counts those reports, and the four
+    # advisory workflows skip every job on release/version-bump while every
+    # other pull request still runs them and none of their contexts is required.
+    add_test(NAME bump-fastpath-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_bump_fastpath.py")
+
+    # Unreleased migration notes: their validation in the index generator and
+    # the fold the version-at-land bump runs to key them to the version it
+    # assigns. Pure file fixtures in a temporary directory.
+    add_test(NAME fold-migration-notes-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_fold_migration_notes.py")
 
     # GitHub's itemTypes-filtered timelineItems connection reports totalCount
     # over EVERY timeline item, so a filtered totalCount reads a never-queued

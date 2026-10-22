@@ -191,6 +191,16 @@ functions:
       - NAMESPACE
     docs: reference/cmake.md#pulp_add_binary_data
 
+  - name: pulp_add_js_bytecode
+    status: usable
+    summary: Compile scripted-UI JavaScript to QuickJS bytecode at build time and embed it in a static library.
+    required:
+      - SOURCES
+    optional:
+      - NAMESPACE
+      - WIDGET_BRIDGE_SCRIPT
+    docs: reference/cmake.md#pulp_add_js_bytecode
+
   - name: pulp_add_ios_auv3
     status: usable
     summary: Build an iOS AUv3 .appex extension bundle from a Pulp processor.

@@ -273,36 +273,68 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+// WaveNet activations are column rings: stream sample n of an activation lives
+// in column (n & mask), where n = pos[0] + t and pos[0] is the stream position
+// of the block's first sample. Ring sizes are powers of two holding at least the
+// layer's causal reach plus one block, so the history a block needs is read in
+// place and nothing is copied between blocks. pos is device-resident: the last
+// dispatch of every submitted block advances it by B (wavenet_advance), so only
+// blocks that actually execute move the stream, in queue order.
 constexpr auto kSharedIoWavenetRechannelWgsl = R"wgsl(
-struct P { in_ch:u32, out_ch:u32, B:u32, woff:u32, src_pad:u32, dst_pad:u32, p0:u32, p1:u32 };
+struct P { in_ch:u32, out_ch:u32, B:u32, woff:u32, src_mask:u32, dst_mask:u32, src_ring:u32, p1:u32 };
 @group(0) @binding(0) var<storage, read> wts:array<f32>;
 @group(0) @binding(1) var<storage, read> src:array<f32>;
 @group(0) @binding(2) var<storage, read_write> dst:array<f32>;
 @group(0) @binding(3) var<uniform> p:P;
+@group(0) @binding(4) var<storage, read> pos:array<u32>;
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u) {
  let t=id.x; if(t>=p.B){return;}
- let si=(p.src_pad+t)*p.in_ch; let di=(p.dst_pad+t)*p.out_ch;
+ let n=pos[0]+t;
+ let si=select(t,n&p.src_mask,p.src_ring==1u)*p.in_ch; let di=(n&p.dst_mask)*p.out_ch;
  for(var oc=0u;oc<p.out_ch;oc++){var v=0.0;let wb=p.woff+oc*p.in_ch;
   for(var ic=0u;ic<p.in_ch;ic++){v+=wts[wb+ic]*src[si+ic];}
   dst[di+oc]=v;
  }
 }
 )wgsl";
+// One layer. The gated sigmoid stays a named reciprocal multiplied after tanh;
+// written as a * (1 / x) the shader compiler contracts it differently and gated
+// outputs move by a few ULP. Each 64-lane workgroup covers S = p.S consecutive samples
+// (64 / Z, or 1 when Z > 32) with lane items over (sample, channel), so narrow
+// models fill the lanes; every output keeps its serial reduction order.
+// head_init = 1 (first layer of the first array) assigns the head sum instead
+// of accumulating, so no per-block clear is needed.
 constexpr auto kSharedIoWavenetLayerWgsl = R"wgsl(
-struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, src_pad:u32, conv_w:u32, conv_b:u32, mix_w:u32, l1_w:u32, l1_b:u32, dst_pad:u32, p1:u32, p2:u32, p3:u32 };
+struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, in_mask:u32, conv_w:u32, conv_b:u32, mix_w:u32, l1_w:u32, l1_b:u32, out_mask:u32, S:u32, head_init:u32, p3:u32 };
 @group(0) @binding(0) var<storage, read> wts:array<f32>;
 @group(0) @binding(1) var<storage, read> ina:array<f32>;
 @group(0) @binding(2) var<storage, read_write> outa:array<f32>;
 @group(0) @binding(3) var<storage, read> cond:array<f32>;
 @group(0) @binding(4) var<storage, read_write> headacc:array<f32>;
 @group(0) @binding(5) var<uniform> p:P;
+@group(0) @binding(6) var<storage, read> pos:array<u32>;
 var<workgroup> zbuf:array<f32,128>; var<workgroup> abuf:array<f32,64>;
 @compute @workgroup_size(64) fn main(@builtin(workgroup_id) wid:vec3u,@builtin(local_invocation_id) lid:vec3u){
- let t=wid.x; if(t>=p.B){return;} let lane=lid.x; let C=p.C; let Z=p.Z; let acol=p.src_pad+t;
- for(var oc=lane;oc<Z;oc+=64u){var acc=wts[p.conv_b+oc]; for(var k=0u;k<p.K;k++){let back=p.dil*(p.K-1u-k);let base=(acol-back)*C;let wb=p.conv_w+oc*C*p.K+k;for(var ic=0u;ic<C;ic++){acc+=wts[wb+ic*p.K]*ina[base+ic];}} acc+=wts[p.mix_w+oc]*cond[t];zbuf[oc]=acc;}
- workgroupBarrier(); if(p.gated==0u){for(var c=lane;c<C;c+=64u){abuf[c]=tanh(clamp(zbuf[c],-15.0,15.0));}}else{for(var c=lane;c<C;c+=64u){let g=1.0/(1.0+exp(-zbuf[C+c]));abuf[c]=tanh(clamp(zbuf[c],-15.0,15.0))*g;}}
- workgroupBarrier(); let hc=t*C; for(var c=lane;c<C;c+=64u){headacc[hc+c]=headacc[hc+c]+abuf[c];} let src=(p.src_pad+t)*C; let dst=(p.dst_pad+t)*C; for(var oc=lane;oc<C;oc+=64u){var r=wts[p.l1_b+oc];let rw=p.l1_w+oc*C;for(var ic=0u;ic<C;ic++){r+=wts[rw+ic]*abuf[ic];}outa[dst+oc]=ina[src+oc]+r;}
+ let S=p.S; let t0=wid.x*S; if(t0>=p.B){return;} let lane=lid.x; let C=p.C; let K=p.K; let Z=p.Z;
+ for(var i=lane;i<S*Z;i+=64u){let s=i/Z; let oc=i-s*Z; let t=t0+s; if(t<p.B){let n=pos[0]+t;
+  var acc=wts[p.conv_b+oc]; for(var k=0u;k<K;k++){let back=p.dil*(K-1u-k);let base=((n-back)&p.in_mask)*C;let wb=p.conv_w+oc*C*K+k;for(var ic=0u;ic<C;ic++){acc+=wts[wb+ic*K]*ina[base+ic];}}
+  acc+=wts[p.mix_w+oc]*cond[t]; zbuf[i]=acc;}}
+ workgroupBarrier();
+ for(var i=lane;i<S*C;i+=64u){let s=i/C; let c=i-s*C; if(t0+s<p.B){
+  if(p.gated==0u){abuf[i]=tanh(clamp(zbuf[s*Z+c],-15.0,15.0));}else{let g=1.0/(1.0+exp(-zbuf[s*Z+C+c]));abuf[i]=tanh(clamp(zbuf[s*Z+c],-15.0,15.0))*g;}}}
+ workgroupBarrier();
+ for(var i=lane;i<S*C;i+=64u){let s=i/C; let oc=i-s*C; let t=t0+s; if(t<p.B){
+  if(p.head_init==1u){headacc[t*C+oc]=abuf[i];}else{headacc[t*C+oc]=headacc[t*C+oc]+abuf[i];}
+  let n=pos[0]+t; var r=wts[p.l1_b+oc]; let rw=p.l1_w+oc*C; let a0=s*C;
+  for(var ic=0u;ic<C;ic++){r+=wts[rw+ic]*abuf[a0+ic];}
+  outa[(n&p.out_mask)*C+oc]=ina[(n&p.in_mask)*C+oc]+r;}}
 }
+)wgsl";
+// Advances the stream position by one block (pos[1] holds B); the last
+// dispatch of every WaveNet block.
+constexpr auto kSharedIoWavenetAdvanceWgsl = R"wgsl(
+@group(0) @binding(0) var<storage, read_write> pos:array<u32>;
+@compute @workgroup_size(1) fn main(){ pos[0]=pos[0]+pos[1]; }
 )wgsl";
 constexpr auto kSharedIoWavenetHeadWgsl = R"wgsl(
 struct P { C:u32,H:u32,B:u32,hr_w:u32,hr_b:u32,bias:u32,p0:u32,p1:u32 };
@@ -432,17 +464,19 @@ struct DawnSharedIoProvider::Impl {
     struct WavenetPlan {
         struct Array {
             std::uint32_t channels = 0, head_size = 0, layers = 0;
+            std::uint32_t samples_per_group = 1; // layer-shader samples per workgroup
             std::vector<std::uint32_t> pads;
-            // One history buffer per activation carries the causal stream
-            // state between transport slots. Slot-local activations can then
-            // be safely reused while the queue preserves stream order.
-            std::vector<wgpu::Buffer> histories;
+            // One column ring per activation carries the causal stream state.
+            // The rings belong to the stream, not to a transport slot: queue
+            // submissions are ordered, so each block reads and extends them in
+            // place before the next slot's command buffer runs.
+            std::vector<wgpu::Buffer> rings;
+            std::vector<std::uint32_t> ring_masks; // columns - 1 (power of two)
             wgpu::Buffer rechannel_u, head_u;
             std::vector<wgpu::Buffer> layer_u;
         };
         struct ArrayGroups {
-            std::vector<wgpu::Buffer> activations;
-            wgpu::Buffer headacc, headout;
+            wgpu::Buffer headacc, headout; // block-local; headout only on the last array
             wgpu::BindGroup rechannel, head;
             std::vector<wgpu::BindGroup> layers;
         };
@@ -451,12 +485,14 @@ struct DawnSharedIoProvider::Impl {
             wgpu::BindGroup scale;
         };
         std::uint32_t block_size = 0;
-        wgpu::ComputePipeline rechannel, layer, head, scale;
+        wgpu::ComputePipeline rechannel, layer, head, scale, advance;
         wgpu::Buffer weights, scale_u;
+        // Device-resident stream position: [0] = sample index of the next
+        // block, [1] = block size. Advanced on the GPU by the last dispatch of
+        // each executed block.
+        wgpu::Buffer position;
+        wgpu::BindGroup advance_group;
         std::vector<Array> arrays;
-        // WaveNet history belongs to the causal stream, not to a transport
-        // slot. Queue submissions are ordered, so every block advances these
-        // buffers before the next slot's command buffer reads them.
         std::uint64_t last_submitted_sequence = 0;
         bool has_submitted_sequence = false;
         std::vector<SlotGroups> slots;
@@ -744,9 +780,19 @@ struct DawnSharedIoProvider::Impl {
             &uncaptured_error_generation);
         device_descriptor.SetDeviceLostCallback(
             wgpu::CallbackMode::AllowProcessEvents,
-            [](const wgpu::Device&, wgpu::DeviceLostReason, wgpu::StringView,
-               std::atomic<bool>* lost) { lost->store(true, std::memory_order_release); },
-            &device_lost);
+            [](const wgpu::Device&, wgpu::DeviceLostReason lost_reason, wgpu::StringView,
+               Impl* self) {
+                self->device_lost_callback_ns.store(
+                    static_cast<std::uint64_t>(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count()),
+                    std::memory_order_relaxed);
+                self->device_lost_reason.store(static_cast<std::uint32_t>(lost_reason),
+                                               std::memory_order_relaxed);
+                self->device_lost.store(true, std::memory_order_release);
+            },
+            this);
         auto device_request = std::make_shared<RequestDevice>();
         adapter.RequestDevice(&device_descriptor, wgpu::CallbackMode::AllowProcessEvents,
                               [device_request](wgpu::RequestDeviceStatus status,
@@ -952,6 +998,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     // owner so reverse member destruction releases the device first.
     std::atomic<std::uint64_t> uncaptured_error_generation{0};
     std::atomic<bool> device_lost{false};
+    std::atomic<std::uint64_t> device_lost_callback_ns{0};
+    std::atomic<std::uint32_t> device_lost_reason{0};
     std::unique_ptr<dawn::native::Instance> native_instance;
     wgpu::Instance instance;
     wgpu::Adapter adapter;
@@ -1749,18 +1797,31 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
         plan->layer = make_pipeline(kSharedIoWavenetLayerWgsl);
         plan->head = make_pipeline(kSharedIoWavenetHeadWgsl);
         plan->scale = make_pipeline(kSharedIoWavenetScaleWgsl);
+        plan->advance = make_pipeline(kSharedIoWavenetAdvanceWgsl);
         plan->weights = make_storage(spec.weights.size() * sizeof(float));
-        if (!plan->rechannel || !plan->layer || !plan->head || !plan->scale || !plan->weights)
+        plan->position = make_storage(2u * sizeof(std::uint32_t));
+        if (!plan->rechannel || !plan->layer || !plan->head || !plan->scale || !plan->advance ||
+            !plan->weights || !plan->position)
             return false;
         impl_->queue.WriteBuffer(plan->weights, 0, spec.weights.data(),
                                  spec.weights.size() * sizeof(float));
+        const std::uint32_t initial_position[2] = {0u, spec.block_size};
+        impl_->queue.WriteBuffer(plan->position, 0, initial_position, sizeof(initial_position));
+        // A ring holds at least `pad + B` columns, rounded up to a power of two
+        // so the shaders wrap with a mask and the u32 position never skews it.
+        const auto ring_columns = [&](std::uint32_t pad) {
+            std::uint32_t columns = 1;
+            while (columns < pad + spec.block_size)
+                columns <<= 1;
+            return columns;
+        };
 
         struct RcU {
-            std::uint32_t in_ch, out_ch, B, woff, src_pad, dst_pad, p0, p1;
+            std::uint32_t in_ch, out_ch, B, woff, src_mask, dst_mask, src_ring, p1;
         };
         struct LyU {
-            std::uint32_t C, K, B, dil, Z, gated, src_pad, conv_w, conv_b, mix_w, l1_w, l1_b,
-                dst_pad, p1, p2, p3;
+            std::uint32_t C, K, B, dil, Z, gated, in_mask, conv_w, conv_b, mix_w, l1_w, l1_b,
+                out_mask, S, head_init, p3;
         };
         struct HdU {
             std::uint32_t C, H, B, hr_w, hr_b, bias, p0, p1;
@@ -1787,26 +1848,28 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             for (const auto dilation : layer.dilations)
                 array.pads.push_back(wavenet_causal_pad(K, dilation));
             array.pads.push_back(0);
-            array.histories.reserve(layer.dilations.size() + 1u);
+            array.samples_per_group = Z <= 64u ? 64u / Z : 1u;
+            array.rings.reserve(layer.dilations.size() + 1u);
+            array.ring_masks.reserve(layer.dilations.size() + 1u);
             for (std::size_t activation = 0; activation <= layer.dilations.size(); ++activation) {
-                const auto history_bytes =
-                    static_cast<std::size_t>(C) * array.pads[activation] * sizeof(float);
-                array.histories.emplace_back();
-                if (history_bytes == 0)
-                    continue;
-                auto history = make_storage(history_bytes);
-                if (!history)
+                const auto columns = ring_columns(array.pads[activation]);
+                const auto ring_floats = static_cast<std::size_t>(C) * columns;
+                auto ring = make_storage(ring_floats * sizeof(float));
+                if (!ring)
                     return false;
-                std::vector<float> zero_history(history_bytes / sizeof(float), 0.0f);
-                impl_->queue.WriteBuffer(history, 0, zero_history.data(), history_bytes);
-                array.histories.back() = std::move(history);
+                std::vector<float> zero_ring(ring_floats, 0.0f);
+                impl_->queue.WriteBuffer(ring, 0, zero_ring.data(), ring_floats * sizeof(float));
+                array.rings.push_back(std::move(ring));
+                array.ring_masks.push_back(columns - 1u);
             }
 
             const auto rc_w = static_cast<std::uint32_t>(weight_offset);
             weight_offset += static_cast<std::uint64_t>(C) * layer.input_size;
-            const auto source_pad = index == 0 ? 0u : plan->arrays[index - 1].pads.back();
-            const RcU rcu{
-                layer.input_size, C, spec.block_size, rc_w, source_pad, array.pads.front(), 0, 0};
+            const auto source_mask = index == 0 ? 0u : plan->arrays[index - 1].ring_masks.back();
+            const RcU rcu{layer.input_size,     C,
+                          spec.block_size,      rc_w,
+                          source_mask,          array.ring_masks.front(),
+                          index == 0 ? 0u : 1u, 0};
             array.rechannel_u = make_uniform(&rcu, sizeof(rcu));
             if (!array.rechannel_u)
                 return false;
@@ -1830,15 +1893,15 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
                               dilation,
                               Z,
                               layer.gated,
-                              array.pads[layer_index],
+                              array.ring_masks[layer_index],
                               conv_w,
                               conv_b,
                               mix_w,
                               l1_w,
                               l1_b,
-                              array.pads[layer_index + 1u],
-                              0,
-                              0,
+                              array.ring_masks[layer_index + 1u],
+                              array.samples_per_group,
+                              (index == 0 && layer_index == 0) ? 1u : 0u,
                               0};
                 auto uniform = make_uniform(&lyu, sizeof(lyu));
                 if (!uniform)
@@ -1866,6 +1929,12 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
         if (!plan->scale_u)
             return false;
 
+        wgpu::BindGroupEntry advance_entry{
+            .binding = 0, .buffer = plan->position, .size = plan->position.GetSize()};
+        plan->advance_group = bind(plan->advance, &advance_entry, 1);
+        if (!plan->advance_group)
+            return false;
+
         plan->slots.resize(impl_->slots.size());
         for (const auto& handle : handles) {
             if (handle.slot >= plan->slots.size() || !validate_slot_buffers(handle))
@@ -1877,72 +1946,78 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             auto& slot_groups = plan->slots[handle.slot];
             slot_groups.arrays.resize(plan->arrays.size());
 
+            // Head sums are block-local, so each slot keeps its own; a head
+            // rechannel writes straight into the next array's head sum (its
+            // seed: head_size == next channels) and the last array writes headout.
             for (std::size_t index = 0; index < plan->arrays.size(); ++index) {
                 const auto& array = plan->arrays[index];
                 auto& groups = slot_groups.arrays[index];
-                groups.activations.reserve(array.layers + 1u);
-                for (std::size_t activation = 0; activation <= array.layers; ++activation) {
-                    const auto activation_floats = static_cast<std::size_t>(array.channels) *
-                                                   (array.pads[activation] + spec.block_size);
-                    const auto activation_bytes = activation_floats * sizeof(float);
-                    auto buffer = make_storage(activation_bytes);
-                    if (!buffer)
-                        return false;
-                    std::vector<float> zero_activation(activation_floats, 0.0f);
-                    impl_->queue.WriteBuffer(buffer, 0, zero_activation.data(), activation_bytes);
-                    groups.activations.push_back(std::move(buffer));
-                }
                 groups.headacc = make_storage(static_cast<std::size_t>(array.channels) *
                                               spec.block_size * sizeof(float));
-                groups.headout = make_storage(static_cast<std::size_t>(array.head_size) *
-                                              spec.block_size * sizeof(float));
-                if (!groups.headacc || !groups.headout)
+                if (!groups.headacc)
                     return false;
+                if (index + 1u == plan->arrays.size()) {
+                    groups.headout = make_storage(static_cast<std::size_t>(array.head_size) *
+                                                  spec.block_size * sizeof(float));
+                    if (!groups.headout)
+                        return false;
+                }
+            }
 
+            for (std::size_t index = 0; index < plan->arrays.size(); ++index) {
+                const auto& array = plan->arrays[index];
+                auto& groups = slot_groups.arrays[index];
                 const auto& rechannel_source =
-                    index == 0 ? *input : slot_groups.arrays[index - 1].activations.back();
-                wgpu::BindGroupEntry rechannel_entries[4]{};
+                    index == 0 ? *input : plan->arrays[index - 1].rings.back();
+                wgpu::BindGroupEntry rechannel_entries[5]{};
                 rechannel_entries[0] = {
                     .binding = 0, .buffer = plan->weights, .size = plan->weights.GetSize()};
                 rechannel_entries[1] = {
                     .binding = 1, .buffer = rechannel_source, .size = rechannel_source.GetSize()};
                 rechannel_entries[2] = {.binding = 2,
-                                        .buffer = groups.activations.front(),
-                                        .size = groups.activations.front().GetSize()};
+                                        .buffer = array.rings.front(),
+                                        .size = array.rings.front().GetSize()};
                 rechannel_entries[3] = {
                     .binding = 3, .buffer = array.rechannel_u, .size = array.rechannel_u.GetSize()};
-                groups.rechannel = bind(plan->rechannel, rechannel_entries, 4);
+                rechannel_entries[4] = {
+                    .binding = 4, .buffer = plan->position, .size = plan->position.GetSize()};
+                groups.rechannel = bind(plan->rechannel, rechannel_entries, 5);
 
                 groups.layers.reserve(array.layers);
                 for (std::uint32_t layer_index = 0; layer_index < array.layers; ++layer_index) {
-                    wgpu::BindGroupEntry layer_entries[6]{};
+                    wgpu::BindGroupEntry layer_entries[7]{};
                     layer_entries[0] = {
                         .binding = 0, .buffer = plan->weights, .size = plan->weights.GetSize()};
                     layer_entries[1] = {.binding = 1,
-                                        .buffer = groups.activations[layer_index],
-                                        .size = groups.activations[layer_index].GetSize()};
+                                        .buffer = array.rings[layer_index],
+                                        .size = array.rings[layer_index].GetSize()};
                     layer_entries[2] = {.binding = 2,
-                                        .buffer = groups.activations[layer_index + 1u],
-                                        .size = groups.activations[layer_index + 1u].GetSize()};
+                                        .buffer = array.rings[layer_index + 1u],
+                                        .size = array.rings[layer_index + 1u].GetSize()};
                     layer_entries[3] = {.binding = 3, .buffer = *input, .size = input->GetSize()};
                     layer_entries[4] = {
                         .binding = 4, .buffer = groups.headacc, .size = groups.headacc.GetSize()};
                     layer_entries[5] = {.binding = 5,
                                         .buffer = array.layer_u[layer_index],
                                         .size = array.layer_u[layer_index].GetSize()};
-                    auto group = bind(plan->layer, layer_entries, 6);
+                    layer_entries[6] = {
+                        .binding = 6, .buffer = plan->position, .size = plan->position.GetSize()};
+                    auto group = bind(plan->layer, layer_entries, 7);
                     if (!group)
                         return false;
                     groups.layers.push_back(std::move(group));
                 }
 
+                const auto& head_target = index + 1u < plan->arrays.size()
+                                              ? slot_groups.arrays[index + 1u].headacc
+                                              : groups.headout;
                 wgpu::BindGroupEntry head_entries[4]{};
                 head_entries[0] = {
                     .binding = 0, .buffer = plan->weights, .size = plan->weights.GetSize()};
                 head_entries[1] = {
                     .binding = 1, .buffer = groups.headacc, .size = groups.headacc.GetSize()};
                 head_entries[2] = {
-                    .binding = 2, .buffer = groups.headout, .size = groups.headout.GetSize()};
+                    .binding = 2, .buffer = head_target, .size = head_target.GetSize()};
                 head_entries[3] = {
                     .binding = 3, .buffer = array.head_u, .size = array.head_u.GetSize()};
                 groups.head = bind(plan->head, head_entries, 4);
@@ -2148,82 +2223,45 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
             spectral_dispatch(plan.output, groups.output, plan.spectral_hop, false, true);
         }
     } else if (wavenet != nullptr) {
+        // One compute pass, no copies: the rings hold the causal history in
+        // place, the first layer starts the head sum, each head rechannel seeds
+        // the next array, and the final dispatch advances the stream position.
         const auto& plan = *wavenet;
         const auto& groups = plan.slots[slot->index];
-        encoder.ClearBuffer(groups.arrays.front().headacc, 0,
-                            groups.arrays.front().headacc.GetSize());
+        const auto per_sample = (plan.block_size + 63u) / 64u;
+        wgpu::ComputePassDescriptor descriptor{};
+        wgpu::PassTimestampWrites timestamp_writes{};
+        if (timestamping) {
+            timestamp_writes.querySet = slot->timestamp_queries;
+            timestamp_writes.beginningOfPassWriteIndex = 0;
+            timestamp_writes.endOfPassWriteIndex = 1;
+            descriptor.timestampWrites = &timestamp_writes;
+        }
+        auto pass = encoder.BeginComputePass(&descriptor);
         for (std::size_t index = 0; index < plan.arrays.size(); ++index) {
             const auto& array = plan.arrays[index];
             const auto& array_groups = groups.arrays[index];
-            for (std::size_t activation = 0; activation < array_groups.activations.size();
-                 ++activation) {
-                const auto pad = array.pads[activation];
-                if (pad == 0)
-                    continue;
-                const auto history_bytes =
-                    static_cast<std::uint64_t>(array.channels) * pad * sizeof(float);
-                ++impl_->stats.runtime_copy_buffer_calls;
-                encoder.CopyBufferToBuffer(array.histories[activation], 0,
-                                           array_groups.activations[activation], 0, history_bytes);
-            }
-            if (index > 0) {
-                const auto& previous = groups.arrays[index - 1u];
-                ++impl_->stats.runtime_copy_buffer_calls;
-                encoder.CopyBufferToBuffer(previous.headout, 0, array_groups.headacc, 0,
-                                           array_groups.headacc.GetSize());
-            }
-            wgpu::ComputePassDescriptor descriptor{};
-            wgpu::PassTimestampWrites timestamp_writes{};
-            const bool first = index == 0;
-            if (timestamping && first) {
-                timestamp_writes.querySet = slot->timestamp_queries;
-                timestamp_writes.beginningOfPassWriteIndex = 0;
-                timestamp_writes.endOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
-                descriptor.timestampWrites = &timestamp_writes;
-            }
-            auto pass = encoder.BeginComputePass(&descriptor);
             pass.SetPipeline(plan.rechannel);
             pass.SetBindGroup(0, array_groups.rechannel);
-            pass.DispatchWorkgroups((plan.block_size + 63u) / 64u);
+            pass.DispatchWorkgroups(per_sample);
+            const auto layer_groups =
+                (plan.block_size + array.samples_per_group - 1u) / array.samples_per_group;
             for (std::uint32_t layer = 0; layer < array.layers; ++layer) {
                 pass.SetPipeline(plan.layer);
                 pass.SetBindGroup(0, array_groups.layers[layer]);
-                pass.DispatchWorkgroups(plan.block_size);
+                pass.DispatchWorkgroups(layer_groups);
             }
             pass.SetPipeline(plan.head);
             pass.SetBindGroup(0, array_groups.head);
-            pass.DispatchWorkgroups((plan.block_size + 63u) / 64u);
-            pass.End();
+            pass.DispatchWorkgroups(per_sample);
         }
-        wgpu::ComputePassDescriptor scale_descriptor{};
-        wgpu::PassTimestampWrites scale_timestamps{};
-        if (timestamping) {
-            scale_timestamps.querySet = slot->timestamp_queries;
-            scale_timestamps.beginningOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
-            scale_timestamps.endOfPassWriteIndex = 1;
-            scale_descriptor.timestampWrites = &scale_timestamps;
-        }
-        auto scale_pass = encoder.BeginComputePass(&scale_descriptor);
-        scale_pass.SetPipeline(plan.scale);
-        scale_pass.SetBindGroup(0, groups.scale);
-        scale_pass.DispatchWorkgroups((plan.block_size + 63u) / 64u);
-        scale_pass.End();
-        for (std::size_t index = 0; index < plan.arrays.size(); ++index) {
-            const auto& array = plan.arrays[index];
-            const auto& array_groups = groups.arrays[index];
-            for (std::size_t activation = 0; activation < array.layers; ++activation) {
-                const auto pad = array.pads[activation];
-                if (pad == 0)
-                    continue;
-                const auto history_bytes =
-                    static_cast<std::uint64_t>(array.channels) * pad * sizeof(float);
-                const auto tail_offset =
-                    static_cast<std::uint64_t>(array.channels) * plan.block_size * sizeof(float);
-                ++impl_->stats.runtime_copy_buffer_calls;
-                encoder.CopyBufferToBuffer(array_groups.activations[activation], tail_offset,
-                                           array.histories[activation], 0, history_bytes);
-            }
-        }
+        pass.SetPipeline(plan.scale);
+        pass.SetBindGroup(0, groups.scale);
+        pass.DispatchWorkgroups(per_sample);
+        pass.SetPipeline(plan.advance);
+        pass.SetBindGroup(0, plan.advance_group);
+        pass.DispatchWorkgroups(1);
+        pass.End();
     } else {
         wgpu::ComputePassDescriptor descriptor{};
         wgpu::PassTimestampWrites timestamp_writes{};
@@ -2540,7 +2578,17 @@ std::uint64_t DawnSharedIoProvider::proc_table_install_count() const noexcept {
 }
 
 DawnSharedIoProvider::Stats DawnSharedIoProvider::stats() const noexcept {
-    return impl_ ? impl_->stats : Stats{};
+    if (!impl_)
+        return Stats{};
+    auto result = impl_->stats;
+    // The callback stores both values before its release-store of device_lost,
+    // so they are read only once that flag is observed and are never torn.
+    if (impl_->device_lost.load(std::memory_order_acquire)) {
+        result.device_lost_callback_ns =
+            impl_->device_lost_callback_ns.load(std::memory_order_relaxed);
+        result.device_lost_reason = impl_->device_lost_reason.load(std::memory_order_relaxed);
+    }
+    return result;
 }
 
 DawnSharedIoProvider::CompletionPolicy DawnSharedIoProvider::completion_policy() const noexcept {

@@ -202,6 +202,10 @@ The static libraries intentionally leave MSVC STL `__std_*` helpers
 unresolved for the consumer's own runtime to supply, so a Windows ARM64
 consumer must link with MSVC 14.51 or newer (Visual Studio 18). A VS 2022
 (14.44) ARM64 toolchain fails at link with unresolved `__std_*` symbols.
+`fetch_skia_for_release.py windows-arm64` checks this receipt before the
+archive enters a cache, on cold fetches and warm hits alike. It refuses an
+archive whose receipt is missing, does not name native ARM64, or leaves the
+toolset, SDK or compiler fields empty or reading "unknown".
 
 The m153 Windows ARM64 archive was re-published in place from a later Skia
 revision and its receipt read "unknown"; m157 has neither problem, because

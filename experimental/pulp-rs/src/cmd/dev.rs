@@ -365,7 +365,12 @@ mod tests {
     // body executes locally — same assumption the existing tests rely
     // on.
 
-    fn write_standalone_fixture(root: &std::path::Path) {
+    /// A standalone project pinned to SDK 0.40.0, plus a `PULP_HOME` (returned)
+    /// in which that SDK is installed. Point `PULP_HOME` at it so the build's
+    /// SDK lookup is answered by the fixture, not by the host.
+    fn write_standalone_fixture(root: &std::path::Path) -> std::path::PathBuf {
+        let home = root.join("pulp-home");
+        crate::test_support::fake_installed_sdk(&home, "0.40.0");
         std::fs::write(root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n").unwrap();
         std::fs::write(
             root.join("CMakeLists.txt"),
@@ -374,13 +379,17 @@ mod tests {
              find_package(Pulp 0.40.0 REQUIRED)\n",
         )
         .unwrap();
+        home
     }
 
     #[test]
     fn run_dispatches_validate_message_when_flag_set() {
-        let _fallthrough = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
-        write_standalone_fixture(td.path());
+        let home = write_standalone_fixture(td.path());
+        let _env = EnvVarGuard::set_many(&[
+            (crate::fallthrough::DISABLE_ENV, Some("1")),
+            ("PULP_HOME", Some(home.to_str().unwrap())),
+        ]);
         let rec = RecordingSpawner::ok();
         let mut buf = Vec::new();
         let args = parse_args(&to_vec(&["--validate"]));
@@ -395,9 +404,12 @@ mod tests {
 
     #[test]
     fn run_dispatches_ctest_with_filter_when_test_flag_set() {
-        let _fallthrough = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
-        write_standalone_fixture(td.path());
+        let home = write_standalone_fixture(td.path());
+        let _env = EnvVarGuard::set_many(&[
+            (crate::fallthrough::DISABLE_ENV, Some("1")),
+            ("PULP_HOME", Some(home.to_str().unwrap())),
+        ]);
         let rec = RecordingSpawner::ok();
         let mut buf = Vec::new();
         let args = parse_args(&to_vec(&["--test-filter=Knob"]));
@@ -425,15 +437,16 @@ mod tests {
         //
         // One guard for every variable: EnvVarGuard holds a single global
         // mutex, so a second guard in the same test would deadlock.
+        let td = tempfile::tempdir().unwrap();
+        let home = write_standalone_fixture(td.path());
         let _env = EnvVarGuard::set_many(&[
             (crate::fallthrough::DISABLE_ENV, Some("1")),
             ("PULP_TARTCI_LEASES", Some("0")),
             ("PULP_BUILD_JOBS", None),
             ("CMAKE_BUILD_PARALLEL_LEVEL", None),
             ("PULP_BUILD_MEM_BUDGET_MB", Some("1536")),
+            ("PULP_HOME", Some(home.to_str().unwrap())),
         ]);
-        let td = tempfile::tempdir().unwrap();
-        write_standalone_fixture(td.path());
         let rec = RecordingSpawner::ok();
         let mut buf = Vec::new();
         let args = parse_args(&[]);
@@ -455,9 +468,12 @@ mod tests {
 
     #[test]
     fn run_emits_watch_loop_stub_when_no_launch_target() {
-        let _fallthrough = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
-        write_standalone_fixture(td.path());
+        let home = write_standalone_fixture(td.path());
+        let _env = EnvVarGuard::set_many(&[
+            (crate::fallthrough::DISABLE_ENV, Some("1")),
+            ("PULP_HOME", Some(home.to_str().unwrap())),
+        ]);
         let rec = RecordingSpawner::ok();
         let mut buf = Vec::new();
         let args = parse_args(&[]);

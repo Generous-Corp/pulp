@@ -59,10 +59,31 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
             style.stroke_width = 8.0f;
             style.arc_start = Knob::start_angle;
             style.arc_sweep = Knob::end_angle - Knob::start_angle;
-            if (canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc,
-                                                  0, 0, w, h, style,
-                                                  host.chart_shader(), options))
+            // The feather an author declared with the shader's geometry
+            // applies to the chart draw too.
+            if (const auto& geometry = host.shader_geometry()) {
+                style.feather_sigma = geometry->style.feather_sigma;
+                style.feather_curve = geometry->style.feather_curve;
+                style.feather_mode = geometry->style.feather_mode;
+            }
+            // A glow whose reach is shorter than its falloff would be cut off
+            // in a hard edge at the draw rect. The chart draw is refused out
+            // loud and the body shader below paints instead, exactly as for a
+            // chart draw that fails.
+            const float min_reach = canvas::Canvas::sdf_feather_min_reach(style);
+            if (options.reach < min_reach) {
+                if (!host.shader_draw_failure_logged()) {
+                    runtime::log_error("[custom-shader] chart feather sigma {} needs reach >= {} "
+                                       "but the shader's reach is {}; painting the body "
+                                       "shader instead of the chart",
+                                       style.feather_sigma, min_reach, options.reach);
+                    host.mark_shader_draw_failure_logged();
+                }
+            } else if (canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc, 0, 0,
+                                                         w, h, style, host.chart_shader(),
+                                                         options)) {
                 return true;
+            }
         }
     }
     if (canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, options)) {

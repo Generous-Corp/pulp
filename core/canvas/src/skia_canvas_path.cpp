@@ -11,6 +11,7 @@
 #include <pulp/canvas/skia_canvas.hpp>
 
 #include "skia_canvas_internal.hpp"
+#include "skia_gradient_compat.hpp"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkImage.h"
@@ -305,7 +306,7 @@ void SkiaCanvas::fill_path(const Path& path, FillRule rule) {
     // Mirror fill_current_path's paint construction: an active gradient shader
     // wins over the solid fill color.
     if (has_gradient_ && gradient_shader_) {
-        paint.setShader(gradient_shader_);
+        skia_gradient::set_paint_shader(paint, gradient_shader_);
     } else {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }
@@ -351,7 +352,8 @@ void SkiaCanvas::stroke_path(const Path& path, const StrokeStyle& style) {
         }
     }
 
-    if (stroke_shader_) paint.setShader(stroke_shader_);
+    if (stroke_shader_)
+        skia_gradient::set_paint_shader(paint, stroke_shader_);
     apply_shadow_filter(paint);
     apply_filter(paint);
 

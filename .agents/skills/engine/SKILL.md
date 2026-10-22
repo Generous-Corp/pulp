@@ -161,6 +161,41 @@ every inline script of a few KB.
   timestamp or nonce baked into the document), not that the cache is off.
 - JSC and V8 inherit the default (`evaluate_script` → `evaluate`).
 
+### Build-time bytecode (`pulp_add_js_bytecode`)
+
+The in-process cache still parses once per process. A product whose editor
+opens right after instantiation (Logic opens the window on insert) waits for
+that parse: 65–80 ms of Spectr's fresh-process open was the editor blocked in
+`script_bytecode_lookup` on the instantiation prewarm compiling its 1.6 MB
+runtime. `pulp_add_js_bytecode(<lib> SOURCES … [WIDGET_BRIDGE_SCRIPT])`
+compiles the scripts at build time with a generator linked against the same
+Pulp libraries, embeds the blobs, and the product hands each to
+`register_embedded_script_bytecode()` before its editor opens (constructor or
+`editor_prewarm()`). A cache miss then takes the embedded bytecode
+(`stats.embedded`) instead of compiling.
+
+- The blob is trusted code because it sits in the signed binary. That is the
+  only reason this does not contradict "never load bytecode from anywhere
+  else" above. Never register bytes read from a writable location.
+- It is used only for the exact source (length + SHA-256) and only by the
+  engine build that emitted it (`script_bytecode_engine_fingerprint()`: the
+  QuickJS version plus a digest of a fixed probe script's bytecode). Anything
+  else compiles from source; a damaged payload fails its bytecode SHA-256 on
+  first use.
+- `WIDGET_BRIDGE_SCRIPT` compiles `WidgetBridge::loaded_script_source(script)`,
+  which is what `load_script()` and the prewarm evaluate. Without it a
+  `load_script()` script never matches, silently: check `stats.embedded`.
+- The fingerprint probe script must compile on Pulp's QuickJS build. BigInt
+  literals do not (CONFIG_BIGNUM is off); a probe that fails to compile
+  degrades the fingerprint to `quickjs-<version>-unavailable`, which the
+  embed test rejects.
+- Trace spans: `script_embedded_lookup` (the SHA-256 match, about 1 ms for
+  1.6 MB with the ARMv8 SHA-2 path) followed by `script_bytecode_read`. A
+  fresh process that still shows `script_precompile` for the runtime is not
+  registering its blobs, or registered them after the prewarm started.
+- Cross-compiling: the generator cannot run, so the library holds placeholder
+  blobs that registration rejects, and the scripts compile at run time.
+
 ## Bridge dispatch measurement
 
 `WidgetBridge::bridge_call_count()` is a per-bridge diagnostic counter for
@@ -238,6 +273,18 @@ When reviewing or loading JS code, if you see any of these patterns, proactively
 Use `recommend` logic above, but **never auto-switch** — always confirm first.
 
 ## Engine Selection Semantics
+
+**Mac plug-in scripted UIs: QuickJS + build-time bytecode beats JSC.** Measured
+on Spectr (1.6 MB materialized runtime, AU v2 editor, M5 Max): JSC opens are
+~100-150 ms slower per open (warm 281-397 ms vs 162-253 ms), with JIT allowed
+or in a hardened-runtime host without `allow-jit` alike (JIT made no
+difference). JSC re-parses the whole runtime in every realm (no in-memory
+bytecode reuse; `JSScript`'s code cache is on disk) and its C-API bridge costs
+more per call (`scripted_ui_live_realm` 290 vs 158 ms). Output was
+pixel-identical. Dropping QuickJS saves ~0.84 MB, which does not pay for it.
+Do not re-run this without a new reason (a JSC in-memory bytecode API, or a
+UI with far heavier steady-state JS than mount).
+
 
 - `auto` (default): QuickJS everywhere unless the build explicitly
   sets a `PULP_DEFAULT_ENGINE_*` compile option. Backward compatible.
@@ -408,13 +455,28 @@ Windows). Last runtime proof (m152): choc V8 consumer init +
 The m157 Windows archives have passed structural ABI inspection but not this
 consumer link/run gate.
 
-The archive ships its own `__Cr` runtime as `lib/libc++.lib` (the embedded
-manifest's `libcxx_lib`), so `PulpV8Windows.cmake` now defaults
-`PULP_V8_WIN_LIBCXX_LIB` to the file beside `V8_IMPORT_LIBRARY` and only
-fails when neither exists. The archive ships no libc++ headers, so
-`PULP_V8_WIN_LIBCXX_INCLUDE` must still point at an llvm-project
-`libcxx/include`. Building the runtime yourself (step 4) is now only an
-override. The mac/linux sealed
+The archive also ships a `__Cr` runtime as `lib/libc++.lib` (the embedded
+manifest's `libcxx_lib`), but it is **not** interchangeable with the step 4
+runtime, so `PulpV8Windows.cmake` does not default to it and fails configure
+when `PULP_V8_WIN_LIBCXX_LIB` is unset. The provider lib is a static-CRT build
+(`/MT`, `/DEFAULTLIB:libcmt`), embeds
+`/FAILIFMISMATCH:"_CRT_STDIO_ISO_WIDE_SPECIFIERS=0"`, and carries no vcruntime
+`exception_ptr` glue, while the module's flags assume the llvm-project
+`LIBCXX_CXX_ABI=vcruntime` build (`_CRT_STDIO_ISO_WIDE_SPECIFIERS=1`, dynamic CRT
+via `msvcprt.lib`). The UCRT's `corecrt_stdio_config.h` emits a
+`detect_mismatch` for that define, so pointing at the provider lib produces an
+LNK2038 at link rather than a configure error. Using it would need both
+settings switched, and that is unproven on Windows. The archive ships no
+libc++ headers either, so `PULP_V8_WIN_LIBCXX_INCLUDE` must still point at an
+llvm-project `libcxx/include`.
+
+**ABI boundary trap:** `pulp_v8_windows_apply_abi(pulp-view-script)` puts the
+`__Cr` libc++ headers on every source in `pulp-view-script`, while
+`pulp-view-core` and the tests compile against the MSVC STL. Any non-virtual
+call that passes `std::` types across that boundary names a symbol in one std
+ABI and resolves it in the other, so it will not link. The narrow fix (an
+object library holding only `js_v8_engine.cpp` behind a std-free surface) is
+open work for the local-VM Windows run. The mac/linux sealed
 artifacts use the **system** libc++ (no `__Cr`) and need none of this —
 the `__Cr` contract is Windows-only.
 

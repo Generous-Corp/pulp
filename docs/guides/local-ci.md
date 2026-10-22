@@ -2927,6 +2927,27 @@ with extra content all keep the full path. The variable is read by the
 workflow, never by PR content; a base verifier that predates the flag rejects
 it and the run keeps the full path.
 
+Every run on the release bot's bump reports the outcome as a `bump-fast-path`
+notice on the `classify` job, and in its step summary: `taken`, or `refused:`
+followed by the reason. The reason is the verifier's own line (`verifier: ...`),
+`shape: no trusted verifier base` when the group or pull-request base resolves
+no trusted base (for example, main moved more than one queue entry past the
+bump's parent, a case the verifier is never asked about), or `the protected
+base has no verifier`. Only the bump is reported; other runs print nothing.
+`tools/scripts/bump_fastpath_report.py` counts the notices
+(`--days 7` by default), and `.github/workflows/bump-fastpath-weekly.yml` runs
+it every Monday into its job summary. A run from before the notice existed
+counts as `unreported`, never as taken.
+
+The four advisory workflows that `pull_request: auto_merge_enabled` starts
+(`coverage.yml`, `control-shipping-native.yml`, `examples-validation.yml`,
+`intel-portability.yml`) skip every job on `release/version-bump`: the bump's
+tree is main's plus version files, which they already ran on, and none of
+their contexts is required. Each job's condition is
+`github.head_ref != 'release/version-bump' && (<its own condition>)`, so every
+other pull request, schedule and dispatch runs exactly as before. This also
+keeps bump pull requests off GitHub-hosted Windows runners.
+
 The current provenance boundary is GitHub's valid SSH-signature record plus the
 `danielraffel` signer/account and exact release-bot author/committer identity.
 The repository does not yet contain an authoritative public key or fingerprint
@@ -5801,7 +5822,7 @@ These are the same inputs already documented above; they are listed
 here for completeness alongside the repo-variable knobs.
 
 For a trusted Linux-only Mac Pro proof during hosted saturation, disable the
-otherwise-default hosted Windows leg explicitly:
+Windows leg explicitly:
 
 ```bash
 gh workflow run build.yml --ref <trusted-branch> \
@@ -5810,7 +5831,29 @@ gh workflow run build.yml --ref <trusted-branch> \
 ```
 
 This switch affects only `workflow_dispatch`; automatic events keep their
-documented matrix policy, and ordinary manual dispatches still include Windows.
+documented matrix policy.
+
+GitHub-hosted Windows is opt-in. A `build.yml` dispatch or a push to `main`
+schedules no hosted Windows job (the `Windows (x64)` leg and the three
+`windows-latest` compile gates) unless one of these is set:
+
+- `-f allow_hosted_windows=true` on the dispatch;
+- `-f windows_runner_selector_json=...` naming a self-hosted runner (a list
+  with `"self-hosted"`), which runs the leg there, not on a hosted image;
+- the repository variable `PULP_ALLOW_HOSTED_WINDOWS=1`, which also lets a push
+  run it.
+
+`resolve-provider` prints `resolve-provider: Windows leg omitted: GitHub-hosted
+Windows is opt-in ...` when it leaves the leg out, and the advisory `windows`
+alias then passes with that line. `android.yml` leaves its `windows-latest`
+row out on every event but the nightly schedule unless
+`PULP_ALLOW_HOSTED_WINDOWS=1`; no required context reads it. `windows-cli-compile.yml` is the one
+listed exception: its push verdict on `main` is the release backstop
+`auto-release.yml`'s pre-tag check reads. Schedules and pull requests keep
+their documented Windows policy. `tools/scripts/test_windows_runner_policy.py`
+(`HostedWindowsOptInTests`) scans every workflow and fails on a job that can
+start a hosted `windows-*` runner on a push, or a `build.yml` dispatch, without
+`vars.PULP_ALLOW_HOSTED_WINDOWS == '1'` in its condition.
 
 ### Reverting
 

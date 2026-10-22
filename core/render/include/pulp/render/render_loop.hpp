@@ -65,6 +65,67 @@ constexpr bool render_loop_backend_is_vsync(RenderLoopBackend backend) {
     return backend != RenderLoopBackend::timer;
 }
 
+// Decides when a display-linked loop asks for the panel's maximum refresh rate.
+//
+// A ProMotion display runs a CADisplayLink at 60 Hz unless the link requests
+// more, so an animation is capped at 60 fps on a 120 Hz panel. Holding the
+// maximum while idle costs battery for frames nobody draws. The policy raises
+// the request on the first vsync that draws and lowers it only after
+// `kIdleVsyncsBeforeLower` consecutive vsyncs without a frame, so a gesture
+// that requests frames with short gaps keeps one steady rate instead of
+// toggling it every gap. Main-thread only; pure, so it is tested on any host.
+//
+// Every iOS host that owns a CADisplayLink (IOSRenderLoop and the hand-rolled
+// window and plug-in view hosts) feeds this policy each tick and hands the
+// result to apply_display_rate_change().
+class DisplayRateBoost {
+  public:
+    enum class Change { none, raise, lower };
+
+    static constexpr int kIdleVsyncsBeforeLower = 30;
+
+    // Record one vsync and whether it produced a frame.
+    Change on_vsync(bool drew) {
+        if (drew) {
+            idle_vsyncs_ = 0;
+            if (boosted_)
+                return Change::none;
+            boosted_ = true;
+            return Change::raise;
+        }
+        if (!boosted_)
+            return Change::none;
+        if (++idle_vsyncs_ < kIdleVsyncsBeforeLower)
+            return Change::none;
+        boosted_ = false;
+        idle_vsyncs_ = 0;
+        return Change::lower;
+    }
+
+    // The loop stopped: drop any request it still holds.
+    Change on_stop() {
+        idle_vsyncs_ = 0;
+        if (!boosted_)
+            return Change::none;
+        boosted_ = false;
+        return Change::lower;
+    }
+
+    bool boosted() const {
+        return boosted_;
+    }
+
+  private:
+    bool boosted_ = false;
+    int idle_vsyncs_ = 0;
+};
+
+/// iOS only: applies `change` to a CADisplayLink (passed as `void*` so C++
+/// callers need no Objective-C). `raise` requests the main screen's maximum
+/// frame rate when it exceeds 60 Hz; `lower` restores the default range;
+/// `none` and a null link do nothing. Defined only in iOS builds.
+void apply_display_rate_change(void* ca_display_link, DisplayRateBoost::Change change);
+
 class RenderLoop {
 public:
     // Create a platform-appropriate render loop.

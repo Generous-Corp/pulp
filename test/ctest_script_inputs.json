@@ -1504,7 +1504,9 @@
    ],
    "inputs": [
     "examples/design-tool/*.js",
-    "templates/ios-auv3/HostApp/ContentView.swift"
+    "templates/ios-auv3/HostApp/ContentView.swift",
+    "templates/ios-auv3/HostApp/Info.plist.in",
+    "templates/ios-auv3/Info.plist.in"
    ],
    "kind": "compiled",
    "sources": [
@@ -1531,6 +1533,7 @@
   "pulp-test-group-canvas-text": {
    "data": "declared",
    "detected_sources": [
+    "test/test_coretext_text.cpp",
     "test/test_font_woff2.cpp"
    ],
    "inputs": [
@@ -1541,6 +1544,7 @@
    ],
    "kind": "compiled",
    "sources": [
+    "test/test_coretext_text.cpp",
     "test/test_font_woff2.cpp"
    ],
    "undeclared_sources": []
@@ -1872,6 +1876,20 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-js-bytecode-embed": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_js_bytecode_embed.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/js-bytecode/embedded_fixture.js"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_js_bytecode_embed.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-lv2-host-discovery": {
    "data": "none",
    "inputs": [],
@@ -1985,6 +2003,20 @@
     "test/test_native_core_processor.cpp"
    ],
    "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-native-metal-audio-comparator": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_metal_native_audio_comparator.mm"
+   ],
+   "inputs": [
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_metal_native_audio_comparator.mm"
+   ],
    "undeclared_sources": []
   },
   "pulp-test-node-pack": {
@@ -2371,6 +2403,7 @@
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
   "pulp-isolated-scanner-crash-helper",
+  "pulp-js-bytecode",
   "pulp-osc-render-wav",
   "pulp-project-package-mutant-helper",
   "pulp-project-package-publish-helper",
@@ -2541,6 +2574,7 @@
   "pulp-test-create-template-instrument",
   "pulp-test-cross-platform-audio-golden",
   "pulp-test-crossfade",
+  "pulp-test-css-gradient-dither-gpu",
   "pulp-test-css-gradient-render",
   "pulp-test-css-translator-gaps-1434",
   "pulp-test-data-display-link-floor",
@@ -2598,6 +2632,7 @@
   "pulp-test-forge-synthesis-catalog",
   "pulp-test-forge-tape-catalog",
   "pulp-test-format-core-only-consumer",
+  "pulp-test-frame-stamp",
   "pulp-test-gesture-threading",
   "pulp-test-golden",
   "pulp-test-golden-effect",
@@ -2616,6 +2651,8 @@
   "pulp-test-gpu-health-provider",
   "pulp-test-gpu-health-read-result",
   "pulp-test-gpu-health-result",
+  "pulp-test-gpu-neural-plugin-boundary-continuity",
+  "pulp-test-gpu-neural-realtime-node",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-shared-io-convolution-pipeline",
@@ -2737,6 +2774,7 @@
   "pulp-test-interchange",
   "pulp-test-ipc",
   "pulp-test-isolated-scanner",
+  "pulp-test-js-bytecode-embed",
   "pulp-test-latency-contract",
   "pulp-test-lfo-sampling",
   "pulp-test-live-dsp-telemetry",
@@ -2838,6 +2876,7 @@
   "pulp-test-render-scenario",
   "pulp-test-routing-primitives",
   "pulp-test-runtime",
+  "pulp-test-runtime-effect-names-gpu",
   "pulp-test-runtime-slot",
   "pulp-test-sample-heritage",
   "pulp-test-sample-heritage-live-cyclic",
@@ -3438,6 +3477,21 @@
     "core/view",
     "core/view/include/pulp/view/view.hpp",
     "tools/scripts/test_build_time_report.py"
+   ],
+   "kind": "python"
+  },
+  "bump-fastpath-selftest": {
+   "entry": "tools/scripts/test_bump_fastpath.py",
+   "inputs": [
+    ".github/rulesets/main-protection.json",
+    ".github/workflows/build.yml",
+    ".github/workflows/bump-fastpath-weekly.yml",
+    ".github/workflows/control-shipping-native.yml",
+    ".github/workflows/coverage.yml",
+    ".github/workflows/examples-validation.yml",
+    ".github/workflows/intel-portability.yml",
+    "tools/scripts/bump_fastpath_report.py",
+    "tools/scripts/test_bump_fastpath.py"
    ],
    "kind": "python"
   },
@@ -4843,6 +4897,15 @@
    ],
    "kind": "python"
   },
+  "fold-migration-notes-selftest": {
+   "entry": "tools/scripts/test_fold_migration_notes.py",
+   "inputs": [
+    "tools/scripts/build_migration_index.py",
+    "tools/scripts/fold_migration_notes.py",
+    "tools/scripts/test_fold_migration_notes.py"
+   ],
+   "kind": "python"
+  },
   "forced-restore-lint": {
    "entry": "tools/scripts/forced_restore_lint.py",
    "inputs": [
@@ -5069,6 +5132,23 @@
     "tools/ci/governed-build.sh"
    ],
    "kind": "shell"
+  },
+  "gpu-audio-comparator-v2-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_comparator_v2.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_comparator_v2.py",
+    "tools/scripts/gpu_audio_p2_host_preflight.py",
+    "tools/scripts/test_gpu_audio_comparator_v2.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-daw-continuity-receipt-verifier-selftest": {
+   "entry": "tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py",
+   "inputs": [
+    "tools/testing/daw-smoke/reaper_smoke.py",
+    "tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py"
+   ],
+   "kind": "python"
   },
   "gpu-audio-p2-campaign-contract-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p2_campaign.py",
@@ -6389,6 +6469,28 @@
    ],
    "kind": "shell"
   },
+  "icu-data-subset-deterministic": {
+   "entry": "tools/cmake/scripts/icu_data_subset.py",
+   "inputs": [
+    "tools/cmake/scripts/icu_data_subset.py"
+   ],
+   "kind": "python"
+  },
+  "icu-data-subset-linked": {
+   "entry": "tools/scripts/plugin_footprint_check.py",
+   "inputs": [
+    "tools/scripts/plugin_footprint_check.py"
+   ],
+   "kind": "python"
+  },
+  "icu-data-subset-selftest": {
+   "entry": "tools/cmake/scripts/test_icu_data_subset.py",
+   "inputs": [
+    "tools/cmake/scripts/icu_data_subset.py",
+    "tools/cmake/scripts/test_icu_data_subset.py"
+   ],
+   "kind": "python"
+  },
   "import-design-external-asset-localized": {
    "entry": "test/test_import_design_external_asset.py",
    "inputs": [
@@ -6490,6 +6592,13 @@
    "inputs": [
     "tools/import-validation/test_verify_browser_fidelity_receipt.py",
     "tools/import-validation/verify_browser_fidelity_receipt.py"
+   ],
+   "kind": "python"
+  },
+  "import-validation-chrome-gradient-oracle-selftest": {
+   "entry": "tools/import-validation/test_chrome_gradient_oracle.py",
+   "inputs": [
+    "tools/import-validation/test_chrome_gradient_oracle.py"
    ],
    "kind": "python"
   },
@@ -7038,6 +7147,14 @@
    ],
    "kind": "python"
   },
+  "plugin-footprint-check-selftest": {
+   "entry": "tools/scripts/test_plugin_footprint_check.py",
+   "inputs": [
+    "tools/scripts/plugin_footprint_check.py",
+    "tools/scripts/test_plugin_footprint_check.py"
+   ],
+   "kind": "python"
+  },
   "portable-ci-timeout-selftest": {
    "entry": "tools/ci/test_run_with_timeout.py",
    "inputs": [
@@ -7099,6 +7216,13 @@
     "docs/status",
     "docs/status/consumption-profiles.json",
     "docs/status/consumption-profiles.schema.json",
+    "experimental/pulp-rs",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "experimental/pulp-rs/Cargo.toml",
+    "experimental/pulp-rs/README.md",
+    "experimental/pulp-rs/UPSTREAM_SYNC.md",
+    "experimental/pulp-rs/src/main.rs",
+    "experimental/pulp-rs/tests/fixtures/docs/mini_docs_tree/docs/reference/cli.md",
     "test/CMakeLists.txt",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
@@ -7124,6 +7248,7 @@
     "tools/ci/lane_reuse_record.py",
     "tools/ci/load_api_exemptions.json",
     "tools/ci/pr_head_affected_tests.py",
+    "tools/ci/record_build_metric.sh",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
     "tools/ci/spawn_none_build_path_reviews.json",
@@ -7133,8 +7258,13 @@
     "tools/cmake/PulpPlugin.cmake",
     "tools/cmake/PulpTestData.cmake",
     "tools/deps/manifest.json",
+    "tools/import-design/browser_capture/runtime_manifest.txt",
     "tools/import-validation/importer_differential/core.py",
     "tools/motion/visual/requirements.lock",
+    "tools/packages/chrome-for-testing-verification.md",
+    "tools/packages/packages.lock.schema.json",
+    "tools/packages/pulp-packages-verify.cmake",
+    "tools/packages/tool-registry.json",
     "tools/scripts",
     "tools/scripts/affected_targets.py",
     "tools/scripts/build_time_report.py",
@@ -7146,6 +7276,7 @@
     "tools/scripts/gpu_audio_provider_identity.py",
     "tools/scripts/json_schema_lite.py",
     "tools/scripts/process_liveness.py",
+    "tools/scripts/release_product_matrix.json",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_build_time_report.py",
@@ -7180,11 +7311,17 @@
     "tools/ci/lane_reuse_record.py",
     "tools/ci/load_api_exemptions.json",
     "tools/ci/pr_head_affected_tests.py",
+    "tools/ci/record_build_metric.sh",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
     "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cmake/PulpTestData.cmake",
+    "tools/import-design/browser_capture/runtime_manifest.txt",
     "tools/motion/visual/requirements.lock",
+    "tools/packages/chrome-for-testing-verification.md",
+    "tools/packages/packages.lock.schema.json",
+    "tools/packages/pulp-packages-verify.cmake",
+    "tools/packages/tool-registry.json",
     "tools/scripts",
     "tools/scripts/affected_targets.py",
     "tools/scripts/build_time_report.py",
@@ -7194,6 +7331,7 @@
     "tools/scripts/gate_python_imports_check.py",
     "tools/scripts/json_schema_lite.py",
     "tools/scripts/process_liveness.py",
+    "tools/scripts/release_product_matrix.json",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_generated_version_bump_check.py"
@@ -7508,6 +7646,20 @@
    ],
    "kind": "python"
   },
+  "pulp-motion-frame-stamp-decode-cpp-frames": {
+   "entry": "tools/motion/visual/test_frame_stamp_decode.py",
+   "inputs": [
+    "tools/motion/visual/test_frame_stamp_decode.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-motion-frame-stamp-decode-selftest": {
+   "entry": "tools/motion/visual/test_frame_stamp_decode.py",
+   "inputs": [
+    "tools/motion/visual/test_frame_stamp_decode.py"
+   ],
+   "kind": "python"
+  },
   "pulp-motion-visual-capture-smoke": {
    "entry": "tools/motion/visual/test_capture_smoke.py",
    "inputs": [
@@ -7556,6 +7708,14 @@
    "inputs": [
     "test/CMakeLists.txt",
     "tools/scripts/test_pulp_test_data_cmake.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-test-native-metal-audio-comparator": {
+   "entry": "tools/scripts/gpu_audio_comparator_v2.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_comparator_v2.py",
+    "tools/scripts/gpu_audio_p2_host_preflight.py"
    ],
    "kind": "python"
   },
@@ -9262,6 +9422,14 @@
     "tools/ci/spawn_closure.py",
     "tools/ci/test_read_audit.py",
     "tools/cmake"
+   ],
+   "kind": "python"
+  },
+  "realtime-pool-resource-locks": {
+   "entry": "tools/scripts/test_realtime_pool_resource_locks.py",
+   "inputs": [
+    "tools/scripts/test_gpu_test_resource_locks.py",
+    "tools/scripts/test_realtime_pool_resource_locks.py"
    ],
    "kind": "python"
   },
@@ -11229,11 +11397,17 @@
     "tools/ci/lane_reuse_record.py",
     "tools/ci/load_api_exemptions.json",
     "tools/ci/pr_head_affected_tests.py",
+    "tools/ci/record_build_metric.sh",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
     "tools/ci/spawn_none_build_path_reviews.json",
     "tools/cmake/PulpTestData.cmake",
+    "tools/import-design/browser_capture/runtime_manifest.txt",
     "tools/motion/visual/requirements.lock",
+    "tools/packages/chrome-for-testing-verification.md",
+    "tools/packages/packages.lock.schema.json",
+    "tools/packages/pulp-packages-verify.cmake",
+    "tools/packages/tool-registry.json",
     "tools/scripts",
     "tools/scripts/affected_targets.py",
     "tools/scripts/build_time_report.py",
@@ -11245,6 +11419,7 @@
     "tools/scripts/json_schema_lite.py",
     "tools/scripts/node_abi_gate.py",
     "tools/scripts/process_liveness.py",
+    "tools/scripts/release_product_matrix.json",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/sample_region_compat_baseline.py",
     "tools/scripts/script_test_inputs.py",
@@ -12227,7 +12402,9 @@
     ".github/workflows",
     "docs/status/gpu-vellum-handoff.yaml",
     "docs/status/pulp-tooling-disposition.json",
+    "tools/scripts/build_migration_index.py",
     "tools/scripts/connected_git_history.py",
+    "tools/scripts/fold_migration_notes.py",
     "tools/scripts/gate_common.py",
     "tools/scripts/gate_test_support.py",
     "tools/scripts/gpu_handoff_provenance.py",

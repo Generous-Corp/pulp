@@ -245,13 +245,19 @@ class PushRunsNeverReachSelfHosted(unittest.TestCase):
         self.assertIsNone(_macos_runs_on(None, event="push"))
 
     def test_push_matrix_is_entirely_hosted(self):
-        entries = _matrix(None, event="push",
-                          extra_env={"AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON": AUTO_LINUX})
-        self.assertTrue(entries, "push produced an empty matrix")
-        self.assertEqual({e["key"] for e in entries}, {"linux", "windows"})
-        for entry in entries:
-            with self.subTest(key=entry["key"]):
-                self.assertNotIn("self-hosted", entry["runs_on_json"])
+        # GitHub-hosted Windows is opt-in, so a default push runs Linux alone;
+        # with PULP_ALLOW_HOSTED_WINDOWS=1 Windows returns, still hosted.
+        for extra, keys in (({}, {"linux"}),
+                            ({"ALLOW_HOSTED_WINDOWS_VAR": "1"}, {"linux", "windows"})):
+            entries = _matrix(None, event="push",
+                              extra_env={"AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON": AUTO_LINUX,
+                                         **extra})
+            with self.subTest(opt_in=bool(extra)):
+                self.assertTrue(entries, "push produced an empty matrix")
+                self.assertEqual({e["key"] for e in entries}, keys)
+                for entry in entries:
+                    with self.subTest(key=entry["key"]):
+                        self.assertNotIn("self-hosted", entry["runs_on_json"])
 
     def test_merge_group_matrix_still_has_the_self_hosted_macos_gate(self):
         """Control: the push guard must not remove the required gate."""
