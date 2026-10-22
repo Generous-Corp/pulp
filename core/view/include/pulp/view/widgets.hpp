@@ -960,6 +960,9 @@ private:
     struct FaceMetrics {
         float ascent = 0.0f;
         float descent = 0.0f;
+        // fAscent/fDescent; see PreparedText::typographic_ascent().
+        float typographic_ascent = 0.0f;
+        float typographic_descent = 0.0f;
         bool real = false;
     };
     FaceMetrics face_metrics(const std::string& family, float font_size,

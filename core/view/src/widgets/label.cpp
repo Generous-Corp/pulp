@@ -1137,6 +1137,8 @@ Label::FaceMetrics Label::face_metrics(const std::string& family,
     if (prepared.metrics_are_real() && prepared.ascent() > 0.0f) {
         m.ascent = prepared.ascent();
         m.descent = prepared.descent();
+        m.typographic_ascent = prepared.typographic_ascent();
+        m.typographic_descent = prepared.typographic_descent();
         m.real = true;
     } else {
         // No Skia, or the family did not resolve. Keep the historic
@@ -1144,6 +1146,8 @@ Label::FaceMetrics Label::face_metrics(const std::string& family,
         // so, since callers gate the correction on `real`.
         m.ascent = font_size * 0.85f;
         m.descent = font_size * 0.15f;
+        m.typographic_ascent = m.ascent;
+        m.typographic_descent = m.descent;
         m.real = false;
     }
     face_metrics_family_ = family;
@@ -1984,9 +1988,25 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         // Unclamped for the same reason the native branch above is: a face
         // whose ink exceeds the captured box has negative leading and CSS lets
         // its glyphs overflow evenly, top and bottom.
-        const float half_leading =
-            (first_line.height - single_line_text_height) * 0.5f;
-        baseline_y = first_line.y + half_leading + first_line_ascent;
+        float line_ink = single_line_text_height;
+        float line_ascent = first_line_ascent;
+        if (!has_attributed_) {
+            // Chromium built this box from the face's typographic metrics,
+            // each rounded to a whole pixel: a text run's captured height is
+            // round(fAscent) + round(fDescent) and its baseline sits
+            // round(fAscent) below the run's top. The worst-case extents
+            // `first_line_ascent` carries (fTop) rise above fAscent on faces
+            // such as Arial Bold, and descending by them paints the line a
+            // device pixel or more high against the box Chromium reported.
+            const auto fm = face_metrics(family, effective_font_size,
+                                         effective_font_weight(), font_style_);
+            if (fm.real) {
+                line_ascent = std::round(fm.typographic_ascent);
+                line_ink = line_ascent + std::round(fm.typographic_descent);
+            }
+        }
+        const float half_leading = (first_line.height - line_ink) * 0.5f;
+        baseline_y = first_line.y + half_leading + line_ascent;
     }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared
