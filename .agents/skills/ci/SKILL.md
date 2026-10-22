@@ -180,6 +180,21 @@ route the build through `tools/ci/governed-build.sh` without an explicit
 `--parallel` cap. The governor owns the worker share and build-directory lock;
 the emulator and fixture execution steps remain separate.
 
+`governed-build.sh` treats an explicit `-j`/`--parallel` on the build command
+(also after `--`) as a request: the lower of it and `PULP_BUILD_JOBS` caps the
+lease, and the flag is rewritten to the final share before the command runs.
+A literal count can therefore lower a build's share but never raise it past
+the lease, and a bare flag cannot go unbounded. Before that rule the flag
+silently overrode the governor (a `-j4` build reserved and logged the full
+profile share). Covered by the `explicit`/`flag` cases in
+`tools/ci/test_governed_build.py`.
+
+A `CMAKE_BUILD_PARALLEL_LEVEL` the caller exports is the same kind of request:
+the lowest of it, any flag, and `PULP_BUILD_JOBS` wins. The wrapper exports its
+own share under that name, which used to replace the caller's value, so
+`CMAKE_BUILD_PARALLEL_LEVEL=4` ran at the full lease. Covered by the
+`caller_parallel_level` cases.
+
 The TSan workflow keeps its SignalGraph selection exact and bounded: include
 the compile-first lifecycle cases, mutation-lock and prepare-swap publication
 cases, and the routed and parallel re-prepare/process race hammers. Do not

@@ -1989,6 +1989,24 @@ It is tiered:
   never asked to use them". `build.yml`'s `Build` step carried `--parallel 4`
   fleet-wide for this reason until it was replaced by the governor.
 
+  **An explicit `-j` under the wrapper is a ceiling, not an override.**
+  `tools/ci/governed-build.sh` reads a `-j N`, `-jN`, `--parallel N` or
+  `--parallel=N` on the build command (including a native-tool flag after
+  `--`) as a request, takes the lower of it and `PULP_BUILD_JOBS`, sizes the
+  lease to that, and rewrites the flag to the final share before running the
+  command. So `governed-build.sh cmake --build build -j4` runs at most four
+  jobs and reserves four cores, `-j64` under a 6-core lease runs six, and a
+  bare `--parallel` gets the governed count instead of going unbounded. The
+  log says so: `build command's own parallelism flag set to the governed share
+  -jN`. Before this, the command's own flag silently won in both directions: a
+  `-j4` reserved and logged a profile-sized lease, and a higher `-j` ran past
+  the lease. `PULP_BUILD_JOBS` remains the way to request a lower share without
+  touching the command. A `CMAKE_BUILD_PARALLEL_LEVEL` you export is a ceiling
+  in the same way: the lowest of it, the flag, and `PULP_BUILD_JOBS` sets the
+  share, and the wrapper then exports that final share under the same name.
+  (It used to overwrite the caller's value, so `CMAKE_BUILD_PARALLEL_LEVEL=4`
+  ran at the full lease.) A non-numeric or zero value is ignored.
+
   **A gate VM's `-j` is its lease.** tartci sizes each macOS gate clone from
   the lane's VM lease: `C` vCPUs and `(C-1) x 1536 x 4/3` MB of RAM, clamped to
   8 GiB and 16 GiB. That memory figure is the exact inverse of the Tier-0
