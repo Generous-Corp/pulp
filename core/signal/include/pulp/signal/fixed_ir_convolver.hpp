@@ -78,17 +78,17 @@ template <typename SampleType = float> class FixedIrConvolverT {
                                                          : ConvolutionBackend::partitioned_fft;
     }
 
-    /// The longest IR run on the direct engine for a block size; `SIZE_MAX`
-    /// means every length.
+    /// The longest IR run on the direct engine for a block size.
     ///
     /// The table is measured on Apple Silicon with the Accelerate backend,
-    /// single and multi-instance. At 16-frame callbacks and below the direct
-    /// engine beat the uniform FFT at every measured length up to 4096 taps,
-    /// since both scale linearly with IR length there and the FFT pays a
-    /// per-partition overhead. Above that the crossover is not monotonic in
-    /// block size, so it is a table rather than a formula. Other backends
-    /// keep the FFT engine until they have their own measurements; a scalar
-    /// direct kernel is an order of magnitude slower.
+    /// single and multi-instance, for IRs of 8 to 4096 taps (receipt:
+    /// docs/validation/convolver-crossover/). At 16-frame callbacks and below
+    /// the direct engine beat the uniform FFT at every measured length, so
+    /// the limit there is the end of the measured range; longer IRs keep the
+    /// FFT engine until they are measured. Above 16 frames the crossover is
+    /// not monotonic in block size, so it is a table rather than a formula.
+    /// Other backends keep the FFT engine until they have their own
+    /// measurements; a scalar direct kernel is an order of magnitude slower.
     static constexpr std::size_t direct_fir_limit(std::size_t block_size) noexcept {
 #if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
         switch (detail::convolver_block_size(block_size)) {
@@ -97,7 +97,7 @@ template <typename SampleType = float> class FixedIrConvolverT {
         case 4:
         case 8:
         case 16:
-            return static_cast<std::size_t>(-1);
+            return 4096;
         case 32:
             return 448;
         case 64:

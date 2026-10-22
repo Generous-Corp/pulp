@@ -171,11 +171,15 @@ TEST_CASE("FixedIrConvolver crossover edges follow the measured per-block table"
           "[signal][convolver][fixed-ir]") {
     using Backend = ConvolutionBackend;
 #if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
-    // At 16-frame callbacks and below the policy keeps the direct engine at
-    // every length.
+    // At 16-frame callbacks and below the direct engine covers the whole
+    // measured range; longer IRs keep the FFT engine.
     for (const std::size_t block :
          {std::size_t{0}, std::size_t{1}, std::size_t{7}, std::size_t{16}}) {
-        REQUIRE(FixedIrConvolver::choose_backend(65536, block) == Backend::direct_fir);
+        INFO("block " << block);
+        REQUIRE(FixedIrConvolver::direct_fir_limit(block) == 4096);
+        REQUIRE(FixedIrConvolver::choose_backend(4096, block) == Backend::direct_fir);
+        REQUIRE(FixedIrConvolver::choose_backend(4097, block) == Backend::partitioned_fft);
+        REQUIRE(FixedIrConvolver::choose_backend(65536, block) == Backend::partitioned_fft);
     }
     struct Edge {
         std::size_t block, limit;
