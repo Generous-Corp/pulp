@@ -653,7 +653,7 @@ TEST_CASE("shared session offline fence refuses reprime until a fresh preparatio
           "[gpu_audio][shared_io][session][recovery]") {
     Fixture fixture;
     fixture.prepare();
-    fixture.provider->auto_complete = false;
+    fixture.provider->complete_on_poll = false;
     std::array<float, 2> output;
     callback(fixture.session, a, output);
     REQUIRE(fixture.session.service(1).submitted == 1);
@@ -690,7 +690,7 @@ TEST_CASE("released shared session cannot be prepared again",
     fixture.prepare();
     REQUIRE(fixture.session.fence_for_offline());
     REQUIRE(fixture.session.release());
-    auto owner = std::make_unique<FakeProvider>(fixture.state);
+    auto owner = make_provider(fixture.state);
     auto program = std::make_unique<FakeProgram>(*owner, fixture.state);
     CHECK_FALSE(fixture.session.prepare(
         {std::move(owner), std::move(program)},
