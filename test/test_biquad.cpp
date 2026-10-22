@@ -603,3 +603,28 @@ TEST_CASE("Biquad::process_chain matches chained sample paths for any section co
         CHECK(std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)) == 0);
     }
 }
+
+TEST_CASE("Biquad block path snaps a subnormal state within 64 samples",
+          "[signal][biquad][denormal]") {
+    using namespace pulp::test::denormal_tail;
+    if (flush_to_zero_active())
+        SKIP("this thread flushes subnormals to zero; the tail counts would be vacuous");
+    // A subnormal impulse puts the state straight into the subnormal range,
+    // where a 20 Hz lowpass rounds into a cycle that never decays on its own.
+    // Only the snap clears it, so the subnormal run length is the snap
+    // interval: this pins the documented 64 samples, not just "one chunk".
+    Biquad filter;
+    filter.set_coefficients(Biquad::Type::lowpass, 20.0f, 0.7071f, kSampleRate);
+    std::vector<float> buffer(8192, 0.0f);
+    buffer[0] = 1.0e-39f;
+    REQUIRE(pulp::signal::is_denormal(buffer[0]));
+    filter.process(buffer.data(), static_cast<int>(buffer.size()));
+    std::size_t subnormal = 0;
+    std::size_t nonzero_end = 0;
+    for (std::size_t i = 0; i < buffer.size(); ++i) {
+        subnormal += pulp::signal::is_denormal(buffer[i]) ? 1u : 0u;
+        if (buffer[i] != 0.0f) nonzero_end = i + 1;
+    }
+    CHECK(subnormal > 0);
+    CHECK(nonzero_end <= 64);
+}

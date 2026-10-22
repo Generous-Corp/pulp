@@ -67,6 +67,16 @@ pulp_add_test_suite(pulp-test-waveform-editor GROUP pulp-test-group-app-view
 # FastMath approximation tests
 pulp_add_test_suite(pulp-test-fast-math GROUP pulp-test-group-app-signal
     LIBRARIES pulp::signal)
+# The same accuracy contracts with multiply-add contraction disabled, as GCC
+# (Pulp's policy), MSVC and x86-64 without FMA compile them. Its own binary:
+# sharing inline functions with a contracting TU would let the linker pick
+# either version.
+pulp_add_test_suite(pulp-test-fast-math-no-contract
+    SOURCES test_fast_math_no_contract.cpp
+    LIBRARIES pulp::signal)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(pulp-test-fast-math-no-contract PRIVATE -ffp-contract=off)
+endif()
 
 # Polynomial/Matrix math tests
 pulp_add_test_suite(pulp-test-poly-math GROUP pulp-test-group-app-signal

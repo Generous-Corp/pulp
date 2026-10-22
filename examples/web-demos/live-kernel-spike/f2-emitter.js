@@ -358,7 +358,8 @@
     // Per-sample imports actually needed by this graph.
     const need = new Set();
     for (const c of cfgs) {
-      // LadderFilterT<float> saturates with FastMath::tanh (Padé), not libm.
+      // LadderFilterT<float> saturates through signal::ladder_tanh (by default
+      // FastMath::tanh_accurate), not libm tanh; the kernel imports that helper.
       if (c.type === NT.LADDER) need.add("ladder_tanhf");
       if (c.type === NT.OSC && c.wave === 0) need.add("sinf");
       if (c.type === NT.OSC && (c.wave === 2 || c.wave === 3)) need.add("fmodf");

@@ -852,7 +852,8 @@ TEST_CASE("Svf block path flushes a decaying tail without subnormal residency",
 TEST_CASE("FastMath::tanh_accurate stays within its pinned bound of std::tanh",
           "[signal][ladder][fast_math]") {
     // Every 64th positive float: the bound is 3.0e-7 absolute over the whole
-    // range (the exhaustive sweep is a private receipt).
+    // range with fused multiply-add and 3.6e-7 without (the no-contract suite
+    // checks the latter on its own).
     double worst = 0.0;
     double worst_small_rel = 0.0;
     for (std::uint32_t bits = 0; bits < 0x7f800000u; bits += 64) {
@@ -866,7 +867,7 @@ TEST_CASE("FastMath::tanh_accurate stays within its pinned bound of std::tanh",
         // Odd symmetry is exact, not approximate.
         REQUIRE(FastMath::tanh_accurate(-x) == -FastMath::tanh_accurate(x));
     }
-    CHECK(worst < 3.5e-7);
+    CHECK(worst < 3.6e-7);
     // Unit slope at the origin: small signals see the same loop gain as tanh.
     CHECK(worst_small_rel < 3.0e-7);
     CHECK(FastMath::tanh_accurate(9.5f) == 1.0f);

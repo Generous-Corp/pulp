@@ -39,9 +39,22 @@ public:
         return process_with_profile<LadderSaturation::realtime_efficient>(input);
     }
 
+    /// Process a buffer in place with the default saturator.
     void process(SampleType* buffer, int num_samples) {
         for (int i = 0; i < num_samples; ++i)
             buffer[i] = process(buffer[i]);
+    }
+
+    /// Process a buffer in place with exact std::tanh stages.
+    void process_reference(SampleType* buffer, int num_samples) {
+        for (int i = 0; i < num_samples; ++i)
+            buffer[i] = process_reference(buffer[i]);
+    }
+
+    /// Process a buffer in place with the Padé `FastMath::tanh` stages.
+    void process_realtime_efficient(SampleType* buffer, int num_samples) {
+        for (int i = 0; i < num_samples; ++i)
+            buffer[i] = process_realtime_efficient(buffer[i]);
     }
 
     void reset() {
