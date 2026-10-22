@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/convolver.hpp>
-#include <vector>
+#include <pulp/signal/fft.hpp>
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <vector>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
@@ -262,4 +265,90 @@ TEST_CASE("Convolver: a block-size violation does not corrupt the stream after i
     REQUIRE(worst_recovered < kTol);
 
     REQUIRE(torn.block_size_violations() == 0);  // cleared by the recovery reset()
+}
+
+namespace {
+
+// Broadband deterministic stimulus / IR in [-1, 1].
+std::vector<double> lcg_signal(std::size_t n, std::uint32_t seed, double decay) {
+    std::vector<double> out(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        const double v = static_cast<double>(seed >> 8) / 8388608.0 - 1.0;
+        out[i] = v * std::exp(-decay * static_cast<double>(i));
+    }
+    return out;
+}
+
+// Residual of `actual` against a long-double direct convolution of the same
+// (already rounded) input and IR, in dB relative to the reference energy.
+template <typename T>
+double convolution_null_db(const std::vector<T>& input, const std::vector<T>& ir,
+                           const std::vector<T>& actual) {
+    long double err = 0, ref = 0;
+    for (std::size_t n = 0; n < actual.size(); ++n) {
+        long double y = 0;
+        const std::size_t taps = std::min(ir.size(), n + 1);
+        for (std::size_t k = 0; k < taps; ++k)
+            y += static_cast<long double>(ir[k]) * static_cast<long double>(input[n - k]);
+        const long double d = static_cast<long double>(actual[n]) - y;
+        err += d * d;
+        ref += y * y;
+    }
+    return 10.0 * std::log10(static_cast<double>(err / ref) + 1e-300);
+}
+
+template <typename T>
+std::vector<T> run_partitioned(const std::vector<T>& input, const std::vector<T>& ir,
+                               std::size_t block) {
+    PartitionedConvolverT<T> conv;
+    conv.load_ir(ir.data(), ir.size(), block);
+    std::vector<T> out(input.size());
+    for (std::size_t off = 0; off < input.size(); off += block)
+        conv.process(input.data() + off, out.data() + off, block);
+    REQUIRE(conv.block_size_violations() == 0);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("Convolver: output nulls against a long-double direct convolution",
+          "[signal][convolver][null]") {
+    struct Case {
+        std::size_t block;
+        std::size_t ir_length;
+    };
+    for (const Case c : {Case{2, 37}, Case{32, 64}, Case{128, 4096}, Case{512, 512},
+                         Case{512, 9000}}) {
+        const std::size_t frames = c.block * ((3 * c.ir_length) / c.block + 8);
+        const auto in64 = lcg_signal(frames, 0x1234567u, 0.0);
+        const auto ir64 = lcg_signal(c.ir_length, 0xBEEFu, 4.0 / static_cast<double>(c.ir_length));
+        const std::vector<float> in32(in64.begin(), in64.end());
+        const std::vector<float> ir32(ir64.begin(), ir64.end());
+
+        const double null32 = convolution_null_db(in32, ir32, run_partitioned(in32, ir32, c.block));
+        const double null64 = convolution_null_db(in64, ir64, run_partitioned(in64, ir64, c.block));
+        INFO("block=" << c.block << " ir=" << c.ir_length << " float null=" << null32
+                      << " dB, double null=" << null64 << " dB");
+        REQUIRE(null32 < -120.0);
+        REQUIRE(null64 < -250.0);
+    }
+}
+
+TEST_CASE("Convolver: the null gate sees a one-tap defect", "[signal][convolver][null]") {
+    // Negative control: render with an IR whose one tap is off by 1e-5 of the
+    // IR's norm and grade it against the true IR. A -100 dB defect must fail the
+    // -120 dB gate, or the gate is grading nothing.
+    const auto in64 = lcg_signal(128 * 40, 0x1234567u, 0.0);
+    const auto ir64 = lcg_signal(1000, 0xBEEFu, 0.004);
+    double norm = 0.0;
+    for (double v : ir64)
+        norm += v * v;
+    auto planted = ir64;
+    planted[333] += 1e-5 * std::sqrt(norm);
+    const std::vector<float> in32(in64.begin(), in64.end());
+    const std::vector<float> ir32(ir64.begin(), ir64.end());
+    const std::vector<float> planted32(planted.begin(), planted.end());
+    REQUIRE(convolution_null_db(in32, ir32, run_partitioned(in32, ir32, 128)) < -120.0);
+    REQUIRE(convolution_null_db(in32, ir32, run_partitioned(in32, planted32, 128)) > -120.0);
 }

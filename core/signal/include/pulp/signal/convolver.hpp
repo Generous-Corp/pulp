@@ -341,30 +341,34 @@ public:
     }
 
 private:
-    // Fold one input block into the shared history: copy it into the overlap
-    // buffer's upper half and take the forward FFT into the current ring slot.
-    // Called ONCE per processed block, before any IR renders.
+    // Fold one input block into the shared history: copy it into the upper
+    // half of the real overlap window and take its real forward transform into
+    // the current ring slot (DC..Nyquist only; every spectrum here is the
+    // transform of real data, so the upper half is never needed). Called ONCE
+    // per processed block, before any IR renders.
     static void capture_input(ConvolverInputHistoryT<SampleType>& h,
                               FftT<SampleType>& fft,
                               const SampleType* input) {
-        for (int i = 0; i < h.block_size; ++i)
-            h.overlap[h.block_size + i] = {input[i], SampleType{0.0f}};
-        auto& current_spectrum = h.spectra[h.write_pos];
-        std::copy(h.overlap.begin(), h.overlap.end(), current_spectrum.begin());
+        SampleType* window = overlap_samples(h);
+        std::copy_n(input, h.block_size, window + h.block_size);
         // The transform is a property of the FFT size, which every IR rendering
         // against this history shares, so any loaded state's `fft` will do.
-        fft.forward(current_spectrum.data());
+        fft.forward_real_half(window, h.spectra[h.write_pos].data());
     }
 
-    // Slide the overlap buffer down and step the ring cursor. Called ONCE per
+    // Slide the overlap window down and step the ring cursor. Called ONCE per
     // processed block, after every IR has read this block — a crossfade renders
     // twice from one history, so stepping per render would double-advance it.
     static void advance_input(ConvolverInputHistoryT<SampleType>& h) {
-        std::copy_n(h.overlap.begin() + h.block_size, h.block_size,
-                    h.overlap.begin());
-        std::fill(h.overlap.begin() + h.block_size, h.overlap.end(),
-                  std::complex<SampleType>{SampleType{0.0f}, SampleType{0.0f}});
+        SampleType* window = overlap_samples(h);
+        std::copy_n(window + h.block_size, h.block_size, window);
         h.write_pos = (h.write_pos + 1) % h.spectra.size();
+    }
+
+    // The overlap window as `fft_size` real samples, packed into the leading
+    // scalars of the history's complex `overlap` storage.
+    static SampleType* overlap_samples(ConvolverInputHistoryT<SampleType>& h) {
+        return reinterpret_cast<SampleType*>(h.overlap.data());
     }
 
     // Multiply-accumulate one IR's partitions against the shared input history
@@ -375,21 +379,22 @@ private:
     static void render_ir(ConvolverIrStateT<SampleType>& s,
                           const ConvolverInputHistoryT<SampleType>& h,
                           SampleType* output) {
-        std::fill(s.accum.begin(), s.accum.end(),
-                  std::complex<SampleType>{SampleType{0.0f}, SampleType{0.0f}});
-        // Input and IR are FFTs of real data, so every spectrum is Hermitian
-        // (bin N-i is the conjugate of bin i). The frequency-domain product is
-        // therefore Hermitian too, so only the lower half + Nyquist (N/2+1 bins)
-        // is independent — the upper half is reconstructed by conjugate symmetry
-        // below instead of being multiply-accumulated, halving the dominant MAC.
+        // Input and IR are transforms of real data, so every spectrum is
+        // Hermitian and only DC..Nyquist (N/2+1 bins) is independent. Only those
+        // bins are multiply-accumulated, and the real inverse transform below
+        // reads only those bins.
         const int half = s.fft_size / 2;   // Nyquist bin; MAC bins [0, half]
         const std::size_t capacity = h.spectra.size();
+        std::complex<SampleType>* accum = s.accum.data();
         for (std::size_t p = 0; p < s.num_partitions; ++p) {
             // Partition p convolves with the input block of age p. `write_pos`
             // holds the block being processed, so age p is p slots back.
             const std::size_t idx = (h.write_pos + capacity - p) % capacity;
             const std::complex<SampleType>* in = h.spectra[idx].data();
             const std::complex<SampleType>* ir = s.ir_spectra[p].data();
+            // Partition 0 writes rather than accumulates, so the accumulator
+            // never needs clearing.
+            const bool first = p == 0;
             for (int i = 0; i <= half; ++i) {
                 // Complex MAC as explicit float ops: the finite-value result of
                 // std::complex::operator* without its libm NaN/Inf-recovery
@@ -397,20 +402,16 @@ private:
                 // finite spectra a convolver sees (differences are sub-ulp).
                 const SampleType ar = in[i].real(), ai = in[i].imag();
                 const SampleType br = ir[i].real(), bi = ir[i].imag();
-                s.accum[i] += std::complex<SampleType>(ar * br - ai * bi,
-                                                       ar * bi + ai * br);
+                const std::complex<SampleType> product(ar * br - ai * bi, ar * bi + ai * br);
+                accum[i] = first ? product : accum[i] + product;
             }
         }
-        // Mirror the lower half onto the conjugate-symmetric upper half so the
-        // inverse transform sees a full spectrum. Bins 0 and `half` (DC and
-        // Nyquist) have no distinct partner, so they keep their MAC'd values.
-        for (int i = half + 1; i < s.fft_size; ++i)
-            s.accum[i] = std::conj(s.accum[s.fft_size - i]);
 
-        s.fft->inverse(s.accum.data());
-
-        for (int i = 0; i < s.block_size; ++i)
-            output[i] = s.accum[s.block_size + i].real();
+        // Real inverse in the accumulator's own storage, 1/N folded in; overlap-
+        // save keeps the second half of the window.
+        auto* time = reinterpret_cast<SampleType*>(accum);
+        s.fft->inverse_real_half(accum, time);
+        std::copy_n(time + s.block_size, s.block_size, output);
     }
 
     // Zero the shared input history so the next block starts a new stream.
