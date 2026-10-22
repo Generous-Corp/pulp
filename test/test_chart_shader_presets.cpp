@@ -8,6 +8,7 @@
 #include <pulp/view/widgets.hpp>
 
 #include <algorithm>
+#include <array>
 #include <clocale>
 #include <cmath>
 #include <cstdint>
@@ -159,6 +160,23 @@ TEST_CASE("chart shader presets are named and refuse what they cannot build",
         std::regex_search(faint_sksl, divisor, std::regex(R"(exp\(-g\.d \* g\.d / ([^)]+)\))")));
     INFO("baked divisor " << divisor[1].str());
     REQUIRE(std::stod(divisor[1].str()) == Catch::Approx(2e-6).epsilon(1e-3));
+#ifdef PULP_HAS_SKIA
+    // SkSL accepts the exponent form to_chars produces: the faint glow bakes
+    // an e-06 divisor and a light from straight above bakes cos(90 deg) as an
+    // e-08 x component.
+    const auto overhead = make_chart_shader_preset("bevel", lit_from(90.0f)).sksl;
+    REQUIRE(std::regex_search(overhead, std::regex("[0-9]e-0[0-9]")));
+    for (const auto* source : {&faint_sksl, &overhead}) {
+        const auto error = Canvas::compile_sdf_chart_sksl(Canvas::SDFShape::flat_arc, *source);
+        INFO(error);
+        REQUIRE(error.empty());
+    }
+#endif
+
+    // An intensity so large that 255 * intensity overflows a float still
+    // gives a finite reach.
+    REQUIRE(std::isfinite(chart_glow_reach(kChartGlowSigmaMax, 1e37f)));
+    REQUIRE(chart_glow_reach(kChartGlowSigmaMax, 1e37f) >= 3.0f * kChartGlowSigmaMax);
 
     ChartProfile profile = ChartProfile::round;
     REQUIRE(parse_chart_profile("chamfer", profile));
@@ -374,17 +392,19 @@ TEST_CASE("lit presets shade a rounded cap as a dome without a seam",
 #endif
 }
 
-TEST_CASE("a knob painted by a chart preset alone still shows its value",
+TEST_CASE("a knob painted by a chart preset still shows its value",
           "[view][shader][chart-preset]") {
 #ifdef PULP_HAS_SKIA
     if (!raw_rgba_render_available())
         SKIP("this build has no raw RGBA render backend");
     // The chart is the full arc at every value, so the knob draws its value
     // pointer over it. Two values must render differently, one value the same.
-    auto render_knob = [](float value) {
+    auto render_knob = [](float value, const char* body) {
         Knob knob;
         knob.set_bounds({0, 0, 80, 80});
         knob.set_value(value);
+        if (body)
+            knob.set_custom_shader(body);
         auto preset = make_chart_shader_preset("bevel");
         REQUIRE(preset.error.empty());
         knob.set_chart_shader(std::move(preset.sksl), preset.reach);
@@ -403,12 +423,36 @@ TEST_CASE("a knob painted by a chart preset alone still shows its value",
                 ++count;
         return count;
     };
-    const auto low = render_knob(0.2f);
-    const auto high = render_knob(0.8f);
-    const auto low_again = render_knob(0.2f);
+    const auto low = render_knob(0.2f, nullptr);
+    const auto high = render_knob(0.8f, nullptr);
+    const auto low_again = render_knob(0.2f, nullptr);
     INFO("pixels differing between 0.2 and 0.8: " << differing(low, high));
     CHECK(differing(low, high) > 40);
     CHECK(differing(low, low_again) == 0);
+
+    // With a body shader as well, the body paints over the chart and owns the
+    // value display. This one fills a translucent green bar along the bottom,
+    // as wide as the value; the bottom centre sits in the arc's gap, so it is
+    // green at 0.8 and not at 0.2.
+    constexpr const char* kValueBar =
+        "uniform float2 resolution; uniform float value; "
+        "half4 main(float2 p) { return p.x < value * resolution.x && "
+        "p.y > resolution.y * 0.8 ? half4(0, 0.6, 0, 0.6) : half4(0); }";
+    const auto bar_low = render_knob(0.2f, kValueBar);
+    const auto bar_high = render_knob(0.8f, kValueBar);
+    auto rgb = [](const std::vector<uint8_t>& rgba, int x, int y) {
+        const auto* p = &rgba[(static_cast<size_t>(y) * 80 + static_cast<size_t>(x)) * 4];
+        return std::array<int, 3>{p[0], p[1], p[2]};
+    };
+    const auto at_high = rgb(bar_high, 40, 70);
+    const auto at_low = rgb(bar_low, 40, 70);
+    INFO("bottom centre at 0.8: " << at_high[0] << "," << at_high[1] << "," << at_high[2]
+                                  << "; at 0.2: " << at_low[0] << "," << at_low[1] << ","
+                                  << at_low[2] << "; differing pixels "
+                                  << differing(bar_low, bar_high));
+    CHECK(at_high[1] > at_high[0] + 60);
+    CHECK(at_low[1] < at_low[0] + 20);
+    CHECK(differing(bar_low, bar_high) > 40);
 #else
     SUCCEED("chart preset renders require PULP_HAS_SKIA");
 #endif

@@ -32,9 +32,12 @@ namespace {
 // widget's normal C++ body instead of leaving it blank — the failure used to be
 // swallowed (the bool was ignored), so a bad draw-time shader painted only the
 // labels over an empty body. Logs the failure exactly once per host instance.
-bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
-                             View& view, float w, float h,
-                             float value, float shader_time) {
+//
+// A knob's chart shader paints first and a body shader, if any, paints over
+// it. `chart_only` reports that the chart painted and no body shader did, so
+// nothing has shown the value yet.
+bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host, View& view, float w,
+                             float h, float value, float shader_time, bool* chart_only = nullptr) {
     canvas::Canvas::ShaderUniforms u;
     u.value = value;
     u.time = shader_time;
@@ -51,6 +54,7 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
                                ? host.shader_scope_binding()->data
                                : nullptr;
     options.geometry = host.shader_geometry();
+    bool chart_painted = false;
     if (!host.chart_shader().empty()) {
         if (dynamic_cast<Knob*>(&view) != nullptr) {
             canvas::Canvas::SDFStyle style;
@@ -83,16 +87,19 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
                                        style.feather_sigma, min_reach, chart_options.reach);
                     host.mark_shader_draw_failure_logged();
                 }
-            } else if (canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc, 0, 0,
-                                                         w, h, style, host.chart_shader(),
-                                                         chart_options)) {
-                return true;
+            } else {
+                chart_painted =
+                    canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc, 0, 0, w,
+                                                      h, style, host.chart_shader(), chart_options);
             }
         }
     }
-    if (canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, options)) {
+    const bool body_painted = (!chart_painted || host.has_custom_shader()) &&
+                              canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, options);
+    if (chart_only)
+        *chart_only = chart_painted && !body_painted;
+    if (body_painted || chart_painted)
         return true;
-    }
     if (!host.shader_draw_failure_logged()) {
         runtime::log_info("[custom-shader] {} shader failed to draw; painting the default "
                           "widget body instead",
@@ -486,6 +493,7 @@ void Knob::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     float cx = b.width * 0.5f;
     float cy = b.height * 0.5f;
+    bool chart_only = false; // set by draw_custom_shader_body below
     float radius = std::min(cx, cy) * 0.8f;
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
     bool captured_indicator_drawn = false;
@@ -617,11 +625,13 @@ void Knob::paint(canvas::Canvas& canvas) {
     // FAILURE falls through to the normal body branches below (not a blank
     // widget); on success the shader painted the body and we skip them.
     else if ((has_custom_shader() || !chart_shader().empty()) &&
-             draw_custom_shader_body(canvas, *this, *this, b.width, b.height, shown, shader_time)) {
+             draw_custom_shader_body(canvas, *this, *this, b.width, b.height, shown, shader_time,
+                                     &chart_only)) {
         // Shader painted the body; fall through to draw labels and value text.
-        // A chart alone paints the knob's material, not its value, so the
-        // rotating pointer goes on top of it.
-        if (!has_custom_shader())
+        // A chart paints the knob's material, not its value: a body shader
+        // over it owns the value display, and without one the rotating
+        // pointer goes on top.
+        if (chart_only)
             draw_knob_indicator_notch(canvas, cx, cy, std::min(cx, cy), std::min(cx, cy), shown);
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal/design-preview: simple circle outline (matches design tools) ──

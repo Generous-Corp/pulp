@@ -293,11 +293,11 @@ knob arcs, LED rings, fader tracks and bar meters are.
 | Field | Meaning |
 |---|---|
 | `g.t` | Position along the centre line, 0 at the start, 1 at the end |
-| `g.cross` | Signed offset from the centre line along the normal `(tan.y, -tan.x)`: outward on arcs and rings, upward on horizontal shapes; `±halfWidth` at the band's edges |
+| `g.cross` | Signed offset from the centre line along the normal `(tan.y, -tan.x)`: outward on arcs and rings, upward on horizontal shapes; `±halfWidth` at the band's edges. Inside a rounded cap it is the distance from the end point, so `cross >= 0` there |
 | `g.halfWidth` | Half the band's width |
 | `g.d` | Signed distance to the band, negative inside, including flat caps |
 | `g.side` | `-1` inside the band, `+1` outside |
-| `g.tan` | Unit tangent of the centre line, the direction `t` grows |
+| `g.tan` | Unit tangent of the centre line, the direction `t` grows. Inside a rounded cap it is perpendicular to the radius from the end point, so `(tan.y, -tan.x)` points away from it; below the axis `tan` and `cross` both flip sign at the cap's edge. Their product `cross * (tan.y, -tan.x)` and anything that depends only on `abs(cross)` stay continuous there, but a shader keyed on the sign of `cross` alone, or on `tan` alone, shows a seam |
 | `g.px` | One device pixel in the units of `d`, so `2.0 * g.px` is two pixels at any backing scale |
 | `g.valid` | `0` for degenerate geometry (no sweep, no length, no band width); ignore the other fields then |
 
@@ -321,10 +321,12 @@ no closed form, so it has no `t`.
 
 From JS, `setWidgetShaderChart(id, source)` installs a chart shader on a knob,
 whose arc is the `flat_arc` from `Knob::start_angle` to `Knob::end_angle`. A
-chart shader alone paints the knob's body and the knob draws its rotating value
-pointer over it, since the chart is the same full arc at every value; a body
-shader is optional, replaces that pointer, and paints whenever the chart draw is
-refused.
+chart shader paints the knob's material, the same full arc at every value, so
+something else must show the value. With a chart alone the knob draws its
+rotating value pointer over it. With a chart and a body shader, the body shader
+paints over the chart and owns the value display, so no pointer is drawn; give
+it transparent areas where the chart should show through. If the chart draw is
+refused, the body shader paints alone.
 
 ### Feather modes and the `reach` rule
 

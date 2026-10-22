@@ -316,7 +316,9 @@ float chart_glow_reach(float sigma, float intensity) {
         return 0.0f;
     // The halo is intensity * exp(-r^2 / (2 sigma^2)); past this r it is under
     // one 8-bit step, and never less than three sigma.
-    const float k = std::sqrt(2.0f * std::log(std::max(255.0f * intensity, 1.0f)));
+    // ln(255 * intensity) as a sum, so a huge intensity cannot overflow the
+    // product to infinity and make the reach unbounded.
+    const float k = std::sqrt(2.0f * std::max(std::log(255.0f) + std::log(intensity), 0.0f));
     return sigma * std::max(3.0f, k);
 }
 
