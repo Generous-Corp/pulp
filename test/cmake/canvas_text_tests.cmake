@@ -90,6 +90,20 @@ pulp_add_test_suite(pulp-test-text-run-planner-parallel GROUP pulp-test-group-ca
 pulp_add_test_suite(pulp-test-text-run-planner-icu GROUP pulp-test-group-canvas-text
     LIBRARIES pulp::canvas)
 
+# CoreText face registry (Apple): the CoreGraphics canvas paints the face
+# TextShaper measures, with and without Skia.
+pulp_add_test_suite(pulp-test-coretext-text GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
+pulp_test_data(pulp-test-coretext-text NO_DEFINE PATHS external/fonts/Inter-Regular.ttf)
+if(APPLE)
+    target_include_directories(pulp-test-group-canvas-text PRIVATE
+        ${PULP_ROOT_DIR}/core/canvas/src)
+    target_compile_definitions(pulp-test-group-canvas-text PRIVATE
+        PULP_TEST_INTER_TTF="${PULP_ROOT_DIR}/external/fonts/Inter-Regular.ttf")
+    target_link_libraries(pulp-test-group-canvas-text PRIVATE
+        "-framework CoreText" "-framework CoreGraphics")
+endif()
+
 # Break iteration through the trimmed ICU data Pulp links (FindSkia,
 # PulpSkiaIcuData.cmake). Expectations are the untrimmed data's boundaries.
 pulp_add_test_suite(pulp-test-icu-data-breaks GROUP pulp-test-group-canvas-text
