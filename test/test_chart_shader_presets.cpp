@@ -149,11 +149,16 @@ TEST_CASE("chart shader presets are named and refuse what they cannot build",
     REQUIRE(make_chart_shader_preset("bevel", out_of_range).sksl ==
             make_chart_shader_preset("bevel", clamped).sksl);
 
-    // Small values survive as themselves rather than rounding to zero.
+    // Small values survive as themselves rather than rounding to zero: the
+    // halo's 2 * sigma^2 divisor is baked as about 2e-06, not 0.000000.
     ChartShaderPresetOptions faint;
     faint.glow_sigma = 0.001f;
-    REQUIRE(make_chart_shader_preset("glow", faint).sksl.find("0.0 ? ") == std::string::npos);
-    REQUIRE(make_chart_shader_preset("glow", faint).sksl.find("2e-06") != std::string::npos);
+    const auto faint_sksl = make_chart_shader_preset("glow", faint).sksl;
+    std::smatch divisor;
+    REQUIRE(
+        std::regex_search(faint_sksl, divisor, std::regex(R"(exp\(-g\.d \* g\.d / ([^)]+)\))")));
+    INFO("baked divisor " << divisor[1].str());
+    REQUIRE(std::stod(divisor[1].str()) == Catch::Approx(2e-6).epsilon(1e-3));
 
     ChartProfile profile = ChartProfile::round;
     REQUIRE(parse_chart_profile("chamfer", profile));
