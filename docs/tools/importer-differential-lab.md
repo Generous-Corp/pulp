@@ -255,8 +255,10 @@ with its `appearance`, the capture's `theme` verdict, and one status:
   never a boundary.
 
 Each control carries its share of the scored foreground error (the registered
-authored-frame crop when registration ran), so the report says how much of the
-residual is theme. A boundary makes the fixture `browser-required` and
+authored-frame crop when registration ran). The share is the error inside the
+theme-painted control's box plus one pixel, so it includes anything Pulp draws
+inside that box, such as a button label; read it as "error inside UA-painted
+control boxes", not as an exact theme attribution. A boundary makes the fixture `browser-required` and
 ineligible. It never removes the fixture from a denominator or changes any
 score. When every numeric gate passes, the promotion carries
 `boundary_overrides_passing_gates: true` and says so in its first reason and in
@@ -346,7 +348,7 @@ provenance, source recognition, and deterministic three-run receipts pass.
 | P0 | Close existing acceptance debt | **DONE** | Attributable M1 ARM64 PR-head receipt recorded for root-canvas and provenance: https://github.com/Generous-Corp/pulp/actions/runs/38996107653/job/117289012852 and protected artifact https://github.com/Generous-Corp/pulp/actions/runs/38996107653/artifacts/12088036268. The later merge-group run reused the receipt and ran zero suites; it is not claimed as fresh execution. |
 | P1 | Reset and reconcile the workstream | **DONE** | Fresh branch `plan/importer-reset-20261018` from `origin/main` `4cbf6f9a845f081fb5fc5fe6f21d758389e64fe0`; old `measure/fixture11-viewport-20261015` is reference-only because its lineage SHA mismatches its head. |
 | P2 | Validate the evidence contract and instruments | **DONE** | 214 Python controls pass; three-run cold benchmark determinism is `pass`; authenticated Skia render receipts, DPR 2 checks, blank-render and planted-defect controls pass; frozen baseline manifest is `test/fixtures/import-differential/reset-manifest-20261018.json`. |
-| P3 | Prove native correctness | **IN PROGRESS — P3a/P3b/P3c COMPLETE; P3d OPEN** | The latest cold corpus completed 16/18 fixtures: mean full-frame visual 0.799, mean registered authored-frame visual 0.846, and gate coverage of 13/16 structure, 8/16 geometry, 14/16 typography, and 6/16 registered visual. Fresh P3a evidence distinguishes browser-assisted design-time lowering from browser-free Skia observation; fresh P3b evidence has a deterministic three-run `02-flex-controls.html` calibration at registered visual 0.999421 with a planted-negative score of 0.94715. P3c now has four frozen held-out fixtures with authenticated three-run receipts; the set fails correctness thresholds, so P3d generic importer fixes remain open. |
+| P3 | Prove native correctness | **NOT PASSED — P3a/P3b/P3c COMPLETE; P3d OPEN FOR FORM CHROME** | Final cold corpus at `3450a14c8d` (Chrome 151.0.7922.47, DPR 2, one ARM64 host), with three-run determinism passing on all 16 completed fixtures: on the frozen 14-fixture in-scope denominator, 12 meet every gate (structure >=0.99, frame placement plus registered geometry, typography >=0.98, registered visual >=0.995). Two fail the visual gate: held-out `08-form-controls` (registered visual 0.762539) and `18-keyed-list-panel` (0.947144), with the residual located inside UA-theme-painted control boxes; that support boundary was stated after the held-out failure, so it does not redraw this denominator and may be proposed as an exclusion only for the next frozen manifest. Held-out 01, 03, and 06 pass every gate. Gate coverage over the 16 completed fixtures: structure 16/16, geometry 16/16, typography 14/16 (the excluded Canvas2D controls), registered visual 14/16. |
 | P4 | Compare baked-native and retained typed-plan paths | **DONE — NO QUALIFYING WIN** | An isolated retained typed plan (experiment branch `plan/importer-next-20261021-p4`, commit `169d06f977`, not landed) matched a fresh rebuild at all 600 trace steps, at six Skia PNG checkpoints, and detected a planted dropped meter update. Across seven interleaved separate-process Release reps on the synthetic benchmark IR, update-plus-frame median was 0.0892 ms against baked-native 0.0825 ms (1.08x) and p95 0.2003 ms against 0.1620 ms (1.24x), versus the pre-registered <=0.80x; allocations were equal (269 per frame) and peak RSS was within noise (+32 KB). It beat only the full-rebuild control (about 4.5x on median), which does not qualify. Layout and paint, shared by every lane, dominate the frame. The host was contended (load about 45 on 28 cores), so absolute times are noisy, but the ratios are far from the criterion. |
 | P5 | Decide promotion or deferment | **DONE — DEFERRED** | The retained plan does not meet the pre-registered performance criterion, so baked-native remains authoritative and the retained plan stays an isolated experiment branch. The generic benchmark instrumentation (p95, warmup exclusion, per-frame allocation counts, RSS high-water) is retained as infrastructure. |
 | P6 | Code-health follow-ups | **ADVISORY** | Narrow `DocumentCanvasPaint` exposure, unify duplicate snapshot parsing, split the oversized browser-capture test unit, and add the direct benchmark peak assertion. These do not substitute for P0-P5 evidence. |
@@ -624,6 +626,34 @@ and used when the captured box is exactly ascent plus descent tall. Runs whose
 font the canvas cannot express exactly record no metrics, and lowering falls
 back to the rounded typographic-ascent rule, which is known to be approximate
 for faces Chromium adjusts (Times, Helvetica, Courier on macOS).
+
+**Final adversarial review (2026-10-22).** Fable reran the controls against the
+final artifacts: the 02 calibration scores 0.999421, a planted 41x41 magenta
+mutation 0.9466, a blank render 0.5569, and a 2 px shift 0.9260, all below
+0.995; geometry plants (+/-3 px on the farthest node, +1.2 px, -10% width, IR
+origin, native `html` rect, and native root shifts) each fail the gate while a
++0.9 px plant passes inside the ruled tolerance. The ruling is that the branch
+may land, stating P3 as not passed. Fixes informed by a held-out fixture, so
+not held-out generalisation evidence:
+
+- `08-form-controls`: the form-control value text, theme verdict, input-type
+  normalisation, default submit/reset labels, masked-control handling, runtime
+  manifest additions, the input-type table pin, and the support boundary itself;
+- `01-basic-card` and `06-absolute-overlay`: the geometry gate correction (an
+  instrument change, ruled separately).
+
+`18-keyed-list-panel` and `11-typography` are challenging fixtures in the
+20261020 manifest, so their fixes are in-sample. Only `03-grid-meter` gives an
+uncontaminated generalisation signal, and it also passed before tuning.
+
+Release blockers for any claim of native import correctness: form-control
+chrome (08, 18); the IPC socket timeout tests, which are timing-sensitive under
+load and fail on `main` independently of this work; and the masked-field secret
+fix, whose own tests fail without it (24 pass, 2 fail when the masking is
+neutered). Deferred items: the RTL caret in `text_x_for_byte`, paragraph-path
+lookup of the system UI font by its private name, non-rendered text outside
+form controls keeping its value in the snapshot, and the native-DPR text-layout
+deviation of up to one device pixel per line.
 
 ### Stop and continuation rules
 

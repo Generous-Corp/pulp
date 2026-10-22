@@ -1,10 +1,17 @@
 # Importer reset handoff (2026-10-19)
 
-Status: **ACTIVE; P3c complete, P3d remains open.** P0, P1, and P2 are
-complete. P3a pipeline-boundary evidence, P3b comparator calibration, and P3c
-replacement held-out freezing plus three-run receipts are complete on the
-current-origin workstream; corpus-wide P3 correctness remains open. P4 and P5
-have not started. This document is the restart packet for the next session.
+Status: **CLOSED FOR THIS WORKSTREAM; P3 NOT PASSED, P4 NO QUALIFYING WIN,
+P5 DEFERRED.** P0 through P2 and P3a through P3c are complete. On the frozen
+14-fixture in-scope denominator, 12 fixtures meet every P3 gate with
+three-run determinism; held-out `08-form-controls` and challenging
+`18-keyed-list-panel` fail the visual gate with the residual inside
+UA-theme-painted control boxes, so P3d stays open for form chrome. The
+retained typed plan matched a full rebuild but did not meet the pre-registered
+wall-clock criterion, so baked-native remains authoritative and the experiment
+stays on its own branch. The authoritative record, including the final
+evidence, review rulings, held-out contamination list, release blockers, and
+deferred items, is the phase table and "Review decisions" in
+`docs/tools/importer-differential-lab.md`.
 
 ## Objective
 
