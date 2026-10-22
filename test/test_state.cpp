@@ -3343,8 +3343,7 @@ TEST_CASE("StateStore quantizes explicitly typed parameters on every write path"
     REQUIRE_THAT(store.get_value(2), WithinAbs(0.6, 0.0001));
 }
 
-TEST_CASE("ParamReader reads the live base value without an ID lookup",
-          "[state][param-reader]") {
+TEST_CASE("ParamReader reads the live base value without an ID lookup", "[state][param-reader]") {
     StateStore store;
     store.add_parameter({.id = 7, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});
     store.add_parameter({.id = 9, .name = "Mix", .range = {0.0f, 1.0f, 0.25f}});
@@ -3363,8 +3362,7 @@ TEST_CASE("ParamReader reads the live base value without an ID lookup",
     REQUIRE(mix.get() == 0.75f);
 }
 
-TEST_CASE("ParamReader for an unknown ID or default handle reads zero",
-          "[state][param-reader]") {
+TEST_CASE("ParamReader for an unknown ID or default handle reads zero", "[state][param-reader]") {
     StateStore store;
     store.add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});
 
@@ -3378,8 +3376,7 @@ TEST_CASE("ParamReader for an unknown ID or default handle reads zero",
     REQUIRE(unbound.get() == 0.0f);
 }
 
-TEST_CASE("ParamReader survives later parameter registration",
-          "[state][param-reader]") {
+TEST_CASE("ParamReader survives later parameter registration", "[state][param-reader]") {
     StateStore store;
     store.add_parameter({.id = 1, .name = "First", .range = {0.0f, 10.0f, 3.0f}});
     const auto first = store.param_reader(1);
@@ -3402,7 +3399,8 @@ TEST_CASE("ParamReader::get does not allocate", "[state][param-reader][rt-safety
     float sum = 0.0f;
     {
         pulp::test::RtAllocationProbe probe;
-        for (int i = 0; i < 64; ++i) sum += gain.get();
+        for (int i = 0; i < 64; ++i)
+            sum += gain.get();
         REQUIRE_FALSE(probe.saw_allocation());
     }
     REQUIRE(sum == 64.0f);

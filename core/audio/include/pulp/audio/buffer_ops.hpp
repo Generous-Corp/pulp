@@ -45,9 +45,11 @@ namespace pulp::audio::buffer_ops {
 template <typename Fn>
 inline void map_samples(const float* in, float* out, std::size_t n, Fn&& fn) {
     if (in == out) {
-        for (std::size_t i = 0; i < n; ++i) out[i] = fn(out[i]);
+        for (std::size_t i = 0; i < n; ++i)
+            out[i] = fn(out[i]);
     } else {
-        for (std::size_t i = 0; i < n; ++i) out[i] = fn(in[i]);
+        for (std::size_t i = 0; i < n; ++i)
+            out[i] = fn(in[i]);
     }
 }
 
@@ -75,8 +77,10 @@ inline void with_channel_count(std::size_t channels, Fn&& fn) {
     const bool matched =
         ((channels == Counts
               ? (static_cast<void>(fn(std::integral_constant<std::size_t, Counts>{})), true)
-              : false) || ...);
-    if (!matched) fn(channels);
+              : false) ||
+         ...);
+    if (!matched)
+        fn(channels);
 }
 
 /// Apply a constant gain to a single channel of samples in place.

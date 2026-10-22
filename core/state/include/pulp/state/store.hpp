@@ -119,7 +119,7 @@ struct ConditionalParameterApplyResult {
 /// }
 /// @endcode
 class ParamReader {
-public:
+  public:
     ParamReader() = default;
 
     /// Current base value (lock-free, relaxed ordering), or 0.0f if unbound.
@@ -128,9 +128,11 @@ public:
     }
 
     /// True if this handle refers to a registered parameter.
-    bool valid() const noexcept { return values_ != nullptr; }
+    bool valid() const noexcept {
+        return values_ != nullptr;
+    }
 
-private:
+  private:
     friend class StateStore;
     ParamReader(const std::vector<ParamValue>* values, std::size_t index) noexcept
         : values_(values), index_(index) {}

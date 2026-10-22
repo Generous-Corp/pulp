@@ -77,8 +77,8 @@ public:
         // hands the previous middle slot back to the writer. Release makes the
         // fill visible to the reader's acquire; acquire orders the reader's
         // last use of the returned slot before the writer refills it.
-        const auto previous = middle_.exchange(
-            static_cast<std::uint8_t>(back_ | kDirtyBit), std::memory_order_acq_rel);
+        const auto previous = middle_.exchange(static_cast<std::uint8_t>(back_ | kDirtyBit),
+                                               std::memory_order_acq_rel);
         back_ = previous & kIndexMask;
     }
 
@@ -94,7 +94,7 @@ public:
         return buffers_[front_];
     }
 
-private:
+  private:
     // middle_ holds the index of the slot between writer and reader, plus a
     // dirty bit set by the writer and cleared by the reader's swap. back_ is
     // owned by the writer thread and front_ by the reader thread; neither is
@@ -112,11 +112,12 @@ private:
         RoleGuard(std::atomic<std::uint8_t>& roles, std::uint8_t role) noexcept
             : roles_(roles), role_(role) {
             const auto before = roles_.fetch_or(role_, std::memory_order_acquire);
-            assert((before & role_) == 0 &&
-                   "TripleBuffer: two overlapping calls in the same role");
+            assert((before & role_) == 0 && "TripleBuffer: two overlapping calls in the same role");
             (void)before;
         }
-        ~RoleGuard() { roles_.fetch_and(static_cast<std::uint8_t>(~role_), std::memory_order_release); }
+        ~RoleGuard() {
+            roles_.fetch_and(static_cast<std::uint8_t>(~role_), std::memory_order_release);
+        }
         std::atomic<std::uint8_t>& roles_;
         std::uint8_t role_;
 #else

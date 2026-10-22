@@ -424,7 +424,8 @@ float StateStore::get_value(ParamID id) const {
 
 ParamReader StateStore::param_reader(ParamID id) const {
     auto it = id_to_index_.find(id);
-    if (it == id_to_index_.end()) return {};
+    if (it == id_to_index_.end())
+        return {};
     return ParamReader(&values_, it->second);
 }
 

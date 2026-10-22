@@ -277,8 +277,7 @@ TEST_CASE("TripleBuffer alternating writes and reads see every value in order",
     }
 }
 
-TEST_CASE("TripleBuffer write_with that throws publishes nothing",
-          "[runtime][triple_buffer]") {
+TEST_CASE("TripleBuffer write_with that throws publishes nothing", "[runtime][triple_buffer]") {
     TripleBuffer<int> buf(1);
     buf.write(2);
     REQUIRE(buf.read() == 2);

@@ -265,7 +265,8 @@ TEST_CASE("buffer_ops::measure_peak_rms is exact on exactly representable input"
         v[i] = 0.25f * static_cast<float>(i % 9) * ((i % 2) ? -1.0f : 1.0f);
     v[36] = -3.0f;
     double sum = 0.0;
-    for (float x : v) sum += static_cast<double>(x) * x;
+    for (float x : v)
+        sum += static_cast<double>(x) * x;
     const auto level = ops::measure_peak_rms(std::span<const float>{v});
     REQUIRE(level.peak == 3.0f);
     REQUIRE(level.rms == std::sqrt(static_cast<float>(sum) / 37.0f));
@@ -286,8 +287,7 @@ TEST_CASE("buffer_ops::measure_peak_rms finds a negative peak in every lane",
     }
 }
 
-TEST_CASE("buffer_ops::measure_peak_rms of an empty span is zero",
-          "[audio][buffer_ops][meter]") {
+TEST_CASE("buffer_ops::measure_peak_rms of an empty span is zero", "[audio][buffer_ops][meter]") {
     const auto level = ops::measure_peak_rms(std::span<const float>{});
     REQUIRE(level.peak == 0.0f);
     REQUIRE(level.rms == 0.0f);
@@ -300,8 +300,8 @@ TEST_CASE("buffer_ops::measure_peak_rms matches a double-precision reference",
         float naive_peak = 0.0f;
         double sum = 0.0;
         for (std::size_t i = 0; i < n; ++i) {
-            v[i] = 0.8f * std::sin(0.37f * static_cast<float>(i) + 0.1f)
-                 + 0.15f * std::cos(2.9f * static_cast<float>(i));
+            v[i] = 0.8f * std::sin(0.37f * static_cast<float>(i) + 0.1f) +
+                   0.15f * std::cos(2.9f * static_cast<float>(i));
             naive_peak = std::max(naive_peak, std::abs(v[i]));
             sum += static_cast<double>(v[i]) * v[i];
         }
@@ -318,8 +318,8 @@ TEST_CASE("buffer_ops::measure_peak_rms keeps NaN out of peak but not out of RMS
     // Quiet and signaling NaNs, in the vector body and in the scalar tail.
     // A signaling NaN matters separately: IEEE maxNum (std::fmax, FMAXNM)
     // returns NaN for it, so only a compare-select keeps it out of the peak.
-    for (const float nan : {std::numeric_limits<float>::quiet_NaN(),
-                            std::numeric_limits<float>::signaling_NaN()}) {
+    for (const float nan :
+         {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::signaling_NaN()}) {
         // 16 is the first tail sample, which lands in partial 0: the partial
         // every combine step keeps, so a NaN there cannot be hidden by the
         // combine and has to be rejected by the per-sample fold itself.
@@ -367,11 +367,13 @@ TEST_CASE("buffer_ops::measure_peak_rms measures one channel of a BufferView",
 TEST_CASE("buffer_ops::map_samples maps out of place without touching the input",
           "[audio][buffer_ops][map_samples]") {
     std::vector<float> in(131), out(131, -1.0f);
-    for (std::size_t i = 0; i < in.size(); ++i) in[i] = 0.01f * static_cast<float>(i) - 0.5f;
+    for (std::size_t i = 0; i < in.size(); ++i)
+        in[i] = 0.01f * static_cast<float>(i) - 0.5f;
     const auto original = in;
     ops::map_samples(in.data(), out.data(), in.size(), [](float x) { return 0.5f * x + 0.25f; });
     REQUIRE(in == original);
-    for (std::size_t i = 0; i < in.size(); ++i) REQUIRE(out[i] == 0.5f * in[i] + 0.25f);
+    for (std::size_t i = 0; i < in.size(); ++i)
+        REQUIRE(out[i] == 0.5f * in[i] + 0.25f);
 }
 
 TEST_CASE("buffer_ops::map_samples in place matches out of place bit for bit",
@@ -391,7 +393,8 @@ TEST_CASE("buffer_ops::map_samples calls the function once per sample in order",
           "[audio][buffer_ops][map_samples]") {
     for (bool in_place : {false, true}) {
         std::vector<float> in(37);
-        for (std::size_t i = 0; i < in.size(); ++i) in[i] = static_cast<float>(i);
+        for (std::size_t i = 0; i < in.size(); ++i)
+            in[i] = static_cast<float>(i);
         std::vector<float> out(in.size());
         float* dst = in_place ? in.data() : out.data();
         std::vector<float> seen;
@@ -399,7 +402,7 @@ TEST_CASE("buffer_ops::map_samples calls the function once per sample in order",
         ops::map_samples(in.data(), dst, in.size(), [&](float x) {
             seen.push_back(x);
             running += x;
-            return running;  // prefix sum: only correct if samples arrive in order
+            return running; // prefix sum: only correct if samples arrive in order
         });
         INFO("in_place = " << in_place);
         REQUIRE(seen.size() == 37);
@@ -414,7 +417,10 @@ TEST_CASE("buffer_ops::map_samples with zero samples does nothing",
           "[audio][buffer_ops][map_samples]") {
     int calls = 0;
     float sample = 3.0f;
-    ops::map_samples(&sample, &sample, 0, [&](float x) { ++calls; return x; });
+    ops::map_samples(&sample, &sample, 0, [&](float x) {
+        ++calls;
+        return x;
+    });
     REQUIRE(calls == 0);
     REQUIRE(sample == 3.0f);
 }
@@ -428,8 +434,7 @@ struct ChannelDispatchRecord {
     std::size_t value = 0;
 };
 
-template <std::size_t... Counts>
-ChannelDispatchRecord dispatch_record(std::size_t channels) {
+template <std::size_t... Counts> ChannelDispatchRecord dispatch_record(std::size_t channels) {
     ChannelDispatchRecord record;
     ops::with_channel_count<Counts...>(channels, [&](auto count) {
         ++record.calls;

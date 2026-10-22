@@ -121,7 +121,8 @@ PeakRms finish_peak_rms(float* peak, float* sum, std::size_t n) noexcept {
 
 PeakRms measure_peak_rms(std::span<const float> samples) noexcept {
     const std::size_t n = samples.size();
-    if (n == 0) return {};
+    if (n == 0)
+        return {};
     const float* x = samples.data();
 
     // Sixteen partials give four independent 4-wide accumulator chains, which
@@ -143,7 +144,7 @@ PeakRms measure_peak_rms(std::span<const float> samples) noexcept {
     const M4 magnitude_bits = {0x7fffffff, 0x7fffffff, 0x7fffffff, 0x7fffffff};
     const auto fold_peak = [magnitude_bits](V4 peak4, V4 v) {
         const V4 a = (V4)((M4)v & magnitude_bits);
-        const M4 larger = a > peak4;  // false for any NaN, quiet or signaling
+        const M4 larger = a > peak4; // false for any NaN, quiet or signaling
         return (V4)(((M4)a & larger) | ((M4)peak4 & ~larger));
     };
     V4 p0{}, p1{}, p2{}, p3{}, s0{}, s1{}, s2{}, s3{};

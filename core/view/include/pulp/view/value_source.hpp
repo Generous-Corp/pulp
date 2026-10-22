@@ -59,7 +59,7 @@ static_assert(std::is_trivially_copyable_v<MeterFrame>);
 /// must decay to its neutral. Comparing values cannot tell those apart, so a
 /// reader watches this counter instead.
 class PublishCounter {
-public:
+  public:
     /// Writer (audio/host) thread, from publish(). Relaxed: the counter orders
     /// no other memory, it only has to be monotonic and eventually visible.
     /// Every source has exactly one writer thread (the TripleBuffer contract),
