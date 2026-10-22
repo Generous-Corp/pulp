@@ -801,6 +801,82 @@ TEST_CASE("shared session offline fence retires work and leaves future callbacks
     REQUIRE(fixture.session.release());
 }
 
+TEST_CASE("shared session offline fence refuses reprime until a fresh preparation",
+          "[gpu_audio][shared_io][session][recovery]") {
+    Fixture fixture;
+    fixture.prepare();
+    fixture.provider->auto_complete = false;
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    REQUIRE(fixture.session.service(1).submitted == 1);
+    REQUIRE(fixture.session.fence_for_offline());
+    // The provider can resume after its clean drain, but the offline fence is
+    // a session boundary: only release and a fresh prepare reopen GPU work.
+    REQUIRE(fixture.provider->can_resume_after_drain());
+    CHECK_FALSE(fixture.session.fence_and_reprime());
+    CHECK(fixture.session.fenced());
+    CHECK(fixture.session.epoch() == 1);
+    CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::OfflineFence);
+    CHECK(callback(fixture.session, b, output).stamp.epoch == 0);
+    CHECK(fixture.session.service(2).submitted == 0);
+    CHECK(fixture.state->submits == 1);
+    REQUIRE(fixture.session.release());
+
+    // Positive control: a fresh preparation (a new session from the factory
+    // in production) admits GPU work again.
+    Fixture fresh;
+    fresh.prepare();
+    CHECK(callback(fresh.session, a, output).stamp.epoch != 0);
+    CHECK(fresh.session.service(1).submitted == 1);
+    REQUIRE(fresh.session.release());
+}
+
+TEST_CASE("released shared session cannot be prepared again",
+          "[gpu_audio][shared_io][session][recovery]") {
+    // The session is single-use: its pipeline prepares once. Recovery after an
+    // offline fence is therefore a new session, which starts unfenced. If this
+    // ever changes, prepare() must clear offline_fenced_ (it does today, but
+    // nothing can reach that path), and this test should become a re-prepare
+    // test that asserts GPU admission reopens.
+    Fixture fixture;
+    fixture.prepare();
+    REQUIRE(fixture.session.fence_for_offline());
+    REQUIRE(fixture.session.release());
+    auto owner = std::make_unique<FakeProvider>(fixture.state);
+    auto program = std::make_unique<FakeProgram>(*owner, fixture.state);
+    CHECK_FALSE(fixture.session.prepare(
+        {std::move(owner), std::move(program)},
+        {.pipeline = {.capacity = 8, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
+         .slots = 2}));
+    CHECK_FALSE(fixture.session.fence_and_reprime());
+}
+
+TEST_CASE("shared session offline fence refuses reprime behind an earlier recovery reason",
+          "[gpu_audio][shared_io][session][recovery]") {
+    Fixture fixture;
+    fixture.prepare();
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    REQUIRE(fixture.session.service(1).submitted == 1);
+    // Recovery reasons latch first-wins, so the guard cannot key on the reason.
+    fixture.session.request_recovery(SharedIoRecoveryReason::SequenceGap);
+    REQUIRE(fixture.session.fence_for_offline());
+    CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::SequenceGap);
+    CHECK_FALSE(fixture.session.fence_and_reprime());
+    CHECK(fixture.session.fenced());
+    REQUIRE(fixture.session.release());
+
+    // Positive control: the same recovery without the offline fence reprimes.
+    Fixture control;
+    control.prepare();
+    callback(control.session, a, output);
+    REQUIRE(control.session.service(1).submitted == 1);
+    control.session.request_recovery(SharedIoRecoveryReason::SequenceGap);
+    CHECK(control.session.fence_and_reprime());
+    CHECK_FALSE(control.session.fenced());
+    REQUIRE(control.session.release());
+}
+
 TEST_CASE("shared session requires affirmative provider resume proof before reopening admission",
           "[gpu_audio][shared_io][session][recovery]") {
     Fixture fixture;

@@ -1504,6 +1504,17 @@ caller ordering/internal headroom, coefficient replacement and reset tails,
 non-finite/unstable/over-capacity transaction failures, denormal decay, and an
 allocation probe around the prepared runtime surface. Build and time the largest
 supported product in Release; Debug timing is not performance evidence.
+
+Two traps when timing a vectorized recursive kernel (`pulp::simd::Lanes`):
+- A block path's mismatch against the per-sample loop is not its error. Measure
+  both against a float64 reference; a single float biquad's block and sample
+  paths differ by up to about -45 dBFS, and that gap is the sample path's own
+  round-off, not the block path's.
+- Keep the per-sample loop body in the caller. Passing it as a lambda that
+  captures the filter state (a `for_each_chunk(n, fn)` helper) kept the state
+  out of registers and made an 8-section cascade 1.7x slower; a chunk range
+  the caller iterates (`snap_chunks(n)`) did not.
+
 ## Sample-region proof surface
 
 For sample-region DSP, pair the declared scalar-kernel contract with a focused

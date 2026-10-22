@@ -47,10 +47,6 @@
       "reason": "SeqLock/TripleBuffer hammer cases run a writer plus readers for 500 ms each. The registration reasons that sanitizers.yml re-covers the code -- true, but that lane is advisory and feeds no coverage, which is the gap this guard names."
     },
     {
-      "target": "pulp-test-sync-race-hammer",
-      "reason": "N-thread race smoke. Same sanitizers.yml reasoning as pulp-test-sync, and the same hole: an advisory lane does not block a merge."
-    },
-    {
       "target": "pulp-test-timeline-scale",
       "reason": "Dedicated scaling benchmark, built only under PULP_BENCHMARK. Carries timing measurements rather than a correctness contract the required gate would enforce."
     },

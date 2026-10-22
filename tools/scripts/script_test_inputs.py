@@ -92,6 +92,18 @@ LITERAL_RE = re.compile(r"""["'](?P<p>(?:%s)[A-Za-z0-9_./@+-]+)["']""" % "|".joi
 NODE_IMPORT_RE = re.compile(r"""(?:from\s+|import\s*\(?\s*|require\s*\(\s*)["'](?P<s>\.{1,2}/[^"']+)["']""")
 SHELL_SOURCE_LINE_RE = re.compile(r"""^\s*(?:source|\.)\s+(?P<rest>.+)$""")
 SHELL_TAIL_RE = re.compile(r"""(?P<f>[A-Za-z0-9_./-]+\.(?:sh|bash))["']?\s*$""")
+# A shell script usually names repository files through a directory variable
+# it derived from its own location (`REPO_ROOT="$(cd "$(dirname
+# "${BASH_SOURCE[0]}")/../.." && pwd)"`), never as a bare quoted literal, so
+# `"$REPO_ROOT/setup.sh"` must resolve through the variable. Only variables
+# bound to a directory the script's own location (or git) determines resolve;
+# a temp or fixture directory stays opaque.
+SHELL_ASSIGN_RE = re.compile(r"""^\s*(?:(?:export|local|readonly|declare)\s+(?:-[A-Za-z]+\s+)*)?(?P<var>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.+?)\s*$""")
+SHELL_SELF_DIR = r"""\$\(\s*dirname\s+["']?(?:\$\{BASH_SOURCE\[0\]\}|\$\{BASH_SOURCE\}|\$BASH_SOURCE|\$0|\$\{0\})["']?\s*\)"""
+SHELL_VAR_REF = r"""\$(?:\{(?P<b>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<v>[A-Za-z_][A-Za-z0-9_]*))"""
+SHELL_DIR_EXPR_RE = re.compile(r"""^(?:(?P<self>%s)|%s|(?P<git>\$\(\s*git\s+(?:-C\s+\S+\s+)?rev-parse\s+--show-toplevel\s*\)))(?P<rel>/[A-Za-z0-9_./-]*)?$""" % (SHELL_SELF_DIR, SHELL_VAR_REF))
+SHELL_CD_PWD_RE = re.compile(r"""^\$\(\s*cd\s+(?P<expr>.+?)\s*&&\s*pwd(?:\s+-P)?\s*\)$""")
+SHELL_VAR_PATH_RE = re.compile(SHELL_VAR_REF + r"""(?P<rel>/[A-Za-z0-9_./@+-]+)""")
 
 
 def _rel(path: Path, root: Path) -> str | None:
@@ -329,6 +341,7 @@ class Walker:
         self._in_repo_memo: dict[Path, bool] = {}
         self._imports_memo: dict[Path, list[tuple] | None] = {}
         self._literals_memo: dict[Path, list[Path]] = {}
+        self._shell_var_memo: dict[Path, list[Path]] = {}
 
     # -- resolution helpers -------------------------------------------------
     def _in_repo(self, p: Path) -> bool:
@@ -448,6 +461,63 @@ class Walker:
                     self.walk_shell(cand, seen)
                     break
         self.literal_paths(entry, seen)
+        if entry not in self._shell_var_memo:
+            self._shell_var_memo[entry] = self._shell_var_paths(entry, text)
+        seen.update(self._shell_var_memo[entry])
+
+    def _shell_dir(self, expr: str, entry: Path, dirs: dict[str, Path]) -> Path | None:
+        """The directory a shell expression names, when the script's own
+        location, git, or an already-resolved variable determines it."""
+        expr = expr.strip()
+        if len(expr) >= 2 and expr[0] == expr[-1] and expr[0] in "\"'":
+            expr = expr[1:-1]
+        m = SHELL_CD_PWD_RE.match(expr)
+        if m:
+            return self._shell_dir(m.group("expr"), entry, dirs)
+        m = SHELL_DIR_EXPR_RE.match(expr)
+        if not m:
+            return None
+        if m.group("self"):
+            base = entry.parent
+        elif m.group("git"):
+            base = self.root
+        else:
+            base = dirs.get(m.group("b") or m.group("v") or "")
+            if base is None:
+                return None
+        rel = (m.group("rel") or "").strip("/")
+        out = Path(os.path.normpath(base / rel)) if rel else base
+        return out if _rel(out, self.root) is not None else None
+
+    def _shell_var_paths(self, entry: Path, text: str) -> list[Path]:
+        # Bindings are read in source order, so a read resolves against the
+        # binding in force on its line.
+        dirs: dict[str, Path] = {}
+        found: list[Path] = []
+        for line in text.splitlines():
+            for m in SHELL_VAR_PATH_RE.finditer(line):
+                base = dirs.get(m.group("b") or m.group("v") or "")
+                if base is None:
+                    continue
+                cand = Path(os.path.normpath(base / m.group("rel").strip("/")))
+                rel = _rel(cand, self.root)
+                if rel is None or rel in (".", ""):
+                    continue
+                if rel.startswith("docs/") and not rel.startswith("docs/status/"):
+                    continue
+                if cand.exists():
+                    found.append(cand)
+            m = SHELL_ASSIGN_RE.match(line)
+            if not m:
+                continue
+            d = self._shell_dir(m.group("value"), entry, dirs)
+            if d is not None and d.is_dir():
+                dirs[m.group("var")] = d
+            else:
+                # Reassigning to something unresolvable (a temp dir) unbinds
+                # the name rather than keeping the old directory.
+                dirs.pop(m.group("var"), None)
+        return found
 
     def literal_paths(self, entry: Path, seen: set[Path]) -> None:
         if entry not in self._literals_memo:

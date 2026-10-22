@@ -1,7 +1,7 @@
 {
   "_generated": "by tools/toolchain/generate.py from tools/toolchain/manifest.toml; do not edit",
   "schema": 1,
-  "source_sha256": "a8a2abef8ffa4e2d7c9e30c5e562183d9a2c2a96e927c1822583396cec00b559",
+  "source_sha256": "c97272ea300029291d51de8e1dc1a1616c918583e1e9ae2a00d8bdd28349a041",
   "enforcement": "warn",
   "tools": {
     "python": "3.14.4",
@@ -22,10 +22,10 @@
     }
   },
   "mise": {
-    "version": "2026.10.11",
-    "path": "~/.local/opt/mise-2026.10.11/bin/mise",
+    "version": "2026.10.17",
+    "path": "~/.local/opt/mise-2026.10.17/bin/mise",
     "sha256": {
-      "macos-arm64": "25e38f796fff67fc5f4c44f6963d4b8ed15be82a5d9244f693cc55d40a245ee3"
+      "macos-arm64": "284869e5b5f57211377f026309910bea91ef65b3a71b934295fa8bd712436dfc"
     }
   },
   "npm_prefixes": [

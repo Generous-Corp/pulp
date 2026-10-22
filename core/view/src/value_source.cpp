@@ -11,10 +11,13 @@ MeterSource::~MeterSource() {
 }
 
 void MeterSource::publish(const MeterFrame& frame) {
-    detail::PublishedValue<MeterFrame> published;
-    published.value = frame;
-    published.publication = ++writer_publication_;
-    buffer_.write(published);
+    // Fill the writer-owned slot directly: one copy of the frame, then one
+    // atomic exchange to publish it.
+    const std::uint64_t publication = ++writer_publication_;
+    buffer_.write_with([&](detail::PublishedValue<MeterFrame>& slot) noexcept {
+        slot.value = frame;
+        slot.publication = publication;
+    });
     note_publish();
 }
 

@@ -17,7 +17,7 @@ permissions:
 #
 # Runner choice mirrors intel-portability.yml -- the stable GitHub-hosted
 # `macos-15`, free for public repos. Dawn is not built from source here: it
-# arrives prebuilt inside the pinned Skia chrome/m153 asset, so a hosted runner
+# arrives prebuilt inside the pinned Skia chrome/m157 asset, so a hosted runner
 # pays a download rather than a toolchain build.
 #
 # This runner has no representative GPU, so the Catch2 cases that need a real

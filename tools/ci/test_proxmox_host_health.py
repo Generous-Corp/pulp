@@ -25,6 +25,7 @@ POOL_UNITS = (
     "pulp-trusted-ephemeral-pool@.service",
     "pulp-pr-safe-ephemeral-pool@.service",
     "proxmox-ephemeral-pool@.service",
+    "pulp-windows-ephemeral-pool@.service",
 )
 
 

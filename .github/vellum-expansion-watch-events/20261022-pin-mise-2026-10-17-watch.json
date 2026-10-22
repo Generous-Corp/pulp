@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-pin-mise-2026-10-17-watch",
+  "created_at": "2026-10-22T09:13:33Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Watch-only: the pinned mise moves from 2026.10.11 to 2026.10.17 (path and sha256 in the opt-in mise candidate lane and the pinned-toolchain golden manifest), and the candidate lane and golden layer now export MISE_LOCKED=1 and MISE_AUTO_INSTALL=0 before running mise. No visual-proof, design-import, Chromium, rendering, or packaging code or authority moves.",
+  "tests": [
+    "python3 tools/ci/test_mise_golden_layer.py",
+    "python3 tools/scripts/test_build_workflow.py",
+    "python3 tools/toolchain/test_generate.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

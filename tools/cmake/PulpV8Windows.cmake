@@ -1,7 +1,7 @@
 # PulpV8Windows.cmake — Windows V8-consumer ABI contract for the sealed
 # v8-builder drop-in.
 #
-# The sealed Windows v8.dll (v8-builder, v8-m153-15.3.76.5-26cef0256b0e) is built — by deliberate,
+# The sealed Windows v8.dll (v8-builder, v8-m157-15.7.112.5-3362da6c495d) is built — by deliberate,
 # documented decision in v8-builder/build-v8.py:win_gn_args() — with:
 #
 #   * v8_enable_pointer_compression = true   (Windows-only; mac/linux are OFF)
@@ -10,15 +10,17 @@
 #   * v8_enable_sandbox              = false
 #   * use_rtti                       = false
 #
-# The m153 archive's ABI shape and required files are inspected and pinned.
+# The m157 x64 and arm64 archives' ABI shape and required files are inspected and
+# pinned (same file layout as m153; v8.dll.lib exports ~314 __Cr@std records;
+# V8_COMPRESS_POINTERS in the embedded consumer_defines).
 # The following consumer consequences were last link/run VERIFIED with m152
 # (15.2.124.7) on the Win11-24H2 arm64 QEMU golden (host arm64; x64 V8 + x64
-# consumer run under Windows-ARM x64 emulation). Repeat that gate for m153 before
-# claiming m153 Windows runtime acceptance:
+# consumer run under Windows-ARM x64 emulation). Repeat that gate for m157 before
+# claiming m157 Windows runtime acceptance:
 #
 #  1. v8.dll.lib exports its std::-bearing API surface mangled into the Chromium
 #     libc++ ABI namespace — e.g. ...V?$shared_ptr@...@__Cr@std@@... (hundreds
-#     of such records in the m153 import library). A consumer built with MSVC cl + the MSVC
+#     of such records in the m157 import library). A consumer built with MSVC cl + the MSVC
 #     STL emits plain `@std@@` symbols that never resolve against those `__Cr@std`
 #     imports → unresolved-external link failure (observed:
 #     `lld-link: error: undefined symbol: ... std::unique_ptr<v8::Platform> ...
@@ -42,7 +44,7 @@
 # (choc_javascript_V8.h + Console) built with the flags below links the sealed
 # v8.dll.lib + a __Cr-ABI libc++.lib and runs —
 #   V8::GetVersion() = 15.2.124.7 / evaluateExpression('40 + 2') = 42 / PASS.
-# m153 has structural ABI inspection only; its equivalent consumer link/run is
+# m157 has structural ABI inspection only; its equivalent consumer link/run is
 # still pending.
 #
 # This module is a NO-OP off Windows.
@@ -57,7 +59,9 @@
 #                                build tree when empty.
 #   PULP_V8_WIN_LIBCXX_LIB     — the __Cr-ABI libc++.lib to link for the
 #                                out-of-line libc++ runtime (REQUIRED for the
-#                                choc consumer; see point 3 above).
+#                                choc consumer; see point 3 above). Defaults to
+#                                the provider's own lib/libc++.lib beside
+#                                V8_IMPORT_LIBRARY when the archive ships one.
 set(PULP_V8_WIN_LIBCXX_INCLUDE "" CACHE PATH
     "Chromium-style libc++ header root for the Windows V8 consumer (dir with <vector>, <__config>)")
 set(PULP_V8_WIN_LIBCXX_CONFIG "" CACHE PATH
@@ -90,7 +94,7 @@ function(pulp_v8_windows_require_clang_cl)
             "    -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl \\\n"
             "    -DPULP_JS_ENGINE=v8 -DV8_DIR=<unpacked v8 provider root> \\\n"
             "    -DPULP_V8_WIN_LIBCXX_INCLUDE=<llvm-project>/libcxx/include \\\n"
-            "    -DPULP_V8_WIN_LIBCXX_LIB=<__Cr libc++.lib>\n"
+            "    [-DPULP_V8_WIN_LIBCXX_LIB=<__Cr libc++.lib; defaults to the provider lib/libc++.lib>]\n"
             "See tools/cmake/PulpV8Windows.cmake for the full ABI rationale.")
     endif()
 endfunction()
@@ -164,9 +168,19 @@ function(pulp_v8_windows_apply_abi target)
             "'${PULP_V8_WIN_LIBCXX_INCLUDE}' has no <__config> — not a libc++ "
             "header root.")
     endif()
+    if(NOT PULP_V8_WIN_LIBCXX_LIB AND V8_IMPORT_LIBRARY)
+        # The sealed provider ships its matching static __Cr libc++ runtime
+        # beside the import library (manifest.json "libcxx_lib"); prefer it over
+        # a separately built llvm-project runtime.
+        get_filename_component(_v8_lib_dir "${V8_IMPORT_LIBRARY}" DIRECTORY)
+        if(EXISTS "${_v8_lib_dir}/libc++.lib")
+            set(PULP_V8_WIN_LIBCXX_LIB "${_v8_lib_dir}/libc++.lib")
+        endif()
+    endif()
     if(NOT PULP_V8_WIN_LIBCXX_LIB)
         message(FATAL_ERROR
-            "Pulp Windows V8: PULP_V8_WIN_LIBCXX_LIB is unset. The sealed v8.dll "
+            "Pulp Windows V8: PULP_V8_WIN_LIBCXX_LIB is unset and the V8 provider "
+            "next to V8_IMPORT_LIBRARY ships no lib/libc++.lib. The sealed v8.dll "
             "exports no out-of-line libc++ runtime; supply a __Cr-ABI libc++.lib "
             "(built from llvm-project/runtimes with LIBCXX_ABI_NAMESPACE=__Cr).")
     endif()

@@ -109,6 +109,14 @@ renaming a helper library cannot hide retained control code. The check reads
 the final linked artifact, so a CMake option or an unlinked declaration is not
 accepted as shipping proof.
 
+Markers are matched inside the artifact's printable string runs rather than in
+a hex dump of the whole image. Every marker is printable ASCII without
+whitespace and at least 14 bytes long, so a marker present anywhere in the raw
+bytes is always inside one such run and the two searches agree; the scanner
+refuses a marker that breaks either property. Reading the runs keeps the scan
+to about a second on a 40 MB plug-in, where hex-encoding the image took
+several seconds on every link.
+
 The generated `dev.pulp.control/shipping-artifact@1` sidecar is per binary and
 names its format, platform, complete architecture list, profile, and canonical
 manifest digest. This makes diagnostic and research artifacts visibly distinct

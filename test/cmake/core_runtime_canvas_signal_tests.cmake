@@ -365,6 +365,10 @@ pulp_add_test_suite(pulp-test-routing-primitives
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
 pulp_add_test_suite(pulp-test-signal-filters GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
+# TptFilter and the lockstep voice banks (LadderBank, SvfBank), split from
+# the signal filter tests above.
+pulp_add_test_suite(pulp-test-filter-banks GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Fixed-state, pivot-normalized tilt EQ with independent response and
 # time-domain oracles, deterministic block processing, and RT proof.
 pulp_add_test_suite(pulp-test-tilt-eq
@@ -477,6 +481,13 @@ pulp_add_test_suite(pulp-test-signal-meter GROUP pulp-test-group-core-signal
 # Biquad filter tests
 pulp_add_test_suite(pulp-test-biquad GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
+# The stereo Biquad and cascade paths with vector lanes disabled (the MSVC
+# fallback). Its own binary: the macro changes inline definitions, so it must
+# not share them with a build that has lanes.
+pulp_add_test_suite(pulp-test-biquad-scalar-lanes
+    SOURCES test_biquad_scalar_lanes.cpp
+    LIBRARIES pulp::signal)
+target_compile_definitions(pulp-test-biquad-scalar-lanes PRIVATE PULP_SIMD_DISABLE_VECTOR_LANES)
 pulp_add_test_suite(pulp-test-osc-phase GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 # The BLEP/BLAMP kernels are gated on measured alias rejection, so this suite
@@ -1011,13 +1022,13 @@ pulp_add_test_suite(pulp-test-file-search-path GROUP pulp-test-group-core-runtim
 # Sync-primitive hammer for the TSan-focused race regression.
 # Runs under the tag-scoped TSan subset via the [concurrent][race]
 # tags embedded in each TEST_CASE (matches the 'Race|Concurrent'
-# alternation in sanitizers.yml's --tests-regex).
-# `slow`: N-thread race smoke. Sanitizer builds also pick this
-# up via the dedicated sanitizers.yml workflow, so fast-CI doesn't
-# need to re-run it.
+# alternation in sanitizers.yml's --tests-regex). Not `slow`: the
+# three hammers take about 1.5 s together and assert only that both
+# sides made progress, so the pull-request affected-test step can run
+# them when a diff edits a sync primitive (its runtime-sync-hammers
+# path family) and the merge queue runs them with the full suite.
 pulp_add_test_suite(pulp-test-sync-race-hammer GROUP pulp-test-group-core-runtime
-    LIBRARIES pulp::runtime
-    PROPERTIES LABELS slow)
+    LIBRARIES pulp::runtime)
 
 # Events tests
 pulp_add_test_suite(pulp-test-events GROUP pulp-test-group-core-events

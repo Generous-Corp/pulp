@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 
 namespace pulp::signal {
 
@@ -60,12 +61,16 @@ template <typename SampleType = float> class TptFilterT {
     }
 
     /// Process and return the lowpass output.
+    ///
+    /// The state update is written as `s + 2g * (input - s)` (algebraically
+    /// `lp + v`) so the recursion is one subtract and one multiply-add; the
+    /// lowpass output is formed off that path.
     SampleType process_lowpass(SampleType input) {
-        SampleType v = g_ * (input - state_);
-        SampleType lp = v + state_;
+        const SampleType d = input - state_;
+        const SampleType lp = g_ * d + state_;
         // Snap the integrator state to flush denormal tails where no FTZ guard
         // applies. No-op above 1e-15.
-        state_ = snap_to_zero(lp + v);
+        state_ = snap_to_zero(two_g_ * d + state_);
         return lp;
     }
 
@@ -80,15 +85,40 @@ template <typename SampleType = float> class TptFilterT {
         return SampleType{2.0f} * lp - input;
     }
 
+    /// Process a buffer in place, replacing it with the lowpass output.
+    ///
+    /// Same arithmetic as the per-sample path on a register-resident state.
+    /// The denormal snap runs once per kSnapChunkSamples chunk
+    /// (snap_chunks()). The integrator's pole is 1 - 2g; unless |1 - 2g| < 0.44
+    /// (cutoffs near a quarter of the sample rate) a state at or above 1e-15
+    /// at the start of a chunk cannot decay into the float subnormal range
+    /// before the next snap, and inside that band the tail falls through the
+    /// subnormal range; there, and with subnormal input, the state can stay
+    /// subnormal until the next snap, so residency is bounded by one chunk.
+    void process_lowpass(SampleType* buffer, std::size_t num_samples) {
+        run_block(buffer, num_samples, [](SampleType, SampleType lp) { return lp; });
+    }
+
+    /// Process a buffer in place, replacing it with the highpass output.
+    void process_highpass(SampleType* buffer, std::size_t num_samples) {
+        run_block(buffer, num_samples, [](SampleType in, SampleType lp) { return in - lp; });
+    }
+
+    /// Process a buffer in place, replacing it with the allpass output.
+    void process_allpass(SampleType* buffer, std::size_t num_samples) {
+        run_block(buffer, num_samples,
+                  [](SampleType in, SampleType lp) { return SampleType{2.0f} * lp - in; });
+    }
+
     /// Process and return all three outputs at once.
     struct Outputs {
         SampleType lowpass, highpass, allpass;
     };
 
     Outputs process(SampleType input) {
-        SampleType v = g_ * (input - state_);
-        SampleType lp = v + state_;
-        state_ = snap_to_zero(lp + v); // flush denormal tails (see above)
+        const SampleType d = input - state_;
+        const SampleType lp = g_ * d + state_;
+        state_ = snap_to_zero(two_g_ * d + state_); // flush denormal tails (see above)
         SampleType hp = input - lp;
         SampleType ap = lp - hp; // = 2*lp - input
         return {lp, hp, ap};
@@ -102,6 +132,7 @@ template <typename SampleType = float> class TptFilterT {
     SampleType sample_rate_ = SampleType{44100.0f};
     SampleType cutoff_ = SampleType{1000.0f};
     SampleType g_ = SampleType{0.0f};
+    SampleType two_g_ = SampleType{0.0f};
     SampleType state_ = SampleType{0.0f};
 
     void update_coefficient() {
@@ -110,6 +141,25 @@ template <typename SampleType = float> class TptFilterT {
         SampleType wa =
             (SampleType{2.0f} * sample_rate_) * std::tan(wd / (SampleType{2.0f} * sample_rate_));
         g_ = wa / (SampleType{2.0f} * sample_rate_ + wa);
+        two_g_ = SampleType{2.0f} * g_;
+    }
+
+    template <typename Output>
+    void run_block(SampleType* buffer, std::size_t num_samples, Output output) {
+        const SampleType g = g_;
+        const SampleType two_g = two_g_;
+        SampleType s = state_;
+        for (const auto [begin, end] : snap_chunks(num_samples)) {
+            for (std::size_t i = begin; i < end; ++i) {
+                const SampleType input = buffer[i];
+                const SampleType d = input - s;
+                const SampleType lp = g * d + s;
+                s = two_g * d + s;
+                buffer[i] = output(input, lp);
+            }
+            s = snap_to_zero(s);
+        }
+        state_ = s;
     }
 };
 

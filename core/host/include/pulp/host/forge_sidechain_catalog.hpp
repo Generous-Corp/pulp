@@ -79,10 +79,19 @@ inline CustomNodeType make_sidechain_compressor_node() {
             s->compressor.set_sidechain_hpf_hz(key_hpf_hz);
         }
 
-        for (int k = 0; k < n; ++k) {
-            output[static_cast<std::size_t>(k)] = s->compressor.process_with_sidechain(
-                main_input[static_cast<std::size_t>(k)], key[static_cast<std::size_t>(k)]);
+        // Every control above is block-rate, so the block runs through the
+        // compressor's buffer path. That path writes the output in place, so a
+        // key that shares the output buffer falls back to the per-sample path.
+        if (output == key) {
+            for (int k = 0; k < n; ++k) {
+                output[static_cast<std::size_t>(k)] = s->compressor.process_with_sidechain(
+                    main_input[static_cast<std::size_t>(k)], key[static_cast<std::size_t>(k)]);
+            }
+            return;
         }
+        if (output != main_input)
+            std::copy_n(main_input, n, output);
+        s->compressor.process_with_sidechain(output, key, n);
     };
     return t;
 }

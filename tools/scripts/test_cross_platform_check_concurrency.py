@@ -32,6 +32,15 @@ class CrossPlatformCheckConcurrencyTests(unittest.TestCase):
         self.assertIn("${{ github.ref }}", concurrency["group"])
         self.assertIs(concurrency["cancel-in-progress"], False)
 
+    def test_a_windows_proof_dispatch_never_shares_the_nightly_group(self) -> None:
+        group = load()["concurrency"]["group"]
+        # The nightly (no inputs) keys on the ref alone; a dispatch that sets
+        # either Windows input gets a per-run suffix.
+        self.assertTrue(group.startswith("cross-platform-check-${{ github.ref }}"))
+        self.assertIn("inputs.windows_only || inputs.windows_runner_selector_json", group)
+        self.assertIn("format('-dispatch-{0}', github.run_id)", group)
+        self.assertIn("|| ''", group)
+
     def test_only_main_maintains_tracking_issues(self) -> None:
         condition = load()["jobs"]["tracking-issues"]["if"]
         self.assertIn("always()", condition)

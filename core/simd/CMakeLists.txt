@@ -92,6 +92,7 @@ endif()
 # directory. The Vellum closure exports exactly these (plus what they include),
 # and the closure tool refuses a header under include/ that is not listed.
 set(PULP_SIMD_UNIT_HEADERS
+    include/pulp/simd/lanes.hpp
     include/pulp/simd/scalar_kernels.hpp
     include/pulp/simd/simd.hpp
 )
