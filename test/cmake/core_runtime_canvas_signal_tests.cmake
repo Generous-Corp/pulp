@@ -719,6 +719,13 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-realtime-node
     LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Architecture-neutral neural node: every family nulls against its private
+# adapter through the transport, with a fake WaveNet provider seam.
+pulp_add_test_suite(pulp-test-gpu-neural-realtime-node
+    SOURCES test_gpu_neural_realtime_node.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Plug-in-boundary continuity: a GPU-audio effect driven through the real CLAP
 # adapter and HeadlessHost must null against a CPU reference across injected
 # provider failure/loss, worker starvation, reactivation, bypass, and state
@@ -726,6 +733,13 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-realtime-node
 if(PULP_HAS_CLAP)
     pulp_add_test_suite(pulp-test-gpu-audio-plugin-boundary-continuity
         SOURCES test_gpu_audio_plugin_boundary_continuity.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::gpu-audio pulp::format pulp::audio-analysis clap
+        COMPILE_DEFINITIONS PULP_CLAP_GUI=1
+        INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+    # The same boundary for the architecture-neutral neural node, over a
+    # GPU-backed (fake provider) family and CPU-only families.
+    pulp_add_test_suite(pulp-test-gpu-neural-plugin-boundary-continuity
+        SOURCES test_gpu_neural_plugin_boundary_continuity.cpp harness/rt_allocation_probe.cpp
         LIBRARIES pulp::gpu-audio pulp::format pulp::audio-analysis clap
         COMPILE_DEFINITIONS PULP_CLAP_GUI=1
         INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
