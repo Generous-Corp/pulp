@@ -3768,6 +3768,24 @@ their siblings). Two traps:
   (hoist promote + demote + indicator-geometry capture + materializer forwarding,
   pure, no I/O) + the GPU harness (end-to-end skin + interactivity).
 
+### Shaded and double CSS borders, and themed form controls
+
+- `border-style: outset | inset | groove | ridge | double` are painted by View
+  in per-side bands (`View::border_shades` / `border_bands` /
+  `border_band_color`, pure and public). The native materializer maps all five
+  keywords; dropping one paints a flat solid frame. The shading rule was fitted
+  to Chrome 151 renders and checked on 189 colours — re-measure with a probe
+  page before changing it, never from a fixture. Pure black is not special in
+  the code: any colour no brighter than rgb(32,32,32) by relative luminance is
+  lightened once before shading, which is why black shades to 168/84.
+- A user-agent `<button>` computes `2px outset rgb(0, 0, 0)`. Chromium paints
+  that border with CSS only when the author styled the box (background, border,
+  or radius); otherwise its native theme paints the control and the computed
+  border is not what is drawn. Whether the theme painted is recorded per control
+  in the DOM snapshot's `formControlTheme` (from matched-rule origins) — read it
+  instead of re-deriving it from computed `appearance`, which stays `auto` in
+  both cases.
+
 ### Rasterized-vector image: suppress its baked stroke as a CSS border
 
 A Figma vector exported as a PNG (the FILTER & EQ curve `Vector 3`, every grid
