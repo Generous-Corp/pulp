@@ -2,6 +2,10 @@
 
 #include <pulp/canvas/canvas.hpp>
 
+namespace pulp::view {
+class SpriteStrip;
+}
+
 // Knob indicator-pointer paint helpers, quarantined out of widgets.cpp.
 //
 // These are the importer-coupled "captured disc + pointer" and synthetic
@@ -38,5 +42,11 @@ void draw_knob_captured_pointer(canvas::Canvas& canvas,
                                 float phase_rad = 0.0f,
                                 canvas::Color outline_color = {},
                                 float outline_width = 0.0f);
+
+// Whether the frame at (fx, fy) of a byte-backed sprite strip lies inside its
+// pixels, shared by the Knob and Fader strip paints. Encoded bytes are bounded
+// by the decoded image size, measured once per strip and recorded on it; raw
+// RGBA bytes by their byte count.
+bool byte_strip_frame_in_bounds(canvas::Canvas& canvas, SpriteStrip& strip, int fx, int fy);
 
 }  // namespace pulp::view

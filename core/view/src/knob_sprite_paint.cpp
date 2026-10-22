@@ -1,5 +1,7 @@
 #include "knob_sprite_paint.hpp"
 
+#include <pulp/view/sprite_strip.hpp>
+
 #include <algorithm>
 #include <cmath>
 
@@ -76,6 +78,30 @@ void draw_knob_captured_pointer(canvas::Canvas& canvas,
     canvas.set_stroke_color(color);
     canvas.set_line_width(width);
     canvas.stroke_line(ix, iy, ox, oy);
+}
+
+// Whether the frame at (fx, fy) of a byte-backed strip lies inside its pixels.
+// Encoded bytes (PNG, JPEG, ...) compress, so their byte count says nothing
+// about which frames exist: they are bounded by the decoded image size, read
+// from the header once per strip. Bytes the decoder does not recognise are raw
+// RGBA and are bounded by their byte count.
+bool byte_strip_frame_in_bounds(canvas::Canvas& canvas, SpriteStrip& strip, int fx, int fy) {
+    if (!strip.decoded_size_known()) {
+        float w = 0.0f, h = 0.0f;
+        if (canvas.measure_image_from_data(strip.data(), strip.data_size(), w, h))
+            strip.set_decoded_size(static_cast<int>(w), static_cast<int>(h));
+        else
+            strip.set_decoded_size(0, 0);
+    }
+    const int fw = strip.frame_width();
+    const int fh = strip.frame_height();
+    if (strip.decoded_width() > 0 && strip.decoded_height() > 0)
+        return fx >= 0 && fy >= 0 && fx + fw <= strip.decoded_width() &&
+               fy + fh <= strip.decoded_height();
+    const size_t frame_bytes = static_cast<size_t>(fw) * static_cast<size_t>(fh) * 4u;
+    const size_t offset = static_cast<size_t>(fy) * static_cast<size_t>(strip.total_width()) * 4u +
+                          static_cast<size_t>(fx) * 4u;
+    return offset + frame_bytes <= strip.data_size();
 }
 
 }  // namespace pulp::view
