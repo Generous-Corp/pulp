@@ -59,6 +59,7 @@ struct Options {
     bool gpu_backend = true;
     NeuralFamily family = NeuralFamily::WaveNet;
     float gpu_gain = 1.0f;
+    std::uint32_t queue_blocks = 16;
 };
 
 struct Rig {
@@ -97,7 +98,8 @@ struct Rig {
                                           .lead_blocks = kLead,
                                           .capacity = kLead + 3,
                                           .shadow_policy = o.policy,
-                                          .shadow_model = shadow_model});
+                                          .shadow_model = shadow_model,
+                                          .shadow_queue_blocks = o.queue_blocks});
         detail::NeuralRealtimeTestAccess::inject_shadow_cost(*node, o.injected_cost);
         detail::NeuralRealtimeTestAccess::manual_shadow(*node, o.manual);
     }
@@ -249,8 +251,8 @@ TEST_CASE("each shadow policy nulls against the reference across a provider faul
     if (policy == Policy::Worker) {
         // Copy only: the model never ran inside the callback.
         CHECK(rig.calls_in_callback() == 0);
-        if (!manual)
-            CHECK(rig.kernels[0].calls >= 32);
+        // Channel 1 is never timed by Auto, so it ran exactly once per block.
+        CHECK(rig.kernels[1].calls == 32);
     } else {
         // Positive control for the instrument: Inline runs it every callback.
         CHECK(rig.calls_in_callback() == 32ull * kChannels);
@@ -309,9 +311,14 @@ TEST_CASE("a starved Worker shadow drops late blocks and stays silent on a doubl
 
 TEST_CASE("an offline render moves a Worker shadow inline on the same timeline",
           "[gpu_audio][neural][shadow-policy]") {
-    Rig rig({.policy = Policy::Worker, .gpu_gain = 2.0f});
+    const auto manual = GENERATE(true, false);
+    CAPTURE(manual);
+    Rig rig({.policy = Policy::Worker, .manual = manual, .gpu_gain = 2.0f});
     REQUIRE(rig.prepare());
-    rig.render(6);
+    rig.render(4);
+    // With an explicit shadow, leave the last two inputs unprocessed so the
+    // handover itself must run them before seeding the inline ring.
+    rig.render(2, true, !manual);
     // The Worker still holds results for the next two slots; the handover to
     // the inline ring must carry them.
     std::array<std::vector<float>, kChannels> in, out;
@@ -429,4 +436,69 @@ TEST_CASE("neural shadow callback cost by policy", "[.][neural-shadow-cost]") {
                 static_cast<unsigned long long>(status.shadow_double_miss));
         }
     }
+}
+
+TEST_CASE("None renders offline as silence", "[gpu_audio][neural][shadow-policy]") {
+    Rig rig({.policy = Policy::None});
+    REQUIRE(rig.prepare());
+    rig.render(6);
+    std::array<std::vector<float>, kChannels> in, out;
+    std::array<const float*, kChannels> in_ptrs{};
+    std::array<float*, kChannels> out_ptrs{};
+    float loudest = 0.0f;
+    for (std::uint32_t b = 0; b < 6; ++b) {
+        for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
+            in[ch].assign(kBlock, 0.5f);
+            out[ch].assign(kBlock, 1.0f);
+            in_ptrs[ch] = in[ch].data();
+            out_ptrs[ch] = out[ch].data();
+        }
+        audio::BufferView<const float> input(in_ptrs.data(), kChannels, kBlock);
+        audio::BufferView<float> result(out_ptrs.data(), kChannels, kBlock);
+        rig.transport.process_offline(input, result, kBlock);
+        for (const auto& channel : out)
+            for (const float y : channel)
+                loudest = std::max(loudest, std::abs(y));
+    }
+    // Documented limitation: no shadow, and the offline fence stops the GPU.
+    CHECK(loudest == 0.0f);
+}
+
+TEST_CASE("a full Worker input queue drops blocks and restarts the shadow state",
+          "[gpu_audio][neural][shadow-policy]") {
+    Rig rig({.policy = Policy::Worker, .queue_blocks = kLead + 2});
+    REQUIRE(rig.prepare());
+    rig.plan.fail_completions = true;
+    rig.render(8);
+    // Callbacks 8..13 run with the shadow stalled. Its four-block input queue
+    // takes inputs 8..11 and drops 12..14 (14 arrives before the first pump).
+    rig.render(6, true, false);
+    rig.render(10);
+    const auto status = rig.node->shadow_status();
+    CHECK(status.shadow_input_dropped == 3);
+    CHECK(status.shadow_resyncs == 1);
+    CHECK(status.shadow_late == 4);
+    CHECK(status.shadow_double_miss == 7);
+    const auto ref = reference(NeuralFamily::WaveNet, 24ull * kBlock);
+    CHECK(block_error(rig, ref, 0, 10, 1.0f) == 0.0f);
+    CHECK(block_error(rig, ref, 10, 17, 0.0f) == 0.0f);
+    // Block 17 carries the restarted state; the FIR's short memory has
+    // refilled by block 18, so the stream is exact again.
+    CHECK(block_error(rig, ref, 18, 24, 1.0f) == 0.0f);
+    CHECK(rig.callback_allocations == 0);
+}
+
+TEST_CASE("a lagging shadow under a healthy GPU is not counted late",
+          "[gpu_audio][neural][shadow-policy]") {
+    Rig rig({.policy = Policy::Worker});
+    REQUIRE(rig.prepare());
+    rig.render(6);
+    rig.render(4, true, false); // the shadow lags; the GPU covers every slot
+    rig.render(6);
+    const auto status = rig.node->shadow_status();
+    CHECK(status.shadow_late == 0);
+    CHECK(status.shadow_double_miss == 0);
+    CHECK(status.shadow_delivered == 0);
+    const auto ref = reference(NeuralFamily::WaveNet, 16ull * kBlock);
+    CHECK(block_error(rig, ref, 0, 16, 1.0f) == 0.0f);
 }

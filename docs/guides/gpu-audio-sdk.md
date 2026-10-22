@@ -292,9 +292,11 @@ Where the shadow runs is `Config::shadow_policy`:
   shadow result that arrives after its slot is dropped. A block that both the
   GPU and the shadow miss is silent.
 - `None` has no shadow, so a GPU miss is silent. It requires a GPU backend.
-- `Auto`, the default, times one block of the CPU model at `prepare()`. It
-  picks `Inline` when that block costs at most 15% of the block period per
-  channel, and `Worker` otherwise.
+  An offline render fences the GPU, so with `None` it renders silence.
+- `Auto`, the default, times one block of the CPU model for one channel at
+  `prepare()`. It picks `Inline` when that block costs at most 15% of the
+  block period, and `Worker` otherwise. The threshold is per channel, so an
+  N-channel `Inline` node spends about N times that on the audio thread.
 
 Families without a GPU backend always run `Inline`, because the CPU model is
 their output. An offline render moves a `Worker` shadow inline on the same
