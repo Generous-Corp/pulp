@@ -158,7 +158,9 @@ class AllpassCascade {
     }
 
     int num_stages() const { return num_stages_; }
-    AllpassStage<SampleType>& stage(int s) { return stages_[s]; }
+    AllpassStage<SampleType>& stage(int s) {
+        return stages_[s];
+    }
 
     // Total delay the cascade contributes to a loop it sits in. An allpass is
     // lossless but not delay-free, and a decay law that ignores it computes the
@@ -229,13 +231,14 @@ class AllpassCascade {
         commit4(n);
     }
 
-public:
+  public:
     // The four stages' delayed and stored spans for the next n samples (the
     // rings mirror their starts, so every span is contiguous). With
     // commit4(), lets a caller run many cascades through run_spans4() without
     // per-cascade setup. Requires four stages and n <= min_delay().
     bool spans4(int n, SampleType** delayed, SampleType** stored) {
-        if (num_stages_ != 4 || n > min_delay_) return false;
+        if (num_stages_ != 4 || n > min_delay_)
+            return false;
         for (int s = 0; s < 4; ++s) {
             FracDelayT<SampleType>& line = stages_[s].line();
             const std::size_t w = line.write_index();
@@ -247,7 +250,8 @@ public:
     }
 
     void commit4(int n) {
-        for (int s = 0; s < 4; ++s) stages_[s].line().advance(n);
+        for (int s = 0; s < 4; ++s)
+            stages_[s].line().advance(n);
     }
 
     // Four stages over one contiguous piece: the expression
@@ -282,7 +286,7 @@ public:
         }
     }
 
-private:
+  private:
     // snap_to_zero on four lanes.
     static lanes::F4 snap(lanes::F4 v) {
         return lanes::select(lanes::less(lanes::abs(v), lanes::splat(snap_threshold<float>())),

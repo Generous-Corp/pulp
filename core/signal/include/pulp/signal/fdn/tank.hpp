@@ -296,8 +296,7 @@ class FdnTank {
         diffuse_lines(span, n);
         for (int k = 0; k < n; ++k) {
             for (int i = 0; i < active_n_; ++i)
-                x[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] =
-                    span[i][k];
+                x[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] = span[i][k];
             for (int i = active_n_; i < kNumChannels; ++i)
                 x[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] = SampleType{0};
         }
@@ -436,7 +435,8 @@ class FdnTank {
         for (std::size_t i = 0; i < static_cast<std::size_t>(kNumChannels); ++i)
             ring[i] = lines_[i].taps_at(0);
         D2 length[kPairs];
-        for (int p = 0; p < kPairs; ++p) length[p] = lanes::load(&current_delay_[2 * static_cast<std::size_t>(p)]);
+        for (int p = 0; p < kPairs; ++p)
+            length[p] = lanes::load(&current_delay_[2 * static_cast<std::size_t>(p)]);
         const D2 depth = lanes::splat(mod_depth_);
         // Each line's delay as integer part and fraction, exactly as
         // FracDelayT::read_hermite_at derives them.
@@ -452,7 +452,8 @@ class FdnTank {
         for (int k = 0; k < n; ++k) {
             alignas(16) double m[kNumChannels];
             modulation_.tick(m);
-            const I2 origin = lanes::splat_i(static_cast<std::int64_t>(write + static_cast<std::size_t>(k)) - 2);
+            const I2 origin =
+                lanes::splat_i(static_cast<std::int64_t>(write + static_cast<std::size_t>(k)) - 2);
             alignas(16) std::int64_t start[kNumChannels];
             F4 frac[kNumChannels / 4];
             for (int j = 0; j < kNumChannels / 4; ++j) {
@@ -480,7 +481,8 @@ class FdnTank {
                 const F4 c2 = ym1 - two_and_half * y0 + two * y1 - half * y2;
                 const F4 c3 = half * (y2 - ym1) + one_and_half * (y0 - y1);
                 const F4 out = ((c3 * t + c2) * t + c1) * t + y0;
-                for (int lane = 0; lane < 4; ++lane) span[4 * j + lane][k] = lanes::lane(out, lane);
+                for (int lane = 0; lane < 4; ++lane)
+                    span[4 * j + lane][k] = lanes::lane(out, lane);
             }
         }
     }
@@ -492,7 +494,8 @@ class FdnTank {
             alignas(64) double lfo[kMaxBlockSamples];
             for (int i = 0; i < active_n_; ++i) {
                 const auto ui = static_cast<std::size_t>(i);
-                for (int k = 0; k < n; ++k) lfo[k] = flutter_lfo_[ui].tick();
+                for (int k = 0; k < n; ++k)
+                    lfo[k] = flutter_lfo_[ui].tick();
                 const SampleType g = (i & 1) ? -loop_g_ : loop_g_;
                 loop_diffusion_[ui].process_block_fluttered(span[i], n, g, lfo, kFlutterDepth);
             }
@@ -529,7 +532,8 @@ class FdnTank {
             for (int s = 0; s < kStages; ++s) {
                 auto& stage = cascade.stage(s);
                 SampleType* base = stage.line().data();
-                delayed[s] = base + ((write[s] - static_cast<std::size_t>(stage.delay())) & mask[s]);
+                delayed[s] =
+                    base + ((write[s] - static_cast<std::size_t>(stage.delay())) & mask[s]);
                 stored[s] = base + write[s];
             }
             AllpassCascade<SampleType>::run_spans4(span[i], n, (i & 1) ? -loop_g_ : loop_g_,

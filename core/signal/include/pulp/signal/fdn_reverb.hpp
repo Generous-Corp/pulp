@@ -356,9 +356,9 @@ private:
         const auto output_lp = fdn::StereoSectionLanes::from(output_lp_coefficients_);
         auto output_state = output_lp_;
         for (int i = 0; i < n; ++i) {
-            const auto y = output_state.process(&output_lp,
-                                              fdn::lanes::make(static_cast<double>(out_left[i]),
-                                                               static_cast<double>(out_right[i])));
+            const auto y = output_state.process(
+                &output_lp, fdn::lanes::make(static_cast<double>(out_left[i]),
+                                             static_cast<double>(out_right[i])));
             const auto scaled = y * makeup;
             out_left[i] = static_cast<SampleType>(fdn::lanes::lane(scaled, 0));
             out_right[i] = static_cast<SampleType>(fdn::lanes::lane(scaled, 1));
@@ -386,9 +386,9 @@ private:
             const auto input_lp = fdn::StereoSectionLanes::from(input_lp_coefficients_);
             auto input_state = input_lp_;
             for (int k = 0; k < n; ++k) {
-                const auto y = input_state.process(
-                    &input_lp,
-                    fdn::lanes::make(static_cast<double>(l[k]), static_cast<double>(r[k])));
+                const auto y =
+                    input_state.process(&input_lp, fdn::lanes::make(static_cast<double>(l[k]),
+                                                                    static_cast<double>(r[k])));
                 l[k] = static_cast<SampleType>(fdn::lanes::lane(y, 0));
                 r[k] = static_cast<SampleType>(fdn::lanes::lane(y, 1));
             }

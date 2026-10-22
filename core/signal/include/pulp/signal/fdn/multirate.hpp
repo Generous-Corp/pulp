@@ -255,7 +255,8 @@ template <int Sections> class StereoBiquadState {
 
     lanes::D2 process(const StereoSection* sections, lanes::D2 x) {
         StereoSectionLanes l[Sections];
-        for (int k = 0; k < Sections; ++k) l[k] = StereoSectionLanes::from(sections[k]);
+        for (int k = 0; k < Sections; ++k)
+            l[k] = StereoSectionLanes::from(sections[k]);
         return process(l, x);
     }
 
