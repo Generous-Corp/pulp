@@ -790,3 +790,37 @@ TEST_CASE("Biquad block path continues the sample path's state exactly in real a
         worst = std::max(worst, std::abs(a[i] - b[i]));
     CHECK(worst < 1.0e-5f);
 }
+
+TEST_CASE("Biquad::process_stereo keeps each channel's own form when one history is degenerate",
+          "[signal][biquad][determinism]") {
+    // Retuning a second-order section to a first-order one (b2 = a2 = 0)
+    // after per-sample processing leaves an s2 that no DF1 history
+    // reproduces, so that channel's block call falls back to the sample
+    // order. The other channel must still run its own DF1 form, exactly as
+    // when processed alone.
+    Biquad left;
+    Biquad right;
+    left.set_coefficients(Biquad::Type::lowpass, 900.0f, 0.9f, 48000.0f);
+    right.set_coefficients(Biquad::Type::peaking, 2500.0f, 1.4f, 48000.0f, 5.0f);
+    for (int i = 0; i < 300; ++i) {
+        const float x = std::sin(0.031f * static_cast<float>(i));
+        (void)left.process(x);
+        (void)right.process(x);
+    }
+    left.set_coefficients(BiquadCoefficients{0.4f, 0.4f, 0.0f, -0.2f, 0.0f});
+
+    Biquad left_alone = left;
+    Biquad right_alone = right;
+    std::vector<float> l(512), r(512);
+    for (std::size_t i = 0; i < l.size(); ++i) {
+        l[i] = 0.7f * std::sin(0.017f * static_cast<float>(i));
+        r[i] = 0.6f * std::cos(0.023f * static_cast<float>(i));
+    }
+    auto l_alone = l;
+    auto r_alone = r;
+    Biquad::process_stereo(left, right, l.data(), r.data(), l.size());
+    left_alone.process(l_alone.data(), static_cast<int>(l_alone.size()));
+    right_alone.process(r_alone.data(), static_cast<int>(r_alone.size()));
+    CHECK(std::memcmp(l.data(), l_alone.data(), l.size() * sizeof(float)) == 0);
+    CHECK(std::memcmp(r.data(), r_alone.data(), r.size() * sizeof(float)) == 0);
+}

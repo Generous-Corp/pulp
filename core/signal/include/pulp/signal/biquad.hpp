@@ -274,8 +274,7 @@ public:
         // Below about 64 samples two separate calls already overlap in the
         // out-of-order window and the lane path measured no faster. Filters
         // whose passes take different forms cannot share lanes.
-        if (!simd::kHasVectorLanes || num_samples < kStereoLaneMinSamples ||
-            pass_form(&left, 1) != pass_form(&right, 1)) {
+        if (num_samples < kStereoLaneMinSamples || pass_form(&left, 1) != pass_form(&right, 1)) {
             dispatch_fixed<1>(&left, nullptr, left_buffer, nullptr, num_samples);
             dispatch_fixed<1>(&right, nullptr, right_buffer, nullptr, num_samples);
             return;
@@ -327,8 +326,7 @@ public:
             const std::size_t n = std::min(count - first, kChainSectionsPerPass);
             // The two channels' passes must take the same form to share
             // lanes; otherwise they run one after the other.
-            if (simd::kHasVectorLanes &&
-                pass_form(left + first, n) == pass_form(right + first, n)) {
+            if (pass_form(left + first, n) == pass_form(right + first, n)) {
                 dispatch_pass(n, left + first, right + first, left_buffer, right_buffer,
                               num_samples);
             } else {
@@ -403,16 +401,19 @@ public:
             if (form == BlockForm::wide_df1) {
                 // A history that cannot be derived (a degenerate section
                 // whose DF2T state no DF1 history reproduces) falls back to
-                // the sample path's order for this call.
-                bool ok = true;
-                for (std::size_t k = 0; k < Count; ++k) {
-                    ok = left[k].prepare_history() && ok;
-                    if (right)
-                        ok = right[k].prepare_history() && ok;
-                }
-                if (ok) {
+                // the sample path's order for this call, for that channel
+                // only: each channel still computes what it would alone.
+                const bool left_ok = prepare_histories<Count>(left);
+                const bool right_ok = right == nullptr || prepare_histories<Count>(right);
+                if (left_ok && right_ok) {
                     run_pass_lanes<Count, BlockForm::wide_df1>(left, right, left_buffer,
                                                                right_buffer, num_samples);
+                    return;
+                }
+                if (right != nullptr) {
+                    run_channel_df1_or_sample_order<Count>(left, left_buffer, num_samples, left_ok);
+                    run_channel_df1_or_sample_order<Count>(right, right_buffer, num_samples,
+                                                           right_ok);
                     return;
                 }
                 form = BlockForm::sample_order;
@@ -426,8 +427,27 @@ public:
                                                            num_samples);
     }
 
-    // One channel in a scalar, or two in the lanes of one vector where the
-    // compiler has them.
+    template <std::size_t Count> static bool prepare_histories(BiquadT* sections) noexcept {
+        bool ok = true;
+        for (std::size_t k = 0; k < Count; ++k)
+            ok = sections[k].prepare_history() && ok;
+        return ok;
+    }
+
+    template <std::size_t Count>
+    static void run_channel_df1_or_sample_order(BiquadT* sections, SampleType* buffer,
+                                                std::size_t num_samples, bool df1) noexcept {
+        if (df1)
+            run_pass_lanes<Count, BlockForm::wide_df1>(sections, nullptr, buffer, nullptr,
+                                                       num_samples);
+        else
+            run_pass_lanes<Count, BlockForm::sample_order>(sections, nullptr, buffer, nullptr,
+                                                           num_samples);
+    }
+
+    // One channel in a scalar, or two in the lanes of one vector; without
+    // vector lanes (simd::kHasVectorLanes false) the two channels run one
+    // after the other, with the same per-lane result.
     template <std::size_t Count, BlockForm Form>
     static void run_pass_lanes(BiquadT* left, BiquadT* right, SampleType* left_buffer,
                                SampleType* right_buffer, std::size_t num_samples) noexcept {

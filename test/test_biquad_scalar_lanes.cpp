@@ -144,3 +144,28 @@ TEST_CASE("SosCascade stereo path without vector lanes matches each cascade alon
     CHECK(same_bits(l, l_alone));
     CHECK(same_bits(r, r_alone));
 }
+
+TEST_CASE("Biquad stereo path without vector lanes keeps each channel's own form",
+          "[signal][biquad][parity]") {
+    using pulp::signal::Biquad;
+    Biquad left;
+    Biquad right;
+    left.set_coefficients(Biquad::Type::lowpass, 900.0f, 0.9f, 48000.0f);
+    right.set_coefficients(Biquad::Type::peaking, 2500.0f, 1.4f, 48000.0f, 5.0f);
+    for (int i = 0; i < 300; ++i) {
+        const float x = std::sin(0.031f * static_cast<float>(i));
+        (void)left.process(x);
+        (void)right.process(x);
+    }
+    // Leaves an s2 no DF1 history reproduces (see test_biquad.cpp).
+    left.set_coefficients(pulp::signal::BiquadCoefficients{0.4f, 0.4f, 0.0f, -0.2f, 0.0f});
+    Biquad left_alone = left;
+    Biquad right_alone = right;
+    auto l = busy<float>(512, 21u), r = busy<float>(512, 23u);
+    auto l_alone = l, r_alone = r;
+    Biquad::process_stereo(left, right, l.data(), r.data(), l.size());
+    left_alone.process(l_alone.data(), static_cast<int>(l_alone.size()));
+    right_alone.process(r_alone.data(), static_cast<int>(r_alone.size()));
+    CHECK(same_bits(l, l_alone));
+    CHECK(same_bits(r, r_alone));
+}
