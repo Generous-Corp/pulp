@@ -3,6 +3,7 @@
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 #include <array>
+#include <stdexcept>
 #include <thread>
 #include <atomic>
 #include <cstddef>
@@ -245,6 +246,49 @@ TEST_CASE("TripleBuffer default and clean reads are stable",
     REQUIRE(second.left == 0.75f);
     REQUIRE(second.right == 0.5f);
     REQUIRE(second.blocks == 12);
+}
+
+TEST_CASE("TripleBuffer writer never overwrites the slot the reader holds",
+          "[runtime][triple_buffer]") {
+    TripleBuffer<int> buf(0);
+    buf.write(7);
+    const int& held = buf.read();
+    REQUIRE(held == 7);
+    // However many publications land before the next read, the reader's
+    // current slot stays untouched; only the other two slots rotate.
+    for (int i = 100; i < 110; ++i) {
+        buf.write(i);
+        REQUIRE(held == 7);
+    }
+    REQUIRE(buf.read() == 109);
+    // A read with nothing new keeps returning the same slot and value.
+    const int& again = buf.read();
+    REQUIRE(&again == &buf.read());
+    REQUIRE(again == 109);
+}
+
+TEST_CASE("TripleBuffer alternating writes and reads see every value in order",
+          "[runtime][triple_buffer]") {
+    TripleBuffer<int> buf(-1);
+    for (int i = 0; i < 64; ++i) {
+        buf.write(i);
+        REQUIRE(buf.read() == i);
+        REQUIRE(buf.read() == i);
+    }
+}
+
+TEST_CASE("TripleBuffer write_with that throws publishes nothing",
+          "[runtime][triple_buffer]") {
+    TripleBuffer<int> buf(1);
+    buf.write(2);
+    REQUIRE(buf.read() == 2);
+    REQUIRE_THROWS(buf.write_with([](int& slot) {
+        slot = 99;
+        throw std::runtime_error("fill failed");
+    }));
+    REQUIRE(buf.read() == 2);
+    buf.write(3);
+    REQUIRE(buf.read() == 3);
 }
 
 TEST_CASE("TripleBuffer concurrent stress test", "[runtime][triple_buffer]") {
