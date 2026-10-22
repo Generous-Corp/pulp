@@ -436,7 +436,7 @@ class CombinedInstallerTest(unittest.TestCase):
                     # Any real Mach-O will do; the fake strip only marks it.
                     executable.write_bytes(Path("/usr/bin/true").read_bytes())
                 else:
-                    executable.write_text("fixture executable\n")
+                    executable.write_text("fixture executable\n", encoding="utf-8")
                 executable.chmod(0o755)
                 if d15_fixture and not plugin_bundles:
                     if d15_fixture == "file":
