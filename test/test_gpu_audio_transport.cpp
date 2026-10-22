@@ -1914,9 +1914,12 @@ TEST_CASE("GpuAudioTransport health sampling and status reads do not allocate",
         pulp::test::RtAllocationProbe probe;
         h.callback();
         h.transport.pump();
-        status = validated(h.transport.status_snapshot());
+        status = h.transport.status_snapshot();
         allocations = probe.allocation_count();
     }
+    // Validate outside the probe window: Catch's message streams allocate on
+    // first use, which is not the code under measurement.
+    (void)validated(status);
     CHECK(allocations == 0);
     CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
 

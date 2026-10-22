@@ -997,13 +997,19 @@ TEST_CASE("GpuConvolver shared-path status reports provider loss through the tra
 
     // Host/UI reads stay allocation-free on the fenced path.
     std::size_t allocations = 0;
+    GpuAudioStatus hosted_status;
+    GpuAudioStatus node_read;
     {
         pulp::test::RtAllocationProbe probe;
-        (void)validated(transport.status_snapshot());
-        (void)validated(convolver->status_snapshot());
+        hosted_status = transport.status_snapshot();
+        node_read = convolver->status_snapshot();
         (void)convolver->fenced();
         allocations = probe.allocation_count();
     }
+    // Validate outside the probe window: Catch's message streams allocate on
+    // first use, which is not the code under measurement.
+    (void)validated(hosted_status);
+    (void)validated(node_read);
     CHECK(allocations == 0);
     transport.release();
 }
