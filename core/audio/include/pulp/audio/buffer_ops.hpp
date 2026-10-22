@@ -125,6 +125,11 @@ MinMax find_min_max(const BufferView<const float>& buffer, std::size_t channel);
 
 /// Find the peak absolute value (magnitude) in a span. Empty span
 /// yields `0.0f`.
+///
+/// Built from the SIMD min/max reductions, so a NaN anywhere in the span can
+/// make the result NaN (it does on the Apple backend). That differs from
+/// `measure_peak_rms().peak`, which ignores NaN samples; use that one for a
+/// meter that must keep reading through a stray NaN.
 float find_magnitude(std::span<const float> samples);
 
 /// Find the peak absolute value across one channel of a multi-channel
@@ -145,9 +150,10 @@ struct PeakRms {
 /// combined pairwise (lane k with lane k + 8, then k with k + 4, k + 2, and
 /// finally 0 with 1). The order is fixed rather than tied to the host's SIMD
 /// width, so builds that make the same FMA-contraction choice for
-/// `sum + x * x` agree bit for bit. Builds that do not contract it (Pulp's
-/// GCC builds use -ffp-contract=off) can differ from contracting builds in
-/// the last bit of `rms`; `peak` is always identical.
+/// `sum + x * x` agree bit for bit; `rms` can differ in the last bit between
+/// builds that do and do not contract it (the per-compiler policy is in
+/// tools/cmake/PulpFloatingPointContraction.cmake). `peak` is always
+/// identical.
 inline constexpr std::size_t kPeakRmsLanes = 16;
 
 /// Measure the peak absolute value and RMS of a block in one pass.
