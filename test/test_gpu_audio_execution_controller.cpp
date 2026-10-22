@@ -85,9 +85,10 @@ TEST_CASE("execution controller telemetry records admission and submission bound
     SharedIoTelemetry telemetry;
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(contract(), &telemetry));
-    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
+    const auto ticket_0 = controller.admit_submission(0);
+    REQUIRE(ticket_0.accepted());
+    REQUIRE(controller.admit_submission(1).accepted());
+    REQUIRE(controller.record_completion(ticket_0, SharedIoCompletion::Success));
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
     REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Priming);
     REQUIRE(controller.deliver(2).path == SharedIoDeliveryPath::Gpu);
