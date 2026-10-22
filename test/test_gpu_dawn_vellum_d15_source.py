@@ -36,10 +36,13 @@ def main() -> int:
     # Anchor on the branch that detects the provider capability, not the first
     # Apple branch: an earlier one selects private observer sources and does
     # not read or write any derived provider state.
+    capability_anchor = "set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO TRUE CACHE INTERNAL"
+    if capability_anchor not in cmake_text:
+        raise SystemExit(
+            f"D15 source contract missing {capability_anchor!r} in {cmake.relative_to(ROOT)}"
+        )
     capability_branch = cmake_text.rindex(
-        "if(APPLE AND NOT PULP_IOS",
-        0,
-        cmake_text.index("set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO TRUE CACHE INTERNAL"),
+        "if(APPLE AND NOT PULP_IOS", 0, cmake_text.index(capability_anchor)
     )
     for derived_cache_key in (
         "PULP_GPU_AUDIO_HAS_VELLUM_D15 FALSE CACHE INTERNAL",
@@ -47,7 +50,9 @@ def main() -> int:
         'PULP_GPU_AUDIO_VELLUM_NOTICE_DIR "" CACHE INTERNAL',
         "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE FALSE CACHE INTERNAL",
     ):
-        if cmake_text.index(derived_cache_key) > capability_branch:
+        # Every reset must precede the branch; a second one after it would
+        # re-derive stale state despite an earlier, correctly placed reset.
+        if cmake_text.rindex(derived_cache_key) > capability_branch:
             raise SystemExit(
                 "D15 source contract requires derived cache reset before "
                 f"platform capability detection: {derived_cache_key}"
