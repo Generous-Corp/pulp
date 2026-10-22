@@ -4,14 +4,14 @@
 // (`background`, `border*`, `textColor`). An element rendered WITHOUT a
 // style source keeps none of those keys — they are ABSENT, not removed. If
 // `applyChangedProps` reads that absence as a deletion it hard-resets the
-// element to `setBackground(id,"transparent")` + `setBorderWidth(id,0)` +
+// element to `setBackground(id,"")` + `setBorderWidth(id,0)` +
 // `setTextColor(id,"")`, and the whole box disappears in one frame. That is
 // the "chip vanishes on hover" failure: a hover re-render emits the element
 // with a plain prop set and the fill, border and text all go at once.
 //
 // The contract pinned here:
-//   - derived (style/className) -> raw shape: derived visual keys are NOT
-//     reset; non-visual removals (visible/opacity) still are
+//   - derived (style/className) -> raw shape: keys that came from the style
+//     source are NOT reset; flat-prop removals (visible/opacity) still are
 //   - derived -> derived with a key genuinely dropped: reset still fires,
 //     so the conditional-spread contract in
 //     prop-applier-disappearing-style.test.ts is preserved
@@ -55,7 +55,7 @@ function makeInstance(
 }
 
 const destructive = (b: MockBridge) => b.calls.filter((c) =>
-    (c.fn === 'setBackground' && c.args[1] === 'transparent')
+    (c.fn === 'setBackground' && c.args[1] === '')
     || (c.fn === 'setBorderWidth' && c.args[1] === 0)
     || (c.fn === 'setTextColor' && c.args[1] === '')
     || c.fn === 'setBorderSide');
@@ -127,7 +127,7 @@ describe('@pulp/react prop-applier — derived-style shape stability', () => {
 
         const bg = bridge.calls.filter((c) => c.fn === 'setBackground');
         const bw = bridge.calls.filter((c) => c.fn === 'setBorderWidth');
-        expect(bg.map((c) => c.args)).toEqual([['chip-spread', 'transparent']]);
+        expect(bg.map((c) => c.args)).toEqual([['chip-spread', '']]);
         expect(bw.map((c) => c.args)).toEqual([['chip-spread', 0]]);
     });
 
@@ -136,7 +136,7 @@ describe('@pulp/react prop-applier — derived-style shape stability', () => {
         // unaffected by the marker.
         applyChangedProps(makeInstance('flat'), { background: 'red' }, {});
         expect(bridge.calls.filter((c) => c.fn === 'setBackground').map((c) => c.args))
-            .toEqual([['flat', 'transparent']]);
+            .toEqual([['flat', '']]);
     });
 
     it('keeps the shape marker out of key walks and bridge setters', () => {
