@@ -781,9 +781,10 @@
                 TIMEOUT 60)
 
             # Narrow physical proof for the private WaveNet provider's mixed
-            # dilation history layout. The test binds both preparation writes
-            # and runtime copies to the independently expected per-layer byte
-            # sizes; it does not alter the provider's runtime behavior.
+            # dilation history layout. The test binds the preparation writes to
+            # the independently expected per-layer ring sizes and requires a
+            # submission to make no copies or host writes; it does not alter the
+            # provider's runtime behavior.
             add_executable(pulp-gpu-dawn-wavenet-history-probe
                 test_gpu_dawn_wavenet_history_probe.cpp)
             target_link_libraries(pulp-gpu-dawn-wavenet-history-probe PRIVATE
