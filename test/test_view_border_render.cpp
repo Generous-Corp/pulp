@@ -81,7 +81,16 @@ struct Pixels {
     }
 };
 
+// render_to_rgba rasterises through Skia; a build without it has no pixels to
+// measure, so every pixel test skips there. Skia builds keep the hard REQUIREs.
+void require_skia_raster() {
+#ifndef PULP_HAS_SKIA
+    SKIP("the border pixel tests need the Skia raster backend");
+#endif
+}
+
 Pixels render(View& v) {
+    require_skia_raster();
     v.set_bounds({0.0f, 0.0f, static_cast<float>(kBoxW),
                   static_cast<float>(kBoxH)});
     v.set_background_color(paint(kPlate));
@@ -431,6 +440,7 @@ TEST_CASE("opposite borders that overflow the box give the near side priority",
     v.set_border_right(paint(kYellow), 50.0f);
     Pixels p;
     uint32_t pw = 0, ph = 0;
+    require_skia_raster();
     p.rgba = render_to_rgba(v, 60, 40, kScale, &pw, &ph);
     REQUIRE(!p.rgba.empty());
     p.width = static_cast<int>(pw);
@@ -457,6 +467,7 @@ TEST_CASE("a border thicker than the box fills it", "[view][border]") {
     v.set_border(paint(kRed), 40.0f);
     Pixels p;
     uint32_t pw = 0, ph = 0;
+    require_skia_raster();
     p.rgba = render_to_rgba(v, 60, 40, kScale, &pw, &ph);
     REQUIRE(!p.rgba.empty());
     p.width = static_cast<int>(pw);
@@ -842,6 +853,7 @@ TEST_CASE("a banded border's outer curve is the background's curve",
     v.set_border_style(View::BorderStyle::outset);
     Pixels px;
     uint32_t w = 0, h = 0;
+    require_skia_raster();
     px.rgba = render_to_rgba(v, 120, 40, kScale, &w, &h);
     REQUIRE(!px.rgba.empty());
     px.width = static_cast<int>(w);
