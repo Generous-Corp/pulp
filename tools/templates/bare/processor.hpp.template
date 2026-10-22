@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/format/processor.hpp>
+#include <algorithm>
 
 // {{PLUGIN_NAME}} — {{DESCRIPTION}}
 
@@ -34,9 +35,15 @@ public:
         const pulp::format::ProcessContext& /*ctx*/) override
     {
         // Pass-through — replace with your processing
-        for (std::size_t ch = 0; ch < output.num_channels(); ++ch)
-            for (std::size_t i = 0; i < output.num_samples(); ++i)
-                output.channel(ch)[i] = input.channel(ch)[i];
+        const std::size_t n = output.num_samples();
+        const std::size_t channels = std::min(output.num_channels(), input.num_channels());
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            const float* in = input.channel_ptr(ch);
+            float* out = output.channel_ptr(ch);
+            if (out != in) std::copy_n(in, n, out);
+        }
+        for (std::size_t ch = channels; ch < output.num_channels(); ++ch)
+            std::fill_n(output.channel_ptr(ch), n, 0.0f);
     }
 };
 

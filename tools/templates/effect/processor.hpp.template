@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/format/processor.hpp>
+#include <algorithm>
 #include <cmath>
 
 // {{PLUGIN_NAME}} — {{DESCRIPTION}}
@@ -38,6 +39,9 @@ public:
 
     void prepare(const pulp::format::PrepareContext& ctx) override {
         sample_rate_ = ctx.sample_rate;
+        // Resolve parameter handles once, off the audio thread; reading one
+        // in process() is a single atomic load with no ID lookup.
+        mix_ = state().param_reader(kMix);
     }
 
     void process(
@@ -47,19 +51,28 @@ public:
         pulp::midi::MidiBuffer& /*midi_out*/,
         const pulp::format::ProcessContext& /*ctx*/) override
     {
-        float mix = state().get_value(kMix) / 100.0f;
+        const float mix = mix_.get() / 100.0f;
 
-        for (std::size_t ch = 0; ch < output.num_channels(); ++ch) {
-            for (std::size_t i = 0; i < output.num_samples(); ++i) {
-                float dry = input.channel(ch)[i];
-                float wet = dry; // TODO: replace with your effect processing
-                output.channel(ch)[i] = dry * (1.0f - mix) + wet * mix;
+        // Take each channel's raw pointers once, outside the sample loop.
+        // input and output may be the same buffer (in-place hosts).
+        const std::size_t n = output.num_samples();
+        const std::size_t channels = std::min(output.num_channels(), input.num_channels());
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            const float* in = input.channel_ptr(ch);
+            float* out = output.channel_ptr(ch);
+            for (std::size_t i = 0; i < n; ++i) {
+                const float dry = in[i];
+                const float wet = dry; // TODO: replace with your effect processing
+                out[i] = dry * (1.0f - mix) + wet * mix;
             }
         }
+        for (std::size_t ch = channels; ch < output.num_channels(); ++ch)
+            std::fill_n(output.channel_ptr(ch), n, 0.0f);
     }
 
 private:
     double sample_rate_ = 48000.0;
+    pulp::state::ParamReader mix_;
 };
 
 inline std::unique_ptr<pulp::format::Processor> create_{{FACTORY_NAME}}() {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/format/processor.hpp>
+#include <algorithm>
 #include <cmath>
 
 // {{PLUGIN_NAME}} — {{DESCRIPTION}}
@@ -38,6 +39,9 @@ public:
 
     void prepare(const pulp::format::PrepareContext& ctx) override {
         sample_rate_ = ctx.sample_rate;
+        // Resolve parameter handles once, off the audio thread; reading one
+        // in process() is a single atomic load with no ID lookup.
+        gain_db_ = state().param_reader(kGain);
     }
 
     void process(
@@ -47,18 +51,25 @@ public:
         pulp::midi::MidiBuffer& /*midi_out*/,
         const pulp::format::ProcessContext& /*ctx*/) override
     {
-        float gain_db = state().get_value(kGain);
-        float gain = std::pow(10.0f, gain_db / 20.0f);
+        const float gain = std::pow(10.0f, gain_db_.get() / 20.0f);
 
-        for (std::size_t ch = 0; ch < output.num_channels(); ++ch) {
-            for (std::size_t i = 0; i < output.num_samples(); ++i) {
-                output.channel(ch)[i] = input.channel(ch)[i] * gain;
-            }
+        // Take each channel's raw pointers once so the loop vectorizes.
+        // input and output may be the same buffer (in-place hosts).
+        const std::size_t n = output.num_samples();
+        const std::size_t channels = std::min(output.num_channels(), input.num_channels());
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            const float* in = input.channel_ptr(ch);
+            float* out = output.channel_ptr(ch);
+            for (std::size_t i = 0; i < n; ++i)
+                out[i] = in[i] * gain;
         }
+        for (std::size_t ch = channels; ch < output.num_channels(); ++ch)
+            std::fill_n(output.channel_ptr(ch), n, 0.0f);
     }
 
 private:
     double sample_rate_ = 48000.0;
+    pulp::state::ParamReader gain_db_;
 };
 
 inline std::unique_ptr<pulp::format::Processor> create_{{FACTORY_NAME}}() {
