@@ -46,9 +46,9 @@ struct ControlValueText {
     CapturedBox content_box;
 };
 
-std::optional<ControlValueText> control_value_text(
-    const CapturedStyleIndex& index, int node_index, const CapturedBox& box,
-    const std::map<std::string, std::string>& computed);
+std::optional<ControlValueText>
+control_value_text(const CapturedStyleIndex& index, int node_index, const CapturedBox& box,
+                   const std::map<std::string, std::string>& computed);
 
 /// The image node for a viewport-plane raster of a captured element.
 ///
@@ -57,9 +57,8 @@ std::optional<ControlValueText> control_value_text(
 /// as usual) and the plane hangs inside it at the page origin, clipped to the
 /// content box where Chromium draws the bitmap. Children are placed against
 /// the padding box, so the plane's page origin sits at minus that box's origin.
-pulp::view::IRNode captured_viewport_plane(
-    const std::string& owner_name, const std::string& asset,
-    const CapturedLayerExtent& layer, const CapturedBox& box,
-    const std::map<std::string, std::string>& computed);
+pulp::view::IRNode captured_viewport_plane(const std::string& owner_name, const std::string& asset,
+                                           const CapturedLayerExtent& layer, const CapturedBox& box,
+                                           const std::map<std::string, std::string>& computed);
 
-}  // namespace pulp::import_design::detail
+} // namespace pulp::import_design::detail

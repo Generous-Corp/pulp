@@ -667,8 +667,10 @@ void append_to_array(std::string& json, std::string_view key, std::string_view e
     REQUIRE(json[cursor] == '[');
     int depth = 0;
     for (; cursor < json.size(); ++cursor) {
-        if (json[cursor] == '[') ++depth;
-        if (json[cursor] == ']' && --depth == 0) break;
+        if (json[cursor] == '[')
+            ++depth;
+        if (json[cursor] == ']' && --depth == 0)
+            break;
     }
     REQUIRE(cursor < json.size());
     const bool empty = json[cursor - 1] == '[';
@@ -681,17 +683,19 @@ void append_to_array(std::string& json, std::string_view key, std::string_view e
 std::string root_canvas_with_pseudo(const std::vector<std::string>& generated) {
     const auto parsed = choc::json::parse(root_canvas_snapshot());
     const auto strings = parsed["strings"];
-    const auto div_style = choc::json::toString(parsed["documents"][0]["layout"]["styles"][5],
-                                                false);
+    const auto div_style =
+        choc::json::toString(parsed["documents"][0]["layout"]["styles"][5], false);
     const auto pseudo_name = std::to_string(strings.size());
     // One row per layout entry: the pseudo's own box, then each generated row.
     const auto rows = [&](const std::string& value) {
         std::string joined = value;
-        for (size_t i = 0; i < generated.size(); ++i) joined += "," + value;
+        for (size_t i = 0; i < generated.size(); ++i)
+            joined += "," + value;
         return joined;
     };
     std::string bounds = "[42,44,10,10]";
-    for (const auto& box : generated) bounds += "," + box;
+    for (const auto& box : generated)
+        bounds += "," + box;
     auto json = choc::json::toString(parsed, false);
     append_to_array(json, "strings", "\"::before\",\"before\"");
     append_to_array(json, "parentIndex", "11");
@@ -737,8 +741,8 @@ TEST_CASE("an empty pseudo-element's generated row keeps the document canvas",
     // A `::before` with `content: ""` adds a zero-size row for its generated
     // content beside its own box. That row paints nothing, so the document
     // canvas proof must survive it.
-    const auto empty = canvas_paint_of(root_canvas_with_pseudo({"[0,0,0,0]"}),
-                                       "root-canvas-empty-pseudo");
+    const auto empty =
+        canvas_paint_of(root_canvas_with_pseudo({"[0,0,0,0]"}), "root-canvas-empty-pseudo");
     REQUIRE(empty);
     CHECK(empty->color == canvas_paint_of(root_canvas_snapshot(), "root-canvas-again")->color);
 
@@ -756,7 +760,8 @@ TEST_CASE("a node's own layout row is its first row with area",
     // The same snapshot and expected rows pin the differential lab's Python
     // reader (test/test_importer_differential_lab.py), so the two languages
     // cannot drift onto different rules.
-    const fs::path root = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) / "browser-capture-layout-rows";
+    const fs::path root =
+        fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) / "browser-capture-layout-rows";
     const auto index = pulp::import_design::CapturedStyleIndex::load(root / "dom-snapshot.json");
     REQUIRE(index);
     std::ifstream input(root / "expected-own-rows.json", std::ios::binary);
@@ -811,9 +816,11 @@ std::string root_canvas_with_canvas() {
 }
 
 const pulp::view::IRNode* find_captured_canvas(const pulp::view::IRNode& node) {
-    if (node.attributes.count("captured_element")) return &node;
+    if (node.attributes.count("captured_element"))
+        return &node;
     for (const auto& child : node.children)
-        if (const auto* found = find_captured_canvas(child)) return found;
+        if (const auto* found = find_captured_canvas(child))
+            return found;
     return nullptr;
 }
 
@@ -829,10 +836,10 @@ TEST_CASE("a capture-sized canvas asset lowers as a viewport plane",
     const auto lower_with_asset = [&](int width, int height) {
         const auto asset = png_header(width, height);
         temp.write("canvas-9002.png", asset);
-        const auto capture = with_canvas_asset(
-            root_canvas_envelope(pulp::runtime::sha256_hex(reference)),
-            pulp::runtime::sha256_hex(asset), 9002, "canvas:9002",
-            "canvas-9002.png", width, height);
+        const auto capture =
+            with_canvas_asset(root_canvas_envelope(pulp::runtime::sha256_hex(reference)),
+                              pulp::runtime::sha256_hex(asset), 9002, "canvas:9002",
+                              "canvas-9002.png", width, height);
         return lower_root_canvas(temp, root_canvas_with_canvas(), capture, false);
     };
 

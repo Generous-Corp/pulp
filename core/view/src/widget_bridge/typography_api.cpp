@@ -202,12 +202,10 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         // only when LineMetrics::valid() holds (finite, positive ascent,
         // non-negative descent); it does not check them against the boxes'
         // heights.
-        if (args.numArgs >= 7 && args[5] && args[6] &&
-            (args[5]->isFloat() || args[5]->isInt()) &&
+        if (args.numArgs >= 7 && args[5] && args[6] && (args[5]->isFloat() || args[5]->isInt()) &&
             (args[6]->isFloat() || args[6]->isInt()))
-            label->set_cached_line_metrics(
-                {static_cast<float>(args.get<double>(5, 0.0)),
-                 static_cast<float>(args.get<double>(6, 0.0))});
+            label->set_cached_line_metrics({static_cast<float>(args.get<double>(5, 0.0)),
+                                            static_cast<float>(args.get<double>(6, 0.0))});
         return choc::value::Value();
     });
 

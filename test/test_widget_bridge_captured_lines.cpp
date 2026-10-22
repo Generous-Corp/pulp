@@ -5,8 +5,8 @@
 // ascent and descent, the call carries them, and the Label places its baseline
 // from them exactly as the native materializer does.
 
-#include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/state/store.hpp>
@@ -25,23 +25,23 @@ namespace {
 
 float painted_baseline(const std::string& metrics_args) {
     const auto face = pulp::canvas::resolved_face_identity("Inter", 400.0f);
-    if (face.empty()) return std::nanf("");
+    if (face.empty())
+        return std::nanf("");
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 200});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
-    bridge.load_script(
-        "createLabel('copy', 'Measured', '');\n"
-        "setFontFamily('copy', 'Inter');\n"
-        "setFontSize('copy', 17);\n");
+    bridge.load_script("createLabel('copy', 'Measured', '');\n"
+                       "setFontFamily('copy', 'Inter');\n"
+                       "setFontSize('copy', 17);\n");
     auto* label = dynamic_cast<Label*>(bridge.widget("copy"));
     REQUIRE(label != nullptr);
     label->set_bounds({0, 0, 200, 40});
-    bridge.load_script(
-        "setCapturedLineBoxes('copy', [\n"
-        "  { left: 0, top: 2, width: 120, height: 20, start: 0, length: 8 }\n"
-        "], 200, '" + face + "', false" + metrics_args + ");\n");
+    bridge.load_script("setCapturedLineBoxes('copy', [\n"
+                       "  { left: 0, top: 2, width: 120, height: 20, start: 0, length: 8 }\n"
+                       "], 200, '" +
+                       face + "', false" + metrics_args + ");\n");
     REQUIRE(label->cached_line_boxes().size() == 1);
     pulp::canvas::RecordingCanvas canvas;
     label->paint(canvas);

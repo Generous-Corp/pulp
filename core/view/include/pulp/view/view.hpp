@@ -108,8 +108,12 @@ public:
     bool subpixel_layout() const { return subpixel_layout_; }
     /// The root of a captured (imported) frame: captured text snaps its
     /// baselines to this frame's grid. Import lanes set it on their root.
-    void set_captured_frame_root(bool v) { captured_frame_root_ = v; }
-    bool captured_frame_root() const { return captured_frame_root_; }
+    void set_captured_frame_root(bool v) {
+        captured_frame_root_ = v;
+    }
+    bool captured_frame_root() const {
+        return captured_frame_root_;
+    }
 
     // ── Child management ─────────────────────────────────────────────────
 
@@ -1228,16 +1232,16 @@ public:
     /// CG). The double and 3D styles paint as bands of per-side colour (see
     /// border_style.hpp). `none` / `hidden` skip the border entirely.
     enum class BorderStyle {
-        solid,    ///< Default — single continuous line.
-        dashed,   ///< Dash of 2w on, 1w off.
-        dotted,   ///< Dash of 1w on, 1w off.
-        double_,  ///< Two lines in the side colour with a gap between.
-        groove,   ///< Outer half shaded as inset, inner half as outset.
-        ridge,    ///< Outer half shaded as outset, inner half as inset.
-        inset,    ///< Top/left darkened, bottom/right lightened.
-        outset,   ///< Top/left lightened, bottom/right darkened.
-        none,     ///< No border drawn (paint short-circuits).
-        hidden,   ///< Same as none for paint purposes.
+        solid,   ///< Default — single continuous line.
+        dashed,  ///< Dash of 2w on, 1w off.
+        dotted,  ///< Dash of 1w on, 1w off.
+        double_, ///< Two lines in the side colour with a gap between.
+        groove,  ///< Outer half shaded as inset, inner half as outset.
+        ridge,   ///< Outer half shaded as outset, inner half as inset.
+        inset,   ///< Top/left darkened, bottom/right lightened.
+        outset,  ///< Top/left lightened, bottom/right darkened.
+        none,    ///< No border drawn (paint short-circuits).
+        hidden,  ///< Same as none for paint purposes.
     };
     void set_border_style(BorderStyle s) { border_style_ = s; invalidate_subtree_caches_up(); }
     BorderStyle border_style() const { return border_style_; }

@@ -107,8 +107,7 @@ void BridgeRegistrars::register_widget_border_box_api(WidgetBridge& self) {
         auto s = args.get<std::string>(1, "solid");
         auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
-        v->set_border_style(
-            border_style_from_css(s).value_or(View::BorderStyle::solid));
+        v->set_border_style(border_style_from_css(s).value_or(View::BorderStyle::solid));
         return choc::value::Value();
     });
     // A ToggleButton paints its own background, border and text from its own

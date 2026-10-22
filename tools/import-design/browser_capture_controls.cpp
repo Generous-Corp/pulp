@@ -10,7 +10,8 @@
 namespace pulp::import_design::detail {
 
 double px_value(const std::string& value) {
-    if (value.empty()) return 0.0;
+    if (value.empty())
+        return 0.0;
     try {
         return std::stod(value);
     } catch (const std::exception&) {
@@ -24,18 +25,20 @@ std::string normalized_input_type(std::string raw) {
     // import-validation/importer_differential/form_controls.py repeat it;
     // test/test_importer_differential_lab.py asserts the three agree.
     static const std::set<std::string> kKnownInputTypes = {
-        "hidden", "text", "search", "tel", "url", "email", "password", "date",
-        "month", "week", "time", "datetime-local", "number", "range", "color",
-        "checkbox", "radio", "file", "submit", "image", "reset", "button"};
+        "hidden",   "text",  "search", "tel",      "url",   "email",
+        "password", "date",  "month",  "week",     "time",  "datetime-local",
+        "number",   "range", "color",  "checkbox", "radio", "file",
+        "submit",   "image", "reset",  "button"};
     for (auto& c : raw) {
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
     }
     return kKnownInputTypes.count(raw) != 0 ? raw : std::string("text");
 }
 
-std::optional<ControlValueText> control_value_text(
-    const CapturedStyleIndex& index, int node_index, const CapturedBox& box,
-    const std::map<std::string, std::string>& computed) {
+std::optional<ControlValueText>
+control_value_text(const CapturedStyleIndex& index, int node_index, const CapturedBox& box,
+                   const std::map<std::string, std::string>& computed) {
     const auto tag = index.tag_name(node_index);
     std::string kind;
     if (tag == "input") {
@@ -52,14 +55,16 @@ std::optional<ControlValueText> control_value_text(
         // belong to neither table. test/test_importer_differential_lab.py
         // asserts the three tables keep this relationship.
         static const std::set<std::string> kValueTypes = {
-            "text", "search", "email", "url", "tel", "number",
-            "button", "submit", "reset"};
-        if (kValueTypes.count(type) == 0) return std::nullopt;
+            "text", "search", "email", "url", "tel", "number", "button", "submit", "reset"};
+        if (kValueTypes.count(type) == 0)
+            return std::nullopt;
         kind = type;
     } else if (tag == "select") {
-        if (!index.attribute(node_index, "multiple").empty()) return std::nullopt;
+        if (!index.attribute(node_index, "multiple").empty())
+            return std::nullopt;
         const auto size = index.attribute(node_index, "size");
-        if (!size.empty() && px_value(size) > 1.0) return std::nullopt;
+        if (!size.empty() && px_value(size) > 1.0)
+            return std::nullopt;
         const auto appearance = computed.find("appearance");
         if (appearance == computed.end() || appearance->second != "none")
             return std::nullopt;
@@ -72,14 +77,13 @@ std::optional<ControlValueText> control_value_text(
     // mask hides. It is never drawn. A capture that predates the property
     // records no value for it and is read as unmasked, as it always was.
     if (const auto security = computed.find("-webkit-text-security");
-        security != computed.end() && !security->second.empty() &&
-        security->second != "none")
+        security != computed.end() && !security->second.empty() && security->second != "none")
         return std::nullopt;
     // Without padding the content box is unknown — a capture that predates it
     // would place the string on the border, so it is not drawn at all.
-    for (const char* edge : {"padding-top", "padding-right", "padding-bottom",
-                             "padding-left"}) {
-        if (computed.find(edge) == computed.end()) return std::nullopt;
+    for (const char* edge : {"padding-top", "padding-right", "padding-bottom", "padding-left"}) {
+        if (computed.find(edge) == computed.end())
+            return std::nullopt;
     }
     auto text = index.control_value(node_index);
     // A submit or reset button with no `value` attribute draws the user
@@ -87,12 +91,14 @@ std::optional<ControlValueText> control_value_text(
     // default is localised in Chromium (the IDS_FORM_SUBMIT_LABEL and
     // IDS_FORM_RESET_LABEL resources), so these are the English strings,
     // which is what an en-US capture paints.
-    if (text.empty() && tag == "input" &&
-        !index.has_attribute(node_index, "value")) {
-        if (kind == "submit") text = "Submit";
-        if (kind == "reset") text = "Reset";
+    if (text.empty() && tag == "input" && !index.has_attribute(node_index, "value")) {
+        if (kind == "submit")
+            text = "Submit";
+        if (kind == "reset")
+            text = "Reset";
     }
-    if (text.empty()) return std::nullopt;
+    if (text.empty())
+        return std::nullopt;
     const auto length = [&](const char* name) {
         const auto found = computed.find(name);
         return found == computed.end() ? 0.0 : px_value(found->second);
@@ -100,21 +106,19 @@ std::optional<ControlValueText> control_value_text(
     const double left = length("border-left-width") + length("padding-left");
     const double right = length("border-right-width") + length("padding-right");
     const double top = length("border-top-width") + length("padding-top");
-    const double bottom =
-        length("border-bottom-width") + length("padding-bottom");
+    const double bottom = length("border-bottom-width") + length("padding-bottom");
     ControlValueText result;
     result.text = std::move(text);
-    result.content_box = {box.left + left, box.top + top,
-                          box.width - left - right, box.height - top - bottom};
+    result.content_box = {box.left + left, box.top + top, box.width - left - right,
+                          box.height - top - bottom};
     if (result.content_box.width <= 0.0 || result.content_box.height <= 0.0)
         return std::nullopt;
     return result;
 }
 
-pulp::view::IRNode captured_viewport_plane(
-    const std::string& owner_name, const std::string& asset,
-    const CapturedLayerExtent& layer, const CapturedBox& box,
-    const std::map<std::string, std::string>& computed) {
+pulp::view::IRNode captured_viewport_plane(const std::string& owner_name, const std::string& asset,
+                                           const CapturedLayerExtent& layer, const CapturedBox& box,
+                                           const std::map<std::string, std::string>& computed) {
     const auto length = [&](const char* name) {
         const auto found = computed.find(name);
         return found == computed.end() ? 0.0 : px_value(found->second);
@@ -123,10 +127,8 @@ pulp::view::IRNode captured_viewport_plane(
     const double border_top = length("border-top-width");
     const double inset_left = border_left + length("padding-left");
     const double inset_top = border_top + length("padding-top");
-    const double inset_right =
-        length("border-right-width") + length("padding-right");
-    const double inset_bottom =
-        length("border-bottom-width") + length("padding-bottom");
+    const double inset_right = length("border-right-width") + length("padding-right");
+    const double inset_bottom = length("border-bottom-width") + length("padding-bottom");
     const double frame_left = box.left + border_left;
     const double frame_top = box.top + border_top;
     pulp::view::IRNode plane;
@@ -134,8 +136,7 @@ pulp::view::IRNode captured_viewport_plane(
     plane.name = owner_name + "/layer";
     plane.attributes["asset_ref"] = asset;
     plane.attributes["captured_layer"] = "viewport";
-    plane.attributes["paint_class"] =
-        std::string(to_string(PaintClass::image_asset));
+    plane.attributes["paint_class"] = std::string(to_string(PaintClass::image_asset));
     plane.style.position = "absolute";
     plane.style.object_fit = "fill";
     plane.style.left = static_cast<float>(-frame_left);
@@ -145,12 +146,10 @@ pulp::view::IRNode captured_viewport_plane(
     pulp::view::IRStyle::ClipRect content{};
     content.x = static_cast<float>(box.left + inset_left);
     content.y = static_cast<float>(box.top + inset_top);
-    content.width = static_cast<float>(
-        std::max(0.0, box.width - inset_left - inset_right));
-    content.height = static_cast<float>(
-        std::max(0.0, box.height - inset_top - inset_bottom));
+    content.width = static_cast<float>(std::max(0.0, box.width - inset_left - inset_right));
+    content.height = static_cast<float>(std::max(0.0, box.height - inset_top - inset_bottom));
     plane.style.clip_rect = content;
     return plane;
 }
 
-}  // namespace pulp::import_design::detail
+} // namespace pulp::import_design::detail

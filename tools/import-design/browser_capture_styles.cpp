@@ -307,7 +307,8 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
             for (uint32_t i = 0; i < which.size() && i < values.size(); ++i) {
                 const int node = json_int(which[static_cast<int>(i)], -1);
                 const int value = json_int(values[static_cast<int>(i)], -1);
-                if (node >= 0 && value >= 0) index.input_value_[node] = value;
+                if (node >= 0 && value >= 0)
+                    index.input_value_[node] = value;
             }
         }
     }
@@ -317,7 +318,8 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
         if (which.isArray()) {
             for (uint32_t i = 0; i < which.size(); ++i) {
                 const int node = json_int(which[static_cast<int>(i)], -1);
-                if (node >= 0) index.option_selected_.push_back(node);
+                if (node >= 0)
+                    index.option_selected_.push_back(node);
             }
         }
     }
@@ -329,7 +331,8 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
         if (controls.isArray()) {
             for (uint32_t i = 0; i < controls.size(); ++i) {
                 const auto control = controls[static_cast<int>(i)];
-                if (!control.isObject()) continue;
+                if (!control.isObject())
+                    continue;
                 const int node = json_int(member(control, "node_index"), -1);
                 const auto verdict = member(control, "theme");
                 if (node >= 0 && verdict.isString())
@@ -394,15 +397,15 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
 
     for (size_t at = 0; at < index.layout_to_node_.size(); ++at) {
         const int node = index.layout_to_node_[at];
-        if (node < 0) continue;
+        if (node < 0)
+            continue;
         const auto has_area = [&](size_t row) {
             const auto& box = index.layout_bounds_[row];
             return box.width > 0.0 && box.height > 0.0;
         };
         const auto [current, inserted] =
             index.node_to_layout_.try_emplace(node, static_cast<int>(at));
-        if (!inserted && has_area(at) &&
-            !has_area(static_cast<size_t>(current->second)))
+        if (!inserted && has_area(at) && !has_area(static_cast<size_t>(current->second)))
             current->second = static_cast<int>(at);
     }
 
@@ -484,8 +487,7 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
                         const auto ascent = member(metrics, "ascent");
                         const auto descent = member(metrics, "descent");
                         auto numeric = [](const choc::value::ValueView& v) {
-                            return v.isInt32() || v.isInt64() ||
-                                   v.isFloat32() || v.isFloat64();
+                            return v.isInt32() || v.isInt64() || v.isFloat32() || v.isFloat64();
                         };
                         if (numeric(ascent) && numeric(descent)) {
                             const pulp::view::LineMetrics m{
@@ -542,8 +544,7 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
     if (index.style_rows_.empty()) return std::nullopt;
     // The canvas proof classifies each layout row against the node's own row,
     // so it runs once that table exists.
-    index.document_canvas_paint_ =
-        detail::extract_document_canvas_paint(snapshot, index);
+    index.document_canvas_paint_ = detail::extract_document_canvas_paint(snapshot, index);
     return index;
 }
 
@@ -552,10 +553,11 @@ std::string CapturedStyleIndex::resolved_face_for_layout(int layout_index) const
     return it == layout_resolved_face_.end() ? std::string{} : it->second;
 }
 
-std::optional<pulp::view::LineMetrics> CapturedStyleIndex::line_metrics_for_layout(
-    int layout_index) const {
+std::optional<pulp::view::LineMetrics>
+CapturedStyleIndex::line_metrics_for_layout(int layout_index) const {
     const auto it = layout_line_metrics_.find(layout_index);
-    if (it == layout_line_metrics_.end()) return std::nullopt;
+    if (it == layout_line_metrics_.end())
+        return std::nullopt;
     return it->second;
 }
 
@@ -696,22 +698,26 @@ std::string CapturedStyleIndex::control_theme(int node_index) const {
 }
 
 std::string CapturedStyleIndex::control_value(int node_index) const {
-    if (const auto found = input_value_.find(node_index);
-        found != input_value_.end())
+    if (const auto found = input_value_.find(node_index); found != input_value_.end())
         return string_at(found->second);
-    if (tag_name(node_index) != "select") return {};
+    if (tag_name(node_index) != "select")
+        return {};
     // The first selected option that belongs to THIS select — directly, or
     // through an `<optgroup>`. A nested select is not valid HTML, so the walk
     // up from the option cannot pass through a different one.
     for (const int option : option_selected_) {
         bool owned = false;
-        for (int cursor = parent_of(option), steps = 0;
-             cursor >= 0 && steps < node_count();
+        for (int cursor = parent_of(option), steps = 0; cursor >= 0 && steps < node_count();
              cursor = parent_of(cursor), ++steps) {
-            if (cursor == node_index) { owned = true; break; }
-            if (tag_name(cursor) == "select") break;
+            if (cursor == node_index) {
+                owned = true;
+                break;
+            }
+            if (tag_name(cursor) == "select")
+                break;
         }
-        if (!owned) continue;
+        if (!owned)
+            continue;
         // An option's label is its text content with whitespace collapsed, as
         // the closed select displays it.
         std::string label;
@@ -728,7 +734,8 @@ std::string CapturedStyleIndex::control_value(int node_index) const {
                 pending_space = !collapsed.empty();
                 continue;
             }
-            if (pending_space) collapsed.push_back(' ');
+            if (pending_space)
+                collapsed.push_back(' ');
             pending_space = false;
             collapsed.push_back(c);
         }
@@ -815,15 +822,14 @@ std::string CapturedStyleIndex::attribute(int node_index,
     return {};
 }
 
-bool CapturedStyleIndex::has_attribute(int node_index,
-                                       std::string_view name) const {
-    if (node_index < 0 ||
-        node_index >= static_cast<int>(node_attributes_.size())) {
+bool CapturedStyleIndex::has_attribute(int node_index, std::string_view name) const {
+    if (node_index < 0 || node_index >= static_cast<int>(node_attributes_.size())) {
         return false;
     }
     const auto& pairs = node_attributes_[static_cast<size_t>(node_index)];
     for (size_t i = 0; i + 1 < pairs.size(); i += 2) {
-        if (string_at(pairs[i]) == name) return true;
+        if (string_at(pairs[i]) == name)
+            return true;
     }
     return false;
 }
@@ -932,7 +938,8 @@ std::map<std::string, std::string> CapturedStyleIndex::styles_for(
             break;
         }
     }
-    if (!chosen) chosen = own_layout_row(node->second);
+    if (!chosen)
+        chosen = own_layout_row(node->second);
     if (!chosen) return computed;
 
     const auto& row = style_rows_[static_cast<size_t>(*chosen)];

@@ -153,7 +153,8 @@ void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
 }
 
 void Label::set_cached_line_metrics(LineMetrics metrics) {
-    if (cached_line_boxes_.empty() || !metrics.valid()) return;
+    if (cached_line_boxes_.empty() || !metrics.valid())
+        return;
     cached_line_metrics_ = metrics;
 }
 
@@ -1570,13 +1571,14 @@ namespace {
 float captured_frame_y(const View& view) {
     float y = 0.0f;
     for (const View* v = &view; v != nullptr; v = v->parent()) {
-        if (v->captured_frame_root()) break;
+        if (v->captured_frame_root())
+            break;
         y += v->bounds().y;
     }
     return y;
 }
 
-}  // namespace
+} // namespace
 
 void Label::paint(canvas::Canvas& canvas) {
     // A Label that also has element children draws its own text inside the
@@ -2022,23 +2024,20 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             if (attributed_prepare_cache_.typographic_descent() > 0.0f)
                 css_descent = attributed_prepare_cache_.typographic_descent();
         } else {
-            const auto fm = face_metrics(family, effective_font_size,
-                                         effective_font_weight(), font_style_);
-            if (fm.real) css_descent = fm.typographic_descent;
+            const auto fm =
+                face_metrics(family, effective_font_size, effective_font_weight(), font_style_);
+            if (fm.real)
+                css_descent = fm.typographic_descent;
         }
         if (cached_line_metrics_ || css_descent) {
             captured_offset = captured_baseline_offset(
-                first_line.height, css_descent.value_or(0.0f),
-                cached_line_metrics_);
+                first_line.height, css_descent.value_or(0.0f), cached_line_metrics_);
         } else {
             captured_offset =
-                (first_line.height - single_line_text_height) * 0.5f +
-                first_line_ascent;
+                (first_line.height - single_line_text_height) * 0.5f + first_line_ascent;
         }
-        captured_root_y = captured_frame_y(*this) +
-                          (has_own_text_box() ? own_text_box().y : 0.0f);
-        baseline_y = captured_baseline(first_line.y, captured_offset,
-                                       captured_root_y);
+        captured_root_y = captured_frame_y(*this) + (has_own_text_box() ? own_text_box().y : 0.0f);
+        baseline_y = captured_baseline(first_line.y, captured_offset, captured_root_y);
         selection_ascent = baseline_y - first_line.y;
         selection_height = first_line.height;
     }
@@ -2164,10 +2163,10 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                 if (need_ellipsis && (emitted + 1 == visible_lines)) {
                     line.append("\xe2\x80\xa6");
                 }
-                const float line_baseline = captured_cache_usable
-                    ? captured_baseline(shaped_line.y, captured_offset,
-                                        captured_root_y)
-                    : y;
+                const float line_baseline =
+                    captured_cache_usable
+                        ? captured_baseline(shaped_line.y, captured_offset, captured_root_y)
+                        : y;
                 // Map the shaped line back to its origin in `display_text`.
                 // The shaper drops the whitespace it broke at, so byte spans
                 // are not contiguous and cannot be accumulated from line

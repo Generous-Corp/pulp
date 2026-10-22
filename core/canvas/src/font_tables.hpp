@@ -37,8 +37,7 @@ auto_optical_size_position(const SkTypeface* face, float css_px);
 /// `face` at its `auto_optical_size_position`. A face without an `opsz` axis
 /// is returned unchanged. Clones are cached per face and size, so paint paths
 /// can call this per draw.
-sk_sp<SkTypeface> typeface_at_auto_optical_size(sk_sp<SkTypeface> face,
-                                                float css_px);
+sk_sp<SkTypeface> typeface_at_auto_optical_size(sk_sp<SkTypeface> face, float css_px);
 
 /// Ask every face a paragraph style resolves to for its `opsz` axis at the
 /// coordinate `primary` (the face the style's family list resolves to) takes
@@ -48,8 +47,8 @@ sk_sp<SkTypeface> typeface_at_auto_optical_size(sk_sp<SkTypeface> face,
 /// them, and the clone starts from that face's current position, so a weight
 /// instance keeps its weight. Faces without the axis ignore the coordinate;
 /// faces with it clamp it to their range.
-void apply_auto_optical_size(skia::textlayout::TextStyle& style,
-                             const SkTypeface* primary, float css_px);
+void apply_auto_optical_size(skia::textlayout::TextStyle& style, const SkTypeface* primary,
+                             float css_px);
 
 /// The tracking a face's AAT `trak` table asks for at `css_px`, in CSS px per
 /// glyph: its normal (0) track, interpolated linearly between the table's
@@ -69,4 +68,4 @@ struct FontTableCacheSizes {
 };
 FontTableCacheSizes font_table_cache_sizes();
 
-}  // namespace pulp::canvas
+} // namespace pulp::canvas

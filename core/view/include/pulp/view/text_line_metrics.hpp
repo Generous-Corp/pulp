@@ -29,4 +29,4 @@ float captured_baseline_offset(float line_height, float css_descent,
 /// it. Returns label-local coordinates.
 float captured_baseline(float line_top, float offset, float root_y);
 
-}  // namespace pulp::view
+} // namespace pulp::view

@@ -225,9 +225,8 @@ PreparedParagraph make_paragraph(const std::string& text,
                               paragraph->getMaxIntrinsicWidth());
     result.alphabetic_baseline = paragraph->getAlphabeticBaseline();
     result.leading_spacing = ltr ? letter_spacing * 0.5f : 0.0f;
-    result.painted_baseline = pstyle.hintingIsOn()
-        ? std::round(result.alphabetic_baseline)
-        : result.alphabetic_baseline;
+    result.painted_baseline =
+        pstyle.hintingIsOn() ? std::round(result.alphabetic_baseline) : result.alphabetic_baseline;
     result.paragraph = std::move(paragraph);
     return result;
 }
@@ -245,26 +244,19 @@ bool contains_variation_selector(std::string_view text) {
 
 // A face with AAT tracking is drawn through SkParagraph with that tracking
 // applied, so it has to be measured there too.
-bool needs_paragraph_for_text_metrics(
-    std::string_view text,
-    const std::vector<Canvas::FontFeature>& features,
-    float letter_spacing,
-    const SkTypeface* typeface,
-    float size) {
-    return !features.empty()
-        || letter_spacing != 0.0f
-        || pulp::canvas::contains_emoji(text)
-        || contains_variation_selector(text)
-        || aat_tracking_px(typeface, size) != 0.0f;
+bool needs_paragraph_for_text_metrics(std::string_view text,
+                                      const std::vector<Canvas::FontFeature>& features,
+                                      float letter_spacing, const SkTypeface* typeface,
+                                      float size) {
+    return !features.empty() || letter_spacing != 0.0f || pulp::canvas::contains_emoji(text) ||
+           contains_variation_selector(text) || aat_tracking_px(typeface, size) != 0.0f;
 }
 
 // SkParagraph paint(canvas, x, y) places the paragraph top at (x, y);
 // Canvas2D puts the alphabetic baseline at y and the first glyph's leading
 // edge at x.
-void paint_prepared(const PreparedParagraph& prepared, SkCanvas* canvas,
-                    float x, float y) {
-    prepared.paragraph->paint(canvas, x - prepared.leading_spacing,
-                              y - prepared.painted_baseline);
+void paint_prepared(const PreparedParagraph& prepared, SkCanvas* canvas, float x, float y) {
+    prepared.paragraph->paint(canvas, x - prepared.leading_spacing, y - prepared.painted_baseline);
 }
 
 // The ink box of a prepared paragraph's glyphs where paint_prepared puts them,
@@ -273,15 +265,18 @@ std::optional<SkRect> painted_ink_bounds(const PreparedParagraph& prepared) {
     SkRect ink = SkRect::MakeEmpty();
     prepared.paragraph->extendedVisit(
         [&](int, const skia::textlayout::Paragraph::ExtendedVisitorInfo* info) {
-            if (!info) return;
+            if (!info)
+                return;
             for (int i = 0; i < info->count; ++i) {
                 SkRect glyph = info->bounds[i];
-                if (glyph.isEmpty()) continue;
+                if (glyph.isEmpty())
+                    continue;
                 glyph.offset(info->origin + info->positions[i]);
                 ink.join(glyph);
             }
         });
-    if (ink.isEmpty()) return std::nullopt;
+    if (ink.isEmpty())
+        return std::nullopt;
     ink.offset(-prepared.leading_spacing, -prepared.painted_baseline);
     return ink;
 }
@@ -568,9 +563,8 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // which lacks Unicode arrows/dashes/etc.), partition the text into runs by
     // typeface and shape each separately. ASCII text bypasses the scan; it's
     // virtually always covered by any Latin typeface.
-    const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
-                                         font.getTypeface(), font_size_);
+    const bool needs_paragraph = needs_paragraph_for_text_metrics(
+        text, font_features_, letter_spacing_, font.getTypeface(), font_size_);
 
     // For plain letter_spacing_ == 0 text only, route missing-glyph text
     // through SkShaper-based per-run fallback for best kerning / ligature
@@ -829,15 +823,12 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
     // emoji typefaces typically have CBDT/COLR bitmaps with no outline
     // tables, so strokeText effectively leaves them unchanged (CSS
     // behavior). Latin text in mixed-emoji runs still gets the stroke.
-    const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
-                                         font.getTypeface(), font_size_);
+    const bool needs_paragraph = needs_paragraph_for_text_metrics(
+        text, font_features_, letter_spacing_, font.getTypeface(), font_size_);
     if (needs_paragraph) {
-        auto prepared = make_paragraph(text, font_family_, font_size_,
-                                        font_weight_, font_slant_,
-                                        letter_spacing_,
-                                        /*ltr=*/direction_ != TextDirection::rtl,
-                                        stroke_paint, font_features_);
+        auto prepared = make_paragraph(
+            text, font_family_, font_size_, font_weight_, font_slant_, letter_spacing_,
+            /*ltr=*/direction_ != TextDirection::rtl, stroke_paint, font_features_);
         if (prepared.paragraph) {
             float draw_x = x;
             if (text_align_ == TextAlign::center) draw_x -= prepared.advance * 0.5f;
@@ -986,15 +977,12 @@ float SkiaCanvas::measure_text(const std::string& text) {
     // the same input. Anything emoji-bearing or feature-tagged still
     // goes through SkParagraph so the measured width matches what
     // fill_text actually draws.
-    const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
-                                         font.getTypeface(), font_size_);
+    const bool needs_paragraph = needs_paragraph_for_text_metrics(
+        text, font_features_, letter_spacing_, font.getTypeface(), font_size_);
     if (needs_paragraph) {
-        auto prepared = make_paragraph(text, font_family_, font_size_,
-                                        font_weight_, font_slant_,
-                                        letter_spacing_,
-                                        /*ltr=*/direction_ != TextDirection::rtl,
-                                        std::nullopt, font_features_);
+        auto prepared = make_paragraph(
+            text, font_family_, font_size_, font_weight_, font_slant_, letter_spacing_,
+            /*ltr=*/direction_ != TextDirection::rtl, std::nullopt, font_features_);
         if (prepared.paragraph) {
             return prepared.advance;
         }
@@ -1106,20 +1094,18 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     // fill_text actually draws. ASCII / no-feature labels keep the
     // SkFont measurement above — same width fill_text emits via the
     // per-glyph fallback path.
-    const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
-                                         font.getTypeface(), font_size_);
+    const bool needs_paragraph = needs_paragraph_for_text_metrics(
+        text, font_features_, letter_spacing_, font.getTypeface(), font_size_);
     if (needs_paragraph) {
-        auto prepared = make_paragraph(text, font_family_, font_size_,
-                                        font_weight_, font_slant_,
-                                        letter_spacing_,
-                                        /*ltr=*/direction_ != TextDirection::rtl,
-                                        std::nullopt, font_features_);
+        auto prepared = make_paragraph(
+            text, font_family_, font_size_, font_weight_, font_slant_, letter_spacing_,
+            /*ltr=*/direction_ != TextDirection::rtl, std::nullopt, font_features_);
         if (prepared.paragraph) {
             advance = prepared.advance;
             // The SkFont box has no letter-spacing or tracking between its
             // glyphs; the shaped glyphs carry both.
-            if (const auto ink = painted_ink_bounds(prepared)) bounds = *ink;
+            if (const auto ink = painted_ink_bounds(prepared))
+                bounds = *ink;
         }
     }
 #endif

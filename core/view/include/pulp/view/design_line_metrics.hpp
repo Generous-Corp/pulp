@@ -17,9 +17,8 @@ struct LineMetrics {
     /// Finite, with a positive ascent and a non-negative descent. Every
     /// producer and consumer of captured metrics gates on this one check.
     bool valid() const {
-        return std::isfinite(ascent) && std::isfinite(descent) &&
-               ascent > 0.0f && descent >= 0.0f;
+        return std::isfinite(ascent) && std::isfinite(descent) && ascent > 0.0f && descent >= 0.0f;
     }
 };
 
-}  // namespace pulp::view
+} // namespace pulp::view

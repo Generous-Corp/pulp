@@ -203,8 +203,7 @@ TEST_CASE("codegen carries measured line metrics with captured line boxes",
     REQUIRE(derived_call != std::string::npos);
     const auto measured_end = js.find(";\n", measured_call);
     const auto derived_end = js.find(";\n", derived_call);
-    CHECK(js.substr(measured_call, measured_end - measured_call)
-              .ends_with(", 14, 4)"));
+    CHECK(js.substr(measured_call, measured_end - measured_call).ends_with(", 14, 4)"));
     const auto derived_text = js.substr(derived_call, derived_end - derived_call);
     CHECK((derived_text.ends_with("true)") || derived_text.ends_with("false)")));
 

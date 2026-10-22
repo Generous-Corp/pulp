@@ -192,7 +192,8 @@ std::uint64_t current_rss_bytes() {
 std::uint64_t rss_high_water_bytes() {
 #if defined(__APPLE__) || defined(__linux__)
     rusage usage{};
-    if (getrusage(RUSAGE_SELF, &usage) != 0) return 0;
+    if (getrusage(RUSAGE_SELF, &usage) != 0)
+        return 0;
 #if defined(__APPLE__)
     return static_cast<std::uint64_t>(usage.ru_maxrss);
 #else
@@ -1088,10 +1089,9 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
         // not land in the median or tail.
         const bool sampled = frame >= warmup_frames;
         if (sampled && !counters_from) {
-            counters_from = CounterOrigin{fixture.bridge_call_count(),
-                                          View::layout_pass_count(),
-                                          View::damage_request_count(),
-                                          View::unmarked_paint_mutation_count()};
+            counters_from =
+                CounterOrigin{fixture.bridge_call_count(), View::layout_pass_count(),
+                              View::damage_request_count(), View::unmarked_paint_mutation_count()};
         }
         std::size_t allocations = 0;
         std::size_t allocated_bytes = 0;
@@ -1119,7 +1119,8 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
         if (sampled) {
             metrics.paint_commands_total += metrics.paint_commands_last;
             ++metrics.paint_calls;
-            if (interactive) update_ms.push_back(update_elapsed);
+            if (interactive)
+                update_ms.push_back(update_elapsed);
             frame_ms.push_back(elapsed_ms(frame_start, frame_end));
             frame_cpu_ms.push_back(cpu_clock_delta_ms(frame_cpu_start, frame_cpu_end));
             frame_allocations.push_back(static_cast<double>(allocations));
@@ -1356,9 +1357,11 @@ std::optional<Config> parse_args(int argc, char** argv) {
         } else if (arg == "--target-fps" && i + 1 < argc) {
             if (!parse_int(argv[++i], config.target_fps)) return std::nullopt;
         } else if (auto value = value_after("--warmup-frames=")) {
-            if (!parse_int(*value, config.warmup_frames)) return std::nullopt;
+            if (!parse_int(*value, config.warmup_frames))
+                return std::nullopt;
         } else if (arg == "--warmup-frames" && i + 1 < argc) {
-            if (!parse_int(argv[++i], config.warmup_frames)) return std::nullopt;
+            if (!parse_int(argv[++i], config.warmup_frames))
+                return std::nullopt;
         } else if (auto value = value_after("--ir=")) {
             config.ir_path = *value;
         } else if (arg == "--ir" && i + 1 < argc) {
@@ -1436,9 +1439,8 @@ int main(int argc, char** argv) {
 
     const auto idle =
         run_phase(*fixture, config->idle_ms, config->frames, config->target_fps, false);
-    const auto interactive =
-        run_phase(*fixture, config->interactive_ms, config->frames, config->target_fps, true,
-                  config->warmup_frames);
+    const auto interactive = run_phase(*fixture, config->interactive_ms, config->frames,
+                                       config->target_fps, true, config->warmup_frames);
 
     std::optional<IrProvenance> ir;
     if (auto* bound = dynamic_cast<IrBoundFixture*>(fixture.get()))

@@ -77,8 +77,7 @@ void BridgeRegistrars::register_widget_outline_api(WidgetBridge& self) {
         auto s = args.get<std::string>(1, "solid");
         auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
-        v->set_outline_style(
-            border_style_from_css(s).value_or(View::BorderStyle::solid));
+        v->set_outline_style(border_style_from_css(s).value_or(View::BorderStyle::solid));
         return choc::value::Value();
     });
 

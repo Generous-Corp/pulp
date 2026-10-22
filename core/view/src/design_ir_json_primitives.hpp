@@ -15,7 +15,8 @@
 
 namespace pulp::view::ir_json {
 
-inline std::string get_string(const choc::value::ValueView& obj, const char* key, const char* def = "") {
+inline std::string get_string(const choc::value::ValueView& obj, const char* key,
+                              const char* def = "") {
     if (obj.hasObjectMember(key))
         return std::string(obj[key].toString());
     return def;
@@ -34,53 +35,54 @@ inline bool get_bool(const choc::value::ValueView& obj, const char* key, bool de
 }
 
 inline void write_key(std::ostringstream& out, bool& first, const char* key) {
-    if (!first) out << ',';
+    if (!first)
+        out << ',';
     first = false;
     out << '"' << key << "\":";
 }
 
-inline void write_string_member(std::ostringstream& out, bool& first,
-                                const char* key, std::string_view value) {
+inline void write_string_member(std::ostringstream& out, bool& first, const char* key,
+                                std::string_view value) {
     write_key(out, first, key);
     out << '"' << json_escape(value) << '"';
 }
 
-inline void write_string_member(std::ostringstream& out, bool& first,
-                                const char* key, const char* value) {
+inline void write_string_member(std::ostringstream& out, bool& first, const char* key,
+                                const char* value) {
     write_string_member(out, first, key, std::string_view(value ? value : ""));
 }
 
-inline void write_string_member(std::ostringstream& out, bool& first,
-                                const char* key, const std::string& value) {
+inline void write_string_member(std::ostringstream& out, bool& first, const char* key,
+                                const std::string& value) {
     write_string_member(out, first, key, std::string_view(value));
 }
 
-inline void write_string_member(std::ostringstream& out, bool& first,
-                                const char* key,
+inline void write_string_member(std::ostringstream& out, bool& first, const char* key,
                                 const std::optional<std::string>& value) {
-    if (value) write_string_member(out, first, key, *value);
+    if (value)
+        write_string_member(out, first, key, *value);
 }
 
-inline void write_float_member(std::ostringstream& out, bool& first,
-                               const char* key, float value) {
+inline void write_float_member(std::ostringstream& out, bool& first, const char* key, float value) {
     write_key(out, first, key);
     out << value;
 }
 
-inline void write_float_member(std::ostringstream& out, bool& first,
-                               const char* key, const std::optional<float>& value) {
-    if (value) write_float_member(out, first, key, *value);
+inline void write_float_member(std::ostringstream& out, bool& first, const char* key,
+                               const std::optional<float>& value) {
+    if (value)
+        write_float_member(out, first, key, *value);
 }
 
-inline void write_int_member(std::ostringstream& out, bool& first,
-                             const char* key, int value) {
+inline void write_int_member(std::ostringstream& out, bool& first, const char* key, int value) {
     write_key(out, first, key);
     out << value;
 }
 
-inline void write_int_member(std::ostringstream& out, bool& first,
-                             const char* key, const std::optional<int>& value) {
-    if (value) write_int_member(out, first, key, *value);
+inline void write_int_member(std::ostringstream& out, bool& first, const char* key,
+                             const std::optional<int>& value) {
+    if (value)
+        write_int_member(out, first, key, *value);
 }
 
-}  // namespace pulp::view::ir_json
+} // namespace pulp::view::ir_json

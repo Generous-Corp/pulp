@@ -46,8 +46,8 @@ BorderBands border_bands(View::BorderStyle style, BorderEdge side, float width);
 
 /// The colour `style` paints the outer or inner band of `side` in, for a side
 /// whose specified colour is `side_color` and width `width`.
-Color border_band_color(View::BorderStyle style, BorderEdge side,
-                        bool outer_band, Color side_color, float width);
+Color border_band_color(View::BorderStyle style, BorderEdge side, bool outer_band, Color side_color,
+                        float width);
 
 /// Whether `style` is painted in bands of per-side colour (`double` and the
 /// four 3D styles) rather than as one stroke.
@@ -80,9 +80,9 @@ CornerRadii fit_corner_radii(float width, float height, CornerRadii radii);
 /// A banded border in its own border box, origin at the top-left corner.
 struct BandedBorder {
     View::BorderStyle style = View::BorderStyle::outset;
-    float width = 0.0f;   ///< border box
+    float width = 0.0f; ///< border box
     float height = 0.0f;
-    float top = 0.0f;     ///< side widths, already resolved and clamped
+    float top = 0.0f; ///< side widths, already resolved and clamped
     float right = 0.0f;
     float bottom = 0.0f;
     float left = 0.0f;
@@ -90,7 +90,7 @@ struct BandedBorder {
     Color right_color;
     Color bottom_color;
     Color left_color;
-    float radius_tl = 0.0f;  ///< outer corner radii, fitted by fit_corner_radii
+    float radius_tl = 0.0f; ///< outer corner radii, fitted by fit_corner_radii
     float radius_tr = 0.0f;
     float radius_br = 0.0f;
     float radius_bl = 0.0f;
@@ -105,4 +105,4 @@ struct BandedBorder {
 /// as one shape, so no antialiased seam runs down a mitre between them.
 void paint_banded_border(canvas::Canvas& canvas, const BandedBorder& border);
 
-}  // namespace pulp::view
+} // namespace pulp::view

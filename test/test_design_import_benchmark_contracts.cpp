@@ -62,13 +62,15 @@ const IRNode* find_ir_node(const IRNode& node, std::string_view id) {
 // Allocates a fixed number of heap blocks per interactive step, so a per-frame
 // allocation count can be checked against a known delta.
 class AllocatingFixture final : public BenchmarkFixture {
-public:
+  public:
     explicit AllocatingFixture(int per_step) : per_step_(per_step) {
         root_.set_id("allocating-root");
         root_.set_bounds({0, 0, 12, 12});
     }
 
-    View& root() override { return root_; }
+    View& root() override {
+        return root_;
+    }
 
     void step(int frame) override {
         held_.clear();
@@ -76,9 +78,11 @@ public:
             held_.push_back(std::make_unique<int>(frame + i));
     }
 
-    int js_evaluation_count() const override { return 0; }
+    int js_evaluation_count() const override {
+        return 0;
+    }
 
-private:
+  private:
     View root_;
     int per_step_ = 0;
     std::vector<std::unique_ptr<int>> held_;
@@ -587,11 +591,9 @@ TEST_CASE("design-import benchmark run_phase counts per-frame allocations",
     REQUIRE(busy_metrics.samples > 1);
     // The empty root's render allocates the same amount in both runs, so the
     // per-frame difference is exactly the fixture's own allocations.
-    CHECK(busy_metrics.allocations_per_frame_median -
-              quiet_metrics.allocations_per_frame_median ==
+    CHECK(busy_metrics.allocations_per_frame_median - quiet_metrics.allocations_per_frame_median ==
           Catch::Approx(8.0));
-    CHECK(busy_metrics.allocations_total >=
-          8u * static_cast<std::uint64_t>(busy_metrics.samples));
+    CHECK(busy_metrics.allocations_total >= 8u * static_cast<std::uint64_t>(busy_metrics.samples));
 }
 
 TEST_CASE("design-import benchmark excludes warmup frames from cumulative counters",

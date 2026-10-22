@@ -951,19 +951,16 @@ TEST_CASE("measured line metrics reach the text basis and survive IR JSON",
     // them to the line-box basis; one that did not leaves them absent rather
     // than inventing a value. Same capture both times, differing ONLY in the
     // sidecar's `line_metrics`, so the difference is the signal.
-    const auto source = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) /
-                        "browser-capture-text-wrap";
-    const auto copy = fs::temp_directory_path() /
-        ("pulp-line-metrics-" + std::to_string(std::rand()));
+    const auto source = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) / "browser-capture-text-wrap";
+    const auto copy =
+        fs::temp_directory_path() / ("pulp-line-metrics-" + std::to_string(std::rand()));
     fs::create_directories(copy);
     for (const auto& entry : fs::directory_iterator(source))
-        fs::copy(entry.path(), copy / entry.path().filename(),
-                 fs::copy_options::recursive);
+        fs::copy(entry.path(), copy / entry.path().filename(), fs::copy_options::recursive);
     {
         std::ifstream in(copy / "platform-fonts.json", std::ios::binary);
         REQUIRE(in);
-        std::string json((std::istreambuf_iterator<char>(in)),
-                         std::istreambuf_iterator<char>());
+        std::string json((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         in.close();
         // Every run object carries "layout_index"; give each one metrics.
         std::string patched;
@@ -971,7 +968,8 @@ TEST_CASE("measured line metrics reach the text basis and survive IR JSON",
         int runs = 0;
         for (;;) {
             const auto next = json.find("\"layout_index\"", at);
-            if (next == std::string::npos) break;
+            if (next == std::string::npos)
+                break;
             patched.append(json, at, next - at);
             patched += "\"line_metrics\": {\"ascent\": 12, \"descent\": 3}, ";
             at = next;
@@ -987,16 +985,15 @@ TEST_CASE("measured line metrics reach the text basis and survive IR JSON",
 
     BrowserCaptureIrOptions options;
     options.native_panel_lowering = true;
-    const auto measured =
-        lower_browser_capture_to_ir(copy / "capture.json", options);
+    const auto measured = lower_browser_capture_to_ir(copy / "capture.json", options);
     const auto plain = lower_wrap_fixture();
     fs::remove_all(copy);
     REQUIRE(measured.design_ir);
     REQUIRE(plain.design_ir);
 
     int with_basis = 0;
-    std::function<void(const pulp::view::IRNode&, const pulp::view::IRNode&)>
-        compare = [&](const pulp::view::IRNode& m, const pulp::view::IRNode& p) {
+    std::function<void(const pulp::view::IRNode&, const pulp::view::IRNode&)> compare =
+        [&](const pulp::view::IRNode& m, const pulp::view::IRNode& p) {
             if (m.text_layout_basis) {
                 REQUIRE(p.text_layout_basis);
                 ++with_basis;
@@ -1013,16 +1010,17 @@ TEST_CASE("measured line metrics reach the text basis and survive IR JSON",
     REQUIRE(with_basis > 0);
 
     // The metrics are part of the basis on disk too.
-    const auto reparsed = pulp::view::parse_design_ir_json(
-        pulp::view::serialize_design_ir(*measured.design_ir));
-    std::function<int(const pulp::view::IRNode&)> count =
-        [&](const pulp::view::IRNode& node) {
-            const auto& basis = node.text_layout_basis;
-            int n = basis && basis->line_metrics &&
-                    basis->line_metrics->ascent == 12.0f &&
-                    basis->line_metrics->descent == 3.0f ? 1 : 0;
-            for (const auto& child : node.children) n += count(child);
-            return n;
-        };
+    const auto reparsed =
+        pulp::view::parse_design_ir_json(pulp::view::serialize_design_ir(*measured.design_ir));
+    std::function<int(const pulp::view::IRNode&)> count = [&](const pulp::view::IRNode& node) {
+        const auto& basis = node.text_layout_basis;
+        int n = basis && basis->line_metrics && basis->line_metrics->ascent == 12.0f &&
+                        basis->line_metrics->descent == 3.0f
+                    ? 1
+                    : 0;
+        for (const auto& child : node.children)
+            n += count(child);
+        return n;
+    };
     CHECK(count(reparsed.root) == with_basis);
 }

@@ -53,14 +53,13 @@ std::string platform_family_for_css_generic(const std::string& css_family);
 /// restore the built-in mapping when `family` is empty. Process-wide. It exists
 /// so a test can name a generic whose platform family the host lacks, which a
 /// stock install never does; call FontResolver::clear_cache() after it.
-void set_css_generic_family_override(const std::string& keyword,
-                                     const std::string& family);
+void set_css_generic_family_override(const std::string& keyword, const std::string& family);
 
 /// One entry of a CSS `font-family` list, as written.
 struct CssFontFamily {
-    std::string name;     ///< without surrounding whitespace or quotes
-    bool quoted = false;  ///< written as a string: a family literally named
-                          ///< `name`, never a generic keyword
+    std::string name;    ///< without surrounding whitespace or quotes
+    bool quoted = false; ///< written as a string: a family literally named
+                         ///< `name`, never a generic keyword
 };
 
 /// Parse one `font-family` list entry: trim whitespace, then strip one
@@ -85,8 +84,7 @@ std::string platform_family_for_css_family(std::string_view entry);
 /// the other ("Helvetica" / "Helvetica Neue"). A hidden system family (a
 /// leading '.') answers with another hidden name (".AppleSystemUIFont" reports
 /// ".SF NS"), so it matches any hidden family.
-bool platform_face_is_family(std::string_view platform_family,
-                             std::string_view actual_family);
+bool platform_face_is_family(std::string_view platform_family, std::string_view actual_family);
 
 #ifdef PULP_HAS_SKIA
 

@@ -179,8 +179,7 @@ class CapturedStyleIndex {
 
     /// The line metrics Blink used for this run's primary font, or nullopt
     /// when the capture did not measure them.
-    std::optional<pulp::view::LineMetrics> line_metrics_for_layout(
-        int layout_index) const;
+    std::optional<pulp::view::LineMetrics> line_metrics_for_layout(int layout_index) const;
 
     /// Every laid-out node, in Chrome's paint order, ties broken by document
     /// order. This is the set a native renderer has to draw.
@@ -250,8 +249,7 @@ class CapturedStyleIndex {
     /// lowered outside that list (an SVG shape emitted beside its `<svg>`)
     /// still needs the same identity to bind to the DOM node it draws.
     int backend_node_id_of(int node_index) const noexcept {
-        if (node_index < 0 ||
-            node_index >= static_cast<int>(node_to_backend_.size()))
+        if (node_index < 0 || node_index >= static_cast<int>(node_to_backend_.size()))
             return -1;
         return node_to_backend_[static_cast<size_t>(node_index)];
     }
@@ -282,7 +280,7 @@ class CapturedStyleIndex {
     std::vector<int> node_value_;                    ///< node index → nodeValue
     std::unordered_map<int, int> input_value_;       ///< node index → string
     std::vector<int> option_selected_;               ///< selected option nodes
-    std::unordered_map<int, std::string> control_theme_;  ///< node → verdict
+    std::unordered_map<int, std::string> control_theme_; ///< node → verdict
     std::unordered_map<int, int> backend_to_node_;
     std::vector<int> node_to_backend_;               ///< node index → backend
     std::unordered_map<int, int> node_to_layout_;    ///< node → own row

@@ -2396,13 +2396,13 @@ static void emit_js_text_node(const NativeEmit& e) {
         for (size_t i = 0; i < node.text_line_boxes.size(); ++i) {
             const auto& box = node.text_line_boxes[i];
             if (i) ss << ", ";
-            ss << "{ left: " << box.left << ", top: " << box.top
-               << ", width: " << box.width << ", height: " << box.height
-               << ", start: " << box.start << ", length: " << box.length << " }";
+            ss << "{ left: " << box.left << ", top: " << box.top << ", width: " << box.width
+               << ", height: " << box.height << ", start: " << box.start
+               << ", length: " << box.length << " }";
         }
         ss << "], " << node.text_layout_basis->width << ", '"
-           << js_single_quote_escape(node.text_layout_basis->resolved_face)
-           << "', " << (browser_wrap_fallback ? "true" : "false");
+           << js_single_quote_escape(node.text_layout_basis->resolved_face) << "', "
+           << (browser_wrap_fallback ? "true" : "false");
         if (const auto& m = node.text_layout_basis->line_metrics)
             ss << ", " << m->ascent << ", " << m->descent;
         ss << ");\n";

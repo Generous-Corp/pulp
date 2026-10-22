@@ -105,14 +105,14 @@ bool document_canvas_registration(const detail::DocumentCanvasPaint& paint,
     const double authored_x = n(authored, "x"), authored_y = n(authored, "y");
     const double authored_width = n(authored, "width"), authored_height = n(authored, "height");
     return std::isfinite(surface_left) && std::isfinite(surface_top) &&
-           std::isfinite(panel_width) && std::isfinite(panel_height) &&
-           std::isfinite(authored_x) && std::isfinite(authored_y) &&
-           std::isfinite(authored_width) && std::isfinite(authored_height) &&
-           panel_width > 0 && panel_height > 0 && panel_width <= width &&
-           panel_height <= height && surface_left >= 0 && surface_top >= 0 &&
-           surface_left + panel_width <= width && surface_top + panel_height <= height &&
-           authored_x == surface_left && authored_y == surface_top &&
-           authored_width == panel_width && authored_height == panel_height;
+           std::isfinite(panel_width) && std::isfinite(panel_height) && std::isfinite(authored_x) &&
+           std::isfinite(authored_y) && std::isfinite(authored_width) &&
+           std::isfinite(authored_height) && panel_width > 0 && panel_height > 0 &&
+           panel_width <= width && panel_height <= height && surface_left >= 0 &&
+           surface_top >= 0 && surface_left + panel_width <= width &&
+           surface_top + panel_height <= height && authored_x == surface_left &&
+           authored_y == surface_top && authored_width == panel_width &&
+           authored_height == panel_height;
 }
 
 bool bool_member(const choc::value::ValueView& object,
@@ -1641,8 +1641,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             const int backend_id = static_cast<int>(backend);
             // A plane is exactly the reference screenshot's size; anything
             // else is an element-sized raster and is drawn into the box.
-            if (dpr > 0.0 && std::isfinite(dpr) &&
-                std::abs(width - logical_width * dpr) < 0.5 &&
+            if (dpr > 0.0 && std::isfinite(dpr) && std::abs(width - logical_width * dpr) < 0.5 &&
                 std::abs(height - logical_height * dpr) < 0.5)
                 captured_layers[id] = {logical_width, logical_height};
             if (!captured_element_assets.emplace(backend_id, id).second) {
@@ -1930,11 +1929,10 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         // only then switches to the exact flat compositor.
         const auto tree =
             captured_element_assets.empty()
-                ? lower_painted_tree(*captured_styles, control_dx, control_dy,
-                                     dpr, ir.root)
-                : lower_painted_tree_preferring_hierarchy(
-                      *captured_styles, control_dx, control_dy, dpr, ir.root,
-                      captured_element_assets, captured_layers);
+                ? lower_painted_tree(*captured_styles, control_dx, control_dy, dpr, ir.root)
+                : lower_painted_tree_preferring_hierarchy(*captured_styles, control_dx, control_dy,
+                                                          dpr, ir.root, captured_element_assets,
+                                                          captured_layers);
         ir.root.attributes["native_painted_nodes"] =
             std::to_string(tree.painted);
         ir.root.attributes["native_nodes_lowered"] =
@@ -2028,8 +2026,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         // Form controls: strings drawn from control state, and controls the
         // native theme paints, whose boxes here are approximations.
         record_if("native_control_value_text", tree.control_value_text);
-        record_if("native_appearance_controls",
-                  tree.native_appearance_controls);
+        record_if("native_appearance_controls", tree.native_appearance_controls);
         // A snapshot taken before the capture collected SVG paint holds the
         // geometry and no colour for it, so every icon in the design falls
         // back — and a reader sees a panel with no icons and no error, which

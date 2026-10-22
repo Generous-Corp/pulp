@@ -163,8 +163,7 @@ const char* interactive_kind_id(InteractiveElementKind k);
 // A text node's captured line boxes and their basis (`lineBoxes` /
 // `lineBoxBasis`); defined in design_ir_json_text.cpp.
 void parse_ir_text_line_layout(IRNode& node, const choc::value::ValueView& obj);
-void write_ir_text_line_layout(std::ostringstream& out, bool& first,
-                               const IRNode& node);
+void write_ir_text_line_layout(std::ostringstream& out, bool& first, const IRNode& node);
 
 // Parse the DesignIR token table; defined in design_ir_json.cpp.
 IRTokens parse_ir_tokens(const choc::value::ValueView& obj);

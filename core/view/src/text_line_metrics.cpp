@@ -19,4 +19,4 @@ float captured_baseline(float line_top, float offset, float root_y) {
     return std::floor(root_y + line_top + offset + 0.5f) - root_y;
 }
 
-}  // namespace pulp::view
+} // namespace pulp::view

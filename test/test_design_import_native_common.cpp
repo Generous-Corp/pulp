@@ -593,10 +593,8 @@ TEST_CASE("border_style dashed reaches View::BorderStyle in the native materiali
     // per-side bands; dropped here, a user-agent button's `2px outset` drew as
     // a flat black frame.
     const std::pair<const char*, View::BorderStyle> banded[] = {
-        {"double", View::BorderStyle::double_},
-        {"groove", View::BorderStyle::groove},
-        {"ridge", View::BorderStyle::ridge},
-        {"inset", View::BorderStyle::inset},
+        {"double", View::BorderStyle::double_}, {"groove", View::BorderStyle::groove},
+        {"ridge", View::BorderStyle::ridge},    {"inset", View::BorderStyle::inset},
         {"outset", View::BorderStyle::outset},
     };
     for (const auto& [keyword, expected] : banded) {

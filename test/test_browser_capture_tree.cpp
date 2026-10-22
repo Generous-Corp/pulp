@@ -300,15 +300,11 @@ std::string build_snapshot(const SnapshotSpec& spec) {
                                   : spec.strings) +
             "],";
     json += R"("computedStyleNames":)" + spec.computed_names + ",";
-    json += R"("documents":[{"nodes":{"parentIndex":)" + spec.parents +
-            R"(,"nodeType":)" + spec.node_types +
-            R"(,"nodeName":)" + spec.node_names +
-            R"(,"backendNodeId":)" + spec.node_names +
-            R"(,"attributes":)" + spec.attributes + spec.extra_nodes + "}," +
-            R"("layout":{"nodeIndex":)" + spec.layout_nodes +
-            R"(,"styles":)" + spec.styles +
-            R"(,"bounds":)" + spec.bounds +
-            R"(,"paintOrders":)" + spec.paint_orders +
+    json += R"("documents":[{"nodes":{"parentIndex":)" + spec.parents + R"(,"nodeType":)" +
+            spec.node_types + R"(,"nodeName":)" + spec.node_names + R"(,"backendNodeId":)" +
+            spec.node_names + R"(,"attributes":)" + spec.attributes + spec.extra_nodes + "}," +
+            R"("layout":{"nodeIndex":)" + spec.layout_nodes + R"(,"styles":)" + spec.styles +
+            R"(,"bounds":)" + spec.bounds + R"(,"paintOrders":)" + spec.paint_orders +
             R"(,"text":)" + texts + "}}]" + spec.extra_top + "}";
     return json;
 }
@@ -1449,9 +1445,8 @@ TEST_CASE("a drawn icon's vector nodes carry their own Chromium identity",
     const auto lowered = lower_capture("browser-capture-svg-icons");
     REQUIRE(lowered.design_ir);
     const auto& root = lowered.design_ir->root;
-    const auto index = CapturedStyleIndex::load(
-        fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) /
-        "browser-capture-svg-icons" / "dom-snapshot.json");
+    const auto index = CapturedStyleIndex::load(fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) /
+                                                "browser-capture-svg-icons" / "dom-snapshot.json");
     REQUIRE(index);
 
     const auto shapes = vector_nodes(root);
@@ -1464,9 +1459,7 @@ TEST_CASE("a drawn icon's vector nodes carry their own Chromium identity",
         CHECK(identities.insert(backend).second);
         const auto* icon = find_node(root, [shape](const IRNode& node) {
             return std::any_of(node.children.begin(), node.children.end(),
-                               [shape](const IRNode& child) {
-                                   return &child == shape;
-                               });
+                               [shape](const IRNode& child) { return &child == shape; });
         });
         REQUIRE(icon != nullptr);
         CHECK(attribute(*icon, "backend_node_id") != backend);
@@ -1474,7 +1467,8 @@ TEST_CASE("a drawn icon's vector nodes carry their own Chromium identity",
         // a DOM child of the icon's own element.
         int dom_node = -1;
         for (int i = 0; i < index->node_count(); ++i)
-            if (index->backend_node_id_of(i) == std::stoi(backend)) dom_node = i;
+            if (index->backend_node_id_of(i) == std::stoi(backend))
+                dom_node = i;
         REQUIRE(dom_node >= 0);
         CHECK(index->tag_name(dom_node) == attribute(*shape, "source_tag"));
         CHECK(index->backend_node_id_of(index->parent_of(dom_node)) ==
@@ -1500,8 +1494,7 @@ TEST_CASE("a captured canvas that paints in tree order keeps the panel nested",
         .paint_orders = "[0,1,1,2,3]",
     };
     IRNode root;
-    const auto counts = lower_into(spec, "captured-canvas-in-order", root,
-                                   {{6, "canvas:6"}});
+    const auto counts = lower_into(spec, "captured-canvas-in-order", root, {{6, "canvas:6"}});
     REQUIRE(counts.overlapping_reorders == 0);
 
     const auto path = write_snapshot(build_snapshot(spec), "captured-canvas-auto");
@@ -1509,13 +1502,12 @@ TEST_CASE("a captured canvas that paints in tree order keeps the panel nested",
     fs::remove(path);
     REQUIRE(index);
     IRNode preferred;
-    const auto chosen = lower_painted_tree_preferring_hierarchy(
-        *index, 0.0, 0.0, 0.0, preferred, {{6, "canvas:6"}});
+    const auto chosen = lower_painted_tree_preferring_hierarchy(*index, 0.0, 0.0, 0.0, preferred,
+                                                                {{6, "canvas:6"}});
     CHECK(chosen.flattened_overlapping_reorders == 0);
     CHECK(chosen.max_depth > 1);
-    const auto* panel = find_node(preferred, [](const IRNode& node) {
-        return attribute(node, "source_tag") == "div";
-    });
+    const auto* panel = find_node(
+        preferred, [](const IRNode& node) { return attribute(node, "source_tag") == "div"; });
     REQUIRE(panel != nullptr);
     REQUIRE(panel->children.size() == 1);
     CHECK(attribute(panel->children[0], "captured_element") == "canvas");
@@ -1542,8 +1534,7 @@ TEST_CASE("a captured canvas that interleaves with another subtree is flattened"
         .paint_orders = "[0,1,1,2,5,3]",
     };
     IRNode nested;
-    const auto audit = lower_into(spec, "captured-canvas-interleaved", nested,
-                                  {{6, "canvas:6"}});
+    const auto audit = lower_into(spec, "captured-canvas-interleaved", nested, {{6, "canvas:6"}});
     REQUIRE(audit.overlapping_reorders == 1);
 
     const auto path = write_snapshot(build_snapshot(spec), "captured-canvas-interleaved-auto");
@@ -1551,8 +1542,8 @@ TEST_CASE("a captured canvas that interleaves with another subtree is flattened"
     fs::remove(path);
     REQUIRE(index);
     IRNode root;
-    const auto counts = lower_painted_tree_preferring_hierarchy(
-        *index, 0.0, 0.0, 0.0, root, {{6, "canvas:6"}});
+    const auto counts =
+        lower_painted_tree_preferring_hierarchy(*index, 0.0, 0.0, 0.0, root, {{6, "canvas:6"}});
     CHECK(counts.flattened_overlapping_reorders == 1);
     CHECK(counts.max_depth == 1);
     int canvas_z = -1;
@@ -1588,20 +1579,17 @@ TEST_CASE("a canvas captured as a viewport plane is placed rather than squeezed"
         .bounds = "[[0,0,400,300],[0,0,400,300],[0,0,400,300],"
                   "[20,79.4375,106,66]]",
         .paint_orders = "[0,1,1,2]",
-        .computed_names =
-            R"(["display","border-left-width","border-top-width",)"
-            R"("border-right-width","border-bottom-width","padding-left",)"
-            R"("padding-top","padding-right","padding-bottom"])",
+        .computed_names = R"(["display","border-left-width","border-top-width",)"
+                          R"("border-right-width","border-bottom-width","padding-left",)"
+                          R"("padding-top","padding-right","padding-bottom"])",
         .strings = R"J("#document","HTML","BODY","CANVAS","block","0px","1px","2px")J",
     };
-    const std::unordered_map<std::string, CapturedLayerExtent> layers{
-        {"canvas:3", {400.0, 300.0}}};
+    const std::unordered_map<std::string, CapturedLayerExtent> layers{{"canvas:3", {400.0, 300.0}}};
 
     IRNode root;
     lower_into(spec, "canvas-plane", root, {{3, "canvas:3"}});
-    const auto* canvas = find_node(root, [](const IRNode& node) {
-        return attribute(node, "captured_element") == "canvas";
-    });
+    const auto* canvas = find_node(
+        root, [](const IRNode& node) { return attribute(node, "captured_element") == "canvas"; });
     REQUIRE(canvas != nullptr);
     // Element-sized behaviour without a plane extent: the picture is the box.
     CHECK(canvas->type == "image");
@@ -1612,8 +1600,7 @@ TEST_CASE("a canvas captured as a viewport plane is placed rather than squeezed"
     fs::remove(path);
     REQUIRE(index);
     IRNode placed_root;
-    lower_painted_tree(*index, 0.0, 0.0, 0.0, placed_root, {{3, "canvas:3"}},
-                       false, layers);
+    lower_painted_tree(*index, 0.0, 0.0, 0.0, placed_root, {{3, "canvas:3"}}, false, layers);
     const auto* box = find_node(placed_root, [](const IRNode& node) {
         return attribute(node, "captured_element") == "canvas";
     });
@@ -1624,8 +1611,7 @@ TEST_CASE("a canvas captured as a viewport plane is placed rather than squeezed"
     const auto& plane = box->children[0];
     CHECK(plane.type == "image");
     CHECK(attribute(plane, "asset_ref") == "canvas:3");
-    CHECK(plane.stable_anchor_id.value_or("") ==
-          box->stable_anchor_id.value_or("") + "/layer[0]");
+    CHECK(plane.stable_anchor_id.value_or("") == box->stable_anchor_id.value_or("") + "/layer[0]");
     // The plane's page origin, expressed against the canvas padding box
     // (border box origin plus the 1px border).
     CHECK(*plane.style.left == Catch::Approx(-21.0));
@@ -3139,8 +3125,7 @@ TEST_CASE("a transformed clipper's clip stays off the grid its paint is not on",
         .paint_orders = "[0,1,1,2,3]",
         .computed_names = std::string(kClipRadiusProperties),
     };
-    const auto lowered = lower_snapshot(spec, "clip-transformed-clipper", {},
-                                        false, 2.0);
+    const auto lowered = lower_snapshot(spec, "clip-transformed-clipper", {}, false, 2.0);
     const auto* track = find_node(lowered.root, [](const IRNode& node) {
         return node.style.width && *node.style.width == 180.0f;
     });
@@ -4082,27 +4067,23 @@ TEST_CASE("form controls draw the string their own state holds",
         .bounds = "[[0,0,200,140],[0,0,200,140],[10,10,150,24],"
                   "[10,40,150,24],[10,70,13,13],[10,90,150,24]]",
         .paint_orders = "[0,1,2,3,4,5]",
-        .computed_names =
-            R"(["display","appearance","padding-top","padding-right",)"
-            R"("padding-bottom","padding-left","border-top-width",)"
-            R"("border-right-width","border-bottom-width","border-left-width",)"
-            R"("font-size","color","text-align"])",
-        .strings =
-            R"J("#document","HTML","BODY","INPUT","SELECT","OPTION","#text",)J"
-            R"J("type","text","Patch 1","  Bank\n A ","Bank B","checkbox",)J"
-            R"J("on","block","none","auto","0px","1px","6px","13px",)J"
-            R"J("rgb(31, 41, 51)","start","Auto","inline-block")J",
-        .extra_nodes =
-            R"(,"nodeValue":[-1,-1,-1,-1,-1,-1,10,-1,11,-1,-1,-1,23])"
-            R"(,"inputValue":{"index":[3,9],"value":[9,13]})"
-            R"(,"optionSelected":{"index":[5,11]})",
+        .computed_names = R"(["display","appearance","padding-top","padding-right",)"
+                          R"("padding-bottom","padding-left","border-top-width",)"
+                          R"("border-right-width","border-bottom-width","border-left-width",)"
+                          R"("font-size","color","text-align"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","SELECT","OPTION","#text",)J"
+                   R"J("type","text","Patch 1","  Bank\n A ","Bank B","checkbox",)J"
+                   R"J("on","block","none","auto","0px","1px","6px","13px",)J"
+                   R"J("rgb(31, 41, 51)","start","Auto","inline-block")J",
+        .extra_nodes = R"(,"nodeValue":[-1,-1,-1,-1,-1,-1,10,-1,11,-1,-1,-1,23])"
+                       R"(,"inputValue":{"index":[3,9],"value":[9,13]})"
+                       R"(,"optionSelected":{"index":[5,11]})",
         // The text field's author box styling dropped the theme; the checkbox
         // is the theme's; the themed select has no verdict at all.
-        .extra_top =
-            R"(,"formControlTheme":{"controls":[)"
-            R"({"node_index":3,"theme":"author"},)"
-            R"({"node_index":4,"theme":"none"},)"
-            R"({"node_index":9,"theme":"native"}]})",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"author"},)"
+                     R"({"node_index":4,"theme":"none"},)"
+                     R"({"node_index":9,"theme":"native"}]})",
     };
     const auto lowered = lower_snapshot(spec, "form-control-values");
 
@@ -4150,20 +4131,17 @@ TEST_CASE("form controls draw the string their own state holds",
     // Every control whose computed appearance is not `none` records it, but
     // only the capture's verdict says whether the theme painted: an
     // `appearance: auto` control with author box styling is painted from CSS.
-    const int auto_appearance = count_nodes(lowered.root, [](const IRNode& n) {
-        return attribute(n, "native_appearance") == "auto";
-    });
+    const int auto_appearance = count_nodes(
+        lowered.root, [](const IRNode& n) { return attribute(n, "native_appearance") == "auto"; });
     CHECK(auto_appearance == 3);
     CHECK(lowered.counts.native_appearance_controls == 1);
     CHECK(attribute(*owners[0], "native_theme") == "author");
-    const auto* checkbox = find_node(lowered.root, [](const IRNode& n) {
-        return attribute(n, "native_theme") == "native";
-    });
+    const auto* checkbox = find_node(
+        lowered.root, [](const IRNode& n) { return attribute(n, "native_theme") == "native"; });
     REQUIRE(checkbox != nullptr);
     CHECK(attribute(*checkbox, "source_tag") == "input");
-    const int unresolved = count_nodes(lowered.root, [](const IRNode& n) {
-        return attribute(n, "native_theme") == "unresolved";
-    });
+    const int unresolved = count_nodes(
+        lowered.root, [](const IRNode& n) { return attribute(n, "native_theme") == "unresolved"; });
     CHECK(unresolved == 1);
 }
 
@@ -4172,18 +4150,22 @@ namespace {
 /// True when `needle` appears in any text run, name, or attribute value of the
 /// lowered tree.
 bool tree_mentions(const IRNode& node, const std::string& needle) {
-    if (node.text_content.find(needle) != std::string::npos) return true;
-    if (node.name.find(needle) != std::string::npos) return true;
+    if (node.text_content.find(needle) != std::string::npos)
+        return true;
+    if (node.name.find(needle) != std::string::npos)
+        return true;
     for (const auto& [key, value] : node.attributes) {
-        if (value.find(needle) != std::string::npos) return true;
+        if (value.find(needle) != std::string::npos)
+            return true;
     }
     for (const auto& child : node.children) {
-        if (tree_mentions(child, needle)) return true;
+        if (tree_mentions(child, needle))
+            return true;
     }
     return false;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("an input's type is read as HTML reads it",
           "[browser-capture][native-lowering][form-controls]") {
@@ -4206,24 +4188,20 @@ TEST_CASE("an input's type is read as HTML reads it",
         .bounds = "[[0,0,200,110],[0,0,200,110],[10,10,150,24],"
                   "[10,40,150,24],[10,70,150,24]]",
         .paint_orders = "[0,1,2,3,4]",
-        .computed_names =
-            R"(["display","appearance","padding-top","padding-right",)"
-            R"("padding-bottom","padding-left","border-top-width",)"
-            R"("border-right-width","border-bottom-width","border-left-width",)"
-            R"("font-size","color","text-align"])",
-        .strings =
-            R"J("#document","HTML","BODY","INPUT","type","Bogus"," password ",)J"
-            R"J("PASSWORD","bogus-value","spaced-value","upper-secret",)J"
-            R"J("block","auto","0px","1px","6px","13px","none",)J"
-            R"J("rgb(31, 41, 51)","start")J",
-        .extra_nodes =
-            R"(,"nodeValue":[-1,-1,-1,-1,-1,-1])"
-            R"(,"inputValue":{"index":[3,4,5],"value":[8,9,10]})",
-        .extra_top =
-            R"(,"formControlTheme":{"controls":[)"
-            R"({"node_index":3,"theme":"native"},)"
-            R"({"node_index":4,"theme":"native"},)"
-            R"({"node_index":5,"theme":"native"}]})",
+        .computed_names = R"(["display","appearance","padding-top","padding-right",)"
+                          R"("padding-bottom","padding-left","border-top-width",)"
+                          R"("border-right-width","border-bottom-width","border-left-width",)"
+                          R"("font-size","color","text-align"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","Bogus"," password ",)J"
+                   R"J("PASSWORD","bogus-value","spaced-value","upper-secret",)J"
+                   R"J("block","auto","0px","1px","6px","13px","none",)J"
+                   R"J("rgb(31, 41, 51)","start")J",
+        .extra_nodes = R"(,"nodeValue":[-1,-1,-1,-1,-1,-1])"
+                       R"(,"inputValue":{"index":[3,4,5],"value":[8,9,10]})",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"native"},)"
+                     R"({"node_index":5,"theme":"native"}]})",
     };
     const auto lowered = lower_snapshot(spec, "input-type-normalisation");
 
@@ -4259,18 +4237,15 @@ TEST_CASE("a submit or reset button without a value draws the default label",
         .bounds = "[[0,0,200,140],[0,0,200,140],[10,10,150,24],"
                   "[10,40,150,24],[10,70,150,24],[10,100,150,24]]",
         .paint_orders = "[0,1,2,3,4,5]",
-        .computed_names =
-            R"(["display","appearance","padding-top","padding-right",)"
-            R"("padding-bottom","padding-left","border-top-width",)"
-            R"("border-right-width","border-bottom-width","border-left-width",)"
-            R"("font-size","color","text-align"])",
-        .strings =
-            R"J("#document","HTML","BODY","INPUT","type","submit","reset",)J"
-            R"J("value","","button","block","auto","0px","1px","6px","13px",)J"
-            R"J("none","rgb(31, 41, 51)","center")J",
-        .extra_nodes =
-            R"(,"nodeValue":[-1,-1,-1,-1,-1,-1,-1])"
-            R"(,"inputValue":{"index":[3,4,5,6],"value":[-1,-1,8,-1]})",
+        .computed_names = R"(["display","appearance","padding-top","padding-right",)"
+                          R"("padding-bottom","padding-left","border-top-width",)"
+                          R"("border-right-width","border-bottom-width","border-left-width",)"
+                          R"("font-size","color","text-align"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","submit","reset",)J"
+                   R"J("value","","button","block","auto","0px","1px","6px","13px",)J"
+                   R"J("none","rgb(31, 41, 51)","center")J",
+        .extra_nodes = R"(,"nodeValue":[-1,-1,-1,-1,-1,-1,-1])"
+                       R"(,"inputValue":{"index":[3,4,5,6],"value":[-1,-1,8,-1]})",
     };
     const auto lowered = lower_snapshot(spec, "default-button-labels");
 
@@ -4300,22 +4275,18 @@ TEST_CASE("a control masked by -webkit-text-security never draws its value",
                   "[8,9,11,12,11,12,11,11,11,11,13,14,15,17]]",
         .bounds = "[[0,0,200,80],[0,0,200,80],[10,10,150,24],[10,40,150,24]]",
         .paint_orders = "[0,1,2,3]",
-        .computed_names =
-            R"(["display","appearance","padding-top","padding-right",)"
-            R"("padding-bottom","padding-left","border-top-width",)"
-            R"("border-right-width","border-bottom-width","border-left-width",)"
-            R"("font-size","color","text-align","-webkit-text-security"])",
-        .strings =
-            R"J("#document","HTML","BODY","INPUT","type","text","hunter2",)J"
-            R"J("visible-value","block","auto","0px","1px","6px","13px",)J"
-            R"J("rgb(31, 41, 51)","start","disc","none")J",
-        .extra_nodes =
-            R"(,"nodeValue":[-1,-1,-1,-1,-1])"
-            R"(,"inputValue":{"index":[3,4],"value":[6,7]})",
-        .extra_top =
-            R"(,"formControlTheme":{"controls":[)"
-            R"({"node_index":3,"theme":"native"},)"
-            R"({"node_index":4,"theme":"native"}]})",
+        .computed_names = R"(["display","appearance","padding-top","padding-right",)"
+                          R"("padding-bottom","padding-left","border-top-width",)"
+                          R"("border-right-width","border-bottom-width","border-left-width",)"
+                          R"("font-size","color","text-align","-webkit-text-security"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","text","hunter2",)J"
+                   R"J("visible-value","block","auto","0px","1px","6px","13px",)J"
+                   R"J("rgb(31, 41, 51)","start","disc","none")J",
+        .extra_nodes = R"(,"nodeValue":[-1,-1,-1,-1,-1])"
+                       R"(,"inputValue":{"index":[3,4],"value":[6,7]})",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"native"}]})",
     };
     const auto lowered = lower_snapshot(spec, "masked-control-value");
 

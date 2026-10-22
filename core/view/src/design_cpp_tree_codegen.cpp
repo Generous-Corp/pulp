@@ -244,9 +244,8 @@ void emit_captured_text_layout(std::ostringstream& out,
                   ", " + (wrap_on_cache_miss ? "true" : "false") + ");");
     if (const auto& m = node.text_layout_basis->line_metrics)
         emit_line(out, depth, ctx.opts.indent_spaces,
-                  std::string(var) + "->set_cached_line_metrics({" +
-                      float_expr(ctx, m->ascent) + ", " +
-                      float_expr(ctx, m->descent) + "});");
+                  std::string(var) + "->set_cached_line_metrics({" + float_expr(ctx, m->ascent) +
+                      ", " + float_expr(ctx, m->descent) + "});");
     if (!explicit_nowrap && node.text_line_boxes.size() > 1)
         emit_line(out, depth, ctx.opts.indent_spaces,
                   std::string(var) + "->set_multi_line(true);");
@@ -898,8 +897,7 @@ void emit_node(std::ostringstream& out,
         // component factories, so opt each tree out of Yoga's pixel rounding.
         emit_line(out, depth, ctx.opts.indent_spaces,
                   var + "->set_subpixel_layout(true);");
-        emit_line(out, depth, ctx.opts.indent_spaces,
-                  var + "->set_captured_frame_root(true);");
+        emit_line(out, depth, ctx.opts.indent_spaces, var + "->set_captured_frame_root(true);");
         emit_line(out, depth, ctx.opts.indent_spaces, "return " + var + ";");
     }
 

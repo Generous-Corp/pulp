@@ -204,17 +204,12 @@ struct CapturedLayerExtent {
 /// page origin, so a root child's relative box is its page box plus the shift
 /// and the composition of offsets down any chain returns Chrome's absolute box
 /// exactly — Blink's 1/64px grid values survive the arithmetic unrounded.
-PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
-                                     double dx,
-                                     double dy,
-                                     double device_scale,
-                                     pulp::view::IRNode& root,
-                                     const std::unordered_map<int, std::string>&
-                                         captured_element_assets = {},
-                                     bool flatten_to_paint_order = false,
-                                     const std::unordered_map<std::string,
-                                                              CapturedLayerExtent>&
-                                         captured_layers = {});
+PaintedTreeCounts lower_painted_tree(
+    const CapturedStyleIndex& index, double dx, double dy, double device_scale,
+    pulp::view::IRNode& root,
+    const std::unordered_map<int, std::string>& captured_element_assets = {},
+    bool flatten_to_paint_order = false,
+    const std::unordered_map<std::string, CapturedLayerExtent>& captured_layers = {});
 
 /// Lower hierarchically, and fall back to the flat paint-order emission only
 /// when the nested tree would visibly disagree with Chromium.
@@ -229,9 +224,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
 /// is flattened and says why in `flattened_overlapping_reorders`.
 PaintedTreeCounts lower_painted_tree_preferring_hierarchy(
     const CapturedStyleIndex& index, double dx, double dy, double device_scale,
-    pulp::view::IRNode& root,
-    const std::unordered_map<int, std::string>& captured_element_assets,
-    const std::unordered_map<std::string, CapturedLayerExtent>& captured_layers =
-        {});
+    pulp::view::IRNode& root, const std::unordered_map<int, std::string>& captured_element_assets,
+    const std::unordered_map<std::string, CapturedLayerExtent>& captured_layers = {});
 
 }  // namespace pulp::import_design

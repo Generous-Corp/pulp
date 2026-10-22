@@ -777,9 +777,7 @@ struct TextShaper::Impl {
         text_style.setFontFamilies(families);
         text_style.setFontSize(font_size);
         apply_auto_optical_size(
-            text_style,
-            resolve_typeface(font_family, font_weight, font_slant).get(),
-            font_size);
+            text_style, resolve_typeface(font_family, font_weight, font_slant).get(), font_size);
         text_style.setFontStyle(SkFontStyle(
             font_weight, SkFontStyle::kNormal_Width,
             skia_slant_from_int(font_slant)));
@@ -875,14 +873,12 @@ struct TextShaper::Impl {
                 skia::textlayout::TextStyle text_style;
                 std::vector<SkString> families;
                 for (const auto& entry : split_css_font_family_list(font_family))
-                    families.emplace_back(
-                        platform_family_for_css_family(entry).c_str());
+                    families.emplace_back(platform_family_for_css_family(entry).c_str());
                 const std::string emoji_family = ctx->emoji_family_name();
                 if (!emoji_family.empty()) families.emplace_back(emoji_family.c_str());
                 if (families.empty()) families.emplace_back("");
                 text_style.setFontFamilies(families);
-                const auto primary =
-                    resolve_typeface(font_family, font_weight, font_slant);
+                const auto primary = resolve_typeface(font_family, font_weight, font_slant);
                 text_style.setFontSize(font_size);
                 apply_auto_optical_size(text_style, primary.get(), font_size);
                 text_style.setFontStyle(SkFontStyle(

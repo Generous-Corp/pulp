@@ -157,8 +157,7 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot,
             // share a DOM node identity, so this repetition is valid evidence
             // and must not invalidate otherwise trustworthy document-canvas
             // metadata.
-            const auto tag_name = tag_index >= 0 &&
-                                          tag_index < static_cast<int>(strings.size())
+            const auto tag_name = tag_index >= 0 && tag_index < static_cast<int>(strings.size())
                                       ? strings[tag_index].toString()
                                       : std::string{};
             const bool repeated_marker = tag_name == "::marker";
@@ -166,9 +165,9 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot,
             // zero-size row for that content beside its own box. It adds no
             // paint and is valid evidence; any other row with area that is not
             // the node's own is still a conflict.
-            const bool empty_generated_row =
-                tag_name.rfind("::", 0) == 0 && !repeated_marker && box.isArray() &&
-                box.size() == 4 && number(box[2]) == 0 && number(box[3]) == 0;
+            const bool empty_generated_row = tag_name.rfind("::", 0) == 0 && !repeated_marker &&
+                                             box.isArray() && box.size() == 4 &&
+                                             number(box[2]) == 0 && number(box[3]) == 0;
             const bool own_row = node >= 0 && captured.own_layout_row(node) == at;
             if (node < 0 || (!own_row && !repeated_marker && !empty_generated_row) ||
                 !row.isArray() ||
@@ -234,11 +233,9 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot,
         };
         const auto html_color = color(html_style["background-color"]);
         const auto body_color = color(body_style["background-color"]);
-        if (!html_color || !body_color ||
-            ((*html_color)[3] != 1 && (*html_color)[3] != 0) ||
+        if (!html_color || !body_color || ((*html_color)[3] != 1 && (*html_color)[3] != 0) ||
             ((*body_color)[3] != 0 && (*body_color)[3] != 1) ||
-            ((*html_color)[3] == 1 && (*body_color)[3] != 0 &&
-             *body_color != *html_color))
+            ((*html_color)[3] == 1 && (*body_color)[3] != 0 && *body_color != *html_color))
             return std::nullopt;
         const double width = number(member(doc, "contentWidth"));
         const double height = number(member(doc, "contentHeight"));
@@ -254,11 +251,10 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot,
         // opaque white. A solid body background also paints the document
         // canvas. Preserve either browser-visible result for native lowering
         // instead of exposing Pulp's host dark clear color.
-        const auto& canvas_color = (*html_color)[3] == 1
-                                       ? *html_color
-                                       : ((*body_color)[3] == 1
-                                              ? *body_color
-                                              : std::array<double, 4>{255, 255, 255, 1});
+        const auto& canvas_color =
+            (*html_color)[3] == 1
+                ? *html_color
+                : ((*body_color)[3] == 1 ? *body_color : std::array<double, 4>{255, 255, 255, 1});
         return DocumentCanvasPaint{"rgb(" + std::to_string(static_cast<int>(canvas_color[0])) +
                                        ", " + std::to_string(static_cast<int>(canvas_color[1])) +
                                        ", " + std::to_string(static_cast<int>(canvas_color[2])) +

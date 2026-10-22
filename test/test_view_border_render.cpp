@@ -488,9 +488,7 @@ struct ShadeCase {
 };
 
 Rgb rgb8(pulp::canvas::Color c) {
-    const auto level = [](float v) {
-        return static_cast<int>(std::lround(v * 255.0f));
-    };
+    const auto level = [](float v) { return static_cast<int>(std::lround(v * 255.0f)); };
     return Rgb{level(c.r), level(c.g), level(c.b)};
 }
 
@@ -498,10 +496,9 @@ bool exactly(Rgb a, Rgb b) {
     return a.r == b.r && a.g == b.g && a.b == b.b;
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("3D border shades match Chrome's per-colour shading",
-          "[view][border][border-shading]") {
+TEST_CASE("3D border shades match Chrome's per-colour shading", "[view][border][border-shading]") {
     const ShadeCase cases[] = {
         {{0, 0, 0}, {168, 168, 168}, {84, 84, 84}},
         {{1, 1, 1}, {169, 169, 169}, {85, 85, 85}},
@@ -527,24 +524,21 @@ TEST_CASE("3D border shades match Chrome's per-colour shading",
     };
     for (const auto& c : cases) {
         const auto shades = border_shades(paint(c.base));
-        INFO("base " << c.base.r << "," << c.base.g << "," << c.base.b
-             << " light " << rgb8(shades.light).r << ","
-             << rgb8(shades.light).g << "," << rgb8(shades.light).b
-             << " dark " << rgb8(shades.dark).r << ","
-             << rgb8(shades.dark).g << "," << rgb8(shades.dark).b);
+        INFO("base " << c.base.r << "," << c.base.g << "," << c.base.b << " light "
+                     << rgb8(shades.light).r << "," << rgb8(shades.light).g << ","
+                     << rgb8(shades.light).b << " dark " << rgb8(shades.dark).r << ","
+                     << rgb8(shades.dark).g << "," << rgb8(shades.dark).b);
         CHECK(exactly(rgb8(shades.light), c.light));
         CHECK(exactly(rgb8(shades.dark), c.dark));
     }
     // Alpha is the side colour's own; only the channels are shaded.
-    const auto translucent =
-        border_shades(pulp::canvas::Color::rgba(0.0f, 0.0f, 1.0f, 0.5f));
+    const auto translucent = border_shades(pulp::canvas::Color::rgba(0.0f, 0.0f, 1.0f, 0.5f));
     CHECK(translucent.light.a == 0.5f);
     CHECK(translucent.dark.a == 0.5f);
     CHECK(exactly(rgb8(translucent.dark), Rgb{0, 0, 171}));
 }
 
-TEST_CASE("each 3D style shades the sides it should",
-          "[view][border][border-shading]") {
+TEST_CASE("each 3D style shades the sides it should", "[view][border][border-shading]") {
     using S = BorderEdge;
     using B = View::BorderStyle;
     const auto black = paint(Rgb{0, 0, 0});
@@ -569,22 +563,18 @@ TEST_CASE("each 3D style shades the sides it should",
     CHECK(exactly(band(B::ridge, S::top, true), light));
     CHECK(exactly(band(B::ridge, S::right, false), light));
     // A 1px groove is not split, and paints the unshaded colour.
-    CHECK(exactly(rgb8(border_band_color(B::groove, S::top, true, black,
-                                               1.0f)),
-                  Rgb{0, 0, 0}));
+    CHECK(exactly(rgb8(border_band_color(B::groove, S::top, true, black, 1.0f)), Rgb{0, 0, 0}));
     // Solid and double are never shaded.
     CHECK(exactly(band(B::double_, S::top, true), Rgb{0, 0, 0}));
     CHECK(exactly(band(B::solid, S::bottom, true), Rgb{0, 0, 0}));
 }
 
-TEST_CASE("groove and double split a side into Chrome's bands",
-          "[view][border][border-shading]") {
+TEST_CASE("groove and double split a side into Chrome's bands", "[view][border][border-shading]") {
     using S = BorderEdge;
     using B = View::BorderStyle;
     // {width, top outer, bottom outer} for a groove, read off Chrome's render:
     // the top and left take the odd pixel on the outside.
-    const float groove[][3] = {{1, 1, 1}, {2, 1, 1}, {3, 2, 1}, {4, 2, 2},
-                               {9, 5, 4}, {12, 6, 6}};
+    const float groove[][3] = {{1, 1, 1}, {2, 1, 1}, {3, 2, 1}, {4, 2, 2}, {9, 5, 4}, {12, 6, 6}};
     for (const auto& g : groove) {
         INFO("groove width " << g[0]);
         const auto top = border_bands(B::groove, S::top, g[0]);
@@ -595,7 +585,7 @@ TEST_CASE("groove and double split a side into Chrome's bands",
         CHECK(bottom.outer + bottom.gap + bottom.inner == g[0]);
     }
     // {width, line, gap} for double: below 3px it is one solid line.
-    const float dbl[][3] = {{2, 2, 0}, {3, 1, 1}, {4, 1, 2}, {5, 2, 1},
+    const float dbl[][3] = {{2, 2, 0}, {3, 1, 1}, {4, 1, 2},  {5, 2, 1},
                             {7, 2, 3}, {8, 3, 2}, {11, 4, 3}, {12, 4, 4}};
     for (const auto& d : dbl) {
         INFO("double width " << d[0]);
@@ -609,8 +599,7 @@ TEST_CASE("groove and double split a side into Chrome's bands",
 // `border: 6px outset black` on the 120x60 box. Chrome paints 12 device px of
 // rgb(168,168,168) down the top and left and of rgb(84,84,84) along the bottom
 // and right; a flat black frame is what this lowered to before.
-TEST_CASE("an outset border paints its light and dark sides",
-          "[view][border][border-shading]") {
+TEST_CASE("an outset border paints its light and dark sides", "[view][border][border-shading]") {
     View v;
     v.set_border(paint(Rgb{0, 0, 0}), 6.0f);
     v.set_border_style(View::BorderStyle::outset);
@@ -638,8 +627,7 @@ TEST_CASE("an outset border paints its light and dark sides",
 // `border: 9px groove black`: Chrome paints 10 device px of the dark shade
 // then 8 of the light one down from the top, and 8 light then 10 dark up from
 // the bottom.
-TEST_CASE("a groove border paints two shaded bands per side",
-          "[view][border][border-shading]") {
+TEST_CASE("a groove border paints two shaded bands per side", "[view][border][border-shading]") {
     View v;
     v.set_border(paint(Rgb{0, 0, 0}), 9.0f);
     v.set_border_style(View::BorderStyle::groove);
@@ -663,8 +651,7 @@ TEST_CASE("a groove border paints two shaded bands per side",
 
 // `border: 9px double white`: two 6-device-px lines with 6 px of the box's own
 // background between them.
-TEST_CASE("a double border paints two lines with a gap",
-          "[view][border][border-shading]") {
+TEST_CASE("a double border paints two lines with a gap", "[view][border][border-shading]") {
     View v;
     v.set_border(paint(kWhite), 9.0f);
     v.set_border_style(View::BorderStyle::double_);
@@ -683,10 +670,9 @@ TEST_CASE("border_style_from_css names every CSS line style and nothing else",
           "[view][border][css]") {
     using B = View::BorderStyle;
     const std::pair<const char*, B> keywords[] = {
-        {"solid", B::solid},   {"dashed", B::dashed}, {"dotted", B::dotted},
-        {"double", B::double_}, {"groove", B::groove}, {"ridge", B::ridge},
-        {"inset", B::inset},   {"outset", B::outset}, {"none", B::none},
-        {"hidden", B::hidden},
+        {"solid", B::solid},   {"dashed", B::dashed}, {"dotted", B::dotted}, {"double", B::double_},
+        {"groove", B::groove}, {"ridge", B::ridge},   {"inset", B::inset},   {"outset", B::outset},
+        {"none", B::none},     {"hidden", B::hidden},
     };
     for (const auto& [keyword, style] : keywords) {
         INFO(keyword);
@@ -714,15 +700,14 @@ namespace {
 // Chrome's 8-bit result, within one level per channel for the float pipeline.
 bool chrome_pixel(const Pixels& px, int x, int y, Rgb want) {
     const Rgb got = px.at(x, y);
-    INFO("pixel (" << x << "," << y << ") = " << got.r << "," << got.g << ","
-         << got.b << " want " << want.r << "," << want.g << "," << want.b);
+    INFO("pixel (" << x << "," << y << ") = " << got.r << "," << got.g << "," << got.b << " want "
+                   << want.r << "," << want.g << "," << want.b);
     return same(got, want);
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("a rounded outset border has a curved inner edge",
-          "[view][border][border-shading]") {
+TEST_CASE("a rounded outset border has a curved inner edge", "[view][border][border-shading]") {
     // `border: 6px outset black; border-radius: 12px`. The inner radius is
     // 6px, so device (13,13) and (14,14) sit in the pocket between the
     // padding-box corner (12,12) and the inner arc and are border; (18,18) is
@@ -741,18 +726,17 @@ TEST_CASE("a rounded outset border has a curved inner edge",
     CHECK_FALSE(chrome_pixel(px, 1, 1, light));
 }
 
-TEST_CASE("a rounded double border keeps both lines curved",
-          "[view][border][border-shading]") {
+TEST_CASE("a rounded double border keeps both lines curved", "[view][border][border-shading]") {
     // `border: 9px double rgb(159,255,221); border-radius: 16px`.
     View v;
     v.set_border(paint(Rgb{159, 255, 221}), 9.0f, 16.0f);
     v.set_border_style(View::BorderStyle::double_);
     const auto px = render(v);
     const Rgb mint{159, 255, 221};
-    CHECK(chrome_pixel(px, 10, 10, mint));    // outer line, on the curve
-    CHECK(chrome_pixel(px, 16, 16, kPlate));  // the gap, on the curve
-    CHECK(chrome_pixel(px, 19, 19, mint));    // inner line, on the curve
-    CHECK_FALSE(chrome_pixel(px, 6, 6, mint));  // outside the outer arc
+    CHECK(chrome_pixel(px, 10, 10, mint));     // outer line, on the curve
+    CHECK(chrome_pixel(px, 16, 16, kPlate));   // the gap, on the curve
+    CHECK(chrome_pixel(px, 19, 19, mint));     // inner line, on the curve
+    CHECK_FALSE(chrome_pixel(px, 6, 6, mint)); // outside the outer arc
 }
 
 TEST_CASE("a translucent double border has no seam on its mitres",
@@ -776,8 +760,7 @@ TEST_CASE("a translucent rounded groove matches on its curved corner",
           "[view][border][border-shading]") {
     // `border: 6px groove rgba(163,230,53,0.6); border-radius: 14px`.
     View v;
-    v.set_border(pulp::canvas::Color::rgba(163.0f / 255.0f, 230.0f / 255.0f,
-                                           53.0f / 255.0f, 0.6f),
+    v.set_border(pulp::canvas::Color::rgba(163.0f / 255.0f, 230.0f / 255.0f, 53.0f / 255.0f, 0.6f),
                  6.0f, 14.0f);
     v.set_border_style(View::BorderStyle::groove);
     const auto px = render(v);
@@ -788,8 +771,7 @@ TEST_CASE("a translucent rounded groove matches on its curved corner",
     CHECK(chrome_pixel(px, 120, 9, Rgb{116, 163, 46}));
 }
 
-TEST_CASE("only double and the 3D styles are banded",
-          "[view][border][border-shading]") {
+TEST_CASE("only double and the 3D styles are banded", "[view][border][border-shading]") {
     using B = View::BorderStyle;
     for (B s : {B::double_, B::groove, B::ridge, B::inset, B::outset})
         CHECK(is_banded_border_style(s));
@@ -801,8 +783,7 @@ TEST_CASE("fit_corner_radii scales overlapping radii by one CSS factor",
           "[view][border][border-radius]") {
     // 120x40 with 30px corners: the left and right sides want 60 of their 40,
     // so f = 40/60 and every corner becomes a 20px circle.
-    const auto pill = fit_corner_radii(120.0f, 40.0f,
-                                       CornerRadii::circular(30, 30, 30, 30));
+    const auto pill = fit_corner_radii(120.0f, 40.0f, CornerRadii::circular(30, 30, 30, 30));
     CHECK(pill.tl_x == 20.0f);
     CHECK(pill.tl_y == 20.0f);
     CHECK(pill.br_x == 20.0f);
@@ -810,22 +791,19 @@ TEST_CASE("fit_corner_radii scales overlapping radii by one CSS factor",
 
     // Radii that fit are kept as given, even past half a side: 80 + 20 along
     // a 100px top edge meet exactly, so nothing is scaled.
-    const auto fits = fit_corner_radii(100.0f, 100.0f,
-                                       CornerRadii::circular(80, 20, 0, 0));
+    const auto fits = fit_corner_radii(100.0f, 100.0f, CornerRadii::circular(80, 20, 0, 0));
     CHECK(fits.tl_x == 80.0f);
     CHECK(fits.tr_x == 20.0f);
 
     // The tightest side sets the factor for all four corners: the left side
     // wants 80 of its 50, so f = 0.625 and the top-right shrinks with it.
-    const auto tight = fit_corner_radii(200.0f, 50.0f,
-                                        CornerRadii::circular(40, 16, 0, 40));
+    const auto tight = fit_corner_radii(200.0f, 50.0f, CornerRadii::circular(40, 16, 0, 40));
     CHECK(tight.tl_x == 25.0f);
     CHECK(tight.tr_x == 10.0f);
     CHECK(tight.bl_y == 25.0f);
 
     // A negative radius is no radius.
-    CHECK(fit_corner_radii(10.0f, 10.0f, CornerRadii::circular(-4, 0, 0, 0)).tl_x
-          == 0.0f);
+    CHECK(fit_corner_radii(10.0f, 10.0f, CornerRadii::circular(-4, 0, 0, 0)).tl_x == 0.0f);
 }
 
 TEST_CASE("a banded border's outer curve is the background's curve",
@@ -851,8 +829,8 @@ TEST_CASE("a banded border's outer curve is the background's curve",
 
     // Device (34,2) is CSS (17.25,1.25): inside the 20px circle, outside the
     // 30x20 ellipse. It is border, at every corner.
-    for (auto [x, y] : {std::pair{34, 2}, std::pair{205, 2}, std::pair{34, 77},
-                        std::pair{205, 77}}) {
+    for (auto [x, y] :
+         {std::pair{34, 2}, std::pair{205, 2}, std::pair{34, 77}, std::pair{205, 77}}) {
         INFO("pixel (" << x << "," << y << ")");
         CHECK_FALSE(same(px.at(x, y), kRed));
     }

@@ -44,19 +44,19 @@ std::unordered_map<std::string, std::string>& generic_overrides() {
     static std::unordered_map<std::string, std::string> overrides;
     return overrides;
 }
-}  // namespace
+} // namespace
 
-void set_css_generic_family_override(const std::string& keyword,
-                                     const std::string& family) {
+void set_css_generic_family_override(const std::string& keyword, const std::string& family) {
     std::string lower = keyword;
     for (auto& c : lower)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     std::lock_guard<std::mutex> lock(g_generic_overrides_mutex);
     auto& overrides = generic_overrides();
-    if (family.empty()) overrides.erase(lower);
-    else overrides[lower] = family;
-    g_generic_overrides_present.store(!overrides.empty(),
-                                      std::memory_order_release);
+    if (family.empty())
+        overrides.erase(lower);
+    else
+        overrides[lower] = family;
+    g_generic_overrides_present.store(!overrides.empty(), std::memory_order_release);
 }
 
 std::string platform_family_for_css_generic(const std::string& css_family) {
@@ -92,7 +92,8 @@ std::string platform_family_for_css_generic(const std::string& css_family) {
     for (auto& c : lower)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     for (const auto& entry : kGeneric)
-        if (lower == entry.keyword) return entry.family;
+        if (lower == entry.keyword)
+            return entry.family;
 #else
     (void)css_family;
 #endif
@@ -106,13 +107,14 @@ std::string lower_ascii(std::string_view s) {
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return out;
 }
-}  // namespace
+} // namespace
 
 CssFontFamily parse_css_font_family(std::string_view entry) {
     constexpr std::string_view kSpace = " \t\n\r\f\v";
     CssFontFamily out;
     const size_t lo = entry.find_first_not_of(kSpace);
-    if (lo == std::string_view::npos) return out;
+    if (lo == std::string_view::npos)
+        return out;
     const size_t hi = entry.find_last_not_of(kSpace);
     entry = entry.substr(lo, hi - lo + 1);
     if (entry.size() >= 2 && (entry.front() == '"' || entry.front() == '\'') &&
@@ -130,8 +132,8 @@ std::vector<std::string> split_css_font_family_list(std::string_view list) {
     size_t pos = 0;
     while (pos <= list.size()) {
         const size_t comma = list.find(',', pos);
-        std::string_view entry = list.substr(
-            pos, (comma == std::string_view::npos ? list.size() : comma) - pos);
+        std::string_view entry =
+            list.substr(pos, (comma == std::string_view::npos ? list.size() : comma) - pos);
         const size_t lo = entry.find_first_not_of(kSpace);
         if (lo != std::string_view::npos) {
             const size_t hi = entry.find_last_not_of(kSpace);
@@ -139,7 +141,8 @@ std::vector<std::string> split_css_font_family_list(std::string_view list) {
             if (!parse_css_font_family(entry).name.empty())
                 out.emplace_back(entry);
         }
-        if (comma == std::string_view::npos) break;
+        if (comma == std::string_view::npos)
+            break;
         pos = comma + 1;
     }
     return out;
@@ -148,20 +151,18 @@ std::vector<std::string> split_css_font_family_list(std::string_view list) {
 std::string platform_family_for_css_family(std::string_view entry) {
     CssFontFamily family = parse_css_font_family(entry);
     if (!family.quoted) {
-        if (auto generic = platform_family_for_css_generic(family.name);
-            !generic.empty())
+        if (auto generic = platform_family_for_css_generic(family.name); !generic.empty())
             return generic;
     }
     return std::move(family.name);
 }
 
-bool platform_face_is_family(std::string_view platform_family,
-                             std::string_view actual_family) {
-    if (platform_family.empty() || actual_family.empty()) return false;
+bool platform_face_is_family(std::string_view platform_family, std::string_view actual_family) {
+    if (platform_family.empty() || actual_family.empty())
+        return false;
     const std::string want = lower_ascii(platform_family);
     const std::string got = lower_ascii(actual_family);
-    if (want.find(got) != std::string::npos ||
-        got.find(want) != std::string::npos)
+    if (want.find(got) != std::string::npos || got.find(want) != std::string::npos)
         return true;
     return want.front() == '.' && got.front() == '.';
 }
@@ -275,11 +276,12 @@ bool names_system_ui_font(const std::string& css_family) {
 // CoreText's weight trait for a CSS weight: Apple's NSFontWeight values at
 // each hundred, interpolated between them, as Skia's own mapping does.
 CGFloat ct_weight_for_css_weight(int css_weight) {
-    static constexpr CGFloat kAtHundreds[] = {
-        -1.00, -0.80, -0.60, -0.40, 0.00, 0.23, 0.30, 0.40, 0.56, 0.62, 1.00};
+    static constexpr CGFloat kAtHundreds[] = {-1.00, -0.80, -0.60, -0.40, 0.00, 0.23,
+                                              0.30,  0.40,  0.56,  0.62,  1.00};
     const int clamped = std::clamp(css_weight, 0, 1000);
     const int lo = clamped / 100;
-    if (lo >= 10) return kAtHundreds[10];
+    if (lo >= 10)
+        return kAtHundreds[10];
     const CGFloat t = static_cast<CGFloat>(clamped - lo * 100) / 100.0;
     return kAtHundreds[lo] + (kAtHundreds[lo + 1] - kAtHundreds[lo]) * t;
 }
@@ -292,27 +294,28 @@ CGFloat ct_weight_for_css_weight(int css_weight) {
 // browser does.
 sk_sp<SkTypeface> system_ui_typeface(SkFontStyle style) {
     CTFontRef base = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, 0.0, nullptr);
-    if (!base) return nullptr;
+    if (!base)
+        return nullptr;
     CTFontDescriptorRef base_descriptor = CTFontCopyFontDescriptor(base);
     CFRelease(base);
-    if (!base_descriptor) return nullptr;
+    if (!base_descriptor)
+        return nullptr;
 
     const CGFloat weight = ct_weight_for_css_weight(style.weight());
     CFNumberRef weight_number = CFNumberCreate(nullptr, kCFNumberCGFloatType, &weight);
     const CTFontSymbolicTraits symbolic =
         style.slant() == SkFontStyle::kUpright_Slant ? 0 : kCTFontItalicTrait;
-    CFNumberRef symbolic_number =
-        CFNumberCreate(nullptr, kCFNumberSInt32Type, &symbolic);
+    CFNumberRef symbolic_number = CFNumberCreate(nullptr, kCFNumberSInt32Type, &symbolic);
     const void* trait_keys[] = {kCTFontWeightTrait, kCTFontSymbolicTrait};
     const void* trait_values[] = {weight_number, symbolic_number};
-    CFDictionaryRef traits = CFDictionaryCreate(
-        nullptr, trait_keys, trait_values, 2, &kCFTypeDictionaryKeyCallBacks,
-        &kCFTypeDictionaryValueCallBacks);
+    CFDictionaryRef traits =
+        CFDictionaryCreate(nullptr, trait_keys, trait_values, 2, &kCFTypeDictionaryKeyCallBacks,
+                           &kCFTypeDictionaryValueCallBacks);
     const void* attribute_keys[] = {kCTFontTraitsAttribute};
     const void* attribute_values[] = {traits};
-    CFDictionaryRef attributes = CFDictionaryCreate(
-        nullptr, attribute_keys, attribute_values, 1,
-        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFDictionaryRef attributes =
+        CFDictionaryCreate(nullptr, attribute_keys, attribute_values, 1,
+                           &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     CTFontDescriptorRef descriptor =
         CTFontDescriptorCreateCopyWithAttributes(base_descriptor, attributes);
     CFRelease(attributes);
@@ -320,11 +323,13 @@ sk_sp<SkTypeface> system_ui_typeface(SkFontStyle style) {
     CFRelease(symbolic_number);
     CFRelease(weight_number);
     CFRelease(base_descriptor);
-    if (!descriptor) return nullptr;
+    if (!descriptor)
+        return nullptr;
 
     CTFontRef font = CTFontCreateWithFontDescriptor(descriptor, 0.0, nullptr);
     CFRelease(descriptor);
-    if (!font) return nullptr;
+    if (!font)
+        return nullptr;
     sk_sp<SkTypeface> typeface = SkMakeTypefaceFromCTFont(font);
     CFRelease(font);
     return typeface;
@@ -334,10 +339,8 @@ sk_sp<SkTypeface> system_ui_typeface(SkFontStyle style) {
 // Keep this TU self-contained by using the public registered-font,
 // bundled-font, and SkFontMgr paths directly.
 
-ResolvedFont resolve_one_family(const std::string& entry,
-                                const FontOptions& opts,
-                                SkFontStyle sk_style,
-                                sk_sp<SkFontMgr> mgr,
+ResolvedFont resolve_one_family(const std::string& entry, const FontOptions& opts,
+                                SkFontStyle sk_style, sk_sp<SkFontMgr> mgr,
                                 std::vector<FallbackTraceStep>& trace) {
     // A family_stack entry may carry its CSS quotes; a quoted entry is a
     // literal family name and never maps as a generic keyword.
@@ -403,7 +406,8 @@ ResolvedFont resolve_one_family(const std::string& entry,
             system_ui = tf != nullptr;
         }
 #endif
-        if (!tf) tf = mgr->matchFamilyStyle(platform_family.c_str(), sk_style);
+        if (!tf)
+            tf = mgr->matchFamilyStyle(platform_family.c_str(), sk_style);
         if (tf) {
             SkString actual;
             tf->getFamilyName(&actual);
@@ -415,9 +419,8 @@ ResolvedFont resolve_one_family(const std::string& entry,
             // held to the family it maps to: when that family is missing
             // the face is the matcher's default, not the generic's.
             const bool name_overlap =
-                system_ui ||
-                platform_face_is_family(platform_family,
-                                        std::string(actual.c_str(), actual.size()));
+                system_ui || platform_face_is_family(platform_family,
+                                                     std::string(actual.c_str(), actual.size()));
 
             // In Deterministic mode we refuse any platform face whose
             // name doesn't overlap the requested family — bug-compatible
@@ -430,11 +433,10 @@ ResolvedFont resolve_one_family(const std::string& entry,
                 r.typeface = std::move(tf);
                 r.actual_family = std::string(actual.c_str(), actual.size());
                 r.origin = FallbackOrigin::Platform;
-                trace.push_back({family, FallbackOrigin::Platform, true,
-                                 r.actual_family,
-                                 system_ui ? "system UI font"
+                trace.push_back({family, FallbackOrigin::Platform, true, r.actual_family,
+                                 system_ui      ? "system UI font"
                                  : name_overlap ? ""
-                                 : "platform default (name does not overlap)"});
+                                                : "platform default (name does not overlap)"});
                 return r;
             }
         } else {
@@ -558,8 +560,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
             // (a named instance such as SF's Bold) needs no clone; cloning it
             // renames it to a synthetic instance the browser never reports.
             const bool already_at_weight =
-                std::abs(static_cast<float>(face->fontStyle().weight()) -
-                         want) < 0.5f;
+                std::abs(static_cast<float>(face->fontStyle().weight()) - want) < 0.5f;
             if (want != wdef && !already_at_weight) {
                 coords.push_back({kWghtTag, want});
             }
