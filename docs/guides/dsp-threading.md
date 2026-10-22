@@ -178,7 +178,15 @@ sample. Hosts usually process in place, and a plain `dst[s] = src[s] * gain`
 loop then runs its scalar fallback: the compiler guards the vector loop with
 an overlap check that `dst == src` fails. `buffer_ops::map_samples()` gives
 the in-place case its own single-pointer loop, so both cases vectorize; write
-the same split yourself for a loop it does not fit. For a per-block UI meter, `audio::buffer_ops::measure_peak_rms()`
+the same split yourself for a loop it does not fit.
+
+A stateful loop that walks samples in the outer loop and channels in the
+inner one (a filter or delay that keeps per-channel state) should not iterate
+a runtime channel count: the compiler cannot unroll across channels, so it
+re-addresses per-channel state every sample. Dispatch the count once per block
+with `buffer_ops::with_channel_count<1, 2>(channels, [&](auto count) { ... })`;
+for a listed count the lambda receives a compile-time constant, and any other
+count still runs through the same body. For a per-block UI meter, `audio::buffer_ops::measure_peak_rms()`
 returns peak and RMS in one vectorized pass; a hand-written
 `sum += x * x` loop is a single serial add chain and can cost more than the
 processing it measures. `pulp create` templates use all three.
