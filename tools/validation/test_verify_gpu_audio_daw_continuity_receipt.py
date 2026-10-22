@@ -8,6 +8,7 @@ rejection case is paired with the passing receipt it was derived from.
 from __future__ import annotations
 
 import copy
+from unittest import mock
 import importlib.util
 import json
 import subprocess
@@ -316,7 +317,7 @@ class DaWContinuityReceipt(unittest.TestCase):
                                       tolerance=1e-4, window_pre=PRE, window_post=POST,
                                       host_alive=True, bounce_path=None)
             self.assertEqual(result["verdict"], "inconclusive", result["verdict_reasons"])
-            self.assertTrue(any("did not feed the stimulus" in r
+            self.assertTrue(any("was not the stimulus" in r
                                 for r in result["verdict_reasons"]))
 
     def test_a_capture_overflow_is_inconclusive_not_an_audio_fail(self):
@@ -413,6 +414,17 @@ class DaWContinuityReceipt(unittest.TestCase):
         # Positive control: the untouched capture is accepted.
         self.assertEqual(self.verify(load(self.good), self.good), "pass")
 
+    def test_foreign_input_while_stopped_is_rejected(self):
+        # M6 covers the whole run: a microphone heard while the transport is
+        # stopped is still host input in the capture.
+        cap = gfc.read_capture(self.good / "capture.bin")
+        stopped = cap.positions.index(-1)
+        cap.inputs[0][stopped] = 0.01
+        _, stim = gfc.read_wav(self.good / "stimulus.wav")
+        self.assertEqual(gfc.captured_input_matches_stimulus(cap, stim[0]), stopped)
+        cap.inputs[0][stopped] = 0.0
+        self.assertIsNone(gfc.captured_input_matches_stimulus(cap, stim[0]))
+
     def test_wpk_disposition_view(self):
         cap = gfc.read_capture(self.good / "capture.bin")
         d = gfc.delivery_disposition(cap, FAULT, FAULT + 128, 2, fault="force_loss_between",
@@ -457,6 +469,93 @@ class DaWContinuityReceipt(unittest.TestCase):
         self.assertEqual(VERIFY.main([str(self.good / "receipt.json"), "--allow-dry-run"]), 0)
         self.assertEqual(VERIFY.main([str(self.bad / "receipt.json"), "--allow-dry-run"]), 1)
         self.assertEqual(VERIFY.main([str(self.good / "receipt.json")]), 2)
+
+
+def live_receipt(run: Path, *, quiet: bool, realtime_seconds: float | None = None,
+                 realtime_copy_of_bounce: bool = False) -> dict:
+    """A receipt shaped like a live REAPER run, built from a synthetic run the
+    same way the harness builds one (the 1 s live window floor is patched down
+    by the caller to keep the pure-Python reference fast)."""
+    nonce = "n" * 32
+    gfc.synthesize_run(run, fault="force_loss_after", fault_sample=FAULT, frames=FRAMES,
+                       tail=POST, nonce=nonce, pid=4242)
+    (run / "preflight.json").write_text(json.dumps(
+        {"status": "passed" if quiet else "blocked", "quiet_host": quiet,
+         "reasons": [] if quiet else ["load_above_quiet_threshold"]}), encoding="utf-8")
+    (run / "reaper.out.txt").write_text("CLAP: initialized 'Pulp GPU Fault Continuity'\n",
+                                        encoding="utf-8")
+    (run / "claim").write_text("4242\n1\n", encoding="utf-8")
+    render_frames = FRAMES + POST
+    (run / "realtime_render.json").unlink()
+    if realtime_seconds is not None:
+        (run / "realtime_render.json").write_text(json.dumps(
+            {"artifact": "realtime.wav", "mode": "realtime", "host": "reaper",
+             "sample_rate": 48000, "started_unix_us": 0,
+             "finished_unix_us": int(realtime_seconds * 1e6)}), encoding="utf-8")
+    if realtime_copy_of_bounce:
+        (run / "realtime.wav").write_bytes((run / "bounce.wav").read_bytes())
+    names = ["stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "preflight.json",
+             "reaper.out.txt", "claim", "realtime.wav", "realtime_render.json", "bounce.wav"]
+    artifacts = gfc.artifact_digests(run, names)
+    summary = gfc.summarize_preflight(json.loads((run / "preflight.json").read_text(encoding="utf-8")))
+    evidence = gfc.evaluate_run(run, fault="force_loss_after", fault_sample=FAULT,
+                                tolerance=1e-4, window_pre=PRE, window_post=POST,
+                                host_alive=True, bounce_path=run / "bounce.wav",
+                                render_frames=render_frames, nonce=nonce, reaper_pid=4242,
+                                listed=list(artifacts), realtime_path=run / "realtime.wav",
+                                host_quiet=summary["quiet_host"])
+    return gfc.build_receipt(
+        trigger_transport="in_process_file", control_op=None, nonce=nonce,
+        analysis={"tolerance": 1e-4, "render_frames": render_frames,
+                  "window": {"pre": PRE, "post": POST}},
+        bounce_artifact="bounce.wav", host_realtime_artifact="realtime.wav",
+        preflight=summary, host_quiet=summary["quiet_host"], artifacts=artifacts,
+        host={"reaper_version": "7.82", "reaper_pid": 4242},
+        plugin={"format": "clap", "name": "Pulp GPU Fault Continuity",
+                "executable_sha256": "0" * 64}, **evidence)
+
+
+class LiveRules(unittest.TestCase):
+    """Rules that apply only to live receipts: the quiet-host rule and the
+    realtime render's provenance."""
+
+    def setUp(self):
+        patcher = mock.patch.object(gfc, "MIN_WINDOW_POST", POST)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def verify(self, quiet=True, **kw):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            receipt = live_receipt(run, quiet=quiet, **kw)
+            return VERIFY.verify(receipt, run), receipt
+
+    def test_a_quiet_live_run_passes(self):
+        self.assertEqual(self.verify(quiet=True, realtime_seconds=(FRAMES + POST) / 48000)[0],
+                         "pass")
+
+    def test_a_busy_host_is_inconclusive_never_pass(self):
+        verdict, receipt = self.verify(quiet=False, realtime_seconds=(FRAMES + POST) / 48000)
+        self.assertEqual(verdict, "inconclusive")
+        self.assertTrue(any(r.startswith("host_not_quiet") for r in receipt["verdict_reasons"]))
+
+    def test_a_render_faster_than_realtime_is_not_realtime_evidence(self):
+        verdict, receipt = self.verify(realtime_seconds=0.1 * (FRAMES + POST) / 48000)
+        self.assertEqual(verdict, "inconclusive")
+        self.assertTrue(any("not a realtime pass" in r for r in receipt["verdict_reasons"]))
+
+    def test_a_realtime_render_copied_from_the_bounce_is_not_evidence(self):
+        verdict, receipt = self.verify(realtime_seconds=(FRAMES + POST) / 48000,
+                                       realtime_copy_of_bounce=True)
+        self.assertEqual(verdict, "inconclusive")
+        self.assertTrue(any("byte-identical" in r for r in receipt["verdict_reasons"]))
+
+    def test_a_live_receipt_needs_realtime_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            receipt = live_receipt(run, quiet=True)
+            with self.assertRaisesRegex(VERIFY.ReceiptError, "realtime_render.json not listed"):
+                VERIFY.verify(receipt, run)
 
 
 class Decisions(unittest.TestCase):

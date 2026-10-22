@@ -170,8 +170,9 @@ class GpuFaultContinuityProcessor : public format::Processor {
     // Request-selected test shapes; written by the service thread once, read
     // by the audio thread.
     std::atomic<std::uint8_t> planted_{0};
+    // PULP_GPU_FAULT_INPUT=internal, read in the constructor (a host-specific
+    // config may also set it there, before the first callback).
     std::atomic<bool> internal_stimulus_{false};
-    std::uint32_t stimulus_state_ = 0x5EEDu;
     std::vector<float> stage_prev_; // FallbackMisaligned: the previous quantum's output
     bool planted_live_ = false;     // audio thread: the fault block has passed
     bool stale_done_ = false;

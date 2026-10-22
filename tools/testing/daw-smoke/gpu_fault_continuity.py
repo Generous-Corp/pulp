@@ -128,6 +128,32 @@ def make_stimulus(frames: int, sample_rate: int = SAMPLE_RATE, seed: int = 0x5EE
     return out
 
 
+_MASK64 = (1 << 64) - 1
+
+
+def _splitmix64(x: int) -> int:
+    x = (x + 0x9E3779B97F4A7C15) & _MASK64
+    x = ((x ^ (x >> 30)) * 0xBF58476D1CE4E5B9) & _MASK64
+    x = ((x ^ (x >> 27)) * 0x94D049BB133111EB) & _MASK64
+    return x ^ (x >> 31)
+
+
+def internal_stimulus(n: int, rate: int = SAMPLE_RATE) -> float:
+    """Sample n (a project position) of the plug-in's internal stimulus,
+    rounded to float32 as the plug-in stores it. Mirrors
+    examples/gpu-fault-continuity/gpu_fault_stimulus.hpp bit for bit."""
+    n &= _MASK64
+    u = (_splitmix64(n) >> 11) * (1.0 / 9007199254740992.0)
+    noise = 0.125 if (n // 2400) % 2 == 0 else 0.025
+    phase = ((220 * n) & _MASK64) % rate / rate
+    value = 0.15 * math.sin(2.0 * math.pi * phase) + noise * (2.0 * u - 1.0)
+    return struct.unpack("<f", struct.pack("<f", value))[0]
+
+
+def internal_stimulus_span(start: int, frames: int, rate: int = SAMPLE_RATE) -> list[float]:
+    return [internal_stimulus(start + i, rate) for i in range(frames)]
+
+
 def make_impulse_response(taps: int = IR_TAPS, seed: int = 0x1B5) -> list[float]:
     noise = _lcg(seed)
     ir = [next(noise) * math.exp(-6.0 * k / taps) for k in range(taps)]
@@ -529,21 +555,25 @@ def gpu_delivered(snapshot: dict) -> int:
     return int(snapshot.get("produced_blocks", 0))
 
 
-def captured_input_matches_stimulus(capture: "Capture", stimulus: Sequence[float],
+def captured_input_matches_stimulus(capture: "Capture", stimulus: Sequence[float] | None,
                                     tolerance: float = 1e-6) -> int | None:
-    """M6: the plug-in's captured INPUT must be exactly the bound stimulus at
-    every played position inside it, and silence past it, on every channel.
-    Returns the first offending project sample, or None. A mismatch means
-    audio other than the track item (a live input, a microphone) reached the
-    capture."""
+    """M6: over the WHOLE run, on every channel, the plug-in's captured INPUT
+    must be exactly the expected stimulus where the transport played, and
+    silence everywhere else (stopped blocks, past the item). `stimulus` is the
+    bound stimulus.wav samples; None means the plug-in's internal stimulus.
+    Returns the first offending stream index, or None. Anything else in the
+    input (a live input, a microphone) is a mismatch."""
     for c in range(capture.channels):
         plane = capture.inputs[c]
         for i, p in enumerate(capture.positions):
             if p < 0:
-                continue
-            want = stimulus[p] if p < len(stimulus) else 0.0
+                want = 0.0
+            elif stimulus is None:
+                want = internal_stimulus(p, capture.sample_rate or SAMPLE_RATE)
+            else:
+                want = stimulus[p] if p < len(stimulus) else 0.0
             if abs(plane[i] - want) > tolerance:
-                return p
+                return i
     return None
 
 
@@ -691,7 +721,8 @@ def decide(*, fault: str, plugin_null: dict | None, bounce_null: dict | None,
            health_ok: bool, fault_fired: bool, host_alive: bool,
            realtime_at_fault: bool, preconditions: Sequence[str] = (),
            mismatches: Sequence[str] = (), realtime_null: dict | None = None,
-           delivery: dict | None = None) -> tuple[str, list[str]]:
+           delivery: dict | None = None,
+           invalid_input: Sequence[str] = ()) -> tuple[str, list[str]]:
     """Order matters. A host crash, evidence that does not belong to this run
     (`mismatches`), and a computed null that failed are all FAIL, even when a
     precondition also failed, so a broken run is never softened to
@@ -707,6 +738,11 @@ def decide(*, fault: str, plugin_null: dict | None, bounce_null: dict | None,
     if not host_alive:
         # A crash on render loss is the h2 finding the plan asks to record, not hide.
         return "fail", ["host process died during the run"]
+    if invalid_input:
+        # The plug-in's input was not the stimulus (host silence, or foreign
+        # audio): nothing about continuity can be concluded, and the verifier
+        # refuses the receipt outright (M6).
+        return "inconclusive", list(invalid_input) + list(preconditions)
     if mismatches:
         return "fail", list(mismatches) + list(preconditions)
     for name, result in (("plugin", plugin_null), ("host realtime render", realtime_null),
@@ -787,7 +823,7 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
     fault_stream = lead_in + fault_sample
     # PDC samples past the stream, so the host's PDC-compensated render of the
     # whole played range exists.
-    node_in = list(stream_in) + [0.0] * pdc
+    node_in = list(stream_in) + [0.0] * (pdc + 1)
     if planted == "fallback_stale":
         q0 = (fault_stream // quantum) * quantum
         node_in[q0:q0 + quantum] = [0.0] * quantum
@@ -824,9 +860,15 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
     # the PDC the host compensates removed. The offline bounce is a separate,
     # fault-free render, so it is always the clean reference.
     played = len(stim) + tail
-    realtime = wet[lead_in + pdc:lead_in + pdc + played]
-    realtime += [0.0] * (played - len(realtime))
+    # One sample longer than the bounce, as a separate render of its own: the
+    # verifier treats a realtime render byte-identical to the bounce as a copy.
+    realtime = wet[lead_in + pdc:lead_in + pdc + played + 1]
+    realtime += [0.0] * (played + 1 - len(realtime))
     write_wav_f32(out_dir / "realtime.wav", [realtime] * CHANNELS)
+    (out_dir / "realtime_render.json").write_text(json.dumps({
+        "artifact": "realtime.wav", "mode": "realtime", "host": "dry_run",
+        "sample_rate": SAMPLE_RATE, "started_unix_us": 0,
+        "finished_unix_us": int(played / SAMPLE_RATE * 1e6)}) + "\n", encoding="utf-8")
     write_wav_f32(out_dir / "bounce.wav", [convolve(stim + [0.0] * tail, ir)] * CHANNELS)
 
     def status(produced: int, fallback_blocks: int) -> dict[str, Any]:
@@ -917,7 +959,8 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
                  bounce_path: Path | None, render_frames: int = 0,
                  nonce: str | None = None, reaper_pid: int | None = None,
                  listed: Sequence[str] | None = None,
-                 realtime_path: Path | None = None) -> dict[str, Any]:
+                 realtime_path: Path | None = None,
+                 host_quiet: bool | None = None) -> dict[str, Any]:
     """Analyse a finished run directory and return the receipt's evidence
     fields (everything except identity and preflight).
 
@@ -941,6 +984,7 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
 
     preconditions: list[str] = []
     mismatches: list[str] = []
+    invalid_input: list[str] = []
     # Every event the verdict rests on must be about this fault and sample.
     for name, event in (("fault_armed", armed), ("fault_fired", fired)):
         if event is None:
@@ -1010,6 +1054,9 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
                 **kw)
             plugin_null = result.as_dict() if result else None
 
+    if (armed or {}).get("input") == "internal" and render_frames:
+        # The plug-in ignored the track item and rendered its own stimulus.
+        stimulus = [internal_stimulus_span(0, render_frames)] * CHANNELS
     realtime_null = None
     if realtime_path is not None and usable(realtime_path.name):
         _, realtime_audio = read_wav(realtime_path)
@@ -1035,14 +1082,37 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
         if result is not None and result["window_reference_rms"] < WINDOW_RMS_FLOOR:
             preconditions.append(f"the {name} reference is near-silent over the fault window "
                                  "(the stimulus did not reach the plug-in)")
-    if capture is not None and stimulus and stimulus[0] and \
-            (armed or {}).get("input", "host") == "host":
-        bad = captured_input_matches_stimulus(capture, stimulus[0])
+    if capture is not None and stimulus and stimulus[0]:
+        internal = (armed or {}).get("input") == "internal"
+        bad = captured_input_matches_stimulus(capture, None if internal else stimulus[0])
         if bad is not None:
             # The harness reports it as INCONCLUSIVE; the verifier refuses the
             # receipt outright (see verify()), because it may hold foreign audio.
-            preconditions.append(f"the host did not feed the stimulus to the plug-in (first "
-                                 f"difference at project sample {bad})")
+            invalid_input.append(f"invalid input: the plug-in's input was not the stimulus "
+                                 f"(first difference at stream sample {bad})")
+    # The quiet-host rule: a live run on a host whose preflight was not quiet is
+    # INCONCLUSIVE and never upgraded (None: not a live run, rule not applied).
+    if host_quiet is False:
+        preconditions.append("host_not_quiet: the host preflight did not admit a quiet host")
+    # M1 provenance: the realtime render must have taken realtime and differ
+    # from the bounce, or it is not evidence of a realtime pass.
+    if usable("realtime_render.json") and realtime_null is not None:
+        try:
+            prov = json.loads((run_dir / "realtime_render.json").read_text(encoding="utf-8"))
+        except ValueError:
+            prov = {}
+        took = (int(prov.get("finished_unix_us", 0)) - int(prov.get("started_unix_us", 0))) / 1e6
+        audio_s = render_frames / SAMPLE_RATE if render_frames else 0.0
+        if prov.get("mode") != "realtime" or prov.get("artifact") != realtime_path.name:
+            preconditions.append("realtime_render.json does not describe the realtime render")
+        elif audio_s and took < 0.9 * audio_s:
+            preconditions.append(f"the realtime render took {took:.1f} s for {audio_s:.1f} s of "
+                                 "audio; it was not a realtime pass")
+        if bounce_path is not None and usable(bounce_path.name) and \
+                sha256_file(realtime_path) == sha256_file(bounce_path):
+            preconditions.append("the realtime render is byte-identical to the bounce")
+    elif realtime_null is not None and host_quiet is not None:
+        preconditions.append("the realtime render has no provenance (realtime_render.json)")
     applied_event = first_event(events, "provider_fault_applied")
     delivery = None
     if capture is not None:
@@ -1090,7 +1160,8 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
                               health_ok=health_ok, fault_fired=took_effect,
                               host_alive=host_alive, realtime_at_fault=realtime,
                               preconditions=preconditions, mismatches=mismatches,
-                              realtime_null=realtime_null, delivery=delivery)
+                              realtime_null=realtime_null, delivery=delivery,
+                              invalid_input=invalid_input)
     if plugin_note:
         reasons.append(plugin_note)
     return {

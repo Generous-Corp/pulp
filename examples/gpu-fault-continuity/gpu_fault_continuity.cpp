@@ -6,6 +6,7 @@
 #endif
 #include "gpu_fault_interposer.hpp"
 #include "gpu_fault_seam.hpp"
+#include "gpu_fault_stimulus.hpp"
 
 #include <pulp/gpu_audio/gpu_audio_capability.hpp>
 #include <pulp/gpu_audio/gpu_audio_status.hpp>
@@ -22,6 +23,7 @@
 #include <sstream>
 
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace pulp::examples::gpu_fault {
@@ -77,6 +79,43 @@ std::uint64_t now_ns() {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                           std::chrono::steady_clock::now().time_since_epoch())
                                           .count());
+}
+
+// Run-directory files are opened without following a symlink, and must be
+// regular files: the run directory is shared with the harness, and a planted
+// link must not redirect a read or a write elsewhere.
+int open_nofollow(const std::filesystem::path& path, int flags) {
+    const int fd = ::open(path.c_str(), flags | O_NOFOLLOW | O_CLOEXEC, 0644);
+    struct stat st{};
+    if (fd >= 0 && (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))) {
+        ::close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+bool read_nofollow(const std::filesystem::path& path, std::string& out) {
+    const int fd = open_nofollow(path, O_RDONLY);
+    if (fd < 0)
+        return false;
+    out.clear();
+    char buf[4096];
+    ssize_t got = 0;
+    while ((got = ::read(fd, buf, sizeof(buf))) > 0)
+        out.append(buf, static_cast<std::size_t>(got));
+    ::close(fd);
+    return got == 0;
+}
+
+void write_all(int fd, const void* data, std::size_t size) {
+    const auto* p = static_cast<const char*>(data);
+    while (fd >= 0 && size > 0) {
+        const ssize_t wrote = ::write(fd, p, size);
+        if (wrote <= 0)
+            return;
+        p += wrote;
+        size -= static_cast<std::size_t>(wrote);
+    }
 }
 
 std::filesystem::path env_path(const char* name) {
@@ -258,6 +297,10 @@ GpuFaultContinuityProcessor::GpuFaultContinuityProcessor() {
         nonce_ = nonce;
     if (const char* provider = std::getenv("PULP_GPU_FAULT_PROVIDER"))
         gpu_off_ = std::string(provider) == "staged";
+    // Fixed here, before any callback, so a run never captures a single host
+    // input sample before switching to the internal stimulus.
+    if (const char* input = std::getenv("PULP_GPU_FAULT_INPUT"))
+        internal_stimulus_.store(std::string(input) == "internal", std::memory_order_relaxed);
 }
 
 void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
@@ -340,9 +383,9 @@ void GpuFaultContinuityProcessor::prepare_engine() {
     std::lock_guard lock(engine_mutex_);
     ir_.clear();
     if (!ir_path_.empty()) {
-        std::ifstream in(ir_path_, std::ios::binary);
-        std::vector<char> bytes((std::istreambuf_iterator<char>(in)),
-                                std::istreambuf_iterator<char>());
+        std::string bytes;
+        if (!read_nofollow(ir_path_, bytes))
+            bytes.clear();
         ir_.resize(bytes.size() / sizeof(float));
         std::memcpy(ir_.data(), bytes.data(), ir_.size() * sizeof(float));
     }
@@ -459,22 +502,22 @@ void GpuFaultContinuityProcessor::process(audio::BufferView<float>& output,
     const bool capture = harness_ && n <= max_block_;
     if (harness_ && !capture)
         ring_.note_drop();
-    // The input this callback uses: the host's, or with "input":"internal"
-    // a deterministic noise the plug-in makes itself, so nothing from a host
-    // input (a live template's microphone) can reach the capture.
+    // The input this callback uses: the host's, or with the internal stimulus
+    // (selected before the first callback) the plug-in's own signal keyed to
+    // the project position, and silence while stopped. Host input is then never
+    // read, so nothing from a host input (a live template's microphone) can
+    // reach the node or the capture.
     float* in_plane[kChannels];
     for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
         in_plane[ch] = scratch_in_.data() + static_cast<std::size_t>(ch) * max_block_;
         if (n > max_block_)
             continue;
         if (internal) {
-            for (std::uint32_t i = 0; i < n; ++i) {
-                if (ch == 0)
-                    stimulus_state_ = 1664525u * stimulus_state_ + 1013904223u;
+            for (std::uint32_t i = 0; i < n; ++i)
                 in_plane[ch][i] =
-                    ch == 0 ? 0.25f * (static_cast<float>(stimulus_state_) / 4294967296.0f - 0.5f)
-                            : in_plane[0][i];
-            }
+                    playing
+                        ? internal_stimulus(static_cast<std::uint64_t>(position) + i, sample_rate_)
+                        : 0.0f;
         } else if (ch < input.num_channels()) {
             std::copy_n(input.channel_ptr(ch), n, in_plane[ch]);
         } else {
@@ -606,10 +649,9 @@ void GpuFaultContinuityProcessor::poll_request() {
     if (request_seen_ || request_path_.empty() || !engine_ready_.load(std::memory_order_acquire) ||
         !std::filesystem::exists(request_path_))
         return;
-    std::ifstream in(request_path_);
-    std::stringstream text;
-    text << in.rdbuf();
-    const std::string body = text.str();
+    std::string body;
+    if (!read_nofollow(request_path_, body))
+        return;
     if (body.find('}') == std::string::npos)
         return; // still being written
     request_seen_ = true;
@@ -644,9 +686,8 @@ void GpuFaultContinuityProcessor::poll_request() {
     // stall for seconds. Either way the callback must not notice.
     delay_ms_ = delay > 0 ? static_cast<std::uint32_t>(std::min<std::int64_t>(delay, 60'000))
                           : (kind == FaultKind::WorkerStall ? 3000u : 100u);
-    const bool internal = json_string(body, "input") == "internal";
+    const bool internal = internal_stimulus_.load(std::memory_order_relaxed);
     planted_.store(static_cast<std::uint8_t>(planted), std::memory_order_relaxed);
-    internal_stimulus_.store(internal, std::memory_order_relaxed);
     fault_at_.store(at, std::memory_order_release);
     armed_kind_.store(static_cast<std::uint8_t>(kind), std::memory_order_release);
     char line[320];
@@ -758,8 +799,8 @@ void GpuFaultContinuityProcessor::maybe_snapshot_after() {
 }
 
 void GpuFaultContinuityProcessor::service_loop() {
-    std::ofstream capture(run_dir_ / "capture.bin", std::ios::binary | std::ios::app);
-    std::ofstream events(run_dir_ / "events.jsonl", std::ios::app);
+    const int capture = open_nofollow(run_dir_ / "capture.bin", O_WRONLY | O_APPEND);
+    const int events = open_nofollow(run_dir_ / "events.jsonl", O_WRONLY | O_APPEND);
     std::vector<std::uint8_t> bytes;
     std::vector<std::string> lines;
     std::uint64_t reported_drops = 0;
@@ -776,22 +817,24 @@ void GpuFaultContinuityProcessor::service_loop() {
         }
         bytes.clear();
         if (ring_.drain(bytes)) {
-            capture.write(reinterpret_cast<const char*>(bytes.data()),
-                          static_cast<std::streamsize>(bytes.size()));
-            capture.flush();
+            write_all(capture, bytes.data(), bytes.size());
         }
         {
             std::lock_guard lock(events_mutex_);
             lines.swap(pending_events_);
         }
-        for (const auto& line : lines)
-            events << line << '\n';
-        if (!lines.empty())
-            events.flush();
+        for (const auto& line : lines) {
+            write_all(events, line.data(), line.size());
+            write_all(events, "\n", 1);
+        }
         lines.clear();
         if (!stopping)
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
+    if (capture >= 0)
+        ::close(capture);
+    if (events >= 0)
+        ::close(events);
 }
 
 std::unique_ptr<format::Processor> create_gpu_fault_continuity() {

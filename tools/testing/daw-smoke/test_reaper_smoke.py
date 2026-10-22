@@ -623,11 +623,12 @@ class GpuFaultMode(unittest.TestCase):
         session.proc.returncode = 139 if crash else None
         return session
 
-    def run_mode(self, tmp, **kw):
+    def run_mode(self, tmp, quiet=True, **kw):
         flags = {k: kw.pop(k) for k in ("crash", "refuse", "break_fallback") if k in kw}
         args = self.args(tmp, **kw)
         session = self.fake_session(tmp, args, **flags)
-        preflight = {"status": "blocked", "quiet_host": False, "reasons": ["load"]}
+        preflight = ({"status": "passed", "quiet_host": True, "reasons": []} if quiet else
+                     {"status": "blocked", "quiet_host": False, "reasons": ["load"]})
         with mock.patch.object(rs, "ReaperSession", return_value=session), \
                 mock.patch.object(rs, "_host_preflight", return_value=preflight), \
                 mock.patch.object(rs, "_reaper_version", return_value="7.79"):
@@ -671,7 +672,16 @@ class GpuFaultMode(unittest.TestCase):
         self.assertEqual(rc, rs.EXIT_PASS)
         self.assertEqual(receipt["verdict"], "pass")
         self.assertEqual(receipt["trigger_transport"], "in_process_file")
+        self.assertTrue(receipt["host_quiet"])
+
+    def test_a_busy_host_is_never_upgraded_to_pass(self):
+        # The quiet-host rule: the same clean run on a host whose preflight
+        # was not quiet is INCONCLUSIVE (host_not_quiet).
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, receipt = self.run_mode(pathlib.Path(tmp), quiet=False)
+        self.assertEqual(rc, rs.EXIT_INCONCLUSIVE)
         self.assertFalse(receipt["host_quiet"])
+        self.assertTrue(any(r.startswith("host_not_quiet") for r in receipt["verdict_reasons"]))
         self.assertEqual(receipt["host"]["reaper_version"], "7.79")
 
     def test_silence_after_the_fault_fails_at_the_fault_sample(self):

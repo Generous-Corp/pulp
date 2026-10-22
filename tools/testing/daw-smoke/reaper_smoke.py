@@ -1468,8 +1468,10 @@ def _wait_for_stable_file(path: Path, deadline: float, proc, settle: float = 3.0
 def _finish_gpu_fault(lib, run_dir: Path, args: argparse.Namespace, *, transport: str,
                       host_alive: bool, bounce: Path | None, identity: dict, nonce: str,
                       reaper_pid: int | None) -> int:
+    preflight = lib.summarize_preflight(
+        json.loads((run_dir / "preflight.json").read_text(encoding="utf-8")))
     names = ["stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "preflight.json",
-             "reaper.out.txt", "claim", "realtime.wav"] + (
+             "reaper.out.txt", "claim", "realtime.wav", "realtime_render.json"] + (
                  [bounce.name] if bounce is not None else [])
     artifacts = lib.artifact_digests(run_dir, names)
     render_frames = args.stimulus_frames + args.window_post
@@ -1478,9 +1480,8 @@ def _finish_gpu_fault(lib, run_dir: Path, args: argparse.Namespace, *, transport
                                 window_post=args.window_post, host_alive=host_alive,
                                 bounce_path=bounce, render_frames=render_frames, nonce=nonce,
                                 reaper_pid=reaper_pid, listed=list(artifacts),
-                                realtime_path=run_dir / "realtime.wav")
-    preflight = lib.summarize_preflight(
-        json.loads((run_dir / "preflight.json").read_text(encoding="utf-8")))
+                                realtime_path=run_dir / "realtime.wav",
+                                host_quiet=None if transport == "dry_run" else preflight["quiet_host"])
     receipt = lib.build_receipt(
         created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         trigger_transport=transport,
@@ -1582,8 +1583,7 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
         fault_request["delay_ms"] = args.fault_delay_ms
     if args.planted:
         fault_request["planted_negative"] = args.planted
-    if args.stimulus == "internal":
-        fault_request["input"] = "internal"
+
     request.write_text(json.dumps(fault_request) + "\n", encoding="utf-8")
     go = run_dir / "go"
 
@@ -1628,6 +1628,9 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
         env["PULP_GPU_FAULT_STIMULUS"] = str(run_dir / "stimulus.wav")
         if args.gpu_off:
             env["PULP_GPU_FAULT_PROVIDER"] = "staged"
+        if args.stimulus == "internal":
+            # Read in the plug-in's constructor, before its first callback.
+            env["PULP_GPU_FAULT_INPUT"] = "internal"
         not_shown = session.run_until_fx_shown(env, status, script=GPU_FAULT_LUA,
                                                before_scripted=forget_scan_instances)
         if not_shown is not None:
@@ -1647,11 +1650,19 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
         go.write_text("go\n", encoding="utf-8")
 
         # An online render of the whole stimulus in realtime, then the bounce.
+        # Its wall-clock span is the provenance that it was a realtime pass.
         deadline = time.time() + args.timeout + render_end * 4
         done, text = False, ""
+        realtime_started = realtime_finished = None
         while time.time() < deadline:
-            time.sleep(1)
+            time.sleep(0.05)
             text = status.read_text(encoding="utf-8").strip() if status.exists() else ""
+            now_us = int(time.time() * 1e6)
+            if text.startswith("RENDERING_REALTIME") and realtime_started is None:
+                realtime_started = now_us
+            if text.startswith(("RENDERING_OFFLINE", "RENDER_")) and realtime_started is not None \
+                    and realtime_finished is None:
+                realtime_finished = now_us
             if text.startswith(("RENDER_DONE", "RENDER_MISSING", "GO_TIMEOUT")):
                 done = True
                 break
@@ -1670,6 +1681,11 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
             return EXIT_INCONCLUSIVE
         host_alive = session.proc is not None and session.proc.poll() is None
         reaper_pid = session.proc.pid if session.proc is not None else None
+        if realtime_started is not None and realtime_finished is not None:
+            (run_dir / "realtime_render.json").write_text(json.dumps({
+                "artifact": realtime.name, "mode": "realtime", "host": "reaper",
+                "sample_rate": 48000, "started_unix_us": realtime_started,
+                "finished_unix_us": realtime_finished}) + "\n", encoding="utf-8")
         identity["host"]["reaper_pid"] = reaper_pid
         session.terminate()
         shutil.copyfile(session.reaper_out, run_dir / "reaper.out.txt")

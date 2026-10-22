@@ -116,6 +116,13 @@ companion gates; screenshots alone do not prove audio or performance.
   - `--planted no_fallback|fallback_misaligned|fallback_stale` must FAIL;
     `--gpu-off` must be INCONCLUSIVE; `--stimulus internal` keeps any host
     input out of the capture.
+  - A live run on a host whose preflight is not quiet is INCONCLUSIVE
+    (`host_not_quiet`) and never upgraded. The realtime render needs
+    `realtime_render.json` provenance: a realtime-length span, and bytes
+    different from the bounce.
+  - The plug-in's captured input must be the expected stimulus over the whole
+    run (silence while stopped), or the verifier refuses the receipt. So no
+    host or microphone audio can be in `capture.bin`.
   - Only `tools/validation/verify_gpu_audio_daw_continuity_receipt.py` accepts
     the receipt. It re-derives everything from digest-bound artifacts and
     binds the run by nonce, pid and claim.

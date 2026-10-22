@@ -132,12 +132,24 @@ block. From them a PASS further requires:
 - the fallback took over within `lead_blocks + 1` quanta of the applied fault;
 - after a loss, the GPU delivered nothing.
 
+Live receipts are judged by two further rules:
+- **The quiet-host rule.** A live run whose host preflight
+  (`gpu_audio_p2_host_preflight.py`, re-derived from `preflight.json`) did not
+  admit a quiet host is INCONCLUSIVE (`host_not_quiet`) and never upgraded to
+  PASS.
+- **Realtime provenance.** The realtime render needs a bound
+  `realtime_render.json`: the harness's wall-clock span around the online
+  render. The render must take at least 90% of the audio's duration and differ
+  from the bounce byte for byte, or the run is INCONCLUSIVE.
+
 Controls: `--planted no_fallback|fallback_misaligned|fallback_stale` are planted
 negatives that keep audio flowing but wrong (or absent), and must FAIL.
 `--gpu-off` (the staged path) is the path negative and must be INCONCLUSIVE.
-`--stimulus internal` has the plug-in make its own input. With the default host
-input, the verifier requires the plug-in's captured input to equal the bound
-stimulus at every played sample, and silence past it. Any other audio, such as a
+`--stimulus internal` (the env var `PULP_GPU_FAULT_INPUT=internal`, read before
+the first callback) has the plug-in make its own input and never read the host's.
+Over the whole run, the verifier requires the plug-in's captured input to equal
+the expected stimulus at every played sample, and exact silence everywhere else:
+the bound `stimulus.wav` normally, or the internal stimulus. Any other audio, such as a
 live input or a microphone, makes the receipt invalid, so no host input can hide
 in `capture.bin`. The capture-producing source files (`gpu_fault_continuity.cpp`,
 `gpu_fault_view.cpp` and `gpu_fault_interposer.cpp`) refuse to compile without

@@ -3,6 +3,7 @@
 // fault arming), driven directly with varying callback sizes.
 
 #include "gpu_fault_continuity.hpp"
+#include "gpu_fault_stimulus.hpp"
 
 #include "harness/rt_allocation_probe.hpp"
 
@@ -398,6 +399,7 @@ namespace {
 
 struct RequestRun {
     std::string events;
+    std::string capture;
     Run run;
     int pdc = 0;
     bool shared = false;
@@ -422,6 +424,7 @@ RequestRun run_request(const std::string& request) {
         wait_for(events, "\"phase\":\"after\"");
     }
     out.events = read_text(events);
+    out.capture = read_text(dir.path / "capture.bin");
     return out;
 }
 
@@ -462,14 +465,43 @@ TEST_CASE("the positive control fires and faults nothing", "[gpu-fault-continuit
                     reference(make_input(), make_ir(), static_cast<std::size_t>(r.pdc))) < 1e-4);
 }
 
-TEST_CASE("an internal stimulus replaces whatever the host feeds", "[gpu-fault-continuity]") {
+TEST_CASE("an internal stimulus never reads or stores host input", "[gpu-fault-continuity]") {
+    ::setenv("PULP_GPU_FAULT_INPUT", "internal", 1);
     const auto r = run_request(R"({"fault": "positive_control", "at_project_sample": 4000,)"
-                               R"( "after_project_sample": 9000, "input": "internal"})");
+                               R"( "after_project_sample": 9000})");
+    ::unsetenv("PULP_GPU_FAULT_INPUT");
     if (!r.shared)
         SKIP("no shared-I/O GPU provider on this host");
     CHECK(r.events.find("\"input\":\"internal\"") != std::string::npos);
-    // The output is the convolution of the plug-in's own noise, not of the
-    // host input, so it does not null against the host-input reference.
+    // Every captured input sample, on every channel, is the internal stimulus
+    // at its project position (or silence while stopped), never the host's.
+    constexpr std::size_t kHeader = 56;
+    std::size_t at = 20, checked = 0, mismatched = 0;
+    while (at + kHeader <= r.capture.size()) {
+        std::uint64_t position = 0;
+        std::uint32_t n = 0, flags = 0;
+        std::memcpy(&position, r.capture.data() + at, 8);
+        std::memcpy(&n, r.capture.data() + at + 8, 4);
+        std::memcpy(&flags, r.capture.data() + at + 12, 4);
+        at += kHeader;
+        const bool playing = (flags & 1u) != 0;
+        for (std::uint32_t ch = 0; ch < 2; ++ch) {
+            for (std::uint32_t i = 0; i < n; ++i) {
+                float v = 0.0f;
+                std::memcpy(&v, r.capture.data() + at + (ch * n + i) * sizeof(float),
+                            sizeof(float));
+                const float want =
+                    playing ? pulp::examples::gpu_fault::internal_stimulus(position + i, kRate)
+                            : 0.0f;
+                mismatched += v != want;
+                ++checked;
+            }
+        }
+        at += 4u * n * sizeof(float);
+    }
+    CHECK(checked > 0);
+    CHECK(mismatched == 0);
+    // And the output is the convolution of that stimulus, not of the host input.
     CHECK(max_error(r.run.output,
                     reference(make_input(), make_ir(), static_cast<std::size_t>(r.pdc))) > 1e-2);
 }
@@ -485,4 +517,23 @@ TEST_CASE("gpu_off puts the plug-in on the staged path", "[gpu-fault-continuity]
     }
     ::unsetenv("PULP_GPU_FAULT_PROVIDER");
     CHECK_FALSE(on_shared_path(dir.path / "events.jsonl"));
+}
+
+TEST_CASE("run-directory files are not followed through a symlink", "[gpu-fault-continuity]") {
+    RunDir dir;
+    write_ir(dir.path, make_ir());
+    const auto events = dir.path / "events.jsonl";
+    // The request the harness would write, but reached through a planted link.
+    const auto real = dir.path / "elsewhere.json";
+    std::ofstream(real) << R"({"fault": "positive_control", "at_project_sample": 4000})";
+    fs::create_symlink(real, dir.path / "fault-request.json");
+    GpuFaultContinuityProcessor p;
+    p.prepare(prepare_context());
+    REQUIRE(wait_for(events, "\"event\":\"prepared\""));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    CHECK(read_text(events).find("\"event\":\"fault_armed\"") == std::string::npos);
+    // Positive control: the same request as a regular file arms.
+    fs::remove(dir.path / "fault-request.json");
+    fs::copy_file(real, dir.path / "fault-request.json");
+    CHECK(wait_for(events, "\"event\":\"fault_armed\""));
 }

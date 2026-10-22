@@ -44,7 +44,7 @@ REQUIRED_ARTIFACTS = ("stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "
                       "realtime.wav")
 # A live run must also bind the host's own log, which names the plug-in it
 # loaded, and the run directory's claim, which names the owning process.
-LIVE_ARTIFACTS = ("reaper.out.txt", "claim")
+LIVE_ARTIFACTS = ("reaper.out.txt", "claim", "realtime_render.json")
 
 
 class ReceiptError(ValueError):
@@ -159,14 +159,15 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
     # the captured input must BE the bound stimulus wherever the plug-in played;
     # anything else (a live input, a microphone) makes the receipt invalid.
     controls = receipt.get("controls") or {}
-    if controls.get("input", "host") == "host":
-        try:
-            capture = gfc.read_capture(run_dir / "capture.bin")
-        except ValueError as exc:
-            raise ReceiptError(f"capture.bin unreadable: {exc}") from exc
-        foreign = gfc.captured_input_matches_stimulus(capture, stimulus[0])
-        _require(foreign is None, f"captured input is not the bound stimulus (first difference "
-                                  f"at project sample {foreign}); it may hold host input")
+    try:
+        capture = gfc.read_capture(run_dir / "capture.bin")
+    except ValueError as exc:
+        raise ReceiptError(f"capture.bin unreadable: {exc}") from exc
+    internal = controls.get("input") == "internal"
+    foreign = gfc.captured_input_matches_stimulus(capture, None if internal else stimulus[0])
+    _require(foreign is None, f"captured input is not the {'internal' if internal else 'bound'} "
+                              f"stimulus over the whole run (first difference at stream sample "
+                              f"{foreign}); it may hold host input")
     _require(analysis.get("render_frames") == render_frames,
              "analysis.render_frames does not match the bound stimulus")
     # host_alive stays self-attested (a crash is a FAIL either way), but only
@@ -178,7 +179,8 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
         host_alive=bool(receipt.get("host_alive")),
         bounce_path=(run_dir / bounce_name) if bounce_name else None,
         render_frames=render_frames, nonce=nonce, reaper_pid=reaper_pid,
-        listed=list(artifacts), realtime_path=run_dir / "realtime.wav")
+        listed=list(artifacts), realtime_path=run_dir / "realtime.wav",
+        host_quiet=summary["quiet_host"] if live else None)
     for key in ("fault", "pdc_samples", "plugin_identity", "capture", "nulls", "health",
                 "delivery", "controls", "offline_records_in_bounce", "offline_path_checked",
                 "host_alive", "verdict", "verdict_reasons"):
