@@ -31,6 +31,7 @@
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
 
+#include "include/core/SkCanvas.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkSurface.h"
