@@ -202,6 +202,51 @@ struct FastMath {
         return x * p / q;
     }
 
+    /// Constrained-minimax [7/6] rational tanh: the evaluation cost of
+    /// `tanh()` above, about 180x lower worst-case error, and no seam.
+    ///
+    /// `tanh()` truncates Lambert's continued fraction, so its error is tiny
+    /// near the origin and grows toward the clamp, where the curve jumps from
+    /// the fraction's value to exactly 1: a step of 6.7e-4 at |x| = 4, which is
+    /// what makes it unfit for a hard-driven feedback saturator. This form
+    /// spends the same coefficients on the worst case instead. They are the
+    /// minimax fit of `x·P(x²)/Q(x²)` (P and Q cubic) to `tanh` on [0, 7] under
+    /// three linear equality constraints: unit slope at the origin, `f(7) = 1`
+    /// and `f'(7) = 0`, so the clamp beyond |x| = 7 meets the curve with
+    /// matching slope. Fit by bisection on the error bound over a
+    /// linear-programming feasibility problem (the linearised rational minimax
+    /// of Cheney & Loeb, Numer. Math. 3, 1961), coefficients rounded to float.
+    ///
+    /// The numerator is then scaled by `1 − 2⁻²¹`. Unscaled, rounding lets the
+    /// rational overshoot 1 by up to two float ulps near the clamp, and how
+    /// far depends on which multiply-adds a compiler contracts; the scale
+    /// keeps every evaluation order strictly inside ±1 without an output
+    /// clamp. Its cost is a 4e-7 step where the clamp takes over and a slope
+    /// of `1 − 2⁻²¹` at the origin, both far below the fit error.
+    ///
+    /// Measured in float over every representable input: absolute error below
+    /// 3.8e-6 (the tail beyond the clamp contributes 1 − tanh(7) = 1.7e-6),
+    /// odd, and bounded by ±1 exactly. The clamps are branches, as in `tanh()`:
+    /// inside a serial recursion such as a ladder they are predicted off the
+    /// critical path, where min/max instructions would sit on it, and a
+    /// vectorising compiler still turns them into selects. A NaN input returns
+    /// NaN.
+    static float tanh_minimax(float x) {
+        constexpr float kClamp = 7.0f;
+        if (x < -kClamp) return -1.0f;
+        if (x > kClamp) return 1.0f;
+        constexpr float kScale = 1.0f - 0x1p-21f;
+        const float t = x * x;
+        const float num =
+            x * (kScale +
+                 t * (1.2183626499918065e-01f * kScale +
+                      t * (2.1714800492144003e-03f * kScale + t * (3.4510574788349538e-06f * kScale))));
+        const float den =
+            1.0f + t * (4.5515217250939749e-01f +
+                        t * (2.0577605545641264e-02f + t * 1.3105688057792639e-04f));
+        return num / den;
+    }
+
     /// Fast sin approximation (Bhaskara-style, max error ~0.001 for any x).
     /// Input in radians.
     static float sin(float x) {

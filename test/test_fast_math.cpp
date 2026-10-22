@@ -80,6 +80,62 @@ TEST_CASE("FastMath tanh clamps exactly beyond approximation range", "[signal][f
     REQUIRE(FastMath::tanh(100.0f) == 1.0f);
 }
 
+namespace {
+
+/// Worst absolute error against double `std::tanh`, plus the largest output,
+/// over every `stride`-th non-negative float up to `limit`.
+template <typename F>
+std::pair<double, float> tanh_error_scan(F&& approx, std::uint32_t stride, float limit) {
+    double worst = 0.0;
+    float largest = 0.0f;
+    for (std::uint32_t bits = 0;; bits += stride) {
+        const float x = std::bit_cast<float>(bits);
+        if (!(x <= limit)) break;
+        const float y = approx(x);
+        worst = std::max(worst, std::abs(static_cast<double>(y) - std::tanh(static_cast<double>(x))));
+        largest = std::max(largest, y);
+    }
+    return {worst, largest};
+}
+
+} // namespace
+
+TEST_CASE("FastMath tanh_minimax holds its worst-case bound across the float range",
+          "[signal][fast_math]") {
+    // A stride co-prime with the mantissa walks every binade densely. The same
+    // scan over tanh() must see that function's 6.7e-4 seam at |x| = 4, which
+    // shows the instrument reaches the region where a clamp hides its error.
+    const auto pade = tanh_error_scan([](float x) { return FastMath::tanh(x); }, 101u, 30.0f);
+    const auto minimax =
+        tanh_error_scan([](float x) { return FastMath::tanh_minimax(x); }, 101u, 30.0f);
+    REQUIRE(pade.first > 6.0e-4);
+    REQUIRE(minimax.first < 3.8e-6);
+    REQUIRE(pade.first / minimax.first > 150.0);
+    REQUIRE(minimax.second == 1.0f);
+}
+
+TEST_CASE("FastMath tanh_minimax is odd, unit-slope, and seamless at its clamp",
+          "[signal][fast_math]") {
+    for (float x : {1e-30f, 1e-6f, 0.1f, 0.5f, 1.0f, 2.5f, 6.99f, 7.0f, 7.01f, 1e6f}) {
+        REQUIRE(FastMath::tanh_minimax(-x) == -FastMath::tanh_minimax(x));
+        REQUIRE(std::abs(FastMath::tanh_minimax(x)) <= 1.0f);
+    }
+    REQUIRE(FastMath::tanh_minimax(0.0f) == 0.0f);
+    // Unit small-signal gain is a constraint of the fit, not a fitted outcome.
+    REQUIRE_THAT(FastMath::tanh_minimax(1e-4f) / 1e-4f, WithinAbs(1.0, 1e-6));
+    // f(7) = 1 and f'(7) = 0 (before the 2^-21 numerator scale): approaching
+    // the clamp from inside, the value is already within the tail error of 1
+    // and has stopped rising.
+    REQUIRE_THAT(FastMath::tanh_minimax(6.999f), WithinAbs(1.0, 2e-6));
+    REQUIRE(FastMath::tanh_minimax(7.5f) == 1.0f);
+    REQUIRE(FastMath::tanh_minimax(-7.5f) == -1.0f);
+    REQUIRE(FastMath::tanh_minimax(std::numeric_limits<float>::max()) == 1.0f);
+    REQUIRE(std::isnan(FastMath::tanh_minimax(std::numeric_limits<float>::quiet_NaN())));
+    // The Lambert form's seam, for contrast: a 6.7e-4 jump across x = 4.
+    REQUIRE(FastMath::tanh(4.0001f) - FastMath::tanh(3.9999f) > 6.0e-4f);
+    REQUIRE(FastMath::tanh_minimax(4.0001f) - FastMath::tanh_minimax(3.9999f) < 1.0e-6f);
+}
+
 TEST_CASE("FastMath sin approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::sin(0.0f), WithinAbs(0.0, 0.01));
     REQUIRE_THAT(FastMath::sin(1.5707963f), WithinAbs(1.0, 0.01)); // pi/2
