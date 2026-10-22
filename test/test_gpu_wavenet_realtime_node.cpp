@@ -1252,14 +1252,22 @@ TEST_CASE("WaveNet transport status carries the node epoch and terminal counts",
     GpuAudioTransport transport;
     REQUIRE(transport.prepare(&h.node, {8}));
     constexpr auto delivered = static_cast<std::size_t>(GpuAudioTerminalDisposition::GpuDelivered);
-    // Drive the node the way its own tests do (unclocked callbacks), then let
-    // one transport pump republish the node's status.
+    // Drive the blocks through the transport, so its delivery counters and the
+    // node's terminal counts describe the same blocks; driving the node
+    // directly would leave produced_blocks at zero and fail the validator's
+    // terminal-count bound.
+    std::array<float, 2> input{};
+    std::array<float, 2> output{};
+    const std::array<const float*, 1> input_channels{input.data()};
+    const std::array<float*, 1> output_channels{output.data()};
     for (int block = 0; block < 6; ++block) {
-        h.callback(float(block + 1));
-        h.service();
-        h.service();
+        input.fill(float(block + 1));
+        const pulp::audio::BufferView<const float> in_view(input_channels.data(), 1, 2);
+        pulp::audio::BufferView<float> out_view(output_channels.data(), 1, 2);
+        transport.process(in_view, out_view, 2);
+        transport.pump();
+        transport.pump();
     }
-    transport.pump();
     auto status = validated(transport.status_snapshot());
     CHECK(status.terminal_counts[delivered] > 0);
     CHECK(status.epoch != 0);

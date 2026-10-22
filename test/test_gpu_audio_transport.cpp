@@ -343,6 +343,7 @@ TEST_CASE("GpuAudioNode appended hooks have inert defaults", "[gpu_audio][status
     MinimalNode node;
     GpuAudioNode& base = node;
     const auto status = base.status_snapshot();
+    CHECK(validate_gpu_audio_status(status).accepted());
     CHECK(status.schema_version == GpuAudioStatus::kSchemaVersion);
     CHECK(status.provider_state == GpuAudioProviderState::Uninitialized);
     CHECK(base.release_bounded(0));
@@ -1668,6 +1669,7 @@ TEST_CASE("GpuAudioTransport status snapshot is stable before and after prepare"
     GpuAudioTransport t;
 
     const auto before = t.status_snapshot();
+    CHECK(validate_gpu_audio_status(before).accepted());
     CHECK(before.schema_version == GpuAudioStatus::kSchemaVersion);
     CHECK(before.provider_state == GpuAudioProviderState::Uninitialized);
     CHECK(before.selected_engine == GpuAudioEngine::Unknown);
@@ -1675,6 +1677,7 @@ TEST_CASE("GpuAudioTransport status snapshot is stable before and after prepare"
     REQUIRE(node.prepare());
     REQUIRE(t.prepare(&node, {8}));
     const auto after = t.status_snapshot();
+    CHECK(validate_gpu_audio_status(after).accepted());
     // A generic staged node does not prove a GPU provider. Its worker may be
     // CPU-backed, so status must remain honest instead of claiming GPU/Ready.
     CHECK(after.provider_state == GpuAudioProviderState::Degraded);

@@ -887,7 +887,9 @@ TEST_CASE("GPU-audio plug-in stays continuous across reactivation with new rate 
     CHECK(gpu.gpu()->quantum() == 256);
     CHECK(gpu.latency() == cpu.latency());
     CHECK(gpu.latency() == (kLeadBlocks + 1) * 256);
-    CHECK(gpu.gpu()->transport().status_snapshot().sample_rate == 96000);
+    const auto transport_status = gpu.gpu()->transport().status_snapshot();
+    CHECK(validate_gpu_audio_status(transport_status).accepted());
+    CHECK(transport_status.sample_rate == 96000);
     CHECK_FALSE(gpu.gpu()->node()->fenced());
     CHECK(delivery(gpu).gpu_blocks > 0);
     CHECK(delivery(gpu).cpu_fallback_blocks == 0);
