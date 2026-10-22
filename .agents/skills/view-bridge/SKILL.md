@@ -3086,7 +3086,24 @@ for `animating` or real damage (`host_frame_composites`). So:
   silently mutates paint state is now a frozen view, not a slow one.
 - A paint that reads time (`frame_clock()->time()`, a shader clock) must keep
   the view in `needs_continuous_frames` (continuous repaint / a registered
-  predicate), or it stops on the first frame nothing dirtied.
+  predicate), or it stops on the first frame nothing dirtied. `Stepper` and
+  `NumberBox` draw their typing caret from the clock's time, so they hold
+  `set_continuous_repaint` equal to their editing state through
+  `set_editing_()` and release it on commit, cancel, focus loss and a scrub;
+  an indeterminate `Spinner` holds it while it spins. A new caret or
+  time-driven widget needs the same, plus a headless test that
+  `needs_continuous_frames()` follows the state.
+- A permanent FrameClock subscriber that republishes on every audio block
+  defeats gating. If it posts a new frame of data into the script (a spectrum,
+  a scope trace) whenever the DSP's sequence number advances, the host's
+  silence still advances it, and every post becomes a commit, then damage, then
+  a composite at the display rate. One imported analyzer editor stayed at
+  ~62 composited frames per second and ~40% CPU while idle. Publish only when
+  the data changes at display resolution (quantize like a meter readout), and
+  unsubscribe while there is nothing to show. To tell this apart from a
+  host-side gap, stop the host's render calls with the editor idle (edbench's
+  `editor-idle-stopped` phase): frames dropping to zero means the product
+  is publishing per block.
 - Before this split, an editor with one bound meter re-composited its whole
   surface every vsync through silence. Measured with an 8-knob, 16-meter
   editor at 60 Hz on an M5 Max (process CPU, editor open and silent, host
