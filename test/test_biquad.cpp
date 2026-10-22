@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/biquad.hpp>
 #include "support/denormal_tail.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -375,37 +376,118 @@ std::vector<int> split_schedule(std::size_t total) {
 
 }  // namespace
 
-TEST_CASE("Biquad block path is bit-identical to the sample path across split blocks",
+namespace {
+
+double max_pole_radius(const BiquadCoefficients& c) {
+    const double a1 = c.a1, a2 = c.a2, disc = a1 * a1 - 4.0 * a2;
+    if (disc < 0.0) return std::sqrt(a2);
+    const double root = std::sqrt(disc);
+    return std::max(std::abs(-a1 + root), std::abs(-a1 - root)) * 0.5;
+}
+
+// RMS error of `actual` against a float64 DF2T running the same float
+// coefficients: the exact filter the float paths approximate.
+double rms_error_db(const BiquadCoefficients& c, const std::vector<float>& input,
+                    const std::vector<float>& actual) {
+    double s1 = 0.0, s2 = 0.0, acc = 0.0;
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        const double x = input[i];
+        const double y = static_cast<double>(c.b0) * x + s1;
+        s1 = static_cast<double>(c.b1) * x - static_cast<double>(c.a1) * y + s2;
+        s2 = static_cast<double>(c.b2) * x - static_cast<double>(c.a2) * y;
+        acc += (actual[i] - y) * (actual[i] - y);
+    }
+    return 10.0 * std::log10(acc / static_cast<double>(input.size()) + 1e-300);
+}
+
+std::vector<float> run_block(Biquad filter, const std::vector<float>& input,
+                             const std::vector<int>& schedule) {
+    auto out = input;
+    std::size_t pos = 0;
+    for (int block : schedule) {
+        filter.process(out.data() + pos, block);
+        pos += static_cast<std::size_t>(block);
+    }
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("Biquad block path error stays within 3 dB of the sample path's",
+          "[signal][biquad][precision]") {
+    // The block path regroups the recurrence (feedback last) for a shorter
+    // loop-carried dependency, so it rounds differently from the sample path.
+    // Its error against the exact filter must not be meaningfully larger.
+    const auto input = busy_signal(16384);
+    const std::vector<int> whole{static_cast<int>(input.size())};
+    const Biquad::Type types[] = {Biquad::Type::lowpass, Biquad::Type::highpass,
+                                  Biquad::Type::bandpass, Biquad::Type::notch,
+                                  Biquad::Type::allpass, Biquad::Type::peaking,
+                                  Biquad::Type::low_shelf, Biquad::Type::high_shelf};
+    int reordered = 0;
+    for (const auto type : types) {
+        for (const float freq : {20.0f, 100.0f, 1000.0f, 8000.0f}) {
+            for (const float q : {0.7071f, 10.0f}) {
+                INFO("type " << static_cast<int>(type) << " f " << freq << " q " << q);
+                Biquad sample_filter;
+                sample_filter.set_coefficients(type, freq, q, kSampleRate, 9.0f);
+                const auto c = sample_filter.coefficients();
+                auto by_sample = input;
+                for (float& x : by_sample) x = sample_filter.process(x);
+                Biquad block_filter;
+                block_filter.set_coefficients(c);
+                const auto by_block = run_block(block_filter, input, whole);
+                CHECK(rms_error_db(c, input, by_block) <= rms_error_db(c, input, by_sample) + 3.0);
+                reordered += max_pole_radius(c) <= Biquad::kFeedbackLastMaxPoleRadius ? 1 : 0;
+            }
+        }
+    }
+    // The grid must actually exercise the regrouped form.
+    CHECK(reordered > 20);
+}
+
+TEST_CASE("Biquad block path keeps the sample path's order near the unit circle",
           "[signal][biquad][determinism]") {
-    const std::array<BiquadCase, 6> cases{{
-        {Biquad::Type::lowpass, 1000.0f, 0.7071f, 0.0f},
-        {Biquad::Type::highpass, 40.0f, 0.7071f, 0.0f},
+    // Poles closer to the unit circle than kFeedbackLastMaxPoleRadius make
+    // the regrouped order measurably noisier, so those designs run the sample
+    // path's arithmetic and stay bit-identical to it.
+    const std::array<BiquadCase, 4> cases{{
+        {Biquad::Type::low_shelf, 20.0f, 10.0f, 12.0f},
+        {Biquad::Type::allpass, 20.0f, 0.7071f, 0.0f},
         {Biquad::Type::peaking, 100.0f, 10.0f, 12.0f},
-        {Biquad::Type::low_shelf, 30.0f, 0.7071f, -9.0f},
-        {Biquad::Type::bandpass, 2500.0f, 4.0f, 0.0f},
-        {Biquad::Type::notch, 12000.0f, 2.0f, 0.0f},
+        {Biquad::Type::highpass, 20.0f, 10.0f, 0.0f},
     }};
     const auto input = busy_signal(8192);
-    const auto schedule = split_schedule(input.size());
-
     for (const auto& c : cases) {
+        INFO("type " << static_cast<int>(c.type) << " f " << c.freq_hz);
         Biquad sample_filter;
-        Biquad block_filter;
         sample_filter.set_coefficients(c.type, c.freq_hz, c.q, kSampleRate, c.gain_db);
-        block_filter.set_coefficients(c.type, c.freq_hz, c.q, kSampleRate, c.gain_db);
-
+        REQUIRE(max_pole_radius(sample_filter.coefficients()) > Biquad::kFeedbackLastMaxPoleRadius);
+        const Biquad block_filter = sample_filter;
         auto expected = input;
-        for (float& sample : expected)
-            sample = sample_filter.process(sample);
-
-        auto actual = input;
-        std::size_t pos = 0;
-        for (int block : schedule) {
-            block_filter.process(actual.data() + pos, block);
-            pos += static_cast<std::size_t>(block);
-        }
+        for (float& x : expected) x = sample_filter.process(x);
+        const auto actual = run_block(block_filter, input, split_schedule(input.size()));
         REQUIRE(std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)) == 0);
     }
+}
+
+TEST_CASE("Biquad block output does not depend on how the buffer is split",
+          "[signal][biquad][determinism]") {
+    const auto input = busy_signal(8192);
+    Biquad filter;
+    filter.set_coefficients(Biquad::Type::lowpass, 1000.0f, 0.7071f, kSampleRate);
+    REQUIRE(max_pole_radius(filter.coefficients()) <= Biquad::kFeedbackLastMaxPoleRadius);
+    const auto whole = run_block(filter, input, {static_cast<int>(input.size())});
+    const auto split = run_block(filter, input, split_schedule(input.size()));
+    REQUIRE(std::memcmp(whole.data(), split.data(), whole.size() * sizeof(float)) == 0);
+    // And it differs from the sample path only at round-off level.
+    auto by_sample = input;
+    Biquad sample_filter = filter;
+    for (float& x : by_sample) x = sample_filter.process(x);
+    float worst = 0.0f;
+    for (std::size_t i = 0; i < input.size(); ++i)
+        worst = std::max(worst, std::abs(whole[i] - by_sample[i]));
+    CHECK(worst < 1.0e-5f);
 }
 
 TEST_CASE("Biquad block path flushes a decaying tail without subnormal residency",
