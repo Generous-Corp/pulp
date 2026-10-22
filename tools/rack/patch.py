@@ -5246,9 +5246,15 @@ def _ask_model(claude: str, prompt: str, seconds: float, tick: float,
         claude_model = exact_model("FORGE_CLAUDE_MODEL", "Claude")
         claude_effort = exact_reasoning_effort(
             "FORGE_CLAUDE_REASONING_EFFORT")
+        # The answer is the JSON on stdout, so the pass needs no tools. A
+        # prompt carries library-index text, module names and a base patch,
+        # so a tool left available is something an injection could use to
+        # write files, run commands or reach the network.
         command = [claude, "-p", "--strict-mcp-config", "--verbose",
                    "--output-format=stream-json",
-                   "--include-partial-messages"]
+                   "--include-partial-messages",
+                   "--disallowedTools", "Write", "Edit", "NotebookEdit",
+                   "Bash", "WebFetch", "WebSearch"]
         if claude_model is not None:
             command.extend(["--model", claude_model])
         if claude_effort is not None:

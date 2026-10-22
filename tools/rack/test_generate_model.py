@@ -39,6 +39,8 @@ import json
 import sys
 expected = ["-p", "--strict-mcp-config", "--verbose",
             "--output-format=stream-json", "--include-partial-messages",
+            "--disallowedTools", "Write", "Edit", "NotebookEdit", "Bash",
+            "WebFetch", "WebSearch",
             "--model", "claude-opus-5", "--effort", "medium"]
 if sys.argv[1:] != expected:
     print("wrong Claude protocol: " + repr(sys.argv[1:]), file=sys.stderr)
