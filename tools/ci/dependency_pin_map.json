@@ -43,6 +43,7 @@
   "Perfetto": "declared in PulpTracing.cmake, which is not a pin file; when tracing is built the codemodel keys its sources, so a manifest change moves all",
   "pugixml": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
   "pybind11": "Python bindings, built outside the test executables, so a change moves all",
+  "QuickJS": "embedded whole in CHOC's choc_javascript_QuickJS.h: no target or archive of its own, so a change moves all",
   "Remotion": "developer-supplied SDK outside the build's pins, so a change moves all",
   "Surge Synth Team tuning-library": "optional parser behind PULP_ENABLE_SCALA_TUNING whose sources compile into its consumers, with no target of its own, so a change moves all",
   "three.js": "JavaScript runtime pinned through tools/cmake/threejs-runtime-manifest.json; no executable compiles it, so a change moves all",

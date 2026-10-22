@@ -86,7 +86,7 @@
       "version": "pulp-webview-dnd-poc1 (df148a41)",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/danielraffel/choc.git",
-      "upstream": { "kind": "git-tag", "ref": "pulp-webview-dnd-poc1" },
+      "upstream": { "kind": "git-tag", "ref": "pulp-webview-dnd-poc1", "commit": "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60" },
       "interim_fork": "Pinned to a danielraffel/choc fork tag adding WebView file drag-and-drop (Tracktion/choc#64 PoC). Fork is upstream f0f5cdf5a938 +5/-0. Revert to upstream Tracktion/choc when #64 merges — see pulp #3619.",
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
@@ -854,6 +854,23 @@
       "source_files": [
         "requirements-docs.txt",
         "mkdocs.yml"
+      ]
+    },
+    {
+      "name": "QuickJS",
+      "category": "core",
+      "license": "MIT",
+      "version": "2021-03-27",
+      "source_kind": "transitive-fetchcontent",
+      "repository": "https://github.com/bellard/quickjs.git",
+      "upstream": { "kind": "git-tag", "ref": "2021-03-27" },
+      "external_names": ["quickjs"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Default JS engine, embedded whole inside CHOC's choc/javascript/choc_javascript_QuickJS.h rather than fetched on its own; the version is that header's CONFIG_VERSION, so a QuickJS bump only arrives through a CHOC pin bump. Listed separately so --check-upstream reports QuickJS drift instead of hiding it behind CHOC.",
+      "source_files": [
+        "tools/cmake/PulpDependencies.cmake",
+        "core/view/src/js_quickjs_engine.cpp"
       ]
     },
     {

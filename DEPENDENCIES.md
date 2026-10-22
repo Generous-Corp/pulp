@@ -58,6 +58,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | pybind11 | 2.13.6 | BSD-3-Clause | Python bindings for HeadlessHost (optional, FetchContent) | bindings/python | 2026-03-25 |
 | Pygments | transitive | BSD-2-Clause | Syntax highlighter used by mkdocs + pymdownx.highlight; redistributed as inline HTML/CSS in the generated docs site | docs | 2026-04-22 |
 | pymdown-extensions | >=10.7,<11 | MIT | Markdown extension bundle used by mkdocs-material (admonitions, tabs, superfences, highlight, emoji) | docs | 2026-04-22 |
+| QuickJS | 2021-03-27 | MIT | Default JavaScript engine, embedded in CHOC's `choc_javascript_QuickJS.h` (the version is that header's `CONFIG_VERSION`); arrives only through the CHOC pin | pulp-view | 2026-10-22 |
 | react | ^18.2.0 | MIT | Peer dependency of `@pulp/react` (packages/pulp-react); plugin authors install it themselves alongside the package — never bundled into Pulp itself | packages/pulp-react | 2026-04-29 |
 | react-reconciler | ^0.29.2 | MIT | Reconciler runtime that `@pulp/react` (packages/pulp-react) wraps to drive `pulp::view::WidgetBridge`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |
 | scheduler | ^0.23.2 | MIT | Cooperative-scheduling runtime pulled in transitively by react-reconciler for `@pulp/react`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |

@@ -26,6 +26,7 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 | **msdfgen** | MIT | Reserved for multi-channel SDF glyph generation | [github.com/Chlumsky/msdfgen](https://github.com/Chlumsky/msdfgen) |
 | **nanosvg** | zlib | SVG parsing and rasterization | [github.com/memononen/nanosvg](https://github.com/memononen/nanosvg) |
 | **pugixml** | MIT | XML parsing and generation | [github.com/zeux/pugixml](https://github.com/zeux/pugixml) |
+| **QuickJS** | MIT | Default JavaScript engine, embedded in CHOC's `choc_javascript_QuickJS.h` (`CONFIG_VERSION` 2021-03-27) | [bellard.org/quickjs](https://bellard.org/quickjs/) |
 | **SheenBidi** | Apache-2.0 | Unicode Bidirectional Algorithm engine for Arabic / Hebrew / mixed-direction text in `core/canvas::BidiAnalyzer` (independent of system ICU) | [github.com/Tehreer/SheenBidi](https://github.com/Tehreer/SheenBidi) |
 | **TweetNaCl** | Public domain | Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures and signed node/package metadata | [tweetnacl.cr.yp.to](https://tweetnacl.cr.yp.to/) |
 | **WOFF2** | MIT | WOFF2-to-sfnt decoder used to register the exact packaged web fonts captured by Chromium | [github.com/google/woff2](https://github.com/google/woff2) |
