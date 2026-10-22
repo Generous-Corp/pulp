@@ -5575,6 +5575,8 @@
    "entry": "tools/testing/daw-smoke/test_real_host_smoke.py",
    "inputs": [
     "tools/scripts/gpu_audio_p2_host_preflight.py",
+    "tools/testing/daw-smoke/real_host_smoke.py",
+    "tools/testing/daw-smoke/test_real_host_smoke.py",
     "tools/validation/verify_gpu_audio_daw_continuity_receipt_v2.py"
    ],
    "kind": "python"
