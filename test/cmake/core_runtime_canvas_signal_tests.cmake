@@ -774,6 +774,11 @@ pulp_add_test_suite(pulp-test-gpu-neural-realtime-node
     LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# The public neural model factory, through installed headers only.
+pulp_add_test_suite(pulp-test-gpu-neural-model-factory
+    SOURCES test_gpu_neural_model_factory.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio)
+
 # Shadow placement (Inline, Worker, None, Auto) for the neural node.
 pulp_add_test_suite(pulp-test-gpu-neural-shadow-policy
     SOURCES test_gpu_neural_shadow_policy.cpp harness/rt_allocation_probe.cpp

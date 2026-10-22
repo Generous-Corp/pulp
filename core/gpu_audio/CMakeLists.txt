@@ -31,6 +31,7 @@ target_sources(pulp-gpu-audio
         src/gpu_spectral_mask.cpp
         src/gpu_wavenet_realtime_node.cpp
         src/gpu_neural_realtime_node.cpp
+        src/gpu_neural_model.cpp
         src/detail/wavenet_streaming_backend.cpp
         src/detail/neural_shadow_worker.cpp
         src/detail/realtime_gpu_audio_path.cpp
