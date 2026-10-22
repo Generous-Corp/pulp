@@ -230,22 +230,23 @@ struct SaturatorShapeMath {
     /// subtracting two large terms when the result is small.
     static double second_antiderivative(SaturatorShape shape, double u) {
         switch (shape) {
-            case SaturatorShape::tanh_soft: return tanh_second_antiderivative(u);
-            case SaturatorShape::atan_soft:
-                return 0.5 * (u * u - 1.0) * std::atan(u) - 0.5 * u * std::log1p(u * u) +
-                       0.5 * u;
-            case SaturatorShape::cubic_soft: {
-                const double a = std::abs(u);
-                if (a < 1.0) return u * u * u / 6.0 - u * u * u * u * u / 60.0;
-                // Odd continuation of the clipped branch: integrating
-                // F1 = (2/3)(a − 1) + 5/12 outward from F2(1) = 3/20.
-                const double r = a - 1.0;
-                return std::copysign(r * r / 3.0 + (5.0 / 12.0) * r + 3.0 / 20.0, u);
-            }
-            case SaturatorShape::sinh_arc: {
-                const double root = std::sqrt(1.0 + u * u);
-                return 0.25 * (2.0 * u * u - 1.0) * std::asinh(u) - 0.75 * u * root;
-            }
+        case SaturatorShape::tanh_soft:
+            return tanh_second_antiderivative(u);
+        case SaturatorShape::atan_soft:
+            return 0.5 * (u * u - 1.0) * std::atan(u) - 0.5 * u * std::log1p(u * u) + 0.5 * u;
+        case SaturatorShape::cubic_soft: {
+            const double a = std::abs(u);
+            if (a < 1.0)
+                return u * u * u / 6.0 - u * u * u * u * u / 60.0;
+            // Odd continuation of the clipped branch: integrating
+            // F1 = (2/3)(a − 1) + 5/12 outward from F2(1) = 3/20.
+            const double r = a - 1.0;
+            return std::copysign(r * r / 3.0 + (5.0 / 12.0) * r + 3.0 / 20.0, u);
+        }
+        case SaturatorShape::sinh_arc: {
+            const double root = std::sqrt(1.0 + u * u);
+            return 0.25 * (2.0 * u * u - 1.0) * std::asinh(u) - 0.75 * u * root;
+        }
         }
         return u * u * u / 6.0;
     }
@@ -272,17 +273,16 @@ struct SaturatorShapeMath {
         const double odd =
             1.0 / 36.0 +
             s2 * (-1.0 / 3600.0 +
-                  s2 * (1.0 / 211680.0 +
-                        s2 * (-1.0 / 10886400.0 +
-                              s2 * (1.0 / 526901760.0 +
-                                    s2 * (-4.0647616451442256e-11 +
-                                          s2 * (8.921691020456452e-13 +
-                                                s2 * -1.9939295860721074e-14))))));
+                  s2 * (1.0 / 211680.0 + s2 * (-1.0 / 10886400.0 +
+                                               s2 * (1.0 / 526901760.0 +
+                                                     s2 * (-4.0647616451442256e-11 +
+                                                           s2 * (8.921691020456452e-13 +
+                                                                 s2 * -1.9939295860721074e-14))))));
         const double li2_w = s - 0.25 * s2 + s * s2 * odd;
         constexpr double kLn2 = 0.69314718055994530942;
         constexpr double kPiSquaredOver24 = 0.41123351671205660911;
-        const double magnitude = 0.5 * a * a - kLn2 * a - 0.5 * li2_w - 0.25 * s2 +
-                                 kPiSquaredOver24;
+        const double magnitude =
+            0.5 * a * a - kLn2 * a - 0.5 * li2_w - 0.25 * s2 + kPiSquaredOver24;
         return std::copysign(magnitude, u);
     }
 };
@@ -303,8 +303,10 @@ struct SaturatorShapeMath {
 /// what moves it out of the audio band.
 inline double adaa_linear_magnitude(int order, double cycles_per_sample) noexcept {
     constexpr double kPi = 3.14159265358979323846;
-    if (order <= 0) return 1.0;
-    if (order == 1) return std::abs(std::cos(kPi * cycles_per_sample));
+    if (order <= 0)
+        return 1.0;
+    if (order == 1)
+        return std::abs(std::cos(kPi * cycles_per_sample));
     return std::abs(1.0 + 2.0 * std::cos(2.0 * kPi * cycles_per_sample)) / 3.0;
 }
 
@@ -331,7 +333,7 @@ inline double adaa_linear_magnitude(int order, double cycles_per_sample) noexcep
 /// The three-point stencil is symmetric about the middle sample, so the
 /// output is delayed by exactly one sample. Scalar state only; `step()` never allocates.
 class SaturatorAdaa2 {
-public:
+  public:
     /// Relative spacing below which a divided difference is replaced by its
     /// series limit. [design parameter] default 1e-4, range 1e-6 .. 1e-3.
     static constexpr double kTolerance = 1e-4;
@@ -358,9 +360,12 @@ public:
         f2_[1] = f2_[0];
         u_[0] = u;
         f2_[0] = f2;
-        if (p[0] > p[1]) swap_pair(p, q, 0, 1);
-        if (p[1] > p[2]) swap_pair(p, q, 1, 2);
-        if (p[0] > p[1]) swap_pair(p, q, 0, 1);
+        if (p[0] > p[1])
+            swap_pair(p, q, 0, 1);
+        if (p[1] > p[2])
+            swap_pair(p, q, 1, 2);
+        if (p[0] > p[1])
+            swap_pair(p, q, 0, 1);
 
         const double spread = p[2] - p[0];
         const double scale = std::max(1.0, std::max(std::abs(p[0]), std::abs(p[2])));
@@ -372,7 +377,7 @@ public:
         return 2.0 * (upper - lower) / spread;
     }
 
-private:
+  private:
     static void swap_pair(double* p, double* q, int i, int j) {
         std::swap(p[i], p[j]);
         std::swap(q[i], q[j]);
@@ -383,7 +388,8 @@ private:
     static double first_difference(SaturatorShape shape, double hi, double lo, double f2_hi,
                                    double f2_lo, double tolerance) {
         const double delta = hi - lo;
-        if (delta > tolerance) return (f2_hi - f2_lo) / delta;
+        if (delta > tolerance)
+            return (f2_hi - f2_lo) / delta;
         const double mid = 0.5 * (hi + lo);
         return detail::SaturatorShapeMath::antiderivative(shape, mid) +
                delta * delta * detail::SaturatorShapeMath::df(shape, mid) / 24.0;
@@ -555,10 +561,13 @@ public:
     /// is below what an integer delay can express (`group_delay_samples()`).
     int latency_samples() const noexcept {
         switch (alias_policy_) {
-            case AliasPolicy::oversample_2x: return oversample_latency_;
-            case AliasPolicy::adaa2: return 1;
-            case AliasPolicy::adaa:
-            case AliasPolicy::off: return 0;
+        case AliasPolicy::oversample_2x:
+            return oversample_latency_;
+        case AliasPolicy::adaa2:
+            return 1;
+        case AliasPolicy::adaa:
+        case AliasPolicy::off:
+            return 0;
         }
         return 0;
     }
@@ -568,10 +577,14 @@ public:
     /// exact figure for `oversample_2x`, 0 for `off`.
     double group_delay_samples() const noexcept {
         switch (alias_policy_) {
-            case AliasPolicy::oversample_2x: return oversampler_.latency().exact_input_samples;
-            case AliasPolicy::adaa2: return 1.0;
-            case AliasPolicy::adaa: return 0.5;
-            case AliasPolicy::off: return 0.0;
+        case AliasPolicy::oversample_2x:
+            return oversampler_.latency().exact_input_samples;
+        case AliasPolicy::adaa2:
+            return 1.0;
+        case AliasPolicy::adaa:
+            return 0.5;
+        case AliasPolicy::off:
+            return 0.0;
         }
         return 0.0;
     }

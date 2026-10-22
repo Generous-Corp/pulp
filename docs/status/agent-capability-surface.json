@@ -3022,7 +3022,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fast_math.hpp",
-      "fingerprint": "sha256:cb9aabb8444a4324a0588f396c6e36f41d40b9d56ba11537842cc65866cfafbf",
+      "fingerprint": "sha256:f88205006d7af34a962e70cbc834aca680ad400c6368edba3317f68b260f0d12",
       "include": "pulp/signal/fast_math.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4205,7 +4205,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/saturator.hpp",
-      "fingerprint": "sha256:f0c2dcfb1651fbf3fb3ac812c00788688c1894a075fdd02d9435a4c3df05d2cd",
+      "fingerprint": "sha256:3923d4e04568dcbbf4962951de2e05022ea0147bf9dd8a6bb536868b9a5c20dc",
       "include": "pulp/signal/saturator.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

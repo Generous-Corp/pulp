@@ -255,8 +255,10 @@ struct FastMath {
     /// skips the division). Over a buffer use the block overload below, which
     /// clamps branch-free. A NaN input returns NaN.
     static float tanh_minimax(float x) {
-        if (x < -kTanhMinimaxClamp) return -1.0f;
-        if (x > kTanhMinimaxClamp) return 1.0f;
+        if (x < -kTanhMinimaxClamp)
+            return -1.0f;
+        if (x > kTanhMinimaxClamp)
+            return 1.0f;
         return tanh_minimax_rational(x);
     }
 
@@ -310,13 +312,11 @@ struct FastMath {
     template <typename T> static T tanh_minimax_rational(T x) noexcept {
         constexpr float kScale = 1.0f - 0x1p-21f;
         const T t = x * x;
-        const T num =
-            x * (kScale +
-                 t * (1.2183626499918065e-01f * kScale +
-                      t * (2.1714800492144003e-03f * kScale + t * (3.4510574788349538e-06f * kScale))));
-        const T den =
-            1.0f + t * (4.5515217250939749e-01f +
-                        t * (2.0577605545641264e-02f + t * 1.3105688057792639e-04f));
+        const T num = x * (kScale + t * (1.2183626499918065e-01f * kScale +
+                                         t * (2.1714800492144003e-03f * kScale +
+                                              t * (3.4510574788349538e-06f * kScale))));
+        const T den = 1.0f + t * (4.5515217250939749e-01f +
+                                  t * (2.0577605545641264e-02f + t * 1.3105688057792639e-04f));
         return num / den;
     }
 

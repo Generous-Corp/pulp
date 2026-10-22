@@ -794,9 +794,9 @@ TEST_CASE("LadderFilter default saturator preserves resonance and drive behavior
             // accurate and exact stay below -120 dBFS; realtime_efficient's
             // 3.8e-6 saturator error, amplified by the resonant recursion,
             // stays below -90 dBFS.
-            const float bound =
-                kDefaultLadderSaturation == LadderSaturation::realtime_efficient ? 3.0e-5f
-                                                                                 : 1.0e-6f;
+            const float bound = kDefaultLadderSaturation == LadderSaturation::realtime_efficient
+                                    ? 3.0e-5f
+                                    : 1.0e-6f;
             CHECK(worst < bound);
             CHECK(crossings_fast == crossings_exact);
         }

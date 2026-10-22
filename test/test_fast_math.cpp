@@ -91,9 +91,11 @@ std::pair<double, float> tanh_error_scan(F&& approx, std::uint32_t stride, float
     float largest = 0.0f;
     for (std::uint32_t bits = 0;; bits += stride) {
         const float x = std::bit_cast<float>(bits);
-        if (!(x <= limit)) break;
+        if (!(x <= limit))
+            break;
         const float y = approx(x);
-        worst = std::max(worst, std::abs(static_cast<double>(y) - std::tanh(static_cast<double>(x))));
+        worst =
+            std::max(worst, std::abs(static_cast<double>(y) - std::tanh(static_cast<double>(x))));
         largest = std::max(largest, y);
     }
     return {worst, largest};
@@ -137,12 +139,11 @@ TEST_CASE("FastMath tanh_minimax is odd, unit-slope, and seamless at its clamp",
     REQUIRE(FastMath::tanh_minimax(4.0001f) - FastMath::tanh_minimax(3.9999f) < 1.0e-6f);
 }
 
-TEST_CASE("FastMath tanh_minimax block form agrees with the scalar form",
-          "[signal][fast_math]") {
+TEST_CASE("FastMath tanh_minimax block form agrees with the scalar form", "[signal][fast_math]") {
     // Lengths straddle the 16-sample vector step so both the vector body and
     // the scalar tail run; the in-place call exercises output == input.
-    for (std::size_t count : {std::size_t{1}, std::size_t{15}, std::size_t{16}, std::size_t{37},
-                              std::size_t{1000}}) {
+    for (std::size_t count :
+         {std::size_t{1}, std::size_t{15}, std::size_t{16}, std::size_t{37}, std::size_t{1000}}) {
         std::vector<float> input(count);
         for (std::size_t i = 0; i < count; ++i)
             input[i] = 12.0f * std::sin(0.7f * static_cast<float>(i) + 0.3f);
@@ -168,7 +169,8 @@ TEST_CASE("FastMath tanh_minimax block form agrees with the scalar form",
     std::vector<float> xs;
     for (std::uint32_t bits = 0;; bits += 4099u) {
         const float x = std::bit_cast<float>(bits);
-        if (!(x <= 8.0f)) break;
+        if (!(x <= 8.0f))
+            break;
         xs.push_back(x);
         xs.push_back(-x);
     }
@@ -176,8 +178,8 @@ TEST_CASE("FastMath tanh_minimax block form agrees with the scalar form",
     FastMath::tanh_minimax(xs.data(), ys.data(), xs.size());
     double worst = 0.0;
     for (std::size_t i = 0; i < xs.size(); ++i)
-        worst = std::max(worst, std::abs(static_cast<double>(ys[i]) -
-                                         std::tanh(static_cast<double>(xs[i]))));
+        worst = std::max(
+            worst, std::abs(static_cast<double>(ys[i]) - std::tanh(static_cast<double>(xs[i]))));
     REQUIRE(worst < 3.8e-6);
 }
 

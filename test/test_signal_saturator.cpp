@@ -788,49 +788,50 @@ double worst_alias_dbc(const std::vector<double>& rendered, double f0) {
     return report.worst_alias_db;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("ADAA2's second antiderivative integrates the first, and is odd",
           "[saturator][aliasing][adaa2]") {
     for (auto shape : kAllShapes) {
-        for (double u : {-37.0, -6.0, -1.3, -1.0, -0.4, -1e-3, 0.0, 2e-4, 0.07, 0.999, 1.0,
-                         1.001, 2.5, 9.0, 41.0}) {
+        for (double u : {-37.0, -6.0, -1.3, -1.0, -0.4, -1e-3, 0.0, 2e-4, 0.07, 0.999, 1.0, 1.001,
+                         2.5, 9.0, 41.0}) {
             const double h = 1e-5 * std::max(1.0, std::abs(u));
             const double derivative =
                 (detail::SaturatorShapeMath::second_antiderivative(shape, u + h) -
                  detail::SaturatorShapeMath::second_antiderivative(shape, u - h)) /
                 (2.0 * h);
             INFO("shape " << static_cast<int>(shape) << " u " << u);
-            REQUIRE_THAT(derivative,
-                         WithinAbs(detail::SaturatorShapeMath::antiderivative(shape, u),
-                                   2e-8 * std::max(1.0, u * u)));
+            REQUIRE_THAT(derivative, WithinAbs(detail::SaturatorShapeMath::antiderivative(shape, u),
+                                               2e-8 * std::max(1.0, u * u)));
             REQUIRE(detail::SaturatorShapeMath::second_antiderivative(shape, -u) ==
                     -detail::SaturatorShapeMath::second_antiderivative(shape, u));
         }
     }
     // Absolute accuracy at the origin is what the divided difference
     // amplifies; tanh's closed form subtracts O(1) terms there.
-    REQUIRE(std::abs(detail::SaturatorShapeMath::second_antiderivative(
-                SaturatorShape::tanh_soft, 1e-6)) < 1e-16);
+    REQUIRE(std::abs(detail::SaturatorShapeMath::second_antiderivative(SaturatorShape::tanh_soft,
+                                                                       1e-6)) < 1e-16);
 }
 
 TEST_CASE("ADAA2 matches the simplex mean of the curve, including degenerate stencils",
           "[saturator][aliasing][adaa2]") {
-    struct Triple { double x0, x1, x2; };
+    struct Triple {
+        double x0, x1, x2;
+    };
     const Triple triples[] = {
-        {0.3, -0.2, 0.9},          // generic
-        {2.7, 0.4, -1.9},          // spans the knee
-        {-3.0, 3.0, -2.5},         // reversal through the origin
-        {1.5, 1.5 + 2e-6, 0.2},    // close pair: midpoint expansion
-        {0.8, -0.6, 0.8 + 3e-6},   // x0 ≈ x2, the textbook ill-conditioned case
-        {0.5, 0.5 + 1e-5, 0.5 - 2e-5},  // near-constant triple
-        {25.0, 24.0, 26.5},        // deep in saturation, F2 ~ u²/2
-        {0.9999, 1.0003, 0.9995},  // the cubic's clip boundary
+        {0.3, -0.2, 0.9},              // generic
+        {2.7, 0.4, -1.9},              // spans the knee
+        {-3.0, 3.0, -2.5},             // reversal through the origin
+        {1.5, 1.5 + 2e-6, 0.2},        // close pair: midpoint expansion
+        {0.8, -0.6, 0.8 + 3e-6},       // x0 ≈ x2, the textbook ill-conditioned case
+        {0.5, 0.5 + 1e-5, 0.5 - 2e-5}, // near-constant triple
+        {25.0, 24.0, 26.5},            // deep in saturation, F2 ~ u²/2
+        {0.9999, 1.0003, 0.9995},      // the cubic's clip boundary
     };
     for (auto shape : kAllShapes) {
         for (const auto& t : triples) {
-            INFO("shape " << static_cast<int>(shape) << " triple " << t.x0 << " " << t.x1
-                          << " " << t.x2);
+            INFO("shape " << static_cast<int>(shape) << " triple " << t.x0 << " " << t.x1 << " "
+                          << t.x2);
             REQUIRE_THAT(adaa2_kernel(shape, t.x0, t.x1, t.x2),
                          WithinAbs(adaa2_oracle(shape, t.x0, t.x1, t.x2), 2e-6));
         }
@@ -881,7 +882,8 @@ TEST_CASE("ADAA2 reports one sample of latency and aligns its dry path",
     sat.set_alias_policy(SaturatorAliasPolicy::adaa2);
     sat.reset();
     std::array<double, 4> h{};
-    for (std::size_t n = 0; n < h.size(); ++n) h[n] = sat.process(n == 0 ? 1e-3 : 0.0);
+    for (std::size_t n = 0; n < h.size(); ++n)
+        h[n] = sat.process(n == 0 ? 1e-3 : 0.0);
     REQUIRE_THAT(h[0], WithinRel(h[1], 1e-4));
     REQUIRE_THAT(h[2], WithinRel(h[1], 1e-4));
     REQUIRE(std::abs(h[3]) < 1e-15);
@@ -903,7 +905,8 @@ TEST_CASE("ADAA paths re-seed on a parameter change instead of mixing two settin
     for (auto policy : {SaturatorAliasPolicy::adaa, SaturatorAliasPolicy::adaa2}) {
         for (auto shape : kAllShapes) {
             auto sat = make_saturator(shape, 6.0, 0.2, policy);
-            for (int n = 0; n < 8; ++n) (void)sat.process(0.35);
+            for (int n = 0; n < 8; ++n)
+                (void)sat.process(0.35);
             sat.set_drive_db(20.0);
             sat.set_bias(-0.4);
             INFO("policy " << static_cast<int>(policy) << " shape " << static_cast<int>(shape));
