@@ -3152,7 +3152,15 @@ Key layout:
   `breaking` (bool), `applies_if` (expression string), `summary`.
   `docs/migrations/README.md` is the schema reference; the codegen
   skips it. Only write a note when a reasonable pro developer needs
-  to change code / config / habits — not every PR.
+  to change code / config / habits — not every PR. A PR never writes
+  this file itself: it writes `docs/migrations/unreleased/<topic>.md`
+  (`breaking` + `summary` only), and the version-at-land bump that
+  assigns the SDK version folds it into `v<assigned>.md`
+  (`tools/scripts/fold_migration_notes.py`). A guessed `vX.Y.Z.md`
+  goes stale whenever another release lands first.
+- **`docs/migrations/unreleased/*.md`** — validated by the codegen
+  (refused if it sets `version` or `applies_if`) but not embedded,
+  because no released CLI can be upgraded to it yet.
 - **`tools/scripts/build_migration_index.py`** — standalone Python
   codegen. Parses the TOML frontmatter, escapes the Markdown body for
   a C++ string literal, sorts entries by parsed semver, and writes
