@@ -89,6 +89,16 @@ struct PulpAUEditorOwnership {
     PulpAUEditorOwnership* _ownership;
 }
 - (instancetype)initWithOwnership:(PulpAUEditorOwnership*)ownership;
+// Destroy the host and bridge now (idempotent). Runs from the editor view's
+// will-dealloc hook, so ~PluginViewHost sees a whole view; -dealloc keeps it
+// as the fallback when the view has no hook.
+- (void)releaseEditor;
+@end
+
+// Implemented by the Pulp plug-in views (plugin_view_host_mac_view.h); the
+// factory checks -respondsToSelector: before using it.
+@interface NSView (PulpWillDeallocHandler)
+- (void)setPulpWillDeallocHandler:(void (^)(void))handler;
 @end
 
 @implementation PulpAUEditorOwner
@@ -98,6 +108,10 @@ struct PulpAUEditorOwnership {
     return self;
 }
 - (void)dealloc {
+    [self releaseEditor];
+    [super dealloc];
+}
+- (void)releaseEditor {
     if (_ownership) {
         // Destruction-order contract:
         // PulpAUEditorOwnership declares `bridge` first, then `host`.
@@ -135,7 +149,6 @@ struct PulpAUEditorOwnership {
             dispatch_sync(dispatch_get_main_queue(), ^{ delete owned; });
         }
     }
-    [super dealloc];
 }
 @end
 
@@ -462,6 +475,21 @@ bool pulp_resize_logic_auv2_editor(NSView* editor_view,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [owner release];
 
+    // The host app's reference must be the one that decides the editor's
+    // lifetime. The PluginViewHost holds the view it created, and the view
+    // holds the host through the owner above: kept as it was, that cycle meant
+    // a closed editor was never deallocated, Processor::on_view_closed never
+    // fired, and every open leaked its host (a GPU editor's Dawn device and
+    // surfaces). So the host's reference is handed to the caller (an
+    // autoreleased return, as AUCocoaUIBase expects), and the editor is torn
+    // down at the start of the view's -dealloc, while the view is still whole.
+    if ([editorView respondsToSelector:@selector(setPulpWillDeallocHandler:)]) {
+        void* owner_ref = (__bridge void*)owner; // the association keeps it alive
+        [editorView setPulpWillDeallocHandler:^{
+          [(__bridge PulpAUEditorOwner*)owner_ref releaseEditor];
+        }];
+        return [editorView autorelease];
+    }
     return editorView;
 }
 

@@ -1074,6 +1074,18 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     pulp::view::HostDragCoalescer _dragCoalescer;
 }
 
+- (void)dealloc {
+    // The editor owner's teardown runs first, while the view is still whole.
+    void (^handler)(void) = _pulpWillDeallocHandler;
+    _pulpWillDeallocHandler = nil;
+    if (handler)
+        handler();
+#if !__has_feature(objc_arc)
+    [handler release];
+    [super dealloc];
+#endif
+}
+
 - (BOOL)isFlipped { return NO; }
 // A press that lands while the editor's window is not key must still act on the
 // control under it. AppKit withholds that press from any view answering NO here
@@ -1412,7 +1424,8 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 // the same gate.
 - (void)setNeedsDisplayInRect:(NSRect)rect {
     [super setNeedsDisplayInRect:rect];
-    if (self.onNeedsDisplay) self.onNeedsDisplay();
+    if (self.onNeedsDisplay)
+        self.onNeedsDisplay();
 }
 
 - (void)viewDidMoveToWindow {
@@ -1565,7 +1578,8 @@ public:
 
     void repaint() override {
         // A plain repaint() carries no damage of its own: it is whole-view.
-        if (!damage_.is_full() && !damage_.has_bounds()) damage_.mark_full();
+        if (!damage_.is_full() && !damage_.has_bounds())
+            damage_.mark_full();
         if (in_idle_half_ || render_link_.is_open()) {
             // While the display link runs, a request waits for its paint half
             // as damage. Marking the view now would let AppKit's own display
@@ -1599,7 +1613,8 @@ public:
     // the damage is taken here.
     void invalidate_pending_damage() {
         const auto damage = damage_.take();
-        if (!damage.is_full() && !damage.has_bounds()) return;  // nothing pending
+        if (!damage.is_full() && !damage.has_bounds())
+            return; // nothing pending
         @autoreleasepool {
             if (damage.is_bounded())
                 [view_ setNeedsDisplayInRect:view_rect_for_root_rect(damage.bounds())];
@@ -1617,8 +1632,8 @@ public:
         const float bh = static_cast<float>(b.size.height);
         float sx = 1.0f, sy = 1.0f, tx = 0.0f, ty = 0.0f;
         if (view_.designW > 0.0f && view_.designH > 0.0f &&
-            !WindowHost::compute_design_viewport_transform(bw, bh, view_.designW, view_.designH,
-                                                          sx, sy, tx, ty)) {
+            !WindowHost::compute_design_viewport_transform(bw, bh, view_.designW, view_.designH, sx,
+                                                           sy, tx, ty)) {
             return b;
         }
         const CGFloat x = r.x * sx + tx - 1.0;
@@ -1838,7 +1853,8 @@ public:
                 // a live clock subscriber: a bound meter in silence would
                 // repaint the whole editor every vsync. A subscriber whose
                 // content moved already marked the view while it advanced.
-                if (tick.animating) [view_ setNeedsDisplay:YES];
+                if (tick.animating)
+                    [view_ setNeedsDisplay:YES];
                 // The requests this frame collected (repaint() defers them
                 // while the link runs). Marking the view re-arms the gate
                 // through -setNeedsDisplay:; this frame draws them, so the
@@ -1875,7 +1891,7 @@ public:
         @autoreleasepool {
             [view_ setFrameSize:NSMakeSize(width, height)];
             [view_ setNeedsDisplay:YES];
-            damage_.clear();  // covered by the whole-view mark above
+            damage_.clear(); // covered by the whole-view mark above
         }
     }
 
@@ -2042,6 +2058,18 @@ private:
     // Holds raw AppKit drag motion between presented frames. Ordering rules and
     // the fail-safe live in the shared type, not here.
     pulp::view::HostDragCoalescer _dragCoalescer;
+}
+
+- (void)dealloc {
+    // The editor owner's teardown runs first, while the view is still whole.
+    void (^handler)(void) = _pulpWillDeallocHandler;
+    _pulpWillDeallocHandler = nil;
+    if (handler)
+        handler();
+#if !__has_feature(objc_arc)
+    [handler release];
+    [super dealloc];
+#endif
 }
 
 // A press in a non-key editor window acts on the control under it. See
@@ -3133,8 +3161,8 @@ private:
         // A tick that advanced only for a live clock subscriber, which nothing
         // dirtied, presents nothing: the drawable already shows these pixels.
         // The gate stays open so the subscribers keep ticking.
-        if (!pulp::view::host_frame_composites(
-                tick, needs_repaint_.load(std::memory_order_relaxed))) {
+        if (!pulp::view::host_frame_composites(tick,
+                                               needs_repaint_.load(std::memory_order_relaxed))) {
             continuous_frames_.store(tick.continuous, std::memory_order_relaxed);
             render_dispatch_queued_.store(false, std::memory_order_release);
             return;
