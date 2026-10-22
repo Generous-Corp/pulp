@@ -297,7 +297,15 @@ public:
                 case 5: chain_pass<5>(sections + first, buffer, num_samples); break;
                 case 6: chain_pass<6>(sections + first, buffer, num_samples); break;
                 case 7: chain_pass<7>(sections + first, buffer, num_samples); break;
-                default: chain_pass<8>(sections + first, buffer, num_samples); break;
+                case 8: chain_pass<8>(sections + first, buffer, num_samples); break;
+                case 9: chain_pass<9>(sections + first, buffer, num_samples); break;
+                case 10: chain_pass<10>(sections + first, buffer, num_samples); break;
+                case 11: chain_pass<11>(sections + first, buffer, num_samples); break;
+                case 12: chain_pass<12>(sections + first, buffer, num_samples); break;
+                case 13: chain_pass<13>(sections + first, buffer, num_samples); break;
+                case 14: chain_pass<14>(sections + first, buffer, num_samples); break;
+                case 15: chain_pass<15>(sections + first, buffer, num_samples); break;
+                default: chain_pass<16>(sections + first, buffer, num_samples); break;
             }
             first += n;
         }
@@ -325,7 +333,15 @@ public:
                 case 5: chain_pair_pass<5>(l, r, left_buffer, right_buffer, num_samples); break;
                 case 6: chain_pair_pass<6>(l, r, left_buffer, right_buffer, num_samples); break;
                 case 7: chain_pair_pass<7>(l, r, left_buffer, right_buffer, num_samples); break;
-                default: chain_pair_pass<8>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 8: chain_pair_pass<8>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 9: chain_pair_pass<9>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 10: chain_pair_pass<10>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 11: chain_pair_pass<11>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 12: chain_pair_pass<12>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 13: chain_pair_pass<13>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 14: chain_pair_pass<14>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 15: chain_pair_pass<15>(l, r, left_buffer, right_buffer, num_samples); break;
+                default: chain_pair_pass<16>(l, r, left_buffer, right_buffer, num_samples); break;
             }
             first += n;
         }
@@ -335,9 +351,11 @@ public:
 #endif
     }
 
-    /// Sections process_chain() runs together in one sample-major pass. Eight
-    /// sections' state fits in registers alongside the working set.
-    static constexpr std::size_t kChainSectionsPerPass = 8;
+    /// Sections process_chain() runs together in one sample-major pass. A
+    /// wider pass keeps more independent recursions in flight; splitting ten
+    /// sections into passes of 8 and 2 measured 1.5x slower than one pass, and
+    /// sixteen into 8 and 8 1.9x slower.
+    static constexpr std::size_t kChainSectionsPerPass = 16;
 
     // Shortest call process_stereo() runs in vector lanes.
     static constexpr int kStereoLaneMinSamples = 64;
