@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -270,6 +271,10 @@ struct SiblingIdentity {
     /// Each (parent node, key) declared by more than one child. Those
     /// siblings fall back to positions.
     std::vector<std::pair<int, std::string>> duplicates;
+    /// Each (parent node, signature) whose children include both a keyed
+    /// sibling and a positional one. The positional ordinals there skip the
+    /// keyed siblings, so adding or removing a key renumbers them.
+    std::vector<std::pair<int, std::string>> mixed;
 };
 
 /// Computed over the WHOLE document rather than over the painted set: an
@@ -301,15 +306,24 @@ SiblingIdentity sibling_identity(const CapturedStyleIndex& index) {
     // visits every parent's children in order and the running tally per
     // (parent, signature) is the ordinal.
     std::map<std::pair<int, std::string>, int> seen;
+    std::set<std::pair<int, std::string>> keyed_groups;
     for (int node = 0; node < count; ++node) {
         const int parent = index.parent_of(node);
         auto key = declared_key(index, node);
         if (!key.empty() && declared[{parent, key}] == 1) {
             identity.key[static_cast<size_t>(node)] = std::move(key);
             ++identity.keyed;
+            keyed_groups.insert({parent, describe(index, node)});
             continue;
         }
         identity.ordinal[static_cast<size_t>(node)] = seen[{parent, describe(index, node)}]++;
+    }
+    // An edit stored on a positional sibling's ordinal moves to a different
+    // node when a neighbour gains or loses a key, and the anchor it lands on
+    // still looks valid, so the mix is reported rather than left to be found.
+    for (const auto& group : keyed_groups) {
+        if (!group.second.empty() && seen.count(group) != 0)
+            identity.mixed.push_back(group);
     }
     return identity;
 }
@@ -1092,7 +1106,12 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     for (const auto& [parent, key] : identity.duplicates) {
         counts.duplicate_keys.push_back(
             (parent >= 0 ? anchor_path(index, identity, parent) : std::string("capture:")) +
-            " data-pulp-key=\"" + key + "\"");
+            " data-pulp-key=\"" + escape_segment(key) + "\"");
+    }
+    for (const auto& [parent, signature] : identity.mixed) {
+        counts.mixed_keyed_siblings.push_back(
+            (parent >= 0 ? anchor_path(index, identity, parent) : std::string("capture:")) + " " +
+            escape_segment(signature));
     }
     // Slots in Chrome's paint order (ties already broken by document order),
     // and the reverse map that turns DOM parentage into tree parentage.

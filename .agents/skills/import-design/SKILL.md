@@ -583,8 +583,11 @@ knowing before you touch that file:
   misapplied edit keys exist to prevent. The one case that does not orphan: in
   a parent that mixes keyed and unkeyed same-signature siblings, the unkeyed
   ones renumber over the unkeyed set only, so an old `li[0]` edit that belonged
-  to a keyed row now resolves onto the first UNKEYED row. Re-check stored edits
-  under such parents by hand. The update planner treats `pulp_key` and
+  to a keyed row now resolves onto the first UNKEYED row. Every such parent is
+  reported on the IR root (`native_keyed_mixed_siblings`, as
+  `<parent anchor> <signature>`) and as an import warning; re-check stored edits
+  under each one by hand. A duplicated key makes its siblings positional, so a
+  duplicate beside a usable key is reported in both lists. The update planner treats `pulp_key` and
   `pulp_id` as immutable contract attributes (they start with `pulp`), so the
   same anchor whose `data-pulp-id` changed is rebuilt, not retained.
 

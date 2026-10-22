@@ -142,6 +142,11 @@ struct PaintedTreeCounts {
     /// anchors; the list says which ones, because a key that silently stopped
     /// identifying its node reads exactly like one that works.
     std::vector<std::string> duplicate_keys;
+    /// Parents whose same-signature children mix keyed and positional
+    /// siblings, as `<parent anchor> <signature>`. The positional ordinals
+    /// count only the unkeyed siblings, so a key added or removed there moves
+    /// a stored edit onto a different node without orphaning it.
+    std::vector<std::string> mixed_keyed_siblings;
 };
 
 /// Lower every painted node in the captured document into a TREE under `root`

@@ -2059,6 +2059,26 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
                                           "distinct data-pulp-key.");
             }
         }
+        // Positional ordinals beside keyed siblings count only the unkeyed
+        // ones, so a key added or removed there hands a stored edit to a
+        // different node whose anchor still resolves. Reported so the drift
+        // is findable instead of silent.
+        if (!tree.mixed_keyed_siblings.empty()) {
+            std::string joined;
+            for (const auto& mixed : tree.mixed_keyed_siblings) {
+                if (!joined.empty())
+                    joined += ",";
+                joined += mixed;
+            }
+            ir.root.attributes["native_keyed_mixed_siblings"] = joined;
+            for (const auto& mixed : tree.mixed_keyed_siblings) {
+                result.warnings.push_back(
+                    "keyed and unkeyed siblings mixed under " + mixed +
+                    ": the unkeyed ones are numbered without the keyed ones, so "
+                    "adding or removing a key moves their stored edits to another "
+                    "node. Give every sibling a data-pulp-key, or none.");
+            }
+        }
     }
 
     int styled_controls = 0;

@@ -1884,7 +1884,7 @@ namespace {
 ///
 /// strings: 0 #document 1 HTML 2 BODY 3 OL 4 LI 5 data-pulp-key
 ///          6 drive 7 tone 8 mix 9 background-image 10 none 11 display
-///          12 block 13 data-pulp-id 14 item-drive
+///          12 block 13 data-pulp-id 14 item-drive 15 t"o/ne
 LoweredSnapshot lower_list(const std::string& item_attributes, const std::string& name) {
     return lower_snapshot(
         {
@@ -1901,7 +1901,7 @@ LoweredSnapshot lower_list(const std::string& item_attributes, const std::string
             .paint_orders = "[0,1,1,2,3,4,5]",
             .strings = R"("#document","HTML","BODY","OL","LI","data-pulp-key",)"
                        R"("drive","tone","mix","background-image","none",)"
-                       R"("display","block","data-pulp-id","item-drive")",
+                       R"("display","block","data-pulp-id","item-drive","t\"o/ne")",
         },
         name);
 }
@@ -2104,6 +2104,33 @@ TEST_CASE("an unkeyed list reorder plans rewrites, not moves",
     REQUIRE(plan.keyed);
     CHECK(plan.work.moved == 0);
     CHECK(plan.work == pulp::view::DesignUpdateWorkCounters{1, 0, 2, 2});
+}
+
+TEST_CASE("a list mixing keyed and unkeyed siblings is reported",
+          "[browser-capture][native-lowering][anchor]") {
+    // Drive is keyed and its two neighbours are not, so they are numbered
+    // li[0] and li[1] over the unkeyed set. Before Drive had its key they were
+    // li[1] and li[2]: an edit stored on li[0] for Drive now resolves onto
+    // Tone, and that anchor still looks valid. The mix is reported so the
+    // moved edit is findable.
+    const auto mixed = lower_list("[5,6],[],[]", "mixed");
+    CHECK(mixed.counts.keyed_anchors == 1);
+    CHECK(mixed.counts.mixed_keyed_siblings ==
+          std::vector<std::string>{"capture:html[0]/body[0]/ol[0] li"});
+
+    // Controls: a fully keyed list and a fully unkeyed list carry no
+    // positional sibling beside a keyed one, so neither is reported.
+    CHECK(lower_list("[5,6],[5,7],[5,8]", "all-keyed").counts.mixed_keyed_siblings.empty());
+    CHECK(lower_list("[],[],[]", "unkeyed").counts.mixed_keyed_siblings.empty());
+}
+
+TEST_CASE("a duplicated sibling key is reported escaped",
+          "[browser-capture][native-lowering][anchor]") {
+    // The raw key is author text. Reported verbatim, a quote in it would end
+    // the quoted value early and the report would name a different key.
+    const auto lowered = lower_list("[5,15],[5,15],[5,8]", "escaped-duplicate");
+    CHECK(lowered.counts.duplicate_keys ==
+          std::vector<std::string>{R"(capture:html[0]/body[0]/ol[0] data-pulp-key="t\"o\/ne")"});
 }
 
 TEST_CASE("hiding a middle sibling misapplies no stored edit",
