@@ -9,6 +9,7 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    "pulp/audio/format_registry.hpp": "Pulp::audio",
     "pulp/signal/parametric_eq.hpp": "Pulp::signal",
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
     "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
@@ -167,6 +168,18 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/audio/format_registry.hpp",
+        "fingerprint": "sha256:d1c11b1c00fee31c138dbafdf3ab64f9dd320c00badbe156deb2d5cd02eb490e",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Audio file decoding (FormatRegistry::read with DecodeLimits) is host "
+            "infrastructure that sample, impulse-response and offline-render "
+            "capabilities consume; it is not an independently selected "
+            "generator-facing capability in the installed contract."
+        ),
+    },
     {
         "include": "pulp/signal/loudness_compensation.hpp",
         "fingerprint": "sha256:cc25f7959641998fdaf14ccc04b3485fdee98191cd8ba01e606a4248dc4d0546",

@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 147,
+  "inventory_version": 148,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,21 +43,21 @@
   ],
   "counts": {
     "public_headers": 508,
-    "reviewed_headers": 241,
-    "legacy_unreviewed_headers": 267,
+    "reviewed_headers": 242,
+    "legacy_unreviewed_headers": 266,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 72,
-      "legacy_unreviewed": 267,
+      "infrastructure": 73,
+      "legacy_unreviewed": 266,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
         "public_headers": 113,
-        "reviewed_headers": 12,
-        "legacy_unreviewed_headers": 101,
+        "reviewed_headers": 13,
+        "legacy_unreviewed_headers": 100,
         "unsupported_headers": 0
       },
       "midi": {
@@ -333,11 +333,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/format_registry.hpp",
-      "fingerprint": "sha256:7241d82c4bdf004085cb68ce3293e8948dce6ea08758d29e9df06778e57705d1",
+      "fingerprint": "sha256:d1c11b1c00fee31c138dbafdf3ab64f9dd320c00badbe156deb2d5cd02eb490e",
       "include": "pulp/audio/format_registry.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Audio file decoding (FormatRegistry::read with DecodeLimits) is host infrastructure that sample, impulse-response and offline-render capabilities consume; it is not an independently selected generator-facing capability in the installed contract."
     },
     {
       "domain": "audio",
