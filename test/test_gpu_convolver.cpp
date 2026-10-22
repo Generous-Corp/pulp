@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/gpu_audio/detail/gpu_ola.hpp>
+#include <pulp/gpu_audio/gpu_audio_program.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
@@ -8,8 +9,8 @@
 
 #include "detail/gpu_convolver_test_access.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
-#include "detail/shared_io_convolution_session.hpp"
 #include "harness/rt_allocation_probe.hpp"
+#include "support/shared_io_loss_provider.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -888,100 +889,7 @@ TEST_CASE("GPU-off convolver nodes expose fail-closed provider status",
 namespace {
 
 using pulp::gpu_audio::detail::GpuConvolverTestAccess;
-using pulp::gpu_audio::detail::SharedIoArenaProvider;
-using pulp::gpu_audio::detail::SharedIoConvolutionSession;
-using pulp::gpu_audio::detail::SharedIoPreparedProgram;
-
-// Deterministic host-memory arena provider. It never completes work; tests
-// flip `lost` to stand in for the backend's loss query.
-class LossProvider final : public SharedIoArenaProvider {
-  public:
-    bool create_slot(std::uint32_t index, std::size_t input_bytes, std::size_t output_bytes,
-                     SlotResources& resources) noexcept override {
-        try {
-            auto slot = std::make_unique<Slot>();
-            slot->index = index;
-            slot->input.resize(input_bytes);
-            slot->output.resize(output_bytes);
-            resources.input = slot->input.data();
-            resources.input_size = input_bytes;
-            resources.output = slot->output.data();
-            resources.output_size = output_bytes;
-            resources.opaque = slot.get();
-            resources.input_lifecycle = {
-                .allocated = true, .import_attempted = true, .import_succeeded = true};
-            resources.output_lifecycle = resources.input_lifecycle;
-            slots_.push_back(std::move(slot));
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-    void retire_slot(SlotResources& resources) noexcept override {
-        resources.input_lifecycle.dispose_observed = true;
-        resources.output_lifecycle.dispose_observed = true;
-    }
-    void destroy_slot(SlotResources& resources) noexcept override {
-        resources.input_lifecycle.host_freed = true;
-        resources.output_lifecycle.host_freed = true;
-        resources.opaque = nullptr;
-    }
-    bool acquire_slot_buffers(const SlotResources& resources,
-                              SlotBufferHandle& handle) const noexcept override {
-        const auto* slot = static_cast<const Slot*>(resources.opaque);
-        if (!slot)
-            return false;
-        handle = {.provider = this,
-                  .device = this,
-                  .input_buffer = slot->input.data(),
-                  .output_buffer = slot->output.data(),
-                  .slot = slot->index,
-                  .generation = 1,
-                  .lifetime = lifetime_};
-        return true;
-    }
-    bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override {
-        return handle.provider == this && !handle.lifetime.expired();
-    }
-    bool submit(const SlotResources&, SlotToken,
-                std::shared_ptr<pulp::gpu_audio::detail::SharedIoTerminalInbox>) noexcept override {
-        return false;
-    }
-    bool device_lost() const noexcept override {
-        return lost;
-    }
-    void poll() noexcept override {}
-    bool drain() noexcept override {
-        return true;
-    }
-
-    bool lost = false;
-
-  private:
-    struct Slot {
-        std::uint32_t index = 0;
-        std::vector<std::byte> input;
-        std::vector<std::byte> output;
-    };
-    std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
-    std::vector<std::unique_ptr<Slot>> slots_;
-};
-
-class IdleProgram final : public SharedIoPreparedProgram {
-  public:
-    bool prepare(SharedIoArenaProvider&,
-                 std::span<const SharedIoArenaProvider::SlotBufferHandle>) noexcept override {
-        return true;
-    }
-    bool submit(SharedIoArenaProvider&, const SharedIoArenaProvider::SlotResources&,
-                SharedIoArenaProvider::SlotToken,
-                std::shared_ptr<pulp::gpu_audio::detail::SharedIoTerminalInbox>) noexcept override {
-        return false;
-    }
-    bool release() noexcept override {
-        return true;
-    }
-};
+using pulp::test::LossProvider;
 
 constexpr std::uint32_t kHealthBlock = 2;
 
@@ -991,28 +899,25 @@ std::unique_ptr<GpuConvolver> convolver_with_loss_provider(LossProvider*& provid
     auto convolver =
         std::make_unique<GpuConvolver>(1, kHealthBlock, 48000, std::vector<float>{1.0f});
     REQUIRE(convolver->prepare());
-    auto owner = std::make_unique<LossProvider>();
-    provider = owner.get();
-    auto session = std::make_unique<SharedIoConvolutionSession>();
-    REQUIRE(session->prepare({std::move(owner), std::make_unique<IdleProgram>()},
-                             {.pipeline = {.capacity = 8,
-                                           .channels = 1,
-                                           .block_size = kHealthBlock,
-                                           .fft_size = kHealthBlock,
-                                           .ir_length = 1,
-                                           .lead_blocks = GpuConvolver::kLatencyBlocks},
-                              .slots = 2}));
-    if (!GpuConvolverTestAccess::install_shared_io_session(*convolver, std::move(session)))
+    if (!pulp::test::install_loss_session(*convolver, kHealthBlock, provider))
         return nullptr;
     return convolver;
 }
 
 } // namespace
 
+// Every status a health test observes must satisfy the v3 invariants.
+pulp::gpu_audio::GpuAudioStatus validated(const pulp::gpu_audio::GpuAudioStatus& status) {
+    const auto validation = pulp::gpu_audio::validate_gpu_audio_status(status);
+    INFO("status error " << static_cast<int>(validation.error));
+    CHECK(validation.accepted());
+    return status;
+}
+
 TEST_CASE("GpuConvolver status is Uninitialized before prepare and fenced",
           "[gpu_audio][convolver][status]") {
     GpuConvolver convolver(1, 32, 48000, {1.0f});
-    const auto status = convolver.status_snapshot();
+    const auto status = validated(convolver.status_snapshot());
     CHECK(status.schema_version == GpuAudioStatus::kSchemaVersion);
     CHECK(status.provider_state == GpuAudioProviderState::Uninitialized);
     CHECK(convolver.recovery_reason() == GpuAudioRecoveryReason::None);
@@ -1037,28 +942,31 @@ TEST_CASE("GpuConvolver shared-path status reports provider loss through the tra
 
     // Positive control: an authenticated, unfenced session is Ready on both
     // the transport and the node.
-    auto status = transport.status_snapshot();
+    auto status = validated(transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
     CHECK(status.delivery_epoch_active);
     CHECK(status.epoch != 0);
     const auto prepared_epoch = status.epoch;
-    CHECK(convolver->status_snapshot().provider_state == GpuAudioProviderState::Ready);
+    CHECK(validated(convolver->status_snapshot()).provider_state == GpuAudioProviderState::Ready);
     CHECK_FALSE(convolver->fenced());
 
     provider->lost = true;
     transport.pump();
 
-    status = transport.status_snapshot();
+    status = validated(transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
     CHECK(status.epoch == prepared_epoch);
+    CHECK(status.selected_engine == GpuAudioEngine::Cpu);
     CHECK_FALSE(status.delivery_epoch_active);
 
-    const auto node_status = convolver->status_snapshot();
+    const auto node_status = validated(convolver->status_snapshot());
     CHECK(node_status.provider_state == GpuAudioProviderState::Unavailable);
     CHECK(node_status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
     CHECK(node_status.provider == GpuAudioProvider::Dawn);
+    CHECK(node_status.selected_engine == GpuAudioEngine::Cpu);
     CHECK(node_status.fallback_policy == MissPolicy::CpuFallback);
     CHECK(node_status.fallback_available);
     CHECK(convolver->recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
@@ -1068,12 +976,59 @@ TEST_CASE("GpuConvolver shared-path status reports provider loss through the tra
     std::size_t allocations = 0;
     {
         pulp::test::RtAllocationProbe probe;
-        (void)transport.status_snapshot();
-        (void)convolver->status_snapshot();
+        (void)validated(transport.status_snapshot());
+        (void)validated(convolver->status_snapshot());
         (void)convolver->fenced();
         allocations = probe.allocation_count();
     }
     CHECK(allocations == 0);
+    transport.release();
+}
+
+TEST_CASE("GpuConvolver shared-path status counts a refused GPU block as CPU fallback",
+          "[gpu_audio][convolver][status][health]") {
+    LossProvider* provider = nullptr;
+    auto convolver = convolver_with_loss_provider(provider);
+    if (!convolver)
+        SKIP("shared-I/O provider state is not compiled into this build");
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(convolver.get(), {8}));
+    auto status = validated(transport.status_snapshot());
+    REQUIRE(status.provider_state == GpuAudioProviderState::Ready);
+    for (const auto count : status.terminal_counts)
+        CHECK(count == 0);
+
+    // One callback block is admitted; the idle program refuses its
+    // submission, which is one terminal per admitted block.
+    std::vector<float> in(kHealthBlock, 0.5f), out(kHealthBlock, 0.0f);
+    const float* in_ptrs[] = {in.data()};
+    float* out_ptrs[] = {out.data()};
+    BufferView<const float> input(in_ptrs, 1, kHealthBlock);
+    BufferView<float> output(out_ptrs, 1, kHealthBlock);
+    transport.process(input, output, kHealthBlock);
+    transport.pump();
+    // Run until that block's slot is due, so the CPU fallback has delivered
+    // the block the GPU refused (a terminal count never runs ahead of the
+    // deliveries it describes).
+    for (std::uint32_t block = 0; block < GpuConvolver::kLatencyBlocks + 1; ++block) {
+        transport.process(input, output, kHealthBlock);
+        transport.pump();
+    }
+
+    status = validated(transport.status_snapshot());
+    CHECK(status.fallback_blocks >= 1);
+    CHECK(status.terminal_counts[static_cast<std::size_t>(
+              GpuAudioTerminalDisposition::CpuFallback)] == 1);
+    CHECK(status.terminal_counts[static_cast<std::size_t>(
+              GpuAudioTerminalDisposition::GpuDelivered)] == 0);
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
+    // Without tracing the node keeps no delivery counters of its own, so it
+    // leaves terminal counts to the transport rather than over-report them.
+    CHECK(
+        validated(convolver->status_snapshot())
+            .terminal_counts[static_cast<std::size_t>(GpuAudioTerminalDisposition::CpuFallback)] ==
+        0);
     transport.release();
 }
 
@@ -1091,7 +1046,7 @@ TEST_CASE("GpuConvolver shared-path status latches the offline fence as Degraded
     BufferView<const float> input(in_ptrs, 1, kHealthBlock);
     BufferView<float> output(out_ptrs, 1, kHealthBlock);
     transport.process_offline(input, output, kHealthBlock);
-    const auto status = transport.status_snapshot();
+    const auto status = validated(transport.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Degraded);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::OfflineFence);
     CHECK(convolver->fenced());
@@ -1109,7 +1064,7 @@ TEST_CASE("GpuConvolver staged status is honest and reports a lost device",
 
     // Positive control: a live staged device proves neither the provider nor
     // the engine, and nothing has been latched.
-    auto status = convolver.status_snapshot();
+    auto status = validated(convolver.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Degraded);
     CHECK(status.provider == GpuAudioProvider::Unknown);
     CHECK(status.selected_engine == GpuAudioEngine::Unknown);
@@ -1122,21 +1077,23 @@ TEST_CASE("GpuConvolver staged status is honest and reports a lost device",
     // The transport folds the staged node's own status in.
     GpuAudioTransport transport;
     REQUIRE(transport.prepare(&convolver, {8}));
-    CHECK(transport.status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+    CHECK(validated(transport.status_snapshot()).provider_state == GpuAudioProviderState::Degraded);
 
     device->notify_device_lost();
-    status = convolver.status_snapshot();
+    status = validated(convolver.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
     CHECK(convolver.fenced());
-    const auto hosted = transport.status_snapshot();
+    // The transport worker samples the staged node's status on its next pump.
+    transport.pump();
+    const auto hosted = validated(transport.status_snapshot());
     CHECK(hosted.provider_state == GpuAudioProviderState::Unavailable);
     CHECK(hosted.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
     transport.release();
 
     // With no device the worker runs the exact CPU convolution, and says so.
     GpuConvolverTestAccess::install_staged_compute(convolver, nullptr);
-    status = convolver.status_snapshot();
+    status = validated(convolver.status_snapshot());
     CHECK(status.selected_engine == GpuAudioEngine::Cpu);
     CHECK(status.provider_state == GpuAudioProviderState::Degraded);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
@@ -1145,12 +1102,12 @@ TEST_CASE("GpuConvolver staged status is honest and reports a lost device",
 TEST_CASE("GpuMultiConvolver status declares silence with no fallback",
           "[gpu_audio][convolver][status]") {
     GpuMultiConvolver multi(32, 48000, {{1.0f}, {0.5f}});
-    auto status = multi.status_snapshot();
+    auto status = validated(multi.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Uninitialized);
     CHECK(multi.fenced());
     if (!multi.prepare())
         SKIP(kNoGpu);
-    status = multi.status_snapshot();
+    status = validated(multi.status_snapshot());
     CHECK(status.provider_state == GpuAudioProviderState::Degraded);
     CHECK(status.fallback_policy == MissPolicy::Silence);
     CHECK_FALSE(status.fallback_available);

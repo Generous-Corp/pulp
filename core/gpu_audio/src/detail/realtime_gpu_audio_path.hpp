@@ -29,7 +29,13 @@ using RealtimeGpuDeliveryFn = void (*)(void*, std::uint64_t, std::uint8_t, std::
 using RealtimeGpuSequenceFn = std::uint64_t (*)(void*) noexcept;
 using RealtimeGpuFenceFn = bool (*)(void*) noexcept;
 
-// Filled by the node on the host/UI thread; allocation-free.
+// One allocation-free health sample, filled by the node's `health` hook.
+// Hook contract: serialized non-RT only. GpuAudioTransport calls it from its
+// worker after each service step and after the offline fence, or from a
+// quiescent host inside prepare(). It is never called from a UI or realtime
+// thread, so a node may read worker-owned state there. The UI-safe read is
+// GpuAudioTransport::status_snapshot(), which serves the transport's coherent
+// copy of the last sample and never calls into the node.
 struct RealtimeGpuHealth {
     bool fenced = false;
     GpuAudioRecoveryReason recovery_reason = GpuAudioRecoveryReason::None;
@@ -54,7 +60,8 @@ struct RealtimeGpuNodePath {
     // Host/quiescent only: the prepared node retains the callback timeline
     // across transport release, reconstruction and reprepare.
     RealtimeGpuSequenceFn next_sequence = nullptr;
-    // Optional; not part of active(). Nothing populates them yet.
+    // Optional; not part of active(). `health` is populated for the WaveNet
+    // realtime node and the shared GpuConvolver path; `reprepare` is unused.
     RealtimeGpuHealthFn health = nullptr;
     RealtimeGpuReprepareFn reprepare = nullptr;
 

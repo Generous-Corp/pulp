@@ -5,6 +5,8 @@
 #include "shared_io_provider_identity.hpp"
 #include "shared_io_trace.hpp"
 
+#include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -112,9 +114,21 @@ class SharedIoConvolutionSession {
     std::uint64_t delivery_epoch() const noexcept {
         return pipeline_.delivery_epoch();
     }
+    // Serialized non-RT (see SharedIoStampedBridge::epoch_first_sequence()).
+    std::uint64_t epoch_first_sequence() const noexcept {
+        return pipeline_.epoch_first_sequence();
+    }
     // Serialized non-RT diagnostic, like the provider query it forwards.
     bool provider_device_lost() const noexcept {
         return provider_ != nullptr && provider_->device_lost();
+    }
+    // GPU terminal dispositions recorded since prepare(), whether or not a
+    // trace recorder is attached. Single writer (the serialized worker).
+    std::uint64_t gpu_terminal_count(SharedIoGpuTerminalDisposition disposition) const noexcept {
+        const auto index = static_cast<std::size_t>(disposition);
+        return index < gpu_terminal_counts_.size()
+                   ? gpu_terminal_counts_[index].load(std::memory_order_relaxed)
+                   : 0;
     }
     bool complete_callback_delivery(const Callback& callback, SharedIoDeliveryDisposition actual,
                                     std::uint64_t callback_end_ns = 0,
@@ -260,6 +274,9 @@ class SharedIoConvolutionSession {
                         bool gpu_elapsed_available = false) noexcept;
     std::vector<TraceSlot> trace_slots_;
     SharedIoTelemetry trace_telemetry_;
+    std::array<std::atomic<std::uint64_t>,
+               static_cast<std::size_t>(SharedIoGpuTerminalDisposition::CancelledTeardown) + 1>
+        gpu_terminal_counts_{};
     SharedIoTelemetrySnapshot last_closed_trace_telemetry_{};
     std::unique_ptr<SharedIoTraceRecorder> trace_recorder_;
     const SharedIoTraceDrainObserver* trace_observer_ = nullptr;

@@ -13,6 +13,10 @@
 
 namespace pulp::gpu_audio {
 
+namespace detail {
+struct GpuConvolutionReverbTestAccess;
+} // namespace detail
+
 /// Configuration for the opt-in GPU realization of Forge's stereo convolution
 /// reverb.  The CPU catalog realization remains the default; callers must set
 /// `gpu_enabled` explicitly before prepare().
@@ -132,7 +136,12 @@ class GpuConvolutionReverb final {
     };
 
     bool valid_config() const noexcept;
-    bool prepare_lanes() noexcept;
+    // Prepares each lane's convolver: the authenticated shared provider by
+    // default, or `prepare_node` when a private test seam supplies one.
+    using LaneNodePreparer = bool (*)(GpuConvolver&, void*) noexcept;
+    bool prepare_with(LaneNodePreparer prepare_node, void* context) noexcept;
+    bool prepare_lanes(LaneNodePreparer prepare_node, void* context) noexcept;
+    friend struct detail::GpuConvolutionReverbTestAccess;
     void update_filter_coefficients() noexcept;
     void clear_runtime_buffers() noexcept;
     void process_quantum() noexcept;

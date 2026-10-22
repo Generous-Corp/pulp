@@ -1,5 +1,6 @@
 #include <pulp/gpu_audio/gpu_convolution_reverb.hpp>
 
+#include "detail/gpu_convolution_reverb_test_access.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 
 #include <algorithm>
@@ -68,7 +69,7 @@ bool GpuConvolutionReverb::valid_config() const noexcept {
     return true;
 }
 
-bool GpuConvolutionReverb::prepare_lanes() noexcept {
+bool GpuConvolutionReverb::prepare_lanes(LaneNodePreparer prepare_node, void* context) noexcept {
     try {
         signal::ZeroLatencyConvolver prepared;
         prepared.prepare(static_cast<double>(config_.sample_rate),
@@ -105,9 +106,14 @@ bool GpuConvolutionReverb::prepare_lanes() noexcept {
                                                         lane->ir, GpuConvolver::kLatencyBlocks);
             if (!lane->node->configure_trace(config_.trace))
                 return false;
-            if (!lane->node->set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired) ||
-                !lane->node->prepare())
+            if (prepare_node != nullptr) {
+                if (!prepare_node(*lane->node, context))
+                    return false;
+            } else if (!lane->node->set_provider_policy(
+                           GpuConvolver::ProviderPolicy::SharedRequired) ||
+                       !lane->node->prepare()) {
                 return false;
+            }
 
             lane->transport = std::make_unique<GpuAudioTransport>();
             const GpuAudioTransport::Config transport_config{
@@ -166,10 +172,14 @@ void GpuConvolutionReverb::clear_runtime_buffers() noexcept {
 }
 
 bool GpuConvolutionReverb::prepare() noexcept {
+    return prepare_with(nullptr, nullptr);
+}
+
+bool GpuConvolutionReverb::prepare_with(LaneNodePreparer prepare_node, void* context) noexcept {
     release();
     if (!valid_config())
         return false;
-    if (!prepare_lanes()) {
+    if (!prepare_lanes(prepare_node, context)) {
         release();
         return false;
     }
@@ -458,6 +468,13 @@ bool GpuConvolutionReverb::fenced() const noexcept {
             return true;
     }
     return false;
+}
+
+bool detail::GpuConvolutionReverbTestAccess::prepare_with(GpuConvolutionReverb& route,
+                                                          bool (*prepare_node)(GpuConvolver&,
+                                                                               void*) noexcept,
+                                                          void* context) noexcept {
+    return prepare_node != nullptr && route.prepare_with(prepare_node, context);
 }
 
 } // namespace pulp::gpu_audio

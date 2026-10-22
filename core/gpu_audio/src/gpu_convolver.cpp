@@ -3,6 +3,7 @@
 #include <pulp/runtime/trace.hpp>
 
 #include <pulp/gpu_audio/detail/gpu_ola.hpp>
+#include <pulp/gpu_audio/gpu_audio_program.hpp>
 
 #include "detail/gpu_convolver_test_access.hpp"
 #include "detail/gpu_convolver_trial_config.hpp"
@@ -692,10 +693,29 @@ bool GpuConvolver::realtime_shared_io_health(const void* self,
     detail::RealtimeGpuHealth health;
     health.recovery_reason = public_recovery_reason(session.recovery_reason());
     health.recovery_sequence = session.recovery_sequence();
+    // A cause the worker latched without a stream position (provider loss,
+    // failure or an offline fence) is attributed to the first sequence of the
+    // epoch it fenced; the exact position is unknown.
+    if (health.recovery_reason != GpuAudioRecoveryReason::None &&
+        health.recovery_sequence == std::numeric_limits<std::uint64_t>::max())
+        health.recovery_sequence = session.epoch_first_sequence();
     health.epoch = session.epoch();
     health.delivery_epoch_active = session.delivery_epoch() != 0;
     health.device_lost = session.provider_device_lost();
     health.fenced = !session.prepared() || session.fenced() || !health.delivery_epoch_active;
+    // Same mapping as the WaveNet node: a failed GPU block is covered by this
+    // node's declared CPU fallback.
+    using Gpu = detail::SharedIoGpuTerminalDisposition;
+    const auto tally = [&](GpuAudioTerminalDisposition disposition, Gpu terminal) noexcept {
+        health.terminal_counts[static_cast<std::size_t>(disposition)] +=
+            session.gpu_terminal_count(terminal);
+    };
+    tally(GpuAudioTerminalDisposition::GpuDelivered, Gpu::CompletedAccepted);
+    tally(GpuAudioTerminalDisposition::CpuFallback, Gpu::ProviderFailed);
+    tally(GpuAudioTerminalDisposition::StaleRejected, Gpu::StaleRejected);
+    tally(GpuAudioTerminalDisposition::LateRejected, Gpu::LateRejected);
+    tally(GpuAudioTerminalDisposition::DeviceLost, Gpu::DeviceLost);
+    tally(GpuAudioTerminalDisposition::Cancelled, Gpu::CancelledTeardown);
     (void)convolver->shared_io_->health.publish(health);
     out = health;
     return true;
@@ -740,17 +760,26 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
         detail::RealtimeGpuHealth health;
         if (shared_io_->health.read(health)) {
             status.provider_state = detail::provider_state_for_health(health);
-            status.recovery_reason = health.recovery_reason;
+            status.recovery_reason = detail::reported_recovery_reason(health);
             status.recovery_sequence = health.recovery_sequence;
             status.epoch = health.epoch;
             status.delivery_epoch_active = health.delivery_epoch_active;
-            for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
-                status.terminal_counts[i] = health.terminal_counts[i];
+            // The node's delivery counters above come from trace telemetry,
+            // which only records while tracing; without them the terminal
+            // counts could run ahead of the deliveries they describe. The
+            // hosting transport reports both from its own counters.
+            if (shared_io_->session->trace_recording_enabled()) {
+                for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
+                    status.terminal_counts[i] = health.terminal_counts[i];
+            }
         } else {
             // No serialized sample yet (or none stable): the provider is
             // authenticated but its delivery state is unverified.
             status.provider_state = GpuAudioProviderState::Degraded;
         }
+        // Fenced or lost: the continuously primed CPU fallback is delivering.
+        status.selected_engine = detail::delivering_engine(
+            status.provider_state, status.selected_engine, status.fallback_policy);
         return status;
     }
 #endif
@@ -761,7 +790,11 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
     status.provider = GpuAudioProvider::Unknown;
     status.selected_engine = gpu_ != nullptr ? GpuAudioEngine::Unknown : GpuAudioEngine::Cpu;
     status.recovery_reason = staged_recovery_reason();
-    status.provider_state = status.recovery_reason == GpuAudioRecoveryReason::ProviderLost
+    // The staged path has no stamped stream, so a cause observed here has no
+    // exact position; it is attributed to the start of the stream.
+    if (status.recovery_reason != GpuAudioRecoveryReason::None)
+        status.recovery_sequence = 0;
+    status.provider_state = detail::provider_loss_reason(status.recovery_reason)
                                 ? GpuAudioProviderState::Unavailable
                                 : GpuAudioProviderState::Degraded;
     return status;

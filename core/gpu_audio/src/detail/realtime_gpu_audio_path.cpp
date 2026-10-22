@@ -1,27 +1,19 @@
 #include "realtime_gpu_audio_path.hpp"
+#include "realtime_gpu_health_mirror.hpp"
 
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 
-#include <cstddef>
-
 namespace pulp::gpu_audio::detail {
 namespace {
 
-// Serialized non-RT read. The public status projection is allocation-free and
-// already carries the bridge's first latched cause; the transport republishes
-// it for host readers.
+// Serialized non-RT read (transport worker or quiescent host). The public
+// status projection is allocation-free and already carries the bridge's first
+// latched cause; the transport republishes it for host readers.
 bool wavenet_health(const void* self, RealtimeGpuHealth& out) noexcept {
     const auto* node = static_cast<const GpuWaveNetRealtimeNode*>(self);
-    const auto status = node->status_snapshot();
-    out.fenced = node->fenced();
-    out.recovery_reason = status.recovery_reason;
-    out.recovery_sequence = status.recovery_sequence;
-    out.epoch = status.epoch;
-    out.delivery_epoch_active = status.delivery_epoch_active;
-    out.device_lost = status.provider_state == GpuAudioProviderState::Unavailable;
-    for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
-        out.terminal_counts[i] = status.terminal_counts[i];
+    out = health_from_status(node->status_snapshot());
+    out.fenced = out.fenced || node->fenced();
     return true;
 }
 

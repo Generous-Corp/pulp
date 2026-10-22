@@ -206,6 +206,10 @@ GpuAudioStatus GpuMultiConvolver::status_snapshot() const noexcept {
     status.recovery_reason = gpu_ != nullptr && gpu_->device_lost()
                                  ? GpuAudioRecoveryReason::ProviderLost
                                  : GpuAudioRecoveryReason::None;
+    // No stamped stream here, so a loss has no exact position; it is
+    // attributed to the start of the stream.
+    if (status.recovery_reason != GpuAudioRecoveryReason::None)
+        status.recovery_sequence = 0;
     status.provider_state = status.recovery_reason == GpuAudioRecoveryReason::ProviderLost
                                 ? GpuAudioProviderState::Unavailable
                                 : GpuAudioProviderState::Degraded;
