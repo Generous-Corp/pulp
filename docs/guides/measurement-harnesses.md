@@ -501,7 +501,7 @@ offers a 96 dB design at standard quality and a 140 dB design at pristine, and
 the suite holds them to within about 2 dB of those targets. `polyphase_iir`
 rejects from 0.58 Fs by 94.8 dB at standard and from 0.55 Fs by 146.3 dB at
 pristine (measured to the design in double; the float pristine build reads
-about -143 dB at its stopband edge). The
+about -148 dB at its stopband edge, because its stages keep double state). The
 below −100 dB residual test mentioned above pins `linear_phase_fir`, `pristine`,
 and 16× explicitly — that threshold is a statement about that configuration and
 not about the oversampler generally.

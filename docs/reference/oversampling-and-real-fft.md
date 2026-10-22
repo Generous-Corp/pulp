@@ -7,7 +7,7 @@ and the real-input transforms in `<pulp/signal/fft.hpp>`.
 
 | Kind | Default | Rejection | Passband | Latency |
 |---|---|---|---|---|
-| `polyphase_iir` | yes | `standard`: 94.8 dB from 0.58 Fs. `pristine`: 146.3 dB from 0.55 Fs (about 143 dB in the float build, which sits on its own rounding floor) | flat (< 1e-8 dB) to 0.42 Fs / 0.45 Fs | minimum phase, frequency dependent |
+| `polyphase_iir` | yes | `standard`: 94.8 dB from 0.58 Fs. `pristine`: 146.3 dB from 0.55 Fs | flat (< 1e-8 dB) to 0.42 Fs / 0.45 Fs | minimum phase, frequency dependent |
 | `fir_biquad` | no | about 7 dB just above base Nyquist, ~9 dB at 0.55 Fs | -1.9 dB at 0.3 Fs | minimum phase, frequency dependent |
 | `linear_phase_fir` | no | `standard`: 96 dB, `pristine`: 140 dB | flat to 0.40 Fs / 0.45 Fs | constant, reported by `latency()` |
 
@@ -31,6 +31,14 @@ matters, `linear_phase_fir` ends its transition at Nyquist instead.
 | `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB, flat to 0.40 Fs) or `pristine` (140 dB, flat to 0.45 Fs). Polyphase lane: `standard` (94.8 dB from 0.58 Fs, flat to 0.42 Fs) or `pristine` (146.3 dB from 0.55 Fs, flat to 0.45 Fs). |
 | `group_delay_samples(double f)` | Round-trip group delay in base samples at `f` cycles per base sample; constant for the linear-phase lane. |
 | `polyphase_stage_design(Quality, int stage)` | The `HalfBandIirDesign` a polyphase stage uses; evaluate it with `halfband_iir_response()`, `halfband_iir_magnitude_db()`, `halfband_iir_group_delay()` or `halfband_iir_stopband_db()`. |
+
+### Precision
+
+The polyphase stages keep their coefficients and state in double even when the
+sample type is float. A float round trip therefore differs from the double one
+only by the rounding of its float samples: -148 to -152 dB, against -132 to
+-139 dB with float state. Double and float arithmetic cost the same in this
+latency-bound kernel; measured, the float lane got about 3% slower.
 
 ### Delay of the minimum-phase lanes
 

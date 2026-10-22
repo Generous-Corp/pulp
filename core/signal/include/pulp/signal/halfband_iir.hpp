@@ -352,15 +352,27 @@ inline constexpr std::array<float, 3> kDefaultCoefficientsB = {
 // harmless because anything below the threshold is ~600 dB under full scale.
 template <typename SampleType = float> class HalfBandIirStageT {
   public:
+    /// Coefficients and recurrence state are kept in double even for a float
+    /// stage. The kernel is scalar and bound by the recurrence latency, and on
+    /// current cores a scalar double fused multiply-add has the same latency
+    /// and throughput as a float one, so the wider state is free; what it buys
+    /// is a round trip whose rounding floor is the float output's own (about
+    /// -153 dB) rather than the accumulated rounding of every section (about
+    /// -132 to -139 dB in float). Extended-precision state is the classic
+    /// remedy for roundoff noise accumulating through cascaded recursive
+    /// sections (L. B. Jackson, "Roundoff-noise analysis for fixed-point
+    /// digital filters realized in cascade or parallel form", IEEE Trans.
+    /// Audio Electroacoust. 18(2), 1970; N. J. Higham, "Accuracy and Stability
+    /// of Numerical Algorithms", 2nd ed., SIAM 2002, ch. 3).
+    using State = std::conditional_t<(sizeof(SampleType) < sizeof(double)), double, SampleType>;
+
     static constexpr std::size_t kMaxPath = kHalfBandIirMaxCoefficients / 2;
 
     void configure(const HalfBandIirDesign& design) noexcept {
         count_ = design.count;
         for (std::size_t i = 0; i < kMaxPath; ++i) {
-            a_[i] = i < design.path_a_count() ? static_cast<SampleType>(design.path_a(i))
-                                              : SampleType{0};
-            b_[i] = i < design.path_b_count() ? static_cast<SampleType>(design.path_b(i))
-                                              : SampleType{0};
+            a_[i] = i < design.path_a_count() ? static_cast<State>(design.path_a(i)) : State{0};
+            b_[i] = i < design.path_b_count() ? static_cast<State>(design.path_b(i)) : State{0};
         }
         reset();
     }
@@ -409,27 +421,29 @@ template <typename SampleType = float> class HalfBandIirStageT {
 
   private:
     struct PathState {
-        std::array<SampleType, kMaxPath> x{};
-        std::array<SampleType, kMaxPath> y{};
+        std::array<State, kMaxPath> x{};
+        std::array<State, kMaxPath> y{};
     };
     struct DirectionState {
         PathState a;
         PathState b;
     };
 
-    std::array<SampleType, kMaxPath> a_{};
-    std::array<SampleType, kMaxPath> b_{};
+    std::array<State, kMaxPath> a_{};
+    std::array<State, kMaxPath> b_{};
     DirectionState up_;
     DirectionState down_;
     std::size_t count_ = 0;
 
     // 1e8 smallest normals: about 1e-30 in float, 2e-300 in double. Far below
     // any audible or measurable signal, far above where the limit cycle lives.
-    static constexpr SampleType kFlushThreshold =
-        std::numeric_limits<SampleType>::min() * SampleType{1e8f};
+    // Keyed to the sample type, not the state type: state below it would only
+    // ever reach the output as subnormal samples.
+    static constexpr State kFlushThreshold =
+        static_cast<State>(std::numeric_limits<SampleType>::min()) * State{1e8};
 
-    static SampleType flush(SampleType v) noexcept {
-        return std::abs(v) < kFlushThreshold ? SampleType{0} : v;
+    static State flush(State v) noexcept {
+        return std::abs(v) < kFlushThreshold ? State{0} : v;
     }
 
     template <std::size_t N> using Count = std::integral_constant<std::size_t, N>;
@@ -490,10 +504,9 @@ template <typename SampleType = float> class HalfBandIirStageT {
     }
 
     template <std::size_t N>
-    static SampleType run(const std::array<SampleType, kMaxPath>& c, SampleType* x, SampleType* y,
-                          SampleType v) noexcept {
+    static State run(const std::array<State, kMaxPath>& c, State* x, State* y, State v) noexcept {
         for (std::size_t k = 0; k < N; ++k) {
-            const SampleType out = c[k] * v + x[k] - c[k] * y[k];
+            const State out = c[k] * v + x[k] - c[k] * y[k];
             x[k] = v;
             y[k] = out;
             v = out;
@@ -503,8 +516,8 @@ template <typename SampleType = float> class HalfBandIirStageT {
 
     template <std::size_t NA, std::size_t NB>
     void upsample_kernel(const SampleType* input, SampleType* output, std::size_t n) noexcept {
-        SampleType xa[NA > 0 ? NA : 1], ya[NA > 0 ? NA : 1];
-        SampleType xb[NB > 0 ? NB : 1], yb[NB > 0 ? NB : 1];
+        State xa[NA > 0 ? NA : 1], ya[NA > 0 ? NA : 1];
+        State xb[NB > 0 ? NB : 1], yb[NB > 0 ? NB : 1];
         for (std::size_t k = 0; k < NA; ++k) {
             xa[k] = up_.a.x[k];
             ya[k] = up_.a.y[k];
@@ -514,9 +527,9 @@ template <typename SampleType = float> class HalfBandIirStageT {
             yb[k] = up_.b.y[k];
         }
         for (std::size_t i = 0; i < n; ++i) {
-            const SampleType v = input[i];
-            output[2 * i] = run<NA>(a_, xa, ya, v);
-            output[2 * i + 1] = run<NB>(b_, xb, yb, v);
+            const State v = static_cast<State>(input[i]);
+            output[2 * i] = static_cast<SampleType>(run<NA>(a_, xa, ya, v));
+            output[2 * i + 1] = static_cast<SampleType>(run<NB>(b_, xb, yb, v));
         }
         for (std::size_t k = 0; k < NA; ++k) {
             up_.a.x[k] = flush(xa[k]);
@@ -530,8 +543,8 @@ template <typename SampleType = float> class HalfBandIirStageT {
 
     template <std::size_t NA, std::size_t NB>
     void downsample_kernel(const SampleType* input, SampleType* output, std::size_t n) noexcept {
-        SampleType xa[NA > 0 ? NA : 1], ya[NA > 0 ? NA : 1];
-        SampleType xb[NB > 0 ? NB : 1], yb[NB > 0 ? NB : 1];
+        State xa[NA > 0 ? NA : 1], ya[NA > 0 ? NA : 1];
+        State xb[NB > 0 ? NB : 1], yb[NB > 0 ? NB : 1];
         for (std::size_t k = 0; k < NA; ++k) {
             xa[k] = down_.a.x[k];
             ya[k] = down_.a.y[k];
@@ -541,11 +554,11 @@ template <typename SampleType = float> class HalfBandIirStageT {
             yb[k] = down_.b.y[k];
         }
         for (std::size_t i = 0; i < n; ++i) {
-            const SampleType even = input[2 * i];
-            const SampleType odd = input[2 * i + 1];
-            const SampleType pa = run<NA>(a_, xa, ya, odd);
-            const SampleType pb = run<NB>(b_, xb, yb, even);
-            output[i] = SampleType{0.5f} * (pa + pb);
+            const State even = static_cast<State>(input[2 * i]);
+            const State odd = static_cast<State>(input[2 * i + 1]);
+            const State pa = run<NA>(a_, xa, ya, odd);
+            const State pb = run<NB>(b_, xb, yb, even);
+            output[i] = static_cast<SampleType>(State{0.5} * (pa + pb));
         }
         for (std::size_t k = 0; k < NA; ++k) {
             down_.a.x[k] = flush(xa[k]);

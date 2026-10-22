@@ -334,7 +334,8 @@ TEST_CASE("Polyphase IIR float build holds its stopband against rounding",
         }
         const double rms_db = 10.0 * std::log10(energy / (frames - 2048) / 0.5 + 1e-300);
         INFO("pristine=" << pristine << " float stopband reading=" << rms_db << " dB");
-        REQUIRE(rms_db < (pristine ? -135.0 : -94.0));
+        // Double stage state lets the float build meet the design figure.
+        REQUIRE(rms_db < (pristine ? -146.0 : -94.0));
     }
 }
 
@@ -406,6 +407,52 @@ TEST_CASE("Polyphase IIR output decays to exact zero on silence without flush-to
             REQUIRE(subnormals == 0);
             REQUIRE(zero_at64 >= 0);
             REQUIRE(zero_at64 <= kBound64);
+        }
+    }
+}
+
+TEST_CASE("Float polyphase round trip sits on the float output's own rounding floor",
+          "[signal][oversampling][polyphase_iir][precision]") {
+    // The float stages keep their state in double, so the only rounding a
+    // float round trip adds over the double one is the float samples between
+    // stages and at the output: -148 to -152 dB here (x4 crosses one more
+    // float stage boundary than x2). Float state measured -132 to -139 dB
+    // (pristine, with eleven sections a stage, worst), which is what the
+    // -146 dB gate separates from.
+    for (const auto quality : {Oversampler::Quality::standard, Oversampler::Quality::pristine}) {
+        for (const auto factor : {Oversampler::Factor::x2, Oversampler::Factor::x4}) {
+            for (const double frequency : {0.0215, 0.104, 0.208, 0.31}) {
+                Oversampler single;
+                Oversampler64 dual;
+                for (auto* o : {&single}) {
+                    o->set_kind(Oversampler::Kind::polyphase_iir);
+                    o->set_quality(quality);
+                    o->set_factor(factor);
+                }
+                dual.set_kind(Oversampler64::Kind::polyphase_iir);
+                dual.set_quality(static_cast<Oversampler64::Quality>(quality));
+                dual.set_factor(static_cast<Oversampler64::Factor>(factor));
+                constexpr std::size_t frames = 32768;
+                std::vector<float> in(frames), out(frames);
+                std::vector<double> in64(frames), out64(frames);
+                for (std::size_t n = 0; n < frames; ++n) {
+                    in[n] = static_cast<float>(0.9 * std::sin(2.0 * kPi * frequency * n + 0.3));
+                    in64[n] = in[n];
+                }
+                single.process_block(in.data(), out.data(), frames, [](float s) { return s; });
+                dual.process_block(in64.data(), out64.data(), frames, [](double s) { return s; });
+                double err = 0.0, ref = 0.0;
+                for (std::size_t n = 4096; n < frames; ++n) {
+                    const double d = static_cast<double>(out[n]) - out64[n];
+                    err += d * d;
+                    ref += out64[n] * out64[n];
+                }
+                const double floor_db = 10.0 * std::log10(err / ref);
+                INFO("quality=" << static_cast<int>(quality)
+                                << " factor=" << static_cast<int>(factor) << " f=" << frequency
+                                << " float-vs-double floor=" << floor_db << " dB");
+                REQUIRE(floor_db < -146.0);
+            }
         }
     }
 }

@@ -36,9 +36,10 @@ namespace pulp::signal {
 //     edge, against the biquad lane's 0.97 (1.46). `Quality::standard`
 //     keeps the base band flat (< 1e-8 dB droop) to 0.42 Fs and rejects
 //     images and aliases from 0.58 Fs by 94.8 dB; `Quality::pristine` is
-//     flat to 0.45 Fs and rejects from 0.55 Fs by 146.3 dB (the float build
-//     sits on its own rounding floor a little above that). Upper stages only
-//     guard the base band, so they use short designs.
+//     flat to 0.45 Fs and rejects from 0.55 Fs by 146.3 dB, in the float
+//     build too: the stages keep their state in double, so a float round trip
+//     adds only the rounding of its float samples (about -150 dB). Upper
+//     stages only guard the base band, so they use short designs.
 //     `polyphase_stopband_db()` returns the per-quality figure,
 //     `polyphase_stage_design()` each stage's design, and
 //     `group_delay_samples()` the round trip's frequency-dependent delay.
