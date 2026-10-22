@@ -76,7 +76,10 @@ statistic from them.
 - **Submit→visible**: p50, p99, p99.9 and max, on the host clock.
 - **GPU busy time**: Metal command-buffer start to end; Dawn first pass to
   last pass, from timestamp queries.
-- **Worker CPU per block**: thread CPU time, minus the oracle check.
+- **Worker CPU per block**: thread CPU time, minus the oracle check. Dawn
+  runs its completion callbacks on the worker, so they count. Metal runs its
+  handlers on its own threads, so they do not. Each cell also records process
+  CPU over the whole cell, so the gap can be checked.
 - **Wake latency**: Metal measures GPU end → worker observes directly. Dawn
   reports only the upper bound described above.
 - **Misses**: a block misses when it is not visible within a two-block lead

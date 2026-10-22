@@ -649,7 +649,7 @@ class MetalLane {
     bool submit(std::uint64_t sequence, const float* input) {
         @autoreleasepool {
             auto& slot = slots_[sequence % kFlightDepth];
-            retire_gpu_times(slot);
+            harvest_gpu_times(history_[sequence % kHistory]);
             std::memcpy(slot.input->pointer, input, workload_->complex_floats * sizeof(float));
             id<MTLCommandBuffer> command = [queue_ commandBuffer];
             if (!command)
@@ -715,10 +715,6 @@ class MetalLane {
                                    target->state.store(2, std::memory_order_release);
                                    dispatch_semaphore_signal(semaphore);
                                  }];
-                [command addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-                  if (completed.status != MTLCommandBufferStatusCompleted)
-                      target->failed.store(true, std::memory_order_release);
-                }];
             } else {
                 [command addCompletedHandler:^(id<MTLCommandBuffer> completed) {
                   if (completed.status != MTLCommandBufferStatusCompleted)
@@ -729,7 +725,7 @@ class MetalLane {
                   dispatch_semaphore_signal(semaphore);
                 }];
             }
-            slot.command = command;
+            history_[sequence % kHistory] = {command, sequence};
             [command commit];
             fifo_[(fifo_head_ + in_flight_) % kFlightDepth] = sequence;
             ++in_flight_;
@@ -767,11 +763,8 @@ class MetalLane {
     }
 
     void finish() {
-        for (auto& slot : slots_) {
-            if (slot.command)
-                [slot.command waitUntilCompleted];
-            retire_gpu_times(slot);
-        }
+        for (auto& entry : history_)
+            harvest_gpu_times(entry);
     }
 
     const std::vector<std::int64_t>& gpu_start() const {
@@ -782,6 +775,9 @@ class MetalLane {
     }
     std::uint64_t late_gpu_time_waits() const {
         return late_gpu_time_waits_;
+    }
+    std::uint64_t command_errors() const {
+        return command_errors_;
     }
 
     static std::uint32_t planted_groups(const Workload& w) {
@@ -797,27 +793,35 @@ class MetalLane {
         id<MTLBuffer> a = nil;
         id<MTLBuffer> b = nil;
         id<MTLBuffer> product = nil;
-        id<MTLCommandBuffer> command = nil;
         std::uint64_t sequence = 0;
         std::atomic<int> state{0}; // 0 free, 1 in flight, 2 completed
         std::atomic<std::int64_t> callback_ns{-1};
         std::atomic<bool> failed{false};
     };
 
-    // GPU timing is read when a slot is reused, well after the worker
-    // observed it, so reading it never delays visibility.
-    void retire_gpu_times(Slot& slot) {
-        if (!slot.command)
+    struct Submitted {
+        id<MTLCommandBuffer> command = nil;
+        std::uint64_t sequence = 0;
+    };
+    // GPU times are read kHistory blocks after submission, when the command
+    // buffer has long completed, so harvesting never blocks a submit. A shared
+    // event can fire before its command buffer reports Completed.
+    static constexpr std::size_t kHistory = 64;
+
+    void harvest_gpu_times(Submitted& entry) {
+        if (!entry.command)
             return;
-        if (slot.command.status < MTLCommandBufferStatusCompleted) {
+        if (entry.command.status < MTLCommandBufferStatusCompleted) {
             ++late_gpu_time_waits_;
-            [slot.command waitUntilCompleted];
+            [entry.command waitUntilCompleted];
         }
-        if (slot.sequence < gpu_start_.size() && slot.command.GPUEndTime > 0.0) {
-            gpu_start_[slot.sequence] = clock_.from_metal_seconds(slot.command.GPUStartTime);
-            gpu_end_[slot.sequence] = clock_.from_metal_seconds(slot.command.GPUEndTime);
+        if (entry.command.status != MTLCommandBufferStatusCompleted)
+            ++command_errors_;
+        else if (entry.sequence < gpu_start_.size() && entry.command.GPUEndTime > 0.0) {
+            gpu_start_[entry.sequence] = clock_.from_metal_seconds(entry.command.GPUStartTime);
+            gpu_end_[entry.sequence] = clock_.from_metal_seconds(entry.command.GPUEndTime);
         }
-        slot.command = nil;
+        entry.command = nil;
     }
 
     id<MTLDevice> device_;
@@ -841,7 +845,9 @@ class MetalLane {
     std::size_t in_flight_ = 0;
     std::vector<std::int64_t> gpu_start_;
     std::vector<std::int64_t> gpu_end_;
+    std::array<Submitted, kHistory> history_{};
     std::uint64_t late_gpu_time_waits_ = 0;
+    std::uint64_t command_errors_ = 0;
     HostClockBridge clock_;
 };
 
@@ -1639,6 +1645,10 @@ int main(int argc, char** argv) {
                             cell.records[i].callback_ns -= t0;
                     }
                     cell.late_gpu_time_waits = lane.late_gpu_time_waits();
+                    if (lane.command_errors() != 0 && cell.status == "completed") {
+                        cell.status = "failed";
+                        cell.reason = "metal_command_buffer_errors";
+                    }
                 }
                 cell.extra_json =
                     "\"metal\":{\"completion\":" +

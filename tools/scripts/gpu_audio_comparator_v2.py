@@ -247,6 +247,12 @@ def assess(receipt: dict[str, Any], min_blocks: int = MIN_COUNTED_BLOCKS) -> dic
 
     metrics = [cell_metrics(c, config) for c in completed
                if not any(r.startswith("sample_shape:" + c["lane"]) for r in refusals)]
+    # A preflight brackets the run but cannot see a load spike inside it; a
+    # worker that starts blocks more than a period late was starved.
+    for m in metrics:
+        lag = m["release_lag_ns"]["p99"]
+        if lag is not None and lag > m["period_ns"]:
+            inconclusive.append(f"worker_starved:{m['lane']}:{m['frames']}:{m['load']}")
     counted = not refusals and not inconclusive
     lanes = {lane["name"]: lane for lane in config.get("lanes", [])}
     return {
@@ -414,18 +420,21 @@ def run_binary(binary: Path, output: Path, extra: list[str]) -> int:
     return subprocess.run(command, check=False).returncode
 
 
-def run_preflight(path: Path) -> dict[str, Any] | None:
+def run_preflight(path: Path, errors: list[str]) -> dict[str, Any] | None:
     result = subprocess.run([sys.executable, str(PREFLIGHT), "--output", str(path)],
                             check=False, capture_output=True, text=True)
     print(result.stdout.strip() or result.stderr.strip(), file=sys.stderr)
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        errors.append(result.stderr.strip() or f"preflight exited {result.returncode}")
         return None
 
 
-def bind(raw: dict[str, Any], binary: Path, preflight: dict[str, Any] | None) -> dict[str, Any]:
+def bind(raw: dict[str, Any], binary: Path, preflight: dict[str, Any] | None,
+         preflight_errors: list[str] | None = None) -> dict[str, Any]:
     receipt = dict(raw)
+    receipt["host_preflight_errors"] = list(preflight_errors or [])
     receipt["host_preflight"] = preflight
     receipt["host_preflight_sha256"] = (sha256_hex(canonical(preflight))
                                         if preflight is not None else None)
@@ -472,7 +481,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as scratch:
         raw_path = Path(scratch) / "raw.json"
-        before = None if args.skip_preflight else run_preflight(Path(scratch) / "before.json")
+        errors: list[str] = []
+        before = (None if args.skip_preflight
+                  else run_preflight(Path(scratch) / "before.json", errors))
         extra = ["--blocks", str(args.blocks), "--warmup", str(args.warmup)]
         if args.frames:
             extra += ["--frames", args.frames]
@@ -483,7 +494,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         code = run_binary(args.binary, raw_path, extra)
         if code == 77:
             return 77
-        after = None if args.skip_preflight else run_preflight(Path(scratch) / "after.json")
+        after = (None if args.skip_preflight
+                 else run_preflight(Path(scratch) / "after.json", errors))
         preflight = ({"before": before, "after": after}
                      if before is not None and after is not None else None)
         try:
@@ -491,7 +503,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         except (OSError, ValueError) as exc:
             print(f"comparator produced no receipt: {exc}", file=sys.stderr)
             return 1
-    receipt = bind(raw, args.binary, preflight)
+    receipt = bind(raw, args.binary, preflight, errors)
     args.out.write_text(json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8")
     evaluation = evaluate([receipt])
     evaluation_path = args.out.with_suffix(".evaluation.json")

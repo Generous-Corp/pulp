@@ -247,6 +247,16 @@ class ComparatorV2Tests(unittest.TestCase):
         result = evaluate(seal(r), receipt())
         self.assertIn("host_preflight_missing", result["reasons"])
 
+    def test_starved_worker_is_not_counted(self):
+        r = receipt()
+        c = find(r, "metal_shared_event", 128, "render")
+        for i in range(c["blocks"] // 50):
+            c["samples"]["submit_ns"][i] += 3_000_000
+            c["samples"]["visible_ns"][i] += 3_000_000
+        result = evaluate(seal(r), receipt())
+        self.assertEqual(result["verdict"], "INCONCLUSIVE")
+        self.assertIn("worker_starved:metal_shared_event:128:render", result["reasons"])
+
     def test_undersampled_campaign_is_not_counted(self):
         result = comparator.evaluate([receipt(), receipt()], min_blocks=BLOCKS + 1)
         self.assertEqual(result["verdict"], "INCONCLUSIVE")
