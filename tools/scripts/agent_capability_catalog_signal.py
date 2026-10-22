@@ -1840,10 +1840,10 @@ EXPORTS = [
         bindings=[
             binding(role="entrypoint", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
                     qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:aaaa538f50fb592c71b4b2f6a32c7d6106590fb01e9e37a0b3f9f6bf7d60453a"),
+                    header_fingerprint="sha256:83d056fd906ff72eb37d3dde19a80293c3b7157af2934e2ca4e2e40cf6e57a15"),
             binding(role="loudness_support", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
                     qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:aaaa538f50fb592c71b4b2f6a32c7d6106590fb01e9e37a0b3f9f6bf7d60453a"),
+                    header_fingerprint="sha256:83d056fd906ff72eb37d3dde19a80293c3b7157af2934e2ca4e2e40cf6e57a15"),
         ],
         _link_probes=[
             {"role": "entrypoint", "binding": "pulp::signal::MultiChannelMeterT<float>",

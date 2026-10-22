@@ -408,7 +408,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             ),
         }
         for include, fingerprint in [
-            ("pulp/signal/compressor.hpp", "sha256:9f81a0de92b4e8d825080533ebb7a266a5cf90067ecb6382251b6d0866d8b02c"),
+            ("pulp/signal/compressor.hpp", "sha256:164c6d838338eecd2e144ca78eb1b3f35edda19e5eda84352dadde24ce2dd5bb"),
             ("pulp/signal/diode_bridge_compressor.hpp", "sha256:2384a18231c9cfcff6b8823613050334776113aac5e6c7de76f6f3cd44e942a3"),
             ("pulp/signal/feedforward_compressor.hpp", "sha256:afcd1e63df356725f2256c0b449900c894e1120f016ac511512cc94b11263524"),
             ("pulp/signal/fet_compressor.hpp", "sha256:45e9524c1ca8d7a5e5a3c7e18c997710e0d5a13b05a5c3c2717f7640c5dd03ee"),
@@ -1437,7 +1437,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fdn_reverb.hpp",
-        "fingerprint": "sha256:e6631c96bfee1e8f051fb6ee1abc538c90215ec2434e7cad603991330b34f0e2",
+        "fingerprint": "sha256:c980772afae85436de3904079bfe8cfb3cd328f4c33b03531ce075f974797df5",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
