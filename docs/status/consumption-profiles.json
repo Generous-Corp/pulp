@@ -1403,6 +1403,7 @@
       "pulp/view/script_event_dispatch.hpp",
       "pulp/view/script_inspector_bridge.hpp",
       "pulp/view/script_inspector_port.hpp",
+      "pulp/view/scripted_editor_session.hpp",
       "pulp/view/scripted_ui.hpp",
       "pulp/view/scripted_ui_prewarm.hpp",
       "pulp/view/scroll_bar.hpp",
