@@ -39,7 +39,10 @@ enum class FastTrigProfile : std::uint8_t {
 /// memory.
 ///
 /// Functions documented as approximations trade precision for speed. Functions
-/// without that label retain the standard-library numerical contract.
+/// without that label retain the standard-library numerical contract. Bounds
+/// quoted "with or without fused multiply-add" hold under either side of
+/// Pulp's contraction policy (tools/cmake/PulpFloatingPointContraction.cmake:
+/// Clang contracts within an expression, GCC does not).
 ///
 /// @code
 /// float out = FastMath::tanh(input);       // ~4x faster than std::tanh

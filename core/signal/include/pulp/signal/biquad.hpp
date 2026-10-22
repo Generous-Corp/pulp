@@ -232,7 +232,9 @@ public:
     // sample path's and on average 45 dB below it (47 dB without fused
     // multiply-add). Block and sample outputs are therefore not bit-identical:
     // they differ by the sample path's own float round-off, at most -47.9 dBFS
-    // over that grid with fused multiply-add and -44.7 dBFS without.
+    // over that grid with fused multiply-add and -44.7 dBFS without. (Which
+    // compilers fuse is Pulp's contraction policy:
+    // tools/cmake/PulpFloatingPointContraction.cmake.)
     //
     // Double SampleType keeps a DF2T block path: the feedback-last order
     //     y = b0 x + s1;  s1 = (-a1) y + (b1 x + s2);  s2 = b2 x - a2 y
