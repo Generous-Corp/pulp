@@ -41,6 +41,57 @@ private:
     std::atomic<bool> on_timer_fallback_{false};
 };
 
+// Decides when a display-linked loop asks for the panel's maximum refresh rate.
+//
+// A ProMotion display runs a CADisplayLink at 60 Hz unless the link requests
+// more, so an animation is capped at 60 fps on a 120 Hz panel. Holding the
+// maximum while idle costs battery for frames nobody draws. The policy raises
+// the request on the first vsync that draws and lowers it only after
+// `kIdleVsyncsBeforeLower` consecutive vsyncs without a frame, so a gesture
+// that requests frames with short gaps keeps one steady rate instead of
+// toggling it every gap. Main-thread only; pure, so it is tested on any host.
+class DisplayRateBoost {
+  public:
+    enum class Change { none, raise, lower };
+
+    static constexpr int kIdleVsyncsBeforeLower = 30;
+
+    // Record one vsync and whether it produced a frame.
+    Change on_vsync(bool drew) {
+        if (drew) {
+            idle_vsyncs_ = 0;
+            if (boosted_)
+                return Change::none;
+            boosted_ = true;
+            return Change::raise;
+        }
+        if (!boosted_)
+            return Change::none;
+        if (++idle_vsyncs_ < kIdleVsyncsBeforeLower)
+            return Change::none;
+        boosted_ = false;
+        idle_vsyncs_ = 0;
+        return Change::lower;
+    }
+
+    // The loop stopped: drop any request it still holds.
+    Change on_stop() {
+        idle_vsyncs_ = 0;
+        if (!boosted_)
+            return Change::none;
+        boosted_ = false;
+        return Change::lower;
+    }
+
+    bool boosted() const {
+        return boosted_;
+    }
+
+  private:
+    bool boosted_ = false;
+    int idle_vsyncs_ = 0;
+};
+
 class RenderLoopState {
 public:
     bool start() {

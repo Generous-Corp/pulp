@@ -297,6 +297,51 @@ TEST_CASE("DwmBackendTracker latches to the timer fallback once a vblank wait fa
     REQUIRE(tracker.effective_backend() == RenderLoopBackend::timer);
 }
 
+TEST_CASE("DisplayRateBoost raises on the first drawn vsync and lowers after sustained idle",
+          "[render][loop][frame-rate]") {
+    using Change = DisplayRateBoost::Change;
+    DisplayRateBoost rate;
+
+    // Idle from the start: nothing to request.
+    REQUIRE(rate.on_vsync(false) == Change::none);
+    REQUIRE_FALSE(rate.boosted());
+
+    // The first frame raises once; further frames keep the request.
+    REQUIRE(rate.on_vsync(true) == Change::raise);
+    REQUIRE(rate.boosted());
+    REQUIRE(rate.on_vsync(true) == Change::none);
+
+    // Idle vsyncs short of the threshold hold the rate.
+    for (int i = 0; i < DisplayRateBoost::kIdleVsyncsBeforeLower - 1; ++i)
+        REQUIRE(rate.on_vsync(false) == Change::none);
+    REQUIRE(rate.boosted());
+
+    // The threshold vsync lowers it, exactly once.
+    REQUIRE(rate.on_vsync(false) == Change::lower);
+    REQUIRE_FALSE(rate.boosted());
+    REQUIRE(rate.on_vsync(false) == Change::none);
+}
+
+TEST_CASE("DisplayRateBoost holds one rate through a gesture with short gaps",
+          "[render][loop][frame-rate]") {
+    using Change = DisplayRateBoost::Change;
+    DisplayRateBoost rate;
+    REQUIRE(rate.on_vsync(true) == Change::raise);
+
+    // A drag that draws every third vsync must never toggle the request: each
+    // drawn vsync resets the idle count.
+    int changes = 0;
+    for (int i = 0; i < 300; ++i)
+        if (rate.on_vsync(i % 3 == 0) != Change::none)
+            ++changes;
+    REQUIRE(changes == 0);
+    REQUIRE(rate.boosted());
+
+    // Stopping the loop drops a held request; stopping an idle loop does not.
+    REQUIRE(rate.on_stop() == Change::lower);
+    REQUIRE(rate.on_stop() == Change::none);
+}
+
 TEST_CASE("RenderLoop coalesces a burst of frame requests into one callback",
           "[render][loop][vblank]") {
     // The canonical safe-repaint contract: any number of request_frame()

@@ -207,6 +207,38 @@ TEST_CASE("ios-auv3 HostApp template matches the embedded descriptor exactly",
 #endif
 }
 
+// The iOS render loop requests the panel's maximum refresh rate while
+// animating, but iOS caps every CADisplayLink at 60 Hz on ProMotion iPhones
+// unless the app's Info.plist opts out. The key must be a boolean true, not
+// merely present, so the value is checked as the plist element after the key.
+TEST_CASE("ios-auv3 HostApp template opts out of the 60 Hz iPhone frame cap",
+          "[ios][auv3][template][frame-rate]") {
+#ifndef PULP_SOURCE_DIR
+    SKIP("PULP_SOURCE_DIR not defined — skipping template-shape assertion");
+#else
+    namespace fs = std::filesystem;
+    const fs::path template_path =
+        fs::path{PULP_SOURCE_DIR} / "templates" / "ios-auv3" / "HostApp" / "Info.plist.in";
+    REQUIRE(fs::exists(template_path));
+
+    std::ifstream in{template_path};
+    REQUIRE(in.good());
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string body = ss.str();
+
+    // Control: the template is the HostApp plist this test means to read.
+    REQUIRE(body.find("<key>LSRequiresIPhoneOS</key>") != std::string::npos);
+
+    const std::string key = "<key>CADisableMinimumFrameDurationOnPhone</key>";
+    const auto at = body.find(key);
+    REQUIRE(at != std::string::npos);
+    const auto value = body.find('<', at + key.size());
+    REQUIRE(value != std::string::npos);
+    CHECK(body.compare(value, 7, "<true/>") == 0);
+#endif
+}
+
 TEST_CASE("Apple platform features are consistent", "[ios][platform]") {
     if constexpr (platform::is_apple) {
         // Apple platforms always use ARM64 on modern devices
