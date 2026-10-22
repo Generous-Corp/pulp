@@ -74,9 +74,22 @@ pulp_add_test_suite(pulp-test-fast-math GROUP pulp-test-group-app-signal
 pulp_add_test_suite(pulp-test-fast-math-no-contract
     SOURCES test_fast_math_no_contract.cpp
     LIBRARIES pulp::signal)
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(pulp-test-fast-math-no-contract PRIVATE -ffp-contract=off)
-endif()
+target_compile_options(pulp-test-fast-math-no-contract PRIVATE
+    $<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>:-ffp-contract=off>)
+# How the ladder-saturator macros select the default, each configuration in
+# its own translation unit (they define the same inline variable differently,
+# so they are compiled but never linked together). A wrong selection, or a
+# PULP_SIGNAL_LADDER_SATURATION outside 0..2, is a static_assert failure at
+# build time.
+add_library(pulp-ladder-saturation-selection-checks OBJECT
+    header_compile/ladder_saturation_default.cpp
+    header_compile/ladder_saturation_fast0.cpp
+    header_compile/ladder_saturation_fast1.cpp
+    header_compile/ladder_saturation_sel0.cpp
+    header_compile/ladder_saturation_sel1.cpp
+    header_compile/ladder_saturation_sel2.cpp
+    header_compile/ladder_saturation_bool_shim.cpp)
+target_link_libraries(pulp-ladder-saturation-selection-checks PRIVATE pulp::signal)
 
 # Polynomial/Matrix math tests
 pulp_add_test_suite(pulp-test-poly-math GROUP pulp-test-group-app-signal

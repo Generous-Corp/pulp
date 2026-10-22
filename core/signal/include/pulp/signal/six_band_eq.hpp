@@ -4,6 +4,7 @@
 /// Fixed-role six-band parametric equalizer for real-time processing.
 
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/sos_cascade.hpp>
 
 #include <algorithm>
 #include <array>
@@ -162,16 +163,16 @@ public:
     ///
     /// A coefficient transition runs sample by sample; once none is pending,
     /// the rest of the block runs the six sections through
-    /// Filter::process_chain(), which matches the sample path while the
-    /// states are at or above 1e-15.
+    /// Filter::process_chain(), which matches the sample path to the Biquad
+    /// block path's accuracy contract (see BiquadT::process_chain()).
     bool process_block(SampleType* samples, std::size_t frames, std::size_t channel = 0) {
         if (channel >= Channels || (samples == nullptr && frames != 0)) return false;
-        std::size_t frame = 0;
-        for (; frame < frames && transition_active(channel); ++frame)
-            samples[frame] = process(samples[frame], channel);
-        if (frame < frames)
-            Filter::process_chain(filters_[channel].data(), band_count, samples + frame,
-                                  frames - frame);
+        detail::transition_then_block(
+            frames, [&] { return transition_active(channel); },
+            [&](std::size_t i) { samples[i] = process(samples[i], channel); },
+            [&](std::size_t first, std::size_t count) {
+                Filter::process_chain(filters_[channel].data(), band_count, samples + first, count);
+            });
         return true;
     }
 

@@ -221,47 +221,23 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class GraphicE
     /// an empty block and otherwise fails without advancing any DSP state.
     ///
     /// A pending crossfade runs sample by sample. Otherwise the block goes
-    /// through the active cascade's block path in chunks, which matches the
-    /// sample path; a chunk containing a non-finite input, or producing a
-    /// non-finite output, is rerun sample by sample from a snapshot of the
-    /// cascade so fault recovery happens at the same sample as in process().
+    /// through the active cascade's block path in kSnapChunkSamples chunks,
+    /// which matches the sample path to the Biquad block path's accuracy
+    /// contract (see BiquadT::process_chain()). Faults keep the sample path's
+    /// timing: a non-finite input is handed to process() at its own sample,
+    /// and at the first non-finite output the cascade is recovered exactly as
+    /// process() would and the rest of the chunk is rerun from its saved input
+    /// on the recovered (reset) cascade. No cascade state needs saving, because
+    /// recovery resets it.
     bool process_block(SampleType* samples, std::size_t frames) noexcept {
         if (samples == nullptr && frames != 0)
             return false;
         if (!prepared())
             return true;
-        constexpr SampleType kMaxFinite = std::numeric_limits<SampleType>::max();
-        std::size_t frame = 0;
-        while (frame < frames) {
-            if (transitioning()) {
-                samples[frame] = process(samples[frame]);
-                ++frame;
-                continue;
-            }
-            const std::size_t n = frames - frame < kBlockChunk ? frames - frame : kBlockChunk;
-            SampleType* chunk = samples + frame;
-            unsigned non_finite = 0;
-            for (std::size_t i = 0; i < n; ++i)
-                non_finite |= static_cast<unsigned>(!(std::abs(chunk[i]) <= kMaxFinite));
-            if (non_finite == 0) {
-                SampleType input[kBlockChunk];
-                std::copy(chunk, chunk + n, input);
-                const auto snapshot = cascades_[active_index_];
-                cascades_[active_index_].process(chunk, n);
-                for (std::size_t i = 0; i < n; ++i)
-                    non_finite |= static_cast<unsigned>(!(std::abs(chunk[i]) <= kMaxFinite));
-                if (non_finite == 0) {
-                    healthy_ = true;
-                    frame += n;
-                    continue;
-                }
-                cascades_[active_index_] = snapshot;
-                std::copy(input, input + n, chunk);
-            }
-            for (std::size_t i = 0; i < n; ++i)
-                chunk[i] = process(chunk[i]);
-            frame += n;
-        }
+        detail::transition_then_block(
+            frames, [&] { return transitioning(); },
+            [&](std::size_t i) { samples[i] = process(samples[i]); },
+            [&](std::size_t first, std::size_t count) { process_steady(samples + first, count); });
         return true;
     }
 
@@ -397,8 +373,42 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class GraphicE
         transition_remaining_ = 0;
     }
 
-    // Samples per block-path chunk: the unit of the non-finite rerun.
-    static constexpr std::size_t kBlockChunk = 64;
+    // The block path with no transition pending (see process_block()).
+    void process_steady(SampleType* samples, std::size_t frames) noexcept {
+        constexpr SampleType kMaxFinite = std::numeric_limits<SampleType>::max();
+        std::size_t frame = 0;
+        while (frame < frames) {
+            const std::size_t n = std::min(frames - frame, kSnapChunkSamples);
+            SampleType* chunk = samples + frame;
+            // Finite prefix of the input: it runs on the block path; the
+            // first non-finite input, if any, goes to process() on its own.
+            std::size_t finite = 0;
+            while (finite < n && std::abs(chunk[finite]) <= kMaxFinite)
+                ++finite;
+            if (finite == 0) {
+                chunk[0] = process(chunk[0]);
+                ++frame;
+                continue;
+            }
+            SampleType input[kSnapChunkSamples];
+            std::copy(chunk, chunk + finite, input);
+            cascades_[active_index_].process(chunk, finite);
+            std::size_t good = 0;
+            while (good < finite && std::abs(chunk[good]) <= kMaxFinite)
+                ++good;
+            if (good > 0)
+                healthy_ = true;
+            if (good == finite) {
+                frame += finite;
+                continue;
+            }
+            // The cascade overflowed at `good`: recover there, as process()
+            // would, and continue from the next input on the reset cascade.
+            chunk[good] = recover_from_fault();
+            std::copy(input + good + 1, input + finite, chunk + good + 1);
+            frame += good + 1;
+        }
+    }
 
     SampleType recover_from_fault() noexcept {
         cascades_[0].reset();

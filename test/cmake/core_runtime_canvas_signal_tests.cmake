@@ -365,6 +365,10 @@ pulp_add_test_suite(pulp-test-routing-primitives
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
 pulp_add_test_suite(pulp-test-signal-filters GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
+# TptFilter and the lockstep voice banks (LadderBank, SvfBank), split from
+# the signal filter tests above.
+pulp_add_test_suite(pulp-test-filter-banks GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Fixed-state, pivot-normalized tilt EQ with independent response and
 # time-domain oracles, deterministic block processing, and RT proof.
 pulp_add_test_suite(pulp-test-tilt-eq

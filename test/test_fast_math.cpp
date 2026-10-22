@@ -529,12 +529,13 @@ TEST_CASE("FastMath::tanh is bit-identical to its saturating Pade contract",
     CHECK(std::isnan(FastMath::tanh(std::numeric_limits<float>::quiet_NaN())));
 }
 
-TEST_CASE("log10_float stays within a few ulps of libm", "[signal][fast-math][decibel]") {
+TEST_CASE("FastMath::log10_accurate stays within a few ulps of libm",
+          "[signal][fast-math][decibel]") {
     double worst_ulps = 0.0;
     for (float x = 1.0e-10f; x < 1.0e6f; x *= 1.0001f) {
         const double reference = std::log10(static_cast<double>(x));
         const double err =
-            std::abs(static_cast<double>(pulp::signal::detail::log10_float(x)) - reference);
+            std::abs(static_cast<double>(pulp::signal::FastMath::log10_accurate(x)) - reference);
         // Near log10(x) = 0 the result ulp shrinks without bound; hold those
         // inputs to an absolute error instead.
         if (std::abs(reference) < 1.0e-3)
@@ -543,30 +544,31 @@ TEST_CASE("log10_float stays within a few ulps of libm", "[signal][fast-math][de
             worst_ulps = std::max(worst_ulps, err / ulp_of(reference));
     }
     CHECK(worst_ulps <= 4.0);
-    CHECK(pulp::signal::detail::log10_float(1.0f) == 0.0f);
-    CHECK(pulp::signal::detail::log10_float(1000.0f) == 3.0f);
-    CHECK(pulp::signal::detail::log10_float(1.0e-10f) ==
+    CHECK(pulp::signal::FastMath::log10_accurate(1.0f) == 0.0f);
+    CHECK(pulp::signal::FastMath::log10_accurate(1000.0f) == 3.0f);
+    CHECK(pulp::signal::FastMath::log10_accurate(1.0e-10f) ==
           static_cast<float>(std::log10(static_cast<double>(1.0e-10f))));
 }
 
-TEST_CASE("exp10_float stays within a few parts in 1e7 of libm and saturates like pow",
+TEST_CASE("FastMath::exp10_accurate stays within a few parts in 1e7 of libm and saturates like pow",
           "[signal][fast-math][decibel]") {
     double worst = 0.0;
     for (float x = -37.0f; x < 38.0f; x += 1.0e-4f) {
         const double reference = std::pow(10.0, static_cast<double>(x));
         worst = std::max(
-            worst, std::abs(static_cast<double>(pulp::signal::detail::exp10_float(x)) - reference) /
-                       reference);
+            worst,
+            std::abs(static_cast<double>(pulp::signal::FastMath::exp10_accurate(x)) - reference) /
+                reference);
     }
     CHECK(worst < 2.0e-7);
-    CHECK(pulp::signal::detail::exp10_float(0.0f) == 1.0f);
-    CHECK(std::isinf(pulp::signal::detail::exp10_float(39.0f)));
-    CHECK(std::isinf(pulp::signal::detail::exp10_float(1.0e30f)));
-    CHECK(pulp::signal::detail::exp10_float(-46.0f) == 0.0f);
-    CHECK(pulp::signal::detail::exp10_float(-1.0e30f) == 0.0f);
-    CHECK_FALSE(std::signbit(pulp::signal::detail::exp10_float(-1.0e30f)));
+    CHECK(pulp::signal::FastMath::exp10_accurate(0.0f) == 1.0f);
+    CHECK(std::isinf(pulp::signal::FastMath::exp10_accurate(39.0f)));
+    CHECK(std::isinf(pulp::signal::FastMath::exp10_accurate(1.0e30f)));
+    CHECK(pulp::signal::FastMath::exp10_accurate(-46.0f) == 0.0f);
+    CHECK(pulp::signal::FastMath::exp10_accurate(-1.0e30f) == 0.0f);
+    CHECK_FALSE(std::signbit(pulp::signal::FastMath::exp10_accurate(-1.0e30f)));
     // Gradual underflow keeps the subnormal range, as std::pow does.
-    const float sub = pulp::signal::detail::exp10_float(-40.0f);
+    const float sub = pulp::signal::FastMath::exp10_accurate(-40.0f);
     CHECK(sub > 0.0f);
     CHECK(std::abs(static_cast<double>(sub) - 1.0e-40) / 1.0e-40 < 1.0e-3);
 }
