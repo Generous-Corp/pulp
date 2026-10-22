@@ -18,6 +18,7 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <functional>
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>
@@ -34,15 +35,24 @@ namespace pulp::view {
 class ContextMenu : public View {
 public:
     struct Item {
+        enum class ControlKind { action, toggle, slider };
         int id = 0;
         std::string label;
         bool enabled = true;
         bool checked = false;
+        ControlKind control_kind = ControlKind::action;
+        float normalized_value = 0.0f;
+        float normalized_step = 0.05f;
+        std::function<void(const Item&)> on_change;
         bool separator = false;
         /// A non-selectable title row that groups the items below it.
         bool header = false;
         bool has_submenu = false;
-        static Item make_separator() { return Item{0, "", true, false, true}; }
+        static Item make_separator() {
+            Item i;
+            i.separator = true;
+            return i;
+        }
         static Item make_header(std::string title) {
             Item i;
             i.label = std::move(title);
@@ -50,11 +60,46 @@ public:
             i.header = true;
             return i;
         }
+        static Item make_toggle(int id, std::string label, bool checked,
+                                std::function<void(const Item&)> on_change) {
+            Item i;
+            i.id = id;
+            i.label = std::move(label);
+            i.checked = checked;
+            i.control_kind = ControlKind::toggle;
+            i.on_change = std::move(on_change);
+            return i;
+        }
+        static Item make_slider(int id, std::string label, float normalized,
+                                float step,
+                                std::function<void(const Item&)> on_change) {
+            Item i;
+            i.id = id;
+            i.label = std::move(label);
+            i.control_kind = ControlKind::slider;
+            i.normalized_value = std::clamp(normalized, 0.0f, 1.0f);
+            i.normalized_step = step > 0.0f ? step : 0.05f;
+            i.on_change = std::move(on_change);
+            return i;
+        }
+        void set_toggled(bool value) {
+            if (control_kind != ControlKind::toggle || checked == value) return;
+            checked = value;
+            if (on_change) on_change(*this);
+        }
+        void set_normalized_value(float value) {
+            if (control_kind != ControlKind::slider) return;
+            const float next = std::clamp(value, 0.0f, 1.0f);
+            if (normalized_value == next) return;
+            normalized_value = next;
+            if (on_change) on_change(*this);
+        }
     };
 
     ContextMenu() { set_focusable(true); }
 
     void set_items(std::vector<Item> items) { items_ = std::move(items); }
+    std::vector<Item>& items() { return items_; }
     const std::vector<Item>& items() const { return items_; }
 
     /// Fired with the chosen item id on select, or with std::nullopt on dismiss
@@ -130,11 +175,15 @@ private:
     void scroll_row_into_view(int index);
     void move_hover(int delta);    // keyboard nav, skipping separators + disabled
     void move_hover_to_edge(bool last);  // Home / End
+    void adjust_control(Item& item, float delta);
+    bool set_control_from_pointer(Item& item, const Rect& row, Point point);
     void fire_close(std::optional<int> result);
 
     std::vector<Item> items_;
     Point anchor_{0, 0};
     int hover_index_ = -1;
+    int active_slider_index_ = -1;
+    int active_pointer_id_ = 0;
     bool closed_ = false;
     float scroll_ = 0.0f;
 
