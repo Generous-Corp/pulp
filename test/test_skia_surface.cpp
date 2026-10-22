@@ -41,7 +41,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <string>
 #include <thread>
+
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 #endif
 
 using namespace pulp::render;
@@ -190,6 +197,52 @@ bool read_drawable(skgpu::graphite::Context& context, wgpu::Texture& texture,
         return false;
     return read_graphite_surface(context, *recorder, surface.get(), out);
 }
+
+#if !defined(_WIN32)
+// Captures what the process writes to stderr (where Skia's SkDebugf warnings
+// go) between construction and text().
+class StderrCapture {
+  public:
+    StderrCapture() {
+        std::fflush(stderr);
+        char path[] = "/tmp/pulp-skia-stderr-XXXXXX";
+        fd_ = mkstemp(path);
+        if (fd_ >= 0) {
+            path_ = path;
+            saved_ = dup(STDERR_FILENO);
+            dup2(fd_, STDERR_FILENO);
+        }
+    }
+    ~StderrCapture() {
+        restore();
+        if (fd_ >= 0) {
+            close(fd_);
+            std::remove(path_.c_str());
+        }
+    }
+    bool active() const {
+        return fd_ >= 0 && saved_ >= 0;
+    }
+    std::string text() {
+        restore();
+        std::ifstream in(path_);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+
+  private:
+    void restore() {
+        if (saved_ < 0)
+            return;
+        std::fflush(stderr);
+        dup2(saved_, STDERR_FILENO);
+        close(saved_);
+        saved_ = -1;
+    }
+    int fd_ = -1;
+    int saved_ = -1;
+    std::string path_;
+};
+#endif
 
 bool pixel_is(const std::vector<uint8_t>& px, uint32_t w, uint32_t x, uint32_t y, uint8_t r,
               uint8_t g, uint8_t b) {
@@ -518,6 +571,106 @@ TEST_CASE("SkiaSurface persistent-scene blit presents each frame's own scene",
     // Frame 2's drawable shows frame 2: its repaint plus the retained half.
     CHECK(pixel_is(px_2, kSize, 16, 32, 0, 0, 255));
     CHECK(pixel_is(px_2, kSize, 48, 32, 255, 0, 0));
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("SkiaSurface readback fallback keeps the scene blit free of snapshot warnings",
+          "[render][skia][persistent-scene]") {
+#ifdef PULP_HAS_SKIA
+    constexpr uint32_t kSize = 64;
+    auto dawn = GpuSurface::create_dawn();
+    if (!dawn)
+        SKIP(kNoGpu);
+    if (!dawn->initialize({.width = kSize, .height = kSize}))
+        SKIP(kNoGpu);
+    if (dawn->adapter_info().backend_type == "Null")
+        SKIP("Dawn Null backend cannot produce raster output");
+
+    TextureDrawableGpu gpu(*dawn);
+    auto skia = SkiaSurface::create(gpu, {.width = kSize, .height = kSize});
+    if (!skia || !skia->is_available())
+        SKIP(kNoSkiaSurface);
+    REQUIRE(skia->set_persistent_scene(true));
+    wgpu::Texture drawable = make_drawable_texture(*dawn, kSize, kSize);
+    REQUIRE(drawable);
+    gpu.set_drawable(&drawable);
+
+    // Restores the asynchronous readback even when an assertion throws.
+    struct AsyncReadbackOff {
+        AsyncReadbackOff() {
+            SkiaSurface::set_async_readback_for_testing(false);
+        }
+        ~AsyncReadbackOff() {
+            SkiaSurface::set_async_readback_for_testing(true);
+        }
+    };
+
+    auto paint = [](pulp::canvas::Canvas& canvas, pulp::canvas::Color color, float width) {
+        canvas.set_fill_color(color);
+        canvas.fill_rect(0.0f, 0.0f, width, 64.0f);
+    };
+
+    // Frame 1 paints the scene red and blits it.
+    REQUIRE(gpu.begin_frame());
+    auto* frame_1 = skia->begin_frame();
+    REQUIRE(frame_1 != nullptr);
+    paint(*frame_1, pulp::canvas::Color::rgba8(255, 0, 0), 64.0f);
+    REQUIRE(skia->end_frame() == FrameOutcome::presented);
+    gpu.end_frame();
+    REQUIRE(skia->wait_for_submitted_work());
+
+#if !defined(_WIN32)
+    StderrCapture captured;
+    REQUIRE(captured.active());
+#endif
+
+    // Frame 2 repaints the left half blue and reads the scene back through
+    // the fallback a timed-out readback takes, then blits as usual. Frame 3
+    // blits again, which is where a snapshot taken by the fallback would make
+    // Graphite warn about mixing the two image APIs.
+    std::vector<uint8_t> px;
+    uint32_t pw = 0;
+    uint32_t ph = 0;
+    bool fallback_read = false;
+    {
+        AsyncReadbackOff fallback;
+        REQUIRE(gpu.begin_frame());
+        auto* frame_2 = skia->begin_frame();
+        REQUIRE(frame_2 != nullptr);
+        paint(*frame_2, pulp::canvas::Color::rgba8(0, 0, 255), 32.0f);
+        fallback_read = skia->read_current_rgba(px, pw, ph);
+        REQUIRE(frame_reached_output(skia->end_frame()));
+        gpu.end_frame();
+    }
+    REQUIRE(gpu.begin_frame());
+    auto* frame_3 = skia->begin_frame();
+    REQUIRE(frame_3 != nullptr);
+    paint(*frame_3, pulp::canvas::Color::rgba8(0, 255, 0), 8.0f);
+    REQUIRE(skia->end_frame() == FrameOutcome::presented);
+    gpu.end_frame();
+    REQUIRE(skia->wait_for_submitted_work());
+
+#if !defined(_WIN32)
+    const std::string log = captured.text();
+    INFO("stderr during the fallback frames: " << log);
+    CHECK(log.find("Intermingling makeImageSnapshot and asImage") == std::string::npos);
+#endif
+
+    // On Graphite the synchronous fallback cannot read a texture-backed image
+    // without a context, so it reports failure rather than handing back
+    // pixels; it must still leave the scene and the blits intact.
+    INFO("fallback readback succeeded: " << fallback_read);
+
+    // The drawable shows frame 3: the blits after the fallback still work.
+    std::vector<uint8_t> shown;
+    auto* context = skia->graphite_context();
+    REQUIRE(context != nullptr);
+    REQUIRE(read_drawable(*context, drawable, shown));
+    CHECK(pixel_is(shown, kSize, 4, 32, 0, 255, 0));
+    CHECK(pixel_is(shown, kSize, 16, 32, 0, 0, 255));
+    CHECK(pixel_is(shown, kSize, 48, 32, 255, 0, 0));
 #else
     REQUIRE(true);
 #endif
