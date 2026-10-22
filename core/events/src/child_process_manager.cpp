@@ -26,7 +26,7 @@ std::filesystem::path private_pipe_directory() {
     const auto tmp = std::filesystem::temp_directory_path();
     const auto owner = static_cast<std::uint64_t>(::geteuid());
     const auto directory = tmp / ("pulp-ipc-" + std::to_string(owner));
-    struct stat status {};
+    struct stat status{};
     if (::mkdir(directory.c_str(), 0700) != 0 && errno != EEXIST)
         return tmp;
     if (::lstat(directory.c_str(), &status) != 0 || !S_ISDIR(status.st_mode) ||

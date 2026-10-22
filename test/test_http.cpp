@@ -205,14 +205,13 @@ TEST_CASE("HTTPS request to a plain-http loopback server fails the TLS handshake
     LoopbackServer loopback;
     std::mutex received_mutex;
     size_t handled_requests = 0;
-    loopback.server.Get("/tls",
-                        [&](const httplib::Request&, httplib::Response& response) {
-                            {
-                                std::lock_guard lock(received_mutex);
-                                ++handled_requests;
-                            }
-                            response.set_content("plaintext", "text/plain");
-                        });
+    loopback.server.Get("/tls", [&](const httplib::Request&, httplib::Response& response) {
+        {
+            std::lock_guard lock(received_mutex);
+            ++handled_requests;
+        }
+        response.set_content("plaintext", "text/plain");
+    });
     loopback.start();
 
     // Control: the same listener serves the same path over plain http.

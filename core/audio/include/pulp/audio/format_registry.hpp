@@ -40,8 +40,7 @@ public:
     /// Read entire file into memory, refusing output beyond `limits`. Every
     /// built-in reader overrides this; the default exists for external readers
     /// that predate limits and falls back to read(path).
-    virtual std::optional<AudioFileData> read(const std::string& path,
-                                              const DecodeLimits& limits) {
+    virtual std::optional<AudioFileData> read(const std::string& path, const DecodeLimits& limits) {
         (void)limits;
         return read(path);
     }
@@ -93,8 +92,7 @@ public:
     /// Read with explicit decode ceilings. Every built-in reader refuses a
     /// file whose header or decoded output would exceed them; a custom reader
     /// registered without a limits overload reads unbounded.
-    std::optional<AudioFileData> read(const std::string& path,
-                                      const DecodeLimits& limits) const;
+    std::optional<AudioFileData> read(const std::string& path, const DecodeLimits& limits) const;
 
     /// Write audio data (dispatches to the right writer based on extension)
     bool write(const std::string& path, const AudioFileData& data) const;

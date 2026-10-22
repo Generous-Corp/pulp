@@ -1079,7 +1079,7 @@ constexpr const char* kHostileAllocationScript =
     "var a = []; for (var i = 0; i < 64; i++) a.push('x'.repeat(1 << 20)); a.length";
 constexpr const char* kBoundedAllocationScript =
     "var a = []; for (var i = 0; i < 1000; i++) a.push('x'.repeat(1024)); a.length";
-}  // namespace
+} // namespace
 
 TEST_CASE("QuickJS heap limit raises a JS error instead of growing unbounded",
           "[js_engine][memory-limit]") {
@@ -1115,8 +1115,7 @@ TEST_CASE("QuickJS heap limit leaves allocation under the cap untouched",
     REQUIRE(engine.evaluate(kBoundedAllocationScript).getWithDefault<int64_t>(0) == 1000);
 }
 
-TEST_CASE("Scripted UI realms default to the shared JS heap ceiling",
-          "[js_engine][memory-limit]") {
+TEST_CASE("Scripted UI realms default to the shared JS heap ceiling", "[js_engine][memory-limit]") {
     STATIC_REQUIRE(kDefaultJsMemoryLimitBytes == std::size_t{512} * 1024 * 1024);
     ScriptedUiOptions options;
     REQUIRE(options.js_memory_limit_bytes == kDefaultJsMemoryLimitBytes);

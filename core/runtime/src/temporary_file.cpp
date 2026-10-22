@@ -67,14 +67,16 @@ TemporaryFile::TemporaryFile(std::string_view extension) {
     ss << "pulp_tmp_" << std::hex << std::random_device{}();
     append_extension(ss, extension);
     auto candidate = tmp_dir / ss.str();
-    if (create_exclusive(candidate)) path_ = candidate;
+    if (create_exclusive(candidate))
+        path_ = candidate;
 }
 
 bool TemporaryFile::create_exclusive(const std::filesystem::path& path) {
 #ifdef _WIN32
     int fd = -1;
-    if (_wsopen_s(&fd, path.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
-                  _SH_DENYNO, _S_IREAD | _S_IWRITE) != 0 || fd < 0) {
+    if (_wsopen_s(&fd, path.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _SH_DENYNO,
+                  _S_IREAD | _S_IWRITE) != 0 ||
+        fd < 0) {
         return false;
     }
     _close(fd);

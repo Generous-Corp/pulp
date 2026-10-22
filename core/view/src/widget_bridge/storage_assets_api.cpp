@@ -223,38 +223,49 @@ void BridgeRegistrars::register_storage_key_value_api(WidgetBridge& self) {
     // per-bridge store (see private_storage.hpp). An empty dir means no
     // per-user root is known and every call is a safe no-op.
     const auto entry_path = [&self](const std::string& key) -> std::filesystem::path {
-        const auto& dir = detail::cached_private_dir(
-            self.private_store_dirs_, detail::PrivateStoreKind::WidgetStorage, self.script_base_dir_);
-        if (dir.empty()) return {};
+        const auto& dir = detail::cached_private_dir(self.private_store_dirs_,
+                                                     detail::PrivateStoreKind::WidgetStorage,
+                                                     self.script_base_dir_);
+        if (dir.empty())
+            return {};
         return dir / detail::storage_key_file_name(key);
     };
 
-    register_bridge_function(api, "storageGetItem", [entry_path](choc::javascript::ArgumentList args) {
-        auto key = args.get<std::string>(0, "");
-        if (key.empty()) return choc::value::createString("");
-        const auto path = entry_path(key);
-        if (path.empty()) return choc::value::createString("");
-        return choc::value::createString(detail::read_private_file(path).value_or(""));
-    });
+    register_bridge_function(
+        api, "storageGetItem", [entry_path](choc::javascript::ArgumentList args) {
+            auto key = args.get<std::string>(0, "");
+            if (key.empty())
+                return choc::value::createString("");
+            const auto path = entry_path(key);
+            if (path.empty())
+                return choc::value::createString("");
+            return choc::value::createString(detail::read_private_file(path).value_or(""));
+        });
 
-    register_bridge_function(api, "storageSetItem", [entry_path](choc::javascript::ArgumentList args) {
-        auto key = args.get<std::string>(0, "");
-        auto val = args.get<std::string>(1, "");
-        if (key.empty()) return choc::value::Value();
-        const auto path = entry_path(key);
-        if (!path.empty()) detail::write_private_file(path, val);
-        return choc::value::Value();
-    });
+    register_bridge_function(api, "storageSetItem",
+                             [entry_path](choc::javascript::ArgumentList args) {
+                                 auto key = args.get<std::string>(0, "");
+                                 auto val = args.get<std::string>(1, "");
+                                 if (key.empty())
+                                     return choc::value::Value();
+                                 const auto path = entry_path(key);
+                                 if (!path.empty())
+                                     detail::write_private_file(path, val);
+                                 return choc::value::Value();
+                             });
 
-    register_bridge_function(api, "storageRemoveItem", [entry_path](choc::javascript::ArgumentList args) {
-        auto key = args.get<std::string>(0, "");
-        if (key.empty()) return choc::value::Value();
-        const auto path = entry_path(key);
-        if (path.empty()) return choc::value::Value();
-        std::error_code ec;
-        std::filesystem::remove(path, ec);
-        return choc::value::Value();
-    });
+    register_bridge_function(api, "storageRemoveItem",
+                             [entry_path](choc::javascript::ArgumentList args) {
+                                 auto key = args.get<std::string>(0, "");
+                                 if (key.empty())
+                                     return choc::value::Value();
+                                 const auto path = entry_path(key);
+                                 if (path.empty())
+                                     return choc::value::Value();
+                                 std::error_code ec;
+                                 std::filesystem::remove(path, ec);
+                                 return choc::value::Value();
+                             });
 }
 
 void BridgeRegistrars::register_asset_loading_api(WidgetBridge& self) {

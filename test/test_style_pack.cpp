@@ -17,17 +17,20 @@ namespace {
 // the test never touches the host's real app data, and locate the written file
 // by name beneath it.
 class ScopedSettingsRoot {
-public:
+  public:
     ScopedSettingsRoot() : root_(pulp::test::make_unique_temp_dir("pulp-style-pack")) {
-        if (const char* old = std::getenv(var())) old_ = std::string(old);
+        if (const char* old = std::getenv(var()))
+            old_ = std::string(old);
         set(root_.string().c_str());
     }
     ~ScopedSettingsRoot() {
 #ifdef _WIN32
         _putenv_s(var(), old_ ? old_->c_str() : "");
 #else
-        if (old_) setenv(var(), old_->c_str(), 1);
-        else unsetenv(var());
+        if (old_)
+            setenv(var(), old_->c_str(), 1);
+        else
+            unsetenv(var());
 #endif
         std::error_code ec;
         std::filesystem::remove_all(root_, ec);
@@ -36,10 +39,12 @@ public:
         std::error_code ec;
         for (std::filesystem::recursive_directory_iterator it(root_, ec), end; !ec && it != end;
              it.increment(ec))
-            if (it->path().filename() == file_name) return it->path();
+            if (it->path().filename() == file_name)
+                return it->path();
         return {};
     }
-private:
+
+  private:
     static const char* var() {
 #if defined(_WIN32)
         return "APPDATA";
@@ -60,7 +65,7 @@ private:
     std::optional<std::string> old_;
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("Style presets round-trip through saveStylePreset/loadStylePreset", "[view][style-pack]") {
     ScopedSettingsRoot settings_root;

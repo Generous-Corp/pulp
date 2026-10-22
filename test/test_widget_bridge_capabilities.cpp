@@ -149,20 +149,24 @@ namespace {
 namespace fs = std::filesystem;
 
 class ScopedEnvVar {
-public:
+  public:
     ScopedEnvVar(const char* name, const std::string& value) : name_(name) {
-        if (const char* old = std::getenv(name_)) old_ = std::string(old);
+        if (const char* old = std::getenv(name_))
+            old_ = std::string(old);
         set(value.c_str());
     }
     ~ScopedEnvVar() {
 #ifdef _WIN32
         _putenv_s(name_, old_ ? old_->c_str() : "");
 #else
-        if (old_) setenv(name_, old_->c_str(), 1);
-        else unsetenv(name_);
+        if (old_)
+            setenv(name_, old_->c_str(), 1);
+        else
+            unsetenv(name_);
 #endif
     }
-private:
+
+  private:
     void set(const char* value) {
 #ifdef _WIN32
         _putenv_s(name_, value);
@@ -188,31 +192,44 @@ struct StorageRig {
     ScriptEngine engine;
     View view;
     StateStore store;
-    CapabilitySet caps = [] { CapabilitySet c; c.grant(ReloadCapability::Storage); return c; }();
+    CapabilitySet caps = [] {
+        CapabilitySet c;
+        c.grant(ReloadCapability::Storage);
+        return c;
+    }();
     WidgetBridge bridge{engine, view, store, nullptr, caps};
 
-    StorageRig() { view.set_bounds({0, 0, 200, 200}); }
-    ~StorageRig() { std::error_code ec; fs::remove_all(root, ec); }
+    StorageRig() {
+        view.set_bounds({0, 0, 200, 200});
+    }
+    ~StorageRig() {
+        std::error_code ec;
+        fs::remove_all(root, ec);
+    }
 
-    std::string eval(const std::string& js) { return engine.evaluate(js).toString(); }
+    std::string eval(const std::string& js) {
+        return engine.evaluate(js).toString();
+    }
 
     // Every regular file currently under the redirected settings root.
     std::vector<fs::path> files_under_root() const {
         std::vector<fs::path> out;
         std::error_code ec;
         for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec))
-            if (it->is_regular_file(ec)) out.push_back(it->path());
+            if (it->is_regular_file(ec))
+                out.push_back(it->path());
         return out;
     }
 };
 
 bool path_has_component(const fs::path& p, const std::string& component) {
     for (const auto& part : p)
-        if (part.string() == component) return true;
+        if (part.string() == component)
+            return true;
     return false;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("storageSetItem with a traversal key creates nothing outside the store",
           "[view][bridge][storage][security]") {
@@ -270,7 +287,7 @@ TEST_CASE("repeated writes to one key reuse the resolved store and keep one entr
     rig.eval("storageSetItem('knob', '0.75')");
     REQUIRE(rig.eval("storageGetItem('knob')") == "0.75");
     const auto files = rig.files_under_root();
-    REQUIRE(files.size() == 1);  // no leftover temporaries, one entry
+    REQUIRE(files.size() == 1); // no leftover temporaries, one entry
     REQUIRE(files.front().filename() == pulp::runtime::sha256_hex("knob") + ".dat");
 
     // Moving the script base dir invalidates the cached directory: the same
@@ -296,7 +313,8 @@ TEST_CASE("the shared Pulp root keeps its permissions; only the store subtree is
 #endif
     fs::create_directories(pulp_root);
     std::error_code ec;
-    fs::permissions(pulp_root, fs::perms::owner_all | fs::perms::group_all, fs::perm_options::replace, ec);
+    fs::permissions(pulp_root, fs::perms::owner_all | fs::perms::group_all,
+                    fs::perm_options::replace, ec);
     const auto before = fs::status(pulp_root).permissions();
 
     rig.eval("storageSetItem('k', 'v')");
@@ -310,8 +328,7 @@ TEST_CASE("the shared Pulp root keeps its permissions; only the store subtree is
 #endif
 }
 
-TEST_CASE("storage entries are namespaced per bridge script base dir",
-          "[view][bridge][storage]") {
+TEST_CASE("storage entries are namespaced per bridge script base dir", "[view][bridge][storage]") {
     StorageRig a;
     const auto base_a = a.root / "plugin-a";
     const auto base_b = a.root / "plugin-b";
@@ -341,7 +358,9 @@ TEST_CASE("storage refuses to read through or write through a symlinked entry",
     const auto store_dir = files.front().parent_path();
 
     const auto target = rig.root / "victim.txt";
-    { std::ofstream(target) << "secret"; }
+    {
+        std::ofstream(target) << "secret";
+    }
     const auto link = store_dir / (pulp::runtime::sha256_hex("linked") + ".dat");
     fs::create_symlink(target, link);
 
@@ -366,5 +385,6 @@ TEST_CASE("style presets persist under the per-user store, not the temp dir",
     REQUIRE(files.size() == 1);
     REQUIRE(path_has_component(files.front(), "style-presets"));
     REQUIRE(files.front().filename() == "caps_preset.json");
-    REQUIRE(rig.eval("JSON.stringify(loadStylePreset('caps preset'))").find("\"a\"") != std::string::npos);
+    REQUIRE(rig.eval("JSON.stringify(loadStylePreset('caps preset'))").find("\"a\"") !=
+            std::string::npos);
 }

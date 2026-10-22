@@ -821,12 +821,13 @@ uint16_t Socket::local_port() const {
 }
 
 std::string Socket::local_address() const {
-    if (fd_ == kInvalidSocketHandle || type_ == SocketType::Local) return {};
+    if (fd_ == kInvalidSocketHandle || type_ == SocketType::Local)
+        return {};
 
     struct sockaddr_in addr{};
     socklen_t addr_len = sizeof(addr);
-    if (::getsockname(NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&addr),
-                      &addr_len) != 0) {
+    if (::getsockname(NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&addr), &addr_len) !=
+        0) {
         return {};
     }
     char text[INET_ADDRSTRLEN] = {};

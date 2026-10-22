@@ -55,7 +55,8 @@ inline const char* private_store_kind_dir(PrivateStoreKind kind) {
 inline bool create_owner_only_dir(const std::filesystem::path& dir) {
     std::error_code ec;
     const bool created = std::filesystem::create_directory(dir, ec);
-    if (ec) return false;
+    if (ec)
+        return false;
     if (created) {
         std::filesystem::permissions(dir, std::filesystem::perms::owner_all,
                                      std::filesystem::perm_options::replace, ec);
@@ -73,7 +74,8 @@ inline bool create_owner_only_dir(const std::filesystem::path& dir) {
 inline std::filesystem::path resolve_private_dir(PrivateStoreKind kind,
                                                  const std::filesystem::path& script_base_dir) {
     const auto root = platform_settings_root();
-    if (root.empty()) return {};
+    if (root.empty())
+        return {};
 
     std::string ns = "shared";
     if (!script_base_dir.empty())
@@ -82,11 +84,14 @@ inline std::filesystem::path resolve_private_dir(PrivateStoreKind kind,
     std::error_code ec;
     const auto pulp_dir = root / "Pulp";
     std::filesystem::create_directories(pulp_dir, ec);
-    if (ec) return {};
+    if (ec)
+        return {};
     const auto kind_dir = pulp_dir / private_store_kind_dir(kind);
-    if (!create_owner_only_dir(kind_dir)) return {};
+    if (!create_owner_only_dir(kind_dir))
+        return {};
     const auto dir = kind_dir / ns;
-    if (!create_owner_only_dir(dir)) return {};
+    if (!create_owner_only_dir(dir))
+        return {};
     return dir;
 }
 
@@ -101,8 +106,10 @@ const std::filesystem::path& cached_private_dir(Cache& cache, PrivateStoreKind k
         cache.widget_storage.reset();
         cache.style_presets.reset();
     }
-    auto& slot = kind == PrivateStoreKind::WidgetStorage ? cache.widget_storage : cache.style_presets;
-    if (!slot) slot = resolve_private_dir(kind, script_base_dir);
+    auto& slot =
+        kind == PrivateStoreKind::WidgetStorage ? cache.widget_storage : cache.style_presets;
+    if (!slot)
+        slot = resolve_private_dir(kind, script_base_dir);
     return *slot;
 }
 
@@ -136,9 +143,11 @@ inline bool write_fully(int fd, std::string_view bytes) {
         const auto n = _write(fd, bytes.data() + done, chunk);
 #else
         const auto n = ::write(fd, bytes.data() + done, chunk);
-        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && errno == EINTR)
+            continue;
 #endif
-        if (n <= 0) return false;
+        if (n <= 0)
+            return false;
         done += static_cast<std::size_t>(n);
     }
     return true;
@@ -167,24 +176,28 @@ inline int current_pid() {
 inline bool write_private_file(const std::filesystem::path& destination, std::string_view bytes) {
     std::error_code ec;
     const auto existing = std::filesystem::symlink_status(destination, ec);
-    if (ec && existing.type() != std::filesystem::file_type::not_found) return false;
-    if (std::filesystem::exists(existing) && !std::filesystem::is_regular_file(existing)) return false;
+    if (ec && existing.type() != std::filesystem::file_type::not_found)
+        return false;
+    if (std::filesystem::exists(existing) && !std::filesystem::is_regular_file(existing))
+        return false;
 
     static std::atomic<std::uint64_t> serial{0};
     for (int attempt = 0; attempt < 16; ++attempt) {
         auto temporary = destination;
-        temporary += ".tmp-" + std::to_string(current_pid()) + "-" +
-                     std::to_string(serial.fetch_add(1));
+        temporary +=
+            ".tmp-" + std::to_string(current_pid()) + "-" + std::to_string(serial.fetch_add(1));
         const int fd = open_exclusive_for_write(temporary);
         if (fd < 0) {
-            if (errno == EEXIST) continue;
+            if (errno == EEXIST)
+                continue;
             return false;
         }
         const bool written = write_fully(fd, bytes);
         close_fd(fd);
         if (written) {
             std::filesystem::rename(temporary, destination, ec);
-            if (!ec) return true;
+            if (!ec)
+                return true;
         }
         std::filesystem::remove(temporary, ec);
         return false;
@@ -197,9 +210,11 @@ inline bool write_private_file(const std::filesystem::path& destination, std::st
 inline std::optional<std::string> read_private_file(const std::filesystem::path& path) {
     std::error_code ec;
     const auto status = std::filesystem::symlink_status(path, ec);
-    if (ec || !std::filesystem::is_regular_file(status)) return std::nullopt;
+    if (ec || !std::filesystem::is_regular_file(status))
+        return std::nullopt;
     std::ifstream in(path, std::ios::binary);
-    if (!in.is_open()) return std::nullopt;
+    if (!in.is_open())
+        return std::nullopt;
     return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 

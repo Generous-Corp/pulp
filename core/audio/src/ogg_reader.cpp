@@ -43,7 +43,8 @@ public:
                                       const DecodeLimits& limits) override {
         int error = 0;
         stb_vorbis* v = stb_vorbis_open_filename(path.c_str(), &error, nullptr);
-        if (!v) return std::nullopt;
+        if (!v)
+            return std::nullopt;
 
         const stb_vorbis_info info = stb_vorbis_get_info(v);
         if (info.channels <= 0) {
@@ -66,18 +67,18 @@ public:
         detail::reserve_planar(data.channels, claimed_frames);
 
         // Decode as int16 and scale, matching stb_vorbis's whole-file decode.
-        std::vector<short> interleaved(
-            static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
+        std::vector<short> interleaved(static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
         std::vector<float> chunk(interleaved.size());
         uint64_t frames_read = 0;
         bool within_limits = true;
         for (;;) {
             const int got = stb_vorbis_get_samples_short_interleaved(
                 v, info.channels, interleaved.data(), static_cast<int>(interleaved.size()));
-            if (got <= 0) break;
+            if (got <= 0)
+                break;
             const auto got_frames = static_cast<uint64_t>(got);
-            if (!detail::within_decode_limits("OGG Vorbis", frames_read + got_frames,
-                                              channels, limits)) {
+            if (!detail::within_decode_limits("OGG Vorbis", frames_read + got_frames, channels,
+                                              limits)) {
                 within_limits = false;
                 break;
             }
@@ -89,7 +90,8 @@ public:
         }
         stb_vorbis_close(v);
 
-        if (!within_limits || frames_read == 0) return std::nullopt;
+        if (!within_limits || frames_read == 0)
+            return std::nullopt;
         return data;
     }
 

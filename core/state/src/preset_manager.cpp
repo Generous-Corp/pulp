@@ -36,13 +36,17 @@ bool is_safe_path_component(std::string_view value) {
 // A folder may nest ("Keys/Analog"); each component must be safe and the
 // path must stay relative, so no leading separator or empty segment.
 bool is_safe_relative_folder(std::string_view folder) {
-    if (folder.empty()) return true;
-    if (folder.front() == '/' || folder.front() == '\\') return false;
+    if (folder.empty())
+        return true;
+    if (folder.front() == '/' || folder.front() == '\\')
+        return false;
     std::size_t start = 0;
     while (start <= folder.size()) {
         std::size_t end = folder.find('/', start);
-        if (end == std::string_view::npos) end = folder.size();
-        if (!is_safe_path_component(folder.substr(start, end - start))) return false;
+        if (end == std::string_view::npos)
+            end = folder.size();
+        if (!is_safe_path_component(folder.substr(start, end - start)))
+            return false;
         start = end + 1;
     }
     return true;
@@ -287,7 +291,8 @@ bool PresetManager::delete_preset(const PresetInfo& preset) {
 }
 
 bool PresetManager::rename(const PresetInfo& preset, const std::string& new_name) {
-    if (preset.is_factory || !is_safe_path_component(new_name)) return false;
+    if (preset.is_factory || !is_safe_path_component(new_name))
+        return false;
     auto new_path = preset.path.parent_path() / (new_name + ".json");
     std::error_code ec;
     fs::rename(preset.path, new_path, ec);

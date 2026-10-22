@@ -155,14 +155,14 @@ public:
         data.channels.resize(channels);
         detail::reserve_planar(data.channels, claimed_frames);
 
-        std::vector<float> interleaved(
-            static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
+        std::vector<float> interleaved(static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
         uint64_t frames_read = 0;
         bool within_limits = true;
         for (;;) {
-            const uint64_t got = drflac_read_pcm_frames_f32(
-                flac, detail::kDecodeChunkFrames, interleaved.data());
-            if (got == 0) break;
+            const uint64_t got =
+                drflac_read_pcm_frames_f32(flac, detail::kDecodeChunkFrames, interleaved.data());
+            if (got == 0)
+                break;
             if (!detail::within_decode_limits("FLAC", frames_read + got, channels, limits)) {
                 within_limits = false;
                 break;
@@ -172,7 +172,8 @@ public:
         }
         drflac_close(flac);
 
-        if (!within_limits || frames_read == 0) return std::nullopt;
+        if (!within_limits || frames_read == 0)
+            return std::nullopt;
         return data;
     }
 
@@ -225,14 +226,14 @@ public:
         data.sample_rate = mp3.sampleRate;
         data.channels.resize(channels);
 
-        std::vector<float> interleaved(
-            static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
+        std::vector<float> interleaved(static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
         uint64_t frames_read = 0;
         bool within_limits = true;
         for (;;) {
-            const uint64_t got = drmp3_read_pcm_frames_f32(
-                &mp3, detail::kDecodeChunkFrames, interleaved.data());
-            if (got == 0) break;
+            const uint64_t got =
+                drmp3_read_pcm_frames_f32(&mp3, detail::kDecodeChunkFrames, interleaved.data());
+            if (got == 0)
+                break;
             if (!detail::within_decode_limits("MP3", frames_read + got, channels, limits)) {
                 within_limits = false;
                 break;
@@ -242,7 +243,8 @@ public:
         }
         drmp3_uninit(&mp3);
 
-        if (!within_limits || frames_read == 0) return std::nullopt;
+        if (!within_limits || frames_read == 0)
+            return std::nullopt;
         return data;
     }
 
@@ -334,7 +336,8 @@ std::optional<AudioFileData> FormatRegistry::read(const std::string& path,
                                                   const DecodeLimits& limits) const {
     auto ext = get_extension(path);
     auto* reader = find_reader(ext);
-    if (!reader) return std::nullopt;
+    if (!reader)
+        return std::nullopt;
     return reader->read(path, limits);
 }
 

@@ -40,9 +40,9 @@ struct TempDir {
         static std::atomic<uint64_t> next_id{0};
         auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
         auto unique_id = next_id.fetch_add(1, std::memory_order_relaxed);
-        path = fs::temp_directory_path()
-             / ("pulp-format-registry-limits-" + std::to_string(current_process_id()) + "-"
-                + std::to_string(stamp) + "-" + std::to_string(unique_id));
+        path = fs::temp_directory_path() /
+               ("pulp-format-registry-limits-" + std::to_string(current_process_id()) + "-" +
+                std::to_string(stamp) + "-" + std::to_string(unique_id));
         fs::create_directories(path);
     }
 
@@ -102,10 +102,10 @@ std::vector<uint8_t> build_flac(uint64_t claimed_total_samples, bool with_frame)
     // Min/max frame size: unknown.
     out.insert(out.end(), 6, 0x00);
     // 20 bits sample rate | 3 bits channels-1 | 5 bits bps-1 | 36 bits total samples.
-    const uint64_t props = (static_cast<uint64_t>(kFixtureSampleRate) << 44)
-                         | (static_cast<uint64_t>(kFixtureChannels - 1u) << 41)
-                         | (static_cast<uint64_t>(15u) << 36)
-                         | (claimed_total_samples & 0xFFFFFFFFFull);
+    const uint64_t props = (static_cast<uint64_t>(kFixtureSampleRate) << 44) |
+                           (static_cast<uint64_t>(kFixtureChannels - 1u) << 41) |
+                           (static_cast<uint64_t>(15u) << 36) |
+                           (claimed_total_samples & 0xFFFFFFFFFull);
     for (int shift = 56; shift >= 0; shift -= 8)
         out.push_back(static_cast<uint8_t>((props >> shift) & 0xFFu));
     // MD5 signature: unset.
@@ -203,7 +203,8 @@ void require_fixture_frame(const AudioFileData& data) {
 
 } // namespace
 
-TEST_CASE("FormatRegistry refuses a FLAC whose STREAMINFO claims more output than the decode limits allow",
+TEST_CASE("FormatRegistry refuses a FLAC whose STREAMINFO claims more output than the decode "
+          "limits allow",
           "[audio][flac][decode-limits]") {
     auto& registry = FormatRegistry::instance();
     TempDir temp;
@@ -223,8 +224,9 @@ TEST_CASE("FormatRegistry refuses a FLAC whose STREAMINFO claims more output tha
     REQUIRE_FALSE(decoded.has_value());
 }
 
-TEST_CASE("FormatRegistry decodes a FLAC inside the default decode limits and honors custom ceilings",
-          "[audio][flac][decode-limits]") {
+TEST_CASE(
+    "FormatRegistry decodes a FLAC inside the default decode limits and honors custom ceilings",
+    "[audio][flac][decode-limits]") {
     auto& registry = FormatRegistry::instance();
     TempDir temp;
     const auto path = (temp.path / "exact-claim.flac").string();
@@ -355,8 +357,9 @@ TEST_CASE("FormatRegistry reads a small WAV and refuses one beyond custom ceilin
     REQUIRE_FALSE(registry.read(path, byte_ceiling).has_value());
 }
 
-TEST_CASE("FormatRegistry refuses a WAV header that claims more frames than the decode limits allow",
-          "[audio][wav][decode-limits]") {
+TEST_CASE(
+    "FormatRegistry refuses a WAV header that claims more frames than the decode limits allow",
+    "[audio][wav][decode-limits]") {
     auto& registry = FormatRegistry::instance();
     TempDir temp;
     const auto path = (temp.path / "huge-claim.wav").string();
@@ -369,8 +372,9 @@ TEST_CASE("FormatRegistry refuses a WAV header that claims more frames than the 
     REQUIRE_FALSE(decoded.has_value());
 }
 
-TEST_CASE("FormatRegistry refuses an AIFF header that claims more output than the decode limits allow",
-          "[audio][aiff][decode-limits]") {
+TEST_CASE(
+    "FormatRegistry refuses an AIFF header that claims more output than the decode limits allow",
+    "[audio][aiff][decode-limits]") {
     auto& registry = FormatRegistry::instance();
     TempDir temp;
     const auto path = (temp.path / "huge-claim.aiff").string();

@@ -44,8 +44,7 @@ inline bool within_decode_limits(std::string_view format, std::uint64_t frames,
         return false;
     }
     if (limits.max_frames != 0u && frames > limits.max_frames) {
-        runtime::log_warn("{}: {} frames exceeds max_frames {}", format, frames,
-                          limits.max_frames);
+        runtime::log_warn("{}: {} frames exceeds max_frames {}", format, frames, limits.max_frames);
         return false;
     }
     std::uint64_t bytes = 0u;
@@ -56,8 +55,8 @@ inline bool within_decode_limits(std::string_view format, std::uint64_t frames,
         return false;
     }
     if (limits.max_output_bytes != 0u && bytes > limits.max_output_bytes) {
-        runtime::log_warn("{}: {} frames x {} channels exceeds max_output_bytes {}", format,
-                          frames, channels, limits.max_output_bytes);
+        runtime::log_warn("{}: {} frames x {} channels exceeds max_output_bytes {}", format, frames,
+                          channels, limits.max_output_bytes);
         return false;
     }
     return true;
@@ -68,7 +67,8 @@ inline bool within_decode_limits(std::string_view format, std::uint64_t frames,
 // A zero claim (unknown length) reserves nothing.
 inline void reserve_planar(std::vector<std::vector<float>>& channels,
                            std::uint64_t claimed_frames) {
-    if (claimed_frames == 0u) return;
+    if (claimed_frames == 0u)
+        return;
     for (auto& planar : channels)
         planar.reserve(static_cast<std::size_t>(claimed_frames));
 }

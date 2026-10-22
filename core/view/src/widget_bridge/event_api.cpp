@@ -744,9 +744,10 @@ void BridgeRegistrars::register_drop_event_api(WidgetBridge& self) {
                 // Dropped text is attacker-chosen; a full JS string literal
                 // keeps a quote or backslash in it from closing the literal.
                 safe_dispatch_eval(alive, engine,
-                    cb + "(" + js_string_literal(type) + "," + js_string_literal(data) + "," +
-                    std::to_string(x) + "," + std::to_string(y) + ")",
-                    "drop");
+                                   cb + "(" + js_string_literal(type) + "," +
+                                       js_string_literal(data) + "," + std::to_string(x) + "," +
+                                       std::to_string(y) + ")",
+                                   "drop");
             };
         }
         return choc::value::Value();

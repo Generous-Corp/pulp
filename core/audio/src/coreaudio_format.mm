@@ -99,10 +99,9 @@ public:
         // Read all frames. The file's own length claim sizes the buffer, so
         // refuse it against the caller's ceilings before allocating.
         uint32_t channels = srcFormat.mChannelsPerFrame;
-        if (frameCount < 0 || frameCount > std::numeric_limits<uint32_t>::max() ||
-            channels == 0 ||
-            !detail::within_decode_limits("CoreAudio", static_cast<uint64_t>(frameCount),
-                                          channels, limits)) {
+        if (frameCount < 0 || frameCount > std::numeric_limits<uint32_t>::max() || channels == 0 ||
+            !detail::within_decode_limits("CoreAudio", static_cast<uint64_t>(frameCount), channels,
+                                          limits)) {
             ExtAudioFileDispose(file);
             return std::nullopt;
         }

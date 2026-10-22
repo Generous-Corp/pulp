@@ -180,7 +180,9 @@ public:
     // that enforce the cap raise a JS "out of memory" error on the allocation
     // that would exceed it. Returns false on backends that cannot enforce one,
     // leaving the realm unbounded.
-    virtual bool set_memory_limit(std::size_t) { return false; }
+    virtual bool set_memory_limit(std::size_t) {
+        return false;
+    }
 
     // Pump any engine-specific message loop / microtask queue. This is a no-op
     // for engines that do not expose an explicit pump hook.

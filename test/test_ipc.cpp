@@ -394,7 +394,7 @@ TEST_CASE("IPC named pipe server creates owner-only FIFOs",
 
     std::vector<mode_t> modes;
     for (const auto& fifo : {pipe_name, pipe_name + ".reply"}) {
-        struct stat status {};
+        struct stat status{};
         if (::lstat(fifo.c_str(), &status) == 0 && S_ISFIFO(status.st_mode))
             modes.push_back(status.st_mode & 0777);
     }
@@ -596,16 +596,14 @@ std::string single_client_server_bind_address(const std::string& host_prefix) {
 
     InterprocessConnection server;
     std::atomic<bool> server_ok{false};
-    std::thread server_thread([&] {
-        server_ok.store(server.create_server(endpoint, IpcTransport::Socket));
-    });
+    std::thread server_thread(
+        [&] { server_ok.store(server.create_server(endpoint, IpcTransport::Socket)); });
 
     InterprocessConnection client;
     bool client_ok = false;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (!client_ok && std::chrono::steady_clock::now() < deadline) {
-        client_ok = client.connect("127.0.0.1:" + std::to_string(*port),
-                                   IpcTransport::Socket,
+        client_ok = client.connect("127.0.0.1:" + std::to_string(*port), IpcTransport::Socket,
                                    std::chrono::milliseconds(200));
         if (!client_ok)
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -622,7 +620,7 @@ std::string single_client_server_bind_address(const std::string& host_prefix) {
     return address;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("IPC single-client server with an omitted host listens on loopback only",
           "[events][ipc][network-exposure]") {

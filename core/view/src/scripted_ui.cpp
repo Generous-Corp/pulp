@@ -98,27 +98,24 @@ void load_script_before_deadline(WidgetBridge& bridge, ScriptEngine& engine,
 
 } // namespace
 
-ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, ScriptedUiOptions options)
-    : identity_(next_scripted_ui_identity.fetch_add(1, std::memory_order_relaxed) + 1)
-    , root_(root)
-    , store_(store)
-    , script_path_(std::move(options.script_path))
-    , theme_path_(options.theme_path.empty() ? script_path_.parent_path() / "theme.json"
-                                             : std::move(options.theme_path))
-    , asset_roots_(std::move(options.asset_roots))
-    , granted_capabilities_(options.granted_capabilities)
-    , hot_reload_enabled_(options.enable_hot_reload)
-    , theme_reload_enabled_(options.enable_theme_reload)
-    , runtime_import_enabled_(options.enable_runtime_import)
-    , js_memory_limit_bytes_(options.js_memory_limit_bytes)
-    , value_channel_access_(
+ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store,
+                                     ScriptedUiOptions options)
+    : identity_(next_scripted_ui_identity.fetch_add(1, std::memory_order_relaxed) + 1), root_(root),
+      store_(store), script_path_(std::move(options.script_path)),
+      theme_path_(options.theme_path.empty() ? script_path_.parent_path() / "theme.json"
+                                             : std::move(options.theme_path)),
+      asset_roots_(std::move(options.asset_roots)),
+      granted_capabilities_(options.granted_capabilities),
+      hot_reload_enabled_(options.enable_hot_reload),
+      theme_reload_enabled_(options.enable_theme_reload),
+      runtime_import_enabled_(options.enable_runtime_import),
+      js_memory_limit_bytes_(options.js_memory_limit_bytes),
+      value_channel_access_(
           options.value_channel_access
               ? std::move(options.value_channel_access)
-              : ValueChannelAccess{
-                    [channels = options.value_channels](
-                        const ValueChannelVisitor& visitor) { visitor(channels); }})
-    , log_callback_(default_log_callback())
-{
+              : ValueChannelAccess{[channels = options.value_channels](
+                                       const ValueChannelVisitor& visitor) { visitor(channels); }}),
+      log_callback_(default_log_callback()) {
     if (const auto make_port = script_inspector_port_factory()) {
         inspector_port_ = make_port();
         if (inspector_port_)

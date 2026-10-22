@@ -48,8 +48,8 @@ static void set_quickjs_stack_size(
 // QuickJS accounts every allocation against the runtime's malloc limit and
 // throws InternalError("out of memory") past it; its own default is unlimited
 // (SIZE_MAX), which is what 0 maps back to here.
-static void set_quickjs_memory_limit(
-    choc::javascript::quickjs::QuickJSContext& context, size_t bytes) {
+static void set_quickjs_memory_limit(choc::javascript::quickjs::QuickJSContext& context,
+                                     size_t bytes) {
     if (context.runtime)
         JS_SetMemoryLimit(context.runtime, bytes == 0 ? static_cast<size_t>(-1) : bytes);
 }

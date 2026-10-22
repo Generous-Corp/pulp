@@ -496,9 +496,7 @@ TEST_CASE("registerDrop delivers dropped text as data, never as code",
     REQUIRE(static_cast<bool>(dropzone->on_drop));
 
     auto calls = [&] { return engine.evaluate("drop_calls").getWithDefault<int>(-1); };
-    auto pwned = [&] {
-        return engine.evaluate("typeof globalThis.__pwned").toString();
-    };
+    auto pwned = [&] { return engine.evaluate("typeof globalThis.__pwned").toString(); };
 
     SECTION("plain text arrives intact") {
         dropzone->on_drop("text", "hello drop", 1.0f, 2.0f);
