@@ -1486,7 +1486,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/oversampling_fir.hpp",
-        "fingerprint": "sha256:b69bdfdfad33b8806c2b8c04a6e1bce898b5d97e2714c3d876f8f4a49f84008e",
+        "fingerprint": "sha256:2a6400d40bb89cce4b6cac9aec75b5005145af178b1d04059c2cd8abd99d0543",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
