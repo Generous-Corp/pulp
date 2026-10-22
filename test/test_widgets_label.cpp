@@ -770,6 +770,17 @@ TEST_CASE("Label honors Chromium captured vertical line positions",
     const auto adjusted_fills = commands_of(adjusted_canvas, DrawCommand::Type::fill_text);
     REQUIRE(adjusted_fills.size() == 1);
     CHECK(adjusted_fills[0].f[1] == Catch::Approx(fills[0].f[1]));
+
+    // The selection band covers the captured rect, not the worst-case glyph
+    // extent hanging from the baseline.
+    adjusted.set_selection_policy(Label::SelectionPolicy::always);
+    RecordingCanvas selection_canvas;
+    adjusted.paint(selection_canvas);
+    const auto layout = adjusted.selectable_layout();
+    REQUIRE(layout.measured);
+    REQUIRE(layout.lines.size() == 1);
+    CHECK(layout.lines[0].top == Catch::Approx(1.0f));
+    CHECK(layout.lines[0].height == Catch::Approx(18.0f));
 }
 
 TEST_CASE("Label keeps a retyped single captured line where Chromium put it",

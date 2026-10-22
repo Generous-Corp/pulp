@@ -595,3 +595,37 @@ TEST_CASE("design-import benchmark IR binding and teardown fail closed",
     std::filesystem::remove(output);
     std::filesystem::remove(path);
 }
+
+TEST_CASE("design-import benchmark retained lane sees a rebound slot",
+          "[design-import][benchmark][retained]") {
+    // Planted negative: swap one slot's Label for a new View under the same
+    // anchor. A check that only re-read the Label it resolved at build would
+    // keep reporting zero.
+    const auto path = write_slot_ir("pulp-bench-rebind.ir.json");
+    Config config = lane_config("baked-native");
+    config.ir_path = path;
+    auto fixture = make_fixture(config);
+    auto* bound = dynamic_cast<IrBoundFixture*>(fixture.get());
+    REQUIRE(bound != nullptr);
+    View* original = nullptr;
+    const auto find = [&](auto& self, View& view) -> void {
+        if (view.anchor_id() == "title")
+            original = &view;
+        for (std::size_t i = 0; i < view.child_count(); ++i)
+            self(self, *view.child_at(i));
+    };
+    find(find, bound->tree());
+    REQUIRE(original != nullptr);
+    View* parent = original->parent();
+    REQUIRE(parent != nullptr);
+    // Hold the original so the retained lane's write through it stays valid.
+    auto held = parent->remove_child(original);
+    auto replacement = std::make_unique<Label>("title");
+    replacement->set_anchor_id("title");
+    parent->add_child(std::move(replacement));
+
+    const auto phase = run_phase(*fixture, 0, 1, 60, true);
+    CHECK(phase.slot_identity_changes == 1);
+    CHECK(phase.slot_text_mismatches == 1);
+    std::filesystem::remove(path);
+}

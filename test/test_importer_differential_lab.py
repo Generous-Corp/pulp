@@ -29,6 +29,14 @@ from importer_differential import core as LAB  # noqa: E402
 from importer_differential import cli as LAB_CLI  # noqa: E402
 
 
+def observer_placement(argv: list[str]) -> dict[str, object]:
+    """The placement block the real observer records for these arguments."""
+    x, y = (float(v) for v in argv[argv.index("--origin") + 1].split(","))
+    background = (argv[argv.index("--page-background") + 1]
+                  if "--page-background" in argv else "")
+    return {"origin_x": x, "origin_y": y, "page_background": background}
+
+
 class DifferentialLabTests(unittest.TestCase):
     def test_source_recognition_records_dynamic_blockers(self) -> None:
         recognition = LAB.source_recognition("""
@@ -744,7 +752,8 @@ class DifferentialLabTests(unittest.TestCase):
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
-                                    "ok": True}), encoding="utf-8")
+                                    "ok": True,
+                                    "placement": observer_placement(argv)}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
                     output.write_text(json.dumps({"root": {"type": "frame",
@@ -842,6 +851,24 @@ class DifferentialLabTests(unittest.TestCase):
             self.assertEqual(geometry["registration"]["x"], 0.25)
             self.assertEqual(geometry["registration"]["applied_to"], "native-render-and-layout")
             self.assertIn("geometry score below 0.980", offset_report["promotion"]["reasons"])
+            # A receipt that records a different placement than was requested
+            # means the render was registered by something else.
+            def misplaced_run(argv: list[str], timeout_seconds: int) -> LAB.CommandResult:
+                result = fake_run(argv, timeout_seconds)
+                if "--render" in argv:
+                    receipt = Path(argv[argv.index("--render-receipt") + 1])
+                    data = json.loads(receipt.read_text(encoding="utf-8"))
+                    data["placement"]["origin_x"] += 24.0
+                    receipt.write_text(json.dumps(data), encoding="utf-8")
+                return result
+            with patch.object(LAB, "run_command", side_effect=misplaced_run), \
+                    patch.object(LAB, "find_browser_evidence", return_value=evidence), \
+                    self.assertRaisesRegex(LAB.LabError, "requested placement"):
+                LAB.compare_one(
+                    Path("importer"), Path("observer"), source, root / "out-misplaced", 60,
+                    "claude", Path("chrome"),
+                    fixture_metadata={"viewport": {"width": 1, "height": 1},
+                                      "browser_interactions": "plan.json"})
             with patch.object(
                 LAB, "viewport_dpr_audit",
                 return_value={"ok": False, "checks": {"planted_negative": False}},
@@ -907,7 +934,8 @@ class DifferentialLabTests(unittest.TestCase):
                     Path(argv[argv.index("--render-receipt") + 1]).write_text(
                         json.dumps({"schema": "pulp-design-ir-render-receipt-v1",
                                     "backend_requested": "skia", "backend_used": "skia",
-                                    "ok": True}), encoding="utf-8")
+                                    "ok": True,
+                                    "placement": observer_placement(argv)}), encoding="utf-8")
                 else:
                     output = Path(argv[argv.index("--output") + 1])
                     output.write_text(json.dumps({"root": {"type": "frame",

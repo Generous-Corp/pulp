@@ -10,12 +10,12 @@
   "tests": [
     "Vellum freeze",
     "Vellum trusted freeze",
-    "ctest --test-dir build -R pulp-test-browser-capture-ir",
-    "ctest --test-dir build -R pulp-test-canvas-fonts",
-    "ctest --test-dir build -R pulp-test-design-import-benchmark-contracts",
-    "ctest --test-dir build -R pulp-test-design-import-codegen-layout-text",
-    "ctest --test-dir build -R pulp-test-view-lifecycle-contract",
-    "ctest --test-dir build -R pulp-test-widgets-label",
+    "ctest --test-dir build -R 'fill_text places the alphabetic baseline at y'",
+    "ctest --test-dir build -R 'Label honors Chromium captured vertical line positions'",
+    "ctest --test-dir build -R 'native codegen preserves the browser'",
+    "ctest --test-dir build -R 'unsupported document canvas facts'",
+    "ctest --test-dir build -R 'design-import benchmark'",
+    "ctest --test-dir build -R 'lifetime counters advance once per view'",
     "python3 test/test_importer_differential_lab.py",
     "python3 tools/import-validation/test_diff_against_reference.py"
   ],

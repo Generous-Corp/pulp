@@ -1497,6 +1497,19 @@ def compare_one(
             or render_receipt.get("backend_used") != "skia"
             or render_receipt.get("ok") is not True):
         raise LabError("native render receipt did not prove a successful Skia render")
+    # The receipt records how the observer placed the panel; it must be the
+    # placement this comparison asked for, or the render was registered by
+    # something other than the authenticated authored frame.
+    placement = render_receipt.get("placement")
+    expected_background = (page_background["color"]
+                           if page_background["status"] == "resolved" else "")
+    if (not isinstance(placement, dict)
+            or not math.isclose(float(placement.get("origin_x", math.nan)), authored_x,
+                                abs_tol=1e-4)
+            or not math.isclose(float(placement.get("origin_y", math.nan)), authored_y,
+                                abs_tol=1e-4)
+            or placement.get("page_background") != expected_background):
+        raise LabError("native render receipt does not record the requested placement")
 
     try:
         from PIL import Image

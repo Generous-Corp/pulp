@@ -1947,6 +1947,11 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             ? 0.0f
             : (first_line_box_h - single_line_ink_height) * 0.5f;
     float baseline_y;
+    // Where a selection band sits relative to the baseline. A captured line
+    // overrides both with the run rect Chromium reported, so the band covers
+    // the box the text was laid out in rather than the worst-case glyph extent.
+    float selection_ascent = first_line_ascent;
+    float selection_height = single_line_text_height;
     switch (vertical_align_) {
         case canvas::TextVerticalAlign::top:
             baseline_y = pad.top + first_half_leading + first_line_ascent;
@@ -1988,6 +1993,8 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                                                        effective_font_weight(), font_style_);
         if (fm.real) {
             baseline_y = first_line.y + first_line.height - std::round(fm.typographic_descent);
+            selection_ascent = baseline_y - first_line.y;
+            selection_height = first_line.height;
         } else {
             const float half_leading = (first_line.height - single_line_text_height) * 0.5f;
             baseline_y = first_line.y + half_leading + first_line_ascent;
@@ -2072,8 +2079,8 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         if (draw_text != display_text && selectable_line.ends_with(kEllipsis)) {
             selectable_line.resize(selectable_line.size() - std::string_view(kEllipsis).size());
         }
-        paint_selection_line_(canvas, selectable_line, draw_x, baseline_y - first_line_ascent,
-                              single_line_text_height,
+        paint_selection_line_(canvas, selectable_line, draw_x, baseline_y - selection_ascent,
+                              selection_height,
                               /*source_start=*/0, text_color, vertical);
         canvas.fill_text(draw_text, draw_x, baseline_y);
         decorate_plain(draw_text, draw_x, baseline_y,
@@ -2133,8 +2140,9 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                     const int src =
                         static_cast<int>(found == std::string::npos ? source_cursor : found);
                     paint_selection_line_(canvas, shaped_line.text, x + shaped_line.x_offset,
-                                          line_baseline - first_line_ascent, lh, src, text_color,
-                                          vertical);
+                                          line_baseline - selection_ascent,
+                                          captured_cache_usable ? shaped_line.height : lh, src,
+                                          text_color, vertical);
                     source_cursor = static_cast<std::size_t>(src) + shaped_line.text.size();
                 }
                 canvas.fill_text(line, x + shaped_line.x_offset, line_baseline);

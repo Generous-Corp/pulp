@@ -909,6 +909,9 @@ class IrBoundFixture final : public BenchmarkFixture {
     std::uint64_t slot_text_mismatch_count() const override {
         return text_mismatches_;
     }
+    View& tree() {
+        return *root_;
+    }
     const LoadedIr& loaded() const {
         return loaded_;
     }
@@ -940,6 +943,7 @@ class IrBoundFixture final : public BenchmarkFixture {
     // Reads every slot back through the anchors of the CURRENT tree, so a
     // slot that rebound to another View, or kept stale text, is counted.
     void verify(int frame) override {
+        resolve_slots();
         for (std::size_t i = 0; i < slots_.size(); ++i) {
             auto* label = resolved_[i];
             if (!label || label->import_binding_instance_id() != slots_[i].instance_id) {
@@ -962,6 +966,15 @@ class IrBoundFixture final : public BenchmarkFixture {
     // construction; `resolved_` always describes the current tree.
     void materialize(const DesignIR& ir) {
         root_ = materialize_checked(ir, loaded_.width, loaded_.height, "IR-bound", &warning_codes_);
+        resolve_slots();
+        // Only the retained lane writes through the Labels of its first tree;
+        // the rebuild lane replaces that tree, so it keeps no such pointers.
+        if (!rebuild_each_step_ && retained_.empty())
+            retained_ = resolved_;
+    }
+
+    // Resolves every slot anchor against the CURRENT tree.
+    void resolve_slots() {
         resolved_.assign(loaded_.slot_anchors.size(), nullptr);
         const auto visit = [&](auto& self, View& view) -> void {
             for (std::size_t i = 0; i < loaded_.slot_anchors.size(); ++i)
@@ -971,10 +984,6 @@ class IrBoundFixture final : public BenchmarkFixture {
                 self(self, *view.child_at(c));
         };
         visit(visit, *root_);
-        // Only the retained lane writes through the Labels of its first tree;
-        // the rebuild lane replaces that tree, so it keeps no such pointers.
-        if (!rebuild_each_step_ && retained_.empty())
-            retained_ = resolved_;
     }
 
     LoadedIr loaded_;

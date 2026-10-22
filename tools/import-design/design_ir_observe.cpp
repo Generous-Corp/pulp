@@ -56,25 +56,22 @@ bool write_text(const std::filesystem::path& path, const std::string& text) {
     return static_cast<bool>(output);
 }
 
-// Moves a panel-local DesignIR to its browser page-space rect, for comparing
-// the render against a full-page Chromium screenshot. The translation is rigid
-// for everything recorded relative to the panel origin: the authored subtree
-// and the captured box paint rects the painter validates against a view's
-// absolute position. Translating the children alone would leave those rects
-// behind, and the painter would reject them as stale and fall back to
-// unsnapped geometry production never draws. Captured raster origins are not
-// moved: the sprite pass crops them out of the full-page screenshot, so they
-// are page-space already.
+// Places a panel-local DesignIR in its browser page-space rect, for comparing
+// the render against a full-page Chromium screenshot. An observer-only page
+// node fills the viewport with the page colour the caller resolved, and the
+// importer's panel root becomes its one child, positioned at the authored
+// origin with its own size, clip and background untouched. So a backdrop the
+// importer dropped stays dropped inside the panel, while the page around it
+// matches Chromium's canvas.
 //
-// The viewport root keeps exactly the background the importer gave it (the
-// document canvas, when the capture proved one); an absent background stays
-// absent, so a dropped page colour shows up as a page-space residual instead
-// of being borrowed from some descendant.
-void translate_to_page_space(pulp::view::IRNode& root, float dx, float dy) {
-    for (auto& child : root.children) {
-        child.style.left = child.style.left.value_or(0.0f) + dx;
-        child.style.top = child.style.top.value_or(0.0f) + dy;
-    }
+// The move is rigid for every coordinate recorded relative to the panel
+// origin: the captured box paint rects the painter validates against a view's
+// absolute position move with it, or the painter would reject them as stale
+// and fall back to unsnapped geometry production never draws. Captured raster
+// origins are not moved: the sprite pass crops them out of the full-page
+// screenshot, so they are page-space already.
+void place_in_page(pulp::view::DesignIR& ir, float dx, float dy, float page_width,
+                   float page_height, const std::string& page_background) {
     const auto shift = [](pulp::view::IRNode& node, const char* key, double by) {
         auto it = node.attributes.find(key);
         if (it == node.attributes.end())
@@ -106,7 +103,22 @@ void translate_to_page_space(pulp::view::IRNode& root, float dx, float dy) {
         for (auto& child : node.children)
             self(self, child);
     };
-    visit(visit, root);
+    visit(visit, ir.root);
+
+    pulp::view::IRNode page;
+    page.type = "frame";
+    page.name = "observer page";
+    page.stable_anchor_id = "observer:page";
+    page.style.width = page_width;
+    page.style.height = page_height;
+    page.style.position = "relative";
+    if (!page_background.empty())
+        page.style.background_color = page_background;
+    ir.root.style.position = "absolute";
+    ir.root.style.left = dx;
+    ir.root.style.top = dy;
+    page.children.push_back(std::move(ir.root));
+    ir.root = std::move(page);
 }
 
 void usage() {
@@ -687,7 +699,7 @@ int main(int argc, char** argv) {
             return 2;
         }
         const char* value = argv[++i];
-        // Panel placement for page-space observation; see translate_to_page_space.
+        // Panel placement for page-space observation; see place_in_page.
         if (arg == "--origin") {
             auto point = parse_point(value);
             if (!point) {
@@ -801,21 +813,8 @@ int main(int argc, char** argv) {
         std::cerr << "Error: invalid DesignIR: " << error.what() << "\n";
         return 1;
     }
-    if (has_origin)
-        translate_to_page_space(ir.root, origin_x, origin_y);
-    if (!page_background.empty()) {
-        // The colour the caller resolved for the page canvas. A root that
-        // already carries the document canvas must agree with it; two
-        // authorities disagreeing is evidence of a binding error, not a
-        // choice for the observer to make.
-        if (ir.root.style.background_color && *ir.root.style.background_color != page_background) {
-            std::cerr << "Error: --page-background " << page_background
-                      << " disagrees with the imported document canvas "
-                      << *ir.root.style.background_color << "\n";
-            return 2;
-        }
-        ir.root.style.background_color = page_background;
-    }
+    if (has_origin || !page_background.empty())
+        place_in_page(ir, origin_x, origin_y, width, height, page_background);
     // The document's own directory is the search root for its manifest assets:
     // relative local_paths resolve against it, and a local_path that no longer
     // points at its bytes is recovered by content hash from the asset folders
