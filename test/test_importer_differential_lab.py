@@ -1697,35 +1697,54 @@ class FormControlBoundaryTests(unittest.TestCase):
     """Themed form controls are a stated boundary, never a hidden score."""
 
     @staticmethod
-    def form_snapshot() -> dict:
+    def form_snapshot(with_theme: bool = True) -> dict:
         # 0 DIV, 1 INPUT[type=range] (themed), 2 INPUT[type=checkbox]
         # (appearance:none), 3 INPUT[type=range] (appearance:none), 4 SELECT,
-        # 5 OPTION (no layout), 6 its text, 7 SPAN (no layout, outside a select).
+        # 5 OPTION (no layout), 6 its text, 7 SPAN (no layout, outside a select),
+        # 8 BUTTON (appearance:auto, author background), 9 BUTTON
+        # (appearance:auto, unstyled).
         strings = [
             "DIV", "INPUT", "SELECT", "OPTION", "#text", "SPAN", "type",
             "range", "checkbox", "block", "auto", "none", "inline-block",
-            "A",
+            "A", "BUTTON",
         ]
-        return {
+        snapshot = {
             "strings": strings,
             "computedStyleNames": ["display", "appearance"],
             "documents": [{
                 "nodes": {
-                    "parentIndex": [-1, 0, 0, 0, 0, 4, 5, 0],
-                    "nodeType": [1, 1, 1, 1, 1, 1, 3, 1],
-                    "nodeName": [0, 1, 1, 1, 2, 3, 4, 5],
-                    "nodeValue": [-1, -1, -1, -1, -1, -1, 13, -1],
-                    "attributes": [[], [6, 7], [6, 8], [6, 7], [], [], [], []],
+                    "parentIndex": [-1, 0, 0, 0, 0, 4, 5, 0, 0, 0],
+                    "nodeType": [1, 1, 1, 1, 1, 1, 3, 1, 1, 1],
+                    "nodeName": [0, 1, 1, 1, 2, 3, 4, 5, 14, 14],
+                    "nodeValue": [-1, -1, -1, -1, -1, -1, 13, -1, -1, -1],
+                    "attributes": [[], [6, 7], [6, 8], [6, 7], [], [], [], [],
+                                   [], []],
                 },
                 "layout": {
-                    "nodeIndex": [0, 1, 2, 3, 4],
-                    "bounds": [[0, 0, 100, 100], [10, 10, 40, 10],
+                    "nodeIndex": [0, 1, 2, 3, 4, 8, 9],
+                    "bounds": [[0, 0, 100, 140], [10, 10, 40, 10],
                                [10, 30, 10, 10], [10, 50, 40, 10],
-                               [10, 70, 40, 20]],
-                    "styles": [[9, 11], [12, 10], [12, 11], [12, 11], [12, 11]],
+                               [10, 70, 40, 20], [10, 95, 40, 20],
+                               [10, 118, 40, 20]],
+                    "styles": [[9, 11], [12, 10], [12, 11], [12, 11], [12, 11],
+                               [12, 10], [12, 10]],
                 },
             }],
         }
+        if with_theme:
+            # The capture's verdicts, as `form_control_theme.mjs` writes them.
+            snapshot["formControlTheme"] = {
+                "schema": "pulp-form-control-theme-v1",
+                "controls": [
+                    {"node_index": 1, "theme": "native"},
+                    {"node_index": 2, "theme": "none"},
+                    {"node_index": 3, "theme": "none"},
+                    {"node_index": 4, "theme": "none"},
+                    {"node_index": 8, "theme": "author"},
+                    {"node_index": 9, "theme": "native"},
+                ],
+            }
+        return snapshot
 
     def test_unlaid_out_options_are_not_expected_boxes(self) -> None:
         tags = [node.tag for node in LAB.browser_nodes(self.form_snapshot())]
@@ -1739,17 +1758,27 @@ class FormControlBoundaryTests(unittest.TestCase):
     def test_control_status_separates_theme_from_author_styling(self) -> None:
         from importer_differential.form_controls import form_controls
 
-        rows = form_controls(LAB.browser_nodes(self.form_snapshot()))
-        status = {(row["tag"], row["type"], row["appearance"]): row["status"]
-                  for row in rows}
-        self.assertEqual(status[("input", "range", "auto")],
-                         "ua-default-form-chrome")
-        self.assertEqual(status[("input", "checkbox", "none")], "author-styled")
+        snapshot = self.form_snapshot()
+        rows = form_controls(LAB.browser_nodes(snapshot), snapshot)
+        status = {row["browser_node"]: row["status"] for row in rows}
+        self.assertEqual(status[1], "ua-default-form-chrome")
+        self.assertEqual(status[2], "author-styled")
         # appearance:none does not reach a range's thumb.
-        self.assertEqual(status[("input", "range", "none")],
-                         "ua-shadow-form-part")
-        self.assertEqual(status[("select", None, "none")], "author-styled")
-        # A capture without `appearance` cannot say, and does not guess.
+        self.assertEqual(status[3], "ua-shadow-form-part")
+        self.assertEqual(status[4], "author-styled")
+        # Both buttons compute `appearance: auto`. Author box styling drops
+        # Chromium's theme, so only the unstyled one is the theme's.
+        self.assertEqual(status[8], "author-styled")
+        self.assertEqual(status[9], "ua-default-form-chrome")
+
+        # A capture without verdicts cannot say who painted an `auto`
+        # control, and does not guess either way.
+        legacy = self.form_snapshot(with_theme=False)
+        rows = form_controls(LAB.browser_nodes(legacy), legacy)
+        status = {row["browser_node"]: row["status"] for row in rows}
+        self.assertEqual(status[8], "theme-unresolved")
+        self.assertEqual(status[9], "theme-unresolved")
+        self.assertEqual(status[2], "author-styled")
         from importer_differential.form_controls import control_status
         self.assertEqual(control_status("button", "", {}),
                          "appearance-unrecorded")
@@ -1808,19 +1837,63 @@ class FormControlBoundaryTests(unittest.TestCase):
         self.assertFalse(result["threshold_eligible"])
         self.assertEqual(result["visual_gate_score"], 0.71)
         self.assertEqual(result["visual_full_frame_score"], 0.7)
-        self.assertEqual(result["support_boundaries"],
-                         ["ua-default-form-chrome"])
+        self.assertEqual(result["support_boundaries"], [
+            {"boundary": "ua-default-form-chrome", "control_count": 2,
+             "foreground_error_share": 0.9}])
+        self.assertFalse(result["boundary_overrides_passing_gates"])
         self.assertTrue(any("visual score below" in reason
                             for reason in result["reasons"]))
-        # Even a passing score stays ineligible across the boundary.
+        # A fixture whose every numeric gate passes stays ineligible across the
+        # boundary, and the report says the boundary, not a score, decided it.
+        gated = {"score": 1.0, "gate": {"ok": True, "failed": []}}
         result = LAB.promotion_recommendation(
-            [], perfect, perfect, perfect, perfect, boundary)
+            [], perfect, gated, perfect, perfect, boundary)
+        self.assertTrue(result["numeric_gates_pass"])
         self.assertFalse(result["threshold_eligible"])
+        self.assertTrue(result["boundary_overrides_passing_gates"])
+        self.assertIn("every numeric gate passes", result["reasons"][0])
+        self.assertEqual(result["support_boundaries"][0]
+                         ["foreground_error_share"], 0.9)
+        # Without the boundary the same scores are eligible: the override is
+        # the boundary's alone.
+        result = LAB.promotion_recommendation(
+            [], perfect, gated, perfect, perfect, [])
+        self.assertTrue(result["threshold_eligible"])
+        self.assertFalse(result["boundary_overrides_passing_gates"])
         recognition = LAB.source_recognition("<!doctype html><html></html>")
         causes = [finding["cause"] for finding in LAB.classify_gaps(
             recognition, perfect, perfect, perfect, visual,
             {"support_boundaries": boundary, "controls": []})]
         self.assertIn("ua-default-form-chrome", causes)
+
+    def test_corpus_lists_every_boundary_reclassification(self) -> None:
+        def report(path, promotion):
+            return {
+                "source": {"path": path},
+                "promotion": {"classification": "browser-required",
+                              **promotion},
+                "comparison": {
+                    "structural": {"score": 1.0},
+                    "geometry": {"score": 1.0, "gate": {"ok": True}},
+                    "typography": {"score": 1.0}, "visual": {"score": 1.0}},
+                "timings": {"browser_import_ms": 1, "native_import_ms": 1,
+                            "native_render_ms": 1, "native_total_ms": 2,
+                            "browser_to_native_import_speedup": 1.0},
+                "classifications": [],
+            }
+
+        boundary = [{"boundary": "ua-default-form-chrome", "control_count": 1,
+                     "foreground_error_share": 0.4}]
+        aggregate = LAB.aggregate_reports([
+            report("passing.html", {"support_boundaries": boundary,
+                                    "boundary_overrides_passing_gates": True}),
+            report("plain.html", {})])
+        rows = aggregate["support_boundary_fixtures"]
+        self.assertEqual([row["fixture"] for row in rows], ["passing.html"])
+        self.assertTrue(rows[0]["boundary_overrides_passing_gates"])
+        from importer_differential.reports import format_corpus_summary
+        self.assertIn("every numeric gate passes",
+                      format_corpus_summary(aggregate))
 
 
 @requires_pillow

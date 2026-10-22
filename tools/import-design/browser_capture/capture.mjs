@@ -66,6 +66,7 @@ import {
   createCaptureProgress,
 } from "./lifecycle.mjs";
 import { evaluateDesignTokens } from "./tokens.mjs";
+import { evaluateFormControlTheme } from "./form_control_theme.mjs";
 import { evaluatePlatformFonts } from "./platform_fonts.mjs";
 import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs";
 import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
@@ -1948,6 +1949,11 @@ async function runCapture(options) {
     // faces reported have to be the ones the frozen frame was shaped with.
     const platformFontReport = await evaluatePlatformFonts(
       cdp, snapshot, COMPUTED_STYLES);
+    // Whether the native theme painted each form control is decided by who
+    // styled it, which only matched-rule origins can say. Written INTO the
+    // snapshot below, so the verdict is bound by the same hash as the boxes.
+    const formControlTheme = await evaluateFormControlTheme(
+      cdp, snapshot, COMPUTED_STYLES);
     if (materializedDocument) {
       materializedDocument.layout_bindings = buildMaterializedLayoutBindings(
         snapshot, materializedDocument.coordinate_space);
@@ -2165,6 +2171,7 @@ async function runCapture(options) {
     const snapshotBytes = Buffer.from(serializeJson({
       ...sanitizedSnapshot,
       computedStyleNames: COMPUTED_STYLES,
+      formControlTheme,
     }), "utf8");
     const interactionReportBytes = interactionReport
       ? serializeJson(interactionReport)

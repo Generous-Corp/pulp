@@ -92,11 +92,14 @@ struct PaintedTreeCounts {
     /// option. Chrome paints those inside a user-agent shadow tree the
     /// snapshot never serializes, so without these the box arrives empty.
     int control_value_text = 0;
-    /// Form controls whose used `appearance` is not `none`, so Chromium's
-    /// native theme paints them and their computed fills and borders do not
-    /// describe their pixels. Each carries `native_appearance` naming the
-    /// value; the box is still drawn from computed style, which is an
-    /// approximation this count keeps visible.
+    /// Form controls the capture recorded as painted by Chromium's native
+    /// theme, so their computed fills and borders do not describe their
+    /// pixels. Every control whose computed `appearance` is not `none` carries
+    /// `native_appearance` and `native_theme` (the verdict, or `unresolved`);
+    /// only `native` ones are counted, because author box styling makes
+    /// Chromium paint an `appearance: auto` control from CSS. The box is
+    /// still drawn from computed style, an approximation this count keeps
+    /// visible.
     int native_appearance_controls = 0;
     int skipped_empty_box = 0;     ///< zero-area layout objects
     int skipped_blank_text = 0;    ///< collapsed whitespace runs

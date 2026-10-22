@@ -1,18 +1,22 @@
 """Form-control support boundary for the differential lab.
 
-Chromium paints a form control one of two ways. With `appearance: none` the
-control is an ordinary box: its computed fills, borders, and padding describe
-its pixels, and the string it shows comes from control state the snapshot
-records. With any other used `appearance`, the native theme paints it, and the
-computed box no longer describes the result: an unstyled range reports a white
-background it never draws, and an unstyled button reports a 2px outset black
-border drawn as a thin rounded grey one. Those pixels belong to the browser's
-own theme code, so Pulp's renderer cannot reproduce them from the capture
-without copying that appearance.
+Chromium paints a form control from CSS or from its native theme, and computed
+`appearance` alone does not say which. With `appearance: none` the control is
+an ordinary box. With any other appearance the theme paints it UNLESS the author
+styled the box: a button or progress bar with an author background, border, or
+border radius, or a text field or textarea with any of those or a box-shadow,
+is painted from CSS while its computed appearance still reads `auto`. A select
+in that state keeps a theme-drawn arrow; checkboxes, radios, ranges and other
+picker controls keep the theme whatever the author sets. Because the rule keys
+on who declared a property, the capture records the verdict from Chromium's
+matched-rule origins (`formControlTheme` in the DOM snapshot), and this module
+reads it rather than re-deriving it from computed values.
 
-This module states that boundary per control and attributes the visual
-residual to it. It never removes a fixture from a denominator or alters a
-score; it only says which part of a score is the theme.
+Where the theme really paints, those pixels belong to the browser's own theme
+code, so Pulp's renderer cannot reproduce them from the capture without copying
+that appearance. This module states that boundary per control and attributes
+the visual residual to it. It never removes a fixture from a denominator or
+alters a score; it only says which part of a score is the theme.
 """
 
 from __future__ import annotations
@@ -33,28 +37,64 @@ UA_DEFAULT_FORM_CHROME = "ua-default-form-chrome"
 UA_SHADOW_FORM_PART = "ua-shadow-form-part"
 AUTHOR_STYLED = "author-styled"
 APPEARANCE_UNRECORDED = "appearance-unrecorded"
+THEME_UNRESOLVED = "theme-unresolved"
 
 BOUNDARY_STATUSES = frozenset({UA_DEFAULT_FORM_CHROME, UA_SHADOW_FORM_PART})
 
 
-def control_status(tag: str, input_type: str, styles: dict[str, str]) -> str:
-    """Classify one laid-out form control from its evaluated styles."""
+def control_status(tag: str, input_type: str, styles: dict[str, str],
+                   theme: str | None = None,
+                   theme_recorded: bool = False) -> str:
+    """Classify one laid-out form control.
+
+    `theme` is the capture's verdict for this control (`none`, `native`,
+    `author`, `author-arrow`, or None when it could not be resolved), and
+    `theme_recorded` whether the capture carried verdicts at all.
+    """
     appearance = styles.get("appearance")
     if appearance is None:
         return APPEARANCE_UNRECORDED
-    if appearance.strip().lower() != "none":
+    if appearance.strip().lower() == "none":
+        if tag == "input" and input_type in SHADOW_PART_INPUT_TYPES:
+            return UA_SHADOW_FORM_PART
+        return AUTHOR_STYLED
+    # Computed appearance is not `none`; only the verdict says whether the
+    # theme actually painted. Without one the answer is unknown, not a
+    # boundary.
+    if not theme_recorded or theme is None:
+        return THEME_UNRESOLVED
+    if theme == "native":
         return UA_DEFAULT_FORM_CHROME
+    if theme == "author-arrow":
+        return UA_SHADOW_FORM_PART
     if tag == "input" and input_type in SHADOW_PART_INPUT_TYPES:
         return UA_SHADOW_FORM_PART
     return AUTHOR_STYLED
 
 
-def form_controls(browser_flat: list[Any]) -> list[dict[str, Any]]:
+def theme_verdicts(snapshot: dict[str, Any] | None) -> dict[int, str | None] | None:
+    """Node index -> the capture's theme verdict, or None for a capture that
+    predates the verdict."""
+    report = (snapshot or {}).get("formControlTheme")
+    if not isinstance(report, dict):
+        return None
+    verdicts: dict[int, str | None] = {}
+    for control in report.get("controls", []):
+        node = control.get("node_index")
+        if isinstance(node, int):
+            verdicts[node] = control.get("theme")
+    return verdicts
+
+
+def form_controls(browser_flat: list[Any],
+                  snapshot: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Every laid-out, visible form control with its support status.
 
     `browser_flat` is the lab's `BrowserNode` list, so hidden and zero-area
-    controls are already gone. Bounds are page-space CSS pixels.
+    controls are already gone. Bounds are page-space CSS pixels. `snapshot` is
+    the DOM snapshot carrying the capture's theme verdicts.
     """
+    verdicts = theme_verdicts(snapshot)
     result = []
     for node in browser_flat:
         if node.tag not in FORM_CONTROL_TAGS or node.bounds is None:
@@ -64,12 +104,15 @@ def form_controls(browser_flat: list[Any]) -> list[dict[str, Any]]:
             input_type = "text"
         if node.tag == "input" and input_type == "hidden":
             continue
+        theme = verdicts.get(node.index) if verdicts is not None else None
         result.append({
             "browser_node": node.index,
             "tag": node.tag,
             "type": input_type if node.tag == "input" else None,
             "appearance": node.styles.get("appearance"),
-            "status": control_status(node.tag, input_type, node.styles),
+            "theme": theme,
+            "status": control_status(node.tag, input_type, node.styles,
+                                     theme, verdicts is not None),
             "bounds": list(node.bounds),
         })
     return result

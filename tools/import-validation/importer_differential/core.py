@@ -1493,13 +1493,14 @@ def form_control_residual(
     reference_path: Path,
     candidate_path: Path,
     visual: dict[str, Any],
+    snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Form controls, their support status, and their share of the residual.
 
     Attributed on the image pair the visual gate scored: the registered
     authored-frame crops when registration ran, the full frames otherwise.
     """
-    controls = form_controls(browser_flat_raw)
+    controls = form_controls(browser_flat_raw, snapshot)
     if not controls:
         return {"controls": [], "support_boundaries": [],
                 "foreground_error_total": 0.0,
@@ -1554,12 +1555,12 @@ def classify_gaps(
             )
         unrecorded = [
             row for row in form_control_report.get("controls", [])
-            if row["status"] == "appearance-unrecorded"]
+            if row["status"] in ("appearance-unrecorded", "theme-unresolved")]
         if unrecorded:
             facts["form-control-appearance-unrecorded"] = (
                 f"{len(unrecorded)} form control(s) have no captured "
-                "appearance, so whether the native theme paints them is "
-                "unknown; capture again",
+                "appearance or theme verdict, so whether the native theme "
+                "paints them is unknown; capture again",
                 0.5,
                 "browser-capture",
             )
@@ -1683,12 +1684,20 @@ def promotion_recommendation(
         return f"{name} score below {PROMOTION_THRESHOLDS[name]:.3f}"
 
     threshold_eligible = not unsupported and not failed and not boundaries
+    # A boundary that reclassifies a fixture whose every numeric gate passed is
+    # a decision, not a measurement, so it is named as one in the report.
+    boundary_overrides_passing_gates = bool(
+        boundaries and not unsupported and not failed)
     if unsupported or boundaries:
         classification = "browser-required"
         reasons = []
         if unsupported:
             reasons.append(
                 f"unsupported dynamic features: {', '.join(unsupported)}")
+        if boundary_overrides_passing_gates:
+            reasons.append(
+                "every numeric gate passes; classified browser-required by "
+                "the support boundary below, not by a score")
         for boundary in boundaries:
             reasons.append(
                 f"support boundary {boundary['boundary']}: "
@@ -1717,7 +1726,12 @@ def promotion_recommendation(
         "full_frame_ok": full_frame_ok(visual),
         "full_frame_classification": full_frame_classification,
         "geometry_gate_failed": geometry_failures,
-        "support_boundaries": [b["boundary"] for b in boundaries],
+        "support_boundaries": [
+            {"boundary": b["boundary"], "control_count": b["control_count"],
+             "foreground_error_share": b["foreground_error_share"]}
+            for b in boundaries],
+        "numeric_gates_pass": not failed,
+        "boundary_overrides_passing_gates": boundary_overrides_passing_gates,
         "reasons": reasons,
     }
 
@@ -2184,7 +2198,8 @@ def compare_one(
         visual["registered_visual"]["registration"]["native_layout"] = native_frame_registration
     blockers = unsupported_features(recognition)
     form_control_report = form_control_residual(
-        browser_flat_raw, browser_dir / "browser.png", native_render, visual)
+        browser_flat_raw, browser_dir / "browser.png", native_render, visual,
+        browser_snapshot)
     classifications = classify_gaps(
         recognition, structural, geometry, typography, visual,
         form_control_report)
@@ -2413,6 +2428,9 @@ def aggregate_reports(
                 report["comparison"]["visual"].get("registered_visual", {})
                 or {}).get("score"),
             "geometry_gate_ok": geometry_gate_ok(report["comparison"]["geometry"]),
+            "support_boundaries": report["promotion"].get("support_boundaries", []),
+            "boundary_overrides_passing_gates": report["promotion"].get(
+                "boundary_overrides_passing_gates", False),
             "registered_geometry": (
                 report["comparison"]["geometry"].get("gate") or {}).get("score"),
         }
@@ -2524,6 +2542,15 @@ def aggregate_reports(
             ("timings", "browser_to_native_import_speedup")),
         "worst_fixtures": worst_fixtures,
         "worst_registered_visual": worst_registered_visual[:5],
+        # Every fixture a support boundary reclassified, with the share of its
+        # residual the boundary explains — listed in full, including the ones
+        # whose numeric gates all pass, so no reclassification is silent.
+        "support_boundary_fixtures": [
+            {"fixture": row["fixture"],
+             "boundaries": row["support_boundaries"],
+             "boundary_overrides_passing_gates":
+                 row["boundary_overrides_passing_gates"]}
+            for row in fixture_rows if row["support_boundaries"]],
         "false_promotions": false_promotions,
         "false_promotion_status": (
             "not-evaluable-production-promotion-disabled"

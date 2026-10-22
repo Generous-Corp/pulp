@@ -323,6 +323,22 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
         }
     }
 
+    // The capture's theme verdicts, written beside the snapshot's own arrays.
+    const auto theme = member(snapshot, "formControlTheme");
+    if (theme.isObject()) {
+        const auto controls = member(theme, "controls");
+        if (controls.isArray()) {
+            for (uint32_t i = 0; i < controls.size(); ++i) {
+                const auto control = controls[static_cast<int>(i)];
+                if (!control.isObject()) continue;
+                const int node = json_int(member(control, "node_index"), -1);
+                const auto verdict = member(control, "theme");
+                if (node >= 0 && verdict.isString())
+                    index.control_theme_[node] = std::string(verdict.getString());
+            }
+        }
+    }
+
     const auto node_index = member(layout, "nodeIndex");
     const auto styles = member(layout, "styles");
     const auto bounds = member(layout, "bounds");
@@ -633,6 +649,11 @@ std::optional<CapturedBox> CapturedStyleIndex::bounds_for(
 std::string CapturedStyleIndex::string_at(int index) const {
     if (index < 0 || index >= static_cast<int>(strings_.size())) return {};
     return strings_[static_cast<size_t>(index)];
+}
+
+std::string CapturedStyleIndex::control_theme(int node_index) const {
+    const auto found = control_theme_.find(node_index);
+    return found == control_theme_.end() ? std::string() : found->second;
 }
 
 std::string CapturedStyleIndex::control_value(int node_index) const {

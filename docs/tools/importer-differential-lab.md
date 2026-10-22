@@ -205,36 +205,43 @@ Production promotion is disabled in this slice. A run is only marked
 
 ### Form-control support boundary
 
-Chromium paints a form control whose used `appearance` is not `none` with its
-native theme. Its computed fills and borders then do not describe its pixels:
-an unstyled range reports a white background it never draws, and an unstyled
-button reports a 2px outset black border drawn as a thin rounded grey one.
-Reproducing those pixels would mean copying the browser's own control
-appearance, so the lab states the boundary instead of scoring it as an
-importer failure. `comparison.form_controls` lists every laid-out control with
-its `appearance` and one status:
+Chromium paints a form control from CSS or from its native theme, and computed
+`appearance` alone does not say which. With `appearance: none` the control is
+an ordinary box. With any other appearance the theme paints it unless the
+author styled the box: a button, button-type input, or progress bar with an
+author background, border, or border radius is painted from CSS, and so is a
+text field or textarea with any of those or a box-shadow, while all of them
+still compute `appearance: auto`. A select in that state keeps a theme-drawn
+arrow. Checkboxes, radios, ranges, and the other picker controls keep the theme
+whatever the author sets. Because the rule depends on who declared a property
+(an author value equal to the user-agent default still counts), the capture
+records a per-control verdict from Chromium's matched-rule origins in the DOM
+snapshot's `formControlTheme`, and the lab and the native lowering both read
+that verdict rather than re-deriving it.
 
-- `ua-default-form-chrome` — themed; a support boundary;
-- `ua-shadow-form-part` — `appearance: none`, but parts such as a range
-  thumb, colour swatch, or date fields live in a user-agent shadow tree the
-  snapshot does not serialize; a support boundary;
-- `author-styled` — the computed box and the control's value describe it,
-  and the native lowering is expected to match;
-- `appearance-unrecorded` — the capture predates the `appearance` column;
-  reported as a hypothesis, never a boundary.
+Where the theme really paints, matching it would mean copying the browser's
+own control appearance, so the lab states the boundary instead of scoring it as
+an importer failure. `comparison.form_controls` lists every laid-out control
+with its `appearance`, the capture's `theme` verdict, and one status:
+
+- `ua-default-form-chrome` — the native theme painted it; a support boundary;
+- `ua-shadow-form-part` — CSS paints the box, but parts such as a range thumb,
+  colour swatch, date fields, or a styled select's arrow come from user-agent
+  internals the snapshot does not serialize; a support boundary;
+- `author-styled` — the computed box and the control's value describe it, and
+  the native lowering is expected to match;
+- `appearance-unrecorded` / `theme-unresolved` — the capture predates the
+  column or the verdict, or could not resolve it; reported as a hypothesis,
+  never a boundary.
 
 Each control carries its share of the scored foreground error (the registered
-authored-frame crop when registration ran), so the report says how much of
-the residual is theme. A boundary makes the fixture `browser-required` and
+authored-frame crop when registration ran), so the report says how much of the
+residual is theme. A boundary makes the fixture `browser-required` and
 ineligible. It never removes the fixture from a denominator or changes any
-score; the summary prints the boundary beside the unchanged scores.
-
-React/Vue/Svelte evaluation, Canvas, WebGL, portals, shadow DOM, asynchronous
-initialization, conditional rendering, and animation are conservative blockers.
-Even a threshold-eligible run remains `native-with-browser-validation`: a
-same-run Chromium comparison cannot prove that a future candidate-only policy
-would safely skip Chromium. The production importer continues to use Chromium
-regardless of this report.
+score. When every numeric gate passes, the promotion carries
+`boundary_overrides_passing_gates: true` and says so in its first reason and in
+the summary, and the corpus report lists every reclassified fixture with its
+boundary shares under `support_boundary_fixtures`.
 
 ## Improving the importer
 

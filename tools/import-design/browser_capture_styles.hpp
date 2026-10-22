@@ -185,6 +185,14 @@ class CapturedStyleIndex {
     /// is the only place the string survives. Empty when the node has none.
     std::string control_value(int node_index) const;
 
+    /// Whether Chromium's native theme painted a form control, as the capture
+    /// recorded it from matched-rule origins: "native", "author" (computed
+    /// appearance is not `none`, but author box styling dropped the theme),
+    /// "author-arrow" (a select whose box is CSS but whose arrow is the
+    /// theme's), or "none". Empty when the capture holds no verdict for the
+    /// node, which means unknown — computed `appearance` cannot answer it.
+    std::string control_theme(int node_index) const;
+
     /// The product of every ancestor `transform` scale above `node_index`.
     ///
     /// Nested transforms multiply, so a run three levels down inherits the
@@ -253,6 +261,7 @@ class CapturedStyleIndex {
     std::vector<int> node_value_;                    ///< node index → nodeValue
     std::unordered_map<int, int> input_value_;       ///< node index → string
     std::vector<int> option_selected_;               ///< selected option nodes
+    std::unordered_map<int, std::string> control_theme_;  ///< node → verdict
     std::unordered_map<int, int> backend_to_node_;
     std::vector<int> node_to_backend_;               ///< node index → backend
     std::unordered_map<int, int> node_to_layout_;

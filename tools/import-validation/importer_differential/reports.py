@@ -56,6 +56,10 @@ def format_summary(report: dict[str, Any]) -> str:
             f"- Registered geometry: mean {gate['score']:.3f}, max edge delta "
             f"{bound['max_abs_delta']} px over {gate['matched_bounds']} matched boxes")
     form_controls = comparison.get("form_controls") or {}
+    if promotion.get("boundary_overrides_passing_gates"):
+        lines.append(
+            "- Every numeric gate passes; the classification comes from the "
+            "support boundary below")
     for boundary in form_controls.get("support_boundaries", []):
         lines.append(
             f"- Support boundary `{boundary['boundary']}`: "
@@ -144,6 +148,17 @@ def format_corpus_summary(aggregate: dict[str, Any]) -> str:
                 f"- `{row['fixture']}` — registered visual "
                 f"{row['registered_visual']:.3f}, classification "
                 f"`{row['classification']}`")
+    boundary_rows = aggregate.get("support_boundary_fixtures", [])
+    if boundary_rows:
+        lines += ["", "## Support boundaries", ""]
+        for row in boundary_rows:
+            shares = ", ".join(
+                f"`{b['boundary']}` {b['foreground_error_share'] * 100:.1f}%"
+                for b in row["boundaries"]
+                if isinstance(b, dict))
+            note = (" — every numeric gate passes"
+                    if row["boundary_overrides_passing_gates"] else "")
+            lines.append(f"- `{row['fixture']}`: {shares}{note}")
     lines += ["", "## Ranked gaps", ""]
     for index, gap in enumerate(aggregate["ranked_gaps"], 1):
         lines.append(

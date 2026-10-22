@@ -1717,9 +1717,14 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             if (appearance != computed.end() && appearance->second != "none" &&
                 (tag == "input" || tag == "button" || tag == "select" ||
                  tag == "textarea" || tag == "meter" || tag == "progress")) {
-                slots.back().node.attributes["native_appearance"] =
-                    appearance->second;
-                ++counts.native_appearance_controls;
+                // Computed appearance stays `auto` on a control whose author
+                // box styling made Chromium paint it from CSS, so it is the
+                // capture's verdict that says whether the theme painted.
+                const auto theme = index.control_theme(node.node_index);
+                auto& attributes = slots.back().node.attributes;
+                attributes["native_appearance"] = appearance->second;
+                attributes["native_theme"] = theme.empty() ? "unresolved" : theme;
+                if (theme == "native") ++counts.native_appearance_controls;
             }
         }
 

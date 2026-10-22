@@ -203,6 +203,10 @@ struct SnapshotSpec {
     /// leading comma — the RareData columns (`nodeValue`, `inputValue`,
     /// `optionSelected`) that only form-control cases need.
     std::string extra_nodes;
+    /// Further top-level members, written verbatim after `documents` with a
+    /// leading comma — the capture's own sidecar fields such as
+    /// `formControlTheme`.
+    std::string extra_top;
 };
 
 /// The shared string table, in index order:
@@ -299,7 +303,7 @@ std::string build_snapshot(const SnapshotSpec& spec) {
             R"(,"styles":)" + spec.styles +
             R"(,"bounds":)" + spec.bounds +
             R"(,"paintOrders":)" + spec.paint_orders +
-            R"(,"text":)" + texts + "}}]}";
+            R"(,"text":)" + texts + "}}]" + spec.extra_top + "}";
     return json;
 }
 
@@ -3915,6 +3919,13 @@ TEST_CASE("form controls draw the string their own state holds",
             R"(,"nodeValue":[-1,-1,-1,-1,-1,-1,10,-1,11,-1,-1,-1,23])"
             R"(,"inputValue":{"index":[3,9],"value":[9,13]})"
             R"(,"optionSelected":{"index":[5,11]})",
+        // The text field's author box styling dropped the theme; the checkbox
+        // is the theme's; the themed select has no verdict at all.
+        .extra_top =
+            R"(,"formControlTheme":{"controls":[)"
+            R"({"node_index":3,"theme":"author"},)"
+            R"({"node_index":4,"theme":"none"},)"
+            R"({"node_index":9,"theme":"native"}]})",
     };
     const auto lowered = lower_snapshot(spec, "form-control-values");
 
@@ -3959,11 +3970,22 @@ TEST_CASE("form controls draw the string their own state holds",
     CHECK(values[1]->style.top.value_or(-1.0f) == Catch::Approx(0.0f));
     CHECK(values[1]->style.height.value_or(-1.0f) == Catch::Approx(22.0f));
 
-    // Every themed control says so, because its computed box is not what the
-    // native theme paints.
-    CHECK(lowered.counts.native_appearance_controls == 3);
-    const int themed = count_nodes(lowered.root, [](const IRNode& n) {
+    // Every control whose computed appearance is not `none` records it, but
+    // only the capture's verdict says whether the theme painted: an
+    // `appearance: auto` control with author box styling is painted from CSS.
+    const int auto_appearance = count_nodes(lowered.root, [](const IRNode& n) {
         return attribute(n, "native_appearance") == "auto";
     });
-    CHECK(themed == 3);
+    CHECK(auto_appearance == 3);
+    CHECK(lowered.counts.native_appearance_controls == 1);
+    CHECK(attribute(*owners[0], "native_theme") == "author");
+    const auto* checkbox = find_node(lowered.root, [](const IRNode& n) {
+        return attribute(n, "native_theme") == "native";
+    });
+    REQUIRE(checkbox != nullptr);
+    CHECK(attribute(*checkbox, "source_tag") == "input");
+    const int unresolved = count_nodes(lowered.root, [](const IRNode& n) {
+        return attribute(n, "native_theme") == "unresolved";
+    });
+    CHECK(unresolved == 1);
 }
