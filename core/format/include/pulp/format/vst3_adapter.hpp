@@ -391,6 +391,7 @@ private:
     // writes the entries it routes instead of value-initialising every slot.
     std::array<ProcessBusBufferView<float>, BusBufferSet::kMaxBuses> rt_output_buses_{};
     std::array<ProcessBusBufferView<double>, BusBufferSet::kMaxBuses> rt_output64_buses_{};
+    std::array<ProcessBusBufferView<const double>, 2> rt_input64_buses_{};
     // Channel count each declared bus expects, captured when the arrangement
     // is (re)negotiated so process() validates layout without SDK RTTI string
     // compares per block. Index past the cached count falls back to the bus.

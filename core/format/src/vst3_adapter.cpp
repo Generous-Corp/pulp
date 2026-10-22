@@ -2574,24 +2574,27 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         output64_ptrs_.data(), proc_out, num_samples);
     audio::BufferView<const double> sidechain64_view(
         sidechain64_ptrs_.data(), sc_channels, num_samples);
-    std::array<ProcessBusBufferView<const double>, 2> input64_buses{{
-        {
+    // The f64 bus views only feed process_f64(); fill them only for a block
+    // that will run natively in f64.
+    auto& input64_buses = rt_input64_buses_;
+    auto& output64_buses = rt_output64_buses_;
+    if (native_f64) {
+        input64_buses[0] = {
             .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
                      proc_in, false, data.numInputs > 0},
             .buffer = input64_view,
-        },
-        {
+        };
+        input64_buses[1] = {
             .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain,
                      sc_channels, true, sc_channels > 0},
             .buffer = sidechain64_view,
-        },
-    }};
-    auto& output64_buses = rt_output64_buses_;
-    output64_buses[0] = {
-        .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
-                 proc_out, false, data.numOutputs > 0},
-        .buffer = output64_view,
-    };
+        };
+        output64_buses[0] = {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                     proc_out, false, data.numOutputs > 0},
+            .buffer = output64_view,
+        };
+    }
     // The f64 aux views only feed process_f64(); the float and boundary paths
     // never read them.
     for (std::size_t b = 1; native_f64 && b < routed_output_buses; ++b) {
