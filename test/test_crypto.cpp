@@ -60,8 +60,7 @@ TEST_CASE("SHA-256 pointer overload preserves embedded NUL bytes",
     }));
 }
 
-TEST_CASE("SHA-256 matches reference digests across block boundaries",
-          "[crypto][sha256]") {
+TEST_CASE("SHA-256 matches reference digests across block boundaries", "[crypto][sha256]") {
     // Lengths around the 55/56-byte padding split and 64-byte blocks, plus
     // multi-block inputs that take the whole-block path. References from an
     // independent SHA-256 implementation over bytes (i * 31 + 7) & 0xff.
@@ -86,8 +85,8 @@ TEST_CASE("SHA-256 matches reference digests across block boundaries",
     }
     // FIPS 180-2 long-message vector: one million 'a'.
     const std::string million(1000000, 'a');
-    CHECK(sha256_hex(million)
-          == "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
+    CHECK(sha256_hex(million) ==
+          "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
 }
 
 // ── SHA-1 ───────────────────────────────────────────────────────────────

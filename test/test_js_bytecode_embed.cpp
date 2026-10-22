@@ -51,12 +51,12 @@ double reference_result(const std::string& code) {
 
 // Offset of the bytecode payload: everything after the header.
 std::size_t payload_offset(const std::vector<std::uint8_t>& blob) {
-    const std::size_t fingerprint = blob[12] | (blob[13] << 8) | (blob[14] << 16)
-                                    | (std::size_t(blob[15]) << 24);
+    const std::size_t fingerprint =
+        blob[12] | (blob[13] << 8) | (blob[14] << 16) | (std::size_t(blob[15]) << 24);
     return 16 + fingerprint + 8 + 32 + 8 + 32;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("Embedded bytecode replaces the compile and runs the same program",
           "[view][js-engine][editor-open]") {
@@ -88,8 +88,8 @@ TEST_CASE("Embedded bytecode serves the instantiation precompile without compili
     const auto blob = build_embedded_script_bytecode(code);
     REQUIRE(register_embedded_script_bytecode(blob.data(), blob.size()));
 
-    CHECK(precompile_scripts({code}) == 0);  // nothing compiled...
-    CHECK(script_bytecode_cached(code));     // ...yet the editor will hit
+    CHECK(precompile_scripts({code}) == 0); // nothing compiled...
+    CHECK(script_bytecode_cached(code));    // ...yet the editor will hit
     auto stats = script_bytecode_cache_stats();
     CHECK(stats.embedded == 1);
     CHECK(stats.compiles == 0);
@@ -119,8 +119,7 @@ TEST_CASE("Embedded bytecode is never used for a different source",
     CHECK(stats.compiles == 1);
 }
 
-TEST_CASE("Malformed or foreign embedded bytecode is refused",
-          "[view][js-engine][editor-open]") {
+TEST_CASE("Malformed or foreign embedded bytecode is refused", "[view][js-engine][editor-open]") {
     Reset reset;
     const auto code = read_fixture();
     const auto blob = build_embedded_script_bytecode(code);
@@ -146,7 +145,7 @@ TEST_CASE("Malformed or foreign embedded bytecode is refused",
     }
     SECTION("another engine build") {
         auto foreign = blob;
-        foreign[16 + 2] ^= 0x01;  // inside the fingerprint string
+        foreign[16 + 2] ^= 0x01; // inside the fingerprint string
         CHECK_FALSE(register_embedded_script_bytecode(foreign.data(), foreign.size()));
     }
     SECTION("the cross-compile placeholder") {

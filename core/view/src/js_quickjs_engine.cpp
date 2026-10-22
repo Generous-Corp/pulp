@@ -472,8 +472,10 @@ public:
             if (bytes != nullptr && find_locked(source) == nullptr) {
                 entries_.push_back({source, std::vector<std::uint8_t>(bytes, bytes + size)});
                 stats_.bytes += source.size() + size;
-                if (embedded) ++stats_.embedded;
-                else ++stats_.compiles;
+                if (embedded)
+                    ++stats_.embedded;
+                else
+                    ++stats_.compiles;
                 while (!entries_.empty()
                        && (entries_.size() > kMaxCachedScripts
                            || stats_.bytes > kMaxCachedBytes)) {
@@ -593,7 +595,8 @@ std::vector<std::uint8_t> write_global_script_bytecode(qjs::JSContext* ctx,
     std::size_t size = 0;
     auto* bytes = qjs::JS_WriteObject(ctx, &size, function, qjs::JS_WRITE_OBJ_BYTECODE);
     qjs::JS_FreeValue(ctx, function);
-    if (!bytes) return {};
+    if (!bytes)
+        return {};
     std::vector<std::uint8_t> out(bytes, bytes + size);
     qjs::js_free(ctx, bytes);
     return out;
@@ -634,10 +637,12 @@ std::string compute_engine_fingerprint() {
 #ifdef CONFIG_VERSION
     fingerprint += CONFIG_VERSION;
 #endif
-    if (!backend.context) return fingerprint + "-unavailable";
-    const auto bytes = write_global_script_bytecode(backend.context,
-                                                    std::string(kFingerprintProbeScript));
-    if (bytes.empty()) return fingerprint + "-unavailable";
+    if (!backend.context)
+        return fingerprint + "-unavailable";
+    const auto bytes =
+        write_global_script_bytecode(backend.context, std::string(kFingerprintProbeScript));
+    if (bytes.empty())
+        return fingerprint + "-unavailable";
     fingerprint += '-';
     fingerprint += runtime::sha256_hex(bytes.data(), bytes.size()).substr(0, 32);
     return fingerprint;
@@ -652,10 +657,12 @@ const std::string& engine_fingerprint() {
 
 std::vector<std::uint8_t> build_embedded_script_bytecode(const std::string& source) {
     qjs::QuickJSContext backend;
-    if (!backend.context) return {};
+    if (!backend.context)
+        return {};
     set_quickjs_stack_size(backend, 1024 * 1024);
     const auto bytecode = write_global_script_bytecode(backend.context, source);
-    if (bytecode.empty()) return {};
+    if (bytecode.empty())
+        return {};
     return detail::encode_script_bytecode_blob(source, bytecode, engine_fingerprint());
 }
 
@@ -671,7 +678,7 @@ namespace detail {
 void clear_embedded_script_bytecode_for_tests() {
     EmbeddedBytecodeRegistry::instance().clear();
 }
-}  // namespace detail
+} // namespace detail
 
 ScriptBytecodeCacheStats script_bytecode_cache_stats() {
     return ScriptBytecodeCache::instance().stats();
@@ -823,7 +830,8 @@ public:
                 bool have_embedded = false;
                 {
                     PULP_TRACE_SCOPE_NAMED("js", "script_embedded_lookup");
-                    have_embedded = detail::EmbeddedBytecodeRegistry::instance().find(code, bytecode);
+                    have_embedded =
+                        detail::EmbeddedBytecodeRegistry::instance().find(code, bytecode);
                 }
                 if (have_embedded) {
                     PULP_TRACE_SCOPE_NAMED("js", "script_bytecode_read");
@@ -845,10 +853,11 @@ public:
                     return backend_->takeValue(function).toChocValue();
                 }
                 std::size_t size = 0;
-                auto* bytes = qjs::JS_WriteObject(ctx, &size, function,
-                                                  qjs::JS_WRITE_OBJ_BYTECODE);
-                if (guard) guard->finish(bytes, size);
-                if (bytes) qjs::js_free(ctx, bytes);
+                auto* bytes = qjs::JS_WriteObject(ctx, &size, function, qjs::JS_WRITE_OBJ_BYTECODE);
+                if (guard)
+                    guard->finish(bytes, size);
+                if (bytes)
+                    qjs::js_free(ctx, bytes);
             }
         }
         PULP_TRACE_SCOPE_NAMED("js", "script_execute");

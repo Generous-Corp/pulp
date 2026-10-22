@@ -21,9 +21,12 @@ int main(int argc, char** argv) {
     std::string input, output;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
-        if (arg == "--widget-bridge-script") widget_bridge = true;
-        else if (input.empty()) input = arg;
-        else if (output.empty()) output = arg;
+        if (arg == "--widget-bridge-script")
+            widget_bridge = true;
+        else if (input.empty())
+            input = arg;
+        else if (output.empty())
+            output = arg;
         else {
             std::fprintf(stderr, "pulp-js-bytecode: unexpected argument %s\n", argv[i]);
             return 2;
@@ -41,7 +44,8 @@ int main(int argc, char** argv) {
         return 2;
     }
     std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (widget_bridge) source = pulp::view::WidgetBridge::loaded_script_source(source);
+    if (widget_bridge)
+        source = pulp::view::WidgetBridge::loaded_script_source(source);
 
     const auto blob = pulp::view::build_embedded_script_bytecode(source);
     if (blob.empty()) {

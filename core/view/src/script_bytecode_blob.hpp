@@ -40,7 +40,7 @@ std::optional<ScriptBytecodeBlob> parse_script_bytecode_blob(const std::uint8_t*
                                                              std::size_t size);
 
 class EmbeddedBytecodeRegistry {
-public:
+  public:
     static EmbeddedBytecodeRegistry& instance();
 
     /// Registers a blob whose engine fingerprint equals `engine_fingerprint`.
@@ -53,7 +53,7 @@ public:
 
     void clear();
 
-private:
+  private:
     struct Entry {
         ScriptBytecodeBlob blob;
         bool verified = false;
@@ -65,4 +65,4 @@ private:
     std::atomic<std::size_t> count_{0};
 };
 
-}  // namespace pulp::view::detail
+} // namespace pulp::view::detail
