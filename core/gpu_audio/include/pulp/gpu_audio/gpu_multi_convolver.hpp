@@ -16,6 +16,15 @@ class GpuCompute;
 
 namespace pulp::gpu_audio {
 
+class GpuMultiConvolver;
+
+namespace detail {
+// Test seam: prepare against a supplied compute device instead of a standalone
+// one. Not part of the SDK surface.
+bool prepare_gpu_multi_convolver_with(GpuMultiConvolver&,
+                                      std::unique_ptr<render::GpuCompute>) noexcept;
+} // namespace detail
+
 /// Massive multi-IR ("multi-room") convolution: convolves one mono input
 /// against MANY distinct impulse responses at once and pans the results into a
 /// stereo field — the whole bank in ONE batched GPU submit per block.
@@ -72,6 +81,10 @@ public:
 
     /// True if the GPU compute device initialized and the multi-IR plan built.
     bool gpu_available() const { return gpu_ != nullptr; }
+    /// True once the prepared device reports loss. Every later block is a
+    /// silent miss (the declared Silence policy) until the node is prepared
+    /// again on a new device.
+    bool device_lost() const noexcept;
     /// The live compute backend ("Metal"/"D3D12"/"Vulkan"), or "" if CPU-only.
     std::string backend() const;
 
@@ -114,7 +127,12 @@ public:
     /// (output left untouched by the GPU path — caller decides the miss policy).
     bool convolve_stereo(const float* mono_in, float* out_l, float* out_r, uint32_t n);
 
-private:
+  private:
+    friend bool
+    detail::prepare_gpu_multi_convolver_with(GpuMultiConvolver&,
+                                             std::unique_ptr<render::GpuCompute>) noexcept;
+    bool prepare_on(std::unique_ptr<render::GpuCompute> gpu);
+
     uint32_t block_;
     uint32_t sample_rate_;
     std::vector<std::vector<float>> irs_;

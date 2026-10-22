@@ -6,6 +6,7 @@
 #include "detail/staged_async_trace_ledger.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <utility>
 
@@ -19,9 +20,43 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response, uint32_t latency_blocks)
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
-      latency_blocks_(latency_blocks), ir_(std::move(impulse_response)) {}
+      latency_blocks_(latency_blocks), ir_(std::move(impulse_response)),
+      staged_readback_(std::make_unique<StagedReadbackState>()) {}
 
 struct GpuConvolver::SharedIoState {};
+struct GpuConvolver::StagedReadbackState {
+    GpuConvolverStagedBreaker breaker{};
+    std::atomic<std::uint8_t> reason{0};
+};
+
+std::uint64_t GpuConvolver::staged_cpu_blocks() const noexcept {
+    return 0;
+}
+
+std::uint64_t GpuConvolver::staged_gpu_blocks() const noexcept {
+    return 0;
+}
+
+std::uint64_t GpuConvolver::staged_breaker_trips() const noexcept {
+    return 0;
+}
+
+GpuAudioRecoveryReason GpuConvolver::staged_latched_reason() const noexcept {
+    return static_cast<GpuAudioRecoveryReason>(
+        staged_readback_->reason.load(std::memory_order_acquire));
+}
+
+bool GpuConvolver::configure_staged_breaker(const GpuConvolverStagedBreaker& config) noexcept {
+    if (prepared_ || config.trip_after_misses == 0 || config.probe_interval_blocks == 0 ||
+        config.recover_after_hits == 0)
+        return false;
+    staged_readback_->breaker = config;
+    return true;
+}
+
+GpuConvolverStagedBreaker GpuConvolver::staged_breaker() const noexcept {
+    return staged_readback_->breaker;
+}
 
 GpuConvolver::~GpuConvolver() = default;
 
@@ -71,7 +106,7 @@ bool GpuConvolver::prepare() {
     prepared_ = false;
     if (provider_policy_ == ProviderPolicy::SharedRequired)
         return false;
-    if (channels_ == 0 || block_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
+    if (channels_ == 0 || block_ == 0 || sample_rate_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
         latency_blocks_ > kMaxLatencyBlocks)
         return false;
 
@@ -184,6 +219,23 @@ GpuAudioNodeDescriptor GpuMultiConvolver::descriptor() const {
 std::string GpuMultiConvolver::backend() const {
     return {};
 }
+
+bool GpuMultiConvolver::device_lost() const noexcept {
+    return false;
+}
+
+bool GpuMultiConvolver::prepare_on(std::unique_ptr<render::GpuCompute>) {
+    prepared_ = false;
+    gpu_.reset();
+    return false;
+}
+
+namespace detail {
+bool prepare_gpu_multi_convolver_with(GpuMultiConvolver&,
+                                      std::unique_ptr<render::GpuCompute>) noexcept {
+    return false;
+}
+} // namespace detail
 
 bool GpuMultiConvolver::prepare() {
     prepared_ = false;

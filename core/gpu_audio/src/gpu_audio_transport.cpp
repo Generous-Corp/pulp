@@ -129,6 +129,9 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     // Need the primed latency plus one in-flight block and one free slot.
     if (config.ring_blocks < desc.latency_blocks + 2)
         return false;
+    // A pipelined node emits wet(N - D); the primed ring makes up the rest.
+    if (desc.worker_pipeline_blocks >= desc.latency_blocks)
+        return false;
 
     node_ = node;
     channels_ = desc.output_channels;
@@ -283,7 +286,10 @@ void GpuAudioTransport::reset_staged_transport_state() noexcept {
         return;
 
     audio::BufferView<float> silence(out_fptrs_.data(), channels_, block_size_);
-    for (uint32_t b = 0; b < latency_blocks_; ++b) {
+    // A node whose worker emits D blocks behind its submit supplies D of the
+    // latency itself, so prime only the remainder.
+    const uint32_t primed = latency_blocks_ - node_->descriptor().worker_pipeline_blocks;
+    for (uint32_t b = 0; b < primed; ++b) {
         (void)output_ring_.write(silence, block_size_);
     }
 }

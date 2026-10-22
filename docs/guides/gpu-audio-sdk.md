@@ -217,11 +217,55 @@ handle is borrowed and must outlive the transport.
 
 `GpuConvolver` exposes a host-thread-only provider policy for experiments that
 need an explicit selection: `Auto` preserves staged execution, `StagedOnly`
-forces the staged provider, and `SharedRequired`
+forces the staged provider, `StagedBlocking` keeps the older blocking staged
+readback (see below), and `SharedRequired`
 fails `prepare()` unless the exact authenticated shared Dawn provider is ready.
 Set the policy before `prepare()`; changing it while prepared is rejected. This
 is a preparation capability contract, not a realtime scheduling guarantee, and
 it exposes no Dawn handles, queues, rings, or callback controls.
+
+**Staged convolver readback (behaviour change).** Under `Auto` and `StagedOnly`
+the staged `GpuConvolver` no longer blocks in `convolve_batch` until the map
+resolves, and its worker never waits on the GPU at all.
+
+- The worker submits block N with `GpuCompute::convolve_batch_async` and
+  returns. Block N's result counts only if it has landed by the time block N
+  is due, `latency_blocks - 1` worker calls later; a result that lands later is
+  discarded. The node declares that pipeline as
+  `GpuAudioNodeDescriptor::worker_pipeline_blocks` (1 at the default lead of
+  2), and `GpuAudioTransport` primes that many fewer blocks, so total latency,
+  the reported PDC and the callback's CPU-fallback alignment are unchanged. A
+  larger lead therefore tolerates a slower readback: with a lead of 3 a result
+  may take up to two block periods. A node with a one-block lead cannot
+  pipeline and instead waits inside the block, bounded to one period minus its
+  CPU cost.
+- Calling `process_block` directly, outside the transport, now returns block
+  N - `worker_pipeline_blocks`: read the descriptor and account for it.
+- Every block's input goes to exactly one place: the GPU overlap-add carry when
+  its readback is on time, otherwise the worker's CPU partitioned convolution.
+  The output is the carry plus whatever the CPU convolution still owes, so a
+  late, failed, non-finite or device-lost block is the exact continuation of
+  the convolution, never silence.
+- The CPU convolution runs only for a missed block and its IR-length tail
+  (`ceil((ir_length - 1) / block)` further blocks); a GPU hit costs no CPU
+  convolution. With a long IR one miss therefore costs a long CPU tail (a 2 s
+  IR at 64-sample blocks: about 1500 blocks), which is the price of an exact
+  seam.
+- A run of late results trips a circuit breaker (`GpuConvolverStagedBreaker`,
+  set with `configure_staged_breaker()` before `prepare()`; defaults: trip
+  after 8 consecutive misses, probe every 32 blocks, recover after 4 on-time
+  results). While tripped the worker submits only the probes.
+- The node latches the first cause since `prepare()`: `ProviderLost` (device
+  loss; replaces any other cause), `SustainedDeadlineMisses` (the breaker
+  tripped on a slow but alive GPU; reported as degraded), `ProviderFailure`
+  (failed map or non-finite readback). A single late block is a served miss
+  and latches nothing. `prepare()` now also rejects a zero sample rate.
+
+A caller that depends on the old unbounded, in-block wait can select
+`ProviderPolicy::StagedBlocking` before `prepare()` (no worker pipeline); it
+still routes failed or device-lost blocks to the CPU convolution.
+`StagedBlocking` is a transition escape hatch and is planned for removal in the
+next minor release.
 
 The Darwin arm64 SDK produced by `release-cli.yml` compiles the shared convolver
 and validates its pinned Dawn provider at configure and before library builds. Installed CMake
@@ -373,6 +417,15 @@ compatibility.
 - `GpuStft` — STFT/ISTFT (windowed analyze / synthesize) — the spectral toolkit base.
 - `GpuSpectralFreeze` — capture + sustain a spectral frame (infinite pad).
 - `GpuSpectralMorph` — blend between two captured spectra (t ∈ [0,1]).
+
+`GpuStft`, `GpuSpectralStack`, `GpuSpectralFreeze` and `GpuSpectralMorph` may
+borrow a shared `GpuCompute`. Each records the device's `device_generation()`
+at `prepare()` and refuses its GPU work (returns false and writes a silent
+frame) once that device reports `device_lost()` or a different generation;
+`device_usable()` (`available()` on the stack) reports the refusal. Prepare
+them again against the re-acquired device to resume. `GpuMultiConvolver`
+refuses a lost device the same way and keeps its declared `Silence` policy;
+`device_lost()` says why its blocks are silent.
 
 ## Authoring pattern
 

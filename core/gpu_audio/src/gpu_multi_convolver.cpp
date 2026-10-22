@@ -19,6 +19,10 @@ std::string GpuMultiConvolver::backend() const {
 
 GpuMultiConvolver::~GpuMultiConvolver() = default;
 
+bool GpuMultiConvolver::device_lost() const noexcept {
+    return gpu_ != nullptr && gpu_->device_lost();
+}
+
 GpuMultiConvolver::GpuMultiConvolver(uint32_t block_size, uint32_t sample_rate,
                                      std::vector<std::vector<float>> irs)
     : block_(block_size), sample_rate_(sample_rate), irs_(std::move(irs)),
@@ -40,7 +44,23 @@ GpuAudioNodeDescriptor GpuMultiConvolver::descriptor() const {
 }
 
 bool GpuMultiConvolver::prepare() {
+    // Release the old device and validate before creating a new one, so an
+    // invalid configuration never spins up a device.
     prepared_ = false;
+    gpu_.reset();
+    if (block_ == 0 || num_ir_ == 0)
+        return false;
+    if (std::all_of(irs_.begin(), irs_.end(), [](const auto& ir) { return ir.empty(); }))
+        return false;
+    auto gpu = render::GpuCompute::create();
+    if (!gpu || !gpu->initialize_standalone())
+        return false;
+    return prepare_on(std::move(gpu));
+}
+
+bool GpuMultiConvolver::prepare_on(std::unique_ptr<render::GpuCompute> gpu) {
+    prepared_ = false;
+    gpu_.reset();
     if (block_ == 0 || num_ir_ == 0) return false;
 
     std::size_t max_ir = 0;
@@ -92,11 +112,9 @@ bool GpuMultiConvolver::prepare() {
         pan_r_[k] = std::sin(theta) * pan_norm_;
     }
 
-    gpu_ = render::GpuCompute::create();
-    if (!gpu_ || !gpu_->initialize_standalone()) {
-        gpu_.reset();
+    gpu_ = std::move(gpu);
+    if (!gpu_)
         return false;
-    }
 
     // Build the num_ir IR spectra: zero-pad each IR to fft_size, forward-FFT on
     // the GPU, pack contiguously. Done once at prepare (non-RT).
@@ -128,6 +146,10 @@ bool GpuMultiConvolver::prepare() {
 bool GpuMultiConvolver::convolve_stereo(const float* mono_in, float* out_l,
                                         float* out_r, uint32_t n) {
     if (!prepared_ || !gpu_ || n != block_) return false;
+    // A lost device cannot produce this block, and its readback would only
+    // fail after a wait. Refuse up front; the caller applies the miss policy.
+    if (gpu_->device_lost())
+        return false;
 
     // Zero-padded complex input (one shared block for all rooms).
     std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
@@ -233,5 +255,16 @@ void GpuMultiConvolver::process_cpu_fallback(const audio::BufferView<const float
     // silence on a miss rather than a misleading partial result.
     output.clear();
 }
+
+namespace detail {
+bool prepare_gpu_multi_convolver_with(GpuMultiConvolver& node,
+                                      std::unique_ptr<render::GpuCompute> gpu) noexcept {
+    try {
+        return node.prepare_on(std::move(gpu));
+    } catch (...) {
+        return false;
+    }
+}
+} // namespace detail
 
 } // namespace pulp::gpu_audio

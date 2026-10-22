@@ -937,10 +937,18 @@ pulp_add_test_suite(pulp-test-flow-pans GROUP pulp-test-group-core-gpu-audio-sig
 # contention that intermittently trips their numeric checks after a 2s readback
 # timeout leaves a stale frame. (The GPU-agnostic transport/flow-pans suites
 # above do NOT create devices and are intentionally left parallel.)
-set(_pulp_gpu_convolver_defs "")
+# With the GPU device layer present, the staged-path cases drive the real
+# process_block against test/support/fake_gpu_compute.hpp.
+set(_pulp_gpu_convolver_def_list "")
 if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
-    set(_pulp_gpu_convolver_defs
-        COMPILE_DEFINITIONS PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
+    list(APPEND _pulp_gpu_convolver_def_list PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
+endif()
+if(TARGET pulp::gpu-device)
+    list(APPEND _pulp_gpu_convolver_def_list PULP_TEST_HAS_GPU_COMPUTE=1)
+endif()
+set(_pulp_gpu_convolver_defs "")
+if(_pulp_gpu_convolver_def_list)
+    set(_pulp_gpu_convolver_defs COMPILE_DEFINITIONS ${_pulp_gpu_convolver_def_list})
 endif()
 pulp_add_test_suite(pulp-test-gpu-convolver GROUP pulp-test-group-core-gpu-audio-private
     SOURCES test_gpu_convolver.cpp harness/rt_allocation_probe.cpp
