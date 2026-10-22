@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "browser_capture_tree.hpp"
 
+#include "browser_capture_controls.hpp"
 #include "svg_shape_lowering.hpp"
 
 #include <algorithm>
@@ -23,6 +24,8 @@ namespace pulp::import_design {
 namespace {
 
 using pulp::view::IRNode;
+using detail::control_value_text;
+using detail::px_value;
 
 constexpr int kElementNode = 1;
 constexpr int kTextNode = 3;
@@ -642,87 +645,6 @@ bool contains(const ClipRect& outer, const ClipRect& inner) {
     return outer.left <= inner.left + kGrid && outer.top <= inner.top + kGrid &&
            outer.right >= inner.right - kGrid &&
            outer.bottom >= inner.bottom - kGrid;
-}
-
-/// A parsed CSS length in px, or 0 for anything else. Chrome serializes
-/// computed border widths as `<n>px`, so this is the whole grammar that
-/// reaches here.
-double px_value(const std::string& value) {
-    if (value.empty()) return 0.0;
-    try {
-        return std::stod(value);
-    } catch (const std::exception&) {
-        return 0.0;
-    }
-}
-
-/// What a form control draws from its own state, and where, or nothing.
-///
-/// Chrome renders an `<input>`'s value and a closed `<select>`'s selected
-/// option in a user-agent shadow tree that DOMSnapshot does not serialize, so
-/// the string reaches the capture only as control state and the box it sits in
-/// only as the control's content box. Both placements are CSS semantics rather
-/// than theme: a single-line text field and a button-type input lay their
-/// string out in the content box, vertically centred. A themed (`appearance`
-/// other than `none`) select is the exception — the theme reserves its own room
-/// for the arrow, which no computed length records — so it is refused rather
-/// than guessed.
-struct ControlValueText {
-    std::string text;
-    CapturedBox content_box;
-};
-
-std::optional<ControlValueText> control_value_text(
-    const CapturedStyleIndex& index, int node_index, const CapturedBox& box,
-    const std::map<std::string, std::string>& computed) {
-    const auto tag = index.tag_name(node_index);
-    std::string kind;
-    if (tag == "input") {
-        auto type = index.attribute(node_index, "type");
-        std::transform(type.begin(), type.end(), type.begin(),
-                       [](unsigned char c) {
-                           return static_cast<char>(std::tolower(c));
-                       });
-        static const std::set<std::string> kValueTypes = {
-            "", "text", "search", "email", "url", "tel", "number",
-            "button", "submit", "reset"};
-        if (kValueTypes.count(type) == 0) return std::nullopt;
-        kind = type;
-    } else if (tag == "select") {
-        if (!index.attribute(node_index, "multiple").empty()) return std::nullopt;
-        const auto size = index.attribute(node_index, "size");
-        if (!size.empty() && px_value(size) > 1.0) return std::nullopt;
-        const auto appearance = computed.find("appearance");
-        if (appearance == computed.end() || appearance->second != "none")
-            return std::nullopt;
-        kind = "select";
-    } else {
-        return std::nullopt;
-    }
-    // Without padding the content box is unknown — a capture that predates it
-    // would place the string on the border, so it is not drawn at all.
-    for (const char* edge : {"padding-top", "padding-right", "padding-bottom",
-                             "padding-left"}) {
-        if (computed.find(edge) == computed.end()) return std::nullopt;
-    }
-    auto text = index.control_value(node_index);
-    if (text.empty()) return std::nullopt;
-    const auto length = [&](const char* name) {
-        const auto found = computed.find(name);
-        return found == computed.end() ? 0.0 : px_value(found->second);
-    };
-    const double left = length("border-left-width") + length("padding-left");
-    const double right = length("border-right-width") + length("padding-right");
-    const double top = length("border-top-width") + length("padding-top");
-    const double bottom =
-        length("border-bottom-width") + length("padding-bottom");
-    ControlValueText result;
-    result.text = std::move(text);
-    result.content_box = {box.left + left, box.top + top,
-                          box.width - left - right, box.height - top - bottom};
-    if (result.content_box.width <= 0.0 || result.content_box.height <= 0.0)
-        return std::nullopt;
-    return result;
 }
 
 /// Where a browser would actually clip a node, resolved from the snapshot.
@@ -1499,50 +1421,10 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                 lowered.attributes["asset_ref"] = asset;
                 lowered.style.object_fit = "fill";
             } else {
-                // A viewport-plane raster. Squeezing the whole plane into the
-                // element's box would draw the page in miniature, so the
-                // element stays a box (its own border and background paint as
-                // usual) and the plane hangs inside it at the page origin,
-                // clipped to the content box where Chromium draws the bitmap.
+                // A viewport-plane raster, hung inside the element's box.
                 lowered.type = "frame";
-                const auto length = [&](const char* name) {
-                    const auto found = computed.find(name);
-                    return found == computed.end() ? 0.0 : px_value(found->second);
-                };
-                const double border_left = length("border-left-width");
-                const double border_top = length("border-top-width");
-                const double inset_left = border_left + length("padding-left");
-                const double inset_top = border_top + length("padding-top");
-                const double inset_right =
-                    length("border-right-width") + length("padding-right");
-                const double inset_bottom =
-                    length("border-bottom-width") + length("padding-bottom");
-                // Children are placed against the padding box (see `place()`),
-                // so the plane's page origin sits at minus that box's origin.
-                const double frame_left = box.left + border_left;
-                const double frame_top = box.top + border_top;
-                IRNode plane;
-                plane.type = "image";
-                plane.name = lowered.name + "/layer";
-                plane.attributes["asset_ref"] = asset;
-                plane.attributes["captured_layer"] = "viewport";
-                plane.attributes["paint_class"] =
-                    std::string(to_string(PaintClass::image_asset));
-                plane.style.position = "absolute";
-                plane.style.object_fit = "fill";
-                plane.style.left = static_cast<float>(-frame_left);
-                plane.style.top = static_cast<float>(-frame_top);
-                plane.style.width = static_cast<float>(layer->second.width);
-                plane.style.height = static_cast<float>(layer->second.height);
-                pulp::view::IRStyle::ClipRect content{};
-                content.x = static_cast<float>(box.left + inset_left);
-                content.y = static_cast<float>(box.top + inset_top);
-                content.width = static_cast<float>(
-                    std::max(0.0, box.width - inset_left - inset_right));
-                content.height = static_cast<float>(
-                    std::max(0.0, box.height - inset_top - inset_bottom));
-                plane.style.clip_rect = content;
-                lowered.children.push_back(std::move(plane));
+                lowered.children.push_back(detail::captured_viewport_plane(
+                    lowered.name, asset, layer->second, box, computed));
             }
         } else if (capture_only) {
             // WHY it cannot be drawn, because the two reasons have different

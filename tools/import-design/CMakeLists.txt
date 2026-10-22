@@ -40,6 +40,7 @@ add_executable(pulp-import-design
     browser_capture_workspace.cpp
     browser_capture_ir.cpp
     browser_capture_styles.cpp
+    browser_capture_controls.cpp
     browser_capture_tree.cpp
     browser_capture_validation.cpp
     browser_knob_sprites.cpp
