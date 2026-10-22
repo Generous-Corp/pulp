@@ -286,6 +286,7 @@ std::size_t CaptureRing::drain(std::vector<std::uint8_t>& out) {
 // ── Processor ────────────────────────────────────────────────────────────
 
 GpuFaultContinuityProcessor::GpuFaultContinuityProcessor() {
+    editor_link_->processor = this;
     // The environment (REAPER) or, for hosts that cannot pass it on, the
     // rendezvous file (gpu_fault_rendezvous.hpp).
     const RunConfig config = resolve_run_config();
@@ -343,6 +344,10 @@ void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
 }
 
 GpuFaultContinuityProcessor::~GpuFaultContinuityProcessor() {
+    {
+        std::lock_guard lock(editor_link_->mutex);
+        editor_link_->processor = nullptr;
+    }
     release_engine();
     running_.store(false, std::memory_order_release);
     if (service_.joinable())
@@ -396,6 +401,7 @@ void GpuFaultContinuityProcessor::prepare(const format::PrepareContext& context)
 
 void GpuFaultContinuityProcessor::prepare_engine() {
     std::lock_guard lock(engine_mutex_);
+    engine_generation_ = prepare_index_;
     ir_.clear();
     if (!ir_path_.empty()) {
         std::string bytes;
@@ -485,9 +491,11 @@ void GpuFaultContinuityProcessor::release() {
 
 void GpuFaultContinuityProcessor::release_engine() {
     engine_ready_.store(false, std::memory_order_release);
+    std::lock_guard lock(engine_mutex_);
+    // Under the engine lock, so an arm cannot slip in between this and the
+    // release; disarming also ends a stall the worker is in.
     if (harness_)
         disarm_provider_fault();
-    std::lock_guard lock(engine_mutex_);
     if (transport_)
         transport_->release();
     transport_.reset();
@@ -517,6 +525,7 @@ void GpuFaultContinuityProcessor::process(audio::BufferView<float>& output,
         !fire_pending_.load(std::memory_order_relaxed)) {
         flags |= kFlagFaultBlock;
         fire_offline_.store(offline, std::memory_order_relaxed);
+        fire_generation_.store(prepare_index_, std::memory_order_relaxed);
         fire_pending_.store(true, std::memory_order_release);
         fault_block = true;
     }
@@ -677,8 +686,9 @@ void GpuFaultContinuityProcessor::emit_health(const char* phase) {
 void GpuFaultContinuityProcessor::poll_request() {
     // Not before the engine is prepared: the provider fault interposer is
     // installed during prepare, and an audio fault read earlier would be refused.
+    std::error_code ec; // the service thread must never throw
     if (request_seen_ || request_path_.empty() || !engine_ready_.load(std::memory_order_acquire) ||
-        !std::filesystem::exists(request_path_))
+        !std::filesystem::exists(request_path_, ec))
         return;
     std::string body;
     if (!read_nofollow(request_path_, body))
@@ -715,7 +725,7 @@ void GpuFaultContinuityProcessor::poll_request() {
     after_at_.store(after, std::memory_order_relaxed);
     // A delayed completion stalls the worker for longer than the lead; a worker
     // stall for seconds. Either way the callback must not notice.
-    delay_ms_ = delay > 0 ? static_cast<std::uint32_t>(std::min<std::int64_t>(delay, 60'000))
+    delay_ms_ = delay > 0 ? static_cast<std::uint32_t>(std::min<std::int64_t>(delay, kMaxProviderStallMs))
                           : (kind == FaultKind::WorkerStall ? 3000u : 100u);
     const bool internal = internal_stimulus_.load(std::memory_order_relaxed);
     planted_.store(static_cast<std::uint8_t>(planted), std::memory_order_relaxed);
@@ -755,10 +765,24 @@ void GpuFaultContinuityProcessor::fire_pending_fault() {
             detail = "no editor is open, so there is no render device to lose";
         }
     } else {
-        applied_before_ = provider_faults_applied();
-        const auto result = inject_audio_fault(kind, delay_ms_);
-        issued = result.accepted;
-        detail = result.detail;
+        // Armed under the engine lock and only for the engine whose callback
+        // reached the fault block, so a host re-prepare in between cannot
+        // leave the fault armed for (or aimed at) a different engine.
+#if defined(PULP_GPU_FAULT_TEST_ONLY)
+        if (before_arm_hook_)
+            before_arm_hook_();
+#endif
+        std::lock_guard lock(engine_mutex_);
+        if (!engine_ready_.load(std::memory_order_acquire) ||
+            fire_generation_.load(std::memory_order_relaxed) != engine_generation_) {
+            issued = false;
+            detail = "the engine was re-prepared after the fault block; not arming a stale fault";
+        } else {
+            applied_before_ = provider_faults_applied();
+            const auto result = inject_audio_fault(kind, delay_ms_);
+            issued = result.accepted;
+            detail = result.detail;
+        }
     }
     char line[512];
     std::snprintf(
