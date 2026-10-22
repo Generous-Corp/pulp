@@ -404,6 +404,14 @@ void StateStore::add_parameter(const ParamInfo& info) {
     params_.push_back(clamped);
     values_.emplace_back(clamped.range.default_value);
     id_to_index_[info.id] = index;
+    if (dense_index_usable_ && info.id < kDenseIndexLimit && index < kNoDenseIndex) {
+        if (dense_index_.size() <= info.id) dense_index_.resize(std::size_t(info.id) + 1, kNoDenseIndex);
+        dense_index_[info.id] = static_cast<std::uint32_t>(index);
+    } else if (dense_index_usable_) {
+        dense_index_usable_ = false;
+        dense_index_.clear();
+        dense_index_.shrink_to_fit();
+    }
     // Cache trigger/momentary params so the audio-thread auto-reset after each
     // block touches only them, allocation-free. A Reset designation implies a
     // trigger (auto_resets()), so it is captured here too.
@@ -417,9 +425,9 @@ void StateStore::add_group(const ParamGroup& group) {
 }
 
 float StateStore::get_value(ParamID id) const {
-    auto it = id_to_index_.find(id);
-    if (it == id_to_index_.end()) return 0.0f;
-    return values_[it->second].get();
+    const std::size_t i = index_of(id);
+    if (i == kNoIndex) return 0.0f;
+    return values_[i].get();
 }
 
 ParamReader StateStore::param_reader(ParamID id) const {
@@ -430,14 +438,14 @@ ParamReader StateStore::param_reader(ParamID id) const {
 }
 
 float StateStore::get_modulated(ParamID id) const {
-    auto it = id_to_index_.find(id);
-    if (it == id_to_index_.end()) return 0.0f;
+    const std::size_t index = index_of(id);
+    if (index == kNoIndex) return 0.0f;
     // base + mod_offset can leave the declared range (e.g. base near max with
     // positive modulation), and the DSP that reads this must never see an
     // out-of-range value. Clamp to the parameter range; a non-finite offset
     // falls back to the default rather than poisoning the audio path.
-    const ParamInfo& param = params_[it->second];
-    const float modulated = values_[it->second].get_modulated();
+    const ParamInfo& param = params_[index];
+    const float modulated = values_[index].get_modulated();
     if (!std::isfinite(modulated)) return param.range.default_value;
     return std::clamp(modulated, param.range.min, param.range.max);
 }
@@ -494,15 +502,15 @@ void StateStore::reset_all_mod() {
 }
 
 void StateStore::set_value(ParamID id, float value) {
-    auto it = id_to_index_.find(id);
-    if (it == id_to_index_.end()) return;
-    auto& param = params_[it->second];
+    const std::size_t index = index_of(id);
+    if (index == kNoIndex) return;
+    auto& param = params_[index];
     float clamped = constrain_stored_value(param, value);
     const auto older_writers =
         active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
     const auto generation = advance_state_generation();
     const bool applied =
-        values_[it->second].set_packed_revisioned(clamped, generation, older_writers + 1);
+        values_[index].set_packed_revisioned(clamped, generation, older_writers + 1);
     active_state_writers_.fetch_sub(1, std::memory_order_release);
 
     // Wait-free fan-out: notify() does a single atomic pointer load and
@@ -513,15 +521,15 @@ void StateStore::set_value(ParamID id, float value) {
 }
 
 void StateStore::set_value_rt(ParamID id, float value) {
-    auto it = id_to_index_.find(id);
-    if (it == id_to_index_.end()) return;
-    auto& param = params_[it->second];
+    const std::size_t index = index_of(id);
+    if (index == kNoIndex) return;
+    auto& param = params_[index];
     float clamped = constrain_stored_value(param, value);
     const auto older_writers =
         active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
     const auto generation = advance_state_generation();
     const bool applied =
-        values_[it->second].set_packed_revisioned(clamped, generation, older_writers + 1);
+        values_[index].set_packed_revisioned(clamped, generation, older_writers + 1);
     active_state_writers_.fetch_sub(1, std::memory_order_release);
     if (applied && registry_) registry_->notify_rt(id, clamped);
 }
@@ -656,9 +664,9 @@ void StateStore::reset_rt_listener_queue_overflow_count() {
 }
 
 float StateStore::get_normalized(ParamID id) const {
-    auto it = id_to_index_.find(id);
-    if (it == id_to_index_.end()) return 0.0f;
-    return values_[it->second].get_normalized(params_[it->second].range);
+    const std::size_t i = index_of(id);
+    if (i == kNoIndex) return 0.0f;
+    return values_[i].get_normalized(params_[i].range);
 }
 
 void StateStore::set_normalized(ParamID id, float normalized) {

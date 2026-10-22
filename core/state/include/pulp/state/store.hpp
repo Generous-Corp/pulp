@@ -657,6 +657,24 @@ public:
     std::vector<ParamGroup> groups_;
     std::unordered_map<ParamID, std::size_t> id_to_index_;
     std::vector<ParamValue> values_;
+    // Direct ParamID -> index table for the audio-thread readers and writers.
+    // Parameter IDs are almost always small dense integers, so a vector beats a
+    // hash lookup; it is kept only while every registered ID is below
+    // kDenseIndexLimit and is otherwise empty (lookups fall back to the map).
+    static constexpr ParamID kDenseIndexLimit = 1u << 14;
+    static constexpr std::uint32_t kNoDenseIndex = 0xFFFF'FFFFu;
+    std::vector<std::uint32_t> dense_index_;
+    bool dense_index_usable_ = true;
+    static constexpr std::size_t kNoIndex = static_cast<std::size_t>(-1);
+    std::size_t index_of(ParamID id) const noexcept {
+        if (id < dense_index_.size()) {
+            const std::uint32_t i = dense_index_[id];
+            return i == kNoDenseIndex ? kNoIndex : i;
+        }
+        if (dense_index_usable_) return kNoIndex;
+        const auto it = id_to_index_.find(id);
+        return it == id_to_index_.end() ? kNoIndex : it->second;
+    }
     using ParameterDisplayNames =
         std::unordered_map<ParamID, std::string>;
     mutable std::mutex parameter_display_mutex_;
