@@ -26,6 +26,7 @@ fallback nulls exactly and a dropout, a dry block or a stale block does not.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import math
@@ -356,13 +357,21 @@ def convolve(signal: Sequence[float], ir: Sequence[float]) -> list[float]:
         spectrum = np.fft.rfft(np.asarray(signal, dtype=np.float64), size) * \
             np.fft.rfft(np.asarray(ir, dtype=np.float64), size)
         return np.fft.irfft(spectrum, size)[:n].tolist()
+    return list(_convolve_pure(tuple(signal), tuple(ir)))
+
+
+@functools.lru_cache(maxsize=8)
+def _convolve_pure(signal: tuple[float, ...], ir: tuple[float, ...]) -> tuple[float, ...]:
+    # The self-tests convolve the same stimulus and IR many times, so the
+    # result is cached; each tap is one slice-wide pass rather than an
+    # indexed inner loop.
+    n = len(signal)
     out = [0.0] * n
     for k, h in enumerate(ir):
-        if h == 0.0:
+        if h == 0.0 or k >= n:
             continue
-        for i in range(k, n):
-            out[i] += h * signal[i - k]
-    return out
+        out[k:] = [o + h * x for o, x in zip(out[k:], signal)]
+    return tuple(out)
 
 
 def delayed(signal: Sequence[float], delay: int) -> list[float]:
