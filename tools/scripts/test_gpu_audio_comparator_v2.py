@@ -280,14 +280,30 @@ class ComparatorV2Tests(unittest.TestCase):
         del first["source_dirty"]
         result = evaluate(seal(first), second)
         self.assertEqual(result["verdict"], "REFUSED")
-        self.assertIn("source_tree_dirty", result["reasons"])
+        self.assertIn("source_dirty_invalid", result["reasons"])
 
     def test_missing_source_git_error_is_refused(self):
         first, second = pair()
         del first["source_git_error"]
         result = evaluate(seal(first), second)
         self.assertEqual(result["verdict"], "REFUSED")
-        self.assertIn("source_git_error", result["reasons"])
+        self.assertIn("source_git_error_invalid", result["reasons"])
+
+    def test_non_boolean_source_provenance_is_refused(self):
+        for field in ("source_dirty", "source_git_error"):
+            with self.subTest(field=field):
+                first, second = pair()
+                first[field] = "false"
+                result = evaluate(seal(first), second)
+                self.assertEqual(result["verdict"], "REFUSED")
+                self.assertIn(f"{field}_invalid", result["reasons"])
+
+    def test_empty_source_revision_is_refused(self):
+        first, second = pair()
+        first["source_revision"] = ""
+        result = evaluate(seal(first), second)
+        self.assertEqual(result["verdict"], "REFUSED")
+        self.assertIn("source_revision_invalid", result["reasons"])
 
     # -- kernel matching ----------------------------------------------------
 
