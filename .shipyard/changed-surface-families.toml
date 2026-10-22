@@ -3488,7 +3488,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-62d373f20a04"
+name = "script-readers-31784396bef8"
 paths = ["tools/scripts/test_gpu_test_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
@@ -3510,6 +3510,7 @@ tests = [
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
+  "realtime-pool-resource-locks",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
   "wide-non-native-selftest",
@@ -4327,6 +4328,40 @@ tests = [
   "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
   "pulp-uninstaller-contract",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-677a096f00e4"
+paths = ["tools/scripts/test_realtime_pool_resource_locks.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "realtime-pool-resource-locks",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
   "wide-non-native-selftest",
@@ -7083,6 +7118,7 @@ paths = [
   "tools/scripts/test_queue_admission_guard.py",
   "tools/scripts/test_queue_age_watchdog.py",
   "tools/scripts/test_queue_batch_attribute.py",
+  "tools/scripts/test_realtime_pool_resource_locks.py",
   "tools/scripts/test_reap_stranded_tracker.py",
   "tools/scripts/test_refresh_push_check.py",
   "tools/scripts/test_relay_contract_check.py",
@@ -7636,6 +7672,7 @@ paths = [
   "tools/scripts/test_queue_admission_guard.py",
   "tools/scripts/test_queue_age_watchdog.py",
   "tools/scripts/test_queue_batch_attribute.py",
+  "tools/scripts/test_realtime_pool_resource_locks.py",
   "tools/scripts/test_reap_stranded_tracker.py",
   "tools/scripts/test_refresh_push_check.py",
   "tools/scripts/test_relay_contract_check.py",

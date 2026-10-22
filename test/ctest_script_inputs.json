@@ -9232,6 +9232,14 @@
    ],
    "kind": "python"
   },
+  "realtime-pool-resource-locks": {
+   "entry": "tools/scripts/test_realtime_pool_resource_locks.py",
+   "inputs": [
+    "tools/scripts/test_gpu_test_resource_locks.py",
+    "tools/scripts/test_realtime_pool_resource_locks.py"
+   ],
+   "kind": "python"
+  },
   "refactor-baseline-manifest": {
    "entry": "tools/scripts/verify_refactor_baselines.py",
    "inputs": [
