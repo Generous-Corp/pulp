@@ -124,7 +124,8 @@ class FixedParamView final : public pulp::host::BakedParamView {
 // irregular length. `alias_port` < 0 gives the node its own output buffer;
 // otherwise the output buffer IS that input port's buffer, as an executor that
 // reuses buffers in place would hand it.
-std::vector<float> run_callback(const pulp::host::CustomNodeType& type, const FixedParamView& params,
+std::vector<float> run_callback(const pulp::host::CustomNodeType& type,
+                                const FixedParamView& params,
                                 std::vector<std::vector<float>> inputs, int alias_port = -1) {
     void* instance = type.create();
     REQUIRE(instance != nullptr);
@@ -320,9 +321,9 @@ TEST_CASE("Forge compressor nodes render what their compressor renders, at any b
         params.set(sc::kKeyHpfHz, 0.0f);
         std::vector<float> main_signal(kSamples);
         for (std::size_t i = 0; i < kSamples; ++i)
-            main_signal[i] = 0.5f * std::sin(static_cast<float>(
-                                        2.0 * std::numbers::pi * 440.0 * static_cast<double>(i) /
-                                        kSampleRate));
+            main_signal[i] =
+                0.5f * std::sin(static_cast<float>(2.0 * std::numbers::pi * 440.0 *
+                                                   static_cast<double>(i) / kSampleRate));
 
         pulp::signal::Compressor reference;
         reference.set_sample_rate(static_cast<float>(kSampleRate));
@@ -343,8 +344,7 @@ TEST_CASE("Forge compressor nodes render what their compressor renders, at any b
                         expected);
         // The key's own buffer receives the output: the key must still be read
         // as the key, not overwritten by the main signal before detection.
-        require_matches(run_callback(type, params, {main_signal, program}, sc::kKeyPort),
-                        expected);
+        require_matches(run_callback(type, params, {main_signal, program}, sc::kKeyPort), expected);
     }
 
     SECTION("multiband compressor") {

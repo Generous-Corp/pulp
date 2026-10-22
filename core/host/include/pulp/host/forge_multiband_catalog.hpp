@@ -119,8 +119,7 @@ inline CustomNodeType make_multiband_compressor_node() {
         for (int start = 0; start < n; start += kBandChunk) {
             const int count = std::min(kBandChunk, n - start);
             for (int k = 0; k < count; ++k) {
-                const auto split =
-                    s->crossover.process(input[static_cast<std::size_t>(start + k)]);
+                const auto split = s->crossover.process(input[static_cast<std::size_t>(start + k)]);
                 low[k] = split.low;
                 high[k] = split.high;
             }
