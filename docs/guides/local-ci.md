@@ -5824,8 +5824,9 @@ schedules no hosted Windows job (the `Windows (x64)` leg and the three
 
 `resolve-provider` prints `resolve-provider: Windows leg omitted: GitHub-hosted
 Windows is opt-in ...` when it leaves the leg out, and the advisory `windows`
-alias then passes with that line. `android.yml` applies the same rule to its
-`windows-latest` row on a push to `main`. `windows-cli-compile.yml` is the one
+alias then passes with that line. `android.yml` leaves its `windows-latest`
+row out on every event but the nightly schedule unless
+`PULP_ALLOW_HOSTED_WINDOWS=1`; no required context reads it. `windows-cli-compile.yml` is the one
 listed exception: its push verdict on `main` is the release backstop
 `auto-release.yml`'s pre-tag check reads. Schedules and pull requests keep
 their documented Windows policy. `tools/scripts/test_windows_runner_policy.py`

@@ -688,10 +688,26 @@ class HostedWindowsOptInTests(unittest.TestCase):
                         if l.startswith("matrix="))
         return [row["os"] for row in json.loads(line.split("=", 1)[1])["include"]]
 
-    def test_android_push_runs_windows_only_by_opting_in(self) -> None:
-        self.assertEqual(self.android_matrix("push"), ["macos-latest"])
-        self.assertEqual(self.android_matrix("push", "1"), ["macos-latest", "windows-latest"])
+    def test_android_runs_hosted_windows_only_nightly_or_by_opting_in(self) -> None:
+        for event in ("push", "pull_request", "merge_group", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.assertEqual(self.android_matrix(event), ["macos-latest"])
+                self.assertEqual(self.android_matrix(event, "1"),
+                                 ["macos-latest", "windows-latest"])
         self.assertEqual(self.android_matrix("schedule"), ["macos-latest", "windows-latest"])
+
+    def test_no_required_context_comes_from_android(self) -> None:
+        ruleset = json.loads(read(REPO_ROOT / ".github/rulesets/main-protection.json"))
+        required = {check["context"] for rule in ruleset["rules"]
+                    if rule["type"] == "required_status_checks"
+                    for check in rule["parameters"]["required_status_checks"]}
+        self.assertIn("macos", required, "control: the required list was read")
+        jobs = yaml.safe_load(read(WORKFLOWS / "android.yml"))["jobs"]
+        for job_name, spec in jobs.items():
+            with self.subTest(job=job_name):
+                name = str(spec.get("name", job_name))
+                self.assertNotIn(name, required)
+                self.assertFalse(any(context.startswith(job_name) for context in required))
 
 
 class TartMacosWorkflowPrerequisiteTests(unittest.TestCase):

@@ -6131,8 +6131,9 @@ A plain `build.yml` dispatch or a push to `main` used to start the
 compile gates), so agents kept landing on hosted Windows without asking for it.
 Now none runs unless the dispatch sets `allow_hosted_windows=true` or a
 self-hosted `windows_runner_selector_json`, or the repository sets
-`PULP_ALLOW_HOSTED_WINDOWS=1`. `android.yml`'s windows row follows the same
-rule on a push. When adding a job that can run on a `windows-*` label in a
+`PULP_ALLOW_HOSTED_WINDOWS=1`. `android.yml`'s windows row runs only on the
+nightly schedule unless that variable is set (pull requests, merge groups,
+pushes and dispatches leave it out). When adding a job that can run on a `windows-*` label in a
 push-triggered workflow, put `vars.PULP_ALLOW_HOSTED_WINDOWS == '1'` in its
 `if:` (or route it through a resolver and list it in
 `COMPUTED_WINDOWS_ROUTING`): `HostedWindowsOptInTests` in
