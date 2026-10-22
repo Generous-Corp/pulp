@@ -250,6 +250,14 @@ class EndToEnd(Env):
                 "start_unix_us": rhs.state(self.run)["launch_unix_us"] + 1,
                 "claimed_unix_us": claimed, "process_path": LOGIC,
                 "config_source": "rendezvous", "nonce": st["nonce"]}
+        for event in events:
+            # As the Batch A plug-in reports them: the interposer's application
+            # time on the capture clock (G3) and the loss named in the status (G2).
+            if event["event"] == "provider_fault_applied":
+                event["host_time_ns"] = (event["project_sample"] + 512) * 20833
+            if event["event"] == "health" and event["phase"] == "after":
+                event["status"].update(provider_state="unavailable",
+                                       recovery_reason="provider-lost")
         with (plugin_run / "events.jsonl").open("w", encoding="utf-8") as out:
             for event in [proc] + events:
                 out.write(json.dumps(event, sort_keys=True) + "\n")

@@ -241,6 +241,33 @@ def positive_control_expectation(snapshots: dict[str, dict]) -> tuple[bool, str]
     return True, f"GPU delivered {gpu} of {total} quanta; {fallback} fallback"
 
 
+def applied_capture_sample(capture: Any, applied_host_time_ns: int | None) -> int | None:
+    """G3: the project sample at which the provider fault took effect, from
+    the capture itself: the first played record whose callback started at or
+    after the interposer applied the fault (both on the plug-in's steady
+    clock). The event's own project_sample is the service thread's 2 ms poll
+    and can only be later than this."""
+    if capture is None or not applied_host_time_ns:
+        return None
+    for rec in getattr(capture, "records", None) or []:
+        if rec.get("position", -1) >= 0 and rec.get("host_time_ns", 0) >= applied_host_time_ns:
+            return int(rec["position"])
+    return None
+
+
+def loss_status_problem(snapshots: dict[str, dict]) -> str:
+    """G2: with Batch A under test, a lost provider is reported as such by the
+    transport's own status: provider_state=unavailable and
+    recovery_reason=provider-lost in the `after` snapshot. Reported is not
+    enough; a status that still says the provider is fine is a defect."""
+    after = snapshots.get("after") or {}
+    state, reason = after.get("provider_state"), after.get("recovery_reason")
+    if state == "unavailable" and reason == "provider-lost":
+        return ""
+    return (f"the transport's status did not report the loss: provider_state={state!r}, "
+            f"recovery_reason={reason!r} (Batch A requires 'unavailable' and 'provider-lost')")
+
+
 def _usable(run_dir: Path, name: str, listed: Sequence[str] | None) -> bool:
     return (run_dir / name).is_file() and (listed is None or name in listed)
 
@@ -338,6 +365,32 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
             capture = gfc.read_capture(run_dir / "capture.bin")
         except ValueError:
             capture = None
+
+    delivery = base.get("delivery")
+    if control_kind == "fault" and fault in gfc.AUDIO_FAULTS:
+        # G2: the loss must be named in the status, not only survived.
+        if fault in gfc.LOSS_FAULTS:
+            problem = loss_status_problem(base["health"]["snapshots"])
+            if problem:
+                mismatches.append(problem)
+        # G3: the takeover deadline is measured from the capture record the
+        # fault actually landed in, not from the service thread's poll.
+        applied_ns = (applied or {}).get("host_time_ns")
+        mapped = applied_capture_sample(capture, applied_ns)
+        if mapped is None:
+            preconditions.append("provider_fault_applied has no host_time_ns that maps to a "
+                                 "capture record (G3)")
+        elif capture is not None:
+            prepared = gfc.first_event(events, "prepared") or {}
+            delivery = gfc.delivery_analysis(
+                capture, fault=fault, fault_sample=fault_sample, applied_sample=mapped,
+                quantum=int(prepared.get("quantum", 0) or 0) or 1,
+                lead_blocks=int(prepared.get("lead_blocks", 0) or 0), window_post=window_post)
+            delivery = dict(delivery, applied_sample_from="capture_host_time",
+                            applied_sample=mapped)
+            if not delivery.get("met"):
+                preconditions.append(f"per-block delivery from the applied record (G3): "
+                                     f"{delivery.get('note')}")
     # The stricter of WP-h1's verdict and this one.
     base_verdict, base_reasons = base["verdict"], list(base["verdict_reasons"])
     capture_only = (host.get("id") not in REALTIME_RENDER_HOSTS and
@@ -394,7 +447,7 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         "capture": base["capture"],
         "calling_pattern": (calling_pattern(capture) if capture else
                             {"classification": "unknown", "callbacks": 0}),
-        "delivery": base.get("delivery"),
+        "delivery": delivery,
         "controls": controls,
         "offline_path": {k: base.get(k) for k in ("offline_records_in_bounce",
                                                   "offline_path_checked")},

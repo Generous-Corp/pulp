@@ -59,7 +59,8 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
              host_id: str = "logic", fmt: str = "au", realtime: bool = True,
              start: int = START, claim_pid: int | None = None,
              responsible_path: str | None = None, template: str = "playback",
-             internal: bool = False, quiet: bool = True) -> dict:
+             internal: bool = False, quiet: bool = True, applied_time: bool = True,
+             loss_reported: bool = True) -> dict:
     """Synthesize one run directory and its v2 receipt. `internal` marks the
     run input=internal and makes every played captured input sample the
     plug-in's internal stimulus (outputs are left as synthesized)."""
@@ -91,6 +92,16 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
             if event["event"] == "fault_armed":
                 event = dict(event, planted_negative=planted, gpu_off=planted == "gpu_off",
                              input="internal" if internal else "host")
+            if event["event"] == "provider_fault_applied" and applied_time:
+                # The interposer's own timestamp, on the capture's clock
+                # (synthesize_run stamps record k at k * 20833 ns, 4 blocks
+                # of lead-in before project sample 0).
+                event = dict(event, host_time_ns=(event["project_sample"] + 512) * 20833)
+            if (event["event"] == "health" and event["phase"] == "after" and
+                    fault in gfc.LOSS_FAULTS and loss_reported):
+                # Batch A names the loss in the transport's status (G2).
+                event = dict(event, status=dict(event["status"], provider_state="unavailable",
+                                                recovery_reason="provider-lost"))
             out.append(event)
         return out
 
@@ -259,6 +270,33 @@ class V2Receipt(unittest.TestCase):
                 receipt = make_run(run, fault=fault, mode="in_process", plugin_pid=HOST_PID,
                                    process_path=LOGIC)
                 self.assertEqual(self.verify(receipt, run), ("pass", "pass"))
+
+    def test_g2_a_loss_the_status_does_not_report_is_a_fail(self):
+        for fault in gfc.LOSS_FAULTS:
+            with self.subTest(fault=fault):
+                run = self.run_dir(f"g2-{fault}")
+                receipt = make_run(run, fault=fault, loss_reported=False)
+                self.assertEqual(self.verify(receipt, run)[0], "fail")
+                self.assertTrue(receipt["verdict_reasons"][0].startswith(
+                    "the transport's status did not report the loss"))
+        # Stall faults do not lose the provider and are not held to it.
+        run = self.run_dir("g2-stall")
+        receipt = make_run(run, fault="worker_stall", loss_reported=False)
+        self.assertEqual(self.verify(receipt, run), ("pass", "pass"))
+
+    def test_g3_the_applied_sample_comes_from_the_capture_clock(self):
+        run = self.run_dir("g3")
+        receipt = make_run(run)
+        applied = receipt["fault"]["provider_fault_applied"]
+        self.assertEqual(receipt["delivery"]["applied_sample_from"], "capture_host_time")
+        # The record the interposer's timestamp falls in, block-aligned.
+        mapped = receipt["delivery"]["applied_sample"]
+        self.assertLessEqual(abs(mapped - applied["project_sample"]), 128)
+        self.assertGreaterEqual(mapped, FAULT)
+        run2 = self.run_dir("g3-missing")
+        receipt2 = make_run(run2, applied_time=False)
+        self.assertEqual(self.verify(receipt2, run2)[0], "inconclusive")
+        self.assertTrue(any("(G3)" in r for r in receipt2["verdict_reasons"]))
 
     def test_m1_no_host_realtime_render_is_inconclusive(self):
         run = self.run_dir("no-realtime")
