@@ -338,3 +338,60 @@ TEST_CASE("buffer_ops::measure_peak_rms measures one channel of a BufferView",
     REQUIRE(right.peak == 2.0f);
     REQUIRE(right.rms == std::sqrt(4.0f / 64.0f));
 }
+
+// ── map_samples ─────────────────────────────────────────────────────────
+
+TEST_CASE("buffer_ops::map_samples maps out of place without touching the input",
+          "[audio][buffer_ops][map_samples]") {
+    std::vector<float> in(131), out(131, -1.0f);
+    for (std::size_t i = 0; i < in.size(); ++i) in[i] = 0.01f * static_cast<float>(i) - 0.5f;
+    const auto original = in;
+    ops::map_samples(in.data(), out.data(), in.size(), [](float x) { return 0.5f * x + 0.25f; });
+    REQUIRE(in == original);
+    for (std::size_t i = 0; i < in.size(); ++i) REQUIRE(out[i] == 0.5f * in[i] + 0.25f);
+}
+
+TEST_CASE("buffer_ops::map_samples in place matches out of place bit for bit",
+          "[audio][buffer_ops][map_samples]") {
+    std::vector<float> in(257);
+    for (std::size_t i = 0; i < in.size(); ++i)
+        in[i] = std::sin(0.11f * static_cast<float>(i)) * 1.7f;
+    const auto fn = [](float x) { return x * 0.70710677f - x * x * 0.125f; };
+    std::vector<float> separate(in.size());
+    ops::map_samples(in.data(), separate.data(), in.size(), fn);
+    std::vector<float> inplace = in;
+    ops::map_samples(inplace.data(), inplace.data(), inplace.size(), fn);
+    REQUIRE(inplace == separate);
+}
+
+TEST_CASE("buffer_ops::map_samples calls the function once per sample in order",
+          "[audio][buffer_ops][map_samples]") {
+    for (bool in_place : {false, true}) {
+        std::vector<float> in(37);
+        for (std::size_t i = 0; i < in.size(); ++i) in[i] = static_cast<float>(i);
+        std::vector<float> out(in.size());
+        float* dst = in_place ? in.data() : out.data();
+        std::vector<float> seen;
+        float running = 0.0f;
+        ops::map_samples(in.data(), dst, in.size(), [&](float x) {
+            seen.push_back(x);
+            running += x;
+            return running;  // prefix sum: only correct if samples arrive in order
+        });
+        INFO("in_place = " << in_place);
+        REQUIRE(seen.size() == 37);
+        for (std::size_t i = 0; i < 37; ++i) {
+            REQUIRE(seen[i] == static_cast<float>(i));
+            REQUIRE(dst[i] == static_cast<float>(i * (i + 1) / 2));
+        }
+    }
+}
+
+TEST_CASE("buffer_ops::map_samples with zero samples does nothing",
+          "[audio][buffer_ops][map_samples]") {
+    int calls = 0;
+    float sample = 3.0f;
+    ops::map_samples(&sample, &sample, 0, [&](float x) { ++calls; return x; });
+    REQUIRE(calls == 0);
+    REQUIRE(sample == 3.0f);
+}

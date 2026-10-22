@@ -28,6 +28,28 @@
 
 namespace pulp::audio::buffer_ops {
 
+/// Write `out[i] = fn(in[i])` for every sample, in index order.
+///
+/// This is the per-sample loop a processor writes for a stateless or
+/// in-order stateful sample function (gain, mix, a waveshaper), written so it
+/// vectorizes whether or not the host processes in place. A plain
+/// `out[i] = f(in[i])` loop compiles to a runtime overlap check, and
+/// `out == in` — the usual in-place call — fails that check and runs the
+/// scalar fallback. Here the in-place case is its own single-pointer loop,
+/// which the compiler can vectorize without a check.
+///
+/// `in` and `out` must be the same pointer or not overlap. `fn` is called
+/// exactly once per sample, in increasing index order, so a function that
+/// carries state from one sample to the next still sees samples in order.
+template <typename Fn>
+inline void map_samples(const float* in, float* out, std::size_t n, Fn&& fn) {
+    if (in == out) {
+        for (std::size_t i = 0; i < n; ++i) out[i] = fn(out[i]);
+    } else {
+        for (std::size_t i = 0; i < n; ++i) out[i] = fn(in[i]);
+    }
+}
+
 /// Apply a constant gain to a single channel of samples in place.
 void apply_gain(std::span<float> samples, float gain);
 
