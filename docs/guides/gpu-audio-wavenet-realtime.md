@@ -101,13 +101,18 @@ good the input ring saturates. If the worker itself stops, the callback latches
 `status_snapshot()` reports `provider_state = Unavailable` after an observed
 device loss, whatever cause latched first, and for `ProviderUnresponsive`:
 delivery cannot resume until the node is released and prepared with a new
-provider. Every other recovery reason reports `Degraded`. The schema v3 fields
-report the preparation `epoch`, whether its delivery epoch is still active,
-`terminal_counts` for every admitted block by `GpuAudioTerminalDisposition` (a
-provider failure counts under the declared miss policy, `CpuFallback` or
-`Silence`), the configured `completion_mode`, `gpu_kernel_available = true`,
-and `timestamps_available = false`, since this provider path records no GPU
-timestamps.
+provider. Every other recovery reason reports `Degraded`. `selected_engine`
+names the engine actually producing audio: `Gpu` only while the provider is
+`Ready`; otherwise `Cpu` when a prepared CPU shadow covers misses, or `Unknown`
+when misses are silent. The schema v3 fields report the preparation `epoch`,
+whether its delivery epoch is still active, `terminal_counts` by
+`GpuAudioTerminalDisposition`, the configured `completion_mode`,
+`gpu_kernel_available = true`, and `timestamps_available = false`, since this
+provider path records no GPU timestamps. A terminal is counted once the audio
+it names is certain: `GpuDelivered` by the callback that consumed the block,
+and a provider failure under the declared miss policy, `CpuFallback` only after
+its consumer delivered the fallback. A quiescent snapshot therefore passes
+`validate_gpu_audio_status()`.
 
 ## Evidence and limits
 

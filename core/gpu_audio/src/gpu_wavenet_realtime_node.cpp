@@ -119,7 +119,7 @@ struct GpuWaveNetRealtimeNode::Impl {
                         detail::SharedIoFallbackReason reason, bool observed = false) noexcept {
         if (!pending.counted) {
             pending.counted = true;
-            tally(terminal);
+            tally(terminal, pending.stamp.sequence);
         }
         if (!pending.trace_pending || !trace)
             return;
@@ -138,38 +138,50 @@ struct GpuWaveNetRealtimeNode::Impl {
         (void)trace->publish_worker(pending.trace_record);
         telemetry.record_retired(outcome == detail::SharedIoTraceOutcome::Success);
     }
-    // One host-visible disposition per admitted block. A provider failure has
-    // no GPU-side disposition of its own; the block's audio comes from the
-    // declared miss policy.
-    void tally(detail::SharedIoGpuTerminalDisposition terminal) noexcept {
+    // One host-visible disposition per admitted block, counted only once the
+    // audio it names is certain, so a quiescent snapshot never reports more
+    // GPU or CPU-fallback blocks than the callback has delivered. A delivered
+    // GPU block is counted by the callback that consumed it (delivered()). A
+    // provider failure has no GPU-side disposition of its own; the block's
+    // audio comes from the declared miss policy, and under CpuFallback it is
+    // counted once its consumer has delivered that fallback.
+    void tally(detail::SharedIoGpuTerminalDisposition terminal, std::uint64_t block) noexcept {
         using Gpu = detail::SharedIoGpuTerminalDisposition;
         using Public = GpuAudioTerminalDisposition;
-        auto disposition = Public::Unknown;
         switch (terminal) {
         case Gpu::CompletedAccepted:
-            disposition = Public::GpuDelivered;
-            break;
-        case Gpu::StaleRejected:
-            disposition = Public::StaleRejected;
-            break;
-        case Gpu::LateRejected:
-            disposition = Public::LateRejected;
-            break;
-        case Gpu::DeviceLost:
-            disposition = Public::DeviceLost;
-            break;
-        case Gpu::CancelledTeardown:
-            disposition = Public::Cancelled;
-            break;
-        case Gpu::ProviderFailed:
-            disposition = config.miss_policy == MissPolicy::CpuFallback ? Public::CpuFallback
-                                                                        : Public::Silence;
-            break;
         case Gpu::None:
-            break;
+            return;
+        case Gpu::StaleRejected:
+            return count(Public::StaleRejected);
+        case Gpu::LateRejected:
+            return count(Public::LateRejected);
+        case Gpu::DeviceLost:
+            return count(Public::DeviceLost);
+        case Gpu::CancelledTeardown:
+            return count(Public::Cancelled);
+        case Gpu::ProviderFailed:
+            if (config.miss_policy != MissPolicy::CpuFallback)
+                return count(Public::Silence);
+            ++deferred_fallbacks;
+            deferred_until = std::max(deferred_until, block + config.lead_blocks);
+            return;
         }
-        auto& count = terminal_counts[static_cast<std::size_t>(disposition)];
-        count.store(count.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+    }
+    void count(GpuAudioTerminalDisposition disposition) noexcept {
+        auto& value = terminal_counts[static_cast<std::size_t>(disposition)];
+        value.store(value.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+    }
+    // Worker only: settle failed blocks whose consumers have delivered.
+    void settle_fallbacks() noexcept {
+        if (deferred_fallbacks == 0 ||
+            delivered_next.load(std::memory_order_acquire) <= deferred_until)
+            return;
+        auto& value =
+            terminal_counts[static_cast<std::size_t>(GpuAudioTerminalDisposition::CpuFallback)];
+        value.store(value.load(std::memory_order_relaxed) + deferred_fallbacks,
+                    std::memory_order_relaxed);
+        deferred_fallbacks = 0;
     }
     // Device loss is the root cause of the completion failures and silence it
     // produces, so once loss is observed it replaces those latched symptoms.
@@ -276,7 +288,12 @@ struct GpuWaveNetRealtimeNode::Impl {
     // Worker-only watchdog state, in callback blocks: the worker's pump rate is
     // a poll interval, not an audio clock.
     std::uint64_t watchdog_limit = 0, completion_mark = 0;
-    // Written by the worker, read by status_snapshot() on a host thread.
+    // The sequence after the last callback whose delivery was reported.
+    std::atomic<std::uint64_t> delivered_next{0};
+    // Worker only: provider failures awaiting their consumer's fallback.
+    std::uint64_t deferred_fallbacks = 0, deferred_until = 0;
+    // Written by the worker, read by status_snapshot() on a host thread. The
+    // GpuDelivered count is written only by the callback.
     std::atomic<bool> device_lost{false};
     std::array<std::atomic<std::uint64_t>, GpuAudioStatus::kTerminalDispositionCount>
         terminal_counts{};
@@ -333,6 +350,8 @@ struct GpuWaveNetRealtimeNode::Impl {
         all_channels_mask = c.channels == 64 ? UINT64_MAX : (UINT64_C(1) << c.channels) - 1;
         next_input = sequence;
         callback_next.store(sequence, std::memory_order_relaxed);
+        delivered_next.store(sequence, std::memory_order_relaxed);
+        deferred_fallbacks = deferred_until = 0;
         watchdog_limit = c.watchdog_blocks != 0 ? c.watchdog_blocks : c.capacity - 1;
         completion_mark = sequence;
         device_lost.store(false, std::memory_order_relaxed);
@@ -679,8 +698,6 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     status.recovery_reason = recovery_reason();
     status.recovery_sequence = recovery_sequence();
     status.diagnostics_available = true;
-    status.selected_engine =
-        authenticated_provider() ? GpuAudioEngine::Gpu : GpuAudioEngine::Unknown;
     status.epoch = impl_->epoch;
     status.delivery_epoch_active = impl_->bridge->delivery_epoch() != 0;
     for (std::size_t i = 0; i < impl_->terminal_counts.size(); ++i)
@@ -710,6 +727,14 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
         status.provider_state = authenticated_provider() && !fenced()
                                     ? GpuAudioProviderState::Ready
                                     : GpuAudioProviderState::Degraded;
+    // The engine actually producing audio: the GPU only while it delivers;
+    // otherwise the prepared CPU shadow, or none when misses are silent.
+    if (status.provider_state == GpuAudioProviderState::Ready)
+        status.selected_engine = GpuAudioEngine::Gpu;
+    else if (status.fallback_policy == MissPolicy::CpuFallback && status.fallback_available)
+        status.selected_engine = GpuAudioEngine::Cpu;
+    else
+        status.selected_engine = GpuAudioEngine::Unknown;
     return status;
 }
 bool GpuWaveNetRealtimeNode::ready() const noexcept {
@@ -732,7 +757,7 @@ std::uint8_t GpuWaveNetRealtimeNode::process(void* self,
     if (!valid || n != s.config.session.descriptor.block_size ||
         input.num_channels() != s.config.channels || output.num_channels() != s.config.channels ||
         input.num_samples() < n || output.num_samples() < n) {
-        s.fail(detail::SharedIoRecoveryReason::InvalidCallback);
+        s.fail(detail::SharedIoRecoveryReason::InvalidCallback, sequence);
         std::fill(s.callback_input.begin(), s.callback_input.end(), 0.f);
     } else {
         for (std::uint32_t ch = 0; ch < s.config.channels; ++ch)
@@ -765,6 +790,7 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
         }
     } drain{s};
     bool progressed = false;
+    s.settle_fallbacks();
     auto produced = s.service_and_collect(pump_now, deadline, &progressed);
     s.watch_provider(progressed);
     if (!s.bridge->begin_worker_admission())
@@ -830,7 +856,7 @@ bool GpuWaveNetRealtimeNode::fence(void* self) noexcept {
     auto& s = *static_cast<GpuWaveNetRealtimeNode*>(self)->impl_;
     if (!s.bridge)
         return true;
-    s.fail(detail::SharedIoRecoveryReason::OfflineFence);
+    s.fail(detail::SharedIoRecoveryReason::OfflineFence, s.first_undelivered());
     bool drained = true;
     for (auto& channel : s.channels)
         if (!channel->release())
@@ -843,14 +869,21 @@ bool GpuWaveNetRealtimeNode::fence(void* self) noexcept {
 void GpuWaveNetRealtimeNode::delivered(void* self, std::uint64_t sequence, std::uint8_t disposition,
                                        std::uint64_t end, std::uint64_t visible) noexcept {
     auto& s = *static_cast<GpuWaveNetRealtimeNode*>(self)->impl_;
-    if (s.callback.stamp.sequence == sequence)
-        (void)s.bridge->complete_callback_delivery(
-            s.callback, static_cast<detail::SharedIoDeliveryDisposition>(disposition), end,
-            visible);
+    if (s.callback.stamp.sequence != sequence)
+        return;
+    const auto actual = static_cast<detail::SharedIoDeliveryDisposition>(disposition);
+    // The bridge records this delivery in telemetry before it is counted here.
+    if (s.bridge->complete_callback_delivery(s.callback, actual, end, visible) &&
+        actual == detail::SharedIoDeliveryDisposition::GpuDelivered)
+        s.count(GpuAudioTerminalDisposition::GpuDelivered);
+    s.delivered_next.store(sequence + 1, std::memory_order_release);
 }
 void detail::WaveNetRealtimeTestAccess::request_recovery(GpuWaveNetRealtimeNode& node,
                                                          SharedIoRecoveryReason reason,
                                                          std::uint64_t sequence) noexcept {
+    // A latched cause always names a block; default to the next one due.
+    if (sequence == std::numeric_limits<std::uint64_t>::max())
+        sequence = node.impl_->bridge->next_sequence();
     node.impl_->bridge->request_recovery(reason, sequence);
 }
 detail::SharedIoRecoveryReason
