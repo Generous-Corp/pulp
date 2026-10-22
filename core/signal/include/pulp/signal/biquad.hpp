@@ -225,9 +225,14 @@ public:
     // bit-identical. The difference is float round-off amplified by the
     // design's noise gain, the same size as the sample path's own error
     // against an exact (float64) DF2T. Over the RBJ type x frequency x Q x
-    // gain grid at 44.1/48/96 kHz the block path's RMS error against that
-    // exact reference is on average about 1 dB lower than the sample path's
-    // and never more than 3 dB higher. Designs with a pole closer to the unit
+    // gain grid at 44.1/48/96 kHz with program and white-noise input (2112
+    // cases) the block path's RMS error against that exact reference is never
+    // more than 3 dB above the sample path's, on average 0.8 dB below it with
+    // fused multiply-add and 0.1 dB above it without; block and sample
+    // outputs differ by at most -70 dBFS. RMS rather than peak error is the
+    // criterion: peak error is a few-sample statistic and exceeded +3 dB in
+    // 13 cases with fused multiply-add (the loudest at -65 dBFS) and 40
+    // without. Designs with a pole closer to the unit
     // circle than kFeedbackLastMaxPoleRadius keep the sample path's order
     // (see below) and stay bit-identical to it.
     //
