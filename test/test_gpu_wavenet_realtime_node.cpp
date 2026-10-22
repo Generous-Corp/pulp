@@ -2033,3 +2033,34 @@ TEST_CASE("WaveNet completions seen only in the bounded-wait tail pass keep the 
     CHECK(node.recovery_reason() == GpuAudioRecoveryReason::None);
     CHECK(checked_status(node).provider_state != GpuAudioProviderState::Unavailable);
 }
+
+TEST_CASE("WaveNet starved worker is not mistaken for an unresponsive provider",
+          "[gpu_audio][wavenet][realtime][hang]") {
+    // The fake behaves like a healthy provider: work finishes right away and
+    // is reported on the next service. The worker is then descheduled for far
+    // longer than the watchdog window. The first service after the stall must
+    // collect what finished before it judges silence.
+    struct Case {
+        std::uint32_t capacity, watchdog_blocks;
+        GpuAudioRecoveryReason expected;
+    };
+    for (const auto c : {Case{128, 8, GpuAudioRecoveryReason::None},
+                         // A ring shorter than the stall overflows first, which
+                         // is the true cause.
+                         Case{4, 3, GpuAudioRecoveryReason::InputSaturated}}) {
+        CAPTURE(c.capacity, c.watchdog_blocks);
+        Harness h(Tweak{.lead = 1, .capacity = c.capacity, .watchdog_blocks = c.watchdog_blocks});
+        for (int block = 0; block < 4; ++block) {
+            h.callback(float(block));
+            h.service();
+        }
+        // One block is in flight and has already finished on the provider.
+        for (int block = 0; block < 100; ++block)
+            h.callback(float(block));
+        for (int pump = 0; pump < 200; ++pump)
+            h.service();
+        CHECK(h.node.recovery_reason() == c.expected);
+        CHECK(h.node.recovery_reason() != GpuAudioRecoveryReason::ProviderUnresponsive);
+        CHECK(checked_status(h.node).provider_state != GpuAudioProviderState::Unavailable);
+    }
+}
