@@ -854,10 +854,13 @@ GpuAudioCapabilityReport GpuNeuralRealtimeNode::capability_report() const noexce
                       : authenticated_provider() ? GpuAudioProvider::Dawn
                                                  : GpuAudioProvider::Unknown;
     report.eligibility = GpuAudioEligibility::Eligible;
-    report.fallback_policy = MissPolicy::CpuFallback;
+    // Under None a realtime miss is silent; the primed model serves offline
+    // renders only, so it is not a fallback a host can rely on in realtime.
+    const bool silent_miss = s.shadow_mode.load(std::memory_order_relaxed) == ShadowPolicy::None;
+    report.fallback_policy = silent_miss ? MissPolicy::Silence : MissPolicy::CpuFallback;
     report.prepared_lead_blocks = s.config.lead_blocks;
     report.prepared = true;
-    report.fallback_available = cpu_fallback_prepared();
+    report.fallback_available = !silent_miss && cpu_fallback_prepared();
     report.diagnostics_available = true;
     report.prepared_latency_blocks = s.config.lead_blocks;
     report.gpu_kernel_available = gpu_kernel_available();
@@ -873,12 +876,13 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
         return status;
     }
     const auto n = s.block_size();
-    status.fallback_policy = MissPolicy::CpuFallback;
+    const bool silent_miss = s.shadow_mode.load(std::memory_order_relaxed) == ShadowPolicy::None;
+    status.fallback_policy = silent_miss ? MissPolicy::Silence : MissPolicy::CpuFallback;
     status.sample_rate = s.model->sample_rate;
     status.block_size = n;
     status.latency_samples = s.config.lead_blocks * n;
     status.prepared_lead_blocks = s.config.lead_blocks;
-    status.fallback_available = cpu_fallback_prepared();
+    status.fallback_available = !silent_miss && cpu_fallback_prepared();
     status.diagnostics_available = true;
     status.recovery_reason = recovery_reason();
     status.recovery_sequence = recovery_sequence();

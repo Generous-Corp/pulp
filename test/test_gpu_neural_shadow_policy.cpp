@@ -310,6 +310,9 @@ TEST_CASE("each shadow policy nulls against the reference across a provider faul
     CHECK(status.shadow_delivered_blocks > 0);
     CHECK(status.shadow_double_miss_blocks == 0);
     CHECK(status.fallback_blocks == status.shadow_delivered_blocks);
+    // Positive control for the None case: a substituting shadow is a fallback.
+    CHECK(status.fallback_policy == MissPolicy::CpuFallback);
+    CHECK(status.fallback_available);
     CHECK(rig.transport.delivery_snapshot().gpu_blocks > 0);
     CHECK(rig.transport.status_snapshot().fallback_blocks == status.shadow_delivered_blocks);
     CHECK(rig.callback_allocations == 0);
@@ -343,6 +346,11 @@ TEST_CASE("None policy plays the GPU and is silent on a realtime miss",
     CHECK(status.shadow_delivered_blocks == 0);
     CHECK(status.shadow_double_miss_blocks == 0);
     CHECK(status.shadow_inline_cost_pct == 0.0f);
+    // A realtime miss is silent under None, and the node says so.
+    CHECK(status.fallback_policy == MissPolicy::Silence);
+    CHECK_FALSE(status.fallback_available);
+    CHECK(rig.node->capability_report().fallback_policy == MissPolicy::Silence);
+    CHECK_FALSE(rig.node->capability_report().fallback_available);
 
     SECTION("None needs a family with a GPU kernel") {
         Rig cpu({.policy = Policy::None, .gpu_backend = false, .family = NeuralFamily::Lstm});
@@ -543,6 +551,8 @@ TEST_CASE("an offline bounce under None continues the stream through the CPU mod
     CHECK(block_error(rig, ref, kLead, 6, 2.0f) == 0.0f); // realtime: the GPU, marked
     CHECK(block_error(rig, ref, 6, 16, 1.0f) == 0.0f);    // offline: the CPU model, continuous
     CHECK(rig.mode() == Mode::Inline);
+    // Offline moved the model inline, so misses are covered again.
+    CHECK(rig.node->status_snapshot().fallback_policy == MissPolicy::CpuFallback);
     rig.offline_status();
 }
 

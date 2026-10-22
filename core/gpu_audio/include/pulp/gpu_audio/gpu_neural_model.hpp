@@ -48,8 +48,10 @@ struct GpuNeuralModelManifest {
     bool local_research = false;
 };
 
-/// The family's state shape. Only the fields for the requested family are
-/// read; WaveNet, Custom and "nam.tcn" kernels own their topology.
+/// The family's state shape: one layer per family (a single scalar TCN
+/// layer, one LSTM/GRU layer, one diagonal SSM). Deeper models fit through a
+/// kernel that owns its topology. Only the fields for the requested family
+/// are read; WaveNet, Custom and "nam.tcn" kernels own their topology.
 struct GpuNeuralModelShape {
     /// Tcn: one scalar dilated causal layer.
     std::uint32_t tcn_kernel_size = 0;
