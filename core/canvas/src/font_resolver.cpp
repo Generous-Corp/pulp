@@ -12,6 +12,7 @@
 #include "pulp/canvas/bundled_fonts.hpp"
 #include "pulp/canvas/font_flight_recorder.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <iterator>
@@ -26,6 +27,10 @@
 #include "include/core/SkFontStyle.h"
 #include "include/core/SkTypeface.h"
 #include "include/core/SkFontArguments.h"
+#if defined(__APPLE__)
+#include <CoreText/CoreText.h>
+#include "include/ports/SkTypeface_mac.h"
+#endif
 #endif
 
 namespace pulp::canvas {
@@ -158,6 +163,74 @@ SkFontStyle to_sk_style(const FontOptions& opts) {
     return SkFontStyle(sk_weight, sk_width, sk_slant);
 }
 
+#if defined(__APPLE__)
+// Whether `css_family` is a keyword for the platform's UI font.
+bool names_system_ui_font(const std::string& css_family) {
+    std::string lower = css_family;
+    for (auto& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return lower == "system-ui" || lower == "blinkmacsystemfont";
+}
+
+// CoreText's weight trait for a CSS weight: Apple's NSFontWeight values at
+// each hundred, interpolated between them, as Skia's own mapping does.
+CGFloat ct_weight_for_css_weight(int css_weight) {
+    static constexpr CGFloat kAtHundreds[] = {
+        -1.00, -0.80, -0.60, -0.40, 0.00, 0.23, 0.30, 0.40, 0.56, 0.62, 1.00};
+    const int clamped = std::clamp(css_weight, 0, 1000);
+    const int lo = clamped / 100;
+    if (lo >= 10) return kAtHundreds[10];
+    const CGFloat t = static_cast<CGFloat>(clamped - lo * 100) / 100.0;
+    return kAtHundreds[lo] + (kAtHundreds[lo + 1] - kAtHundreds[lo]) * t;
+}
+
+// The system UI font at `style`. Its family name (".AppleSystemUIFont") is
+// private, and CoreText does not reliably honour a lookup by it: after a
+// request at a weight between its named instances, later lookups by the name
+// in the same process return nothing. CTFontCreateUIFontForLanguage is the
+// supported way in, and its faces report the same `.SFNS-*` names the
+// browser does.
+sk_sp<SkTypeface> system_ui_typeface(SkFontStyle style) {
+    CTFontRef base = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, 0.0, nullptr);
+    if (!base) return nullptr;
+    CTFontDescriptorRef base_descriptor = CTFontCopyFontDescriptor(base);
+    CFRelease(base);
+    if (!base_descriptor) return nullptr;
+
+    const CGFloat weight = ct_weight_for_css_weight(style.weight());
+    CFNumberRef weight_number = CFNumberCreate(nullptr, kCFNumberCGFloatType, &weight);
+    const CTFontSymbolicTraits symbolic =
+        style.slant() == SkFontStyle::kUpright_Slant ? 0 : kCTFontItalicTrait;
+    CFNumberRef symbolic_number =
+        CFNumberCreate(nullptr, kCFNumberSInt32Type, &symbolic);
+    const void* trait_keys[] = {kCTFontWeightTrait, kCTFontSymbolicTrait};
+    const void* trait_values[] = {weight_number, symbolic_number};
+    CFDictionaryRef traits = CFDictionaryCreate(
+        nullptr, trait_keys, trait_values, 2, &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+    const void* attribute_keys[] = {kCTFontTraitsAttribute};
+    const void* attribute_values[] = {traits};
+    CFDictionaryRef attributes = CFDictionaryCreate(
+        nullptr, attribute_keys, attribute_values, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CTFontDescriptorRef descriptor =
+        CTFontDescriptorCreateCopyWithAttributes(base_descriptor, attributes);
+    CFRelease(attributes);
+    CFRelease(traits);
+    CFRelease(symbolic_number);
+    CFRelease(weight_number);
+    CFRelease(base_descriptor);
+    if (!descriptor) return nullptr;
+
+    CTFontRef font = CTFontCreateWithFontDescriptor(descriptor, 0.0, nullptr);
+    CFRelease(descriptor);
+    if (!font) return nullptr;
+    sk_sp<SkTypeface> typeface = SkMakeTypefaceFromCTFont(font);
+    CFRelease(font);
+    return typeface;
+}
+#endif
+
 // Keep this TU self-contained by using the public registered-font,
 // bundled-font, and SkFontMgr paths directly.
 
@@ -215,7 +288,18 @@ ResolvedFont resolve_one_family(const std::string& family,
         // A generic keyword names a platform family rather than being one.
         const std::string generic = platform_family_for_css_generic(family);
         const std::string& platform_family = generic.empty() ? family : generic;
-        if (auto tf = mgr->matchFamilyStyle(platform_family.c_str(), sk_style)) {
+        sk_sp<SkTypeface> tf;
+        bool system_ui = false;
+#if defined(__APPLE__)
+        // Widths other than normal keep the name lookup, which maps them.
+        if (names_system_ui_font(family) &&
+            sk_style.width() == SkFontStyle::kNormal_Width) {
+            tf = system_ui_typeface(sk_style);
+            system_ui = tf != nullptr;
+        }
+#endif
+        if (!tf) tf = mgr->matchFamilyStyle(platform_family.c_str(), sk_style);
+        if (tf) {
             SkString actual;
             tf->getFamilyName(&actual);
 
@@ -248,7 +332,9 @@ ResolvedFont resolve_one_family(const std::string& family,
                 r.origin = FallbackOrigin::Platform;
                 trace.push_back({family, FallbackOrigin::Platform, true,
                                  r.actual_family,
-                                 name_overlap ? "" : "platform default (name does not overlap)"});
+                                 system_ui ? "system UI font"
+                                 : name_overlap ? ""
+                                 : "platform default (name does not overlap)"});
                 return r;
             }
         } else {

@@ -1848,4 +1848,68 @@ TEST_CASE("an optical-size clone keeps a weight instance's weight",
 #endif
 }
 
+// ── system-ui through CoreText's UI-font API ─────────────────────────────────
+//
+// The system font's family name is private, and a lookup by it stops working
+// for the rest of the process once a weight between its named instances has
+// been asked for. Resolving through CTFontCreateUIFontForLanguage keeps every
+// weight on the system font and keeps the `.SFNS-*` identities a captured
+// layout is compared against.
+TEST_CASE("system-ui resolves to the system font at every weight",
+          "[canvas][skia][text][generic-family]") {
+#if !defined(__APPLE__)
+    SKIP("the system UI font lookup covers macOS");
+#else
+    pulp::canvas::FontResolver::instance().clear_cache();
+    auto resolve = [](float weight) {
+        pulp::canvas::FontOptions options;
+        options.weight = weight;
+        options.family_stack = {"system-ui"};
+        return pulp::canvas::FontResolver::instance().resolve_family_list(options);
+    };
+    // A weight between named instances, then named ones after it.
+    for (float weight : {250.0f, 400.0f, 700.0f, 650.0f, 900.0f}) {
+        INFO("weight " << weight);
+        const auto resolved = resolve(weight);
+        REQUIRE(resolved.typeface != nullptr);
+        SkString postscript;
+        resolved.typeface->getPostScriptName(&postscript);
+        CHECK(std::string(postscript.c_str()).rfind(".SFNS-", 0) == 0);
+        CHECK(resolved.typeface->fontStyle().weight() == static_cast<int>(weight));
+        REQUIRE_FALSE(resolved.trace.empty());
+        CHECK(resolved.trace.back().note == "system UI font");
+    }
+    CHECK(pulp::canvas::resolved_face_identity("system-ui", 400.0f) == ".SFNS-Regular");
+    CHECK(pulp::canvas::resolved_face_identity("system-ui", 700.0f) == ".SFNS-Bold");
+    CHECK(pulp::canvas::resolved_face_identity("BlinkMacSystemFont", 700.0f,
+                                               pulp::canvas::FontSlant::Italic) ==
+          ".SFNS-BoldItalic");
+#endif
+}
+
+TEST_CASE("an optical-size clone of the system font's bold keeps weight 700",
+          "[canvas][skia][text][optical-size][generic-family]") {
+#if !defined(__APPLE__)
+    SKIP("needs the macOS system UI font, which is variable on wght and opsz");
+#else
+    pulp::canvas::FontOptions options;
+    options.weight = 700.0f;
+    options.family_stack = {"system-ui"};
+    const auto resolved =
+        pulp::canvas::FontResolver::instance().resolve_family_list(options);
+    REQUIRE(resolved.typeface != nullptr);
+    SkString postscript;
+    resolved.typeface->getPostScriptName(&postscript);
+    REQUIRE(std::string(postscript.c_str()) == ".SFNS-Bold");
+
+    const auto sized =
+        pulp::canvas::typeface_at_auto_optical_size(resolved.typeface, 40.0f);
+    REQUIRE(sized != nullptr);
+    CHECK(sized->fontStyle().weight() == 700);
+    const auto position = position_of(sized.get());
+    CHECK(coordinate_of(position, kWghtTag) == 700.0f);
+    CHECK(coordinate_of(position, kOpszTag) == 40.0f);
+#endif
+}
+
 #endif  // PULP_HAS_SKIA
