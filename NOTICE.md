@@ -287,7 +287,7 @@ For more information, please refer to <http://unlicense.org/>.
 
 ## fastgltf
 
-Copyright (C) 2022 - 2025 Sean Apeler
+Copyright (C) 2022 - 2026 Sean Apeler
 
 MIT License
 
@@ -1076,7 +1076,7 @@ https://github.com/google/perfetto
 
 ## pugixml
 
-Copyright (c) 2006-2024 Arseny Kapoulkine
+Copyright (c) 2006-2026 Arseny Kapoulkine
 
 MIT License
 
@@ -1680,7 +1680,7 @@ exhaustive attested transitive source and license manifest.
 
 ## VST3 SDK
 
-Copyright (c) 2025, Steinberg Media Technologies GmbH
+Copyright (c) 2026, Steinberg Media Technologies GmbH
 
 MIT License
 

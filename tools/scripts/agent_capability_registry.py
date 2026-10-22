@@ -309,6 +309,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/audio/buffer_ops.hpp",
+        "fingerprint": "sha256:3fbb9aafb8571d0423a6b4aeb7998d7fa0137d87f6772a2f6c52615cf8d17bc3",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Allocation-free buffer helpers a processor uses inside process(): gain, copy, "
+            "mix, a one-pass peak/RMS meter, in-place-aware per-sample mapping, and a "
+            "constant channel-count dispatch. Authoring infrastructure rather than a "
+            "generator DSP claim."
+        ),
+    },
+    {
         "include": "pulp/audio/audio_probe.hpp",
         "fingerprint": "sha256:dfc218a6cd7bee7048c8c543be697165f127ee3d8cb5db99fbc0f23297232a5b",
         "disposition": "infrastructure",
