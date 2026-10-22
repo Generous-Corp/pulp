@@ -209,7 +209,9 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         desc.input_channels != desc.output_channels) {
         return false; // 3a: symmetric channel count only
     }
-    if (desc.block_size == 0 || desc.latency_blocks == 0)
+    // A zero rate would prepare a shape that the status validator then
+    // rejects as PreparedShapeMissing, so refuse it here instead.
+    if (desc.block_size == 0 || desc.sample_rate == 0 || desc.latency_blocks == 0)
         return false;
     // CpuFallback requires both a declaration and a host-thread witness that
     // prepare() built the allocation-free, latency-aligned fallback state.

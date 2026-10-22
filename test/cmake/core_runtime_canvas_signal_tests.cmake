@@ -630,6 +630,16 @@ pulp_add_test_suite(pulp-test-gpu-audio-transport
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
                  ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Capability and program validators, plus the transport's refusal of a
+# shape those validators would reject. GPU-agnostic, like the transport suite.
+pulp_add_test_suite(pulp-test-gpu-audio-capability-validation
+    SOURCES test_gpu_audio_capability_validation.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/gpu_audio_transport.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/realtime_gpu_audio_path.cpp
+    LIBRARIES pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Dawn-free configuration/lifecycle coverage for the public convolution route.
 # These cases stop before provider creation, so malformed configuration and
 # fail-closed behavior remain testable on every CPU-only builder.
