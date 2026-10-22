@@ -513,3 +513,35 @@ TEST_CASE("SosCascade block path flushes a decaying tail without subnormal resid
         REQUIRE(tail.nonzero_end < kTotal / 2);
     }
 }
+
+TEST_CASE("SosCascade stereo path matches two block calls bit for bit",
+          "[signal][sos][determinism]") {
+    static constexpr int kPattern[] = {1, 63, 64, 65, 7, 128, 333, 1024, 2, 512, 31};
+    const auto left_in = cascade_busy_signal(8192);
+    auto right_in = cascade_busy_signal(8192);
+    for (float& x : right_in) x *= -0.6f;
+    for (auto [left_count, right_count] : {std::pair<std::size_t, std::size_t>{8, 8}, {11, 11}, {3, 3}, {8, 5}}) {
+        INFO("sections " << left_count << "/" << right_count);
+        auto left_bands = peaking_bands(left_count);
+        auto right_bands = peaking_bands(right_count);
+        for (auto& c : right_bands) c.b0 *= 0.9f; // different coefficients per channel
+        SosCascadeT<float, 16> lm, rm, lp, rp;
+        for (auto* c : {&lm, &rm, &lp, &rp}) REQUIRE(c->prepare(16));
+        lm.set_coefficients(std::span<const BiquadCoefficients>(left_bands));
+        lp.set_coefficients(std::span<const BiquadCoefficients>(left_bands));
+        rm.set_coefficients(std::span<const BiquadCoefficients>(right_bands));
+        rp.set_coefficients(std::span<const BiquadCoefficients>(right_bands));
+        auto le = left_in, re = right_in, la = left_in, ra = right_in;
+        std::size_t pos = 0;
+        for (std::size_t k = 0; pos < le.size(); ++k) {
+            const std::size_t block = std::min<std::size_t>(
+                static_cast<std::size_t>(kPattern[k % std::size(kPattern)]), le.size() - pos);
+            lm.process(le.data() + pos, block);
+            rm.process(re.data() + pos, block);
+            SosCascadeT<float, 16>::process_stereo(lp, rp, la.data() + pos, ra.data() + pos, block);
+            pos += block;
+        }
+        CHECK(std::memcmp(la.data(), le.data(), la.size() * sizeof(float)) == 0);
+        CHECK(std::memcmp(ra.data(), re.data(), ra.size() * sizeof(float)) == 0);
+    }
+}

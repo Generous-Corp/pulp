@@ -223,6 +223,7 @@ TEST_CASE("Scalar signal helpers are allocation-free after configuration",
 
     Biquad biquad;
     biquad.set_coefficients(Biquad::Type::lowpass, 1800.0f, 0.707f, 48000.0f);
+    Biquad biquad_right = biquad;
     Biquad64 biquad64;
     biquad64.set_coefficients(Biquad64::Type::lowpass, 1800.0, 0.707, 48000.0);
 
@@ -304,6 +305,8 @@ TEST_CASE("Scalar signal helpers are allocation-free after configuration",
                         static_cast<int>(mixed64.size()));
         biquad64.process(samples64.data(), static_cast<int>(samples64.size()));
         biquad.process(samples.data(), static_cast<int>(samples.size()));
+        Biquad::process_stereo(biquad, biquad_right, samples.data(), dry.data(),
+                               static_cast<int>(samples.size()));
         svf.process(samples.data(), static_cast<int>(samples.size()));
         phaser.process(samples.data(), static_cast<int>(samples.size()));
         shaper.process(samples.data(), static_cast<int>(samples.size()));

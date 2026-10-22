@@ -546,3 +546,33 @@ TEST_CASE("Biquad block path flushes a decaying tail without subnormal residency
         REQUIRE(tail.nonzero_end < 1024);
     }
 }
+
+TEST_CASE("Biquad stereo path matches two block calls bit for bit",
+          "[signal][biquad][determinism]") {
+    const auto left_in = busy_signal(8192);
+    auto right_in = busy_signal(8192);
+    for (float& x : right_in) x *= -0.7f;
+    // Same-form pairs run in vector lanes; a mixed pair (one design near the
+    // unit circle) falls back to two calls. Both must match exactly.
+    const std::array<std::pair<BiquadCase, BiquadCase>, 3> pairs{{
+        {{Biquad::Type::lowpass, 1000.0f, 0.7071f, 0.0f}, {Biquad::Type::lowpass, 1000.0f, 0.7071f, 0.0f}},
+        {{Biquad::Type::peaking, 3000.0f, 1.0f, 6.0f}, {Biquad::Type::highpass, 200.0f, 0.7071f, 0.0f}},
+        {{Biquad::Type::lowpass, 1000.0f, 0.7071f, 0.0f}, {Biquad::Type::low_shelf, 20.0f, 10.0f, 12.0f}},
+    }};
+    for (const auto& [lc, rc] : pairs) {
+        Biquad l_mono, r_mono;
+        l_mono.set_coefficients(lc.type, lc.freq_hz, lc.q, kSampleRate, lc.gain_db);
+        r_mono.set_coefficients(rc.type, rc.freq_hz, rc.q, kSampleRate, rc.gain_db);
+        Biquad l_pair = l_mono, r_pair = r_mono;
+        auto l_expected = left_in, r_expected = right_in, l_actual = left_in, r_actual = right_in;
+        std::size_t pos = 0;
+        for (int block : split_schedule(left_in.size())) {
+            l_mono.process(l_expected.data() + pos, block);
+            r_mono.process(r_expected.data() + pos, block);
+            Biquad::process_stereo(l_pair, r_pair, l_actual.data() + pos, r_actual.data() + pos, block);
+            pos += static_cast<std::size_t>(block);
+        }
+        CHECK(std::memcmp(l_actual.data(), l_expected.data(), l_actual.size() * sizeof(float)) == 0);
+        CHECK(std::memcmp(r_actual.data(), r_expected.data(), r_actual.size() * sizeof(float)) == 0);
+    }
+}
