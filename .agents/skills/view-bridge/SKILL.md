@@ -41,6 +41,25 @@ installed and does not cross a PRIVATE static-library link. The proofs live in
 `test/fixtures/data_display_editor/` (plug-in editor and hot reload, both with
 the registry cleared first) and `cmake-view-audio-sdk-consumer`.
 
+### The UI_SCRIPT selection is a runtime value, never a compile definition
+
+`pulp_add_plugin(UI_SCRIPT ...)` and `pulp_use_kit_ui()` record the script,
+theme, and asset roots as target properties, and one generated source per
+format target (`<build>/pulp_editor_assets/<target>.cpp`) registers them at
+load time through `pulp::format::register_editor_assets()`. ViewBridge reads
+them back with `editor_assets_for(<bundle id>)`: a keyed bundle entry's
+`ui_*` fields win, then the binary-wide record.
+
+Do not reintroduce a `#ifdef PULP_UI_SCRIPT_PATH` reader. ViewBridge is
+compiled once into the shared format library, so a per-target compile
+definition never reaches it, and every plug-in format silently opens AutoUi
+with no test failing. An inline
+function whose body depends on a per-TU define is also an ODR hazard: the
+linker keeps whichever copy it sees first. The proof is
+`ui-script-plugin-editor-{vst3,clap,au}` (built bundles opened through
+`PluginSlot`, asserting `mode=scripted`, `gpu=true`, and the script's own
+console line) plus `ui-script-plugin-editor-installed-sdk`.
+
 ### Native scripted UI is not a WebView
 
 When a materialized canvas is retained as the native paint and hit-test
