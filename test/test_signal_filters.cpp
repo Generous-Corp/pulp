@@ -720,3 +720,46 @@ TEST_CASE("LadderFilter default saturator preserves resonance and drive behavior
         }
     }
 }
+
+TEST_CASE("LadderFilter default saturator holds its documented bound up to +20 dBFS drive",
+          "[signal][ladder][parity]") {
+    // The grid behind LadderSaturation::accurate's documented bound: cutoff
+    // 300 Hz - 6 kHz, resonance 0 - 1, sine input 110 Hz - 7 kHz at 48 kHz,
+    // pointwise against process_reference() (exact std::tanh stages). Worst
+    // cases measured with Apple clang and with GCC and glibc: -124.5 dBFS at
+    // 0 dBFS, -107.3 dBFS at +10 dBFS, -101.9 dBFS at +20 dBFS (high
+    // resonance, low input, high cutoff). Each limit sits about 2 dB above
+    // the measurement.
+    struct Drive {
+        float amplitude;
+        float limit;
+    };
+    constexpr float kSr = 48000.0f;
+    for (const Drive drive : {Drive{1.0f, 7.9e-7f},     // -122 dBFS at 0 dBFS
+                              Drive{3.1623f, 5.6e-6f},  // -105 dBFS at +10 dBFS
+                              Drive{10.0f, 1.0e-5f}}) { // -100 dBFS at +20 dBFS
+        float worst = 0.0f;
+        for (const float f0 : {110.0f, 440.0f, 2500.0f, 7000.0f}) {
+            for (const float res : {0.0f, 0.5f, 0.9f, 1.0f}) {
+                for (const float fc : {300.0f, 1500.0f, 6000.0f}) {
+                    LadderFilter fast;
+                    LadderFilter exact;
+                    for (auto* l : {&fast, &exact}) {
+                        l->set_sample_rate(kSr);
+                        l->set_frequency(fc);
+                        l->set_resonance(res);
+                    }
+                    const double w = 2.0 * std::numbers::pi * static_cast<double>(f0) / kSr;
+                    for (int i = 0; i < 48000; ++i) {
+                        const float x = static_cast<float>(static_cast<double>(drive.amplitude) *
+                                                           std::sin(w * static_cast<double>(i)));
+                        worst =
+                            std::max(worst, std::abs(fast.process(x) - exact.process_reference(x)));
+                    }
+                }
+            }
+        }
+        INFO("amplitude " << drive.amplitude << " worst " << worst);
+        CHECK(worst < drive.limit);
+    }
+}

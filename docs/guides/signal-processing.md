@@ -549,7 +549,7 @@ Each stage saturates for analog-style nonlinearity. The feedback path creates re
 The saturator is a `LadderSaturation` choice. The default, `accurate`, is
 `FastMath::tanh_accurate`: within 3.0e-7 of `std::tanh` (3.6e-7 without fused
 multiply-add) and about 2.4x its throughput, keeping the filter's output within
--126 dBFS of the exact-tanh ladder for input up to 0 dBFS (-102 dBFS at
+-124 dBFS of the exact-tanh ladder for input up to 0 dBFS (-102 dBFS at
 +20 dBFS drive). `exact` is `std::tanh`; `realtime_efficient` is the Padé
 `FastMath::tanh`, whose clamp at |x| = 4 audibly changes heavy overdrive.
 Select the build default with `PULP_SIGNAL_LADDER_SATURATION` = 0 (exact),

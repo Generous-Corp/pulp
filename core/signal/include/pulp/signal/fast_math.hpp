@@ -414,10 +414,12 @@ public:
 ///   fused multiply-add) of std::tanh for every input. Against the
 ///   exact-saturator ladder, over cutoffs of 300 Hz to 6 kHz, resonance 0 to
 ///   1 and sine input of 110 Hz to 7 kHz at 48 kHz, the pointwise output
-///   difference is at most -126 dBFS for input up to 0 dBFS, -107 dBFS at
-///   +10 dBFS drive and -102 dBFS at +20 dBFS, with or without fused
-///   multiply-add (the worst cases are high resonance, a low input and a high
-///   cutoff, where the recursion amplifies the saturator's error). Harmonic
+///   difference is at most -124 dBFS for input up to 0 dBFS, -107 dBFS at
+///   +10 dBFS drive and -102 dBFS at +20 dBFS, measured with Apple clang and
+///   with GCC and glibc, with or without fused multiply-add (the worst cases
+///   are high resonance, a low input and a high cutoff, where the recursion
+///   amplifies the saturator's error; the exact reference's own libm tanh
+///   differs by platform). Tested with about 2 dB of margin. Harmonic
 ///   and alias levels match to 0.001 dB and resonant ringing frequency and
 ///   decay are unchanged. About 2.4x the throughput of std::tanh. This is the
 ///   default.
