@@ -131,14 +131,15 @@ std::unique_ptr<View> build_widget_gallery(const Theme& theme) {
             {"glow", false, ChartProfile::round},
         };
         float kx = M;
+        float value = 0.1f;
         for (const auto& look : looks) {
             options.pressed = look.pressed;
             options.profile = look.profile;
             auto preset = make_chart_shader_preset(look.preset, options);
             auto k = std::make_unique<Knob>();
-            k->set_value(0.62f);
-            k->set_chart_shader(std::move(preset.sksl));
-            k->set_shader_reach(preset.reach);
+            k->set_value(value);
+            value += 0.13f;
+            k->set_chart_shader(std::move(preset.sksl), preset.reach);
             add(std::move(k), kx, y, 84.0f, 84.0f);
             kx += 104.0f;
         }

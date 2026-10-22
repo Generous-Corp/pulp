@@ -30,6 +30,10 @@ enum class ChartProfile {
     chamfer, ///< a flat centre with 45 degree chamfers on the outer 40%
 };
 
+/// Largest accepted `glow_sigma`. The draw rect grows by several sigma on
+/// every side, so an unbounded sigma would grow it without limit.
+inline constexpr float kChartGlowSigmaMax = 256.0f;
+
 struct ChartShaderPresetOptions {
     /// Material colour (sRGB) for `bevel`, `inset-channel`, `tube` and the
     /// base of `centre-highlight`.
@@ -52,15 +56,17 @@ struct ChartShaderPresetOptions {
     float bevel_width = 0.35f;
     /// Strength of the highlight, specular or glow, >= 0. Zero removes it.
     float intensity = 1.0f;
-    /// `glow`: Gaussian falloff outside the band, in local units, >= 0.
+    /// `glow`: Gaussian falloff outside the band, in local units, from 0 to
+    /// kChartGlowSigmaMax.
     float glow_sigma = 6.0f;
 };
 
 struct ChartShaderPreset {
     /// SkSL defining `half4 shade(PulpChart g)`; empty when refused.
     std::string sksl;
-    /// Draw-rect reach the preset needs on every side: three sigma for
-    /// `glow`, whose light lives outside the band, otherwise zero.
+    /// Draw-rect reach the preset needs on every side: for `glow`, whose
+    /// light lives outside the band, `chart_glow_reach(sigma, intensity)`;
+    /// otherwise zero.
     float reach = 0.0f;
     /// Why the request was refused; empty on success.
     std::string error;
@@ -76,6 +82,11 @@ const std::vector<std::string>& chart_shader_preset_names();
 /// message naming it.
 ChartShaderPreset make_chart_shader_preset(std::string_view name,
                                            const ChartShaderPresetOptions& options = {});
+
+/// Distance past which a glow of `sigma` and `intensity` is below one 8-bit
+/// step (intensity * exp(-r^2 / (2 sigma^2)) < 1/255), and never less than
+/// three sigma. Zero when either is zero.
+float chart_glow_reach(float sigma, float intensity);
 
 /// Parse a profile name (`round`, `flat`, `chamfer`).
 bool parse_chart_profile(std::string_view name, ChartProfile& out);

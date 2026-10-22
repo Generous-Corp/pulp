@@ -70,18 +70,22 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
             // in a hard edge at the draw rect. The chart draw is refused out
             // loud and the body shader below paints instead, exactly as for a
             // chart draw that fails.
+            // The chart also gets the reach its own source declared (a glow
+            // preset's halo); the body shader below keeps the widget's reach.
+            auto chart_options = options;
+            chart_options.reach = std::max(options.reach, host.chart_reach());
             const float min_reach = canvas::Canvas::sdf_feather_min_reach(style);
-            if (options.reach < min_reach) {
+            if (chart_options.reach < min_reach) {
                 if (!host.shader_draw_failure_logged()) {
                     runtime::log_error("[custom-shader] chart feather sigma {} needs reach >= {} "
                                        "but the shader's reach is {}; painting the body "
                                        "shader instead of the chart",
-                                       style.feather_sigma, min_reach, options.reach);
+                                       style.feather_sigma, min_reach, chart_options.reach);
                     host.mark_shader_draw_failure_logged();
                 }
             } else if (canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc, 0, 0,
                                                          w, h, style, host.chart_shader(),
-                                                         options)) {
+                                                         chart_options)) {
                 return true;
             }
         }
@@ -615,6 +619,10 @@ void Knob::paint(canvas::Canvas& canvas) {
     else if ((has_custom_shader() || !chart_shader().empty()) &&
              draw_custom_shader_body(canvas, *this, *this, b.width, b.height, shown, shader_time)) {
         // Shader painted the body; fall through to draw labels and value text.
+        // A chart alone paints the knob's material, not its value, so the
+        // rotating pointer goes on top of it.
+        if (!has_custom_shader())
+            draw_knob_indicator_notch(canvas, cx, cy, std::min(cx, cy), std::min(cx, cy), shown);
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal/design-preview: simple circle outline (matches design tools) ──
         float full_r = std::min(cx, cy) - 2.0f;

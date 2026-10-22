@@ -1,4 +1,5 @@
 #include "widget_bridge_test_support.hpp"
+#include <pulp/view/chart_shader_presets.hpp>
 #include <pulp/view/screenshot.hpp>
 
 #include <array>
@@ -4958,6 +4959,9 @@ TEST_CASE("WidgetBridge installs named chart shader presets on a knob",
         globalThis.badColor = setWidgetShaderChartPreset('knob', 'bevel', { color: 'not-a-colour' });
         globalThis.badProfile = setWidgetShaderChartPreset('knob', 'tube', { profile: 'square' });
         globalThis.glow = setWidgetShaderChartPreset('knob', 'glow', { sigma: 6 });
+        globalThis.hugeGlow = setWidgetShaderChartPreset('knob', 'glow', { sigma: 1e5 });
+        // Keep the value pointer off the top of the arc the probes read.
+        setValue('knob', 0.1);
     )");
     REQUIRE(engine.evaluate("source.success").getWithDefault<bool>(false));
     REQUIRE(engine.evaluate("source.sksl")
@@ -4975,10 +4979,17 @@ TEST_CASE("WidgetBridge installs named chart shader presets on a knob",
     REQUIRE(knob != nullptr);
 #ifdef PULP_HAS_SKIA
     REQUIRE(engine.evaluate("glow.success").getWithDefault<bool>(false));
-    // The glow's falloff lives outside the band, so installing it raises the
-    // widget's reach to three sigma.
-    REQUIRE(knob->shader_reach() == Catch::Approx(18.0f));
+    // The glow's falloff lives outside the band, so the preset carries the
+    // reach that holds it, and an unbounded sigma is refused.
+    REQUIRE_FALSE(engine.evaluate("hugeGlow.success").getWithDefault<bool>(true));
+    REQUIRE(knob->chart_reach() == Catch::Approx(chart_glow_reach(6.0f, 1.0f)));
+    REQUIRE(knob->chart_reach() >= 18.0f);
+    REQUIRE(knob->shader_reach() == 0.0f);
     REQUIRE_FALSE(knob->has_custom_shader());
+    // That reach belongs to the glow: another preset replaces it.
+    bridge.load_script("globalThis.plain = setWidgetShaderChartPreset('knob', 'bevel');");
+    REQUIRE(engine.evaluate("plain.success").getWithDefault<bool>(false));
+    REQUIRE(knob->chart_reach() == 0.0f);
 
     if (!raw_rgba_render_available())
         SKIP("this build has no raw RGBA render backend");

@@ -1,17 +1,33 @@
 #include <pulp/view/chart_shader_presets.hpp>
 
+#include <algorithm>
+#include <charconv>
 #include <cmath>
-#include <cstdio>
 #include <string>
 
 namespace pulp::view {
 namespace {
 
-// SkSL float literal: always with a decimal point so it never reads as int.
+// SkSL float literal: the shortest decimal that round-trips the float, with a
+// decimal point or exponent so it never reads as an int. std::to_chars ignores
+// LC_NUMERIC, so a host that set a comma-decimal locale still gets `0.65`, and
+// it never truncates a small value to zero the way a fixed precision would.
 std::string lit(float v) {
     char buf[32];
-    std::snprintf(buf, sizeof(buf), "%.6f", static_cast<double>(v));
-    return buf;
+    auto [end, ec] = std::to_chars(buf, buf + sizeof(buf), v);
+    if (ec != std::errc{})
+        return "0.0"; // unreachable for finite floats
+    std::string out(buf, end);
+    if (out.find_first_of(".e") == std::string::npos)
+        out += ".0";
+    return out;
+}
+
+void clamp_unit(canvas::Color& c) {
+    c.r = std::clamp(c.r, 0.0f, 1.0f);
+    c.g = std::clamp(c.g, 0.0f, 1.0f);
+    c.b = std::clamp(c.b, 0.0f, 1.0f);
+    c.a = std::clamp(c.a, 0.0f, 1.0f);
 }
 
 std::string rgb_literal(const canvas::Color& c) {
@@ -123,8 +139,8 @@ std::string validate(const ChartShaderPresetOptions& o) {
         return "bevel width must be in (0, 1]";
     if (!(o.intensity >= 0.0f) || !std::isfinite(o.intensity))
         return "intensity must be finite and >= 0";
-    if (!(o.glow_sigma >= 0.0f) || !std::isfinite(o.glow_sigma))
-        return "glow sigma must be finite and >= 0";
+    if (!(o.glow_sigma >= 0.0f && o.glow_sigma <= kChartGlowSigmaMax))
+        return "glow sigma must be in [0, " + lit(kChartGlowSigmaMax) + "]";
     return {};
 }
 
@@ -261,19 +277,19 @@ bool parse_chart_profile(std::string_view name, ChartProfile& out) {
 ChartShaderPreset make_chart_shader_preset(std::string_view name,
                                            const ChartShaderPresetOptions& options) {
     ChartShaderPreset preset;
-    std::string body;
+    std::string (*build)(const ChartShaderPresetOptions&) = nullptr;
     if (name == "bevel")
-        body = bevel(options);
+        build = bevel;
     else if (name == "inset-channel")
-        body = inset_channel(options);
+        build = inset_channel;
     else if (name == "tube")
-        body = tube(options);
+        build = tube;
     else if (name == "light-pipe")
-        body = light_pipe(options);
+        build = light_pipe;
     else if (name == "centre-highlight" || name == "center-highlight")
-        body = centre_highlight(options);
+        build = centre_highlight;
     else if (name == "glow")
-        body = glow(options);
+        build = glow;
     else {
         preset.error = "Unknown chart shader preset '" + std::string(name) + "'; expected one of:";
         for (const auto& known : chart_shader_preset_names())
@@ -284,10 +300,24 @@ ChartShaderPreset make_chart_shader_preset(std::string_view name,
         preset.error = "Chart shader preset '" + std::string(name) + "': " + error;
         return preset;
     }
-    preset.sksl = prelude(options) + body;
+    // Colours outside [0, 1] would feed pow() a negative base in the sRGB
+    // decode and produce NaN pixels.
+    ChartShaderPresetOptions o = options;
+    clamp_unit(o.color);
+    clamp_unit(o.accent);
+    preset.sksl = prelude(o) + build(o);
     if (name == "glow")
-        preset.reach = 3.0f * options.glow_sigma;
+        preset.reach = chart_glow_reach(o.glow_sigma, o.intensity);
     return preset;
+}
+
+float chart_glow_reach(float sigma, float intensity) {
+    if (!(sigma > 0.0f) || !(intensity > 0.0f))
+        return 0.0f;
+    // The halo is intensity * exp(-r^2 / (2 sigma^2)); past this r it is under
+    // one 8-bit step, and never less than three sigma.
+    const float k = std::sqrt(2.0f * std::log(std::max(255.0f * intensity, 1.0f)));
+    return sigma * std::max(3.0f, k);
 }
 
 } // namespace pulp::view

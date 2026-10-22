@@ -5,10 +5,14 @@
 #include <pulp/view/chart_shader_presets.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/widgets.hpp>
 
 #include <algorithm>
+#include <clocale>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -59,14 +63,15 @@ struct SegmentRender {
     }
 };
 
-SegmentRender render_segment(const std::string& name, const ChartShaderPresetOptions& options) {
+SegmentRender render_segment(const std::string& name, const ChartShaderPresetOptions& options,
+                             Canvas::SDFShape shape = Canvas::SDFShape::flat_segment) {
     auto preset = make_chart_shader_preset(name, options);
     INFO(preset.error);
     REQUIRE(preset.error.empty());
     Canvas::SDFStyle style;
     style.stroke_width = 16.0f;
     // The swatch is the render root, so no layout pass resizes it.
-    PresetSwatch swatch(Canvas::SDFShape::flat_segment, preset, style);
+    PresetSwatch swatch(shape, preset, style);
     swatch.set_bounds({0, 0, 128, 32});
     SegmentRender out;
     uint32_t w = 0, h = 0;
@@ -114,10 +119,41 @@ TEST_CASE("chart shader presets are named and refuse what they cannot build",
 
     // The glow's light lives outside the band, so it declares the reach that
     // holds its falloff; every other preset stays inside the band.
+    // The reach ends where the halo drops under one 8-bit step, and is never
+    // shorter than three sigma.
     ChartShaderPresetOptions glow;
     glow.glow_sigma = 5.0f;
-    REQUIRE(make_chart_shader_preset("glow", glow).reach == Catch::Approx(15.0f));
+    for (float intensity : {0.5f, 1.0f, 4.0f}) {
+        glow.intensity = intensity;
+        const float reach = make_chart_shader_preset("glow", glow).reach;
+        INFO("intensity " << intensity << " reach " << reach);
+        REQUIRE(reach >= 15.0f);
+        REQUIRE(intensity * std::exp(-reach * reach / (2.0f * 25.0f)) <= 1.0f / 255.0f + 1e-6f);
+    }
+    glow.intensity = 1.0f;
     REQUIRE(make_chart_shader_preset("bevel", glow).reach == 0.0f);
+    glow.glow_sigma = 0.0f;
+    REQUIRE(make_chart_shader_preset("glow", glow).reach == 0.0f);
+    // An unbounded sigma would grow the draw rect without limit.
+    glow.glow_sigma = kChartGlowSigmaMax;
+    REQUIRE(make_chart_shader_preset("glow", glow).error.empty());
+    glow.glow_sigma = kChartGlowSigmaMax * 2.0f;
+    REQUIRE(make_chart_shader_preset("glow", glow).error.find("sigma") != std::string::npos);
+
+    // Colour channels outside [0, 1] are clamped before they reach the sRGB
+    // decode, where a negative base would produce NaN.
+    ChartShaderPresetOptions out_of_range;
+    out_of_range.color = pulp::canvas::Color::rgba(-1.0f, 2.0f, 0.5f, 1.0f);
+    ChartShaderPresetOptions clamped;
+    clamped.color = pulp::canvas::Color::rgba(0.0f, 1.0f, 0.5f, 1.0f);
+    REQUIRE(make_chart_shader_preset("bevel", out_of_range).sksl ==
+            make_chart_shader_preset("bevel", clamped).sksl);
+
+    // Small values survive as themselves rather than rounding to zero.
+    ChartShaderPresetOptions faint;
+    faint.glow_sigma = 0.001f;
+    REQUIRE(make_chart_shader_preset("glow", faint).sksl.find("0.0 ? ") == std::string::npos);
+    REQUIRE(make_chart_shader_preset("glow", faint).sksl.find("2e-06") != std::string::npos);
 
     ChartProfile profile = ChartProfile::round;
     REQUIRE(parse_chart_profile("chamfer", profile));
@@ -276,6 +312,98 @@ TEST_CASE("chart preset profiles and unlit presets shade their cross-section",
                                 << " background: " << background);
     CHECK(glowing.luma(64, 5) > background + 30.0f);
     CHECK(std::abs(sharp.luma(64, 5) - background) < 1.5f);
+#else
+    SUCCEED("chart preset renders require PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("chart shader preset literals ignore a comma-decimal locale",
+          "[view][shader][chart-preset][locale]") {
+    // A host that called setlocale with a comma-decimal locale must not turn
+    // `0.65` into `0,65`, which SkSL reads as two arguments.
+    const char* previous = std::setlocale(LC_NUMERIC, nullptr);
+    const std::string saved = previous ? previous : "C";
+    if (!std::setlocale(LC_NUMERIC, "de_DE.UTF-8"))
+        SKIP("the de_DE.UTF-8 locale is not installed");
+    char probe[16];
+    std::snprintf(probe, sizeof(probe), "%.1f", 0.5);
+    const bool comma_locale = std::string(probe) == "0,5";
+    ChartShaderPresetOptions options;
+    options.light_angle_deg = 123.4f;
+    const auto preset = make_chart_shader_preset("tube", options);
+    std::string compile_error;
+#ifdef PULP_HAS_SKIA
+    compile_error = Canvas::compile_sdf_chart_sksl(Canvas::SDFShape::flat_arc, preset.sksl);
+#endif
+    std::setlocale(LC_NUMERIC, saved.c_str());
+    REQUIRE(comma_locale); // the locale really is in effect, or the test proves nothing
+    REQUIRE(preset.error.empty());
+    REQUIRE_FALSE(std::regex_search(preset.sksl, std::regex("[0-9],[0-9]")));
+    INFO(compile_error);
+    REQUIRE(compile_error.empty());
+}
+
+TEST_CASE("lit presets shade a rounded cap as a dome without a seam",
+          "[view][shader][chart-preset]") {
+#ifdef PULP_HAS_SKIA
+    if (!raw_rgba_render_available())
+        SKIP("this build has no raw RGBA render backend");
+    // A 128 x 32 stadium: radius 14, the right cap's centre at x = 112 and its
+    // tip at 126. Just inside the tip, one row either side of the axis (row
+    // 16), neighbouring rows face almost the same way, so luma must change in
+    // small steps. A cap whose cross flipped sign across the axis faced rows
+    // above and below it opposite ways and drew a hard line there.
+    ChartShaderPresetOptions options = lit_from(90.0f);
+    for (const char* name : {"tube", "bevel"}) {
+        const auto cap = render_segment(name, options, Canvas::SDFShape::stadium);
+        REQUIRE(cap.drawn);
+        float largest_step = 0.0f;
+        for (int row = 13; row < 19; ++row)
+            largest_step =
+                std::max(largest_step, std::abs(cap.luma(122, row + 1) - cap.luma(122, row)));
+        INFO(name << " largest row-to-row luma step across the axis in the cap: " << largest_step);
+        CHECK(largest_step < 10.0f);
+    }
+#else
+    SUCCEED("chart preset renders require PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("a knob painted by a chart preset alone still shows its value",
+          "[view][shader][chart-preset]") {
+#ifdef PULP_HAS_SKIA
+    if (!raw_rgba_render_available())
+        SKIP("this build has no raw RGBA render backend");
+    // The chart is the full arc at every value, so the knob draws its value
+    // pointer over it. Two values must render differently, one value the same.
+    auto render_knob = [](float value) {
+        Knob knob;
+        knob.set_bounds({0, 0, 80, 80});
+        knob.set_value(value);
+        auto preset = make_chart_shader_preset("bevel");
+        REQUIRE(preset.error.empty());
+        knob.set_chart_shader(std::move(preset.sksl), preset.reach);
+        uint32_t w = 0, h = 0;
+        auto rgba = render_to_rgba(knob, 80, 80, 1.0f, &w, &h);
+        REQUIRE(w == 80);
+        return rgba;
+    };
+    auto differing = [](const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+        REQUIRE(a.size() == b.size());
+        int count = 0;
+        for (size_t i = 0; i < a.size(); i += 4)
+            if (std::abs(int(a[i]) - int(b[i])) + std::abs(int(a[i + 1]) - int(b[i + 1])) +
+                    std::abs(int(a[i + 2]) - int(b[i + 2])) >
+                24)
+                ++count;
+        return count;
+    };
+    const auto low = render_knob(0.2f);
+    const auto high = render_knob(0.8f);
+    const auto low_again = render_knob(0.2f);
+    INFO("pixels differing between 0.2 and 0.8: " << differing(low, high));
+    CHECK(differing(low, high) > 40);
+    CHECK(differing(low, low_again) == 0);
 #else
     SUCCEED("chart preset renders require PULP_HAS_SKIA");
 #endif

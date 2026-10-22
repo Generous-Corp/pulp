@@ -729,8 +729,8 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
 
     // setWidgetShaderChartPreset(id, name, options?) -> {success, error}
     // Installs a named preset as the widget's chart shader, exactly as
-    // setWidgetShaderChart would install its source, and raises the widget's
-    // reach to what the preset needs (a glow's three sigma).
+    // setWidgetShaderChart would install its source, together with the reach
+    // the preset needs (a glow's halo), which pads only the chart draw.
     register_bridge_function(
         api, "setWidgetShaderChartPreset", [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
@@ -751,8 +751,7 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
                                                                 preset.sksl);
             if (!error.empty())
                 return shader_result(false, error);
-            host->set_chart_shader(std::move(preset.sksl));
-            host->set_shader_reach(std::max(host->shader_reach(), preset.reach));
+            host->set_chart_shader(std::move(preset.sksl), preset.reach);
             self.request_repaint();
             return shader_result(true, "");
         });
