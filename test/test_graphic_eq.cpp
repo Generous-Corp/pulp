@@ -9,6 +9,7 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <cstring>
 #include <cstddef>
 #include <limits>
 #include <span>
@@ -404,4 +405,42 @@ TEST_CASE("GraphicEq lifecycle configuration processing and reset allocate no me
     REQUIRE(prepared == GraphicEqPrepareStatus::prepared);
     REQUIRE(configured == GraphicEqConfigureStatus::configured);
     REQUIRE(allocations == 0);
+}
+
+TEST_CASE("GraphicEq block processing matches the sample path including faults",
+          "[signal][graphic-eq][determinism]") {
+    std::vector<pulp::signal::GraphicEqBand> bands;
+    for (int k = 0; k < 10; ++k)
+        bands.push_back(
+            {31.25f * std::pow(2.0f, static_cast<float>(k)), k % 2 ? -4.0f : 5.0f, 1.4f});
+    std::vector<float> input(4096);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = 0.6f * std::sin(0.0371f * static_cast<float>(i)) +
+                   0.3f * std::sin(0.4113f * static_cast<float>(i));
+    input[700] = std::numeric_limits<float>::quiet_NaN();
+    // A finite input large enough to overflow the cascade to a non-finite
+    // output exercises the snapshot-and-rerun path.
+    input[2500] = std::numeric_limits<float>::max();
+
+    pulp::signal::GraphicEq by_block;
+    pulp::signal::GraphicEq by_sample;
+    for (auto* eq : {&by_block, &by_sample}) {
+        REQUIRE(eq->prepare(48000.0f, 16) == GraphicEqPrepareStatus::prepared);
+        REQUIRE(eq->configure(bands) == GraphicEqConfigureStatus::configured);
+    }
+    auto a = input;
+    auto b = input;
+    std::size_t pos = 0;
+    for (std::size_t block : {std::size_t{100}, std::size_t{512}, std::size_t{37},
+                              std::size_t{2048}, std::size_t{1399}}) {
+        REQUIRE(by_block.process_block(a.data() + pos, block));
+        for (std::size_t i = pos; i < pos + block; ++i)
+            b[i] = by_sample.process(b[i]);
+        pos += block;
+    }
+    REQUIRE(pos == input.size());
+    CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
+    CHECK(by_block.fault_count() == by_sample.fault_count());
+    CHECK(by_block.fault_count() >= 1);
+    CHECK(by_block.healthy() == by_sample.healthy());
 }

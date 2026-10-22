@@ -365,6 +365,10 @@ pulp_add_test_suite(pulp-test-routing-primitives
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
 pulp_add_test_suite(pulp-test-signal-filters GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
+# TptFilter and the lockstep voice banks (LadderBank, SvfBank), split from
+# the signal filter tests above.
+pulp_add_test_suite(pulp-test-filter-banks GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Fixed-state, pivot-normalized tilt EQ with independent response and
 # time-domain oracles, deterministic block processing, and RT proof.
 pulp_add_test_suite(pulp-test-tilt-eq
@@ -477,6 +481,13 @@ pulp_add_test_suite(pulp-test-signal-meter GROUP pulp-test-group-core-signal
 # Biquad filter tests
 pulp_add_test_suite(pulp-test-biquad GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
+# The stereo Biquad and cascade paths with vector lanes disabled (the MSVC
+# fallback). Its own binary: the macro changes inline definitions, so it must
+# not share them with a build that has lanes.
+pulp_add_test_suite(pulp-test-biquad-scalar-lanes
+    SOURCES test_biquad_scalar_lanes.cpp
+    LIBRARIES pulp::signal)
+target_compile_definitions(pulp-test-biquad-scalar-lanes PRIVATE PULP_SIMD_DISABLE_VECTOR_LANES)
 pulp_add_test_suite(pulp-test-osc-phase GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 # The BLEP/BLAMP kernels are gated on measured alias rejection, so this suite

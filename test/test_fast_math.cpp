@@ -486,3 +486,114 @@ TEST_CASE("FastMath log2 orders common gain ratios", "[signal][fast_math]") {
     REQUIRE(FastMath::log2(1.0f) < FastMath::log2(2.0f));
     REQUIRE(FastMath::log2(2.0f) < FastMath::log2(4.0f));
 }
+
+namespace {
+
+// FastMath::tanh's contract written with early returns: exactly +/-1 beyond
+// |x| = 4, the [7/6] Pade form inside.
+float tanh_reference(float x) {
+    if (x < -4.0f)
+        return -1.0f;
+    if (x > 4.0f)
+        return 1.0f;
+    const float x2 = x * x;
+    const float num = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
+    const float den = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
+    return num / den;
+}
+
+double ulp_of(double value) {
+    const float f = static_cast<float>(std::abs(value));
+    return static_cast<double>(std::nextafter(f, std::numeric_limits<float>::infinity()) - f);
+}
+
+} // namespace
+
+TEST_CASE("FastMath::tanh is bit-identical to its saturating Pade contract",
+          "[signal][fast-math][tanh]") {
+    std::size_t mismatches = 0;
+    for (float x = -12.0f; x <= 12.0f; x += 1.0e-4f) {
+        const float a = FastMath::tanh(x);
+        const float b = tanh_reference(x);
+        mismatches += std::bit_cast<std::uint32_t>(a) != std::bit_cast<std::uint32_t>(b);
+    }
+    CHECK(mismatches == 0);
+    CHECK(FastMath::tanh(4.0f) == tanh_reference(4.0f));
+    CHECK(FastMath::tanh(-4.0f) == tanh_reference(-4.0f));
+    CHECK(FastMath::tanh(std::nextafter(4.0f, 5.0f)) == 1.0f);
+    CHECK(FastMath::tanh(std::nextafter(-4.0f, -5.0f)) == -1.0f);
+    CHECK(FastMath::tanh(1.0e30f) == 1.0f);
+    CHECK(FastMath::tanh(-1.0e30f) == -1.0f);
+    CHECK(FastMath::tanh(std::numeric_limits<float>::infinity()) == 1.0f);
+    CHECK(FastMath::tanh(-std::numeric_limits<float>::infinity()) == -1.0f);
+    CHECK(std::isnan(FastMath::tanh(std::numeric_limits<float>::quiet_NaN())));
+}
+
+TEST_CASE("FastMath::log10_accurate stays within a few ulps of libm",
+          "[signal][fast-math][decibel]") {
+    double worst_ulps = 0.0;
+    for (float x = 1.0e-10f; x < 1.0e6f; x *= 1.0001f) {
+        const double reference = std::log10(static_cast<double>(x));
+        const double err =
+            std::abs(static_cast<double>(pulp::signal::FastMath::log10_accurate(x)) - reference);
+        // Near log10(x) = 0 the result ulp shrinks without bound; hold those
+        // inputs to an absolute error instead.
+        if (std::abs(reference) < 1.0e-3)
+            CHECK(err < 1.0e-9);
+        else
+            worst_ulps = std::max(worst_ulps, err / ulp_of(reference));
+    }
+    CHECK(worst_ulps <= 4.0);
+    CHECK(pulp::signal::FastMath::log10_accurate(1.0f) == 0.0f);
+    CHECK(pulp::signal::FastMath::log10_accurate(1000.0f) == 3.0f);
+    CHECK(pulp::signal::FastMath::log10_accurate(1.0e-10f) ==
+          static_cast<float>(std::log10(static_cast<double>(1.0e-10f))));
+}
+
+TEST_CASE("FastMath::exp10_accurate stays within a few parts in 1e7 of libm and saturates like pow",
+          "[signal][fast-math][decibel]") {
+    double worst = 0.0;
+    for (float x = -37.0f; x < 38.0f; x += 1.0e-4f) {
+        const double reference = std::pow(10.0, static_cast<double>(x));
+        worst = std::max(
+            worst,
+            std::abs(static_cast<double>(pulp::signal::FastMath::exp10_accurate(x)) - reference) /
+                reference);
+    }
+    CHECK(worst < 2.0e-7);
+    CHECK(pulp::signal::FastMath::exp10_accurate(0.0f) == 1.0f);
+    CHECK(std::isinf(pulp::signal::FastMath::exp10_accurate(39.0f)));
+    CHECK(std::isinf(pulp::signal::FastMath::exp10_accurate(1.0e30f)));
+    CHECK(pulp::signal::FastMath::exp10_accurate(-46.0f) == 0.0f);
+    CHECK(pulp::signal::FastMath::exp10_accurate(-1.0e30f) == 0.0f);
+    CHECK_FALSE(std::signbit(pulp::signal::FastMath::exp10_accurate(-1.0e30f)));
+    // Gradual underflow keeps the subnormal range, as std::pow does.
+    const float sub = pulp::signal::FastMath::exp10_accurate(-40.0f);
+    CHECK(sub > 0.0f);
+    CHECK(std::abs(static_cast<double>(sub) - 1.0e-40) / 1.0e-40 < 1.0e-3);
+}
+
+TEST_CASE("Bit-operation selects match the conditionals they replace",
+          "[signal][fast-math][select]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    CHECK(pulp::signal::detail::select_bits(true, 1.5f, -2.0f) == 1.5f);
+    CHECK(pulp::signal::detail::select_bits(false, 1.5f, -2.0f) == -2.0f);
+    CHECK(std::isnan(pulp::signal::detail::select_bits(true, nan, 0.0f)));
+    CHECK(std::signbit(pulp::signal::detail::select_bits(false, 0.0f, -0.0f)));
+    CHECK(pulp::signal::detail::select_bits(true, 2.0, 3.0) == 2.0);
+    std::size_t mismatches = 0;
+    for (std::uint32_t bits = 0; bits < 0x7f800000u; bits += 4099) {
+        for (const float sign : {1.0f, -1.0f}) {
+            const float x = sign * std::bit_cast<float>(bits);
+            mismatches +=
+                std::bit_cast<std::uint32_t>(pulp::signal::detail::tanh_accurate_bits(x)) !=
+                std::bit_cast<std::uint32_t>(FastMath::tanh_accurate(x));
+            mismatches +=
+                std::bit_cast<std::uint32_t>(pulp::signal::detail::snap_to_zero_bits(x)) !=
+                std::bit_cast<std::uint32_t>(pulp::signal::snap_to_zero(x));
+        }
+    }
+    CHECK(mismatches == 0);
+    CHECK(std::isnan(pulp::signal::detail::tanh_accurate_bits(nan)));
+    CHECK(std::isnan(pulp::signal::detail::snap_to_zero_bits(nan)));
+}

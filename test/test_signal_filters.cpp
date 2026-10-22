@@ -7,61 +7,15 @@
 #include <limits>
 #include <numbers>
 #include <pulp/signal/signal.hpp>
+#include "support/denormal_tail.hpp"
+#include "support/filter_block_fixtures.hpp"
+#include <cstdint>
+#include <cstring>
 #include <vector>
 
 using namespace pulp::signal;
+using namespace pulp::test::filter_block;
 using Catch::Matchers::WithinAbs;
-
-// ── TptFilter ────────────────────────────────────────────────────────────────
-
-TEST_CASE("TptFilter owns invalid sample-rate normalization", "[signal][filter][tpt]") {
-    for (const float sample_rate : {
-             0.0f,
-             -1.0f,
-             std::numeric_limits<float>::quiet_NaN(),
-             std::numeric_limits<float>::infinity(),
-         }) {
-        TptFilter filter;
-        filter.prepare(sample_rate);
-        filter.set_cutoff(1.0f);
-
-        REQUIRE(filter.sample_rate() == TptFilter::kMinSampleRate);
-        REQUIRE(filter.cutoff() == TptFilter::kMinCutoffHz);
-        REQUIRE(std::isfinite(filter.process_lowpass(0.25f)));
-    }
-
-    TptFilter64 filter64;
-    filter64.prepare(-std::numeric_limits<double>::infinity());
-    filter64.set_cutoff(1.0);
-    REQUIRE(filter64.sample_rate() == TptFilter64::kMinSampleRate);
-    REQUIRE(std::isfinite(filter64.process_lowpass(0.25)));
-}
-
-TEST_CASE("TptFilter reclamps its retained cutoff when the rate falls", "[signal][filter][tpt]") {
-    TptFilter filter;
-    filter.prepare(48000.0f);
-    filter.set_cutoff(10000.0f);
-
-    filter.prepare(TptFilter::kMinSampleRate);
-
-    REQUIRE_THAT(filter.cutoff(),
-                 WithinAbs(TptFilter::kMinSampleRate * TptFilter::kMaxCutoffFraction, 1.0e-6f));
-    REQUIRE(std::isfinite(filter.process_lowpass(0.25f)));
-}
-
-TEST_CASE("TptFilter64 calculates coefficients at double precision",
-          "[signal][filter][tpt][precision]") {
-    constexpr double sample_rate = 192000.0;
-    constexpr double cutoff = 12345.678901234;
-    TptFilter64 filter;
-    filter.prepare(sample_rate);
-    filter.set_cutoff(cutoff);
-
-    const double tangent = std::tan(std::numbers::pi_v<double> * cutoff / sample_rate);
-    const double expected_first_sample = tangent / (1.0 + tangent);
-
-    REQUIRE_THAT(filter.process_lowpass(1.0), WithinAbs(expected_first_sample, 1.0e-15));
-}
 
 // ── Biquad ───────────────────────────────────────────────────────────────────
 
@@ -253,10 +207,12 @@ TEST_CASE("LadderFilter lowpass behavior", "[signal][ladder]") {
 }
 
 // The float ladder's saturator is gated by PULP_SIGNAL_FAST_LADDER_TANH
-// (fast_math.hpp): exact std::tanh by DEFAULT, opt-in Padé FastMath::tanh. The
-// references below reproduce both formulations of the process loop so the tests
-// can (a) prove the default is bit-exact std::tanh and (b) pin how far the Padé
-// path would move the filter — regardless of which way the gate is compiled.
+// (fast_math.hpp): FastMath::tanh_accurate by DEFAULT, opt-in Padé
+// FastMath::tanh, and exact std::tanh through process_reference(). The
+// references below reproduce the process loop with each saturator so the tests
+// can (a) bound how far the default moves the filter from exact tanh and (b)
+// pin how far the Padé path would — regardless of which way the gate is
+// compiled.
 namespace {
 template <typename Sat>
 float ladder_reference(const std::vector<float>& in, float sr, float fc, float res, Sat sat) {
@@ -276,6 +232,10 @@ float ladder_reference(const std::vector<float>& in, float sr, float fc, float r
 }
 float ladder_reference_std_tanh(const std::vector<float>& in, float sr, float fc, float res) {
     return ladder_reference(in, sr, fc, res, [](float v) { return std::tanh(v); });
+}
+[[maybe_unused]] float ladder_reference_accurate_tanh(const std::vector<float>& in, float sr,
+                                                      float fc, float res) {
+    return ladder_reference(in, sr, fc, res, [](float v) { return FastMath::tanh_accurate(v); });
 }
 [[maybe_unused]] float ladder_reference_fast_tanh(const std::vector<float>& in, float sr, float fc,
                                                   float res) {
@@ -305,10 +265,11 @@ TEST_CASE("FastMath::tanh stays within its pinned error bound of std::tanh",
     REQUIRE(max_err_full < 7e-4f); // ~-63 dBFS  — the +/-4 hard-clamp seam (worst case)
 }
 
-// The default float ladder must be EXACT std::tanh, so a driven signal tracks
-// the libm reference to float round-off. If someone flips the default back to
-// the Padé path, this fails — the fidelity guarantee is pinned, not implicit.
-TEST_CASE("LadderFilter default saturator is exact std::tanh", "[signal][ladder]") {
+// The default float ladder must track the EXACT std::tanh filter to within
+// the accurate saturator's bound even when overdriven. If someone flips the
+// default to the Padé path, this fails — the fidelity guarantee is pinned, not
+// implicit.
+TEST_CASE("LadderFilter default saturator tracks exact std::tanh", "[signal][ladder]") {
     constexpr float kSr = 48000.0f, kFc = 1200.0f, kRes = 0.7f;
     LadderFilter ladder;
     ladder.set_sample_rate(kSr);
@@ -347,8 +308,9 @@ TEST_CASE("LadderFilter default saturator is exact std::tanh", "[signal][ladder]
     REQUIRE(max_fast_dev < 1e-3f); // tracks the Padé reference
     REQUIRE(max_abs_dev > 1e-5f);  // and is provably NOT the exact filter
 #else
-    // Default build: bit-exact to libm (snap_to_zero is a no-op at these levels).
-    REQUIRE(max_abs_dev < 1e-5f);
+    // Default build: within a few times the saturator's 3.0e-7 bound of the
+    // exact filter at +10 dBFS drive, far inside the Padé path's ~1e-3 seam.
+    REQUIRE(max_abs_dev < 4e-6f);
 #endif
 }
 
@@ -577,5 +539,227 @@ TEST_CASE("LinkwitzRiley retuning after active history stays finite", "[signal][
         auto split = lr.process(i == 0 ? 1.0f : 0.0f);
         REQUIRE(std::isfinite(split.low));
         REQUIRE(std::isfinite(split.high));
+    }
+}
+
+// ── Svf block path and denormal tail ────────────────────────────────────────
+
+TEST_CASE("Svf block path is bit-identical to the sample path for every mode",
+          "[signal][svf][determinism]") {
+    constexpr float sr = 48000.0f;
+    const auto input = filters_busy_signal(8192, sr);
+    const auto schedule = filters_split_schedule(input.size());
+    for (const auto mode :
+         {Svf::Mode::lowpass, Svf::Mode::highpass, Svf::Mode::bandpass, Svf::Mode::notch}) {
+        INFO("mode " << static_cast<int>(mode));
+        Svf by_sample;
+        Svf by_block;
+        by_sample.configure(mode, sr, 1000.0f, 0.7071f);
+        by_block.configure(mode, sr, 1000.0f, 0.7071f);
+        std::vector<float> expected = input;
+        std::vector<float> actual = input;
+        std::size_t pos = 0;
+        int k = 0;
+        for (int block : schedule) {
+            if (k++ % 4 == 1) {
+                const float f = 200.0f * static_cast<float>(1 + k % 7);
+                const float q = 0.5f + static_cast<float>(k % 5);
+                by_sample.set_frequency(f);
+                by_block.set_frequency(f);
+                by_sample.set_resonance(q);
+                by_block.set_resonance(q);
+            }
+            for (int i = 0; i < block; ++i)
+                expected[pos + static_cast<std::size_t>(i)] =
+                    by_sample.process(expected[pos + static_cast<std::size_t>(i)]);
+            by_block.process(actual.data() + pos, block);
+            pos += static_cast<std::size_t>(block);
+        }
+        CHECK(same_bits(actual, expected));
+    }
+}
+
+TEST_CASE("Svf block path applies a mode change from the next block", "[signal][svf]") {
+    constexpr float sr = 48000.0f;
+    const auto input = filters_busy_signal(256, sr);
+    Svf by_sample;
+    Svf by_block;
+    by_sample.configure(Svf::Mode::lowpass, sr, 1500.0f, 2.0f);
+    by_block.configure(Svf::Mode::lowpass, sr, 1500.0f, 2.0f);
+    std::vector<float> expected = input;
+    std::vector<float> actual = input;
+    const Svf::Mode order[] = {Svf::Mode::lowpass, Svf::Mode::highpass, Svf::Mode::bandpass,
+                               Svf::Mode::notch};
+    for (int b = 0; b < 4; ++b) {
+        by_sample.set_mode(order[b]);
+        by_block.set_mode(order[b]);
+        for (int i = 0; i < 64; ++i)
+            expected[static_cast<std::size_t>(b * 64 + i)] =
+                by_sample.process(expected[static_cast<std::size_t>(b * 64 + i)]);
+        by_block.process(actual.data() + b * 64, 64);
+    }
+    CHECK(same_bits(actual, expected));
+}
+
+TEST_CASE("Svf block path flushes a decaying tail without subnormal residency",
+          "[signal][svf][denormal]") {
+    using namespace pulp::test::denormal_tail;
+    if (flush_to_zero_active())
+        SKIP("this thread flushes subnormals to zero; the tail counts would be vacuous");
+    constexpr std::size_t kTotal = std::size_t{1} << 18;
+
+    // Negative control: the same TPT recursion with no snap.
+    const float g = std::tan(3.14159265f * 20.0f / 48000.0f);
+    const float k = 1.0f / 0.7071f;
+    const float a1 = 1.0f / (1.0f + g * (g + k));
+    const float a2 = g * a1;
+    const float a3 = g * a2;
+    float ic1 = 0.0f;
+    float ic2 = 0.0f;
+    const auto control = impulse_tail(
+        [&](float* x, int n) {
+            for (int i = 0; i < n; ++i) {
+                const float v3 = x[i] - ic2;
+                const float v1 = a1 * ic1 + a2 * v3;
+                const float v2 = ic2 + a2 * ic1 + a3 * v3;
+                ic1 = 2.0f * v1 - ic1;
+                ic2 = 2.0f * v2 - ic2;
+                x[i] = v2;
+            }
+        },
+        kTotal, 512);
+    REQUIRE(control.subnormal_outputs > kTotal / 2);
+
+    for (std::size_t block : {std::size_t{1}, std::size_t{64}, std::size_t{4096}, kTotal}) {
+        INFO("block " << block);
+        Svf filter;
+        filter.configure(Svf::Mode::lowpass, 48000.0f, 20.0f, 0.7071f);
+        const auto tail =
+            impulse_tail([&](float* x, int n) { filter.process(x, n); }, kTotal, block);
+        REQUIRE(tail.subnormal_outputs == 0);
+        REQUIRE(tail.nonzero_end > 0);
+        // A one-sample block snaps every sample, as the sample path does; the
+        // chunked snap must still bring the tail to exact zero.
+        if (block > 1)
+            REQUIRE(tail.nonzero_end < kTotal / 8);
+    }
+}
+
+TEST_CASE("FastMath::tanh_accurate stays within its pinned bound of std::tanh",
+          "[signal][ladder][fast_math]") {
+    // Every 64th positive float: the bound is 3.0e-7 absolute over the whole
+    // range with fused multiply-add and 3.6e-7 without (the no-contract suite
+    // checks the latter on its own).
+    double worst = 0.0;
+    double worst_small_rel = 0.0;
+    for (std::uint32_t bits = 0; bits < 0x7f800000u; bits += 64) {
+        float x;
+        std::memcpy(&x, &bits, sizeof x);
+        const double exact = std::tanh(static_cast<double>(x));
+        const double got = FastMath::tanh_accurate(x);
+        worst = std::max(worst, std::abs(got - exact));
+        if (x > 0.0f && x < 0.05f)
+            worst_small_rel = std::max(worst_small_rel, std::abs(got - exact) / exact);
+        // Odd symmetry is exact, not approximate.
+        REQUIRE(FastMath::tanh_accurate(-x) == -FastMath::tanh_accurate(x));
+    }
+    CHECK(worst < 3.6e-7);
+    // Unit slope at the origin: small signals see the same loop gain as tanh.
+    CHECK(worst_small_rel < 3.0e-7);
+    CHECK(FastMath::tanh_accurate(9.5f) == 1.0f);
+    CHECK(FastMath::tanh_accurate(-9.5f) == -1.0f);
+    CHECK(FastMath::tanh_accurate(1.0e30f) == 1.0f);
+    CHECK(FastMath::tanh_accurate(-1.0e30f) == -1.0f);
+    CHECK(FastMath::tanh_accurate(std::numeric_limits<float>::infinity()) == 1.0f);
+    CHECK(FastMath::tanh_accurate(-std::numeric_limits<float>::infinity()) == -1.0f);
+    // A NaN must propagate, not turn into a full-scale constant.
+    CHECK(std::isnan(FastMath::tanh_accurate(std::numeric_limits<float>::quiet_NaN())));
+    CHECK(std::isnan(FastMath::tanh_accurate(-std::numeric_limits<float>::quiet_NaN())));
+    CHECK(std::signbit(FastMath::tanh_accurate(-0.0f)));
+}
+
+TEST_CASE("LadderFilter default saturator preserves resonance and drive behavior",
+          "[signal][ladder][parity]") {
+    // Against process_reference() (exact std::tanh stages): ringing frequency,
+    // decay, and the driven waveform must match to well below -120 dBFS at
+    // normal levels.
+    constexpr float kSr = 48000.0f;
+    for (const float fc : {500.0f, 2000.0f}) {
+        for (const float res : {0.0f, 0.9f, 1.0f}) {
+            INFO("fc " << fc << " res " << res);
+            LadderFilter fast;
+            LadderFilter exact;
+            for (auto* l : {&fast, &exact}) {
+                l->set_sample_rate(kSr);
+                l->set_frequency(fc);
+                l->set_resonance(res);
+            }
+            float worst = 0.0f;
+            int crossings_fast = 0;
+            int crossings_exact = 0;
+            float prev_fast = 0.0f;
+            float prev_exact = 0.0f;
+            for (int i = 0; i < 48000; ++i) {
+                // A kick, then a 0 dBFS two-tone, then silence to ring out.
+                float x = i < 32 ? 2.0f : 0.0f;
+                if (i >= 8000 && i < 24000)
+                    x = 0.6f * std::sin(6.2831853f * 220.0f * static_cast<float>(i) / kSr) +
+                        0.4f * std::sin(6.2831853f * 3150.0f * static_cast<float>(i) / kSr);
+                const float a = fast.process(x);
+                const float b = exact.process_reference(x);
+                worst = std::max(worst, std::abs(a - b));
+                if (i > 1000 && i < 8000) {
+                    crossings_fast += prev_fast < 0.0f && a >= 0.0f;
+                    crossings_exact += prev_exact < 0.0f && b >= 0.0f;
+                }
+                prev_fast = a;
+                prev_exact = b;
+            }
+            CHECK(worst < 1.0e-6f);
+            CHECK(crossings_fast == crossings_exact);
+        }
+    }
+}
+
+TEST_CASE("LadderFilter default saturator holds its documented bound up to +20 dBFS drive",
+          "[signal][ladder][parity]") {
+    // The grid behind LadderSaturation::accurate's documented bound: cutoff
+    // 300 Hz - 6 kHz, resonance 0 - 1, sine input 110 Hz - 7 kHz at 48 kHz,
+    // pointwise against process_reference() (exact std::tanh stages). Worst
+    // cases measured with Apple clang and with GCC and glibc: -124.5 dBFS at
+    // 0 dBFS, -107.3 dBFS at +10 dBFS, -101.9 dBFS at +20 dBFS (high
+    // resonance, low input, high cutoff). Each limit sits about 2 dB above
+    // the measurement.
+    struct Drive {
+        float amplitude;
+        float limit;
+    };
+    constexpr float kSr = 48000.0f;
+    for (const Drive drive : {Drive{1.0f, 7.9e-7f},     // -122 dBFS at 0 dBFS
+                              Drive{3.1623f, 5.6e-6f},  // -105 dBFS at +10 dBFS
+                              Drive{10.0f, 1.0e-5f}}) { // -100 dBFS at +20 dBFS
+        float worst = 0.0f;
+        for (const float f0 : {110.0f, 440.0f, 2500.0f, 7000.0f}) {
+            for (const float res : {0.0f, 0.5f, 0.9f, 1.0f}) {
+                for (const float fc : {300.0f, 1500.0f, 6000.0f}) {
+                    LadderFilter fast;
+                    LadderFilter exact;
+                    for (auto* l : {&fast, &exact}) {
+                        l->set_sample_rate(kSr);
+                        l->set_frequency(fc);
+                        l->set_resonance(res);
+                    }
+                    const double w = 2.0 * std::numbers::pi * static_cast<double>(f0) / kSr;
+                    for (int i = 0; i < 48000; ++i) {
+                        const float x = static_cast<float>(static_cast<double>(drive.amplitude) *
+                                                           std::sin(w * static_cast<double>(i)));
+                        worst =
+                            std::max(worst, std::abs(fast.process(x) - exact.process_reference(x)));
+                    }
+                }
+            }
+        }
+        INFO("amplitude " << drive.amplitude << " worst " << worst);
+        CHECK(worst < drive.limit);
     }
 }

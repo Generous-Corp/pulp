@@ -168,13 +168,20 @@ std::vector<float> burst_signal(std::size_t frames) {
     return result;
 }
 
+// The node and the reference must agree bit for bit: the node only routes
+// samples, so any difference is a routing bug, not rounding.
 void require_matches(const std::vector<float>& actual, const std::vector<float>& expected) {
     REQUIRE(actual.size() == expected.size());
-    float worst = 0.0f;
-    for (std::size_t i = 0; i < actual.size(); ++i)
-        worst = std::max(worst, std::abs(actual[i] - expected[i]));
-    INFO("worst |node - reference| = " << worst);
-    CHECK(worst <= 1e-5f);
+    std::size_t mismatches = 0;
+    std::size_t first = actual.size();
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        if (actual[i] != expected[i]) {
+            ++mismatches;
+            first = std::min(first, i);
+        }
+    }
+    INFO("mismatched samples = " << mismatches << ", first at " << first);
+    CHECK(mismatches == 0);
 }
 
 } // namespace

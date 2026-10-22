@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/processor_duplicator.hpp>
+#include <pulp/signal/svf.hpp>
 #include <pulp/signal/matrix.hpp>
 #include <pulp/signal/special_functions.hpp>
 #include <pulp/signal/compressor.hpp>
@@ -898,4 +899,68 @@ TEST_CASE("Limiter clamps signal", "[dsp][limiter]") {
     float signal = 1.0f;
     float result = lim.process(signal);
     REQUIRE(std::abs(result) <= 0.51f);  // Should be limited to ~-6dB
+}
+
+namespace {
+
+struct BlockAwareGain {
+    float gain = 2.0f;
+    int sample_calls = 0;
+    int block_calls = 0;
+    void set_sample_rate(float) {}
+    float process(float x) {
+        ++sample_calls;
+        return x * gain;
+    }
+    void process(float* buffer, int n) {
+        ++block_calls;
+        for (int i = 0; i < n; ++i)
+            buffer[i] *= gain;
+    }
+    void reset() {}
+};
+
+} // namespace
+
+TEST_CASE("ProcessorDuplicator hands whole channels to a block path when one exists",
+          "[dsp][duplicator]") {
+    ProcessorDuplicator<BlockAwareGain> dup;
+    dup.prepare(2, 48000.0f);
+    float ch0[] = {1.0f, 2.0f, 3.0f};
+    float ch1[] = {4.0f, 5.0f, 6.0f};
+    float* channels[] = {ch0, ch1};
+    dup.process(channels, 2, 3);
+    REQUIRE(dup[0].block_calls == 1);
+    REQUIRE(dup[1].block_calls == 1);
+    REQUIRE(dup[0].sample_calls == 0);
+    REQUIRE(ch0[2] == 6.0f);
+    REQUIRE(ch1[0] == 8.0f);
+
+    dup.process_channel(ch1, 1, 3);
+    REQUIRE(dup[1].block_calls == 2);
+    REQUIRE(dup[1].sample_calls == 0);
+    REQUIRE(ch1[0] == 16.0f);
+}
+
+TEST_CASE("ProcessorDuplicator of Svf matches a per-sample Svf exactly", "[dsp][duplicator][svf]") {
+    ProcessorDuplicator<Svf> dup;
+    dup.prepare(1, 48000.0f);
+    dup.for_each([](Svf& s) {
+        s.set_frequency(1200.0f);
+        s.set_resonance(1.5f);
+    });
+    Svf reference;
+    reference.set_sample_rate(48000.0f);
+    reference.set_frequency(1200.0f);
+    reference.set_resonance(1.5f);
+    float buffer[200];
+    float expected[200];
+    for (int i = 0; i < 200; ++i)
+        buffer[i] = expected[i] = std::sin(0.05f * static_cast<float>(i)) + 0.25f;
+    float* channels[] = {buffer};
+    dup.process(channels, 1, 200);
+    for (float& x : expected)
+        x = reference.process(x);
+    for (int i = 0; i < 200; ++i)
+        REQUIRE(buffer[i] == expected[i]);
 }
