@@ -51,6 +51,7 @@ endif()
 pulp_add_plugin(PulpDelay
     FORMATS             ${PULP_DELAY_FORMATS}
     PLUGIN_NAME         "Pulp Delay"
+    LITE_EDITOR
     BUNDLE_ID           "com.pulp.delay"
     MANUFACTURER        "Pulp"
     VERSION             "1.0.0"
@@ -74,4 +75,15 @@ if(PULP_HAS_CLAP AND APPLE)
     set_tests_properties(clap-dlopen-PulpDelay PROPERTIES
         LABELS "validation;clap"
         TIMEOUT 10)
+endif()
+
+# LITE_EDITOR: the C++ editor paints on the CoreGraphics host, so its modules carry no Skia, Dawn, Tint or GPU host.
+if(PULP_BUILD_TESTS AND APPLE AND CMAKE_NM AND TARGET pulp-canvas-lite-objects)
+    if(TARGET PulpDelay_VST3)
+        add_test(NAME editor-stack-PulpDelay_VST3
+            COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                -DMODULE=$<TARGET_FILE:PulpDelay_VST3> -DEXPECT=lite
+                -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_editor_stack.cmake)
+        set_tests_properties(editor-stack-PulpDelay_VST3 PROPERTIES LABELS "plugin-footprint" TIMEOUT 60)
+    endif()
 endif()

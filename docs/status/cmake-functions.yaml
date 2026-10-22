@@ -16,6 +16,7 @@ functions:
       - ACCEPTS_MIDI
       - NATIVE_UI
       - NO_EDITOR
+      - LITE_EDITOR
       - PLUGIN_CODE
       - MANUFACTURER_CODE
       - AAX_PRODUCT_CODE

@@ -35,6 +35,16 @@
 #endif
 #endif
 
+// PULP_LITE_EDITOR builds this file a second time, into the pulp-editor-lite
+// objects that a plug-in without a GPU editor links ahead of the library.
+// It changes function bodies only; every declaration stays as the headers
+// give it, so the two builds agree on every type.
+#if defined(PULP_HAS_SKIA) && !(defined(PULP_LITE_EDITOR) && PULP_LITE_EDITOR)
+#define PULP_FONT_RESOLVER_SKIA 1
+#else
+#define PULP_FONT_RESOLVER_SKIA 0
+#endif
+
 namespace pulp::canvas {
 
 namespace {
@@ -238,7 +248,7 @@ std::size_t FontResolver::cache_size() const noexcept {
     return impl_->cache.size();
 }
 
-#ifdef PULP_HAS_SKIA
+#if PULP_FONT_RESOLVER_SKIA
 
 namespace {
 
@@ -691,7 +701,7 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
     return r;
 }
 
-#else // !PULP_HAS_SKIA
+#else // !PULP_FONT_RESOLVER_SKIA
 
 // Non-Skia builds: every resolver call returns a NotFound result. The
 // callers that pull this in are expected to fall back to their own
@@ -753,12 +763,12 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
     return r;
 }
 
-#endif // PULP_HAS_SKIA
+#endif // PULP_FONT_RESOLVER_SKIA
 
 // Color-font predicates — Skia-conditional method bodies that compile
 // in both Skia and non-Skia builds.
 
-#ifdef PULP_HAS_SKIA
+#if PULP_FONT_RESOLVER_SKIA
 namespace {
 
 // Enumerate which specific color tables a typeface carries so
@@ -801,10 +811,10 @@ ColorTablePresence scan_color_tables(const SkTypeface* typeface) {
 }
 
 } // namespace
-#endif // PULP_HAS_SKIA
+#endif // PULP_FONT_RESOLVER_SKIA
 
 bool ResolvedFont::supports_color_font() const noexcept {
-#ifdef PULP_HAS_SKIA
+#if PULP_FONT_RESOLVER_SKIA
     return scan_color_tables(typeface.get()).any_color;
 #else
     return false;
@@ -812,7 +822,7 @@ bool ResolvedFont::supports_color_font() const noexcept {
 }
 
 bool ResolvedFont::color_font_active() const noexcept {
-#ifdef PULP_HAS_SKIA
+#if PULP_FONT_RESOLVER_SKIA
     if (color_font_mode == ColorFontMode::ForceMonochrome) return false;
     if (!typeface) return false;
     const ColorTablePresence p = scan_color_tables(typeface.get());
@@ -835,7 +845,7 @@ bool ResolvedFont::color_font_active() const noexcept {
 
 std::string resolved_face_identity(const std::string& css_font_family,
                                    float weight, FontSlant slant) {
-#ifdef PULP_HAS_SKIA
+#if PULP_FONT_RESOLVER_SKIA
     FontOptions options;
     options.weight = weight;
     options.slant = slant;

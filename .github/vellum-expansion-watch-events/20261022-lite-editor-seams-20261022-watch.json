@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-lite-editor-seams-20261022-watch",
+  "created_at": "2026-10-22T12:59:39Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "pulp_add_plugin LITE_EDITOR builds a plug-in's macOS binaries without the GPU plug-in and window hosts and links lite copies of four canvas/view sources (PULP_LITE_EDITOR selects their CoreText and no-op bodies), so those binaries carry no Skia, Dawn or Tint. Binaries that do not opt in, and every library, are unchanged; the full-stack paths are the defaults of the new switches. Lite editors render byte-identically on the CoreGraphics host they already used. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R editor-stack",
+    "ctest --test-dir build -R plugin-footprint",
+    "ctest --test-dir build -R pulp-test-lite-editor-host-mac",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

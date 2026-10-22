@@ -11,7 +11,17 @@
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
 #include <pulp/canvas/text_shaper.hpp>
-#if !defined(PULP_HAS_TEXT_SHAPING) && defined(__APPLE__)
+// PULP_LITE_EDITOR builds this file a second time, into the pulp-editor-lite
+// objects that a plug-in without a GPU editor links ahead of the library.
+// It changes function bodies only; every declaration stays as the headers
+// give it, so the two builds agree on every type.
+#if defined(PULP_HAS_TEXT_SHAPING) && !(defined(PULP_LITE_EDITOR) && PULP_LITE_EDITOR)
+#define PULP_TEXT_SHAPER_SKIA 1
+#else
+#define PULP_TEXT_SHAPER_SKIA 0
+#endif
+
+#if !PULP_TEXT_SHAPER_SKIA && defined(__APPLE__)
 #include "coretext_text.hpp"
 #endif
 #include <algorithm>
@@ -20,7 +30,7 @@
 #include <sstream>
 #include <numeric>
 
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
 #include "font_tables.hpp"
 // SkParagraph headers — available when Skia is built with text shaping
 #include "modules/skparagraph/include/ParagraphBuilder.h"
@@ -532,7 +542,7 @@ float PreparedText::total_width() const {
 struct TextShaper::Impl {
     bool has_real_shaping = false;
 
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
     static FontSlant font_slant_from_int(int slant) {
         if (slant == 2) return FontSlant::Oblique;
         if (slant == 1) return FontSlant::Italic;
@@ -635,7 +645,7 @@ struct TextShaper::Impl {
     std::uint64_t metrics_cached_generation = 0;
     std::mutex metrics_mutex;
 
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
     // Typeface resolution routes through FontResolver. Comma-list parsing
     // happens once inside the resolver; the registered → bundled →
     // platform cascade is shared with skia_canvas. Returns null when
@@ -693,7 +703,7 @@ struct TextShaper::Impl {
         box.typographic_descent = box.descent;
         box.real = false;
 
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
         SkFont font;
         sk_sp<SkTypeface> tf = resolve_typeface(font_family, font_weight, font_slant);
         if (tf) font.setTypeface(std::move(tf));
@@ -783,7 +793,7 @@ struct TextShaper::Impl {
                                  float font_size, int font_weight,
                                  int font_slant) {
         LineBox box;
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
         auto ctx = TextFontContext::shared();
         auto collection = ctx->font_collection();
         if (!collection || text.empty()) return box;
@@ -880,7 +890,7 @@ struct TextShaper::Impl {
         float width = 0;
         bool styled_measurement = false;
 
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
         // Measure through the same fallback-aware SkParagraph path used by
         // SkiaCanvas paint. Besides honoring slant, tracking, and OpenType
         // features, this keeps plain and styled CJK/emoji runs on the same

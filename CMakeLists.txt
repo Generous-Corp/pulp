@@ -451,6 +451,15 @@ endif()
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
+# The lite editor stack's replacement objects (see PulpLiteEditorObjects.cmake).
+# Apple only: the lite TextShaper measures through CoreText.
+if(APPLE AND NOT IOS AND PULP_HAS_SKIA AND TARGET pulp-canvas AND TARGET pulp-view-core)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLiteEditorObjects.cmake")
+    _pulp_add_lite_editor_objects(pulp-canvas-lite-objects HOME pulp-canvas
+        SOURCES core/canvas/src/text_shaper.cpp core/canvas/src/font_resolver.cpp)
+    _pulp_add_lite_editor_objects(pulp-view-lite-objects HOME pulp-view-core
+        SOURCES core/view/src/canvas_widget.cpp core/view/src/asset_manager.cpp)
+endif()
 # The arranger rung sits above both the editor kernel and the view stack, so it
 # is added after core/view rather than beside core/timeline_editor.
 add_subdirectory(core/timeline_view)

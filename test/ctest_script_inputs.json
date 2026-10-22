@@ -2851,6 +2851,7 @@
   "pulp-test-js-bytecode-embed",
   "pulp-test-latency-contract",
   "pulp-test-lfo-sampling",
+  "pulp-test-lite-editor-host-mac",
   "pulp-test-live-dsp-telemetry",
   "pulp-test-live-dsp-telemetry-graph",
   "pulp-test-live-kernel-crossfade-null",

@@ -89,7 +89,7 @@ endfunction()
 function(pulp_add_plugin target)
     _pulp_resolve_consumer_targets()
     cmake_parse_arguments(PLUGIN
-        "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;AAX_HEADLESS;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
+        "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;LITE_EDITOR;AAX_HEADLESS;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
         ${ARGN}
@@ -166,6 +166,21 @@ function(pulp_add_plugin target)
                 "pulp_add_plugin(${target} AAX_HEADLESS): this Pulp SDK does not export Pulp::format-core")
         endif()
         set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")
+    endif()
+
+    # LITE_EDITOR: the editor's binaries leave out the GPU hosts and link the
+    # lite replacement objects, so they carry no Skia, Dawn or Tint (see
+    # tools/cmake/PulpLiteEditorObjects.cmake). For an editor that paints on the
+    # CoreGraphics host: AutoUi, or C++ views that never ask for the GPU. A
+    # scripted UI needs the GPU host, so UI_SCRIPT keeps the full stack.
+    set(_PULP_EDITOR_STACK full)
+    if(PLUGIN_LITE_EDITOR)
+        if(PLUGIN_UI_SCRIPT)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): LITE_EDITOR cannot be combined with UI_SCRIPT; "
+                "a scripted editor renders on the GPU host")
+        endif()
+        set(_PULP_EDITOR_STACK lite)
     endif()
 
     _pulp_normalize_ui_script_path(_PULP_UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_UI_SCRIPT}")
