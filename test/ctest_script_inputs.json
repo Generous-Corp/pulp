@@ -2335,6 +2335,7 @@
   "pulp-generate-control-protocol-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
+  "pulp-gpu-wavenet-scaling-bench",
   "pulp-gpu-wgpu-native-staged-diagnostic",
   "pulp-heritage-adaptive-calibration-render",
   "pulp-heritage-c1-c5-calibration-render",
@@ -7067,11 +7068,15 @@
    "inputs": [
     ".github/workflows",
     ".github/workflows/build.yml",
+    "core/audio/include/pulp/audio/buffer_ops.hpp",
+    "core/audio/src/buffer_ops.cpp",
     "core/gpu_audio/CMakeLists.txt",
     "core/host",
     "core/host/include",
     "core/host/include/pulp/host/custom_node_type.hpp",
     "core/host/include/pulp/host/signal_graph.hpp",
+    "core/runtime/include/pulp/runtime/seqlock.hpp",
+    "core/runtime/include/pulp/runtime/simd.hpp",
     "docs/status",
     "docs/status/consumption-profiles.json",
     "docs/status/consumption-profiles.schema.json",
@@ -7084,6 +7089,9 @@
     "test/fixtures/sample-region-compat/expected/abi.txt",
     "test/sample_region_compat/compat_runner.cpp",
     "test/support",
+    "test/test_buffer_ops.cpp",
+    "test/test_meter_source.cpp",
+    "test/test_sync_race_hammer.cpp",
     "tools/ci",
     "tools/ci/build_dir_lock.py",
     "tools/ci/changed_surface_lane_reds.json",
@@ -7246,6 +7254,16 @@
   "project-package-mutation-control": {
    "entry": "${CMAKE_BINARY_DIR}/test/run_project_package_mutation_control.py",
    "inputs": [],
+   "kind": "python"
+  },
+  "proxmox-ephemeral-windows-runner-selftest": {
+   "entry": "tools/ci/test_proxmox_ephemeral_runner_windows.py",
+   "inputs": [
+    "tools/ci/proxmox-ephemeral-runner-windows.sh",
+    "tools/ci/proxmox-host-health.sh",
+    "tools/ci/pulp-windows-ephemeral-pool@.service",
+    "tools/ci/test_proxmox_ephemeral_runner_windows.py"
+   ],
    "kind": "python"
   },
   "proxmox-host-watch-selftest": {

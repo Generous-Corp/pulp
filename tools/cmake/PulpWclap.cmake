@@ -79,7 +79,7 @@ if(NOT PULP_WCLAP_CHOC_INCLUDE)
     set(PULP_WCLAP_CHOC_INCLUDE "${choc_wclap_SOURCE_DIR}")
 endif()
 
-# CLAP headers (header-only, MIT). Fetched to match the native pin (1.2.9).
+# CLAP headers (header-only, MIT). Fetched to match the native pin (1.2.10).
 if(NOT PULP_WCLAP_CLAP_INCLUDE)
     include(FetchContent)
     FetchContent_Declare(

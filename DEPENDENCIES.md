@@ -19,16 +19,16 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | Babel parser | 7.29.7 | MIT | JSX/TSX source-contract extraction for `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`; npm-installed for import tooling, not bundled into the C++ runtime | import tooling | 2026-05-27 |
 | Catch2 | 3.7.1 | BSL-1.0 | Unit testing framework | test | 2026-03-24 |
 | CHOC | pulp-webview-dnd-poc1 (fork of f0f5cdf5a938) | ISC | JS engine abstraction, MIDI utilities, audio helpers, WebView drag-and-drop | multiple | 2026-03-24 |
-| CLAP | 1.2.9 | MIT | CLAP plugin format headers | pulp-format | 2026-03-24 |
+| CLAP | 1.2.10 | MIT | CLAP plugin format headers | pulp-format | 2026-03-24 |
 | command-group | 5.0.1 | Apache-2.0 | Cross-platform process-tree containment and termination for bounded Rust CLI trace analysis (Unix process groups; Windows Job Objects) | pulp-rs | 2026-08-30 |
 | cpp-httplib | vendored-snapshot | MIT | HTTP client (GET/POST/download) | pulp-runtime | 2026-04-07 |
 | css-tree | 3.2.1 | MIT | CSS value parsing and lexer validation for JSX source-contract extraction; npm-installed for import tooling, not bundled into the C++ runtime | import tooling | 2026-05-27 |
 | Dawn | chrome/m153 deps (bundled in Skia toolchain) | BSD-3-Clause | WebGPU implementation used by the GPU render path (via pre-built Skia toolchain) | pulp-render | 2026-08-29 |
-| DRACO | 1.5.7 | Apache-2.0 | Optional glTF mesh decompression; fetched via FetchContent only when `PULP_ENABLE_DRACO=ON` (default OFF) | pulp-render | 2026-04-21 |
+| DRACO | 1.5.9 | Apache-2.0 | Optional glTF mesh decompression; fetched via FetchContent only when `PULP_ENABLE_DRACO=ON` (default OFF) | pulp-render | 2026-04-21 |
 | dr_libs | vendored-snapshot; dr_mp3@4d74802+0b12cb57 | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (dr_flac, dr_mp3, dr_wav); dr_mp3 carries upstream's one-line Xing frame-count overflow fix | pulp-audio | 2026-04-07 |
-| fastgltf | v0.9.0 | MIT | Optional native no-JS glTF/GLB parser; fetched only when `PULP_ENABLE_SCENE3D=ON` | pulp-scene | 2026-06-03 |
+| fastgltf | v0.9.1 | MIT | Optional native no-JS glTF/GLB parser; fetched only when `PULP_ENABLE_SCENE3D=ON` | pulp-scene | 2026-06-03 |
 | Gradle Wrapper | 8.11 | Apache-2.0 | Redistributed wrapper scripts and JAR used to bootstrap the pinned Android build toolchain (JAR SHA-256 `b3a875ddc1f044746e1b1a55f645584505f4a10438c1afea9f15e92a7c42ec13`) | Android tooling | 2026-07-14 |
-| Highway | 1.2.0 | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | pulp-runtime | 2026-04-06 |
+| Highway | 1.4.0 | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | pulp-runtime | 2026-04-06 |
 | ICU | 78.2 (bundled in Skia `chrome/m153`, `libskunicode_icu.a`) | Unicode-3.0 (+ ICU, BSD, IPADIC/ICOT notices for bundled dictionaries) | Text segmentation (line/word/sentence/grapheme breaks), bidi and normalization data for SkParagraph and TextShaper, linked through Skia. Pulp links the data subsetted (`PULP_ICU_DATA_SUBSET`, `tools/cmake/scripts/icu_data_subset.py`): collation, time-zone, currency, display-name, unit, transliteration, spell-out, IDNA, converter and spoof data removed (10.9 MB to 4.85 MB). See NOTICE.md. | pulp-canvas | 2026-10-22 |
 | Inter | 4.001;git-9221beed3 | SIL OFL 1.1 | Embedded UI font. TTF SHA-256 `40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82`; web-player WOFF2 SHA-256 `338239f6b590b8ced3bf857654d32da3fd3663294cd3003651ed57aa3abd7aa1` | pulp-view, web-player | 2026-04-21 |
 | JetBrains Mono | 2.304 | SIL OFL 1.1 | Embedded monospace font (JetBrainsMono-Regular.ttf, SHA-256 `a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f`) | pulp-view | 2026-04-21 |
@@ -39,7 +39,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | LV2 | 1.18.10 | ISC | LV2 plugin format headers | pulp-format | 2026-03-30 |
 | Material Design Icons | bundled-with-mkdocs-material | Apache-2.0 | Icon set bundled inside mkdocs-material and redistributed as SVG assets in the generated docs site | docs | 2026-04-22 |
 | Mbed TLS | 3.6.2 | Apache-2.0 | Cryptographic primitives (SHA-256, RSA, AES) | pulp-runtime | 2026-04-21 |
-| miniz | 3.0.2 | MIT | ZIP/GZIP compression | pulp-runtime | 2026-04-07 |
+| miniz | 3.1.2 | MIT | ZIP/GZIP compression | pulp-runtime | 2026-04-07 |
 | mkdocs | transitive | BSD-2-Clause | Static site generator (transitive via mkdocs-material); theme assets (search JS, sitemap) redistributed in the generated docs site | docs | 2026-04-22 |
 | mkdocs-awesome-pages-plugin | >=2.9,<3 | MIT | MkDocs plugin for nav ordering; build-time only | docs | 2026-04-22 |
 | mkdocs-git-revision-date-localized-plugin | >=1.2,<2 | MIT | MkDocs plugin for git-revision dates; build-time only | docs | 2026-04-22 |
@@ -51,11 +51,11 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | node-addon-api | 8.x | MIT | Node.js bindings via Node-API (optional, npm install) | bindings/nodejs | 2026-03-25 |
 | Node.js runtime | 22.23.2 | MIT and bundled third-party notices | Official target-architecture executable shipped with `pulp-import-design` so sandboxed plugin hosts do not depend on Homebrew, PATH, or host dylibs. Exact archive SHA-256 pins live in `prepare_node_runtime.py`; the complete upstream `node.LICENSE` ships beside the executable. | design-import | 2026-08-27 |
 | Noto Color Emoji | noto-emoji main @ 2026-05-17 | SIL OFL 1.1 | Embedded color-emoji typeface (NotoColorEmoji.ttf, SHA-256 `0ae57fe58645638523ba35f388d93739d292539a9acb84df5700c81b1e1a28d2`). Bundled only when `PULP_BUNDLE_NOTO_COLOR_EMOJI=ON` (defaults ON for Linux/Android/headless, OFF on macOS/Windows where the platform color-emoji typeface is preferred). Provides the cross-platform fallback for emoji clusters in Canvas2D text. | pulp-canvas | 2026-05-17 |
-| Brotli | v1.2.0 | MIT | Decoder used by the bundled WOFF2 path so Chromium-captured `@font-face` bytes can be registered by the native renderer. | pulp-canvas | 2026-08-12 |
+| Brotli | v1.2.1 | MIT | Decoder used by the bundled WOFF2 path so Chromium-captured `@font-face` bytes can be registered by the native renderer. | pulp-canvas | 2026-08-12 |
 | WOFF2 | fb9c3379f260 | MIT | Google's WOFF2-to-sfnt decoder. Materialized browser imports register their exact packaged font subsets instead of substituting a system face. | pulp-canvas | 2026-08-12 |
-| Oboe | 1.9.0 | Apache-2.0 | Android audio backend (AAudio/OpenSL ES abstraction) | pulp-audio | 2026-04-07 |
+| Oboe | 1.11.0 | Apache-2.0 | Android audio backend (AAudio/OpenSL ES abstraction) | pulp-audio | 2026-04-07 |
 | Perfetto | v57.2 | Apache-2.0 | Tracing SDK (amalgamated `perfetto.cc`/`perfetto.h`, shipped as the `perfetto-cpp-sdk-src.zip` release artifact) for the dev-only Perfetto tracing subsystem. Fetched by pinned URL + SHA-256 in `tools/cmake/PulpTracing.cmake` ONLY when `PULP_TRACING=ON`; OFF by default, never linked into a shipping build, never exported by `cmake --install`. The prebuilt `trace_processor_shell` query tool (same v57.2) backs offline `pulp trace query --trace`; `pulp trace fetch` downloads it on demand into `$PULP_HOME`, SHA-256-verified per platform, never linked or shipped. | pulp-tracing (dev-only) | 2026-07-08 |
-| pugixml | 1.14 | MIT | XML parsing and generation | pulp-runtime | 2026-04-07 |
+| pugixml | 1.16 | MIT | XML parsing and generation | pulp-runtime | 2026-04-07 |
 | pybind11 | 2.13.6 | BSD-3-Clause | Python bindings for HeadlessHost (optional, FetchContent) | bindings/python | 2026-03-25 |
 | Pygments | transitive | BSD-2-Clause | Syntax highlighter used by mkdocs + pymdownx.highlight; redistributed as inline HTML/CSS in the generated docs site | docs | 2026-04-22 |
 | pymdown-extensions | >=10.7,<11 | MIT | Markdown extension bundle used by mkdocs-material (admonitions, tabs, superfences, highlight, emoji) | docs | 2026-04-22 |
@@ -72,10 +72,10 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | TweetNaCl | 20140427 | Public domain | Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures and signed node/package metadata | pulp-runtime | 2026-05-25 |
 | V8 | v8-m153-15.3.76.5-26cef0256b0e | BSD-3-Clause | JIT JavaScript engine backend (optional, selected with `PULP_JS_ENGINE=v8`; default is QuickJS, with JSC opt-in on Apple). Sealed prebuilt `libv8` (exports only `v8::`/`cppgc::`; bundles ICU/zlib/Abseil internally) via the [danielraffel/v8-builder](https://github.com/danielraffel/v8-builder) release matched to the active Skia/Dawn chrome/m153 provider generation; fetched by `tools/scripts/fetch_v8_for_release.py` into `external/v8-build/`. Exact provider identity and ODR gates remain mandatory. The m153 Android V8 provider requires API 29+ (general Pulp/QuickJS Android remains API 26); V8 is unavailable on iOS, where QuickJS and JSC remain supported. See NOTICE.md for bundled ICU/zlib/Abseil attribution. | pulp-view | 2026-08-29 |
 | Vellum D15 GPU provider | 0.1.7 (retired; pending v0.1.8) | MIT plus bundled third-party notices | Opt-in macOS development provider for coordinated Dawn GPU-audio execution. Vellum 0.1.7 is retired; D15 awaits v0.1.8. A D15-enabled SDK redistributes `libvellum-gpu.dylib` and the provider's exact LICENSE, NOTICE, and dependency inventory. Production release eligibility remains blocked until Vellum's renderer builder emits and attests an exhaustive transitive source/license manifest. | pulp-gpu-audio (development SDK only) | 2026-09-17 |
-| VST3 SDK | v3.8.0_build_66 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
+| VST3 SDK | v3.8.1_build_84 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
 | WebGPU-distribution | 17dcd42a7683 | MIT | WebGPU C API wrapper for Dawn (FetchContent) | pulp-render | 2026-03-25 |
 | wgpu-native | v24.0.3.1 | MIT OR Apache-2.0 | Prebuilt WebGPU runtime (`libwgpu_native`) that WebGPU-distribution links on desktop GPU builds and Pulp stages beside each module. Every release asset is pinned by SHA-256 (archive and extracted tree) in `tools/deps/manifest.json`; `setup.sh` and configure refuse a mismatch. | pulp-render | 2026-10-12 |
-| yaml-cpp | 0.8.0 | MIT | YAML frontmatter parser for the DESIGN.md import source (FetchContent) | pulp-view | 2026-05-13 |
+| yaml-cpp | 0.9.0 | MIT | YAML frontmatter parser for the DESIGN.md import source (FetchContent) | pulp-view | 2026-05-13 |
 | Yoga | 3.2.1 | MIT | CSS Flexbox/Grid layout engine (Meta, FetchContent) | pulp-view | 2026-03-29 |
 
 ## Open-Source Format SDKs Pulp Can Bootstrap

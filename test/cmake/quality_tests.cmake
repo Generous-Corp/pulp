@@ -1236,6 +1236,11 @@ if(Python3_Interpreter_FOUND)
     # Pure Python against a recorded host observation; runs on every host.
     add_test(NAME proxmox-host-watch-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_host_watch.py")
+    # Drives the supervisor against fake qm/gh/ssh, so it runs on any Unix host.
+    if(UNIX)
+        add_test(NAME proxmox-ephemeral-windows-runner-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_runner_windows.py")
+    endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME proxmox-ephemeral-linux-runner-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_runner_linux.py")
