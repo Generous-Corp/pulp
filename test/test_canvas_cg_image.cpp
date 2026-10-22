@@ -270,6 +270,16 @@ TEST_CASE("Canvas default measure_image_from_data reads a PNG header only",
                                   0,   0,   0,   0,   0,   0,   0,    0,    0,    0,    0, 0};
     REQUIRE_FALSE(canvas.measure_image_from_data(gif_header, sizeof(gif_header), w, h));
     CHECK(w == 0.0f);
+
+    // A first chunk other than IHDR, or a dimension past PNG's 2^31 - 1 cap,
+    // is not a size.
+    std::vector<uint8_t> bad = png;
+    bad[12] = 'X';
+    REQUIRE_FALSE(canvas.measure_image_from_data(bad.data(), bad.size(), w, h));
+    bad = png;
+    bad[16] = 0xff;
+    REQUIRE_FALSE(canvas.measure_image_from_data(bad.data(), bad.size(), w, h));
+    CHECK(w == 0.0f);
 }
 
 #endif // __APPLE__
