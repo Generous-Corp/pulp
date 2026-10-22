@@ -159,10 +159,19 @@ public:
 
     /// Process one caller-owned channel in place. A null buffer with a non-zero
     /// frame count or an invalid channel is rejected without changing state.
+    ///
+    /// A coefficient transition runs sample by sample; once none is pending,
+    /// the rest of the block runs the six sections through
+    /// Filter::process_chain(), which matches the sample path while the
+    /// states are at or above 1e-15.
     bool process_block(SampleType* samples, std::size_t frames, std::size_t channel = 0) {
         if (channel >= Channels || (samples == nullptr && frames != 0)) return false;
-        for (std::size_t frame = 0; frame < frames; ++frame)
+        std::size_t frame = 0;
+        for (; frame < frames && transition_active(channel); ++frame)
             samples[frame] = process(samples[frame], channel);
+        if (frame < frames)
+            Filter::process_chain(filters_[channel].data(), band_count, samples + frame,
+                                  frames - frame);
         return true;
     }
 

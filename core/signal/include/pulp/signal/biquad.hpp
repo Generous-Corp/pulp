@@ -9,9 +9,6 @@
 
 namespace pulp::signal {
 
-template <typename SampleType, std::size_t MaxSections>
-class SosCascadeT;
-
 // Coefficients of one normalized second-order section (a0 == 1).
 //
 // This is the canonical exchange type between the three layers that all speak
@@ -274,6 +271,74 @@ public:
         right.process(right_buffer, num_samples);
     }
 
+    /// Run a chain of sections (a cascade: each section's output feeds the
+    /// next) over a buffer in place.
+    ///
+    /// Sample-major over up to kChainSectionsPerPass sections at a time: each
+    /// sample runs through every section of the pass before the next sample
+    /// starts, so the sections' recursions are independent dependency chains
+    /// that execute concurrently instead of one section's whole buffer waiting
+    /// on its own feedback latency (pipeline interleaving). Every section uses
+    /// the sample path's expressions on register-resident coefficients and
+    /// state, and the denormal snap runs every kStateSnapInterval samples and
+    /// at the end of the call, so the output is identical to chaining the
+    /// sections' per-sample process() while the states are at or above 1e-15.
+    static void process_chain(BiquadT* sections, std::size_t count, SampleType* buffer,
+                              std::size_t num_samples) noexcept {
+        std::size_t first = 0;
+        while (first < count) {
+            const std::size_t n = count - first < kChainSectionsPerPass ? count - first
+                                                                         : kChainSectionsPerPass;
+            switch (n) {
+                case 1: chain_pass<1>(sections + first, buffer, num_samples); break;
+                case 2: chain_pass<2>(sections + first, buffer, num_samples); break;
+                case 3: chain_pass<3>(sections + first, buffer, num_samples); break;
+                case 4: chain_pass<4>(sections + first, buffer, num_samples); break;
+                case 5: chain_pass<5>(sections + first, buffer, num_samples); break;
+                case 6: chain_pass<6>(sections + first, buffer, num_samples); break;
+                case 7: chain_pass<7>(sections + first, buffer, num_samples); break;
+                default: chain_pass<8>(sections + first, buffer, num_samples); break;
+            }
+            first += n;
+        }
+    }
+
+    /// process_chain() for two channels at once, each through its own chain
+    /// of `count` sections, with the channels in the lanes of one vector.
+    /// Each channel's output is bit-identical to process_chain() on it alone.
+    /// Compilers without GNU vector extensions run the two chains in turn.
+    static void process_chain_stereo(BiquadT* left, BiquadT* right, std::size_t count,
+                                     SampleType* left_buffer, SampleType* right_buffer,
+                                     std::size_t num_samples) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+        std::size_t first = 0;
+        while (first < count) {
+            const std::size_t n = count - first < kChainSectionsPerPass ? count - first
+                                                                         : kChainSectionsPerPass;
+            BiquadT* l = left + first;
+            BiquadT* r = right + first;
+            switch (n) {
+                case 1: chain_pair_pass<1>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 2: chain_pair_pass<2>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 3: chain_pair_pass<3>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 4: chain_pair_pass<4>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 5: chain_pair_pass<5>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 6: chain_pair_pass<6>(l, r, left_buffer, right_buffer, num_samples); break;
+                case 7: chain_pair_pass<7>(l, r, left_buffer, right_buffer, num_samples); break;
+                default: chain_pair_pass<8>(l, r, left_buffer, right_buffer, num_samples); break;
+            }
+            first += n;
+        }
+#else
+        process_chain(left, count, left_buffer, num_samples);
+        process_chain(right, count, right_buffer, num_samples);
+#endif
+    }
+
+    /// Sections process_chain() runs together in one sample-major pass. Eight
+    /// sections' state fits in registers alongside the working set.
+    static constexpr std::size_t kChainSectionsPerPass = 8;
+
     // Shortest call process_stereo() runs in vector lanes.
     static constexpr int kStereoLaneMinSamples = 64;
 
@@ -365,6 +430,86 @@ private:
     }
 #endif
 
+    template <std::size_t Count>
+    static void chain_pass(BiquadT* sections, SampleType* buffer, std::size_t num_samples) noexcept {
+        constexpr std::size_t kSnap = static_cast<std::size_t>(kStateSnapInterval);
+        SampleType b0[Count], b1[Count], b2[Count], a1[Count], a2[Count], s1[Count], s2[Count];
+        for (std::size_t k = 0; k < Count; ++k) {
+            b0[k] = sections[k].b0_;
+            b1[k] = sections[k].b1_;
+            b2[k] = sections[k].b2_;
+            a1[k] = sections[k].a1_;
+            a2[k] = sections[k].a2_;
+            s1[k] = sections[k].s1_;
+            s2[k] = sections[k].s2_;
+        }
+        for (std::size_t start = 0; start < num_samples; start += kSnap) {
+            const std::size_t end = num_samples - start < kSnap ? num_samples : start + kSnap;
+            for (std::size_t i = start; i < end; ++i) {
+                SampleType x = buffer[i];
+                for (std::size_t k = 0; k < Count; ++k) {
+                    const SampleType output = b0[k] * x + s1[k];
+                    s1[k] = b1[k] * x - a1[k] * output + s2[k];
+                    s2[k] = b2[k] * x - a2[k] * output;
+                    x = output;
+                }
+                buffer[i] = x;
+            }
+            for (std::size_t k = 0; k < Count; ++k) {
+                s1[k] = snap_to_zero(s1[k]);
+                s2[k] = snap_to_zero(s2[k]);
+            }
+        }
+        for (std::size_t k = 0; k < Count; ++k) {
+            sections[k].s1_ = s1[k];
+            sections[k].s2_ = s2[k];
+        }
+    }
+
+#if defined(__GNUC__) || defined(__clang__)
+    template <std::size_t Count>
+    static void chain_pair_pass(BiquadT* l, BiquadT* r, SampleType* lb, SampleType* rb,
+                                std::size_t num_samples) noexcept {
+        constexpr std::size_t kSnap = static_cast<std::size_t>(kStateSnapInterval);
+        Pair b0[Count], b1[Count], b2[Count], a1[Count], a2[Count], s1[Count], s2[Count];
+        for (std::size_t k = 0; k < Count; ++k) {
+            b0[k] = Pair{l[k].b0_, r[k].b0_};
+            b1[k] = Pair{l[k].b1_, r[k].b1_};
+            b2[k] = Pair{l[k].b2_, r[k].b2_};
+            a1[k] = Pair{l[k].a1_, r[k].a1_};
+            a2[k] = Pair{l[k].a2_, r[k].a2_};
+            s1[k] = Pair{l[k].s1_, r[k].s1_};
+            s2[k] = Pair{l[k].s2_, r[k].s2_};
+        }
+        for (std::size_t start = 0; start < num_samples; start += kSnap) {
+            const std::size_t end = num_samples - start < kSnap ? num_samples : start + kSnap;
+            for (std::size_t i = start; i < end; ++i) {
+                Pair v = {lb[i], rb[i]};
+                for (std::size_t k = 0; k < Count; ++k) {
+                    const Pair output = b0[k] * v + s1[k];
+                    s1[k] = b1[k] * v - a1[k] * output + s2[k];
+                    s2[k] = b2[k] * v - a2[k] * output;
+                    v = output;
+                }
+                lb[i] = v[0];
+                rb[i] = v[1];
+            }
+            for (std::size_t k = 0; k < Count; ++k) {
+                for (int lane = 0; lane < 2; ++lane) {
+                    s1[k][lane] = snap_to_zero(s1[k][lane]);
+                    s2[k][lane] = snap_to_zero(s2[k][lane]);
+                }
+            }
+        }
+        for (std::size_t k = 0; k < Count; ++k) {
+            l[k].s1_ = s1[k][0];
+            l[k].s2_ = s2[k][0];
+            r[k].s1_ = s1[k][1];
+            r[k].s2_ = s2[k][1];
+        }
+    }
+#endif
+
     // Largest pole radius of z^2 + a1 z + a2, in double so the threshold
     // decision does not depend on the sample type.
     void update_block_form() {
@@ -381,12 +526,6 @@ private:
         // A NaN radius fails the comparison and keeps the sample-path order.
         sample_path_order_in_block_ = !(radius <= kFeedbackLastMaxPoleRadius);
     }
-
-    // The cascade's block kernel runs several sections' recursions in
-    // registers at once and reads and writes their coefficients and state
-    // directly.
-    template <typename, std::size_t>
-    friend class SosCascadeT;
 
     static constexpr SampleType pi =
         std::is_same_v<SampleType, float>

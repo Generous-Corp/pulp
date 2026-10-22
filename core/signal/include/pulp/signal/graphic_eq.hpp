@@ -219,11 +219,49 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class GraphicE
 
     /// Process caller-owned storage in place. A null pointer is valid only for
     /// an empty block and otherwise fails without advancing any DSP state.
+    ///
+    /// A pending crossfade runs sample by sample. Otherwise the block goes
+    /// through the active cascade's block path in chunks, which matches the
+    /// sample path; a chunk containing a non-finite input, or producing a
+    /// non-finite output, is rerun sample by sample from a snapshot of the
+    /// cascade so fault recovery happens at the same sample as in process().
     bool process_block(SampleType* samples, std::size_t frames) noexcept {
         if (samples == nullptr && frames != 0)
             return false;
-        for (std::size_t frame = 0; frame < frames; ++frame)
-            samples[frame] = process(samples[frame]);
+        if (!prepared())
+            return true;
+        constexpr SampleType kMaxFinite = std::numeric_limits<SampleType>::max();
+        std::size_t frame = 0;
+        while (frame < frames) {
+            if (transitioning()) {
+                samples[frame] = process(samples[frame]);
+                ++frame;
+                continue;
+            }
+            const std::size_t n = frames - frame < kBlockChunk ? frames - frame : kBlockChunk;
+            SampleType* chunk = samples + frame;
+            unsigned non_finite = 0;
+            for (std::size_t i = 0; i < n; ++i)
+                non_finite |= static_cast<unsigned>(!(std::abs(chunk[i]) <= kMaxFinite));
+            if (non_finite == 0) {
+                SampleType input[kBlockChunk];
+                std::copy(chunk, chunk + n, input);
+                const auto snapshot = cascades_[active_index_];
+                cascades_[active_index_].process(chunk, n);
+                for (std::size_t i = 0; i < n; ++i)
+                    non_finite |= static_cast<unsigned>(!(std::abs(chunk[i]) <= kMaxFinite));
+                if (non_finite == 0) {
+                    healthy_ = true;
+                    frame += n;
+                    continue;
+                }
+                cascades_[active_index_] = snapshot;
+                std::copy(input, input + n, chunk);
+            }
+            for (std::size_t i = 0; i < n; ++i)
+                chunk[i] = process(chunk[i]);
+            frame += n;
+        }
         return true;
     }
 
@@ -358,6 +396,9 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class GraphicE
         transition_total_ = 0;
         transition_remaining_ = 0;
     }
+
+    // Samples per block-path chunk: the unit of the non-finite rerun.
+    static constexpr std::size_t kBlockChunk = 64;
 
     SampleType recover_from_fault() noexcept {
         cascades_[0].reset();
