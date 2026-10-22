@@ -37,6 +37,8 @@ INCLUDE_SLOW_TESTS=false
 
 # shellcheck source=coverage_ctest_policy.sh
 source "${SCRIPT_DIR}/coverage_ctest_policy.sh"
+# shellcheck source=coverage_native_paths.sh
+source "${SCRIPT_DIR}/coverage_native_paths.sh"
 
 # Coverage measures executable source lines. It does not need to repeat the
 # long soak/configuration proofs that the primary build matrix already owns.
@@ -315,7 +317,9 @@ PROFILE_INPUTS="${REPORT_DIR}/llvm-profdata-inputs.txt"
 # Keep argv bounded and use one llvm-profdata invocation. xargs may split a
 # large profile set into multiple merges, and each later -o invocation
 # overwrites the prior result instead of accumulating it.
-find "${PROFRAW_DIR}" -name '*.profraw' -type f -print > "${PROFILE_INPUTS}"
+# llvm-profdata reads this list itself, so its entries must be native paths.
+find "${PROFRAW_DIR}" -name '*.profraw' -type f -print \
+    | coverage_native_path_list > "${PROFILE_INPUTS}"
 PROFILE_SHARDS=$(wc -l < "${PROFILE_INPUTS}" | tr -d ' ')
 # Distinct module signatures among the pool files: one per instrumented binary
 # that wrote a profile. Checked against the test-binary count once that is
@@ -521,19 +525,14 @@ OBJ_RSP="${REPORT_DIR}/llvm-cov-objects.rsp"
 # missing -object ("failed to load coverage: '…': no such file or directory"),
 # so one disappearing fixture would blackhole the whole os-windows leg. Drop any
 # that are no longer present instead.
-: > "${OBJ_RSP}"
+KEPT_OBJECT_PATHS=()
 KEPT_OBJECTS=0
 VANISHED_OBJECTS=0
 prev=""
 for tok in "${BINARIES[@]}"; do
     if [[ "${prev}" == "-object" ]]; then
         if [[ -f "${tok}" ]]; then
-            # Quote the path: LLVM response files are whitespace-tokenized but
-            # honor double quotes, so a runner workdir containing a space
-            # (e.g. /Volumes/CI Builds/...) stays a single -object argument
-            # instead of splitting into bogus tokens. Harmless for the common
-            # space-free GitHub/self-hosted paths.
-            printf -- '-object\n"%s"\n' "${tok}" >> "${OBJ_RSP}"
+            KEPT_OBJECT_PATHS+=("${tok}")
             KEPT_OBJECTS=$((KEPT_OBJECTS + 1))
         else
             VANISHED_OBJECTS=$((VANISHED_OBJECTS + 1))
@@ -561,6 +560,14 @@ if [[ "${VANISHED_OBJECTS}" -gt 25 \
     echo "run_coverage.sh: ${VANISHED_OBJECTS}/${TOTAL_OBJECTS} -object entries vanished after the pre-flight probe (>5%) — refusing to upload coverage from the survivors; object discovery or the build tree is likely broken." >&2
     exit 1
 fi
+# llvm-cov reads the response file itself, so its paths must be native. Quote
+# each one: LLVM response files are whitespace-tokenized but honor double
+# quotes, so a runner workdir containing a space (e.g. /Volumes/CI Builds/...)
+# stays a single -object argument instead of splitting into bogus tokens.
+printf '%s\n' "${KEPT_OBJECT_PATHS[@]}" | coverage_native_path_list \
+    | while IFS= read -r native; do
+        printf -- '-object\n"%s"\n' "${native}"
+    done > "${OBJ_RSP}"
 echo "=== Wrote ${KEPT_OBJECTS} -object tokens to a response file (avoids Windows ARG_MAX) ==="
 
 coverage_phase "llvm-cov report (top-level summary)"
