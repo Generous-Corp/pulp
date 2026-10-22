@@ -41,7 +41,24 @@ GATE_FRAMES = 64
 MIN_COUNTED_BLOCKS = 10_000
 SAMPLE_FIELDS = (
     "release_ns", "submit_ns", "submit_end_ns", "visible_ns", "gpu_busy_ns",
-    "gpu_end_ns", "callback_ns", "worker_cpu_ns", "oracle", "stalled",
+    "gpu_end_ns", "callback_ns", "callback_cpu_ns", "worker_cpu_ns", "oracle", "stalled",
+)
+# The verifier's own parity bound; a receipt's stated tolerance is ignored.
+PARITY_TOLERANCE = 1e-4
+# Allowance for the Metal GPU-clock to host-clock conversion.
+CLOCK_MARGIN_NS = 50_000
+GATING_ROBUSTNESS = "tint_equivalent"
+ROBUSTNESS_PROBE_ROLE = "robustness_cost_probe"
+ROBUSTNESS_PROBE_LANE = "metal_shared_event_unguarded_robustness_probe"
+ROBUSTNESS_REFERENCE_LANE = "metal_shared_event"
+REQUIRED_LANES = (
+    "metal_shared_event",
+    "metal_completed_handler",
+    ROBUSTNESS_PROBE_LANE,
+    "dawn_imported_timed_wait_any",
+    "dawn_imported_process_events_poll50us",
+    "dawn_imported_wait_any_poll50us",
+    "dawn_staged_timestamps_timed_wait_any",
 )
 
 # PROPOSED by the roadmap; the owner ratifies. Fractions are of the block
@@ -115,21 +132,33 @@ def cell_metrics(cell: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]
         if s["gpu_busy_ns"][i] >= 0:
             busy.append(s["gpu_busy_ns"][i])
             if ok:
-                # Submit-to-visible minus GPU busy bounds wake latency from
-                # above when no host-domain completion time exists.
+                # Submit-to-visible minus GPU busy: an upper bound on wake
+                # latency where no host-domain completion time exists.
                 wake_bound.append(visible - submit - s["gpu_busy_ns"][i])
         if ok and s["gpu_end_ns"][i] >= 0:
             wake.append(visible - s["gpu_end_ns"][i])
         if ok and s["callback_ns"][i] >= 0:
             cb_to_worker.append(visible - s["callback_ns"][i])
     cpu = [v for v in s["worker_cpu_ns"] if v >= 0]
+    callback_cpu = [v for v in s.get("callback_cpu_ns", []) if v >= 0]
+    # Gate CPU: process CPU over the driven window, minus the render thread
+    # and the oracle, per driven block. It counts completion work wherever it
+    # runs: Dawn's on the worker, Metal's on its own dispatch threads.
+    driven = cell.get("driven_blocks") or 0
+    process_cpu = None
+    if driven > 0:
+        process_cpu = max(0, cell.get("process_cpu_total_ns", 0) -
+                          cell.get("render_cpu_in_window_ns", 0) -
+                          cell.get("oracle_cpu_ns", 0)) / driven
     frames = cell.get("render_load", {}).get("frame_ns", [])
     return {
-        "lane": cell["lane"], "side": cell["side"], "frames": cell["frames"],
-        "load": cell["load"], "blocks": n, "period_ns": period,
+        "lane": cell["lane"], "side": cell["side"], "role": cell.get("role", "gating"),
+        "frames": cell["frames"], "load": cell["load"], "blocks": n, "period_ns": period,
         "submit_to_visible_ns": summarize(s2v),
         "gpu_busy_ns": summarize(busy),
         "worker_cpu_ns": summarize(cpu),
+        "callback_cpu_ns": summarize(callback_cpu),
+        "process_cpu_per_block_ns": process_cpu,
         "wake_ns": summarize(wake),
         "callback_to_worker_ns": summarize(cb_to_worker),
         "wake_upper_bound_ns": summarize(wake_bound),
@@ -146,14 +175,48 @@ def cell_metrics(cell: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def _check_samples(cell: dict[str, Any], refusals: list[str]) -> None:
+    """Refuse a cell whose timeline is impossible."""
+    s = cell["samples"]
+    tag = f"{cell['lane']}:{cell['frames']}:{cell['load']}"
+    for i in range(cell["blocks"]):
+        release, submit = s["release_ns"][i], s["submit_ns"][i]
+        submit_end, visible = s["submit_end_ns"][i], s["visible_ns"][i]
+        if min(release, submit, submit_end) < 0 or not release <= submit <= submit_end:
+            refusals.append(f"sample_order:{tag}")
+            return
+        if visible >= 0 and visible < submit_end:
+            refusals.append(f"sample_order:{tag}")
+            return
+        gpu_end = s["gpu_end_ns"][i]
+        if gpu_end >= 0 and visible >= 0 and not (
+                submit - CLOCK_MARGIN_NS <= gpu_end <= visible + CLOCK_MARGIN_NS):
+            refusals.append(f"sample_gpu_end_order:{tag}")
+            return
+        busy = s["gpu_busy_ns"][i]
+        if busy >= 0 and visible >= 0 and busy > visible - submit + CLOCK_MARGIN_NS:
+            refusals.append(f"sample_gpu_busy_exceeds_latency:{tag}")
+            return
+
+
+def _canonical_without(canon: dict[str, Any], *keys: str) -> bytes:
+    return canonical({k: v for k, v in canon.items() if k not in keys})
+
+
 def _check_kernel(receipt: dict[str, Any], completed: list[dict[str, Any]],
-                  refusals: list[str]) -> None:
+                  lanes: dict[str, dict[str, Any]], refusals: list[str]) -> None:
     kernel = receipt.get("kernel", {})
     wgsl = kernel.get("provider_wgsl", {})
     if not wgsl.get("ok"):
         refusals.append("provider_wgsl_unavailable")
         return
-    by_frames: dict[int, set[str]] = {}
+    # The WGSL read from the tree at run time must be the WGSL the binary was
+    # built from (hashed at configure time).
+    if (wgsl.get("build_fft_sha256") != wgsl.get("fft_sha256") or
+            wgsl.get("build_mul_sha256") != wgsl.get("mul_sha256")):
+        refusals.append("provider_wgsl_differs_from_build")
+    gating: dict[int, set[str]] = {}
+    probes: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for cell in completed:
         canon = cell["kernel"].get("canonical")
         digest = cell["kernel"].get("kernel_digest")
@@ -166,16 +229,38 @@ def _check_kernel(receipt: dict[str, Any], completed: list[dict[str, Any]],
                 canon.get("fft_wgsl_sha256") != wgsl.get("fft_sha256") or
                 canon.get("mul_wgsl_sha256") != wgsl.get("mul_sha256")):
             refusals.append(f"dawn_kernel_not_provider_wgsl:{cell['lane']}")
-        by_frames.setdefault(cell["frames"], set()).add(digest)
-    for frames, digests in sorted(by_frames.items()):
+        if cell.get("role", "gating") == ROBUSTNESS_PROBE_ROLE:
+            if cell["side"] != "metal" or canon.get("robustness") != "none":
+                refusals.append(f"robustness_probe_mislabelled:{cell['lane']}")
+            probes.append((cell, canon))
+            continue
+        if canon.get("robustness") != GATING_ROBUSTNESS:
+            refusals.append(f"gating_kernel_not_tint_equivalent:{cell['lane']}:{cell['frames']}")
+        gating.setdefault(cell["frames"], set()).add(digest)
+    for frames, digests in sorted(gating.items()):
         if len(digests) != 1:
             refusals.append(f"kernel_digest_mismatch:{frames}")
-    parity = {(p["lane"], p["frames"], p["load"]): p for p in kernel.get("parity", [])}
+    # The probe must be the gating program with only the guards removed.
+    gating_shape = {}
+    for cell in completed:
+        canon = cell["kernel"].get("canonical")
+        if isinstance(canon, dict) and cell.get("role", "gating") != ROBUSTNESS_PROBE_ROLE:
+            gating_shape.setdefault(cell["frames"], _canonical_without(canon, "robustness"))
+    for cell, canon in probes:
+        if gating_shape.get(cell["frames"]) != _canonical_without(canon, "robustness"):
+            refusals.append(f"kernel_digest_mismatch:{cell['frames']}:robustness_probe")
+    parity = {(p.get("lane"), p.get("frames"), p.get("load")): p
+              for p in kernel.get("parity", [])}
     for cell in completed:
         entry = parity.get((cell["lane"], cell["frames"], cell["load"]))
         if entry is None:
             refusals.append(f"kernel_parity_missing:{cell['lane']}:{cell['frames']}")
-        elif entry.get("max_abs_diff") is None or entry["max_abs_diff"] > entry["tolerance"]:
+            continue
+        reference = lanes.get(entry.get("reference_lane"), {})
+        if reference.get("side") != "dawn" or not reference.get("production_eligible"):
+            refusals.append(f"kernel_parity_reference_not_dawn_production:{cell['lane']}")
+        diff = entry.get("max_abs_diff")
+        if not isinstance(diff, (int, float)) or diff > PARITY_TOLERANCE:
             refusals.append(f"kernel_parity_failed:{cell['lane']}:{cell['frames']}")
 
 
@@ -187,52 +272,72 @@ def host_quiet(preflight: dict[str, Any] | None) -> bool:
 
 def assess(receipt: dict[str, Any], min_blocks: int = MIN_COUNTED_BLOCKS) -> dict[str, Any]:
     """Assess one receipt: refusals, inconclusive reasons, and metrics."""
+    try:
+        return _assess(receipt, min_blocks)
+    except (KeyError, TypeError, IndexError, AttributeError, ValueError) as exc:
+        return {"refusals": [f"malformed_receipt:{type(exc).__name__}:{exc}"],
+                "inconclusive": [], "counted": False, "metrics": [], "host_id": None,
+                "dawn_revision": None, "production_eligible": {}, "identity": {}}
+
+
+def _assess(receipt: dict[str, Any], min_blocks: int) -> dict[str, Any]:
     refusals: list[str] = []
     inconclusive: list[str] = []
     if receipt.get("schema") != SCHEMA:
-        return {"refusals": ["schema_mismatch"], "inconclusive": [], "counted": False,
-                "metrics": []}
+        raise ValueError("schema_mismatch")
     if receipt.get("receipt_sha256") != receipt_digest(receipt):
         refusals.append("receipt_digest_mismatch")
     config = receipt["config"]
-    cells = receipt.get("cells", [])
-    completed = [c for c in cells if c.get("status") == "completed"]
+    lanes = {lane["name"]: lane for lane in config.get("lanes", [])}
+    cells = receipt["cells"]
+    completed = [c for c in cells if c["status"] == "completed"]
     for cell in cells:
-        if cell.get("status") == "failed":
+        if cell["status"] == "failed":
             refusals.append(f"cell_failed:{cell['lane']}:{cell['frames']}:{cell['load']}")
+    shaped = []
     for cell in completed:
-        samples = cell.get("samples", {})
-        if (cell.get("blocks") != config.get("blocks_per_cell") or
-                any(len(samples.get(f, [])) != cell.get("blocks") for f in SAMPLE_FIELDS)):
+        samples = cell["samples"]
+        if (cell["blocks"] != config["blocks_per_cell"] or
+                any(len(samples[f]) != cell["blocks"] for f in SAMPLE_FIELDS)):
             refusals.append(f"sample_shape:{cell['lane']}:{cell['frames']}:{cell['load']}")
-        elif sum(1 for v in samples["oracle"] if v != 1) != cell.get("oracle_failures"):
+            continue
+        shaped.append(cell)
+        if sum(1 for v in samples["oracle"] if v != 1) != cell["oracle_failures"]:
             refusals.append(f"oracle_count_mismatch:{cell['lane']}:{cell['frames']}")
-        elif cell.get("oracle_failures"):
+        elif cell["oracle_failures"]:
             refusals.append(f"oracle_failures:{cell['lane']}:{cell['frames']}:{cell['load']}")
-    _check_kernel(receipt, completed, refusals)
+        _check_samples(cell, refusals)
+    _check_kernel(receipt, completed, lanes, refusals)
 
     if not config.get("paced"):
         refusals.append("not_paced")
-    for frames in REQUIRED_FRAMES:
-        for load in REQUIRED_LOADS:
-            for side in ("metal", "dawn"):
-                if not any(c["frames"] == frames and c["load"] == load and c["side"] == side
+    # Every default lane must have run every block size under every load, so
+    # a subset that leaves out Dawn's best configuration cannot be counted.
+    for lane in REQUIRED_LANES:
+        if lane not in lanes:
+            inconclusive.append(f"lane_missing:{lane}")
+            continue
+        for frames in REQUIRED_FRAMES:
+            for load in REQUIRED_LOADS:
+                if not any(c["lane"] == lane and c["frames"] == frames and c["load"] == load
                            for c in completed):
                     reason = ("render_load_unavailable" if load == "render"
                               else "coverage_incomplete")
-                    inconclusive.append(f"{reason}:{side}:{frames}:{load}")
+                    inconclusive.append(f"{reason}:{lane}:{frames}:{load}")
     for cell in completed:
         if cell["load"] == "render" and cell.get("render_load", {}).get("status") != "completed":
             inconclusive.append(f"render_load_incomplete:{cell['lane']}:{cell['frames']}")
     if not any(c["side"] == "dawn" and c.get("gpu_timestamps") and
-               any(v >= 0 for v in c["samples"]["gpu_busy_ns"]) for c in completed):
+               any(v >= 0 for v in c["samples"]["gpu_busy_ns"]) for c in shaped):
         inconclusive.append("dawn_gpu_timestamps_unavailable")
     if receipt.get("planted_unmatched_kernel"):
         inconclusive.append("planted_unmatched_kernel_run")
     if receipt.get("mode") != "campaign":
         inconclusive.append(f"mode_{receipt.get('mode')}")
-    if config.get("blocks_per_cell", 0) < min_blocks:
+    if config["blocks_per_cell"] < min_blocks:
         inconclusive.append("undersampled")
+    if receipt.get("source_dirty") is not False:
+        inconclusive.append("source_tree_dirty")
     # The host must pass the P2 preflight both before and after the campaign,
     # at the revision being measured.
     preflight = receipt.get("host_preflight")
@@ -248,8 +353,7 @@ def assess(receipt: dict[str, Any], min_blocks: int = MIN_COUNTED_BLOCKS) -> dic
              for k in ("before", "after")):
         inconclusive.append("host_preflight_source_mismatch")
 
-    metrics = [cell_metrics(c, config) for c in completed
-               if not any(r.startswith("sample_shape:" + c["lane"]) for r in refusals)]
+    metrics = [cell_metrics(c, config) for c in shaped]
     # A preflight brackets the run but cannot see a load spike inside it; a
     # worker that starts blocks more than a period late was starved.
     for m in metrics:
@@ -257,56 +361,98 @@ def assess(receipt: dict[str, Any], min_blocks: int = MIN_COUNTED_BLOCKS) -> dic
         if lag is not None and lag > m["period_ns"]:
             inconclusive.append(f"worker_starved:{m['lane']}:{m['frames']}:{m['load']}")
     counted = not refusals and not inconclusive
-    lanes = {lane["name"]: lane for lane in config.get("lanes", [])}
     return {
         "refusals": sorted(set(refusals)),
         "inconclusive": sorted(set(inconclusive)),
         "counted": counted,
         "host_id": preflight["before"].get("host_id") if preflight else None,
         "dawn_revision": receipt.get("dawn", {}).get("dawn_revision"),
+        "identity": {
+            "receipt_sha256": receipt.get("receipt_sha256"),
+            "assembled_at": receipt.get("assembled_at"),
+            "binary_sha256": receipt.get("binary_sha256"),
+            "source_revision": receipt.get("source_revision"),
+        },
         "metrics": metrics,
         "production_eligible": {name: bool(lane.get("production_eligible", True))
                                 for name, lane in lanes.items()},
     }
 
 
-def _best(metrics: list[dict[str, Any]], side: str, load: str, key: str, stat: str,
-          eligible: dict[str, bool] | None = None) -> tuple[float | None, str | None]:
+def _best(metrics: list[dict[str, Any]], side: str, load: str, key: str, stat: str | None,
+          eligible: dict[str, bool]) -> tuple[float | None, str | None]:
+    """Best (lowest) value among production-eligible gating lanes of a side."""
     best: tuple[float | None, str | None] = (None, None)
     for m in metrics:
         if m["side"] != side or m["load"] != load or m["frames"] != GATE_FRAMES:
             continue
-        if eligible is not None and not eligible.get(m["lane"], True):
+        if m["role"] != "gating" or not eligible.get(m["lane"], False):
             continue
-        value = m[key][stat] if key != "miss_rate" else m["miss_rate"]
+        value = m[key] if stat is None else m[key][stat]
         if value is not None and (best[0] is None or value < best[0]):
             best = (value, m["lane"])
     return best
 
 
+def _lane_value(metrics: list[dict[str, Any]], lane: str, load: str, frames: int,
+                key: str, stat: str) -> float | None:
+    for m in metrics:
+        if m["lane"] == lane and m["load"] == load and m["frames"] == frames:
+            return m[key][stat]
+    return None
+
+
+def robustness_cost(metrics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Labelled, non-gating: what the Tint-equivalent guards cost on Metal."""
+    rows = []
+    for frames in REQUIRED_FRAMES:
+        for load in REQUIRED_LOADS:
+            guarded = _lane_value(metrics, ROBUSTNESS_REFERENCE_LANE, load, frames,
+                                  "gpu_busy_ns", "p50")
+            unguarded = _lane_value(metrics, ROBUSTNESS_PROBE_LANE, load, frames,
+                                    "gpu_busy_ns", "p50")
+            if guarded is None or unguarded is None:
+                continue
+            rows.append({
+                "frames": frames, "load": load,
+                "metal_guarded_gpu_busy_p50_ns": guarded,
+                "metal_unguarded_gpu_busy_p50_ns": unguarded,
+                "guard_cost_gpu_busy_p50_ns": guarded - unguarded,
+                "metal_guarded_s2v_p50_ns": _lane_value(
+                    metrics, ROBUSTNESS_REFERENCE_LANE, load, frames,
+                    "submit_to_visible_ns", "p50"),
+                "metal_unguarded_s2v_p50_ns": _lane_value(
+                    metrics, ROBUSTNESS_PROBE_LANE, load, frames, "submit_to_visible_ns", "p50"),
+            })
+    return rows
+
+
 def evaluate_thresholds(assessment: dict[str, Any]) -> dict[str, Any]:
     """Evaluate the PROPOSED criteria at GATE_FRAMES using the best-performing
-    production-eligible Dawn lane against the best Metal lane, per load."""
+    production-eligible gating lane of each side, per load."""
     t = THRESHOLDS
     metrics = assessment["metrics"]
     eligible = assessment["production_eligible"]
     period = GATE_FRAMES * 1e9 / 48_000
     out: dict[str, Any] = {}
     for load in REQUIRED_LOADS:
-        dawn_p999, dawn_p999_lane = _best(metrics, "dawn", load, "submit_to_visible_ns", "p999",
-                                          eligible)
-        metal_p999, metal_p999_lane = _best(metrics, "metal", load, "submit_to_visible_ns",
-                                            "p999")
-        dawn_cpu, dawn_cpu_lane = _best(metrics, "dawn", load, "worker_cpu_ns", "mean", eligible)
-        metal_cpu, metal_cpu_lane = _best(metrics, "metal", load, "worker_cpu_ns", "mean")
-        metal_wake, metal_wake_lane = _best(metrics, "metal", load, "wake_ns", "p99")
-        dawn_wake, dawn_wake_lane = _best(metrics, "dawn", load, "wake_ns", "p99", eligible)
-        # Dawn exposes no host-domain completion time; the staged timestamp
-        # lane's (submit-to-visible minus GPU busy) is an upper bound.
-        dawn_wake_bound, dawn_bound_lane = _best(metrics, "dawn", load, "wake_upper_bound_ns",
-                                                 "p99")
-        dawn_miss, dawn_miss_lane = _best(metrics, "dawn", load, "miss_rate", "", eligible)
-        metal_miss, metal_miss_lane = _best(metrics, "metal", load, "miss_rate", "")
+        def best(side: str, key: str, stat: str | None) -> tuple[float | None, str | None]:
+            return _best(metrics, side, load, key, stat, eligible)
+
+        dawn_p999, dawn_p999_lane = best("dawn", "submit_to_visible_ns", "p999")
+        metal_p999, metal_p999_lane = best("metal", "submit_to_visible_ns", "p999")
+        dawn_cpu, dawn_cpu_lane = best("dawn", "process_cpu_per_block_ns", None)
+        metal_cpu, metal_cpu_lane = best("metal", "process_cpu_per_block_ns", None)
+        dawn_worker, _ = best("dawn", "worker_cpu_ns", "mean")
+        metal_worker, _ = best("metal", "worker_cpu_ns", "mean")
+        metal_wake, metal_wake_lane = best("metal", "wake_ns", "p99")
+        dawn_wake, dawn_wake_lane = best("dawn", "wake_ns", "p99")
+        # Not production-eligible; reported, never decides the gate.
+        proxy = [m["wake_upper_bound_ns"]["p99"] for m in metrics
+                 if m["side"] == "dawn" and m["load"] == load and m["frames"] == GATE_FRAMES
+                 and m["wake_upper_bound_ns"]["p99"] is not None]
+        dawn_miss, dawn_miss_lane = best("dawn", "miss_rate", None)
+        metal_miss, metal_miss_lane = best("metal", "miss_rate", None)
 
         def state(fires: bool | None) -> str:
             return "not_evaluable" if fires is None else ("fires" if fires else "does_not_fire")
@@ -320,14 +466,12 @@ def evaluate_thresholds(assessment: dict[str, Any]) -> dict[str, Any]:
             ii = (dawn_cpu > t["ii_cpu_ratio_gt"] * metal_cpu and
                   dawn_cpu > t["ii_dawn_cpu_fraction_gt"] * period)
         iii = None
-        iii_basis = "not_evaluable"
+        iii_basis = "dawn_wake_unobservable"
         if metal_wake is not None and metal_wake >= t["iii_metal_wake_p99_ns_lt"]:
             iii, iii_basis = False, "metal_wake_not_below_threshold"
         elif dawn_wake is not None and metal_wake is not None:
             iii = dawn_wake > t["iii_dawn_wake_p99_ns_gt"]
             iii_basis = "direct"
-        elif dawn_wake_bound is not None and dawn_wake_bound <= t["iii_dawn_wake_p99_ns_gt"]:
-            iii, iii_basis = False, "dawn_upper_bound_within_threshold"
         iv = None
         if load == "render" and dawn_miss is not None and metal_miss is not None:
             iv = (dawn_miss > t["iv_dawn_miss_rate_gt"] and
@@ -336,12 +480,16 @@ def evaluate_thresholds(assessment: dict[str, Any]) -> dict[str, Any]:
             "period_ns": period,
             "i": {"state": state(i), "dawn_p999_ns": dawn_p999, "dawn_lane": dawn_p999_lane,
                   "metal_p999_ns": metal_p999, "metal_lane": metal_p999_lane},
-            "ii": {"state": state(ii), "dawn_cpu_mean_ns": dawn_cpu, "dawn_lane": dawn_cpu_lane,
-                   "metal_cpu_mean_ns": metal_cpu, "metal_lane": metal_cpu_lane},
+            "ii": {"state": state(ii), "basis": "process_cpu_minus_render_and_oracle_per_block",
+                   "dawn_cpu_per_block_ns": dawn_cpu, "dawn_lane": dawn_cpu_lane,
+                   "metal_cpu_per_block_ns": metal_cpu, "metal_lane": metal_cpu_lane,
+                   "dawn_worker_cpu_mean_ns": dawn_worker,
+                   "metal_worker_cpu_mean_ns": metal_worker},
             "iii": {"state": state(iii), "basis": iii_basis, "dawn_wake_p99_ns": dawn_wake,
-                    "dawn_lane": dawn_wake_lane, "dawn_wake_upper_bound_p99_ns": dawn_wake_bound,
-                    "dawn_bound_lane": dawn_bound_lane, "metal_wake_p99_ns": metal_wake,
-                    "metal_lane": metal_wake_lane},
+                    "dawn_lane": dawn_wake_lane, "metal_wake_p99_ns": metal_wake,
+                    "metal_lane": metal_wake_lane,
+                    "dawn_wake_upper_bound_p99_ns_non_production_proxy":
+                        min(proxy) if proxy else None},
             "iv": {"state": state(iv) if load == "render" else "render_load_only",
                    "dawn_miss_rate": dawn_miss, "dawn_lane": dawn_miss_lane,
                    "metal_miss_rate": metal_miss, "metal_lane": metal_miss_lane},
@@ -355,6 +503,27 @@ def evaluate_thresholds(assessment: dict[str, Any]) -> dict[str, Any]:
     return {"per_load": out, "criteria": criteria}
 
 
+def _campaign_set_problems(campaigns: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    """Distinct, time-ordered campaigns of one binary, source, host and Dawn."""
+    refusals: list[str] = []
+    inconclusive: list[str] = []
+    ids = [c["identity"] for c in campaigns]
+    digests = [i.get("receipt_sha256") for i in ids]
+    if len(set(digests)) != len(digests):
+        refusals.append("duplicate_campaign")
+    stamps = [i.get("assembled_at") for i in ids]
+    if any(not isinstance(s, str) for s in stamps) or len(set(stamps)) != len(stamps):
+        refusals.append("duplicate_campaign")
+    elif stamps != sorted(stamps):
+        inconclusive.append("campaigns_not_time_ordered")
+    if len(campaigns) > 1:
+        if len({(i.get("binary_sha256"), i.get("source_revision")) for i in ids}) != 1:
+            inconclusive.append("campaigns_not_same_binary_and_source")
+        if len({(c["host_id"], c["dawn_revision"]) for c in campaigns}) != 1:
+            inconclusive.append("campaigns_not_same_host_and_dawn_revision")
+    return refusals, inconclusive
+
+
 def evaluate(receipts: list[dict[str, Any]],
              min_blocks: int = MIN_COUNTED_BLOCKS) -> dict[str, Any]:
     assessments = [assess(r, min_blocks) for r in receipts]
@@ -363,39 +532,40 @@ def evaluate(receipts: list[dict[str, Any]],
         campaigns.append({
             "refusals": a["refusals"], "inconclusive": a["inconclusive"],
             "counted": a["counted"], "host_id": a["host_id"],
-            "dawn_revision": a["dawn_revision"],
+            "dawn_revision": a["dawn_revision"], "identity": a["identity"],
             "thresholds": evaluate_thresholds(a) if not a["refusals"] else None,
+            "robustness_cost": robustness_cost(a["metrics"]) if not a["refusals"] else [],
             "metrics": a["metrics"],
         })
+    set_refusals, set_inconclusive = _campaign_set_problems(campaigns)
     reasons: list[str] = []
-    if any(c["refusals"] for c in campaigns):
+    counted = [c for c in campaigns if c["counted"]]
+    if set_refusals or any(c["refusals"] for c in campaigns):
         verdict = "REFUSED"
-        reasons = sorted({r for c in campaigns for r in c["refusals"]})
+        reasons = sorted(set(set_refusals) | {r for c in campaigns for r in c["refusals"]})
+    elif len(counted) < THRESHOLDS["consecutive_quiet_campaigns"]:
+        verdict = "INCONCLUSIVE"
+        reasons = sorted({r for c in campaigns for r in c["inconclusive"]} |
+                         set(set_inconclusive))
+        reasons.append(f"counted_campaigns_{len(counted)}_of_"
+                       f"{THRESHOLDS['consecutive_quiet_campaigns']}")
+    elif set_inconclusive:
+        verdict = "INCONCLUSIVE"
+        reasons = sorted(set(set_inconclusive))
     else:
-        counted = [c for c in campaigns if c["counted"]]
-        if len(counted) < THRESHOLDS["consecutive_quiet_campaigns"]:
+        fired = [name for name in ("i", "ii", "iii", "iv")
+                 if all(c["thresholds"]["criteria"][name] == "fires" for c in counted)]
+        unknown = [name for name in ("i", "ii", "iii", "iv")
+                   if any(c["thresholds"]["criteria"][name] == "not_evaluable"
+                          for c in counted)]
+        if fired:
+            verdict = "GATE_FIRES"
+            reasons = [f"criterion_{name}_fires_in_all_counted_campaigns" for name in fired]
+        elif unknown:
             verdict = "INCONCLUSIVE"
-            reasons = sorted({r for c in campaigns for r in c["inconclusive"]})
-            if len(counted) < THRESHOLDS["consecutive_quiet_campaigns"]:
-                reasons.append(f"counted_campaigns_{len(counted)}_of_"
-                               f"{THRESHOLDS['consecutive_quiet_campaigns']}")
-        elif len({(c["host_id"], c["dawn_revision"]) for c in counted}) != 1:
-            verdict = "INCONCLUSIVE"
-            reasons = ["campaigns_not_same_host_and_dawn_revision"]
+            reasons = [f"criterion_{name}_not_evaluable" for name in unknown]
         else:
-            fired = [name for name in ("i", "ii", "iii", "iv")
-                     if all(c["thresholds"]["criteria"][name] == "fires" for c in counted)]
-            unknown = [name for name in ("i", "ii", "iii", "iv")
-                       if any(c["thresholds"]["criteria"][name] == "not_evaluable"
-                              for c in counted)]
-            if fired:
-                verdict = "GATE_FIRES"
-                reasons = [f"criterion_{name}_fires_in_all_counted_campaigns" for name in fired]
-            elif unknown:
-                verdict = "INCONCLUSIVE"
-                reasons = [f"criterion_{name}_not_evaluable" for name in unknown]
-            else:
-                verdict = "GATE_DOES_NOT_FIRE"
+            verdict = "GATE_DOES_NOT_FIRE"
     return {
         "schema": EVALUATION_SCHEMA,
         "verdict": verdict,
@@ -461,18 +631,24 @@ def print_summary(evaluation: dict[str, Any]) -> None:
         print(f"campaign {index}: counted={campaign['counted']} "
               f"inconclusive={campaign['inconclusive']} refusals={campaign['refusals']}")
         header = ("lane", "fr", "load", "s2v p50", "p99", "p99.9", "max", "gpu p50",
-                  "cpu mean", "wake p99", "bound p99", "miss", "ui p99", "drop")
+                  "proc cpu/blk", "worker cpu", "cb cpu", "wake p99", "bound p99", "miss",
+                  "ui p99", "drop")
         print("  " + " | ".join(header) + "   (us unless noted)")
         for m in sorted(campaign["metrics"], key=lambda m: (m["frames"], m["load"], m["lane"])):
             s = m["submit_to_visible_ns"]
             print("  " + " | ".join([
                 m["lane"], str(m["frames"]), m["load"], _fmt_us(s["p50"]), _fmt_us(s["p99"]),
                 _fmt_us(s["p999"]), _fmt_us(s["max"]), _fmt_us(m["gpu_busy_ns"]["p50"]),
-                _fmt_us(m["worker_cpu_ns"]["mean"]), _fmt_us(m["wake_ns"]["p99"]),
+                _fmt_us(m["process_cpu_per_block_ns"]), _fmt_us(m["worker_cpu_ns"]["mean"]),
+                _fmt_us(m["callback_cpu_ns"]["mean"]), _fmt_us(m["wake_ns"]["p99"]),
                 _fmt_us(m["wake_upper_bound_ns"]["p99"]), f"{m['misses']}/{m['blocks']}",
                 _fmt_us(m["render"]["frame_ns"]["p99"]) if m["render"]["active"] else "-",
                 str(m["render"]["dropped_frames"]) if m["render"]["active"] else "-",
             ]))
+        for row in campaign["robustness_cost"]:
+            print(f"  robustness cost (Metal-side, non-gating) {row['frames']}/{row['load']}: "
+                  f"guarded {_fmt_us(row['metal_guarded_gpu_busy_p50_ns'])} vs unguarded "
+                  f"{_fmt_us(row['metal_unguarded_gpu_busy_p50_ns'])} us GPU busy p50")
         if campaign["thresholds"]:
             print(f"  PROPOSED criteria at {GATE_FRAMES} frames: "
                   f"{campaign['thresholds']['criteria']}")
@@ -564,6 +740,18 @@ def cmd_smoke(args: argparse.Namespace) -> int:
 def cmd_verify(args: argparse.Namespace) -> int:
     receipts = [json.loads(Path(p).read_text(encoding="utf-8")) for p in args.receipts]
     evaluation = evaluate(receipts, args.min_blocks)
+    # receipt_sha256 is an integrity check, not authentication: anyone who can
+    # edit a receipt can recompute it. --binary ties receipts to a binary.
+    if args.binary is not None:
+        digest = sha256_hex(args.binary.read_bytes())
+        if any(r.get("binary_sha256") != digest for r in receipts):
+            evaluation["verdict"] = "REFUSED"
+            evaluation["reasons"] = sorted(set(evaluation["reasons"]) |
+                                           {"binary_sha256_mismatch"})
+    # A lowered block floor is for exploration; it can never yield a gate verdict.
+    if args.min_blocks < MIN_COUNTED_BLOCKS and evaluation["verdict"].startswith("GATE_"):
+        evaluation["verdict"] = "INCONCLUSIVE"
+        evaluation["reasons"] = evaluation["reasons"] + ["min_blocks_below_campaign_floor"]
     if args.output:
         args.output.write_text(json.dumps(evaluation, indent=2, sort_keys=True) + "\n",
                                encoding="utf-8")
@@ -593,6 +781,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     verify.add_argument("receipts", nargs="+")
     verify.add_argument("--output", type=Path)
     verify.add_argument("--min-blocks", type=int, default=MIN_COUNTED_BLOCKS)
+    verify.add_argument("--binary", type=Path,
+                        help="refuse receipts not produced by this binary")
     verify.set_defaults(func=cmd_verify)
     return parser.parse_args(argv)
 

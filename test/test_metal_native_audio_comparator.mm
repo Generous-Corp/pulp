@@ -46,6 +46,7 @@
 #include <cstring>
 #include <dispatch/dispatch.h>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <mach/mach_time.h>
 #include <memory>
@@ -69,6 +70,14 @@
 #ifndef PULP_GPU_AUDIO_PROVIDER_SOURCE
 #define PULP_GPU_AUDIO_PROVIDER_SOURCE ""
 #endif
+// The provider WGSL hashes taken from its source at configure time, i.e. the
+// WGSL compiled into this binary. The run-time extraction must agree.
+#ifndef PULP_COMPARATOR_BUILD_FFT_WGSL_SHA256
+#define PULP_COMPARATOR_BUILD_FFT_WGSL_SHA256 ""
+#endif
+#ifndef PULP_COMPARATOR_BUILD_MUL_WGSL_SHA256
+#define PULP_COMPARATOR_BUILD_MUL_WGSL_SHA256 ""
+#endif
 
 namespace {
 
@@ -80,6 +89,10 @@ constexpr const char* kPortedFromFftWgslSha256 =
     "8275969f135a4024fb78bf0a9efe1795ac55b252803aaad7b3321b7aa0b35faa";
 constexpr const char* kPortedFromMulWgslSha256 =
     "988d833cb4431aff69a0c43ab5a60e076e7c987f8bc26ee3ff3400a1b56da568";
+// SHA-256 of kMatchedMsl, the reviewed port pinned to that WGSL. Editing the
+// MSL without re-pinning this hash is a kernel-digest mismatch.
+constexpr const char* kPinnedMslSha256 =
+    "e71759de1adb3966ab80e658997ae6c56f78666030ac67f7f64e4229f3b2aa63";
 constexpr std::uint32_t kSampleRate = 48000;
 constexpr std::uint32_t kChannels = 2;
 constexpr std::uint32_t kFlightDepth = 2;
@@ -308,16 +321,27 @@ struct KernelIdentity {
     std::string digest;
 };
 
+// Robustness of the compiled kernels. Dawn always compiles with Tint's
+// robustness and integer polyfills; the gating Metal lanes run the guarded
+// MSL that reproduces them, and only the labelled robustness-cost probe runs
+// without guards.
+constexpr const char* kRobustnessTint = "tint_equivalent";
+constexpr const char* kRobustnessNone = "none";
+
 // Canonical form matches json.dumps(sort_keys=True, separators=(",", ":")), so
-// the verifier recomputes the digest instead of trusting it.
+// the verifier recomputes the digest instead of trusting it. `port_sha` names
+// the MSL port: the compiled source on Metal, and the port pinned to this WGSL
+// on Dawn, so an edited port without a re-pinned hash is a digest mismatch.
 KernelIdentity make_kernel_identity(const std::string& program, const std::string& fft_sha,
-                                    const std::string& mul_sha, const Workload& w,
+                                    const std::string& mul_sha, const std::string& port_sha,
+                                    const char* robustness, const Workload& w,
                                     const std::vector<PassShape>& passes) {
     std::string c = "{\"channels\":" + std::to_string(kChannels) +
                     ",\"fft_size\":" + std::to_string(w.fft_size) +
                     ",\"fft_wgsl_sha256\":" + json_string(fft_sha) +
                     ",\"frames\":" + std::to_string(w.frames) +
                     ",\"ir_length\":" + std::to_string(w.ir_length) +
+                    ",\"metal_port_sha256\":" + json_string(port_sha) +
                     ",\"mul_wgsl_sha256\":" + json_string(mul_sha) + ",\"passes\":[";
     for (std::size_t i = 0; i < passes.size(); ++i) {
         const auto& p = passes[i];
@@ -327,37 +351,56 @@ KernelIdentity make_kernel_identity(const std::string& program, const std::strin
              ",\"ns\":" + std::to_string(p.ns) + ",\"sign\":" + std::to_string(p.sign) +
              ",\"workgroup\":" + std::to_string(kWorkgroup) + "}";
     }
-    c += "],\"program\":" + json_string(program) + "}";
+    c += "],\"program\":" + json_string(program) + ",\"robustness\":" + json_string(robustness) +
+         "}";
     return {c, sha256_hex(c)};
 }
 
 // MSL port of kSharedIoFftWgsl and kSharedIoMulWgsl (hashes above).
+//
+// With kGuarded (function constant 0) the kernels carry the guards Tint adds
+// when Dawn compiles the WGSL for Metal: every storage-buffer index is clamped
+// to the bound length, and unsigned `/` and `%` substitute 1 for a zero
+// divisor. This is an equivalent of Tint's robustness transform and integer
+// polyfills, not Tint's literal output. kGuarded=false is the robustness-cost
+// probe only.
 constexpr const char* kMatchedMsl = R"msl(#include <metal_stdlib>
 using namespace metal;
 
+constant bool kGuarded [[function_constant(0)]];
+
+static inline uint guard_index(uint i, uint len) { return kGuarded ? min(i, len - 1u) : i; }
+static inline uint guard_div(uint a, uint b) { return kGuarded ? a / select(b, 1u, b == 0u) : a / b; }
+static inline uint guard_mod(uint a, uint b) { return kGuarded ? a % select(b, 1u, b == 0u) : a % b; }
+
 struct FftParams { uint n; uint ns; float sign; uint batch; };
+struct FftLengths { uint src_len; uint dst_len; };
 constant float PI = 3.1415926535897932f;
 
 kernel void stockham_fft(const device float* src [[buffer(0)]],
                          device float* dst [[buffer(1)]],
                          constant FftParams& params [[buffer(2)]],
+                         constant FftLengths& lengths [[buffer(3)]],
                          uint3 gid [[thread_position_in_grid]]) {
-    const uint half_n = params.n / 2u;
+    const uint half_n = guard_div(params.n, 2u);
     const uint tid = gid.x;
     if (tid >= params.batch * half_n) {
         return;
     }
-    const uint b = tid / half_n;
+    const uint b = guard_div(tid, half_n);
     const uint j = tid - b * half_n;
     const uint base = b * params.n;
+    const uint sl = lengths.src_len;
+    const uint dl = lengths.dst_len;
 
-    const float v0_re = src[2u * (base + j)];
-    const float v0_im = src[2u * (base + j) + 1u];
+    const float v0_re = src[guard_index(2u * (base + j), sl)];
+    const float v0_im = src[guard_index(2u * (base + j) + 1u, sl)];
     const uint k = j + half_n;
-    const float v1_re = src[2u * (base + k)];
-    const float v1_im = src[2u * (base + k) + 1u];
+    const float v1_re = src[guard_index(2u * (base + k), sl)];
+    const float v1_im = src[guard_index(2u * (base + k) + 1u, sl)];
 
-    const float angle = params.sign * 2.0f * PI * float(j % params.ns) / float(params.ns * 2u);
+    const float angle = params.sign * 2.0f * PI * float(guard_mod(j, params.ns)) /
+                        float(params.ns * 2u);
     const float tw_re = cos(angle);
     const float tw_im = sin(angle);
 
@@ -369,14 +412,14 @@ kernel void stockham_fft(const device float* src [[buffer(0)]],
     const float y1_re = v0_re - u1_re;
     const float y1_im = v0_im - u1_im;
 
-    const uint idxD = (j / params.ns) * params.ns * 2u + (j % params.ns);
-    dst[2u * (base + idxD)] = y0_re;
-    dst[2u * (base + idxD) + 1u] = y0_im;
-    dst[2u * (base + idxD + params.ns)] = y1_re;
-    dst[2u * (base + idxD + params.ns) + 1u] = y1_im;
+    const uint idxD = guard_div(j, params.ns) * params.ns * 2u + guard_mod(j, params.ns);
+    dst[guard_index(2u * (base + idxD), dl)] = y0_re;
+    dst[guard_index(2u * (base + idxD) + 1u, dl)] = y0_im;
+    dst[guard_index(2u * (base + idxD + params.ns), dl)] = y1_re;
+    dst[guard_index(2u * (base + idxD + params.ns) + 1u, dl)] = y1_im;
 }
 
-struct MulParams { uint a_len; uint ir_len; };
+struct MulParams { uint a_len; uint ir_len; uint out_len; };
 
 kernel void complex_multiply_ir(const device float* a [[buffer(0)]],
                                 const device float* ir [[buffer(1)]],
@@ -388,13 +431,13 @@ kernel void complex_multiply_ir(const device float* a [[buffer(0)]],
     if (p + 1u >= lengths.a_len) {
         return;
     }
-    const uint k = p % lengths.ir_len;
-    const float ar = a[p];
-    const float ai = a[p + 1u];
-    const float br = ir[k];
-    const float bi = ir[k + 1u];
-    out[p] = ar * br - ai * bi;
-    out[p + 1u] = ar * bi + ai * br;
+    const uint k = guard_mod(p, lengths.ir_len);
+    const float ar = a[guard_index(p, lengths.a_len)];
+    const float ai = a[guard_index(p + 1u, lengths.a_len)];
+    const float br = ir[guard_index(k, lengths.ir_len)];
+    const float bi = ir[guard_index(k + 1u, lengths.ir_len)];
+    out[guard_index(p, lengths.out_len)] = ar * br - ai * bi;
+    out[guard_index(p + 1u, lengths.out_len)] = ar * bi + ai * br;
 }
 
 // Planted negative only: the pre-WP-Q comparator's unmatched kernel.
@@ -478,6 +521,7 @@ struct BlockRecord {
     std::int64_t gpu_busy_ns = -1;
     std::int64_t gpu_end_ns = -1;
     std::int64_t callback_ns = -1;
+    std::int64_t callback_cpu_ns = -1;
     std::int64_t worker_cpu_ns = -1;
     int oracle = 0;
     int stalled = 0;
@@ -547,8 +591,12 @@ struct AlignedBytes {
 enum class MetalCompletion { SharedEvent, CompletedHandler };
 
 struct MetalPipelines {
+    // Guarded (Tint-equivalent) kernels gate; unguarded ones only feed the
+    // labelled robustness-cost probe.
     id<MTLComputePipelineState> fft = nil;
     id<MTLComputePipelineState> multiply = nil;
+    id<MTLComputePipelineState> fft_unguarded = nil;
+    id<MTLComputePipelineState> multiply_unguarded = nil;
     id<MTLComputePipelineState> planted = nil;
     std::string msl_sha256;
     std::string math_mode;
@@ -557,8 +605,18 @@ struct MetalPipelines {
 class MetalLane {
   public:
     MetalLane(id<MTLDevice> device, const MetalPipelines& pipelines, MetalCompletion completion,
-              bool planted)
-        : device_(device), pipelines_(pipelines), completion_(completion), planted_(planted) {}
+              bool guarded, bool planted)
+        : device_(device), pipelines_(pipelines), completion_(completion), guarded_(guarded),
+          planted_(planted) {}
+
+    // Completion blocks hold `slots_` (and with it the no-copy host memory)
+    // until they run, so a failed cell can be torn down with work in flight.
+    ~MetalLane() {
+        finish();
+        if (listener_queue_)
+            dispatch_sync(listener_queue_, ^{
+                          });
+    }
 
     bool prepare(const Workload& w, std::uint32_t total, std::string& reason) {
         workload_ = &w;
@@ -570,14 +628,18 @@ class MetalLane {
             return false;
         }
         const auto bytes = w.complex_floats * sizeof(float);
+        const auto floats = static_cast<std::uint32_t>(w.complex_floats);
         ir_ = [device_ newBufferWithBytes:w.ir_spectrum.data()
                                    length:w.ir_spectrum.size() * sizeof(float)
                                   options:MTLResourceStorageModeShared];
-        const std::uint32_t lengths[2] = {static_cast<std::uint32_t>(w.complex_floats),
-                                          w.fft_size * 2};
-        mul_params_ = [device_ newBufferWithBytes:lengths
-                                           length:sizeof(lengths)
+        const std::uint32_t mul_lengths[3] = {floats, w.fft_size * 2, floats};
+        mul_params_ = [device_ newBufferWithBytes:mul_lengths
+                                           length:sizeof(mul_lengths)
                                           options:MTLResourceStorageModeShared];
+        const std::uint32_t fft_lengths[2] = {floats, floats};
+        fft_lengths_ = [device_ newBufferWithBytes:fft_lengths
+                                            length:sizeof(fft_lengths)
+                                           options:MTLResourceStorageModeShared];
         struct Params {
             std::uint32_t n;
             std::uint32_t ns;
@@ -594,7 +656,7 @@ class MetalLane {
                                                     length:sizeof(inverse)
                                                    options:MTLResourceStorageModeShared]);
         }
-        for (auto& slot : slots_) {
+        for (auto& slot : shared_->slots) {
             slot.input = std::make_unique<AlignedBytes>(bytes);
             slot.output = std::make_unique<AlignedBytes>(bytes);
             if (!slot.input->pointer || !slot.output->pointer) {
@@ -618,7 +680,8 @@ class MetalLane {
                 return false;
             }
         }
-        if (!ir_ || !mul_params_ || forward_.size() != w.log2 || inverse_.size() != w.log2) {
+        if (!ir_ || !mul_params_ || !fft_lengths_ || forward_.size() != w.log2 ||
+            inverse_.size() != w.log2) {
             reason = "buffer_unavailable";
             return false;
         }
@@ -635,11 +698,15 @@ class MetalLane {
         }
         gpu_start_.assign(total, -1);
         gpu_end_.assign(total, -1);
+        shared_->callback_cpu = std::make_unique<std::atomic<std::int64_t>[]>(total);
+        for (std::uint32_t i = 0; i < total; ++i)
+            shared_->callback_cpu[i].store(-1, std::memory_order_relaxed);
+        shared_->total = total;
         return true;
     }
 
     bool can_submit(std::uint64_t sequence) const {
-        return slots_[sequence % kFlightDepth].state.load(std::memory_order_acquire) == 0;
+        return shared_->slots[sequence % kFlightDepth].state.load(std::memory_order_acquire) == 0;
     }
 
     std::size_t in_flight() const {
@@ -648,7 +715,7 @@ class MetalLane {
 
     bool submit(std::uint64_t sequence, const float* input) {
         @autoreleasepool {
-            auto& slot = slots_[sequence % kFlightDepth];
+            auto& slot = shared_->slots[sequence % kFlightDepth];
             harvest_gpu_times(history_[sequence % kHistory]);
             std::memcpy(slot.input->pointer, input, workload_->complex_floats * sizeof(float));
             id<MTLCommandBuffer> command = [queue_ commandBuffer];
@@ -675,23 +742,25 @@ class MetalLane {
                 pass(pipelines_.planted, slot.input_buffer, slot.output_buffer, nil, mul_params_,
                      planted_groups(w));
             } else {
+                const auto fft = guarded_ ? pipelines_.fft : pipelines_.fft_unguarded;
+                const auto multiply =
+                    guarded_ ? pipelines_.multiply : pipelines_.multiply_unguarded;
                 // Same ping-pong as the provider's convolution plan.
                 id<MTLBuffer> source = slot.input_buffer;
                 id<MTLBuffer> destination = slot.a;
                 for (std::uint32_t stage = 0; stage < w.log2; ++stage) {
-                    pass(pipelines_.fft, source, destination, forward_[stage], nil,
+                    pass(fft, source, destination, forward_[stage], fft_lengths_,
                          passes_[stage].groups);
                     source = destination;
                     destination = destination == slot.a ? slot.b : slot.a;
                 }
-                pass(pipelines_.multiply, source, ir_, slot.product, mul_params_,
-                     passes_[w.log2].groups);
+                pass(multiply, source, ir_, slot.product, mul_params_, passes_[w.log2].groups);
                 source = slot.product;
                 destination = slot.a;
                 for (std::uint32_t stage = 0; stage < w.log2; ++stage) {
                     if (stage + 1u == w.log2)
                         destination = slot.output_buffer;
-                    pass(pipelines_.fft, source, destination, inverse_[stage], nil,
+                    pass(fft, source, destination, inverse_[stage], fft_lengths_,
                          passes_[w.log2 + 1 + stage].groups);
                     source = destination;
                     if (stage + 1u < w.log2)
@@ -700,29 +769,41 @@ class MetalLane {
             }
             slot.sequence = sequence;
             slot.callback_ns.store(-1, std::memory_order_relaxed);
-            slot.failed.store(false, std::memory_order_relaxed);
             slot.state.store(1, std::memory_order_release);
-            Slot* target = &slot;
+            // Blocks capture the shared state, never `this`. The completion
+            // block's own thread CPU is recorded per block, since Dawn's
+            // equivalent work runs on the measured worker.
+            auto shared = shared_;
+            const auto index = sequence % kFlightDepth;
             dispatch_semaphore_t semaphore = semaphore_;
+            const auto complete = ^{
+              const auto cpu_begin = thread_cpu_ns();
+              auto& target = shared->slots[index];
+              target.callback_ns.store(static_cast<std::int64_t>(now_ns()),
+                                       std::memory_order_relaxed);
+              target.state.store(2, std::memory_order_release);
+              dispatch_semaphore_signal(semaphore);
+              if (sequence < shared->total)
+                  shared->callback_cpu[sequence].store(
+                      static_cast<std::int64_t>(thread_cpu_ns() - cpu_begin),
+                      std::memory_order_relaxed);
+            };
             if (completion_ == MetalCompletion::SharedEvent) {
                 const auto value = sequence + 1;
                 [command encodeSignalEvent:event_ value:value];
                 [event_ notifyListener:listener_
                                atValue:value
                                  block:^(id<MTLSharedEvent>, uint64_t) {
-                                   target->callback_ns.store(static_cast<std::int64_t>(now_ns()),
-                                                             std::memory_order_relaxed);
-                                   target->state.store(2, std::memory_order_release);
-                                   dispatch_semaphore_signal(semaphore);
+                                   complete();
                                  }];
+                // Keeps the slots (and the no-copy memory) alive until the
+                // GPU is done with this command buffer.
+                [command addCompletedHandler:^(id<MTLCommandBuffer>) {
+                  (void)shared;
+                }];
             } else {
-                [command addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-                  if (completed.status != MTLCommandBufferStatusCompleted)
-                      target->failed.store(true, std::memory_order_release);
-                  target->callback_ns.store(static_cast<std::int64_t>(now_ns()),
-                                            std::memory_order_relaxed);
-                  target->state.store(2, std::memory_order_release);
-                  dispatch_semaphore_signal(semaphore);
+                [command addCompletedHandler:^(id<MTLCommandBuffer>) {
+                  complete();
                 }];
             }
             history_[sequence % kHistory] = {command, sequence};
@@ -745,26 +826,26 @@ class MetalLane {
     }
 
     void collect(Observer& observer, std::vector<BlockRecord>& records) {
-        while (in_flight_ != 0) {
-            const auto sequence = fifo_[fifo_head_];
-            auto& slot = slots_[sequence % kFlightDepth];
-            if (slot.state.load(std::memory_order_acquire) != 2)
-                break;
-            const auto visible = now_ns();
-            records[sequence].callback_ns = slot.callback_ns.load(std::memory_order_relaxed);
-            observer.visible(sequence, visible,
-                             slot.failed.load(std::memory_order_acquire)
-                                 ? nullptr
-                                 : static_cast<const float*>(slot.output->pointer));
-            fifo_head_ = (fifo_head_ + 1) % kFlightDepth;
-            --in_flight_;
-            slot.state.store(0, std::memory_order_release);
+        collect_completed(observer, records);
+        // Drop surplus signals so the next wait sleeps until a real
+        // completion, then re-check: a completion whose signal was just
+        // drained has already published state 2.
+        while (dispatch_semaphore_wait(semaphore_, DISPATCH_TIME_NOW) == 0) {
         }
+        collect_completed(observer, records);
     }
 
     void finish() {
         for (auto& entry : history_)
             harvest_gpu_times(entry);
+    }
+
+    // Completion-block CPU per sequence; -1 where the block had not finished
+    // when the cell ended.
+    std::int64_t callback_cpu(std::uint64_t sequence) const {
+        return sequence < shared_->total
+                   ? shared_->callback_cpu[sequence].load(std::memory_order_relaxed)
+                   : -1;
     }
 
     const std::vector<std::int64_t>& gpu_start() const {
@@ -796,9 +877,12 @@ class MetalLane {
         std::uint64_t sequence = 0;
         std::atomic<int> state{0}; // 0 free, 1 in flight, 2 completed
         std::atomic<std::int64_t> callback_ns{-1};
-        std::atomic<bool> failed{false};
     };
-
+    struct Shared {
+        std::array<Slot, kFlightDepth> slots;
+        std::unique_ptr<std::atomic<std::int64_t>[]> callback_cpu;
+        std::uint32_t total = 0;
+    };
     struct Submitted {
         id<MTLCommandBuffer> command = nil;
         std::uint64_t sequence = 0;
@@ -807,6 +891,21 @@ class MetalLane {
     // buffer has long completed, so harvesting never blocks a submit. A shared
     // event can fire before its command buffer reports Completed.
     static constexpr std::size_t kHistory = 64;
+
+    void collect_completed(Observer& observer, std::vector<BlockRecord>& records) {
+        while (in_flight_ != 0) {
+            const auto sequence = fifo_[fifo_head_];
+            auto& slot = shared_->slots[sequence % kFlightDepth];
+            if (slot.state.load(std::memory_order_acquire) != 2)
+                break;
+            const auto visible = now_ns();
+            records[sequence].callback_ns = slot.callback_ns.load(std::memory_order_relaxed);
+            observer.visible(sequence, visible, static_cast<const float*>(slot.output->pointer));
+            fifo_head_ = (fifo_head_ + 1) % kFlightDepth;
+            --in_flight_;
+            slot.state.store(0, std::memory_order_release);
+        }
+    }
 
     void harvest_gpu_times(Submitted& entry) {
         if (!entry.command)
@@ -827,6 +926,7 @@ class MetalLane {
     id<MTLDevice> device_;
     const MetalPipelines& pipelines_;
     MetalCompletion completion_;
+    bool guarded_;
     bool planted_;
     const Workload* workload_ = nullptr;
     std::vector<PassShape> passes_;
@@ -837,15 +937,16 @@ class MetalLane {
     MTLSharedEventListener* listener_ = nil;
     id<MTLBuffer> ir_ = nil;
     id<MTLBuffer> mul_params_ = nil;
+    id<MTLBuffer> fft_lengths_ = nil;
     std::vector<id<MTLBuffer>> forward_;
     std::vector<id<MTLBuffer>> inverse_;
-    std::array<Slot, kFlightDepth> slots_;
+    std::shared_ptr<Shared> shared_ = std::make_shared<Shared>();
     std::array<std::uint64_t, kFlightDepth> fifo_{};
     std::size_t fifo_head_ = 0;
     std::size_t in_flight_ = 0;
+    std::array<Submitted, kHistory> history_{};
     std::vector<std::int64_t> gpu_start_;
     std::vector<std::int64_t> gpu_end_;
-    std::array<Submitted, kHistory> history_{};
     std::uint64_t late_gpu_time_waits_ = 0;
     std::uint64_t command_errors_ = 0;
     HostClockBridge clock_;
@@ -872,16 +973,22 @@ bool make_metal_pipelines(id<MTLDevice> device, MetalPipelines& out, std::string
         reason = "msl_compile_failed";
         return false;
     }
-    const auto make = [&](NSString* name) -> id<MTLComputePipelineState> {
-        id<MTLFunction> function = [library newFunctionWithName:name];
+    const auto make = [&](NSString* name, bool guarded) -> id<MTLComputePipelineState> {
+        MTLFunctionConstantValues* constants = [MTLFunctionConstantValues new];
+        [constants setConstantValue:&guarded type:MTLDataTypeBool atIndex:0];
+        id<MTLFunction> function = [library newFunctionWithName:name
+                                                 constantValues:constants
+                                                          error:&error];
         return function ? [device newComputePipelineStateWithFunction:function error:&error] : nil;
     };
-    out.fft = make(@"stockham_fft");
-    out.multiply = make(@"complex_multiply_ir");
-    out.planted = make(@"complex_multiply");
+    out.fft = make(@"stockham_fft", true);
+    out.multiply = make(@"complex_multiply_ir", true);
+    out.fft_unguarded = make(@"stockham_fft", false);
+    out.multiply_unguarded = make(@"complex_multiply_ir", false);
+    out.planted = make(@"complex_multiply", true);
     out.msl_sha256 = sha256_hex(std::string(kMatchedMsl));
-    if (!out.fft || !out.multiply || !out.planted ||
-        out.fft.maxTotalThreadsPerThreadgroup < kWorkgroup ||
+    if (!out.fft || !out.multiply || !out.fft_unguarded || !out.multiply_unguarded ||
+        !out.planted || out.fft.maxTotalThreadsPerThreadgroup < kWorkgroup ||
         out.multiply.maxTotalThreadsPerThreadgroup < kWorkgroup) {
         reason = "pipeline_unavailable";
         return false;
@@ -997,7 +1104,20 @@ class DawnLane {
             return;
         }
         if (policy_ == DawnSharedIoProvider::CompletionPolicy::TimedWaitAny) {
+            // Event-driven: block in WaitAny on the queue futures. When none is
+            // pending (queue work done, scope or map callbacks still due),
+            // WaitAny cannot block, so fall back to the transport's poll
+            // quantum instead of spinning; the fallbacks are counted.
+            const auto waits_before = provider_->stats().wait_any_timed_calls;
             provider_->service_until(deadline);
+            if (provider_->stats().wait_any_timed_calls == waits_before &&
+                plan_.drain(now_ns()) == 0) {
+                ++fallback_sleeps_;
+                const auto after = now_ns();
+                if (after < deadline)
+                    std::this_thread::sleep_for(
+                        std::chrono::nanoseconds(std::min(kDawnPollIntervalNs, deadline - after)));
+            }
             return;
         }
         // Polling policies mirror the transport worker: poll, then sleep one
@@ -1051,6 +1171,9 @@ class DawnLane {
     DawnSharedIoProvider::Stats stats() const {
         return provider_ ? provider_->stats() : DawnSharedIoProvider::Stats{};
     }
+    std::uint64_t fallback_sleeps() const {
+        return fallback_sleeps_;
+    }
 
   private:
     DawnSharedIoProvider::CompletionPolicy policy_;
@@ -1061,6 +1184,7 @@ class DawnLane {
     SharedIoComputePlan plan_;
     std::size_t in_flight_ = 0;
     bool timestamps_enabled_ = false;
+    std::uint64_t fallback_sleeps_ = 0;
     std::vector<std::int64_t> gpu_busy_;
 };
 #endif
@@ -1097,9 +1221,11 @@ class RenderLoad {
 #if defined(PULP_COMPARATOR_HAS_RENDER_LOAD)
         if (thread_.joinable())
             return ready_;
-        std::promise<bool> started;
-        auto future = started.get_future();
-        thread_ = std::thread([this, &started] { run(started); });
+        // The thread owns the promise, so set_value never touches a promise
+        // this frame has already destroyed.
+        auto started = std::make_shared<std::promise<bool>>();
+        auto future = started->get_future();
+        thread_ = std::thread([this, started] { run(*started); });
         ready_ = future.get();
         if (!ready_)
             reason = error_.empty() ? "render_surface_unavailable" : error_;
@@ -1117,6 +1243,12 @@ class RenderLoad {
         stats_.status = "running";
         active_ = true;
         cv_.notify_all();
+    }
+
+    // Cumulative render-thread CPU, sampled around each cell so it can be
+    // removed from process CPU.
+    std::uint64_t thread_cpu_total() const {
+        return cpu_total_.load(std::memory_order_relaxed);
     }
 
     RenderStats stop() {
@@ -1211,6 +1343,7 @@ class RenderLoad {
                         [frame](pulp::canvas::Canvas& c) { paint(c, frame); });
                 }
                 const auto end = now_ns();
+                cpu_total_.store(thread_cpu_ns(), std::memory_order_relaxed);
                 frames.push_back(static_cast<std::int64_t>(end - begin));
                 ++frame;
                 // Frame slots whose deadline already passed are dropped.
@@ -1239,6 +1372,7 @@ class RenderLoad {
     bool quit_ = false;
     std::string error_;
     RenderStats stats_;
+    std::atomic<std::uint64_t> cpu_total_{0};
 };
 
 // ---------------------------------------------------------------------------
@@ -1252,6 +1386,10 @@ struct LaneSpec {
     bool dawn_staged_timestamps = false;
     std::uint64_t poll_interval_ns = 0;
     bool production_eligible = true;
+    // Metal only: Tint-equivalent guards. Unguarded lanes are the labelled
+    // robustness-cost probe and never gate.
+    bool guarded = true;
+    std::string role = "gating";
 };
 
 struct CellResult {
@@ -1268,6 +1406,10 @@ struct CellResult {
     std::uint64_t stalls = 0;
     std::uint64_t worker_cpu_total_ns = 0;
     std::uint64_t process_cpu_total_ns = 0;
+    std::uint64_t render_cpu_in_window_ns = 0;
+    std::uint64_t oracle_cpu_ns = 0;
+    std::uint64_t driven_blocks = 0;
+    std::string role = "gating";
     bool gpu_timestamps = false;
     std::string gpu_busy_domain;
     std::string wake_domain;
@@ -1293,8 +1435,13 @@ struct RunConfig {
 // Block k is released at t0 + k * period. Between releases the worker only
 // services completions; worker CPU for interval k is the thread CPU from
 // release k to release k+1, minus the oracle work.
+//
+// Process CPU over the same window, minus the render thread and the oracle,
+// is the CPU measure the gate uses: it counts completion work wherever it
+// runs (Dawn on the worker, Metal on its own dispatch threads).
 template <class Lane>
-void drive(Lane& lane, const Workload& w, const RunConfig& rc, CellResult& cell) {
+void drive(Lane& lane, const Workload& w, const RunConfig& rc, CellResult& cell,
+           const std::function<std::uint64_t()>& render_cpu) {
     const std::uint32_t total = rc.warmup + rc.blocks;
     std::vector<BlockRecord> records(total);
     Observer observer;
@@ -1310,6 +1457,7 @@ void drive(Lane& lane, const Workload& w, const RunConfig& rc, CellResult& cell)
     auto cpu_mark = thread_cpu_ns();
     std::uint64_t excluded_mark = 0;
     const auto process_begin = process_cpu_ns();
+    const auto render_begin = render_cpu();
     const auto worker_begin = cpu_mark;
     for (std::uint32_t k = 0; k < total; ++k) {
         const auto release = t0 + static_cast<std::uint64_t>(k * period);
@@ -1369,9 +1517,12 @@ void drive(Lane& lane, const Workload& w, const RunConfig& rc, CellResult& cell)
     const auto tail = cpu_end - cpu_mark;
     records[total - 1].worker_cpu_ns =
         static_cast<std::int64_t>(tail > excluded ? tail - excluded : 0);
+    cell.process_cpu_total_ns = process_cpu_ns() - process_begin;
+    cell.render_cpu_in_window_ns = render_cpu() - render_begin;
+    cell.oracle_cpu_ns = observer.excluded_cpu_ns;
+    cell.driven_blocks = total;
     lane.finish();
     cell.worker_cpu_total_ns = cpu_end - worker_begin - observer.excluded_cpu_ns;
-    cell.process_cpu_total_ns = process_cpu_ns() - process_begin;
     for (std::uint32_t k = rc.warmup; k < total; ++k)
         if (!records[k].oracle)
             ++cell.oracle_failures;
@@ -1394,7 +1545,8 @@ template <class Fn> void on_worker_thread(Fn&& fn) {
 }
 
 std::string cell_json(const CellResult& cell, const RunConfig& rc) {
-    std::vector<std::int64_t> release, submit, submit_end, visible, busy, end, callback, cpu;
+    std::vector<std::int64_t> release, submit, submit_end, visible, busy, end, callback,
+        callback_cpu, cpu;
     std::vector<int> oracle, stalled;
     for (const auto& r : cell.records) {
         release.push_back(r.release_ns);
@@ -1404,14 +1556,16 @@ std::string cell_json(const CellResult& cell, const RunConfig& rc) {
         busy.push_back(r.gpu_busy_ns);
         end.push_back(r.gpu_end_ns);
         callback.push_back(r.callback_ns);
+        callback_cpu.push_back(r.callback_cpu_ns);
         cpu.push_back(r.worker_cpu_ns);
         oracle.push_back(r.oracle);
         stalled.push_back(r.stalled);
     }
     std::string out =
         "{\"lane\":" + json_string(cell.lane) + ",\"side\":" + json_string(cell.side) +
-        ",\"frames\":" + std::to_string(cell.frames) + ",\"load\":" + json_string(cell.load) +
-        ",\"status\":" + json_string(cell.status) + ",\"reason\":" + json_string(cell.reason) +
+        ",\"role\":" + json_string(cell.role) + ",\"frames\":" + std::to_string(cell.frames) +
+        ",\"load\":" + json_string(cell.load) + ",\"status\":" + json_string(cell.status) +
+        ",\"reason\":" + json_string(cell.reason) +
         ",\"blocks\":" + std::to_string(cell.records.size()) +
         ",\"warmup_blocks\":" + std::to_string(rc.warmup) + ",\"kernel\":{\"canonical\":" +
         (cell.kernel.canonical.empty() ? "null" : cell.kernel.canonical) +
@@ -1421,6 +1575,9 @@ std::string cell_json(const CellResult& cell, const RunConfig& rc) {
         ",\"stalls\":" + std::to_string(cell.stalls) +
         ",\"worker_cpu_total_ns\":" + std::to_string(cell.worker_cpu_total_ns) +
         ",\"process_cpu_total_ns\":" + std::to_string(cell.process_cpu_total_ns) +
+        ",\"render_cpu_in_window_ns\":" + std::to_string(cell.render_cpu_in_window_ns) +
+        ",\"oracle_cpu_ns\":" + std::to_string(cell.oracle_cpu_ns) +
+        ",\"driven_blocks\":" + std::to_string(cell.driven_blocks) +
         ",\"gpu_timestamps\":" + json_bool(cell.gpu_timestamps) +
         ",\"gpu_busy_domain\":" + json_string(cell.gpu_busy_domain) +
         ",\"wake_domain\":" + json_string(cell.wake_domain) +
@@ -1436,6 +1593,7 @@ std::string cell_json(const CellResult& cell, const RunConfig& rc) {
            ",\"submit_ns\":" + json_array(submit) + ",\"submit_end_ns\":" + json_array(submit_end) +
            ",\"visible_ns\":" + json_array(visible) + ",\"gpu_busy_ns\":" + json_array(busy) +
            ",\"gpu_end_ns\":" + json_array(end) + ",\"callback_ns\":" + json_array(callback) +
+           ",\"callback_cpu_ns\":" + json_array(callback_cpu) +
            ",\"worker_cpu_ns\":" + json_array(cpu) + ",\"oracle\":" + json_array(oracle) +
            ",\"stalled\":" + json_array(stalled) + "}}";
     return out;
@@ -1449,6 +1607,14 @@ std::vector<LaneSpec> default_lanes() {
     lanes.push_back({.name = "metal_completed_handler",
                      .side = "metal",
                      .metal_completion = MetalCompletion::CompletedHandler});
+    // Robustness-cost probe: the same program without the Tint-equivalent
+    // guards. Labelled, never production-eligible, never gating.
+    lanes.push_back({.name = "metal_shared_event_unguarded_robustness_probe",
+                     .side = "metal",
+                     .metal_completion = MetalCompletion::SharedEvent,
+                     .production_eligible = false,
+                     .guarded = false,
+                     .role = "robustness_cost_probe"});
     lanes.push_back({.name = "dawn_imported_timed_wait_any", .side = "dawn", .dawn_policy = 2});
     lanes.push_back({.name = "dawn_imported_process_events_poll50us",
                      .side = "dawn",
@@ -1590,6 +1756,11 @@ int main(int argc, char** argv) {
         if (std::find(rc.loads.begin(), rc.loads.end(), "render") != rc.loads.end())
             render_available = render.ensure(render_reason);
 
+        const std::function<std::uint64_t()> no_render_cpu = [] { return std::uint64_t{0}; };
+        const std::function<std::uint64_t()> render_thread_cpu = [&render] {
+            return render.thread_cpu_total();
+        };
+
         DawnIdentity dawn_identity;
         HostClockBridge clock;
         std::vector<CellResult> cells;
@@ -1602,22 +1773,27 @@ int main(int argc, char** argv) {
             cell.side = spec.side;
             cell.frames = plan.frames;
             cell.load = plan.load;
+            cell.role = spec.role;
             const bool planted_cell = rc.planted && spec.side == "metal";
             if (spec.side == "metal") {
                 cell.kernel =
                     planted_cell
                         ? make_kernel_identity(
-                              kPlantedProgramId, pipelines.msl_sha256, pipelines.msl_sha256, w,
+                              kPlantedProgramId, pipelines.msl_sha256, pipelines.msl_sha256,
+                              pipelines.msl_sha256, kRobustnessNone, w,
                               {{"complex_multiply", 0, 0, MetalLane::planted_groups(w)}})
                         : make_kernel_identity(kProgramId, kPortedFromFftWgslSha256,
-                                               kPortedFromMulWgslSha256, w, convolution_passes(w));
+                                               kPortedFromMulWgslSha256, pipelines.msl_sha256,
+                                               spec.guarded ? kRobustnessTint : kRobustnessNone, w,
+                                               convolution_passes(w));
                 cell.gpu_timestamps = true;
                 cell.gpu_busy_domain = "metal_command_buffer_gpu_start_to_end";
                 cell.wake_domain = "metal_gpu_end_to_worker_observed";
             } else {
                 cell.kernel = make_kernel_identity(
                     kProgramId, wgsl.ok ? wgsl.fft_sha256 : "unavailable",
-                    wgsl.ok ? wgsl.mul_sha256 : "unavailable", w, convolution_passes(w));
+                    wgsl.ok ? wgsl.mul_sha256 : "unavailable", kPinnedMslSha256, kRobustnessTint, w,
+                    convolution_passes(w));
                 cell.gpu_busy_domain = "dawn_timestamp_query_first_to_last_compute_pass";
                 cell.wake_domain = "unobservable_no_host_completion_time_exposed";
             }
@@ -1630,13 +1806,15 @@ int main(int argc, char** argv) {
             const std::uint32_t total = rc.warmup + rc.blocks;
             if (plan.load == "render")
                 render.start();
+            const auto& render_cpu = plan.load == "render" ? render_thread_cpu : no_render_cpu;
             if (spec.side == "metal") {
-                MetalLane lane(device, pipelines, spec.metal_completion, planted_cell);
+                MetalLane lane(device, pipelines, spec.metal_completion, spec.guarded,
+                               planted_cell);
                 if (!lane.prepare(w, total, reason)) {
                     cell.status = "unavailable";
                     cell.reason = reason;
                 } else {
-                    on_worker_thread([&] { drive(lane, w, rc, cell); });
+                    on_worker_thread([&] { drive(lane, w, rc, cell, render_cpu); });
                     const auto& start = lane.gpu_start();
                     const auto& end = lane.gpu_end();
                     const auto t0 = static_cast<std::int64_t>(cell.t0_ns);
@@ -1648,6 +1826,7 @@ int main(int argc, char** argv) {
                         }
                         if (cell.records[i].callback_ns >= 0)
                             cell.records[i].callback_ns -= t0;
+                        cell.records[i].callback_cpu_ns = lane.callback_cpu(k);
                     }
                     cell.late_gpu_time_waits = lane.late_gpu_time_waits();
                     if (lane.command_errors() != 0 && cell.status == "completed") {
@@ -1655,13 +1834,13 @@ int main(int argc, char** argv) {
                         cell.reason = "metal_command_buffer_errors";
                     }
                 }
-                cell.extra_json =
-                    "\"metal\":{\"completion\":" +
-                    json_string(spec.metal_completion == MetalCompletion::SharedEvent
-                                    ? "MTLSharedEvent_notifyListener_semaphore"
-                                    : "addCompletedHandler_semaphore") +
-                    ",\"storage\":\"no_copy_page_aligned_host\",\"planted_unmatched_kernel\":" +
-                    json_bool(planted_cell) + "}";
+                cell.extra_json = "\"metal\":{\"completion\":" +
+                                  json_string(spec.metal_completion == MetalCompletion::SharedEvent
+                                                  ? "MTLSharedEvent_notifyListener_semaphore"
+                                                  : "addCompletedHandler_semaphore") +
+                                  ",\"storage\":\"no_copy_page_aligned_host\",\"robustness\":" +
+                                  json_string(spec.guarded ? kRobustnessTint : kRobustnessNone) +
+                                  ",\"planted_unmatched_kernel\":" + json_bool(planted_cell) + "}";
             } else {
                 const auto policy =
                     spec.dawn_policy == 2   ? DawnSharedIoProvider::CompletionPolicy::TimedWaitAny
@@ -1673,7 +1852,7 @@ int main(int argc, char** argv) {
                     cell.reason = reason;
                 } else {
                     cell.gpu_timestamps = lane.timestamps_enabled();
-                    on_worker_thread([&] { drive(lane, w, rc, cell); });
+                    on_worker_thread([&] { drive(lane, w, rc, cell, render_cpu); });
                     for (std::size_t i = 0; i < cell.records.size(); ++i)
                         cell.records[i].gpu_busy_ns = lane.gpu_busy()[i + rc.warmup];
                     const auto stats = lane.stats();
@@ -1690,6 +1869,12 @@ int main(int argc, char** argv) {
                         json_string(spec.dawn_staged_timestamps
                                         ? ""
                                         : "timestamps_require_staged_storage") +
+                        ",\"wait_mode\":" +
+                        json_string(spec.dawn_policy == 2
+                                        ? "timed_wait_any_on_queue_future_else_50us_poll_fallback"
+                                        : "poll_then_sleep_poll_interval") +
+                        ",\"wait_fallback_sleeps\":" + std::to_string(lane.fallback_sleeps()) +
+                        ",\"robustness\":\"dawn_default_tint_robustness\"" +
                         ",\"poll_interval_ns\":" + std::to_string(spec.poll_interval_ns) +
                         ",\"production_eligible\":" + json_bool(spec.production_eligible) +
                         ",\"stats\":{\"service_calls\":" + std::to_string(stats.service_calls) +
@@ -1770,7 +1955,8 @@ int main(int argc, char** argv) {
             if (i)
                 lanes_json += ",";
             lanes_json += "{\"name\":" + json_string(l.name) + ",\"side\":" + json_string(l.side) +
-                          ",\"production_eligible\":" + json_bool(l.production_eligible) + "}";
+                          ",\"production_eligible\":" + json_bool(l.production_eligible) +
+                          ",\"role\":" + json_string(l.role) + "}";
         }
         lanes_json += "]";
         std::string order_json = "[";
@@ -1807,9 +1993,11 @@ int main(int argc, char** argv) {
             ",\"source_path\":" + json_string(wgsl.source_path) +
             ",\"source_sha256\":" + json_string(wgsl.source_sha256) +
             ",\"fft_sha256\":" + json_string(wgsl.fft_sha256) +
-            ",\"mul_sha256\":" + json_string(wgsl.mul_sha256) + "}" +
-            ",\"msl_port\":{\"ported_from_fft_wgsl_sha256\":" +
-            json_string(kPortedFromFftWgslSha256) +
+            ",\"mul_sha256\":" + json_string(wgsl.mul_sha256) +
+            ",\"build_fft_sha256\":" + json_string(PULP_COMPARATOR_BUILD_FFT_WGSL_SHA256) +
+            ",\"build_mul_sha256\":" + json_string(PULP_COMPARATOR_BUILD_MUL_WGSL_SHA256) + "}" +
+            ",\"msl_port\":{\"pinned_msl_sha256\":" + json_string(kPinnedMslSha256) +
+            ",\"ported_from_fft_wgsl_sha256\":" + json_string(kPortedFromFftWgslSha256) +
             ",\"ported_from_mul_wgsl_sha256\":" + json_string(kPortedFromMulWgslSha256) +
             ",\"msl_sha256\":" + json_string(pipelines.msl_sha256) +
             ",\"math_mode\":" + json_string(pipelines.math_mode) + "}" +
@@ -1856,8 +2044,13 @@ int main(int argc, char** argv) {
         }
         if (rc.planted)
             return planted_detected ? 0 : 1;
+        const bool built_from_source = wgsl.fft_sha256 == PULP_COMPARATOR_BUILD_FFT_WGSL_SHA256 &&
+                                       wgsl.mul_sha256 == PULP_COMPARATOR_BUILD_MUL_WGSL_SHA256;
         const bool port_current = wgsl.fft_sha256 == kPortedFromFftWgslSha256 &&
-                                  wgsl.mul_sha256 == kPortedFromMulWgslSha256;
+                                  wgsl.mul_sha256 == kPortedFromMulWgslSha256 &&
+                                  pipelines.msl_sha256 == kPinnedMslSha256 && built_from_source;
+        if (!built_from_source)
+            std::fprintf(stderr, "comparator: provider source WGSL differs from the build\n");
         if (!port_current)
             std::fprintf(stderr, "comparator: MSL port is stale against the provider WGSL\n");
         if (any_failure || !parity_ok || !port_current)

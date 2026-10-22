@@ -125,10 +125,37 @@
                 set(_pulp_comparator_dawn_sha "")
             endif()
         endif()
+        # Hash the provider WGSL at configure time: that is the WGSL compiled into
+        # pulp-gpu-audio, and the comparator refuses a run whose source tree
+        # disagrees with it.
+        set(_pulp_comparator_provider
+            "${PROJECT_SOURCE_DIR}/core/gpu_audio/src/detail/dawn_shared_io_provider.cpp")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            "${_pulp_comparator_provider}")
+        file(READ "${_pulp_comparator_provider}" _pulp_comparator_src)
+        foreach(_kernel Fft Mul)
+            string(TOUPPER "${_kernel}" _kernel_upper)
+            set(_pulp_comparator_${_kernel_upper} "")
+            set(_marker "constexpr auto kSharedIo${_kernel}Wgsl = R\"wgsl(")
+            string(FIND "${_pulp_comparator_src}" "${_marker}" _begin)
+            if(_begin GREATER -1)
+                string(LENGTH "${_marker}" _marker_length)
+                math(EXPR _begin "${_begin} + ${_marker_length}")
+                string(SUBSTRING "${_pulp_comparator_src}" ${_begin} -1 _rest)
+                string(FIND "${_rest}" ")wgsl\"" _end)
+                if(_end GREATER -1)
+                    string(SUBSTRING "${_rest}" 0 ${_end} _body)
+                    string(SHA256 _pulp_comparator_${_kernel_upper} "${_body}")
+                endif()
+            endif()
+        endforeach()
         target_compile_definitions(pulp-test-native-metal-audio-comparator PRIVATE
             PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_comparator_dawn_sha}"
-            PULP_GPU_AUDIO_PROVIDER_SOURCE="${PROJECT_SOURCE_DIR}/core/gpu_audio/src/detail/dawn_shared_io_provider.cpp")
+            PULP_GPU_AUDIO_PROVIDER_SOURCE="${_pulp_comparator_provider}"
+            PULP_COMPARATOR_BUILD_FFT_WGSL_SHA256="${_pulp_comparator_FFT}"
+            PULP_COMPARATOR_BUILD_MUL_WGSL_SHA256="${_pulp_comparator_MUL}")
         unset(_pulp_comparator_dawn_sha)
+        unset(_pulp_comparator_src)
         # The kernel digest reads the WGSL the provider compiles from its source.
         pulp_test_data(pulp-test-native-metal-audio-comparator NO_DEFINE
             PATHS core/gpu_audio/src/detail/dawn_shared_io_provider.cpp)
