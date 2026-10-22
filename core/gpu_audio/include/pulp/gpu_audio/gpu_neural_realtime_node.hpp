@@ -146,6 +146,10 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
 
     /// Reason for the most recent failed prepare(); None after a success.
     PrepareError last_prepare_error() const noexcept;
+    /// Non-finite input samples (NaN, +/-Inf) replaced with zero since
+    /// prepare(). The GPU submission and the CPU shadow both see the
+    /// replacement, so they stay comparable.
+    std::uint64_t sanitized_input_samples() const noexcept;
     NeuralFamily family() const noexcept;
     /// True only while a GPU backend for this family is prepared and has not
     /// been quiesced by an offline fence.

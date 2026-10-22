@@ -285,11 +285,19 @@ host-only model factory from a verified neural model manifest, and each model
 binds to one node. The shadow runs on the audio thread for every block, even
 when the GPU delivers, so measure its cost for the model size you ship.
 A transport hosting a CPU-only family reports the `Cpu` path and provider and
-a `Ready` state. Its `missed_blocks` counter still counts every CPU-only block,
-because the shadow is selected through the miss policy, so for those nodes read
-`fallback_blocks` instead. Any latched cause, including one invalid callback,
-fences GPU delivery until the host prepares the node again. The shadow carries
-the stream until then. `last_prepare_error()` reports why `prepare()` failed.
+a `Ready` state. Because the CPU model is that node's primary path, its blocks
+count under `fallback_blocks` and never under `missed_blocks`. A WaveNet
+model whose GPU provider could not be prepared also runs on the `Cpu` path. It
+reports `Degraded`, with `ProviderFailure` as the recovery reason.
+
+Non-finite input samples (NaN, +Inf, -Inf) are replaced with zero before
+either the GPU submission or the CPU shadow sees them, so the two stay
+comparable and no causal state is poisoned. `sanitized_input_samples()`
+counts the replacements.
+
+Any latched cause, including one invalid callback, fences GPU delivery until
+the host prepares the node again. The shadow carries the stream until then.
+`last_prepare_error()` reports why `prepare()` failed.
 
 When a host has already prepared a transport, pass its
 `GpuAudioCapabilityReport` to the two-argument overload of

@@ -416,6 +416,15 @@ void require_null(const ClapSession& gpu, const ClapSession& cpu) {
     CHECK(null.passed);
 }
 
+/// Both the plug-in's transport status and its node status satisfy the
+/// shared status contract.
+void require_valid_status(ClapSession& session) {
+    CHECK(validate_gpu_audio_status(session.gpu()->transport().status_snapshot()).error ==
+          GpuAudioStatusError::None);
+    CHECK(validate_gpu_audio_status(session.gpu()->node()->status_snapshot()).error ==
+          GpuAudioStatusError::None);
+}
+
 GpuAudioTransport::DeliverySnapshot delivery(ClapSession& session) {
     return session.gpu()->transport().delivery_snapshot();
 }
@@ -457,6 +466,7 @@ TEST_CASE("neural plug-in nulls against the CPU reference for every hosted famil
     }
     CHECK(d.silence_blocks == 0);
     CHECK(gpu.callback_allocations() == 0);
+    require_valid_status(gpu);
     require_null(gpu, cpu);
 }
 
@@ -485,5 +495,6 @@ TEST_CASE("neural plug-in output stays continuous across simulated provider faul
     CHECK(after.invalid_blocks == 0);
     CHECK_FALSE(gpu.gpu()->plan().sequence_gap_seen);
     CHECK(gpu.callback_allocations() == 0);
+    require_valid_status(gpu);
     require_null(gpu, cpu);
 }
