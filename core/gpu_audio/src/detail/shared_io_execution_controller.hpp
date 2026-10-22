@@ -118,7 +118,9 @@ class SharedIoExecutionController {
     // provider completion deferred across release()/prepare() names a stale
     // generation and cannot retire a sequence of the next stream. Providers
     // must capture it when the submission is admitted, never when the
-    // completion runs.
+    // completion runs. This does not make release() safe against a completion
+    // that is still running: providers must drain or fence their completion
+    // callbacks before release(), as with every host/quiescent operation.
     std::uint64_t generation() const noexcept {
         return generation_;
     }
@@ -269,10 +271,13 @@ class SharedIoExecutionController {
             telemetry_->record_callback_block(false);
         // Accepting the terminal sequence value would wrap the callback epoch
         // to zero and silently re-enter priming on the next callback. Latch the
-        // timeline at the terminal value so every later callback is a gap.
+        // timeline at the terminal value so every later callback is a gap, and
+        // stop admitting or holding provider work that can never be delivered.
         if (callback_sequence == kLastSequence) {
             callback_started_ = true;
             next_callback_sequence_ = kLastSequence;
+            resync_admission(kLastSequence);
+            discard_ready_entries_before(kLastSequence);
             result.path = fallback_path();
             result.fallback_reason = SharedIoFallbackReason::SequenceGap;
             if (telemetry_) {

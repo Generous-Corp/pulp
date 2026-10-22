@@ -500,7 +500,9 @@ TEST_CASE("completion deferred across re-prepare cannot retire the next generati
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
 
     // Teardown while sequence 0 is still pending with the provider: every
-    // entry point fails closed until the owner prepares again.
+    // entry point fails closed until the owner prepares again. The completion
+    // below is refused because nothing is prepared, not by the generation
+    // check, which the re-prepared stream exercises further down.
     controller.release();
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::NotPrepared);
     REQUIRE_FALSE(controller.record_completion(lost_generation, 0, SharedIoCompletion::Success));
@@ -598,12 +600,20 @@ TEST_CASE("execution controller refuses to wrap the sequence epoch",
 
 TEST_CASE("a terminal first callback cannot re-enter priming",
           "[gpu_audio][shared_io][controller][fault-injection][negative]") {
+    SharedIoTelemetry telemetry;
     SharedIoExecutionController controller;
-    REQUIRE(controller.prepare(contract()));
+    REQUIRE(controller.prepare(contract(), &telemetry));
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(controller.generation(), 0, SharedIoCompletion::Success));
 
     const auto terminal = controller.deliver(std::numeric_limits<std::uint64_t>::max());
     REQUIRE(terminal.path == SharedIoDeliveryPath::CpuFallback);
     REQUIRE(terminal.fallback_reason == SharedIoFallbackReason::SequenceGap);
+
+    // The terminal callback releases the ready entry it can never deliver and
+    // stops admitting new provider work.
+    REQUIRE(telemetry.snapshot().late_completions == 1);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::SequenceGap);
 
     const auto wrapped = controller.deliver(0);
     REQUIRE(wrapped.path == SharedIoDeliveryPath::CpuFallback);
