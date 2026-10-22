@@ -125,13 +125,12 @@ def apply_class_label_raw(raw: str, label: str, env: dict[str, str]) -> str:
 
 
 # release-path-pr-gate.yml picks its macOS selector from a chain of repo
-# variables, and repo variables (unlike secrets) resolve for fork runs. Only
-# the PR-gate variable names an isolated pool (ephemeral PR-gate VMs); the
-# rest of the chain reaches persistent or release-tier hosts, so a fork pull
-# request may use the PR-gate variable or nothing.
+# variables, and repo variables (unlike secrets) resolve for fork runs. Every
+# self-hosted pool on that chain, the PR-gate one included, shares caches with
+# trusted builds, so a fork pull request gets GitHub-hosted macos-15 whatever
+# the variables say (the same rule as build.yml's fork guard).
 PR_EVENTS = ("pull_request", "pull_request_target")
-PR_GATE_ISOLATED_VAR = "PR_GATE_JSON"
-FORK_SKIP = "skip"
+FORK_HOSTED = '["macos-15"]'
 SAME_REPO = "same-repo"
 
 
@@ -146,31 +145,15 @@ def is_fork_pull_request(env: dict[str, str]) -> bool:
 
 def fork_pr_gate_route(env: dict[str, str]) -> str:
     """`same-repo` when this is not a fork pull request (the workflow's own
-    chain applies, unchanged). For a fork: the isolated PR-gate selector when
-    one is configured, else `skip`. Never another variable, never a hosted
-    default."""
+    chain applies, unchanged). For a fork, the hosted selector; no repo
+    variable is read."""
     if not is_fork_pull_request(env):
         return SAME_REPO
-    raw = (env.get(PR_GATE_ISOLATED_VAR) or "").strip()
     head = (env.get("PR_HEAD_REPO") or "").strip() or "deleted head"
-    if not raw:
-        print(
-            f"::notice::fork pull request ({head}): no isolated PR-gate selector "
-            f"(PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON) is configured, so the "
-            f"darwin-arm64 release-path leg is skipped; fork code never falls "
-            f"through to the persistent or release-tier selectors.",
-            file=sys.stderr,
-        )
-        return FORK_SKIP
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise SystemExit(f"{PR_GATE_ISOLATED_VAR} is not valid JSON: {raw!r} ({exc})")
-    if not parsed:
-        raise SystemExit(f"{PR_GATE_ISOLATED_VAR} resolved to an empty runs-on: {raw!r}")
-    print(f"::notice::fork pull request ({head}): using only the isolated "
-          f"PR-gate selector {raw}", file=sys.stderr)
-    return raw
+    print(f"::notice::fork pull request ({head}): routing the darwin-arm64 "
+          f"release-path leg to GitHub-hosted macos-15; fork code never runs "
+          f"on the self-hosted Macs.", file=sys.stderr)
+    return FORK_HOSTED
 
 
 def resolve(env: dict[str, str]) -> dict[str, object]:
@@ -244,8 +227,8 @@ def main(argv: list[str] | None = None) -> int:
                          f"{CLASS_TOKENS_VAR} opts in (verbatim otherwise)")
     ap.add_argument("--selector", help="runs-on JSON for --apply-class-label")
     ap.add_argument("--fork-pr-gate-route", action="store_true",
-                    help=f"print `{SAME_REPO}`, `{FORK_SKIP}`, or the isolated "
-                         "PR-gate selector a fork pull request may use")
+                    help=f"print `{SAME_REPO}`, or the hosted selector a fork "
+                         "pull request uses")
     args = ap.parse_args(argv)
 
     env = dict(os.environ)

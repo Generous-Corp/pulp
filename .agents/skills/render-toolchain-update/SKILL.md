@@ -319,9 +319,9 @@ retain those fields in the PR/landing evidence.
   sparse checkout. With `PULP_RELEASE_CLASS_TOKENS` unset the selector is
   verbatim; set, a self-hosted selector gains `pulp-release-pr-gate`, so a gate
   run that never starts may be an unserved class, not a toolchain failure. A
-  fork pull request uses only `PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON`; with it
-  unset its darwin-arm64 leg is skipped (`--fork-pr-gate-route`), so a missing
-  macOS leg on a fork PR is routing, not a toolchain result.
+  fork pull request ignores these variables and runs its darwin-arm64 leg on
+  hosted `macos-15` (`--fork-pr-gate-route`), so a fork PR's macOS timing is
+  not evidence about the self-hosted gate.
 - A Skia milestone name alone does not select a V8 revision. Resolve through Chromium's
   milestone branch, preserve its raw Skia SHA, and separately prove the release's
   validated `built_skia`/`built_dawn` pair equals Pulp's active provider.

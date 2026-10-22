@@ -12,7 +12,7 @@ the module wrapped around it the way PulpDependencies.cmake wraps SDL3:
   5. PULP_CONFIGURE_CHECK_CACHE=OFF records and replays nothing.
   6. The cache directory can be shared with untrusted jobs, so a results file
      is parsed, never include()d: one line the writer would not emit (CMake
-     code, a non-boolean value, a CMAKE_* name) makes the whole file ignored,
+     code, a non-boolean value, a CMAKE_/PULP_/FETCHCONTENT_ name) makes the whole file ignored,
      nothing in it runs, and the configure runs its checks uncached.
 
 Exit 77 (ctest SKIP) off Apple, where the module is deliberately inert.
@@ -167,6 +167,8 @@ def main() -> int:
                                  f'file(TOUCH "{marker.as_posix()}")\n',
             "non-boolean value": 'pulp_configure_check_cache_seed(FD_X "$(touch planted)" "Have symbol x")\n',
             "CMAKE_ name": 'pulp_configure_check_cache_seed(CMAKE_C_COMPILER "1" "Have symbol x")\n',
+            "PULP_ name": 'pulp_configure_check_cache_seed(PULP_ENABLE_JS "OFF" "Have symbol x")\n',
+            "FETCHCONTENT_ name": 'pulp_configure_check_cache_seed(FETCHCONTENT_FULLY_DISCONNECTED "ON" "Have symbol x")\n',
             "non-check help": 'pulp_configure_check_cache_seed(FD_X "1" "not a configure check")\n',
             "unknown escape": 'pulp_configure_check_cache_seed(FD_X "1" "Have symbol \\t")\n',
         }

@@ -173,36 +173,32 @@ class ReleaseClassLabelOptIn(unittest.TestCase):
         )
 
 
-class ForkPullRequestsUseOnlyTheIsolatedSelector(unittest.TestCase):
-    """release-path-pr-gate.yml's variable chain reaches persistent and
-    release-tier hosts, and repo variables resolve for fork runs. A fork pull
-    request may use only the isolated PR-gate selector, or skip."""
+class ForkPullRequestsUseOnlyHostedMacos(unittest.TestCase):
+    """release-path-pr-gate.yml's variable chain reaches self-hosted pools
+    that share caches with trusted builds, and repo variables resolve for fork
+    runs. A fork pull request gets hosted macos-15, whatever they say."""
 
     PR = {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REPOSITORY": "Generous-Corp/pulp"}
     ISOLATED = '["self-hosted","macOS","ARM64","pulp-build-vm","pulp-release-pr-gate"]'
     PERSISTENT = '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]'
 
-    def test_fork_without_isolated_selector_skips(self) -> None:
-        # The persistent/release-tier variables are set; none may be used.
-        env = dict(self.PR, PR_HEAD_REPO="someone/pulp", RELEASE_JSON=self.PERSISTENT,
-                   LOCAL_JSON=self.PERSISTENT, NAMESPACE_JSON='"nscloud-macos"')
-        self.assertEqual(fork_pr_gate_route(env), "skip")
-        self.assertEqual(fork_pr_gate_route(dict(env, PR_GATE_JSON="  ")), "skip")
-
-    def test_fork_with_isolated_selector_uses_only_it(self) -> None:
+    def test_fork_ignores_a_self_hosted_pr_gate_selector(self) -> None:
         env = dict(self.PR, PR_HEAD_REPO="someone/pulp", PR_GATE_JSON=self.ISOLATED,
-                   RELEASE_JSON=self.PERSISTENT, LOCAL_JSON=self.PERSISTENT)
-        self.assertEqual(fork_pr_gate_route(env), self.ISOLATED)
+                   RELEASE_JSON=self.PERSISTENT, LOCAL_JSON=self.PERSISTENT,
+                   NAMESPACE_JSON='"nscloud-macos"')
+        self.assertEqual(json.loads(fork_pr_gate_route(env)), ["macos-15"])
+        # Malformed variables are never read for a fork, so cannot fail it.
+        self.assertEqual(json.loads(fork_pr_gate_route(dict(env, PR_GATE_JSON="[x"))),
+                         ["macos-15"])
 
-    def test_fork_with_malformed_isolated_selector_fails_loud(self) -> None:
+    def test_fork_with_nothing_configured_gets_hosted(self) -> None:
         env = dict(self.PR, PR_HEAD_REPO="someone/pulp")
-        for bad in ("[self-hosted", "[]"):
-            with self.subTest(bad=bad), self.assertRaises(SystemExit):
-                fork_pr_gate_route(dict(env, PR_GATE_JSON=bad))
+        self.assertEqual(json.loads(fork_pr_gate_route(env)), ["macos-15"])
 
     def test_deleted_fork_head_counts_as_fork(self) -> None:
         self.assertTrue(is_fork_pull_request(dict(self.PR, PR_HEAD_REPO="")))
-        self.assertEqual(fork_pr_gate_route(dict(self.PR, LOCAL_JSON=self.PERSISTENT)), "skip")
+        self.assertEqual(json.loads(fork_pr_gate_route(
+            dict(self.PR, LOCAL_JSON=self.PERSISTENT))), ["macos-15"])
         self.assertTrue(is_fork_pull_request(
             dict(self.PR, GITHUB_EVENT_NAME="pull_request_target", PR_HEAD_REPO="x/y")))
 
@@ -212,7 +208,8 @@ class ForkPullRequestsUseOnlyTheIsolatedSelector(unittest.TestCase):
         self.assertEqual(fork_pr_gate_route(same), "same-repo")
         for event in ("merge_group", "workflow_dispatch", "push", ""):
             with self.subTest(event=event):
-                env = {"GITHUB_EVENT_NAME": event, "GITHUB_REPOSITORY": "Generous-Corp/pulp"}
+                env = {"GITHUB_EVENT_NAME": event, "GITHUB_REPOSITORY": "Generous-Corp/pulp",
+                       "PR_GATE_JSON": self.ISOLATED}
                 self.assertEqual(fork_pr_gate_route(env), "same-repo")
 
 

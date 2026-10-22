@@ -5978,10 +5978,10 @@ down this list before touching build code:
    `pulp-release-pr-gate` label; its legacy fallback to the tagged-release
    selector is migration-only and must remain until the separate selector has
    been deployed and proven. A fork pull request never reaches that chain:
-   `resolve_release_runners.py --fork-pr-gate-route` gives it only
-   `PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON` (the isolated PR-gate VMs) and,
-   when that is unset, drops the darwin-arm64 leg with a notice rather than
-   falling through to persistent, release-tier or hosted runners. The TartCI release supervisor scans tagged-release
+   `resolve_release_runners.py --fork-pr-gate-route` gives it GitHub-hosted
+   `["macos-15"]` and reads no repo variable, because every self-hosted pool
+   on the chain (the `pulp-release-pr-gate` VMs included) shares caches with
+   trusted builds; this is build.yml's fork rule. The TartCI release supervisor scans tagged-release
    demand before PR-gate demand, registers a runner with only the selected
    class label, and force-refreshes higher-priority demand immediately before
    minting a lower-priority runner. GitHub remains FIFO within each class. Do
