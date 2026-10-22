@@ -470,6 +470,35 @@ public:
     virtual bool wavenet_forward(const float* in_block, float* out_block,
                                  uint32_t block_size, uint32_t instance = 0) = 0;
 
+    /// Run one block for `count` independent WaveNet instances at once. Each
+    /// `instances[i]` must have been prepared with `block_size`, and an instance
+    /// may appear at most once. Every instance's passes are encoded into ONE
+    /// command buffer, submitted once, and the `count` output blocks come back
+    /// through ONE readback map — so the fixed submit + map round trip is paid
+    /// once per block for the whole set instead of once per instance. Each
+    /// instance's output and dilation history are exactly what `count` separate
+    /// wavenet_forward() calls would produce. When `gpu_busy_us` is non-null it
+    /// receives the GPU-busy microseconds spanning the batch, or -1 when the
+    /// device has no timestamp queries. Returns false on an unprepared or
+    /// repeated instance; the Dawn implementation validates the whole set before
+    /// encoding, so a rejected batch advances no instance's history. Blocks on the
+    /// readback like wavenet_forward(): run it on a GPU worker or offline, never
+    /// on the audio thread. The default implementation calls wavenet_forward()
+    /// per instance.
+    virtual bool wavenet_forward_batch(const float* const* in_blocks, float* const* out_blocks,
+                                       const uint32_t* instances, uint32_t count,
+                                       uint32_t block_size, double* gpu_busy_us = nullptr) {
+        if (gpu_busy_us) *gpu_busy_us = -1.0;
+        if (!in_blocks || !out_blocks || !instances || count == 0) return false;
+        for (uint32_t i = 0; i < count; ++i)
+            for (uint32_t j = i + 1; j < count; ++j)
+                if (instances[i] == instances[j]) return false;
+        for (uint32_t i = 0; i < count; ++i)
+            if (!wavenet_forward(in_blocks[i], out_blocks[i], block_size, instances[i]))
+                return false;
+        return true;
+    }
+
     // ── Asynchronous readback (compute_magnitude + convolve_batch) ──────────
     //
     // SCOPE FIRST, so nobody reads the contract below as a general promise:

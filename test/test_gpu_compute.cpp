@@ -1605,6 +1605,124 @@ TEST_CASE("GpuCompute prepare_wavenet rejects unsupported shapes",
       REQUIRE_FALSE(compute->wavenet_forward(in.data(), out.data(), B * 2)); }
 }
 
+namespace {
+// A two-array dilated net shaped like a small amp capture (both arrays dilated so
+// streaming history crosses block boundaries), with per-instance weights.
+struct BatchNet {
+    std::vector<uint32_t> d0 = {1, 2, 4, 8};
+    std::vector<uint32_t> d1 = {16, 1, 2};
+    GpuCompute::WavenetLayerArraySpec specs[2];
+    uint32_t need = 0;
+    BatchNet() {
+        specs[0] = {1, 1, 4, 3, 2, 0, 0, d0.data(), 4};
+        specs[1] = {4, 1, 2, 3, 1, 0, 1, d1.data(), 3};
+        auto arr = [](uint32_t in, uint32_t C, uint32_t K, uint32_t L, uint32_t H, bool hb) {
+            return C * in + L * (C * C * K + C + C + C * C + C) + H * C + (hb ? H : 0u);
+        };
+        need = arr(1, 4, 3, 4, 2, false) + arr(4, 2, 3, 3, 1, true) + 1;
+    }
+    std::vector<float> weights(uint32_t seed) const {
+        std::vector<float> w(need);
+        for (uint32_t i = 0; i < need; ++i)
+            w[i] = 0.35f * std::sin(0.61f * i + 1.7f * seed) + 0.05f * std::cos(0.13f * i * (seed + 1));
+        w.back() = 0.5f + 0.1f * seed;
+        return w;
+    }
+};
+}  // namespace
+
+TEST_CASE("GpuCompute wavenet_forward_batch matches per-instance forwards bit-for-bit",
+          "[render][gpu][compute]") {
+    // Batching only changes how the work is submitted and read back. Every
+    // instance's output and its carried dilation history must be exactly what
+    // separate wavenet_forward() calls produce, over several streaming blocks, so
+    // two devices are driven in lockstep and compared for exact equality.
+    auto serial = GpuCompute::create();
+    auto batched = GpuCompute::create();
+    if (!serial || !serial->initialize_standalone()) SKIP(kNoGpu);
+    if (!batched || !batched->initialize_standalone()) SKIP(kNoGpu);
+
+    const BatchNet net;
+    constexpr uint32_t N = 5, B = 24, blocks = 6;
+    std::vector<std::vector<float>> w(N);
+    for (uint32_t i = 0; i < N; ++i) {
+        w[i] = net.weights(i);
+        REQUIRE(serial->prepare_wavenet(net.specs, 2, w[i].data(), net.need, B, w[i].back(), i));
+        REQUIRE(batched->prepare_wavenet(net.specs, 2, w[i].data(), net.need, B, w[i].back(), i));
+    }
+    // Batch the instances out of order to prove the routing follows `instances`.
+    const uint32_t order[N] = {3, 0, 4, 1, 2};
+    double peak = 0.0;
+    for (uint32_t blk = 0; blk < blocks; ++blk) {
+        std::vector<std::vector<float>> in(N, std::vector<float>(B)), a(N, std::vector<float>(B, 0.0f)),
+            b(N, std::vector<float>(B, -7.0f));
+        for (uint32_t i = 0; i < N; ++i)
+            for (uint32_t t = 0; t < B; ++t)
+                in[i][t] = 0.6f * std::sin(0.07f * (blk * B + t) * (i + 1)) + 0.1f * i;
+        for (uint32_t i = 0; i < N; ++i)
+            REQUIRE(serial->wavenet_forward(in[i].data(), a[i].data(), B, i));
+        const float* ip[N];
+        float* op[N];
+        for (uint32_t k = 0; k < N; ++k) {
+            ip[k] = in[order[k]].data();
+            op[k] = b[order[k]].data();
+        }
+        double busy = 0.0;
+        REQUIRE(batched->wavenet_forward_batch(ip, op, order, N, B, &busy));
+        REQUIRE((busy == -1.0 || busy >= 0.0));
+        for (uint32_t i = 0; i < N; ++i)
+            for (uint32_t t = 0; t < B; ++t) {
+                INFO("block " << blk << " instance " << i << " sample " << t);
+                REQUIRE(std::isfinite(b[i][t]));
+                REQUIRE(b[i][t] == a[i][t]);
+                peak = std::max(peak, static_cast<double>(std::abs(a[i][t])));
+            }
+    }
+    // The comparison is only meaningful if the net produced real signal.
+    REQUIRE(peak > 1e-3);
+}
+
+TEST_CASE("GpuCompute wavenet_forward_batch rejects a bad set without advancing history",
+          "[render][gpu][compute]") {
+    auto compute = GpuCompute::create();
+    auto reference = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
+    if (!reference || !reference->initialize_standalone()) SKIP(kNoGpu);
+
+    const BatchNet net;
+    constexpr uint32_t B = 16;
+    const std::vector<float> w0 = net.weights(0), w1 = net.weights(1);
+    for (auto* c : {compute.get(), reference.get()}) {
+        REQUIRE(c->prepare_wavenet(net.specs, 2, w0.data(), net.need, B, w0.back(), 0));
+        REQUIRE(c->prepare_wavenet(net.specs, 2, w1.data(), net.need, B, w1.back(), 1));
+    }
+    std::vector<float> in0(B, 0.4f), in1(B, -0.3f), o0(B), o1(B), r0(B), r1(B);
+    const float* ip[3] = {in0.data(), in1.data(), in0.data()};
+    float* op[3] = {o0.data(), o1.data(), o0.data()};
+
+    const uint32_t repeated[3] = {0, 1, 0};
+    REQUIRE_FALSE(compute->wavenet_forward_batch(ip, op, repeated, 3, B));
+    const uint32_t unprepared[2] = {0, 9};
+    REQUIRE_FALSE(compute->wavenet_forward_batch(ip, op, unprepared, 2, B));
+    const uint32_t valid[2] = {0, 1};
+    REQUIRE_FALSE(compute->wavenet_forward_batch(ip, op, valid, 2, B * 2));  // wrong block size
+    REQUIRE_FALSE(compute->wavenet_forward_batch(ip, op, valid, 0, B));
+    const float* null_in[2] = {in0.data(), nullptr};
+    REQUIRE_FALSE(compute->wavenet_forward_batch(null_in, op, valid, 2, B));
+
+    // A rejected batch must leave both histories at their prepared state: the next
+    // accepted block equals a fresh device's first block, sample for sample.
+    for (int blk = 0; blk < 2; ++blk) {
+        REQUIRE(compute->wavenet_forward_batch(ip, op, valid, 2, B));
+        REQUIRE(reference->wavenet_forward(in0.data(), r0.data(), B, 0));
+        REQUIRE(reference->wavenet_forward(in1.data(), r1.data(), B, 1));
+        for (uint32_t t = 0; t < B; ++t) {
+            REQUIRE(o0[t] == r0[t]);
+            REQUIRE(o1[t] == r1[t]);
+        }
+    }
+}
+
 // ── Capability Report Tests ─────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
