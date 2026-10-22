@@ -113,8 +113,12 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
     void process_block(const audio::BufferView<const float>&, audio::BufferView<float>&,
                        std::uint32_t) final;
 
+    // The queries below are host/UI-thread reads. Like prepare() and
+    // release(), they must not race a concurrent prepare() or release().
+
     NeuralFamily family() const noexcept;
-    /// True only while a GPU backend for this family is prepared.
+    /// True only while a GPU backend for this family is prepared and has not
+    /// been quiesced by an offline fence.
     bool gpu_kernel_available() const noexcept;
     /// Current GPU delivery epoch, or zero when no GPU epoch is open. A
     /// CPU-only node stays at zero for its whole lifetime.

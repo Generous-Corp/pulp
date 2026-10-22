@@ -42,6 +42,8 @@ GpuAudioRecoveryReason public_reason(detail::SharedIoRecoveryReason reason) noex
         return GpuAudioRecoveryReason::OfflineFence;
     case detail::SharedIoRecoveryReason::InvalidCallback:
         return GpuAudioRecoveryReason::InvalidCallback;
+    case detail::SharedIoRecoveryReason::ProviderUnresponsive:
+        return GpuAudioRecoveryReason::ProviderUnresponsive;
     }
     return GpuAudioRecoveryReason::None;
 }
@@ -76,8 +78,14 @@ struct GpuNeuralRealtimeNode::Impl {
     bool shadow_published = false;
     bool test_skip_publish = false;
 
-    // GPU delivery, present only while a backend is prepared.
+    // GPU delivery, present only while a backend is prepared. A fence
+    // quiesces the backend but keeps the bridge, so the callback stays on the
+    // fenced shared path; `backend_quiesced` records that the kernel is gone.
     bool backend_active = false;
+    bool production_backend = false; // cached at prepare; read by host threads
+    std::atomic<bool> backend_quiesced{false};
+    // Prewarm leases outlive any failed prewarm until the backend releases.
+    std::vector<float> prewarm_input, prewarm_output;
     std::unique_ptr<Bridge> bridge;
     detail::SharedIoTelemetry telemetry;
     std::vector<float> callback_input, callback_output;
@@ -107,9 +115,19 @@ struct GpuNeuralRealtimeNode::Impl {
                model->block_size > 0 && c.lead_blocks > 0 && c.capacity > c.lead_blocks &&
                c.max_inflight > 0 && c.max_inflight <= c.capacity - c.lead_blocks &&
                c.completion_service_wait_ns <= 1'000'000 &&
-               c.miss_policy == MissPolicy::CpuFallback && epoch != UINT64_MAX &&
-               sequence < Bridge::kSequenceLimit &&
+               c.miss_policy == MissPolicy::CpuFallback && backend_admits(c.max_inflight) &&
+               epoch != UINT64_MAX && sequence < Bridge::kSequenceLimit &&
                c.prewarm_blocks < Bridge::kSequenceLimit - sequence;
+    }
+
+    // A node must never admit more blocks than the backend can hold: a
+    // backpressure rejection would otherwise fence the GPU as a failure.
+    bool backend_admits(std::uint32_t inflight) const noexcept {
+        if (!model->backend)
+            return true;
+        const auto* wavenet =
+            dynamic_cast<const detail::WaveNetStreamingBackend*>(model->backend.get());
+        return wavenet != nullptr && inflight <= wavenet->max_inflight();
     }
 
     detail::StreamingPrepareContext context_for(const detail::StreamingModelSpec& spec,
@@ -174,12 +192,13 @@ struct GpuNeuralRealtimeNode::Impl {
 
     bool prewarm_backend(detail::StreamingBackend& backend) {
         const auto count = static_cast<std::size_t>(config.channels) * block_size();
-        std::vector<float> zero(count, 0.0f), output(count, 0.0f);
+        prewarm_input.assign(count, 0.0f);
+        prewarm_output.assign(count, 0.0f);
         for (std::uint32_t block = 0; block < config.prewarm_blocks; ++block) {
             const detail::StreamingBlock request{
                 .stamp = {.epoch = epoch, .sequence = sequence + block},
-                .input = zero,
-                .output = output,
+                .input = prewarm_input,
+                .output = prewarm_output,
                 .input_channels = config.channels,
                 .output_channels = config.channels,
                 .frames = block_size(),
@@ -282,8 +301,9 @@ GpuNeuralRealtimeNode::GpuNeuralRealtimeNode(Config config)
     : impl_(std::make_unique<Impl>(std::move(config))) {}
 
 GpuNeuralRealtimeNode::~GpuNeuralRealtimeNode() {
-    (void)release();
-    if (impl_->model_owner)
+    // A failed release leaves the backend holding this node's work, so the
+    // model stays bound and no other node can adopt that state.
+    if (release() && impl_->model_owner)
         impl_->model->bound.store(false, std::memory_order_release);
 }
 
@@ -348,6 +368,8 @@ bool GpuNeuralRealtimeNode::prepare() {
                 backend.begin_epoch(s.epoch, detail::StreamingResetReason::TransportRestart) &&
                 s.prewarm_backend(backend)) {
                 s.backend_active = true;
+                s.production_backend = s.model->production_backend();
+                s.backend_quiesced.store(false, std::memory_order_release);
             } else if (!backend.release()) {
                 (void)release();
                 return false;
@@ -399,6 +421,7 @@ bool GpuNeuralRealtimeNode::release() noexcept {
         if (!s.model->backend->release())
             return false;
         s.backend_active = false;
+        s.production_backend = false;
     }
     while (!s.processors.empty()) {
         if (!s.processors.back()->release())
@@ -464,7 +487,8 @@ NeuralFamily GpuNeuralRealtimeNode::family() const noexcept {
 }
 
 bool GpuNeuralRealtimeNode::gpu_kernel_available() const noexcept {
-    return impl_->prepared && impl_->backend_active;
+    return impl_->prepared && impl_->backend_active &&
+           !impl_->backend_quiesced.load(std::memory_order_acquire);
 }
 
 std::uint64_t GpuNeuralRealtimeNode::epoch() const noexcept {
@@ -504,7 +528,7 @@ GpuAudioCapabilityReport GpuNeuralRealtimeNode::capability_report() const noexce
     report.fallback_available = cpu_fallback_prepared();
     report.diagnostics_available = true;
     report.prepared_latency_blocks = s.config.lead_blocks;
-    report.gpu_kernel_available = s.backend_active;
+    report.gpu_kernel_available = gpu_kernel_available();
     report.recovery_policy = GpuAudioRecoveryPolicy::Manual;
     return report;
 }
@@ -528,7 +552,7 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
     status.recovery_sequence = recovery_sequence();
     status.epoch = epoch();
     status.delivery_epoch_active = !fenced();
-    status.gpu_kernel_available = s.backend_active;
+    status.gpu_kernel_available = gpu_kernel_available();
     // A model with a GPU kernel asked for the GPU; the others asked for CPU.
     status.requested_engine = s.model->backend ? GpuAudioEngine::Gpu : GpuAudioEngine::Cpu;
     if (!s.backend_active) {
@@ -562,7 +586,7 @@ bool GpuNeuralRealtimeNode::ready() const noexcept {
 }
 
 bool GpuNeuralRealtimeNode::authenticated_provider() const noexcept {
-    return impl_->prepared && impl_->backend_active && impl_->model->production_backend();
+    return impl_->prepared && impl_->backend_active && impl_->production_backend;
 }
 
 std::uint64_t GpuNeuralRealtimeNode::next_sequence(void* self) noexcept {
@@ -676,6 +700,7 @@ bool GpuNeuralRealtimeNode::fence(void* self) noexcept {
     s.fail(detail::SharedIoRecoveryReason::OfflineFence);
     if (!s.model->backend->quiesce())
         return false;
+    s.backend_quiesced.store(true, std::memory_order_release);
     for (auto& pending : s.pending_ring)
         pending.reset();
     s.pending_head = s.pending_count = 0;

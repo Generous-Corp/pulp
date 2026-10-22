@@ -67,6 +67,9 @@ GpuAudioProvider realtime_gpu_provider(GpuAudioNode* node) noexcept {
     if (auto* wavenet = dynamic_cast<GpuWaveNetRealtimeNode*>(node))
         return wavenet->authenticated_provider() ? GpuAudioProvider::Dawn
                                                  : GpuAudioProvider::Unknown;
+    // A CPU-only neural node stays Unknown here: the transport maps every
+    // known provider to the shared-memory path. The node's own capability
+    // report carries the Cpu provider.
     if (auto* neural = dynamic_cast<GpuNeuralRealtimeNode*>(node))
         return neural->authenticated_provider() ? GpuAudioProvider::Dawn
                                                 : GpuAudioProvider::Unknown;
