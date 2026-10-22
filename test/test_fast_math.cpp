@@ -583,10 +583,12 @@ TEST_CASE("Bit-operation selects match the conditionals they replace",
     for (std::uint32_t bits = 0; bits < 0x7f800000u; bits += 4099) {
         for (const float sign : {1.0f, -1.0f}) {
             const float x = sign * std::bit_cast<float>(bits);
-            mismatches += std::bit_cast<std::uint32_t>(pulp::signal::detail::tanh_accurate_bits(x)) !=
-                          std::bit_cast<std::uint32_t>(FastMath::tanh_accurate(x));
-            mismatches += std::bit_cast<std::uint32_t>(pulp::signal::detail::snap_to_zero_bits(x)) !=
-                          std::bit_cast<std::uint32_t>(pulp::signal::snap_to_zero(x));
+            mismatches +=
+                std::bit_cast<std::uint32_t>(pulp::signal::detail::tanh_accurate_bits(x)) !=
+                std::bit_cast<std::uint32_t>(FastMath::tanh_accurate(x));
+            mismatches +=
+                std::bit_cast<std::uint32_t>(pulp::signal::detail::snap_to_zero_bits(x)) !=
+                std::bit_cast<std::uint32_t>(pulp::signal::snap_to_zero(x));
         }
     }
     CHECK(mismatches == 0);
