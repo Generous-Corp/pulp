@@ -99,10 +99,39 @@ template <typename SampleType = float, std::size_t MaxSections = 16> class SosCa
         return input;
     }
 
+    /// Process a buffer in place.
+    ///
+    /// Sample-major over up to kSectionsPerPass sections at a time: each
+    /// sample runs through every section of the pass before the next sample
+    /// starts, so the sections' recursions are independent dependency chains
+    /// that execute concurrently instead of one section's whole buffer waiting
+    /// on its own feedback latency. Every section uses BiquadT's expressions
+    /// on register-resident coefficients and state, and the denormal snap runs
+    /// every BiquadT::kStateSnapInterval samples and at the end of the call,
+    /// so the output is identical to the sample path while the states are at
+    /// or above 1e-15 (see BiquadT::process(SampleType*, int)).
     void process(SampleType* buffer, std::size_t num_samples) noexcept {
-        for (std::size_t i = 0; i < num_samples; ++i)
-            buffer[i] = process(buffer[i]);
+        std::size_t first = 0;
+        while (first < size_) {
+            const std::size_t count = size_ - first < kSectionsPerPass ? size_ - first
+                                                                       : kSectionsPerPass;
+            switch (count) {
+                case 1: process_pass<1>(first, buffer, num_samples); break;
+                case 2: process_pass<2>(first, buffer, num_samples); break;
+                case 3: process_pass<3>(first, buffer, num_samples); break;
+                case 4: process_pass<4>(first, buffer, num_samples); break;
+                case 5: process_pass<5>(first, buffer, num_samples); break;
+                case 6: process_pass<6>(first, buffer, num_samples); break;
+                case 7: process_pass<7>(first, buffer, num_samples); break;
+                default: process_pass<8>(first, buffer, num_samples); break;
+            }
+            first += count;
+        }
     }
+
+    /// Sections the block path runs together in one sample-major pass. Eight
+    /// sections' state fits in registers alongside the working set.
+    static constexpr std::size_t kSectionsPerPass = 8;
 
     void reset() noexcept {
         for (std::size_t i = 0; i < MaxSections; ++i)
@@ -114,6 +143,43 @@ template <typename SampleType = float, std::size_t MaxSections = 16> class SosCa
     }
 
   private:
+    template <std::size_t Count>
+    void process_pass(std::size_t first, SampleType* buffer, std::size_t num_samples) noexcept {
+        constexpr std::size_t kSnap = static_cast<std::size_t>(BiquadT<SampleType>::kStateSnapInterval);
+        SampleType b0[Count], b1[Count], b2[Count], a1[Count], a2[Count], s1[Count], s2[Count];
+        for (std::size_t k = 0; k < Count; ++k) {
+            const auto& section = sections_[first + k];
+            b0[k] = section.b0_;
+            b1[k] = section.b1_;
+            b2[k] = section.b2_;
+            a1[k] = section.a1_;
+            a2[k] = section.a2_;
+            s1[k] = section.s1_;
+            s2[k] = section.s2_;
+        }
+        for (std::size_t start = 0; start < num_samples; start += kSnap) {
+            const std::size_t end = num_samples - start < kSnap ? num_samples : start + kSnap;
+            for (std::size_t i = start; i < end; ++i) {
+                SampleType x = buffer[i];
+                for (std::size_t k = 0; k < Count; ++k) {
+                    const SampleType output = b0[k] * x + s1[k];
+                    s1[k] = b1[k] * x - a1[k] * output + s2[k];
+                    s2[k] = b2[k] * x - a2[k] * output;
+                    x = output;
+                }
+                buffer[i] = x;
+            }
+            for (std::size_t k = 0; k < Count; ++k) {
+                s1[k] = snap_to_zero(s1[k]);
+                s2[k] = snap_to_zero(s2[k]);
+            }
+        }
+        for (std::size_t k = 0; k < Count; ++k) {
+            sections_[first + k].s1_ = s1[k];
+            sections_[first + k].s2_ = s2[k];
+        }
+    }
+
     template <typename CoefficientType>
     SosCascadeInstallStatus
     install(std::span<const BiquadCoefficientsT<CoefficientType>> coefficients,

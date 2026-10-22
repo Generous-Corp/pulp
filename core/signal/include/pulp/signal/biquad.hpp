@@ -3,9 +3,13 @@
 #include <pulp/signal/denormal.hpp>
 
 #include <cmath>
+#include <cstddef>
 #include <type_traits>
 
 namespace pulp::signal {
+
+template <typename SampleType, std::size_t MaxSections>
+class SosCascadeT;
 
 // Coefficients of one normalized second-order section (a0 == 1).
 //
@@ -249,6 +253,12 @@ public:
     void reset() { s1_ = SampleType{0}; s2_ = SampleType{0}; }
 
 private:
+    // The cascade's block kernel runs several sections' recursions in
+    // registers at once and reads and writes their coefficients and state
+    // directly.
+    template <typename, std::size_t>
+    friend class SosCascadeT;
+
     static constexpr SampleType pi =
         std::is_same_v<SampleType, float>
             ? static_cast<SampleType>(3.14159265358979323846f)
