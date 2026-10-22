@@ -282,8 +282,34 @@ epoch is ever opened. A WaveNet model whose provider cannot be prepared uses the
 CPU-only contract. Its status reports a GPU request that was degraded to the
 CPU, and preparation still succeeds. Models are built by Pulp's private,
 host-only model factory from a verified neural model manifest, and each model
-binds to one node. The shadow runs on the audio thread for every block, even
-when the GPU delivers, so measure its cost for the model size you ship.
+binds to one node.
+
+Where the shadow runs is `Config::shadow_policy`:
+- `Inline` runs it on the audio thread for every block, even when the GPU
+  delivers.
+- `Worker` runs it on a dedicated non-realtime thread. The callback only copies
+  its input in and, on a GPU miss, copies the shadow's stamped result out. A
+  shadow result that arrives after its slot is dropped. A block that both the
+  GPU and the shadow miss is silent.
+- `None` has no shadow, so a GPU miss is silent. It requires a GPU backend.
+- `Auto`, the default, times one block of the CPU model at `prepare()`. It
+  picks `Inline` when that block costs at most 15% of the block period per
+  channel, and `Worker` otherwise.
+
+Families without a GPU backend always run `Inline`, because the CPU model is
+their output. An offline render moves a `Worker` shadow inline on the same
+timeline, and it stays inline until the next `prepare()`. `shadow_status()`
+reports the requested and active policy, the measured inline cost, and how
+many shadow blocks were delivered, late or double-missed. A cheaper
+`shadow_model` is allowed but never selected by default, and status reports
+`shadow_model_differs` when one is in use. Set `shadow_audio_workgroup` to the
+host audio thread's workgroup so the shadow thread joins it. Without one, the
+thread runs at `USER_INTERACTIVE` QoS.
+
+A `Worker` shadow for a large model can still miss blocks. Its result must
+arrive within the lead. For a model that costs about half the block period, a
+lead of two blocks leaves little slack, so a loaded host will see occasional
+double misses.
 A transport hosting a CPU-only family reports the `Cpu` path and provider and
 a `Ready` state. Because the CPU model is that node's primary path, its blocks
 count under `fallback_blocks` and never under `missed_blocks`. A WaveNet
