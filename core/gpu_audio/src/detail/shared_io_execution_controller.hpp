@@ -24,6 +24,20 @@ enum class SharedIoAdmission : std::uint8_t {
     SequenceExhausted,
 };
 
+// Admission result. The provider carries the ticket to its completion, so the
+// preparation generation is captured when the submission is admitted and is
+// never read when the completion runs. Only an Accepted ticket of the current
+// generation can retire an entry.
+struct SharedIoSubmissionTicket {
+    SharedIoAdmission admission = SharedIoAdmission::NotPrepared;
+    std::uint64_t generation = 0;
+    std::uint64_t sequence = 0;
+
+    constexpr bool accepted() const noexcept {
+        return admission == SharedIoAdmission::Accepted;
+    }
+};
+
 enum class SharedIoCompletion : std::uint8_t { Success, Failed };
 
 enum class SharedIoDeliveryPath : std::uint8_t {
@@ -116,9 +130,11 @@ class SharedIoExecutionController {
     // Generation of the current (or most recent) preparation; zero means the
     // controller was never prepared. release() does not reset it, so a
     // provider completion deferred across release()/prepare() names a stale
-    // generation and cannot retire a sequence of the next stream. Providers
-    // must capture it when the submission is admitted, never when the
-    // completion runs.
+    // generation and cannot retire a sequence of the next stream; providers
+    // receive it through SharedIoSubmissionTicket. This does not make
+    // release() or prepare() safe against a completion that is still running:
+    // providers must drain or fence their completion callbacks before either,
+    // as with every host/quiescent operation.
     std::uint64_t generation() const noexcept {
         return generation_;
     }
@@ -142,18 +158,18 @@ class SharedIoExecutionController {
 
     // Non-RT dispatcher operation. Admission is strictly ordered so a missing
     // input cannot silently move the logical stream onto another sequence.
-    SharedIoAdmission admit_submission(std::uint64_t sequence) noexcept {
+    SharedIoSubmissionTicket admit_submission(std::uint64_t sequence) noexcept {
         if (!prepared_)
-            return SharedIoAdmission::NotPrepared;
+            return {SharedIoAdmission::NotPrepared, generation_, sequence};
         if (sequence == kLastSequence) {
             if (telemetry_)
                 telemetry_->record_resync_drop();
-            return SharedIoAdmission::SequenceExhausted;
+            return {SharedIoAdmission::SequenceExhausted, generation_, sequence};
         }
         if (sequence != next_admission_sequence_.load(std::memory_order_acquire)) {
             if (telemetry_)
                 telemetry_->record_resync_drop();
-            return SharedIoAdmission::SequenceGap;
+            return {SharedIoAdmission::SequenceGap, generation_, sequence};
         }
 
         for (std::uint32_t index = 0; index < capacity_; ++index) {
@@ -176,7 +192,7 @@ class SharedIoExecutionController {
             if (occupancy >= contract_.max_inflight) {
                 entry.state.store(static_cast<std::uint8_t>(EntryState::Empty),
                                   std::memory_order_release);
-                return SharedIoAdmission::CapacityFull;
+                return {SharedIoAdmission::CapacityFull, generation_, sequence};
             }
             entry.sequence = sequence;
             entry.completion = SharedIoCompletion::Failed;
@@ -190,7 +206,7 @@ class SharedIoExecutionController {
                                   std::memory_order_release);
                 if (telemetry_)
                     telemetry_->record_resync_drop();
-                return SharedIoAdmission::SequenceGap;
+                return {SharedIoAdmission::SequenceGap, generation_, sequence};
             }
             // Occupancy must be reserved before the release-store publishes
             // the entry to provider and callback consumers.
@@ -210,26 +226,27 @@ class SharedIoExecutionController {
                 telemetry_->record_submit();
                 telemetry_->observe_in_flight(count);
             }
-            return SharedIoAdmission::Accepted;
+            return {SharedIoAdmission::Accepted, generation_, sequence};
         }
         // Saturation is retryable backpressure. The owner records an input
         // drop only if it abandons this sequence.
-        return SharedIoAdmission::CapacityFull;
+        return {SharedIoAdmission::CapacityFull, generation_, sequence};
     }
 
-    // Provider completion operation. A completion for another generation or
-    // for an unadmitted, stale, or duplicate sequence is rejected without
-    // mutating another sequence.
+    // Provider completion operation. A completion whose ticket was not
+    // accepted, belongs to another generation, or names an unadmitted, stale,
+    // or duplicate sequence is rejected without mutating another sequence.
     bool record_completion(
-        std::uint64_t generation, std::uint64_t sequence, SharedIoCompletion completion,
+        const SharedIoSubmissionTicket& ticket, SharedIoCompletion completion,
         SharedIoFallbackReason failure_reason = SharedIoFallbackReason::None) noexcept {
         if (!prepared_)
             return false;
-        if (generation != generation_) {
+        if (!ticket.accepted() || ticket.generation != generation_) {
             if (telemetry_)
                 telemetry_->record_resync_drop();
             return false;
         }
+        const auto sequence = ticket.sequence;
         for (std::uint32_t index = 0; index < capacity_; ++index) {
             Entry& entry = entries_[index];
             if (entry.state.load(std::memory_order_acquire) !=
@@ -274,10 +291,13 @@ class SharedIoExecutionController {
             telemetry_->record_callback_block(false);
         // Accepting the terminal sequence value would wrap the callback epoch
         // to zero and silently re-enter priming on the next callback. Latch the
-        // timeline at the terminal value so every later callback is a gap.
+        // timeline at the terminal value so every later callback is a gap, and
+        // stop admitting or holding provider work that can never be delivered.
         if (callback_sequence == kLastSequence) {
             callback_started_ = true;
             next_callback_sequence_ = kLastSequence;
+            resync_admission(kLastSequence);
+            discard_ready_entries_before(kLastSequence);
             result.path = fallback_path();
             result.fallback_reason = SharedIoFallbackReason::SequenceGap;
             if (telemetry_) {

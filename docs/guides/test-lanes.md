@@ -586,7 +586,11 @@ The one visible difference is `--target`: build the group
 ### Hosted macOS advisory lanes and arm-time dispatch
 
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
-native matrix are advisory hosted-macOS lanes. They run from the nightly
+native matrix are advisory hosted lanes. The control-shipping matrix covers
+macOS universal, Linux x64/arm64, and Windows x64/arm64; the Windows ARM leg
+uses the `windows-11-arm` runner and emits `arm64-win` scanner evidence. Its
+installed-SDK probe has GPU disabled, so it does not replace Spectr's separate
+Skia/Dawn, DAW, audio, or Perfetto proof. These lanes run from the nightly
 `schedule` on `main` and from `workflow_dispatch` on an approved PR head; they
 do not start on every `pull_request` push. The `pulp pr` wrapper calls
 `tools/scripts/dispatch_advisory_lanes.sh` after its delegated Shipyard arm/ship

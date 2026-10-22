@@ -34,6 +34,7 @@ EXPECTED_LEGS = {
     "linux-x64": ("linux", {"x86_64"}),
     "linux-arm64": ("linux", {"arm64"}),
     "windows-x64": ("windows", {"x86_64-win"}),
+    "windows-arm64": ("windows", {"arm64-win"}),
 }
 
 EXPECTED_FORMATS = {
@@ -50,6 +51,7 @@ EXPECTED_FORMATS = {
     "linux-x64": {"Standalone", "VST3", "CLAP", "LV2"},
     "linux-arm64": {"Standalone", "VST3", "CLAP", "LV2"},
     "windows-x64": {"Standalone", "VST3", "CLAP", "LV2"},
+    "windows-arm64": {"Standalone", "VST3", "CLAP", "LV2"},
 }
 
 ARCH_ALIASES = {
