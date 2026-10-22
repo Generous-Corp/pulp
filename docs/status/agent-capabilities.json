@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 76,
+  "manifest_revision": 77,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -8781,7 +8781,40 @@
               "partial_count()",
               "max_partials()",
               "set_inharmonicity_b(double b)",
-              "inharmonicity_b()"
+              "inharmonicity_b()",
+              "set_spectral_tilt_db_oct(double s)",
+              "spectral_tilt_db_oct()",
+              "set_master_gain_db(double g)",
+              "master_gain_db()",
+              "set_trig_profile(FastTrigProfile profile)",
+              "trig_profile()",
+              "trig_profile_has_vector_path(FastTrigProfile profile)",
+              "load_voice(const VoiceTable& v)",
+              "voice()",
+              "set_partial(int p, double ratio, double amp_lin, double phase01, double decay_ms)",
+              "set_envelope_a(const SpectralEnvelope& e)",
+              "set_envelope_b(const SpectralEnvelope& e)",
+              "set_morph(float m)",
+              "morph()",
+              "set_spectral_domain(SpectralDomain d)",
+              "spectral_domain()",
+              "envelope_db_at(double f_hz)",
+              "set_envelope_mode(EnvelopeMode mode)",
+              "envelope_mode()",
+              "set_attack_ms(double ms)",
+              "set_release_ms(double ms)",
+              "set_detune_cents(double cents)",
+              "detune_cents()",
+              "doublet_active()",
+              "set_pitch_glide(double start_cents, double time_ms)",
+              "set_retrig_phase(RetrigPhase p)",
+              "retrig_phase()",
+              "set_seed(std::uint32_t seed)",
+              "retrigger()",
+              "release()",
+              "active()",
+              "partial_frequency(int p)",
+              "next()"
             ],
             "enums": [
               [
@@ -8867,7 +8900,10 @@
               "set_smoothing_time_ms(double milliseconds)",
               "latency_samples()",
               "latency_samples_for_oversampling(int factor)",
-              "cutoff_hz()"
+              "cutoff_hz()",
+              "requested_cutoff_hz_for(Voicing voicing, double knob01, double modulation_octaves = 0.0)",
+              "oversampling()",
+              "voicing()"
             ],
             "enums": [
               [
@@ -8953,7 +8989,8 @@
               "input_count()",
               "output_count()",
               "max_block_size()",
-              "nonfinite_gain_count()"
+              "nonfinite_gain_count()",
+              "out_of_range_gain_count()"
             ],
             "enums": []
           }
@@ -8977,7 +9014,10 @@
               "prepared()",
               "sample_rate()",
               "latency_samples()",
-              "tail_samples()"
+              "tail_samples()",
+              "detector_envelope()",
+              "current_gain_db()",
+              "gain_reduction()"
             ],
             "enums": []
           }
@@ -9001,7 +9041,8 @@
               "release_ms()",
               "attack_coefficient()",
               "release_coefficient()",
-              "coefficient_for_time_ms(SampleType ms, SampleType sample_rate)"
+              "coefficient_for_time_ms(SampleType ms, SampleType sample_rate)",
+              "exact_coefficient_for_time_ms(SampleType ms, SampleType sample_rate)"
             ],
             "enums": [
               [
@@ -9049,7 +9090,19 @@
               "set_reverse(ReverseMode mode)",
               "set_transition_frames(int frames)",
               "prepared()",
-              "channels()"
+              "channels()",
+              "history_capacity_frames()",
+              "available_history_frames()",
+              "status()",
+              "last_capture_rejected()",
+              "can_snapshot()",
+              "loop_length()",
+              "loop_position()",
+              "completed_repeats()",
+              "latency_samples()",
+              "max_tail_samples()",
+              "retained_bytes()",
+              "transport_discontinuity()"
             ],
             "enums": [
               [
@@ -9178,7 +9231,9 @@
               "point_count()",
               "current_segment()",
               "segment_position_samples()",
-              "loops_completed()"
+              "loops_completed()",
+              "sample_rate()",
+              "points()"
             ],
             "enums": []
           }
@@ -9226,7 +9281,12 @@
               "set_offsets(int x_cv, int y_cv)",
               "apply_reset_edge()",
               "latency_samples()",
-              "x()"
+              "x()",
+              "y()",
+              "cell_x()",
+              "cell_y()",
+              "gate()",
+              "cv()"
             ],
             "enums": []
           }
@@ -9267,7 +9327,25 @@
               "right_time_ms()",
               "set_feedback(SampleType feedback)",
               "set_crossfeed(SampleType crossfeed)",
-              "set_character_amount(SampleType amount)"
+              "set_character_amount(SampleType amount)",
+              "set_diffusion_amount(SampleType amount)",
+              "set_mod(SampleType rate01, SampleType depth01)",
+              "set_duck(SampleType amount01)",
+              "set_freeze(bool on)",
+              "set_reverse(bool on)",
+              "set_loop_low_cut_hz(SampleType hz)",
+              "set_loop_low_cut_resonance(SampleType q)",
+              "set_loop_high_cut_hz(SampleType hz)",
+              "set_loop_high_cut_resonance(SampleType q)",
+              "loop_tone_active()",
+              "latency_samples()",
+              "set_bbd_compander_enabled(bool enabled)",
+              "bbd_bandwidth_hz()",
+              "bbd_stages()",
+              "vintage_band_edge_hz()",
+              "vintage_internal_rate_hz()",
+              "chew_state_index(int channel)",
+              "tape_gap_coefficients(int channel)"
             ],
             "enums": [
               [
@@ -9732,7 +9810,18 @@
               "rate_hz()",
               "set_depth(SampleType depth01)",
               "set_mix(SampleType mix01)",
-              "set_stereo_width(SampleType width01)"
+              "set_stereo_width(SampleType width01)",
+              "set_bbd_color(bool on)",
+              "bbd_color()",
+              "discard_history()",
+              "latency_samples()",
+              "current_delay_ms(int voice)",
+              "voice_count()",
+              "bbd_bandwidth_hz()",
+              "bbd_stage_delay_ms()",
+              "worst_case_gain()",
+              "shelf_l1()",
+              "highpass_l1()"
             ],
             "enums": [
               [
@@ -9846,7 +9935,9 @@
               "process_with_sidechain(SampleType input, SampleType sidechain)",
               "process_with_sidechain(SampleType* buffer, const SampleType* sidechain, int num_samples)",
               "attack_coefficient()",
-              "release_coefficient()"
+              "release_coefficient()",
+              "gain_reduction_db()",
+              "gain_reduction()"
             ],
             "enums": []
           },
@@ -9946,7 +10037,12 @@
               "set_feedback_gain(double gain)",
               "feedback_gain()",
               "set_cross_feedback(double amount01)",
-              "cross_feedback()"
+              "cross_feedback()",
+              "worst_case_feedback_gain()",
+              "latency_samples()",
+              "tail_samples()",
+              "process_sample(SampleType input_left, SampleType input_right, SampleType& output_left, SampleType& output_right)",
+              "process_block(const SampleType* input_left, const SampleType* input_right, SampleType* output_left, SampleType* output_right, std::size_t sample_count)"
             ],
             "enums": []
           }
@@ -9970,7 +10066,22 @@
               "set_output_db(double db)",
               "set_regime(const CyclicStretchRegime& regime)",
               "cycle_samples()",
-              "grain_samples()"
+              "grain_samples()",
+              "crossfade_samples()",
+              "hop_samples()",
+              "flutter_hz()",
+              "capture_window_samples()",
+              "sample_rate()",
+              "stretch_ratio()",
+              "crossfade_shape()",
+              "latency_samples()",
+              "worst_case_gain()",
+              "schedule_input_position(long long out_pos)",
+              "grain_input_position(long long g)",
+              "grain_count()",
+              "next_grain_out_pos()",
+              "read_position()",
+              "total_captured()"
             ],
             "enums": []
           }
@@ -10008,7 +10119,11 @@
               "fault_count()",
               "set_bypassed(bool bypassed)",
               "bypassed()",
-              "set_output_mode(OutputMode mode)"
+              "set_output_mode(OutputMode mode)",
+              "output_mode()",
+              "gain_reduction_db()",
+              "gain_reduction()",
+              "detector_level_db()"
             ],
             "enums": [
               [
@@ -10149,7 +10264,8 @@
               "curvature(double control_drive)",
               "shape(double s, double beta)",
               "shape_antiderivative(double s, double beta)",
-              "max_operating_amplitude(double beta)"
+              "max_operating_amplitude(double beta)",
+              "third_harmonic_ratio(double s, double beta)"
             ],
             "enums": []
           },
@@ -10186,7 +10302,16 @@
               "set_mix_percent(double percent)",
               "set_sc_hpf_hz(double hz)",
               "set_auto_release(bool on)",
-              "set_feedback(bool on)"
+              "set_feedback(bool on)",
+              "set_adaa(bool on)",
+              "latency_samples()",
+              "gain_reduction_db()",
+              "gain_reduction()",
+              "control_drive()",
+              "static_curve_db(double input_db)",
+              "static_curve_feedback_db(double input_db)",
+              "worst_case_gain()",
+              "process_block(SampleType* io, int n)"
             ],
             "enums": []
           }
@@ -10309,7 +10434,8 @@
               "noise_shaping()",
               "state()",
               "rng_state()",
-              "seed()"
+              "seed()",
+              "latency_samples()"
             ],
             "enums": []
           }
@@ -10333,7 +10459,12 @@
               "set_resonance(double q)",
               "set_noise_color(NoiseColor color)",
               "set_body_level(double level)",
-              "set_body_hz(double hz)"
+              "set_body_hz(double hz)",
+              "output()",
+              "output_stage()",
+              "latency_samples()",
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)"
             ],
             "enums": []
           }
@@ -10357,7 +10488,17 @@
               "set_noise_level(double level)",
               "set_strike_level(double level)",
               "set_strike_ms(double ms)",
-              "set_tone_hz(double hz)"
+              "set_tone_hz(double hz)",
+              "set_low_cut_hz(double hz)",
+              "set_variation(double amount)",
+              "set_hit_life(HitLifeMode mode)",
+              "hit_life()",
+              "set_noise_color(NoiseColor color)",
+              "output()",
+              "output_stage()",
+              "latency_samples()",
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)"
             ],
             "enums": []
           }
@@ -10381,7 +10522,26 @@
               "set_carrier_warp(double amount)",
               "set_modulator_warp(double amount)",
               "set_carrier_warp_ms(double ms)",
-              "set_modulator_warp_ms(double ms)"
+              "set_modulator_warp_ms(double ms)",
+              "set_lfo_rate_hz(double hz)",
+              "set_lfo_depth_octaves(double octaves)",
+              "set_lfo_delay_ms(double ms)",
+              "set_lfo_fade_ms(double ms)",
+              "set_hard_sync(bool sync)",
+              "set_transient(int index)",
+              "set_noise_level(double level)",
+              "set_noise_decay_ms(double ms)",
+              "set_noise_color(NoiseColor color)",
+              "set_cutoff_hz(double hz)",
+              "set_resonance(double q)",
+              "set_bandpass(bool bandpass)",
+              "set_click_level(double level)",
+              "set_click_cutoff_hz(double hz)",
+              "output()",
+              "output_stage()",
+              "latency_samples()",
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)"
             ],
             "enums": []
           },
@@ -10403,7 +10563,14 @@
               "set_formant_q(double q)",
               "set_transient(int index)",
               "set_noise_level(double level)",
-              "set_noise_decay_ms(double ms)"
+              "set_noise_decay_ms(double ms)",
+              "set_noise_color(NoiseColor color)",
+              "set_click_level(double level)",
+              "output()",
+              "output_stage()",
+              "latency_samples()",
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)"
             ],
             "enums": []
           }
@@ -10427,7 +10594,10 @@
               "set_formant_hz(double hz)",
               "set_formant_q(double q)",
               "output()",
-              "output_stage()"
+              "output_stage()",
+              "latency_samples()",
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)"
             ],
             "enums": []
           }
@@ -10463,7 +10633,8 @@
               "output()",
               "output_stage()",
               "latency_samples()",
-              "output_oversampling()"
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)"
             ],
             "enums": []
           }
@@ -10501,7 +10672,22 @@
               "set_noise_decay_ms(double ms)",
               "set_noise_color(NoiseColor color)",
               "set_sub_level(double level)",
-              "output()"
+              "output()",
+              "output_stage()",
+              "latency_samples()",
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)",
+              "set_oscillator_triangle(bool triangle)",
+              "set_fm_amount(double amount)",
+              "set_fm_ratio(double ratio)",
+              "set_circuit_components(const BridgedTComponents& c)",
+              "set_circuit_feedback(double gain)",
+              "set_circuit_attack_ms(double ms)",
+              "set_circuit_pulse_ms(double ms)",
+              "set_circuit_drive(double amount)",
+              "set_circuit_sigh(bool enabled)",
+              "set_circuit_hit_life(HitLifeMode mode)",
+              "circuit_hit_life()"
             ],
             "enums": []
           }
@@ -10616,7 +10802,16 @@
               "set_exciter(MembraneExciter exciter)",
               "set_sub_level(double level)",
               "set_air_level(double level)",
-              "set_air_decay_ms(double ms)"
+              "set_air_decay_ms(double ms)",
+              "set_click_level(double level)",
+              "set_click_decay_ms(double ms)",
+              "mode_gain_energy()",
+              "gate()",
+              "output()",
+              "output_stage()",
+              "latency_samples()",
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)"
             ],
             "enums": []
           }
@@ -10640,7 +10835,12 @@
               "set_fold(double amount)",
               "set_level(double level)",
               "set_ahd_ms(double attack_ms, double hold_ms, double decay_ms)",
-              "set_ahd_enabled(bool enabled)"
+              "set_ahd_enabled(bool enabled)",
+              "ahd_enabled()",
+              "ahd_gain()",
+              "sync_configuration_from(const OutputStageT& other)",
+              "trigger()",
+              "lofi()"
             ],
             "enums": [
               [
@@ -10674,7 +10874,21 @@
               "set_noise_color(NoiseColor color)",
               "set_noise_cutoff_hz(double hz)",
               "set_noise_resonance(double q)",
-              "set_noise_sweep_octaves(double octaves)"
+              "set_noise_sweep_octaves(double octaves)",
+              "set_rattle(double amount)",
+              "set_rattle_hz(double hz)",
+              "set_snap_level(double level)",
+              "set_snap_cutoff_hz(double hz)",
+              "set_snap_decay_ms(double ms)",
+              "set_shell_level(double level)",
+              "set_shell_resonance(double q)",
+              "output()",
+              "output_stage()",
+              "latency_samples()",
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)",
+              "tone_lofi()",
+              "noise_lofi()"
             ],
             "enums": []
           }
@@ -10698,7 +10912,14 @@
               "set_modulation_mix(double mix)",
               "set_modulation_ratio(double ratio)",
               "set_fm_depth_octaves(double octaves)",
-              "set_lpg_amount(double amount)"
+              "set_lpg_amount(double amount)",
+              "gate()",
+              "set_noise_color(NoiseColor color)",
+              "output()",
+              "output_stage()",
+              "latency_samples()",
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)"
             ],
             "enums": []
           }
@@ -10724,7 +10945,13 @@
               "set_click_cutoff_hz(double hz)",
               "set_click_decay_ms(double ms)",
               "apply_preset(Preset preset)",
-              "body_lofi()"
+              "body_lofi()",
+              "noise_lofi()",
+              "output()",
+              "output_stage()",
+              "latency_samples()",
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)"
             ],
             "enums": [
               [
@@ -10790,7 +11017,9 @@
               "output_oversampling()",
               "set_output_oversampling(OutputOversampling)",
               "output_stage()",
-              "set_velocity_response(const VelocityResponse& r)"
+              "set_velocity_response(const VelocityResponse& r)",
+              "velocity_response()",
+              "process_stereo(float* left, float* right, int num_samples)"
             ],
             "enums": []
           }
@@ -10814,7 +11043,10 @@
               "set_ring_ratio(double ratio)",
               "gate()",
               "output()",
-              "output_stage()"
+              "output_stage()",
+              "latency_samples()",
+              "output_oversampling()",
+              "set_output_oversampling(OutputOversampling factor)"
             ],
             "enums": []
           }
@@ -10861,7 +11093,9 @@
               "level()",
               "distribution()",
               "seed()",
-              "triggered()"
+              "triggered()",
+              "latency_samples()",
+              "tail_samples()"
             ],
             "enums": []
           }
@@ -10967,7 +11201,14 @@
               "set_sustain(SampleType level)",
               "set_has_sustain(bool on)",
               "set_gate_driven(bool on)",
-              "set_loop(bool on, int count)"
+              "set_loop(bool on, int count)",
+              "trigger(SampleType velocity)",
+              "release()",
+              "next()",
+              "current()",
+              "stage()",
+              "active()",
+              "loops_completed()"
             ],
             "enums": [
               [
@@ -11002,7 +11243,8 @@
               "next()",
               "current()",
               "value()",
-              "active()"
+              "active()",
+              "stage()"
             ],
             "enums": []
           },
@@ -11024,7 +11266,10 @@
               "gate_off()",
               "next()",
               "current()",
-              "value()"
+              "value()",
+              "active()",
+              "loops_completed()",
+              "stage()"
             ],
             "enums": []
           },
@@ -11046,7 +11291,11 @@
               "gate_on()",
               "gate_off()",
               "next()",
-              "current()"
+              "current()",
+              "value()",
+              "active()",
+              "loops_completed()",
+              "stage()"
             ],
             "enums": []
           },
@@ -11068,7 +11317,16 @@
               "set_release_curve(float c)",
               "set_curve(double c)",
               "set_loop(bool on, int count = 0)",
-              "note_on(SampleType velocity = SampleType{1})"
+              "note_on(SampleType velocity = SampleType{1})",
+              "note_off()",
+              "gate_on()",
+              "gate_off()",
+              "next()",
+              "current()",
+              "value()",
+              "active()",
+              "loops_completed()",
+              "stage()"
             ],
             "enums": []
           },
@@ -11090,7 +11348,15 @@
               "set_curve(double c)",
               "set_loop(bool on, int count = 0)",
               "set_depth(SampleType d)",
-              "trigger(SampleType velocity = SampleType{1})"
+              "trigger(SampleType velocity = SampleType{1})",
+              "gate_on()",
+              "gate_off()",
+              "next()",
+              "modulation()",
+              "current()",
+              "value()",
+              "active()",
+              "stage()"
             ],
             "enums": []
           },
@@ -11127,7 +11393,8 @@
               "sample_rate()",
               "latency_samples()",
               "tail_samples()",
-              "current_gain_db()"
+              "current_gain_db()",
+              "gain_reduction()"
             ],
             "enums": []
           }
@@ -11151,7 +11418,9 @@
               "latency_samples()",
               "retained_bytes()",
               "band_output(int index)",
-              "envelope_at(int index)"
+              "envelope_at(int index)",
+              "applied_band_recipe(int index)",
+              "estimated_t60_seconds(const BandRecipe& recipe)"
             ],
             "enums": []
           }
@@ -11177,7 +11446,11 @@
               "log10_accurate(float x)",
               "exp10_accurate(float x)",
               "gain_to_db_accurate(float gain)",
-              "db_to_gain_accurate(float db)"
+              "db_to_gain_accurate(float db)",
+              "rcp(float x)",
+              "rsqrt(float x)",
+              "clamp_unit(float x)",
+              "soft_clip(float x)"
             ],
             "enums": []
           }
@@ -11470,7 +11743,9 @@
               "latency_samples()",
               "interpolation_skew_samples()",
               "tank_rate()",
-              "duck_gain()"
+              "duck_gain()",
+              "tank()",
+              "process_block(const SampleType* in_left, const SampleType* in_right, SampleType* out_left, SampleType* out_right, int n)"
             ],
             "enums": []
           }
@@ -11494,7 +11769,18 @@
               "set_rms_window_ms(double ms)",
               "set_lookahead_ms(double ms)",
               "set_program_dependent_release(bool on)",
-              "set_makeup_gain_db(double db)"
+              "set_makeup_gain_db(double db)",
+              "set_auto_makeup(bool on)",
+              "set_stereo_link(double amount)",
+              "latency_samples()",
+              "static_curve_db(double input_db)",
+              "gain_computer_db(double input_db)",
+              "effective_makeup_db()",
+              "gain_reduction_db(int channel = 0)",
+              "gain_reduction(int channel = 0)",
+              "process_stereo(SampleType& left, SampleType& right)",
+              "process_block(SampleType* io, int n)",
+              "process_block_stereo(SampleType* left, SampleType* right, int n)"
             ],
             "enums": [
               [
@@ -11526,7 +11812,34 @@
               "set_transformer_amount(double pct01)",
               "set_mix(double pct01)",
               "latency_samples()",
-              "sample_rate()"
+              "sample_rate()",
+              "oversampled_rate()",
+              "static_curve_db(double level_db)",
+              "gain_computer_db(double level_db)",
+              "measured_static_curve_db(double input_db)",
+              "measured_gain_reduction_db(double input_db)",
+              "loop_slope()",
+              "measured_ratio()",
+              "measured_knee_db()",
+              "nominal_ratio()",
+              "effective_knee_db()",
+              "bias_shift_db()",
+              "coloration_depth()",
+              "attack_coefficient()",
+              "release_coefficient()",
+              "gain_reduction_db()",
+              "gain_reduction()",
+              "control_voltage()",
+              "divider_conductance(double c)",
+              "divider_small_signal_gain(double c)",
+              "divider_gain(double c, double v)",
+              "coloration_multiplier(double c, double v)",
+              "coloration_multiplier_bound()",
+              "control_for_reduction_db(double db)",
+              "divider_supremum_is_provable()",
+              "resampler_peak_gain_bound()",
+              "worst_case_gain()",
+              "process_block(SampleType* io, int n)"
             ],
             "enums": [
               [
@@ -11628,7 +11941,11 @@
               "configured()",
               "first_coefficients()",
               "second_coefficients()",
-              "magnitude(double frequency_hz)"
+              "magnitude(double frequency_hz)",
+              "magnitude_db(double frequency_hz)",
+              "response_curve_db(double min_hz, double max_hz, std::span<float> output)",
+              "latency_samples()",
+              "tail_samples()"
             ],
             "enums": []
           }
@@ -11728,7 +12045,27 @@
               "set_rate_hz(double hz)",
               "set_waveform(Wave wave)",
               "set_stereo_spread(double cycles01)",
-              "set_depth_ms(double ms)"
+              "set_depth_ms(double ms)",
+              "depth_ms()",
+              "set_center_delay_ms(double ms)",
+              "center_delay_ms()",
+              "set_offset_ms(double ms)",
+              "offset_ms()",
+              "set_feedback(double fb)",
+              "feedback()",
+              "set_mix(double wet01)",
+              "mix()",
+              "set_barberpole_shift_hz(double hz)",
+              "barberpole_shift_hz()",
+              "process_stereo(const SampleType* in_left, const SampleType* in_right, SampleType* out_left, SampleType* out_right, int n)",
+              "latency_samples()",
+              "effective_depth_ms()",
+              "instantaneous_delay_ms(int channel = 0)",
+              "fixed_delay_samples()",
+              "notch_hz(int k, double delay_ms, Polarity polarity)",
+              "notch_spacing_hz(double delay_ms)",
+              "worst_case_gain()",
+              "mix_gains(double wet01, double& dry_gain, double& wet_gain)"
             ],
             "enums": [
               [
@@ -11790,7 +12127,20 @@
               "base_frequency_hz()",
               "set_operator_frequency_mode(std::size_t op, FrequencyMode mode)",
               "set_operator_ratio(std::size_t op, SampleType ratio)",
-              "set_operator_fixed_frequency_hz(std::size_t op, SampleType hz)"
+              "set_operator_fixed_frequency_hz(std::size_t op, SampleType hz)",
+              "set_operator_level(std::size_t op, SampleType linear_level)",
+              "set_operator_feedback_radians(std::size_t op, SampleType radians)",
+              "set_operator_key_scaling(std::size_t op, SampleType db_per_octave, SampleType reference_hz = SampleType{440})",
+              "set_operator_envelope(std::size_t op, Envelope envelope)",
+              "set_routing(const Routing& routing)",
+              "routing()",
+              "set_alias_policy(AliasPolicy policy)",
+              "alias_policy()",
+              "set_trig_profile(TrigProfile profile)",
+              "trig_profile()",
+              "is_active()",
+              "latency_samples()",
+              "tail_samples()"
             ],
             "enums": [
               [
@@ -11829,7 +12179,16 @@
               "configure(const Recipe& recipe)",
               "configure_vowel_morph(FormantVowel from, FormantVowel to, double amount, double headroom_db = 3.0)",
               "requested_recipe()",
-              "process_block(const SampleType* input, SampleType* output, std::size_t frames)"
+              "process_block(const SampleType* input, SampleType* output, std::size_t frames)",
+              "process_block(SampleType* samples, std::size_t frames)",
+              "latency_samples()",
+              "tail_seconds()",
+              "coefficients(std::size_t index)",
+              "magnitude(double frequency_hz)",
+              "magnitude_db(double frequency_hz)",
+              "response_curve_db(double min_hz, double max_hz, std::span<SampleType> output)",
+              "vowel_recipe(FormantVowel vowel)",
+              "interpolate(const Recipe& from, const Recipe& to, double amount)"
             ],
             "enums": []
           }
@@ -11892,7 +12251,9 @@
               "thiran_integer_interval_start()",
               "retained_samples()",
               "required_older_lookback()",
-              "processing_latency_samples()"
+              "processing_latency_samples()",
+              "minimum_delay_samples(FractionalDelayMethod method)",
+              "older_stencil_lookback(FractionalDelayMethod method)"
             ],
             "enums": []
           }
@@ -11930,7 +12291,20 @@
               "set_frozen(bool frozen)",
               "is_engaged()",
               "is_latched()",
-              "is_releasing()"
+              "is_releasing()",
+              "has_hold()",
+              "engage_progress()",
+              "held_magnitudes(int channel)",
+              "held_phases(int channel)",
+              "instantaneous_frequency()",
+              "write_hold(std::complex<SampleType>* const* frames, int channels, int num_bins)",
+              "engage_pending()",
+              "advance_hold(int frames = 1)",
+              "rewind_hold_phases(int frames)",
+              "snapshot(Snapshot& out)",
+              "stage_restore(const Snapshot& in, FreezeRestoreEngage engage = FreezeRestoreEngage::crossfade)",
+              "restore_pending()",
+              "process_group(std::complex<SampleType>* const* frames, int channels, int num_bins)"
             ],
             "enums": []
           }
@@ -11954,7 +12328,10 @@
               "loop_sample(int channel, int frame)",
               "freeze(int loop_samples)",
               "release()",
-              "read(SampleType* const* out, int n)"
+              "read(SampleType* const* out, int n)",
+              "clear_history()",
+              "snapshot()",
+              "restore(const std::vector<SampleType>& blob)"
             ],
             "enums": [
               [
@@ -12015,7 +12392,13 @@
               "set_mode(Mode mode)",
               "mode()",
               "set_mix(double wet01)",
-              "set_stereo_spread(double spread01)"
+              "set_stereo_spread(double spread01)",
+              "process_stereo(SampleType& left, SampleType& right)",
+              "latency_samples()",
+              "worst_case_gain()",
+              "shift_hz_from_knob(double knob)",
+              "knob_from_shift_hz(double hz)",
+              "feedback_delay_ms_from_knob(double u)"
             ],
             "enums": [
               [
@@ -12049,7 +12432,17 @@
               "set_oversampling_enabled(bool on)",
               "set_seed(std::uint32_t seed)",
               "set_drift_enabled(bool on)",
-              "loading_factor()"
+              "loading_factor()",
+              "bias_voltage()",
+              "base_bias_voltage()",
+              "quiescent_collector()",
+              "stage_gain()",
+              "input_scale_volts()",
+              "available_current()",
+              "loop_gain()",
+              "worst_residual()",
+              "latency_samples()",
+              "process_block(const SampleType* in, SampleType* out, int n)"
             ],
             "enums": [
               [
@@ -12138,7 +12531,49 @@
               "set_position(double pos01)",
               "position()",
               "set_position_spray_ms(double ms)",
-              "position_spray_ms()"
+              "position_spray_ms()",
+              "set_density_hz(double hz)",
+              "density_hz()",
+              "set_grain_ms(double ms)",
+              "grain_ms()",
+              "set_async_jitter(double j01)",
+              "async_jitter()",
+              "set_max_grains(int count)",
+              "max_grains()",
+              "set_steal_policy(StealPolicy policy)",
+              "steal_policy()",
+              "set_window_taper(double t01)",
+              "window_taper()",
+              "set_window_trapezoid(bool trapezoid)",
+              "window_trapezoid()",
+              "set_pitch_semitones(double st)",
+              "pitch_semitones()",
+              "set_pitch_spray_semitones(double st)",
+              "set_pan_spray(double s01)",
+              "set_coherence(Coherence coherence)",
+              "coherence()",
+              "set_interp(GrainInterp interp)",
+              "interp()",
+              "set_level_db(double db)",
+              "set_mix(double mix01)",
+              "mix()",
+              "set_seed(std::uint32_t seed)",
+              "seed()",
+              "latency_samples()",
+              "mean_overlap()",
+              "grain_gain()",
+              "window_mean()",
+              "window_rms()",
+              "window_at(double phase)",
+              "active_grain_count()",
+              "grain(int slot)",
+              "grain_index()",
+              "steal_count()",
+              "clamp_count()",
+              "ring_length()",
+              "ring_storage_sample(int index)",
+              "causality_guard_samples()",
+              "derived_guard_samples(double sample_rate)"
             ],
             "enums": []
           }
@@ -12162,7 +12597,13 @@
               "band_count()",
               "sample_rate()",
               "supported_frequency_ceiling_hz()",
-              "band(std::size_t index)"
+              "band(std::size_t index)",
+              "coefficients(std::size_t index)",
+              "latency_samples()",
+              "tail_samples()",
+              "magnitude(double frequency_hz)",
+              "magnitude_db(double frequency_hz)",
+              "storage_capacity()"
             ],
             "enums": []
           }
@@ -12271,7 +12712,29 @@
               "voice_detune_cents(int voice)",
               "set_voice_level_db(int voice, double db)",
               "voice_level_db(int voice)",
-              "set_voice_enabled(int voice, bool on)"
+              "set_voice_enabled(int voice, bool on)",
+              "voice_enabled(int voice)",
+              "set_dry_level_db(double db)",
+              "dry_level_db()",
+              "set_glide_ms(double ms)",
+              "glide_ms()",
+              "set_humanize_cents(double cents)",
+              "humanize_cents()",
+              "set_crossfade_ms(double ms)",
+              "crossfade_ms()",
+              "set_interp(PitchInterp interp)",
+              "latency_samples()",
+              "tracker_latency_samples()",
+              "shifter_latency_samples()",
+              "tracked_f0_hz()",
+              "voiced()",
+              "voice_mapping(int voice)",
+              "voice_cents(int voice)",
+              "voice_ratio(int voice)",
+              "voice_shift_semitones(int voice)",
+              "mute_gain()",
+              "tracker()",
+              "diatonic_map()"
             ],
             "enums": []
           }
@@ -12295,7 +12758,10 @@
               "delay_samples()",
               "set_cutoff_hz(double cutoff_hz)",
               "cutoff_hz()",
-              "latency_samples()"
+              "latency_samples()",
+              "tail_samples()",
+              "process_sample(SampleType input_left, SampleType input_right, SampleType& output_left, SampleType& output_right)",
+              "process_block(const SampleType* input_left, const SampleType* input_right, SampleType* output_left, SampleType* output_right, std::size_t sample_count)"
             ],
             "enums": []
           }
@@ -12461,7 +12927,39 @@
               "set_drum_slow_hz(double hz)",
               "set_horn_accel_s(double seconds)",
               "set_horn_decel_s(double seconds)",
-              "set_drum_accel_s(double seconds)"
+              "set_drum_accel_s(double seconds)",
+              "set_drum_decel_s(double seconds)",
+              "set_crossover_hz(double hz)",
+              "set_horn_radius_m(double metres)",
+              "set_drum_radius_m(double metres)",
+              "set_mic_distance_m(double metres)",
+              "set_mic_angle_deg(double degrees)",
+              "set_am_depth(double depth)",
+              "set_dir_depth_db(double db)",
+              "set_drum_dir_depth_db(double db)",
+              "set_dir_corner_hz(double hz)",
+              "set_d_bias_ms(double ms)",
+              "set_reflection_db(double db)",
+              "set_num_reflections(int taps)",
+              "set_refl_delay_ms(double ms)",
+              "set_refl_spacing_ms(double ms)",
+              "set_refl_corner_hz(double hz)",
+              "set_drift_cents(double cents)",
+              "set_seed(std::uint32_t seed)",
+              "set_mix(double mix01)",
+              "horn_rate_hz()",
+              "drum_rate_hz()",
+              "target_horn_hz()",
+              "target_drum_hz()",
+              "horn_phase()",
+              "drum_phase()",
+              "mic_face_offset()",
+              "horn_delay_seconds(double phase_cycles, bool right_mic)",
+              "drum_delay_seconds(double phase_cycles, bool right_mic)",
+              "latency_samples()",
+              "process_block(const SampleType* in_left, const SampleType* in_right, SampleType* out_left, SampleType* out_right, int n)",
+              "process_block(const SampleType* mono_in, SampleType* out_left, SampleType* out_right, int n)",
+              "worst_case_delay_samples(double sample_rate)"
             ],
             "enums": [
               [
@@ -12494,7 +12992,31 @@
               "set_shape_morph(float m)",
               "set_shape_morph_enabled(bool on)",
               "shape_morph_enabled()",
-              "set_pulse_width(float pw)"
+              "set_pulse_width(float pw)",
+              "set_tri_bias(float b)",
+              "set_random_blend(float b)",
+              "set_random_segments(int n)",
+              "set_seed(std::uint32_t s)",
+              "set_phase_offset(double cycles01)",
+              "set_stereo_offset(double cycles01)",
+              "set_delay_ms(double ms)",
+              "set_fade_in_ms(double ms)",
+              "set_fade_out_ms(double ms, bool enabled)",
+              "set_fade_curve(FadeCurve c)",
+              "set_repeat_count(int n)",
+              "set_mode(Mode m)",
+              "mode()",
+              "set_band_limited(bool on)",
+              "band_limited()",
+              "next_mean(int samples)",
+              "stage()",
+              "finished()",
+              "cycles_completed()",
+              "phase()",
+              "next()",
+              "next_unipolar()",
+              "next_stereo(SampleType& left, SampleType& right)",
+              "next_quadrature(SampleType& sine_out, SampleType& cosine_out)"
             ],
             "enums": [
               [
@@ -12565,7 +13087,12 @@
               "minimum_output()",
               "maximum_output()",
               "length()",
-              "feedback_mask()"
+              "feedback_mask()",
+              "seed()",
+              "state()",
+              "offset()",
+              "latency_samples()",
+              "tail_samples()"
             ],
             "enums": []
           }
@@ -12603,7 +13130,10 @@
               "fault_count()",
               "maximum_downward_log_slew_nepers_per_second()",
               "minimum_transition_samples(std::span<const SampleType> cutoffs)",
-              "latency_samples()"
+              "latency_samples()",
+              "supports_configuration(SampleType sample_rate, std::span<const SampleType> cutoffs)",
+              "band_response(std::span<const SampleType> cutoffs, std::size_t band, double frequency_hz, double sample_rate)",
+              "reconstruction_response(std::span<const SampleType> cutoffs, double frequency_hz, double sample_rate)"
             ],
             "enums": []
           },
@@ -12789,7 +13319,45 @@
               "has_arrived()",
               "arrived_shape_legs()",
               "has_previous()",
-              "alternating()"
+              "alternating()",
+              "previous_shape_legs()",
+              "alternate_shape_legs(int which)",
+              "merges()",
+              "prepared_for(double sample_rate, int channels, const LoudnessCompensationConfig& config)",
+              "frames_since_restart()",
+              "wet_becomes_dry()",
+              "legs_uncorrelated()",
+              "push(const float* const* wet, const float* const* dry, int channels, int num_samples, OnFrame&& on_frame)",
+              "push(const float* const* x, int channels, int num_samples, OnFrame&& on_frame)",
+              "push(const float* const* x, int channels, int num_samples)",
+              "export_bands(SpectrumBands& out)",
+              "import_bands(const SpectrumBands& in, Import how = Import::warm)",
+              "prepared()",
+              "fft_size()",
+              "hop()",
+              "samples_to_next_frame()",
+              "bins()",
+              "bin_hz()",
+              "sample_rate()",
+              "hop_seconds()",
+              "config()",
+              "observed_frames()",
+              "gated_frames()",
+              "level_drops()",
+              "restarts()",
+              "last_frame_lufs()",
+              "prior_weight()",
+              "prior_legs()",
+              "set_prior_fade_scale(double scale)",
+              "last_frame_audible()",
+              "spectrum()",
+              "legs()",
+              "fast_legs()",
+              "fast_shape_legs()",
+              "slow_shape_legs()",
+              "shape_frames()",
+              "weight(double lo_hz, double hi_hz)",
+              "cdf()"
             ],
             "enums": [
               [
@@ -12954,7 +13522,8 @@
               "rise_ms()",
               "fall_ms()",
               "value()",
-              "current()"
+              "current()",
+              "settled()"
             ],
             "enums": [
               [
@@ -12984,7 +13553,8 @@
               "rise_ms()",
               "fall_ms()",
               "value()",
-              "current()"
+              "current()",
+              "settled()"
             ],
             "enums": [
               [
@@ -13225,7 +13795,8 @@
               "active_taps()",
               "max_taps()",
               "sample_rate()",
-              "latency_samples()"
+              "latency_samples()",
+              "retained_bytes()"
             ],
             "enums": []
           }
@@ -13328,7 +13899,29 @@
               "set_attack_pct(double pct)",
               "set_topology(NonlinProgram program, double length_ms, double predelay_ms, double density_pct, double density_growth, double gate_hold_pct, double attack_pct)",
               "request_topology(NonlinProgram program, double length_ms, double predelay_ms, double density_pct, double density_growth, double gate_hold_pct, double attack_pct)",
-              "topology_rebuild_count()"
+              "topology_rebuild_count()",
+              "topology_work_units_last_sample()",
+              "set_seed(std::uint32_t seed)",
+              "set_diffusion(double g)",
+              "set_tone(double tone)",
+              "set_hf_damp_hz(double hz)",
+              "set_width_pct(double pct)",
+              "set_converter_amount(double amount)",
+              "set_output_gain_db(double db)",
+              "set_mix_pct(double pct)",
+              "process_sample(SampleType& left, SampleType& right)",
+              "tap_count(int channel)",
+              "tap(int channel, int index)",
+              "tap_norm(int channel)",
+              "window_samples()",
+              "predelay_samples()",
+              "allpass_length(int index)",
+              "worst_case_gain()",
+              "program()",
+              "length_ms()",
+              "tone()",
+              "swap_in_progress()",
+              "envelope(double tau)"
             ],
             "enums": []
           }
@@ -13369,7 +13962,17 @@
               "stages()",
               "set_fold(double fold01)",
               "fold()",
-              "set_stage_offset(int stage, double offset)"
+              "set_stage_offset(int stage, double offset)",
+              "stage_offset(int stage)",
+              "set_stage_symmetry(int stage, double symmetry)",
+              "stage_symmetry(int stage)",
+              "set_dc_coupling(double amount01)",
+              "set_stage_dc_coupling(int stage, double amount01)",
+              "stage_dc_coupling(int stage)",
+              "small_signal_gain()",
+              "dc_output()",
+              "process_block(const SampleType* input, SampleType* output, std::size_t sample_count)",
+              "shape(double input)"
             ],
             "enums": []
           },
@@ -13391,7 +13994,10 @@
               "set_harmonic(int order, double amplitude)",
               "harmonic(int order)",
               "dc_output()",
-              "small_signal_gain()"
+              "small_signal_gain()",
+              "worst_case_output()",
+              "process_block(const SampleType* input, SampleType* output, std::size_t sample_count)",
+              "shape(double input)"
             ],
             "enums": []
           },
@@ -13413,7 +14019,21 @@
               "model()",
               "set_carrier_hz(double hz)",
               "carrier_hz()",
-              "set_index(double index01)"
+              "set_index(double index01)",
+              "index()",
+              "set_nonlinear_drive(double drive)",
+              "nonlinear_drive()",
+              "set_carrier_waveform(RingCarrierWaveform waveform)",
+              "carrier_waveform()",
+              "set_carrier_mode(RingCarrierMode mode)",
+              "carrier_mode()",
+              "set_output_polarity(RingOutputPolarity polarity)",
+              "output_polarity()",
+              "set_phase(double cycles)",
+              "phase()",
+              "dc_output()",
+              "process_block(const SampleType* input, SampleType* output, std::size_t sample_count)",
+              "shape(double input, double carrier)"
             ],
             "enums": []
           }
@@ -13468,7 +14088,12 @@
               "divider_n()",
               "tuning_word()",
               "realized_hz()",
-              "effective_note_hz()"
+              "effective_note_hz()",
+              "detune_cents()",
+              "quantization_bound_cents()",
+              "reset_intervals(std::span<long long> out)",
+              "phase()",
+              "next()"
             ],
             "enums": []
           }
@@ -13550,7 +14175,20 @@
               "set_level_tilt(double db_per_octave)",
               "level_tilt()",
               "set_core_reset_time(double seconds)",
-              "core_reset_time()"
+              "core_reset_time()",
+              "set_ac_coupling(double corner_hz)",
+              "ac_coupling()",
+              "ac_pole()",
+              "set_drift_depth(double depth_cents)",
+              "drift_depth()",
+              "set_drift_rate_hz(double corner_hz)",
+              "drift_rate_hz()",
+              "set_jitter_depth(double depth_cents)",
+              "jitter_depth()",
+              "set_seed(std::uint64_t seed)",
+              "seed()",
+              "phase()",
+              "next(double increment)"
             ],
             "enums": []
           },
@@ -13607,7 +14245,8 @@
               "bit_depth()",
               "stored_table(std::size_t i)",
               "sample_rate()",
-              "reconstruction_enabled()"
+              "reconstruction_enabled()",
+              "oversample_factor()"
             ],
             "enums": []
           }
@@ -13659,7 +14298,14 @@
               "set_bias(double bias)",
               "set_compensation(double amount)",
               "set_output_gain(double gain)",
-              "set_cross_modulation(double depth, double drive = 2.0)"
+              "set_cross_modulation(double depth, double drive = 2.0)",
+              "set_mode(Mode mode)",
+              "set_smoothing_time_ms(double milliseconds)",
+              "set_drift(double cutoff_cents, double resonance_fraction, double cutoff_rate_hz = 1.5, double resonance_rate_hz = 0.0)",
+              "latency_samples_for_oversampling(int factor)",
+              "latency_samples()",
+              "oversampling()",
+              "sample_rate()"
             ],
             "enums": [
               [
@@ -13693,7 +14339,9 @@
               "factor_value()",
               "latency()",
               "latency_samples()",
-              "group_delay_samples(double frequency)"
+              "group_delay_samples(double frequency)",
+              "polyphase_stage_design(Quality quality, int stage)",
+              "process_block(const SampleType* input, SampleType* output, std::size_t num_samples, Callback&& callback)"
             ],
             "enums": [
               [
@@ -13813,7 +14461,9 @@
               "storage_capacity()",
               "band(std::size_t index)",
               "coefficients(std::size_t index)",
-              "magnitude(double frequency_hz)"
+              "magnitude(double frequency_hz)",
+              "magnitude_db(double frequency_hz)",
+              "response_curve_db(double min_hz, double max_hz, std::span<float> out)"
             ],
             "enums": []
           }
@@ -13837,7 +14487,14 @@
               "energy()",
               "particle_count()",
               "event_rate()",
-              "energy_decay_ms()"
+              "energy_decay_ms()",
+              "sustain_floor()",
+              "collision_energy_loss()",
+              "seed()",
+              "sample_rate()",
+              "latency_samples()",
+              "retained_bytes()",
+              "tail_samples()"
             ],
             "enums": []
           }
@@ -13861,7 +14518,11 @@
               "set_collision_energy_loss(SampleType loss)",
               "excite(SampleType amount01)",
               "model()",
-              "sample_rate()"
+              "sample_rate()",
+              "prepared()",
+              "latency_samples()",
+              "retained_bytes()",
+              "tail_samples()"
             ],
             "enums": [
               [
@@ -13985,7 +14646,22 @@
               "set_rate_hz(double hz)",
               "rate_hz()",
               "set_depth(float depth01)",
-              "depth()"
+              "depth()",
+              "set_center_hz(double fc)",
+              "center_hz()",
+              "set_feedback(float fb)",
+              "feedback()",
+              "set_mix(float mix01)",
+              "mix()",
+              "set_stereo_spread(float cycles01)",
+              "stereo_spread()",
+              "set_wave(Wave wave)",
+              "wave()",
+              "set_stagger_ratio(double ratio)",
+              "stagger_ratio()",
+              "set_seed(std::uint32_t seed)",
+              "sweep_frequency_hz(int channel)",
+              "process_mono(const SampleType* in, SampleType* out, int n_frames)"
             ],
             "enums": []
           }
@@ -14009,7 +14685,35 @@
               "shift_semitones()",
               "set_pedal(double e01)",
               "pedal()",
-              "set_pedal_mode(PedalMode mode)"
+              "set_pedal_mode(PedalMode mode)",
+              "pedal_mode()",
+              "set_targets(double heel, double toe)",
+              "set_harmony(double a, double b)",
+              "set_detune_cents(double cents)",
+              "set_dive_floor_semis(double semitones)",
+              "set_window_ms(double ms)",
+              "window_ms()",
+              "set_glide_ms(double up_ms, double down_ms)",
+              "glide_up_ms()",
+              "glide_down_ms()",
+              "set_mix(double wet01)",
+              "mix()",
+              "set_detents(bool on)",
+              "detents()",
+              "set_interp(PitchInterp interp)",
+              "interp()",
+              "set_drift_depth(double d01)",
+              "drift_depth()",
+              "snap_to_target()",
+              "target_semitones()",
+              "pedal_law(double e01)",
+              "current_semitones()",
+              "current_ratio()",
+              "warble_hz()",
+              "tap_phase_pi(double hz)",
+              "window_samples()",
+              "latency_samples()",
+              "process_wet(SampleType x)"
             ],
             "enums": []
           }
@@ -14178,7 +14882,16 @@
               "set_time_ratio(float ratio)",
               "achieved_time_ratio()",
               "feed(const SampleType* const* in, int num_samples)",
-              "available_stretched()"
+              "available_stretched()",
+              "output_free_space()",
+              "input_priming_samples()",
+              "output_alignment_samples()",
+              "maximum_stream_output_lag_samples()",
+              "samples_until_next_analysis_frame()",
+              "finalize()",
+              "plan_finalize(int max_samples)",
+              "finalize(int max_samples)",
+              "read_stretched(SampleType* const* out, int num_samples)"
             ],
             "enums": []
           }
@@ -14202,7 +14915,11 @@
               "set_bell_reflection_gain(SampleType value)",
               "set_bell_loss_pole(SampleType value)",
               "bell_loss_pole()",
-              "internal_bell_loss_pole()"
+              "internal_bell_loss_pole()",
+              "oversampling_factor()",
+              "latency_samples()",
+              "tail_samples()",
+              "prepared()"
             ],
             "enums": []
           }
@@ -14266,7 +14983,10 @@
               "state()",
               "position()",
               "set_bypassed(bool bypassed)",
-              "bypassed()"
+              "bypassed()",
+              "discard_history()",
+              "process_sample(SampleType input)",
+              "process_block(const SampleType* input, SampleType* output, std::size_t sample_count)"
             ],
             "enums": []
           }
@@ -14290,7 +15010,11 @@
               "current()",
               "active()",
               "looping()",
-              "rise_ms()"
+              "rise_ms()",
+              "fall_ms()",
+              "low()",
+              "high()",
+              "stage()"
             ],
             "enums": []
           }
@@ -14333,7 +15057,8 @@
               "current()",
               "value()",
               "theta()",
-              "sigma()"
+              "sigma()",
+              "stationary_std()"
             ],
             "enums": []
           },
@@ -14389,7 +15114,13 @@
               "range_v()",
               "set_external_data(bool on)",
               "external_data()",
-              "set_seed_pattern(std::uint32_t pattern)"
+              "set_seed_pattern(std::uint32_t pattern)",
+              "seed_pattern()",
+              "apply_reset_edge()",
+              "latency_samples()",
+              "register_bits()",
+              "dac_code()",
+              "value()"
             ],
             "enums": []
           }
@@ -14424,7 +15155,13 @@
               "set_tone_tracking(bool tracking)",
               "set_tone_de_hz(double hz)",
               "set_pre_boost_db(double db)",
-              "set_alias_policy(AliasPolicy policy)"
+              "set_alias_policy(AliasPolicy policy)",
+              "alias_policy()",
+              "set_mix(double wet01)",
+              "set_output_trim_db(double db)",
+              "latency_samples()",
+              "worst_case_gain()",
+              "shaped(double x)"
             ],
             "enums": [
               [
@@ -14466,7 +15203,9 @@
               "root_pc()",
               "set_hysteresis_cents(double cents)",
               "hysteresis_cents()",
-              "apply_reset_edge()"
+              "apply_reset_edge()",
+              "latency_samples()",
+              "latched_step()"
             ],
             "enums": []
           }
@@ -14490,7 +15229,11 @@
               "set_v3_frac(double frac)",
               "set_chorus_mix(double mix01)",
               "depth_fraction()",
-              "dry_mix()"
+              "dry_mix()",
+              "peak_pitch_shift_ratio()",
+              "latency_samples()",
+              "process_block(const SampleType* in, SampleType* out, int n)",
+              "worst_case_delay_samples(double sample_rate)"
             ],
             "enums": [
               [
@@ -14598,7 +15341,11 @@
               "sample_rate()",
               "band_type(std::size_t index)",
               "default_band(std::size_t index)",
-              "coefficients(std::size_t band)"
+              "coefficients(std::size_t band)",
+              "process_block(SampleType* samples, std::size_t frames, std::size_t channel = 0)",
+              "magnitude(double frequency_hz)",
+              "magnitude_db(double frequency_hz)",
+              "response_curve_db(double min_hz, double max_hz, std::span<SampleType> output)"
             ],
             "enums": []
           }
@@ -14761,7 +15508,36 @@
               "set_q_resonance(double q)",
               "set_cone_breakup_amount(double percent)",
               "set_treble_rolloff_hz(double hz)",
-              "set_drive_db(double db)"
+              "set_drive_db(double db)",
+              "set_compression_amount(double percent)",
+              "set_mic_distance_cm(double cm)",
+              "set_mic_position_pct(double percent)",
+              "set_mic_axis_deg(double degrees)",
+              "set_diffraction_amount(double percent)",
+              "set_output_trim_db(double db)",
+              "latency_samples()",
+              "worst_case_gain()",
+              "compliance_ratio()",
+              "resonance_fc_hz()",
+              "resonance_q()",
+              "resonance_peak_db()",
+              "resonance_peak_hz()",
+              "baffle_step_hz()",
+              "ripple_hz()",
+              "dipole_hz()",
+              "breakup_mode_hz(int index)",
+              "offaxis_corner_hz()",
+              "proximity_gain_db()",
+              "presence_shelf_db()",
+              "air_loss_db()",
+              "inductance_magnitude_db(double hz)",
+              "bl_beta()",
+              "cms_gamma()",
+              "excursion()",
+              "dynamic_fc_hz()",
+              "archetype_index()",
+              "box_type()",
+              "sample_rate()"
             ],
             "enums": []
           }
@@ -14948,7 +15724,16 @@
               "set_wet_source_stage(WetSourceStage* stage)",
               "wet_source_stage()",
               "set_mix(SampleType mix)",
-              "set_mix_ramp_samples(int samples)"
+              "set_mix_ramp_samples(int samples)",
+              "set_mix_curve(MixCurve curve)",
+              "prepared()",
+              "latency_samples()",
+              "maximum_tail_samples()",
+              "num_bins()",
+              "channels()",
+              "retained_bytes()",
+              "active_table_version()",
+              "table_publication_pending()"
             ],
             "enums": []
           }
@@ -15079,7 +15864,22 @@
               "stage_pulse_count(int s)",
               "set_stage_gate_mode(int s, StageGateMode m)",
               "stage_gate_mode(int s)",
-              "set_stage_slide(int s, bool on)"
+              "set_stage_slide(int s, bool on)",
+              "stage_slide(int s)",
+              "set_stage_skip(int s, bool on)",
+              "stage_skip(int s)",
+              "set_slide_ms(double ms)",
+              "slide_ms()",
+              "set_repeat_duty(double duty)",
+              "repeat_duty()",
+              "set_seed(std::uint32_t seed)",
+              "apply_reset_edge()",
+              "latency_samples()",
+              "gate()",
+              "pitch_v()",
+              "stage()",
+              "pulse()",
+              "started()"
             ],
             "enums": []
           }
@@ -15246,7 +16046,26 @@
               "set_bias(float bias_c)",
               "effective_bias()",
               "set_drive(float drive01)",
-              "drive()"
+              "drive()",
+              "set_age(float age01)",
+              "age()",
+              "set_crosstalk_db(float db)",
+              "crosstalk_db()",
+              "set_companding_enabled(bool enabled)",
+              "companding_enabled()",
+              "set_print_through(float level_db, float offset_ms, bool pre_echo_enabled)",
+              "print_through_db()",
+              "print_offset_ms()",
+              "pre_echo_enabled()",
+              "set_mix(float wet01)",
+              "latency_samples()",
+              "worst_case_insertion_gain()",
+              "record_eq(int channel = 0)",
+              "playback_eq(int channel = 0)",
+              "gap_fir()",
+              "reproduce_gap_m()",
+              "reproduce_alignment_db()",
+              "sample_rate()"
             ],
             "enums": []
           },
@@ -15331,7 +16150,10 @@
               "sample_rate()",
               "maximum_delay_samples()",
               "current_delay_samples()",
-              "target_delay_samples()"
+              "target_delay_samples()",
+              "conservative_delay_samples()",
+              "latency_samples()",
+              "tail_samples()"
             ],
             "enums": []
           }
@@ -15364,7 +16186,15 @@
               "sample_rate()",
               "maximum_delay_samples()",
               "current_delay_samples()",
-              "target_delay_samples()"
+              "target_delay_samples()",
+              "current_right_delay_samples()",
+              "target_right_delay_samples()",
+              "transition_active()",
+              "feedback()",
+              "crossfeed()",
+              "interpolation()",
+              "latency_samples()",
+              "tail_samples()"
             ],
             "enums": []
           }
@@ -15388,7 +16218,10 @@
               "coefficients(std::size_t index)",
               "process_block(SampleType* samples, std::size_t frames, std::size_t channel = 0)",
               "process_block(const SampleType* input, SampleType* output, std::size_t frames, std::size_t channel = 0)",
-              "magnitude(double frequency_hz)"
+              "magnitude(double frequency_hz)",
+              "magnitude_db(double frequency_hz)",
+              "latency_samples()",
+              "tail_samples()"
             ],
             "enums": []
           }
@@ -15451,7 +16284,12 @@
               "attack_db()",
               "sustain_db()",
               "fast_attack_ms()",
-              "fast_release_ms()"
+              "fast_release_ms()",
+              "slow_attack_ms()",
+              "slow_release_ms()",
+              "contrast()",
+              "gain_db()",
+              "latency_samples()"
             ],
             "enums": []
           }
@@ -15665,7 +16503,19 @@
               "detector_mac_count_per_channel()",
               "set_ceiling_dbtp(double dbtp)",
               "set_release_ms(double milliseconds)",
-              "set_realtime_control_coefficients(double ceiling_dbtp, double safe_ceiling_linear, double release_ms, double release_retain)"
+              "set_realtime_control_coefficients(double ceiling_dbtp, double safe_ceiling_linear, double release_ms, double release_retain)",
+              "ceiling_dbtp()",
+              "lookahead_ms()",
+              "release_ms()",
+              "channel_link()",
+              "channel_count()",
+              "latency_samples()",
+              "tail_samples()",
+              "prepared()",
+              "fault_count()",
+              "gain_reduction_db(std::size_t channel = 0)",
+              "process_frame(std::span<const SampleType> input, std::span<SampleType> output)",
+              "process_interleaved(const SampleType* input, SampleType* output, std::size_t frames, std::size_t channels)"
             ],
             "enums": [
               [
@@ -15791,7 +16641,20 @@
               "set_makeup_db(double db)",
               "set_lookahead_ms(double ms)",
               "set_mix(double mix01)",
-              "set_ceiling_db(double db)"
+              "set_ceiling_db(double db)",
+              "latency_samples()",
+              "static_curve_db(double input_db)",
+              "gain_computer_db(double input_db)",
+              "gain_computer_unclamped_db(double input_db)",
+              "active_ratio()",
+              "gain_reduction_db()",
+              "gain_reduction()",
+              "level_db()",
+              "mean_square()",
+              "current_gain_linear()",
+              "attack_coef()",
+              "release_coef()",
+              "process_block(SampleType* io, int n)"
             ],
             "enums": []
           }
@@ -15861,7 +16724,8 @@
               "stage_count()",
               "set_mix(double mix)",
               "mix()",
-              "corner_hz()"
+              "corner_hz()",
+              "latency_samples()"
             ],
             "enums": []
           },
@@ -15914,7 +16778,30 @@
               "set_internal_pitch_hz(SampleType hz)",
               "internal_pitch_hz()",
               "set_noise_mix(SampleType m01)",
-              "set_attack_ms(SampleType ms)"
+              "set_attack_ms(SampleType ms)",
+              "set_release_ms(SampleType ms)",
+              "set_unvoiced_sensitivity(SampleType s01)",
+              "set_sibilance_mix(SampleType m01)",
+              "set_formant_shift_semitones(SampleType st)",
+              "set_formant_freeze(bool on)",
+              "formant_freeze()",
+              "set_output_trim_db(SampleType db)",
+              "set_dry_wet(SampleType w01)",
+              "band_count()",
+              "band_ratio()",
+              "band_q()",
+              "section_q()",
+              "bands_per_octave()",
+              "shift_bands()",
+              "band_center_hz(int k)",
+              "attack_eff_ms(int k)",
+              "release_eff_ms(int k)",
+              "analysis_band(int k)",
+              "band_envelope(int k)",
+              "synthesis_gain(int k)",
+              "unvoiced()",
+              "zcr_hz()",
+              "zcr_window_ms()"
             ],
             "enums": [
               [
@@ -16113,7 +17000,11 @@
               "min_cmnd()",
               "latency_samples()",
               "window_samples()",
-              "integration_samples()"
+              "integration_samples()",
+              "tau_min()",
+              "tau_max()",
+              "hop_samples()",
+              "cost_mac_per_sample()"
             ],
             "enums": []
           }
@@ -16137,7 +17028,29 @@
               "set_lowcut_hz(double hz)",
               "set_highcut_hz(double hz)",
               "set_normalize_mode(IrNormalizeMode mode)",
-              "set_tail_trim_db(double db)"
+              "set_tail_trim_db(double db)",
+              "set_tail_fade_ms(double ms)",
+              "set_resample_taps_per_phase(int taps)",
+              "latency_samples()",
+              "worst_case_gain()",
+              "l1_norm()",
+              "is_loaded()",
+              "head_length()",
+              "num_levels()",
+              "level_block_length(int level)",
+              "level_ir_start(int level)",
+              "level_partitions(int level)",
+              "level_margin(int level)",
+              "prepared_ir_length()",
+              "prepared_ir_channels()",
+              "prepared_ir(int channel)",
+              "last_block_cost()",
+              "sample_rate()",
+              "normalize_mode()",
+              "tail_trim_db()",
+              "tail_fade_ms()",
+              "predelay_ms()",
+              "predelay_samples()"
             ],
             "enums": []
           }
