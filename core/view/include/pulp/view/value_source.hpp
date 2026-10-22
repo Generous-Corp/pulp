@@ -62,12 +62,7 @@ class PublishCounter {
   public:
     /// Writer (audio/host) thread, from publish(). Relaxed: the counter orders
     /// no other memory, it only has to be monotonic and eventually visible.
-    /// Every source has exactly one writer thread (the TripleBuffer contract),
-    /// so a plain load and store suffices; no read-modify-write is needed.
-    void note_publish() noexcept {
-        publish_seq_.store(publish_seq_.load(std::memory_order_relaxed) + 1,
-                           std::memory_order_relaxed);
-    }
+    void note_publish() noexcept { publish_seq_.fetch_add(1, std::memory_order_relaxed); }
 
     /// Reader (UI) thread. Changes iff the writer published since the last read.
     std::uint32_t publish_seq() const noexcept {
