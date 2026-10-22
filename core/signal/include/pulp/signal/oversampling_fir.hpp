@@ -220,8 +220,34 @@ template <typename SampleType> class LinearPhaseOversamplingStage2x {
     std::size_t taps_ = 0;
 };
 
+/// Whether the target guarantees a hardware fused multiply-add at compile
+/// time. Without one (x86-64's SSE2 baseline, an MSVC build below /arch:AVX2),
+/// std::fma is a library call per tap that also blocks vectorization, which
+/// made this loop more than an order of magnitude slower on an x86-64
+/// baseline build.
+#if defined(__FMA__) || defined(__AVX2__) || defined(__aarch64__) || defined(_M_ARM64) ||          \
+    defined(__ARM_FEATURE_FMA)
+#define PULP_SIGNAL_HARDWARE_FMA 1
+#else
+#define PULP_SIGNAL_HARDWARE_FMA 0
+#endif
+
+/// acc + a * b for the block FIR: one fused multiply-add where the hardware
+/// has it, a separate multiply and add otherwise. Either way the same
+/// expression runs for every output, so partition exactness holds; the two
+/// forms differ only by rounding, and only between targets.
+template <typename SampleType>
+inline SampleType fir_multiply_add(SampleType a, SampleType b, SampleType acc) noexcept {
+#if PULP_SIGNAL_HARDWARE_FMA
+    return std::fma(a, b, acc);
+#else
+    return acc + a * b;
+#endif
+}
+
 /// One polyphase branch of a block 2x stage: a direct-form FIR whose every
-/// output is the taps summed oldest-first with one fused multiply-add each.
+/// output is the taps summed oldest-first, one multiply-add each (fused where
+/// the hardware has it; see fir_multiply_add()).
 ///
 /// That fixed per-output order is the point. A vectorised correlation
 /// (vDSP_conv, a tree-reduced dot) regroups the sum differently depending on
@@ -263,7 +289,7 @@ template <typename SampleType> class FixedOrderFirBranch {
             for (std::size_t k = 0; k < taps; ++k) {
                 const SampleType c = h[k];
                 for (std::size_t lane = 0; lane < kLanes; ++lane)
-                    acc[lane] = std::fma(c, x[k + lane], acc[lane]);
+                    acc[lane] = fir_multiply_add(c, x[k + lane], acc[lane]);
             }
             std::copy_n(acc, kLanes, output + i);
         }
@@ -271,7 +297,7 @@ template <typename SampleType> class FixedOrderFirBranch {
             SampleType acc = SampleType{0};
             const SampleType* x = history + i;
             for (std::size_t k = 0; k < taps; ++k)
-                acc = std::fma(h[k], x[k], acc);
+                acc = fir_multiply_add(h[k], x[k], acc);
             output[i] = acc;
         }
         std::copy(history + n, history + n + keep, history);
