@@ -58,6 +58,13 @@ struct GpuAudioNodeDescriptor {
     // about misses is exactly the author who has not made the fallback correct.
     MissPolicy miss_policy = MissPolicy::Silence;
     bool supports_cpu_fallback = false;
+
+    /// Number of blocks the node's worker emits behind its submit (wet(N-D)).
+    /// The transport primes `latency_blocks - worker_pipeline_blocks`, which
+    /// requires `latency_blocks >= worker_pipeline_blocks + 1`; total latency
+    /// stays `latency_blocks`. Appended to keep positional initialization of the
+    /// fields above source-compatible.
+    std::uint32_t worker_pipeline_blocks = 0;
 };
 
 } // namespace pulp::gpu_audio

@@ -744,9 +744,19 @@ struct DawnSharedIoProvider::Impl {
             &uncaptured_error_generation);
         device_descriptor.SetDeviceLostCallback(
             wgpu::CallbackMode::AllowProcessEvents,
-            [](const wgpu::Device&, wgpu::DeviceLostReason, wgpu::StringView,
-               std::atomic<bool>* lost) { lost->store(true, std::memory_order_release); },
-            &device_lost);
+            [](const wgpu::Device&, wgpu::DeviceLostReason lost_reason, wgpu::StringView,
+               Impl* self) {
+                self->device_lost_callback_ns.store(
+                    static_cast<std::uint64_t>(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count()),
+                    std::memory_order_relaxed);
+                self->device_lost_reason.store(static_cast<std::uint32_t>(lost_reason),
+                                               std::memory_order_relaxed);
+                self->device_lost.store(true, std::memory_order_release);
+            },
+            this);
         auto device_request = std::make_shared<RequestDevice>();
         adapter.RequestDevice(&device_descriptor, wgpu::CallbackMode::AllowProcessEvents,
                               [device_request](wgpu::RequestDeviceStatus status,
@@ -952,6 +962,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     // owner so reverse member destruction releases the device first.
     std::atomic<std::uint64_t> uncaptured_error_generation{0};
     std::atomic<bool> device_lost{false};
+    std::atomic<std::uint64_t> device_lost_callback_ns{0};
+    std::atomic<std::uint32_t> device_lost_reason{0};
     std::unique_ptr<dawn::native::Instance> native_instance;
     wgpu::Instance instance;
     wgpu::Adapter adapter;
@@ -2540,7 +2552,12 @@ std::uint64_t DawnSharedIoProvider::proc_table_install_count() const noexcept {
 }
 
 DawnSharedIoProvider::Stats DawnSharedIoProvider::stats() const noexcept {
-    return impl_ ? impl_->stats : Stats{};
+    if (!impl_)
+        return Stats{};
+    auto result = impl_->stats;
+    result.device_lost_callback_ns = impl_->device_lost_callback_ns.load(std::memory_order_acquire);
+    result.device_lost_reason = impl_->device_lost_reason.load(std::memory_order_acquire);
+    return result;
 }
 
 DawnSharedIoProvider::CompletionPolicy DawnSharedIoProvider::completion_policy() const noexcept {
