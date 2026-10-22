@@ -1012,7 +1012,10 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
         # "<pid>\n" or "<pid>\n<claimed_unix_us>\n"
         claim_pid = (run_dir / "claim").read_text(encoding="utf-8").splitlines()[0].strip()
         if any(str(e.get("pid")) != claim_pid for e in prepares):
-            mismatches.append("the run directory was claimed by a different process")
+            # Typically a plug-in scanner won the claim: the test did not run in
+            # the intended process, which says nothing about the audio (M5).
+            preconditions.append("unbound: the run directory was claimed by a different "
+                                 "process than the one that prepared")
     if reaper_pid is not None and any(e.get("pid") != reaper_pid for e in prepares):
         mismatches.append("the plug-in's events come from a different process than the REAPER "
                           "this run started")

@@ -452,6 +452,25 @@ class DaWContinuityReceipt(unittest.TestCase):
         self.assertEqual(evidence["verdict"], "fail")
         self.assertIn("not this plug-in's provider", evidence["verdict_reasons"][0])
 
+    def test_a_claim_won_by_another_process_is_inconclusive(self):
+        # M5: a scanner that won the claim means the test did not run in the
+        # intended process; INCONCLUSIVE (unbound), not FAIL.
+        run = self.copy_run(self.good)
+        (run / "claim").write_text("99999\n1\n", encoding="utf-8")
+        evidence = gfc.evaluate_run(run, fault="force_loss_between", fault_sample=FAULT,
+                                    tolerance=1e-4, window_pre=PRE, window_post=POST,
+                                    host_alive=True, bounce_path=run / "bounce.wav",
+                                    realtime_path=run / "realtime.wav")
+        self.assertEqual(evidence["verdict"], "inconclusive")
+        self.assertTrue(any(r.startswith("unbound") for r in evidence["verdict_reasons"]))
+        # Positive control: the claim naming the preparing process passes.
+        (run / "claim").write_text("0\n1\n", encoding="utf-8")
+        evidence = gfc.evaluate_run(run, fault="force_loss_between", fault_sample=FAULT,
+                                    tolerance=1e-4, window_pre=PRE, window_post=POST,
+                                    host_alive=True, bounce_path=run / "bounce.wav",
+                                    realtime_path=run / "realtime.wav")
+        self.assertEqual(evidence["verdict"], "pass")
+
     def test_a_foreign_nonce_is_a_mismatch(self):
         receipt = load(self.good)
         receipt["nonce"] = "f" * 32
