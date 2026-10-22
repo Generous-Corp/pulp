@@ -101,6 +101,15 @@ the release provenance handoff hashes the complete tree and rejects a missing
 sibling or an undeclared extra. Validate the archive with
 `python3 tools/scripts/test_release_artifact_contents.py` before publishing.
 
+A new module `capture.mjs` imports must be named in FOUR lists, not one:
+`browser_capture/runtime_manifest.txt` (the source of truth CMake installs
+from), `tools/cli/upgrade_install.hpp` (`browser_capture_runtime_files`),
+`experimental/pulp-rs/src/install_import_design.rs`
+(`BROWSER_CAPTURE_RUNTIME_FILES`), and `tools/scripts/release_product_matrix.json`
+(`common_cli_members`). A source build passes with only the first; the miss
+surfaces as the upgrade-manifest tests (C++ and Rust) or, worse, as an
+upgraded SDK whose capture cannot resolve its own module graph.
+
 ## TOOLS THIS SKILL ALREADY SHIPS — reach for these before hand-rolling (read this first)
 
 Every one of these is documented further down this file. That was not enough:
