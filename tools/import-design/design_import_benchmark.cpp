@@ -6,6 +6,8 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include "test/harness/rt_allocation_probe.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -29,8 +31,10 @@
 
 #if defined(__APPLE__)
 #include <mach/mach.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #elif defined(__linux__)
+#include <sys/resource.h>
 #include <unistd.h>
 #include <fstream>
 #endif
@@ -50,6 +54,7 @@ struct Config {
     int idle_ms = 60000;
     int interactive_ms = 60000;
     int target_fps = 60;
+    int warmup_frames = 0;
     std::filesystem::path output_path;
 };
 
@@ -59,15 +64,22 @@ struct PhaseMetrics {
     double cpu_ms = 0.0;
     double cpu_frame_ms_median = 0.0;
     double cpu_frame_ms_p99 = 0.0;
+    int warmup_frames = 0;
     double frame_ms_median = 0.0;
+    double frame_ms_p95 = 0.0;
     double frame_ms_p99 = 0.0;
     double frame_ms_max = 0.0;
     double update_ms_median = 0.0;
+    double update_ms_p95 = 0.0;
     double update_ms_p99 = 0.0;
     double update_ms_max = 0.0;
     std::uint64_t rss_median_bytes = 0;
     std::uint64_t rss_p99_bytes = 0;
     std::uint64_t rss_peak_bytes = 0;
+    std::uint64_t allocations_total = 0;
+    std::uint64_t allocated_bytes_total = 0;
+    double allocations_per_frame_median = 0.0;
+    double allocations_per_frame_p95 = 0.0;
     std::uint64_t paint_commands_last = 0;
     std::uint64_t bridge_calls = 0;
     std::uint64_t layout_passes = 0;
@@ -156,6 +168,22 @@ std::uint64_t current_rss_bytes() {
         if (page_size > 0) return resident * static_cast<std::uint64_t>(page_size);
     }
     return 0;
+#else
+    return 0;
+#endif
+}
+
+// Process resident-set high-water mark, which unlike sampled RSS cannot miss
+// a transient peak between frames.
+std::uint64_t rss_high_water_bytes() {
+#if defined(__APPLE__) || defined(__linux__)
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) != 0) return 0;
+#if defined(__APPLE__)
+    return static_cast<std::uint64_t>(usage.ru_maxrss);
+#else
+    return static_cast<std::uint64_t>(usage.ru_maxrss) * 1024u;
+#endif
 #else
     return 0;
 #endif
@@ -791,9 +819,11 @@ std::uint64_t render_frame(View& root) {
 PhaseMetrics run_phase(BenchmarkFixture& fixture,
                        int duration_ms,
                        int target_fps,
-                       bool interactive) {
+                       bool interactive,
+                       int warmup_frames = 0) {
     PhaseMetrics metrics;
     metrics.duration_ms = duration_ms;
+    metrics.warmup_frames = warmup_frames;
     if (duration_ms <= 0) return metrics;
 
     const auto interval = std::chrono::duration<double>(1.0 / std::max(1, target_fps));
@@ -809,26 +839,45 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     std::vector<double> frame_cpu_ms;
     std::vector<double> update_ms;
     std::vector<double> rss_bytes;
+    std::vector<double> frame_allocations;
 
     int frame = 0;
     do {
+        // Warmup frames run the same work but are excluded from every
+        // per-frame statistic so first-touch cache and allocator effects do
+        // not land in the median or tail.
+        const bool sampled = frame >= warmup_frames;
+        std::size_t allocations = 0;
+        std::size_t allocated_bytes = 0;
+        double update_elapsed = 0.0;
         const auto frame_start = Clock::now();
         const auto frame_cpu_start = std::clock();
-        if (interactive) {
-            const auto update_start = Clock::now();
-            fixture.step(frame);
-            update_ms.push_back(elapsed_ms(update_start));
+        {
+            pulp::test::RtAllocationProbe probe;
+            if (interactive) {
+                const auto update_start = Clock::now();
+                fixture.step(frame);
+                update_elapsed = elapsed_ms(update_start);
+            }
+            metrics.paint_commands_last = render_frame(fixture.root());
+            allocations = probe.allocation_count();
+            allocated_bytes = probe.allocated_bytes();
         }
-        metrics.paint_commands_last = render_frame(fixture.root());
         metrics.paint_commands_total += metrics.paint_commands_last;
         ++metrics.paint_calls;
         const auto frame_cpu_end = std::clock();
         const auto frame_end = Clock::now();
-        frame_ms.push_back(elapsed_ms(frame_start, frame_end));
-        frame_cpu_ms.push_back(cpu_clock_delta_ms(frame_cpu_start, frame_cpu_end));
-        const auto rss = current_rss_bytes();
-        rss_bytes.push_back(static_cast<double>(rss));
-        metrics.rss_peak_bytes = std::max(metrics.rss_peak_bytes, rss);
+        if (sampled) {
+            if (interactive) update_ms.push_back(update_elapsed);
+            frame_ms.push_back(elapsed_ms(frame_start, frame_end));
+            frame_cpu_ms.push_back(cpu_clock_delta_ms(frame_cpu_start, frame_cpu_end));
+            frame_allocations.push_back(static_cast<double>(allocations));
+            metrics.allocations_total += allocations;
+            metrics.allocated_bytes_total += allocated_bytes;
+            const auto rss = current_rss_bytes();
+            rss_bytes.push_back(static_cast<double>(rss));
+            metrics.rss_peak_bytes = std::max(metrics.rss_peak_bytes, rss);
+        }
         ++frame;
 
         next_frame += interval_duration;
@@ -839,6 +888,7 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     metrics.samples = static_cast<int>(frame_ms.size());
     if (!frame_ms.empty()) {
         metrics.frame_ms_median = percentile(frame_ms, 50.0);
+        metrics.frame_ms_p95 = percentile(frame_ms, 95.0);
         metrics.frame_ms_p99 = percentile(frame_ms, 99.0);
         metrics.frame_ms_max = *std::max_element(frame_ms.begin(), frame_ms.end());
     }
@@ -848,8 +898,13 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
     }
     if (!update_ms.empty()) {
         metrics.update_ms_median = percentile(update_ms, 50.0);
+        metrics.update_ms_p95 = percentile(update_ms, 95.0);
         metrics.update_ms_p99 = percentile(update_ms, 99.0);
         metrics.update_ms_max = *std::max_element(update_ms.begin(), update_ms.end());
+    }
+    if (!frame_allocations.empty()) {
+        metrics.allocations_per_frame_median = percentile(frame_allocations, 50.0);
+        metrics.allocations_per_frame_p95 = percentile(frame_allocations, 95.0);
     }
     if (!rss_bytes.empty()) {
         metrics.rss_median_bytes = static_cast<std::uint64_t>(std::llround(percentile(rss_bytes, 50.0)));
@@ -881,18 +936,26 @@ void append_phase_json(std::ostringstream& out,
     out << "  \"" << name << "\": {\n";
     out << "    \"duration_ms\": " << metrics.duration_ms << ",\n";
     out << "    \"samples\": " << metrics.samples << ",\n";
+    out << "    \"warmup_frames\": " << metrics.warmup_frames << ",\n";
     out << "    \"cpu_ms\": " << metrics.cpu_ms << ",\n";
     out << "    \"cpu_frame_ms_median\": " << metrics.cpu_frame_ms_median << ",\n";
     out << "    \"cpu_frame_ms_p99\": " << metrics.cpu_frame_ms_p99 << ",\n";
     out << "    \"frame_ms_median\": " << metrics.frame_ms_median << ",\n";
+    out << "    \"frame_ms_p95\": " << metrics.frame_ms_p95 << ",\n";
     out << "    \"frame_ms_p99\": " << metrics.frame_ms_p99 << ",\n";
     out << "    \"frame_ms_max\": " << metrics.frame_ms_max << ",\n";
     out << "    \"update_ms_median\": " << metrics.update_ms_median << ",\n";
+    out << "    \"update_ms_p95\": " << metrics.update_ms_p95 << ",\n";
     out << "    \"update_ms_p99\": " << metrics.update_ms_p99 << ",\n";
     out << "    \"update_ms_max\": " << metrics.update_ms_max << ",\n";
     out << "    \"rss_median_bytes\": " << metrics.rss_median_bytes << ",\n";
     out << "    \"rss_p99_bytes\": " << metrics.rss_p99_bytes << ",\n";
     out << "    \"rss_peak_bytes\": " << metrics.rss_peak_bytes << ",\n";
+    out << "    \"allocations_total\": " << metrics.allocations_total << ",\n";
+    out << "    \"allocated_bytes_total\": " << metrics.allocated_bytes_total << ",\n";
+    out << "    \"allocations_per_frame_median\": " << metrics.allocations_per_frame_median
+        << ",\n";
+    out << "    \"allocations_per_frame_p95\": " << metrics.allocations_per_frame_p95 << ",\n";
     out << "    \"paint_commands_last\": " << metrics.paint_commands_last << ",\n";
     out << "    \"js_evaluations_total\": " << metrics.js_evaluations << ",\n";
     out << "    \"counters\": {\n";
@@ -910,7 +973,8 @@ void append_phase_json(std::ostringstream& out,
 std::string make_json(const Config& config,
                       const StartupMetrics& startup,
                       const PhaseMetrics& idle,
-                      const PhaseMetrics& interactive) {
+                      const PhaseMetrics& interactive,
+                      std::uint64_t rss_high_water = 0) {
     std::ostringstream out;
     out << std::fixed << std::setprecision(4);
     out << "{\n";
@@ -927,6 +991,7 @@ std::string make_json(const Config& config,
     out << "    \"first_frame_paint_commands\": " << startup.first_frame_paint_commands << ",\n";
     out << "    \"rss_after_first_frame_bytes\": " << startup.rss_after_first_frame_bytes << "\n";
     out << "  },\n";
+    out << "  \"rss_high_water_bytes\": " << rss_high_water << ",\n";
     out << "  \"interaction_model\": \"value drag plus overflow-panel scroll offset; live lane "
            "mutates through JS bridge, baked-native materializes once and uses direct native "
            "setters, baked-native-rebuild rematerializes the same IR per interactive step, "
@@ -940,7 +1005,8 @@ std::string make_json(const Config& config,
 void print_usage(std::ostream& out) {
     out << "usage: pulp-design-import-bench "
            "[--lane=live|baked-native|baked-native-rebuild|baked-cpp] "
-           "[--idle-ms=N] [--interactive-ms=N] [--target-fps=N] [--output=PATH]\n";
+           "[--idle-ms=N] [--interactive-ms=N] [--target-fps=N] [--warmup-frames=N] "
+           "[--output=PATH]\n";
 }
 
 bool parse_int(std::string_view value, int& out) {
@@ -983,6 +1049,10 @@ std::optional<Config> parse_args(int argc, char** argv) {
             if (!parse_int(*value, config.target_fps)) return std::nullopt;
         } else if (arg == "--target-fps" && i + 1 < argc) {
             if (!parse_int(argv[++i], config.target_fps)) return std::nullopt;
+        } else if (auto value = value_after("--warmup-frames=")) {
+            if (!parse_int(*value, config.warmup_frames)) return std::nullopt;
+        } else if (arg == "--warmup-frames" && i + 1 < argc) {
+            if (!parse_int(argv[++i], config.warmup_frames)) return std::nullopt;
         } else if (auto value = value_after("--output=")) {
             config.output_path = *value;
         } else if (arg == "--output" && i + 1 < argc) {
@@ -997,6 +1067,7 @@ std::optional<Config> parse_args(int argc, char** argv) {
     config.idle_ms = std::max(0, config.idle_ms);
     config.interactive_ms = std::max(0, config.interactive_ms);
     config.target_fps = std::max(1, config.target_fps);
+    config.warmup_frames = std::max(0, config.warmup_frames);
     return config;
 }
 
@@ -1036,8 +1107,9 @@ int main(int argc, char** argv) {
     startup.rss_after_first_frame_bytes = current_rss_bytes();
 
     const auto idle = run_phase(*fixture, config->idle_ms, config->target_fps, false);
-    const auto interactive = run_phase(*fixture, config->interactive_ms, config->target_fps, true);
-    const auto json = make_json(*config, startup, idle, interactive);
+    const auto interactive = run_phase(*fixture, config->interactive_ms, config->target_fps, true,
+                                       config->warmup_frames);
+    const auto json = make_json(*config, startup, idle, interactive, rss_high_water_bytes());
 
     if (!config->output_path.empty()) {
         if (!write_file(config->output_path, json)) {

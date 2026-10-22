@@ -200,8 +200,11 @@ install(FILES
     "${_pulp_materialized_ids_map}"
     DESTINATION bin/jsx-runtime)
 
+# The allocation probe replaces global operator new in this binary so every
+# lane's per-frame allocation count is measured the same way.
 add_executable(pulp-design-import-bench
-    design_import_benchmark.cpp)
+    design_import_benchmark.cpp
+    ${CMAKE_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
 target_include_directories(pulp-design-import-bench PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-design-import-bench PRIVATE
     pulp::view
