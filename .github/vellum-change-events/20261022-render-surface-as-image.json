@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "20261022-render-surface-as-image",
+  "kind": "change",
+  "created_at": "2026-10-22T06:40:25Z",
+  "slices": [
+    "canvas-kernel",
+    "render-skia-dawn"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); on Graphite, SkiaSurface's persistent-scene blit and SkiaCanvas::end_layer()'s retained-layer seal now take SkSurfaces::AsImage, a view of the surface's own texture, instead of makeImageSnapshot, which on Graphite always copies; both fall back to the copy when the surface is not textureable, and Ganesh and raster keep their copy-on-write snapshot. The scene view lives only inside the blit, which is recorded into the frame's own recording before any later scene draw; the layer surface is released immediately after the seal, so the sealed image is its texture's only owner. Presented and sealed pixels are unchanged; a steady persistent-scene frame no longer encodes a full-scene texture copy and a retained seal no longer allocates a second texture. No frame, present, readback, design-import, Chromium, packaging or authority boundary moves; the Pulp canvas and render targets have not adopted a Vellum package.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'Graphite AsImage view of a surface sees later draws into it'",
+    "ctest --test-dir build -R 'SkiaCanvas Graphite layer seal shares the layer texture'",
+    "ctest --test-dir build -R 'SkiaSurface persistent-scene blit presents each frame.s own scene'",
+    "ctest --test-dir build -R 'SkiaSurface persistent-scene frames do not copy the scene'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

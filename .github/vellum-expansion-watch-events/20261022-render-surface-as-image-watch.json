@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-render-surface-as-image-watch",
+  "created_at": "2026-10-22T06:40:25Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "A generic render-backend change. On Graphite the persistent-scene blit and the retained-layer seal take a view of the surface's own texture (SkSurfaces::AsImage) instead of a snapshot copy, falling back to the copy when the surface is not textureable; the blit is recorded before the next frame's scene draws and the layer surface is released at the seal, so presented and sealed pixels are unchanged. Pulp continues to own these targets under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits the change when the targets adopt the Vellum package. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'Graphite AsImage view of a surface sees later draws into it'",
+    "ctest --test-dir build -R 'SkiaCanvas Graphite layer seal shares the layer texture'",
+    "ctest --test-dir build -R 'SkiaSurface persistent-scene blit presents each frame.s own scene'",
+    "ctest --test-dir build -R 'SkiaSurface persistent-scene frames do not copy the scene'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}
