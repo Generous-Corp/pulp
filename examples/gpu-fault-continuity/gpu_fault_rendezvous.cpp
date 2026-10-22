@@ -1,0 +1,183 @@
+#include "gpu_fault_rendezvous.hpp"
+
+#ifndef PULP_GPU_FAULT_TEST_ONLY
+#error "gpu_fault_rendezvous.cpp belongs only to the PULP_GPU_AUDIO_FAULT_HOOKS test plug-in"
+#endif
+
+#include <chrono>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <system_error>
+
+#include <dlfcn.h>
+#include <libproc.h>
+#include <pwd.h>
+#include <unistd.h>
+
+namespace pulp::examples::gpu_fault {
+namespace {
+
+namespace fs = std::filesystem;
+
+// active.json is written by the harness as a flat object, so a key scan is
+// enough; anything malformed simply fails validation.
+std::string json_string(const std::string& text, const char* key) {
+    const auto at = text.find(std::string("\"") + key + "\"");
+    if (at == std::string::npos)
+        return {};
+    const auto colon = text.find(':', at);
+    const auto open = colon == std::string::npos ? colon : text.find('"', colon + 1);
+    const auto close = open == std::string::npos ? open : text.find('"', open + 1);
+    return close == std::string::npos ? std::string() : text.substr(open + 1, close - open - 1);
+}
+
+std::int64_t json_int(const std::string& text, const char* key) {
+    const auto at = text.find(std::string("\"") + key + "\"");
+    if (at == std::string::npos)
+        return -1;
+    const auto colon = text.find(':', at);
+    return colon == std::string::npos ? -1 : std::strtoll(text.c_str() + colon + 1, nullptr, 10);
+}
+
+bool is_hex(const std::string& s) {
+    for (char c : s)
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            return false;
+    return true;
+}
+
+// True when `path` resolves (symlinks included) to somewhere strictly inside `dir`.
+bool strictly_inside(const fs::path& path, const fs::path& dir) {
+    std::error_code ec;
+    const fs::path p = fs::weakly_canonical(path, ec);
+    if (ec)
+        return false;
+    const fs::path d = fs::weakly_canonical(dir, ec);
+    if (ec)
+        return false;
+    const fs::path rel = p.lexically_relative(d);
+    return !rel.empty() && *rel.begin() != ".." && rel != ".";
+}
+
+std::string escape(const std::string& text) {
+    std::string out;
+    for (char c : text) {
+        if (c == '"' || c == '\\')
+            out.push_back('\\');
+        if (static_cast<unsigned char>(c) >= 0x20)
+            out.push_back(c);
+    }
+    return out;
+}
+
+RunConfig from_rendezvous(const fs::path& root, std::int64_t now_unix) {
+    RunConfig config;
+    const fs::path active = root / "active.json";
+    std::error_code ec;
+    if (root.empty() || !fs::is_regular_file(active, ec)) {
+        config.detail = "no rendezvous file";
+        return config;
+    }
+    std::ifstream in(active);
+    std::stringstream text;
+    text << in.rdbuf();
+    const std::string body = text.str();
+    auto refuse = [&](std::string why) {
+        config = RunConfig{};
+        config.detail = "rendezvous refused: " + std::move(why);
+        return config;
+    };
+    if (json_string(body, "schema") != kRendezvousSchema)
+        return refuse("schema is not " + std::string(kRendezvousSchema));
+    const std::int64_t expires = json_int(body, "expires_unix");
+    if (expires <= now_unix)
+        return refuse("expired");
+    const std::string nonce = json_string(body, "nonce");
+    if (nonce.size() < 16 || !is_hex(nonce))
+        return refuse("nonce missing or not lowercase hex");
+    const fs::path run_dir = json_string(body, "run_dir");
+    const fs::path request = json_string(body, "request");
+    const fs::path ir = json_string(body, "ir");
+    if (!strictly_inside(run_dir, root / "runs") || !fs::is_directory(run_dir, ec))
+        return refuse("run_dir is not a directory under " + (root / "runs").string());
+    if (!strictly_inside(request, run_dir) || !strictly_inside(ir, run_dir))
+        return refuse("request and ir must be inside run_dir");
+    config.run_dir = run_dir;
+    config.request = request;
+    config.ir = ir;
+    config.nonce = nonce;
+    config.provider_staged = json_string(body, "provider") == "staged";
+    config.source = "rendezvous";
+    return config;
+}
+
+} // namespace
+
+fs::path default_rendezvous_root() {
+    if (const char* override_root = std::getenv("PULP_GPU_FAULT_RENDEZVOUS_ROOT"))
+        return override_root;
+    const passwd* account = ::getpwuid(::getuid());
+    if (account == nullptr || account->pw_dir == nullptr)
+        return {};
+    return fs::path(account->pw_dir) / "Library" / "Application Support" / "Pulp" /
+           "gpu-fault-continuity";
+}
+
+RunConfig resolve_run_config(const RunConfigSources& sources) {
+    const auto env = [&](const char* name) -> fs::path {
+        const char* value = sources.getenv ? sources.getenv(name) : nullptr;
+        return value ? fs::path(value) : fs::path();
+    };
+    RunConfig config;
+    config.run_dir = env("PULP_GPU_FAULT_RUN_DIR");
+    if (!config.run_dir.empty()) {
+        config.request = env("PULP_GPU_FAULT_REQUEST");
+        config.ir = env("PULP_GPU_FAULT_IR");
+        config.nonce = env("PULP_GPU_FAULT_NONCE").string();
+        config.provider_staged = env("PULP_GPU_FAULT_PROVIDER") == "staged";
+        config.source = "env";
+        return config;
+    }
+    return from_rendezvous(sources.rendezvous_root, sources.now_unix);
+}
+
+RunConfig resolve_run_config() {
+    RunConfigSources sources;
+    sources.getenv = [](const char* name) { return static_cast<const char*>(std::getenv(name)); };
+    sources.rendezvous_root = default_rendezvous_root();
+    sources.now_unix = std::chrono::duration_cast<std::chrono::seconds>(
+                           std::chrono::system_clock::now().time_since_epoch())
+                           .count();
+    return resolve_run_config(sources);
+}
+
+HostProcess current_host_process() {
+    HostProcess process;
+    process.pid = static_cast<int>(::getpid());
+    process.ppid = static_cast<int>(::getppid());
+    char path[PROC_PIDPATHINFO_MAXSIZE] = {};
+    if (::proc_pidpath(process.pid, path, sizeof(path)) > 0)
+        process.path = path;
+    // Neither call has a public header; both are looked up so a missing
+    // symbol degrades to "unknown" rather than a load failure inside a host.
+    using ResponsibleFn = pid_t (*)(pid_t);
+    if (auto fn = reinterpret_cast<ResponsibleFn>(
+            ::dlsym(RTLD_DEFAULT, "responsibility_get_pid_responsible_for_pid")))
+        process.responsible_pid = static_cast<int>(fn(process.pid));
+    using SandboxCheckFn = int (*)(pid_t, const char*, int, ...);
+    if (auto fn = reinterpret_cast<SandboxCheckFn>(::dlsym(RTLD_DEFAULT, "sandbox_check")))
+        process.sandboxed = fn(process.pid, nullptr, 0) != 0 ? 1 : 0;
+    return process;
+}
+
+std::string host_process_event(const HostProcess& process, const RunConfig& config) {
+    return "{\"event\":\"host_process\",\"pid\":" + std::to_string(process.pid) +
+           ",\"ppid\":" + std::to_string(process.ppid) +
+           ",\"responsible_pid\":" + std::to_string(process.responsible_pid) +
+           ",\"sandboxed\":" + std::to_string(process.sandboxed) + ",\"process_path\":\"" +
+           escape(process.path) + "\",\"config_source\":\"" + escape(config.source) +
+           "\",\"nonce\":\"" + escape(config.nonce) + "\"}";
+}
+
+} // namespace pulp::examples::gpu_fault

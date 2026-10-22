@@ -5,6 +5,7 @@
 #error "the GPU fault-continuity test plug-in builds only with PULP_GPU_FAULT_TEST_ONLY"
 #endif
 #include "gpu_fault_interposer.hpp"
+#include "gpu_fault_rendezvous.hpp"
 #include "gpu_fault_seam.hpp"
 #include "gpu_fault_stimulus.hpp"
 
@@ -116,11 +117,6 @@ void write_all(int fd, const void* data, std::size_t size) {
         p += wrote;
         size -= static_cast<std::size_t>(wrote);
     }
-}
-
-std::filesystem::path env_path(const char* name) {
-    const char* value = std::getenv(name);
-    return value ? std::filesystem::path(value) : std::filesystem::path();
 }
 
 // The request file is written by the harness: {"fault": "...", "at_project_sample": N,
@@ -290,17 +286,18 @@ std::size_t CaptureRing::drain(std::vector<std::uint8_t>& out) {
 // ── Processor ────────────────────────────────────────────────────────────
 
 GpuFaultContinuityProcessor::GpuFaultContinuityProcessor() {
-    run_dir_ = env_path("PULP_GPU_FAULT_RUN_DIR");
-    request_path_ = env_path("PULP_GPU_FAULT_REQUEST");
-    ir_path_ = env_path("PULP_GPU_FAULT_IR");
-    if (const char* nonce = std::getenv("PULP_GPU_FAULT_NONCE"))
-        nonce_ = nonce;
-    if (const char* provider = std::getenv("PULP_GPU_FAULT_PROVIDER"))
-        gpu_off_ = std::string(provider) == "staged";
+    // The environment (REAPER) or, for hosts that cannot pass it on, the
+    // rendezvous file (gpu_fault_rendezvous.hpp).
+    const RunConfig config = resolve_run_config();
+    run_dir_ = config.run_dir;
+    request_path_ = config.request;
+    ir_path_ = config.ir;
+    nonce_ = config.nonce;
+    config_source_ = config.source;
+    gpu_off_ = config.provider_staged;
     // Fixed here, before any callback, so a run never captures a single host
     // input sample before switching to the internal stimulus.
-    if (const char* input = std::getenv("PULP_GPU_FAULT_INPUT"))
-        internal_stimulus_.store(std::string(input) == "internal", std::memory_order_relaxed);
+    internal_stimulus_.store(config.internal_stimulus, std::memory_order_relaxed);
 }
 
 void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
@@ -323,6 +320,10 @@ void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
     capture.write(kCaptureMagic, 4);
     capture.write(reinterpret_cast<const char*>(header), sizeof(header));
     std::ofstream(run_dir_ / "events.jsonl", std::ios::trunc);
+    RunConfig config;
+    config.source = config_source_;
+    config.nonce = nonce_;
+    emit(host_process_event(current_host_process(), config));
     running_.store(true, std::memory_order_release);
     service_ = std::thread([this] { service_loop(); });
 }

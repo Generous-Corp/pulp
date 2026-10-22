@@ -149,6 +149,7 @@ class GpuFaultContinuityProcessor : public format::Processor {
     std::filesystem::path run_dir_;
     std::filesystem::path request_path_;
     std::filesystem::path ir_path_;
+    std::string config_source_ = "none";
     bool harness_ = false;
 
     // Engine (host thread; guarded by engine_mutex_ against the service thread).
