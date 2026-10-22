@@ -1274,6 +1274,16 @@ add_test(NAME cmake-control-shipping-matrix
 set_tests_properties(cmake-control-shipping-matrix PROPERTIES
     LABELS "cmake;control;ship;matrix" TIMEOUT 180)
 
+# The signing preflight and default entitlements are installed into every SDK
+# (share/pulp/ship); they must not name a build host, a local path or a user.
+# cmake-pulp-install-layout runs the same scan over the installed copies.
+add_test(NAME cmake-ship-files-no-host-identifiers
+    COMMAND ${CMAKE_COMMAND}
+        "-DSCAN_FILES=${CMAKE_SOURCE_DIR}/tools/scripts/ensure_signing_ready.sh\;${CMAKE_SOURCE_DIR}/ship/templates/entitlements.plist"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_no_host_identifiers.cmake)
+set_tests_properties(cmake-ship-files-no-host-identifiers PROPERTIES
+    LABELS "cmake;ship" TIMEOUT 30)
+
 add_test(NAME cmake-control-shipping-fresh-stamp
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
