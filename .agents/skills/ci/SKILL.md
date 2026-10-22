@@ -12445,6 +12445,22 @@ first.
 
 ## Hosted macOS advisory cadence
 
+## Release lanes pin the shell exec JS bridge OFF
+
+`PULP_DEV_BRIDGE_EXEC` compiles the developer-only `exec` / `execAsync` JS
+bridge (a `/bin/sh` for scripted UIs) into `pulp-view-script`. It defaults to
+`PULP_BUILD_TESTS`, so tests OFF already implies it, but every release
+configure — `release-cli.yml` (CLI build and both SDK builds) and
+`sign-and-release.yml` — passes `-DPULP_DEV_BRIDGE_EXEC=OFF` explicitly and
+`sdk_provenance.py` refuses to mint a release marker from a cache where it is
+ON or missing. The marker records it as `features.bridge_exec: false`;
+`PulpSdkProvenance.cmake` fails a release SDK whose marker claims `true`. When
+adding a release configure site, carry the flag; when a release leg fails on
+`bridge_exec=OFF`, the leg dropped the flag or configured from a source tree
+that predates the option — neither is a test failure. The same refusal
+stops a `workflow_dispatch` backfill of a tag older than the option: those
+SDKs do carry the bridge, so re-minting their provenance is refused by design.
+
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
 native matrix are scheduled nightly and dispatched on an approved PR head. The
 `pulp pr` wrapper invokes `tools/scripts/dispatch_advisory_lanes.sh` after its

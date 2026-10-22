@@ -406,7 +406,10 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
         // runtime design-import) from the shipped SDK. The runtime W3C token API
         // stays. Re-enable with -DPULP_ENABLE_DESIGN_IMPORT=ON for a plugin that
         // needs runtime design import.
-        + " -DPULP_ENABLE_DESIGN_IMPORT=OFF" + " -DPULP_ENABLE_GPU=OFF";
+        + " -DPULP_ENABLE_DESIGN_IMPORT=OFF" + " -DPULP_ENABLE_GPU=OFF"
+        // Tests OFF already implies this, but an installed SDK must never carry
+        // the shell exec/execAsync JS bridge, so say so explicitly.
+        + " -DPULP_DEV_BRIDGE_EXEC=OFF";
     append_windows_visual_studio_generator_args(configure_cmd);
     if (run_with_spinner(configure_cmd, "Configuring local SDK") != 0) {
         return {};
