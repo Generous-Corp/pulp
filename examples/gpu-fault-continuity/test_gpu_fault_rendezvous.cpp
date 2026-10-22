@@ -75,6 +75,28 @@ TEST_CASE("a valid rendezvous configures the run", "[gpu-fault-continuity][rende
     CHECK(config.request == root.run / "fault-request.json");
     CHECK(config.ir == root.run / "ir.f32");
     CHECK(config.nonce == kNonce);
+    CHECK_FALSE(config.provider_staged);
+}
+
+TEST_CASE("the staged provider is selected by rendezvous or environment",
+          "[gpu-fault-continuity][rendezvous]") {
+    Root root;
+    root.write_valid();
+    {
+        std::string body;
+        {
+            std::ifstream in(root.path / "active.json");
+            std::getline(in, body);
+        }
+        body.insert(body.size() - 1, ",\"provider\":\"staged\"");
+        std::ofstream(root.path / "active.json") << body << "\n";
+    }
+    CHECK(resolve_run_config(sources_for(root)).provider_staged);
+    CHECK(resolve_run_config(sources_for(root, {{"PULP_GPU_FAULT_RUN_DIR", "/env/run"},
+                                                {"PULP_GPU_FAULT_PROVIDER", "staged"}}))
+              .provider_staged);
+    CHECK_FALSE(resolve_run_config(sources_for(root, {{"PULP_GPU_FAULT_RUN_DIR", "/env/run"}}))
+                    .provider_staged);
 }
 
 TEST_CASE("the environment wins over a rendezvous", "[gpu-fault-continuity][rendezvous]") {

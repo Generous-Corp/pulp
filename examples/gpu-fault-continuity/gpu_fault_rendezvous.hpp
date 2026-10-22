@@ -46,6 +46,10 @@ struct RunConfig {
     std::filesystem::path request;
     std::filesystem::path ir;
     std::string nonce;
+    // Staged GPU path instead of shared I/O (the gpu_off path negative and
+    // the staged rows): env PULP_GPU_FAULT_PROVIDER=staged or rendezvous
+    // "provider":"staged".
+    bool provider_staged = false;
     std::string source = "none"; // "env", "rendezvous" or "none"
     std::string detail;          // why the rendezvous was refused, when it was
 };

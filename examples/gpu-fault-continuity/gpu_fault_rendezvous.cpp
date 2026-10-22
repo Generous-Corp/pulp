@@ -165,6 +165,7 @@ RunConfig from_rendezvous(const fs::path& root, std::int64_t now_unix) {
     config.request = request;
     config.ir = ir;
     config.nonce = nonce;
+    config.provider_staged = json_string(body, "provider") == "staged";
     config.source = "rendezvous";
     return config;
 }
@@ -196,6 +197,7 @@ RunConfig resolve_run_config(const RunConfigSources& sources) {
         config.request = env("PULP_GPU_FAULT_REQUEST");
         config.ir = env("PULP_GPU_FAULT_IR");
         config.nonce = env("PULP_GPU_FAULT_NONCE").string();
+        config.provider_staged = env("PULP_GPU_FAULT_PROVIDER") == "staged";
         config.source = "env";
         return config;
     }
