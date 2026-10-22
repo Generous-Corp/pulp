@@ -1762,6 +1762,9 @@ def validate_mode_args(ap: argparse.ArgumentParser, args: argparse.Namespace) ->
             ap.error("gpu-fault mode requires --plugin-name and --plugin-path (or --dry-run)")
         if not 0 < args.fault_at_sample < args.stimulus_frames:
             ap.error("--fault-at-sample must fall inside the stimulus")
+        if args.window_post < 4800:
+            ap.error("--window-post must be at least 4800 samples (100 ms): the verifier "
+                     "refuses a shorter post-fault window")
         if args.fault_at_sample < args.window_pre:
             ap.error("--fault-at-sample must leave room for --window-pre before it: the "
                      "fault window has to lie entirely inside the compared audio")

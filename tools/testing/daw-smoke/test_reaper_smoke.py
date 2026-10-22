@@ -567,7 +567,7 @@ class GpuFaultMode(unittest.TestCase):
     render wait, crash detection, receipt — is exercised without REAPER.
     """
 
-    FRAMES, FAULT, POST = 6000, 3000, 2400
+    FRAMES, FAULT, POST = 9600, 3000, 4800
 
     def args(self, tmp: pathlib.Path, **kw):
         ap = rs.build_parser()
@@ -719,7 +719,7 @@ class GpuFaultMode(unittest.TestCase):
                 run = pathlib.Path(tmp)
                 fault = "render_force_loss" if name.startswith("render") else "hang"
                 lib.synthesize_run(run, fault=fault, fault_sample=self.FAULT,
-                                   frames=self.FRAMES)
+                                   frames=self.FRAMES, window_post=self.POST)
                 events = (run / "events.jsonl").read_text(encoding="utf-8")
                 if name.startswith("render"):
                     events = events.replace('"performed": true', '"performed": false')
@@ -733,7 +733,8 @@ class GpuFaultMode(unittest.TestCase):
                                           host_alive=True, bounce_path=run / "bounce.wav")
                 self.assertEqual(result["verdict"], "inconclusive", result["verdict_reasons"])
                 # Positive control: the untouched run passes.
-                lib.synthesize_run(run, fault=fault, fault_sample=self.FAULT, frames=self.FRAMES)
+                lib.synthesize_run(run, fault=fault, fault_sample=self.FAULT, frames=self.FRAMES,
+                                   window_post=self.POST)
                 result = lib.evaluate_run(run, fault=fault, fault_sample=self.FAULT,
                                           tolerance=1e-4, window_pre=100, window_post=self.POST,
                                           host_alive=True, bounce_path=run / "bounce.wav")

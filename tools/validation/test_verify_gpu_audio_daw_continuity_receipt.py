@@ -25,7 +25,7 @@ VERIFY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VERIFY)
 gfc = VERIFY.gfc
 
-FRAMES, FAULT, PRE, POST = 6000, 3000, 1000, 2400
+FRAMES, FAULT, PRE, POST = 9600, 3000, 1000, 4800
 
 
 def dry_run(out: Path, fault: str = "force_loss_between", *extra: str) -> int:
@@ -209,6 +209,40 @@ class DaWContinuityReceipt(unittest.TestCase):
                                     render_frames=FRAMES + POST)
         self.assertFalse(evidence["nulls"]["bounce"]["covered"])
         self.assertEqual(evidence["verdict"], "fail")
+
+    def test_a_shrunk_window_and_render_length_are_rejected(self):
+        # Re-review probe: cut the bounce just past the fault and shrink the
+        # receipt's own window and render length to match.
+        run = self.copy_run(self.good)
+        _, bounce = gfc.read_wav(run / "bounce.wav")
+        gfc.write_wav_f32(run / "bounce.wav", [p[:FAULT + 2] for p in bounce])
+        receipt = load(run)
+        receipt["artifacts"]["bounce.wav"] = gfc.sha256_file(run / "bounce.wav")
+        receipt["analysis"]["window"]["post"] = 1
+        receipt["analysis"]["render_frames"] = FAULT + 1
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "window.post is shorter"):
+            self.verify(resign(receipt), run)
+        receipt["analysis"]["window"]["post"] = gfc.MIN_WINDOW_POST
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "render_frames does not match"):
+            self.verify(resign(receipt), run)
+        # And a legal-length window that differs from what the plug-in was
+        # asked to observe is a mismatch.
+        receipt["analysis"]["render_frames"] = FRAMES + gfc.MIN_WINDOW_POST
+        with self.assertRaisesRegex(VERIFY.ReceiptError, "re-derive"):
+            self.verify(resign(receipt), run)
+
+    def test_a_capture_overflow_is_inconclusive_not_an_audio_fail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            gfc.synthesize_run(run, fault="hang", fault_sample=FAULT, frames=FRAMES, tail=POST,
+                               break_fallback=True)
+            with (run / "events.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write('{"event": "capture_overflow", "dropped_records": 1}\n')
+            kw = dict(fault="hang", fault_sample=FAULT, tolerance=1e-4, window_pre=PRE,
+                      window_post=POST, host_alive=True, bounce_path=None)
+            result = gfc.evaluate_run(run, **kw)
+            self.assertIsNone(result["nulls"]["plugin"])
+            self.assertEqual(result["verdict"], "inconclusive")
 
     def test_a_relabeled_fault_kind_is_a_mismatch(self):
         receipt = load(self.good)

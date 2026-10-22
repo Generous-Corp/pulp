@@ -18,7 +18,8 @@ bool provider_fault_interposer_installed() noexcept;
 // stall for delay_completion and hang.
 bool arm_provider_fault(FaultKind kind, std::uint32_t delay_ms, std::string& detail);
 
-// Host thread. Drops a fault that was armed but never applied.
+// Host thread, before the engine is released. Drops a fault that was armed
+// but never applied, and forgets every queue -> device mapping.
 void disarm_provider_fault() noexcept;
 
 // How many provider faults were actually applied, and at which call site.

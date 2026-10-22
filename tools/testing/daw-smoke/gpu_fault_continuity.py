@@ -60,6 +60,9 @@ IR_TAPS = 384
 DEFAULT_TOLERANCE = 1e-4
 DEFAULT_WINDOW_PRE = 4800    # 100 ms before the fault sample
 DEFAULT_WINDOW_POST = 48000  # 1 s after it
+# The shortest post-fault window a receipt may use: long enough that a lost
+# device's silence or a stalled worker's late blocks are inside it.
+MIN_WINDOW_POST = 4800  # 100 ms
 
 CAPTURE_MAGIC = b"PGFC"
 CAPTURE_VERSION = 1
@@ -496,8 +499,13 @@ def health_expectation(fault: str, snapshots: dict[str, dict]) -> tuple[bool, st
         return True, (f"loss observed; the GPU stopped delivering and {fallback_delta} fallback "
                       f"blocks covered it; recovery_reason={reason!r}")
     if fault in ("delay_completion", "hang"):
-        if fallback_delta <= 0 and int(after.get("missed_blocks", 0)) <= int(before.get("missed_blocks", 0)):
-            return False, f"{fault}: neither missed nor fallback blocks moved"
+        # Tied to this transport: its fallback must already have taken over by
+        # the "at" snapshot, taken just after the stall was applied, so a stall
+        # applied to some other Dawn client in the process does not count.
+        at_delta = int(snapshots["at"].get("fallback_blocks", 0)) - \
+            int(before.get("fallback_blocks", 0))
+        if at_delta <= 0 or fallback_delta <= 0:
+            return False, f"{fault}: this transport's fallback did not take over at the stall"
         return True, f"stall observed; {fallback_delta} fallback blocks covered it"
     # render_force_loss: the audio device is separate, so audio health must not move.
     if after.get("provider_state") != "ready" or after.get("recovery_reason", "none") != "none":
@@ -569,7 +577,7 @@ def receipt_digest(receipt: dict[str, Any]) -> str:
 def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
                    block: int = 128, quantum: int = 128, lead_blocks: int = 2,
                    break_fallback: bool = False, nonce: str = "dry-run",
-                   pid: int = 0, tail: int = 0) -> dict[str, Any]:
+                   pid: int = 0, tail: int = 0, window_post: int | None = None) -> dict[str, Any]:
     """Write the artifacts a real run would produce, from the reference
     itself, so the analysis and the verifier can be exercised without REAPER.
     `break_fallback` is the planted negative: the blocks after the fault
@@ -632,7 +640,8 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
          "lead_blocks": lead_blocks, "ir_taps": len(ir),
          "provider": "dawn", "path": "shared_memory", "nonce": nonce, "pid": pid,
          "prepare_index": 1},
-        {"event": "fault_armed", "fault": fault, "at_project_sample": fault_sample},
+        {"event": "fault_armed", "fault": fault, "at_project_sample": fault_sample,
+         "after_project_sample": fault_sample + (tail if window_post is None else window_post)},
         {"event": "fault_fired", "fault": fault, "at_project_sample": fault_sample,
          "issued_project_sample": fault_sample + block, "offline": False},
     ] + ([{"event": "render_loss", "performed": True, "detail": "dry run"}]
@@ -721,6 +730,11 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
         if event.get("at_project_sample") != fault_sample:
             mismatches.append(f"{name} is at project sample {event.get('at_project_sample')}, "
                               f"the run asked for {fault_sample}")
+    # The window the receipt analyses must be the one the plug-in was asked to
+    # observe, so a receipt cannot shrink it after the fact.
+    if armed is not None and armed.get("after_project_sample") != fault_sample + window_post:
+        mismatches.append(f"fault_armed observes until {armed.get('after_project_sample')}, the "
+                          f"analysis window ends at {fault_sample + window_post}")
     if nonce is not None and any(e.get("nonce") != nonce for e in prepares):
         mismatches.append("the plug-in's events carry a different run nonce")
     if reaper_pid is not None and any(e.get("pid") != reaper_pid for e in prepares):
@@ -730,7 +744,12 @@ def evaluate_run(run_dir: Path, *, fault: str, fault_sample: int, tolerance: flo
     capture = None
     plugin_null, plugin_note = None, "no capture"
     owning: list[dict] = []
-    if usable("capture.bin") and prepares:
+    overflow = first_event(events, "capture_overflow") is not None
+    if overflow:
+        # A dropped record splices the stream, so a null over it would blame
+        # the audio for a harness-side drop. No plug-in null is computed.
+        plugin_note = "capture records were dropped; no plug-in null"
+    if usable("capture.bin") and prepares and not overflow:
         capture = read_capture(run_dir / "capture.bin")
         # Pair each capture segment with the prepare it follows. A host may
         # prepare several times before processing again; only the last of

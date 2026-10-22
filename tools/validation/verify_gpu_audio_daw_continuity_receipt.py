@@ -143,11 +143,14 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
     bounce_name = receipt.get("bounce_artifact")
     if bounce_name is not None:
         _require(bounce_name in artifacts, "bounce artifact not digest-bound")
-    render_frames = analysis.get("render_frames")
-    _require(isinstance(render_frames, int) and render_frames > 0,
-             "analysis.render_frames malformed")
-    _require(render_frames >= int(fault.get("requested_project_sample", -1)) + window["post"],
-             "analysis.render_frames ends before the fault window does")
+    _require(window["post"] >= gfc.MIN_WINDOW_POST,
+             f"analysis.window.post is shorter than {gfc.MIN_WINDOW_POST} samples")
+    # The render length comes from the bound stimulus, not from the receipt:
+    # the harness renders the whole stimulus plus the post-fault window.
+    _, stimulus = gfc.read_wav(run_dir / "stimulus.wav")
+    render_frames = len(stimulus[0]) + window["post"]
+    _require(analysis.get("render_frames") == render_frames,
+             "analysis.render_frames does not match the bound stimulus")
     # host_alive stays self-attested (a crash is a FAIL either way), but only
     # digest-listed artifacts are read and the events must carry this run's
     # nonce and REAPER's pid.

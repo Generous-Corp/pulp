@@ -145,7 +145,9 @@ The verifier reads only digest-listed artifacts. From them it re-derives every
 null, the counter expectations, the verdict, and the preflight summary (from
 `preflight.json`). It checks that the plug-in's events carry this run's nonce
 and REAPER's pid, and that every fault event names the fault and sample the
-receipt claims. Edited numbers, unlisted or swapped files, and events from
+receipt claims. It also checks that the post-fault window is the one the
+plug-in was asked to observe, at least 4800 samples long, and that the render
+length comes from the bound stimulus. Edited numbers, unlisted or swapped files, and events from
 another run are rejected (exit 2). What it cannot prove is that the bound files
 came from a real REAPER rather than a careful forger: the receipt is
 self-contained, with no external signer. `--require-quiet-host` makes host

@@ -21,6 +21,18 @@
 // (gpu_surface_dawn.cpp), which silently removed the interposer in REAPER,
 // where the editor opens after the plug-in prepares.
 //
+// Accepted test-only races and limits:
+//  - Re-asserting the table is a plain struct copy into Dawn's global table
+//    while other threads may be calling wgpu*. Each entry is a pointer-sized
+//    store, and a mixed native/wrapped table is harmless because every wrapper
+//    forwards to the native function, so a call sees either one. ThreadSanitizer
+//    will still report it. If the editor reinstalls the native table between
+//    arm and apply, the fault is never applied and the run is INCONCLUSIVE.
+//  - The fault goes to the first matching call off the main thread, whoever
+//    makes it. In the harness only one instance processes audio, and the
+//    verdict ties the effect to this plug-in's own transport: its GPU delivery
+//    must freeze after a loss, and its fallback must take over at a stall.
+//
 // Only calls made off the main thread are faulted. The shared-I/O provider is
 // driven from the transport's worker thread, while the editor's Skia/Dawn
 // render device is driven from the main thread, so a render-side call is never
@@ -66,12 +78,17 @@ std::size_t g_queues_next = 0;
 // provider records its encoders on the submitting worker thread.
 thread_local WGPUDevice t_device = nullptr;
 
+// The submitting worker's own device wins; the table covers a worker that
+// fetched no encoder yet. Both are reset when the plug-in releases its engine,
+// so a recycled queue address can never map to a freed device.
 WGPUDevice device_for(WGPUQueue queue) {
+    if (t_device != nullptr)
+        return t_device;
     std::lock_guard lock(g_queues_mutex);
     for (const auto& [q, d] : g_queues)
         if (q == queue)
             return d;
-    return t_device;
+    return nullptr;
 }
 
 WGPUCommandEncoder create_command_encoder(WGPUDevice device,
@@ -108,9 +125,12 @@ void force_loss(WGPUDevice device, const char* point) noexcept {
 WGPUQueue get_queue(WGPUDevice device) {
     WGPUQueue queue = g_native.deviceGetQueue(device);
     std::lock_guard lock(g_queues_mutex);
-    for (const auto& [q, d] : g_queues)
-        if (q == queue)
+    for (auto& [q, d] : g_queues) {
+        if (q == queue) {
+            d = device; // a recycled queue address belongs to the new device
             return queue;
+        }
+    }
     g_queues[g_queues_next++ % g_queues.size()] = {queue, device};
     return queue;
 }
@@ -198,6 +218,13 @@ bool arm_provider_fault(FaultKind kind, std::uint32_t delay_ms, std::string& det
 
 void disarm_provider_fault() noexcept {
     g_armed.store(0, std::memory_order_release);
+#if defined(PULP_GPU_FAULT_HAS_DAWN)
+    // The engine is being released: its device and queue are about to be
+    // freed, so no mapping to them may survive.
+    std::lock_guard lock(g_queues_mutex);
+    g_queues = {};
+    g_queues_next = 0;
+#endif
 }
 
 std::uint64_t provider_faults_applied() noexcept {
