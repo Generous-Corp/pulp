@@ -299,10 +299,13 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   the result to `render::apply_display_rate_change(link, change)`, which sets
   `preferredFrameRateRange` to the panel maximum while drawing and back to the
   default after 30 idle ticks; `stop_display_link()` feeds `on_stop()`. On an
-  iPhone the request is ignored unless the app's Info.plist sets
-  `CADisableMinimumFrameDurationOnPhone` (the `templates/ios-auv3/HostApp`
-  template does; an AUv3 extension inherits its host app's setting, so a
-  third-party host without the key keeps the editor at 60 Hz). `IOSRenderLoop`
+  iPhone the request is ignored unless the Info.plist of the process that owns
+  the link sets `CADisableMinimumFrameDurationOnPhone`. An AUv3 editor's link
+  runs in the extension process, so both `templates/ios-auv3/HostApp/Info.plist.in`
+  and the appex's `templates/ios-auv3/Info.plist.in` (top-level dict, not inside
+  `NSExtension`) set it. Which bundle iOS actually reads for an out-of-process
+  extension is unverified on device. An iOS standalone app built without these
+  templates gets no key and stays at 60 Hz on iPhone. `IOSRenderLoop`
   is not what the window and plug-in view hosts use; they hand-roll their links,
   so a change made only in `render_loop_apple.mm` never reaches a shipping
   editor. Proof is device-only: log `link.targetTimestamp` deltas (8.3 ms at

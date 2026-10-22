@@ -207,35 +207,51 @@ TEST_CASE("ios-auv3 HostApp template matches the embedded descriptor exactly",
 #endif
 }
 
-// The iOS render loop requests the panel's maximum refresh rate while
+// The iOS display links request the panel's maximum refresh rate while
 // animating, but iOS caps every CADisplayLink at 60 Hz on ProMotion iPhones
-// unless the app's Info.plist opts out. The key must be a boolean true, not
-// merely present, so the value is checked as the plist element after the key.
-TEST_CASE("ios-auv3 HostApp template opts out of the 60 Hz iPhone frame cap",
+// unless the Info.plist of the process that owns the link opts out. The AUv3
+// editor's link runs in the extension process, so both the HostApp and the
+// appex templates carry the key. It must be a boolean true, not merely
+// present, and the appex copy must sit in the top-level dict rather than
+// inside NSExtension, where iOS would not read it.
+TEST_CASE("ios-auv3 templates opt out of the 60 Hz iPhone frame cap",
           "[ios][auv3][template][frame-rate]") {
 #ifndef PULP_SOURCE_DIR
     SKIP("PULP_SOURCE_DIR not defined — skipping template-shape assertion");
 #else
     namespace fs = std::filesystem;
-    const fs::path template_path =
-        fs::path{PULP_SOURCE_DIR} / "templates" / "ios-auv3" / "HostApp" / "Info.plist.in";
-    REQUIRE(fs::exists(template_path));
+    auto read = [](const fs::path& path) {
+        REQUIRE(fs::exists(path));
+        std::ifstream in{path};
+        REQUIRE(in.good());
+        std::stringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    };
+    auto key_is_true = [](const std::string& body) -> size_t {
+        const std::string key = "<key>CADisableMinimumFrameDurationOnPhone</key>";
+        const auto at = body.find(key);
+        REQUIRE(at != std::string::npos);
+        const auto value = body.find('<', at + key.size());
+        REQUIRE(value != std::string::npos);
+        CHECK(body.compare(value, 7, "<true/>") == 0);
+        return at;
+    };
+    const fs::path dir = fs::path{PULP_SOURCE_DIR} / "templates" / "ios-auv3";
 
-    std::ifstream in{template_path};
-    REQUIRE(in.good());
-    std::stringstream ss;
-    ss << in.rdbuf();
-    const std::string body = ss.str();
-
-    // Control: the template is the HostApp plist this test means to read.
-    REQUIRE(body.find("<key>LSRequiresIPhoneOS</key>") != std::string::npos);
-
-    const std::string key = "<key>CADisableMinimumFrameDurationOnPhone</key>";
-    const auto at = body.find(key);
-    REQUIRE(at != std::string::npos);
-    const auto value = body.find('<', at + key.size());
-    REQUIRE(value != std::string::npos);
-    CHECK(body.compare(value, 7, "<true/>") == 0);
+    SECTION("HostApp") {
+        const std::string body = read(dir / "HostApp" / "Info.plist.in");
+        // Control: the template is the HostApp plist this test means to read.
+        REQUIRE(body.find("<key>LSRequiresIPhoneOS</key>") != std::string::npos);
+        key_is_true(body);
+    }
+    SECTION("AUv3 extension") {
+        const std::string body = read(dir / "Info.plist.in");
+        const auto extension = body.find("<key>NSExtension</key>");
+        // Control: the template is the appex plist this test means to read.
+        REQUIRE(extension != std::string::npos);
+        CHECK(key_is_true(body) < extension);
+    }
 #endif
 }
 
