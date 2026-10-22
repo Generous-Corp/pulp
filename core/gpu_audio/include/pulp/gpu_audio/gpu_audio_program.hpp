@@ -24,6 +24,11 @@ enum class GpuAudioProgramKind : std::uint8_t {
 /// the audio delivered for that block are intentionally represented by one
 /// stable, host-visible value so a trace cannot leave an admitted block
 /// orphaned between provider completion and callback delivery.
+///
+/// `GpuAudioStatus::terminal_counts` has one slot per value. When appending a
+/// value, raise `GpuAudioStatus::kTerminalDispositionCount` and name the new
+/// last value in the static_assert below; the assert only checks the value it
+/// names.
 enum class GpuAudioTerminalDisposition : std::uint8_t {
     Unknown = 0,
     GpuDelivered = 1,
