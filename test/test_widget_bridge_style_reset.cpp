@@ -246,6 +246,18 @@ TEST_CASE("layout baselines are dropped when the bridge forgets a widget",
     CHECK(layout_baseline_count() == before);
 }
 
+TEST_CASE("layout baselines are dropped when the bridge is destroyed",
+          "[view][bridge][style-reset]") {
+    const auto before = layout_baseline_count();
+    {
+        Harness h;
+        h.bridge.load_script("createCol('a', ''); createCol('b', 'a'); "
+                             "setFlex('a', 'gap', 4); setFlex('b', 'gap', 2);");
+        REQUIRE(layout_baseline_count() == before + 2);
+    }
+    CHECK(layout_baseline_count() == before);
+}
+
 TEST_CASE("a style toggled on and off renders like one never styled",
           "[view][bridge][style-reset][pixel]") {
     if (!raw_rgba_render_available())
