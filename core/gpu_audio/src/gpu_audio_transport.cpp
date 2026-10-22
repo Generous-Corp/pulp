@@ -846,6 +846,12 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
         status.delivery_epoch_active = health.delivery_epoch_active;
         for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
             status.terminal_counts[i] = health.terminal_counts[i];
+        status.shadow_mode = health.shadow_mode;
+        status.shadow_inline_cost_pct = health.shadow_inline_cost_pct;
+        status.shadow_delivered_blocks = health.shadow_delivered_blocks;
+        status.shadow_late_blocks = health.shadow_late_blocks;
+        status.shadow_double_miss_blocks = health.shadow_double_miss_blocks;
+        status.shadow_model_differs = health.shadow_model_differs;
     } else if (configuration.realtime_health) {
         // No coherent health copy: never report an unverified provider as
         // Ready, and claim no recovery cause that was not observed. A staged

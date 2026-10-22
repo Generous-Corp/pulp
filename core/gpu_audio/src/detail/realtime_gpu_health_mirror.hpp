@@ -151,6 +151,12 @@ inline RealtimeGpuHealth health_from_status(const GpuAudioStatus& status) noexce
     health.fenced = health.device_lost || status.recovery_reason != GpuAudioRecoveryReason::None;
     for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
         health.terminal_counts[i] = status.terminal_counts[i];
+    health.shadow_mode = status.shadow_mode;
+    health.shadow_inline_cost_pct = status.shadow_inline_cost_pct;
+    health.shadow_delivered_blocks = status.shadow_delivered_blocks;
+    health.shadow_late_blocks = status.shadow_late_blocks;
+    health.shadow_double_miss_blocks = status.shadow_double_miss_blocks;
+    health.shadow_model_differs = status.shadow_model_differs;
     return health;
 }
 

@@ -117,9 +117,24 @@ struct Rig {
         return node->prepare() && transport.prepare(node.get(), {});
     }
 
-    GpuAudioStatus status() const {
+    // The node's status, and the transport's mirror of it after the last
+    // pump: the shadow fields must arrive unchanged through the transport.
+    // After an offline render the transport's mirror holds the sample taken
+    // at the fence (no worker pumps offline), so only validity is checked.
+    GpuAudioStatus offline_status() const {
         validated(transport.status_snapshot());
         return validated(node->status_snapshot());
+    }
+    GpuAudioStatus status() const {
+        const auto hosted = validated(transport.status_snapshot());
+        const auto own = validated(node->status_snapshot());
+        CHECK(hosted.shadow_mode == own.shadow_mode);
+        CHECK(hosted.shadow_inline_cost_pct == own.shadow_inline_cost_pct);
+        CHECK(hosted.shadow_delivered_blocks == own.shadow_delivered_blocks);
+        CHECK(hosted.shadow_late_blocks == own.shadow_late_blocks);
+        CHECK(hosted.shadow_double_miss_blocks == own.shadow_double_miss_blocks);
+        CHECK(hosted.shadow_model_differs == own.shadow_model_differs);
+        return own;
     }
     Mode mode() const {
         return node->status_snapshot().shadow_mode;
@@ -403,7 +418,7 @@ TEST_CASE("an offline render moves a Worker shadow inline on the same timeline",
     CHECK(block_error(rig, ref, kLead, 6, 2.0f) == 0.0f); // GPU, marked
     CHECK(block_error(rig, ref, 6, 16, 1.0f) == 0.0f);    // shadow, continuous
     CHECK(rig.mode() == Mode::Inline);
-    rig.status();
+    rig.offline_status();
 }
 
 TEST_CASE("a different shadow model is reported and must match the stream shape",
@@ -528,7 +543,7 @@ TEST_CASE("an offline bounce under None continues the stream through the CPU mod
     CHECK(block_error(rig, ref, kLead, 6, 2.0f) == 0.0f); // realtime: the GPU, marked
     CHECK(block_error(rig, ref, 6, 16, 1.0f) == 0.0f);    // offline: the CPU model, continuous
     CHECK(rig.mode() == Mode::Inline);
-    rig.status();
+    rig.offline_status();
 }
 
 TEST_CASE("the Worker shadow keeps delivering after a fence with no GPU ingress",

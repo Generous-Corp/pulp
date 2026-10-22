@@ -45,6 +45,14 @@ struct RealtimeGpuHealth {
     bool device_lost = false;
     // Indexed by GpuAudioTerminalDisposition.
     std::array<std::uint64_t, GpuAudioStatus::kTerminalDispositionCount> terminal_counts{};
+    // The node's CPU shadow, with the meaning of GpuAudioStatus's shadow_*
+    // fields. Nodes without a shadow leave them at their defaults.
+    GpuAudioShadowMode shadow_mode = GpuAudioShadowMode::None;
+    float shadow_inline_cost_pct = 0.0f;
+    std::uint64_t shadow_delivered_blocks = 0;
+    std::uint64_t shadow_late_blocks = 0;
+    std::uint64_t shadow_double_miss_blocks = 0;
+    bool shadow_model_differs = false;
 };
 // Returns false when no coherent read could be taken.
 using RealtimeGpuHealthFn = bool (*)(const void*, RealtimeGpuHealth&) noexcept;

@@ -133,6 +133,29 @@ struct GpuNeuralRealtimeNode::Impl {
             shadow_model.reset();
     }
 
+    // The shadow_* projection shared by status_snapshot() and the health hook
+    // the transport mirrors. Counters are atomics; mode and cost change only
+    // in prepare(), release() and the offline fence.
+    void fill_shadow(detail::RealtimeGpuHealth& out) const noexcept {
+        switch (shadow_mode.load(std::memory_order_relaxed)) {
+        case ShadowPolicy::Worker:
+            out.shadow_mode = GpuAudioShadowMode::Worker;
+            break;
+        case ShadowPolicy::None:
+            out.shadow_mode = GpuAudioShadowMode::None;
+            return; // None carries no shadow counts
+        default:
+            out.shadow_mode = GpuAudioShadowMode::Inline;
+            break;
+        }
+        out.shadow_inline_cost_pct =
+            std::max(0.0f, inline_cost_pct.load()) * static_cast<float>(config.channels);
+        out.shadow_delivered_blocks = shadow_delivered.load(std::memory_order_relaxed);
+        out.shadow_late_blocks = worker.late();
+        out.shadow_double_miss_blocks = shadow_double_miss.load(std::memory_order_relaxed);
+        out.shadow_model_differs = shadow_model != nullptr;
+    }
+
     // Worker and None both keep the model primed on the shadow thread; only
     // Worker substitutes its results for realtime GPU misses.
     bool worker_fed() const noexcept {
@@ -790,25 +813,14 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
     status.epoch = epoch();
     status.delivery_epoch_active = epoch() != 0;
     status.gpu_kernel_available = gpu_kernel_available();
-    switch (s.shadow_mode.load(std::memory_order_relaxed)) {
-    case ShadowPolicy::Worker:
-        status.shadow_mode = GpuAudioShadowMode::Worker;
-        break;
-    case ShadowPolicy::None:
-        status.shadow_mode = GpuAudioShadowMode::None;
-        break;
-    default:
-        status.shadow_mode = GpuAudioShadowMode::Inline;
-        break;
-    }
-    if (status.shadow_mode != GpuAudioShadowMode::None) {
-        status.shadow_inline_cost_pct =
-            std::max(0.0f, s.inline_cost_pct.load()) * static_cast<float>(s.config.channels);
-        status.shadow_delivered_blocks = s.shadow_delivered.load(std::memory_order_relaxed);
-        status.shadow_late_blocks = s.worker.late();
-        status.shadow_double_miss_blocks = s.shadow_double_miss.load(std::memory_order_relaxed);
-        status.shadow_model_differs = s.shadow_model != nullptr;
-    }
+    detail::RealtimeGpuHealth shadow;
+    s.fill_shadow(shadow);
+    status.shadow_mode = shadow.shadow_mode;
+    status.shadow_inline_cost_pct = shadow.shadow_inline_cost_pct;
+    status.shadow_delivered_blocks = shadow.shadow_delivered_blocks;
+    status.shadow_late_blocks = shadow.shadow_late_blocks;
+    status.shadow_double_miss_blocks = shadow.shadow_double_miss_blocks;
+    status.shadow_model_differs = shadow.shadow_model_differs;
     // A model with a GPU kernel asked for the GPU; the others asked for CPU.
     status.requested_engine = s.model->backend ? GpuAudioEngine::Gpu : GpuAudioEngine::Cpu;
     if (!s.backend_active) {
@@ -1011,6 +1023,8 @@ bool GpuNeuralRealtimeNode::health(const void* self, detail::RealtimeGpuHealth& 
     out.recovery_sequence = node.recovery_sequence();
     out.epoch = node.epoch();
     out.delivery_epoch_active = out.epoch != 0;
+    if (node.impl_->prepared)
+        node.impl_->fill_shadow(out);
     return true;
 }
 
