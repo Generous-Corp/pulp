@@ -906,6 +906,253 @@ def receipt_path_violations(document: dict) -> list[str]:
 
 BUILD_TIMESTAMP_PLACEHOLDER = "<build-timestamp>"
 
+PRELUDE_SOURCE = "@build/core/view/web_compat_preludes_gen.cpp"
+PRELUDE_HEADER = "@build/core/view/web_compat_preludes_gen.hpp"
+
+
+def prelude_inputs(source: Path) -> list[Path] | None:
+    """Return the ordered JS inputs declared by the prelude producer."""
+    producer = source / "core/view/cmake/PulpViewJsPreludes.cmake"
+    encoder = source / "core/view/js/embed_js.py"
+    if not producer.is_file() or not encoder.is_file():
+        return None
+    try:
+        with producer.open("r", encoding="utf-8", newline="") as handle:
+            text = handle.read()
+    except (OSError, UnicodeError):
+        return None
+    cmake_ws = " \t\r\n"
+    # Comments are the only tolerated variation.  Parse balanced CMake
+    # invocations after removing comments, then compare the complete command
+    # recipe.  Marker searches are insufficient: they accept duplicate
+    # APPENDs, changed NAME_WE/NAME, extra outputs, or a commented producer.
+    # Strip comments in one lexical pass.  Bracket comments are recognized
+    # only outside quoted arguments, so ``#`` and ``#[=[...]=]`` in a quoted
+    # CMake string remain data.  An unterminated quote or bracket comment is
+    # malformed input and must fail closed.
+    def strip_comments(value: str) -> str | None:
+        output: list[str] = []
+        index = 0
+        quote = False
+        escaped = False
+        while index < len(value):
+            char = value[index]
+            if quote:
+                output.append(char)
+                index += 1
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    quote = False
+                continue
+            if char == '"':
+                quote = True
+                output.append(char)
+                index += 1
+                continue
+            bracket_argument = re.match(r"\[(=*)\[", value[index:])
+            if bracket_argument:
+                closing = "]" + bracket_argument.group(1) + "]"
+                content_start = index + bracket_argument.end()
+                content_end = value.find(closing, content_start)
+                if content_end < 0:
+                    return None
+                end = content_end + len(closing)
+                output.append(value[index:end])
+                index = end
+                continue
+            if char == '#':
+                bracket = re.match(r"#\[(=*)\[", value[index:])
+                if bracket:
+                    closing = "]" + bracket.group(1) + "]"
+                    content_start = index + bracket.end()
+                    content_end = value.find(closing, content_start)
+                    if content_end < 0:
+                        return None
+                    index = content_end + len(closing)
+                    # Keep bracket comments opaque.  CMake does not permit a
+                    # command to follow a closing ')' until a real newline;
+                    # replacing this comment with '\n' would manufacture one.
+                    output.append("\x00")
+                    continue
+                newline = value.find("\n", index)
+                if newline < 0:
+                    break
+                output.append("\n")
+                index = newline + 1
+                continue
+            output.append(char)
+            index += 1
+        if quote or escaped:
+            return None
+        return "".join(output)
+
+    uncommented = strip_comments(text)
+    if uncommented is None:
+        return None
+
+    def commands(value: str) -> list[tuple[str, list[str]]] | None:
+        found: list[tuple[str, list[str]]] = []
+        cursor = 0
+        while cursor < len(value):
+            match = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)[ \t\r]*\(", value[cursor:])
+            if match is None:
+                break
+            gap = value[cursor:cursor + match.start()]
+            if found and ("\n" not in gap):
+                return None
+            if any(char not in cmake_ws for char in gap):
+                return None
+            name = match.group(1).lower()
+            start = cursor + match.end()
+            depth = 1
+            index = start
+            quote = False
+            escaped = False
+            while index < len(value) and depth:
+                char = value[index]
+                if quote:
+                    if escaped:
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif char == '"':
+                        quote = False
+                elif char == '"':
+                    quote = True
+                elif char == '(':
+                    depth += 1
+                elif char == ')':
+                    depth -= 1
+                index += 1
+            if depth:
+                return None
+            body = value[start:index - 1]
+            tokens: list[str] = []
+            token_index = 0
+            while token_index < len(body):
+                while token_index < len(body) and body[token_index] in cmake_ws:
+                    token_index += 1
+                if token_index == len(body):
+                    break
+                token_start = token_index
+                if body[token_index] == '"':
+                    token_index += 1
+                    escaped = False
+                    while token_index < len(body):
+                        char = body[token_index]
+                        token_index += 1
+                        if escaped:
+                            escaped = False
+                        elif char == "\\":
+                            escaped = True
+                        elif char == '"':
+                            break
+                else:
+                    while token_index < len(body) and body[token_index] not in cmake_ws:
+                        token_index += 1
+                tokens.append(body[token_start:token_index])
+            found.append((name, tokens))
+            cursor = index
+        if any(char not in cmake_ws for char in value[cursor:]):
+            return None
+        return found
+
+    parsed = commands(uncommented)
+    declarations = list(re.finditer(
+        r"\bset\s*\(\s*PULP_JS_PRELUDES\b(?P<body>.*?)\n\s*\)",
+        uncommented,
+        re.S | re.I,
+    ))
+    set_count = len(re.findall(
+        r"\bset\s*\(\s*PULP_JS_PRELUDES\b",
+        uncommented,
+        re.I,
+    ))
+    list_mutation = re.search(
+        r"\blist\s*\([^)]*\bPULP_JS_PRELUDES\b",
+        uncommented,
+        re.S | re.I,
+    )
+    unset_mutation = re.search(
+        r"\bunset\s*\(\s*PULP_JS_PRELUDES\b",
+        uncommented,
+        re.I,
+    )
+    if len(declarations) != 1 or set_count != 1 or list_mutation or unset_mutation:
+        return None
+    expected_names = [
+        "set", "set", "set", "find_package", "set", "foreach",
+        "get_filename_component", "string", "string", "endforeach", "string",
+        "set", "if", "file", "endif", "if", "file", "endif",
+        "add_custom_command", "target_sources",
+    ]
+    if parsed is None or [name for name, _ in parsed] != expected_names:
+        return None
+    # A stray CMake command keyword outside the parsed invocation (for
+    # example, ``COMMAND echo ...`` appended after the recipe) would otherwise
+    # be invisible to the balanced command scanner.
+    if len(re.findall(r"(?i)\bCOMMAND\b", uncommented)) != 1:
+        return None
+
+    expected_preludes = ["PULP_JS_PRELUDES"]
+    expected_commands = [
+        expected_preludes,
+        ["PULP_JS_EMBEDDED_HEADER", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp"],
+        ["PULP_JS_EMBEDDED_SOURCE", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.cpp"],
+        ["Python3", "REQUIRED", "COMPONENTS", "Interpreter"],
+        ["_pulp_prelude_decls", '"#pragma once\\n// Auto-generated from the JS prelude file list — do not edit\\n\\nnamespace pulp::view::preludes {\\n\\n"'],
+        ["_prelude", "${PULP_JS_PRELUDES}"],
+        ["_prelude_stem", '"${_prelude}"', "NAME_WE"],
+        ["REPLACE", '"-"', '"_"', "_prelude_var", '"${_prelude_stem}"'],
+        ["APPEND", "_pulp_prelude_decls", '"extern const char* const ${_prelude_var};\\n"'],
+        [],
+        ["APPEND", "_pulp_prelude_decls", '"\\n}  // namespace pulp::view::preludes\\n"'],
+        ["_pulp_existing_decls", '""'],
+        ["EXISTS", '"${PULP_JS_EMBEDDED_HEADER}"'],
+        ["READ", '"${PULP_JS_EMBEDDED_HEADER}"', "_pulp_existing_decls"],
+        [],
+        ["NOT", '"${_pulp_existing_decls}"', "STREQUAL", '"${_pulp_prelude_decls}"'],
+        ["WRITE", '"${PULP_JS_EMBEDDED_HEADER}"', '"${_pulp_prelude_decls}"'],
+        [],
+        ["OUTPUT", "${PULP_JS_EMBEDDED_SOURCE}", "COMMAND", "${Python3_EXECUTABLE}", "${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.py", "${PULP_JS_EMBEDDED_SOURCE}", "${PULP_JS_PRELUDES}", "DEPENDS", "${PULP_JS_PRELUDES}", "${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.py", "COMMENT", '"Embedding JS preludes into C++ source (UTF-8-safe Python chunker)"', "VERBATIM"],
+        ["pulp-view-script", "PRIVATE", "${PULP_JS_EMBEDDED_SOURCE}"],
+    ]
+    if parsed is None or len(parsed) != len(expected_commands):
+        return None
+    for index, ((actual_name, actual), expected) in enumerate(zip(parsed, expected_commands)):
+        if index == 0:
+            if actual_name != "set" or not actual or actual[0] != "PULP_JS_PRELUDES":
+                return None
+            expected_preludes = actual
+            continue
+        if actual != expected:
+            return None
+    tokens = parsed[0][1][1:]
+    prefix = "${CMAKE_CURRENT_SOURCE_DIR}/"
+    paths: list[Path] = []
+    for token in tokens:
+        if not token.startswith(prefix + "js/"):
+            return None
+        token = token.removeprefix(prefix)
+        rel = Path(token)
+        if rel.is_absolute() or ".." in rel.parts:
+            return None
+        path = source / "core/view" / rel
+        if not path.is_file():
+            return None
+        paths.append(path)
+    if len({path.relative_to(source / "core/view") for path in paths}) != len(paths):
+        return None
+    return paths or None
+
+
+def mirrorable_generated_source(rel: str) -> bool:
+    """Allow only the generated prelude TU as a target source."""
+    return rel == PRELUDE_SOURCE
+
 
 def generated_digest(rel: str, path: Path, source: Path) -> dict | None:
     """A generated input's digest that does not depend on when or whether it was built.
@@ -923,6 +1170,28 @@ def generated_digest(rel: str, path: Path, source: Path) -> dict | None:
         if stamp and stamp.group(1):
             text = text.replace(stamp.group(1), BUILD_TIMESTAMP_PLACEHOLDER)
         return {"sha256": _text_sha256(text), "normalization": {"build_timestamp": BUILD_TIMESTAMP_PLACEHOLDER}}
+    if rel in {PRELUDE_HEADER, PRELUDE_SOURCE}:
+        inputs = prelude_inputs(source)
+        if inputs is None:
+            return None
+        if rel == PRELUDE_HEADER:
+            names = [input_path.stem.replace("-", "_") for input_path in inputs]
+            text = "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n"
+            text += "namespace pulp::view::preludes {\n\n"
+            text += "".join(f"extern const char* const {name};\n" for name in names)
+            text += "\n}  // namespace pulp::view::preludes\n"
+            return {"sha256": _text_sha256(text)}
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="pulp-preludes-") as td:
+            output = Path(td) / "web_compat_preludes_gen.cpp"
+            completed = subprocess.run(
+                [sys.executable, str(source / "core/view/js/embed_js.py"), str(output), *map(str, inputs)],
+                capture_output=True,
+                check=False,
+            )
+            if completed.returncode or not output.is_file():
+                return None
+            return {"sha256": sha256(output)}
     data = re.fullmatch(r"@build/core/canvas/(?P<target>pulp-bundled-[A-Za-z0-9-]+?)_data_(?P<var>[A-Za-z0-9_]+)\.cpp", rel)
     if not data:
         return None
@@ -1325,7 +1594,7 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
             if dep_name:
                 links.add(dep_name)
                 deps.append(dep_name)
-        selected.append({"name": name, "type": data.get("type"), "sources": sorted(rel for rel in (norm_path(str(p), source, build) for p in target_files) if not rel.startswith(("@build/", "/"))), "include_dirs": sorted(set(includes)), "compile_definitions": sorted(set(defines)), "link_targets": sorted(set(deps)), "external_link_inputs": external_links})
+        selected.append({"name": name, "type": data.get("type"), "sources": sorted(rel for rel in (norm_path(str(p), source, build) for p in target_files) if (not rel.startswith(("@build/", "/")) or mirrorable_generated_source(rel))), "include_dirs": sorted(set(includes)), "compile_definitions": sorted(set(defines)), "link_targets": sorted(set(deps)), "external_link_inputs": external_links})
     public, declared = unit_public_headers(targets, names, source, unit_header_manifests(build))
     for entry in selected:
         if entry["name"] in declared:
@@ -1352,6 +1621,20 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
                 normalized.append(norm_path(str(candidate), source, build))
                 all_files.add(candidate.resolve())
     if "pulp-view-script" in selected_names:
+        # The prelude generator consumes tracked JavaScript inputs directly.
+        # They are not reported by CMake's file API, so add the exact ordered
+        # list declared by PulpViewJsPreludes.cmake to the closure.  Without
+        # these source files a Vellum export carries only the generated C++
+        # and header and cannot reproduce the prelude bytes.
+        prelude_paths = prelude_inputs(source)
+        if prelude_paths is None:
+            raise SystemExit(
+                "pulp-view-script prelude producer could not be parsed: "
+                "core/view/cmake/PulpViewJsPreludes.cmake"
+            )
+        for input_path in prelude_paths:
+            all_files.add(input_path.resolve())
+            normalized.append(norm_path(str(input_path), source, build))
         for suffix in ("web_compat_preludes_gen.hpp", "web_compat_preludes_gen.cpp"):
             candidate = build / "core/view" / suffix
             if candidate.is_file():
