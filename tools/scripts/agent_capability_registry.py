@@ -1378,6 +1378,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/fixed_ir_convolver.hpp",
+        "fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Fixed-IR convolution that runs FirFilterT or PartitionedConvolverT, chosen "
+            "once at prepare time by a pure policy. A bounded DSP primitive a processor "
+            "drives from its own process() at a fixed block size, documented beside the "
+            "partitioned convolver in the signal guide; it makes no installed agent "
+            "capability claim of its own."
+        ),
+    },
+    {
         "include": "pulp/signal/oversampling_fir.hpp",
         "fingerprint": "sha256:b9834233787912af899e21571b08517b4c60135e4a61f5be6e04391ac2e4831a",
         "disposition": "infrastructure",
