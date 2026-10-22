@@ -665,15 +665,26 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
           if (body) body.style.setProperty('visibility', 'hidden', 'important');
           for (const item of backgrounds)
             item.element.style.setProperty('background', 'transparent', 'important');
+          // Chromium draws a canvas bitmap into the element's CONTENT box;
+          // the border and padding around it belong to the element's own box
+          // paint. Placing the overlay on the border box would stretch the
+          // bitmap across the border and shift every stroke inward.
+          const computed = getComputedStyle(this);
+          const px = name => parseFloat(computed.getPropertyValue(name)) || 0;
+          const insetLeft = px('border-left-width') + px('padding-left');
+          const insetTop = px('border-top-width') + px('padding-top');
+          const insetRight = px('border-right-width') + px('padding-right');
+          const insetBottom = px('border-bottom-width') + px('padding-bottom');
           const overlay = document.createElement('img');
           overlay.src = this.toDataURL('image/png');
           overlay.style.cssText = [
             'position:absolute', 'display:block', 'visibility:visible',
             'pointer-events:none', 'margin:0', 'padding:0', 'border:0',
             'max-width:none', 'max-height:none', 'object-fit:fill',
-            'left:' + (rect.left + window.scrollX) + 'px',
-            'top:' + (rect.top + window.scrollY) + 'px',
-            'width:' + rect.width + 'px', 'height:' + rect.height + 'px'
+            'left:' + (rect.left + window.scrollX + insetLeft) + 'px',
+            'top:' + (rect.top + window.scrollY + insetTop) + 'px',
+            'width:' + Math.max(0, rect.width - insetLeft - insetRight) + 'px',
+            'height:' + Math.max(0, rect.height - insetTop - insetBottom) + 'px'
           ].join(';');
           root.appendChild(overlay);
           globalThis.__pulpCanvasIsolationRestore = {
