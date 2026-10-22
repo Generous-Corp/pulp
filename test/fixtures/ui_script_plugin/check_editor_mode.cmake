@@ -5,7 +5,11 @@
 # mode=autoui and never prints the marker.
 #
 #   cmake -DPROBE=<exe> -DFORMAT=<vst3|clap|au> -DBUNDLE=<path> -DEXPECT_GPU=<bool>
-#         -P check_editor_mode.cmake
+#         [-DEXPECT_LOG=<regex>] -P check_editor_mode.cmake
+#
+# EXPECT_LOG names a line the probe's teardown must print. The AU probe uses it
+# to prove the editor view outlived the disposed audio unit and that the adapter
+# took the path that leaves the freed parameter store alone.
 
 foreach(_var PROBE FORMAT BUNDLE)
     if(NOT DEFINED ${_var})
@@ -40,5 +44,8 @@ if(EXPECT_GPU AND NOT _gpu STREQUAL "true")
 endif()
 if(NOT _log MATCHES "script-ui\\[[a-z]+\\] pulp-ui-script-fixture-mounted")
     message(FATAL_ERROR "${FORMAT} editor never ran ui/main.js:\n${_log}")
+endif()
+if(DEFINED EXPECT_LOG AND NOT _log MATCHES "${EXPECT_LOG}")
+    message(FATAL_ERROR "${FORMAT} teardown never logged \"${EXPECT_LOG}\":\n${_log}")
 endif()
 message(STATUS "${FORMAT}: ${_line}")

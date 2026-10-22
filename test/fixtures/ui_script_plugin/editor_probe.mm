@@ -145,6 +145,9 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "PROBE: editor opened for %s\n", format.c_str());
         slot->destroy_hosted_editor(std::move(editor));
         slot->release();
+        // Disposed while the editor view is still alive: AppKit releases the
+        // view when the enclosing autorelease pool drains, after the plug-in
+        // is gone. A host may close in this order, so the probe keeps it.
         slot.reset();
         [window close];
     }

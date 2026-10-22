@@ -61,6 +61,12 @@ static const char* const kPulpAUCocoaViewClassName = PULP_STRINGIFY(PULP_AU_COCO
 // state between the audio thread and the UI; the live adapter owns both.
 
 struct PulpAUEditorOwnership {
+    // Declared FIRST so it is destroyed LAST: taken at the start of teardown
+    // and held until every member below is gone. The audio unit retires
+    // `processor_alive` before it destroys its Processor and StateStore, and
+    // that retire waits for this lease, so a dispose on another thread cannot
+    // free the store while the bridge is still closing against it.
+    pulp::runtime::AliveToken::Lease teardown_lease;
     std::unique_ptr<pulp::format::ViewBridge> bridge;
     std::unique_ptr<pulp::view::PluginViewHost> host;
     pulp::format::Processor* processor = nullptr;
@@ -72,16 +78,29 @@ struct PulpAUEditorOwnership {
     pulp::view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding;
 
     ~PulpAUEditorOwnership() {
+        teardown_lease = pulp::runtime::AliveToken::try_acquire(processor_alive);
+        const bool owner_alive = static_cast<bool>(teardown_lease);
         // Remove the owner-scoped handler before host/bridge member teardown.
         // The adapter can outlive the Cocoa view, but the callback captures
         // both objects and the returned NSView.
-        if (processor && resize_owner &&
-            pulp::runtime::AliveToken::is_alive(processor_alive)) {
+        if (processor && resize_owner && owner_alive)
             processor->set_editor_resize_handler(resize_owner, nullptr);
-        }
         // Explicit, not just reverse-member-order luck: the host publishes
         // `unavailable` from its own destructor.
         gpu_surface_binding.reset();
+        // A host may dispose the audio unit before it releases the view, so
+        // the view's dealloc can run after the Processor and its StateStore are
+        // gone. Closing the bridge then would tear down the view tree and the
+        // scripted UI session, both of which unregister from that store. With
+        // the owner gone, keep the bridge's objects alive instead: the host
+        // still tears down its native surfaces, and nothing touches the freed
+        // store.
+        if (bridge && !owner_alive) {
+            pulp::runtime::log_warn(
+                "AU v2 editor: view outlived its audio unit; leaving the editor's "
+                "view tree unreleased to avoid touching the freed parameter store");
+            (void)bridge.release();
+        }
     }
 };
 
@@ -467,9 +486,13 @@ bool pulp_resize_logic_auv2_editor(NSView* editor_view,
     // Transfer C++ ownership to an ObjC wrapper attached to the NSView.
     // When the NSView is deallocated, the wrapper's dealloc closes the
     // bridge (fires Processor::on_view_closed) and frees the host.
-    auto* ownership = new PulpAUEditorOwnership{
-        std::move(bridge), std::move(host), ctx.processor, ctx.owner_alive,
-        (const void*)editorView, std::move(gpu_surface_binding)};
+    auto* ownership =
+        new PulpAUEditorOwnership{.bridge = std::move(bridge),
+                                  .host = std::move(host),
+                                  .processor = ctx.processor,
+                                  .processor_alive = ctx.owner_alive,
+                                  .resize_owner = (const void*)editorView,
+                                  .gpu_surface_binding = std::move(gpu_surface_binding)};
     PulpAUEditorOwner* owner = [[PulpAUEditorOwner alloc] initWithOwnership:ownership];
     objc_setAssociatedObject(editorView, &kOwnershipKey, owner,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);

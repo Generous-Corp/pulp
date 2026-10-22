@@ -62,16 +62,29 @@ foreach(_fmt IN LISTS _ui_script_formats)
         continue()
     endif()
     string(TOLOWER "${_fmt}" _probe_format)
+    # The probe disposes the plug-in before AppKit releases the editor view.
+    # For AU that is the order in which the view's dealloc runs after the audio
+    # unit and its parameter store are gone, so the adapter must say it left
+    # that store alone.
+    # MallocScribble fills freed memory, so a read of the disposed unit's
+    # store crashes the probe even in a Release build instead of passing.
+    set(_expect_log "")
+    set(_probe_env ${_ui_script_editor_env})
+    if(_fmt STREQUAL "AU")
+        set(_expect_log "-DEXPECT_LOG=AU v2 editor: view outlived its audio unit")
+        list(APPEND _probe_env "MallocScribble=set:1")
+    endif()
     add_test(NAME ui-script-plugin-editor-${_probe_format}
         COMMAND ${CMAKE_COMMAND}
             "-DPROBE=$<TARGET_FILE:pulp-ui-script-editor-probe>"
             "-DFORMAT=${_probe_format}"
             "-DBUNDLE=$<TARGET_BUNDLE_DIR:PulpUiScriptFixture_${_fmt}>"
             "-DEXPECT_GPU=${PULP_HAS_SKIA}"
+            ${_expect_log}
             -P "${CMAKE_CURRENT_SOURCE_DIR}/check_editor_mode.cmake")
     set_tests_properties(ui-script-plugin-editor-${_probe_format} PROPERTIES
         LABELS "pr;format;view;scripted-ui" TIMEOUT 120
-        ENVIRONMENT_MODIFICATION "${_ui_script_editor_env}")
+        ENVIRONMENT_MODIFICATION "${_probe_env}")
 endforeach()
 
 # The Standalone opens an audio device, so it is not launched here; its image
