@@ -432,6 +432,11 @@ ParamReader StateStore::param_reader(ParamID id) const {
     return ParamReader(this, it->second);
 }
 
+std::size_t StateStore::index_of_sparse(ParamID id) const noexcept {
+    const auto it = id_to_index_.find(id);
+    return it == id_to_index_.end() ? kNoIndex : it->second;
+}
+
 float StateStore::get_modulated(ParamID id) const {
     const std::size_t index = index_of(id);
     if (index == kNoIndex)

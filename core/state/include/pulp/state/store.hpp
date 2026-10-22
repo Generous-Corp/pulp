@@ -183,7 +183,7 @@ class StateStore {
     /// Read a parameter's base value (lock-free).
     /// @note Safe to call from the audio thread. Defined inline: processors
     /// call this for every parameter they read on every block.
-    float get_value(ParamID id) const {
+    [[gnu::always_inline]] float get_value(ParamID id) const {
         const std::size_t i = index_of(id);
         return i == kNoIndex ? 0.0f : values_[i].get();
     }
@@ -683,16 +683,17 @@ class StateStore {
     std::vector<std::uint32_t> dense_index_;
     bool dense_index_usable_ = true;
     static constexpr std::size_t kNoIndex = static_cast<std::size_t>(-1);
+    // The dense-table hit is the whole inline path; the hash-map fallback is
+    // out of line so get_value() stays small enough to inline into a
+    // processor's per-block parameter reads.
     [[gnu::always_inline]] std::size_t index_of(ParamID id) const noexcept {
         if (id < dense_index_.size()) {
             const std::uint32_t i = dense_index_[id];
             return i == kNoDenseIndex ? kNoIndex : i;
         }
-        if (dense_index_usable_)
-            return kNoIndex;
-        const auto it = id_to_index_.find(id);
-        return it == id_to_index_.end() ? kNoIndex : it->second;
+        return dense_index_usable_ ? kNoIndex : index_of_sparse(id);
     }
+    [[gnu::noinline]] std::size_t index_of_sparse(ParamID id) const noexcept;
     using ParameterDisplayNames =
         std::unordered_map<ParamID, std::string>;
     mutable std::mutex parameter_display_mutex_;
