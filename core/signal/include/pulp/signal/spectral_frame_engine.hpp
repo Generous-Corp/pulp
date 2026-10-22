@@ -184,7 +184,6 @@ inline std::optional<SpectralFrameEngineGeometry> checked_spectral_frame_engine_
         || !charge.add<SampleType>(fft_size) // window
         || !charge.add<SampleType>(fft_size) // time scratch
         || !charge.add<std::complex<SampleType>>(geometry.frame_elements)
-        || !charge.add<std::complex<SampleType>>(fft_size) // freq scratch
         || !charge.add<std::complex<SampleType>*>(channels) // frame pointers
         || !checked_fft_retained_bytes<SampleType>(fft_size, target_max_bytes,
                                                    fft_retained_bytes)
@@ -262,8 +261,6 @@ public:
             frame_ptrs_[ch] = frames_.data() + static_cast<size_t>(ch) * num_bins_;
 
         time_buf_.assign(config_.fft_size, SampleType{0.0f});
-        freq_buf_.assign(config_.fft_size,
-                         std::complex<SampleType>(SampleType{0.0f}, SampleType{0.0f}));
 
         reset();
     }
@@ -435,16 +432,14 @@ private:
       const int n = config_.fft_size;
       const int skip =
           synth_pos_ < 0 ? static_cast<int>(std::min<std::int64_t>(-synth_pos_, n)) : 0;
-      for (int k = 0; k < num_bins_; ++k) {
-          freq_buf_[static_cast<size_t>(k)] = frames[ch][k];
-          if (k > 0 && k < n / 2)
-              freq_buf_[static_cast<size_t>(n - k)] = std::conj(frames[ch][k]);
-      }
-      fft_.inverse(freq_buf_.data());
+      // The frame holds DC..Nyquist of a real signal; the real inverse reads
+      // exactly that and ignores DC/Nyquist imaginary parts, which a full
+      // complex inverse would only have sent to the discarded imaginary output.
+      fft_.inverse_real_half(frames[ch], time_buf_.data());
       SampleType* ring = output_ring_.data() + static_cast<size_t>(ch) * ring_size_;
       for (int i = skip; i < n; ++i) {
           const auto idx = static_cast<size_t>((synth_pos_ + i) & ring_mask_);
-          ring[idx] += freq_buf_[static_cast<size_t>(i)].real() * window_[static_cast<size_t>(i)];
+          ring[idx] += time_buf_[static_cast<size_t>(i)] * window_[static_cast<size_t>(i)];
       }
   }
 
@@ -534,9 +529,8 @@ private:
             for (int i = 0; i < n; ++i)
                 time_buf_[static_cast<size_t>(i)] =
                     ring[(input_pos_ + i) % n] * window_[static_cast<size_t>(i)];
-            fft_.forward_real(time_buf_.data(), freq_buf_.data());
-            std::copy(freq_buf_.begin(), freq_buf_.begin() + num_bins_,
-                      frames_.begin() + static_cast<size_t>(ch) * num_bins_);
+            fft_.forward_real_half(time_buf_.data(),
+                                   frames_.data() + static_cast<size_t>(ch) * num_bins_);
         }
         on_frames(frame_ptrs_.data(), num_bins_);
     }
@@ -557,7 +551,6 @@ private:
     std::vector<std::complex<SampleType>> frames_;      // channels * num_bins
     std::vector<std::complex<SampleType>*> frame_ptrs_; // channels
     std::vector<SampleType> time_buf_;                  // fft_size
-    std::vector<std::complex<SampleType>> freq_buf_;    // fft_size
 
     int input_pos_ = 0;
     std::int64_t samples_fed_ = 0;

@@ -65,7 +65,6 @@ RetainedChargeOracle exact_owned_store_charge(
         store_bytes<float>(fft_size), // engine window
         store_bytes<float>(fft_size), // engine time scratch
         store_bytes<std::complex<float>>(engine->frame_elements),
-        store_bytes<std::complex<float>>(fft_size), // engine frequency scratch
         store_bytes<std::complex<float>*>(channels),
         store_bytes<std::complex<double>>(fft_size / 2u), // engine twiddles
         platform_split_buffers,
