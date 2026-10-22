@@ -274,6 +274,18 @@ Use `recommend` logic above, but **never auto-switch** — always confirm first.
 
 ## Engine Selection Semantics
 
+**Mac plug-in scripted UIs: QuickJS + build-time bytecode beats JSC.** Measured
+on Spectr (1.6 MB materialized runtime, AU v2 editor, M5 Max): JSC opens are
+~100-150 ms slower per open (warm 281-397 ms vs 162-253 ms), with JIT allowed
+or in a hardened-runtime host without `allow-jit` alike (JIT made no
+difference). JSC re-parses the whole runtime in every realm (no in-memory
+bytecode reuse; `JSScript`'s code cache is on disk) and its C-API bridge costs
+more per call (`scripted_ui_live_realm` 290 vs 158 ms). Output was
+pixel-identical. Dropping QuickJS saves ~0.84 MB, which does not pay for it.
+Do not re-run this without a new reason (a JSC in-memory bytecode API, or a
+UI with far heavier steady-state JS than mount).
+
+
 - `auto` (default): QuickJS everywhere unless the build explicitly
   sets a `PULP_DEFAULT_ENGINE_*` compile option. Backward compatible.
   Safe. Do not describe this as "Apple defaults to JSC"; that was an
