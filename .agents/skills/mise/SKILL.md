@@ -130,6 +130,27 @@ binary stays installed as the rollback. A source build at a new path is a new
 program to LuLu on every host; flipping the pin needs no network (the tools are
 already installed), so pre-seed rather than asking for firewall rules.
 
+A relock can differ from the committed lock with no mise change at all: conda
+resolves clang-format's runtime dependencies (for example `libcxx`) to the
+newest build the channel publishes. Before blaming the new mise for a lock
+diff, relock the same manifest with the currently pinned binary in a second
+copy. If both write identical bytes, the diff is upstream drift: keep the
+committed lock in the mise move, prove the new binary installs from it with a
+cold `mise install --locked` in throwaway mise directories, and move the drift
+in its own change.
+
+Since mise 2026.10.13 a project's `[settings]` apply only once the checkout is
+trusted. In an untrusted checkout `locked`, `auto_install` and
+`disable_update_warning` from `.mise.toml` read as mise's defaults (`false`,
+`true`, `false`), so a script that runs mise in a checkout must set
+`MISE_TRUSTED_CONFIG_PATHS` (as `generate.py --lock`, the golden layer and the
+candidate CI lane do) or pass the setting as an environment variable. Since
+2026.10.14 a global `~/.config/mise/config.override.toml` (or
+`config.toolchain.override.toml`) outranks the project's tools and is exempt
+from `--locked`; when a host reports a tool drift that the lock cannot
+explain, look for one. `mise config explain` lists the keys a config file
+sets and flags unknown ones.
+
 New mise releases surface in the weekly "Dependency drift: weekly audit"
 issue (`deps-drift-check.yml`): `tools/deps/manifest.json` tracks mise as a
 `git-tag` upstream, and a test refuses it unless its version and tag match

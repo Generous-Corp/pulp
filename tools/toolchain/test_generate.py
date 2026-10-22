@@ -258,11 +258,11 @@ class StrictPinTests(unittest.TestCase):
 
     def test_mise_binary_must_be_pinned_by_digest(self) -> None:
         source = generate.SOURCE.read_text(encoding="utf-8")
-        digest = '25e38f796fff67fc5f4c44f6963d4b8ed15be82a5d9244f693cc55d40a245ee3'
+        digest = '284869e5b5f57211377f026309910bea91ef65b3a71b934295fa8bd712436dfc'
         cases = (
             (f'macos-arm64 = "{digest}"', f'macos-arm64 = "{digest[:-1]}"', "64-hex"),
             (f'macos-arm64 = "{digest}"', f'macos-arm65 = "{digest}"', "64-hex"),
-            ('path = "~/.local/opt/mise-2026.10.11/bin/mise"', 'path = "/opt/homebrew/bin/mise"', "with its version in the path"),
+            ('path = "~/.local/opt/mise-2026.10.17/bin/mise"', 'path = "/opt/homebrew/bin/mise"', "with its version in the path"),
         )
         for old, new, needle in cases:
             with self.subTest(new=new), tempfile.TemporaryDirectory() as td:

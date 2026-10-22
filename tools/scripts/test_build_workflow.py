@@ -88,7 +88,7 @@ class MiseCandidateWorkflowTest(unittest.TestCase):
         )
         text = json.dumps(self.steps[activate], sort_keys=True)
         for marker in (
-            "mise-2026.10.11/bin/mise",
+            "mise-2026.10.17/bin/mise",
             'RUNNER_ARCH',
             "expected_mise_version",
             "expected_mise_sha",
@@ -96,7 +96,7 @@ class MiseCandidateWorkflowTest(unittest.TestCase):
             "actual_mise_version",
             "MISE_ENV=toolchain",
             "MISE_TRUSTED_CONFIG_PATHS",
-            "PATH=$HOME/.local/opt/mise-2026.10.11/bin:$HOME/.cargo/bin:$tool_path",
+            "PATH=$HOME/.local/opt/mise-2026.10.17/bin:$HOME/.cargo/bin:$tool_path",
             "GITHUB_ENV",
         ):
             self.assertIn(marker, text)

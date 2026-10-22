@@ -101,9 +101,9 @@ remaining host-toolchain path is a migration boundary, not a second set of
 Pulp pins. `setup.sh`, `pulp build`, and public CI still accept hosts without
 mise until their provisioning is migrated and verified.
 
-### 1. Install mise 2026.10.11
+### 1. Install mise 2026.10.17
 
-The lock is generated with mise **2026.10.11**, and only that version is
+The lock is generated with mise **2026.10.17**, and only that version is
 guaranteed to read it the same way: mise releases differ in how they resolve
 some download URLs, so an older mise can read the same config differently or
 reject rows of the lock.
@@ -118,7 +118,7 @@ Linux package manager). On macOS (on Linux use `linux-x64` or `linux-arm64`, and
 `sha256sum -c` in place of `shasum -a 256 -c`):
 
 ```bash
-mise_version=2026.10.11
+mise_version=2026.10.17
 mise_platform=macos-arm64   # or macos-x64
 base="https://github.com/jdx/mise/releases/download/v${mise_version}"
 curl -fL -O "$base/SHASUMS256.txt" -O "$base/SHASUMS256.txt.minisig" \
@@ -134,22 +134,22 @@ mkdir -p ~/.local/bin && install -m 755 mise/bin/mise ~/.local/bin/mise
 mise --version
 ```
 
-Stop if either check fails. As a cross-check, the 2026.10.11 archives have
+Stop if either check fails. As a cross-check, the 2026.10.17 archives have
 these sha256 digests:
 
 | Archive | sha256 |
 |---------|--------|
-| `mise-v2026.10.11-macos-arm64.tar.gz` | `64592e2978459d91b9dc690352c97d59a8c2b327f586fd201468fa56afe66311` |
-| `mise-v2026.10.11-macos-x64.tar.gz` | `6eaffe02521c700b420ba6930dfbc528951f27c1c9896c827ab6aab7248c75f1` |
-| `mise-v2026.10.11-linux-arm64.tar.gz` | `7534d514495449e267997410583833080ed0b99a0053f3b26a10691794a597b5` |
-| `mise-v2026.10.11-linux-x64.tar.gz` | `a7d0aad3d6782d42675fe0a2732b39bfc356f6cf2b554437f84c597814a2fd85` |
-| `mise-v2026.10.11-windows-x64.zip` | `2337f9fdb13ba51d3bf5831cacec9c59e70fec9630e9ad30f65975eb6b83b162` |
-| `mise-v2026.10.11-windows-arm64.zip` | `6132280c5d2ccd194b26d957ed4c71f830d8114449be50125093e9ca0c95fc4f` |
+| `mise-v2026.10.17-macos-arm64.tar.gz` | `d7c50c1683524a764260986ccc9c41c0de5e1fcd491714b5640b657b76781af6` |
+| `mise-v2026.10.17-macos-x64.tar.gz` | `e42418100e2f781f9be00b9feaa60378e77551741faececc2bf360992c5410c8` |
+| `mise-v2026.10.17-linux-arm64.tar.gz` | `cac510e51793ad45e65fe92305bdbe4309c9c60b5907badbc7eba111738ab08f` |
+| `mise-v2026.10.17-linux-x64.tar.gz` | `17565e268c5542d8ce944321e17af81e0b741b65af4aa7e8e010ee77376a4aa3` |
+| `mise-v2026.10.17-windows-x64.zip` | `32bcfda5f72bf7cb189e18ba93c2798bffcb4a678fd004e3127780363f2d8c8c` |
+| `mise-v2026.10.17-windows-arm64.zip` | `d9fb396fa2a1f41b7c68275b6e0e6af4126c2ce138c61b19b819d502cfbf0f43` |
 
 On Windows, compare `(Get-FileHash <archive> -Algorithm SHA256).Hash` with the
 table (PowerShell prints it in upper case).
 
-The convenience installer `curl https://mise.run | MISE_VERSION=v2026.10.11 sh`
+The convenience installer `curl https://mise.run | MISE_VERSION=v2026.10.17 sh`
 checks the archive's sha256, against digests embedded in the script when you
 ask for the script's own current release and against the release's
 `SHASUMS256.txt` otherwise. It does not check the minisign or GPG signature
@@ -168,7 +168,9 @@ MISE_ENV=toolchain mise install --locked
 `--locked` makes mise refuse any tool or platform that the lock does not cover,
 rather than resolving a new download. Pulp's `.mise.toml` also sets
 `locked = true` and `auto_install = false`, so mise never installs a tool
-behind your back.
+behind your back. mise applies a project's `[settings]` only after you trust
+the checkout, so run `mise trust` first; until then those two settings, and
+`disable_update_warning`, are ignored.
 
 ### 3. Use the tools
 
@@ -210,7 +212,7 @@ A tool version changes only through a pull request that:
 2. regenerates the derived files with the pinned mise:
 
    ```bash
-   python3 tools/toolchain/generate.py --lock --mise /path/to/mise-2026.10.11
+   python3 tools/toolchain/generate.py --lock --mise /path/to/mise-2026.10.17
    ```
 
    This rewrites `.mise.toolchain.toml`, the generated block in `.mise.toml`,
@@ -223,7 +225,7 @@ A tool version changes only through a pull request that:
 every version and lock checksum that moved, for the pull request body:
 
 ```bash
-python3 tools/toolchain/update.py cmake --to 4.3.4 --mise /path/to/mise-2026.10.11
+python3 tools/toolchain/update.py cmake --to 4.3.4 --mise /path/to/mise-2026.10.17
 python3 tools/toolchain/update.py rust --to 1.98.0      # no lock rows: rustup installs Rust
 python3 tools/toolchain/update.py shipyard --to v0.270.0
 ```
