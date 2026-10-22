@@ -1467,6 +1467,21 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
 
 namespace {
 
+// CSS groove, ridge, inset and outset borders are drawn in shades derived
+// from the author's border colour. Nothing here is a theme colour: the
+// constants below define that derivation, and every colour it builds is the
+// author's colour scaled channel by channel.
+
+// How far a shade moves the colour's brightest channel, on a 0..1 scale.
+constexpr float kShadeStep = 0.33f;
+// The lighter shade of pure black, which has no channel to scale.
+constexpr float kBlackLightShade = 84.0f / 255.0f;
+// Grey levels bounding the band in which a colour gets one lighter and one
+// darker shade; darker colours get two lighter shades, lighter ones keep
+// their own colour as the light shade.
+constexpr float kDarkLimitGrey = 32.0f / 255.0f;
+constexpr float kLightLimitGrey = 235.0f / 255.0f;
+
 // One channel of a shade, quantized the way the reference quantizes it: the
 // scaled value is floored onto the 8-bit grid. Rounding instead moves about a
 // third of all shades by one level.
@@ -1476,23 +1491,28 @@ float shade_channel(float channel, float multiplier) {
     return std::clamp(level, 0.0f, 255.0f) / 255.0f;
 }
 
-Color lighten_border_color(Color c) {
-    const float v = std::max({c.r, c.g, c.b});
-    if (v <= 0.0f) return Color::rgba(84.0f / 255.0f, 84.0f / 255.0f,
-                                      84.0f / 255.0f, c.a);
-    const float multiplier = std::min(1.0f, v + 0.33f) / v;
-    return Color::rgba(shade_channel(c.r, multiplier),
+// `c` with every channel scaled by `multiplier` onto the 8-bit grid.
+Color scaled_shade(Color c, float multiplier) {
+    return Color::rgba(shade_channel(c.r, multiplier),  // token-lint:allow derived from the author's colour
                        shade_channel(c.g, multiplier),
                        shade_channel(c.b, multiplier), c.a);
 }
 
+// A neutral grey at `level` (0..1), keeping `alpha`.
+Color grey(float level, float alpha) {
+    return Color::rgba(level, level, level, alpha);  // token-lint:allow shade derivation constant
+}
+
+Color lighten_border_color(Color c) {
+    const float v = std::max({c.r, c.g, c.b});
+    if (v <= 0.0f) return grey(kBlackLightShade, c.a);
+    return scaled_shade(c, std::min(1.0f, v + kShadeStep) / v);
+}
+
 Color darken_border_color(Color c) {
     const float v = std::max({c.r, c.g, c.b});
-    if (v <= 0.0f) return Color::rgba(0.0f, 0.0f, 0.0f, c.a);
-    const float multiplier = std::max(0.0f, v - 0.33f) / v;
-    return Color::rgba(shade_channel(c.r, multiplier),
-                       shade_channel(c.g, multiplier),
-                       shade_channel(c.b, multiplier), c.a);
+    if (v <= 0.0f) return grey(0.0f, c.a);
+    return scaled_shade(c, std::max(0.0f, v - kShadeStep) / v);
 }
 
 float relative_luminance(Color c) {
@@ -1513,9 +1533,9 @@ bool is_near_side(View::BorderEdge side) {
 
 View::BorderShades View::border_shades(Color side_color) {
     static const float kDarkLimit =
-        relative_luminance(Color::rgba8(32, 32, 32));
+        relative_luminance(grey(kDarkLimitGrey, 1.0f));
     static const float kLightLimit =
-        relative_luminance(Color::rgba8(235, 235, 235));
+        relative_luminance(grey(kLightLimitGrey, 1.0f));
     const float luminance = relative_luminance(side_color);
     if (luminance <= kDarkLimit) {
         const Color base = lighten_border_color(side_color);
