@@ -5,7 +5,6 @@
   "delivery_state": "pending",
   "claim_id": "9db85cc1-18bb-4003-bf38-072410293a00",
   "owned_paths": [
-    "docs/guides/signal-processing.md",
     "docs/status/sequencer-exposure/rows/signal-guide-oversampler-convolver-accuracy.json"
   ],
   "evidence": [
