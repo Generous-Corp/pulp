@@ -1,4 +1,5 @@
 #include <pulp/audio/format_registry.hpp>
+#include "decode_limits_detail.hpp"
 #include <filesystem>
 #include <algorithm>
 #include <array>
@@ -79,6 +80,17 @@ public:
     }
 
     std::optional<AudioFileData> read(const std::string& path) override {
+        return read(path, DecodeLimits{});
+    }
+
+    std::optional<AudioFileData> read(const std::string& path,
+                                      const DecodeLimits& limits) override {
+        // The header's frame and channel counts are what the decoder sizes
+        // its output from; refuse them before it allocates.
+        auto info = read_audio_file_info(path);
+        if (!info ||
+            !detail::within_decode_limits("WAV", info->num_frames, info->num_channels, limits))
+            return std::nullopt;
         return read_audio_file(path);
     }
 
@@ -120,31 +132,47 @@ public:
     }
 
     std::optional<AudioFileData> read(const std::string& path) override {
+        return read(path, DecodeLimits{});
+    }
+
+    std::optional<AudioFileData> read(const std::string& path,
+                                      const DecodeLimits& limits) override {
         drflac* flac = drflac_open_file(path.c_str(), nullptr);
         if (!flac) return std::nullopt;
 
+        // STREAMINFO's total sample count is a 36-bit untrusted claim (zero
+        // means unknown); refuse before any output allocation.
+        const uint64_t claimed_frames = flac->totalPCMFrameCount;
+        const uint32_t channels = flac->channels;
+        if (channels == 0 ||
+            !detail::within_decode_limits("FLAC", claimed_frames, channels, limits)) {
+            drflac_close(flac);
+            return std::nullopt;
+        }
+
         AudioFileData data;
         data.sample_rate = flac->sampleRate;
+        data.channels.resize(channels);
+        detail::reserve_planar(data.channels, claimed_frames);
 
-        uint64_t total_frames = flac->totalPCMFrameCount;
-        uint32_t channels = flac->channels;
-
-        // Read as interleaved float
-        std::vector<float> interleaved(total_frames * channels);
-        uint64_t frames_read = drflac_read_pcm_frames_f32(flac, total_frames, interleaved.data());
+        std::vector<float> interleaved(
+            static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
+        uint64_t frames_read = 0;
+        bool within_limits = true;
+        for (;;) {
+            const uint64_t got = drflac_read_pcm_frames_f32(
+                flac, detail::kDecodeChunkFrames, interleaved.data());
+            if (got == 0) break;
+            if (!detail::within_decode_limits("FLAC", frames_read + got, channels, limits)) {
+                within_limits = false;
+                break;
+            }
+            detail::append_deinterleaved(data.channels, interleaved.data(), got, channels);
+            frames_read += got;
+        }
         drflac_close(flac);
 
-        if (frames_read == 0) return std::nullopt;
-
-        // Deinterleave
-        data.channels.resize(channels);
-        for (auto& ch : data.channels)
-            ch.resize(static_cast<size_t>(frames_read));
-
-        for (uint64_t i = 0; i < frames_read; ++i)
-            for (uint32_t ch = 0; ch < channels; ++ch)
-                data.channels[ch][i] = interleaved[i * channels + ch];
-
+        if (!within_limits || frames_read == 0) return std::nullopt;
         return data;
     }
 
@@ -176,27 +204,45 @@ public:
     }
 
     std::optional<AudioFileData> read(const std::string& path) override {
-        drmp3_config config;
-        drmp3_uint64 total_frames;
-        float* samples = drmp3_open_file_and_read_pcm_frames_f32(
-            path.c_str(), &config, &total_frames, nullptr);
+        return read(path, DecodeLimits{});
+    }
 
-        if (!samples) return std::nullopt;
+    std::optional<AudioFileData> read(const std::string& path,
+                                      const DecodeLimits& limits) override {
+        drmp3 mp3;
+        if (!drmp3_init_file(&mp3, path.c_str(), nullptr))
+            return std::nullopt;
+
+        // MP3 carries no trustworthy frame count, so the running decoded
+        // size is the only check; decode in chunks so allocation follows it.
+        const uint32_t channels = mp3.channels;
+        if (channels == 0 || !detail::within_decode_limits("MP3", 0, channels, limits)) {
+            drmp3_uninit(&mp3);
+            return std::nullopt;
+        }
 
         AudioFileData data;
-        data.sample_rate = config.channels > 0 ? config.sampleRate : 44100;
-
-        uint32_t channels = config.channels;
+        data.sample_rate = mp3.sampleRate;
         data.channels.resize(channels);
-        for (auto& ch : data.channels)
-            ch.resize(static_cast<size_t>(total_frames));
 
-        // Deinterleave
-        for (uint64_t i = 0; i < total_frames; ++i)
-            for (uint32_t ch = 0; ch < channels; ++ch)
-                data.channels[ch][i] = samples[i * channels + ch];
+        std::vector<float> interleaved(
+            static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
+        uint64_t frames_read = 0;
+        bool within_limits = true;
+        for (;;) {
+            const uint64_t got = drmp3_read_pcm_frames_f32(
+                &mp3, detail::kDecodeChunkFrames, interleaved.data());
+            if (got == 0) break;
+            if (!detail::within_decode_limits("MP3", frames_read + got, channels, limits)) {
+                within_limits = false;
+                break;
+            }
+            detail::append_deinterleaved(data.channels, interleaved.data(), got, channels);
+            frames_read += got;
+        }
+        drmp3_uninit(&mp3);
 
-        drmp3_free(samples, nullptr);
+        if (!within_limits || frames_read == 0) return std::nullopt;
         return data;
     }
 
@@ -282,6 +328,14 @@ std::optional<AudioFileData> FormatRegistry::read(const std::string& path) const
     auto* reader = find_reader(ext);
     if (!reader) return std::nullopt;
     return reader->read(path);
+}
+
+std::optional<AudioFileData> FormatRegistry::read(const std::string& path,
+                                                  const DecodeLimits& limits) const {
+    auto ext = get_extension(path);
+    auto* reader = find_reader(ext);
+    if (!reader) return std::nullopt;
+    return reader->read(path, limits);
 }
 
 bool FormatRegistry::write(const std::string& path, const AudioFileData& data) const {

@@ -199,6 +199,36 @@ TEST_CASE("OggReader reports metadata for a valid Vorbis stream",
     REQUIRE_THAT(info->duration_seconds, WithinAbs(0.02, 0.000001));
 }
 
+TEST_CASE("OggReader refuses output beyond the decode limits it is handed",
+          "[audio][ogg][decode-limits]") {
+    auto reader = pulp::audio::create_ogg_reader();
+    TempDir temp;
+    auto path = temp.path / "tiny.ogg";
+    write_base64_audio_fixture(path, kTinyOggVorbisBase64);
+    REQUIRE(reader != nullptr);
+
+    // The fixture holds 160 stereo frames; a ceiling one frame short refuses it.
+    pulp::audio::DecodeLimits frame_ceiling;
+    frame_ceiling.max_frames = 159u;
+    REQUIRE_FALSE(reader->read(path.string(), frame_ceiling).has_value());
+
+    pulp::audio::DecodeLimits channel_ceiling;
+    channel_ceiling.max_channels = 1u;
+    REQUIRE_FALSE(reader->read(path.string(), channel_ceiling).has_value());
+
+    pulp::audio::DecodeLimits byte_ceiling;
+    byte_ceiling.max_output_bytes = 160u * 2u * sizeof(float) - 1u;
+    REQUIRE_FALSE(reader->read(path.string(), byte_ceiling).has_value());
+
+    pulp::audio::DecodeLimits exact_fit;
+    exact_fit.max_frames = 160u;
+    exact_fit.max_channels = 2u;
+    exact_fit.max_output_bytes = 160u * 2u * sizeof(float);
+    auto data = reader->read(path.string(), exact_fit);
+    REQUIRE(data.has_value());
+    REQUIRE(data->num_frames() == 160u);
+}
+
 TEST_CASE("OggReader decodes a valid Vorbis stream into deinterleaved channels",
           "[audio][ogg]") {
     auto reader = pulp::audio::create_ogg_reader();

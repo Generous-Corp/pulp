@@ -2,6 +2,8 @@
 // Supports any format that CoreAudio can decode (AAC, ALAC, Apple Lossless, CAF).
 
 #include <pulp/audio/format_registry.hpp>
+#include "decode_limits_detail.hpp"
+#include <limits>
 
 #ifdef __APPLE__
 #import <AudioToolbox/AudioToolbox.h>
@@ -55,6 +57,11 @@ public:
     }
 
     std::optional<AudioFileData> read(const std::string& path) override {
+        return read(path, DecodeLimits{});
+    }
+
+    std::optional<AudioFileData> read(const std::string& path,
+                                      const DecodeLimits& limits) override {
         CFURLRef url = CFURLCreateFromFileSystemRepresentation(
             nullptr, reinterpret_cast<const UInt8*>(path.c_str()),
             static_cast<CFIndex>(path.size()), false);
@@ -89,8 +96,16 @@ public:
         ExtAudioFileSetProperty(file, kExtAudioFileProperty_ClientDataFormat,
                                 sizeof(clientFormat), &clientFormat);
 
-        // Read all frames
+        // Read all frames. The file's own length claim sizes the buffer, so
+        // refuse it against the caller's ceilings before allocating.
         uint32_t channels = srcFormat.mChannelsPerFrame;
+        if (frameCount < 0 || frameCount > std::numeric_limits<uint32_t>::max() ||
+            channels == 0 ||
+            !detail::within_decode_limits("CoreAudio", static_cast<uint64_t>(frameCount),
+                                          channels, limits)) {
+            ExtAudioFileDispose(file);
+            return std::nullopt;
+        }
         auto totalFrames = static_cast<uint32_t>(frameCount);
 
         std::vector<float> interleaved(static_cast<size_t>(totalFrames) * channels);

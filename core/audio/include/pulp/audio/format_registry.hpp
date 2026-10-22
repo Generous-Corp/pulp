@@ -4,6 +4,7 @@
 // Provides unified audio file I/O across all supported formats.
 
 #include <pulp/audio/audio_file.hpp>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,6 +12,19 @@
 #include <memory>
 
 namespace pulp::audio {
+
+/// Resource ceilings a reader enforces on decoded output. Container headers
+/// are untrusted: a reader checks the claimed size against these limits before
+/// allocating, then keeps checking as frames arrive, so a tiny file cannot
+/// request terabytes of output. A zero field means that ceiling is not
+/// enforced. The plain read(path) overloads apply these defaults; callers
+/// reading very long material pass larger limits explicitly. Field names
+/// match WavDecodeLimits.
+struct DecodeLimits {
+    std::uint64_t max_frames = 268'435'456u;
+    std::uint32_t max_channels = 64u;
+    std::uint64_t max_output_bytes = 1024ull * 1024u * 1024u;
+};
 
 /// Audio format reader interface
 class FormatReader {
@@ -22,6 +36,15 @@ public:
 
     /// Read entire file into memory
     virtual std::optional<AudioFileData> read(const std::string& path) = 0;
+
+    /// Read entire file into memory, refusing output beyond `limits`. Every
+    /// built-in reader overrides this; the default exists for external readers
+    /// that predate limits and falls back to read(path).
+    virtual std::optional<AudioFileData> read(const std::string& path,
+                                              const DecodeLimits& limits) {
+        (void)limits;
+        return read(path);
+    }
 
     /// Whether this reader supports the given file extension (e.g., ".flac")
     virtual bool supports_extension(std::string_view ext) const = 0;
@@ -66,6 +89,12 @@ public:
     /// Read any supported audio file (dispatches to the right reader)
     std::optional<AudioFileInfo> read_info(const std::string& path) const;
     std::optional<AudioFileData> read(const std::string& path) const;
+
+    /// Read with explicit decode ceilings. Every built-in reader refuses a
+    /// file whose header or decoded output would exceed them; a custom reader
+    /// registered without a limits overload reads unbounded.
+    std::optional<AudioFileData> read(const std::string& path,
+                                      const DecodeLimits& limits) const;
 
     /// Write audio data (dispatches to the right writer based on extension)
     bool write(const std::string& path, const AudioFileData& data) const;
