@@ -3,6 +3,7 @@
 #include <pulp/signal/denormal.hpp>
 
 #include <cmath>
+#include <cstddef>
 
 namespace pulp::signal {
 
@@ -72,30 +73,26 @@ public:
     ///
     /// Same arithmetic as the per-sample path, with the mode resolved once per
     /// call and the coefficients and integrator states held in registers. The
-    /// denormal snap runs every kStateSnapInterval samples and at the end of the
-    /// call; it only alters states below 1e-15, so the output differs from the
+    /// denormal snap runs once per kSnapChunkSamples chunk (snap_chunks());
+    /// it only alters states below 1e-15, so the output differs from the
     /// per-sample path only once a tail is already below that level.
     void process(SampleType* buffer, int num_samples) {
         switch (mode_) {
         case Mode::lowpass:
-            process_block<Mode::lowpass>(buffer, num_samples);
+            run_block<Mode::lowpass>(buffer, num_samples);
             return;
         case Mode::highpass:
-            process_block<Mode::highpass>(buffer, num_samples);
+            run_block<Mode::highpass>(buffer, num_samples);
             return;
         case Mode::bandpass:
-            process_block<Mode::bandpass>(buffer, num_samples);
+            run_block<Mode::bandpass>(buffer, num_samples);
             return;
         case Mode::notch:
-            process_block<Mode::notch>(buffer, num_samples);
+            run_block<Mode::notch>(buffer, num_samples);
             return;
         }
-        process_block<Mode::lowpass>(buffer, num_samples);
+        run_block<Mode::lowpass>(buffer, num_samples);
     }
-
-    /// Number of samples the buffer path runs between denormal snaps of the
-    /// integrator states.
-    static constexpr int kStateSnapInterval = 64;
 
     void reset() { ic1_ = 0; ic2_ = 0; }
 
@@ -109,13 +106,13 @@ private:
     SampleType a1_ = 0, a2_ = 0, a3_ = 0;
     SampleType ic1_ = 0, ic2_ = 0;
 
-    template <Mode M> void process_block(SampleType* buffer, int num_samples) {
+    template <Mode M> void run_block(SampleType* buffer, int num_samples) {
         const SampleType a1 = a1_, a2 = a2_, a3 = a3_, k = k_;
         SampleType ic1 = ic1_, ic2 = ic2_;
-        for (int start = 0; start < num_samples; start += kStateSnapInterval) {
-            const int end =
-                num_samples - start < kStateSnapInterval ? num_samples : start + kStateSnapInterval;
-            for (int i = start; i < end; ++i) {
+        if (num_samples <= 0)
+            return;
+        for (const auto [begin, end] : snap_chunks(static_cast<std::size_t>(num_samples))) {
+            for (std::size_t i = begin; i < end; ++i) {
                 const SampleType input = buffer[i];
                 const SampleType v3 = input - ic2;
                 const SampleType v1 = a1 * ic1 + a2 * v3;

@@ -25,8 +25,8 @@ namespace pulp::signal {
 ///     every rate, frequency or resonance change; a default-constructed voice
 ///     has all-zero coefficients until one of them is set, as SvfT does.
 ///   - Voices share nothing but storage, and each has its own mode.
-///   - process() advances every voice by one sample; process_block() advances
-///     every voice by a block, one buffer per voice.
+///   - process() advances every voice by one sample; process_voices()
+///     advances every voice by a block, one buffer per voice.
 ///
 /// Why it is faster: the voices' state is held in structure-of-arrays form
 /// and every step is a loop over independent voices, which the compiler
@@ -55,7 +55,7 @@ template <typename SampleType = float, std::size_t Voices = 16> class SvfBankT {
                    SampleType resonance) {
         if (voice >= Voices)
             return;
-        mode_[voice] = mode_index(mode);
+        mode_[voice] = mode;
         sample_rate_[voice] = sample_rate;
         frequency_[voice] = frequency;
         resonance_[voice] = resonance;
@@ -83,7 +83,7 @@ template <typename SampleType = float, std::size_t Voices = 16> class SvfBankT {
     void set_mode(std::size_t voice, Mode mode) {
         if (voice >= Voices)
             return;
-        mode_[voice] = mode_index(mode);
+        mode_[voice] = mode;
     }
 
     /// The voice's coefficients (SvfT::design() for its current settings).
@@ -105,21 +105,22 @@ template <typename SampleType = float, std::size_t Voices = 16> class SvfBankT {
             ic2_[v] = detail::snap_to_zero_bits(SampleType{2.0f} * v2 - ic2_[v]);
             const SampleType highpass = input - k_[v] * v1 - v2;
             const SampleType notch = input - k_[v] * v1;
-            const int mode = mode_[v];
+            const Mode mode = mode_[v];
             // Bit-operation selects (same values as conditionals) keep this
             // loop free of control flow, so it vectorizes under GCC too.
-            const SampleType low_or_high = detail::select_bits(mode == kHighpass, highpass, v2);
-            const SampleType band_or_notch = detail::select_bits(mode == kNotch, notch, v1);
-            const bool band_family = (mode == kBandpass) | (mode == kNotch);
+            const SampleType low_or_high =
+                detail::select_bits(mode == Mode::highpass, highpass, v2);
+            const SampleType band_or_notch = detail::select_bits(mode == Mode::notch, notch, v1);
+            const bool band_family = (mode == Mode::bandpass) | (mode == Mode::notch);
             out[v] = detail::select_bits(band_family, band_or_notch, low_or_high);
         }
     }
 
     /// Advance every voice by `num_samples` samples in place, one buffer per
     /// voice (buffers[v] holds voice v's input and receives its output).
-    void process_block(SampleType* const* buffers, int num_samples) {
+    void process_voices(SampleType* const* buffers, std::size_t num_samples) {
         SampleType frame[Voices];
-        for (int n = 0; n < num_samples; ++n) {
+        for (std::size_t n = 0; n < num_samples; ++n) {
             for (std::size_t v = 0; v < Voices; ++v)
                 frame[v] = buffers[v][n];
             process(frame, frame);
@@ -141,22 +142,6 @@ template <typename SampleType = float, std::size_t Voices = 16> class SvfBankT {
     }
 
   private:
-    static constexpr int kLowpass = 0, kHighpass = 1, kBandpass = 2, kNotch = 3;
-
-    static int mode_index(Mode mode) {
-        switch (mode) {
-        case Mode::lowpass:
-            return kLowpass;
-        case Mode::highpass:
-            return kHighpass;
-        case Mode::bandpass:
-            return kBandpass;
-        case Mode::notch:
-            return kNotch;
-        }
-        return kLowpass;
-    }
-
     void update(std::size_t voice) {
         const auto c = Filter::design(sample_rate_[voice], frequency_[voice], resonance_[voice]);
         g_[voice] = c.g;
@@ -169,7 +154,7 @@ template <typename SampleType = float, std::size_t Voices = 16> class SvfBankT {
     SampleType sample_rate_[Voices];
     SampleType frequency_[Voices];
     SampleType resonance_[Voices];
-    int mode_[Voices] = {};
+    Mode mode_[Voices] = {};
     SampleType g_[Voices] = {};
     SampleType k_[Voices] = {};
     SampleType a1_[Voices] = {};

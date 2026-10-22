@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 
 namespace pulp::signal {
 
@@ -87,26 +88,26 @@ template <typename SampleType = float> class TptFilterT {
     /// Process a buffer in place, replacing it with the lowpass output.
     ///
     /// Same arithmetic as the per-sample path on a register-resident state.
-    /// The denormal snap runs every kStateSnapInterval samples and at the end
-    /// of the call. The integrator's pole is 1 - 2g; unless |1 - 2g| < 0.44
+    /// The denormal snap runs once per kSnapChunkSamples chunk
+    /// (snap_chunks()). The integrator's pole is 1 - 2g; unless |1 - 2g| < 0.44
     /// (cutoffs near a quarter of the sample rate) a state at or above 1e-15
     /// at the start of a chunk cannot decay into the float subnormal range
     /// before the next snap, and inside that band the tail falls through the
     /// subnormal range; there, and with subnormal input, the state can stay
     /// subnormal until the next snap, so residency is bounded by one chunk.
-    void process_lowpass(SampleType* buffer, int num_samples) {
-        process_block(buffer, num_samples, [](SampleType, SampleType lp) { return lp; });
+    void process_lowpass(SampleType* buffer, std::size_t num_samples) {
+        run_block(buffer, num_samples, [](SampleType, SampleType lp) { return lp; });
     }
 
     /// Process a buffer in place, replacing it with the highpass output.
-    void process_highpass(SampleType* buffer, int num_samples) {
-        process_block(buffer, num_samples, [](SampleType in, SampleType lp) { return in - lp; });
+    void process_highpass(SampleType* buffer, std::size_t num_samples) {
+        run_block(buffer, num_samples, [](SampleType in, SampleType lp) { return in - lp; });
     }
 
     /// Process a buffer in place, replacing it with the allpass output.
-    void process_allpass(SampleType* buffer, int num_samples) {
-        process_block(buffer, num_samples,
-                      [](SampleType in, SampleType lp) { return SampleType{2.0f} * lp - in; });
+    void process_allpass(SampleType* buffer, std::size_t num_samples) {
+        run_block(buffer, num_samples,
+                  [](SampleType in, SampleType lp) { return SampleType{2.0f} * lp - in; });
     }
 
     /// Process and return all three outputs at once.
@@ -122,10 +123,6 @@ template <typename SampleType = float> class TptFilterT {
         SampleType ap = lp - hp; // = 2*lp - input
         return {lp, hp, ap};
     }
-
-    /// Number of samples the buffer paths run between denormal snaps of the
-    /// integrator state.
-    static constexpr int kStateSnapInterval = 64;
 
     void reset() {
         state_ = SampleType{0.0f};
@@ -148,14 +145,12 @@ template <typename SampleType = float> class TptFilterT {
     }
 
     template <typename Output>
-    void process_block(SampleType* buffer, int num_samples, Output output) {
+    void run_block(SampleType* buffer, std::size_t num_samples, Output output) {
         const SampleType g = g_;
         const SampleType two_g = two_g_;
         SampleType s = state_;
-        for (int start = 0; start < num_samples; start += kStateSnapInterval) {
-            const int end =
-                num_samples - start < kStateSnapInterval ? num_samples : start + kStateSnapInterval;
-            for (int i = start; i < end; ++i) {
+        for (const auto [begin, end] : snap_chunks(num_samples)) {
+            for (std::size_t i = begin; i < end; ++i) {
                 const SampleType input = buffer[i];
                 const SampleType d = input - s;
                 const SampleType lp = g * d + s;

@@ -20,13 +20,15 @@ namespace pulp::signal {
 ///     with the same sample rate, frequency and resonance, driven with the
 ///     same inputs through LadderFilterT::process() (the default saturator,
 ///     LadderSaturation / kDefaultLadderSaturation), from the same reset
-///     state. Setters have LadderFilterT's semantics, including that
-///     set_sample_rate() takes effect at the next set_frequency() or
-///     set_resonance().
+///     state. One sample rate applies to every voice; set_sample_rate()
+///     recomputes every voice's coefficient at once (LadderFilterT applies a
+///     new rate only at its next set_frequency() or set_resonance(), so match
+///     it by setting the rate before the frequencies). The other setters have
+///     LadderFilterT's semantics.
 ///   - Voices share nothing but storage: changing or resetting one voice
 ///     never affects another.
-///   - process() advances every voice by one sample; process_block() advances
-///     every voice by a block, one buffer per voice.
+///   - process() advances every voice by one sample; process_voices()
+///     advances every voice by a block, one buffer per voice.
 ///   - The per-stage coefficient and the saturator are the ones LadderFilterT
 ///     exposes (stage_coefficient(), saturate()), so a widget or test can
 ///     reproduce a voice without running the bank.
@@ -52,14 +54,19 @@ template <typename SampleType = float, std::size_t Voices = 16> class LadderBank
     static constexpr std::size_t voice_count = Voices;
 
     LadderBankT() {
-        std::fill(std::begin(sample_rate_), std::end(sample_rate_), SampleType{44100.0f});
         std::fill(std::begin(cutoff_), std::end(cutoff_), SampleType{1000.0f});
     }
 
-    /// Set every voice's sample rate (applied by the next frequency or
-    /// resonance change, as in LadderFilterT).
+    /// Set the sample rate every voice runs at, and recompute every voice's
+    /// coefficient for its current frequency.
     void set_sample_rate(SampleType sample_rate) {
-        std::fill(std::begin(sample_rate_), std::end(sample_rate_), sample_rate);
+        sample_rate_ = sample_rate;
+        for (std::size_t v = 0; v < Voices; ++v)
+            update(v);
+    }
+
+    SampleType sample_rate() const {
+        return sample_rate_;
     }
 
     void set_frequency(std::size_t voice, SampleType hz) {
@@ -113,9 +120,9 @@ template <typename SampleType = float, std::size_t Voices = 16> class LadderBank
 
     /// Advance every voice by `num_samples` samples in place, one buffer per
     /// voice (buffers[v] holds voice v's input and receives its output).
-    void process_block(SampleType* const* buffers, int num_samples) {
+    void process_voices(SampleType* const* buffers, std::size_t num_samples) {
         SampleType frame[Voices];
-        for (int n = 0; n < num_samples; ++n) {
+        for (std::size_t n = 0; n < num_samples; ++n) {
             for (std::size_t v = 0; v < Voices; ++v)
                 frame[v] = buffers[v][n];
             process(frame, frame);
@@ -153,10 +160,10 @@ template <typename SampleType = float, std::size_t Voices = 16> class LadderBank
     }
 
     void update(std::size_t voice) {
-        g_[voice] = Filter::stage_coefficient(cutoff_[voice], sample_rate_[voice]);
+        g_[voice] = Filter::stage_coefficient(cutoff_[voice], sample_rate_);
     }
 
-    SampleType sample_rate_[Voices];
+    SampleType sample_rate_ = SampleType{44100.0f};
     SampleType cutoff_[Voices];
     SampleType resonance_[Voices] = {};
     SampleType g_[Voices] = {};

@@ -197,14 +197,14 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class Parametr
             return false;
         if (!prepared())
             return true;
-        std::size_t i = 0;
-        for (; i < frames && transitioning(); ++i)
-            samples[i] = process(samples[i]);
-        if (i == frames)
-            return true;
-        cascades_[active_index_].process(samples + i, frames - i);
-        for (; i < frames; ++i)
-            samples[i] = std::isfinite(samples[i]) ? samples[i] : SampleType{};
+        detail::transition_then_block(
+            frames, [&] { return transitioning(); },
+            [&](std::size_t i) { samples[i] = process(samples[i]); },
+            [&](std::size_t first, std::size_t count) {
+                cascades_[active_index_].process(samples + first, count);
+                for (std::size_t i = first; i < first + count; ++i)
+                    samples[i] = std::isfinite(samples[i]) ? samples[i] : SampleType{};
+            });
         return true;
     }
 

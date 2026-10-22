@@ -271,6 +271,93 @@ struct FastMath {
         return log2(gain) * 6.0205999f; // 20 / log2(10) ≈ 6.0205999
     }
 
+    // Branch-free decibel conversions for per-sample dynamics paths: plain
+    // arithmetic and bit manipulation with no calls and no branches, so a loop
+    // over them auto-vectorizes, unlike the libm calls they replace. Accurate
+    // enough to keep a compressor's gain within a few parts in 10^7 of the
+    // libm path (a residual below -120 dBFS), unlike the coarse log2-based
+    // db_to_gain() / gain_to_db() above.
+
+    /// log10(x) for finite, positive, normal x, within 4 ulps of the correctly
+    /// rounded result (3.47 worst measured), with or without fused multiply-add.
+    /// Other inputs are outside the contract (callers clamp to a positive floor
+    /// first).
+    ///
+    /// x = m * 2^k with m in [sqrt(1/2), sqrt(2)); ln(m) = 2 atanh(s) with
+    /// s = (m - 1) / (m + 1), |s| <= 0.1716, from the odd series
+    /// 2s (1 + s^2/3 + s^4/5 + ...) truncated after s^8/9; the next term is
+    /// below 2e-9 relative, under float resolution.
+    static float log10_accurate(float x) noexcept {
+        constexpr std::uint32_t kSqrtHalfBits = 0x3f3504f3u; // bits of sqrt(1/2)
+        const std::uint32_t offset = std::bit_cast<std::uint32_t>(x) - kSqrtHalfBits;
+        const float k = static_cast<float>(static_cast<std::int32_t>(offset) >> 23);
+        const float m = std::bit_cast<float>((offset & 0x007fffffu) + kSqrtHalfBits);
+        const float f = m - 1.0f; // exact: m is within a factor of 2 of 1
+        const float s = f / (2.0f + f);
+        const float z = s * s;
+        const float series =
+            z * (1.0f / 3.0f + z * (1.0f / 5.0f + z * (1.0f / 7.0f + z * (1.0f / 9.0f))));
+        const float two_s = 2.0f * s;
+        const float ln_m = two_s * series + two_s;
+        // log10(2) and 1/ln(10). The high part of log10(2) has few enough
+        // significant bits that k * hi is exact for every float exponent.
+        constexpr float kLog10TwoHi = 0.30102539062f; // 0x3e9a2000
+        constexpr float kLog10TwoLo = 4.6050390e-06f; // log10(2) - hi
+        constexpr float kInvLn10 = 0.43429448190f;
+        return k * kLog10TwoHi + (ln_m * kInvLn10 + k * kLog10TwoLo);
+    }
+
+    /// 10^x within 1.2e-7 relative of the correctly rounded result, with or
+    /// without fused multiply-add. Results beyond the float range saturate to +inf
+    /// or 0 (through the subnormal range) as std::pow does, and NaN propagates.
+    ///
+    /// 10^x = 2^n * 10^d with n = round(x log2(10)) and d = x - n log10(2),
+    /// |d| <= log10(2) / 2. The reduction is Cody-Waite in the decimal domain:
+    /// log10(2) is split into a high part with few enough significant bits that
+    /// n * hi is exact for every n used, so x - n * hi is exact (Sterbenz) and d
+    /// carries no rounding from the product whether or not the compiler fuses
+    /// multiply-adds. 10^d = e^(d ln 10) is the Taylor series through degree 7
+    /// (truncation below 6e-9 relative). 2^n is applied as two normal-range
+    /// factors so n may run past the float exponent range and the final product
+    /// over- or underflows naturally.
+    static float exp10_accurate(float x) noexcept {
+        constexpr float kLog2Ten = 3.32192809489f;
+        constexpr float kLog10TwoHi = 0.30102539062f; // 0x3e9a2000, 11 significant bits
+        constexpr float kLog10TwoLo = 4.6050390e-06f; // log10(2) - hi
+        constexpr float kLnTen = 2.30258509299f;
+        // Past 10^+/-75 (about 250 octaves) the result is inf or 0 anyway;
+        // clamping there keeps |n| <= 250 (so n * hi stays exact) and each half
+        // of 2^n inside the normal exponent range.
+        const float xc = std::fmin(std::fmax(x, -75.0f), 75.0f);
+        const float n = std::nearbyint(xc * kLog2Ten);
+        const float d = (xc - n * kLog10TwoHi) - n * kLog10TwoLo;
+        const float t = d * kLnTen;
+        const float p =
+            1.0f +
+            t * (1.0f + t * (0.5f + t * (1.0f / 6.0f +
+                                         t * (1.0f / 24.0f +
+                                              t * (1.0f / 120.0f +
+                                                   t * (1.0f / 720.0f + t * (1.0f / 5040.0f)))))));
+        const std::int32_t e = static_cast<std::int32_t>(n);
+        const std::int32_t e_half = e / 2;
+        const float scale_a = std::bit_cast<float>(static_cast<std::uint32_t>(e_half + 127) << 23);
+        const float scale_b =
+            std::bit_cast<float>(static_cast<std::uint32_t>(e - e_half + 127) << 23);
+        const float result = (p * scale_a) * scale_b;
+        return x == x ? result : x;
+    }
+
+    /// 20 log10(gain) for a finite, positive, normal gain (clamp to a floor
+    /// first); within log10_accurate()'s bound.
+    static float gain_to_db_accurate(float gain) noexcept {
+        return 20.0f * log10_accurate(gain);
+    }
+
+    /// 10^(dB / 20), within exp10_accurate()'s bound.
+    static float db_to_gain_accurate(float db) noexcept {
+        return exp10_accurate(db / 20.0f);
+    }
+
     /// Fast reciprocal (1/x) via Newton-Raphson with SSE hint.
     static float rcp(float x) {
         // One Newton-Raphson iteration from initial estimate
@@ -321,13 +408,16 @@ public:
 ///
 /// - `exact`: std::tanh. The reference the others are measured against.
 /// - `accurate`: `FastMath::tanh_accurate`, within 3.0e-7 (3.6e-7 without
-///   fused multiply-add) of std::tanh for
-///   every input. Against the exact-saturator ladder the output residual is
-///   at most -129 dBFS for input up to 0 dBFS, -115.6 dBFS at +10 dBFS drive
-///   and -113.9 dBFS at +20 dBFS (about -134 dB relative to the output);
-///   harmonic and alias levels match to 0.001 dB and resonant ringing
-///   frequency and decay are unchanged (measured with fused multiply-add).
-///   About 2.4x the throughput of std::tanh. This is the default.
+///   fused multiply-add) of std::tanh for every input. Against the
+///   exact-saturator ladder, over cutoffs of 300 Hz to 6 kHz, resonance 0 to
+///   1 and sine input of 110 Hz to 7 kHz at 48 kHz, the pointwise output
+///   difference is at most -126 dBFS for input up to 0 dBFS, -107 dBFS at
+///   +10 dBFS drive and -102 dBFS at +20 dBFS, with or without fused
+///   multiply-add (the worst cases are high resonance, a low input and a high
+///   cutoff, where the recursion amplifies the saturator's error). Harmonic
+///   and alias levels match to 0.001 dB and resonant ringing frequency and
+///   decay are unchanged. About 2.4x the throughput of std::tanh. This is the
+///   default.
 /// - `realtime_efficient`: the Padé `FastMath::tanh`. Its hard clamp at
 ///   |x| = 4, where tanh is still climbing, changes the overdrive character
 ///   (about -63 dBFS pointwise, -69 dBFS in the filtered output at +10 dBFS
@@ -347,6 +437,10 @@ enum class LadderSaturation { exact, accurate, realtime_efficient };
 /// emitter) both route through it, so the per-node bit-exact null test stays
 /// green under any setting.
 #if defined(PULP_SIGNAL_LADDER_SATURATION)
+static_assert(PULP_SIGNAL_LADDER_SATURATION == 0 || PULP_SIGNAL_LADDER_SATURATION == 1 ||
+                  PULP_SIGNAL_LADDER_SATURATION == 2,
+              "PULP_SIGNAL_LADDER_SATURATION must be 0 (exact), 1 (accurate) or "
+              "2 (realtime_efficient)");
 inline constexpr LadderSaturation kDefaultLadderSaturation =
     PULP_SIGNAL_LADDER_SATURATION == 0   ? LadderSaturation::exact
     : PULP_SIGNAL_LADDER_SATURATION == 2 ? LadderSaturation::realtime_efficient
@@ -409,15 +503,6 @@ inline double lipschitz_tanh(double v) noexcept {
 
 namespace detail {
 
-// Branch-free float log10 / exp10 for decibel conversions in per-sample
-// dynamics paths. Both are plain arithmetic and bit manipulation with no calls
-// and no branches, so a loop over them auto-vectorizes, unlike the libm calls
-// they replace. log10_float is within 4 ulps (3.47 worst measured) and exp10_float
-// within 1.2e-7 relative of the correctly rounded result over the documented
-// domain, with or without fused multiply-add, which keeps a compressor's gain
-// within a few parts in 10^7 of the libm path, i.e. a residual below
-// -120 dBFS.
-
 /// `condition ? if_true : if_false` as bit operations. Same value as the
 /// conditional for every input, including NaN payloads and signed zeros, but
 /// with no control flow: GCC with its default -ftrapping-math will not
@@ -448,71 +533,6 @@ inline float tanh_accurate_bits(float x) noexcept {
     const float r = FastMath::tanh_accurate_rational(x, u);
     const float upper = select_bits(r > 1.0f, 1.0f, r);
     return select_bits(upper < -1.0f, -1.0f, upper);
-}
-
-/// log10(x) for finite, positive, normal x, within 4 ulps. Other inputs are
-/// outside the contract (callers clamp to a positive floor first).
-///
-/// x = m * 2^k with m in [sqrt(1/2), sqrt(2)); ln(m) = 2 atanh(s) with
-/// s = (m - 1) / (m + 1), |s| <= 0.1716, from the odd series
-/// 2s (1 + s^2/3 + s^4/5 + ...) truncated after s^8/9; the next term is
-/// below 2e-9 relative, under float resolution.
-inline float log10_float(float x) noexcept {
-    constexpr std::uint32_t kSqrtHalfBits = 0x3f3504f3u; // bits of sqrt(1/2)
-    const std::uint32_t offset = std::bit_cast<std::uint32_t>(x) - kSqrtHalfBits;
-    const float k = static_cast<float>(static_cast<std::int32_t>(offset) >> 23);
-    const float m = std::bit_cast<float>((offset & 0x007fffffu) + kSqrtHalfBits);
-    const float f = m - 1.0f; // exact: m is within a factor of 2 of 1
-    const float s = f / (2.0f + f);
-    const float z = s * s;
-    const float series =
-        z * (1.0f / 3.0f + z * (1.0f / 5.0f + z * (1.0f / 7.0f + z * (1.0f / 9.0f))));
-    const float two_s = 2.0f * s;
-    const float ln_m = two_s * series + two_s;
-    // log10(2) and 1/ln(10). The high part of log10(2) has few enough
-    // significant bits that k * hi is exact for every float exponent.
-    constexpr float kLog10TwoHi = 0.30102539062f; // 0x3e9a2000
-    constexpr float kLog10TwoLo = 4.6050390e-06f; // log10(2) - hi
-    constexpr float kInvLn10 = 0.43429448190f;
-    return k * kLog10TwoHi + (ln_m * kInvLn10 + k * kLog10TwoLo);
-}
-
-/// 10^x. Results beyond the float range saturate to +inf or 0 (through the
-/// subnormal range) as std::pow does, and NaN propagates.
-///
-/// 10^x = 2^n * 10^d with n = round(x log2(10)) and d = x - n log10(2),
-/// |d| <= log10(2) / 2. The reduction is Cody-Waite in the decimal domain:
-/// log10(2) is split into a high part with few enough significant bits that
-/// n * hi is exact for every n used, so x - n * hi is exact (Sterbenz) and d
-/// carries no rounding from the product whether or not the compiler fuses
-/// multiply-adds. 10^d = e^(d ln 10) is the Taylor series through degree 7
-/// (truncation below 6e-9 relative). 2^n is applied as two normal-range
-/// factors so n may run past the float exponent range and the final product
-/// over- or underflows naturally.
-inline float exp10_float(float x) noexcept {
-    constexpr float kLog2Ten = 3.32192809489f;
-    constexpr float kLog10TwoHi = 0.30102539062f; // 0x3e9a2000, 11 significant bits
-    constexpr float kLog10TwoLo = 4.6050390e-06f; // log10(2) - hi
-    constexpr float kLnTen = 2.30258509299f;
-    // Past 10^+/-75 (about 250 octaves) the result is inf or 0 anyway;
-    // clamping there keeps |n| <= 250 (so n * hi stays exact) and each half
-    // of 2^n inside the normal exponent range.
-    const float xc = std::fmin(std::fmax(x, -75.0f), 75.0f);
-    const float n = std::nearbyint(xc * kLog2Ten);
-    const float d = (xc - n * kLog10TwoHi) - n * kLog10TwoLo;
-    const float t = d * kLnTen;
-    const float p =
-        1.0f +
-        t * (1.0f + t * (0.5f + t * (1.0f / 6.0f +
-                                     t * (1.0f / 24.0f +
-                                          t * (1.0f / 120.0f +
-                                               t * (1.0f / 720.0f + t * (1.0f / 5040.0f)))))));
-    const std::int32_t e = static_cast<std::int32_t>(n);
-    const std::int32_t e_half = e / 2;
-    const float scale_a = std::bit_cast<float>(static_cast<std::uint32_t>(e_half + 127) << 23);
-    const float scale_b = std::bit_cast<float>(static_cast<std::uint32_t>(e - e_half + 127) << 23);
-    const float result = (p * scale_a) * scale_b;
-    return x == x ? result : x;
 }
 
 } // namespace detail

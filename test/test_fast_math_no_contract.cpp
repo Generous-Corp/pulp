@@ -39,7 +39,7 @@ TEST_CASE("Branch-free math holds its bounds without fused multiply-add",
     double log10_ulps = 0.0;
     for (float x = 1.0e-10f; x < 1.0e6f; x *= 1.0001f) {
         const double reference = std::log10(static_cast<double>(x));
-        const double err = std::abs(static_cast<double>(detail::log10_float(x)) - reference);
+        const double err = std::abs(static_cast<double>(FastMath::log10_accurate(x)) - reference);
         if (std::abs(reference) >= 1.0e-3)
             log10_ulps = std::max(log10_ulps, err / ulp_of(reference));
     }
@@ -48,12 +48,12 @@ TEST_CASE("Branch-free math holds its bounds without fused multiply-add",
     double exp10_rel = 0.0;
     for (float x = -37.0f; x < 38.0f; x += 1.0e-4f) {
         const double reference = std::pow(10.0, static_cast<double>(x));
-        exp10_rel =
-            std::max(exp10_rel,
-                     std::abs(static_cast<double>(detail::exp10_float(x)) - reference) / reference);
+        exp10_rel = std::max(
+            exp10_rel,
+            std::abs(static_cast<double>(FastMath::exp10_accurate(x)) - reference) / reference);
     }
     CHECK(exp10_rel < 2.0e-7);
-    CHECK(std::isnan(detail::exp10_float(std::numeric_limits<float>::quiet_NaN())));
+    CHECK(std::isnan(FastMath::exp10_accurate(std::numeric_limits<float>::quiet_NaN())));
 
     double tanh_err = 0.0;
     for (std::uint32_t bits = 0; bits < 0x7f800000u; bits += 64) {

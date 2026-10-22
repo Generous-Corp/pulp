@@ -131,16 +131,24 @@ public:
         return input * gain_linear;
     }
 
-    /// Process a block in place; the buffer is also the sidechain.
+    /// Process a block in place; the buffer is also the sidechain. Same as
+    /// process_with_sidechain(buffer, buffer, num_samples).
     void process(SampleType* buffer, int num_samples) {
-        process_block(buffer, buffer, num_samples);
+        run_chunks(buffer, buffer, num_samples);
     }
 
     /// Process a block with a separate sidechain input. Both buffers
     /// must be at least @p num_samples long.
+    ///
+    /// Equivalent to calling process_with_sidechain(SampleType, SampleType)
+    /// per sample, including the reset at a non-finite sample, but run in
+    /// kSnapChunkSamples chunks of three passes each (detector and static
+    /// curve, envelope recursion, gain), so the transcendental work in the
+    /// outer passes vectorizes. The float path computes the same values; the
+    /// envelope's denormal snap runs once per chunk (see run_chunks()).
     void process_with_sidechain(SampleType* buffer, const SampleType* sidechain,
                                 int num_samples) {
-        process_block(buffer, sidechain, num_samples);
+        run_chunks(buffer, sidechain, num_samples);
     }
 
     /// Envelope smoothing coefficients in force for the current parameters and
@@ -225,23 +233,23 @@ private:
         return input_db < threshold - half_knee ? SampleType{0.0f} : upper;
     }
 
-    // Detector magnitude in dB, floored at -200 dB. The float path uses the
-    // branch-free log10 so the block path's detector pass vectorizes.
+    // Detector magnitude in dB, floored at -200 dB. Float uses FastMath's
+    // branch-free conversion so the block path's detector pass vectorizes;
+    // double has no fast path and keeps libm.
     static SampleType level_db(SampleType detector) {
         const SampleType magnitude = std::max(std::abs(detector), SampleType{1e-10f});
         if constexpr (std::is_same_v<SampleType, float>)
-            return SampleType{20.0f} * detail::log10_float(magnitude);
+            return FastMath::gain_to_db_accurate(magnitude);
         else
             return SampleType{20.0f} * std::log10(magnitude);
     }
 
-    // Linear gain for a gain change in dB.
+    // Linear gain for a gain change in dB (FastMath for float, as above).
     static SampleType db_to_gain(SampleType db) {
-        const SampleType exponent = db / SampleType{20.0f};
         if constexpr (std::is_same_v<SampleType, float>)
-            return detail::exp10_float(exponent);
+            return FastMath::db_to_gain_accurate(db);
         else
-            return std::pow(SampleType{10.0f}, exponent);
+            return std::pow(SampleType{10.0f}, db / SampleType{20.0f});
     }
 
     static SampleType ballistic_coeff(SampleType time_ms, SampleType sample_rate) {
@@ -256,18 +264,19 @@ private:
         release_coeff_ = ballistic_coeff(params_.release_ms, sample_rate_);
     }
 
-    // Samples per pass of the block path. Each chunk runs the detector and
-    // static curve over the whole chunk, then the envelope recursion, then the
-    // gain stage, so the transcendental calls in the outer passes are
-    // independent of one another and of the recursion.
-    static constexpr int kBlockChunk = 64;
-
-    void process_block(SampleType* buffer, const SampleType* sidechain, int num_samples) {
-        SampleType level[kBlockChunk];
-        for (int start = 0; start < num_samples; start += kBlockChunk) {
-            const int n = num_samples - start < kBlockChunk ? num_samples - start : kBlockChunk;
-            SampleType* x = buffer + start;
-            const SampleType* sc = sidechain + start;
+    // The block path behind process(buffer) and process_with_sidechain(buffer,
+    // sidechain). Each kSnapChunkSamples chunk runs the detector and static
+    // curve over the whole chunk, then the envelope recursion, then the gain
+    // stage, so the transcendental calls in the outer passes are independent
+    // of one another and of the recursion.
+    void run_chunks(SampleType* buffer, const SampleType* sidechain, int num_samples) {
+        if (num_samples <= 0)
+            return;
+        SampleType level[kSnapChunkSamples];
+        for (const auto [begin, end] : snap_chunks(static_cast<std::size_t>(num_samples))) {
+            const int n = static_cast<int>(end - begin);
+            SampleType* x = buffer + begin;
+            const SampleType* sc = sidechain + begin;
 
             // A non-finite sample resets signal history at that exact sample,
             // which the per-sample path already implements. The scan is a

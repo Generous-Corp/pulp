@@ -1,6 +1,8 @@
 #pragma once
 
+#include <pulp/runtime/dispatch_count.hpp>
 #include <pulp/signal/denormal.hpp>
+#include <pulp/simd/lanes.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -214,21 +216,26 @@ public:
 
     // Process a buffer in-place.
     //
-    // For float the block path runs Direct Form I with its recursive state
-    // and arithmetic in double, written so the loop-carried dependency from
-    // one output to the next is a single multiply-add:
+    // The block path runs the same per-pass form selection as process_chain()
+    // (a single filter is a one-section pass), so a filter computes the same
+    // output whether it is processed alone or as a one-section chain.
+    //
+    // For float that form is Direct Form I with its recursive state and
+    // arithmetic in double, written so the loop-carried dependency from one
+    // output to the next is a single multiply-add:
     //     y = -a1 y[n-1] + ((b0 x + b1 x[n-1]) + (b2 x[n-2] - a2 y[n-2]))
     // (y[n-2] reaches y two samples later, so it is off the critical path).
     // That is about twice as fast as the sample path's DF2T order and, with a
-    // double accumulator, far more accurate: over the RBJ type x frequency x
-    // Q x gain grid at 44.1/48/96 kHz with program and white-noise input
-    // (2112 cases) its RMS error against an exact (float64) DF2T is never
-    // above the sample path's and on average 23 dB below it, with or without
-    // fused multiply-add. Block and sample outputs are therefore not
-    // bit-identical; they differ by the sample path's own float round-off.
+    // double accumulator, more accurate: over the RBJ type x frequency x Q x
+    // gain grid at 44.1/48/96 kHz with program and white-noise input (2112
+    // cases) its RMS error against an exact (float64) DF2T is never above the
+    // sample path's and on average 45 dB below it (47 dB without fused
+    // multiply-add). Block and sample outputs are therefore not bit-identical:
+    // they differ by the sample path's own float round-off, at most -47.9 dBFS
+    // over that grid with fused multiply-add and -44.7 dBFS without.
     //
     // Double SampleType keeps a DF2T block path: the feedback-last order
-    //     y = b0 x + s1;  s1 = (b1 x + s2) - a1 y;  s2 = b2 x - a2 y
+    //     y = b0 x + s1;  s1 = (-a1) y + (b1 x + s2);  s2 = b2 x - a2 y
     // for designs whose poles are at most kFeedbackLastMaxPoleRadius from the
     // origin, and the sample path's own order (bit-identical to it) above.
     //
@@ -241,15 +248,12 @@ public:
     //
     // Coefficients and state are held in locals: member state would otherwise
     // be stored and reloaded every sample because the buffer may alias it.
-    // The denormal snap is applied to the recursive state every
-    // kStateSnapInterval samples and at the end of the call instead of after
-    // every sample: it only alters states below 1e-15, and a state that starts
-    // a chunk at or above 1e-15 cannot decay into the float subnormal range
-    // within one chunk unless both poles are inside |z| < 0.44. Inside that
-    // radius, or when the input itself is subnormal, the state can sit in the
-    // subnormal range (rounding can hold it in a one-ulp cycle) until the next
-    // snap. Subnormal residency is therefore bounded by one chunk however long
-    // the buffer is.
+    // The denormal snap is applied to the recursive state once per
+    // kSnapChunkSamples chunk (see snap_chunks()) instead of after
+    // every sample; it only alters states below 1e-15. With both poles inside
+    // |z| < 0.44, or with subnormal input, the state can sit in the subnormal
+    // range (rounding can hold it in a one-ulp cycle) until the next snap, so
+    // subnormal residency is bounded by one chunk however long the buffer is.
     void process(SampleType* buffer, int num_samples) {
         if (num_samples <= 0)
             return;
@@ -262,25 +266,19 @@ public:
     // calling that filter's block process(); the filters may have different
     // coefficients. Both buffers must hold num_samples samples.
     static void process_stereo(BiquadT& left, BiquadT& right, SampleType* left_buffer,
-                               SampleType* right_buffer, int num_samples) {
-        if (num_samples <= 0)
+                               SampleType* right_buffer, std::size_t num_samples) {
+        if (num_samples == 0)
             return;
         // Below about 64 samples two separate calls already overlap in the
-        // out-of-order window and the lane path measured no faster.
-        if (num_samples < kStereoLaneMinSamples) {
-            left.process(left_buffer, num_samples);
-            right.process(right_buffer, num_samples);
+        // out-of-order window and the lane path measured no faster. Filters
+        // whose passes take different forms cannot share lanes.
+        if (!simd::kHasVectorLanes || num_samples < kStereoLaneMinSamples ||
+            pass_form(&left, 1) != pass_form(&right, 1)) {
+            dispatch_fixed<1>(&left, nullptr, left_buffer, nullptr, num_samples);
+            dispatch_fixed<1>(&right, nullptr, right_buffer, nullptr, num_samples);
             return;
         }
-#if defined(__GNUC__) || defined(__clang__)
-        if (pass_form(&left, 1) == pass_form(&right, 1)) {
-            dispatch_fixed<1>(&left, &right, left_buffer, right_buffer,
-                              static_cast<std::size_t>(num_samples));
-            return;
-        }
-#endif
-        left.process(left_buffer, num_samples);
-        right.process(right_buffer, num_samples);
+        dispatch_fixed<1>(&left, &right, left_buffer, right_buffer, num_samples);
     }
 
     /// Run a chain of sections (a cascade: each section's output feeds the
@@ -292,56 +290,50 @@ public:
     /// that execute concurrently instead of one section's whole buffer waiting
     /// on its own feedback latency (pipeline interleaving). Each pass picks
     /// the fastest form that meets the block path's accuracy contract (see
-    /// process(SampleType*, int)):
+    /// process(SampleType*, int)); a single filter's block path is the
+    /// one-section case of the same choice:
     ///   - float passes of up to kWideStateMaxSections sections run the DF1
     ///     double-state form, with the signal kept in double between the
     ///     sections of the pass;
-    ///   - longer passes run the feedback-last DF2T order when every section's
-    ///     largest pole radius is at most kFeedbackLastMaxPoleRadius (its RMS
-    ///     error then stays within +2.8 dB of the sample path's), and the
-    ///     sample path's order, bit-identical to chaining the sections'
-    ///     per-sample process(), otherwise.
+    ///   - longer passes, and every double pass, run the feedback-last DF2T
+    ///     order when every section's largest pole radius is at most
+    ///     kFeedbackLastMaxPoleRadius (its RMS error then stays within +2.8 dB
+    ///     of the sample path's; per section it differs from the sample path
+    ///     by at most -71 dBFS over the RBJ grid), and the sample path's
+    ///     order, bit-identical to chaining the sections' per-sample
+    ///     process(), otherwise.
     /// Measured on Apple M3 (ns per sample, contraction on): sample order
     /// 3.8 / 6.2 / 4.2 / 4.7 for 1 / 3 / 6 / 8 sections, feedback-last
     /// 2.0 / 2.3 / 2.7 / 3.2, DF1 double 1.9 / 2.2 / 3.7 / 6.0.
     static void process_chain(BiquadT* sections, std::size_t count, SampleType* buffer,
                               std::size_t num_samples) noexcept {
-        std::size_t first = 0;
-        while (first < count) {
-            const std::size_t n =
-                count - first < kChainSectionsPerPass ? count - first : kChainSectionsPerPass;
+        for (std::size_t first = 0; first < count; first += kChainSectionsPerPass) {
+            const std::size_t n = std::min(count - first, kChainSectionsPerPass);
             dispatch_pass(n, sections + first, nullptr, buffer, nullptr, num_samples);
-            first += n;
         }
     }
 
     /// process_chain() for two channels at once, each through its own chain
     /// of `count` sections, with the channels in the lanes of one vector.
     /// Each channel's output is bit-identical to process_chain() on it alone.
-    /// Compilers without GNU vector extensions run the two chains in turn.
+    /// Compilers without vector lanes (simd::kHasVectorLanes) run the two
+    /// chains in turn.
     static void process_chain_stereo(BiquadT* left, BiquadT* right, std::size_t count,
                                      SampleType* left_buffer, SampleType* right_buffer,
                                      std::size_t num_samples) noexcept {
-#if defined(__GNUC__) || defined(__clang__)
-        std::size_t first = 0;
-        while (first < count) {
-            const std::size_t n =
-                count - first < kChainSectionsPerPass ? count - first : kChainSectionsPerPass;
+        for (std::size_t first = 0; first < count; first += kChainSectionsPerPass) {
+            const std::size_t n = std::min(count - first, kChainSectionsPerPass);
             // The two channels' passes must take the same form to share
             // lanes; otherwise they run one after the other.
-            if (pass_form(left + first, n) == pass_form(right + first, n)) {
+            if (simd::kHasVectorLanes &&
+                pass_form(left + first, n) == pass_form(right + first, n)) {
                 dispatch_pass(n, left + first, right + first, left_buffer, right_buffer,
                               num_samples);
             } else {
                 dispatch_pass(n, left + first, nullptr, left_buffer, nullptr, num_samples);
                 dispatch_pass(n, right + first, nullptr, right_buffer, nullptr, num_samples);
             }
-            first += n;
         }
-#else
-        process_chain(left, count, left_buffer, num_samples);
-        process_chain(right, count, right_buffer, num_samples);
-#endif
     }
 
     /// Sections process_chain() runs together in one sample-major pass. A
@@ -355,7 +347,7 @@ public:
     static constexpr std::size_t kWideStateMaxSections = 4;
 
     // Shortest call process_stereo() runs in vector lanes.
-    static constexpr int kStereoLaneMinSamples = 64;
+    static constexpr std::size_t kStereoLaneMinSamples = 64;
 
     // Longer passes (and double SampleType) use the feedback-last DF2T order
     // only when every section's largest pole radius is at most this. Near the
@@ -365,10 +357,6 @@ public:
     // and high-Q bells); at or below this radius it stayed within +2.8 dB
     // over 5,200 design and stimulus cases.
     static constexpr double kFeedbackLastMaxPoleRadius = 0.995;
-
-    // Number of samples the buffer path runs between denormal snaps of the
-    // recursive state.
-    static constexpr int kStateSnapInterval = 64;
 
     // Reset state (call on discontinuities)
     void reset() {
@@ -381,7 +369,8 @@ public:
   private:
     enum class BlockForm { sample_order, feedback_last, wide_df1 };
 
-    // The form a pass of `count` sections takes (see process_chain()).
+    // The form a pass of `count` sections takes; process() and
+    // process_chain() make the same choice per pass (see process_chain()).
     static BlockForm pass_form(const BiquadT* sections, std::size_t count) noexcept {
         if constexpr (std::is_same_v<SampleType, float>) {
             if (count <= kWideStateMaxSections)
@@ -393,8 +382,17 @@ public:
         return BlockForm::feedback_last;
     }
 
-    // Run one pass of a compile-time section count; `right` non-null means a
-    // stereo pass in vector lanes.
+    // Run one pass of `count` sections; `right` non-null runs a second
+    // channel's sections in the other lane.
+    static void dispatch_pass(std::size_t count, BiquadT* left, BiquadT* right,
+                              SampleType* left_buffer, SampleType* right_buffer,
+                              std::size_t num_samples) noexcept {
+        runtime::dispatch_count<kChainSectionsPerPass>(count, [&](auto sections) {
+            dispatch_fixed<decltype(sections)::value>(left, right, left_buffer, right_buffer,
+                                                      num_samples);
+        });
+    }
+
     template <std::size_t Count>
     static void dispatch_fixed(BiquadT* left, BiquadT* right, SampleType* left_buffer,
                                SampleType* right_buffer, std::size_t num_samples) noexcept {
@@ -411,243 +409,170 @@ public:
                         ok = right[k].prepare_history() && ok;
                 }
                 if (ok) {
-                    if (right)
-                        pair_pass<Count, BlockForm::wide_df1>(left, right, left_buffer,
-                                                              right_buffer, num_samples);
-                    else
-                        scalar_pass<Count, BlockForm::wide_df1>(left, left_buffer, num_samples);
+                    run_pass_lanes<Count, BlockForm::wide_df1>(left, right, left_buffer,
+                                                               right_buffer, num_samples);
                     return;
                 }
                 form = BlockForm::sample_order;
             }
         }
-        if (form == BlockForm::feedback_last) {
-            if (right)
-                pair_pass<Count, BlockForm::feedback_last>(left, right, left_buffer, right_buffer,
+        if (form == BlockForm::feedback_last)
+            run_pass_lanes<Count, BlockForm::feedback_last>(left, right, left_buffer, right_buffer,
+                                                            num_samples);
+        else
+            run_pass_lanes<Count, BlockForm::sample_order>(left, right, left_buffer, right_buffer,
                                                            num_samples);
-            else
-                scalar_pass<Count, BlockForm::feedback_last>(left, left_buffer, num_samples);
-        } else {
-            if (right)
-                pair_pass<Count, BlockForm::sample_order>(left, right, left_buffer, right_buffer,
-                                                          num_samples);
-            else
-                scalar_pass<Count, BlockForm::sample_order>(left, left_buffer, num_samples);
-        }
     }
 
-    static void dispatch_pass(std::size_t count, BiquadT* l, BiquadT* r, SampleType* lb,
-                              SampleType* rb, std::size_t n) noexcept {
-        // clang-format off
-        switch (count) {
-#define PULP_BIQUAD_PASS_CASE(C)                                                                   \
-    case C:                                                                                        \
-        dispatch_fixed<C>(l, r, lb, rb, n);                                                        \
-        return;
-            PULP_BIQUAD_PASS_CASE(1)  PULP_BIQUAD_PASS_CASE(2)  PULP_BIQUAD_PASS_CASE(3)
-            PULP_BIQUAD_PASS_CASE(4)  PULP_BIQUAD_PASS_CASE(5)  PULP_BIQUAD_PASS_CASE(6)
-            PULP_BIQUAD_PASS_CASE(7)  PULP_BIQUAD_PASS_CASE(8)  PULP_BIQUAD_PASS_CASE(9)
-            PULP_BIQUAD_PASS_CASE(10) PULP_BIQUAD_PASS_CASE(11) PULP_BIQUAD_PASS_CASE(12)
-            PULP_BIQUAD_PASS_CASE(13) PULP_BIQUAD_PASS_CASE(14) PULP_BIQUAD_PASS_CASE(15)
-#undef PULP_BIQUAD_PASS_CASE
-        default:
-            dispatch_fixed<16>(l, r, lb, rb, n);
+    // One channel in a scalar, or two in the lanes of one vector where the
+    // compiler has them.
+    template <std::size_t Count, BlockForm Form>
+    static void run_pass_lanes(BiquadT* left, BiquadT* right, SampleType* left_buffer,
+                               SampleType* right_buffer, std::size_t num_samples) noexcept {
+        if (right == nullptr) {
+            BiquadT* filters[1] = {left};
+            SampleType* buffers[1] = {left_buffer};
+            run_pass<Count, Form, 1>(filters, buffers, num_samples);
             return;
         }
-        // clang-format on
-    }
-
-    // One section's recurrence on a lane type V (a scalar or a vector of
-    // lanes) with DF2T state.
-    template <BlockForm Form, typename V>
-    static V df2t_step(V x, V b0, V b1, V b2, V a1, V neg_a1, V a2, V& s1, V& s2) noexcept {
-        const V output = b0 * x + s1;
-        if constexpr (Form == BlockForm::feedback_last) {
-            const V t1 = b1 * x + s2;
-            const V t2 = b2 * x;
-            s1 = neg_a1 * output + t1;
-            s2 = t2 - a2 * output;
+        if constexpr (simd::kHasVectorLanes) {
+            BiquadT* filters[2] = {left, right};
+            SampleType* buffers[2] = {left_buffer, right_buffer};
+            run_pass<Count, Form, 2>(filters, buffers, num_samples);
         } else {
-            (void)neg_a1;
-            s1 = b1 * x - a1 * output + s2;
-            s2 = b2 * x - a2 * output;
-        }
-        return output;
-    }
-
-    // One section's DF1 recurrence on a wide lane type W.
-    template <typename W>
-    static W df1_step(W x, W b0, W b1, W b2, W na1, W na2, W& x1, W& x2, W& y1, W& y2) noexcept {
-        const W feed = (b0 * x + b1 * x1) + (b2 * x2 + na2 * y2);
-        const W y = na1 * y1 + feed;
-        x2 = x1;
-        x1 = x;
-        y2 = y1;
-        y1 = y;
-        return y;
-    }
-
-    template <std::size_t Count, BlockForm Form>
-    static void scalar_pass(BiquadT* sec, SampleType* buffer, std::size_t num_samples) noexcept {
-        constexpr std::size_t kSnap = static_cast<std::size_t>(kStateSnapInterval);
-        if constexpr (Form == BlockForm::wide_df1) {
-            double b0[Count], b1[Count], b2[Count], na1[Count], na2[Count];
-            double x1[Count], x2[Count], y1[Count], y2[Count];
-            for (std::size_t k = 0; k < Count; ++k) {
-                b0[k] = sec[k].b0_;
-                b1[k] = sec[k].b1_;
-                b2[k] = sec[k].b2_;
-                na1[k] = -static_cast<double>(sec[k].a1_);
-                na2[k] = -static_cast<double>(sec[k].a2_);
-                x1[k] = sec[k].hx1_;
-                x2[k] = sec[k].hx2_;
-                y1[k] = sec[k].hy1_;
-                y2[k] = sec[k].hy2_;
-            }
-            for (std::size_t start = 0; start < num_samples; start += kSnap) {
-                const std::size_t end = num_samples - start < kSnap ? num_samples : start + kSnap;
-                for (std::size_t i = start; i < end; ++i) {
-                    double v = buffer[i];
-                    for (std::size_t k = 0; k < Count; ++k)
-                        v = df1_step(v, b0[k], b1[k], b2[k], na1[k], na2[k], x1[k], x2[k], y1[k],
-                                     y2[k]);
-                    buffer[i] = static_cast<SampleType>(v);
-                }
-                for (std::size_t k = 0; k < Count; ++k) {
-                    y1[k] = snap_to_zero(y1[k]);
-                    y2[k] = snap_to_zero(y2[k]);
-                }
-            }
-            for (std::size_t k = 0; k < Count; ++k)
-                sec[k].store_history(x1[k], x2[k], y1[k], y2[k]);
-        } else {
-            SampleType b0[Count], b1[Count], b2[Count], a1[Count], na1[Count], a2[Count], s1[Count],
-                s2[Count];
-            for (std::size_t k = 0; k < Count; ++k) {
-                b0[k] = sec[k].b0_;
-                b1[k] = sec[k].b1_;
-                b2[k] = sec[k].b2_;
-                a1[k] = sec[k].a1_;
-                na1[k] = -sec[k].a1_;
-                a2[k] = sec[k].a2_;
-                s1[k] = sec[k].s1_;
-                s2[k] = sec[k].s2_;
-            }
-            for (std::size_t start = 0; start < num_samples; start += kSnap) {
-                const std::size_t end = num_samples - start < kSnap ? num_samples : start + kSnap;
-                for (std::size_t i = start; i < end; ++i) {
-                    SampleType x = buffer[i];
-                    for (std::size_t k = 0; k < Count; ++k)
-                        x = df2t_step<Form>(x, b0[k], b1[k], b2[k], a1[k], na1[k], a2[k], s1[k],
-                                            s2[k]);
-                    buffer[i] = x;
-                }
-                for (std::size_t k = 0; k < Count; ++k) {
-                    s1[k] = snap_to_zero(s1[k]);
-                    s2[k] = snap_to_zero(s2[k]);
-                }
-            }
-            for (std::size_t k = 0; k < Count; ++k) {
-                sec[k].s1_ = s1[k];
-                sec[k].s2_ = s2[k];
-                sec[k].history_valid_ = false;
-            }
+            BiquadT* filters[2] = {left, right};
+            SampleType* buffers[2] = {left_buffer, right_buffer};
+            for (std::size_t lane = 0; lane < 2; ++lane)
+                run_pass<Count, Form, 1>(filters + lane, buffers + lane, num_samples);
         }
     }
 
-#if defined(__GNUC__) || defined(__clang__)
-    // Two lanes; element-wise arithmetic in each lane is the same scalar
-    // operation sequence as scalar_pass(), so the lanes match it bit for bit.
-    using Pair [[gnu::vector_size(2 * sizeof(SampleType))]] = SampleType;
-    using WidePair [[gnu::vector_size(2 * sizeof(double))]] = double;
+    // The value a pass computes in: SampleType for the DF2T forms, double for
+    // DF1; `Width` channels side by side.
+    template <BlockForm Form>
+    using PassElement = std::conditional_t<Form == BlockForm::wide_df1, double, SampleType>;
 
-    template <std::size_t Count, BlockForm Form>
-    static void pair_pass(BiquadT* l, BiquadT* r, SampleType* lb, SampleType* rb,
-                          std::size_t num_samples) noexcept {
-        constexpr std::size_t kSnap = static_cast<std::size_t>(kStateSnapInterval);
-        if constexpr (Form == BlockForm::wide_df1) {
-            WidePair b0[Count], b1[Count], b2[Count], na1[Count], na2[Count];
-            WidePair x1[Count], x2[Count], y1[Count], y2[Count];
-            for (std::size_t k = 0; k < Count; ++k) {
-                b0[k] = WidePair{static_cast<double>(l[k].b0_), static_cast<double>(r[k].b0_)};
-                b1[k] = WidePair{static_cast<double>(l[k].b1_), static_cast<double>(r[k].b1_)};
-                b2[k] = WidePair{static_cast<double>(l[k].b2_), static_cast<double>(r[k].b2_)};
-                na1[k] = WidePair{-static_cast<double>(l[k].a1_), -static_cast<double>(r[k].a1_)};
-                na2[k] = WidePair{-static_cast<double>(l[k].a2_), -static_cast<double>(r[k].a2_)};
-                x1[k] = WidePair{l[k].hx1_, r[k].hx1_};
-                x2[k] = WidePair{l[k].hx2_, r[k].hx2_};
-                y1[k] = WidePair{l[k].hy1_, r[k].hy1_};
-                y2[k] = WidePair{l[k].hy2_, r[k].hy2_};
-            }
-            for (std::size_t start = 0; start < num_samples; start += kSnap) {
-                const std::size_t end = num_samples - start < kSnap ? num_samples : start + kSnap;
-                for (std::size_t i = start; i < end; ++i) {
-                    WidePair v = {static_cast<double>(lb[i]), static_cast<double>(rb[i])};
-                    for (std::size_t k = 0; k < Count; ++k)
-                        v = df1_step(v, b0[k], b1[k], b2[k], na1[k], na2[k], x1[k], x2[k], y1[k],
-                                     y2[k]);
-                    lb[i] = static_cast<SampleType>(v[0]);
-                    rb[i] = static_cast<SampleType>(v[1]);
-                }
-                for (std::size_t k = 0; k < Count; ++k) {
-                    for (int lane = 0; lane < 2; ++lane) {
-                        y1[k][lane] = snap_to_zero(y1[k][lane]);
-                        y2[k][lane] = snap_to_zero(y2[k][lane]);
-                    }
-                }
-            }
-            for (std::size_t k = 0; k < Count; ++k) {
-                l[k].store_history(x1[k][0], x2[k][0], y1[k][0], y2[k][0]);
-                r[k].store_history(x1[k][1], x2[k][1], y1[k][1], y2[k][1]);
-            }
-        } else {
-            Pair b0[Count], b1[Count], b2[Count], a1[Count], na1[Count], a2[Count], s1[Count],
-                s2[Count];
-            for (std::size_t k = 0; k < Count; ++k) {
-                b0[k] = Pair{l[k].b0_, r[k].b0_};
-                b1[k] = Pair{l[k].b1_, r[k].b1_};
-                b2[k] = Pair{l[k].b2_, r[k].b2_};
-                a1[k] = Pair{l[k].a1_, r[k].a1_};
-                na1[k] = Pair{-l[k].a1_, -r[k].a1_};
-                a2[k] = Pair{l[k].a2_, r[k].a2_};
-                s1[k] = Pair{l[k].s1_, r[k].s1_};
-                s2[k] = Pair{l[k].s2_, r[k].s2_};
-            }
-            for (std::size_t start = 0; start < num_samples; start += kSnap) {
-                const std::size_t end = num_samples - start < kSnap ? num_samples : start + kSnap;
-                for (std::size_t i = start; i < end; ++i) {
-                    Pair v = {lb[i], rb[i]};
-                    for (std::size_t k = 0; k < Count; ++k)
-                        v = df2t_step<Form>(v, b0[k], b1[k], b2[k], a1[k], na1[k], a2[k], s1[k],
-                                            s2[k]);
-                    lb[i] = v[0];
-                    rb[i] = v[1];
-                }
-                for (std::size_t k = 0; k < Count; ++k) {
-                    for (int lane = 0; lane < 2; ++lane) {
-                        s1[k][lane] = snap_to_zero(s1[k][lane]);
-                        s2[k][lane] = snap_to_zero(s2[k][lane]);
-                    }
-                }
-            }
-            for (std::size_t k = 0; k < Count; ++k) {
-                l[k].s1_ = s1[k][0];
-                l[k].s2_ = s2[k][0];
-                r[k].s1_ = s1[k][1];
-                r[k].s2_ = s2[k][1];
-                l[k].history_valid_ = false;
-                r[k].history_valid_ = false;
-            }
-        }
-    }
-#else
-    template <std::size_t Count, BlockForm Form>
-    static void pair_pass(BiquadT* l, BiquadT* r, SampleType* lb, SampleType* rb,
-                          std::size_t num_samples) noexcept {
-        scalar_pass<Count, Form>(l, lb, num_samples);
-        scalar_pass<Count, Form>(r, rb, num_samples);
-    }
+    template <typename E, std::size_t Width> struct PassLanes {
+        using type = E;
+    };
+#if PULP_SIMD_HAS_VECTOR_LANES
+    template <typename E> struct PassLanes<E, 2> {
+        using type = simd::Lanes<E, 2>;
+    };
 #endif
+
+    // One section's recurrence on a lane type V. DF2T state is (s1, s2) in
+    // (z0, z1):
+    //   sample order:  y = b0 x + s1; s1 = b1 x - a1 y + s2; s2 = b2 x - a2 y
+    //   feedback last: the same with s1 = (-a1) y + (b1 x + s2), so the only
+    //                  operation after y is one multiply-add;
+    // DF1 (double) keeps (x1, x2, y1, y2) in (z0, z1, z2, z3):
+    //   y = (-a1) y1 + ((b0 x + b1 x1) + (b2 x2 + (-a2) y2)).
+    // a1 and a2 arrive in the sign the form's recurrence uses (see
+    // run_pass()).
+    template <BlockForm Form, typename V>
+    static V step(V x, V b0, V b1, V b2, V a1, V a2, V& z0, V& z1, V& z2, V& z3) noexcept {
+        if constexpr (Form == BlockForm::wide_df1) {
+            const V feed = (b0 * x + b1 * z0) + (b2 * z1 + a2 * z3);
+            const V y = a1 * z2 + feed;
+            z1 = z0;
+            z0 = x;
+            z3 = z2;
+            z2 = y;
+            return y;
+        } else if constexpr (Form == BlockForm::feedback_last) {
+            (void)z2;
+            (void)z3;
+            const V y = b0 * x + z0;
+            const V t1 = b1 * x + z1;
+            const V t2 = b2 * x;
+            z0 = a1 * y + t1;
+            z1 = t2 - a2 * y;
+            return y;
+        } else {
+            (void)z2;
+            (void)z3;
+            const V y = b0 * x + z0;
+            z0 = b1 * x - a1 * y + z1;
+            z1 = b2 * x - a2 * y;
+            return y;
+        }
+    }
+
+    // Snap each lane of a recursive state value.
+    template <typename V> static void snap_lanes(V& v) noexcept {
+        for (std::size_t lane = 0; lane < simd::lane_count<V>; ++lane)
+            simd::set_lane(v, lane, snap_to_zero(simd::get_lane(v, lane)));
+    }
+
+    // A sample-major pass of Count sections over Width channels, coefficients
+    // and state in local arrays the compiler keeps in registers (separate
+    // arrays per field measured faster than an array of per-section structs
+    // once a stereo pass spills). Every lane runs the scalar operation
+    // sequence, so a channel's output does not depend on Width.
+    template <std::size_t Count, BlockForm Form, std::size_t Width>
+    static void run_pass(BiquadT* const* filters, SampleType* const* buffers,
+                         std::size_t num_samples) noexcept {
+        using E = PassElement<Form>;
+        using V = typename PassLanes<E, Width>::type;
+        constexpr bool df1 = Form == BlockForm::wide_df1;
+        V b0[Count], b1[Count], b2[Count], a1[Count], a2[Count];
+        V z0[Count], z1[Count], z2[Count], z3[Count];
+        for (std::size_t k = 0; k < Count; ++k) {
+            for (std::size_t lane = 0; lane < Width; ++lane) {
+                const BiquadT& f = filters[lane][k];
+                simd::set_lane(b0[k], lane, static_cast<E>(f.b0_));
+                simd::set_lane(b1[k], lane, static_cast<E>(f.b1_));
+                simd::set_lane(b2[k], lane, static_cast<E>(f.b2_));
+                if constexpr (df1) {
+                    simd::set_lane(a1[k], lane, -static_cast<double>(f.a1_));
+                    simd::set_lane(a2[k], lane, -static_cast<double>(f.a2_));
+                    simd::set_lane(z0[k], lane, f.hx1_);
+                    simd::set_lane(z1[k], lane, f.hx2_);
+                    simd::set_lane(z2[k], lane, f.hy1_);
+                    simd::set_lane(z3[k], lane, f.hy2_);
+                } else {
+                    simd::set_lane(a1[k], lane, Form == BlockForm::feedback_last ? -f.a1_ : f.a1_);
+                    simd::set_lane(a2[k], lane, f.a2_);
+                    simd::set_lane(z0[k], lane, f.s1_);
+                    simd::set_lane(z1[k], lane, f.s2_);
+                    z2[k] = z3[k] = V{};
+                }
+            }
+        }
+        for (const auto [begin, end] : snap_chunks(num_samples)) {
+            for (std::size_t i = begin; i < end; ++i) {
+                V v;
+                if constexpr (Width == 1)
+                    v = static_cast<E>(buffers[0][i]);
+                else
+                    v = V{static_cast<E>(buffers[0][i]), static_cast<E>(buffers[1][i])};
+                for (std::size_t k = 0; k < Count; ++k)
+                    v = step<Form>(v, b0[k], b1[k], b2[k], a1[k], a2[k], z0[k], z1[k], z2[k],
+                                   z3[k]);
+                for (std::size_t lane = 0; lane < Width; ++lane)
+                    buffers[lane][i] = static_cast<SampleType>(simd::get_lane(v, lane));
+            }
+            // The recursive state: (s1, s2) for DF2T, (y1, y2) for DF1.
+            for (std::size_t k = 0; k < Count; ++k) {
+                snap_lanes(df1 ? z2[k] : z0[k]);
+                snap_lanes(df1 ? z3[k] : z1[k]);
+            }
+        }
+        for (std::size_t k = 0; k < Count; ++k) {
+            for (std::size_t lane = 0; lane < Width; ++lane) {
+                BiquadT& f = filters[lane][k];
+                if constexpr (df1) {
+                    f.store_history(simd::get_lane(z0[k], lane), simd::get_lane(z1[k], lane),
+                                    simd::get_lane(z2[k], lane), simd::get_lane(z3[k], lane));
+                } else {
+                    f.s1_ = simd::get_lane(z0[k], lane);
+                    f.s2_ = simd::get_lane(z1[k], lane);
+                    f.history_valid_ = false;
+                }
+            }
+        }
+    }
 
     // Make the DF1 history describe the current DF2T state: if the last
     // writer was the sample path or a coefficient change, derive an

@@ -28,6 +28,25 @@ enum class SosCascadeTransition {
     preserve_state,
 };
 
+namespace detail {
+
+/// The block path the cascade EQs share: a design transition (crossfade or
+/// coefficient ramp) runs sample by sample through `sample(i)` while
+/// `transitioning()` holds; once it has finished, the rest of the block goes
+/// to `block(first, count)` in one call. A transition never starts inside a
+/// block, so the split happens at most once.
+template <typename Transitioning, typename Sample, typename Block>
+inline void transition_then_block(std::size_t frames, Transitioning&& transitioning,
+                                  Sample&& sample, Block&& block) {
+    std::size_t i = 0;
+    for (; i < frames && transitioning(); ++i)
+        sample(i);
+    if (i < frames)
+        block(i, frames - i);
+}
+
+} // namespace detail
+
 /// Executes a bounded cascade of normalized second-order sections (SOS).
 ///
 /// This class deliberately accepts only BiquadCoefficientsT sections. It is not
@@ -99,9 +118,11 @@ template <typename SampleType = float, std::size_t MaxSections = 16> class SosCa
         return input;
     }
 
-    /// Process a buffer in place through BiquadT::process_chain(): the output
-    /// is identical to the sample path while the states are at or above
-    /// 1e-15.
+    /// Process a buffer in place through BiquadT::process_chain(). The output
+    /// matches the sample path to the Biquad block path's accuracy contract
+    /// (see BiquadT::process_chain()): it is not bit-identical, but its error
+    /// against an exact cascade is never more than 3 dB (RMS) above the
+    /// sample path's.
     void process(SampleType* buffer, std::size_t num_samples) noexcept {
         BiquadT<SampleType>::process_chain(sections_.data(), size_, buffer, num_samples);
     }

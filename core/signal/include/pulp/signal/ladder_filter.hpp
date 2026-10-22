@@ -4,6 +4,7 @@
 #include <pulp/signal/fast_math.hpp>
 
 #include <cmath>
+#include <cstddef>
 #include <algorithm>
 #include <type_traits>
 
@@ -52,14 +53,14 @@ public:
     }
 
     /// Process a buffer in place with exact std::tanh stages.
-    void process_reference(SampleType* buffer, int num_samples) {
-        for (int i = 0; i < num_samples; ++i)
+    void process_reference(SampleType* buffer, std::size_t num_samples) {
+        for (std::size_t i = 0; i < num_samples; ++i)
             buffer[i] = process_reference(buffer[i]);
     }
 
     /// Process a buffer in place with the Padé `FastMath::tanh` stages.
-    void process_realtime_efficient(SampleType* buffer, int num_samples) {
-        for (int i = 0; i < num_samples; ++i)
+    void process_realtime_efficient(SampleType* buffer, std::size_t num_samples) {
+        for (std::size_t i = 0; i < num_samples; ++i)
             buffer[i] = process_realtime_efficient(buffer[i]);
     }
 

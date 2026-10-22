@@ -557,7 +557,7 @@ TEST_CASE("Biquad block path flushes a decaying tail without subnormal residency
         filter.set_coefficients(Biquad::Type::lowpass, kSampleRate / 4.0f, 0.7071f, kSampleRate);
         const auto tail =
             impulse_tail([&](float* x, int n) { filter.process(x, n); }, kTotal, block);
-        REQUIRE(tail.subnormal_outputs <= static_cast<std::size_t>(Biquad::kStateSnapInterval));
+        REQUIRE(tail.subnormal_outputs <= pulp::signal::kSnapChunkSamples);
         REQUIRE(tail.nonzero_end < 1024);
     }
 }
