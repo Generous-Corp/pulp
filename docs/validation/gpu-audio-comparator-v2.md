@@ -189,7 +189,9 @@ agent host can therefore still produce a dry-run receipt. Lowering
 Git provenance failures are fail-closed: a missing or invalid `HEAD`, a failed
 Git status query, or any dirty/untracked source tree produces a `REFUSED`
 verdict (`source_revision_invalid`, `source_git_error`, or
-`source_tree_dirty`) rather than an inconclusive campaign.
+`source_tree_dirty`) rather than an inconclusive campaign. Receipts must carry
+explicit boolean `false` values for both `source_git_error` and `source_dirty`;
+missing or non-boolean provenance fields are refused as malformed provenance.
 
 The ctest runs `gpu_audio_comparator_v2.py smoke`, which makes two runs:
 

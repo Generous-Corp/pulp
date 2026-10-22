@@ -126,6 +126,7 @@ def receipt(overrides=None, *, quiet=True, blocks=BLOCKS, host="host-a",
         "host_quiet": quiet,
         "source_revision": "a" * 40,
         "source_dirty": False,
+        "source_git_error": False,
         "binary_sha256": binary,
         "assembled_at": assembled_at,
     }
@@ -273,6 +274,20 @@ class ComparatorV2Tests(unittest.TestCase):
         result = evaluate(seal(first), second)
         self.assertEqual(result["verdict"], "REFUSED")
         self.assertIn("source_revision_invalid", result["reasons"])
+
+    def test_missing_source_dirty_is_refused(self):
+        first, second = pair()
+        del first["source_dirty"]
+        result = evaluate(seal(first), second)
+        self.assertEqual(result["verdict"], "REFUSED")
+        self.assertIn("source_tree_dirty", result["reasons"])
+
+    def test_missing_source_git_error_is_refused(self):
+        first, second = pair()
+        del first["source_git_error"]
+        result = evaluate(seal(first), second)
+        self.assertEqual(result["verdict"], "REFUSED")
+        self.assertIn("source_git_error", result["reasons"])
 
     # -- kernel matching ----------------------------------------------------
 

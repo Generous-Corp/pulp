@@ -291,9 +291,9 @@ def _assess(receipt: dict[str, Any], min_blocks: int) -> dict[str, Any]:
     source_revision = receipt.get("source_revision")
     if not isinstance(source_revision, str) or not re.fullmatch(r"[0-9a-f]{40}", source_revision):
         refusals.append("source_revision_invalid")
-    if receipt.get("source_git_error") is True:
+    if receipt.get("source_git_error") is not False:
         refusals.append("source_git_error")
-    if receipt.get("source_dirty") is True:
+    if receipt.get("source_dirty") is not False:
         refusals.append("source_tree_dirty")
     config = receipt["config"]
     lanes = {lane["name"]: lane for lane in config.get("lanes", [])}
