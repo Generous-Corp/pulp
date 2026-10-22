@@ -80,6 +80,10 @@ ProviderUnderTest fake_provider(Violation violation = Violation::None,
     provider.busy_retries = [](const conformance::SharedIoArenaProvider& inner) {
         return static_cast<const FakeSharedIoProvider&>(inner).terminal_busy_retries;
     };
+    provider.loss_record = [](const conformance::SharedIoArenaProvider& inner) {
+        const auto& fake = static_cast<const FakeSharedIoProvider&>(inner);
+        return conformance::LossRecord{fake.device_lost_callback_ns, fake.device_lost_reason};
+    };
     return provider;
 }
 
@@ -146,6 +150,16 @@ const std::vector<Mutant>& mutants() {
         {Violation::ReplayStaleOnResubmit,
          "replay-stale-on-resubmit",
          {{Scenario::StaleGenerationReplay, "provider_emitted_stale_callback"}}},
+        {Violation::LossCallbackNotRecorded,
+         "loss-callback-not-recorded",
+         {{Scenario::ForceLossBeforeSubmit, "loss_callback_not_recorded"},
+          {Scenario::ForceLossBetweenSubmitAndRegistration, "loss_callback_not_recorded"},
+          {Scenario::ForceLossAfterRegistration, "loss_callback_not_recorded"},
+          {Scenario::DrainAfterLoss, "loss_callback_not_recorded"}}},
+        {Violation::LossCallbackStaleTime,
+         "loss-callback-stale-time",
+         {{Scenario::ForceLossBeforeSubmit, "loss_callback_time_out_of_range"},
+          {Scenario::DrainAfterLoss, "loss_callback_time_out_of_range"}}},
     };
     return registry;
 }
@@ -319,6 +333,35 @@ TEST_CASE("provider conformance kit derives an unauthenticated real provider as 
     const auto unidentified = conformance::run_suite(anonymous, spec);
     CHECK(unidentified.kind() == ProviderKind::Unidentified);
     CHECK_FALSE(unidentified.passed());
+}
+
+TEST_CASE("a real provider must expose its device-lost callback record",
+          "[gpu_audio][shared_io][conformance][negative]") {
+    const conformance::ProgramSpec spec;
+    auto real_without_hook = fake_provider();
+    real_without_hook.loss_record = nullptr;
+    auto make = real_without_hook.make;
+    real_without_hook.make = [make](Fault fault) {
+        auto created = make(fault);
+        static_cast<FakeSharedIoProvider&>(*created.provider).identity.adapter_backend = "metal";
+        return created;
+    };
+    for (const auto scenario : {Scenario::ForceLossBeforeSubmit, Scenario::DrainAfterLoss}) {
+        const auto row = conformance::run_scenario(scenario, real_without_hook, spec);
+        INFO(conformance::scenario_name(scenario) << ": " << row.reason);
+        CHECK(row.verdict == Verdict::Failed);
+        CHECK(row.reason == "loss_callback_unobservable");
+    }
+    // Controls: the same real provider with the hook passes, and a fake may
+    // omit the hook.
+    auto real_with_hook = real_without_hook;
+    real_with_hook.loss_record = fake_provider().loss_record;
+    CHECK(conformance::run_scenario(Scenario::DrainAfterLoss, real_with_hook, spec).verdict ==
+          Verdict::Passed);
+    auto fake_without_hook = fake_provider();
+    fake_without_hook.loss_record = nullptr;
+    CHECK(conformance::run_scenario(Scenario::DrainAfterLoss, fake_without_hook, spec).verdict ==
+          Verdict::Passed);
 }
 
 TEST_CASE("provider conformance kit records unsupported and unprovable paths as typed skips",

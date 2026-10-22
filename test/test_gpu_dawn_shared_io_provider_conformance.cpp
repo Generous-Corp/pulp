@@ -64,6 +64,10 @@ ProviderUnderTest dawn_provider(DawnSharedIoProvider::StorageKind storage, std::
     provider.busy_retries = [](const conformance::SharedIoArenaProvider& inner) {
         return static_cast<const DawnSharedIoProvider&>(inner).stats().terminal_busy_retries;
     };
+    provider.loss_record = [](const conformance::SharedIoArenaProvider& inner) {
+        const auto stats = static_cast<const DawnSharedIoProvider&>(inner).stats();
+        return conformance::LossRecord{stats.device_lost_callback_ns, stats.device_lost_reason};
+    };
     return provider;
 }
 

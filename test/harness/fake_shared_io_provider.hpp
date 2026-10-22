@@ -9,6 +9,7 @@
 #include "detail/shared_io_arena.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -95,6 +96,10 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
         FalseResumeClaim,
         // A resubmission re-publishes the slot's previous token.
         ReplayStaleOnResubmit,
+        // Device loss happens without a recorded loss callback.
+        LossCallbackNotRecorded,
+        // The loss callback records a time before the faulted submission.
+        LossCallbackStaleTime,
     };
 
     struct Allocation {
@@ -354,6 +359,8 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
         if (fault == Fault::ForceLossBeforeSubmit ||
             fault == Fault::ForceLossBetweenSubmitAndCompletionRegistration ||
             fault == Fault::ForceLossAfterCompletionRegistration) {
+            if (!force_lost_)
+                record_loss_callback();
             force_lost_ = true;
             ++fault_injections;
         }
@@ -659,6 +666,9 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
     std::uint32_t disposals_observed = 0;
     std::uint32_t host_frees = 0;
     std::uint64_t terminal_busy_retries = 0;
+    // Device-lost callback record; zero until a loss fault fires.
+    std::uint64_t device_lost_callback_ns = 0;
+    std::uint32_t device_lost_reason = 0;
     std::uint64_t fault_injections = 0;
     bool drain_push_failed = false;
     bool destroy_before_dispose = false;
@@ -738,6 +748,20 @@ class FakeSharedIoProvider : public pulp::gpu_audio::detail::SharedIoArenaProvid
         held_stale_token = token;
         if (held_stale_token.slot_generation > 0)
             --held_stale_token.slot_generation;
+    }
+
+    // Models a backend device-lost callback: steady-clock time and a nonzero
+    // reason (1, as WGPUDeviceLostReason_Unknown), set once at the loss.
+    void record_loss_callback() noexcept {
+        if (violation == Violation::LossCallbackNotRecorded)
+            return;
+        device_lost_reason = 1;
+        device_lost_callback_ns = violation == Violation::LossCallbackStaleTime
+                                      ? 1
+                                      : static_cast<std::uint64_t>(
+                                            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                std::chrono::steady_clock::now().time_since_epoch())
+                                                .count());
     }
 
     bool force_lost_ = false;

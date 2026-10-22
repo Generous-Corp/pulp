@@ -113,6 +113,20 @@ struct ProgramSpec {
     }
 };
 
+// What a provider recorded inside its device-lost callback: the steady-clock
+// time of the callback and the backend's numeric loss reason. Zero means no
+// loss callback has run.
+struct LossRecord {
+    std::uint64_t callback_ns = 0;
+    std::uint32_t reason = 0;
+};
+
+inline std::uint64_t steady_now_ns() noexcept {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+}
+
 struct CreateOutcome {
     std::unique_ptr<SharedIoArenaProvider> provider;
     // Non-empty when the provider or the requested fault is unavailable.
@@ -128,6 +142,10 @@ struct ProviderUnderTest {
     // Optional: busy terminal publications retained and retried so far. Without
     // it the kit cannot prove the busy path ran and skips that scenario.
     std::function<std::uint64_t(const SharedIoArenaProvider&)> busy_retries;
+    // Reads the provider's device-lost callback record. Required for a real
+    // provider (its identity derives kind real): without it every loss
+    // scenario fails. A fake may omit it.
+    std::function<LossRecord(const SharedIoArenaProvider&)> loss_record;
     std::chrono::milliseconds completion_timeout{15000};
     // How long withheld or lost work is serviced before the drain boundary.
     std::chrono::milliseconds quiet_window{30};
@@ -568,6 +586,22 @@ struct Run {
         return true;
     }
 
+    // A loss scenario's provider must have recorded its device-lost callback,
+    // timestamped between the faulted submission and now.
+    bool verify_loss_record(std::uint64_t submitted_ns) {
+        if (!provider.loss_record) {
+            if (kind_of(owned->provider_identity()) == ProviderKind::Real)
+                return fail("loss_callback_unobservable");
+            return true;
+        }
+        const auto record = provider.loss_record(*owned);
+        if (record.callback_ns == 0 || record.reason == 0)
+            return fail("loss_callback_not_recorded");
+        if (record.callback_ns < submitted_ns || record.callback_ns > steady_now_ns())
+            return fail("loss_callback_time_out_of_range");
+        return true;
+    }
+
     void finish_counts() {
         result.retired_success = terminals.successes();
         result.retired_failure = terminals.failures();
@@ -627,6 +661,7 @@ inline ScenarioResult force_loss(const ProviderUnderTest& provider, const Progra
     Run run(provider, spec, scenario);
     if (!run.create(loss_fault(scenario)) || !run.prepare(spec.slots))
         return run.result;
+    const auto submitted_ns = steady_now_ns();
     bool accepted = false;
     const auto token = run.submit_block(1, 0, accepted);
     if (!token)
@@ -651,6 +686,8 @@ inline ScenarioResult force_loss(const ProviderUnderTest& provider, const Progra
     }
     if (!run.recorder->device_lost())
         return run.failed("device_loss_not_reported");
+    if (!run.verify_loss_record(submitted_ns))
+        return run.failed(run.result.reason);
     if (run.recorder->can_resume_after_drain())
         return run.failed("resume_claimed_after_loss");
     run.finish_counts();
@@ -837,6 +874,7 @@ inline ScenarioResult drain_after_loss(const ProviderUnderTest& provider, const 
     Run run(provider, spec, Scenario::DrainAfterLoss);
     if (!run.create(Fault::ForceLossAfterCompletionRegistration) || !run.prepare(spec.slots))
         return run.result;
+    const auto submitted_ns = steady_now_ns();
     std::vector<SlotToken> inflight;
     for (std::uint32_t block = 0; block < spec.slots; ++block) {
         bool accepted = false;
@@ -863,6 +901,8 @@ inline ScenarioResult drain_after_loss(const ProviderUnderTest& provider, const 
     }
     if (!run.recorder->device_lost())
         return run.failed("device_loss_not_reported");
+    if (!run.verify_loss_record(submitted_ns))
+        return run.failed(run.result.reason);
     if (run.recorder->can_resume_after_drain())
         return run.failed("resume_claimed_after_loss");
     run.finish_counts();
