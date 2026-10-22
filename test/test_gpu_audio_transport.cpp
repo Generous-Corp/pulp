@@ -120,12 +120,20 @@ TEST_CASE("GpuAudioStatus v2 positional prefix still aggregate-initializes",
     CHECK(status.epoch == 0);
     CHECK(status.completion_mode == GpuAudioCompletionMode::Unknown);
     CHECK_FALSE(status.gpu_kernel_available);
+
+    // The descriptor's pre-append fields, positionally, as installed callers write them.
+    const GpuAudioNodeDescriptor descriptor{"probe", 2, 2, 64, 48000, 3, MissPolicy::CpuFallback,
+                                            true};
+    CHECK(descriptor.latency_blocks == 3);
+    CHECK(descriptor.supports_cpu_fallback);
+    CHECK(descriptor.worker_pipeline_blocks == 0);
 }
 
 TEST_CASE("GPU audio contract enums append without renumbering", "[gpu_audio][status]") {
     CHECK(static_cast<int>(GpuAudioRecoveryReason::InvalidCallback) == 6);
     CHECK(static_cast<int>(GpuAudioRecoveryReason::ProviderUnresponsive) == 7);
     CHECK(static_cast<int>(GpuAudioRecoveryReason::ProviderReacquired) == 8);
+    CHECK(static_cast<int>(GpuAudioRecoveryReason::SustainedDeadlineMisses) == 9);
     CHECK(static_cast<int>(GpuAudioProvider::Metal) == 2);
     CHECK(static_cast<int>(GpuAudioProvider::Cpu) == 3);
     const GpuAudioCapabilityReport report;
@@ -134,6 +142,8 @@ TEST_CASE("GPU audio contract enums append without renumbering", "[gpu_audio][st
     const detail::RealtimeGpuNodePath path;
     CHECK(path.health == nullptr);
     CHECK(path.reprepare == nullptr);
+    const GpuAudioNodeDescriptor descriptor;
+    CHECK(descriptor.worker_pipeline_blocks == 0);
 }
 
 TEST_CASE("GpuAudioNode appended hooks have inert defaults", "[gpu_audio][status]") {

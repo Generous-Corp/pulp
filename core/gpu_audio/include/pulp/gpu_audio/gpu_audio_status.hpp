@@ -47,6 +47,9 @@ enum class GpuAudioRecoveryReason : std::uint8_t {
     /// Informational: a lost provider was re-acquired under an automatic
     /// recovery policy and delivery resumed on a new epoch.
     ProviderReacquired = 8,
+    /// The GPU is alive but repeatedly late; the node switched to CPU with
+    /// periodic GPU probes. Maps to Degraded, not Unavailable.
+    SustainedDeadlineMisses = 9,
 };
 
 /// How the non-realtime dispatcher services provider completions. Unknown
