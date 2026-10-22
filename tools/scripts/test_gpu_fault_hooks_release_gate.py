@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -136,6 +138,41 @@ class ReleaseGate(unittest.TestCase):
             self.assertEqual(self.run_gate(), 0)
             self.assertEqual(GATE.main(["--build-dir", str(self.build), "--extra-dir", extra]),
                              1)
+
+    def _staged(self, planted: bool) -> Path:
+        stage = self.build.parent / (self.build.name + ("-dirty" if planted else "-clean"))
+        binary = stage / "Payload/X.clap/Contents/MacOS/X"
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_bytes(b"\xcf\xfa\xed\xfe " + (b"resolve_run_config" if planted else b"ok"))
+        self.addCleanup(shutil.rmtree, stage, True)
+        return stage
+
+    def test_zip_and_tar_archives_are_opened_and_scanned(self):
+        for planted in (False, True):
+            stage = self._staged(planted)
+            for kind in ("zip", "gztar"):
+                with self.subTest(planted=planted, kind=kind):
+                    out = shutil.make_archive(str(self.build / f"dist-{kind}"), kind, stage)
+                    self.assertEqual(self.run_gate(), 1 if planted else 0)
+                    Path(out).unlink()
+
+    def test_a_zip_inside_a_zip_is_scanned(self):
+        stage = self._staged(True)
+        inner = shutil.make_archive(str(self.build.parent / (self.build.name + "-inner")), "zip",
+                                    stage)
+        self.addCleanup(Path(inner).unlink)
+        outer_stage = self.build.parent / (self.build.name + "-outer-stage")
+        outer_stage.mkdir()
+        self.addCleanup(shutil.rmtree, outer_stage, True)
+        shutil.copy(inner, outer_stage / "inner.zip")
+        shutil.make_archive(str(self.build / "outer"), "zip", outer_stage)
+        self.assertEqual(self.run_gate(), 1)
+
+    def test_an_unreadable_archive_fails_closed(self):
+        (self.build / "broken.zip").write_bytes(b"not a zip")
+        findings = GATE.check(self.build)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("could not be opened", findings[0])
 
     def test_not_a_build_directory(self):
         (self.build / "CMakeCache.txt").unlink()

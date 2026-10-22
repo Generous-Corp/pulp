@@ -6,13 +6,13 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <fstream>
-#include <sstream>
 #include <system_error>
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <libproc.h>
 #include <pwd.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace pulp::examples::gpu_fault {
@@ -20,8 +20,10 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// active.json is written by the harness as a flat object, so a key scan is
-// enough; anything malformed simply fails validation.
+// active.json is written by the harness as a flat object of plain strings and
+// integers, so a key scan is enough. well_formed() refuses what a key scan
+// could misread (a repeated key, an escape sequence); anything else malformed
+// fails validation.
 std::string json_string(const std::string& text, const char* key) {
     const auto at = text.find(std::string("\"") + key + "\"");
     if (at == std::string::npos)
@@ -38,6 +40,49 @@ std::int64_t json_int(const std::string& text, const char* key) {
         return -1;
     const auto colon = text.find(':', at);
     return colon == std::string::npos ? -1 : std::strtoll(text.c_str() + colon + 1, nullptr, 10);
+}
+
+std::size_t occurrences(const std::string& text, const std::string& needle) {
+    std::size_t count = 0;
+    for (auto at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1))
+        ++count;
+    return count;
+}
+
+bool well_formed(const std::string& body) {
+    if (body.find('\\') != std::string::npos)
+        return false;
+    for (const char* key : {"schema", "run_dir", "request", "ir", "nonce", "expires_unix"})
+        if (occurrences(body, std::string("\"") + key + "\"") != 1)
+            return false;
+    return true;
+}
+
+// Reads `path` only if it is a regular file reached without following a
+// symlink, checked on the open descriptor rather than by a separate stat.
+bool read_regular_no_follow(const fs::path& path, std::string& out) {
+    const int fd = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0)
+        return false;
+    struct stat st{};
+    bool ok = ::fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size < (1 << 16);
+    if (ok) {
+        out.resize(static_cast<std::size_t>(st.st_size));
+        ok = ::read(fd, out.data(), out.size()) == static_cast<ssize_t>(out.size());
+    }
+    ::close(fd);
+    return ok;
+}
+
+// True when `path` opens, without following a symlink, as a directory.
+bool directory_no_follow(const fs::path& path) {
+    const int fd = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0)
+        return false;
+    struct stat st{};
+    const bool ok = ::fstat(fd, &st) == 0 && S_ISDIR(st.st_mode);
+    ::close(fd);
+    return ok;
 }
 
 bool is_hex(const std::string& s) {
@@ -80,19 +125,20 @@ RunConfig from_rendezvous(const fs::path& root, std::int64_t now_unix) {
     RunConfig config;
     const fs::path active = root / "active.json";
     std::error_code ec;
-    if (root.empty() || !fs::is_regular_file(active, ec)) {
+    std::string body;
+    if (root.empty() || !fs::exists(fs::symlink_status(active, ec))) {
         config.detail = "no rendezvous file";
         return config;
     }
-    std::ifstream in(active);
-    std::stringstream text;
-    text << in.rdbuf();
-    const std::string body = text.str();
     auto refuse = [&](std::string why) {
         config = RunConfig{};
         config.detail = "rendezvous refused: " + std::move(why);
         return config;
     };
+    if (!read_regular_no_follow(active, body))
+        return refuse("active.json is not a regular file (or is a symlink)");
+    if (!well_formed(body))
+        return refuse("active.json repeats a key or uses an escape sequence");
     if (json_string(body, "schema") != kRendezvousSchema)
         return refuse("schema is not " + std::string(kRendezvousSchema));
     const std::int64_t expires = json_int(body, "expires_unix");
@@ -109,7 +155,7 @@ RunConfig from_rendezvous(const fs::path& root, std::int64_t now_unix) {
     const fs::path ir = json_string(body, "ir");
     if (no_follow_is_link(root) || no_follow_is_link(root / "runs") || no_follow_is_link(run_dir))
         return refuse("the root, runs/ and run_dir must not be symlinks");
-    if (!strictly_inside(run_dir, root / "runs") || !fs::is_directory(run_dir, ec))
+    if (!strictly_inside(run_dir, root / "runs") || !directory_no_follow(run_dir))
         return refuse("run_dir is not a directory under " + (root / "runs").string());
     // Containment resolves symlinks, so a link from inside the run dir to
     // anywhere outside it is refused here too.

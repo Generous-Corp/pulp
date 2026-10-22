@@ -26,6 +26,8 @@ a run INCONCLUSIVE, never PASS.
 from __future__ import annotations
 
 import importlib.util
+import json
+import math
 import re
 import statistics
 import sys
@@ -91,6 +93,58 @@ DAW_EXECUTABLES = {
     "cubase": re.compile(r"/Cubase[^/]*\.app/Contents/MacOS/"),
     "studio_one": re.compile(r"/Studio One[^/]*\.app/Contents/MacOS/"),
 }
+
+
+_MASK64 = (1 << 64) - 1
+REALTIME_PROVENANCE = "realtime_render.json"
+# A realtime render cannot finish faster than the audio it renders; allow a
+# little clock slack, never an offline-speed render.
+REALTIME_MIN_WALL_FRACTION = 0.9
+
+
+# ── Internal stimulus (mirror of the plug-in's generator, WP-h1) ──────────
+
+def _splitmix64(x: int) -> int:
+    x = (x + 0x9E3779B97F4A7C15) & _MASK64
+    x = ((x ^ (x >> 30)) * 0xBF58476D1CE4E5B9) & _MASK64
+    x = ((x ^ (x >> 27)) * 0x94D049BB133111EB) & _MASK64
+    return x ^ (x >> 31)
+
+
+def internal_stimulus(n: int, rate: int = gfc.SAMPLE_RATE) -> float:
+    """Sample n of the plug-in's internal stimulus, keyed to the project
+    position and rounded to float32 as the plug-in stores it:
+    0.15*sin(2*pi*((220*n) mod rate)/rate) + a(n)*(2*u(n) - 1), where
+    a(n) = 0.125 if (n // 2400) is even else 0.025 and u(n) is the top 53
+    bits of splitmix64(n) as a uniform in [0, 1)."""
+    n &= _MASK64
+    u = (_splitmix64(n) >> 11) * (1.0 / 9007199254740992.0)
+    noise = 0.125 if (n // 2400) % 2 == 0 else 0.025
+    phase = ((220 * n) & _MASK64) % rate / rate
+    value = 0.15 * math.sin(2.0 * math.pi * phase) + noise * (2.0 * u - 1.0)
+    return gfc.struct.unpack("<f", gfc.struct.pack("<f", value))[0]
+
+
+def internal_stimulus_span(start: int, frames: int, rate: int = gfc.SAMPLE_RATE) -> list[float]:
+    return [internal_stimulus(start + i, rate) for i in range(frames)]
+
+
+def live_input_violations(capture: Any) -> int:
+    """Played samples whose captured input is neither the internal stimulus
+    nor exact digital silence. A live-template row runs with the track input
+    on "No Input" (host input is exact zeros by construction) AND the
+    plug-in's internal stimulus; anything else means host input (possibly a
+    microphone) reached the capture. Whether the signal is non-trivial is the
+    null's reference-RMS floor, not this check."""
+    if capture is None:
+        return -1
+    bad = 0
+    for c in range(capture.channels):
+        for i, pos in enumerate(capture.positions):
+            value = capture.inputs[c][i]
+            if pos >= 0 and value != 0.0 and value != internal_stimulus(pos, capture.sample_rate):
+                bad += 1
+    return bad
 
 
 # ── Calling pattern ───────────────────────────────────────────────────────
@@ -305,7 +359,7 @@ def _usable(run_dir: Path, name: str, listed: Sequence[str] | None) -> bool:
 def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: int,
                 tolerance: float, window_pre: int, window_post: int, host_alive: bool,
                 bounce_path: Path | None, realtime_path: Path | None, render_frames: int,
-                nonce: str, host: dict, hosting_mode: str,
+                nonce: str, host: dict, hosting_mode: str, live_template: bool = False,
                 listed: Sequence[str] | None = None) -> dict[str, Any]:
     """The v2 evidence for one run. The null analysis, capture checks and
     health snapshots are WP-h1's (`evaluate_run`); the verdict is recomputed
@@ -346,8 +400,12 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
     if (control_kind == "planted_negative") != (planted in PLANTED_NEGATIVES):
         mismatches.append(f"control kind {control_kind!r} but the plug-in armed "
                           f"planted_negative={planted!r}")
-    if (control_kind == POSITIVE_CONTROL) != (fault == POSITIVE_CONTROL):
-        mismatches.append(f"control kind {control_kind!r} with fault {fault!r}")
+    # gpu_off arms nothing (the GPU path is off, so there is no provider to
+    # fault); every other negative and every fault row rides on a real fault.
+    wants_control_fault = control_kind == POSITIVE_CONTROL or planted == "gpu_off"
+    if wants_control_fault != (fault == POSITIVE_CONTROL):
+        mismatches.append(f"control kind {control_kind!r} (planted={planted!r}) with fault "
+                          f"{fault!r}")
     if armed and armed.get("after_project_sample") != fault_sample + window_post:
         mismatches.append("fault_armed observes a different window than the analysis")
     for name in ("fault_armed", "fault_fired"):
@@ -374,6 +432,11 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
             mismatches.append("a provider fault was applied during the positive control")
         took_effect = fired is not None
         health_ok, health_note = positive_control_expectation(snapshots, disposition)
+    elif planted == "gpu_off":
+        if applied is not None:
+            mismatches.append("a provider fault was applied during gpu_off")
+        took_effect = fired is not None
+        health_ok, health_note = True, "gpu_off: health not judged"
     else:
         took_effect = fired is not None and (
             bool(render_loss and render_loss.get("performed")) if fault in gfc.RENDER_FAULTS
@@ -404,6 +467,13 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         # "realtime render" is the bounce, not a second artifact.
         preconditions.append("the host realtime render is the offline bounce itself")
         realtime_path = None
+    provenance_note = ""
+    if realtime_path is not None:
+        provenance_note = realtime_provenance_problem(run_dir, realtime_path.name, host,
+                                                      render_frames, listed)
+        if provenance_note:
+            preconditions.append(f"host realtime render provenance: {provenance_note}")
+            realtime_path = None
     if realtime_path is not None and _usable(run_dir, realtime_path.name, listed):
         _, rendered = gfc.read_wav(realtime_path)
         _, stimulus = gfc.read_wav(run_dir / "stimulus.wav")
@@ -415,6 +485,14 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
     if (host.get("id") in REALTIME_RENDER_HOSTS and realtime_null is None and
             control_kind in ("fault", POSITIVE_CONTROL)):
         preconditions.append("no host realtime render of the fault pass (M1)")
+
+    live_violations = None
+    if live_template:
+        live_violations = live_input_violations(capture)
+        if live_violations != 0:
+            mismatches.append(f"a live-template row captured input that is not the internal "
+                              f"stimulus ({live_violations} samples): host input reached "
+                              f"capture.bin")
 
     verdict, reasons = gfc.decide(fault=base_fault, plugin_null=nulls["plugin"],
                                   bounce_null=nulls["bounce"], health_ok=health_ok,
@@ -436,6 +514,7 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         # else about the run was off.
         bound = binding["outcome"] == "bound" and not mismatches
         if PLANTED_NEGATIVES.get(planted) == "fail":
+            # Fired AND applied (the provider fault, or the editor's render loss).
             sound = bound and took_effect
             # Proved only by a plug-in null that fails, and not before the
             # fault: what these negatives corrupt is the fallback.
@@ -445,14 +524,11 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
                 not plugin["passed"] and plugin["first_deviating_sample"] is not None and
                 plugin["first_deviating_sample"] >= fault_sample)
         else:
-            # gpu_off: the GPU path is off, so a provider fault may be refused;
-            # the proof is that the path precondition, and only it (plus that
-            # refusal), kept the run from passing.
+            # gpu_off: fired, bound, and the path precondition is the one and
+            # only thing that kept the run from passing.
             negative_proved = bool(
-                bound and verdict == "inconclusive" and
-                any(NOT_SHARED_PATH in p for p in preconditions) and
-                all(NOT_SHARED_PATH in p or p.startswith("the plug-in refused the request")
-                    for p in preconditions))
+                bound and took_effect and verdict == "inconclusive" and
+                len(preconditions) == 1 and NOT_SHARED_PATH in preconditions[0])
     return {
         "fault": base["fault"],
         "pdc_samples": base["pdc_samples"],
@@ -473,7 +549,42 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         "verdict_reasons": reasons,
         "planted_negative": planted,
         "negative_proved": negative_proved,
+        "live_input_violations": live_violations,
     }
+
+
+def realtime_provenance_problem(run_dir: Path, artifact: str, host: dict, render_frames: int,
+                                listed: Sequence[str] | None) -> str:
+    """Why the host realtime render's provenance record does not show a
+    realtime render of this artifact by this host, or "" when it does. The
+    record is written by the harness around the host's realtime render:
+    {"artifact", "mode": "realtime", "host", "started_unix_us",
+    "finished_unix_us", "sample_rate"}. A realtime render takes at least as
+    long as the audio it renders; an offline bounce does not."""
+    if not _usable(run_dir, REALTIME_PROVENANCE, listed):
+        return f"{REALTIME_PROVENANCE} is missing"
+    try:
+        record = json.loads((run_dir / REALTIME_PROVENANCE).read_text(encoding="utf-8"))
+    except ValueError:
+        return f"{REALTIME_PROVENANCE} is unreadable"
+    if not isinstance(record, dict):
+        return f"{REALTIME_PROVENANCE} is not an object"
+    if record.get("artifact") != artifact:
+        return f"it describes {record.get('artifact')!r}, not {artifact!r}"
+    if record.get("mode") != "realtime" or record.get("host") != host.get("id"):
+        return f"mode={record.get('mode')!r} host={record.get('host')!r}"
+    start, end, rate = (record.get("started_unix_us"), record.get("finished_unix_us"),
+                        record.get("sample_rate"))
+    if not all(isinstance(v, int) and v > 0 for v in (start, end, rate)):
+        return "times or sample rate missing"
+    launch = host.get("launch_unix_us")
+    if isinstance(launch, int) and start < launch:
+        return "the render started before the host was launched"
+    needed = REALTIME_MIN_WALL_FRACTION * render_frames / rate * 1e6
+    if end - start < needed:
+        return (f"it took {(end - start) / 1e6:.3f} s for {render_frames / rate:.3f} s of audio, "
+                f"faster than realtime")
+    return ""
 
 
 def column_outcome(evidence: dict, *, control_kind: str, host_id: str) -> str:

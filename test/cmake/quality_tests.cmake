@@ -84,6 +84,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-fault-hooks-release-gate-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_fault_hooks_release_gate.py")
+    if(APPLE)
+        add_test(NAME gpu-fault-hooks-release-gate-macos-selftest
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_fault_hooks_release_gate_macos.py")
+    endif()
     if(NOT PULP_GPU_AUDIO_FAULT_HOOKS)
         add_test(NAME gpu-fault-hooks-release-gate
             COMMAND ${Python3_EXECUTABLE}

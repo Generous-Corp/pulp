@@ -3,7 +3,9 @@
 
 Runs are synthesized with WP-h1's `synthesize_run` and then given what a
 non-REAPER host run adds: the plug-in's `host_process` event and `claim` file,
-the control kind's request fields, a host realtime render, host evidence.
+the control kind's request fields, a host realtime render with its
+provenance record, host evidence. Receipts are live (non-dry-run) with the
+live 1 s post-fault window unless a test says otherwise.
 Each rejection is paired with the receipt it was derived from, and every
 success rule has a planted negative.
 
@@ -31,7 +33,7 @@ sys.modules[SPEC.name] = V2
 SPEC.loader.exec_module(V2)
 gfc, hosts = V2.gfc, V2.hosts
 
-FRAMES, FAULT, PRE, POST = 9600, 3000, 1000, 4800
+FRAMES, FAULT, PRE, POST = 9600, 3000, 1000, 48000
 NONCE = "0123456789abcdef0123456789abcdef"
 HOST_PID, HOST_RESPONSIBLE, PLUGIN_PID = 4242, 4242, 5151
 LAUNCH, START, CLAIMED = 1_800_000_000_000_000, 1_800_000_001_000_000, 1_800_000_002_000_000
@@ -58,12 +60,20 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
              plugin_pid: int = PLUGIN_PID, planted: str | None = None,
              host_id: str = "logic", fmt: str = "au", realtime: bool = True,
              start: int = START, claim_pid: int | None = None,
-             responsible_path: str | None = None) -> dict:
-    """Synthesize one run directory and its v2 receipt."""
+             responsible_path: str | None = None, template: str = "playback",
+             internal: bool = False) -> dict:
+    """Synthesize one run directory and its v2 receipt. `internal` makes the
+    plug-in's captured input the internal stimulus (a live-template row)."""
     synth_fault = "render_force_loss" if fault == hosts.POSITIVE_CONTROL else fault
-    gfc.synthesize_run(run, fault=synth_fault, fault_sample=FAULT, frames=FRAMES,
-                       break_fallback=break_fallback, nonce=NONCE, pid=plugin_pid, tail=POST,
-                       window_post=POST)
+    saved = gfc.make_stimulus
+    if internal:
+        gfc.make_stimulus = lambda frames, *a, **k: hosts.internal_stimulus_span(0, frames)
+    try:
+        gfc.synthesize_run(run, fault=synth_fault, fault_sample=FAULT, frames=FRAMES,
+                           break_fallback=break_fallback, nonce=NONCE, pid=plugin_pid,
+                           tail=POST, window_post=POST)
+    finally:
+        gfc.make_stimulus = saved
     if planted is None and kind == "planted_negative":
         planted = "no_fallback"
 
@@ -95,8 +105,9 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
     write_host_evidence(run, host_id)
     if realtime:
         write_realtime_from(run / "bounce.wav", run / "realtime.wav")
+        write_provenance(run, host_id)
     return receipt_for(run, kind=kind, fault=fault, mode=mode, host_id=host_id, fmt=fmt,
-                       realtime=realtime)
+                       realtime=realtime, template=template)
 
 
 GARAGEBAND = "/Applications/GarageBand.app/Contents/MacOS/GarageBand"
@@ -120,6 +131,19 @@ def write_realtime_from(source: Path, target: Path) -> None:
     gfc.write_wav_f32(target, channels)
 
 
+def write_provenance(run: Path, host_id: str = "logic", *, artifact: str = "realtime.wav",
+                     mode: str = "realtime", seconds: float | None = None) -> None:
+    """The harness's record of the host's realtime render: it took at least
+    as long as the audio it rendered."""
+    duration = (FRAMES + POST) / gfc.SAMPLE_RATE if seconds is None else seconds
+    started = LAUNCH + 10_000_000
+    (run / hosts.REALTIME_PROVENANCE).write_text(json.dumps(
+        {"artifact": artifact, "mode": mode, "host": host_id, "sample_rate": gfc.SAMPLE_RATE,
+         "started_unix_us": started,
+         "finished_unix_us": started + int(duration * 1e6) + 50_000}) + "\n",
+        encoding="utf-8")
+
+
 def host_block(host_id: str = "logic") -> dict:
     return {"id": host_id, "version": "12.4", "pid": HOST_PID,
             "responsible_pid": HOST_RESPONSIBLE,
@@ -128,22 +152,25 @@ def host_block(host_id: str = "logic") -> dict:
 
 
 def receipt_for(run: Path, *, kind: str, fault: str, mode: str, host_id: str = "logic",
-                fmt: str = "au", realtime: bool = True) -> dict:
+                fmt: str = "au", realtime: bool = True, template: str = "playback",
+                transport: str = "rendezvous_file") -> dict:
     host = host_block(host_id)
     names = ["stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "preflight.json", "claim",
-             "host_evidence.json", "bounce.wav"] + (["realtime.wav"] if realtime else [])
+             "host_evidence.json", "bounce.wav"] + (
+        ["realtime.wav", hosts.REALTIME_PROVENANCE] if realtime else [])
     artifacts = gfc.artifact_digests(run, names)
     evidence = hosts.evaluate_v2(
         run, control_kind=kind, fault=fault, fault_sample=FAULT, tolerance=gfc.DEFAULT_TOLERANCE,
         window_pre=PRE, window_post=POST, host_alive=True, bounce_path=run / "bounce.wav",
         realtime_path=(run / "realtime.wav") if realtime else None,
         render_frames=FRAMES + POST, nonce=NONCE, host=host, hosting_mode=mode,
-        listed=list(artifacts))
+        live_template=template == "live", listed=list(artifacts))
     preflight = gfc.summarize_preflight(
         json.loads((run / "preflight.json").read_text(encoding="utf-8")))
     receipt = hosts.build_receipt_v2(
-        control_kind=kind, trigger_transport="dry_run", nonce=NONCE, host=host,
-        hosting_mode=mode, host_settings={"process_buffer_range": "medium"},
+        control_kind=kind, trigger_transport=transport, nonce=NONCE, host=host,
+        hosting_mode=mode, host_settings={"process_buffer_range": "medium",
+                                          "template": template},
         plugin={"format": fmt, "name": NAME, "executable_sha256": "a" * 64},
         code_under_test={"commit": "b" * 40}, artifacts=artifacts,
         bounce_artifact="bounce.wav",
@@ -185,10 +212,10 @@ class V2Receipt(unittest.TestCase):
         return path
 
     def verify(self, receipt: dict, run: Path) -> tuple[str, str]:
-        return V2.verify(receipt, run, allow_dry_run=True)
+        return V2.verify(receipt, run)
 
     def main(self, run: Path) -> int:
-        return V2.main([str(run / "receipt.json"), "--allow-dry-run"])
+        return V2.main([str(run / "receipt.json")])
 
     # ── Fault rows ─────────────────────────────────────────────────────
 
@@ -227,6 +254,28 @@ class V2Receipt(unittest.TestCase):
         self.assertEqual(self.verify(receipt, run)[0], "inconclusive")
         self.assertIn("the host realtime render is the offline bounce itself",
                       receipt["verdict_reasons"])
+
+    def test_m1_the_realtime_render_needs_realtime_provenance(self):
+        cases = {
+            "is missing": None,
+            "faster than realtime": dict(seconds=0.2),
+            "describes 'bounce.wav'": dict(artifact="bounce.wav"),
+            "mode='offline'": dict(mode="offline"),
+        }
+        for needle, kw in cases.items():
+            with self.subTest(needle):
+                run = self.run_dir(needle.replace(" ", "-").replace("'", ""))
+                make_run(run)
+                if kw is None:
+                    (run / hosts.REALTIME_PROVENANCE).unlink()
+                else:
+                    write_provenance(run, **kw)
+                receipt = receipt_for(run, kind="fault", fault="force_loss_before",
+                                      mode="auhostingservice_arrow")
+                self.assertEqual(self.verify(receipt, run)[0], "inconclusive")
+                self.assertTrue(any(r.startswith("host realtime render provenance") and needle in r
+                                    for r in receipt["verdict_reasons"]),
+                                receipt["verdict_reasons"])
 
     def test_m1_a_failing_host_realtime_render_is_a_fail(self):
         run = self.run_dir("realtime-broken")
@@ -376,17 +425,31 @@ class V2Receipt(unittest.TestCase):
 
     def test_gpu_off_is_proved_by_an_inconclusive_on_the_path(self):
         run = self.run_dir("gpu-off")
-        receipt = make_run(run, kind="planted_negative", planted="gpu_off")
+        receipt = make_run(run, kind="planted_negative", planted="gpu_off",
+                           fault=hosts.POSITIVE_CONTROL)
         self.assertEqual(self.verify(receipt, run), ("inconclusive", "negative_proved"))
-        run2 = self.run_dir("gpu-off-but-shared")
-        make_run(run2, kind="planted_negative", planted="gpu_off")
-        # On the shared path and unbound: INCONCLUSIVE, but not for the path.
-        _rewrite_events(run2, lambda ev: [dict(e, path="shared_memory")
-                                          if e["event"] == "prepared" else e for e in ev
-                                          if e["event"] != "host_process"])
-        receipt2 = receipt_for(run2, kind="planted_negative", fault="force_loss_before",
-                               mode="auhostingservice_arrow")
-        self.assertEqual(self.verify(receipt2, run2), ("inconclusive", "negative_not_proved"))
+
+    def test_gpu_off_is_not_proved_when_anything_else_is_off(self):
+        cases = {
+            "also unbound": dict(responsible=999),
+            "never fired": None,
+        }
+        for label, kw in cases.items():
+            with self.subTest(label):
+                run = self.run_dir("gpu-off-" + label.replace(" ", "-"))
+                receipt = make_run(run, kind="planted_negative", planted="gpu_off",
+                                   fault=hosts.POSITIVE_CONTROL, **(kw or {}))
+                if kw is None:
+                    _rewrite_events(run, lambda ev: [e for e in ev
+                                                     if e["event"] != "fault_fired"])
+                    receipt = receipt_for(run, kind="planted_negative",
+                                          fault=hosts.POSITIVE_CONTROL,
+                                          mode="auhostingservice_arrow")
+                self.assertEqual(self.verify(receipt, run), ("inconclusive",
+                                                             "negative_not_proved"))
+        run = self.run_dir("gpu-off-on-a-provider-fault")
+        receipt = make_run(run, kind="planted_negative", planted="gpu_off")
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
 
     def test_a_planted_negative_must_not_ride_on_a_fault_row(self):
         run = self.run_dir("planted-in-fault")
@@ -491,6 +554,9 @@ class V2Receipt(unittest.TestCase):
             "host realtime artifact not digest-bound": lambda r: resign(
                 r.update(artifacts={k: v for k, v in r["artifacts"].items()
                                     if k != "realtime.wav"}) or r),
+            "commit missing": lambda r: resign(r.update(code_under_test={"commit": "abc"}) or r),
+            "executable_sha256 missing": lambda r: resign(
+                r.update(plugin=dict(r["plugin"], executable_sha256="x")) or r),
             "binding does not re-derive": lambda r: resign(
                 r.update(binding=dict(r["binding"], outcome="wrong_daw")) or r),
         }
@@ -508,7 +574,6 @@ class V2Receipt(unittest.TestCase):
         for field, needle in (("launch_unix_us", "launch_unix_us"), ("pid", "host.pid")):
             with self.subTest(field):
                 receipt = copy.deepcopy(good)
-                receipt["trigger_transport"] = "rendezvous_file"
                 receipt["host"].pop(field)
                 with self.assertRaisesRegex(V2.ReceiptError, needle):
                     V2.verify(resign(receipt), run)
@@ -516,7 +581,6 @@ class V2Receipt(unittest.TestCase):
     def test_a_live_receipt_needs_host_evidence_showing_the_plugin(self):
         run = self.run_dir("evidence")
         receipt = make_run(run)
-        receipt["trigger_transport"] = "rendezvous_file"
         for kw, needle in ((dict(plugin="Channel EQ"), "never shows the plug-in"),
                            (dict(pid=HOST_PID + 1), "different host process")):
             with self.subTest(needle):
@@ -529,9 +593,34 @@ class V2Receipt(unittest.TestCase):
     def test_a_live_receipt_needs_the_live_window_floor(self):
         run = self.run_dir("floor")
         receipt = make_run(run)
-        receipt["trigger_transport"] = "rendezvous_file"
+        receipt["analysis"]["window"]["post"] = 4800
         with self.assertRaisesRegex(V2.ReceiptError, "post must be >="):
             V2.verify(resign(receipt), run)
+
+    def test_a_dry_run_receipt_is_not_daw_evidence(self):
+        run = self.run_dir("dry")
+        make_run(run)
+        receipt = receipt_for(run, kind="fault", fault="force_loss_before",
+                              mode="auhostingservice_arrow", transport="dry_run")
+        with self.assertRaisesRegex(V2.ReceiptError, "not DAW evidence"):
+            V2.verify(receipt, run)
+        self.assertEqual(V2.verify(receipt, run, allow_dry_run=True), ("pass", "pass"))
+
+    # ── M6: live-template rows never capture host input ────────────────
+
+    def test_a_live_row_with_the_internal_stimulus_passes(self):
+        run = self.run_dir("live-internal")
+        receipt = make_run(run, template="live", internal=True)
+        self.assertEqual(receipt["live_input_violations"], 0)
+        self.assertEqual(self.verify(receipt, run), ("pass", "pass"))
+
+    def test_a_live_row_that_captured_host_input_is_a_fail(self):
+        run = self.run_dir("live-host-input")
+        receipt = make_run(run, template="live", internal=False)
+        self.assertGreater(receipt["live_input_violations"], 0)
+        self.assertEqual(self.verify(receipt, run)[0], "fail")
+        self.assertTrue(any("host input reached capture.bin" in r
+                            for r in receipt["verdict_reasons"]))
 
 
 class Pattern(unittest.TestCase):

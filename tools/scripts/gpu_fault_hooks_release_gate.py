@@ -17,9 +17,11 @@ meant to ship, or to be the base for one:
    match unrelated binary data.
 
 `--extra-dir` adds directories outside the build to scan the same way, such
-as an install prefix or ~/Library/Audio/Plug-Ins. Archives (.zip, .pkg,
-.dmg, .tar.*) are compressed and are not looked inside: scan the staged tree
-they are made from.
+as an install prefix or ~/Library/Audio/Plug-Ins. Archives are opened and
+their contents scanned the same way: .zip and .tar.* in-process, .pkg via
+`pkgutil --expand-full`, .dmg mounted read-only and hidden (`hdiutil attach
+-readonly -nobrowse`) and detached afterwards. An archive that cannot be
+opened is itself a finding: the gate fails closed rather than skip it.
 
 Exit codes: 0 clean, 1 a hook was found, 2 the build directory is unusable.
 """
@@ -29,6 +31,11 @@ import argparse
 import os
 import plistlib
 import re
+import shutil
+import subprocess
+import tarfile
+import tempfile
+import zipfile
 import sys
 from pathlib import Path
 
@@ -50,6 +57,8 @@ TARGET = re.compile(r"\bPulpGpuFaultContinuity_\w+|\bgpu-fault-continuity-test\b
 BINARY_SUFFIXES = (".a", ".dylib", ".so", ".o", ".dll", ".lib", ".exe")
 BUNDLES = (".clap", ".vst3", ".component", ".appex", ".app", ".aaxplugin", ".lv2")
 SKIP_DIRS = {"CMakeFiles", "_deps", "Testing", ".cmake"}
+ARCHIVE_SUFFIXES = (".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".pkg", ".dmg")
+MAX_ARCHIVE_DEPTH = 3
 
 
 def _cmake_true(value: str) -> bool:
@@ -121,9 +130,81 @@ def _scan(path: Path) -> list[str]:
     return [needle.decode() for needle in FORBIDDEN if needle in data]
 
 
-def scan_tree(root: Path) -> list[str]:
-    """Binary and bundle-metadata findings under `root`, relative to it."""
+def _archives(root: Path):
+    for here, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for name in files:
+            if name.lower().endswith(ARCHIVE_SUFFIXES):
+                path = Path(here) / name
+                if not path.is_symlink():
+                    yield path
+
+
+def _extract(archive: Path, into: Path) -> str | None:
+    """Unpack `archive` into `into`; return why it could not be, or None."""
+    name = archive.name.lower()
+    try:
+        if name.endswith(".zip"):
+            with zipfile.ZipFile(archive) as z:
+                for member in z.infolist():
+                    target = (into / member.filename).resolve()
+                    if into.resolve() not in target.parents and target != into.resolve():
+                        return f"member {member.filename!r} escapes the archive"
+                z.extractall(into)
+            return None
+        if name.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz")):
+            with tarfile.open(archive) as tar:
+                if hasattr(tarfile, "data_filter"):
+                    tar.extractall(into, filter="data")
+                else:  # Python < 3.11.4: refuse what the data filter would
+                    for member in tar.getmembers():
+                        target = (into / member.name).resolve()
+                        if (member.issym() or member.islnk() or
+                                into.resolve() not in target.parents):
+                            return f"member {member.name!r} is a link or escapes the archive"
+                    tar.extractall(into)
+            return None
+        if name.endswith(".pkg"):
+            if shutil.which("pkgutil") is None:
+                return "pkgutil is not available"
+            done = subprocess.run(["pkgutil", "--expand-full", str(archive), str(into / "pkg")],
+                                  capture_output=True, text=True, timeout=300, encoding="utf-8")
+            return None if done.returncode == 0 else f"pkgutil failed: {done.stderr.strip()}"
+        if name.endswith(".dmg"):
+            if shutil.which("hdiutil") is None:
+                return "hdiutil is not available"
+            mount = into / "mnt"
+            mount.mkdir()
+            done = subprocess.run(["hdiutil", "attach", "-readonly", "-nobrowse", "-noautoopen",
+                                   "-mountpoint", str(mount), str(archive)],
+                                  capture_output=True, text=True, timeout=300, encoding="utf-8")
+            if done.returncode != 0:
+                return f"hdiutil attach failed: {done.stderr.strip()}"
+            try:
+                shutil.copytree(mount, into / "dmg", symlinks=True)
+            finally:
+                subprocess.run(["hdiutil", "detach", str(mount), "-force"],
+                               capture_output=True, timeout=120)
+            return None
+    except (OSError, zipfile.BadZipFile, tarfile.TarError, subprocess.SubprocessError) as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return "unknown archive type"
+
+
+def scan_tree(root: Path, depth: int = 0) -> list[str]:
+    """Binary, bundle-metadata and archive findings under `root`, relative to it."""
     findings: list[str] = []
+    for archive in _archives(root):
+        rel = archive.relative_to(root)
+        if depth >= MAX_ARCHIVE_DEPTH:
+            findings.append(f"{rel} is nested deeper than {MAX_ARCHIVE_DEPTH} archives")
+            continue
+        with tempfile.TemporaryDirectory(prefix="pulp-gate-") as tmp:
+            why = _extract(archive, Path(tmp))
+            if why is not None:
+                findings.append(f"{rel} could not be opened to scan ({why})")
+                continue
+            findings += [f"{rel}: {f}" for f in scan_tree(Path(tmp), depth + 1)]
     for path in _candidates(root):
         hits = _scan(path)
         if hits:

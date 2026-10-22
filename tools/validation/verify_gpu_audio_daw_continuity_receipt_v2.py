@@ -25,6 +25,12 @@ stimulus and impulse response, never read from the receipt. On top of v1:
   offline-fault row is never GPU-continuity evidence;
 * the code under test is named by commit.
 
+`receipt_sha256` is an unkeyed digest of the receipt body: it detects
+accidental edits and binds the body to the artifacts it lists, which are
+re-derived here. It is integrity-only, not authenticity: anyone who can
+rewrite every artifact and recompute the digests can produce a consistent
+receipt. Nothing here should be read as a signature.
+
 Exit codes: 0 verified and the row did what its kind requires without
 qualification (fault `pass`, `control_passed`, `negative_proved`); 1 verified
 but not that, including the qualified passes `pass_degraded_host` and
@@ -78,7 +84,8 @@ REQUIRED_ARTIFACTS = ("stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "
 LIVE_ARTIFACTS = ("host_evidence.json",)
 RECOMPUTED = ("fault", "pdc_samples", "plugin_identity", "binding", "plugin_process", "capture",
               "calling_pattern", "disposition", "delivery", "offline_path", "nulls", "health",
-              "host_alive", "verdict", "verdict_reasons", "planted_negative", "negative_proved")
+              "host_alive", "verdict", "verdict_reasons", "planted_negative", "negative_proved",
+              "live_input_violations")
 FULL_OUTCOMES = ("pass", "control_passed", "negative_proved")
 
 ReceiptError = v1.ReceiptError
@@ -197,6 +204,7 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
         bounce_path=(run_dir / bounce_name) if bounce_name else None,
         realtime_path=(run_dir / realtime_name) if realtime_name else None,
         render_frames=render_frames, nonce=nonce, host=host, hosting_mode=mode,
+        live_template=(receipt.get("host_settings") or {}).get("template") == "live",
         listed=list(artifacts))
     for key in RECOMPUTED:
         _require(_close(receipt.get(key), recomputed.get(key)),

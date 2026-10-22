@@ -172,6 +172,21 @@ TEST_CASE("a rendezvous that fails any check is refused", "[gpu-fault-continuity
         root.write_active(root.run.string(), "/etc/passwd", ir);
         refused("resolve inside run_dir");
     }
+    SECTION("active.json is a symlink") {
+        root.write_active(root.run.string(), req, ir);
+        fs::rename(root.path / "active.json", root.path / "real.json");
+        fs::create_symlink(root.path / "real.json", root.path / "active.json");
+        refused("symlink");
+    }
+    SECTION("a repeated key") {
+        root.write_active(root.run.string(), req, ir);
+        std::ofstream(root.path / "active.json", std::ios::app) << "{\"run_dir\":\"/etc\"}\n";
+        refused("repeats a key");
+    }
+    SECTION("an escape sequence") {
+        root.write_active(root.run.string() + "\\\"x", req, ir);
+        refused("escape");
+    }
     SECTION("ir outside the run dir") {
         root.write_active(root.run.string(), req, "/etc/passwd");
         refused("resolve inside run_dir");
