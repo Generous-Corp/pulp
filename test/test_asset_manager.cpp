@@ -556,6 +556,23 @@ TEST_CASE("AssetManager data URI bytes are returned whatever the image format",
     REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;base64,").empty());
 }
 
+TEST_CASE("AssetManager data URI without ;base64 is percent-decoded",
+          "[view][assets][inline-image]") {
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif,GIF87a%10%00%ff") ==
+            std::vector<uint8_t>{'G', 'I', 'F', '8', '7', 'a', 0x10, 0x00, 0xff});
+    // The media type is optional and its parameters are not the base64 marker.
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:,a%2Cb") ==
+            std::vector<uint8_t>{'a', ',', 'b'});
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/svg+xml;charset=utf-8,%3Csvg%3E") ==
+            std::vector<uint8_t>{'<', 's', 'v', 'g', '>'});
+    // The base64 marker is case-insensitive.
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/gif;BASE64,R0lGODdh") ==
+            std::vector<uint8_t>{'G', 'I', 'F', '8', '7', 'a'});
+    // A malformed escape yields no bytes rather than a corrupted payload.
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/png,%89PNG%0").empty());
+    REQUIRE(AssetManager::decode_data_uri_bytes("data:image/png,%zzPNG").empty());
+}
+
 // ── Display Scale ───────────────────────────────────────────────────────────
 
 TEST_CASE("AssetManager display scale", "[view][assets]") {

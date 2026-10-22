@@ -2,6 +2,7 @@
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/text_font_context.hpp>
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <filesystem>
 
@@ -175,12 +176,71 @@ ImageData AssetManager::load_image_embedded(const std::string& name) {
     return img;
 }
 
+namespace {
+
+// RFC 2397 marks a base64 payload with a final ";base64" parameter in the
+// metadata before the comma; the token is case-insensitive.
+bool data_uri_metadata_is_base64(std::string_view metadata) {
+    const auto semicolon = metadata.rfind(';');
+    if (semicolon == std::string_view::npos)
+        return false;
+    const std::string_view token = metadata.substr(semicolon + 1);
+    constexpr std::string_view kBase64 = "base64";
+    if (token.size() != kBase64.size())
+        return false;
+    for (size_t i = 0; i < token.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(token[i])) != kBase64[i])
+            return false;
+    return true;
+}
+
+int hex_digit_value(char c) {
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+// Percent-decode a non-base64 payload. A '%' not followed by two hex digits
+// makes the whole payload malformed, so the caller gets no bytes rather than a
+// silently corrupted image.
+std::vector<uint8_t> percent_decode(std::string_view encoded) {
+    std::vector<uint8_t> decoded;
+    decoded.reserve(encoded.size());
+    for (size_t i = 0; i < encoded.size(); ++i) {
+        const char c = encoded[i];
+        if (c != '%') {
+            decoded.push_back(static_cast<uint8_t>(c));
+            continue;
+        }
+        if (i + 2 >= encoded.size())
+            return {};
+        const int hi = hex_digit_value(encoded[i + 1]);
+        const int lo = hex_digit_value(encoded[i + 2]);
+        if (hi < 0 || lo < 0)
+            return {};
+        decoded.push_back(static_cast<uint8_t>((hi << 4) | lo));
+        i += 2;
+    }
+    return decoded;
+}
+
+} // namespace
+
 std::vector<uint8_t> AssetManager::decode_data_uri_bytes(std::string_view uri) {
-    // data:<media type>;base64,<payload>
+    // data:[<media type>][;base64],<payload>
     auto comma = uri.find(',');
     if (comma == std::string_view::npos)
         return {};
     const std::string_view encoded = uri.substr(comma + 1);
+    std::string_view metadata = uri.substr(0, comma);
+    if (metadata.starts_with("data:"))
+        metadata.remove_prefix(5);
+    if (!data_uri_metadata_is_base64(metadata))
+        return percent_decode(encoded);
 
     // Lenient base64 decode: padding, line breaks and stray characters are skipped.
     static constexpr std::string_view chars =

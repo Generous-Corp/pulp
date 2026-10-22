@@ -496,6 +496,52 @@ TEST_CASE("ImageView JPEG, WebP and GIF data URIs draw at their decoded size and
     }
 }
 
+TEST_CASE("ImageView percent-encoded PNG data URI draws and hits the cache",
+          "[gpu][skia][image-cache][inline-image][image-view]") {
+    CacheEnabledRestore restore_cache;
+    // RFC 2397: a payload without ;base64 is percent-encoded octets.
+    constexpr int kSize = 128;
+    auto f = make_fixture(kSize, kSize);
+    if (!usable(f))
+        SKIP("Dawn/Graphite unavailable on this host.");
+    const auto png = make_png(64, 64, SK_ColorYELLOW);
+    REQUIRE_FALSE(png.empty());
+    std::string uri = "data:image/png,";
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    for (uint8_t byte : png) {
+        if (std::isalnum(byte) || byte == '-' || byte == '.' || byte == '_' || byte == '~') {
+            uri.push_back(static_cast<char>(byte));
+        } else {
+            uri.push_back('%');
+            uri.push_back(kHex[byte >> 4]);
+            uri.push_back(kHex[byte & 0x0f]);
+        }
+    }
+    view::ImageView image;
+    image.set_bounds({0, 0, kSize, kSize});
+    image.set_image_source(uri);
+    view::ImageView base64_image;
+    base64_image.set_bounds({0, 0, kSize, kSize});
+    base64_image.set_image_source(data_uri(png));
+
+    reset_cache(false);
+    std::vector<uint8_t> reference;
+    if (!paint_frame(f, [&](canvas::Canvas& c) { base64_image.paint(c); }, &reference))
+        SKIP("GPU readback failed (no adapter).");
+    if (red_pixels(reference) == 0)
+        SKIP("Offscreen GPU composited nothing (no real adapter).");
+
+    reset_cache(true);
+    std::vector<uint8_t> cached;
+    for (int frame = 0; frame < kFrames; ++frame) {
+        REQUIRE(paint_frame(f, [&](canvas::Canvas& c) { image.paint(c); }, &cached));
+        CHECK(max_channel_delta(reference, cached) == 0);
+    }
+    const auto stats = canvas::ImageFileCache::instance().inline_stats();
+    CHECK(stats.builds == 1);
+    CHECK(stats.hits == kFrames - 1);
+}
+
 TEST_CASE("ImageView with an undecodable inline payload attempts one decode and paints a "
           "stable placeholder",
           "[gpu][skia][image-cache][inline-image][image-view]") {

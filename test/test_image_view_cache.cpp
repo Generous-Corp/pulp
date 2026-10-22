@@ -480,3 +480,46 @@ TEST_CASE("ImageView fails an undecodable inline payload once and then paints th
     v.paint(cv);
     CHECK(cv.keyed.size() == 2);
 }
+
+TEST_CASE("ImageView fails a malformed percent-encoded data URI once into the placeholder",
+          "[widgets][image][inline-image]") {
+    ImageView v;
+    v.set_image_source("data:image/png,%89PNG%0D%0A%1A%0A%zz");
+    v.set_bounds({0, 0, 64, 64});
+    InlineStubCanvas cv;
+    for (int i = 0; i < 3; ++i)
+        v.paint(cv);
+    // No bytes came out of the payload, so nothing is measured or drawn.
+    CHECK(cv.measures == 0);
+    CHECK(cv.keyed.empty());
+    CHECK(cv.file_draws == 0);
+    int labels = 0;
+    for (const auto& cmd : cv.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_text) {
+            CHECK(cmd.text == "image/png");
+            ++labels;
+        }
+    }
+    CHECK(labels == 3);
+}
+
+TEST_CASE("ImageView draws a percent-encoded data URI through the keyed entry",
+          "[widgets][image][inline-image]") {
+    std::string uri = "data:image/gif,";
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    for (uint8_t byte : kSplitGif) {
+        uri.push_back('%');
+        uri.push_back(kHex[byte >> 4]);
+        uri.push_back(kHex[byte & 0x0f]);
+    }
+    ImageView v;
+    v.set_image_source(uri);
+    v.set_bounds({0, 0, 32, 16});
+    InlineStubCanvas cv;
+    cv.img_w = 16.0f;
+    cv.img_h = 8.0f;
+    v.paint(cv);
+    REQUIRE(cv.keyed.size() == 1);
+    CHECK(cv.keyed[0].key == pulp::runtime::sha256_hex(kSplitGif, sizeof(kSplitGif)));
+    CHECK(cv.keyed[0].size == sizeof(kSplitGif));
+}
