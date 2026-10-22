@@ -668,7 +668,7 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     if (context) {
         FUnknownPtr<IHostApplication> host_app(context);
         if (host_app) {
-            runtime::log_info(
+            runtime::log_debug(
                 "VST3: IHostApplication present; publishing ARA factory "
                 "under kVst3AraFactoryContextKey='{}'",
                 pulp::format::kVst3AraFactoryContextKey);
@@ -944,7 +944,7 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
         }
     }
 
-    runtime::log_info("VST3: initialized '{}' with {} parameters",
+    runtime::log_debug("VST3: initialized '{}' with {} parameters",
                       desc.name, store_.param_count());
 
     // Opt this plugin instance into the process-wide MainThreadDispatcher
@@ -1160,7 +1160,7 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
 
     silence_unsupported_active_ = false;
     apply_arrangements();
-    runtime::log_info(
+    runtime::log_debug(
         "VST3 setBusArrangements: accepted {} in / {} out buses", numIns, numOuts);
     return kResultTrue;
 }

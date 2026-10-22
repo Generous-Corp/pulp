@@ -14,31 +14,41 @@
 //      extension itself — i.e. the AU is being loaded in-process (rare
 //      for AU v3 on shipping macOS, but happens during auval and inside
 //      the Pulp standalone host).
-//   3. `[NSProcessInfo processInfo].processName` when it carries a
+//   3. The process name (`getprogname()`) when it carries a
 //      recognisable Apple wrapper name (`AUHostingServiceXPC_*`,
 //      `AUHostingService`). The classifier in `host_type.cpp` then
 //      decides whether the name resolves to a known host.
+//
+// This runs on every plug-in instantiation, so it reads the main bundle
+// through CoreFoundation and the process name through libc: NSBundle and
+// NSProcessInfo cost a few hundred microseconds in a host (a scanner, a
+// validator) that has not created them yet.
 //
 // Returns an empty string when no wrapper context is detected — the
 // caller falls back to the executable-path heuristic.
 
 #include <pulp/format/host_type.hpp>
 
-#import <Foundation/Foundation.h>
+#include <CoreFoundation/CoreFoundation.h>
 
 #include <cstdlib>
+#include <string>
 
 namespace pulp::format {
 
-static std::string nsstring_to_std(NSString* s) {
-    if (s == nil) return {};
-    const char* utf8 = [s UTF8String];
-    if (utf8 == nullptr) return {};
-    return std::string(utf8);
+static std::string cfstring_to_std(CFStringRef s) {
+    if (s == nullptr) return {};
+    if (const char* fast = CFStringGetCStringPtr(s, kCFStringEncodingUTF8)) return fast;
+    const CFIndex max =
+        CFStringGetMaximumSizeForEncoding(CFStringGetLength(s), kCFStringEncodingUTF8) + 1;
+    std::string out(static_cast<std::size_t>(max), '\0');
+    if (!CFStringGetCString(s, out.data(), max, kCFStringEncodingUTF8)) return {};
+    out.resize(std::char_traits<char>::length(out.c_str()));
+    return out;
 }
 
 std::string current_auv3_wrapper_identifier() {
-    @autoreleasepool {
+    {
         // (1) Environment variable channel — preferred when present.
         if (const char* env = std::getenv("AU_HOST_BUNDLE_ID"); env && *env) {
             return std::string(env);
@@ -59,16 +69,25 @@ std::string current_auv3_wrapper_identifier() {
         // AUv3 extension processes, so this function leaked the
         // extension's own bundle id as if it were the host id, breaking
         // downstream host classification.
-        NSBundle* main = [NSBundle mainBundle];
-        NSString* main_id = main ? [main bundleIdentifier] : nil;
-        NSString* main_path = main ? [main bundlePath] : nil;
-        const bool main_is_extension =
-            main_path != nil &&
-            [[main_path pathExtension] isEqualToString:@"appex"];
+        CFBundleRef main = CFBundleGetMainBundle();
+        const std::string main_id =
+            main ? cfstring_to_std(CFBundleGetIdentifier(main)) : std::string{};
+        bool main_is_extension = false;
+        if (main) {
+            if (CFURLRef url = CFBundleCopyBundleURL(main)) {
+                if (CFStringRef extension = CFURLCopyPathExtension(url)) {
+                    main_is_extension =
+                        CFStringCompare(extension, CFSTR("appex"), 0) == kCFCompareEqualTo;
+                    CFRelease(extension);
+                }
+                CFRelease(url);
+            }
+        }
 
-        NSProcessInfo* info = [NSProcessInfo processInfo];
-        NSString* process_name = info ? [info processName] : nil;
-        std::string process_name_str = nsstring_to_std(process_name);
+        // getprogname() rather than -[NSProcessInfo processName]: the same
+        // executable name, without creating NSProcessInfo.
+        const char* program = getprogname();
+        std::string process_name_str = program ? program : "";
 
         // (3) Recognize Apple's AUHostingService wrapper name. The
         // suffix is informative on macOS Logic 10.5+ (e.g.
@@ -84,10 +103,7 @@ std::string current_auv3_wrapper_identifier() {
         // When the main bundle is not the extension, use it as the host
         // identifier. This is the in-process load path (auval, the Pulp
         // standalone host loading its own AU).
-        if (!main_is_extension) {
-            std::string id = nsstring_to_std(main_id);
-            if (!id.empty()) return id;
-        }
+        if (!main_is_extension && !main_id.empty()) return main_id;
 
         // No wrapper context detected — caller falls back to the
         // executable-path heuristic.

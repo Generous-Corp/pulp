@@ -649,7 +649,7 @@ OSStatus PulpAUEffect::Initialize()
 
     warm_render_path();
 
-    runtime::log_info("AU v2: initialized with {} channels at {} Hz",
+    runtime::log_debug("AU v2: initialized with {} channels at {} Hz",
                       GetNumberOfChannels(), GetSampleRate());
     return noErr;
 }

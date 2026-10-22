@@ -330,7 +330,7 @@ bool clap_init(const clap_plugin_t* plugin) {
         runtime::log_info("CLAP: UMP sidecar enabled for '{}'", desc.name);
     }
 
-    runtime::log_info("CLAP: initialized '{}'", desc.name);
+    runtime::log_debug("CLAP: initialized '{}'", desc.name);
     return true;
 }
 

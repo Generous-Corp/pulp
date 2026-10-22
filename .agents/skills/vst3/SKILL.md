@@ -1493,3 +1493,18 @@ automation in a private host, run `process()` on a thread other than the one
 that created the plug-in: writes on the creating thread are treated as editor
 edits by `HostParameterEditBridge` and echoed back through `performEdit` and
 `setParamNormalized`, which inflated the old numbers by several times.
+
+## Instantiation is a hot path: no Foundation singletons, no info logs
+
+Hosts and scanners instantiate plug-ins far more often than they open
+editors, and a scanner or validator process may not have created
+`NSProcessInfo` or `NSBundle` yet. Host detection (`detect_host_info()` ->
+`current_auv3_wrapper_identifier()`) used to cost about 300 us per
+instantiation in such a process because it asked `NSProcessInfo` for the
+process name and `NSBundle` for the main bundle; it now uses `getprogname()`
+and CoreFoundation, and `initialize()` dropped from about 320 us to 40 us.
+Each `runtime::log_info` costs tens of microseconds (an `os_log` record plus
+an unbuffered stderr write), so per-instance happy-path lifecycle messages
+(VST3 initialized / ARA factory published / bus arrangement accepted, and the
+AU v2 and CLAP equivalents) are `log_debug`; keep `log_info` for refusals and
+accommodations a user may need to see.
