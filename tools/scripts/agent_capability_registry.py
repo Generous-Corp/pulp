@@ -408,7 +408,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             ),
         }
         for include, fingerprint in [
-            ("pulp/signal/compressor.hpp", "sha256:cebb468e5290b1d2f019cf0b2e256a57e6028f1e48981abc1e26bb52aa73a907"),
+            ("pulp/signal/compressor.hpp", "sha256:5c1974f731de731d31ec324ff586854f003d987279367c2e939c7eceaca98b46"),
             ("pulp/signal/diode_bridge_compressor.hpp", "sha256:2384a18231c9cfcff6b8823613050334776113aac5e6c7de76f6f3cd44e942a3"),
             ("pulp/signal/feedforward_compressor.hpp", "sha256:afcd1e63df356725f2256c0b449900c894e1120f016ac511512cc94b11263524"),
             ("pulp/signal/fet_compressor.hpp", "sha256:45e9524c1ca8d7a5e5a3c7e18c997710e0d5a13b05a5c3c2717f7640c5dd03ee"),
@@ -773,7 +773,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:20be67408b047261a5ae3c472cf08b5283b2bb53e205b3580d5d4caab95b567a",
+        "fingerprint": "sha256:b749452f8860e043bf21e16e0925d86fd7bcd95d76bb402301de66dd4b822c74",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -784,7 +784,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/ladder_filter.hpp",
-        "fingerprint": "sha256:a8171956549c9c2f1991c8a92c6f4d668a822d14df96d1f6850f0657e233d957",
+        "fingerprint": "sha256:399f80b1a8d01250ac1cbad10b0c511dc5cf465e1d48a85b9489828f8908a16a",
         "disposition": "capability_support",
         "capability_keys": ["signal.drum-tom-voice"],
         "rationale": (
@@ -804,7 +804,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:4f436966a7378ef4e5e18716657ee66f4556bdf0e6a7f0fa6815c9d1c1600398",
+        "fingerprint": "sha256:0c326ef2065cbf44b83373e6f0f7d9b08eda6ff82817ceb25971ba036d2f1cfe",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
@@ -1316,6 +1316,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/denormal.hpp",
+        "fingerprint": "sha256:a8a9433f0bd463d455260b3b1470571ce1f139722b4cb8acfe42f0e142ed56f4",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Denormal handling helpers: flush-to-zero scopes, value snapping, and the shared "
+            "snap-chunk length recursive filters use to bound subnormal decay within a block. "
+            "Internal numeric hygiene that processors call from their own process(); it makes "
+            "no installed agent capability claim of its own."
+        ),
+    },
+    {
         "include": "pulp/signal/convolver.hpp",
         "fingerprint": "sha256:f2324d75e7b1fde411c4907b5f2b5f4f4a2849e4877a7b45cf9bd368d6da7564",
         "disposition": "infrastructure",
@@ -1454,7 +1466,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/svf.hpp",
-        "fingerprint": "sha256:bf48e17653601e28d7f0cf8b0a452323dc9904675f1455b7860d4608176dad7d",
+        "fingerprint": "sha256:50341bc965475434473aaca48a378ca56c4c19d757922fd1b2ae23406a5ebb66",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1466,7 +1478,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/tpt_filter.hpp",
-        "fingerprint": "sha256:9b9ed303b512f4471d79768fc55e5329005ca9366475091efee30445c4b725bc",
+        "fingerprint": "sha256:2e70a37436a0e624d192e38cd15dbf71c936230d21577b35271251d97b04b69c",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1477,7 +1489,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/ladder_bank.hpp",
-        "fingerprint": "sha256:f7d0a33997de0505a28b5d94b70c76ecf94422692937f660d1116bb8c3b75585",
+        "fingerprint": "sha256:4b69722977f1fc7c92ae2aff3d0864b5c264bdc49d4fa86fc9d5bdc51a4c44e9",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1488,7 +1500,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/svf_bank.hpp",
-        "fingerprint": "sha256:816cf8858943dff7de341276ddd5eaf1dd2439bf41dca203d62ce2ddb02871cf",
+        "fingerprint": "sha256:feedf8dd0862d2fe70a0640b2f3c4cccb684ff045052f713d11fc31f527ea5d2",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

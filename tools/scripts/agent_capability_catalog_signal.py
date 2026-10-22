@@ -1213,20 +1213,20 @@ EXPORTS = [
             binding(
                 role="voice", kind="cpp_type", include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice", target="Pulp::signal",
-                header_fingerprint="sha256:66feaffef9ec91c1002150734abf7f1579e7a2213f8c650928050cbebc99f147",
+                header_fingerprint="sha256:df13e3f7a6452302cc25acea7e84bd52aa77008e5ecbd46ad5517b14011f9d68",
             ),
             binding(
                 role="ladder_profile", kind="cpp_type", include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice::LadderMathProfile",
                 target="Pulp::signal",
-                header_fingerprint="sha256:66feaffef9ec91c1002150734abf7f1579e7a2213f8c650928050cbebc99f147",
+                header_fingerprint="sha256:df13e3f7a6452302cc25acea7e84bd52aa77008e5ecbd46ad5517b14011f9d68",
             ),
             binding(
                 role="set_ladder_profile", kind="cpp_function",
                 include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice::set_ladder_math_profile",
                 target="Pulp::signal",
-                header_fingerprint="sha256:66feaffef9ec91c1002150734abf7f1579e7a2213f8c650928050cbebc99f147",
+                header_fingerprint="sha256:df13e3f7a6452302cc25acea7e84bd52aa77008e5ecbd46ad5517b14011f9d68",
                 address_expression=(
                     "static_cast<bool (pulp::signal::drum::TomVoice::*)("
                     "pulp::signal::drum::TomVoice::LadderMathProfile) noexcept>("
@@ -1238,7 +1238,7 @@ EXPORTS = [
                 include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice::ladder_math_profile",
                 target="Pulp::signal",
-                header_fingerprint="sha256:66feaffef9ec91c1002150734abf7f1579e7a2213f8c650928050cbebc99f147",
+                header_fingerprint="sha256:df13e3f7a6452302cc25acea7e84bd52aa77008e5ecbd46ad5517b14011f9d68",
                 address_expression=(
                     "static_cast<pulp::signal::drum::TomVoice::LadderMathProfile "
                     "(pulp::signal::drum::TomVoice::*)() const noexcept>("
@@ -1527,7 +1527,7 @@ EXPORTS = [
         latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/six_band_eq.hpp",
                          qualified_name="pulp::signal::SixBandEqT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:e10967c5ab397d4f49ee02d9fa9600ff7ae007ecc464727452ba0f4fd32e0389")],
+                         header_fingerprint="sha256:25699c04e11bdd358bbde25071f8528ec81bfddd3a5defda58f1afc3556def09")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::SixBandEqT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2462,7 +2462,7 @@ EXPORTS = [
         latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/graphic_eq.hpp",
                          qualified_name="pulp::signal::GraphicEqT<float, 31>", target="Pulp::signal",
-                         header_fingerprint="sha256:1409ea28ebe82baf624e47dc8e0b2abfc8119773548862ecbd12e5d6d3174025")],
+                         header_fingerprint="sha256:a556beb98a3e89254fe51ff90866a8290246410a7e4ae6e0b9f0f3a8cbc2561f")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::GraphicEqT<float, 31>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2664,7 +2664,7 @@ EXPORTS = [
         determinism={"repeatability": "tolerance_bounded", "block_partition": "invariant", "platform_scope": "same_build", "transport_history": "irrelevant"},
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/parametric_eq.hpp",
                           qualified_name="pulp::signal::ParametricEqT<float>", target="Pulp::signal",
-                          header_fingerprint="sha256:75737376be5b484a49350d668105498c42c4c191ab1436947f8ec8008ecbccd5")],
+                          header_fingerprint="sha256:7fac0742c304d74e201ece2799ee172c81805e3f7bf1ba5dcc7a8fab70d5fbb6")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::ParametricEqT<float>", "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
 ]
