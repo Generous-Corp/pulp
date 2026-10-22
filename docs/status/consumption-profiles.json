@@ -672,6 +672,7 @@
       "pulp/runtime/child_process.hpp",
       "pulp/runtime/crypto.hpp",
       "pulp/runtime/detail/durable_file_replacement.hpp",
+      "pulp/runtime/dispatch_count.hpp",
       "pulp/runtime/dynamic_library.hpp",
       "pulp/runtime/exceptions.hpp",
       "pulp/runtime/expression.hpp",
@@ -1120,6 +1121,7 @@
       "pulp/signal/zero_latency_convolver_support.hpp"
     ],
     "core/simd/include": [
+      "pulp/simd/lanes.hpp",
       "pulp/simd/scalar_kernels.hpp",
       "pulp/simd/simd.hpp"
     ],
