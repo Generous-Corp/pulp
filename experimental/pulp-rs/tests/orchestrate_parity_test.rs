@@ -550,6 +550,30 @@ mod build_configure_argv {
     }
 
     #[test]
+    fn standalone_without_an_installed_sdk_or_delegate_names_the_fix() {
+        let (td, bin, log) = fixture(true);
+        let home = td.path().join("empty-pulp-home");
+        std::fs::create_dir_all(&home).unwrap();
+        let root = standalone_fixture(td.path(), "9.8.7");
+        let out = pulp_rs_no_fallthrough()
+            .arg("build")
+            .current_dir(&root)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("PULP_HOME", &home)
+            .env("PULP_TARTCI_LEASES", "0")
+            .output()
+            .expect("run pulp build");
+        assert!(!out.status.success(), "{out:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("no installed Pulp SDK matches this project's pulp.toml")
+                && stderr.contains("pulp sdk install"),
+            "{stderr}"
+        );
+        assert!(!log.exists(), "cmake ran: {:?}", std::fs::read_to_string(&log));
+    }
+
+    #[test]
     fn examples_flag_and_missing_ninja_are_honored() {
         let (td, bin, log) = fixture(false);
         let argv = configure_argv(&td.path().join("checkout"), &bin, &log, &["--examples"]);

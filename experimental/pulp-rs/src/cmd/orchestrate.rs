@@ -4531,8 +4531,45 @@ mod tests {
     }
 
     #[test]
+    fn standalone_build_without_an_installed_sdk_refuses_instead_of_configuring() {
+        // No SDK under PULP_HOME and no pulp-cpp delegate: the build must stop
+        // with the delegation error rather than configure without a prefix,
+        // which would let find_package(Pulp) pick up any Pulp on the search path.
+        let home = tempfile::tempdir().unwrap();
+        let _guard = EnvVarGuard::set_many(&[
+            (affected::FOCUS_ENV, Some("0")),
+            (crate::fallthrough::DISABLE_ENV, Some("1")),
+            ("PULP_HOME", Some(home.path().to_str().unwrap())),
+        ]);
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("CMakeLists.txt"), "project(x)\n").unwrap();
+        std::fs::write(td.path().join("pulp.toml"), "sdk_version = \"9.8.7\"\n").unwrap();
+        let standalone = ActiveProject::new(td.path().to_path_buf(), true);
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let err = build_with(&standalone, &BuildArgs::default(), &spawner, &mut out)
+            .expect_err("a standalone build with no installed SDK must not proceed");
+        assert!(matches!(err, CliError::BadUsage(_)), "{err:?}");
+        assert!(
+            spawner.calls.borrow().iter().all(|c| c.program != "cmake"),
+            "cmake ran without an SDK prefix: {:?}",
+            spawner.calls.borrow()
+        );
+    }
+
+    #[test]
     fn seed_build_skips_an_existing_build_dir_and_standalone_projects() {
-        let _guard = EnvVarGuard::set(affected::FOCUS_ENV, "0");
+        // The standalone half configures; its SDK lookup is answered by an SDK
+        // installed under this test's PULP_HOME, not by the host.
+        let home = tempfile::tempdir().unwrap();
+        crate::test_support::fake_installed_sdk(
+            home.path(),
+            &crate::build_info::cli_version_string(),
+        );
+        let _guard = EnvVarGuard::set_many(&[
+            (affected::FOCUS_ENV, Some("0")),
+            ("PULP_HOME", Some(home.path().to_str().unwrap())),
+        ]);
         let td = tempfile::tempdir().unwrap();
         let proj = focused_source_tree(td.path(), FOCUSED_SELECTION);
         std::fs::write(td.path().join(SEED_SCRIPT_RELATIVE), "#!/usr/bin/env python3\n").unwrap();
