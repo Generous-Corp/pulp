@@ -300,7 +300,7 @@ var<workgroup> zbuf:array<f32,128>; var<workgroup> abuf:array<f32,64>;
 @compute @workgroup_size(64) fn main(@builtin(workgroup_id) wid:vec3u,@builtin(local_invocation_id) lid:vec3u){
  let t=wid.x; if(t>=p.B){return;} let lane=lid.x; let C=p.C; let Z=p.Z; let acol=p.src_pad+t;
  for(var oc=lane;oc<Z;oc+=64u){var acc=wts[p.conv_b+oc]; for(var k=0u;k<p.K;k++){let back=p.dil*(p.K-1u-k);let base=(acol-back)*C;let wb=p.conv_w+oc*C*p.K+k;for(var ic=0u;ic<C;ic++){acc+=wts[wb+ic*p.K]*ina[base+ic];}} acc+=wts[p.mix_w+oc]*cond[t];zbuf[oc]=acc;}
- workgroupBarrier(); if(p.gated==0u){for(var c=lane;c<C;c+=64u){abuf[c]=tanh(zbuf[c]);}}else{for(var c=lane;c<C;c+=64u){let g=1.0/(1.0+exp(-zbuf[C+c]));abuf[c]=tanh(zbuf[c])*g;}}
+ workgroupBarrier(); if(p.gated==0u){for(var c=lane;c<C;c+=64u){abuf[c]=tanh(clamp(zbuf[c],-15.0,15.0));}}else{for(var c=lane;c<C;c+=64u){let g=1.0/(1.0+exp(-zbuf[C+c]));abuf[c]=tanh(clamp(zbuf[c],-15.0,15.0))*g;}}
  workgroupBarrier(); let hc=t*C; for(var c=lane;c<C;c+=64u){headacc[hc+c]=headacc[hc+c]+abuf[c];} let src=(p.src_pad+t)*C; let dst=(p.dst_pad+t)*C; for(var oc=lane;oc<C;oc+=64u){var r=wts[p.l1_b+oc];let rw=p.l1_w+oc*C;for(var ic=0u;ic<C;ic++){r+=wts[rw+ic]*abuf[ic];}outa[dst+oc]=ina[src+oc]+r;}
 }
 )wgsl";

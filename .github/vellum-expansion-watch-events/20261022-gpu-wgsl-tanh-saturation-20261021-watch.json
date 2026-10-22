@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-gpu-wgsl-tanh-saturation-20261021-watch",
+  "created_at": "2026-10-22T02:37:40Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "GPU compute kernels (WaveNet layer, fused layer, shared-IO layer, dense) clamp the WGSL tanh argument to [-15, 15] so backends whose tanh returns NaN for large inputs saturate like float tanh instead. Numeric robustness inside existing render-backend compute kernels only; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-gpu-compute",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

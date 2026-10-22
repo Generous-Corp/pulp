@@ -1100,6 +1100,27 @@ TEST_CASE("GpuCompute dense_tanh matches CPU", "[render][gpu][compute]") {
     REQUIRE_FALSE(compute->dense_tanh(x.data(), w.data(), b.data(), out.data(), 0, OUT));
 }
 
+TEST_CASE("GpuCompute dense_tanh saturates large pre-activations to exactly +-1",
+          "[render][gpu][compute]") {
+    // Some backends' tanh returns NaN once |x| is large; the kernel must
+    // saturate instead, exactly as float std::tanh does.
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone())
+        SKIP(kNoGpu);
+
+    constexpr uint32_t IN = 1, OUT = 6;
+    const std::vector<float> x = {1.0f};
+    const std::vector<float> w = {20.0f, -20.0f, 90.0f, -90.0f, 1.0e6f, -1.0e6f};
+    const std::vector<float> b(OUT, 0.0f);
+    std::vector<float> out(OUT, 0.0f);
+    REQUIRE(compute->dense_tanh(x.data(), w.data(), b.data(), out.data(), IN, OUT));
+    for (uint32_t j = 0; j < OUT; ++j) {
+        INFO("pre-activation " << w[j]);
+        REQUIRE(std::isfinite(out[j]));
+        REQUIRE(out[j] == (w[j] > 0.0f ? 1.0f : -1.0f));
+    }
+}
+
 // ── Fused WaveNet inference ─────────────────────────────────────────────────
 
 namespace {
@@ -1492,6 +1513,55 @@ TEST_CASE("GpuCompute wavenet_forward matches a scalar reference with a "
         weights, C, K, L, dilations, H, gated, /*head_bias=*/false, head_scale, in);
     REQUIRE(std::isfinite(out[0]));
     REQUIRE(std::abs(out[0] - expect[0]) <= 1e-3 + 1e-3 * std::abs(expect[0]));
+}
+
+TEST_CASE("GpuCompute wavenet_forward stays finite when activations saturate",
+          "[render][gpu][compute]") {
+    // Hot captures drive the layer pre-activations far past tanh's knee. A
+    // backend tanh that returns NaN there turns the whole block (and every
+    // later block, through the dilation history) into NaN; the shader must
+    // saturate like float std::tanh, on both the gated and ungated paths.
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone())
+        SKIP(kNoGpu);
+
+    for (const bool gated : {false, true}) {
+        INFO("gated " << gated);
+        const uint32_t C = 8, K = 3, L = 2, H = 1;
+        std::vector<uint32_t> dilations = {1, 2};
+        const uint32_t need = wavenet_single_array_len(C, K, L, H, gated);
+        std::vector<float> weights = wavenet_weight_blob(need);
+        for (auto& v : weights)
+            v *= 60.0f; // push |z| well past the point where tanh saturates
+        const float head_scale = 0.5f;
+
+        GpuCompute::WavenetLayerArraySpec spec;
+        spec.input_size = 1;
+        spec.condition_size = 1;
+        spec.channels = C;
+        spec.kernel = K;
+        spec.head_size = H;
+        spec.gated = gated ? 1 : 0;
+        spec.head_bias = 0;
+        spec.dilations = dilations.data();
+        spec.num_layers = L;
+
+        const uint32_t B = 32;
+        REQUIRE(compute->prepare_wavenet(&spec, 1, weights.data(), need, B, head_scale));
+
+        std::vector<float> in(B), out(B, 0.0f);
+        for (uint32_t i = 0; i < B; ++i)
+            in[i] = std::sin(0.37f * i);
+        REQUIRE(compute->wavenet_forward(in.data(), out.data(), B));
+
+        const std::vector<double> expect = wavenet_ref_single_array(
+            weights, C, K, L, dilations, H, gated, /*head_bias=*/false, head_scale, in);
+        for (uint32_t i = 0; i < B; ++i) {
+            INFO("sample " << i);
+            REQUIRE(std::isfinite(out[i]));
+            REQUIRE(std::abs(out[i] - expect[i]) <= 1e-3 + 1e-3 * std::abs(expect[i]));
+        }
+    }
 }
 
 TEST_CASE("GpuCompute prepare_wavenet rejects unsupported shapes",
