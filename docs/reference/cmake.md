@@ -275,6 +275,10 @@ Format targets are only created when the corresponding SDK is available:
 
 On Linux and Ubuntu, requesting `AAX` in `FORMATS` is a configure-time error.
 
+In every non-Debug Apple build the VST3, CLAP,
+AU v2, LV2 and AAX modules link with `-dead_strip`, so code nothing references
+is removed from the module. AU v3 targets are not dead-stripped.
+
 ### Install Target
 
 `pulp-install-${target}` copies supported built bundles to platform-standard locations:

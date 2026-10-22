@@ -110,7 +110,7 @@ public:
     /// before it destroys the editor root. Idempotent; the destructor runs it.
     void release_root() noexcept override;
     /// True when `view` is this session's root.
-    bool borrows_root(const View& view) const noexcept { return &root_ == &view; }
+    bool borrows_root(const View& view) const noexcept override { return &root_ == &view; }
 
     ScriptedUiSession(const ScriptedUiSession&) = delete;
     ScriptedUiSession& operator=(const ScriptedUiSession&) = delete;
@@ -128,7 +128,7 @@ public:
     /// a processor that builds its own session in create_view() should too.
     bool load_deferrable(std::string* error = nullptr);
     /// True between a deferred load() and the poll() that evaluates it.
-    bool document_load_pending() const noexcept { return document_load_pending_; }
+    bool document_load_pending() const noexcept override { return document_load_pending_; }
 
     /// True while the mounted document still owes host frames to settle its
     /// commits (see WidgetBridge::pending_runtime_settle_rounds()). Each

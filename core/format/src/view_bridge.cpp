@@ -211,7 +211,7 @@ bool ViewBridge::open(std::string* error) {
 
     // Tell the scripted editor where it lives, so a document can keep its
     // plain-key global shortcuts standalone-only (see EditorHostKind).
-    if (auto* session = scripted_ui()) {
+    if (view::ScriptedEditorSession* session = scripted_ui()) {
         session->set_host_kind(
             processor_.editor_host_kind() == EditorHostKind::standalone
                 ? "standalone" : "plugin");
@@ -373,7 +373,8 @@ bool ViewBridge::prepare_first_frame(view::PluginViewHost& host) {
         return false;
     PULP_TRACE_SCOPE_NAMED("render", "editor_first_frame");
     {
-        if (auto* session = scripted_ui(); session && session->document_load_pending()) {
+        if (view::ScriptedEditorSession* session = scripted_ui();
+            session && session->document_load_pending()) {
             std::string load_error;
             // Reports through the session's loaded callback either way; a
             // failure leaves the root to the processor's fail-closed path.
@@ -388,7 +389,7 @@ bool ViewBridge::prepare_first_frame(view::PluginViewHost& host) {
         const auto pump = make_editor_idle_pump(*this);
         const auto started = std::chrono::steady_clock::now();
         for (int round = 0; round < kFirstFrameSettleRounds; ++round) {
-            auto* session = scripted_ui();
+            view::ScriptedEditorSession* session = scripted_ui();
             if (!session || !session->settling())
                 break;
             if (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
@@ -496,7 +497,7 @@ void ViewBridge::close() {
     // realm before the root goes, unless the root was released to a new owner.
     // Only while the processor lives: once it is gone, so is its session.
     if (!released_ && owner_is_alive()) {
-        if (auto* session = safe_active_scripted_ui(processor_);
+        if (view::ScriptedEditorSession* session = safe_active_scripted_ui(processor_);
             session && session->borrows_root(*view_raw_))
             session->release_root();
     }

@@ -8,6 +8,8 @@ class GpuSurface;
 
 namespace pulp::view {
 
+class View;
+
 /// The part of a scripted editor session that editor hosts drive: the frame
 /// pump, the content-first open, GPU-surface handoff, and teardown.
 ///
@@ -20,6 +22,10 @@ class ScriptedEditorSession {
 public:
     virtual ~ScriptedEditorSession() = default;
 
+    /// See ScriptedUiSession::document_load_pending().
+    virtual bool document_load_pending() const noexcept = 0;
+    /// See ScriptedUiSession::borrows_root().
+    virtual bool borrows_root(const View& view) const noexcept = 0;
     /// See ScriptedUiSession::poll().
     virtual bool poll(std::string* error = nullptr) = 0;
     /// See ScriptedUiSession::settling().
