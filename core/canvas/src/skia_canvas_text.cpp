@@ -176,8 +176,10 @@ PreparedParagraph make_paragraph(const std::string& text,
     }
     if (families.empty()) families.emplace_back("");
     tstyle.setFontFamilies(families);
-    tstyle.setFontSize(size > 0 ? size : 14.0f);
-    apply_auto_optical_size(tstyle, size > 0 ? size : 14.0f);
+    const float paragraph_size = size > 0 ? size : 14.0f;
+    const SkFont primary = make_font(family, paragraph_size, weight, slant);
+    tstyle.setFontSize(paragraph_size);
+    apply_auto_optical_size(tstyle, primary.getTypeface(), paragraph_size);
     SkFontStyle sk_style{weight, SkFontStyle::kNormal_Width,
                          skia_slant(slant)};
     tstyle.setFontStyle(sk_style);
@@ -185,10 +187,7 @@ PreparedParagraph make_paragraph(const std::string& text,
     // CSS letter-spacing, split around each glyph the same way SkParagraph
     // splits letter-spacing, so it rides along with it. Only the CSS part is
     // taken back out of the leading edge below.
-    const float paragraph_size = size > 0 ? size : 14.0f;
-    const float tracking = aat_tracking_px(
-        make_font(family, paragraph_size, weight, slant).getTypeface(),
-        paragraph_size);
+    const float tracking = aat_tracking_px(primary.getTypeface(), paragraph_size);
     if (letter_spacing + tracking != 0.0f)
         tstyle.setLetterSpacing(letter_spacing + tracking);
     if (foreground_paint.has_value()) {

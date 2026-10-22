@@ -1707,6 +1707,65 @@ TEST_CASE("SkiaCanvas measures text at its optical size with AAT tracking",
     // would be 2 x 25.2 + 8.4; without tracking 2 x 29.4.
     CHECK(canvas.measure_text("HH") == Catch::Approx(67.2f).margin(0.05));
 }
+
+// Sizes that animate or auto-fit reach these caches at a new float every
+// frame. Optical size is asked for on a quarter-pixel grid, and both caches
+// evict, so neither grows with the number of distinct sizes drawn.
+TEST_CASE("optical-size and tracking caches stay bounded across many sizes",
+          "[canvas][skia][text][optical-size][tracking]") {
+    if (!opsz_trak_face()) SKIP("no platform font manager to load the fixture font");
+    using pulp::canvas::kFontTableCacheCapacity;
+    using pulp::canvas::typeface_at_auto_optical_size;
+
+    // Sizes within an eighth of a pixel share one clone.
+    auto face = opsz_trak_face();
+    CHECK(typeface_at_auto_optical_size(face, 20.01f).get() ==
+          typeface_at_auto_optical_size(face, 20.1f).get());
+    CHECK(typeface_at_auto_optical_size(face, 20.01f).get() !=
+          typeface_at_auto_optical_size(face, 20.2f).get());
+
+    // Three separately loaded copies are three faces to the caches, which is
+    // more face-and-coordinate pairs than either cache holds.
+    std::vector<sk_sp<SkTypeface>> faces{opsz_trak_face(), opsz_trak_face(),
+                                         opsz_trak_face()};
+    REQUIRE(faces[0]->uniqueID() != faces[1]->uniqueID());
+    REQUIRE(faces[1]->uniqueID() != faces[2]->uniqueID());
+    for (const auto& source : faces) {
+        for (int i = 0; i < 2000; ++i) {
+            const float size = 10.0f + static_cast<float>(i) * 0.031f;
+            const auto clone = typeface_at_auto_optical_size(source, size);
+            (void)pulp::canvas::aat_tracking_px(clone.get(), size);
+        }
+    }
+    const auto sizes = pulp::canvas::font_table_cache_sizes();
+    CHECK(sizes.optical_size_clones <= kFontTableCacheCapacity);
+    CHECK(sizes.track_tables <= kFontTableCacheCapacity);
+
+    // SkParagraph's FontCollection keeps a clone per argument set, so the
+    // paragraph path asks for no more distinct arguments than the grid has
+    // points in the axis range, and none for a face without opsz.
+    SkFontParameters::Variation::Axis axis;
+    REQUIRE(face->getVariationDesignParameters(SkSpan(&axis, 1)) == 1);
+    REQUIRE(axis.tag == SkSetFourByteTag('o', 'p', 's', 'z'));
+    const auto grid_points =
+        static_cast<std::size_t>((axis.max - axis.min) * 4.0f) + 1;
+    std::vector<skia::textlayout::FontArguments> distinct;
+    for (int i = 0; i < 2000; ++i) {
+        skia::textlayout::TextStyle style;
+        pulp::canvas::apply_auto_optical_size(
+            style, face.get(), 10.0f + static_cast<float>(i) * 0.031f);
+        REQUIRE(style.getFontArguments().has_value());
+        const auto& args = *style.getFontArguments();
+        if (std::find(distinct.begin(), distinct.end(), args) == distinct.end())
+            distinct.push_back(args);
+    }
+    CHECK(distinct.size() <= grid_points);
+    auto plain = pulp::canvas::platform_font_manager()->makeFromFile(PULP_TEST_FONT_PATH);
+    REQUIRE(plain != nullptr);
+    skia::textlayout::TextStyle plain_style;
+    pulp::canvas::apply_auto_optical_size(plain_style, plain.get(), 20.0f);
+    CHECK_FALSE(plain_style.getFontArguments().has_value());
+}
 #endif
 
 // ── Optical sizing on a face that already sits on other axes ────────────────
@@ -1770,7 +1829,7 @@ TEST_CASE("an optical-size clone keeps a weight instance's weight",
     style.setFontSize(40.0f);
     style.setFontStyle(SkFontStyle(700, SkFontStyle::kNormal_Width,
                                    SkFontStyle::kUpright_Slant));
-    pulp::canvas::apply_auto_optical_size(style, 40.0f);
+    pulp::canvas::apply_auto_optical_size(style, bold.get(), 40.0f);
     skia::textlayout::ParagraphStyle paragraph_style;
     paragraph_style.setTextStyle(style);
     auto collection_use = ctx->lock_font_collection_use();
