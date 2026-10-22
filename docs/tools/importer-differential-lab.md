@@ -568,21 +568,33 @@ metadata shift, native `html` rect shift, +/-3 px on the farthest node, -10%
 width). This supersedes the earlier decision to keep raw page-space geometry
 canonical; raw remains reported in every receipt.
 
-**Paint-oracle correction (2026-10-21).** Under
+**Paint-oracle ruling (2026-10-21).** Under
 `Emulation.setDeviceMetricsOverride` with a device scale factor of 2, which
 both the production capture and the lab's Chromium reference use, Chromium
-snaps text baselines to whole CSS pixels (`2 * round(L)` device px). Real
-Chrome launched with `--force-device-scale-factor=2` and no override snaps in
-device pixels (`round(2L)`), which is what Pulp's painter does. A 48-run
-sub-pixel baseline sweep shows the emulated line pitch alternating 80/82 device
-px while native Chrome and Pulp step 81 at the quarter phases. The emulated
-capture therefore remains the layout oracle (DOM snapshot, geometry,
-typography), but it is a miscalibrated paint reference for text. Fable ruled
-against snapping native text to whole CSS pixels to match it, because that
-would fit the instrument while moving the product away from real HiDPI
-output. The visual gate is moving to a native-DPR Chromium reference, with the
-emulated paint score still reported; visual scores taken against the emulated
-reference are not comparable with native-reference scores.
+rounds font metrics and snaps text baselines to whole CSS pixels. Real Chrome
+launched with `--force-device-scale-factor=2` and no override rounds to device
+pixels and changes text layout itself: on a 364-case grid (13 families, 7
+sizes, two weights and styles) native DPR produced half-CSS-pixel fragment
+heights in 296 cases, while emulated DPR 2 and DPR 1 matched canvas font
+metrics in all 364. The import is CSS-pixel canonical by design, because that
+layout renders the same geometry at every display scale; a native-DPR capture
+would bake one display's half-pixel metrics into the IR. The emulated PNG is
+therefore the only Chromium reference whose layout matches what Pulp renders,
+and it remains the visual oracle. Reproducing the captured layout's whole-CSS-
+pixel baseline snap in captured text is the captured layout's own paint
+semantics, not instrument fitting. The documented product limitation is that
+on a HiDPI display imported text can sit up to one device pixel from where
+native Chrome would lay out the same source. A native-DPR pixel comparison was
+prototyped and abandoned, because it scores Pulp's render of one layout
+against Chromium's render of another.
+
+Captured text baselines come from metrics measured during capture: each text
+run's ascent and descent are read from an `OffscreenCanvas` in an isolated
+world under the capture's own emulation, recorded in `platform-fonts.json`,
+and used when the captured box is exactly ascent plus descent tall. Runs whose
+font the canvas cannot express exactly record no metrics, and lowering falls
+back to the rounded typographic-ascent rule, which is known to be approximate
+for faces Chromium adjusts (Times, Helvetica, Courier on macOS).
 
 ### Stop and continuation rules
 
