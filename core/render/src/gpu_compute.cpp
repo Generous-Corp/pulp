@@ -592,13 +592,22 @@ static constexpr const char* kWavenetLayerShader = R"wgsl(
 // memory so the activation and 1x1 stages can read every channel the conv
 // stage produced for their sample; S*Z <= 128 and S*C <= 64 by construction.
 //
+// Weight layout (p.wt): with wt = 1 the conv and 1x1 weights are stored
+// output-channel-minor ([k][ic][oc] and [ic][oc]; the host transposes the blob
+// at prepare), so the lanes of one sample, which own consecutive output
+// channels, read consecutive weights on every step of their reductions. That
+// wins once a large group keeps the GPU throughput-bound. With wt = 0 they keep
+// the blob's [oc][ic][k] / [oc][ic] order, where each lane walks one contiguous
+// row; that is faster when few instances leave each dispatch latency-bound.
+// Either way every reduction runs in the same order, so results are identical.
+//
 // Activations are column rings (see the rechannel shader): ina holds this
 // layer's input with at least dil*(K-1) columns of history before the block,
 // outa receives the layer output at the block's columns. Ring sizes are powers
 // of two, so the u32 wrap of the stream position keeps column indices exact.
 struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, in_mask:u32,
            conv_w:u32, conv_b:u32, mix_w:u32, l1_w:u32, l1_b:u32,
-           out_mask:u32, S:u32, head_init:u32, p3:u32 };
+           out_mask:u32, S:u32, head_init:u32, wt:u32 };
 @group(0) @binding(0) var<storage, read>       wts     : array<f32>;
 @group(0) @binding(1) var<storage, read>       ina     : array<f32>;  // C*(in_mask+1)
 @group(0) @binding(2) var<storage, read_write> outa    : array<f32>;  // C*(out_mask+1)
@@ -638,9 +647,11 @@ fn main(@builtin(workgroup_id) wid : vec3u,
             for (var k = 0u; k < K; k = k + 1u) {
                 let back = p.dil * (K - 1u - k);   // valid: ring history >= max back
                 let base = in0 + ((n - back) & p.in_mask) * C;
-                let wbase = w0 + p.conv_w + oc * C * K + k;
+                // wt == 1: [k][ic][oc] (stride Z per ic); else [oc][ic][k] (stride K).
+                let wbase = w0 + p.conv_w + select(oc * C * K + k, k * C * Z + oc, p.wt == 1u);
+                let wstep = select(K, Z, p.wt == 1u);
                 for (var ic = 0u; ic < C; ic = ic + 1u) {
-                    acc = acc + wts[wbase + ic * K] * ina[base + ic];
+                    acc = acc + wts[wbase + ic * wstep] * ina[base + ic];
                 }
             }
             acc = acc + wts[w0 + p.mix_w + oc] * cond[inst * p.B + t];   // input_mixin (condition_size == 1)
@@ -680,9 +691,11 @@ fn main(@builtin(workgroup_id) wid : vec3u,
             }
             let n = st.x + t;
             var r = wts[w0 + p.l1_b + oc];
-            let rrow = w0 + p.l1_w + oc * C;
             let a0 = s * C;
-            for (var ic = 0u; ic < C; ic = ic + 1u) { r = r + wts[rrow + ic] * abuf[a0 + ic]; }
+            for (var ic = 0u; ic < C; ic = ic + 1u) {
+                r = r + wts[w0 + p.l1_w + select(oc * C + ic, ic * C + oc, p.wt == 1u)] *
+                            abuf[a0 + ic];
+            }
             outa[out0 + (n & p.out_mask) * C + oc] = ina[in0 + (n & p.in_mask) * C + oc] + r;
         }
     }
@@ -3836,10 +3849,14 @@ private:
         wgpu::BindGroup rechannel_bg, head_bg;
         std::vector<wgpu::BindGroup> layer_bg;
     };
+    // Groups at least this large store layer weights output-channel-minor (see
+    // the layer shader); smaller plans keep the blob's row order.
+    static constexpr uint32_t kWavenetTransposedWeightsMinGroup = 32;
     struct WavenetPlan {
         uint32_t B = 0;
-        uint32_t count = 1;         // same-shape instances run together
-        uint32_t weight_stride = 0; // floats per instance weight slice
+        uint32_t count = 1;              // same-shape instances run together
+        uint32_t weight_stride = 0;      // floats per instance weight slice
+        bool transposed_weights = false; // layer weights output-channel-minor
         wgpu::Buffer weights, input, output, readback;
         wgpu::Buffer scale_u, stream_u;
         uint32_t position = 0; // stream sample index of the next block (wraps)
@@ -3860,6 +3877,39 @@ private:
     std::vector<WavenetPlan*> wavenet_batch_plans_;
     wgpu::Buffer wavenet_batch_readback_;
     std::vector<float> wavenet_batch_scratch_;
+
+    // Copies a validated WaveNet blob into its device layout: identical offsets,
+    // but each layer's conv weights go from [oc][ic][k] to [k][ic][oc] and its
+    // 1x1 weights from [oc][ic] to [ic][oc] (see the layer shader).
+    static void wavenet_device_layout(const WavenetLayerArraySpec* arrays, uint32_t num_arrays,
+                                      const float* src, float* dst) {
+        std::size_t off = 0;
+        auto copy = [&](std::size_t n) {
+            std::memcpy(dst + off, src + off, n * sizeof(float));
+            off += n;
+        };
+        for (uint32_t a = 0; a < num_arrays; ++a) {
+            const WavenetLayerArraySpec& s = arrays[a];
+            const std::size_t C = s.channels, K = s.kernel, H = s.head_size;
+            const std::size_t Z = s.gated ? 2u * C : C;
+            copy(C * s.input_size); // rechannel
+            for (uint32_t l = 0; l < s.num_layers; ++l) {
+                for (std::size_t oc = 0; oc < Z; ++oc) // conv W
+                    for (std::size_t ic = 0; ic < C; ++ic)
+                        for (std::size_t k = 0; k < K; ++k)
+                            dst[off + (k * C + ic) * Z + oc] = src[off + (oc * C + ic) * K + k];
+                off += Z * C * K;
+                copy(Z + Z * s.condition_size);        // conv bias, mixin
+                for (std::size_t oc = 0; oc < C; ++oc) // 1x1 W
+                    for (std::size_t ic = 0; ic < C; ++ic)
+                        dst[off + ic * C + oc] = src[off + oc * C + ic];
+                off += C * C;
+                copy(C); // 1x1 bias
+            }
+            copy(H * C + (s.head_bias ? H : 0u)); // head rechannel
+        }
+        copy(1); // head_scale
+    }
 
     // Builds a plan for `count` same-shape WaveNet instances that run as one
     // group (count == 1 for an ordinary single-stream plan). Each instance gets
@@ -3910,6 +3960,7 @@ private:
 
         plan.B = B;
         plan.count = count;
+        plan.transposed_weights = count >= kWavenetTransposedWeightsMinGroup;
         // Every per-instance buffer must stay addressable with u32 byte sizes.
         const uint64_t wbytes64 = need * 4u * count;
         const uint64_t blk64 = static_cast<uint64_t>(B) * 4u * count;
@@ -3931,10 +3982,15 @@ private:
             return false;
         // The scale pass reads each instance's head_scale from the last float of
         // its weight slice, so that slot always holds the caller's head_scale.
+        std::vector<float> slice(static_cast<std::size_t>(need));
         for (uint32_t i = 0; i < count; ++i) {
-            queue_.WriteBuffer(plan.weights, uint64_t{wslice} * i, weights[i], wslice);
-            queue_.WriteBuffer(plan.weights, uint64_t{wslice} * i + wslice - 4u, &head_scales[i],
-                               4u);
+            if (plan.transposed_weights) {
+                wavenet_device_layout(arrays, num_arrays, weights[i], slice.data());
+            } else {
+                std::memcpy(slice.data(), weights[i], wslice);
+            }
+            slice.back() = head_scales[i];
+            queue_.WriteBuffer(plan.weights, uint64_t{wslice} * i, slice.data(), wslice);
         }
 
         auto make_uniform = [&](uint32_t size) {
@@ -4054,7 +4110,7 @@ private:
                       na.act_mask[l + 1],
                       na.samples_per_group,
                       (a == 0 && l == 0) ? 1u : 0u,
-                      0};
+                      plan.transposed_weights ? 1u : 0u};
                 queue_.WriteBuffer(u, 0, &lyu, sizeof(lyu));
                 wgpu::BindGroup bg = create_bind_group(wavenet_layer_pipeline_,
                                                        {plan.weights, na.act[l], na.act[l + 1],

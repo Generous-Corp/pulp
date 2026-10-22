@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <pulp/render/gpu_compute.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/signal/convolver.hpp>
@@ -1613,11 +1614,13 @@ struct BatchNet {
     std::vector<uint32_t> d1 = {16, 1, 2};
     GpuCompute::WavenetLayerArraySpec specs[2];
     uint32_t need = 0;
-    BatchNet() {
-        specs[0] = {1, 1, 4, 3, 2, 0, 0, d0.data(), 4};
-        specs[1] = {4, 1, 2, 3, 1, 0, 1, d1.data(), 3};
-        auto arr = [](uint32_t in, uint32_t C, uint32_t K, uint32_t L, uint32_t H, bool hb) {
-            return C * in + L * (C * C * K + C + C + C * C + C) + H * C + (hb ? H : 0u);
+    explicit BatchNet(bool gated = false) {
+        const uint32_t g = gated ? 1u : 0u;
+        specs[0] = {1, 1, 4, 3, 2, g, 0, d0.data(), 4};
+        specs[1] = {4, 1, 2, 3, 1, g, 1, d1.data(), 3};
+        auto arr = [g](uint32_t in, uint32_t C, uint32_t K, uint32_t L, uint32_t H, bool hb) {
+            const uint32_t Z = g ? 2u * C : C;
+            return C * in + L * (Z * C * K + Z + Z + C * C + C) + H * C + (hb ? H : 0u);
         };
         need = arr(1, 4, 3, 4, 2, false) + arr(4, 2, 3, 3, 1, true) + 1;
     }
@@ -1744,6 +1747,11 @@ TEST_CASE("GpuCompute wavenet_forward_group matches per-instance forwards bit-fo
     // several streaming blocks, with its own weights and its own head_scale.
     // One instance's head_scale argument deliberately differs from the trailing
     // float of its blob: the argument is the value that must take effect.
+    // A group below the transposed-weights threshold (5) and one above it (40)
+    // cover both device weight layouts, each gated and ungated (Z != C).
+    const uint32_t N = GENERATE(5u, 40u);
+    const bool gated = GENERATE(false, true);
+    INFO("group size " << N << " gated " << gated);
     auto serial = GpuCompute::create();
     auto grouped = GpuCompute::create();
     if (!serial || !serial->initialize_standalone())
@@ -1751,8 +1759,8 @@ TEST_CASE("GpuCompute wavenet_forward_group matches per-instance forwards bit-fo
     if (!grouped || !grouped->initialize_standalone())
         SKIP(kNoGpu);
 
-    const BatchNet net;
-    constexpr uint32_t N = 5, B = 24, blocks = 8;
+    const BatchNet net(gated);
+    constexpr uint32_t B = 24, blocks = 8;
     std::vector<std::vector<float>> w(N);
     std::vector<const float*> wp(N);
     std::vector<float> scales(N);
