@@ -852,6 +852,10 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
         status.shadow_late_blocks = health.shadow_late_blocks;
         status.shadow_double_miss_blocks = health.shadow_double_miss_blocks;
         status.shadow_model_differs = health.shadow_model_differs;
+        status.gpu_kernel_available = health.gpu_kernel_available;
+        status.completion_mode = health.completion_mode;
+        status.timestamps_available = health.timestamps_available;
+        status.last_delivery_ns = health.last_delivery_ns;
     } else if (configuration.realtime_health) {
         // No coherent health copy: never report an unverified provider as
         // Ready, and claim no recovery cause that was not observed. A staged

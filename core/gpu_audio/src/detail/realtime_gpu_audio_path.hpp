@@ -53,6 +53,12 @@ struct RealtimeGpuHealth {
     std::uint64_t shadow_late_blocks = 0;
     std::uint64_t shadow_double_miss_blocks = 0;
     bool shadow_model_differs = false;
+    // Provider facts with the meaning of the GpuAudioStatus fields of the same
+    // names. Nodes that do not report them leave the defaults.
+    bool gpu_kernel_available = false;
+    GpuAudioCompletionMode completion_mode = GpuAudioCompletionMode::Unknown;
+    bool timestamps_available = false;
+    std::uint64_t last_delivery_ns = 0;
 };
 // Returns false when no coherent read could be taken.
 using RealtimeGpuHealthFn = bool (*)(const void*, RealtimeGpuHealth&) noexcept;

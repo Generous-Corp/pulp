@@ -1033,6 +1033,8 @@ TEST_CASE("GpuConvolver shared-path status reports provider loss through the tra
     CHECK(node_status.provider_state == GpuAudioProviderState::Unavailable);
     CHECK(node_status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
     CHECK(node_status.provider == GpuAudioProvider::Dawn);
+    CHECK(node_status.gpu_kernel_available);
+    CHECK(status.gpu_kernel_available);
     CHECK(node_status.selected_engine == GpuAudioEngine::Cpu);
     CHECK(node_status.fallback_policy == MissPolicy::CpuFallback);
     CHECK(node_status.fallback_available);

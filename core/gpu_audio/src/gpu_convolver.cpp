@@ -832,6 +832,7 @@ bool GpuConvolver::realtime_shared_io_health(const void* self,
     health.delivery_epoch_active = session.delivery_epoch() != 0;
     health.device_lost = session.provider_device_lost();
     health.fenced = !session.prepared() || session.fenced() || !health.delivery_epoch_active;
+    health.gpu_kernel_available = true;
     // Same mapping as the WaveNet node: a failed GPU block is covered by this
     // node's declared CPU fallback.
     using Gpu = detail::SharedIoGpuTerminalDisposition;
@@ -884,6 +885,7 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
     if (has_realtime_shared_io()) {
         const auto telemetry = shared_io_->session->trace_telemetry();
         status.provider = GpuAudioProvider::Dawn;
+        status.gpu_kernel_available = true;
         status.selected_engine = GpuAudioEngine::Gpu;
         status.prepared_lead_blocks = latency_blocks_;
         status.produced_blocks = telemetry.delivered_blocks;
@@ -923,6 +925,7 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
     // no device the worker runs the exact CPU convolution.
     status.provider = GpuAudioProvider::Unknown;
     status.selected_engine = gpu_ != nullptr ? GpuAudioEngine::Unknown : GpuAudioEngine::Cpu;
+    status.gpu_kernel_available = gpu_ != nullptr;
     status.recovery_reason = staged_recovery_reason();
     if (status.recovery_reason != GpuAudioRecoveryReason::None) {
         // The worker block at which the cause was latched; a loss the worker

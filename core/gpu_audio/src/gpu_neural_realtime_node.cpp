@@ -1105,6 +1105,7 @@ bool GpuNeuralRealtimeNode::health(const void* self, detail::RealtimeGpuHealth& 
     out.epoch = node.epoch();
     out.delivery_epoch_active = out.epoch != 0;
     out.device_lost = node.impl_->device_lost.load(std::memory_order_acquire);
+    out.gpu_kernel_available = node.gpu_kernel_available();
     if (node.impl_->prepared)
         node.impl_->fill_shadow(out);
     return true;

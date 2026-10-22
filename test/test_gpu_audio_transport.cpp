@@ -2261,3 +2261,38 @@ TEST_CASE("GpuAudioTransport status names the engine that delivers after a fence
               (policy == MissPolicy::CpuFallback ? GpuAudioEngine::Cpu : GpuAudioEngine::Unknown));
     }
 }
+
+TEST_CASE("GpuAudioTransport status carries the node's provider facts",
+          "[gpu_audio][transport][status][health]") {
+    // Realtime node: the facts arrive through the health hook.
+    HealthHarness h;
+    // Positive control: a node that reports nothing leaves the defaults.
+    auto status = validated(h.transport.status_snapshot());
+    CHECK_FALSE(status.gpu_kernel_available);
+    CHECK(status.completion_mode == GpuAudioCompletionMode::Unknown);
+    CHECK_FALSE(status.timestamps_available);
+    CHECK(status.last_delivery_ns == 0);
+
+    h.node.health.gpu_kernel_available = true;
+    h.node.health.completion_mode = GpuAudioCompletionMode::TimedWaitAny;
+    h.node.health.timestamps_available = true;
+    h.node.health.last_delivery_ns = 1234;
+    h.transport.pump();
+    status = validated(h.transport.status_snapshot());
+    CHECK(status.gpu_kernel_available);
+    CHECK(status.completion_mode == GpuAudioCompletionMode::TimedWaitAny);
+    CHECK(status.timestamps_available);
+    CHECK(status.last_delivery_ns == 1234);
+
+    // Staged node: the facts arrive through its own status projection.
+    StatusReportingNode node;
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {8}));
+    node.reported.provider_state = GpuAudioProviderState::Degraded;
+    node.reported.gpu_kernel_available = true;
+    node.reported.completion_mode = GpuAudioCompletionMode::ProcessEvents;
+    t.pump();
+    status = validated(t.status_snapshot());
+    CHECK(status.gpu_kernel_available);
+    CHECK(status.completion_mode == GpuAudioCompletionMode::ProcessEvents);
+}

@@ -163,6 +163,10 @@ inline RealtimeGpuHealth health_from_status(const GpuAudioStatus& status) noexce
     health.shadow_late_blocks = status.shadow_late_blocks;
     health.shadow_double_miss_blocks = status.shadow_double_miss_blocks;
     health.shadow_model_differs = status.shadow_model_differs;
+    health.gpu_kernel_available = status.gpu_kernel_available;
+    health.completion_mode = status.completion_mode;
+    health.timestamps_available = status.timestamps_available;
+    health.last_delivery_ns = status.last_delivery_ns;
     return health;
 }
 
