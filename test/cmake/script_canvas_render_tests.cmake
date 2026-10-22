@@ -88,6 +88,8 @@ pulp_add_js_bytecode(js_bytecode_embed_bridge_fixture
 pulp_add_test_suite(pulp-test-js-bytecode-embed
     LIBRARIES pulp::view js_bytecode_embed_fixture js_bytecode_embed_bridge_fixture
     COMPILE_DEFINITIONS PULP_TEST_JS_BYTECODE_FIXTURE="${_pulp_js_bytecode_fixture}")
+pulp_test_data(pulp-test-js-bytecode-embed NO_DEFINE
+    PATHS test/fixtures/js-bytecode/embedded_fixture.js)
 
 # Cooperative-interrupt (runaway-abort) tests for the QuickJS backend
 pulp_add_test_suite(pulp-test-js-engine-interrupt GROUP pulp-test-group-script-view
