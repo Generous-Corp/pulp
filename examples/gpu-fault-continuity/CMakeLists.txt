@@ -16,8 +16,10 @@ if(PULP_BUILD_TESTS)
                 -B ${CMAKE_CURRENT_BINARY_DIR}/vellum-guard-${_vellum}
                 -DWITH_VELLUM=${_vellum})
     endforeach()
+    # Refusing means stopping: the configure must not get past the guard.
     set_tests_properties(gpu-fault-continuity-vellum-guard-ON PROPERTIES
-        PASS_REGULAR_EXPRESSION "refuses to build when Vellum::Gpu")
+        PASS_REGULAR_EXPRESSION "refuses to build when Vellum::Gpu"
+        FAIL_REGULAR_EXPRESSION "gpu-fault vellum guard: configured")
     set_tests_properties(gpu-fault-continuity-vellum-guard-OFF PROPERTIES
         PASS_REGULAR_EXPRESSION "gpu-fault vellum guard: configured")
 endif()
