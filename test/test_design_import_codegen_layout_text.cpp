@@ -503,15 +503,12 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
             return command.type == pulp::canvas::DrawCommand::Type::fill_text;
         });
     REQUIRE(cached_text != cached_canvas.commands().end());
-    // CSS half-leading against the captured line box, measured against the
-    // same content area the baseline then descends by: the face's typographic
-    // ascent + descent, which is what Chromium built the 15px box from (Inter
-    // 12px: 11.625 + 2.906). (15 - 14.53) / 2 + 11.625 puts the baseline at
-    // ~11.87, within rounding of Chromium's top + round(ascent) = 12. The
-    // glyph bounding box (~17.16px for Inter) is a clip bound, not a CSS
-    // metric; descending by it painted the line ~0.35px low here and by
-    // several pixels at display sizes.
-    CHECK(cached_text->f[1] == Catch::Approx(11.8652f).margin(0.01f));
+    // Chromium built this 15px box from Inter 12px's typographic ascent and
+    // descent rounded to whole px (12 + 3), so it is the text fragment and
+    // the baseline sits round(ascent) = 12 below its top. The glyph bounding
+    // box (~17.16px for Inter) is a clip bound, not a CSS metric; descending
+    // by it painted the line ~0.2px low here and by pixels at display sizes.
+    CHECK(cached_text->f[1] == Catch::Approx(12.0f).margin(0.001f));
 
     live_single->set_text("01  SLOW");
     pulp::canvas::RecordingCanvas changed_text_canvas;

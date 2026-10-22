@@ -829,6 +829,43 @@ TEST_CASE("Label places a captured baseline from the face's typographic ascent",
     CHECK(leaded_fills[0].f[1] - fills[0].f[1] == Catch::Approx(4.0f).margin(0.01f));
 }
 
+TEST_CASE("Label puts a captured text fragment's baseline a rounded ascent below its top",
+          "[view][widget][label-cache][alignment][typography]") {
+    // Chromium rounds ascent and descent to whole CSS px, and a text
+    // fragment's rect is exactly that rounded content area, so its baseline
+    // is top + round(ascent). Inter 17px rounds its ascent and descent by
+    // different amounts, which makes that differ from the unrounded
+    // half-leading split.
+    constexpr float kSize = 17.0f;
+    const auto prepared =
+        global_text_shaper().prepare(" ", "Inter", kSize, 400, 0);
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    if (face.empty() || !prepared.metrics_are_real()) {
+        SKIP("Inter does not resolve to a real face on this host");
+    }
+    const float a = prepared.font_ascent();
+    const float d = prepared.font_descent();
+    const float fragment_h = std::round(a) + std::round(d);
+    // Control: the unrounded split must land somewhere else, or this
+    // assertion could not tell the two rules apart.
+    const float unrounded = (fragment_h - (a + d)) * 0.5f + a;
+    REQUIRE(std::abs(unrounded - std::round(a)) > 0.05f);
+
+    constexpr float kTop = 3.25f;
+    Label label("Fragment");
+    label.set_font_family("Inter");
+    label.set_font_size(kSize);
+    label.set_bounds({0, 0, 200, 40});
+    label.set_cached_line_boxes(
+        {{0, kTop, 120, fragment_h, 0, 8}}, 200.0f, face, false);
+    REQUIRE_FALSE(label.cached_line_boxes().empty());
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    CHECK(fills[0].f[1] == Catch::Approx(kTop + std::round(a)).margin(0.001f));
+}
+
 TEST_CASE("Label keeps a retyped single captured line where Chromium put it",
           "[view][widget][label-cache][readout]") {
     // A modulated readout ("32 BANDS" playing "64 BANDS") changes its copy

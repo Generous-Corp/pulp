@@ -2010,6 +2010,14 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         const float half_leading =
             (first_line.height - (css_ascent + css_descent)) * 0.5f;
         baseline_y = first_line.y + half_leading + css_ascent;
+        // Chromium rounds a face's ascent and descent to whole CSS px before
+        // it builds the content area, so a captured box exactly that tall IS
+        // the text fragment, and its baseline sits a rounded ascent below the
+        // box top rather than wherever the unrounded split above puts it.
+        const float rounded_ascent = std::round(css_ascent);
+        if (std::abs(first_line.height -
+                     (rounded_ascent + std::round(css_descent))) < 0.01f)
+            baseline_y = first_line.y + rounded_ascent;
     }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared
