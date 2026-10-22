@@ -1024,6 +1024,10 @@ pulp_add_test_suite(pulp-test-widget-bridge-yoga-border GROUP pulp-test-group-vi
 # 3,000-line target.
 pulp_add_test_suite(pulp-test-widget-bridge-css-misc GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
+# Captured browser line layout installed through setCapturedLineBoxes,
+# including the measured line metrics a capture records.
+pulp_add_test_suite(pulp-test-widget-bridge-captured-lines GROUP pulp-test-group-view-widgets LIBRARIES pulp::view pulp::state)
+
 # Autonomous Spectr regression suite. Composes the six
 # [contract] invariants from
 # test_widget_bridge.cpp into a Spectr-shaped mini-scenario so a future
