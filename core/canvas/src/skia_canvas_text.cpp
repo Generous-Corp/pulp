@@ -54,7 +54,7 @@
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/font_resolver.hpp>
-#include "auto_optical_size.hpp"
+#include "font_tables.hpp"
 #include <pulp/canvas/font_options.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #ifdef PULP_HAS_SKIA

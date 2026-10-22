@@ -33,7 +33,7 @@
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkColorMatrix.h"
 #include "include/core/SkColorFilter.h"
-#include "include/core/SkPathBuilder.h"
+#include "font_tables.hpp"
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkPicture.h"
 #include "include/core/SkPictureRecorder.h"
@@ -59,8 +59,6 @@
 
 #include "runtime_effect_cache.hpp"
 #include "skia_canvas_filter.hpp"  // parse_filter_chain — CSS `filter` parser
-#include "include/effects/SkImageFilters.h"
-#include "include/core/SkColorFilter.h"
 #if PULP_CANVAS_GRAPHITE
 #include "include/gpu/graphite/Image.h"
 #endif

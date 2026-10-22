@@ -259,21 +259,6 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
 bool face_wght_axis(const SkTypeface* face,
                     float& out_min, float& out_max, float& out_default);
 
-/// `face` at the optical size CSS `font-optical-sizing: auto` gives text set
-/// at `css_px`: its `opsz` axis at the font size in CSS px, clamped to the
-/// axis range. A face without an `opsz` axis is returned unchanged. Clones are
-/// cached per face and size, so paint paths can call this per draw.
-sk_sp<SkTypeface> typeface_at_auto_optical_size(sk_sp<SkTypeface> face,
-                                                float css_px);
-
-/// The tracking a face's AAT `trak` table asks for at `css_px`, in CSS px per
-/// glyph: its normal (0) track, interpolated linearly between the table's
-/// sizes and held at the end values outside them, scaled from font units.
-/// Zero when the face has no usable `trak` table. Browsers on macOS apply it,
-/// half before and half after each glyph, which is how the system UI font
-/// tightens at text sizes and opens up at display sizes.
-float aat_tracking_px(const SkTypeface* face, float css_px);
-
 /// A single user-registered typeface paired with the family name it was
 /// registered under (the `family_override` passed to `register_font`).
 struct RegisteredTypeface {

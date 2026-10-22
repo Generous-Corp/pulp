@@ -64,6 +64,7 @@ using namespace pulp::canvas;
 #include "modules/skparagraph/include/ParagraphStyle.h"
 #include "modules/skparagraph/include/TextStyle.h"
 #include "../core/canvas/src/skia_unicode.hpp"
+#include "../core/canvas/src/font_tables.hpp"
 #include <cstdlib>
 #include <string>
 #if defined(__APPLE__)
@@ -1707,5 +1708,85 @@ TEST_CASE("SkiaCanvas measures text at its optical size with AAT tracking",
     CHECK(canvas.measure_text("HH") == Catch::Approx(67.2f).margin(0.05));
 }
 #endif
+
+// ── Optical sizing on a face that already sits on other axes ────────────────
+//
+// The macOS system UI font is variable on wght and opsz, so its bold is a
+// position on the wght axis. Setting opsz must leave that position alone, or
+// bold text at a display size would come out regular.
+namespace {
+constexpr SkFourByteTag kWghtTag = SkSetFourByteTag('w', 'g', 'h', 't');
+constexpr SkFourByteTag kOpszTag = SkSetFourByteTag('o', 'p', 's', 'z');
+float coordinate_of(
+    const std::vector<SkFontArguments::VariationPosition::Coordinate>& position,
+    SkFourByteTag axis) {
+    for (const auto& c : position)
+        if (c.axis == axis) return c.value;
+    return -1.0f;
+}
+std::vector<SkFontArguments::VariationPosition::Coordinate>
+position_of(const SkTypeface* face) {
+    std::vector<SkFontArguments::VariationPosition::Coordinate> position(16);
+    const int n = face ? face->getVariationDesignPosition(SkSpan(position)) : 0;
+    position.resize(n > 0 && n <= 16 ? static_cast<std::size_t>(n) : 0u);
+    return position;
+}
+}  // namespace
+
+TEST_CASE("an optical-size clone keeps a weight instance's weight",
+          "[canvas][skia][text][optical-size]") {
+#if !defined(__APPLE__)
+    SKIP("needs the macOS system UI font, which is variable on wght and opsz");
+#else
+    auto mgr = pulp::canvas::platform_font_manager();
+    REQUIRE(mgr != nullptr);
+    auto regular = mgr->matchFamilyStyle(".AppleSystemUIFont", SkFontStyle::Normal());
+    REQUIRE(regular != nullptr);
+    const SkFontArguments::VariationPosition::Coordinate wght{kWghtTag, 700.0f};
+    SkFontArguments args;
+    args.setVariationDesignPosition({&wght, 1});
+    auto bold = regular->makeClone(args);
+    REQUIRE(bold != nullptr);
+    REQUIRE(coordinate_of(position_of(bold.get()), kWghtTag) == 700.0f);
+
+    // The position handed to makeClone carries the weight with the size.
+    const auto position = pulp::canvas::auto_optical_size_position(bold.get(), 40.0f);
+    CHECK(coordinate_of(position, kWghtTag) == 700.0f);
+    CHECK(coordinate_of(position, kOpszTag) == 40.0f);
+
+    // SkFont path: the clone sits at both coordinates.
+    const auto sized = position_of(
+        pulp::canvas::typeface_at_auto_optical_size(bold, 40.0f).get());
+    CHECK(coordinate_of(sized, kWghtTag) == 700.0f);
+    CHECK(coordinate_of(sized, kOpszTag) == 40.0f);
+
+    // Paragraph path: the style carries only opsz, and the face SkParagraph
+    // matches at weight 700 keeps its weight when it is cloned.
+    auto ctx = pulp::canvas::TextFontContext::shared();
+    auto collection = ctx->font_collection();
+    REQUIRE(collection != nullptr);
+    skia::textlayout::TextStyle style;
+    style.setFontFamilies({SkString(".AppleSystemUIFont")});
+    style.setFontSize(40.0f);
+    style.setFontStyle(SkFontStyle(700, SkFontStyle::kNormal_Width,
+                                   SkFontStyle::kUpright_Slant));
+    pulp::canvas::apply_auto_optical_size(style, 40.0f);
+    skia::textlayout::ParagraphStyle paragraph_style;
+    paragraph_style.setTextStyle(style);
+    auto collection_use = ctx->lock_font_collection_use();
+    auto builder = skia::textlayout::ParagraphBuilder::make(
+        paragraph_style, collection, pulp::canvas::shared_sk_unicode());
+    REQUIRE(builder != nullptr);
+    builder->addText("Hamburgefons");
+    auto paragraph = builder->Build();
+    REQUIRE(paragraph != nullptr);
+    paragraph->layout(SK_ScalarInfinity);
+    const auto fonts = paragraph->getFonts();
+    REQUIRE_FALSE(fonts.empty());
+    const auto shaped = position_of(fonts.front().fFont.getTypeface());
+    CHECK(coordinate_of(shaped, kWghtTag) == 700.0f);
+    CHECK(coordinate_of(shaped, kOpszTag) == 40.0f);
+#endif
+}
 
 #endif  // PULP_HAS_SKIA
