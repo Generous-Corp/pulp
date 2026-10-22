@@ -270,6 +270,21 @@ TEST_CASE("buffer_ops::measure_peak_rms is exact on exactly representable input"
     REQUIRE(level.rms == std::sqrt(static_cast<float>(sum) / 37.0f));
 }
 
+TEST_CASE("buffer_ops::measure_peak_rms finds a negative peak in every lane",
+          "[audio][buffer_ops][meter]") {
+    // 40 samples: two full 16-lane passes plus a tail. A negative sample of
+    // the largest magnitude is placed at each position in turn, so every
+    // partial (and its absolute value) has to reach the result.
+    for (std::size_t at = 0; at < 40; ++at) {
+        std::vector<float> v(40, 0.25f);
+        v[at] = -2.0f;
+        const auto level = ops::measure_peak_rms(std::span<const float>{v});
+        INFO("peak at " << at);
+        REQUIRE(level.peak == 2.0f);
+        REQUIRE(level.rms == std::sqrt((39.0f * 0.0625f + 4.0f) / 40.0f));
+    }
+}
+
 TEST_CASE("buffer_ops::measure_peak_rms of an empty span is zero",
           "[audio][buffer_ops][meter]") {
     const auto level = ops::measure_peak_rms(std::span<const float>{});
