@@ -918,6 +918,51 @@ TEST_CASE("Label places a captured baseline from the browser's measured ascent",
     CHECK(std::abs(leaded_derived - (kTop + 2.0f + kAscent)) > 0.25f);
 }
 
+TEST_CASE("Label snaps a captured baseline to a whole CSS px in root space",
+          "[view][widget][label-cache][alignment][typography]") {
+    // Chromium paints captured text with each line's baseline on a whole CSS
+    // px, measured from the page; the label's own origin can be fractional.
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    const auto prepared =
+        global_text_shaper().prepare(" ", "Inter", 17.0f, 400, 0);
+    if (face.empty() || !prepared.metrics_are_real()) {
+        SKIP("Inter does not resolve to a real face on this host");
+    }
+    constexpr float kAscent = 15.0f;
+    constexpr float kDescent = 4.0f;
+    auto root_baseline = [&](float parent_y, float label_y, bool captured) {
+        View root;
+        root.set_bounds({0, 0, 400, 200});
+        auto parent = std::make_unique<View>();
+        parent->set_bounds({0, parent_y, 300, 100});
+        auto label = std::make_unique<Label>("Snap");
+        label->set_font_family("Inter");
+        label->set_font_size(17.0f);
+        label->set_bounds({0, label_y, 200, 40});
+        if (captured) {
+            label->set_cached_line_boxes(
+                {{0, 0, 120, kAscent + kDescent, 0, 4}}, 200.0f, face, false);
+            label->set_cached_line_metrics(kAscent, kDescent);
+        }
+        Label* raw = label.get();
+        parent->add_child(std::move(label));
+        root.add_child(std::move(parent));
+        RecordingCanvas canvas;
+        raw->paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return parent_y + label_y + fills[0].f[1];
+    };
+    // 10.375 + 0.25 + 15 = 25.625 in root space: snapped to 26.
+    CHECK(root_baseline(10.375f, 0.25f, true) == Catch::Approx(26.0f).margin(0.001f));
+    // 10.125 + 0.25 + 15 = 25.375: snapped down to 25.
+    CHECK(root_baseline(10.125f, 0.25f, true) == Catch::Approx(25.0f).margin(0.001f));
+    // Control: the same label without a captured layout is not snapped, so
+    // its root baseline keeps the fractional origin.
+    const float native = root_baseline(10.375f, 0.25f, false);
+    CHECK(std::abs(native - std::round(native)) > 0.01f);
+}
+
 TEST_CASE("Label keeps a retyped single captured line where Chromium put it",
           "[view][widget][label-cache][readout]") {
     // A modulated readout ("32 BANDS" playing "64 BANDS") changes its copy

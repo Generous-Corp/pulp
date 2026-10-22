@@ -1961,6 +1961,17 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             ? 0.0f
             : (first_line_box_h - single_line_ink_height) * 0.5f;
     float baseline_y;
+    // Chromium lays captured text out in CSS px and paints each line at its
+    // baseline snapped to a whole CSS px; the import is CSS-px canonical, so a
+    // captured line is drawn on that grid too, measured in root (design)
+    // space. The root is the captured frame, whose origin is a whole CSS px.
+    // Text without a captured layout is not snapped.
+    float captured_root_y = 0.0f;
+    float captured_first_baseline = 0.0f;
+    auto snap_captured_baseline = [&](float local_baseline) {
+        const float root_baseline = captured_root_y + local_baseline;
+        return std::floor(root_baseline + 0.5f) - captured_root_y;
+    };
     switch (vertical_align_) {
         case canvas::TextVerticalAlign::top:
             baseline_y = pad.top + first_half_leading + first_line_ascent;
@@ -2042,6 +2053,11 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             std::abs(first_line.height -
                      (cached_line_ascent_ + cached_line_descent_)) < 0.01f)
             baseline_y = first_line.y + cached_line_ascent_;
+        captured_first_baseline = baseline_y;
+        for (const View* v = this; v != nullptr; v = v->parent())
+            captured_root_y += v->bounds().y;
+        if (has_own_text_box()) captured_root_y += own_text_box().y;
+        baseline_y = snap_captured_baseline(baseline_y);
     }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared
@@ -2169,7 +2185,8 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                     line.append("\xe2\x80\xa6");
                 }
                 const float line_baseline = captured_cache_usable
-                    ? baseline_y + shaped_line.y - captured_first_top
+                    ? snap_captured_baseline(captured_first_baseline +
+                                             shaped_line.y - captured_first_top)
                     : y;
                 // Map the shaped line back to its origin in `display_text`.
                 // The shaper drops the whitespace it broke at, so byte spans
