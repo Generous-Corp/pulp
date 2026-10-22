@@ -130,6 +130,14 @@ binary stays installed as the rollback. A source build at a new path is a new
 program to LuLu on every host; flipping the pin needs no network (the tools are
 already installed), so pre-seed rather than asking for firewall rules.
 
+A mise source build is not bit-reproducible, so never rebuild on each host to
+"verify" the pin. Two builds of 2026.10.17 with identical flags on the same Mac
+differed in about 100 KB: the aqua registry that mise's `build.rs` embeds
+(serialized from structs that hold hash maps, such as `replacements`) comes
+out in a different order each build. The `[mise.binary]` digest names one
+build. Hosts get that exact file, copied from the build host and checked by
+sha256; a differing rebuild is expected and is not a replacement.
+
 A relock can differ from the committed lock with no mise change at all: conda
 resolves clang-format's runtime dependencies (for example `libcxx`) to the
 newest build the channel publishes. Before blaming the new mise for a lock
