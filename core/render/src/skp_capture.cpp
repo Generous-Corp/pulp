@@ -367,12 +367,29 @@ bool skp_capture_supported() { return false; }
 // Defined once for both builds: it forwards to capture_skp_to_file, which is
 // itself defined in both branches above (the non-Skia one returns a failed
 // result), so a non-Skia build gets an honest no-op here too.
+// The environment-triggered capture writes frames to a directory the
+// process's environment names. That is a development hook, so a release build
+// (PULP_DEV_BUILD=0, tools/cmake/PulpProfiles.cmake) never reads the variable;
+// capture_skp_to_file() with an explicit path stays available to callers.
+#ifndef PULP_DEV_BUILD
+#error "PULP_DEV_BUILD is not defined; link pulp::platform, which exports it (PulpProfiles.cmake)"
+#endif
+
 namespace pulp::render {
 
 SkpCaptureResult maybe_capture_skp_from_env(
     int width, int height,
     const std::function<void(canvas::Canvas&)>& paint,
     skgpu::graphite::Context* graphite_context) {
+#if !PULP_DEV_BUILD
+    (void)width;
+    (void)height;
+    (void)paint;
+    (void)graphite_context;
+    SkpCaptureResult r;
+    r.reason = "environment-triggered capture is compiled out of release builds";
+    return r;
+#else
     const char* dir = std::getenv("PULP_SKP_CAPTURE_DIR");
     if (dir == nullptr || dir[0] == '\0') {
         SkpCaptureResult r;
@@ -413,6 +430,7 @@ SkpCaptureResult maybe_capture_skp_from_env(
                            result.reason);
     }
     return result;
+#endif
 }
 
 } // namespace pulp::render

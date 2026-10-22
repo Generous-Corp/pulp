@@ -63,6 +63,13 @@
 #include <string>
 #include <vector>
 
+// PULP_DEV_BUILD (tools/cmake/PulpProfiles.cmake, exported PUBLIC by
+// pulp-platform) gates the development hooks this host reads from the
+// environment; a missing definition is an error, never a silent default.
+#ifndef PULP_DEV_BUILD
+#error "PULP_DEV_BUILD is not defined; link pulp::platform, which exports it (PulpProfiles.cmake)"
+#endif
+
 namespace pulp::view {
 
 namespace {
@@ -931,10 +938,17 @@ private:
         FrameGeometry geometry = frame_geometry();
         geometry.width = width;    // the caller may be mid-resize
         geometry.height = height;
+        // The partial-repaint switch is a development hook; a release build
+        // (PULP_DEV_BUILD=0) never reads it from the host's environment.
+#if PULP_DEV_BUILD
         const char* env = std::getenv("PULP_PARTIAL_REPAINT");
-        auto surfaces = create_editor_surfaces(
-            &x11_handle_, geometry, options_.present_policy,
-            options_.enable_gpu_timing, env && env[0] == '1', "X11PluginViewHost");
+        const bool partial_repaint = env && env[0] == '1';
+#else
+        const bool partial_repaint = false;
+#endif
+        auto surfaces = create_editor_surfaces(&x11_handle_, geometry, options_.present_policy,
+                                               options_.enable_gpu_timing, partial_repaint,
+                                               "X11PluginViewHost");
 
         partial_repaint_enabled_ = surfaces.partial_repaint;
         gpu_surface_ = std::move(surfaces.gpu);

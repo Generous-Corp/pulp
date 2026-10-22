@@ -1282,6 +1282,30 @@ numpy/Pillow on the host, `cmake-*-sdk-consumer`,
 `pulp-browser-capture-node-integration`) are host gaps, not timing. They each
 want their own fix; a label would only hide them.
 
+## Compile-out gates are proven by object/binary inspection, not by a green build
+
+Three ctests (`test/cmake/format_reload_tests.cmake`,
+`test/cmake/view_widget_bridge_tests.cmake`) compile one translation unit twice
+and inspect the outputs with `nm` / `file(STRINGS)`:
+`pulp-bridge-exec-ship-symbol-absence` (the `/bin/sh` bridge),
+`pulp-reload-ship-symbol-absence` (the reload watcher, `resolve_logic_path`,
+and the `PULP_RELOAD_LOGIC_PATH` literal) and
+`pulp-dev-env-gate-symbol-absence` (`PULP_DEV_HOT_RELOAD` +
+`PULP_RELOAD_LOGIC_PATH` under `PULP_DEV_BUILD=0`). Each carries a positive
+control — the dev object must contain the thing — so a refactor that moves a
+getenv to a place the fixture no longer emits fails the control, not the
+check. Gotcha when adding one: the gate value reaches the fixture as a PUBLIC
+definition from `pulp::platform`, so an override must go in
+`target_compile_options` (`-UPULP_DEV_BUILD -DPULP_DEV_BUILD=0`), which the
+generators emit after inherited definitions; a second `-D` in
+`target_compile_definitions` is a macro-redefinition warning and the first
+value wins in the diagnostic. Unix-only, like the other `nm` checks. A
+two-object check needs BOTH objects rebuilt after its header changes:
+`confirm_failure.sh` deletes every object that depends on the edited header
+and rebuilds one `--target`, so point it at the aggregate
+`pulp-dev-env-gate-fixtures` target (not one fixture) or the baseline fails
+with "fixture objects missing" and the loop reads INCONCLUSIVE.
+
 ## Test lanes — what gates the required `macos` check
 
 For native pull requests, Shipyard `workflow_dispatch` validation, and merge

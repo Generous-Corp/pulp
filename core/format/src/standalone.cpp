@@ -935,9 +935,12 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     set_app_update_service(detail::make_standalone_update_service(updater_plan));
 
     std::string editor_error;
+    // The standalone is the dev tool, so a dev build always hot-reloads its
+    // scripted UI; a release build follows the same profile axis as a hosted
+    // editor and never watches the script path.
     auto bridge = std::make_unique<ViewBridge>(
         *processor_, store_,
-        ViewBridge::Options{.enable_hot_reload = true, .role = ViewRole::Editor});
+        ViewBridge::Options{.enable_hot_reload = PULP_DEV_BUILD != 0, .role = ViewRole::Editor});
     if (!bridge->open(&editor_error)) {
         runtime::log_error("Standalone: failed to build editor UI ({})", editor_error);
         stop();

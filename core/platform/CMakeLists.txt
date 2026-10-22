@@ -7,6 +7,21 @@ target_include_directories(pulp-platform
         $<INSTALL_INTERFACE:include>
 )
 
+# PULP_DEV_BUILD is the build profile's compile-time axis
+# (tools/cmake/PulpProfiles.cmake): 1 under PULP_PROFILE=dev, 0 under release.
+# It lives on pulp-platform because this is the lowest library every Pulp
+# target links (pulp-runtime PUBLIC-links it, and everything links runtime) and
+# because pulp-platform is exported with the SDK, so a consumer inherits the
+# value its archives were built with. It must be PUBLIC: the gated readers are
+# header-inline (view_bridge.hpp, reloadable_shell.hpp), so every translation
+# unit that includes them has to agree or the inline functions violate ODR.
+# Every gated reader refuses to compile without it.
+if(NOT DEFINED PULP_DEV_BUILD)
+    message(FATAL_ERROR
+        "PULP_DEV_BUILD is not set; include tools/cmake/PulpProfiles.cmake before core/platform")
+endif()
+target_compile_definitions(pulp-platform PUBLIC PULP_DEV_BUILD=${PULP_DEV_BUILD})
+
 target_sources(pulp-platform PRIVATE
     src/platform.cpp
     src/file_dialog_stub.cpp

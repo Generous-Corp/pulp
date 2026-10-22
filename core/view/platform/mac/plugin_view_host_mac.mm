@@ -83,6 +83,13 @@ extern "C" void pulp_mac_plugin_text_input_client_category_anchor();
 // Interface shared with the text-input and drag-drop categories.
 #include "plugin_view_host_mac_view.h"
 
+// PULP_DEV_BUILD (tools/cmake/PulpProfiles.cmake, exported PUBLIC by
+// pulp-platform) gates the development hooks this host reads from the
+// environment; a missing definition is an error, never a silent default.
+#ifndef PULP_DEV_BUILD
+#error "PULP_DEV_BUILD is not defined; link pulp::platform, which exports it (PulpProfiles.cmake)"
+#endif
+
 // ── Accessibility element wrapping a Pulp View ──────────────────────────────
 
 @interface PulpAccessibilityElement : NSAccessibilityElement {
@@ -2970,11 +2977,14 @@ private:
         // emitting real, non-black content frame after frame — impossible to
         // confirm with screencapture in a permission-blocked env. Off by default;
         // costs a full GPU readback on the sampled frames only.
+        // Development hook; a release build (PULP_DEV_BUILD=0) never reads it.
         static const int kStatEvery = [] {
+#if PULP_DEV_BUILD
             if (const char* e = std::getenv("PULP_EMBED_GPU_FRAME_STAT")) {
                 int n = std::atoi(e);
                 return n > 0 ? n : 30;
             }
+#endif
             return 0;
         }();
         // Once-per-run on-screen geometry/visibility proof. A foreign host that
@@ -3063,7 +3073,9 @@ private:
         if (!alive->load(std::memory_order_acquire)) return kCVReturnSuccess;
 
         // PULP_EMBED_GPU_FRAME_STAT — env-gated proof that the CVDisplayLink is
-        // actually ticking in the embedded case. Logs every ~120 vsyncs.
+        // actually ticking in the embedded case. Logs every ~120 vsyncs. A
+        // release build (PULP_DEV_BUILD=0) never reads it.
+#if PULP_DEV_BUILD
         if (std::getenv("PULP_EMBED_GPU_FRAME_STAT")) {
             int n = ++self->display_link_ticks_;
             if (n == 1 || (n % 120) == 0) {
@@ -3074,6 +3086,7 @@ private:
                         self->continuous_frames_.load(std::memory_order_relaxed) ? 1 : 0);
             }
         }
+#endif
 
         // Gate on the link thread — see should_dispatch_host_frame(). A vsync we
         // decline to dispatch is a vsync the pump never measures, so it is

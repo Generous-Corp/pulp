@@ -58,6 +58,9 @@
 #import <CoreVideo/CVDisplayLink.h>
 #import <Metal/Metal.h>
 #endif
+#ifndef PULP_DEV_BUILD
+#error "PULP_DEV_BUILD is not defined; link pulp::platform, which exports it (PulpProfiles.cmake)"
+#endif
 
 // Window setup, geometry, event, and gesture helpers live in
 // window_host_mac_geometry.mm; use them via pulp::view::mac_geometry.
@@ -1742,18 +1745,22 @@ public:
             // optionally enable debug-printing of the per-frame union rect.
             tracker_.invalidate_all();
             tracker_.set_viewport(options.width, options.height);
+            // Development hooks read from the process environment; a release
+            // build (PULP_DEV_BUILD=0) compiles the reads out.
+#if PULP_DEV_BUILD
             if (const char* env = std::getenv("PULP_PARTIAL_RENDERING_DEBUG")) {
                 partial_rendering_debug_ = (env[0] == '1');
             }
-            // FU-2 partial repaint (WI-17), default OFF: only when
-            // PULP_PARTIAL_REPAINT=1 does the host clip the repaint to the
-            // damaged rect and blit a retained scene target. Unset ⇒ the
-            // unconditional full-repaint path below is untouched.
+            // Partial repaint, default OFF: only when PULP_PARTIAL_REPAINT=1
+            // does the host clip the repaint to the damaged rect and blit a
+            // retained scene target. Unset ⇒ the unconditional full-repaint
+            // path below is untouched.
             if (const char* env = std::getenv("PULP_PARTIAL_REPAINT")) {
                 partial_repaint_enabled_ = (env[0] == '1');
             }
             test_pointer_drag_ = mac_test_drag::parse_test_pointer_drag(
                 std::getenv("PULP_TEST_POINTER_DRAG"));
+#endif
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
 
             // Shared NSWindow construction (style, released-when-closed,

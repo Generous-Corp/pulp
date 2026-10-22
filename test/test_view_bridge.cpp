@@ -1592,10 +1592,14 @@ TEST_CASE("ViewBridge tolerates the host freeing the Processor before the bridge
     // freed Processor either.
 }
 
-// item 1.3: in-DAW editors enable scripted-UI hot reload only when the developer
-// opts in via PULP_DEV_HOT_RELOAD; default (unset) is OFF so a shipping plugin
-// never watches + reloads from disk inside a host.
-TEST_CASE("dev_editor_hot_reload_enabled honors PULP_DEV_HOT_RELOAD", "[format][view-bridge][issue-1-3]") {
+// In-DAW editors enable scripted-UI hot reload only when the developer opts in
+// via PULP_DEV_HOT_RELOAD, and only in a dev-profile build: default (unset) is
+// OFF so a shipping plugin never watches + reloads from disk inside a host, and
+// a release build (PULP_DEV_BUILD=0) ignores the variable outright. The suite
+// inherits PULP_DEV_BUILD from pulp::platform, so the expectation follows the
+// configuration it was built under.
+TEST_CASE("dev_editor_hot_reload_enabled reads PULP_DEV_HOT_RELOAD only in a dev build",
+          "[format][view-bridge][dev-gate]") {
     ScopedEnvVar hot_reload("PULP_DEV_HOT_RELOAD");
 
     hot_reload.unset();
@@ -1603,7 +1607,11 @@ TEST_CASE("dev_editor_hot_reload_enabled honors PULP_DEV_HOT_RELOAD", "[format][
 
     for (const char* on : {"1", "true", "yes", "T", "Y"}) {
         hot_reload.set(on);
+#if PULP_DEV_BUILD
         CHECK(format::dev_editor_hot_reload_enabled());
+#else
+        CHECK_FALSE(format::dev_editor_hot_reload_enabled());
+#endif
     }
     for (const char* off : {"0", "false", "no", ""}) {
         hot_reload.set(off);
@@ -1621,7 +1629,11 @@ TEST_CASE("ViewBridge::Options::hosted_editor tracks the developer opt-in",
     CHECK_FALSE(format::ViewBridge::Options::hosted_editor().enable_hot_reload);
 
     hot_reload.set("1");
+#if PULP_DEV_BUILD
     CHECK(format::ViewBridge::Options::hosted_editor().enable_hot_reload);
+#else
+    CHECK_FALSE(format::ViewBridge::Options::hosted_editor().enable_hot_reload);
+#endif
 
     // The role is what makes this the *primary editor* factory; an auxiliary
     // panel must not silently pick it up.

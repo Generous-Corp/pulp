@@ -75,6 +75,13 @@
 #include <string>
 #include <vector>
 
+// PULP_DEV_BUILD (tools/cmake/PulpProfiles.cmake, exported PUBLIC by
+// pulp-platform) gates the development hooks this host reads from the
+// environment; a missing definition is an error, never a silent default.
+#ifndef PULP_DEV_BUILD
+#error "PULP_DEV_BUILD is not defined; link pulp::platform, which exports it (PulpProfiles.cmake)"
+#endif
+
 namespace pulp::view {
 
 namespace {
@@ -736,9 +743,15 @@ private:
     bool start_frame_timer() {
         // This opt-in seam makes the attach rollback test deterministic without
         // changing the production timer API or exhausting the process timer
-        // quota. It is inert unless a test sets the variable.
+        // quota. It is inert unless a test sets the variable, and a release
+        // build (PULP_DEV_BUILD=0) does not read it at all.
+#if PULP_DEV_BUILD
         const char* force_failure = std::getenv("PULP_TEST_FORCE_WIN_FRAME_TIMER_FAILURE");
-        if ((force_failure && std::strcmp(force_failure, "1") == 0) || !hwnd_ ||
+        const bool forced_failure = force_failure && std::strcmp(force_failure, "1") == 0;
+#else
+        const bool forced_failure = false;
+#endif
+        if (forced_failure || !hwnd_ ||
             SetTimer(hwnd_, kFrameTimerId, kFrameTimerPeriodMs, nullptr) == 0) {
             runtime::log_warn("WinPluginViewHost: SetTimer frame pump failed");
             frame_pump_.suspend();
@@ -917,11 +930,17 @@ private:
         FrameGeometry geometry = frame_geometry();
         geometry.width = width;    // the caller may be mid-resize
         geometry.height = height;
-        // FU-2 partial repaint, default OFF.
+        // Partial repaint, default OFF. The switch is a development hook; a
+        // release build (PULP_DEV_BUILD=0) never reads it from the environment.
+#if PULP_DEV_BUILD
         const char* env = std::getenv("PULP_PARTIAL_REPAINT");
-        auto surfaces = create_editor_surfaces(
-            static_cast<void*>(hwnd_), geometry, options_.present_policy,
-            options_.enable_gpu_timing, env && env[0] == '1', "WinPluginViewHost");
+        const bool partial_repaint = env && env[0] == '1';
+#else
+        const bool partial_repaint = false;
+#endif
+        auto surfaces = create_editor_surfaces(static_cast<void*>(hwnd_), geometry,
+                                               options_.present_policy, options_.enable_gpu_timing,
+                                               partial_repaint, "WinPluginViewHost");
 
         partial_repaint_enabled_ = surfaces.partial_repaint;
         gpu_surface_ = std::move(surfaces.gpu);

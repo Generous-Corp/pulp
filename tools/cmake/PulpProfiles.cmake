@@ -46,6 +46,16 @@
 # cache as a dev build: the release marker refuses to mint, and the
 # source-install stamp and dev-experiment document record build_profile "dev".
 #
+# The profile is also a compile-time axis. PULP_DEV_BUILD is 1 under the dev
+# profile and 0 under release, and core/platform exports it as a PUBLIC
+# compile definition on pulp-platform, the lowest library every Pulp target and
+# every installed-SDK consumer links. Header-inline code that reads a
+# development-only environment variable (PULP_DEV_HOT_RELOAD, the reload
+# shell's PULP_RELOAD_LOGIC_PATH) and the plugin view hosts' test hooks compile
+# those reads out when it is 0, so a release plugin never honors them inside a
+# DAW process. One PUBLIC definition keeps every translation unit, and the
+# consumer of an installed SDK, on the same side of the gate.
+#
 # Profile-neutral options, owner decision pending: PULP_ENABLE_DESIGN_IMPORT
 # and PULP_ENABLE_INSPECTOR are chosen per site today (the checkout SDK turns
 # design import off, the release workflows gate the inspector on the tag
@@ -63,6 +73,17 @@ option(PULP_PROFILE_ALLOW_OVERRIDE
 if(NOT PULP_PROFILE MATCHES "^(dev|release)$")
     message(FATAL_ERROR
         "PULP_PROFILE=${PULP_PROFILE} is not a Pulp build profile; use dev or release")
+endif()
+
+# The compile-time axis (see above). Cached INTERNAL so a configure log, the
+# provenance writers, and the profile contract test can read the value the
+# targets were given.
+if(PULP_PROFILE STREQUAL "release")
+    set(PULP_DEV_BUILD 0 CACHE INTERNAL
+        "1 under PULP_PROFILE=dev, 0 under release; exported as a compile definition" FORCE)
+else()
+    set(PULP_DEV_BUILD 1 CACHE INTERNAL
+        "1 under PULP_PROFILE=dev, 0 under release; exported as a compile definition" FORCE)
 endif()
 
 # Every option the release profile forces OFF. The order is the report order.

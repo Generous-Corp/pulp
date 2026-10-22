@@ -19,23 +19,38 @@ class HostParamSurface;
 class StateStoreHostParamSurface;
 } // namespace pulp::view
 
+// PULP_DEV_BUILD is the build profile's compile-time axis (1 under
+// PULP_PROFILE=dev, 0 under release), exported PUBLIC by pulp-platform from
+// tools/cmake/PulpProfiles.cmake. The inline readers below must see the same
+// value in every translation unit, so a missing definition is an error rather
+// than a silent default.
+#ifndef PULP_DEV_BUILD
+#error "PULP_DEV_BUILD is not defined; link pulp::platform, which exports it (PulpProfiles.cmake)"
+#endif
+
 namespace pulp::format {
 
-/// Whether a DAW-hosted editor should enable scripted-UI + theme hot reload
-/// (item 1.3). OFF by default — a shipping plugin must not watch and reload from
-/// disk inside a host — but a developer opts in for the edit→see-it loop by
-/// exporting `PULP_DEV_HOT_RELOAD=1` in the DAW's environment. (The standalone
-/// app always enables it; it IS the dev tool.) Polling already runs on every
-/// editor tick, so this only decides whether the watcher acts. Kept header-inline
-/// so the platform view controllers (`au_view_controller_*.mm`,
-/// `au_v2_cocoa_view.mm`) share one definition.
+/// Whether a DAW-hosted editor should enable scripted-UI + theme hot reload.
+/// OFF by default — a shipping plugin must not watch and reload from disk inside
+/// a host — but in a dev-profile build a developer opts in for the edit→see-it
+/// loop by exporting `PULP_DEV_HOT_RELOAD=1` in the DAW's environment. A release
+/// build (PULP_DEV_BUILD=0) never reads the variable: the editor cannot be
+/// switched to re-evaluating a script path on disk by the host's environment.
+/// (The standalone app enables it in dev builds unconditionally; it IS the dev
+/// tool.) Polling already runs on every editor tick, so this only decides
+/// whether the watcher acts. Kept header-inline so the platform view controllers
+/// (`au_view_controller_*.mm`, `au_v2_cocoa_view.mm`) share one definition.
 inline bool dev_editor_hot_reload_enabled() {
+#if PULP_DEV_BUILD
     const char* v = std::getenv("PULP_DEV_HOT_RELOAD");
     if (!v) return false;
     switch (v[0]) {
         case '1': case 't': case 'T': case 'y': case 'Y': return true;
         default: return false;
     }
+#else
+    return false;
+#endif
 }
 
 /// Whether a DAW-hosted editor opens content-first (the default) or view-first.
@@ -101,7 +116,8 @@ public:
         bool content_first_open = false;
 
         /// Options for a primary editor embedded in a host: hot reload follows
-        /// the developer's `PULP_DEV_HOT_RELOAD` opt-in, role is Editor.
+        /// the developer's `PULP_DEV_HOT_RELOAD` opt-in (dev builds only), role
+        /// is Editor.
         ///
         /// Every format adapter builds its editor from this rather than
         /// assembling the struct itself. Hand-assembly is what let VST3 and CLAP
@@ -111,7 +127,7 @@ public:
         /// omit an option, and a new option lands in exactly one place.
         ///
         /// The standalone host deliberately does NOT use this — it forces hot
-        /// reload on unconditionally because it is itself the dev tool.
+        /// reload on in every dev build because it is itself the dev tool.
         static Options hosted_editor() {
             return Options{.enable_hot_reload = dev_editor_hot_reload_enabled(),
                            .role = ViewRole::Editor,

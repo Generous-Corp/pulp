@@ -245,6 +245,93 @@ if(UNIX)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/reload_ship_symbol_check.cmake)
 endif()
 
+# The PULP_DEV_BUILD=0 arms of the macOS view hosts and the SKP capture are
+# otherwise compiled only by the release workflows (tests are OFF under the
+# release profile). Compile each translation unit twice as an object with the
+# owning target's include directories, definitions and options, overriding the
+# axis in compile OPTIONS (emitted after inherited definitions), and assert the
+# environment-variable literals are present in the =1 control and absent at =0.
+# All three sites sit inside the Skia GPU host sections (#ifdef PULP_HAS_SKIA),
+# so the check is meaningful only in a GPU configure: a non-GPU object carries
+# none of the literals at either axis value and the positive control fails.
+# skp_capture.cpp exists only when pulp-render is a target.
+if(APPLE AND NOT IOS AND NOT PULP_HAS_SKIA)
+    message(STATUS
+        "release-arm check: SKIPPED (PULP_HAS_SKIA is OFF; the gated reads live in the Skia GPU hosts)")
+endif()
+if(APPLE AND NOT IOS AND PULP_HAS_SKIA)
+    function(_pulp_release_arm_fixture name owner source)
+        foreach(_axis 1 0)
+            set(_target ${name}-${_axis})
+            add_library(${_target} OBJECT ${source})
+            target_link_libraries(${_target} PRIVATE ${owner})
+            target_include_directories(${_target} PRIVATE
+                $<TARGET_PROPERTY:${owner},INCLUDE_DIRECTORIES>)
+            target_compile_definitions(${_target} PRIVATE
+                $<TARGET_PROPERTY:${owner},COMPILE_DEFINITIONS>)
+            target_compile_options(${_target} PRIVATE
+                $<TARGET_PROPERTY:${owner},COMPILE_OPTIONS>
+                -UPULP_DEV_BUILD -DPULP_DEV_BUILD=${_axis})
+        endforeach()
+    endfunction()
+    _pulp_release_arm_fixture(pulp-release-arm-window-host pulp-view-core
+        "${CMAKE_SOURCE_DIR}/core/view/platform/mac/window_host_mac.mm")
+    _pulp_release_arm_fixture(pulp-release-arm-plugin-view-host pulp-view-tooling
+        "${CMAKE_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac.mm")
+    set(_pulp_release_arm_args
+        "-DWINDOW_HOST_DEV=$<TARGET_OBJECTS:pulp-release-arm-window-host-1>"
+        "-DWINDOW_HOST_SHIP=$<TARGET_OBJECTS:pulp-release-arm-window-host-0>"
+        "-DPLUGIN_VIEW_HOST_DEV=$<TARGET_OBJECTS:pulp-release-arm-plugin-view-host-1>"
+        "-DPLUGIN_VIEW_HOST_SHIP=$<TARGET_OBJECTS:pulp-release-arm-plugin-view-host-0>")
+    if(TARGET pulp-render)
+        _pulp_release_arm_fixture(pulp-release-arm-skp-capture pulp-render
+            "${CMAKE_SOURCE_DIR}/core/render/src/skp_capture.cpp")
+        list(APPEND _pulp_release_arm_args
+            "-DSKP_CAPTURE_DEV=$<TARGET_OBJECTS:pulp-release-arm-skp-capture-1>"
+            "-DSKP_CAPTURE_SHIP=$<TARGET_OBJECTS:pulp-release-arm-skp-capture-0>")
+    else()
+        message(STATUS
+            "release-arm check: skp_capture.cpp not compiled (PULP_ENABLE_GPU is OFF, no pulp-render target)")
+    endif()
+    add_custom_target(pulp-release-arm-fixtures)
+    add_dependencies(pulp-release-arm-fixtures
+        pulp-release-arm-window-host-1 pulp-release-arm-window-host-0
+        pulp-release-arm-plugin-view-host-1 pulp-release-arm-plugin-view-host-0)
+    if(TARGET pulp-render)
+        add_dependencies(pulp-release-arm-fixtures
+            pulp-release-arm-skp-capture-1 pulp-release-arm-skp-capture-0)
+    endif()
+    add_test(NAME pulp-release-arm-env-literal-absence
+        COMMAND ${CMAKE_COMMAND} ${_pulp_release_arm_args}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/release_arm_env_check.cmake)
+    unset(_pulp_release_arm_args)
+endif()
+
+# The shell's initial load under both watcher configurations: the same suite
+# built with the dev watcher (unsigned loads, PULP_RELOAD_LOGIC_PATH honored)
+# and with PULP_RELOAD_DEV_WATCHER=0 (unsigned refused before dlopen, the
+# environment ignored, a signed pack under the pinned key still loads).
+foreach(_pulp_shell_trust_lane dev ship)
+    set(_pulp_shell_trust_target pulp-test-reloadable-shell-trust-${_pulp_shell_trust_lane})
+    pulp_add_test_suite(${_pulp_shell_trust_target}
+        SOURCES test_reloadable_shell_trust.cpp
+        TEST_PREFIX "reload-shell-${_pulp_shell_trust_lane}: "
+        LIBRARIES pulp::format pulp::runtime)
+    add_dependencies(${_pulp_shell_trust_target} pulp-reload-logic-unity)
+    target_compile_definitions(${_pulp_shell_trust_target} PRIVATE
+        RELOAD_LOGIC_UNITY="$<TARGET_FILE:pulp-reload-logic-unity>"
+        RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    if(_pulp_shell_trust_lane STREQUAL "ship")
+        target_compile_definitions(${_pulp_shell_trust_target} PRIVATE PULP_RELOAD_DEV_WATCHER=0)
+    endif()
+    if(NOT WIN32)
+        target_link_libraries(${_pulp_shell_trust_target} PRIVATE ${CMAKE_DL_LIBS})
+    endif()
+    target_link_libraries(${_pulp_shell_trust_target} PRIVATE Threads::Threads)
+endforeach()
+unset(_pulp_shell_trust_lane)
+unset(_pulp_shell_trust_target)
+
 # Plugin-contributed settings sections; SettingsPanel lives in pulp::standalone.
 pulp_add_test_suite(pulp-test-settings-sections LIBRARIES pulp::standalone)
 

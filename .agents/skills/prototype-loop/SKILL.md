@@ -232,6 +232,7 @@ The mode is *advisory* at the build layer today. The marker is read by tooling t
 - **Drifting past merged upstream PRs** — the planned `--watch-issues` monitor is the structural answer. Until then, set a 5-minute timer or pin the `gh pr list` watch in a side terminal.
 - **ar-swap leaving SDK in inconsistent state** — header vs `.a` vtable mismatch is the trap. The planned helper refuses on mismatch; until then, `nm -gU` the patched object before splicing and delete the local archive after validation.
 - **Multiple worktrees on different focus platforms** — the marker is per-`PULP_HOME`, so two worktrees pointing at the same `~/.pulp/config.toml` share the marker. If you're working on macOS in one worktree and want a Linux focus check in another, use `PULP_HOME=/tmp/pulp-linux pulp loop --platform=linux`.
+- **The in-DAW / reload dev hooks exist only in a dev-profile SDK** — `PULP_DEV_HOT_RELOAD`, `PULP_RELOAD_LOGIC_PATH`, `PULP_SKP_CAPTURE_DIR`, and the plugin view hosts' `PULP_PARTIAL_REPAINT` / `PULP_TEST_POINTER_DRAG` / `PULP_EMBED_GPU_FRAME_STAT` reads are compiled out when `PULP_DEV_BUILD` is 0, which is what `PULP_PROFILE=release` sets (`tools/cmake/PulpProfiles.cmake`). A `ReloadableShell` built that way also refuses an unsigned logic dylib and runs as passthrough. If a loop against an installed SDK stops reacting to those variables, the SDK was configured as `release` (the local `forge-dev` profile is `dev`); rebuild the SDK as dev rather than exporting the variable harder.
 
 ## Slash command
 

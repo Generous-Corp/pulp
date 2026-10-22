@@ -2522,8 +2522,23 @@ edit→see-it loop, export `PULP_DEV_HOT_RELOAD=1` in the DAW's environment befo
 launching it.
 
 The standalone app (`standalone.cpp`) is the one deliberate exception — it
-hand-assembles `.enable_hot_reload = true` unconditionally because it *is* the
+hand-assembles `.enable_hot_reload = PULP_DEV_BUILD != 0` because it *is* the
 dev tool.
+
+**Gotcha: the opt-in only exists in a dev-profile build.** `PULP_DEV_BUILD`
+(from `tools/cmake/PulpProfiles.cmake`, exported PUBLIC by `pulp-platform`) is 1
+under `PULP_PROFILE=dev` and 0 under `release`, and
+`dev_editor_hot_reload_enabled()` compiles its `getenv("PULP_DEV_HOT_RELOAD")`
+out at 0, so a release plugin (or the standalone from a release SDK) ignores
+the variable no matter what the DAW's environment says — the
+`pulp-dev-env-gate-symbol-absence` ctest proves the literal is gone from a
+`PULP_DEV_BUILD=0` object. If "I exported `PULP_DEV_HOT_RELOAD=1` and the
+editor does not reload" turns up, check the profile of the SDK the plugin was
+built against before debugging the watcher: `pulp sdk install` from the
+release site configures `PULP_PROFILE=release`, the local `forge-dev` profile
+configures `dev`. Every translation unit that includes `view_bridge.hpp` must
+see the define (it is a `#error` otherwise), so a consumer build that does not
+link `pulp::platform` fails to compile rather than silently picking a value.
 
 **Why the factory, and why a test guards it.** VST3 and CLAP shipped without
 scripted-UI hot reload because they constructed their bridge from the
