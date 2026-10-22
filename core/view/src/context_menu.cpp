@@ -144,6 +144,35 @@ int ContextMenu::row_at(Point local_point, const MenuLayout& lay) const {
     return -1;
 }
 
+void ContextMenu::adjust_control(Item& item, float delta) {
+    if (!item.enabled) return;
+    if (item.control_kind == Item::ControlKind::toggle) {
+        item.set_toggled(!item.checked);
+    } else if (item.control_kind == Item::ControlKind::slider) {
+        item.set_normalized_value(item.normalized_value + delta);
+    }
+    request_repaint();
+}
+
+bool ContextMenu::set_control_from_pointer(Item& item, const Rect& row,
+                                            Point point) {
+    if (!item.enabled || item.control_kind != Item::ControlKind::slider ||
+        row.width <= 0.0f)
+        return false;
+    // The right-hand half of a slider row is the value track. Keeping the
+    // label area available for selection makes the menu usable at narrow
+    // sizes and mirrors ordinary parameter popovers.
+    const float left = row.x + std::min(90.0f, row.width * 0.45f);
+    const float right = row.x + row.width - 10.0f;
+    const float value = right > left
+        ? (point.x - left) / (right - left)
+        : 0.0f;
+    const float before = item.normalized_value;
+    item.set_normalized_value(value);
+    request_repaint();
+    return before != item.normalized_value;
+}
+
 void ContextMenu::move_hover(int delta) {
     if (items_.empty()) return;
     const int n = static_cast<int>(items_.size());
@@ -295,7 +324,8 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
             canvas.fill_rect(row.x + 1, iy, row.width - 2, rh);
         }
 
-        // Checkmark glyph for checked items.
+        // Checkmark glyph for checked items. Toggle controls keep their state
+        // visible while the menu remains open.
         if (it.checked) {
             auto check_color = (i == hover_index_ && it.enabled)
                                    ? canvas::Color::rgba8(255, 255, 255)
@@ -311,6 +341,19 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color(row_text);
         canvas.set_text_align(canvas::TextAlign::left);
         canvas.fill_text(it.label, row.x + 22, iy + rh * 0.5f + 4.0f);
+
+        if (it.control_kind == Item::ControlKind::slider) {
+            const float left = row.x + std::min(90.0f, row.width * 0.45f);
+            const float right = row.x + row.width - 10.0f;
+            const float cy = iy + rh * 0.5f;
+            canvas.set_stroke_color(text_dim);
+            canvas.set_line_width(2.0f);
+            canvas.stroke_line(left, cy, right, cy);
+            const float thumb = left + (right - left) *
+                std::clamp(it.normalized_value, 0.0f, 1.0f);
+            canvas.set_fill_color(accent_c);
+            canvas.fill_circle(thumb, cy, 4.0f);
+        }
     }
 
     // Scroll affordance: a chevron on whichever edge has rows beyond it, so a
@@ -353,6 +396,29 @@ void ContextMenu::on_mouse_event(const MouseEvent& event) {
     }
 
     const MenuLayout lay = layout();  // canvas-free geometry
+
+    // Slider rows stay live while the pointer is dragged. Pointer capture is
+    // important here: once the thumb leaves the row, the host still sends the
+    // gesture to the menu instead of handing it to the view underneath.
+    if (active_slider_index_ >= 0) {
+        const int slider = active_slider_index_;
+        if (event.phase == MousePhase::drag || event.has_movement_delta ||
+            event.phase == MousePhase::automatic) {
+            if (slider < static_cast<int>(items_.size())) {
+                set_control_from_pointer(items_[static_cast<size_t>(slider)],
+                                         lay.rows[static_cast<size_t>(slider)],
+                                         event.position);
+            }
+            return;
+        }
+        if (!event.is_down || event.phase == MousePhase::release) {
+            release_pointer_capture(active_pointer_id_);
+            active_slider_index_ = -1;
+            active_pointer_id_ = 0;
+            request_repaint();
+            return;
+        }
+    }
     const int row = row_at(event.position, lay);
 
     if (!event.is_down) {
@@ -371,9 +437,19 @@ void ContextMenu::on_mouse_event(const MouseEvent& event) {
         fire_close(std::nullopt);
         return;
     }
-    const auto& it = items_[static_cast<size_t>(row)];
+    auto& it = items_[static_cast<size_t>(row)];
     if (is_selectable(it)) {
-        fire_close(it.id);  // commit selection
+        if (it.control_kind == Item::ControlKind::toggle) {
+            adjust_control(it, 0.0f);
+        } else if (it.control_kind == Item::ControlKind::slider) {
+            active_slider_index_ = row;
+            active_pointer_id_ = event.pointer_id;
+            set_pointer_capture(active_pointer_id_);
+            set_control_from_pointer(it, lay.rows[static_cast<size_t>(row)],
+                                     event.position);
+        } else {
+            fire_close(it.id);  // commit action selection
+        }
     }
     // Click on a disabled row or separator: ignore (menu stays open).
 }
@@ -381,8 +457,24 @@ void ContextMenu::on_mouse_event(const MouseEvent& event) {
 bool ContextMenu::on_key_event(const KeyEvent& event) {
     if (!event.is_down || closed_) return false;
     switch (event.key) {
-        case KeyCode::up:   move_hover(-1); return true;
-        case KeyCode::down: move_hover(+1); return true;
+        case KeyCode::up:
+        case KeyCode::left:
+            if (hover_index_ >= 0 && hover_index_ < static_cast<int>(items_.size()) &&
+                items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::slider) {
+                adjust_control(items_[static_cast<size_t>(hover_index_)],
+                               -items_[static_cast<size_t>(hover_index_)].normalized_step);
+                return true;
+            }
+            move_hover(-1); return true;
+        case KeyCode::down:
+        case KeyCode::right:
+            if (hover_index_ >= 0 && hover_index_ < static_cast<int>(items_.size()) &&
+                items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::slider) {
+                adjust_control(items_[static_cast<size_t>(hover_index_)],
+                               items_[static_cast<size_t>(hover_index_)].normalized_step);
+                return true;
+            }
+            move_hover(+1); return true;
         case KeyCode::home: move_hover_to_edge(false); return true;
         case KeyCode::end_: move_hover_to_edge(true); return true;
         case KeyCode::escape:
@@ -392,8 +484,15 @@ bool ContextMenu::on_key_event(const KeyEvent& event) {
         case KeyCode::space:
             if (hover_index_ >= 0 &&
                 hover_index_ < static_cast<int>(items_.size()) &&
-                is_selectable(items_[static_cast<size_t>(hover_index_)]))
-                fire_close(items_[static_cast<size_t>(hover_index_)].id);
+                is_selectable(items_[static_cast<size_t>(hover_index_)])) {
+                auto& item = items_[static_cast<size_t>(hover_index_)];
+                if (item.control_kind == Item::ControlKind::toggle)
+                    adjust_control(item, 0.0f);
+                else if (item.control_kind == Item::ControlKind::slider)
+                    adjust_control(item, item.normalized_step);
+                else
+                    fire_close(item.id);
+            }
             return true;
         default:
             return false;
