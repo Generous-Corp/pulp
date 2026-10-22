@@ -5571,6 +5571,14 @@
    ],
    "kind": "python"
   },
+  "gpu-fault-real-host-driver-selftest": {
+   "entry": "tools/testing/daw-smoke/test_real_host_smoke.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_host_preflight.py",
+    "tools/validation/verify_gpu_audio_daw_continuity_receipt_v2.py"
+   ],
+   "kind": "python"
+  },
   "gpu-first-visible-acceptance-selftest": {
    "entry": "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
    "inputs": [

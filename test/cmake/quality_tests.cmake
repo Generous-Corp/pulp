@@ -81,6 +81,10 @@ if(Python3_Interpreter_FOUND)
 
     # The GPU fault-injection test hooks never reach a build that did not ask
     # for them: the self-test plants each way in; the gate scans this tree.
+    add_test(NAME gpu-fault-real-host-driver-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/testing/daw-smoke/test_real_host_smoke.py")
+
     add_test(NAME gpu-fault-hooks-release-gate-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_fault_hooks_release_gate.py")

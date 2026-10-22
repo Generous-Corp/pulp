@@ -387,6 +387,12 @@
       ]
     },
     {
+      "name": "gpu-fault-real-host-driver-selftest",
+      "argv": [
+        "{repo}/tools/testing/daw-smoke/test_real_host_smoke.py"
+      ]
+    },
+    {
       "name": "gpu-fault-hooks-release-gate-selftest",
       "argv": [
         "{repo}/tools/scripts/test_gpu_fault_hooks_release_gate.py"
