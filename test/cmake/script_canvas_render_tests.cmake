@@ -387,6 +387,12 @@ pulp_add_test_suite(pulp-test-view GROUP pulp-test-group-script-view
 pulp_add_test_suite(pulp-test-view-corner-radius GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
 
+# View border paint, asserted against pixel spans and shades read off
+# Chrome's render: inside-the-box placement, per-side widths and colours,
+# dash cadence, and the shaded (inset/outset/groove/ridge) and double styles.
+pulp_add_test_suite(pulp-test-view-border-render GROUP pulp-test-group-script-view
+    LIBRARIES pulp::view)
+
 # View z-index + overflow tests extracted from test_view.cpp. Covers
 # z-index paint-order + hit-test, overflow:visible default for
 # absolute-positioned popovers, and symmetric overflow:visible hit-test

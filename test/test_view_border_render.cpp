@@ -467,3 +467,212 @@ TEST_CASE("a border thicker than the box fills it", "[view][border]") {
     CHECK(col.start == 0);
     CHECK(col.length == p.height);
 }
+
+// ── Shaded and multi-line border styles ─────────────────────────────────────
+//
+// `outset`, `inset`, `groove` and `ridge` paint each side in a lighter or
+// darker shade of its colour, and `double` paints two lines. Every shade below
+// is the 8-bit colour Chrome 151 painted for that side colour, read out of its
+// dpr-2 render; the set covers the special cases the rule has (pure and
+// near-black, the too-dark-to-darken band up to rgb(32,32,32) by luminance,
+// the not-lightened band above rgb(235,235,235)) and ordinary colours.
+
+namespace {
+
+struct ShadeCase {
+    Rgb base;
+    Rgb light;
+    Rgb dark;
+};
+
+Rgb rgb8(pulp::canvas::Color c) {
+    const auto level = [](float v) {
+        return static_cast<int>(std::lround(v * 255.0f));
+    };
+    return Rgb{level(c.r), level(c.g), level(c.b)};
+}
+
+bool exactly(Rgb a, Rgb b) {
+    return a.r == b.r && a.g == b.g && a.b == b.b;
+}
+
+}  // namespace
+
+TEST_CASE("3D border shades match Chrome's per-colour shading",
+          "[view][border][border-shading]") {
+    const ShadeCase cases[] = {
+        {{0, 0, 0}, {168, 168, 168}, {84, 84, 84}},
+        {{1, 1, 1}, {169, 169, 169}, {85, 85, 85}},
+        {{32, 32, 32}, {200, 200, 200}, {116, 116, 116}},
+        {{33, 33, 33}, {117, 117, 117}, {0, 0, 0}},
+        {{34, 31, 31}, {202, 185, 185}, {118, 108, 108}},
+        {{33, 32, 32}, {117, 114, 114}, {0, 0, 0}},
+        {{10, 20, 30}, {66, 132, 198}, {38, 76, 114}},
+        {{60, 0, 0}, {229, 0, 0}, {144, 0, 0}},
+        {{80, 0, 0}, {164, 0, 0}, {0, 0, 0}},
+        {{0, 0, 100}, {0, 0, 255}, {0, 0, 184}},
+        {{0, 0, 128}, {0, 0, 212}, {0, 0, 44}},
+        {{84, 84, 84}, {168, 168, 168}, {0, 0, 0}},
+        {{128, 128, 128}, {212, 212, 212}, {44, 44, 44}},
+        {{20, 40, 160}, {30, 61, 245}, {9, 19, 76}},
+        {{200, 150, 40}, {255, 191, 51}, {116, 87, 23}},
+        {{235, 235, 235}, {255, 255, 255}, {151, 151, 151}},
+        {{236, 236, 236}, {236, 236, 236}, {152, 152, 152}},
+        {{250, 230, 240}, {250, 230, 240}, {166, 153, 159}},
+        {{220, 245, 250}, {220, 245, 250}, {146, 163, 166}},
+        {{255, 0, 0}, {255, 0, 0}, {171, 0, 0}},
+        {{255, 255, 255}, {255, 255, 255}, {171, 171, 171}},
+    };
+    for (const auto& c : cases) {
+        const auto shades = View::border_shades(paint(c.base));
+        INFO("base " << c.base.r << "," << c.base.g << "," << c.base.b
+             << " light " << rgb8(shades.light).r << ","
+             << rgb8(shades.light).g << "," << rgb8(shades.light).b
+             << " dark " << rgb8(shades.dark).r << ","
+             << rgb8(shades.dark).g << "," << rgb8(shades.dark).b);
+        CHECK(exactly(rgb8(shades.light), c.light));
+        CHECK(exactly(rgb8(shades.dark), c.dark));
+    }
+    // Alpha is the side colour's own; only the channels are shaded.
+    const auto translucent =
+        View::border_shades(pulp::canvas::Color::rgba(0.0f, 0.0f, 1.0f, 0.5f));
+    CHECK(translucent.light.a == 0.5f);
+    CHECK(translucent.dark.a == 0.5f);
+    CHECK(exactly(rgb8(translucent.dark), Rgb{0, 0, 171}));
+}
+
+TEST_CASE("each 3D style shades the sides it should",
+          "[view][border][border-shading]") {
+    using S = View::BorderEdge;
+    using B = View::BorderStyle;
+    const auto black = paint(Rgb{0, 0, 0});
+    const Rgb light{168, 168, 168};
+    const Rgb dark{84, 84, 84};
+    const auto band = [&](B style, S side, bool outer) {
+        return rgb8(View::border_band_color(style, side, outer, black, 6.0f));
+    };
+    // Outset lights the top and left, inset the bottom and right.
+    CHECK(exactly(band(B::outset, S::top, true), light));
+    CHECK(exactly(band(B::outset, S::left, true), light));
+    CHECK(exactly(band(B::outset, S::bottom, true), dark));
+    CHECK(exactly(band(B::outset, S::right, true), dark));
+    CHECK(exactly(band(B::inset, S::top, true), dark));
+    CHECK(exactly(band(B::inset, S::bottom, true), light));
+    // A groove's outer half is shaded as inset and its inner half as outset;
+    // a ridge is the reverse.
+    CHECK(exactly(band(B::groove, S::top, true), dark));
+    CHECK(exactly(band(B::groove, S::top, false), light));
+    CHECK(exactly(band(B::groove, S::bottom, true), light));
+    CHECK(exactly(band(B::groove, S::bottom, false), dark));
+    CHECK(exactly(band(B::ridge, S::top, true), light));
+    CHECK(exactly(band(B::ridge, S::right, false), light));
+    // A 1px groove is not split, and paints the unshaded colour.
+    CHECK(exactly(rgb8(View::border_band_color(B::groove, S::top, true, black,
+                                               1.0f)),
+                  Rgb{0, 0, 0}));
+    // Solid and double are never shaded.
+    CHECK(exactly(band(B::double_, S::top, true), Rgb{0, 0, 0}));
+    CHECK(exactly(band(B::solid, S::bottom, true), Rgb{0, 0, 0}));
+}
+
+TEST_CASE("groove and double split a side into Chrome's bands",
+          "[view][border][border-shading]") {
+    using S = View::BorderEdge;
+    using B = View::BorderStyle;
+    // {width, top outer, bottom outer} for a groove, read off Chrome's render:
+    // the top and left take the odd pixel on the outside.
+    const float groove[][3] = {{1, 1, 1}, {2, 1, 1}, {3, 2, 1}, {4, 2, 2},
+                               {9, 5, 4}, {12, 6, 6}};
+    for (const auto& g : groove) {
+        INFO("groove width " << g[0]);
+        const auto top = View::border_bands(B::groove, S::top, g[0]);
+        const auto bottom = View::border_bands(B::groove, S::bottom, g[0]);
+        CHECK(top.outer == g[1]);
+        CHECK(top.outer + top.gap + top.inner == g[0]);
+        CHECK(bottom.outer == g[2]);
+        CHECK(bottom.outer + bottom.gap + bottom.inner == g[0]);
+    }
+    // {width, line, gap} for double: below 3px it is one solid line.
+    const float dbl[][3] = {{2, 2, 0}, {3, 1, 1}, {4, 1, 2}, {5, 2, 1},
+                            {7, 2, 3}, {8, 3, 2}, {11, 4, 3}, {12, 4, 4}};
+    for (const auto& d : dbl) {
+        INFO("double width " << d[0]);
+        const auto bands = View::border_bands(B::double_, S::right, d[0]);
+        CHECK(bands.outer == d[1]);
+        CHECK(bands.gap == d[2]);
+        CHECK(bands.inner == (d[0] < 3 ? 0.0f : d[1]));
+    }
+}
+
+// `border: 6px outset black` on the 120x60 box. Chrome paints 12 device px of
+// rgb(168,168,168) down the top and left and of rgb(84,84,84) along the bottom
+// and right; a flat black frame is what this lowered to before.
+TEST_CASE("an outset border paints its light and dark sides",
+          "[view][border][border-shading]") {
+    View v;
+    v.set_border(paint(Rgb{0, 0, 0}), 6.0f);
+    v.set_border_style(View::BorderStyle::outset);
+    const auto px = render(v);
+    const Rgb light{168, 168, 168};
+    const Rgb dark{84, 84, 84};
+
+    const auto top = scan_col(px, kDevW / 2, light);
+    CHECK(top.start == 0);
+    CHECK(top.length == 12);
+    const auto bottom = scan_col(px, kDevW / 2, dark, kDevH / 2);
+    CHECK(bottom.start == kDevH - 12);
+    CHECK(bottom.length == 12);
+    const auto left = scan_row(px, kDevH / 2, light);
+    CHECK(left.start == 0);
+    CHECK(left.length == 12);
+    const auto right = scan_row(px, kDevH / 2, dark, kDevW / 2);
+    CHECK(right.start == kDevW - 12);
+    CHECK(right.length == 12);
+    // The top-right corner is mitred: light above the diagonal, dark below.
+    CHECK(same(px.at(kDevW - 11, 1), light));
+    CHECK(same(px.at(kDevW - 2, 10), dark));
+}
+
+// `border: 9px groove black`: Chrome paints 10 device px of the dark shade
+// then 8 of the light one down from the top, and 8 light then 10 dark up from
+// the bottom.
+TEST_CASE("a groove border paints two shaded bands per side",
+          "[view][border][border-shading]") {
+    View v;
+    v.set_border(paint(Rgb{0, 0, 0}), 9.0f);
+    v.set_border_style(View::BorderStyle::groove);
+    const auto px = render(v);
+    const Rgb light{168, 168, 168};
+    const Rgb dark{84, 84, 84};
+
+    const auto top_outer = scan_col(px, kDevW / 2, dark);
+    CHECK(top_outer.start == 0);
+    CHECK(top_outer.length == 10);
+    const auto top_inner = scan_col(px, kDevW / 2, light);
+    CHECK(top_inner.start == 10);
+    CHECK(top_inner.length == 8);
+    const auto bottom_inner = scan_col(px, kDevW / 2, dark, kDevH / 2);
+    CHECK(bottom_inner.start == kDevH - 18);
+    CHECK(bottom_inner.length == 10);
+    const auto bottom_outer = scan_col(px, kDevW / 2, light, kDevH / 2);
+    CHECK(bottom_outer.start == kDevH - 8);
+    CHECK(bottom_outer.length == 8);
+}
+
+// `border: 9px double white`: two 6-device-px lines with 6 px of the box's own
+// background between them.
+TEST_CASE("a double border paints two lines with a gap",
+          "[view][border][border-shading]") {
+    View v;
+    v.set_border(paint(kWhite), 9.0f);
+    v.set_border_style(View::BorderStyle::double_);
+    const auto px = render(v);
+    const auto runs = scan_row_runs(px, kDevH / 2, kWhite);
+    INFO("runs " << describe(runs));
+    REQUIRE(runs.size() == 4);
+    CHECK(runs[0].start == 0);
+    CHECK(runs[0].length == 6);
+    CHECK(runs[1].start == 12);
+    CHECK(runs[1].length == 6);
+    CHECK(same(px.at(8, kDevH / 2), kPlate));
+}

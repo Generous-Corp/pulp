@@ -1465,6 +1465,113 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     }
 }
 
+namespace {
+
+// One channel of a shade, quantized the way the reference quantizes it: the
+// scaled value is floored onto the 8-bit grid. Rounding instead moves about a
+// third of all shades by one level.
+float shade_channel(float channel, float multiplier) {
+    constexpr float kScale = 255.99998f;
+    const float level = std::floor(channel * multiplier * kScale);
+    return std::clamp(level, 0.0f, 255.0f) / 255.0f;
+}
+
+Color lighten_border_color(Color c) {
+    const float v = std::max({c.r, c.g, c.b});
+    if (v <= 0.0f) return Color::rgba(84.0f / 255.0f, 84.0f / 255.0f,
+                                      84.0f / 255.0f, c.a);
+    const float multiplier = std::min(1.0f, v + 0.33f) / v;
+    return Color::rgba(shade_channel(c.r, multiplier),
+                       shade_channel(c.g, multiplier),
+                       shade_channel(c.b, multiplier), c.a);
+}
+
+Color darken_border_color(Color c) {
+    const float v = std::max({c.r, c.g, c.b});
+    if (v <= 0.0f) return Color::rgba(0.0f, 0.0f, 0.0f, c.a);
+    const float multiplier = std::max(0.0f, v - 0.33f) / v;
+    return Color::rgba(shade_channel(c.r, multiplier),
+                       shade_channel(c.g, multiplier),
+                       shade_channel(c.b, multiplier), c.a);
+}
+
+float relative_luminance(Color c) {
+    const auto linear = [](float channel) {
+        return channel <= 0.04045f
+                   ? channel / 12.92f
+                   : std::pow((channel + 0.055f) / 1.055f, 2.4f);
+    };
+    return 0.2126f * linear(c.r) + 0.7152f * linear(c.g) +
+           0.0722f * linear(c.b);
+}
+
+bool is_near_side(View::BorderEdge side) {
+    return side == View::BorderEdge::top || side == View::BorderEdge::left;
+}
+
+}  // namespace
+
+View::BorderShades View::border_shades(Color side_color) {
+    static const float kDarkLimit =
+        relative_luminance(Color::rgba8(32, 32, 32));
+    static const float kLightLimit =
+        relative_luminance(Color::rgba8(235, 235, 235));
+    const float luminance = relative_luminance(side_color);
+    if (luminance <= kDarkLimit) {
+        const Color base = lighten_border_color(side_color);
+        return {lighten_border_color(base), base};
+    }
+    return {luminance > kLightLimit ? side_color
+                                    : lighten_border_color(side_color),
+            darken_border_color(side_color)};
+}
+
+View::BorderBands View::border_bands(BorderStyle style, BorderEdge side,
+                                     float width) {
+    BorderBands bands;
+    const float w = std::max(0.0f, width);
+    bands.outer = w;
+    // A whole-pixel width splits on whole pixels, as the reference does; a
+    // fractional one splits exactly.
+    const bool whole = std::abs(w - std::round(w)) < 1e-3f;
+    if ((style == BorderStyle::groove || style == BorderStyle::ridge) &&
+        w >= 2.0f) {
+        const float half = whole ? (is_near_side(side) ? std::ceil(w * 0.5f)
+                                                       : std::floor(w * 0.5f))
+                                 : w * 0.5f;
+        bands.outer = half;
+        bands.inner = w - half;
+    } else if (style == BorderStyle::double_ && w >= 3.0f) {
+        const float line = whole ? std::round(w / 3.0f) : w / 3.0f;
+        bands.outer = line;
+        bands.inner = line;
+        bands.gap = w - 2.0f * line;
+    }
+    return bands;
+}
+
+Color View::border_band_color(BorderStyle style, BorderEdge side,
+                              bool outer_band, Color side_color, float width) {
+    const auto shades = [&](bool lit) {
+        const auto s = border_shades(side_color);
+        return lit ? s.light : s.dark;
+    };
+    const bool near = is_near_side(side);
+    switch (style) {
+        case BorderStyle::outset: return shades(near);
+        case BorderStyle::inset:  return shades(!near);
+        case BorderStyle::groove:
+        case BorderStyle::ridge: {
+            if (width < 2.0f) return side_color;
+            // Groove: the outer half is shaded as inset, the inner as outset.
+            const bool outset_band =
+                (style == BorderStyle::ridge) == outer_band;
+            return shades(outset_band ? near : !near);
+        }
+        default: return side_color;
+    }
+}
+
 // A border lives INSIDE the border box. `bounds_` is the border box, so the
 // outer edge of every side is the box outline and the ink grows inward. A
 // stroke is centred on its path, so stroking the outline directly puts half
@@ -1525,6 +1632,75 @@ void View::paint_border(canvas::Canvas& canvas, float paint_w, float paint_h,
     const Color cr = edge_c(border_right_color_set_, border_right_.color);
     const Color cb = edge_c(border_bottom_color_set_, border_bottom_.color);
     const Color cl = edge_c(border_left_color_set_, border_left_.color);
+
+    // Shaded and multi-line styles are bands of per-side colour: up to two
+    // rings, each side of a ring a trapezoid mitred into its neighbours at
+    // 45°, which is how the reference joins a light top to a dark right.
+    if (border_style_ == BorderStyle::double_ ||
+        border_style_ == BorderStyle::groove ||
+        border_style_ == BorderStyle::ridge ||
+        border_style_ == BorderStyle::inset ||
+        border_style_ == BorderStyle::outset) {
+        const bool rounded_bands = use_per_corner || eff_r > 0;
+        if (rounded_bands) {
+            canvas.save();
+            if (use_per_corner) {
+                build_corner_path(w, h, eff_tl, eff_tr, eff_bl, eff_br);
+            } else {
+                build_per_corner_rounded_rect_path(canvas, w, h, eff_r, eff_r,
+                                                   eff_r, eff_r);
+            }
+            canvas.clip();
+        }
+        const BorderBands bt = border_bands(border_style_, BorderEdge::top, wt);
+        const BorderBands br = border_bands(border_style_, BorderEdge::right, wr);
+        const BorderBands bb = border_bands(border_style_, BorderEdge::bottom, wb);
+        const BorderBands bl = border_bands(border_style_, BorderEdge::left, wl);
+        const auto band = [&](BorderEdge side, bool outer, Color c, float width) {
+            return border_band_color(border_style_, side, outer, c, width);
+        };
+        // One ring between two rectangles, each given by its insets from the
+        // border box, so mitres stay on the diagonal through both corners.
+        const auto fill_quad = [&](Color c, float ax, float ay, float bx,
+                                   float by, float cx, float cy, float dx,
+                                   float dy) {
+            canvas.set_fill_color(c);
+            canvas.begin_path();
+            canvas.move_to(ax, ay);
+            canvas.line_to(bx, by);
+            canvas.line_to(cx, cy);
+            canvas.line_to(dx, dy);
+            canvas.close_path();
+            canvas.fill_current_path();
+        };
+        const auto ring = [&](float ot, float orr, float ob, float ol,
+                              float it, float ir, float ib, float il,
+                              Color kt, Color kr, Color kb, Color kl) {
+            if (it > ot)
+                fill_quad(kt, ol, ot, w - orr, ot, w - ir, it, il, it);
+            if (ir > orr)
+                fill_quad(kr, w - orr, ot, w - orr, h - ob, w - ir, h - ib,
+                          w - ir, it);
+            if (ib > ob)
+                fill_quad(kb, w - orr, h - ob, ol, h - ob, il, h - ib, w - ir,
+                          h - ib);
+            if (il > ol)
+                fill_quad(kl, ol, h - ob, ol, ot, il, it, il, h - ib);
+        };
+        ring(0.0f, 0.0f, 0.0f, 0.0f, bt.outer, br.outer, bb.outer, bl.outer,
+             band(BorderEdge::top, true, ct, wt),
+             band(BorderEdge::right, true, cr, wr),
+             band(BorderEdge::bottom, true, cb, wb),
+             band(BorderEdge::left, true, cl, wl));
+        ring(wt - bt.inner, wr - br.inner, wb - bb.inner, wl - bl.inner,
+             wt, wr, wb, wl,
+             band(BorderEdge::top, false, ct, wt),
+             band(BorderEdge::right, false, cr, wr),
+             band(BorderEdge::bottom, false, cb, wb),
+             band(BorderEdge::left, false, cl, wl));
+        if (rounded_bands) canvas.restore();
+        return;
+    }
 
     if (wt == wr && wr == wb && wb == wl && ct == cr && cr == cb && cb == cl) {
         const float bw = wt;

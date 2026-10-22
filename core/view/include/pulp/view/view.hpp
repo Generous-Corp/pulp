@@ -1214,25 +1214,63 @@ public:
         return corner_radius_;
     }
 
-    /// CSS / RN border-style. Skia path effect dispatches on style at paint
-    /// time. CG falls through to solid (the cg_canvas.mm path inherits the
-    /// canvas-base no-op set_line_dash). Values that Pulp doesn't render
-    /// natively (`double` / `groove` / `ridge` / `inset` / `outset`) degrade
-    /// to solid. `none` / `hidden` skip the stroke entirely.
+    /// CSS / RN border-style. `dashed` / `dotted` are a stroke dash (CG falls
+    /// through to solid: cg_canvas.mm inherits the canvas-base no-op
+    /// set_line_dash). `double`, `groove`, `ridge`, `inset` and `outset` are
+    /// painted as bands of per-side colour — see `border_band_color()` and
+    /// `border_bands()`. `none` / `hidden` skip the border entirely.
     enum class BorderStyle {
         solid,    ///< Default — single continuous line.
-        dashed,   ///< SkDashPathEffect with 3w/3w on/off pattern.
-        dotted,   ///< SkDashPathEffect with w/2w on/off pattern (round caps).
-        double_,  ///< Two parallel lines — degrades to solid for now.
-        groove,   ///< Carved-in look — degrades to solid for now.
-        ridge,    ///< Raised look — degrades to solid for now.
-        inset,    ///< 3D-shaded inset — degrades to solid for now.
-        outset,   ///< 3D-shaded outset — degrades to solid for now.
+        dashed,   ///< Dash of 2w on, 1w off.
+        dotted,   ///< Dash of 1w on, 1w off.
+        double_,  ///< Two lines in the side colour with a gap between.
+        groove,   ///< Outer half shaded as inset, inner half as outset.
+        ridge,    ///< Outer half shaded as outset, inner half as inset.
+        inset,    ///< Top/left darkened, bottom/right lightened.
+        outset,   ///< Top/left lightened, bottom/right darkened.
         none,     ///< No border drawn (paint short-circuits).
         hidden,   ///< Same as none for paint purposes.
     };
     void set_border_style(BorderStyle s) { border_style_ = s; invalidate_subtree_caches_up(); }
     BorderStyle border_style() const { return border_style_; }
+
+    /// The two shades a 3D border style paints a side colour in, as Chromium
+    /// resolves them. Lightening and darkening move the colour's largest
+    /// channel by a third of full scale, up or down, and scale the other
+    /// channels with it; alpha is kept. A colour no lighter than rgb(32,32,32)
+    /// by relative luminance is too dark to darken visibly, so it is lightened
+    /// once first and that becomes the dark shade. A colour lighter than
+    /// rgb(235,235,235) is not lightened. Derived from, and checked against,
+    /// Chrome's render of 189 colours.
+    struct BorderShades {
+        Color light;
+        Color dark;
+    };
+    static BorderShades border_shades(Color side_color);
+
+    /// Which edge of the box a border side is on.
+    enum class BorderEdge { top, right, bottom, left };
+
+    /// How a side of `width` CSS px splits into bands for `style`: an outer
+    /// band, a transparent gap, and an inner band, summing to `width`. A
+    /// single-band style puts the whole width in `outer`. `groove` / `ridge`
+    /// split in half, the top and left sides taking the odd pixel on the
+    /// outside; `double` draws two lines a third of the width each, rounded,
+    /// with the rest as the gap. Below 2px a groove or ridge, and below 3px a
+    /// double border, is one solid band.
+    struct BorderBands {
+        float outer = 0.0f;
+        float gap = 0.0f;
+        float inner = 0.0f;
+    };
+    static BorderBands border_bands(BorderStyle style, BorderEdge side,
+                                    float width);
+
+    /// The colour `style` paints the outer or inner band of `side` in, for a
+    /// side whose specified colour is `side_color` and width `width`.
+    static Color border_band_color(BorderStyle style, BorderEdge side,
+                                   bool outer_band, Color side_color,
+                                   float width);
 
     /// CSS / RN list-style cluster. Pulp doesn't model HTML <li>/<ul>/<ol>
     /// semantics; these slots store the values the consumer set so a list

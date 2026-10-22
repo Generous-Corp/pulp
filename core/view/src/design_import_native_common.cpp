@@ -1638,12 +1638,19 @@ void apply_visual_style(View& view, const IRStyle& style,
         // CSS border-style keyword → View::BorderStyle, same table the bridge's
         // setBorderStyle uses. A Figma dashPattern lowers to "dashed" at the
         // producers; without this the native materializer painted it solid
-        // while the JS-bridge lane dashed it. Unknown keywords keep the solid
-        // default (View degrades double/groove/... to solid anyway).
+        // while the JS-bridge lane dashed it. The shaded and double styles
+        // are painted by View in per-side bands; a user-agent button's
+        // `2px outset` drew as a flat black frame while they were dropped
+        // here. Unknown keywords keep the solid default.
         if (style.border_style) {
             const std::string& bs = *style.border_style;
             if (bs == "dashed")      view.set_border_style(View::BorderStyle::dashed);
             else if (bs == "dotted") view.set_border_style(View::BorderStyle::dotted);
+            else if (bs == "double") view.set_border_style(View::BorderStyle::double_);
+            else if (bs == "groove") view.set_border_style(View::BorderStyle::groove);
+            else if (bs == "ridge")  view.set_border_style(View::BorderStyle::ridge);
+            else if (bs == "inset")  view.set_border_style(View::BorderStyle::inset);
+            else if (bs == "outset") view.set_border_style(View::BorderStyle::outset);
             else if (bs == "none")   view.set_border_style(View::BorderStyle::none);
             else if (bs == "hidden") view.set_border_style(View::BorderStyle::hidden);
         }
