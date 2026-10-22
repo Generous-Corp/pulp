@@ -365,6 +365,8 @@ private:
     // Parameter output: snapshot values before process to detect plugin-side changes
     std::vector<float> param_snapshot_;
     state::ParameterEventQueue param_events_;
+    // Processor::wants_sample_accurate_parameters(), asked in initialize().
+    bool sample_accurate_params_ = false;
     // Lent to param_events_.sort(); sized in setupProcessing().
     std::vector<state::ParameterEvent> param_sort_scratch_;
     std::vector<std::uint32_t> param_offset_counts_;

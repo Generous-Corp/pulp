@@ -986,6 +986,7 @@ namespace {
 
 class ScheduledAutomationProcessor final : public pulp::format::Processor {
 public:
+    bool wants_sample_accurate_parameters() const override { return true; }
     pulp::format::PluginDescriptor descriptor() const override {
         return {
             .name = "AUScheduledAutomationTest",
@@ -1117,6 +1118,9 @@ namespace {
 
 class DenseAutomationProcessor final : public pulp::format::Processor {
 public:
+    // Read when the AU effect constructs the processor.
+    static inline bool sample_accurate = true;
+    bool wants_sample_accurate_parameters() const override { return sample_accurate; }
     static inline int process_calls = 0;
     pulp::format::PluginDescriptor descriptor() const override {
         return {
@@ -1241,6 +1245,69 @@ TEST_CASE("AU v2 effect slices dense scheduled automation in time order with fin
         REQUIRE(value == Catch::Approx(0.25f));
     }
 
+    effect.DoCleanup();
+}
+
+TEST_CASE("AU v2 effect renders scheduled automation in one call for a block-rate processor",
+          "[au][au-v2][automation]")
+{
+    const auto previous = pulp::format::registered_factory();
+    pulp::format::register_plugin(create_dense_automation_effect);
+    struct Restore {
+        pulp::format::ProcessorFactory value;
+        ~Restore() {
+            pulp::format::register_plugin(value);
+            DenseAutomationProcessor::sample_accurate = true;
+        }
+    } restore{previous};
+    DenseAutomationProcessor::sample_accurate = false;
+
+    constexpr UInt32 kFrames = 64;
+    TestScheduledEffect effect;
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    std::vector<AudioUnitParameterEvent> events;
+    for (UInt32 i = 0; i < 8; ++i) events.push_back(immediate_event(1, i * 8, 0.1f * (i + 1)));
+    for (UInt32 i = 0; i < 8; ++i) events.push_back(immediate_event(2, i * 8 + 4, 0.05f * (i + 1)));
+    AudioUnitParameterEvent ramp{};
+    ramp.eventType = kParameterEvent_Ramped;
+    ramp.parameter = 3;
+    ramp.scope = kAudioUnitScope_Global;
+    ramp.eventValues.ramp.startBufferOffset = 16;
+    ramp.eventValues.ramp.durationInFrames = 96;  // runs past this buffer
+    ramp.eventValues.ramp.startValue = 0.0f;
+    ramp.eventValues.ramp.endValue = 1.0f;
+    events.push_back(ramp);
+    REQUIRE(effect.ScheduleParameter(events.data(), static_cast<UInt32>(events.size())) == noErr);
+
+    std::array<float, kFrames> input_samples{};
+    std::array<float, kFrames> output_samples{};
+    AudioBufferList input{};
+    input.mNumberBuffers = 1;
+    input.mBuffers[0] = {1, kFrames * sizeof(float), input_samples.data()};
+    AudioBufferList output{};
+    output.mNumberBuffers = 1;
+    output.mBuffers[0] = {1, kFrames * sizeof(float), output_samples.data()};
+    DenseAutomationProcessor::process_calls = 0;
+    AudioUnitRenderActionFlags flags = 0;
+    REQUIRE(effect.process_scheduled(flags, input, output, kFrames) == noErr);
+    effect.clear_scheduled();
+
+    // One call; no events, so every sample reads the block's final value.
+    REQUIRE(DenseAutomationProcessor::process_calls == 1);
+    for (UInt32 n = 0; n < kFrames; ++n) REQUIRE(output_samples[n] == Catch::Approx(0.8f));
+    Float32 value = 0.0f;
+    REQUIRE(effect.GetParameter(2, kAudioUnitScope_Global, 0, value) == noErr);
+    REQUIRE(value == Catch::Approx(0.4f));
+    REQUIRE(effect.GetParameter(3, kAudioUnitScope_Global, 0, value) == noErr);
+    REQUIRE(value == Catch::Approx(0.5f));  // 48 of the ramp's 96 frames
     effect.DoCleanup();
 }
 

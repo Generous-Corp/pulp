@@ -1295,3 +1295,13 @@ editor, or nothing to prewarm, costs one virtual call. The editor itself does
 not change: an open that races the worker waits for the in-flight result
 instead of compiling again. Details: `view-bridge`, "What the host shows while
 it waits".
+
+## Parameter events reach the queue only on opt-in
+
+Sample-accurate automation is opt-in: `Processor::wants_sample_accurate_parameters()`
+(default false, asked once when the adapter creates the processor). Opted out, `CLAP_EVENT_PARAM_VALUE` events
+are written to the store only (in event order, so the block's last one wins)
+and `param_events` stays empty; opted in, each is also queued with its
+`header.time`. Test processors that inspect the queue must override the flag;
+`ObservingParamIngressProcessor` in `test_clap_midi_events.cpp` shows the
+pattern.

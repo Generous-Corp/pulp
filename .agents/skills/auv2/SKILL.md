@@ -1291,6 +1291,13 @@ times, and the first real render runs it once and settles the trigger.
 
 ## Scheduled automation is sliced by Pulp's own ProcessForScheduledParams
 
+Sample-accurate automation is opt-in: `Processor::wants_sample_accurate_parameters()`
+(default false, asked once when the adapter creates the processor). Opted out, `ProcessForScheduledParams` sorts
+the events, writes each owned parameter's end-of-buffer value (immediates in
+time order, a ramp's value at the buffer end), and renders the whole buffer in
+one `ProcessScheduledSlice(0, frames)` call with no parameter events. The
+slicing described below runs only for a processor that opted in.
+
 `AUBase::ProcessForScheduledParams` rescans the whole event list at every
 slice and rewrites every past event into the element map each time, and the
 old `ProcessScheduledSlice` did three more full passes of store writes per

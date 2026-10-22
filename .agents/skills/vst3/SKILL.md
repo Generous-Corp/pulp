@@ -1479,7 +1479,12 @@ automation write first, and a re-read would report the host's value to the host
 as the user's edit. `[vst3][editor][automation]` in `test_vst3_plugin_state.cpp`
 interleaves exactly that.
 
-## Automation points: every point to the queue, one store write per parameter
+## Automation points: one store write per parameter; the queue only on opt-in
+
+Sample-accurate automation is opt-in: `Processor::wants_sample_accurate_parameters()`
+(default false, asked once when the adapter creates the processor). Opted out, the decode loop reads each
+`IParamValueQueue`'s last point only, writes the store once and leaves
+`param_events_` empty and unsorted. Opted in, it does what follows.
 
 VST3 delivers one time-ordered `IParamValueQueue` per parameter, so a block's
 `param_events_` arrive as one sorted run per parameter. An insertion sort over

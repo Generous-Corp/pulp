@@ -39,8 +39,10 @@ The plugin descriptor (id, name, vendor, version, features) is derived automatic
 ### Parameter Sync
 
 **Host to plugin:** During `clap_process()`, the adapter iterates `in_events`,
-looking for `CLAP_EVENT_PARAM_VALUE` events. Each one is pushed into the
-per-block `ParameterEventQueue` and written with `StateStore::set_value_rt()`.
+looking for `CLAP_EVENT_PARAM_VALUE` events. Each one is written with
+`StateStore::set_value_rt()`, and, for a processor whose
+`wants_sample_accurate_parameters()` returns true, also pushed into the
+per-block `ParameterEventQueue`.
 Gesture events (`CLAP_EVENT_PARAM_GESTURE_BEGIN` / `END`) are forwarded to
 `StateStore::begin_gesture()` / `end_gesture()`.
 
@@ -175,12 +177,14 @@ The FUID must be generated once and never changed across versions. It is the sta
 ### Parameter Sync
 
 **Host to plugin:** During `process()`, the adapter reads
-`data.inputParameterChanges`. Each point is denormalized, pushed into the
-per-block `ParameterEventQueue`, and written with
-`StateStore::set_normalized_rt()`. If a host sends more than 1024 points in one
-block, the adapter keeps the first 1024 sample-accurate points, records the
-overflow/drop count on the queue, and still writes every incoming point to
-`StateStore` so block-end reads observe the latest host value.
+`data.inputParameterChanges`. Each parameter's last point is denormalized and
+written to `StateStore` once. For a processor whose
+`wants_sample_accurate_parameters()` returns true, every point is also pushed
+into the per-block `ParameterEventQueue`, in time order. If a host sends more
+than 1024 points in one block, the adapter keeps the first 1024 sample-accurate
+points, records the overflow/drop count on the queue, and still writes each
+parameter's last point to `StateStore` so block-end reads observe the latest
+host value.
 
 **Plugin to host:** The adapter snapshots all parameter values before calling `Processor::process()`. After processing, any value that changed is:
 1. Written to `data.outputParameterChanges` as a normalized value (so the host can record automation)

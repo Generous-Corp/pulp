@@ -1129,6 +1129,24 @@ public:
     /// ordering (node_abi_gate).
     virtual EditorPrewarm editor_prewarm() const { return {}; }
 
+    /// Whether this processor reads sample-accurate parameter automation:
+    /// `param_events()`, a `state::ParamCursor`, or `for_each_subblock()`.
+    ///
+    /// Default false. The VST3, AU v2 and CLAP adapters then deliver each
+    /// automated parameter's last value in a block, written to the store once
+    /// before `process()`, `param_events()` is empty, and AU v2 renders the
+    /// whole buffer in one call instead of one call per scheduled slice. That
+    /// is what a processor that reads parameters once per block needs, and it
+    /// keeps dense host automation from costing time per point.
+    ///
+    /// Return true to receive every automation point with its sample offset
+    /// (and, on AU v2, one `process()` call per slice between scheduled events,
+    /// with the store at each slice's starting value). Asked once, when the
+    /// adapter creates the processor. Other hosting paths (AU v3, LV2, AAX, the
+    /// standalone and headless hosts, graph nodes) deliver every point either
+    /// way. Appended to preserve additive-only vtable ordering (node_abi_gate).
+    virtual bool wants_sample_accurate_parameters() const { return false; }
+
 private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;
     static constexpr std::size_t kF64FallbackMaxBuses = 16;

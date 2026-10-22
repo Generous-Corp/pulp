@@ -179,6 +179,7 @@ public:
 // Captures midi_in so the test can assert what the CLAP adapter handed up.
 class CapturingProcessor : public Processor {
 public:
+    bool wants_sample_accurate_parameters() const override { return true; }
     static constexpr state::ParamID kParamId = 9001;
     static constexpr state::ParamID kBypassParamId = 9002;
     static constexpr std::size_t kMaxCapturedSysex = 8;
@@ -695,6 +696,9 @@ public:
 class ObservingParamIngressProcessor : public Processor {
 public:
     static constexpr state::ParamID kParamId = 9101;
+    // Read by the adapter at clap_init(); the cases here inspect the queue.
+    static inline bool sample_accurate = true;
+    bool wants_sample_accurate_parameters() const override { return sample_accurate; }
 
     bool observed_param_events_attached = false;
     std::size_t observed_param_event_count = 0;
@@ -3098,6 +3102,36 @@ TEST_CASE("CLAP parameter automation drops past realtime event capacity without 
     REQUIRE(h.plugin.param_events.capacity() == state::ParameterEventQueue::kCapacity);
     REQUIRE(h.plugin.param_events.overflowed());
     REQUIRE(h.plugin.param_events.dropped_event_count() == 1);
+}
+
+TEST_CASE("CLAP delivers automation points only to a processor that asks for them",
+          "[clap][params][automation]") {
+    // Opted out: the store takes the block's last value and the event queue
+    // stays empty. Opted in: every point reaches the queue with its offset.
+    for (const bool sample_accurate : {false, true}) {
+        CAPTURE(sample_accurate);
+        ObservingParamIngressProcessor::sample_accurate = sample_accurate;
+        Harness h(make_observing_param_ingress);
+        REQUIRE(g_observing_param_ingress != nullptr);
+        InputEventList events;
+        for (uint32_t i = 0; i < 3; ++i) {
+            clap_event_param_value_t ev{};
+            ev.header = make_header(sizeof(ev), CLAP_EVENT_PARAM_VALUE, i * 10);
+            ev.param_id = ObservingParamIngressProcessor::kParamId;
+            ev.value = 0.25 * (i + 1);
+            events.push(ev);
+        }
+        REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_observing_param_ingress->observed_param_events_attached);
+        REQUIRE(g_observing_param_ingress->observed_state_value == 0.75f);
+        if (sample_accurate) {
+            REQUIRE(g_observing_param_ingress->observed_param_event_count == 3);
+            REQUIRE(g_observing_param_ingress->observed_last_sample_offset == 20);
+        } else {
+            REQUIRE(g_observing_param_ingress->observed_param_event_count == 0);
+        }
+    }
+    ObservingParamIngressProcessor::sample_accurate = true;
 }
 
 TEST_CASE("CLAP_EVENT_MIDI decodes CC into MidiBuffer",

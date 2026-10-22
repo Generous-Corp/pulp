@@ -171,8 +171,21 @@ carries the current absolute per-voice expression value.
 
 ## Sample-Accurate Automation
 
-Format adapters preserve sparse host automation points in a per-block
-`ParameterEventQueue` and expose it during `Processor::process()`:
+A processor that wants every host automation point opts in:
+
+```cpp
+bool wants_sample_accurate_parameters() const override { return true; }
+```
+
+The VST3, AU v2 and CLAP adapters then preserve sparse host automation points
+in a per-block `ParameterEventQueue` and expose it during
+`Processor::process()` (AU v2 also renders one call per slice between
+scheduled events). Without the override, those adapters write each automated
+parameter's last value in the block to `StateStore`, leave the queue empty,
+and render AU v2 automation in one call, so dense automation costs a
+block-rate processor nothing per point. AU v3, LV2, AAX and the standalone and
+headless hosts deliver every point either way. See
+[the 0.1005.0 migration note](../migrations/v0.1005.0.md).
 
 ```cpp
 void process(audio::BufferView<float>& output,

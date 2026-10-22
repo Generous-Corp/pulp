@@ -244,6 +244,7 @@ bool clap_init(const clap_plugin_t* plugin) {
     self->owner_alive.reset();
     self->processor = self->factory();
     if (!self->processor) return false;
+    self->sample_accurate_params = self->processor->wants_sample_accurate_parameters();
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
     request_editor_prewarm(*self->processor);
@@ -702,11 +703,19 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
                 // set_value_rt path (atomic store + non-allocating SPSC push).
                 // The editor calls store.pump_listeners() from its UI tick to
                 // deliver the queued notifications; Audio listeners fire inline.
-                boundary::apply_param_value(
-                    self->param_events, self->store,
-                    static_cast<state::ParamID>(ev.param_id),
-                    static_cast<int32_t>(hdr->time),
-                    static_cast<float>(ev.value));
+                // A processor that does not read sample-accurate automation
+                // gets the value in the store only, so the block's last event
+                // wins and nothing is queued.
+                if (self->sample_accurate_params) {
+                    boundary::apply_param_value(
+                        self->param_events, self->store,
+                        static_cast<state::ParamID>(ev.param_id),
+                        static_cast<int32_t>(hdr->time),
+                        static_cast<float>(ev.value));
+                } else {
+                    self->store.set_value_rt(static_cast<state::ParamID>(ev.param_id),
+                                             static_cast<float>(ev.value));
+                }
             } else if (hdr->type == CLAP_EVENT_PARAM_MOD) {
                 const auto ev = load_event<clap_event_param_mod_t>(hdr);
                 state::ModulationLane lane;

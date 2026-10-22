@@ -684,6 +684,7 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // Create the Pulp processor
     processor_ = factory_();
     if (!processor_) return kInternalError;
+    sample_accurate_params_ = processor_->wants_sample_accurate_parameters();
 
     // Resolve host accommodations once. Cross-host defenses such as
     // clamp_latency_to_nonneg apply regardless of the detected DAW;
@@ -1656,12 +1657,25 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
                         }
                         continue;
                     }
-                    // Every point reaches the sample-accurate queue; the store
-                    // takes only the block's last value. The store is block-rate
-                    // state, and writing it per point cost a revisioned atomic
-                    // write plus a listener notification each time.
+                    // A processor that reads sample-accurate automation gets
+                    // every point in the queue; any other gets only the
+                    // block's last value. Either way the store, block-rate
+                    // state, is written once: per point it cost a revisioned
+                    // atomic write plus a listener notification each time.
                     const auto param_id = static_cast<state::ParamID>(id);
                     const auto* info = store_.info(param_id);
+                    const auto plain = [info](ParamValue value) {
+                        return info ? state::value_from_host_normalized(*info, value)
+                                    : static_cast<float>(value);
+                    };
+                    if (!sample_accurate_params_) {
+                        ParamValue value;
+                        int32 offset;
+                        if (point_count > 0 &&
+                            queue->getPoint(point_count - 1, offset, value) == kResultTrue)
+                            store_.set_value_rt(param_id, plain(value));
+                        continue;
+                    }
                     bool any_point = false;
                     float last_value = 0.0f;
                     for (int32 point = 0; point < point_count; ++point) {
@@ -1674,8 +1688,7 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
                         // the store both want the plain value. A continuous
                         // parameter keeps the host's exact value, as it does in
                         // the plain-value formats.
-                        last_value = info ? state::value_from_host_normalized(*info, value)
-                                          : static_cast<float>(value);
+                        last_value = plain(value);
                         param_events_.push(state::ParameterEvent{
                             param_id, static_cast<int32_t>(offset), last_value});
                         any_point = true;
@@ -1685,7 +1698,7 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
             }
         }
     }
-    param_events_.sort(param_sort_scratch_, param_offset_counts_);
+    if (sample_accurate_params_) param_events_.sort(param_sort_scratch_, param_offset_counts_);
 }
 
 void PulpVst3Processor::refresh_bus_channel_cache() {

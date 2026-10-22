@@ -41,6 +41,7 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
     if (factory) {
         processor_ = factory();
         if (processor_) {
+            sample_accurate_params_ = processor_->wants_sample_accurate_parameters();
             processor_->set_state_store(&store_);
             processor_->define_parameters(store_);
             // Compile/verify the editor's scripts off-thread before the host
@@ -186,6 +187,16 @@ SInt32 scheduled_start_offset(const AudioUnitParameterEvent& event) noexcept {
         : event.eventValues.ramp.startBufferOffset;
 }
 
+float scheduled_ramp_value_at(const AudioUnitParameterEvent& event, UInt32 frame) noexcept {
+    const auto& ramp = event.eventValues.ramp;
+    const auto ramp_start = static_cast<UInt32>(std::max<SInt32>(0, ramp.startBufferOffset));
+    const auto duration = ramp.durationInFrames;
+    if (frame < ramp_start) return ramp.startValue;
+    if (duration == 0 || frame >= ramp_start + duration) return ramp.endValue;
+    const auto t = static_cast<float>(frame - ramp_start) / static_cast<float>(duration);
+    return ramp.startValue + (ramp.endValue - ramp.startValue) * t;
+}
+
 constexpr std::size_t kScheduledRampCapacity = 256;
 constexpr std::size_t kScheduledSortCapacity = 4096;
 
@@ -212,6 +223,33 @@ OSStatus PulpAUEffect::ProcessForScheduledParams(ParameterEventList& events,
             std::span<AudioUnitParameterEvent>(scheduled_sort_scratch_),
             std::span<std::uint32_t>(scheduled_offset_counts_)))
         state::stable_sort_in_place(events.begin(), events.end(), by_start);
+
+    if (!sample_accurate_params_) {
+        // Block-rate processor: the store takes each parameter's value at the
+        // end of the buffer (the last event wins) and the buffer renders in one
+        // call with no parameter events.
+        {
+            ScopedHostParamWrite host_write;
+            for (const auto& event : events) {
+                if (event.scope != kAudioUnitScope_Global || event.element != 0) continue;
+                const auto param_id = static_cast<state::ParamID>(event.parameter);
+                const bool owned = store_.info(param_id) != nullptr;
+                if (event.eventType == kParameterEvent_Immediate) {
+                    if (owned) {
+                        store_.set_value_rt(param_id, event.eventValues.immediate.value);
+                    } else if (auto* element = GetElement(event.scope, event.element)) {
+                        element->SetScheduledEvent(event.parameter, event, 0, frames_to_process);
+                    }
+                } else if (event.eventType == kParameterEvent_Ramped && owned) {
+                    store_.set_value_rt(param_id,
+                                        scheduled_ramp_value_at(event, frames_to_process));
+                }
+            }
+        }
+        return AUEffectBase::ProcessScheduledSlice(user_data, 0, frames_to_process,
+                                                   frames_to_process);
+    }
+
     scheduled_events_ = &events;
     scheduled_cursor_ = 0;
     scheduled_ramps_.clear();
@@ -278,14 +316,7 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
     const auto is_global = [](const AudioUnitParameterEvent& event) {
         return event.scope == kAudioUnitScope_Global && event.element == 0;
     };
-    const auto ramp_value_at = [](const AudioUnitParameterEvent& event, UInt32 frame) {
-        const auto& ramp = event.eventValues.ramp;
-        const auto ramp_start = static_cast<UInt32>(std::max<SInt32>(0, ramp.startBufferOffset));
-        const auto duration = ramp.durationInFrames;
-        if (duration == 0 || frame >= ramp_start + duration) return ramp.endValue;
-        const auto t = static_cast<float>(frame - ramp_start) / static_cast<float>(duration);
-        return ramp.startValue + (ramp.endValue - ramp.startValue) * t;
-    };
+    const auto ramp_value_at = scheduled_ramp_value_at;
 
     // Immediates up to this slice's start take effect once, in time order (a
     // later one wins), and supersede an earlier ramp on the same parameter.

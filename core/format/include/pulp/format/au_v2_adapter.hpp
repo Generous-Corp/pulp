@@ -413,6 +413,9 @@ private:
     // events translated from AudioUnitParameterEvent; otherwise it is empty.
     state::ParameterEventQueue param_events_;
     bool scheduled_slice_active_ = false;
+    // Processor::wants_sample_accurate_parameters(), asked at construction.
+    // False: scheduled automation renders the buffer in one call.
+    bool sample_accurate_params_ = false;
 
     // One scheduled render: the time-sorted event list, how far its
     // immediates have been applied, and its ramps (by index, reserved in

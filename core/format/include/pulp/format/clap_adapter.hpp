@@ -203,6 +203,8 @@ struct PulpClapPlugin {
     // Refreshed only when the store generation moved since it was taken; the
     // post-process diff only runs when the generation moved across process().
     std::vector<float> param_snapshot;
+    // Processor::wants_sample_accurate_parameters(), asked in clap_init().
+    bool sample_accurate_params = false;
     boundary::ParamSnapshotState snapshot_state;
     std::uint64_t pre_process_generation = 0;
     // Bus views handed to the Processor. Members so a block writes only the
