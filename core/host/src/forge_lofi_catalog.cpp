@@ -453,8 +453,11 @@ CustomNodeType make_compressor_node() {
         cp.knee_db = 6.0f;   // musical soft knee
         cp.makeup_db = 0.0f; // reduce-only: never restores level
         s->comp.set_params(cp);
-        for (int k = 0; k < n; ++k)
-            o[static_cast<std::size_t>(k)] = s->comp.process(i[static_cast<std::size_t>(k)]);
+        // Ballistics are block-rate, so the whole block runs through the
+        // compressor's buffer path rather than its per-sample one.
+        if (o != i)
+            std::copy_n(i, n, o);
+        s->comp.process(o, n);
     };
     return t;
 }
