@@ -228,9 +228,13 @@ pulp_add_test_suite(pulp-test-canvas-fonts GROUP pulp-test-group-canvas
         "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\""
         # Deterministic variable font (wght axis 300-800) for the variable-font
         # weight-instancing regression tests. Test-only; not in bundled_blobs().
-        "PULP_TEST_VARIABLE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/FunnelDisplay-VariableFont_wght.ttf\"")
+        "PULP_TEST_VARIABLE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/FunnelDisplay-VariableFont_wght.ttf\""
+        # Self-authored opsz axis + AAT trak table with analytic expectations;
+        # regenerate with test/fixtures/fonts/make_opsz_trak_font.py.
+        "PULP_TEST_OPSZ_TRAK_FONT_PATH=\"${CMAKE_SOURCE_DIR}/test/fixtures/fonts/pulp-test-opsz-trak.ttf\"")
 pulp_test_data(pulp-test-canvas-fonts NO_DEFINE
-    PATHS external/fonts/Inter-Regular.ttf external/fonts/FunnelDisplay-VariableFont_wght.ttf)
+    PATHS external/fonts/Inter-Regular.ttf external/fonts/FunnelDisplay-VariableFont_wght.ttf
+          test/fixtures/fonts/pulp-test-opsz-trak.ttf)
 
 # CSS gradient strings judged by the pixels they produce. Every defect this
 # covers was a value the parser ACCEPTED and painted wrong, so a string

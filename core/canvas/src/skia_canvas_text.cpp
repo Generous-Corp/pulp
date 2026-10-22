@@ -54,6 +54,7 @@
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/font_resolver.hpp>
+#include "auto_optical_size.hpp"
 #include <pulp/canvas/font_options.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #ifdef PULP_HAS_SKIA
@@ -176,10 +177,20 @@ PreparedParagraph make_paragraph(const std::string& text,
     if (families.empty()) families.emplace_back("");
     tstyle.setFontFamilies(families);
     tstyle.setFontSize(size > 0 ? size : 14.0f);
+    apply_auto_optical_size(tstyle, size > 0 ? size : 14.0f);
     SkFontStyle sk_style{weight, SkFontStyle::kNormal_Width,
                          skia_slant(slant)};
     tstyle.setFontStyle(sk_style);
-    if (letter_spacing != 0.0f) tstyle.setLetterSpacing(letter_spacing);
+    // The primary face's AAT tracking is spacing the browser adds on top of
+    // CSS letter-spacing, split around each glyph the same way SkParagraph
+    // splits letter-spacing, so it rides along with it. Only the CSS part is
+    // taken back out of the leading edge below.
+    const float paragraph_size = size > 0 ? size : 14.0f;
+    const float tracking = aat_tracking_px(
+        make_font(family, paragraph_size, weight, slant).getTypeface(),
+        paragraph_size);
+    if (letter_spacing + tracking != 0.0f)
+        tstyle.setLetterSpacing(letter_spacing + tracking);
     if (foreground_paint.has_value()) {
         tstyle.setForegroundPaint(*foreground_paint);
     }
@@ -550,8 +561,11 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // typeface and shape each separately. ASCII text bypasses the scan; it's
     // virtually always covered by any Latin typeface.
     //
+    // A face with AAT tracking is drawn through SkParagraph with that
+    // tracking applied, so it has to be measured there too.
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_) ||
+        aat_tracking_px(font.getTypeface(), font_size_) != 0.0f;
 
     // For plain letter_spacing_ == 0 text only, route missing-glyph text
     // through SkShaper-based per-run fallback for best kerning / ligature
@@ -814,8 +828,11 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
     // emoji typefaces typically have CBDT/COLR bitmaps with no outline
     // tables, so strokeText effectively leaves them unchanged (CSS
     // behavior). Latin text in mixed-emoji runs still gets the stroke.
+    // A face with AAT tracking is drawn through SkParagraph with that
+    // tracking applied, so it has to be measured there too.
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_) ||
+        aat_tracking_px(font.getTypeface(), font_size_) != 0.0f;
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
@@ -970,8 +987,11 @@ float SkiaCanvas::measure_text(const std::string& text) {
     // the same input. Anything emoji-bearing or feature-tagged still
     // goes through SkParagraph so the measured width matches what
     // fill_text actually draws.
+    // A face with AAT tracking is drawn through SkParagraph with that
+    // tracking applied, so it has to be measured there too.
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_) ||
+        aat_tracking_px(font.getTypeface(), font_size_) != 0.0f;
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
@@ -1088,8 +1108,11 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     // fill_text actually draws. ASCII / no-feature labels keep the
     // SkFont measurement above — same width fill_text emits via the
     // per-glyph fallback path.
+    // A face with AAT tracking is drawn through SkParagraph with that
+    // tracking applied, so it has to be measured there too.
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_) ||
+        aat_tracking_px(font.getTypeface(), font_size_) != 0.0f;
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,

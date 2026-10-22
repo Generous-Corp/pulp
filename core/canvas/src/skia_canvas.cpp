@@ -277,7 +277,8 @@ SkFont make_font(const std::string& family, float size,
         // which draws nothing. A bundled face is the only real default here.
         if (!typeface) typeface = bundled_fallback_typeface();
     }
-    if (typeface) font.setTypeface(std::move(typeface));
+    if (typeface)
+        font.setTypeface(typeface_at_auto_optical_size(std::move(typeface), size));
 
     return font;
 }

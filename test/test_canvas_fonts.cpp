@@ -1622,4 +1622,90 @@ TEST_CASE("CSS generic families resolve to the browser's platform faces",
 #endif
 }
 
+// ── Optical size and AAT tracking, as the browser applies them ─────────────
+//
+// `font-optical-sizing: auto` (the CSS default) sets a variable font's `opsz`
+// axis to the font size in CSS px, and macOS browsers apply a face's AAT
+// `trak` table, half before and half after each glyph. The system UI font has
+// both, so without them its text came out a size-dependent few percent wide
+// or narrow. The fixture font is self-authored with analytic answers: `H` is
+// 600 units at the opsz default (12) and 800 at its maximum (72), and the
+// normal track is -100 units at 10 px and +100 at 20 px, at 1000 units/em.
+#ifdef PULP_TEST_OPSZ_TRAK_FONT_PATH
+namespace {
+sk_sp<SkTypeface> opsz_trak_face() {
+    auto mgr = pulp::canvas::platform_font_manager();
+    if (!mgr) return nullptr;
+    return mgr->makeFromFile(PULP_TEST_OPSZ_TRAK_FONT_PATH);
+}
+float h_advance(const sk_sp<SkTypeface>& face, float size) {
+    SkFont font(face, size);
+    font.setLinearMetrics(true);
+    const SkGlyphID glyph = face->unicharToGlyph('H');
+    SkScalar width = 0;
+    font.getWidths(SkSpan<const SkGlyphID>(&glyph, 1), SkSpan<SkScalar>(&width, 1));
+    return width;
+}
+}  // namespace
+
+TEST_CASE("aat_tracking_px reads the normal track of a trak table",
+          "[canvas][skia][text][tracking]") {
+    auto face = opsz_trak_face();
+    if (!face) SKIP("no platform font manager to load the fixture font");
+    using pulp::canvas::aat_tracking_px;
+    // At the table's sizes, between them, and held at the ends beyond them.
+    CHECK(aat_tracking_px(face.get(), 10.0f) == Catch::Approx(-1.0f).margin(1e-4));
+    CHECK(aat_tracking_px(face.get(), 15.0f) == Catch::Approx(0.0f).margin(1e-4));
+    CHECK(aat_tracking_px(face.get(), 20.0f) == Catch::Approx(2.0f).margin(1e-4));
+    CHECK(aat_tracking_px(face.get(), 30.0f) == Catch::Approx(3.0f).margin(1e-4));
+    CHECK(aat_tracking_px(face.get(), 5.0f) == Catch::Approx(-0.5f).margin(1e-4));
+    // A face without the table tracks nothing.
+    auto mgr = pulp::canvas::platform_font_manager();
+    auto plain = mgr->makeFromFile(PULP_TEST_FONT_PATH);
+    REQUIRE(plain != nullptr);
+    CHECK(aat_tracking_px(plain.get(), 20.0f) == 0.0f);
+}
+
+TEST_CASE("typeface_at_auto_optical_size sets opsz to the font size",
+          "[canvas][skia][text][optical-size]") {
+    auto face = opsz_trak_face();
+    if (!face) SKIP("no platform font manager to load the fixture font");
+    using pulp::canvas::typeface_at_auto_optical_size;
+    // The default instance: the control every expectation below differs from.
+    REQUIRE(h_advance(face, 100.0f) == Catch::Approx(60.0f).margin(0.01));
+    // opsz 42 is halfway from the default to the maximum: 700 units.
+    CHECK(h_advance(typeface_at_auto_optical_size(face, 42.0f), 100.0f) ==
+          Catch::Approx(70.0f).margin(0.01));
+    // Clamped to the axis range at both ends.
+    CHECK(h_advance(typeface_at_auto_optical_size(face, 200.0f), 100.0f) ==
+          Catch::Approx(80.0f).margin(0.01));
+    CHECK(h_advance(typeface_at_auto_optical_size(face, 4.0f), 100.0f) ==
+          Catch::Approx(60.0f).margin(0.01));
+    // A face without an opsz axis comes back as itself.
+    auto mgr = pulp::canvas::platform_font_manager();
+    auto plain = mgr->makeFromFile(PULP_TEST_FONT_PATH);
+    REQUIRE(plain != nullptr);
+    CHECK(typeface_at_auto_optical_size(plain, 42.0f).get() == plain.get());
+}
+
+TEST_CASE("SkiaCanvas measures text at its optical size with AAT tracking",
+          "[canvas][skia][text][optical-size][tracking]") {
+    if (!opsz_trak_face()) SKIP("no platform font manager to load the fixture font");
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_OPSZ_TRAK_FONT_PATH,
+                                             "Pulp Test Opsz Trak"));
+    SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    canvas.set_font_full("Pulp Test Opsz Trak", 42.0f, 400, /*slant=*/0,
+                         /*letter_spacing=*/0.0f);
+    // Two H at opsz 42 (700 units -> 29.4px each) plus the track held at its
+    // 20px end (+100 units -> 4.2px) on each glyph. Without optical sizing it
+    // would be 2 x 25.2 + 8.4; without tracking 2 x 29.4.
+    CHECK(canvas.measure_text("HH") == Catch::Approx(67.2f).margin(0.05));
+}
+#endif
+
 #endif  // PULP_HAS_SKIA

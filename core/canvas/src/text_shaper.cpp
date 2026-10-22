@@ -9,6 +9,7 @@
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/font_resolver.hpp>
+#include "auto_optical_size.hpp"
 #include <pulp/canvas/font_options.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <algorithm>
@@ -812,6 +813,7 @@ struct TextShaper::Impl {
         if (families.empty()) families.emplace_back("");
         text_style.setFontFamilies(families);
         text_style.setFontSize(font_size);
+        apply_auto_optical_size(text_style, font_size);
         text_style.setFontStyle(SkFontStyle(
             font_weight, SkFontStyle::kNormal_Width,
             skia_slant_from_int(font_slant)));
@@ -934,11 +936,17 @@ struct TextShaper::Impl {
                 if (families.empty()) families.emplace_back("");
                 text_style.setFontFamilies(families);
                 text_style.setFontSize(font_size);
+                apply_auto_optical_size(text_style, font_size);
                 text_style.setFontStyle(SkFontStyle(
                     font_weight, SkFontStyle::kNormal_Width,
                     skia_slant_from_int(font_slant)));
-                if (letter_spacing != 0.0f)
-                    text_style.setLetterSpacing(letter_spacing);
+                // The painter adds the primary face's AAT tracking to the
+                // letter-spacing; measure with the same spacing it draws.
+                const float tracking = aat_tracking_px(
+                    resolve_typeface(font_family, font_weight, font_slant).get(),
+                    font_size);
+                if (letter_spacing + tracking != 0.0f)
+                    text_style.setLetterSpacing(letter_spacing + tracking);
                 for (const auto& feature : font_features) {
                     char tag_chars[4] = {
                         static_cast<char>((feature.tag >> 24) & 0xFF),
@@ -1036,6 +1044,7 @@ struct TextShaper::Impl {
                     }
                     tstyle.setFontFamilies(families);
                     tstyle.setFontSize(font_size);
+                    apply_auto_optical_size(tstyle, font_size);
                     pstyle.setTextStyle(tstyle);
                     auto collection_use = ctx->lock_font_collection_use();
                     auto pb = skia::textlayout::ParagraphBuilder::make(
