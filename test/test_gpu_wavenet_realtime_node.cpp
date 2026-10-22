@@ -1840,8 +1840,10 @@ TEST_CASE("WaveNet status reports the configured completion mode",
         Shape shape;
         auto config = shape.config();
         config.session.completion_policy = policy;
-        GpuWaveNetRealtimeNode node(config);
+        // The channel reads `control` when the node releases it, so `control`
+        // must outlive `node`.
         Control control;
+        GpuWaveNetRealtimeNode node(config);
         std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
         providers.push_back(std::make_unique<Channel>(control));
         REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
