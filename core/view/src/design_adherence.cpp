@@ -89,8 +89,8 @@ std::string expand_hex(const std::string& body) {
 // locale via strtod instead. That keeps parsing locale-independent — a
 // comma-decimal global locale cannot misparse "8.0" — without the fragile float
 // overload. to_chars(float) is universally available and gives the shortest
-// round-trip. (pulp::format::detail::parse_double_c_locale is the same idea in
-// the format layer; kept local here to avoid a view→format detail dependency.)
+// round-trip. (The format layer's locale-independent parser uses the same idea;
+// kept local here to avoid a view→format detail dependency.)
 std::string normalize_number(const std::string& num) {
     if (num.empty()) return num;
     errno = 0;

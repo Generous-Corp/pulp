@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261021-g2h-protected-20261021-watch",
+  "created_at": "2026-10-21T23:58:33Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Protected E1 export tooling hardens deterministic closure parsing and records the exact eight-unit mirror. The change fixes export comments and generated-prelude provenance; it does not move design-import, Chromium, rendering, or packaging authority.",
+  "tests": [
+    "python3 tools/scripts/test_vellum_closure.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -20,6 +20,22 @@ The rebuild control must replay the complete fixture state, including secondary
 meter state such as the `peak` value; matching only a primary value changes the
 rendered workload and invalidates retained-versus-rebuild comparisons.
 
+To measure importer output rather than the built-in panel, pass
+`--ir=<design.ir.json>` (baked-native and baked-native-rebuild only; `live`
+and `baked-cpp` refuse it because neither can be built from a DesignIR) with
+`--frames=N`. Fixed frames are what make the counters comparable run to run;
+wall-clock pacing changes the frame count and every counter with it. Anchored
+text nodes become keyed slots: the retained lane writes through the Label each
+anchor resolved to at build, the rebuild lane rematerializes a copy of the IR.
+The receipt binds the IR's sha256 and adds per-phase views constructed and
+destroyed, slot identity changes and slot text mismatches, plus a terminal
+`teardown` readback; a run that leaves live views exits 3. On the held-out
+corpus the retained lane builds no views, rebinds no slots and records no
+unmarked mutations, while the rebuild control rebinds every slot every frame
+and records thousands of unmarked mutations. If the control ever reports zero
+identity changes, the counter is blind, not the plan retained. `--plant-leak`
+holds one subtree past the fixture's destruction to prove the readback fails.
+
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
 ### Preconverted vector artwork is validation-only
@@ -557,6 +573,36 @@ knowing before you touch that file:
   test/fixtures/import-differential/manifest.json --output <dir>`.
   Production native promotion is disabled; `threshold_eligible` is advisory
   evidence only. See `docs/tools/importer-differential-lab.md`.
+
+  **Page-space gotcha:** a browser-backed native import is panel-local, while
+  Chromium's screenshot and DOM snapshot are page-space. The lab passes the
+  signed authored-frame origin to `pulp-design-ir-observe --origin`, which
+  wraps the importer's panel root, untouched, in an observer-only page node and
+  positions it there. The captured `browser_box_paint_*_px` rects move with it
+  (the painter validates them against a view's absolute position, so leaving
+  them behind makes it reject every snapped rect and fractional edges
+  reappear). `captured_raster_origin_*_px` does NOT move: the sprite pass crops
+  it from the full-page screenshot, so it is page-space already. The page node,
+  never the panel root, carries `--page-background`, which the lab resolves
+  from the verified DOM snapshot by CSS canvas propagation (html, else body;
+  both transparent is `unresolved`, since the UA colour follows a
+  color-scheme the capture does not record) and supplies only for a panel with
+  page around it. A whole-page panel owns its canvas: the importer stamps it on
+  the root, and filling underneath would hide a dropped stamp. Never translate
+  the browser nodes as well; that registers the panel twice.
+
+  **Counter gotcha:** the observer's render receipt carries its own work
+  counters (`pulp-design-ir-observer-counters-v1`), phased as `build`,
+  `first_frame` and `readback`, plus views constructed/destroyed and a
+  terminal `live_views_after_teardown` read after the tree is destroyed. The
+  lab gates eligibility on a zero teardown residue and zero unmarked paint
+  mutations in `readback` only: materialization and the first layout set
+  paint state on views that have never been drawn (~80 "unmarked" mutations on
+  an 8-view card), which stales nothing. Gating those would block every
+  fixture for a non-defect; ungating `readback` would let a read-back that
+  mutates the painted tree pass. Raw DOM-snapshot hashes differ per capture
+  only by the CDP frame ID, so compare `*_snapshot_semantic_sha256` across
+  runs, not the raw binding.
 
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
   evidence. The differential matcher must join captured elements by

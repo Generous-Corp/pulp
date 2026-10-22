@@ -1137,6 +1137,7 @@ Label::FaceMetrics Label::face_metrics(const std::string& family,
     if (prepared.metrics_are_real() && prepared.ascent() > 0.0f) {
         m.ascent = prepared.ascent();
         m.descent = prepared.descent();
+        m.typographic_descent = prepared.typographic_descent();
         m.real = true;
     } else {
         // No Skia, or the family did not resolve. Keep the historic
@@ -1144,6 +1145,7 @@ Label::FaceMetrics Label::face_metrics(const std::string& family,
         // so, since callers gate the correction on `real`.
         m.ascent = font_size * 0.85f;
         m.descent = font_size * 0.15f;
+        m.typographic_descent = m.descent;
         m.real = false;
     }
     face_metrics_family_ = family;
@@ -1945,6 +1947,11 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             ? 0.0f
             : (first_line_box_h - single_line_ink_height) * 0.5f;
     float baseline_y;
+    // Where a selection band sits relative to the baseline. A captured line
+    // overrides both with the run rect Chromium reported, so the band covers
+    // the box the text was laid out in rather than the worst-case glyph extent.
+    float selection_ascent = first_line_ascent;
+    float selection_height = single_line_text_height;
     switch (vertical_align_) {
         case canvas::TextVerticalAlign::top:
             baseline_y = pad.top + first_half_leading + first_line_ascent;
@@ -1970,23 +1977,28 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
     if (captured_cache_usable && shaped_layout != nullptr &&
         !shaped_layout->lines.empty()) {
         // A cached browser line box already resolved padding, line-height and
-        // vertical-align. CSS distributes the line box's extra leading above
-        // and below the font em box; using only `top + ascent` drops that
-        // half-leading and paints compact button captions visibly high. Keep
-        // Chromium's captured top, add its half-leading, then the active face
-        // ascent. Do not center the complete owner bounds a second time.
+        // vertical-align, so the owner bounds are not centred a second time.
+        // The box is the rect Chromium gave the text run: its content area,
+        // round(fAscent) + round(fDescent) tall plus any ascent adjustment
+        // Blink applies to particular faces, with the baseline round(fDescent)
+        // above its bottom. Reading the baseline off the bottom keeps it right
+        // whatever the ascent side holds. Descending from the top by the
+        // worst-case extents `first_line_ascent` carries (fTop) painted faces
+        // whose tallest glyph rises above fAscent a device pixel or more high.
+        // Without real face metrics, fall back to centring the ink in the box
+        // (unclamped: negative leading lets glyphs overflow evenly).
         const auto& first_line = shaped_layout->lines.front();
-        // One reference, not two. Half-leading is the surplus of the line BOX
-        // over the ink it carries, so it has to be measured against the same
-        // ascent + descent the baseline then descends by. Measuring it against
-        // the em box while descending by a real ascent double-counts the
-        // difference between them and paints the line low by exactly that gap.
-        // Unclamped for the same reason the native branch above is: a face
-        // whose ink exceeds the captured box has negative leading and CSS lets
-        // its glyphs overflow evenly, top and bottom.
-        const float half_leading =
-            (first_line.height - single_line_text_height) * 0.5f;
-        baseline_y = first_line.y + half_leading + first_line_ascent;
+        const auto fm = has_attributed_ ? FaceMetrics{}
+                                        : face_metrics(family, effective_font_size,
+                                                       effective_font_weight(), font_style_);
+        if (fm.real) {
+            baseline_y = first_line.y + first_line.height - std::round(fm.typographic_descent);
+            selection_ascent = baseline_y - first_line.y;
+            selection_height = first_line.height;
+        } else {
+            const float half_leading = (first_line.height - single_line_text_height) * 0.5f;
+            baseline_y = first_line.y + half_leading + first_line_ascent;
+        }
     }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared
@@ -2067,8 +2079,8 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         if (draw_text != display_text && selectable_line.ends_with(kEllipsis)) {
             selectable_line.resize(selectable_line.size() - std::string_view(kEllipsis).size());
         }
-        paint_selection_line_(canvas, selectable_line, draw_x, baseline_y - first_line_ascent,
-                              single_line_text_height,
+        paint_selection_line_(canvas, selectable_line, draw_x, baseline_y - selection_ascent,
+                              selection_height,
                               /*source_start=*/0, text_color, vertical);
         canvas.fill_text(draw_text, draw_x, baseline_y);
         decorate_plain(draw_text, draw_x, baseline_y,
@@ -2128,8 +2140,9 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                     const int src =
                         static_cast<int>(found == std::string::npos ? source_cursor : found);
                     paint_selection_line_(canvas, shaped_line.text, x + shaped_line.x_offset,
-                                          line_baseline - first_line_ascent, lh, src, text_color,
-                                          vertical);
+                                          line_baseline - selection_ascent,
+                                          captured_cache_usable ? shaped_line.height : lh, src,
+                                          text_color, vertical);
                     source_cursor = static_cast<std::size_t>(src) + shaped_line.text.size();
                 }
                 canvas.fill_text(line, x + shaped_line.x_offset, line_baseline);

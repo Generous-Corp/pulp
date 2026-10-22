@@ -69,6 +69,12 @@ on a real PR. Do them in order.
      One edit can owe BOTH events. A committed event whose rationale is still
      the `<REPLACE: ...>` placeholder also fails here, because CI accepts it.
 
+   - **node ABI virtual order** (`node_abi_gate.py`) — the append-only check
+     covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
+     surface. New GPU-audio virtual hooks belong at the end of that class;
+     inserting one in the middle shifts existing slots even though the SDK
+     remains source-rebuild oriented.
+
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
    on its own for just the Vellum verdict.
@@ -4446,6 +4452,14 @@ Need Windows on a specific branch before the nightly:
 ```sh
 ghapp workflow run build.yml --ref <branch>
 ```
+
+A `build.yml` dispatch always includes the macOS leg, so it also spends a macOS
+gate VM. When only Windows matters, dispatch the nightly with `windows_only=true`
+instead. To prove a self-hosted Windows runner (the Mac Pro Windows x64 slot), also
+pass `windows_runner_selector_json` with that slot's labels. The schedule has no
+inputs, so the nightly stays on `windows-latest`. A run with either input set skips
+`tracking-issues`, so a red result on a new runner never files or closes the main
+tracking issue. Read where the job actually ran from the job's `runner_name`.
 
 **Before "fixing" this by putting Windows back on merge_group**, note the trade was
 explicit: up to ~24 h of latency on a Windows regression, bought with merge-queue
