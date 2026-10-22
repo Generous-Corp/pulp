@@ -160,8 +160,7 @@ TEST_CASE("VST3 getParamValueByString uses ParamInfo::from_string",
     processor.terminate();
 }
 
-TEST_CASE("VST3 parses the text it shows for a toggle without labels",
-          "[vst3][params][display]") {
+TEST_CASE("VST3 parses the text it shows for a toggle without labels", "[vst3][params][display]") {
     // PulpGain's Bypass is a Toggle with no value labels, displayed as "0" or
     // "1". A host that converts that text back must get the same value, as
     // validators check for every parameter.

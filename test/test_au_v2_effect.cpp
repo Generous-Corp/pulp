@@ -1114,13 +1114,14 @@ TEST_CASE("AU v2 effect preserves scheduled offsets and ramps for processors",
 }
 
 TEST_CASE("AU v2 PulpGain at 0 dB is bit-transparent, including after a round trip",
-          "[au][au-v2][null-test]")
-{
+          "[au][au-v2][null-test]") {
     const auto previous = pulp::format::registered_factory();
     pulp::format::register_plugin(pulp::examples::create_pulp_gain);
     struct RestoreFactory {
         pulp::format::ProcessorFactory value;
-        ~RestoreFactory() { pulp::format::register_plugin(value); }
+        ~RestoreFactory() {
+            pulp::format::register_plugin(value);
+        }
     } restore{previous};
 
     constexpr UInt32 kFrames = 256;

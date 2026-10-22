@@ -433,7 +433,8 @@ inline bool is_discrete_param(const ParamInfo& info) {
 /// such as 1.4e-6 dB -- which is a gain of 1 + 1 ulp, and a failed null test.
 inline float value_from_host_normalized(const ParamInfo& info, double normalized) {
     const ParamRange& range = info.range;
-    if (is_discrete_param(info)) return range.denormalize(static_cast<float>(normalized));
+    if (is_discrete_param(info))
+        return range.denormalize(static_cast<float>(normalized));
     if (!range.is_linear()) {
         ParamRange exact = range;
         exact.step = 0.0f;
@@ -454,8 +455,8 @@ inline double host_normalized_from_value(const ParamInfo& info, float value) {
     if (!range.is_linear() || range.max == range.min)
         return static_cast<double>(range.normalize(value));
     const double span = static_cast<double>(range.max) - static_cast<double>(range.min);
-    return std::clamp((static_cast<double>(value) - static_cast<double>(range.min)) / span,
-                      0.0, 1.0);
+    return std::clamp((static_cast<double>(value) - static_cast<double>(range.min)) / span, 0.0,
+                      1.0);
 }
 
 inline bool is_boolean_param(const ParamInfo& info) {

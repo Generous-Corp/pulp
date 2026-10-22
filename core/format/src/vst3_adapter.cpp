@@ -735,20 +735,20 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // and snapshots the normalized value ONCE per reported edit, so
     // performEdit and setParamNormalized can no longer disagree.
     edit_bridge_ = std::make_unique<HostParameterEditBridge>(
-        store_,
-        HostParameterEditBridge::Callbacks{
-            [this](state::ParamID id) { beginEdit(static_cast<ParamID>(id)); },
-            [this](state::ParamID id, float normalized) {
-                // Report the editor's value in double precision so the host
-                // writes back exactly what the store holds; a float-normalized
-                // 0 dB comes back 1.4e-6 dB off.
-                ParamValue host_value = static_cast<ParamValue>(normalized);
-                if (const auto* info = store_.info(id))
-                    host_value = state::host_normalized_from_value(*info, store_.get_value(id));
-                performEdit(static_cast<ParamID>(id), host_value);
-                setParamNormalized(static_cast<ParamID>(id), host_value);
-            },
-            [this](state::ParamID id) { endEdit(static_cast<ParamID>(id)); }});
+        store_, HostParameterEditBridge::Callbacks{
+                    [this](state::ParamID id) { beginEdit(static_cast<ParamID>(id)); },
+                    [this](state::ParamID id, float normalized) {
+                        // Report the editor's value in double precision so the host
+                        // writes back exactly what the store holds; a float-normalized
+                        // 0 dB comes back 1.4e-6 dB off.
+                        ParamValue host_value = static_cast<ParamValue>(normalized);
+                        if (const auto* info = store_.info(id))
+                            host_value =
+                                state::host_normalized_from_value(*info, store_.get_value(id));
+                        performEdit(static_cast<ParamID>(id), host_value);
+                        setParamNormalized(static_cast<ParamID>(id), host_value);
+                    },
+                    [this](state::ParamID id) { endEdit(static_cast<ParamID>(id)); }});
 
     // Add audio buses from descriptor (supports multi-bus: main, sidechain, aux).
     // PluginDescriptor carries channel counts rather than speaker positions, so
@@ -2737,7 +2737,8 @@ tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id, ParamValue 
         // double round trip, which can differ from it in the last bit.
         if (const auto* info = store_.info(param_id);
             info && state::host_normalized_from_value(*info, store_.get_value(param_id)) != value)
-            store_.set_value(param_id, state::value_from_host_normalized(*info, static_cast<double>(value)));
+            store_.set_value(param_id,
+                             state::value_from_host_normalized(*info, static_cast<double>(value)));
     }
     return result;
 }

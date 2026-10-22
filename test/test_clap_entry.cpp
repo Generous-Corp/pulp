@@ -761,28 +761,28 @@ TEST_CASE("CLAP params extension reports metadata and text conversions",
     pulp::format::set_host_quirk_policy(std::nullopt);
 }
 
-TEST_CASE("CLAP synthesized Bypass parses back the text it shows",
-          "[clap][entry][params]") {
+TEST_CASE("CLAP synthesized Bypass parses back the text it shows", "[clap][entry][params]") {
     // The adapter adds a Bypass parameter when the plug-in declares none; a
     // validator's value -> text -> value check covers it like any other.
     pulp::format::set_host_quirk_policy(std::nullopt);
     REQUIRE(clap_entry.init("test"));
-    auto* factory = static_cast<const clap_plugin_factory_t*>(
-        clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    auto* factory =
+        static_cast<const clap_plugin_factory_t*>(clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
     REQUIRE(factory != nullptr);
     auto* desc = factory->get_plugin_descriptor(factory, 0);
     const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
     REQUIRE(plugin != nullptr);
     REQUIRE(plugin->init(plugin));
-    auto* params = static_cast<const clap_plugin_params_t*>(
-        plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    auto* params =
+        static_cast<const clap_plugin_params_t*>(plugin->get_extension(plugin, CLAP_EXT_PARAMS));
     REQUIRE(params != nullptr);
 
     bool found = false;
     for (uint32_t i = 0; i < params->count(plugin); ++i) {
         clap_param_info_t info{};
         REQUIRE(params->get_info(plugin, i, &info));
-        if (std::string(info.name) != "Bypass") continue;
+        if (std::string(info.name) != "Bypass")
+            continue;
         found = true;
         for (const double value : {info.min_value, info.max_value}) {
             char shown[64]{};

@@ -338,7 +338,10 @@ TEST_CASE("PulpGain CLAP at 0 dB is bit-transparent, including after a round tri
                 ev.header.type = CLAP_EVENT_PARAM_VALUE;
                 ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
                 ev.param_id = id;
-                ev.note_id = -1; ev.port_index = -1; ev.channel = -1; ev.key = -1;
+                ev.note_id = -1;
+                ev.port_index = -1;
+                ev.channel = -1;
+                ev.key = -1;
                 ev.value = db;
                 events.values.push_back(ev);
             }

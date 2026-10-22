@@ -676,7 +676,9 @@ TEST_CASE("AU v2 parses the text it shows for a toggle without labels",
     pulp::format::register_plugin(pulp::examples::create_pulp_gain);
     struct RestoreFactory {
         pulp::format::ProcessorFactory value;
-        ~RestoreFactory() { pulp::format::register_plugin(value); }
+        ~RestoreFactory() {
+            pulp::format::register_plugin(value);
+        }
     } restore{previous};
     pulp::format::au::PulpAUEffect effect(nullptr);
 
@@ -693,8 +695,8 @@ TEST_CASE("AU v2 parses the text it shows for a toggle without labels",
         vfs.inParamID = pulp::examples::kBypass;
         vfs.inString = sfv.outString;
         vfs.outValue = -1.0f;
-        const OSStatus parsed = effect.GetProperty(
-            kAudioUnitProperty_ParameterValueFromString, kAudioUnitScope_Global, 0, &vfs);
+        const OSStatus parsed = effect.GetProperty(kAudioUnitProperty_ParameterValueFromString,
+                                                   kAudioUnitScope_Global, 0, &vfs);
         CFRelease(sfv.outString);
         REQUIRE(parsed == noErr);
         REQUIRE(vfs.outValue == value);
