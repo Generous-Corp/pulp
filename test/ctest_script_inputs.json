@@ -2554,6 +2554,7 @@
   "pulp-test-design-import-benchmark",
   "pulp-test-design-import-benchmark-contracts",
   "pulp-test-design-import-designmd",
+  "pulp-test-design-import-inert-styles",
   "pulp-test-design-import-jsx-runtime",
   "pulp-test-design-import-native-common",
   "pulp-test-design-import-native-materializer",

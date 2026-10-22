@@ -11,6 +11,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::view {
@@ -59,5 +60,10 @@ std::optional<canvas::Canvas::BlendMode> css_blend_mode(const std::string& keywo
 /// Rotation is about the view's CENTRE, which is the renderer default and what
 /// both importers assume.
 std::optional<float> css_transform_rotation(const std::string& transform);
+
+/// True for an empty value or the CSS keyword `none`, which keywords match
+/// case-insensitively and with surrounding whitespace. A style property that
+/// takes either is the initial value and must not install anything.
+bool css_keyword_is_none(std::string_view value);
 
 }  // namespace pulp::view
