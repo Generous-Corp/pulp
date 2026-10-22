@@ -1,16 +1,25 @@
-// Test-only native Metal controls for the shared GPU-audio multiply. The Dawn
-// row is unmatched: the native modes run the `complex_multiply` kernel, while
-// the Dawn row runs the shared-I/O provider's FFT identity-convolution plan, so
-// the rows are not a like-for-like kernel comparison.
+// Matched Dawn-vs-native-Metal comparator for the shared-I/O convolution
+// program (WP-Q decision gate). Test-only; never runs from an audio callback.
 //
-// This is deliberately outside GpuAudioTransport and never runs from an audio
-// callback. Both modes use the same no-copy buffers, pipeline, two-slot flight
-// depth, and semaphore completion service. It measures submission and
-// completion phases so a future Dawn receipt can be compared without mixing
-// observer polling or per-trial resource construction into the result.
+// Both sides run the production shared-I/O convolution program shape: log2(N)
+// radix-2 Stockham forward passes, one complex multiply against a prepared IR
+// spectrum, and log2(N) inverse passes, each pass its own compute encoder.
+// The Dawn side compiles the WGSL inside DawnSharedIoProvider; the Metal side
+// compiles an MSL port of that WGSL. The port records the SHA-256 of the WGSL
+// it was written against, and the comparator extracts the WGSL actually built
+// into the provider from its source, so a stale port or a different kernel
+// produces a different kernel digest and the verifier refuses the receipt.
+//
+// Workload: 64/128/256 frames at 48 kHz, two channels, two-slot flight depth,
+// page-aligned host memory (imported on Dawn, no-copy on Metal), prebuilt
+// pipelines and buffers. Each cell is paced at the block period, idle or under
+// a concurrent Skia render load, and emits raw per-block samples into a
+// pulp.gpu-audio.comparator.v2 receipt. Statistics and the PROPOSED gate
+// thresholds are evaluated only by tools/scripts/gpu_audio_comparator_v2.py.
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#include <CommonCrypto/CommonDigest.h>
 
 #if __has_include("detail/dawn_shared_io_provider.hpp")
 #include "detail/dawn_shared_io_provider.hpp"
@@ -20,8 +29,14 @@
 #define PULP_HAS_DAWN_COMPARATOR 0
 #endif
 
+#if defined(PULP_COMPARATOR_HAS_RENDER_LOAD)
+#include <pulp/canvas/canvas.hpp>
+#include <pulp/render/headless_surface.hpp>
+#endif
+
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -30,43 +45,497 @@
 #include <cstdlib>
 #include <cstring>
 #include <dispatch/dispatch.h>
-#include <limits>
+#include <fstream>
+#include <future>
+#include <mach/mach_time.h>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <pthread.h>
+#include <random>
+#include <sstream>
 #include <string>
+#include <sys/qos.h>
+#include <sys/resource.h>
+#include <thread>
+#include <tuple>
+#include <time.h>
+#include <unistd.h>
 #include <vector>
 
-#if __has_include(<Metal/MTL4CommandQueue.h>) && \
-    defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
-#define PULP_HAS_METAL4_COMPARATOR 1
-#import <Metal/MTL4ArgumentTable.h>
-#import <Metal/MTL4CommandQueue.h>
-#else
-#define PULP_HAS_METAL4_COMPARATOR 0
+#ifndef PULP_GPU_AUDIO_EXPECTED_DAWN_SHA
+#define PULP_GPU_AUDIO_EXPECTED_DAWN_SHA ""
+#endif
+#ifndef PULP_GPU_AUDIO_PROVIDER_SOURCE
+#define PULP_GPU_AUDIO_PROVIDER_SOURCE ""
 #endif
 
 namespace {
 
-using Clock = std::chrono::steady_clock;
-constexpr std::uint32_t kFrames = 32;
+constexpr const char* kSchema = "pulp.gpu-audio.comparator.v2";
+constexpr const char* kProgramId = "pulp.shared_io_convolution.v1";
+constexpr const char* kPlantedProgramId = "pulp.native_metal.complex_multiply.v0";
+// SHA-256 of the provider WGSL this MSL port was written against.
+constexpr const char* kPortedFromFftWgslSha256 =
+    "8275969f135a4024fb78bf0a9efe1795ac55b252803aaad7b3321b7aa0b35faa";
+constexpr const char* kPortedFromMulWgslSha256 =
+    "988d833cb4431aff69a0c43ab5a60e076e7c987f8bc26ee3ff3400a1b56da568";
+constexpr std::uint32_t kSampleRate = 48000;
 constexpr std::uint32_t kChannels = 2;
-constexpr std::uint32_t kComplexValues = kFrames * kChannels;
-constexpr std::uint32_t kFloatValues = kComplexValues * 2;
-constexpr std::uint32_t kTrials = 128;
-constexpr std::uint32_t kWarmup = 8;
 constexpr std::uint32_t kFlightDepth = 2;
+constexpr std::uint32_t kLeadBlocks = 2;
+constexpr std::uint32_t kPatterns = 8;
+constexpr std::uint32_t kWorkgroup = 256;
+constexpr float kOracleTolerance = 1.0e-3f;
+constexpr double kParityTolerance = 1.0e-4;
+constexpr std::uint64_t kDawnPollIntervalNs = 50'000;
+constexpr std::uint64_t kStallLimitNs = 1'000'000'000;
+
+// ---------------------------------------------------------------------------
+// Clocks, hashing, JSON
 
 std::uint64_t now_ns() {
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch())
-            .count());
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
 }
+
+std::uint64_t thread_cpu_ns() {
+    return clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID);
+}
+
+std::uint64_t process_cpu_ns() {
+    rusage usage{};
+    getrusage(RUSAGE_SELF, &usage);
+    const auto tv = [](const timeval& t) {
+        return static_cast<std::uint64_t>(t.tv_sec) * 1'000'000'000ull +
+               static_cast<std::uint64_t>(t.tv_usec) * 1'000ull;
+    };
+    return tv(usage.ru_utime) + tv(usage.ru_stime);
+}
+
+void sleep_until_ns(std::uint64_t deadline) {
+    const auto now = now_ns();
+    if (deadline > now)
+        std::this_thread::sleep_for(std::chrono::nanoseconds(deadline - now));
+}
+
+// Metal reports GPUStartTime/GPUEndTime in mach-absolute seconds; steady_clock
+// on Darwin is also mach-absolute based. The measured offset is recorded.
+struct HostClockBridge {
+    double ticks_to_ns = 1.0;
+    std::int64_t steady_minus_mach_ns = 0;
+    HostClockBridge() {
+        mach_timebase_info_data_t info{};
+        mach_timebase_info(&info);
+        ticks_to_ns = static_cast<double>(info.numer) / static_cast<double>(info.denom);
+        std::uint64_t best_span = UINT64_MAX;
+        for (int i = 0; i < 64; ++i) {
+            const auto a = now_ns();
+            const auto mach = static_cast<std::uint64_t>(mach_absolute_time() * ticks_to_ns);
+            const auto b = now_ns();
+            if (b - a < best_span) {
+                best_span = b - a;
+                steady_minus_mach_ns =
+                    static_cast<std::int64_t>(a + (b - a) / 2) - static_cast<std::int64_t>(mach);
+            }
+        }
+    }
+    std::int64_t from_metal_seconds(double seconds) const {
+        return static_cast<std::int64_t>(seconds * 1.0e9) + steady_minus_mach_ns;
+    }
+};
+
+std::string sha256_hex(const void* data, std::size_t size) {
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data, static_cast<CC_LONG>(size), digest);
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(CC_SHA256_DIGEST_LENGTH * 2);
+    for (unsigned char byte : digest) {
+        out.push_back(kHex[byte >> 4]);
+        out.push_back(kHex[byte & 15]);
+    }
+    return out;
+}
+
+std::string sha256_hex(const std::string& text) {
+    return sha256_hex(text.data(), text.size());
+}
+
+std::string json_string(const std::string& value) {
+    std::string out = "\"";
+    for (unsigned char c : value) {
+        switch (c) {
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            if (c < 0x20) {
+                char buffer[8];
+                std::snprintf(buffer, sizeof(buffer), "\\u%04x", c);
+                out += buffer;
+            } else {
+                out.push_back(static_cast<char>(c));
+            }
+        }
+    }
+    out += "\"";
+    return out;
+}
+
+template <class T> std::string json_array(const std::vector<T>& values) {
+    std::string out = "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i)
+            out += ",";
+        out += std::to_string(values[i]);
+    }
+    out += "]";
+    return out;
+}
+
+std::string json_double(double value) {
+    if (!std::isfinite(value))
+        return "null";
+    char buffer[64];
+    std::snprintf(buffer, sizeof(buffer), "%.9g", value);
+    return buffer;
+}
+
+const char* json_bool(bool value) {
+    return value ? "true" : "false";
+}
+
+// ---------------------------------------------------------------------------
+// Kernel identity
+
+struct WgslExtraction {
+    bool ok = false;
+    std::string source_path;
+    std::string source_sha256;
+    std::string fft_sha256;
+    std::string mul_sha256;
+    std::string reason;
+};
+
+std::optional<std::string> extract_raw_string(const std::string& text, const std::string& name) {
+    const auto marker = "constexpr auto " + name + " = R\"wgsl(";
+    const auto begin = text.find(marker);
+    if (begin == std::string::npos)
+        return std::nullopt;
+    const auto body = begin + marker.size();
+    const auto end = text.find(")wgsl\"", body);
+    if (end == std::string::npos)
+        return std::nullopt;
+    return text.substr(body, end - body);
+}
+
+// Reads the WGSL that DawnSharedIoProvider compiles, from the source the
+// provider library was built from.
+WgslExtraction extract_provider_wgsl(const std::string& path) {
+    WgslExtraction out;
+    out.source_path = path;
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        out.reason = "provider_source_unreadable";
+        return out;
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    const auto text = buffer.str();
+    out.source_sha256 = sha256_hex(text);
+    const auto fft = extract_raw_string(text, "kSharedIoFftWgsl");
+    const auto mul = extract_raw_string(text, "kSharedIoMulWgsl");
+    if (!fft || !mul) {
+        out.reason = "provider_wgsl_not_found";
+        return out;
+    }
+    out.fft_sha256 = sha256_hex(*fft);
+    out.mul_sha256 = sha256_hex(*mul);
+    out.ok = true;
+    return out;
+}
+
+struct PassShape {
+    std::string kernel;
+    int sign = 0;
+    std::uint32_t ns = 0;
+    std::uint32_t groups = 0;
+};
+
+struct Workload {
+    std::uint32_t frames = 0;
+    std::uint32_t fft_size = 0;
+    std::uint32_t ir_length = 0;
+    std::uint32_t log2 = 0;
+    std::size_t complex_floats = 0;                     // kChannels * fft_size * 2
+    std::vector<float> ir_spectrum;                     // normalized by 1/N, interleaved complex
+    std::array<std::vector<float>, kPatterns> inputs;   // interleaved complex
+    std::array<std::vector<float>, kPatterns> expected; // real, kChannels * fft_size
+    double period_ns = 0.0;
+};
+
+// The provider's convolution submit contract: log2(N) forward passes, one
+// multiply, log2(N) inverse passes; FFT passes cover channels*N/2 butterflies
+// and the multiply channels*N bins, in 256-wide workgroups.
+std::vector<PassShape> convolution_passes(const Workload& w) {
+    std::vector<PassShape> passes;
+    const auto fft_groups = (kChannels * (w.fft_size / 2u) + kWorkgroup - 1) / kWorkgroup;
+    for (std::uint32_t stage = 0; stage < w.log2; ++stage)
+        passes.push_back({"stockham_fft", -1, 1u << stage, fft_groups});
+    passes.push_back(
+        {"complex_multiply_ir", 0, 0, (kChannels * w.fft_size + kWorkgroup - 1) / kWorkgroup});
+    for (std::uint32_t stage = 0; stage < w.log2; ++stage)
+        passes.push_back({"stockham_fft", 1, 1u << stage, fft_groups});
+    return passes;
+}
+
+struct KernelIdentity {
+    std::string canonical;
+    std::string digest;
+};
+
+// Canonical form matches json.dumps(sort_keys=True, separators=(",", ":")), so
+// the verifier recomputes the digest instead of trusting it.
+KernelIdentity make_kernel_identity(const std::string& program, const std::string& fft_sha,
+                                    const std::string& mul_sha, const Workload& w,
+                                    const std::vector<PassShape>& passes) {
+    std::string c = "{\"channels\":" + std::to_string(kChannels) +
+                    ",\"fft_size\":" + std::to_string(w.fft_size) +
+                    ",\"fft_wgsl_sha256\":" + json_string(fft_sha) +
+                    ",\"frames\":" + std::to_string(w.frames) +
+                    ",\"ir_length\":" + std::to_string(w.ir_length) +
+                    ",\"mul_wgsl_sha256\":" + json_string(mul_sha) + ",\"passes\":[";
+    for (std::size_t i = 0; i < passes.size(); ++i) {
+        const auto& p = passes[i];
+        if (i)
+            c += ",";
+        c += "{\"groups\":" + std::to_string(p.groups) + ",\"kernel\":" + json_string(p.kernel) +
+             ",\"ns\":" + std::to_string(p.ns) + ",\"sign\":" + std::to_string(p.sign) +
+             ",\"workgroup\":" + std::to_string(kWorkgroup) + "}";
+    }
+    c += "],\"program\":" + json_string(program) + "}";
+    return {c, sha256_hex(c)};
+}
+
+// MSL port of kSharedIoFftWgsl and kSharedIoMulWgsl (hashes above).
+constexpr const char* kMatchedMsl = R"msl(#include <metal_stdlib>
+using namespace metal;
+
+struct FftParams { uint n; uint ns; float sign; uint batch; };
+constant float PI = 3.1415926535897932f;
+
+kernel void stockham_fft(const device float* src [[buffer(0)]],
+                         device float* dst [[buffer(1)]],
+                         constant FftParams& params [[buffer(2)]],
+                         uint3 gid [[thread_position_in_grid]]) {
+    const uint half_n = params.n / 2u;
+    const uint tid = gid.x;
+    if (tid >= params.batch * half_n) {
+        return;
+    }
+    const uint b = tid / half_n;
+    const uint j = tid - b * half_n;
+    const uint base = b * params.n;
+
+    const float v0_re = src[2u * (base + j)];
+    const float v0_im = src[2u * (base + j) + 1u];
+    const uint k = j + half_n;
+    const float v1_re = src[2u * (base + k)];
+    const float v1_im = src[2u * (base + k) + 1u];
+
+    const float angle = params.sign * 2.0f * PI * float(j % params.ns) / float(params.ns * 2u);
+    const float tw_re = cos(angle);
+    const float tw_im = sin(angle);
+
+    const float u1_re = tw_re * v1_re - tw_im * v1_im;
+    const float u1_im = tw_re * v1_im + tw_im * v1_re;
+
+    const float y0_re = v0_re + u1_re;
+    const float y0_im = v0_im + u1_im;
+    const float y1_re = v0_re - u1_re;
+    const float y1_im = v0_im - u1_im;
+
+    const uint idxD = (j / params.ns) * params.ns * 2u + (j % params.ns);
+    dst[2u * (base + idxD)] = y0_re;
+    dst[2u * (base + idxD) + 1u] = y0_im;
+    dst[2u * (base + idxD + params.ns)] = y1_re;
+    dst[2u * (base + idxD + params.ns) + 1u] = y1_im;
+}
+
+struct MulParams { uint a_len; uint ir_len; };
+
+kernel void complex_multiply_ir(const device float* a [[buffer(0)]],
+                                const device float* ir [[buffer(1)]],
+                                device float* out [[buffer(2)]],
+                                constant MulParams& lengths [[buffer(3)]],
+                                uint3 gid [[thread_position_in_grid]]) {
+    const uint i = gid.x;
+    const uint p = i * 2u;
+    if (p + 1u >= lengths.a_len) {
+        return;
+    }
+    const uint k = p % lengths.ir_len;
+    const float ar = a[p];
+    const float ai = a[p + 1u];
+    const float br = ir[k];
+    const float bi = ir[k + 1u];
+    out[p] = ar * br - ai * bi;
+    out[p + 1u] = ar * bi + ai * br;
+}
+
+// Planted negative only: the pre-WP-Q comparator's unmatched kernel.
+kernel void complex_multiply(const device float* a [[buffer(0)]],
+                             device float* out [[buffer(1)]],
+                             constant MulParams& lengths [[buffer(3)]],
+                             uint3 gid [[thread_position_in_grid]]) {
+    const uint p = gid.x * 2u;
+    if (p + 1u >= lengths.a_len) return;
+    const float ar = a[p], ai = a[p + 1u];
+    out[p] = ar * 1.75f - ai * 0.25f;
+    out[p + 1u] = ar * 0.25f + ai * 1.75f;
+}
+)msl";
+
+// ---------------------------------------------------------------------------
+// Workload: a decaying random IR of `frames` taps, convolved by an N=2*frames
+// FFT, with eight deterministic input patterns and double-precision oracles.
+
+Workload make_workload(std::uint32_t frames, std::uint32_t seed) {
+    Workload w;
+    w.frames = frames;
+    w.fft_size = frames * 2;
+    w.ir_length = frames;
+    for (auto n = w.fft_size; n > 1; n >>= 1)
+        ++w.log2;
+    w.complex_floats = static_cast<std::size_t>(kChannels) * w.fft_size * 2;
+    w.period_ns = static_cast<double>(frames) * 1.0e9 / kSampleRate;
+
+    std::mt19937 rng(seed + frames);
+    std::uniform_real_distribution<double> uniform(-1.0, 1.0);
+    std::vector<double> ir(w.ir_length);
+    for (std::uint32_t t = 0; t < w.ir_length; ++t)
+        ir[t] = 0.5 * uniform(rng) * std::exp(-static_cast<double>(t) / (w.ir_length / 4.0));
+
+    const auto n = w.fft_size;
+    w.ir_spectrum.assign(static_cast<std::size_t>(n) * 2, 0.0f);
+    for (std::uint32_t bin = 0; bin < n; ++bin) {
+        double re = 0.0;
+        double im = 0.0;
+        for (std::uint32_t t = 0; t < w.ir_length; ++t) {
+            const double angle = -2.0 * M_PI * static_cast<double>(bin) * t / n;
+            re += ir[t] * std::cos(angle);
+            im += ir[t] * std::sin(angle);
+        }
+        w.ir_spectrum[bin * 2] = static_cast<float>(re / n);
+        w.ir_spectrum[bin * 2 + 1] = static_cast<float>(im / n);
+    }
+
+    for (std::uint32_t p = 0; p < kPatterns; ++p) {
+        auto& input = w.inputs[p];
+        auto& expected = w.expected[p];
+        input.assign(w.complex_floats, 0.0f);
+        expected.assign(static_cast<std::size_t>(kChannels) * n, 0.0f);
+        for (std::uint32_t c = 0; c < kChannels; ++c) {
+            std::vector<float> x(frames);
+            for (std::uint32_t f = 0; f < frames; ++f) {
+                x[f] = static_cast<float>(0.8 * uniform(rng));
+                input[(static_cast<std::size_t>(c) * n + f) * 2] = x[f];
+            }
+            for (std::uint32_t out = 0; out < n; ++out) {
+                double acc = 0.0;
+                for (std::uint32_t t = 0; t < w.ir_length; ++t)
+                    if (out >= t && out - t < frames)
+                        acc += ir[t] * static_cast<double>(x[out - t]);
+                expected[static_cast<std::size_t>(c) * n + out] = static_cast<float>(acc);
+            }
+        }
+    }
+    return w;
+}
+
+// ---------------------------------------------------------------------------
+// Per-block observation shared by both sides
+
+struct BlockRecord {
+    std::int64_t release_ns = -1;
+    std::int64_t submit_ns = -1;
+    std::int64_t submit_end_ns = -1;
+    std::int64_t visible_ns = -1;
+    std::int64_t gpu_busy_ns = -1;
+    std::int64_t gpu_end_ns = -1;
+    std::int64_t callback_ns = -1;
+    std::int64_t worker_cpu_ns = -1;
+    int oracle = 0;
+    int stalled = 0;
+};
+
+struct Observer {
+    const Workload* workload = nullptr;
+    std::vector<BlockRecord>* records = nullptr;
+    std::uint32_t warmup = 0;
+    std::array<std::vector<float>, kPatterns>* parity = nullptr;
+    // Oracle and parity work is subtracted from the worker CPU samples.
+    std::uint64_t excluded_cpu_ns = 0;
+    double max_oracle_error = 0.0;
+
+    // `output` is interleaved complex; the real parts are the audio samples.
+    void visible(std::uint64_t sequence, std::uint64_t visible_ns, const float* output) {
+        auto& record = (*records)[sequence];
+        record.visible_ns = static_cast<std::int64_t>(visible_ns);
+        const auto cpu_begin = thread_cpu_ns();
+        const auto pattern = sequence % kPatterns;
+        const auto& expected = workload->expected[pattern];
+        double error = 0.0;
+        bool ok = output != nullptr;
+        for (std::size_t i = 0; ok && i < expected.size(); ++i) {
+            const float value = output[i * 2];
+            if (!std::isfinite(value)) {
+                ok = false;
+                break;
+            }
+            error = std::max(error, static_cast<double>(std::fabs(value - expected[i])));
+        }
+        ok = ok && error <= kOracleTolerance;
+        record.oracle = ok ? 1 : 0;
+        max_oracle_error = std::max(max_oracle_error, error);
+        // The last kPatterns warm-up blocks cover every pattern once.
+        if (output != nullptr && sequence + kPatterns >= warmup && sequence < warmup) {
+            auto& slot = (*parity)[pattern];
+            slot.resize(expected.size());
+            for (std::size_t i = 0; i < expected.size(); ++i)
+                slot[i] = output[i * 2];
+        }
+        excluded_cpu_ns += thread_cpu_ns() - cpu_begin;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Native Metal side
 
 struct AlignedBytes {
     void* pointer = nullptr;
+    std::size_t length = 0;
     explicit AlignedBytes(std::size_t bytes) {
-        if (posix_memalign(&pointer, 4096, bytes) == 0)
-            std::memset(pointer, 0, bytes);
+        const auto page = static_cast<std::size_t>(getpagesize());
+        length = (bytes + page - 1) / page * page;
+        if (posix_memalign(&pointer, page, length) == 0)
+            std::memset(pointer, 0, length);
+        else
+            pointer = nullptr;
     }
     ~AlignedBytes() {
         std::free(pointer);
@@ -75,499 +544,1313 @@ struct AlignedBytes {
     AlignedBytes& operator=(const AlignedBytes&) = delete;
 };
 
-struct Completion {
-    dispatch_semaphore_t semaphore = nullptr;
-    std::mutex mutex;
-    bool observed = false;
-    bool error = false;
-    double gpu_start_ns = 0.0;
-    double gpu_end_ns = 0.0;
-    Completion() : semaphore(dispatch_semaphore_create(0)) {}
-    ~Completion() {
-        if (semaphore)
-            dispatch_release(semaphore);
-    }
+enum class MetalCompletion { SharedEvent, CompletedHandler };
+
+struct MetalPipelines {
+    id<MTLComputePipelineState> fft = nil;
+    id<MTLComputePipelineState> multiply = nil;
+    id<MTLComputePipelineState> planted = nil;
+    std::string msl_sha256;
+    std::string math_mode;
 };
 
-struct Slot {
-    AlignedBytes input{kFloatValues * sizeof(float)};
-    AlignedBytes output{kFloatValues * sizeof(float)};
-    id<MTLBuffer> input_buffer = nil;
-    id<MTLBuffer> output_buffer = nil;
-    Completion completion;
-};
+class MetalLane {
+  public:
+    MetalLane(id<MTLDevice> device, const MetalPipelines& pipelines, MetalCompletion completion,
+              bool planted)
+        : device_(device), pipelines_(pipelines), completion_(completion), planted_(planted) {}
 
-struct Record {
-    std::uint64_t sequence = 0;
-    std::uint64_t encode_start_ns = 0;
-    std::uint64_t encode_end_ns = 0;
-    std::uint64_t commit_start_ns = 0;
-    std::uint64_t commit_return_ns = 0;
-    std::uint64_t completion_observed_ns = 0;
-    double gpu_start_ns = 0.0;
-    double gpu_end_ns = 0.0;
-    bool oracle = false;
-};
-
-struct Result {
-    const char* mode = "unknown";
-    std::vector<Record> records;
-    bool unavailable = false;
-    bool gpu_timestamps_available = true;
-    std::string reason;
-};
-
-id<MTLBuffer> no_copy_buffer(id<MTLDevice> device, AlignedBytes& storage, std::size_t bytes) {
-    if (!storage.pointer)
-        return nil;
-    return [device newBufferWithBytesNoCopy:storage.pointer
-                                     length:bytes
-                                    options:MTLResourceStorageModeShared
-                                deallocator:nil];
-}
-
-id<MTLLibrary> make_library(id<MTLDevice> device, NSError** error) {
-    NSString* source = @""
-                        "#include <metal_stdlib>\n"
-                        "using namespace metal;\n"
-                        "kernel void complex_multiply(const device float* a [[buffer(0)]],\n"
-                        "                              device float* out [[buffer(1)]],\n"
-                        "                              uint id [[thread_position_in_grid]]) {\n"
-                        "  if (id >= 128u) return; uint p = id & ~1u;\n"
-                        "  float ar = a[p], ai = a[p + 1u];\n"
-                        "  out[p] = ar * 1.75f - ai * 0.25f;\n"
-                        "  out[p + 1u] = ar * 0.25f + ai * 1.75f;\n"
-                        "}\n";
-    return [device newLibraryWithSource:source options:nil error:error];
-}
-
-bool validate(Slot& slot, std::uint64_t sequence) {
-    const auto* in = static_cast<const float*>(slot.input.pointer);
-    const auto* out = static_cast<const float*>(slot.output.pointer);
-    for (std::uint32_t i = 0; i < kFloatValues; i += 2) {
-        const float er = in[i] * 1.75f - in[i + 1] * 0.25f;
-        const float ei = in[i] * 0.25f + in[i + 1] * 1.75f;
-        if (!std::isfinite(out[i]) || std::fabs(out[i] - er) > 1.0e-5f ||
-            !std::isfinite(out[i + 1]) || std::fabs(out[i + 1] - ei) > 1.0e-5f)
+    bool prepare(const Workload& w, std::uint32_t total, std::string& reason) {
+        workload_ = &w;
+        passes_ = convolution_passes(w);
+        queue_ = [device_ newCommandQueue];
+        semaphore_ = dispatch_semaphore_create(0);
+        if (!queue_ || !semaphore_) {
+            reason = "queue_unavailable";
             return false;
+        }
+        const auto bytes = w.complex_floats * sizeof(float);
+        ir_ = [device_ newBufferWithBytes:w.ir_spectrum.data()
+                                   length:w.ir_spectrum.size() * sizeof(float)
+                                  options:MTLResourceStorageModeShared];
+        const std::uint32_t lengths[2] = {static_cast<std::uint32_t>(w.complex_floats),
+                                          w.fft_size * 2};
+        mul_params_ = [device_ newBufferWithBytes:lengths
+                                           length:sizeof(lengths)
+                                          options:MTLResourceStorageModeShared];
+        struct Params {
+            std::uint32_t n;
+            std::uint32_t ns;
+            float sign;
+            std::uint32_t batch;
+        };
+        for (std::uint32_t stage = 0; stage < w.log2; ++stage) {
+            const Params forward{w.fft_size, 1u << stage, -1.0f, kChannels};
+            const Params inverse{w.fft_size, 1u << stage, 1.0f, kChannels};
+            forward_.push_back([device_ newBufferWithBytes:&forward
+                                                    length:sizeof(forward)
+                                                   options:MTLResourceStorageModeShared]);
+            inverse_.push_back([device_ newBufferWithBytes:&inverse
+                                                    length:sizeof(inverse)
+                                                   options:MTLResourceStorageModeShared]);
+        }
+        for (auto& slot : slots_) {
+            slot.input = std::make_unique<AlignedBytes>(bytes);
+            slot.output = std::make_unique<AlignedBytes>(bytes);
+            if (!slot.input->pointer || !slot.output->pointer) {
+                reason = "host_allocation_failed";
+                return false;
+            }
+            slot.input_buffer = [device_ newBufferWithBytesNoCopy:slot.input->pointer
+                                                           length:slot.input->length
+                                                          options:MTLResourceStorageModeShared
+                                                      deallocator:nil];
+            slot.output_buffer = [device_ newBufferWithBytesNoCopy:slot.output->pointer
+                                                            length:slot.output->length
+                                                           options:MTLResourceStorageModeShared
+                                                       deallocator:nil];
+            slot.a = [device_ newBufferWithLength:bytes options:MTLResourceStorageModePrivate];
+            slot.b = [device_ newBufferWithLength:bytes options:MTLResourceStorageModePrivate];
+            slot.product = [device_ newBufferWithLength:bytes
+                                                options:MTLResourceStorageModePrivate];
+            if (!slot.input_buffer || !slot.output_buffer || !slot.a || !slot.b || !slot.product) {
+                reason = "buffer_unavailable";
+                return false;
+            }
+        }
+        if (!ir_ || !mul_params_ || forward_.size() != w.log2 || inverse_.size() != w.log2) {
+            reason = "buffer_unavailable";
+            return false;
+        }
+        if (completion_ == MetalCompletion::SharedEvent) {
+            event_ = [device_ newSharedEvent];
+            dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(
+                DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
+            listener_queue_ = dispatch_queue_create("pulp.comparator.metal.listener", attr);
+            listener_ = [[MTLSharedEventListener alloc] initWithDispatchQueue:listener_queue_];
+            if (!event_ || !listener_) {
+                reason = "shared_event_unavailable";
+                return false;
+            }
+        }
+        gpu_start_.assign(total, -1);
+        gpu_end_.assign(total, -1);
+        return true;
     }
-    (void)sequence;
+
+    bool can_submit(std::uint64_t sequence) const {
+        return slots_[sequence % kFlightDepth].state.load(std::memory_order_acquire) == 0;
+    }
+
+    std::size_t in_flight() const {
+        return in_flight_;
+    }
+
+    bool submit(std::uint64_t sequence, const float* input) {
+        @autoreleasepool {
+            auto& slot = slots_[sequence % kFlightDepth];
+            retire_gpu_times(slot);
+            std::memcpy(slot.input->pointer, input, workload_->complex_floats * sizeof(float));
+            id<MTLCommandBuffer> command = [queue_ commandBuffer];
+            if (!command)
+                return false;
+            const auto& w = *workload_;
+            const MTLSize threads = MTLSizeMake(kWorkgroup, 1, 1);
+            const auto pass = [&](id<MTLComputePipelineState> pipeline, id<MTLBuffer> first,
+                                  id<MTLBuffer> second, id<MTLBuffer> third, id<MTLBuffer> fourth,
+                                  std::uint32_t groups) {
+                id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
+                [encoder setComputePipelineState:pipeline];
+                [encoder setBuffer:first offset:0 atIndex:0];
+                [encoder setBuffer:second offset:0 atIndex:1];
+                if (third)
+                    [encoder setBuffer:third offset:0 atIndex:2];
+                if (fourth)
+                    [encoder setBuffer:fourth offset:0 atIndex:3];
+                [encoder dispatchThreadgroups:MTLSizeMake(groups, 1, 1)
+                        threadsPerThreadgroup:threads];
+                [encoder endEncoding];
+            };
+            if (planted_) {
+                pass(pipelines_.planted, slot.input_buffer, slot.output_buffer, nil, mul_params_,
+                     planted_groups(w));
+            } else {
+                // Same ping-pong as the provider's convolution plan.
+                id<MTLBuffer> source = slot.input_buffer;
+                id<MTLBuffer> destination = slot.a;
+                for (std::uint32_t stage = 0; stage < w.log2; ++stage) {
+                    pass(pipelines_.fft, source, destination, forward_[stage], nil,
+                         passes_[stage].groups);
+                    source = destination;
+                    destination = destination == slot.a ? slot.b : slot.a;
+                }
+                pass(pipelines_.multiply, source, ir_, slot.product, mul_params_,
+                     passes_[w.log2].groups);
+                source = slot.product;
+                destination = slot.a;
+                for (std::uint32_t stage = 0; stage < w.log2; ++stage) {
+                    if (stage + 1u == w.log2)
+                        destination = slot.output_buffer;
+                    pass(pipelines_.fft, source, destination, inverse_[stage], nil,
+                         passes_[w.log2 + 1 + stage].groups);
+                    source = destination;
+                    if (stage + 1u < w.log2)
+                        destination = destination == slot.a ? slot.b : slot.a;
+                }
+            }
+            slot.sequence = sequence;
+            slot.callback_ns.store(-1, std::memory_order_relaxed);
+            slot.failed.store(false, std::memory_order_relaxed);
+            slot.state.store(1, std::memory_order_release);
+            Slot* target = &slot;
+            dispatch_semaphore_t semaphore = semaphore_;
+            if (completion_ == MetalCompletion::SharedEvent) {
+                const auto value = sequence + 1;
+                [command encodeSignalEvent:event_ value:value];
+                [event_ notifyListener:listener_
+                               atValue:value
+                                 block:^(id<MTLSharedEvent>, uint64_t) {
+                                   target->callback_ns.store(static_cast<std::int64_t>(now_ns()),
+                                                             std::memory_order_relaxed);
+                                   target->state.store(2, std::memory_order_release);
+                                   dispatch_semaphore_signal(semaphore);
+                                 }];
+                [command addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+                  if (completed.status != MTLCommandBufferStatusCompleted)
+                      target->failed.store(true, std::memory_order_release);
+                }];
+            } else {
+                [command addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+                  if (completed.status != MTLCommandBufferStatusCompleted)
+                      target->failed.store(true, std::memory_order_release);
+                  target->callback_ns.store(static_cast<std::int64_t>(now_ns()),
+                                            std::memory_order_relaxed);
+                  target->state.store(2, std::memory_order_release);
+                  dispatch_semaphore_signal(semaphore);
+                }];
+            }
+            slot.command = command;
+            [command commit];
+            fifo_[(fifo_head_ + in_flight_) % kFlightDepth] = sequence;
+            ++in_flight_;
+            return true;
+        }
+    }
+
+    void wait(std::uint64_t deadline) {
+        const auto now = now_ns();
+        if (in_flight_ == 0 || deadline <= now) {
+            sleep_until_ns(deadline);
+            return;
+        }
+        dispatch_semaphore_wait(
+            semaphore_,
+            dispatch_time(DISPATCH_TIME_NOW, static_cast<std::int64_t>(deadline - now)));
+    }
+
+    void collect(Observer& observer, std::vector<BlockRecord>& records) {
+        while (in_flight_ != 0) {
+            const auto sequence = fifo_[fifo_head_];
+            auto& slot = slots_[sequence % kFlightDepth];
+            if (slot.state.load(std::memory_order_acquire) != 2)
+                break;
+            const auto visible = now_ns();
+            records[sequence].callback_ns = slot.callback_ns.load(std::memory_order_relaxed);
+            observer.visible(sequence, visible,
+                             slot.failed.load(std::memory_order_acquire)
+                                 ? nullptr
+                                 : static_cast<const float*>(slot.output->pointer));
+            fifo_head_ = (fifo_head_ + 1) % kFlightDepth;
+            --in_flight_;
+            slot.state.store(0, std::memory_order_release);
+        }
+    }
+
+    void finish() {
+        for (auto& slot : slots_) {
+            if (slot.command)
+                [slot.command waitUntilCompleted];
+            retire_gpu_times(slot);
+        }
+    }
+
+    const std::vector<std::int64_t>& gpu_start() const {
+        return gpu_start_;
+    }
+    const std::vector<std::int64_t>& gpu_end() const {
+        return gpu_end_;
+    }
+    std::uint64_t late_gpu_time_waits() const {
+        return late_gpu_time_waits_;
+    }
+
+    static std::uint32_t planted_groups(const Workload& w) {
+        return static_cast<std::uint32_t>((w.complex_floats / 2 + kWorkgroup - 1) / kWorkgroup);
+    }
+
+  private:
+    struct Slot {
+        std::unique_ptr<AlignedBytes> input;
+        std::unique_ptr<AlignedBytes> output;
+        id<MTLBuffer> input_buffer = nil;
+        id<MTLBuffer> output_buffer = nil;
+        id<MTLBuffer> a = nil;
+        id<MTLBuffer> b = nil;
+        id<MTLBuffer> product = nil;
+        id<MTLCommandBuffer> command = nil;
+        std::uint64_t sequence = 0;
+        std::atomic<int> state{0}; // 0 free, 1 in flight, 2 completed
+        std::atomic<std::int64_t> callback_ns{-1};
+        std::atomic<bool> failed{false};
+    };
+
+    // GPU timing is read when a slot is reused, well after the worker
+    // observed it, so reading it never delays visibility.
+    void retire_gpu_times(Slot& slot) {
+        if (!slot.command)
+            return;
+        if (slot.command.status < MTLCommandBufferStatusCompleted) {
+            ++late_gpu_time_waits_;
+            [slot.command waitUntilCompleted];
+        }
+        if (slot.sequence < gpu_start_.size() && slot.command.GPUEndTime > 0.0) {
+            gpu_start_[slot.sequence] = clock_.from_metal_seconds(slot.command.GPUStartTime);
+            gpu_end_[slot.sequence] = clock_.from_metal_seconds(slot.command.GPUEndTime);
+        }
+        slot.command = nil;
+    }
+
+    id<MTLDevice> device_;
+    const MetalPipelines& pipelines_;
+    MetalCompletion completion_;
+    bool planted_;
+    const Workload* workload_ = nullptr;
+    std::vector<PassShape> passes_;
+    id<MTLCommandQueue> queue_ = nil;
+    dispatch_semaphore_t semaphore_ = nullptr;
+    id<MTLSharedEvent> event_ = nil;
+    dispatch_queue_t listener_queue_ = nil;
+    MTLSharedEventListener* listener_ = nil;
+    id<MTLBuffer> ir_ = nil;
+    id<MTLBuffer> mul_params_ = nil;
+    std::vector<id<MTLBuffer>> forward_;
+    std::vector<id<MTLBuffer>> inverse_;
+    std::array<Slot, kFlightDepth> slots_;
+    std::array<std::uint64_t, kFlightDepth> fifo_{};
+    std::size_t fifo_head_ = 0;
+    std::size_t in_flight_ = 0;
+    std::vector<std::int64_t> gpu_start_;
+    std::vector<std::int64_t> gpu_end_;
+    std::uint64_t late_gpu_time_waits_ = 0;
+    HostClockBridge clock_;
+};
+
+bool make_metal_pipelines(id<MTLDevice> device, MetalPipelines& out, std::string& reason) {
+    MTLCompileOptions* options = [MTLCompileOptions new];
+    if (@available(macOS 15.0, *)) {
+        options.mathMode = MTLMathModeSafe;
+        out.math_mode = "safe";
+    } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        options.fastMathEnabled = NO;
+#pragma clang diagnostic pop
+        out.math_mode = "fast_math_disabled";
+    }
+    NSError* error = nil;
+    id<MTLLibrary> library =
+        [device newLibraryWithSource:[NSString stringWithUTF8String:kMatchedMsl]
+                             options:options
+                               error:&error];
+    if (!library) {
+        reason = "msl_compile_failed";
+        return false;
+    }
+    const auto make = [&](NSString* name) -> id<MTLComputePipelineState> {
+        id<MTLFunction> function = [library newFunctionWithName:name];
+        return function ? [device newComputePipelineStateWithFunction:function error:&error] : nil;
+    };
+    out.fft = make(@"stockham_fft");
+    out.multiply = make(@"complex_multiply_ir");
+    out.planted = make(@"complex_multiply");
+    out.msl_sha256 = sha256_hex(std::string(kMatchedMsl));
+    if (!out.fft || !out.multiply || !out.planted ||
+        out.fft.maxTotalThreadsPerThreadgroup < kWorkgroup ||
+        out.multiply.maxTotalThreadsPerThreadgroup < kWorkgroup) {
+        reason = "pipeline_unavailable";
+        return false;
+    }
     return true;
 }
 
-void reset(Slot& slot, std::uint64_t sequence) {
-    auto* in = static_cast<float*>(slot.input.pointer);
-    auto* out = static_cast<float*>(slot.output.pointer);
-    for (std::uint32_t i = 0; i < kFloatValues; ++i)
-        in[i] = static_cast<float>((sequence % 97u) * 0.01 + i * 0.003 - 0.2);
-    std::fill(out, out + kFloatValues, 0.0f);
-    std::lock_guard lock(slot.completion.mutex);
-    slot.completion.observed = false;
-    slot.completion.error = false;
-    slot.completion.gpu_start_ns = 0.0;
-    slot.completion.gpu_end_ns = 0.0;
-}
-
-void wait_completion(Slot& slot, Record& record) {
-    dispatch_semaphore_wait(slot.completion.semaphore, DISPATCH_TIME_FOREVER);
-    {
-        std::lock_guard lock(slot.completion.mutex);
-        record.gpu_start_ns = slot.completion.gpu_start_ns;
-        record.gpu_end_ns = slot.completion.gpu_end_ns;
-        record.oracle = !slot.completion.error;
-    }
-    record.completion_observed_ns = now_ns();
-}
-
-Result run_ordinary(id<MTLDevice> device, id<MTLComputePipelineState> pipeline) {
-    Result result{.mode = "ordinary_metal"};
-    id<MTLCommandQueue> queue = [device newCommandQueue];
-    if (!queue) {
-        result.unavailable = true;
-        result.reason = "queue_unavailable";
-        return result;
-    }
-    std::array<Slot, kFlightDepth> slots;
-    for (auto& slot : slots) {
-        slot.input_buffer = no_copy_buffer(device, slot.input, kFloatValues * sizeof(float));
-        slot.output_buffer = no_copy_buffer(device, slot.output, kFloatValues * sizeof(float));
-        if (!slot.input_buffer || !slot.output_buffer) {
-            result.unavailable = true;
-            result.reason = "shared_buffer_unavailable";
-            return result;
-        }
-    }
-    const auto width = std::max<NSUInteger>(1, pipeline.threadExecutionWidth);
-    result.records.reserve(kTrials);
-    std::array<Record, kFlightDepth> pending{};
-    for (std::uint32_t sequence = 0; sequence < kWarmup + kTrials; ++sequence) {
-        const auto index = sequence % kFlightDepth;
-        auto& slot = slots[index];
-        if (sequence >= kFlightDepth) {
-            Record retired = pending[(sequence - kFlightDepth) % kFlightDepth];
-            wait_completion(slots[(sequence - kFlightDepth) % kFlightDepth], retired);
-            if (!validate(slots[(sequence - kFlightDepth) % kFlightDepth], retired.sequence))
-                retired.oracle = false;
-            if (retired.sequence >= kWarmup)
-                result.records.push_back(retired);
-        }
-        reset(slot, sequence);
-        id<MTLCommandBuffer> command = [queue commandBuffer];
-        if (!command) {
-            result.unavailable = true;
-            result.reason = "command_buffer_unavailable";
-            return result;
-        }
-        Record record{};
-        record.sequence = sequence;
-        record.encode_start_ns = now_ns();
-        id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
-        [encoder setComputePipelineState:pipeline];
-        [encoder setBuffer:slot.input_buffer offset:0 atIndex:0];
-        [encoder setBuffer:slot.output_buffer offset:0 atIndex:1];
-        [encoder dispatchThreads:MTLSizeMake(kFloatValues, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake(width, 1, 1)];
-        [encoder endEncoding];
-        record.encode_end_ns = now_ns();
-        Slot* slot_ptr = &slot;
-        [command addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-          Slot* target = slot_ptr;
-          std::lock_guard lock(target->completion.mutex);
-          target->completion.error = completed.status != MTLCommandBufferStatusCompleted;
-          target->completion.gpu_start_ns = completed.GPUStartTime * 1.0e9;
-          target->completion.gpu_end_ns = completed.GPUEndTime * 1.0e9;
-          target->completion.observed = true;
-          dispatch_semaphore_signal(target->completion.semaphore);
-        }];
-        record.commit_start_ns = now_ns();
-        [command commit];
-        record.commit_return_ns = now_ns();
-        pending[index] = record;
-    }
-    for (std::uint32_t i = 0; i < kFlightDepth; ++i) {
-        Record retired = pending[(kWarmup + kTrials - kFlightDepth + i) % kFlightDepth];
-        wait_completion(slots[(kWarmup + kTrials - kFlightDepth + i) % kFlightDepth], retired);
-        retired.oracle = validate(slots[(kWarmup + kTrials - kFlightDepth + i) % kFlightDepth],
-                                  retired.sequence);
-        result.records.push_back(retired);
-    }
-    return result;
-}
-
-#if PULP_HAS_METAL4_COMPARATOR
-Result run_metal4(id<MTLDevice> device, id<MTLComputePipelineState> pipeline)
-    API_AVAILABLE(macos(26.0)) {
-    Result result{.mode = "metal4"};
-    if (!@available(macOS 26.0, *)) {
-        result.unavailable = true;
-        result.reason = "os_before_macos26";
-        return result;
-    }
-    id<MTL4CommandQueue> queue = [device newMTL4CommandQueue];
-    if (!queue) {
-        result.unavailable = true;
-        result.reason = "queue_unavailable";
-        return result;
-    }
-    std::array<Slot, kFlightDepth> slots;
-    std::array<id<MTL4CommandAllocator>, kFlightDepth> allocators{};
-    std::array<id<MTL4ArgumentTable>, kFlightDepth> tables{};
-    MTLResidencySetDescriptor* residency_descriptor = [MTLResidencySetDescriptor new];
-    residency_descriptor.initialCapacity = kFlightDepth * 2;
-    NSError* residency_error = nil;
-    id<MTLResidencySet> residency = [device newResidencySetWithDescriptor:residency_descriptor
-                                                                    error:&residency_error];
-    if (!residency) {
-        result.unavailable = true;
-        result.reason = "residency_set_unavailable";
-        return result;
-    }
-    for (std::uint32_t i = 0; i < kFlightDepth; ++i) {
-        auto& slot = slots[i];
-        slot.input_buffer = no_copy_buffer(device, slot.input, kFloatValues * sizeof(float));
-        slot.output_buffer = no_copy_buffer(device, slot.output, kFloatValues * sizeof(float));
-        allocators[i] = [device newCommandAllocator];
-        MTL4ArgumentTableDescriptor* descriptor = [MTL4ArgumentTableDescriptor new];
-        descriptor.maxBufferBindCount = 2;
-        descriptor.initializeBindings = YES;
-        NSError* error = nil;
-        tables[i] = [device newArgumentTableWithDescriptor:descriptor error:&error];
-        if (!slot.input_buffer || !slot.output_buffer || !allocators[i] || !tables[i]) {
-            result.unavailable = true;
-            result.reason = "persistent_resource_unavailable";
-            return result;
-        }
-        [tables[i] setAddress:slot.input_buffer.gpuAddress atIndex:0];
-        [tables[i] setAddress:slot.output_buffer.gpuAddress atIndex:1];
-        const id<MTLAllocation> allocations[] = {slot.input_buffer, slot.output_buffer};
-        [residency addAllocations:allocations count:2];
-    }
-    [residency commit];
-    [residency requestResidency];
-    [queue addResidencySet:residency];
-    const auto width = std::max<NSUInteger>(1, pipeline.threadExecutionWidth);
-    result.records.reserve(kTrials);
-    std::array<Record, kFlightDepth> pending{};
-    for (std::uint32_t sequence = 0; sequence < kWarmup + kTrials; ++sequence) {
-        const auto index = sequence % kFlightDepth;
-        if (sequence >= kFlightDepth) {
-            Record retired = pending[(sequence - kFlightDepth) % kFlightDepth];
-            wait_completion(slots[(sequence - kFlightDepth) % kFlightDepth], retired);
-            retired.oracle =
-                validate(slots[(sequence - kFlightDepth) % kFlightDepth], retired.sequence);
-            if (retired.sequence >= kWarmup)
-                result.records.push_back(retired);
-        }
-        auto& slot = slots[index];
-        reset(slot, sequence);
-        id<MTL4CommandBuffer> command = [device newCommandBuffer];
-        if (!command) {
-            result.unavailable = true;
-            result.reason = "command_buffer_unavailable";
-            return result;
-        }
-        Record record{};
-        record.sequence = sequence;
-        record.encode_start_ns = now_ns();
-        [command beginCommandBufferWithAllocator:allocators[index]];
-        [command useResidencySet:residency];
-        id<MTL4ComputeCommandEncoder> encoder = [command computeCommandEncoder];
-        [encoder setComputePipelineState:pipeline];
-        [encoder setArgumentTable:tables[index]];
-        [encoder dispatchThreads:MTLSizeMake(kFloatValues, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake(width, 1, 1)];
-        [encoder endEncoding];
-        [command endCommandBuffer];
-        record.encode_end_ns = now_ns();
-        MTL4CommitOptions* options = [MTL4CommitOptions new];
-        Slot* slot_ptr = &slot;
-        [options addFeedbackHandler:^(id<MTL4CommitFeedback> feedback) {
-          Slot* target = slot_ptr;
-          std::lock_guard lock(target->completion.mutex);
-          target->completion.error = feedback.error != nil;
-          target->completion.gpu_start_ns = feedback.GPUStartTime * 1.0e9;
-          target->completion.gpu_end_ns = feedback.GPUEndTime * 1.0e9;
-          target->completion.observed = true;
-          dispatch_semaphore_signal(target->completion.semaphore);
-        }];
-        const id<MTL4CommandBuffer> buffers[] = {command};
-        record.commit_start_ns = now_ns();
-        [queue commit:buffers count:1 options:options];
-        record.commit_return_ns = now_ns();
-        pending[index] = record;
-    }
-    for (std::uint32_t i = 0; i < kFlightDepth; ++i) {
-        const auto sequence = kWarmup + kTrials - kFlightDepth + i;
-        Record retired = pending[sequence % kFlightDepth];
-        wait_completion(slots[sequence % kFlightDepth], retired);
-        retired.oracle = validate(slots[sequence % kFlightDepth], sequence);
-        result.records.push_back(retired);
-    }
-    return result;
-}
-#endif
+// ---------------------------------------------------------------------------
+// Dawn side (production DawnSharedIoProvider + SharedIoComputePlan)
 
 #if PULP_HAS_DAWN_COMPARATOR
-Result run_dawn() {
-    using pulp::gpu_audio::detail::DawnSharedIoProvider;
-    using pulp::gpu_audio::detail::SharedIoArena;
-    using pulp::gpu_audio::detail::SharedIoComputePlan;
-    Result result{.mode = "dawn_wait_any", .gpu_timestamps_available = false};
-    DawnSharedIoProvider::Options options;
-    options.completion_policy = DawnSharedIoProvider::CompletionPolicy::WaitAny;
-    auto created = DawnSharedIoProvider::create(options);
-    if (!created.provider) {
-        result.unavailable = true;
-        result.reason = created.reason;
-        return result;
+using pulp::gpu_audio::detail::DawnSharedIoProvider;
+using pulp::gpu_audio::detail::SharedIoArena;
+using pulp::gpu_audio::detail::SharedIoArenaProvider;
+using pulp::gpu_audio::detail::SharedIoComputePlan;
+
+struct DawnIdentity {
+    bool observed = false;
+    std::string provider_revision;
+    bool authenticated = false;
+    bool native_runtime_authenticated = false;
+    std::string adapter_name;
+    std::string adapter_backend;
+    std::string native_runtime_name;
+    std::string native_runtime_revision;
+    std::string dawn_revision;
+};
+
+class DawnLane {
+  public:
+    DawnLane(DawnSharedIoProvider::CompletionPolicy policy, bool staged_timestamps,
+             std::uint64_t poll_interval_ns)
+        : policy_(policy), staged_timestamps_(staged_timestamps),
+          poll_interval_ns_(poll_interval_ns) {}
+
+    ~DawnLane() {
+        if (plan_.prepared())
+            (void)plan_.release();
     }
 
-    // A one-sample impulse makes the prepared FFT convolution an identity
-    // transform while retaining the production shared-I/O program path.
-    constexpr std::uint32_t fft_size = kFrames * 2;
-    std::vector<float> normalized_spectrum(static_cast<std::size_t>(fft_size) * 2, 0.0f);
-    for (std::uint32_t bin = 0; bin < fft_size; ++bin)
-        normalized_spectrum[static_cast<std::size_t>(bin) * 2] = 1.0f / fft_size;
-    const auto bytes = static_cast<std::size_t>(kChannels) * fft_size * 2 * sizeof(float);
-    auto program =
-        created.provider->make_convolution_program({.fft_size = fft_size,
-                                                    .channels = kChannels,
-                                                    .logical_frames = kFrames,
-                                                    .ir_length = 1,
-                                                    .normalized_ir_spectrum = normalized_spectrum});
-    SharedIoComputePlan plan;
-    if (!program ||
-        !plan.prepare(
-            *created.provider,
-            {.slots = kFlightDepth, .input_bytes_per_slot = bytes, .output_bytes_per_slot = bytes},
-            std::move(program))) {
-        result.unavailable = true;
-        result.reason = "prepare_failed";
-        return result;
+    bool prepare(const Workload& w, std::uint32_t total, std::string& reason,
+                 DawnIdentity& identity) {
+        workload_ = &w;
+        DawnSharedIoProvider::Options options;
+        options.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA;
+        options.completion_policy = policy_;
+        if (staged_timestamps_) {
+            options.storage_kind = SharedIoArenaProvider::StorageKind::Staged;
+            options.enable_timestamps = true;
+        }
+        auto created = DawnSharedIoProvider::create(options);
+        if (!created.provider) {
+            reason = created.reason.empty() ? "provider_unavailable" : created.reason;
+            return false;
+        }
+        provider_ = std::move(created.provider);
+        auto program =
+            provider_->make_convolution_program({.fft_size = w.fft_size,
+                                                 .channels = kChannels,
+                                                 .logical_frames = w.frames,
+                                                 .ir_length = w.ir_length,
+                                                 .normalized_ir_spectrum = w.ir_spectrum});
+        const auto bytes = w.complex_floats * sizeof(float);
+        SharedIoComputePlan::Config config{
+            .slots = kFlightDepth, .input_bytes_per_slot = bytes, .output_bytes_per_slot = bytes};
+        if (staged_timestamps_)
+            config.storage_kind = SharedIoArenaProvider::StorageKind::Staged;
+        if (!program || !plan_.prepare(*provider_, config, std::move(program))) {
+            reason = "prepare_failed";
+            return false;
+        }
+        if (!identity.observed) {
+            const auto id = provider_->provider_identity();
+            const auto adapter = provider_->adapter_identity();
+            identity.observed = true;
+            identity.provider_revision = id.provider_revision;
+            identity.authenticated = id.authenticated;
+            identity.native_runtime_authenticated = id.native_runtime_authenticated;
+            identity.adapter_name = adapter.name;
+            identity.adapter_backend = adapter.backend;
+            identity.native_runtime_name = adapter.native_runtime_name;
+            identity.native_runtime_revision = adapter.native_runtime_revision;
+            identity.dawn_revision = provider_->dawn_revision();
+        }
+        timestamps_enabled_ = provider_->timestamps_enabled();
+        gpu_busy_.assign(total, -1);
+        return true;
     }
 
-    std::array<Record, kFlightDepth> pending{};
-    std::array<std::array<float, kChannels * kFrames>, kFlightDepth> expected{};
-    result.records.reserve(kTrials);
-    auto settle = [&](std::uint64_t sequence) {
-        std::optional<SharedIoComputePlan::Completion> completion;
-        while (!completion) {
-            created.provider->service_until(now_ns() + 1'000'000);
-            plan.drain(now_ns());
-            while (auto candidate = plan.pop_completion()) {
-                if (candidate->token.slot.stream_sequence == sequence + 1) {
-                    completion = *candidate;
-                    break;
-                }
+    bool can_submit(std::uint64_t) const {
+        return in_flight_ < kFlightDepth && plan_.available_slots() != 0;
+    }
+
+    std::size_t in_flight() const {
+        return in_flight_;
+    }
+
+    bool submit(std::uint64_t sequence, const float* input) {
+        auto write = plan_.acquire_input(sequence + 1, 0);
+        if (!write)
+            return false;
+        std::memcpy(write->bytes.data(), input, workload_->complex_floats * sizeof(float));
+        if (!plan_.submit({write->token, 0}))
+            return false;
+        ++in_flight_;
+        return true;
+    }
+
+    void wait(std::uint64_t deadline) {
+        const auto now = now_ns();
+        if (in_flight_ == 0 || deadline <= now) {
+            sleep_until_ns(deadline);
+            return;
+        }
+        if (policy_ == DawnSharedIoProvider::CompletionPolicy::TimedWaitAny) {
+            provider_->service_until(deadline);
+            return;
+        }
+        // Polling policies mirror the transport worker: poll, then sleep one
+        // poll quantum when nothing retired.
+        provider_->service_until(0);
+        if (plan_.drain(now_ns()) == 0)
+            std::this_thread::sleep_for(
+                std::chrono::nanoseconds(std::min(poll_interval_ns_, deadline - now)));
+    }
+
+    void collect(Observer& observer, std::vector<BlockRecord>&) {
+        if (in_flight_ == 0)
+            return;
+        if (policy_ != DawnSharedIoProvider::CompletionPolicy::TimedWaitAny)
+            provider_->service_until(0);
+        plan_.drain(now_ns());
+        while (auto completion = plan_.pop_completion()) {
+            const auto sequence = completion->token.slot.stream_sequence - 1;
+            auto output = plan_.acquire_output(*completion);
+            const auto visible = now_ns();
+            const bool ok = output.has_value() &&
+                            completion->status == SharedIoArena::CompletionStatus::RetiredSuccess;
+            if (completion->gpu_elapsed_available && sequence < gpu_busy_.size())
+                gpu_busy_[sequence] = static_cast<std::int64_t>(completion->gpu_elapsed_ns);
+            observer.visible(sequence, visible,
+                             ok ? reinterpret_cast<const float*>(output->bytes.data()) : nullptr);
+            if (output) {
+                const auto token = output->token;
+                output.reset();
+                (void)plan_.release_output({token});
             }
+            if (in_flight_ != 0)
+                --in_flight_;
         }
-        auto record = pending[sequence % kFlightDepth];
-        record.completion_observed_ns = now_ns();
-        auto output = plan.acquire_output(*completion);
-        record.oracle = output.has_value() &&
-                        completion->status == SharedIoArena::CompletionStatus::RetiredSuccess;
-        if (output) {
-            const auto* values = reinterpret_cast<const float*>(output->bytes.data());
-            for (std::uint32_t channel = 0; record.oracle && channel < kChannels; ++channel)
-                for (std::uint32_t frame = 0; frame < kFrames; ++frame) {
-                    const auto offset =
-                        static_cast<std::size_t>(channel) * fft_size * 2 + frame * 2;
-                    const auto expected_value =
-                        expected[sequence % kFlightDepth][channel * kFrames + frame];
-                    if (!std::isfinite(values[offset]) ||
-                        std::fabs(values[offset] - expected_value) > 1.0e-4f)
-                        record.oracle = false;
-                }
-            const auto token = output->token;
-            output.reset();
-            if (!plan.release_output({token}))
-                record.oracle = false;
-        }
-        if (record.sequence >= kWarmup)
-            result.records.push_back(record);
-    };
+    }
 
-    for (std::uint32_t sequence = 0; sequence < kWarmup + kTrials; ++sequence) {
-        if (sequence >= kFlightDepth)
-            settle(sequence - kFlightDepth);
-        const auto index = sequence % kFlightDepth;
-        auto write = plan.acquire_input(sequence + 1, 0);
-        if (!write) {
-            result.unavailable = true;
-            result.reason = "acquire_failed";
-            return result;
-        }
-        auto* values = reinterpret_cast<float*>(write->bytes.data());
-        for (std::uint32_t channel = 0; channel < kChannels; ++channel)
-            for (std::uint32_t frame = 0; frame < fft_size; ++frame) {
-                const float sample =
-                    frame < kFrames ? static_cast<float>((sequence % 97u) * 0.01 +
-                                                         (channel * kFrames + frame) * 0.003 - 0.2)
-                                    : 0.0f;
-                values[(static_cast<std::size_t>(channel) * fft_size + frame) * 2] = sample;
-                values[(static_cast<std::size_t>(channel) * fft_size + frame) * 2 + 1] = 0.0f;
-                if (frame < kFrames)
-                    expected[index][channel * kFrames + frame] = sample;
-            }
-        Record record{};
-        record.sequence = sequence;
-        record.encode_start_ns = now_ns();
-        record.encode_end_ns = now_ns();
-        record.commit_start_ns = now_ns();
-        if (!plan.submit({write->token, 0})) {
-            result.unavailable = true;
-            result.reason = "submit_failed";
-            return result;
-        }
-        record.commit_return_ns = now_ns();
-        pending[index] = record;
+    void finish() {}
+
+    bool release() {
+        const bool released = plan_.release();
+        provider_.reset();
+        return released;
     }
-    for (std::uint32_t i = 0; i < kFlightDepth; ++i)
-        settle(kWarmup + kTrials - kFlightDepth + i);
-    if (!plan.release()) {
-        result.unavailable = true;
-        result.reason = "release_failed";
+
+    const std::vector<std::int64_t>& gpu_busy() const {
+        return gpu_busy_;
     }
-    return result;
-}
+    bool timestamps_enabled() const {
+        return timestamps_enabled_;
+    }
+    DawnSharedIoProvider::Stats stats() const {
+        return provider_ ? provider_->stats() : DawnSharedIoProvider::Stats{};
+    }
+
+  private:
+    DawnSharedIoProvider::CompletionPolicy policy_;
+    bool staged_timestamps_;
+    std::uint64_t poll_interval_ns_;
+    const Workload* workload_ = nullptr;
+    std::unique_ptr<DawnSharedIoProvider> provider_;
+    SharedIoComputePlan plan_;
+    std::size_t in_flight_ = 0;
+    bool timestamps_enabled_ = false;
+    std::vector<std::int64_t> gpu_busy_;
+};
 #endif
 
-void emit(const Result& result, id<MTLDevice> device) {
-    std::printf("{\"schema\":\"pulp.gpu-audio.native-metal-matched.v1\",\"status\":\"%s\",\"mode\":"
-                "\"%s\",\"device\":\"%s\",\"frames\":%u,\"channels\":%u,\"flight_depth\":%u,"
-                "\"trials\":%zu,\"reason\":\"%s\",\"cpu_timestamp_domain\":\"steady_clock_ns\","
-                "\"gpu_timestamp_domain\":\"%s\",\"records\":[",
-                result.unavailable ? "unavailable" : "completed", result.mode,
-                device.name.UTF8String, kFrames, kChannels, kFlightDepth, result.records.size(),
-                result.reason.c_str(),
-                result.gpu_timestamps_available ? "Metal_host_seconds_converted_to_ns"
-                                                : "unavailable_for_Dawn_provider");
-    for (std::size_t i = 0; i < result.records.size(); ++i) {
-        if (i)
-            std::printf(",");
-        const auto& r = result.records[i];
-        std::printf("{\"sequence\":%llu,\"encode_start_ns\":%llu,\"encode_end_ns\":%llu,\"commit_"
-                    "start_ns\":%llu,\"commit_return_ns\":%llu,\"completion_observed_ns\":%llu,"
-                    "\"gpu_start_ns\":%.0f,\"gpu_end_ns\":%.0f,\"oracle\":%s}",
-                    (unsigned long long)r.sequence, (unsigned long long)r.encode_start_ns,
-                    (unsigned long long)r.encode_end_ns, (unsigned long long)r.commit_start_ns,
-                    (unsigned long long)r.commit_return_ns,
-                    (unsigned long long)r.completion_observed_ns, r.gpu_start_ns, r.gpu_end_ns,
-                    r.oracle ? "true" : "false");
+// ---------------------------------------------------------------------------
+// Concurrent Skia render load (ADR Measurement C) on Pulp's own UI device,
+// paced at 60 fps, with a full readback per frame.
+
+struct RenderStats {
+    bool active = false;
+    std::string status = "not_requested";
+    std::vector<std::int64_t> frame_ns;
+    std::uint64_t dropped = 0;
+    std::uint64_t thread_cpu_ns = 0;
+};
+
+class RenderLoad {
+  public:
+    static constexpr std::uint32_t kWidth = 1280;
+    static constexpr std::uint32_t kHeight = 800;
+    static constexpr double kFramePeriodNs = 1.0e9 / 60.0;
+
+    ~RenderLoad() {
+        {
+            std::lock_guard lock(mutex_);
+            quit_ = true;
+        }
+        cv_.notify_all();
+        if (thread_.joinable())
+            thread_.join();
     }
-    std::printf("]}\n");
+
+    bool ensure(std::string& reason) {
+#if defined(PULP_COMPARATOR_HAS_RENDER_LOAD)
+        if (thread_.joinable())
+            return ready_;
+        std::promise<bool> started;
+        auto future = started.get_future();
+        thread_ = std::thread([this, &started] { run(started); });
+        ready_ = future.get();
+        if (!ready_)
+            reason = error_.empty() ? "render_surface_unavailable" : error_;
+        return ready_;
+#else
+        reason = "render_load_not_built";
+        return false;
+#endif
+    }
+
+    void start() {
+        std::lock_guard lock(mutex_);
+        stats_ = {};
+        stats_.active = true;
+        stats_.status = "running";
+        active_ = true;
+        cv_.notify_all();
+    }
+
+    RenderStats stop() {
+        std::unique_lock lock(mutex_);
+        active_ = false;
+        idle_cv_.wait(lock, [&] { return !rendering_; });
+        stats_.status = "completed";
+        return stats_;
+    }
+
+  private:
+#if defined(PULP_COMPARATOR_HAS_RENDER_LOAD)
+    static void paint(pulp::canvas::Canvas& canvas, std::uint64_t frame) {
+        using pulp::canvas::Color;
+        const float phase = static_cast<float>(frame % 240) / 240.0f;
+        canvas.set_fill_color(Color::rgba(0.06f, 0.07f, 0.09f));
+        canvas.fill_rect(0, 0, kWidth, kHeight);
+        const Color stops[3] = {Color::rgba(0.9f, 0.3f, 0.2f, 0.8f),
+                                Color::rgba(0.2f, 0.6f, 0.9f, 0.8f),
+                                Color::rgba(0.3f, 0.9f, 0.4f, 0.8f)};
+        const float positions[3] = {0.0f, 0.5f, 1.0f};
+        for (int i = 0; i < 320; ++i) {
+            const auto x = static_cast<float>((i * 37) % static_cast<int>(kWidth));
+            const auto y = static_cast<float>((i * 53 + static_cast<int>(phase * 400)) %
+                                              static_cast<int>(kHeight));
+            canvas.save();
+            canvas.translate(x, y);
+            canvas.rotate(phase * 6.2831853f + static_cast<float>(i) * 0.1f);
+            canvas.set_fill_gradient_linear(0, 0, 80, 40, stops, positions, 3);
+            canvas.fill_rounded_rect(-40, -20, 80, 40, 8);
+            canvas.clear_fill_gradient();
+            canvas.restore();
+        }
+        canvas.set_line_width(2.0f);
+        for (int i = 0; i < 160; ++i) {
+            canvas.set_stroke_color(Color::rgba(0.8f, 0.8f, 0.2f + 0.004f * i, 0.6f));
+            canvas.begin_path();
+            const float y = 5.0f * static_cast<float>(i);
+            canvas.move_to(0, y);
+            canvas.cubic_to(400, y + 120 * std::sin(phase * 6.28f + i), 880,
+                            y - 120 * std::cos(phase * 6.28f + i), kWidth, y);
+            canvas.stroke_current_path();
+        }
+        for (int i = 0; i < 200; ++i) {
+            canvas.set_fill_color(Color::rgba(0.1f + 0.004f * i, 0.4f, 0.8f, 0.35f));
+            canvas.fill_circle(static_cast<float>((i * 97) % static_cast<int>(kWidth)),
+                               static_cast<float>((i * 61) % static_cast<int>(kHeight)),
+                               6.0f + static_cast<float>(i % 24));
+        }
+    }
+
+    void run(std::promise<bool>& started) {
+        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+        pulp::render::HeadlessSurface::Config config;
+        config.width = kWidth;
+        config.height = kHeight;
+        auto surface = pulp::render::HeadlessSurface::create(config, &error_);
+        const bool ok = surface && surface->is_ready() &&
+                        !surface->render_rgba([](pulp::canvas::Canvas& c) { paint(c, 0); }).empty();
+        started.set_value(ok);
+        if (!ok)
+            return;
+        std::uint64_t frame = 0;
+        for (;;) {
+            {
+                std::unique_lock lock(mutex_);
+                cv_.wait(lock, [&] { return quit_ || active_; });
+                if (quit_)
+                    return;
+                rendering_ = true;
+            }
+            const auto cpu_begin = thread_cpu_ns();
+            const auto t0 = now_ns();
+            std::uint64_t index = 0;
+            std::vector<std::int64_t> frames;
+            std::uint64_t dropped = 0;
+            for (;;) {
+                {
+                    std::lock_guard lock(mutex_);
+                    if (!active_ || quit_)
+                        break;
+                }
+                sleep_until_ns(t0 + static_cast<std::uint64_t>(index * kFramePeriodNs));
+                const auto begin = now_ns();
+                @autoreleasepool {
+                    (void)surface->render_rgba(
+                        [frame](pulp::canvas::Canvas& c) { paint(c, frame); });
+                }
+                const auto end = now_ns();
+                frames.push_back(static_cast<std::int64_t>(end - begin));
+                ++frame;
+                // Frame slots whose deadline already passed are dropped.
+                const auto next = static_cast<std::uint64_t>((end - t0) / kFramePeriodNs) + 1;
+                if (next > index + 1)
+                    dropped += next - index - 1;
+                index = std::max(next, index + 1);
+            }
+            std::lock_guard lock(mutex_);
+            stats_.frame_ns = std::move(frames);
+            stats_.dropped = dropped;
+            stats_.thread_cpu_ns = thread_cpu_ns() - cpu_begin;
+            rendering_ = false;
+            idle_cv_.notify_all();
+        }
+    }
+#endif
+
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::condition_variable idle_cv_;
+    std::thread thread_;
+    bool ready_ = false;
+    bool active_ = false;
+    bool rendering_ = false;
+    bool quit_ = false;
+    std::string error_;
+    RenderStats stats_;
+};
+
+// ---------------------------------------------------------------------------
+// Paced cell driver
+
+struct LaneSpec {
+    std::string name;
+    std::string side; // "metal" | "dawn"
+    MetalCompletion metal_completion = MetalCompletion::SharedEvent;
+    int dawn_policy = 0; // 0 ProcessEvents, 1 WaitAny, 2 TimedWaitAny
+    bool dawn_staged_timestamps = false;
+    std::uint64_t poll_interval_ns = 0;
+    bool production_eligible = true;
+};
+
+struct CellResult {
+    std::string lane;
+    std::string side;
+    std::uint32_t frames = 0;
+    std::string load;
+    std::string status = "completed";
+    std::string reason;
+    KernelIdentity kernel;
+    std::vector<BlockRecord> records;
+    std::uint64_t oracle_failures = 0;
+    double max_oracle_error = 0.0;
+    std::uint64_t stalls = 0;
+    std::uint64_t worker_cpu_total_ns = 0;
+    std::uint64_t process_cpu_total_ns = 0;
+    bool gpu_timestamps = false;
+    std::string gpu_busy_domain;
+    std::string wake_domain;
+    std::uint64_t late_gpu_time_waits = 0;
+    std::string extra_json;
+    RenderStats render;
+    std::array<std::vector<float>, kPatterns> parity;
+    std::uint64_t t0_ns = 0;
+};
+
+struct RunConfig {
+    std::uint32_t blocks = 10'000;
+    std::uint32_t warmup = 512;
+    std::vector<std::uint32_t> frames = {64, 128, 256};
+    std::vector<std::string> loads = {"idle", "render"};
+    std::vector<std::string> lanes;
+    std::uint32_t seed = 20261022;
+    bool planted = false;
+    std::string output;
+    std::string mode = "campaign";
+};
+
+// Block k is released at t0 + k * period. Between releases the worker only
+// services completions; worker CPU for interval k is the thread CPU from
+// release k to release k+1, minus the oracle work.
+template <class Lane>
+void drive(Lane& lane, const Workload& w, const RunConfig& rc, CellResult& cell) {
+    const std::uint32_t total = rc.warmup + rc.blocks;
+    std::vector<BlockRecord> records(total);
+    Observer observer;
+    observer.workload = &w;
+    observer.records = &records;
+    observer.warmup = rc.warmup;
+    observer.parity = &cell.parity;
+
+    const auto period = w.period_ns;
+    const auto t0 = now_ns() + 5'000'000;
+    cell.t0_ns = t0;
+    sleep_until_ns(t0 - 1'000'000);
+    auto cpu_mark = thread_cpu_ns();
+    std::uint64_t excluded_mark = 0;
+    const auto process_begin = process_cpu_ns();
+    const auto worker_begin = cpu_mark;
+    for (std::uint32_t k = 0; k < total; ++k) {
+        const auto release = t0 + static_cast<std::uint64_t>(k * period);
+        for (;;) {
+            lane.collect(observer, records);
+            if (now_ns() >= release)
+                break;
+            lane.wait(release);
+        }
+        const auto cpu_now = thread_cpu_ns();
+        if (k > 0) {
+            const auto excluded = observer.excluded_cpu_ns - excluded_mark;
+            const auto used = cpu_now - cpu_mark;
+            records[k - 1].worker_cpu_ns =
+                static_cast<std::int64_t>(used > excluded ? used - excluded : 0);
+        }
+        cpu_mark = cpu_now;
+        excluded_mark = observer.excluded_cpu_ns;
+
+        bool stalled = false;
+        const auto stall_begin = now_ns();
+        while (!lane.can_submit(k)) {
+            stalled = true;
+            lane.wait(now_ns() + 1'000'000);
+            lane.collect(observer, records);
+            if (now_ns() - stall_begin > kStallLimitNs) {
+                cell.status = "failed";
+                cell.reason = "completion_stalled";
+                return;
+            }
+        }
+        auto& record = records[k];
+        record.release_ns = static_cast<std::int64_t>(release - t0);
+        record.stalled = stalled ? 1 : 0;
+        cell.stalls += stalled ? 1 : 0;
+        const auto submit_begin = now_ns();
+        if (!lane.submit(k, w.inputs[k % kPatterns].data())) {
+            cell.status = "failed";
+            cell.reason = "submit_failed";
+            return;
+        }
+        record.submit_ns = static_cast<std::int64_t>(submit_begin - t0);
+        record.submit_end_ns = static_cast<std::int64_t>(now_ns() - t0);
+    }
+    const auto drain_begin = now_ns();
+    while (lane.in_flight() != 0) {
+        lane.wait(now_ns() + 1'000'000);
+        lane.collect(observer, records);
+        if (now_ns() - drain_begin > kStallLimitNs) {
+            cell.status = "failed";
+            cell.reason = "drain_stalled";
+            return;
+        }
+    }
+    const auto cpu_end = thread_cpu_ns();
+    const auto excluded = observer.excluded_cpu_ns - excluded_mark;
+    const auto tail = cpu_end - cpu_mark;
+    records[total - 1].worker_cpu_ns =
+        static_cast<std::int64_t>(tail > excluded ? tail - excluded : 0);
+    lane.finish();
+    cell.worker_cpu_total_ns = cpu_end - worker_begin - observer.excluded_cpu_ns;
+    cell.process_cpu_total_ns = process_cpu_ns() - process_begin;
+    for (std::uint32_t k = rc.warmup; k < total; ++k)
+        if (!records[k].oracle)
+            ++cell.oracle_failures;
+    cell.max_oracle_error = observer.max_oracle_error;
+    for (auto& record : records)
+        if (record.visible_ns >= 0)
+            record.visible_ns -= static_cast<std::int64_t>(t0);
+    cell.records.assign(records.begin() + rc.warmup, records.end());
+}
+
+// Every lane runs on a dedicated worker thread at the same QoS.
+template <class Fn> void on_worker_thread(Fn&& fn) {
+    std::thread worker([&] {
+        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+        @autoreleasepool {
+            fn();
+        }
+    });
+    worker.join();
+}
+
+std::string cell_json(const CellResult& cell, const RunConfig& rc) {
+    std::vector<std::int64_t> release, submit, submit_end, visible, busy, end, callback, cpu;
+    std::vector<int> oracle, stalled;
+    for (const auto& r : cell.records) {
+        release.push_back(r.release_ns);
+        submit.push_back(r.submit_ns);
+        submit_end.push_back(r.submit_end_ns);
+        visible.push_back(r.visible_ns);
+        busy.push_back(r.gpu_busy_ns);
+        end.push_back(r.gpu_end_ns);
+        callback.push_back(r.callback_ns);
+        cpu.push_back(r.worker_cpu_ns);
+        oracle.push_back(r.oracle);
+        stalled.push_back(r.stalled);
+    }
+    std::string out =
+        "{\"lane\":" + json_string(cell.lane) + ",\"side\":" + json_string(cell.side) +
+        ",\"frames\":" + std::to_string(cell.frames) + ",\"load\":" + json_string(cell.load) +
+        ",\"status\":" + json_string(cell.status) + ",\"reason\":" + json_string(cell.reason) +
+        ",\"blocks\":" + std::to_string(cell.records.size()) +
+        ",\"warmup_blocks\":" + std::to_string(rc.warmup) + ",\"kernel\":{\"canonical\":" +
+        (cell.kernel.canonical.empty() ? "null" : cell.kernel.canonical) +
+        ",\"kernel_digest\":" + json_string(cell.kernel.digest) + "}" +
+        ",\"oracle_failures\":" + std::to_string(cell.oracle_failures) +
+        ",\"max_oracle_error\":" + json_double(cell.max_oracle_error) +
+        ",\"stalls\":" + std::to_string(cell.stalls) +
+        ",\"worker_cpu_total_ns\":" + std::to_string(cell.worker_cpu_total_ns) +
+        ",\"process_cpu_total_ns\":" + std::to_string(cell.process_cpu_total_ns) +
+        ",\"gpu_timestamps\":" + json_bool(cell.gpu_timestamps) +
+        ",\"gpu_busy_domain\":" + json_string(cell.gpu_busy_domain) +
+        ",\"wake_domain\":" + json_string(cell.wake_domain) +
+        ",\"late_gpu_time_waits\":" + std::to_string(cell.late_gpu_time_waits);
+    if (!cell.extra_json.empty())
+        out += "," + cell.extra_json;
+    out += ",\"render_load\":{\"active\":" + std::string(json_bool(cell.render.active)) +
+           ",\"status\":" + json_string(cell.render.status) +
+           ",\"dropped_frames\":" + std::to_string(cell.render.dropped) +
+           ",\"thread_cpu_ns\":" + std::to_string(cell.render.thread_cpu_ns) +
+           ",\"frame_ns\":" + json_array(cell.render.frame_ns) + "}";
+    out += ",\"samples\":{\"release_ns\":" + json_array(release) +
+           ",\"submit_ns\":" + json_array(submit) + ",\"submit_end_ns\":" + json_array(submit_end) +
+           ",\"visible_ns\":" + json_array(visible) + ",\"gpu_busy_ns\":" + json_array(busy) +
+           ",\"gpu_end_ns\":" + json_array(end) + ",\"callback_ns\":" + json_array(callback) +
+           ",\"worker_cpu_ns\":" + json_array(cpu) + ",\"oracle\":" + json_array(oracle) +
+           ",\"stalled\":" + json_array(stalled) + "}}";
+    return out;
+}
+
+std::vector<LaneSpec> default_lanes() {
+    std::vector<LaneSpec> lanes;
+    lanes.push_back({.name = "metal_shared_event",
+                     .side = "metal",
+                     .metal_completion = MetalCompletion::SharedEvent});
+    lanes.push_back({.name = "metal_completed_handler",
+                     .side = "metal",
+                     .metal_completion = MetalCompletion::CompletedHandler});
+    lanes.push_back({.name = "dawn_imported_timed_wait_any", .side = "dawn", .dawn_policy = 2});
+    lanes.push_back({.name = "dawn_imported_process_events_poll50us",
+                     .side = "dawn",
+                     .dawn_policy = 0,
+                     .poll_interval_ns = kDawnPollIntervalNs});
+    lanes.push_back({.name = "dawn_imported_wait_any_poll50us",
+                     .side = "dawn",
+                     .dawn_policy = 1,
+                     .poll_interval_ns = kDawnPollIntervalNs});
+    // The provider refuses timestamps on imported storage, so Dawn GPU busy
+    // time comes from a diagnostic staged lane that production never uses.
+    lanes.push_back({.name = "dawn_staged_timestamps_timed_wait_any",
+                     .side = "dawn",
+                     .dawn_policy = 2,
+                     .dawn_staged_timestamps = true,
+                     .production_eligible = false});
+    return lanes;
+}
+
+std::vector<std::string> split(const std::string& text) {
+    std::vector<std::string> out;
+    std::stringstream stream(text);
+    std::string item;
+    while (std::getline(stream, item, ','))
+        if (!item.empty())
+            out.push_back(item);
+    return out;
+}
+
+bool parse_args(int argc, char** argv, RunConfig& rc) {
+    try {
+        for (int i = 1; i < argc; ++i) {
+            const std::string arg = argv[i];
+            const auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
+            if (arg == "--blocks")
+                rc.blocks = static_cast<std::uint32_t>(std::stoul(next()));
+            else if (arg == "--warmup")
+                rc.warmup = static_cast<std::uint32_t>(std::stoul(next()));
+            else if (arg == "--frames") {
+                rc.frames.clear();
+                for (const auto& f : split(next()))
+                    rc.frames.push_back(static_cast<std::uint32_t>(std::stoul(f)));
+            } else if (arg == "--loads")
+                rc.loads = split(next());
+            else if (arg == "--lanes")
+                rc.lanes = split(next());
+            else if (arg == "--seed")
+                rc.seed = static_cast<std::uint32_t>(std::stoul(next()));
+            else if (arg == "--output")
+                rc.output = next();
+            else if (arg == "--plant-unmatched-kernel")
+                rc.planted = true;
+            else if (arg == "--smoke") {
+                rc.blocks = 192;
+                rc.warmup = 32;
+                rc.mode = "smoke";
+            } else {
+                std::fprintf(stderr, "unknown argument: %s\n", arg.c_str());
+                return false;
+            }
+        }
+    } catch (const std::exception&) {
+        return false;
+    }
+    for (auto f : rc.frames)
+        if (f < 8 || f > 4096 || (f & (f - 1)) != 0)
+            return false;
+    for (const auto& load : rc.loads)
+        if (load != "idle" && load != "render")
+            return false;
+    return rc.blocks > 0 && rc.warmup >= kPatterns && !rc.frames.empty() && !rc.loads.empty();
 }
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     @autoreleasepool {
+        RunConfig rc;
+        if (!parse_args(argc, argv, rc))
+            return 2;
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-        if (!device)
-            return 77;
-        NSError* error = nil;
-        id<MTLLibrary> library = make_library(device, &error);
-        id<MTLFunction> function =
-            library ? [library newFunctionWithName:@"complex_multiply"] : nil;
-        id<MTLComputePipelineState> pipeline =
-            function ? [device newComputePipelineStateWithFunction:function error:&error] : nil;
-        if (!pipeline)
-            return 1;
-        const auto ordinary = run_ordinary(device, pipeline);
-        emit(ordinary, device);
-        if (ordinary.unavailable)
-            return 77;
-        bool metal4_ok = false;
-#if PULP_HAS_METAL4_COMPARATOR
-        if (@available(macOS 26.0, *)) {
-            const auto metal4 = run_metal4(device, pipeline);
-            emit(metal4, device);
-            if (metal4.unavailable)
-                return 77;
-            metal4_ok = std::all_of(metal4.records.begin(), metal4.records.end(),
-                                    [](const Record& record) { return record.oracle; });
-        } else {
+        if (!device) {
+            std::fprintf(stderr, "comparator: no Metal device\n");
             return 77;
         }
-#else
+        std::string reason;
+        MetalPipelines pipelines;
+        if (!make_metal_pipelines(device, pipelines, reason)) {
+            std::fprintf(stderr, "comparator: %s\n", reason.c_str());
+            return 1;
+        }
+        const auto wgsl = extract_provider_wgsl(PULP_GPU_AUDIO_PROVIDER_SOURCE);
+
+        auto lanes = default_lanes();
+        if (!rc.lanes.empty()) {
+            std::vector<LaneSpec> selected;
+            for (const auto& name : rc.lanes)
+                for (const auto& lane : lanes)
+                    if (lane.name == name)
+                        selected.push_back(lane);
+            if (selected.size() != rc.lanes.size()) {
+                std::fprintf(stderr, "comparator: unknown lane\n");
+                return 2;
+            }
+            lanes = selected;
+        }
+#if !PULP_HAS_DAWN_COMPARATOR
+        std::fprintf(stderr, "comparator: Dawn provider not built\n");
         return 77;
-#endif
-        for (const auto& record : ordinary.records)
-            if (!record.oracle)
+#else
+        struct CellPlan {
+            std::size_t lane;
+            std::uint32_t frames;
+            std::string load;
+        };
+        std::vector<CellPlan> order;
+        for (std::size_t l = 0; l < lanes.size(); ++l)
+            for (auto f : rc.frames)
+                for (const auto& load : rc.loads)
+                    order.push_back({l, f, load});
+        // Randomized cell order keeps drift and thermal state from lining up
+        // with a lane or a block size.
+        std::mt19937 shuffle_rng(rc.seed);
+        std::shuffle(order.begin(), order.end(), shuffle_rng);
+
+        std::vector<Workload> workloads;
+        for (auto f : rc.frames)
+            workloads.push_back(make_workload(f, rc.seed));
+        const auto workload_for = [&](std::uint32_t frames) -> const Workload& {
+            for (const auto& w : workloads)
+                if (w.frames == frames)
+                    return w;
+            return workloads.front();
+        };
+
+        RenderLoad render;
+        std::string render_reason;
+        bool render_available = false;
+        if (std::find(rc.loads.begin(), rc.loads.end(), "render") != rc.loads.end())
+            render_available = render.ensure(render_reason);
+
+        DawnIdentity dawn_identity;
+        HostClockBridge clock;
+        std::vector<CellResult> cells;
+        bool any_failure = false;
+        for (const auto& plan : order) {
+            const auto& spec = lanes[plan.lane];
+            const auto& w = workload_for(plan.frames);
+            CellResult cell;
+            cell.lane = spec.name;
+            cell.side = spec.side;
+            cell.frames = plan.frames;
+            cell.load = plan.load;
+            const bool planted_cell = rc.planted && spec.side == "metal";
+            if (spec.side == "metal") {
+                cell.kernel =
+                    planted_cell
+                        ? make_kernel_identity(
+                              kPlantedProgramId, pipelines.msl_sha256, pipelines.msl_sha256, w,
+                              {{"complex_multiply", 0, 0, MetalLane::planted_groups(w)}})
+                        : make_kernel_identity(kProgramId, kPortedFromFftWgslSha256,
+                                               kPortedFromMulWgslSha256, w, convolution_passes(w));
+                cell.gpu_timestamps = true;
+                cell.gpu_busy_domain = "metal_command_buffer_gpu_start_to_end";
+                cell.wake_domain = "metal_gpu_end_to_worker_observed";
+            } else {
+                cell.kernel = make_kernel_identity(
+                    kProgramId, wgsl.ok ? wgsl.fft_sha256 : "unavailable",
+                    wgsl.ok ? wgsl.mul_sha256 : "unavailable", w, convolution_passes(w));
+                cell.gpu_busy_domain = "dawn_timestamp_query_first_to_last_compute_pass";
+                cell.wake_domain = "unobservable_no_host_completion_time_exposed";
+            }
+            if (plan.load == "render" && !render_available) {
+                cell.status = "unavailable";
+                cell.reason = "render_load_unavailable:" + render_reason;
+                cells.push_back(std::move(cell));
+                continue;
+            }
+            const std::uint32_t total = rc.warmup + rc.blocks;
+            if (plan.load == "render")
+                render.start();
+            if (spec.side == "metal") {
+                MetalLane lane(device, pipelines, spec.metal_completion, planted_cell);
+                if (!lane.prepare(w, total, reason)) {
+                    cell.status = "unavailable";
+                    cell.reason = reason;
+                } else {
+                    on_worker_thread([&] { drive(lane, w, rc, cell); });
+                    const auto& start = lane.gpu_start();
+                    const auto& end = lane.gpu_end();
+                    const auto t0 = static_cast<std::int64_t>(cell.t0_ns);
+                    for (std::size_t i = 0; i < cell.records.size(); ++i) {
+                        const auto k = i + rc.warmup;
+                        if (start[k] >= 0 && end[k] >= start[k]) {
+                            cell.records[i].gpu_busy_ns = end[k] - start[k];
+                            cell.records[i].gpu_end_ns = end[k] - t0;
+                        }
+                        if (cell.records[i].callback_ns >= 0)
+                            cell.records[i].callback_ns -= t0;
+                    }
+                    cell.late_gpu_time_waits = lane.late_gpu_time_waits();
+                }
+                cell.extra_json =
+                    "\"metal\":{\"completion\":" +
+                    json_string(spec.metal_completion == MetalCompletion::SharedEvent
+                                    ? "MTLSharedEvent_notifyListener_semaphore"
+                                    : "addCompletedHandler_semaphore") +
+                    ",\"storage\":\"no_copy_page_aligned_host\",\"planted_unmatched_kernel\":" +
+                    json_bool(planted_cell) + "}";
+            } else {
+                const auto policy =
+                    spec.dawn_policy == 2   ? DawnSharedIoProvider::CompletionPolicy::TimedWaitAny
+                    : spec.dawn_policy == 1 ? DawnSharedIoProvider::CompletionPolicy::WaitAny
+                                            : DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
+                DawnLane lane(policy, spec.dawn_staged_timestamps, spec.poll_interval_ns);
+                if (!lane.prepare(w, total, reason, dawn_identity)) {
+                    cell.status = "unavailable";
+                    cell.reason = reason;
+                } else {
+                    cell.gpu_timestamps = lane.timestamps_enabled();
+                    on_worker_thread([&] { drive(lane, w, rc, cell); });
+                    for (std::size_t i = 0; i < cell.records.size(); ++i)
+                        cell.records[i].gpu_busy_ns = lane.gpu_busy()[i + rc.warmup];
+                    const auto stats = lane.stats();
+                    cell.extra_json =
+                        "\"dawn\":{\"completion_policy\":" +
+                        json_string(spec.dawn_policy == 2   ? "TimedWaitAny"
+                                    : spec.dawn_policy == 1 ? "WaitAny"
+                                                            : "ProcessEvents") +
+                        ",\"storage\":" +
+                        json_string(spec.dawn_staged_timestamps ? "staged"
+                                                                : "imported_host_pointer") +
+                        ",\"enable_timestamps\":" + json_bool(spec.dawn_staged_timestamps) +
+                        ",\"timestamps_unavailable_reason\":" +
+                        json_string(spec.dawn_staged_timestamps
+                                        ? ""
+                                        : "timestamps_require_staged_storage") +
+                        ",\"poll_interval_ns\":" + std::to_string(spec.poll_interval_ns) +
+                        ",\"production_eligible\":" + json_bool(spec.production_eligible) +
+                        ",\"stats\":{\"service_calls\":" + std::to_string(stats.service_calls) +
+                        ",\"process_events_calls\":" + std::to_string(stats.process_events_calls) +
+                        ",\"wait_any_calls\":" + std::to_string(stats.wait_any_calls) +
+                        ",\"wait_any_timeouts\":" + std::to_string(stats.wait_any_timeouts) +
+                        ",\"runtime_write_buffer_calls\":" +
+                        std::to_string(stats.runtime_write_buffer_calls) +
+                        ",\"timestamp_samples\":" + std::to_string(stats.timestamp_samples) +
+                        ",\"timestamp_failures\":" + std::to_string(stats.timestamp_failures) +
+                        "}}";
+                    if (!lane.release() && cell.status == "completed") {
+                        cell.status = "failed";
+                        cell.reason = "release_failed";
+                    }
+                }
+            }
+            if (plan.load == "render")
+                cell.render = render.stop();
+            if (cell.status == "failed" || (cell.oracle_failures != 0 && !planted_cell))
+                any_failure = true;
+            std::fprintf(stderr,
+                         "comparator: %-40s frames=%3u load=%-6s %s%s%s oracle_failures=%llu\n",
+                         cell.lane.c_str(), cell.frames, cell.load.c_str(), cell.status.c_str(),
+                         cell.reason.empty() ? "" : ":", cell.reason.c_str(),
+                         static_cast<unsigned long long>(cell.oracle_failures));
+            cells.push_back(std::move(cell));
+        }
+
+        // Output parity: every completed cell against one Dawn reference lane
+        // at the same block size, over the same deterministic patterns.
+        std::string parity_json = "[";
+        bool parity_ok = true;
+        bool planted_detected = false;
+        for (const auto frames : rc.frames) {
+            const CellResult* reference = nullptr;
+            for (const auto& c : cells)
+                if (c.frames == frames && c.side == "dawn" && c.status == "completed" &&
+                    !c.parity[0].empty() &&
+                    (!reference ||
+                     std::tie(c.lane, c.load) < std::tie(reference->lane, reference->load)))
+                    reference = &c;
+            for (const auto& c : cells) {
+                if (c.frames != frames || c.status != "completed" || c.parity[0].empty())
+                    continue;
+                double max_diff = reference ? 0.0 : INFINITY;
+                for (std::uint32_t p = 0; reference && p < kPatterns; ++p) {
+                    if (c.parity[p].size() != reference->parity[p].size()) {
+                        max_diff = INFINITY;
+                        break;
+                    }
+                    for (std::size_t i = 0; i < c.parity[p].size(); ++i)
+                        max_diff =
+                            std::max(max_diff, std::fabs(static_cast<double>(c.parity[p][i]) -
+                                                         reference->parity[p][i]));
+                }
+                const bool ok = max_diff <= kParityTolerance;
+                const bool planted_cell = rc.planted && c.side == "metal";
+                if (!ok && !planted_cell)
+                    parity_ok = false;
+                if (!ok && planted_cell)
+                    planted_detected = true;
+                if (parity_json.size() > 1)
+                    parity_json += ",";
+                parity_json +=
+                    "{\"frames\":" + std::to_string(frames) + ",\"lane\":" + json_string(c.lane) +
+                    ",\"load\":" + json_string(c.load) +
+                    ",\"reference_lane\":" + json_string(reference ? reference->lane : "") +
+                    ",\"max_abs_diff\":" + json_double(max_diff) +
+                    ",\"tolerance\":" + json_double(kParityTolerance) + "}";
+            }
+        }
+        parity_json += "]";
+
+        std::string lanes_json = "[";
+        for (std::size_t i = 0; i < lanes.size(); ++i) {
+            const auto& l = lanes[i];
+            if (i)
+                lanes_json += ",";
+            lanes_json += "{\"name\":" + json_string(l.name) + ",\"side\":" + json_string(l.side) +
+                          ",\"production_eligible\":" + json_bool(l.production_eligible) + "}";
+        }
+        lanes_json += "]";
+        std::string order_json = "[";
+        for (std::size_t i = 0; i < order.size(); ++i) {
+            if (i)
+                order_json += ",";
+            order_json += "{\"lane\":" + json_string(lanes[order[i].lane].name) +
+                          ",\"frames\":" + std::to_string(order[i].frames) +
+                          ",\"load\":" + json_string(order[i].load) + "}";
+        }
+        order_json += "]";
+
+        std::string out =
+            "{\"schema\":" + json_string(kSchema) + ",\"mode\":" + json_string(rc.mode) +
+            ",\"planted_unmatched_kernel\":" + json_bool(rc.planted) +
+            ",\"device\":{\"metal_name\":" + json_string(device.name.UTF8String) +
+            ",\"registry_id\":" + std::to_string(device.registryID) +
+            ",\"unified_memory\":" + json_bool(device.hasUnifiedMemory) + "}" +
+            ",\"dawn\":{\"expected_dawn_revision\":" +
+            json_string(PULP_GPU_AUDIO_EXPECTED_DAWN_SHA) +
+            ",\"dawn_revision\":" + json_string(dawn_identity.dawn_revision) +
+            ",\"provider_revision\":" + json_string(dawn_identity.provider_revision) +
+            ",\"provider_authenticated\":" + json_bool(dawn_identity.authenticated) +
+            ",\"native_runtime_authenticated\":" +
+            json_bool(dawn_identity.native_runtime_authenticated) +
+            ",\"adapter_name\":" + json_string(dawn_identity.adapter_name) +
+            ",\"adapter_backend\":" + json_string(dawn_identity.adapter_backend) +
+            ",\"native_runtime_name\":" + json_string(dawn_identity.native_runtime_name) +
+            ",\"native_runtime_revision\":" + json_string(dawn_identity.native_runtime_revision) +
+            ",\"wp_t_switches\":\"not_present_on_base\"}" +
+            ",\"kernel\":{\"program\":" + json_string(kProgramId) +
+            ",\"provider_wgsl\":{\"ok\":" + json_bool(wgsl.ok) +
+            ",\"reason\":" + json_string(wgsl.reason) +
+            ",\"source_path\":" + json_string(wgsl.source_path) +
+            ",\"source_sha256\":" + json_string(wgsl.source_sha256) +
+            ",\"fft_sha256\":" + json_string(wgsl.fft_sha256) +
+            ",\"mul_sha256\":" + json_string(wgsl.mul_sha256) + "}" +
+            ",\"msl_port\":{\"ported_from_fft_wgsl_sha256\":" +
+            json_string(kPortedFromFftWgslSha256) +
+            ",\"ported_from_mul_wgsl_sha256\":" + json_string(kPortedFromMulWgslSha256) +
+            ",\"msl_sha256\":" + json_string(pipelines.msl_sha256) +
+            ",\"math_mode\":" + json_string(pipelines.math_mode) + "}" +
+            ",\"parity\":" + parity_json + "}" +
+            ",\"config\":{\"sample_rate\":" + std::to_string(kSampleRate) +
+            ",\"channels\":" + std::to_string(kChannels) +
+            ",\"flight_depth\":" + std::to_string(kFlightDepth) +
+            ",\"lead_blocks\":" + std::to_string(kLeadBlocks) +
+            ",\"blocks_per_cell\":" + std::to_string(rc.blocks) +
+            ",\"warmup_blocks\":" + std::to_string(rc.warmup) +
+            ",\"frames\":" + json_array(rc.frames) + ",\"paced\":true" +
+            ",\"seed\":" + std::to_string(rc.seed) +
+            ",\"oracle_tolerance\":" + json_double(kOracleTolerance) +
+            ",\"worker_qos\":\"QOS_CLASS_USER_INTERACTIVE\"" +
+            ",\"host_clock\":\"steady_clock_ns_relative_to_cell_t0\"" +
+            ",\"steady_minus_mach_ns\":" + std::to_string(clock.steady_minus_mach_ns) +
+            ",\"render_load\":{\"available\":" + json_bool(render_available) +
+            ",\"reason\":" + json_string(render_reason) +
+            ",\"width\":" + std::to_string(RenderLoad::kWidth) +
+            ",\"height\":" + std::to_string(RenderLoad::kHeight) +
+            ",\"target_fps\":60,\"device\":\"separate_pulp_ui_dawn_device\"}" +
+            ",\"lanes\":" + lanes_json + ",\"cell_order\":" + order_json + "}" + ",\"cells\":[";
+        for (std::size_t i = 0; i < cells.size(); ++i) {
+            if (i)
+                out += ",";
+            out += cell_json(cells[i], rc);
+        }
+        out += "]}\n";
+
+        if (!rc.output.empty()) {
+            std::ofstream file(rc.output, std::ios::binary);
+            file << out;
+            if (!file) {
+                std::fprintf(stderr, "comparator: cannot write %s\n", rc.output.c_str());
                 return 1;
-        if (!metal4_ok)
+            }
+        } else {
+            std::fwrite(out.data(), 1, out.size(), stdout);
+        }
+
+        if (!wgsl.ok) {
+            std::fprintf(stderr, "comparator: %s\n", wgsl.reason.c_str());
             return 1;
-#if PULP_HAS_DAWN_COMPARATOR
-        const auto dawn = run_dawn();
-        emit(dawn, device);
-        if (dawn.unavailable)
-            return 77;
-        if (!std::all_of(dawn.records.begin(), dawn.records.end(),
-                         [](const Record& record) { return record.oracle; }))
+        }
+        if (rc.planted)
+            return planted_detected ? 0 : 1;
+        const bool port_current = wgsl.fft_sha256 == kPortedFromFftWgslSha256 &&
+                                  wgsl.mul_sha256 == kPortedFromMulWgslSha256;
+        if (!port_current)
+            std::fprintf(stderr, "comparator: MSL port is stale against the provider WGSL\n");
+        if (any_failure || !parity_ok || !port_current)
             return 1;
-#else
-        return 77;
+        bool dawn_ran = false;
+        for (const auto& c : cells)
+            dawn_ran = dawn_ran || (c.side == "dawn" && c.status == "completed");
+        return dawn_ran ? 0 : 77;
 #endif
-        return 0;
     }
 }
