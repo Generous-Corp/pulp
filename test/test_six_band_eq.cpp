@@ -10,6 +10,8 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <cstring>
+#include <vector>
 #include <limits>
 
 using Catch::Matchers::WithinAbs;
@@ -380,4 +382,32 @@ TEST_CASE("SixBandEq control process response and reset paths allocate nothing",
         allocations = probe.allocation_count();
     }
     REQUIRE(allocations == 0);
+}
+
+TEST_CASE("SixBandEq block processing matches the sample path through a transition",
+          "[signal][eq][determinism]") {
+    std::vector<float> input(6000);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = 0.6f * std::sin(0.0371f * static_cast<float>(i)) +
+                   0.3f * std::sin(0.4113f * static_cast<float>(i));
+    SixBandEq by_block;
+    SixBandEq by_sample;
+    for (auto* eq : {&by_block, &by_sample}) {
+        eq->prepare(48000.0f);
+        eq->set_transition_samples(300);
+        REQUIRE(eq->set_band(0, {120.0f, 6.0f, 0.8f}));
+        REQUIRE(eq->set_band(2, {850.0f, -7.0f, 2.5f}));
+    }
+    auto a = input;
+    auto b = input;
+    for (std::size_t start = 0; start < a.size(); start += 1000) {
+        if (start == 2000) {
+            // The 300-sample transition ends inside this block.
+            REQUIRE(by_block.set_band(3, {2500.0f, 4.0f, 1.5f}));
+            REQUIRE(by_sample.set_band(3, {2500.0f, 4.0f, 1.5f}));
+        }
+        REQUIRE(by_block.process_block(a.data() + start, 1000));
+        for (std::size_t i = start; i < start + 1000; ++i) b[i] = by_sample.process(b[i]);
+    }
+    CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
 }

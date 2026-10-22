@@ -99,72 +99,29 @@ template <typename SampleType = float, std::size_t MaxSections = 16> class SosCa
         return input;
     }
 
-    /// Process a buffer in place.
-    ///
-    /// Sample-major over up to kSectionsPerPass sections at a time: each
-    /// sample runs through every section of the pass before the next sample
-    /// starts, so the sections' recursions are independent dependency chains
-    /// that execute concurrently instead of one section's whole buffer waiting
-    /// on its own feedback latency. Every section uses BiquadT's expressions
-    /// on register-resident coefficients and state, and the denormal snap runs
-    /// every BiquadT::kStateSnapInterval samples and at the end of the call,
-    /// so the output is identical to the sample path while the states are at
-    /// or above 1e-15 (see BiquadT::process(SampleType*, int)).
+    /// Process a buffer in place through BiquadT::process_chain(): the output
+    /// is identical to the sample path while the states are at or above
+    /// 1e-15.
     void process(SampleType* buffer, std::size_t num_samples) noexcept {
-        std::size_t first = 0;
-        while (first < size_) {
-            const std::size_t count = size_ - first < kSectionsPerPass ? size_ - first
-                                                                       : kSectionsPerPass;
-            switch (count) {
-                case 1: process_pass<1>(first, buffer, num_samples); break;
-                case 2: process_pass<2>(first, buffer, num_samples); break;
-                case 3: process_pass<3>(first, buffer, num_samples); break;
-                case 4: process_pass<4>(first, buffer, num_samples); break;
-                case 5: process_pass<5>(first, buffer, num_samples); break;
-                case 6: process_pass<6>(first, buffer, num_samples); break;
-                case 7: process_pass<7>(first, buffer, num_samples); break;
-                default: process_pass<8>(first, buffer, num_samples); break;
-            }
-            first += count;
-        }
+        BiquadT<SampleType>::process_chain(sections_.data(), size_, buffer, num_samples);
     }
 
     /// Process two channels in place, each through its own cascade, with the
-    /// two channels in the lanes of one vector on top of the sample-major
-    /// section pass, so a stereo pair costs about as much as one channel.
-    /// Each channel's output is bit-identical to that cascade's block
-    /// process(); the cascades may hold different coefficients. Cascades of
-    /// different lengths are processed one after the other.
+    /// two channels in vector lanes (BiquadT::process_chain_stereo()). Each
+    /// channel's output is bit-identical to that cascade's block process();
+    /// the cascades may hold different coefficients. Cascades of different
+    /// lengths are processed one after the other.
     static void process_stereo(SosCascadeT& left, SosCascadeT& right, SampleType* left_buffer,
                                SampleType* right_buffer, std::size_t num_samples) noexcept {
-#if defined(__GNUC__) || defined(__clang__)
         if (left.size_ == right.size_) {
-            std::size_t first = 0;
-            while (first < left.size_) {
-                const std::size_t count = left.size_ - first < kSectionsPerPass
-                    ? left.size_ - first : kSectionsPerPass;
-                switch (count) {
-                    case 1: process_pair_pass<1>(left, right, first, left_buffer, right_buffer, num_samples); break;
-                    case 2: process_pair_pass<2>(left, right, first, left_buffer, right_buffer, num_samples); break;
-                    case 3: process_pair_pass<3>(left, right, first, left_buffer, right_buffer, num_samples); break;
-                    case 4: process_pair_pass<4>(left, right, first, left_buffer, right_buffer, num_samples); break;
-                    case 5: process_pair_pass<5>(left, right, first, left_buffer, right_buffer, num_samples); break;
-                    case 6: process_pair_pass<6>(left, right, first, left_buffer, right_buffer, num_samples); break;
-                    case 7: process_pair_pass<7>(left, right, first, left_buffer, right_buffer, num_samples); break;
-                    default: process_pair_pass<8>(left, right, first, left_buffer, right_buffer, num_samples); break;
-                }
-                first += count;
-            }
+            BiquadT<SampleType>::process_chain_stereo(left.sections_.data(), right.sections_.data(),
+                                                     left.size_, left_buffer, right_buffer,
+                                                     num_samples);
             return;
         }
-#endif
         left.process(left_buffer, num_samples);
         right.process(right_buffer, num_samples);
     }
-
-    /// Sections the block path runs together in one sample-major pass. Eight
-    /// sections' state fits in registers alongside the working set.
-    static constexpr std::size_t kSectionsPerPass = 8;
 
     void reset() noexcept {
         for (std::size_t i = 0; i < MaxSections; ++i)
@@ -176,92 +133,6 @@ template <typename SampleType = float, std::size_t MaxSections = 16> class SosCa
     }
 
   private:
-    template <std::size_t Count>
-    void process_pass(std::size_t first, SampleType* buffer, std::size_t num_samples) noexcept {
-        constexpr std::size_t kSnap = static_cast<std::size_t>(BiquadT<SampleType>::kStateSnapInterval);
-        SampleType b0[Count], b1[Count], b2[Count], a1[Count], a2[Count], s1[Count], s2[Count];
-        for (std::size_t k = 0; k < Count; ++k) {
-            const auto& section = sections_[first + k];
-            b0[k] = section.b0_;
-            b1[k] = section.b1_;
-            b2[k] = section.b2_;
-            a1[k] = section.a1_;
-            a2[k] = section.a2_;
-            s1[k] = section.s1_;
-            s2[k] = section.s2_;
-        }
-        for (std::size_t start = 0; start < num_samples; start += kSnap) {
-            const std::size_t end = num_samples - start < kSnap ? num_samples : start + kSnap;
-            for (std::size_t i = start; i < end; ++i) {
-                SampleType x = buffer[i];
-                for (std::size_t k = 0; k < Count; ++k) {
-                    const SampleType output = b0[k] * x + s1[k];
-                    s1[k] = b1[k] * x - a1[k] * output + s2[k];
-                    s2[k] = b2[k] * x - a2[k] * output;
-                    x = output;
-                }
-                buffer[i] = x;
-            }
-            for (std::size_t k = 0; k < Count; ++k) {
-                s1[k] = snap_to_zero(s1[k]);
-                s2[k] = snap_to_zero(s2[k]);
-            }
-        }
-        for (std::size_t k = 0; k < Count; ++k) {
-            sections_[first + k].s1_ = s1[k];
-            sections_[first + k].s2_ = s2[k];
-        }
-    }
-
-#if defined(__GNUC__) || defined(__clang__)
-    using Pair [[gnu::vector_size(2 * sizeof(SampleType))]] = SampleType;
-
-    template <std::size_t Count>
-    static void process_pair_pass(SosCascadeT& l, SosCascadeT& r, std::size_t first,
-                                  SampleType* lb, SampleType* rb,
-                                  std::size_t num_samples) noexcept {
-        constexpr std::size_t kSnap = static_cast<std::size_t>(BiquadT<SampleType>::kStateSnapInterval);
-        Pair b0[Count], b1[Count], b2[Count], a1[Count], a2[Count], s1[Count], s2[Count];
-        for (std::size_t k = 0; k < Count; ++k) {
-            const auto& x = l.sections_[first + k];
-            const auto& y = r.sections_[first + k];
-            b0[k] = Pair{x.b0_, y.b0_};
-            b1[k] = Pair{x.b1_, y.b1_};
-            b2[k] = Pair{x.b2_, y.b2_};
-            a1[k] = Pair{x.a1_, y.a1_};
-            a2[k] = Pair{x.a2_, y.a2_};
-            s1[k] = Pair{x.s1_, y.s1_};
-            s2[k] = Pair{x.s2_, y.s2_};
-        }
-        for (std::size_t start = 0; start < num_samples; start += kSnap) {
-            const std::size_t end = num_samples - start < kSnap ? num_samples : start + kSnap;
-            for (std::size_t i = start; i < end; ++i) {
-                Pair v = {lb[i], rb[i]};
-                for (std::size_t k = 0; k < Count; ++k) {
-                    const Pair output = b0[k] * v + s1[k];
-                    s1[k] = b1[k] * v - a1[k] * output + s2[k];
-                    s2[k] = b2[k] * v - a2[k] * output;
-                    v = output;
-                }
-                lb[i] = v[0];
-                rb[i] = v[1];
-            }
-            for (std::size_t k = 0; k < Count; ++k) {
-                for (int lane = 0; lane < 2; ++lane) {
-                    s1[k][lane] = snap_to_zero(s1[k][lane]);
-                    s2[k][lane] = snap_to_zero(s2[k][lane]);
-                }
-            }
-        }
-        for (std::size_t k = 0; k < Count; ++k) {
-            l.sections_[first + k].s1_ = s1[k][0];
-            l.sections_[first + k].s2_ = s2[k][0];
-            r.sections_[first + k].s1_ = s1[k][1];
-            r.sections_[first + k].s2_ = s2[k][1];
-        }
-    }
-#endif
-
     template <typename CoefficientType>
     SosCascadeInstallStatus
     install(std::span<const BiquadCoefficientsT<CoefficientType>> coefficients,
