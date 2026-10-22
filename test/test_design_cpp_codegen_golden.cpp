@@ -75,6 +75,8 @@ TEST_CASE("generate_pulp_cpp checkpoint artifact stays byte-exact",
     INFO("binding_manifest bytes=" << result.binding_manifest.size()
          << " sha256=" << binding_hash);
 
+    // The C++ lane marks its import root as the captured frame.
+    CHECK(result.source.find("->set_captured_frame_root(true);") != std::string::npos);
     CHECK(result.header.size() == 494);
     CHECK(header_hash == "53c5ce7b1e23e25eb0616b132485ca3ef46df0e85c6d1a56fc06114e512a3ffc");
     CHECK(result.source.size() == 5864);

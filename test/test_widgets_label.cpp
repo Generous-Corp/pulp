@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -1015,6 +1016,50 @@ TEST_CASE("A captured baseline snaps on its captured frame's grid and not the ho
     // and the half-pixel embed offset moves the snapped baseline, even though
     // the frame still lays out at sub-pixel precision.
     CHECK(std::abs(local_baseline(10.5f, 1.0f, false) - at_origin) > 0.25f);
+}
+
+TEST_CASE("An embedded JS import keeps its captured frame's snap grid",
+          "[view][widget][label-cache][alignment][typography][bridge]") {
+    // The JS import lane marks its root through the bridge, as generated code
+    // does with setCapturedFrameRoot('', true). The bridge root is embedded
+    // in a host at a half-pixel offset; the text must paint where it does at
+    // the origin.
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    if (face.empty()) SKIP("Inter does not resolve to a real face on this host");
+    auto local_baseline = [&](float embed_y, bool mark_frame) {
+        View host;
+        host.set_bounds({0, 0, 800, 600});
+        auto frame_owned = std::make_unique<View>();
+        View* frame = frame_owned.get();
+        frame->set_bounds({0, embed_y, 500, 300});
+        host.add_child(std::move(frame_owned));
+        pulp::view::ScriptEngine engine;
+        pulp::state::StateStore store;
+        WidgetBridge bridge(engine, *frame, store);
+        bridge.load_script(mark_frame
+            ? "setSubpixelLayout('', true); setCapturedFrameRoot('', true);"
+              " createLabel('t', 'Grid', '');"
+            : "setSubpixelLayout('', true); createLabel('t', 'Grid', '');");
+        auto* label = dynamic_cast<Label*>(bridge.widget("t"));
+        REQUIRE(label != nullptr);
+        CHECK(frame->captured_frame_root() == mark_frame);
+        label->set_font_family("Inter");
+        label->set_font_size(17.0f);
+        label->set_bounds({0, 3.25f, 200, 40});
+        label->set_cached_line_boxes({{0, 0, 120, 19, 0, 4}}, 200.0f, face, false);
+        label->set_cached_line_metrics({15.0f, 4.0f});
+        RecordingCanvas canvas;
+        label->paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return fills[0].f[1];
+    };
+    // In the frame: 3.25 + 15 = 18.25 -> 18, so 14.75 below the label's top.
+    const float at_origin = local_baseline(0.0f, true);
+    CHECK(at_origin == Catch::Approx(14.75f).margin(1e-4f));
+    CHECK(local_baseline(10.5f, true) == Catch::Approx(at_origin).margin(1e-4f));
+    // Control: unmarked, the grid is the host's and the offset moves the text.
+    CHECK(std::abs(local_baseline(10.5f, false) - at_origin) > 0.25f);
 }
 
 TEST_CASE("Label snaps a captured baseline to a whole CSS px in root space",
