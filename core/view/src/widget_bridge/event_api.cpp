@@ -741,14 +741,10 @@ void BridgeRegistrars::register_drop_event_api(WidgetBridge& self) {
             auto* engine = &self.engine_;
             v->on_drop = [alive, engine, cb](const std::string& type, const std::string& data, float x, float y) {
                 BridgeCallbackScope scope(alive);
-                std::string safe_data;
-                for (char c : data) {
-                    if (c == '\'') safe_data += "\\'";
-                    else if (c == '\n') safe_data += "\\n";
-                    else safe_data += c;
-                }
+                // Dropped text is attacker-chosen; a full JS string literal
+                // keeps a quote or backslash in it from closing the literal.
                 safe_dispatch_eval(alive, engine,
-                    cb + "('" + type + "','" + safe_data + "'," +
+                    cb + "(" + js_string_literal(type) + "," + js_string_literal(data) + "," +
                     std::to_string(x) + "," + std::to_string(y) + ")",
                     "drop");
             };

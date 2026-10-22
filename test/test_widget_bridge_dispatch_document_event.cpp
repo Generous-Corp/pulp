@@ -463,3 +463,73 @@ TEST_CASE("dispatch_document_event survives bridge destruction mid-fan-out",
         "mousedown", "{clientX:-1,clientY:-1,target:null}");
     REQUIRE(keeper_hits() == 2);
 }
+
+TEST_CASE("registerDrop delivers dropped text as data, never as code",
+          "[view][widget-bridge][dnd][injection]") {
+    // The drop callback is invoked by evaluating generated JS, and the dropped
+    // text is attacker-chosen. Every byte must arrive inside the string
+    // argument; none may close the literal and run in the realm.
+    using namespace pulp::view;
+    using pulp::state::StateStore;
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var drop_calls = 0;
+        var drop_type = null;
+        var drop_data = null;
+        function recordDrop(type, data, x, y) {
+            drop_calls++;
+            drop_type = type;
+            drop_data = data;
+        }
+        createPanel('dropzone', '');
+        registerDrop('dropzone', 'recordDrop');
+    )JS");
+
+    auto* dropzone = bridge.widget("dropzone");
+    REQUIRE(dropzone != nullptr);
+    REQUIRE(static_cast<bool>(dropzone->on_drop));
+
+    auto calls = [&] { return engine.evaluate("drop_calls").getWithDefault<int>(-1); };
+    auto pwned = [&] {
+        return engine.evaluate("typeof globalThis.__pwned").toString();
+    };
+
+    SECTION("plain text arrives intact") {
+        dropzone->on_drop("text", "hello drop", 1.0f, 2.0f);
+        REQUIRE(calls() == 1);
+        REQUIRE(engine.evaluate("drop_type").toString() == "text");
+        REQUIRE(engine.evaluate("drop_data").toString() == "hello drop");
+        REQUIRE(pwned() == "undefined");
+    }
+
+    SECTION("a backslash-quote payload stays inside the string argument") {
+        // Escaping only the quote turns `\'` into `\\'`, which ends the literal
+        // and lets the rest of the payload execute.
+        const std::string payload = "\\');globalThis.__pwned=1;//";
+        dropzone->on_drop("text", payload, 1.0f, 2.0f);
+        REQUIRE(calls() == 1);
+        REQUIRE(engine.evaluate("drop_data").toString() == payload);
+        REQUIRE(pwned() == "undefined");
+    }
+
+    SECTION("newline and U+2028 line terminators survive as data") {
+        const std::string payload = "first\nsecond\xE2\x80\xA8third";
+        dropzone->on_drop("text", payload, 1.0f, 2.0f);
+        REQUIRE(calls() == 1);
+        REQUIRE(engine.evaluate("drop_data").toString() == payload);
+        REQUIRE(pwned() == "undefined");
+    }
+
+    SECTION("the type argument is quoted the same way") {
+        dropzone->on_drop("text');globalThis.__pwned=1;//", "x", 1.0f, 2.0f);
+        REQUIRE(calls() == 1);
+        REQUIRE(engine.evaluate("drop_type").toString() == "text');globalThis.__pwned=1;//");
+        REQUIRE(pwned() == "undefined");
+    }
+}
