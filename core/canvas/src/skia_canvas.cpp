@@ -170,17 +170,16 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
             // we keep walking the list to give later families a chance.
             SkString actual_name;
             resolved->getFamilyName(&actual_name);
-            // Case-insensitive comparison — Skia normalizes but some
-            // platforms canonicalise differently (e.g. "Helvetica" vs
-            // "Helvetica Neue"). Accept if the actual name CONTAINS
-            // the requested family or vice-versa.
+            // Case-insensitive containment either way ("Helvetica" vs
+            // "Helvetica Neue"); a generic keyword's face never shares its name.
             std::string actual(actual_name.c_str(), actual_name.size());
             auto lower = [](std::string s) {
                 for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 return s;
             };
             std::string a = lower(actual), f = lower(fam);
-            if (a == f || a.find(f) != std::string::npos || f.find(a) != std::string::npos) {
+            if (a == f || a.find(f) != std::string::npos || f.find(a) != std::string::npos ||
+                !platform_family_for_css_generic(fam).empty()) {
                 return resolved;
             }
             // Else: SkFontMgr returned a default — keep walking.

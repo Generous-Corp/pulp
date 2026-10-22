@@ -1919,6 +1919,31 @@ TEST_CASE("system-ui resolves to the system font at every weight",
 #endif
 }
 
+TEST_CASE("Canvas text keeps a generic family that leads a family list",
+          "[canvas][skia][text][generic-family]") {
+#if !defined(__APPLE__)
+    SKIP("the generic-family table covers macOS");
+#else
+    // The system font's family name (".AppleSystemUIFont") shares nothing with
+    // "system-ui", so a name-overlap check alone reads it as a platform
+    // default and walks on to sans-serif.
+    SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    auto width_in = [&](const char* family) {
+        canvas.set_font_full(family, 20.0f, 400, /*slant=*/0, /*letter_spacing=*/0.0f);
+        return canvas.measure_text("Hamburgefons");
+    };
+    const float system_ui = width_in("system-ui");
+    const float sans_serif = width_in("sans-serif");
+    REQUIRE(std::abs(system_ui - sans_serif) > 1.0f);
+    CHECK(width_in("system-ui, sans-serif") == Catch::Approx(system_ui).margin(0.01));
+#endif
+}
+
 TEST_CASE("an optical-size clone of the system font's bold keeps weight 700",
           "[canvas][skia][text][optical-size][generic-family]") {
 #if !defined(__APPLE__)
