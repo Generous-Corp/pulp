@@ -198,13 +198,24 @@ sample-accurate processor that reads automation only through `param_events()`
 can also override `wants_au_scheduled_parameter_slices()` to return false: AU
 v2 then renders the buffer in one call with every point at its buffer offset
 (a scheduled ramp arrives as a step to the ramp's starting value plus a ramp
-to its value at the block's end), as VST3 and CLAP do.
+to its value at the block's end), as VST3 and CLAP do:
+
+```cpp
+bool wants_au_scheduled_parameter_slices() const override { return false; }
+```
+
+The adapters ask both hooks once, when they create the processor, so the
+answer must not change afterwards. The examples and
+the `pulp create` templates opt out because they read parameters once per
+block.
 
 Opting out a processor that does read `param_events()` is the one way to get
-this wrong. The VST3, AU v2 and CLAP adapters record such a read on the audio
-thread (one relaxed atomic store) and log a warning once per processor, when
-the host deactivates or releases it, naming the processor and the override to
-remove. See [the 0.1005.0 migration note](../migrations/v0.1005.0.md).
+this wrong: its queue is always empty and its parameters move once per block.
+The VST3, AU v2 and CLAP adapters record such a read on the audio thread (one
+relaxed atomic store) and log a warning once per processor, naming the
+processor and the override to remove. The warning is logged at deactivation or
+teardown, off the audio thread: VST3 `setActive(false)` and `terminate()`,
+CLAP `deactivate` and `destroy`, AU v2 `Cleanup()`.
 
 ```cpp
 void process(audio::BufferView<float>& output,
