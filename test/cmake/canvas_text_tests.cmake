@@ -120,6 +120,18 @@ if(APPLE AND PULP_HAS_SKIA AND PULP_ICU_DATA_SUBSET AND Python3_EXECUTABLE)
         LABELS "footprint"
         TIMEOUT 60
         SKIP_RETURN_CODE 77)
+    # Rewriting the same archive twice must produce the same bytes: ar and
+    # ranlib file times would otherwise reach every linked binary.
+    if(PULP_SKIA_ICU_SOURCE_ARCHIVE)
+        add_test(NAME icu-data-subset-deterministic
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/cmake/scripts/icu_data_subset.py"
+                --archive "${PULP_SKIA_ICU_SOURCE_ARCHIVE}" --output unused
+                --verify-deterministic)
+        set_tests_properties(icu-data-subset-deterministic PROPERTIES
+            LABELS "footprint"
+            TIMEOUT 120)
+    endif()
 endif()
 
 # Async font lifecycle (register_font_url).

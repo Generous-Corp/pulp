@@ -34,19 +34,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Bump when the keep/drop policy or the rewrite changes, so cached outputs
 # from an older policy are not reused.
-POLICY_VERSION = 2
+POLICY_VERSION = 3
 
 # Item path prefixes (after the "icudtNNl/" package name) that only ICU
-# services absent from a Pulp binary read.
+# services absent from a Pulp binary read. The display-name entry points
+# (uloc_getDisplayLanguage, uloc_getDisplayCountry, ...) are linked, but only
+# through the break-iterator service's virtual getDisplayName, which nothing
+# reachable calls; if a caller is added, restore lang/ and region/.
 DROPPED_TREES = (
     "coll/",      # collation (ucol)
     "zone/",      # time-zone display names
@@ -281,8 +286,16 @@ def replace_macho_payload(obj: bytes, payload: bytes) -> bytes:
 # ── Archive handling ───────────────────────────────────────────────────────
 
 
+# ar and ranlib stamp member and symbol-table headers with file times, which
+# also reach the N_OSO debug-map entries of every binary linked against the
+# archive. ZERO_AR_DATE makes Apple's tools write zero instead, so the same
+# input always produces the same bytes.
+_TOOL_ENV = {**os.environ, "ZERO_AR_DATE": "1"}
+
+
 def _run(*args: str, cwd: Path | None = None) -> str:
-    res = subprocess.run(args, cwd=cwd, capture_output=True, text=True, encoding="utf-8")
+    res = subprocess.run(args, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
+                         env=_TOOL_ENV)
     if res.returncode != 0:
         raise SubsetError(f"{' '.join(args)} failed: {res.stderr.strip()}")
     return res.stdout
@@ -346,13 +359,39 @@ def subset_archive(archive: Path, output: Path, work: Path, dropped=is_dropped) 
     return report
 
 
+def verify_deterministic(archive: Path) -> int:
+    """Rewrite `archive` twice, a second apart, and compare the outputs."""
+    with tempfile.TemporaryDirectory() as tmp:
+        outs = []
+        for i in range(2):
+            out = Path(tmp) / f"run{i}" / "libskunicode_icu.a"
+            try:
+                subset_archive(archive, out, Path(tmp) / f"work{i}")
+            except SubsetError as exc:
+                print(f"icu_data_subset: {exc}", file=sys.stderr)
+                return 1
+            outs.append(out.read_bytes())
+            if i == 0:
+                time.sleep(1.1)  # A leaked file time would differ between runs.
+    if outs[0] != outs[1]:
+        print("icu_data_subset: rewriting the same archive twice produced different bytes",
+              file=sys.stderr)
+        return 1
+    print(f"icu_data_subset: deterministic ({len(outs[0])} bytes, identical across two runs)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--archive", type=Path, required=True)
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--work-dir", type=Path)
     ap.add_argument("--report", type=Path)
+    ap.add_argument("--verify-deterministic", action="store_true",
+                    help="rewrite twice, a second apart, and fail unless the archives match")
     args = ap.parse_args(argv)
+    if args.verify_deterministic:
+        return verify_deterministic(args.archive)
     try:
         if args.work_dir:
             shutil.rmtree(args.work_dir, ignore_errors=True)

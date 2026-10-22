@@ -23,6 +23,9 @@ function(_pulp_skia_subset_icu_data libs_var)
     if(NOT _src OR NOT EXISTS "${_src}")
         return()
     endif()
+    # Read by the icu-data-subset-deterministic test.
+    set(PULP_SKIA_ICU_SOURCE_ARCHIVE "${_src}" CACHE INTERNAL
+        "Skia's unmodified libskunicode_icu.a")
 
     set(_script "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/scripts/icu_data_subset.py")
     if(NOT EXISTS "${_script}")
