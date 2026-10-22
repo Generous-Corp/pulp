@@ -133,8 +133,7 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
         for (auto& slot : slots_)
             slot.data.assign(quantum, 0.0f);
     }
-    bool submit(std::span<const float> input, std::uint64_t sequence,
-                std::uint64_t) noexcept override {
+    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
         if (plan_.reject_submissions || plan_.lost)
             return false;
         auto slot =

@@ -46,18 +46,11 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
         std::uint64_t completion_service_wait_ns = 0;
         MissPolicy miss_policy = MissPolicy::Silence;
         bool supports_cpu_fallback = false;
-        /// Completion deadline for each submitted block, measured from the
-        /// start of the callback that captured its input. A result observed
-        /// after it is retired as late and never delivered. Zero selects the
-        /// lead window, `lead_blocks` block periods: the last instant at which
-        /// the result can still reach its callback.
-        std::uint64_t completion_deadline_ns = 0;
-        /// Callback blocks that may pass while every in-flight slot is occupied
-        /// and no completion arrives before the node latches
-        /// `GpuAudioRecoveryReason::ProviderUnresponsive`. Zero selects
-        /// `capacity - 1`. The watchdog also fires when the input ring has one
-        /// free record left, so a hung provider is reported as unresponsive
-        /// rather than as input saturation.
+        /// Callback blocks that may pass with work in flight and no completion
+        /// before the node latches `GpuAudioRecoveryReason::ProviderUnresponsive`.
+        /// Zero selects `capacity - 1`, which fires before the input ring
+        /// saturates while the worker keeps up with the callback. A provider
+        /// that keeps completing, however late, is never unresponsive.
         std::uint32_t watchdog_blocks = 0;
     };
     /// Copies all descriptors, dilation arrays and weights. Host thread only.

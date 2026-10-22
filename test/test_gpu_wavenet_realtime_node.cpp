@@ -3,10 +3,14 @@
 #include "detail/shared_io_trace.hpp"
 #include "detail/wavenet_realtime_channel.hpp"
 #include "harness/rt_allocation_probe.hpp"
+#include "support/wavenet_program_session_channel.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <thread>
+#include <pulp/gpu_audio/gpu_audio_program.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <string_view>
@@ -28,27 +32,17 @@ struct Control {
     bool wrong_sequence = false, late = false;
     // lost: the device is gone; submits are refused, pending work completes
     // as ProviderFailed. hang: the provider accepts work and never completes it.
-    // late_after_deadline: mark a completion late when it is received after the
-    // deadline the node submitted, as the shared-I/O plan does.
-    bool lost = false, hang = false, late_after_deadline = false;
+    bool lost = false, hang = false;
     // The device is lost while a submission is in progress.
     bool lose_on_submit = false;
     int submits = 0, services = 0, wait_services = 0, receives = 0, releases = 0;
     std::uint64_t last_wait_deadline = 0;
-    std::array<std::uint64_t, 8> wait_deadlines{}, wait_starts{}, submit_deadlines{};
+    std::array<std::uint64_t, 8> wait_deadlines{}, wait_starts{};
 };
-std::uint64_t steady_ns() {
-    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                          std::chrono::steady_clock::now().time_since_epoch())
-                                          .count());
-}
 class Channel final : public detail::WaveNetRealtimeChannel {
   public:
     explicit Channel(Control& control) : control_(control) {}
-    bool submit(std::span<const float> input, std::uint64_t sequence,
-                std::uint64_t deadline_ns) noexcept override {
-        if (control_.submits < static_cast<int>(control_.submit_deadlines.size()))
-            control_.submit_deadlines[control_.submits] = deadline_ns;
+    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
         ++control_.submits;
         if (control_.lose_on_submit)
             control_.lost = true;
@@ -60,7 +54,6 @@ class Channel final : public detail::WaveNetRealtimeChannel {
             return false;
         std::copy(input.begin(), input.end(), pending->data.begin());
         pending->sequence = sequence;
-        pending->deadline = deadline_ns;
         pending->active = true;
         return true;
     }
@@ -88,9 +81,7 @@ class Channel final : public detail::WaveNetRealtimeChannel {
         const bool failed = control_.fail || control_.lost;
         if (!failed)
             std::copy_n(pending->data.data(), output.size(), output.data());
-        const bool late =
-            control_.late || (control_.late_after_deadline && pending->deadline != 0 &&
-                              steady_ns() > pending->deadline);
+        const bool late = control_.late;
         return GpuWaveNetBlockResult{pending->sequence + (control_.wrong_sequence ? 1 : 0),
                                      failed ? GpuWaveNetBlockStatus::ProviderFailed
                                             : GpuWaveNetBlockStatus::GpuDelivered,
@@ -108,7 +99,6 @@ class Channel final : public detail::WaveNetRealtimeChannel {
     struct Pending {
         std::array<float, 2> data{};
         std::uint64_t sequence = 0;
-        std::uint64_t deadline = 0;
         bool active = false;
     };
     Control& control_;
@@ -224,7 +214,6 @@ struct Shape {
 };
 struct Tweak {
     std::uint32_t lead = 1, capacity = 0, channels = 1;
-    std::uint64_t completion_deadline_ns = 0;
     std::uint32_t watchdog_blocks = 0;
     bool trace = false;
 };
@@ -250,7 +239,6 @@ struct Harness {
         auto config = shape.config(tweak.lead, tweak.channels);
         if (tweak.capacity != 0)
             config.capacity = tweak.capacity;
-        config.completion_deadline_ns = tweak.completion_deadline_ns;
         config.watchdog_blocks = tweak.watchdog_blocks;
         return config;
     }
@@ -1338,7 +1326,8 @@ TEST_CASE("WaveNet hung provider is reported unresponsive before the input ring 
     };
     // The watchdog counts callback blocks, so worker pump rate must not matter;
     // a worker that falls behind still reports the hang, not the saturation.
-    for (const auto cadence : {Cadence{1, 1}, Cadence{1, 4}, Cadence{2, 1}}) {
+    for (const auto cadence :
+         {Cadence{1, 1}, Cadence{1, 4}, Cadence{2, 1}, Cadence{3, 1}, Cadence{4, 1}}) {
         CAPTURE(cadence.callbacks, cadence.pumps);
         const auto run = run_hang({}, cadence.callbacks, cadence.pumps);
         CHECK(run.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
@@ -1355,10 +1344,10 @@ TEST_CASE("WaveNet watchdog honors its configured block budget",
     // Wide ring, so only the configured budget can fire.
     const auto one = run_hang({.capacity = 16, .watchdog_blocks = 1}, 1, 1);
     CHECK(one.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
-    CHECK(one.blocks_after_hang == 2);
+    CHECK(one.blocks_after_hang == 1);
     const auto five = run_hang({.capacity = 16, .watchdog_blocks = 5}, 1, 1);
     CHECK(five.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
-    CHECK(five.blocks_after_hang == 6);
+    CHECK(five.blocks_after_hang == 5);
 }
 
 TEST_CASE("WaveNet provider that stalls inside the watchdog budget is not unresponsive",
@@ -1368,55 +1357,49 @@ TEST_CASE("WaveNet provider that stalls inside the watchdog budget is not unresp
     CHECK(run.state != GpuAudioProviderState::Unavailable);
 }
 
-TEST_CASE("WaveNet submits carry the lead-window deadline from callback ingress",
-          "[gpu_audio][wavenet][realtime][deadline]") {
-    // Lead 2 at 2 frames / 48 kHz: 83'333 ns.
-    {
-        Harness h(Tweak{.lead = 2});
-        const auto start = steady_ns();
-        h.callback(1, start);
-        h.service();
-        REQUIRE(h.controls[0].submits == 1);
-        CHECK(h.controls[0].submit_deadlines[0] == start + 83'333);
-    }
-    {
-        Harness h(Tweak{.lead = 2, .completion_deadline_ns = 5'000'000});
-        const auto start = steady_ns();
-        h.callback(1, start);
-        h.service();
-        CHECK(h.controls[0].submit_deadlines[0] == start + 5'000'000);
-    }
-    {
-        // No callback timestamp: worker admission anchors the deadline.
-        Harness h(Tweak{.lead = 2});
-        h.callback(1);
-        const auto before = steady_ns();
-        h.service();
-        const auto after = steady_ns();
-        CHECK(h.controls[0].submit_deadlines[0] >= before + 83'333);
-        CHECK(h.controls[0].submit_deadlines[0] <= after + 83'333);
-    }
-}
-
-TEST_CASE("WaveNet completion after its deadline retires as LateRejected",
-          "[gpu_audio][wavenet][realtime][deadline]") {
-    for (const std::uint64_t deadline : {std::uint64_t{1}, std::uint64_t{10'000'000'000}}) {
-        const bool expect_late = deadline == 1;
-        CAPTURE(deadline);
-        TraceCapture capture;
-        Harness h(Tweak{.completion_deadline_ns = deadline, .trace = true});
-        capture.attach(h.node);
-        h.controls[0].late_after_deadline = true;
-        h.callback(1, steady_ns());
-        h.service();
-        // Let the steady clock pass the one-nanosecond deadline.
-        const auto submitted = steady_ns();
-        while (steady_ns() <= submitted + 1'000) {
+TEST_CASE("WaveNet results are late only once their consuming callback has finished",
+          "[gpu_audio][wavenet][realtime][late]") {
+    SECTION("bursty callbacks and a stalled worker never drop a result that can still land") {
+        // Lead 2 at 2 frames / 48 kHz is an 83 us window. Callbacks arrive in
+        // bursts and the worker sleeps far past that window between them; every
+        // result still precedes its consumer, so none may be rejected.
+        Harness h(Tweak{.lead = 2, .capacity = 8});
+        std::uint32_t ready = 0, missed = 0;
+        for (int round = 0; round < 12; ++round) {
+            for (int burst = 0; burst < 2; ++burst) {
+                const auto status = h.callback(float(h.sequence + 1));
+                ready += status == detail::kRealtimeGpuReady ? 1 : 0;
+                missed += status == detail::kRealtimeGpuMissed ? 1 : 0;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            // One admission per pump: the third pump collects the burst's
+            // second block before its consumer runs.
+            h.service();
+            h.service();
+            h.service();
         }
+        const auto status = h.node.status_snapshot();
+        const auto late = static_cast<std::size_t>(GpuAudioTerminalDisposition::LateRejected);
+        CHECK(missed == 0);
+        CHECK(ready == 22);
+        CHECK(status.terminal_counts[late] == 0);
+        CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::None);
+    }
+    SECTION("a result whose consumer already ran is rejected as late") {
+        TraceCapture capture;
+        Harness h(1, 1, 0, true);
+        capture.attach(h.node);
+        h.controls[0].complete = false;
+        h.callback(1);
         h.service();
-        CHECK(h.callback(2) ==
-              (expect_late ? detail::kRealtimeGpuMissed : detail::kRealtimeGpuReady));
-        // A late block is a miss, not a provider fault.
+        // The consumer of block 0 runs before the provider completes it.
+        CHECK(h.callback(2) == detail::kRealtimeGpuMissed);
+        h.controls[0].complete = true;
+        h.service();
+        const auto status = h.node.status_snapshot();
+        CHECK(status.terminal_counts[static_cast<std::size_t>(
+                  GpuAudioTerminalDisposition::LateRejected)] == 1);
+        // Late is a miss, not a provider fault.
         CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::None);
         REQUIRE(h.node.release());
         const auto first =
@@ -1425,11 +1408,360 @@ TEST_CASE("WaveNet completion after its deadline retires as LateRejected",
                              return record.value.sequence == 0 && record.value.gpu_work_admitted;
                          });
         REQUIRE(first != capture.records.begin() + capture.record_count);
-        CHECK(first->value.gpu_terminal ==
-              (expect_late ? detail::SharedIoGpuTerminalDisposition::LateRejected
-                           : detail::SharedIoGpuTerminalDisposition::CompletedAccepted));
-        CHECK(first->value.gpu_reason == (expect_late
-                                              ? detail::SharedIoFallbackReason::DeadlineExceeded
-                                              : detail::SharedIoFallbackReason::None));
+        CHECK(first->value.gpu_terminal == detail::SharedIoGpuTerminalDisposition::LateRejected);
+        CHECK(first->value.gpu_reason == detail::SharedIoFallbackReason::DeadlineExceeded);
     }
+}
+
+namespace {
+// Minimal shared-I/O provider whose completions retire through the real
+// SharedIoComputePlan. Each accepted submission becomes terminal after
+// `delay_polls` provider polls, so a test can make the provider slow without
+// making it silent.
+class SlowProvider final : public detail::SharedIoArenaProvider {
+    struct Slot {
+        std::vector<std::byte> input, output;
+        std::uint32_t index = 0;
+        std::uint64_t generation = 1;
+        bool retired = false;
+    };
+    struct Deferred {
+        SlotToken token;
+        std::shared_ptr<detail::SharedIoTerminalInbox> inbox;
+        std::uint32_t polls_left = 0;
+    };
+
+  public:
+    std::uint32_t delay_polls = 0;
+    std::uint64_t completions = 0, polls = 0;
+
+    bool create_slot(std::uint32_t index, std::size_t in, std::size_t out,
+                     SlotResources& resources) noexcept override {
+        auto slot = std::make_unique<Slot>();
+        slot->input.resize(in);
+        slot->output.resize(out);
+        slot->index = index;
+        resources.input = slot->input.data();
+        resources.input_size = in;
+        resources.output = slot->output.data();
+        resources.output_size = out;
+        resources.opaque = slot.get();
+        resources.input_lifecycle = {
+            .allocated = true, .import_attempted = true, .import_succeeded = true};
+        resources.output_lifecycle = resources.input_lifecycle;
+        resources.storage_kind = StorageKind::ImportedHostPointer;
+        slots_.push_back(std::move(slot));
+        return true;
+    }
+    void retire_slot(SlotResources& resources) noexcept override {
+        if (auto* slot = static_cast<Slot*>(resources.opaque)) {
+            slot->retired = true;
+            ++slot->generation;
+        }
+        resources.input_lifecycle.dispose_observed = true;
+        resources.output_lifecycle.dispose_observed = true;
+    }
+    void destroy_slot(SlotResources& resources) noexcept override {
+        auto* slot = static_cast<Slot*>(resources.opaque);
+        std::erase_if(slots_, [slot](const auto& owned) { return owned.get() == slot; });
+        resources.input_lifecycle.host_freed = true;
+        resources.output_lifecycle.host_freed = true;
+        resources.opaque = nullptr;
+    }
+    bool acquire_slot_buffers(const SlotResources& resources,
+                              SlotBufferHandle& handle) const noexcept override {
+        auto* slot = static_cast<Slot*>(resources.opaque);
+        if (!slot || slot->retired)
+            return false;
+        handle = {};
+        handle.provider = this;
+        handle.device = this;
+        handle.input_buffer = slot->input.data();
+        handle.output_buffer = slot->output.data();
+        handle.slot = slot->index;
+        handle.generation = slot->generation;
+        handle.lifetime = lifetime_;
+        return true;
+    }
+    bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override {
+        if (handle.provider != this || handle.lifetime.expired())
+            return false;
+        return std::any_of(slots_.begin(), slots_.end(), [&](const auto& slot) {
+            return !slot->retired && handle.input_buffer == slot->input.data() &&
+                   handle.generation == slot->generation;
+        });
+    }
+    bool submit(const SlotResources& resources, SlotToken token,
+                std::shared_ptr<detail::SharedIoTerminalInbox> inbox) noexcept override {
+        std::copy_n(static_cast<const std::byte*>(resources.input),
+                    std::min(resources.input_size, resources.output_size),
+                    static_cast<std::byte*>(resources.output));
+        deferred_[deferred_count_++] = {token, std::move(inbox), delay_polls};
+        return true;
+    }
+    void poll() noexcept override {
+        ++polls;
+        std::size_t kept = 0;
+        for (std::size_t i = 0; i < deferred_count_; ++i) {
+            auto& entry = deferred_[i];
+            if (entry.polls_left > 0 && --entry.polls_left > 0) {
+                deferred_[kept++] = std::move(entry);
+                continue;
+            }
+            (void)entry.inbox->push(entry.token, CompletionStatus::RetiredSuccess);
+            ++completions;
+        }
+        deferred_count_ = kept;
+    }
+    bool drain() noexcept override {
+        for (std::size_t i = 0; i < deferred_count_; ++i)
+            (void)deferred_[i].inbox->push(deferred_[i].token, CompletionStatus::RetiredSuccess);
+        deferred_count_ = 0;
+        return true;
+    }
+
+  private:
+    std::vector<std::unique_ptr<Slot>> slots_;
+    std::array<Deferred, 8> deferred_{};
+    std::size_t deferred_count_ = 0;
+    std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
+};
+class PassthroughProgram final : public detail::SharedIoPreparedProgram {
+  public:
+    bool prepare(detail::SharedIoArenaProvider&,
+                 std::span<const SlotBufferHandle>) noexcept override {
+        return true;
+    }
+    bool submit(detail::SharedIoArenaProvider& provider, const SlotResources& resources,
+                SlotToken token,
+                std::shared_ptr<detail::SharedIoTerminalInbox> inbox) noexcept override {
+        return provider.submit(resources, token, std::move(inbox));
+    }
+    bool release() noexcept override {
+        return true;
+    }
+};
+} // namespace
+
+TEST_CASE("WaveNet provider that completes late through the shared-I/O plan is slow, not "
+          "unresponsive",
+          "[gpu_audio][wavenet][realtime][hang]") {
+    // About two provider polls per worker pump and two pumps per callback, so a
+    // delay of 4 polls is roughly two callback blocks and 16 is about eight.
+    for (const std::uint32_t delay : {0u, 4u, 16u}) {
+        CAPTURE(delay);
+        Shape shape;
+        auto config = shape.config(1);
+        // The bounded completion service drives SharedIoComputePlan::drain_until.
+        config.completion_service_wait_ns = 50'000;
+        GpuWaveNetRealtimeNode node(config);
+        auto provider = std::make_unique<SlowProvider>();
+        auto* slow = provider.get();
+        slow->delay_polls = delay;
+        auto session = std::make_unique<detail::SharedIoProgramSession>();
+        REQUIRE(session->prepare({std::move(provider), std::make_unique<PassthroughProgram>()},
+                                 {.slots = 2,
+                                  .input_bytes_per_slot = 2 * sizeof(float),
+                                  .output_bytes_per_slot = 2 * sizeof(float)}));
+        std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> channels;
+        channels.push_back(std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)));
+        REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(channels)));
+        auto path = detail::realtime_gpu_node_path(&node);
+        std::array<float, 2> input{}, output{};
+        const float* ip = input.data();
+        float* op = output.data();
+        pulp::audio::BufferView<const float> in(&ip, 1, 2);
+        pulp::audio::BufferView<float> out(&op, 1, 2);
+        for (std::uint64_t sequence = 0; sequence < 24; ++sequence) {
+            input.fill(float(sequence + 1));
+            const auto status = path.process(path.context, in, out, 2, sequence, true, 0);
+            path.delivered(path.context, sequence,
+                           static_cast<std::uint8_t>(
+                               status == detail::kRealtimeGpuReady
+                                   ? detail::SharedIoDeliveryDisposition::GpuDelivered
+                                   : detail::SharedIoDeliveryDisposition::SilenceDelivered),
+                           0, 0);
+            (void)path.service(path.context, 0);
+            (void)path.service(path.context, 0);
+        }
+        const auto status = node.status_snapshot();
+        INFO("polls " << slow->polls << " completions " << slow->completions);
+        CHECK(slow->completions > 0);
+        const auto delivered = status.terminal_counts[static_cast<std::size_t>(
+            GpuAudioTerminalDisposition::GpuDelivered)];
+        const auto late = status.terminal_counts[static_cast<std::size_t>(
+            GpuAudioTerminalDisposition::LateRejected)];
+        if (delay == 0) {
+            CHECK(node.recovery_reason() == GpuAudioRecoveryReason::None);
+            CHECK(delivered > 0);
+            CHECK(late == 0);
+        } else if (delay == 4) {
+            // Slow: it keeps completing, misses its consumers, and falls behind
+            // until the input ring saturates. It is never unresponsive.
+            CHECK(late > 0);
+            CHECK(node.recovery_reason() == GpuAudioRecoveryReason::InputSaturated);
+            CHECK(status.provider_state != GpuAudioProviderState::Unavailable);
+        } else {
+            // Silent for longer than the watchdog window with work in flight.
+            CHECK(node.recovery_reason() == GpuAudioRecoveryReason::ProviderUnresponsive);
+            CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
+        }
+        REQUIRE(node.release());
+    }
+}
+
+TEST_CASE("WaveNet device loss replaces an earlier symptom it caused",
+          "[gpu_audio][wavenet][realtime][loss]") {
+    SECTION("a failed completion one pump before the device reports loss") {
+        Harness h;
+        h.callback(1);
+        h.service();
+        h.controls[0].fail = true;
+        h.service();
+        REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderFailure);
+        CHECK(h.node.status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+        h.controls[0].lost = true;
+        h.service();
+        CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
+        CHECK(h.node.recovery_sequence() == 0);
+        CHECK(h.node.status_snapshot().provider_state == GpuAudioProviderState::Unavailable);
+    }
+    SECTION("an unresponsive provider that later reports loss") {
+        Harness h;
+        h.callback(1);
+        h.service();
+        h.controls[0].hang = true;
+        for (int i = 0; i < 4 && h.node.recovery_reason() == GpuAudioRecoveryReason::None; ++i) {
+            h.callback(float(i));
+            h.service();
+        }
+        REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderUnresponsive);
+        h.controls[0].lost = true;
+        h.service();
+        CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
+    }
+    SECTION("an independent earlier cause stays first, but the provider is unavailable") {
+        Harness h;
+        for (int i = 0; i < 8; ++i)
+            h.callback(float(i));
+        h.service();
+        REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::InputSaturated);
+        CHECK(h.node.status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+        h.controls[0].lost = true;
+        h.service();
+        CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::InputSaturated);
+        CHECK(h.node.status_snapshot().provider_state == GpuAudioProviderState::Unavailable);
+    }
+}
+
+TEST_CASE("WaveNet status reports schema v3 epoch, terminals and provider facts",
+          "[gpu_audio][wavenet][diagnostic]") {
+    const auto count = [](const GpuAudioStatus& status, GpuAudioTerminalDisposition disposition) {
+        return status.terminal_counts[static_cast<std::size_t>(disposition)];
+    };
+    Harness h;
+    for (int block = 0; block < 4; ++block) {
+        h.callback(float(block));
+        h.service();
+        h.service();
+    }
+    // One block in flight is the next callback's; collect it early enough.
+    h.callback(4);
+    h.service();
+    // Delivering: blocks 0-3 retired as delivered, block 4 in flight.
+    auto status = h.node.status_snapshot();
+    CHECK(status.schema_version == 3);
+    CHECK(status.epoch == 1);
+    CHECK(status.delivery_epoch_active);
+    CHECK(count(status, GpuAudioTerminalDisposition::GpuDelivered) == 4);
+    std::uint64_t total = 0;
+    for (const auto value : status.terminal_counts)
+        total += value;
+    CHECK(total == 4);
+    CHECK(status.gpu_kernel_available);
+    CHECK(status.completion_mode == GpuAudioCompletionMode::ProcessEvents);
+    CHECK_FALSE(status.timestamps_available);
+
+    // Fenced: the in-flight block is cancelled and delivery stops.
+    REQUIRE(h.path.fence(h.path.context));
+    status = h.node.status_snapshot();
+    CHECK(status.epoch == 1);
+    CHECK_FALSE(status.delivery_epoch_active);
+    CHECK(count(status, GpuAudioTerminalDisposition::Cancelled) == 1);
+    CHECK(count(status, GpuAudioTerminalDisposition::GpuDelivered) == 4);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::OfflineFence);
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+
+    // A new preparation opens a new epoch with fresh counts.
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+    providers.push_back(std::make_unique<Channel>(h.controls[0]));
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(h.node, std::move(providers), h.sequence));
+    status = h.node.status_snapshot();
+    CHECK(status.epoch == 2);
+    CHECK(status.delivery_epoch_active);
+    CHECK(count(status, GpuAudioTerminalDisposition::GpuDelivered) == 0);
+}
+
+TEST_CASE("WaveNet status counts a failed block under its miss policy",
+          "[gpu_audio][wavenet][diagnostic]") {
+    Harness h;
+    h.callback(1);
+    h.service();
+    h.controls[0].fail = true;
+    h.service();
+    const auto status = h.node.status_snapshot();
+    CHECK(status.terminal_counts[static_cast<std::size_t>(GpuAudioTerminalDisposition::Silence)] ==
+          1);
+    CHECK(status.terminal_counts[static_cast<std::size_t>(
+              GpuAudioTerminalDisposition::CpuFallback)] == 0);
+}
+
+TEST_CASE("WaveNet status reports the configured completion mode",
+          "[gpu_audio][wavenet][diagnostic]") {
+    const std::array cases{
+        std::pair{GpuWaveNetCompletionPolicy::ProcessEvents, GpuAudioCompletionMode::ProcessEvents},
+        std::pair{GpuWaveNetCompletionPolicy::WaitAny, GpuAudioCompletionMode::WaitAny},
+        std::pair{GpuWaveNetCompletionPolicy::TimedWaitAny, GpuAudioCompletionMode::TimedWaitAny},
+    };
+    for (const auto& [policy, mode] : cases) {
+        Shape shape;
+        auto config = shape.config();
+        config.session.completion_policy = policy;
+        GpuWaveNetRealtimeNode node(config);
+        Control control;
+        std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+        providers.push_back(std::make_unique<Channel>(control));
+        REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
+        CHECK(node.status_snapshot().completion_mode == mode);
+    }
+}
+
+TEST_CASE("WaveNet watchdog stays quiet while a concurrent worker admits mid-callback",
+          "[gpu_audio][wavenet][realtime][hang]") {
+    // The worker can admit a block after the callback publishes it but before
+    // the callback advances its position, so the watchdog must not read that
+    // gap as silence. A healthy provider on a concurrent worker never trips it.
+    // A deep ring and a wide window absorb worker scheduling hiccups; an
+    // unsigned wrap of the silence count would exceed any window.
+    Harness h(Tweak{.lead = 2, .capacity = 64, .watchdog_blocks = 32});
+    std::atomic<bool> done{false};
+    // Completing on every other pump leaves pumps that see work in flight
+    // and no completion, which is when the watchdog measures silence.
+    std::thread worker([&] {
+        for (std::uint64_t pump = 0; !done.load(std::memory_order_acquire); ++pump) {
+            h.controls[0].complete = pump % 2 == 0;
+            (void)h.path.service(h.path.context, 0);
+        }
+    });
+    // Paced like a fast audio device so the spinning worker keeps up.
+    for (int block = 0; block < 5'000 && h.node.recovery_reason() == GpuAudioRecoveryReason::None;
+         ++block) {
+        (void)h.callback(float(block));
+        std::this_thread::sleep_for(std::chrono::microseconds(20));
+    }
+    done.store(true, std::memory_order_release);
+    worker.join();
+    INFO("blocks " << h.sequence << " reason " << int(h.node.recovery_reason()));
+    CHECK(h.sequence >= 100);
+    CHECK(h.node.recovery_reason() != GpuAudioRecoveryReason::ProviderUnresponsive);
 }
