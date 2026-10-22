@@ -213,6 +213,10 @@ public:
     // drive keyed slots report non-zero.
     virtual std::uint64_t slot_identity_change_count() const { return 0; }
     virtual std::uint64_t slot_text_mismatch_count() const { return 0; }
+    // Untimed check that the update `step(frame)` made is what the tree now
+    // holds. run_phase calls it outside every clock, so verification cost
+    // never lands in update or frame time.
+    virtual void verify(int /*frame*/) {}
 };
 
 void place_absolute(IRNode& node, float left, float top, float width, float height) {
@@ -791,11 +795,34 @@ layout();
     int js_evaluations_ = 0;
 };
 
-View* find_by_anchor(View& root, std::string_view anchor) {
-    if (root.anchor_id() == anchor) return &root;
-    for (std::size_t i = 0; i < root.child_count(); ++i)
-        if (auto* found = find_by_anchor(*root.child_at(i), anchor)) return found;
-    return nullptr;
+// Materializes a DesignIR and fails closed on any import error, so a
+// benchmark never measures a tree the importer reported as wrong. Warnings
+// (a design that states no widget palette, say) do not change the tree's
+// structure; their codes are returned so the receipt shows every one.
+std::unique_ptr<View> materialize_checked(const DesignIR& ir, float width, float height,
+                                          std::string_view lane,
+                                          std::vector<std::string>* warning_codes) {
+    NativeMaterializeOptions options;
+    std::vector<ImportDiagnostic> diagnostics;
+    options.diagnostics_out = &diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest, options);
+    for (const auto& diagnostic : diagnostics) {
+        if (diagnostic.severity == ImportDiagnosticSeverity::error) {
+            std::ostringstream msg;
+            msg << lane << " materialization reported an error";
+            if (!diagnostic.code.empty()) msg << "; code=" << diagnostic.code;
+            if (!diagnostic.message.empty()) msg << ": " << diagnostic.message;
+            throw std::runtime_error(msg.str());
+        }
+        if (warning_codes &&
+            std::find(warning_codes->begin(), warning_codes->end(), diagnostic.code) ==
+                warning_codes->end())
+            warning_codes->push_back(diagnostic.code);
+    }
+    if (!root) throw std::runtime_error(std::string(lane) + " materialization returned null root");
+    root->set_bounds({0, 0, width, height});
+    root->layout_children();
+    return root;
 }
 
 // An importer-produced DesignIR, with the provenance that binds a receipt to
@@ -828,6 +855,11 @@ LoadedIr load_ir(const std::filesystem::path& path) {
         for (const auto& child : node.children) self(self, child);
     };
     collect(collect, loaded.ir.root);
+    auto sorted = loaded.slot_anchors;
+    std::sort(sorted.begin(), sorted.end());
+    if (auto dup = std::adjacent_find(sorted.begin(), sorted.end()); dup != sorted.end())
+        throw std::runtime_error("DesignIR " + loaded.file_name + " repeats text slot anchor " + *dup +
+                                 "; a keyed slot needs a unique anchor");
     if (loaded.slot_anchors.empty())
         throw std::runtime_error("DesignIR " + loaded.file_name + " has no anchored text slots");
     return loaded;
@@ -848,11 +880,12 @@ class IrBoundFixture final : public BenchmarkFixture {
     IrBoundFixture(const std::filesystem::path& path, bool rebuild_each_step)
         : loaded_(load_ir(path)), rebuild_each_step_(rebuild_each_step) {
         materialize(loaded_.ir);
-        for (const auto& anchor : loaded_.slot_anchors) {
-            auto* label = dynamic_cast<Label*>(find_by_anchor(*root_, anchor));
+        for (std::size_t i = 0; i < loaded_.slot_anchors.size(); ++i) {
+            auto* label = resolved_[i];
             if (!label)
-                throw std::runtime_error("text slot " + anchor + " did not materialize as a Label");
-            slots_.push_back({label, label->import_binding_instance_id()});
+                throw std::runtime_error("text slot " + loaded_.slot_anchors[i] +
+                                         " did not materialize as a Label");
+            slots_.push_back({label->import_binding_instance_id()});
         }
     }
 
@@ -861,6 +894,7 @@ class IrBoundFixture final : public BenchmarkFixture {
     std::uint64_t slot_identity_change_count() const override { return identity_changes_; }
     std::uint64_t slot_text_mismatch_count() const override { return text_mismatches_; }
     const LoadedIr& loaded() const { return loaded_; }
+    const std::vector<std::string>& warning_codes() const { return warning_codes_; }
 
     void step(int frame) override {
         if (rebuild_each_step_) {
@@ -877,14 +911,19 @@ class IrBoundFixture final : public BenchmarkFixture {
             materialize(ir);
         } else {
             for (std::size_t i = 0; i < slots_.size(); ++i)
-                slots_[i].label->set_text(slot_text(i, frame));
+                retained_[i]->set_text(slot_text(i, frame));
             root_->layout_children();
         }
+    }
+
+    // Reads every slot back through the anchors of the CURRENT tree, so a
+    // slot that rebound to another View, or kept stale text, is counted.
+    void verify(int frame) override {
         for (std::size_t i = 0; i < slots_.size(); ++i) {
-            auto* label = dynamic_cast<Label*>(find_by_anchor(*root_, loaded_.slot_anchors[i]));
+            auto* label = resolved_[i];
             if (!label || label->import_binding_instance_id() != slots_[i].instance_id) {
                 ++identity_changes_;
-                if (label) slots_[i] = {label, label->import_binding_instance_id()};
+                if (label) slots_[i].instance_id = label->import_binding_instance_id();
             }
             if (!label || label->text() != slot_text(i, frame)) ++text_mismatches_;
         }
@@ -892,25 +931,33 @@ class IrBoundFixture final : public BenchmarkFixture {
 
   private:
     struct Slot {
-        Label* label = nullptr;
         std::uint64_t instance_id = 0;
     };
 
+    // Builds the tree and resolves every slot anchor in one walk. The
+    // retained lane keeps writing through the Labels resolved at
+    // construction; `resolved_` always describes the current tree.
     void materialize(const DesignIR& ir) {
-        NativeMaterializeOptions options;
-        std::vector<ImportDiagnostic> diagnostics;
-        options.diagnostics_out = &diagnostics;
-        auto next = build_native_view_tree(ir, ir.asset_manifest, options);
-        if (!next) throw std::runtime_error("DesignIR materialization returned null root");
-        next->set_bounds({0, 0, loaded_.width, loaded_.height});
-        next->layout_children();
-        root_ = std::move(next);
+        root_ = materialize_checked(ir, loaded_.width, loaded_.height, "IR-bound",
+                                    &warning_codes_);
+        resolved_.assign(loaded_.slot_anchors.size(), nullptr);
+        const auto visit = [&](auto& self, View& view) -> void {
+            for (std::size_t i = 0; i < loaded_.slot_anchors.size(); ++i)
+                if (view.anchor_id() == loaded_.slot_anchors[i])
+                    resolved_[i] = dynamic_cast<Label*>(&view);
+            for (std::size_t c = 0; c < view.child_count(); ++c) self(self, *view.child_at(c));
+        };
+        visit(visit, *root_);
+        if (retained_.empty()) retained_ = resolved_;
     }
 
     LoadedIr loaded_;
     bool rebuild_each_step_ = false;
     std::unique_ptr<View> root_;
     std::vector<Slot> slots_;
+    std::vector<Label*> resolved_;
+    std::vector<Label*> retained_;
+    std::vector<std::string> warning_codes_;
     std::uint64_t identity_changes_ = 0;
     std::uint64_t text_mismatches_ = 0;
 };
@@ -976,6 +1023,7 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture,
         ++metrics.paint_calls;
         const auto frame_cpu_end = std::clock();
         const auto frame_end = Clock::now();
+        if (interactive) fixture.verify(frame);
         frame_ms.push_back(elapsed_ms(frame_start, frame_end));
         frame_cpu_ms.push_back(cpu_clock_delta_ms(frame_cpu_start, frame_cpu_end));
         const auto rss = current_rss_bytes();
@@ -1081,6 +1129,7 @@ struct IrProvenance {
     std::string file_name;
     std::string sha256;
     std::size_t slots = 0;
+    std::vector<std::string> materialization_warnings;
 };
 
 std::string make_json(const Config& config,
@@ -1099,7 +1148,11 @@ std::string make_json(const Config& config,
     if (ir) {
         out << "  \"ir\": {\n";
         out << "    \"sha256\": \"" << ir->sha256 << "\",\n";
-        out << "    \"text_slots\": " << ir->slots << "\n";
+        out << "    \"text_slots\": " << ir->slots << ",\n";
+        out << "    \"materialization_warnings\": [";
+        for (std::size_t i = 0; i < ir->materialization_warnings.size(); ++i)
+            out << (i ? ", " : "") << "\"" << json_escape(ir->materialization_warnings[i]) << "\"";
+        out << "]\n";
         out << "  },\n";
     }
     out << "  \"pacing\": \"" << (config.frames ? "fixed-frames" : "wall-clock") << "\",\n";
@@ -1263,7 +1316,7 @@ int main(int argc, char** argv) {
     std::optional<IrProvenance> ir;
     if (auto* bound = dynamic_cast<IrBoundFixture*>(fixture.get()))
         ir = IrProvenance{bound->loaded().file_name, bound->loaded().sha256,
-                          bound->loaded().slot_anchors.size()};
+                          bound->loaded().slot_anchors.size(), bound->warning_codes()};
 
     // Terminal readback: destroy the fixture, then count the views it left.
     TeardownMetrics teardown;
@@ -1271,8 +1324,13 @@ int main(int argc, char** argv) {
     // The planted subtree outlives the fixture but is freed after the
     // readback, so the negative control is a live view, not a real leak.
     std::unique_ptr<View> planted;
-    if (config->plant_leak && fixture->root().child_count() > 0)
+    if (config->plant_leak) {
+        if (fixture->root().child_count() == 0) {
+            std::cerr << "--plant-leak: the fixture root has no child to hold past teardown\n";
+            return 2;
+        }
         planted = fixture->root().remove_child(fixture->root().child_at(0));
+    }
     fixture.reset();
     teardown.views_constructed = View::constructed_count() - views_constructed_start;
     teardown.views_destroyed = View::destroyed_count() - views_destroyed_start;

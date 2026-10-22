@@ -574,11 +574,26 @@ TEST_CASE("design-import benchmark IR binding and teardown fail closed",
     CHECK(json.find("\"pacing\": \"fixed-frames\"") != std::string::npos);
     CHECK(json.find("\"text_slots\": 2") != std::string::npos);
     CHECK(json.find("\"live_views_after_teardown\": 0") != std::string::npos);
+    // A design with no widget palette materializes with a warning, never
+    // silently: the receipt names it.
+    CHECK(json.find("\"materialization_warnings\": [\"design-token-unmapped\"]") !=
+          std::string::npos);
 
     // Planted negative: a view leaked past teardown fails the run.
     REQUIRE(run_benchmark_main({"bench", "--lane=baked-native", "--ir=" + path.string(),
                                 "--frames=1", "--plant-leak",
                                 "--output=" + output.string()}) == 3);
+    // A plant that cannot be placed fails rather than reporting a clean run.
+    DesignIR lone;
+    lone.root.type = "text";
+    lone.root.stable_anchor_id = "only";
+    lone.root.text_content = "only";
+    const auto lone_path = std::filesystem::temp_directory_path() / "pulp-bench-lone.ir.json";
+    std::ofstream(lone_path) << serialize_design_ir(lone);
+    CHECK(run_benchmark_main({"bench", "--lane=baked-native", "--ir=" + lone_path.string(),
+                              "--frames=1", "--plant-leak",
+                              "--output=" + output.string()}) == 2);
+    std::filesystem::remove(lone_path);
     std::filesystem::remove(output);
     std::filesystem::remove(path);
 }
