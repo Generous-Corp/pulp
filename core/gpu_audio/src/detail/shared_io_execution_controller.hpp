@@ -202,6 +202,11 @@ class SharedIoExecutionController {
             entry.state.store(static_cast<std::uint8_t>(EntryState::Admitted),
                               std::memory_order_release);
             if (telemetry_) {
+                // This controller's admission is the provider-facing
+                // publication boundary, so admission and submission are
+                // intentionally counted together. Traced providers expose
+                // separate boundaries when submission can fail afterward.
+                telemetry_->record_admission();
                 telemetry_->record_submit();
                 telemetry_->observe_in_flight(count);
             }
