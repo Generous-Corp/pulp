@@ -500,6 +500,115 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
+// An SDK consumer project has pulp.toml and no core/. `pulp ship` resolves it
+// as the project root and takes the signing preflight from the selected SDK's
+// share/pulp/ship, since there is no Pulp checkout to take it from.
+static fs::path make_fake_consumer_project(std::string_view name, bool with_build_cache) {
+    auto root = pulp::test::make_unique_temp_dir("pulp-ship-consumer-" + std::string(name));
+    {
+        std::ofstream cmake(root / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.24)\n"
+              << "project(FakeConsumerPlugin VERSION 1.0.0)\n";
+    }
+    {
+        std::ofstream toml(root / "pulp.toml");
+        toml << "sdk_version = \"latest\"\n";
+    }
+    if (with_build_cache) {
+        fs::create_directories(root / "build");
+        std::ofstream cache(root / "build" / "CMakeCache.txt");
+        cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << root.string() << "\n";
+    }
+    return root;
+}
+
+// An installed SDK under <pulp_home>/sdk/<version> carrying a stub preflight.
+static void make_fake_installed_sdk(const fs::path& pulp_home, std::string_view version) {
+    auto sdk = pulp_home / "sdk" / std::string(version);
+    fs::create_directories(sdk / "lib" / "cmake" / "Pulp");
+    std::ofstream(sdk / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake") << "\n";
+    std::ofstream(sdk / "version.txt") << version << "\n";
+    auto ship_dir = sdk / "share" / "pulp" / "ship";
+    fs::create_directories(ship_dir);
+    auto stub = ship_dir / "ensure_signing_ready.sh";
+    {
+        std::ofstream out(stub);
+        out << "#!/usr/bin/env bash\n"
+               "echo \"SDK-DOCTOR-STUB-RAN args=$*\"\n"
+               "exit 0\n";
+    }
+    fs::permissions(stub, fs::perms::owner_all | fs::perms::group_read |
+                              fs::perms::others_read);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship doctor in an SDK consumer project runs the SDK's preflight",
+                 "[cli][shellout][ship][doctor][sdk-consumer]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    make_fake_installed_sdk(home_dir, "0.1.0");
+    auto root = make_fake_consumer_project("doctor", /*with_build_cache=*/false);
+    REQUIRE_FALSE(fs::exists(root / "core"));
+
+    auto r = run_pulp_in(root, {"ship", "doctor", "--print-env"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE_FALSE(contains(combined, "not in a Pulp project directory"));
+    REQUIRE(contains(combined, "SDK-DOCTOR-STUB-RAN args=--print-env"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship doctor in an SDK consumer project names the SDK path it needs",
+                 "[cli][shellout][ship][doctor][sdk-consumer]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    // The SDK is installed but predates the shipped preflight.
+    make_fake_installed_sdk(home_dir, "0.1.0");
+    fs::remove(home_dir / "sdk" / "0.1.0" / "share" / "pulp" / "ship" /
+               "ensure_signing_ready.sh");
+    auto root = make_fake_consumer_project("doctor-old-sdk", false);
+
+    auto r = run_pulp_in(root, {"ship", "doctor"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(combined, "missing"));
+    REQUIRE(contains(combined, (fs::path("share") / "pulp" / "ship" /
+                                "ensure_signing_ready.sh").string()));
+
+    fs::remove_all(root);
+}
+
+#if defined(__APPLE__)
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package in an SDK consumer project reaches the packager",
+                 "[cli][shellout][ship][package][sdk-consumer]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    make_fake_installed_sdk(home_dir, "0.1.0");
+    auto root = make_fake_consumer_project("package", /*with_build_cache=*/true);
+
+    auto r = run_pulp_in(root, {"ship", "package", "--version", "1.0.0"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE_FALSE(contains(combined, "not in a Pulp project directory"));
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output, "nothing to package"));
+    REQUIRE(fs::exists(root / "artifacts"));
+
+    fs::remove_all(root);
+}
+#endif
+
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship sign in project without identity reports signing guidance",
                  "[cli][shellout][ship][issue-643][issue-901]") {
@@ -1030,10 +1139,38 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     auto r = run_pulp_in(root, {"ship", "package", "--version", "9.9.9"});
     REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 0);
+    // Nothing to package is a failed `package`, as on Linux: `release` and
+    // scripts read the exit code, not the summary line.
+    REQUIRE(r.exit_code == 1);
     REQUIRE(contains(r.stdout_output, "Created 0 .pkg and 0 .dmg artifacts"));
+    REQUIRE(contains(r.stderr_output, "nothing to package"));
     REQUIRE(fs::exists(root / "artifacts"));
     REQUIRE(fs::is_empty(root / "artifacts"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package exits non-zero when the combined installer fails",
+                 "[cli][shellout][ship][package]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("package-combined-fails", true);
+    make_fake_bundle(root, "VST3", "FakeShipPlugin.vst3");
+    make_fake_bundle(root, "CLAP", "FakeShipPlugin.clap");
+
+    // HOME is the fixture's empty directory, so no installer identity by this
+    // name can exist and productbuild's signing step must fail.
+    auto r = run_pulp_in(root, {"ship", "package", "--version", "9.9.9",
+                                "--installer-identity",
+                                "Developer ID Installer: Pulp Fixture Nobody (0000000000)"});
+    REQUIRE_FALSE(r.timed_out);
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output, "FAILED to create combined installer"));
+    REQUIRE(contains(r.stderr_output, "installer(s) failed to build"));
+    REQUIRE(contains(r.stdout_output, "Created 0 .pkg and 0 .dmg artifacts"));
 
     fs::remove_all(root);
 }

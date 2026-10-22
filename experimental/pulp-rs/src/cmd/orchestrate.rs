@@ -570,6 +570,30 @@ fn build_with_dependency_policy<S: Spawner>(
         .map_err(io_err)?;
         needs_configure = true;
     }
+    // A standalone project configures against the SDK its pulp.toml selects.
+    // Without CMAKE_PREFIX_PATH, find_package(Pulp) takes whatever Pulp
+    // package is first on CMake's search path, or none. A cache that already
+    // records the prefix keeps it across reconfigures, so only a fresh or
+    // migrated build dir needs one supplied.
+    let mut standalone_prefix = None;
+    if needs_configure
+        && proj.standalone
+        && existing_cache
+            .as_deref()
+            .and_then(|cache| cmake_cache_value(cache, "CMAKE_PREFIX_PATH"))
+            .map_or(true, str::is_empty)
+    {
+        standalone_prefix = crate::standalone_sdk::installed_sdk_dir(&proj.root);
+        if standalone_prefix.is_none() {
+            // No installed SDK matches. The C++ delegate owns the rest of the
+            // resolution: it downloads a pinned SDK or builds one from a checkout.
+            let cpp_argv = build_delegate_argv(args);
+            let stub = "pulp build: no installed Pulp SDK matches this project's pulp.toml, \
+                        and fetching one needs pulp-cpp next to pulp. Run `pulp sdk install`.";
+            let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
+            return Ok(rc);
+        }
+    }
     if needs_configure {
         if !proj.standalone {
             if dependencies_prepared {
@@ -598,6 +622,9 @@ fn build_with_dependency_policy<S: Spawner>(
             .arg(proj.root.to_string_lossy().into_owned());
         if !proj.standalone {
             cfg = cfg.arg("-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON");
+        }
+        if let Some(sdk) = &standalone_prefix {
+            cfg = cfg.arg(format!("-DCMAKE_PREFIX_PATH={}", sdk.display()));
         }
         if args.trace {
             cfg = cfg.arg("-DPULP_TRACING=ON");
@@ -2231,8 +2258,18 @@ mod tests {
         assert!(text.contains("/repo/build-trace"), "{text}");
     }
 
+    /// A standalone project whose `sdk_path` names an installed SDK, so a fresh
+    /// configure resolves its prefix without the C++ delegate.
     fn standalone_project(root: &Path) -> ActiveProject {
-        std::fs::write(root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n").unwrap();
+        let sdk = root.join("fixture-sdk");
+        std::fs::create_dir_all(sdk.join("lib/cmake/Pulp")).unwrap();
+        std::fs::write(sdk.join("lib/cmake/Pulp/PulpConfig.cmake"), "").unwrap();
+        std::fs::write(sdk.join("version.txt"), "0.40.0\n").unwrap();
+        std::fs::write(
+            root.join("pulp.toml"),
+            format!("sdk_version = \"0.40.0\"\nsdk_path = '{}'\n", sdk.display()),
+        )
+        .unwrap();
         ActiveProject::new(root.to_path_buf(), true)
     }
 

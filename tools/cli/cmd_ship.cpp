@@ -144,9 +144,31 @@ static int print_ship_help() {
     return 0;
 }
 
-// Path to the non-interactive-signing doctor script (tools/scripts).
+// A file the ship flow takes from Pulp itself. A source checkout has it at
+// `checkout_rel`; an SDK consumer project (pulp.toml, no core/) uses the copy
+// its selected SDK installs under share/pulp/ship. When neither exists, the
+// path returned is the one the caller should name in its error.
+static fs::path ship_support_file(const fs::path& root, const fs::path& checkout_rel,
+                                  const std::string& sdk_name) {
+    auto in_checkout = root / checkout_rel;
+    if (fs::exists(in_checkout) || fs::exists(root / "core")
+        || !fs::exists(root / "pulp.toml")) {
+        return in_checkout;
+    }
+    auto sdk = resolve_standalone_sdk(root, /*materialize=*/false);
+    if (sdk.resolved_sdk_dir.empty()) return in_checkout;
+    return sdk.resolved_sdk_dir / "share" / "pulp" / "ship" / sdk_name;
+}
+
+// Path to the non-interactive-signing doctor script.
 static fs::path signing_doctor_script(const fs::path& root) {
-    return root / "tools" / "scripts" / "ensure_signing_ready.sh";
+    return ship_support_file(root, fs::path("tools") / "scripts" / "ensure_signing_ready.sh",
+                             "ensure_signing_ready.sh");
+}
+
+static fs::path default_entitlements(const fs::path& root) {
+    return ship_support_file(root, fs::path("ship") / "templates" / "entitlements.plist",
+                             "entitlements.plist");
 }
 
 // Fail-closed, quiet, idempotent preflight: materialize and prove the dedicated
@@ -289,7 +311,7 @@ static int ship_sign(const std::vector<std::string>& args,
     const std::string sub = "sign";
         std::string identity, target, keystore_path, key_alias, store_pass, key_pass;
         std::string sign_path;  // --path: sign one explicit desktop artifact (not .pkg)
-        std::string entitlements = (root / "ship" / "templates" / "entitlements.plist").string();
+        std::string entitlements = default_entitlements(root).string();
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--identity") {
@@ -898,7 +920,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
 #endif  // __linux__
 
 #if defined(__APPLE__)
-        int pkg_count = 0, dmg_count = 0;
+        int pkg_count = 0, dmg_count = 0, failed_count = 0;
 
         // Resolve the Developer ID Installer identity for flat-package
         // signing. Apple's installer-distribution flow requires the `.pkg`
@@ -928,7 +950,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 std::cout << "Packaging " << name << " (Standalone .app → .dmg)...\n";
                 if (pulp::ship::create_dmg(app.string(), dmg_path.string(), name))
                     ++dmg_count;
-                else std::cerr << "  FAILED to create .dmg for " << name << "\n";
+                else { std::cerr << "  FAILED to create .dmg for " << name << "\n"; ++failed_count; }
             } else {
                 combined.push_back({app.string(), "/Applications", "Standalone App"});
             }
@@ -962,6 +984,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
                         ++dmg_count;
                     } else {
                         std::cerr << "  FAILED to create .dmg\n";
+                        ++failed_count;
                     }
                     continue;
                 }
@@ -992,7 +1015,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
                     cmd += " --sign " + shell_quote(installer_identity);
                 cmd += " " + shell_quote(pkg_path.string()) + " 2>/dev/null";
                 if (run(cmd) == 0) ++pkg_count;
-                else std::cerr << "  FAILED\n";
+                else { std::cerr << "  FAILED\n"; ++failed_count; }
             }
         }
 
@@ -1006,10 +1029,22 @@ static int ship_package_impl(const std::vector<std::string>& args,
             if (pulp::ship::create_combined_pkg(combined, pkg_path.string(),
                     "com.pulp." + product_name, version, installer_identity))
                 ++pkg_count;
-            else std::cerr << "  FAILED to create combined installer\n";
+            else { std::cerr << "  FAILED to create combined installer\n"; ++failed_count; }
         }
         std::cout << "Created " << pkg_count << " .pkg and " << dmg_count
                   << " .dmg artifacts in " << artifacts.string() << "\n";
+        // An installer that failed, or a run that found nothing to package,
+        // is a failed `package`: `release` and scripts key off the exit code.
+        if (failed_count > 0) {
+            std::cerr << "Error: " << failed_count
+                      << " installer(s) failed to build; see the FAILED lines above.\n";
+            return 1;
+        }
+        if (pkg_count + dmg_count == 0) {
+            std::cerr << "Error: nothing to package: no plugin bundles or standalone apps "
+                         "were found under " << build_dir.string() << "\n";
+            return 1;
+        }
         return 0;
 #else
         std::cerr << "Error: `pulp ship package` has no packager for this "
@@ -2196,7 +2231,7 @@ static int ship_share(const std::vector<std::string>& args,
         identity = ship_config(identity, "PULP_SIGN_IDENTITY",
                                "signing.apple", "identity");
         if (entitlements.empty()) {
-            auto def = root / "ship" / "templates" / "entitlements.plist";
+            auto def = default_entitlements(root);
             if (fs::exists(def)) entitlements = def.string();
         }
 
@@ -2463,10 +2498,12 @@ int cmd_ship(const std::vector<std::string>& args) {
     if (sub == "help" || sub == "--help" || sub == "-h")
         return print_ship_help();
 
-    auto root = find_project_root();
+    // A Pulp source checkout or an SDK consumer project (pulp.toml, no core/):
+    // both build into <root>/build, and ship_support_file() finds the signing
+    // script and entitlements in whichever one this is.
+    auto root = resolve_active_project_root(nullptr);
     // An appcast describes artifacts that already exist, so given an explicit
-    // --output it needs neither a Pulp source tree nor a build directory. That
-    // lets an SDK consumer (whose repo has no core/) publish its update feed.
+    // --output it needs neither a project nor a build directory.
     if (sub == "appcast" && root.empty() &&
         std::find(args.begin(), args.end(), "--output") != args.end())
         return ship_appcast(args, fs::current_path(), {});

@@ -889,8 +889,12 @@ int cmd_create(const std::vector<std::string>& args) {
             }
         }
 
+        // Same generator choice as `pulp build`'s fresh configure; without it
+        // the project gets CMake's platform default (Makefiles on macOS/Linux).
+        const bool use_ninja = configure_ninja_available()
+            && !fs::exists(out_dir / "build" / "CMakeCache.txt");
         std::string configure_cmd = pulp::cli::create_standalone_configure_command(
-            out_dir, out_dir / "build", debug_build, sdk_dir);
+            out_dir, out_dir / "build", debug_build, sdk_dir, use_ninja);
         append_windows_visual_studio_generator_args(configure_cmd);
         int rc = run_with_spinner(configure_cmd, "Configuring");
         if (rc != 0) {
