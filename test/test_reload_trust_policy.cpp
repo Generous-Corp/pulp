@@ -72,6 +72,23 @@ TEST_CASE("require_signed ON + no sidecar → refuse", "[reload][trust-policy]")
     fs::remove_all(d);
 }
 
+TEST_CASE("require_signed ON + a trust decision with no pack → refuse (fail closed)",
+          "[reload][trust-policy]") {
+    auto d = make_dir();
+    const fs::path logic = d / "logic.mod";
+    write(logic, "bytes");
+    // A decision that is neither a refusal nor a verified pack must not collapse
+    // into the empty "policy off" digest that lets a caller load without trust.
+    auto checked = signed_member_sha256(logic, ReloadTrustPolicy{true, {}}, std::monostate{});
+    REQUIRE(std::holds_alternative<ReloadOutcome>(checked));
+    REQUIRE(std::get<ReloadOutcome>(checked).status == ReloadOutcome::Status::RejectedIntegrity);
+    // Control: the policy off yields the empty digest for the same decision.
+    auto off = signed_member_sha256(logic, ReloadTrustPolicy{false, {}}, std::monostate{});
+    REQUIRE(std::holds_alternative<std::string>(off));
+    REQUIRE(std::get<std::string>(off).empty());
+    fs::remove_all(d);
+}
+
 TEST_CASE("require_signed ON + malformed sidecar → refuse (fail closed)",
           "[reload][trust-policy]") {
     auto d = make_dir();

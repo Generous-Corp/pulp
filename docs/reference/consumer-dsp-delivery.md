@@ -43,18 +43,27 @@ Open items: **Team-ID re-sign** (a curator signs each pack — key management +
 revocation duties) **vs library-validation-off** (a weakened OS security
 posture). Until that is decided, native packs are first-party/curated only.
 
-## 4. A shipping plugin NEVER dlopens a downloaded dylib
+## 4. A shipping plugin NEVER dlopens an unsigned dylib
 The developer hot-reload lane (`ReloadableShell`) has a filesystem watcher that
 `dlopen`s a rebuilt logic library — a *development* affordance. It is **compiled
-out of shipping builds** by the ship-safety gate (item 1.12):
-`PULP_RELOAD_DEV_WATCHER=0` removes the watcher thread, its poll loop, and the
-raw-path `ReloadController`
+out of shipping builds** by the ship-safety gate: `PULP_RELOAD_DEV_WATCHER`
+defaults to `PULP_DEV_BUILD`, the build-profile axis `tools/cmake/PulpProfiles.cmake`
+exports PUBLIC from `pulp-platform` (1 under `PULP_PROFILE=dev`, 0 under
+`release`), and at 0 it removes the watcher thread, its poll loop, the raw-path
+`ReloadController`, and the `PULP_RELOAD_LOGIC_PATH` environment lookup
 (`core/format/include/pulp/format/reload/reloadable_shell.hpp`), enforced by the
-`nm` symbol-absence test (`pulp-reload-ship-symbol-absence`,
-`test/cmake/reload_ship_symbol_check.cmake`). So a shipped binary has no
-filesystem-watch / arbitrary-`dlopen` entry point at all. The only sanctioned
-"is this content trustworthy?" path is `verify_swap_pack` (signature-then-hash,
-fail-closed).
+`nm`/strings symbol-absence test (`pulp-reload-ship-symbol-absence`,
+`test/cmake/reload_ship_symbol_check.cmake`). The shell's *initial* load — the
+constructor's `dlopen` of the path the shell factory passes — is not compiled
+out, because a shipped shell still has to load its DSP. Instead it is gated: with
+the watcher compiled out the shell's trust policy defaults to `require_signed`,
+so the constructor verifies the path's signed sidecar pack (`verify_swap_pack`,
+signature-then-hash, fail-closed) on the raw bytes before any `dlopen`, and an
+unsigned or wrongly signed image leaves the shell running as passthrough
+(`pulp-test-reloadable-shell-trust-ship`). So a shipped binary has no
+filesystem-watch or environment-chosen `dlopen` entry point, and the only image
+it loads is a verified member of a signed pack under the key the shell was
+constructed with.
 
 ## Why this shape
 Data-graphs + WASM are portable and sandboxable; native code is neither without a

@@ -65,12 +65,19 @@ namespace pulp::format::reload {
 /// (only images doing flat-namespace lookup — i.e. thin reload logic — consult
 /// the promoted symbols). No-op on Windows (the static model is used there).
 ///
-/// DEV-ONLY: the thin-logic dlopen path is compiled out of shipping builds
-///. Multi-instance caveat (dev-time only): two DIFFERENT Pulp
-/// plugins reloading thin logic in the SAME host would share one global set of
-/// `pulp::*` symbols; that is a niche dev scenario and the shared symbols are the
-/// same SDK build, so stateless SDK calls are unaffected (only process-global
-/// SDK singletons could cross-talk). Documented as a dev-loop limitation.
+/// This promotion is itself unconditional (it is a scope change on the running
+/// host image, not a load). What a shipping build removes is the way to REACH an
+/// arbitrary thin image: with PULP_RELOAD_DEV_WATCHER=0 (the default under
+/// PULP_PROFILE=release, via PULP_DEV_BUILD) ReloadableShell compiles out its
+/// filesystem watcher, its raw-path ReloadController, and its
+/// PULP_RELOAD_LOGIC_PATH lookup, and its initial load defaults to
+/// require_signed, so the only image a shipped shell dlopens is a member of a
+/// verified signed pack. Multi-instance caveat (dev-time only): two DIFFERENT
+/// Pulp plugins reloading thin logic in the SAME host would share one global
+/// set of `pulp::*` symbols; that is a niche dev scenario and the shared
+/// symbols are the same SDK build, so stateless SDK calls are unaffected (only
+/// process-global SDK singletons could cross-talk). Documented as a dev-loop
+/// limitation.
 inline void promote_host_symbols_once() {
     static const bool promoted = [] {
         ::Dl_info info{};

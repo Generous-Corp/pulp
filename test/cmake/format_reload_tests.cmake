@@ -243,6 +243,35 @@ if(UNIX)
             -DDEV_BIN=$<TARGET_FILE:pulp-reload-ship-fixture-dev>
             -DSHIP_BIN=$<TARGET_FILE:pulp-reload-ship-fixture-ship>
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/reload_ship_symbol_check.cmake)
+
+    # The development-only environment variables (PULP_DEV_HOT_RELOAD,
+    # PULP_RELOAD_LOGIC_PATH) are read by header-inline code that keys on
+    # PULP_DEV_BUILD, the profile axis pulp::platform exports PUBLIC. Compile one
+    # translation unit that includes both headers twice, once per axis value,
+    # and inspect the objects: the dev object must carry both literals (positive
+    # control), the release object neither. The override goes in compile
+    # OPTIONS, which the generators emit after the inherited definitions, so
+    # -U then -D replaces the PUBLIC value without a redefinition warning.
+    set(_pulp_dev_env_gate_src "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dev_env_gate_fixture.cpp")
+    add_library(pulp-dev-env-gate-fixture-dev OBJECT ${_pulp_dev_env_gate_src})
+    target_link_libraries(pulp-dev-env-gate-fixture-dev PRIVATE pulp::format)
+    target_compile_options(pulp-dev-env-gate-fixture-dev PRIVATE -UPULP_DEV_BUILD -DPULP_DEV_BUILD=1)
+
+    add_library(pulp-dev-env-gate-fixture-ship OBJECT ${_pulp_dev_env_gate_src})
+    target_link_libraries(pulp-dev-env-gate-fixture-ship PRIVATE pulp::format)
+    target_compile_options(pulp-dev-env-gate-fixture-ship PRIVATE -UPULP_DEV_BUILD -DPULP_DEV_BUILD=0)
+
+    # One target that builds both objects, for confirm_failure.sh and anyone
+    # rebuilding just this check after the header changed.
+    add_custom_target(pulp-dev-env-gate-fixtures)
+    add_dependencies(pulp-dev-env-gate-fixtures
+        pulp-dev-env-gate-fixture-dev pulp-dev-env-gate-fixture-ship)
+
+    add_test(NAME pulp-dev-env-gate-symbol-absence
+        COMMAND ${CMAKE_COMMAND}
+            -DDEV_OBJ=$<TARGET_OBJECTS:pulp-dev-env-gate-fixture-dev>
+            -DSHIP_OBJ=$<TARGET_OBJECTS:pulp-dev-env-gate-fixture-ship>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dev_env_gate_symbol_check.cmake)
 endif()
 
 # The PULP_DEV_BUILD=0 arms of the macOS view hosts and the SKP capture are

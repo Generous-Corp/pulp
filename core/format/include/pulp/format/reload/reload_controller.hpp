@@ -231,44 +231,23 @@ private:
         return h;
     }
 
-    // SHA-256 (hex) of a file's bytes, for confirming the staged image matches the
-    // signed manifest hash. std::nullopt if the file can't be read.
-    static std::optional<std::string> sha256_of_file(const std::filesystem::path& p) {
-        std::ifstream f(p, std::ios::binary);
-        if (!f) return std::nullopt;
-        const std::string bytes((std::istreambuf_iterator<char>(f)),
-                                std::istreambuf_iterator<char>());
-        return runtime::sha256_hex(bytes);
-    }
-
     // Copy the watched file to a fresh, uniquely-named path and reload THAT, so
     // the loader reads the new bytes rather than returning a cached image for a
     // path it already opened.
     ReloadOutcome stage_and_reload() {
         ++attempts_;
-        // require_signed enforcement (opt-in; default OFF = the frictionless dev
-        // loop). Verify the WATCHED file's signed pack BEFORE staging, then confirm
-        // AFTER the stage copy that the staged bytes we actually load still match the
-        // signed hash. The copy re-reads path_, so verifying only the source would
-        // leave a verify→copy TOCTOU (a racing writer could swap in unsigned bytes
-        // between the check and the copy); re-hashing the staged image closes it,
-        // mirroring pack_install's verify-the-published-bytes rule. Fail closed
-        // throughout — a refusal returns without loading anything.
+        // require_signed enforcement (opt-in while the dev watcher is compiled
+        // in). Verify the WATCHED file's signed pack BEFORE staging, then confirm
+        // AFTER the stage copy that the staged bytes we actually load still match
+        // the signed hash (signed_member_sha256 explains the verify→copy window
+        // this closes, mirroring pack_install's verify-the-published-bytes rule).
+        // Fail closed throughout — a refusal returns without loading anything.
         std::string expected_signed_sha;  // signed SHA-256 of the watched member
-        if (trust_policy_.require_signed) {
-            auto decision = resolve_reload_trust(path_, trust_policy_);
-            if (auto* refused = std::get_if<ReloadOutcome>(&decision)) return *refused;
-            if (auto* trust = std::get_if<SwapPackTrust>(&decision)) {
-                if (auto rejected = verify_pack_before_load(*trust, path_.string()))
-                    return *rejected;
-                const std::string member = path_.filename().string();
-                for (const auto& f : trust->manifest.files)
-                    if (f.path == member) { expected_signed_sha = f.sha256_hex; break; }
-                if (expected_signed_sha.empty())
-                    return {ReloadOutcome::Status::RejectedIntegrity,
-                            "require_signed: watched file is not a named member of its "
-                            "signed manifest"};
-            }
+        {
+            auto checked = signed_member_sha256(path_, trust_policy_);
+            if (auto* refused = std::get_if<ReloadOutcome>(&checked))
+                return *refused;
+            expected_signed_sha = std::get<std::string>(checked);
         }
         // Stage to a name unique per-INSTANCE and per-process. Two shells
         // watching the same logic_path share a default stage_dir (the watched
@@ -303,7 +282,7 @@ private:
         // swapped between the verify above and the copy, the staged bytes won't
         // match and we refuse (and drop the untrusted stage copy) before any load.
         if (!expected_signed_sha.empty()) {
-            const auto staged_sha = sha256_of_file(staged);
+            const auto staged_sha = sha256_hex_of_file(staged);
             if (!staged_sha || *staged_sha != expected_signed_sha) {
                 std::error_code rm;
                 std::filesystem::remove(staged, rm);

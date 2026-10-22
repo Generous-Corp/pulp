@@ -33,10 +33,13 @@
 /// DSP behind a stable contract hot-swaps. This is by design (the host has
 /// already cached the parameter list).
 ///
-/// Logic path resolution (in order): the explicit constructor argument, else the
-/// `PULP_RELOAD_LOGIC_PATH` environment variable, else the empty path (the shell
-/// runs as passthrough with no parameters and logs a clear diagnostic — e.g. the
-/// host scanned the plugin before the developer built the logic library).
+/// Logic path resolution (in order): the explicit constructor argument, else —
+/// only while the dev watcher is compiled in — the `PULP_RELOAD_LOGIC_PATH`
+/// environment variable, else the empty path (the shell runs as passthrough with
+/// no parameters and logs a clear diagnostic — e.g. the host scanned the plugin
+/// before the developer built the logic library). With the watcher compiled out
+/// the environment is never read, and the initial image must be a signed pack
+/// (see ReloadTrustPolicy and the constructor).
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/reload/build_fingerprint.hpp>
@@ -75,14 +78,25 @@
 // Ship-safety gate. The dev filesystem WATCHER — the
 // background thread that polls a source path and dlopen()s whatever compiled
 // artifact appears — is a development affordance, not something a shipped plugin
-// should carry. Define PULP_RELOAD_DEV_WATCHER=0 in a release build and the
-// watcher thread, its poll loop, and the raw-path ReloadController it drives are
-// compiled OUT entirely (no filesystem-watch / auto-dlopen entry point in the
-// binary — asserted by the symbol-absence test). The signed SwapTransaction
-// surface (`session_` / the hot-swap slot) is deliberately NOT gated: that is
-// the path a shipping app-store-style signed content swap would use.
+// should carry. With PULP_RELOAD_DEV_WATCHER=0 the watcher thread, its poll
+// loop, the raw-path ReloadController it drives, and the PULP_RELOAD_LOGIC_PATH
+// environment lookup are compiled OUT entirely (no filesystem-watch /
+// auto-dlopen entry point in the binary — asserted by the symbol-absence test),
+// and the constructor's initial load defaults to require_signed, so an
+// unsigned image is refused before dlopen and the shell runs as passthrough.
+// The signed SwapTransaction surface (`session_` / the hot-swap slot) is
+// deliberately NOT gated: that is the path a shipping app-store-style signed
+// content swap uses.
+//
+// The default follows the build profile: PULP_DEV_BUILD
+// (tools/cmake/PulpProfiles.cmake, exported PUBLIC by pulp-platform) is 1 under
+// PULP_PROFILE=dev and 0 under release. An explicit -DPULP_RELOAD_DEV_WATCHER=…
+// still overrides it either way.
+#ifndef PULP_DEV_BUILD
+#error "PULP_DEV_BUILD is not defined; link pulp::platform, which exports it (PulpProfiles.cmake)"
+#endif
 #if !defined(PULP_RELOAD_DEV_WATCHER)
-#define PULP_RELOAD_DEV_WATCHER 1
+#define PULP_RELOAD_DEV_WATCHER PULP_DEV_BUILD
 #endif
 
 namespace pulp::format::reload {
@@ -96,10 +110,34 @@ public:
     /// Crossfade length applied on each hot-swap so the DSP change is click-free.
     static constexpr double kCrossfadeMs = 12.0;
 
-    /// @param logic_path path to the logic shared library. Empty → resolve from
-    /// the `PULP_RELOAD_LOGIC_PATH` environment variable.
-    explicit ReloadableShell(std::string logic_path = {})
-        : logic_path_(resolve_logic_path(std::move(logic_path))) {
+    /// Trust policy a shell is constructed with when none is passed: the
+    /// unsigned dev loop while the dev watcher is compiled in, signed-only once
+    /// it is compiled out. A shipping shell passes its pinned signer key
+    /// explicitly; without one, every initial image is refused.
+    static ReloadTrustPolicy default_trust_policy() {
+        ReloadTrustPolicy policy;
+        policy.require_signed = PULP_RELOAD_DEV_WATCHER == 0;
+        return policy;
+    }
+
+    /// @param logic_path path to the logic shared library. While the dev
+    /// watcher is compiled in, empty → resolve from the `PULP_RELOAD_LOGIC_PATH`
+    /// environment variable; with it compiled out the environment is never
+    /// consulted and an empty path runs as passthrough.
+    /// @param trust policy for the initial load (and the dev watcher); see
+    /// default_trust_policy(). With require_signed the watched path must sit in
+    /// a signed pack (sidecar `<logic>.manifest.json`, pinned key) and is
+    /// verified on its raw bytes before anything is dlopen'd.
+    explicit ReloadableShell(std::string logic_path = {},
+                             ReloadTrustPolicy trust = default_trust_policy())
+        : logic_path_(
+#if PULP_RELOAD_DEV_WATCHER
+              resolve_logic_path(std::move(logic_path))
+#else
+              std::move(logic_path)
+#endif
+                  ),
+          reload_trust_policy_(std::move(trust)) {
         load_initial();
     }
 
@@ -172,12 +210,14 @@ public:
         on_reloaded_ = std::move(cb);
     }
 
-    /// Opt-in "require signed reloads" for this shell's dev watcher (default OFF =
-    /// the frictionless unsigned dev loop). When enabled with the pinned key, the
-    /// watcher refuses any reload whose bytes are not covered by a valid signed
-    /// sidecar manifest — the same fail-closed verification consumers get, applied
-    /// in dev. Set BEFORE prepare() so the controller adopts it; a call after
-    /// prepare() takes effect on the next prepare()/re-emplace.
+    /// Opt-in "require signed reloads" for this shell's dev watcher (default OFF
+    /// while the watcher is compiled in = the frictionless unsigned dev loop).
+    /// When enabled with the pinned key, the watcher refuses any reload whose
+    /// bytes are not covered by a valid signed sidecar manifest — the same
+    /// fail-closed verification consumers get, applied in dev. Set BEFORE
+    /// prepare() so the controller adopts it; a call after prepare() takes
+    /// effect on the next prepare()/re-emplace. The initial load has already
+    /// happened in the constructor, so its policy is the constructor argument.
     void set_reload_trust_policy(ReloadTrustPolicy policy) {
         std::lock_guard<std::mutex> g(controller_mutex_);
         reload_trust_policy_ = std::move(policy);
@@ -293,6 +333,13 @@ public:
     }
 
     const std::string& logic_path() const { return logic_path_; }
+    /// Outcome of the constructor's initial load: Swapped when the logic image
+    /// is live behind the frozen contract, otherwise the rejection (or
+    /// RejectedLoadFailed with no path at all). Distinguishes a "no logic"
+    /// passthrough from a "logic refused" passthrough.
+    const ReloadOutcome& initial_load_outcome() const {
+        return initial_outcome_;
+    }
     std::uint64_t reload_attempts() const { return reload_attempts_.load(std::memory_order_relaxed); }
     std::uint64_t successful_reloads() const { return successful_reloads_.load(std::memory_order_relaxed); }
     ReloadOutcome::Status last_status() const { return last_status_.load(std::memory_order_relaxed); }
@@ -301,13 +348,22 @@ public:
     std::uint64_t contention_blocks() const { return slot_.contention_blocks(); }
     bool has_active_dsp() const { return slot_.has_active(); }
 
-private:
+  private:
+#if PULP_RELOAD_DEV_WATCHER
+    // The environment lookup exists only beside the dev watcher: a shipped shell
+    // has no path by which the host's environment can choose what it dlopens.
+    // PULP_RELOAD_SHIP_FIXTURE_MARK (test-only) force-emits the symbol so the
+    // ship-safety symbol-absence test has a deterministic marker here too.
+#if defined(PULP_RELOAD_SHIP_FIXTURE_MARK)
+    [[gnu::used]]
+#endif
     static std::string resolve_logic_path(std::string explicit_path) {
         if (!explicit_path.empty()) return explicit_path;
         if (const char* env = std::getenv("PULP_RELOAD_LOGIC_PATH"); env && *env)
             return std::string(env);
         return {};
     }
+#endif
 
     // Copy the watched logic to a private, uniquely-named sibling and return that
     // path; the initial image is loaded from it so the live mapping never sits on
@@ -353,9 +409,43 @@ private:
     void load_initial() {
         descriptor_ = default_descriptor();
         if (logic_path_.empty()) {
+#if PULP_RELOAD_DEV_WATCHER
             runtime::log_info("[reload-shell] no logic path (set PULP_RELOAD_LOGIC_PATH "
                               "or pass one); running as passthrough");
+#else
+            runtime::log_info("[reload-shell] no logic path; running as passthrough");
+#endif
+            initial_outcome_ = outcome(ReloadOutcome::Status::RejectedLoadFailed, "no logic path");
             return;
+        }
+        auto reject = [this](const ReloadOutcome& rejected) {
+            runtime::log_warn("[reload-shell] initial logic rejected ({}) — passthrough; "
+                              "a logic with parameters needs a full plugin reload to take effect",
+                              rejected.detail);
+            // Surface the structured per-field diff (fingerprint/contract) so a
+            // rejection says WHAT differs (e.g. cpp_standard host vs logic), not
+            // just "mismatch" — the difference between a 5-minute fix and an hour.
+            for (const auto& issue : rejected.issues)
+                runtime::log_warn("[reload-shell]   diff: {}", issue);
+            initial_outcome_ = rejected;
+        };
+        // Trust gate on the WATCHED path's raw bytes, before any copy or dlopen.
+        // Off by default while the dev watcher is compiled in; on by default once
+        // it is compiled out, so a shipped shell never maps an unsigned image.
+        // The staged copy below is re-hashed against the signed digest, closing
+        // the verify→copy window (see signed_member_sha256). One window remains:
+        // a writer with access to the logic's parent directory can replace the
+        // staged copy between that re-hash and the dlopen; a shipped bundle's
+        // directory is not user-writable, so this holds only for a writable dev
+        // location.
+        std::string expected_signed_sha;
+        {
+            auto checked = signed_member_sha256(logic_path_, reload_trust_policy_);
+            if (auto* refused = std::get_if<ReloadOutcome>(&checked)) {
+                reject(*refused);
+                return;
+            }
+            expected_signed_sha = std::get<std::string>(checked);
         }
         // Load the initial image from a PRIVATE staged copy, never the watched
         // path directly. The watched path is the developer's build output, which a
@@ -381,6 +471,19 @@ private:
         std::error_code mtime_ec;
         const auto loaded_mtime = std::filesystem::last_write_time(logic_path_, mtime_ec);
         const std::string load_path = stage_initial(logic_path_);
+        if (!expected_signed_sha.empty()) {
+            const auto staged_sha = sha256_hex_of_file(load_path);
+            if (!staged_sha || *staged_sha != expected_signed_sha) {
+                if (load_path != logic_path_) {
+                    std::error_code rm;
+                    std::filesystem::remove(load_path, rm);
+                }
+                reject(outcome(ReloadOutcome::Status::RejectedIntegrity,
+                               "require_signed: staged bytes do not match the signed hash "
+                               "(source changed after verification) — refused"));
+                return;
+            }
+        }
         // The version now live is the staged bytes; the watcher's baseline.
         if (const auto hash = ReloadController::content_hash(load_path); hash && !mtime_ec)
             loaded_baseline_ = ReloadController::Baseline{loaded_mtime, *hash};
@@ -393,27 +496,30 @@ private:
         // hot-swaps in via the watcher.
         auto gated = gate_logic_image(load_path, current_build_fingerprint());
         if (auto* rejected = std::get_if<ReloadOutcome>(&gated)) {
-            runtime::log_warn("[reload-shell] initial logic rejected ({}) — passthrough; "
-                              "a logic with parameters needs a full plugin reload to take effect",
-                              rejected->detail);
-            // Surface the structured per-field diff (fingerprint/contract) so a
-            // rejection says WHAT differs (e.g. cpp_standard host vs logic), not
-            // just "mismatch" — the difference between a 5-minute fix and an hour.
-            for (const auto& issue : rejected->issues)
-                runtime::log_warn("[reload-shell]   diff: {}", issue);
+            reject(*rejected);
             return;
         }
         GatedImage& image = std::get<GatedImage>(gated);
         std::unique_ptr<Processor> p(image.create());
         if (!p) {
             runtime::log_warn("[reload-shell] initial logic create returned null — passthrough");
+            initial_outcome_ = outcome(ReloadOutcome::Status::RejectedNoEntryPoints,
+                                       "initial logic create returned null");
             return;
         }
         descriptor_ = p->descriptor();
         initial_latency_ = p->latency_samples();        // freeze the host-cached latency
         initial_ = std::move(p);
         initial_images_.push_back(std::move(image.lib)); // keep the code mapped
+        initial_outcome_ = outcome(ReloadOutcome::Status::Swapped, "loaded initial logic");
         runtime::log_info("[reload-shell] loaded initial logic: {}", logic_path_);
+    }
+
+    static ReloadOutcome outcome(ReloadOutcome::Status status, std::string detail) {
+        ReloadOutcome o;
+        o.status = status;
+        o.detail = std::move(detail);
+        return o;
     }
 
     static PluginDescriptor default_descriptor() {
@@ -510,7 +616,10 @@ private:
     std::function<void()> on_reloaded_snapshot() const { return on_reloaded_; }
 
     std::string logic_path_;
-    ReloadTrustPolicy reload_trust_policy_;  // opt-in require_signed (default OFF)
+    ReloadTrustPolicy
+        reload_trust_policy_; // initial-load + dev-watcher trust (see default_trust_policy)
+    ReloadOutcome initial_outcome_ =
+        outcome(ReloadOutcome::Status::RejectedLoadFailed, "not loaded");
     PluginDescriptor descriptor_;
     int initial_latency_ = 0;                     // host-cached latency of the initial logic
     std::unique_ptr<Processor> initial_;          // pre-prepare; moved into slot_

@@ -131,19 +131,21 @@ PULP_RELOAD_LOGIC(new MyDsp())   // exports abi-version / fingerprint / create /
 ```
 
 Build it with the `pulp_add_reload_logic()` CMake helper, publishing it to the
-path the shell will watch:
+path the shell will watch. `$HOME/.pulp/<plugin>/` is the **development
+convention** the examples use for that watched path; it is not where a shipped
+plugin looks for its DSP (see "Shipping the shell" below):
 
 ```cmake
 pulp_add_reload_logic(my-plugin-logic
     SOURCES     my_dsp.cpp
     OUTPUT_NAME logic
-    PUBLISH_DIR "$ENV{HOME}/.pulp/my-plugin")   # the watched path
+    PUBLISH_DIR "$ENV{HOME}/.pulp/my-plugin")   # the watched path (dev loop)
 ```
 
 ### 2. The shell (what the host loads)
 
-The shell factory returns a `ReloadableShell` pointed at the logic path
-(`PULP_RELOAD_LOGIC_PATH` overrides it at runtime):
+The shell factory returns a `ReloadableShell` pointed at the logic path. In a
+dev-profile build `PULP_RELOAD_LOGIC_PATH` overrides it at runtime:
 
 ```cpp
 #include <pulp/format/reload/reloadable_shell.hpp>
@@ -156,6 +158,32 @@ inline std::unique_ptr<pulp::format::Processor> create_my_plugin() {
 
 Wire it into the formats with the usual `pulp_add_plugin()` + the convention
 entry files (`clap_entry.cpp`, `vst3_entry.cpp`, `main.cpp`).
+
+### Shipping the shell
+
+A release build (`PULP_PROFILE=release`, which sets the `PULP_DEV_BUILD=0`
+compile definition and with it `PULP_RELOAD_DEV_WATCHER=0`) compiles the
+watcher, the raw-path controller, and the `PULP_RELOAD_LOGIC_PATH` lookup out of
+the shell, and the constructor's trust policy defaults to `require_signed`. A
+shipped shell therefore has to pass a **signed pack** and the key that signed
+it, not a loose dylib under `$HOME`:
+
+```cpp
+inline std::unique_ptr<pulp::format::Processor> create_my_plugin() {
+    using namespace pulp::format::reload;
+    ReloadTrustPolicy trust;
+    trust.require_signed = true;
+    trust.trusted_public_key = kMyPinnedSignerKey;   // Ed25519, baked into the binary
+    return std::make_unique<ReloadableShell>(installed_logic_path(), trust);
+}
+```
+
+The logic sits beside its sidecar manifest (`<logic>.manifest.json`, written by
+the swap-pack tooling in [Reload Trust & Safety](reload-trust.md)); the shell
+verifies the manifest's signature and the file's hash on the raw bytes before
+any `dlopen`, and an image that fails leaves the plugin running as passthrough
+with a `[reload-shell] initial logic rejected` log line. Passing the same policy
+in a dev build makes the dev watcher refuse unsigned reloads too.
 
 ### 3. The dev loop
 
