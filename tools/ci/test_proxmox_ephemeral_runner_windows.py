@@ -12,10 +12,13 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
+import signal
 import textwrap
+import time
 import unittest
 
 
@@ -67,6 +70,7 @@ with locked_state() as state:
             rc = 1
         else:
             state["rollbacks"] += 1
+            state["events"].append("rollback")
     elif cmd == "start":
         state["vm"] = "running"
     elif cmd == "guest":
@@ -76,7 +80,7 @@ with locked_state() as state:
                  "ip-addresses": [{"ip-address-type": "ipv4", "ip-address": "127.0.0.1"}]},
                 {"name": "Ethernet",
                  "ip-addresses": [{"ip-address-type": "ipv4", "ip-address": "169.254.3.4"},
-                                  {"ip-address-type": "ipv4", "ip-address": "198.51.100.21"}]},
+                                  {"ip-address-type": "ipv4", "ip-address": "192.0.2.21"}]},
             ]))
         else:
             rc = 2
@@ -128,9 +132,54 @@ if out:
 sys.exit(rc)
 '''
 
+FAKE_PVESH = STATE_HELPERS + r'''
+with locked_state() as state:
+    tasks = state["tasks"]
+print(json.dumps(tasks))
+'''
+
+FAKE_JOURNALCTL = r'''
+print("Accepted publickey for root from 192.0.2.174 port 59530 ssh2: RSA SHA256:x")
+print("Connection closed by 192.0.2.9 port 22")
+'''
+
 # The guest. `run.cmd` registers the JIT runner as online, takes a job, and
 # deregisters itself, the way an ephemeral runner does after one job.
 FAKE_SSH = STATE_HELPERS + r'''
+EXTERNAL_STOP = (
+    "import json, os, time, fcntl\n"
+    "path = os.environ['FAKE_STATE']\n"
+    "def update(change):\n"
+    "    with open(path + '.lock', 'a') as lock:\n"
+    "        fcntl.flock(lock, fcntl.LOCK_EX)\n"
+    "        state = json.load(open(path))\n"
+    "        change(state)\n"
+    "        json.dump(state, open(path + '.tmp', 'w'))\n"
+    "        os.replace(path + '.tmp', path)\n"
+    "time.sleep(1)\n"
+    "def stop(state):\n"
+    "    state['vm'] = 'stopped'\n"
+    "    state['tasks'].append({'type': 'qmshutdown', 'user': 'root@pam', 'starttime': int(time.time())})\n"
+    "    state['events'].append('external-stop')\n"
+    "update(stop)\n"
+    "time.sleep(1.5)\n"
+    "def lost(state):\n"
+    "    state['runners'] = [r for r in state['runners'] if r['id'] != 4242]\n"
+    "update(lost)\n"
+)
+FINISH_JOB = (
+    "import json, os, sys, time, fcntl\n"
+    "time.sleep(float(sys.argv[1]))\n"
+    "path = os.environ['FAKE_STATE']\n"
+    "with open(path + '.lock', 'a') as lock:\n"
+    "    fcntl.flock(lock, fcntl.LOCK_EX)\n"
+    "    state = json.load(open(path))\n"
+    "    state['runners'] = [r for r in state['runners'] if r['id'] != 4242]\n"
+    "    state['jobs_run'] += 1\n"
+    "    state['events'].append('job-done')\n"
+    "    json.dump(state, open(path + '.tmp', 'w'))\n"
+    "    os.replace(path + '.tmp', path)\n"
+)
 args = sys.argv[1:]
 command = args[-1]
 with locked_state() as state:
@@ -147,6 +196,35 @@ if "run.cmd" in command:
     if behavior == "never-online":
         time.sleep(30)
         sys.exit(1)
+    if behavior == "external-stop":
+        # Someone else stops the VM mid-job; GitHub notices the lost runner a
+        # little later.
+        with locked_state() as state:
+            name = state["jit_requests"][-1]["name"]
+            state["runners"].append({"id": 4242, "name": name, "status": "online", "busy": True})
+        import subprocess
+        subprocess.Popen(
+            [sys.executable, "-c", EXTERNAL_STOP],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        time.sleep(120)
+        sys.exit(0)
+    if behavior == "long-job":
+        # The job runs in the guest, not in this SSH session: killing the
+        # session (as the supervisor does on SIGTERM) must not end it. A
+        # detached child finishes it after FAKE_JOB_SECONDS.
+        with locked_state() as state:
+            name = state["jit_requests"][-1]["name"]
+            state["runners"].append({"id": 4242, "name": name, "status": "online", "busy": True})
+        import subprocess
+        subprocess.Popen(
+            [sys.executable, "-c", FINISH_JOB, os.environ.get("FAKE_JOB_SECONDS", "2")],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        time.sleep(120)
+        sys.exit(0)
     with locked_state() as state:
         name = state["jit_requests"][-1]["name"]
         state["runners"].append({"id": 4242, "name": name, "status": "online", "busy": False})
@@ -181,6 +259,9 @@ class WindowsSupervisorTests(unittest.TestCase):
         write_exec(self.bin / "gh", FAKE_GH, python)
         write_exec(self.bin / "ssh", FAKE_SSH, python)
         write_exec(self.bin / "flock", "exit 0\n", "/bin/bash")
+        write_exec(self.bin / "pvesh", FAKE_PVESH, python)
+        write_exec(self.bin / "journalctl", FAKE_JOURNALCTL, python)
+        write_exec(self.bin / "logger", 'echo "$*" >> "$FAKE_SYSLOG"\n', "/bin/bash")
         write_exec(
             self.bin / "governor",
             textwrap.dedent(
@@ -207,6 +288,8 @@ class WindowsSupervisorTests(unittest.TestCase):
             "mint_ok": True,
             "runner_behavior": "one-job",
             "jobs_run": 0,
+            "events": [],
+            "tasks": [],
             "guest_jit": "",
             "qm": [],
             "gh": [],
@@ -216,9 +299,8 @@ class WindowsSupervisorTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def run_supervisor(self, *args: str, **env_overrides: str) -> subprocess.CompletedProcess:
-        self.state_path.write_text(json.dumps(self.state), encoding="utf-8")
-        env = {
+    def base_env(self) -> dict[str, str]:
+        return {
             "PATH": f"{self.bin}:{os.environ['PATH']}",
             "HOME": str(self.tmp),
             "FAKE_STATE": str(self.state_path),
@@ -238,7 +320,17 @@ class WindowsSupervisorTests(unittest.TestCase):
             "PULP_WINDOWS_GUEST_BOOT_TIMEOUT_SECONDS": "5",
             "PULP_WINDOWS_BUSY_WAIT_SECONDS": "0",
             "PULP_GOVERNOR_REFUSAL_BACKOFF_SECONDS": "0",
+            "PULP_WINDOWS_BUSY_POLL_SECONDS": "0.2",
+            "PULP_WINDOWS_VM_WATCH_SECONDS": "0.2",
+            "PULP_WINDOWS_PVESH": str(self.bin / "pvesh"),
+            "PULP_WINDOWS_JOURNALCTL": str(self.bin / "journalctl"),
+            "PULP_WINDOWS_LOGGER": str(self.bin / "logger"),
+            "FAKE_SYSLOG": str(self.tmp / "syslog"),
         }
+
+    def run_supervisor(self, *args: str, **env_overrides: str) -> subprocess.CompletedProcess:
+        self.state_path.write_text(json.dumps(self.state), encoding="utf-8")
+        env = self.base_env()
         env.update(env_overrides)
         result = subprocess.run(
             ["/bin/bash", str(SCRIPT), *args],
@@ -251,6 +343,28 @@ class WindowsSupervisorTests(unittest.TestCase):
         self.state = json.loads(self.state_path.read_text(encoding="utf-8"))
         return result
 
+    def start_supervisor(self, **env_overrides: str) -> subprocess.Popen:
+        self.state_path.write_text(json.dumps(self.state), encoding="utf-8")
+        env = self.base_env()
+        env.update(env_overrides)
+        return subprocess.Popen(
+            ["/bin/bash", str(SCRIPT)],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+        )
+
+    def wait_for_busy_runner(self, deadline_seconds: float = 20) -> None:
+        deadline = time.monotonic() + deadline_seconds
+        while time.monotonic() < deadline:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+            if any(r["busy"] for r in state["runners"]):
+                return
+            time.sleep(0.1)
+        self.fail("the fake guest never reported a busy runner")
+
     def qm_verbs(self) -> list[str]:
         return [call[0] for call in self.state["qm"] if call[0] in ("rollback", "start")]
 
@@ -261,7 +375,7 @@ class WindowsSupervisorTests(unittest.TestCase):
         self.assertEqual(self.qm_verbs(), ["rollback", "start", "rollback"])
         self.assertEqual(self.state["vm"], "stopped")
         self.assertIn(["rollback", "300", GOLDEN], self.state["qm"])
-        self.assertIn("198.51.100.21", result.stdout)
+        self.assertIn("192.0.2.21", result.stdout)
 
     def test_jit_config_travels_on_stdin_never_argv(self) -> None:
         result = self.run_supervisor()
@@ -344,6 +458,58 @@ class WindowsSupervisorTests(unittest.TestCase):
         self.assertEqual(self.qm_verbs(), ["rollback", "start", "rollback"])
         self.assertEqual(self.state["vm"], "stopped")
 
+    def test_sigterm_during_a_job_drains_it_before_the_reset(self) -> None:
+        self.state["runner_behavior"] = "long-job"
+        proc = self.start_supervisor(PULP_WINDOWS_BUSY_WAIT_SECONDS="30", FAKE_JOB_SECONDS="2")
+        self.wait_for_busy_runner()
+        proc.send_signal(signal.SIGTERM)
+        output, _ = proc.communicate(timeout=60)
+        self.state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(self.state["jobs_run"], 1, output)
+        # Pre-job reset, the job, then the post-job reset: never a rollback
+        # while the job was still running.
+        self.assertEqual(self.state["events"], ["rollback", "job-done", "rollback"], output)
+        self.assertEqual(self.state["vm"], "stopped", output)
+        self.assertIn("is running a job; waiting", output)
+
+    def test_sigterm_with_a_job_outlasting_the_wait_leaves_the_vm_running(self) -> None:
+        self.state["runner_behavior"] = "long-job"
+        proc = self.start_supervisor(PULP_WINDOWS_BUSY_WAIT_SECONDS="0", FAKE_JOB_SECONDS="60")
+        self.wait_for_busy_runner()
+        proc.send_signal(signal.SIGTERM)
+        output, _ = proc.communicate(timeout=60)
+        self.state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        self.assertNotEqual(proc.returncode, 0, output)
+        self.assertEqual(self.state["events"], ["rollback"], output)
+        self.assertEqual(self.state["vm"], "running", output)
+        self.assertIn("leaving VM 300 running", output)
+
+    def test_external_vm_stop_is_named_fenced_and_reset(self) -> None:
+        self.state["runner_behavior"] = "external-stop"
+        started = time.monotonic()
+        result = self.run_supervisor(PULP_WINDOWS_BUSY_WAIT_SECONDS="30")
+        elapsed = time.monotonic() - started
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        # Detected by the VM watch, not by the 3-minute SSH keepalive.
+        self.assertLess(elapsed, 30, result.stdout)
+        self.assertIn("VM 300 stopped externally during the job", result.stdout)
+        self.assertIn("task=qmshutdown by root@pam", result.stdout)
+        self.assertIn("root-ssh-from=192.0.2.174", result.stdout)
+        self.assertNotIn("192.0.2.9", result.stdout)
+        record = (self.tmp / "state" / "external-stops.log").read_text(encoding="utf-8")
+        self.assertIn("vm=300 status=stopped", record)
+        self.assertIn("root-ssh-from=192.0.2.174", record)
+        self.assertIn("stopped externally", (self.tmp / "syslog").read_text(encoding="utf-8"))
+        # The lost registration is fenced and the VM is reset for the next job.
+        self.assertEqual(self.state["events"], ["rollback", "external-stop", "rollback"])
+        self.assertEqual(self.state["runners"], [])
+
+    def test_a_normal_job_records_no_external_stop(self) -> None:
+        result = self.run_supervisor()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("stopped externally", result.stdout)
+        self.assertFalse((self.tmp / "state" / "external-stops.log").exists())
+
     def test_keep_leaves_the_vm_up(self) -> None:
         result = self.run_supervisor("--keep")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -352,6 +518,15 @@ class WindowsSupervisorTests(unittest.TestCase):
 
 
 class WindowsDeploymentTests(unittest.TestCase):
+    def test_stop_timeout_outlasts_the_busy_wait(self) -> None:
+        # systemd must not SIGKILL a supervisor that is still draining a job.
+        busy_wait = int(re.search(
+            r'BUSY_WAIT_SECONDS="\$\{PULP_WINDOWS_BUSY_WAIT_SECONDS:-(\d+)\}"',
+            SCRIPT.read_text(encoding="utf-8")).group(1))
+        stop_timeout = int(re.search(
+            r"(?m)^TimeoutStopSec=(\d+)$", SERVICE.read_text(encoding="utf-8")).group(1))
+        self.assertGreaterEqual(stop_timeout, busy_wait + 300)
+
     def test_unit_runs_the_installed_supervisor_with_a_restart_ceiling(self) -> None:
         unit = SERVICE.read_text(encoding="utf-8")
         self.assertIn("ExecStart=/usr/local/sbin/pulp-windows-ephemeral-runner.sh", unit)

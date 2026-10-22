@@ -201,7 +201,10 @@ def validate_embedded_payload(embedded: dict, manifest: dict,
     An outer archive digest proves identity, but without this check a future
     update can consistently pin the wrong milestone asset. Matched-milestone
     archives must carry the v8-builder manifest and agree with every recorded
-    pair field plus Pulp's active Skia/built-Dawn generation.
+    pair field plus Pulp's active Skia/built-Dawn generation. A V8 entry may
+    instead carry ``independent_skia_advance`` naming the exact active Skia
+    release, commit and built Dawn, which records that Skia/Dawn deliberately
+    moved ahead of this V8 release; the pair must still match the V8 entry.
     """
     determinism = v8_entry.get("determinism", {})
     if determinism.get("pair_kind") != "chromium-milestone":
@@ -238,16 +241,37 @@ def validate_embedded_payload(embedded: dict, manifest: dict,
         mismatches.append("active Pulp Skia entry is missing")
     else:
         skia_det = skia_entry.get("determinism", {})
-        active_pairs = {
-            "validated_skia_release": skia_entry.get("version"),
-            "built_skia": skia_det.get("skia_commit"),
+        active = {
+            "skia_release": skia_entry.get("version"),
+            "skia_commit": skia_det.get("skia_commit"),
             "built_dawn": skia_det.get("built_dawn"),
         }
-        for name, expected in active_pairs.items():
-            if pair.get(name) != expected:
-                mismatches.append(
-                    f"active {name}: embedded={pair.get(name)!r}, Pulp={expected!r}"
-                )
+        advance = determinism.get("independent_skia_advance")
+        if advance is not None:
+            # Skia/Dawn moved ahead of this V8 release on purpose. The embedded
+            # pair is already bound to the V8 entry's own paired_* fields above;
+            # the declaration must name the exact active provider, so a later
+            # Skia move cannot silently reuse a stale exception.
+            if not isinstance(advance, dict) or not str(advance.get("reason", "")).strip():
+                mismatches.append("independent_skia_advance must be an object with a reason")
+            else:
+                for name, expected in active.items():
+                    if advance.get(name) != expected:
+                        mismatches.append(
+                            f"independent_skia_advance {name}: declared="
+                            f"{advance.get(name)!r}, active Pulp={expected!r}"
+                        )
+        else:
+            active_pairs = {
+                "validated_skia_release": active["skia_release"],
+                "built_skia": active["skia_commit"],
+                "built_dawn": active["built_dawn"],
+            }
+            for name, expected in active_pairs.items():
+                if pair.get(name) != expected:
+                    mismatches.append(
+                        f"active {name}: embedded={pair.get(name)!r}, Pulp={expected!r}"
+                    )
 
     expected_pair_sha = determinism.get("pair_manifest_sha256")
     actual_pair_sha = hashlib.sha256(

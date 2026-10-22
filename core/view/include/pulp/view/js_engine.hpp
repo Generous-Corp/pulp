@@ -88,7 +88,7 @@ public:
     // (QuickJS, JSC) and forward-compatibility callers degrade cleanly.
 
     // The engine's own reported runtime version string (e.g. V8's
-    // "15.3.76.5"). Empty when the backend does not report one.
+    // "15.7.112.5"). Empty when the backend does not report one.
     virtual std::string runtime_version() const { return {}; }
 
     // Where the runtime came from, as wired at build time: "v8builder" for the

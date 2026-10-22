@@ -692,6 +692,9 @@ def write_mise_lock(pulp_root: Path, data: dict, mise: Path) -> str:
             "MISE_TRUSTED_CONFIG_PATHS": str(pulp_root),
             "MISE_YES": "1",
             "MISE_DISABLE_UPDATE_WARNING": "1",
+            # `mise lock` resolves new URLs, so it cannot run locked, but it
+            # must never install a tool while it does.
+            "MISE_AUTO_INSTALL": "0",
             "MISE_ENV": MISE_ENV,
         }
         for key in ("GITHUB_TOKEN", "MISE_GITHUB_TOKEN", "SSL_CERT_FILE"):

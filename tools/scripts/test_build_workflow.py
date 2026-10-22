@@ -88,7 +88,7 @@ class MiseCandidateWorkflowTest(unittest.TestCase):
         )
         text = json.dumps(self.steps[activate], sort_keys=True)
         for marker in (
-            "mise-2026.10.11/bin/mise",
+            "mise-2026.10.17/bin/mise",
             'RUNNER_ARCH',
             "expected_mise_version",
             "expected_mise_sha",
@@ -96,12 +96,24 @@ class MiseCandidateWorkflowTest(unittest.TestCase):
             "actual_mise_version",
             "MISE_ENV=toolchain",
             "MISE_TRUSTED_CONFIG_PATHS",
-            "PATH=$HOME/.local/opt/mise-2026.10.11/bin:$HOME/.cargo/bin:$tool_path",
+            "PATH=$HOME/.local/opt/mise-2026.10.17/bin:$HOME/.cargo/bin:$tool_path",
             "GITHUB_ENV",
         ):
             self.assertIn(marker, text)
         self.assertNotIn("runner.arch == 'ARM64'", self.steps[activate]["if"])
         self.assertNotIn("runner.arch == 'ARM64'", self.steps[enforce]["if"])
+
+    def test_candidate_mise_runs_locked_with_auto_install_off(self) -> None:
+        run = self.steps[
+            [step.get("name") for step in self.steps].index(
+                "Activate pinned mise candidate toolchain"
+            )
+        ]["run"]
+        first_mise = run.index('"$mise" exec')
+        for setting in ("MISE_LOCKED=1", "MISE_AUTO_INSTALL=0"):
+            # Set before the first mise call, and exported to every later step.
+            self.assertLess(run.index(f"export {setting}"), first_mise, setting)
+            self.assertIn(f'echo "{setting}"', run.split(">> \"$GITHUB_ENV\"")[0], setting)
 
     def test_non_arm_candidate_fails_before_build(self) -> None:
         activation = self.steps[

@@ -40,6 +40,9 @@ GUEST_USER="${PULP_WINDOWS_GUEST_USER:-ci}"
 PAT_FILE="${PULP_RUNNER_PAT_FILE:-/root/.config/pulp/secrets/gh-runner-pat}"
 GH_CLI="${PULP_WINDOWS_GH_CLI:-gh}"
 QM="${PULP_WINDOWS_QM:-qm}"
+PVESH="${PULP_WINDOWS_PVESH:-pvesh}"
+JOURNALCTL="${PULP_WINDOWS_JOURNALCTL:-journalctl}"
+LOGGER="${PULP_WINDOWS_LOGGER:-logger}"
 SSH_BIN="${PULP_WINDOWS_SSH:-ssh}"
 FLOCK="${PULP_WINDOWS_FLOCK:-flock}"
 GOVERNOR="${PULP_WINDOWS_GOVERNOR:-/usr/local/sbin/macpro-governor.sh}"
@@ -49,8 +52,10 @@ RUNNER_READY_TIMEOUT_SECONDS="${PULP_WINDOWS_RUNNER_READY_TIMEOUT_SECONDS:-180}"
 RUNNER_HEARTBEAT_INTERVAL_SECONDS="${PULP_WINDOWS_RUNNER_HEARTBEAT_INTERVAL_SECONDS:-15}"
 GUEST_BOOT_TIMEOUT_SECONDS="${PULP_WINDOWS_GUEST_BOOT_TIMEOUT_SECONDS:-600}"
 BUSY_WAIT_SECONDS="${PULP_WINDOWS_BUSY_WAIT_SECONDS:-4800}"
+BUSY_POLL_SECONDS="${PULP_WINDOWS_BUSY_POLL_SECONDS:-30}"
 GOVERNOR_REFUSAL_BACKOFF_SECONDS="${PULP_GOVERNOR_REFUSAL_BACKOFF_SECONDS:-270}"
 POLL_SECONDS="${PULP_WINDOWS_POLL_SECONDS:-5}"
+VM_WATCH_SECONDS="${PULP_WINDOWS_VM_WATCH_SECONDS:-15}"
 KEEP=0
 PAT=""
 VM_STARTED=0
@@ -161,7 +166,7 @@ fence_slot_registrations() {
         [ "$rc" = 3 ] || return 0
         [ "$SECONDS" -lt "$deadline" ] || { log "slot ${RUNNER_SLOT_ID} stayed busy for ${BUSY_WAIT_SECONDS}s"; return 3; }
         log "a registration of ${RUNNER_SLOT_ID} is running a job; waiting"
-        sleep 30
+        sleep "$BUSY_POLL_SECONDS"
     done
 }
 
@@ -210,12 +215,74 @@ sys.exit(1)
 '
 }
 
+# Name whatever stopped the VM under a running job. Another tool driving the
+# same VMID (an interactive harness, an operator's `qm shutdown`) looks to the
+# runner like a dead network; this says who it was. The Proxmox task log gives
+# the stop task and its user; the host's SSH log gives where a root session
+# came from in the two minutes before it. Best effort: a missing tool leaves
+# its field as "unknown".
+describe_external_stop() {
+    local task="unknown" sources="unknown" task_start=""
+    local node
+    node="$(hostname -s 2>/dev/null || hostname)"
+    if task="$("$PVESH" get "/nodes/${node}/tasks" --vmid "$VMID" --limit 10 \
+            --output-format json 2>/dev/null | python3 -c '
+import json, sys
+since = int(sys.argv[1])
+try:
+    tasks = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+stops = [t for t in tasks
+         if t.get("type") in ("qmshutdown", "qmstop", "qmreboot", "qmreset", "qmsuspend")
+         and int(t.get("starttime", 0)) >= since]
+if not stops:
+    sys.exit(1)
+t = max(stops, key=lambda t: int(t["starttime"]))
+print("%s by %s at %s" % (t["type"], t.get("user", "?"), t["starttime"]))
+' "${VM_START_EPOCH:-0}")"; then
+        task_start="${task##* at }"
+    else
+        task="unknown"
+    fi
+    if [[ "$task_start" =~ ^[0-9]+$ ]]; then
+        sources="$("$JOURNALCTL" --since "@$((task_start - 120))" --until "@$((task_start + 5))" \
+            --no-pager -o cat 2>/dev/null \
+            | sed -n 's/^Accepted publickey for root from \([0-9a-fA-F.:]*\) .*/\1/p' \
+            | sort -u | paste -sd, -)"
+        [ -n "$sources" ] || sources="none"
+    fi
+    printf 'task=%s; root-ssh-from=%s' "$task" "$sources"
+}
+
+# Watches the VM while the job runs. If it stops without this supervisor
+# stopping it, record who did and end the job wait now, instead of waiting out
+# the SSH keepalive. Cleanup then fences the registration and resets the VM.
+monitor_vm_presence() {
+    local status detail
+    while kill -0 "$RUNNER_PID" 2>/dev/null; do
+        status="$(vm_status)"
+        if [ -n "$status" ] && [ "$status" != running ]; then
+            detail="$(describe_external_stop)"
+            printf '%s vm=%s status=%s runner=%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                "$VMID" "$status" "$RUNNER_NAME" "$detail" >"$EXTERNAL_STOP_FILE"
+            cat "$EXTERNAL_STOP_FILE" >>"${STATE_DIR}/external-stops.log" 2>/dev/null || true
+            "$LOGGER" -t pulp-windows-runner -p user.warning \
+                "VM $VMID stopped externally during job $RUNNER_NAME: $detail" 2>/dev/null || true
+            kill "$RUNNER_PID" 2>/dev/null || true
+            break
+        fi
+        sleep "$VM_WATCH_SECONDS"
+    done
+}
+
 cleanup() {
     local rc=$?
     [ -z "${HEARTBEAT_PID:-}" ] || kill "$HEARTBEAT_PID" 2>/dev/null || true
+    [ -z "${VM_WATCH_PID:-}" ] || kill "$VM_WATCH_PID" 2>/dev/null || true
     [ -z "${RUNNER_PID:-}" ] || kill "$RUNNER_PID" 2>/dev/null || true
     rm -f -- "${JIT_REQUEST_FILE:-}" "${JIT_CONFIG_FILE:-}" \
-        "${RUNNER_OUTPUT_FILE:-}" "${HEARTBEAT_FAILURE_FILE:-}"
+        "${RUNNER_OUTPUT_FILE:-}" "${HEARTBEAT_FAILURE_FILE:-}" "${EXTERNAL_STOP_FILE:-}"
     [ "$VM_STARTED" = 1 ] || exit "$rc"
     if [ "$KEEP" = 1 ]; then
         log "--keep set: leaving VM $VMID up at ${GUEST_IP:-unknown address}"
@@ -332,6 +399,7 @@ trap cleanup EXIT
 trap 'exit 143' TERM INT
 "$QM" set "$VMID" --description "pulp-runner-generation=${RUNNER_NAME};pulp-runner-snapshot=${GOLDEN_SNAPSHOT}" \
     >/dev/null 2>&1 || log "WARN: could not record the runner generation on VM $VMID"
+VM_START_EPOCH="$(date +%s)"
 "$QM" start "$VMID" >/dev/null || die "start of VM $VMID failed"
 VM_STARTED=1
 
@@ -408,13 +476,18 @@ fi
 HEARTBEAT_FAILURE_FILE="$(mktemp)" || die "could not allocate heartbeat state"
 monitor_runner_heartbeat &
 HEARTBEAT_PID=$!
+EXTERNAL_STOP_FILE="$(mktemp)" || die "could not allocate VM watch state"
+monitor_vm_presence &
+VM_WATCH_PID=$!
 
 wait "$RUNNER_PID"
 runner_exit=$?
 RUNNER_PID=""
-kill "$HEARTBEAT_PID" 2>/dev/null || true
-wait "$HEARTBEAT_PID" 2>/dev/null || true
-HEARTBEAT_PID=""
+kill "$HEARTBEAT_PID" "$VM_WATCH_PID" 2>/dev/null || true
+wait "$HEARTBEAT_PID" "$VM_WATCH_PID" 2>/dev/null || true
+HEARTBEAT_PID="" VM_WATCH_PID=""
+external_stop="$(cat "$EXTERNAL_STOP_FILE" 2>/dev/null || true)"
+[ -z "$external_stop" ] || die "VM $VMID stopped externally during the job: ${external_stop}"
 heartbeat_failure="$(cat "$HEARTBEAT_FAILURE_FILE" 2>/dev/null || true)"
 [ -z "$heartbeat_failure" ] || die "JIT runner lost its GitHub heartbeat ($heartbeat_failure)"
 if [ "$runner_exit" -ne 0 ]; then
