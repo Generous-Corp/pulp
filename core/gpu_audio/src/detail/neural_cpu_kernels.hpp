@@ -224,8 +224,8 @@ template <class Isa = neural_simd::DefaultIsa> class NamTcnSimdKernel {
             if (d == 0 || d > 65536)
                 return false;
         const std::size_t c = w.channels, k = w.kernel, l = w.dilations.size();
-        return w.in_w.size() >= c && w.conv_w.size() >= l * c * c * k &&
-               w.conv_b.size() >= l * c && w.mix_w.size() >= l * c * c && w.head_w.size() >= c;
+        return w.in_w.size() >= c && w.conv_w.size() >= l * c * c * k && w.conv_b.size() >= l * c &&
+               w.mix_w.size() >= l * c * c && w.head_w.size() >= c;
     }
 
     explicit NamTcnSimdKernel(const Weights& w) {

@@ -925,8 +925,8 @@ TEST_CASE("SIMD family kernels fail closed on inconsistent construction",
         CHECK_FALSE(bad_shape.valid());
         // The adapter refuses to prepare over a kernel that failed closed.
         RecurrentCpuAdapter adapter(
-            family_spec(recurrent_state_bytes(shape), recurrent_state_schema(shape.family)),
-            shape, bind_neural_cpu_kernel<RecurrentCpuKernel>(bad));
+            family_spec(recurrent_state_bytes(shape), recurrent_state_schema(shape.family)), shape,
+            bind_neural_cpu_kernel<RecurrentCpuKernel>(bad));
         CHECK_FALSE(adapter.prepare({.spec = &adapter.spec(),
                                      .artifact_id = "simd.weights",
                                      .artifact_hash = kSha,
