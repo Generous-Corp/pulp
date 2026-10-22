@@ -1276,3 +1276,11 @@ pulp_add_test_suite(pulp-test-gpu-audio-header-standalone
             test_gpu_audio_header_standalone_node.cpp
             test_gpu_audio_header_standalone_program.cpp
     GROUP pulp-test-group-core-gpu-audio-private)
+
+# Host-memory shared-I/O provider: lifecycle, terminal contract, and the
+# convolution/WaveNet programs nulled against independent references. It needs
+# no GPU, so it runs in GPU-off configurations too.
+pulp_add_test_suite(pulp-test-gpu-cpu-shared-io-provider GROUP pulp-test-group-core-gpu-audio-private
+    SOURCES test_gpu_cpu_shared_io_provider.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)

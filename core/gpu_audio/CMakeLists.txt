@@ -45,6 +45,8 @@ target_sources(pulp-gpu-audio
         src/detail/shared_io_convolution_pipeline.cpp
         src/detail/shared_io_convolution_session.cpp
         src/detail/shared_io_trace.cpp
+        # Host-memory shared-I/O provider; Dawn-free, built on every platform.
+        src/detail/cpu_shared_io_provider.cpp
 )
 
 if(APPLE AND NOT PULP_IOS AND PULP_SKIA_PROVIDES_DAWN)
