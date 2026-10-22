@@ -59,8 +59,37 @@ GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept;
 ///
 /// The shadow's cost is paid on the audio thread for every block, including
 /// blocks the GPU delivers. Measure it for the model size you ship.
+///
+/// Recovery is manual: any latched cause, including a single invalid
+/// callback, fences GPU delivery until the host prepares the node again. The
+/// shadow carries the stream meanwhile. Automatic re-acquire is future work.
+///
+/// Threading: prepare() and release() are host-thread operations with the
+/// callback and worker stopped. The queries below read lifecycle state that
+/// only those two calls change, plus counters and recovery state that are
+/// atomics, so they are safe from a host or UI thread at any time except
+/// concurrently with prepare() or release(). A transport-hosted node is
+/// sampled by the transport worker into a sequence-guarded mirror, so the
+/// UI-safe read is `GpuAudioTransport::status_snapshot()`.
 class GpuNeuralRealtimeNode : public GpuAudioNode {
   public:
+    /// Why the last prepare() returned false.
+    enum class PrepareError : std::uint8_t {
+        None,
+        InvalidConfig,
+        FamilyMismatch,
+        ChannelMismatch,
+        /// max_inflight exceeds the backend's own in-flight capacity.
+        BackendInflightExceeded,
+        /// The model is bound to another node.
+        ModelBound,
+        ShadowPrepareFailed,
+        /// The shadow processors were prepared but not published.
+        ShadowUnpublished,
+        BridgeFailed,
+        ReleaseFailed,
+    };
+
     struct Config {
         /// Must match the family the model was built for.
         NeuralFamily family = NeuralFamily::Unknown;
@@ -113,9 +142,10 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
     void process_block(const audio::BufferView<const float>&, audio::BufferView<float>&,
                        std::uint32_t) final;
 
-    // The queries below are host/UI-thread reads. Like prepare() and
-    // release(), they must not race a concurrent prepare() or release().
+    // Host/UI reads; see the threading note on the class.
 
+    /// Reason for the most recent failed prepare(); None after a success.
+    PrepareError last_prepare_error() const noexcept;
     NeuralFamily family() const noexcept;
     /// True only while a GPU backend for this family is prepared and has not
     /// been quiesced by an offline fence.
@@ -123,8 +153,8 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
     /// Current GPU delivery epoch, or zero when no GPU epoch is open. A
     /// CPU-only node stays at zero for its whole lifetime.
     std::uint64_t epoch() const noexcept;
-    /// True when no GPU delivery is active: before preparation, for CPU-only
-    /// execution, or after delivery was fenced.
+    /// True before preparation, or once GPU delivery was fenced. A CPU-only
+    /// node has no GPU delivery to fence and reports false.
     bool fenced() const noexcept;
     /// First latched recovery cause.
     GpuAudioRecoveryReason recovery_reason() const noexcept;
@@ -143,6 +173,9 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
     friend GpuAudioProvider detail::realtime_gpu_provider(GpuAudioNode*) noexcept;
     bool ready() const noexcept;
     bool authenticated_provider() const noexcept;
+    // Provider identity for the transport: Dawn when authenticated, Cpu when
+    // prepared without a GPU backend, otherwise Unknown.
+    GpuAudioProvider transport_provider() const noexcept;
     static std::uint8_t process(void*, const audio::BufferView<const float>&,
                                 audio::BufferView<float>&, std::uint32_t, std::uint64_t, bool,
                                 std::uint64_t) noexcept;

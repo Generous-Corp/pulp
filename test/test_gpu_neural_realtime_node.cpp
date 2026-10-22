@@ -263,7 +263,8 @@ TEST_CASE("CPU-only families report CPU execution and never open a GPU epoch",
         CHECK(rig.node->epoch() == 0);
         CHECK(rig.node->family() == c.family);
         CHECK_FALSE(rig.node->gpu_kernel_available());
-        CHECK(rig.node->fenced());
+        // Nothing to fence: there is no GPU delivery.
+        CHECK_FALSE(rig.node->fenced());
         CHECK(rig.node->cpu_fallback_prepared());
 
         const auto capability = rig.node->capability_report();
@@ -295,12 +296,25 @@ TEST_CASE("CPU-only families report CPU execution and never open a GPU epoch",
         detail::RealtimeGpuHealth health;
         REQUIRE(path.health != nullptr);
         REQUIRE(path.health(path.context, health));
-        CHECK(health.fenced);
+        CHECK_FALSE(health.fenced);
         CHECK(health.epoch == 0);
+        CHECK_FALSE(health.delivery_epoch_active);
         // Reached through the base class, as a host holding GpuAudioNode* would.
         const GpuAudioNode& base = *rig.node;
         CHECK(base.status_snapshot().selected_engine == GpuAudioEngine::Cpu);
-        CHECK(detail::realtime_gpu_provider(rig.node.get()) == GpuAudioProvider::Unknown);
+        CHECK(detail::realtime_gpu_provider(rig.node.get()) == GpuAudioProvider::Cpu);
+
+        // The transport hosting the node agrees: CPU path, CPU provider, Ready.
+        const auto hosted = rig.transport.capability_report();
+        CHECK(hosted.path == GpuAudioExecutionPath::Cpu);
+        CHECK(hosted.provider == GpuAudioProvider::Cpu);
+        CHECK(hosted.prepared_lead_blocks == kLead);
+        const auto hosted_status = rig.transport.status_snapshot();
+        CHECK(hosted_status.selected_engine == GpuAudioEngine::Cpu);
+        CHECK(hosted_status.provider == GpuAudioProvider::Cpu);
+        CHECK(hosted_status.provider_state == GpuAudioProviderState::Ready);
+        CHECK(hosted_status.epoch == 0);
+        CHECK(hosted_status.recovery_reason == GpuAudioRecoveryReason::None);
 
         // Reprepare (host reactivation) keeps the stream position.
         const auto position = path.next_sequence(path.context);
@@ -356,9 +370,9 @@ TEST_CASE("WaveNet family reports its GPU backend truthfully", "[gpu_audio][neur
 
 TEST_CASE("WaveNet family stays continuous across provider faults",
           "[gpu_audio][neural][realtime]") {
-    enum class Fault { FailCompletions, RejectSubmissions, ProviderLost, Starve };
+    enum class Fault { FailCompletions, RejectSubmissions, ProviderLost, Unresponsive, Starve };
     const auto fault = GENERATE(Fault::FailCompletions, Fault::RejectSubmissions,
-                                Fault::ProviderLost, Fault::Starve);
+                                Fault::ProviderLost, Fault::Unresponsive, Fault::Starve);
     CAPTURE(static_cast<int>(fault));
     Rig rig(kWaveNetGpu);
     REQUIRE(rig.prepare());
@@ -374,6 +388,10 @@ TEST_CASE("WaveNet family stays continuous across provider faults",
     case Fault::ProviderLost:
         detail::NeuralRealtimeTestAccess::request_recovery(
             *rig.node, detail::SharedIoRecoveryReason::ProviderLost);
+        break;
+    case Fault::Unresponsive:
+        detail::NeuralRealtimeTestAccess::request_recovery(
+            *rig.node, detail::SharedIoRecoveryReason::ProviderUnresponsive);
         break;
     case Fault::Starve:
         rig.plan.starve = true;
@@ -392,10 +410,17 @@ TEST_CASE("WaveNet family stays continuous across provider faults",
         CHECK(rig.node->recovery_reason() == GpuAudioRecoveryReason::InputSaturated);
     } else {
         CHECK(rig.node->fenced());
-        CHECK(rig.node->recovery_reason() == (fault == Fault::ProviderLost
-                                                  ? GpuAudioRecoveryReason::ProviderLost
-                                                  : GpuAudioRecoveryReason::ProviderFailure));
-        CHECK(rig.node->status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+        const bool lost = fault == Fault::ProviderLost || fault == Fault::Unresponsive;
+        const auto expected_state =
+            lost ? GpuAudioProviderState::Unavailable : GpuAudioProviderState::Degraded;
+        CHECK(rig.node->status_snapshot().provider_state == expected_state);
+        CHECK(rig.transport.status_snapshot().provider_state == expected_state);
+        const auto expected_reason =
+            fault == Fault::ProviderLost   ? GpuAudioRecoveryReason::ProviderLost
+            : fault == Fault::Unresponsive ? GpuAudioRecoveryReason::ProviderUnresponsive
+                                           : GpuAudioRecoveryReason::ProviderFailure;
+        CHECK(rig.node->recovery_reason() == expected_reason);
+        CHECK(rig.transport.status_snapshot().recovery_reason == expected_reason);
     }
 }
 
@@ -404,8 +429,11 @@ TEST_CASE("offline rendering fences the GPU and keeps the shadow timeline",
     const auto c = GENERATE(kWaveNetGpu, kLstm);
     CAPTURE(c.name);
     Rig rig(c);
+    // GPU blocks come back doubled, so they cannot pass for shadow output.
+    rig.plan.gain = 2.0f;
     REQUIRE(rig.prepare());
-    rig.render(6);
+    constexpr std::uint32_t realtime_blocks = 6;
+    rig.render(realtime_blocks);
     const auto submissions = rig.plan.submissions;
     const auto gpu_blocks = rig.transport.delivery_snapshot().gpu_blocks;
     const auto n = kBlock;
@@ -429,10 +457,27 @@ TEST_CASE("offline rendering fences the GPU and keeps the shadow timeline",
         rig.frame += n;
     }
     const auto reference = direct_reference(c, 16ull * kBlock);
-    CHECK(max_abs_difference(rig.output, reference) == 0.0f);
-    CHECK(rig.node->fenced());
-    // The fake provider computes the same function as the shadow, so the null
-    // alone cannot tell them apart: the offline blocks never reached it.
+    const auto split = std::uint64_t{realtime_blocks} * kBlock;
+    float gpu_marked = 0.0f, offline_error = 0.0f, realtime_error = 0.0f;
+    for (std::uint32_t ch = 0; ch < kChannels; ++ch)
+        for (std::uint64_t i = 0; i < reference[ch].size(); ++i) {
+            const float y = rig.output[ch][i], r = reference[ch][i];
+            if (i >= split) {
+                offline_error = std::max(offline_error, std::abs(y - r));
+            } else if (c.gpu_backend && i >= std::uint64_t{kLead} * kBlock) {
+                realtime_error = std::max(realtime_error, std::abs(y - 2.0f * r));
+                gpu_marked = std::max(gpu_marked, std::abs(r));
+            } else {
+                realtime_error = std::max(realtime_error, std::abs(y - r));
+            }
+        }
+    // Positive control: before the fence the GPU's doubled output was heard.
+    CHECK(realtime_error == 0.0f);
+    if (c.gpu_backend)
+        CHECK(gpu_marked > 0.0f);
+    // Every offline block is the unscaled shadow.
+    CHECK(offline_error == 0.0f);
+    CHECK(rig.node->fenced() == c.gpu_backend);
     CHECK(rig.plan.submissions == submissions);
     CHECK(rig.transport.delivery_snapshot().gpu_blocks == gpu_blocks);
     CHECK_FALSE(rig.node->gpu_kernel_available());
@@ -450,6 +495,7 @@ TEST_CASE("an unpublished CPU shadow makes prepare fail", "[gpu_audio][neural][n
     }
     Rig rig(c, kBlock, false, /*skip_publish=*/true);
     CHECK_FALSE(rig.node->prepare());
+    CHECK(rig.node->last_prepare_error() == GpuNeuralRealtimeNode::PrepareError::ShadowUnpublished);
     CHECK_FALSE(rig.node->cpu_fallback_prepared());
     CHECK_FALSE(detail::realtime_gpu_node_path(rig.node.get()).active());
     CHECK_FALSE(rig.transport.prepare(rig.node.get(), {}));
@@ -467,17 +513,22 @@ TEST_CASE("node configuration fails closed", "[gpu_audio][neural][negative]") {
                                              .channels = kChannels,
                                              .lead_blocks = kLead,
                                              .capacity = kLead + 3};
+    using Error = GpuNeuralRealtimeNode::PrepareError;
     const auto mode = GENERATE(0, 1, 2, 3, 4, 5, 6);
     CAPTURE(mode);
     auto config = good;
+    auto expected = Error::InvalidConfig;
     switch (mode) {
     case 0: // positive control
+        expected = Error::None;
         break;
     case 1:
         config.family = NeuralFamily::Gru;
+        expected = Error::FamilyMismatch;
         break;
     case 2:
         config.channels = 1;
+        expected = Error::ChannelMismatch;
         break;
     case 3:
         config.miss_policy = MissPolicy::Silence;
@@ -494,6 +545,7 @@ TEST_CASE("node configuration fails closed", "[gpu_audio][neural][negative]") {
     }
     GpuNeuralRealtimeNode node(config);
     CHECK(node.prepare() == (mode == 0));
+    CHECK(node.last_prepare_error() == expected);
 }
 
 TEST_CASE("a model binds to exactly one node", "[gpu_audio][neural][negative]") {
@@ -506,6 +558,7 @@ TEST_CASE("a model binds to exactly one node", "[gpu_audio][neural][negative]") 
     GpuNeuralRealtimeNode second(config);
     REQUIRE(first->prepare());
     CHECK_FALSE(second.prepare());
+    CHECK(second.last_prepare_error() == GpuNeuralRealtimeNode::PrepareError::ModelBound);
     // Reprepare by the owner is allowed; destruction unbinds the model.
     CHECK(first->prepare());
     first.reset();
@@ -764,6 +817,10 @@ TEST_CASE("node in-flight depth may not exceed the backend's", "[gpu_audio][neur
                                     .max_inflight = 2});
         // Positive control: matching depths prepare.
         CHECK(node.prepare() == (backend_inflight == 2));
+        CHECK(node.last_prepare_error() ==
+              (backend_inflight == 2
+                   ? GpuNeuralRealtimeNode::PrepareError::None
+                   : GpuNeuralRealtimeNode::PrepareError::BackendInflightExceeded));
     }
 }
 
