@@ -525,14 +525,14 @@ class V2Receipt(unittest.TestCase):
                 self.assertEqual(receipt["binding"]["outcome"], "unbound")
                 self.assertEqual(self.verify(receipt, run)[0], "inconclusive")
 
-    def test_a_claim_by_another_process_never_passes(self):
-        # Fable M5 classes this INCONCLUSIVE (a scanner won the claim); WP-h1's
-        # evaluate_run currently FAILs it. Either way it can never pass, and
-        # v2 records the claim conjunct as failed.
+    def test_a_claim_by_another_process_is_inconclusive(self):
+        # Fable M5 / team-lead: a run whose claim another process won (a
+        # scanner, a validator) is unbound, not evidence of a failure.
         run = self.run_dir("claim-other")
         receipt = make_run(run, claim_pid=7777)
         self.assertEqual(receipt["binding"]["conjuncts"]["claim_pid"], "failed")
-        self.assertIn(self.verify(receipt, run)[0], ("fail", "inconclusive"))
+        self.assertEqual(receipt["binding"]["outcome"], "unbound")
+        self.assertEqual(self.verify(receipt, run), ("inconclusive", "inconclusive"))
 
     def test_an_unavailable_responsible_pid_is_bindable_only_in_process(self):
         run = self.run_dir("no-responsible-inproc")
