@@ -21,19 +21,20 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-BUILD = ROOT / ".github" / "workflows" / "build.yml"
-RULESET = ROOT / ".github" / "rulesets" / "main-protection.json"
-WEEKLY = ROOT / ".github" / "workflows" / "bump-fastpath-weekly.yml"
+# Literal repository paths, so the script-input scanner sees each file read.
+BUILD = ROOT / ".github/workflows/build.yml"
+RULESET = ROOT / ".github/rulesets/main-protection.json"
+WEEKLY = ROOT / ".github/workflows/bump-fastpath-weekly.yml"
+REPORT = ROOT / "tools/scripts/bump_fastpath_report.py"
 ADVISORY = {
-    "coverage.yml": "Coverage",
-    "control-shipping-native.yml": "Control shipping native matrix",
-    "examples-validation.yml": "Example validation",
-    "intel-portability.yml": "Intel portability (advisory)",
+    ".github/workflows/coverage.yml": "Coverage",
+    ".github/workflows/control-shipping-native.yml": "Control shipping native matrix",
+    ".github/workflows/examples-validation.yml": "Example validation",
+    ".github/workflows/intel-portability.yml": "Intel portability (advisory)",
 }
 GUARD = "github.head_ref != 'release/version-bump'"
 
-SPEC = importlib.util.spec_from_file_location(
-    "bump_fastpath_report", ROOT / "tools" / "scripts" / "bump_fastpath_report.py")
+SPEC = importlib.util.spec_from_file_location("bump_fastpath_report", REPORT)
 assert SPEC is not None and SPEC.loader is not None
 report = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(report)
@@ -44,7 +45,7 @@ SHA = "a" * 40
 def workflow_jobs(name: str) -> dict[str, dict[str, object]]:
     """Each job's `if`, `name` and literal matrix legs/labels, read from the
     workflow text (the gate's Python has no YAML parser)."""
-    lines = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8").split("\n")
+    lines = (ROOT / name).read_text(encoding="utf-8").split("\n")
     start = lines.index("jobs:")
     jobs: dict[str, dict[str, object]] = {}
     current: dict[str, object] | None = None
@@ -68,7 +69,7 @@ def workflow_jobs(name: str) -> dict[str, dict[str, object]]:
 
 def workflow_triggers(name: str) -> str:
     """The workflow's `on:` block, as text."""
-    text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+    text = (ROOT / name).read_text(encoding="utf-8")
     block = text.split("\non:\n", 1)[1]
     return re.split(r"\n\S", block, 1)[0]
 CANDIDATE = "b" * 40
@@ -291,9 +292,9 @@ class AdvisorySkips(unittest.TestCase):
 
     def test_the_weekly_count_runs_the_report(self) -> None:
         text = WEEKLY.read_text(encoding="utf-8")
-        self.assertIn("  schedule:\n", workflow_triggers(WEEKLY.name))
+        self.assertIn("  schedule:\n", workflow_triggers(".github/workflows/bump-fastpath-weekly.yml"))
         self.assertIn("python3 tools/scripts/bump_fastpath_report.py", text)
-        job = workflow_jobs(WEEKLY.name)["count"]
+        job = workflow_jobs(".github/workflows/bump-fastpath-weekly.yml")["count"]
         self.assertIn("github.repository", str(job.get("if", "")), "fork-guarded")
         self.assertIn("    runs-on: ubuntu-latest\n", text)
 
