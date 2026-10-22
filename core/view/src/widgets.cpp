@@ -59,6 +59,27 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
             style.stroke_width = 8.0f;
             style.arc_start = Knob::start_angle;
             style.arc_sweep = Knob::end_angle - Knob::start_angle;
+            // The feather an author declared with the shader's geometry
+            // applies to the chart draw too.
+            if (const auto& geometry = host.shader_geometry()) {
+                style.feather_sigma = geometry->style.feather_sigma;
+                style.feather_curve = geometry->style.feather_curve;
+                style.feather_mode = geometry->style.feather_mode;
+            }
+            // A glow whose reach is shorter than its falloff would be cut off
+            // in a hard edge at the draw rect. Refuse it out loud and paint the
+            // default body instead of a clipped glow.
+            const float min_reach = canvas::Canvas::sdf_feather_min_reach(style);
+            if (options.reach < min_reach) {
+                if (!host.shader_draw_failure_logged()) {
+                    runtime::log_error("[custom-shader] chart feather sigma {} needs reach >= {} "
+                                       "but the shader's reach is {}; painting the default "
+                                       "widget body instead",
+                                       style.feather_sigma, min_reach, options.reach);
+                    host.mark_shader_draw_failure_logged();
+                }
+                return false;
+            }
             if (canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc,
                                                   0, 0, w, h, style,
                                                   host.chart_shader(), options))

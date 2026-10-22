@@ -1064,6 +1064,7 @@ TEST_CASE("analytic SDF feather modes render finite chart coverage",
         style.feather_curve = mode == 1 ? 1 : 0;
         style.feather_mode = mode;
         Canvas::ShaderDrawOptions options;
+        options.reach = 3.0f;
         REQUIRE(canvas.draw_sdf_shape_with_shader(
             Canvas::SDFShape::flat_arc, 0, 0, 64, 64, style,
             "half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }", options));
@@ -1124,6 +1125,75 @@ TEST_CASE("SDF geometry gradient stays finite at a field extremum",
     REQUIRE(SkColorGetG(offset) > 200);
 #else
     SUCCEED("SDF geometry gradient test requires PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("SDF chart glow paints past the shape rect out to its reach",
+          "[canvas][sdf][shader][feather][reach]") {
+    Canvas::SDFStyle glow;
+    glow.feather_sigma = 8.0f;
+    glow.feather_mode = 1;
+    REQUIRE(Canvas::sdf_feather_min_reach(glow) == Catch::Approx(24.0f));
+    glow.feather_mode = 3;
+    REQUIRE(Canvas::sdf_feather_min_reach(glow) == Catch::Approx(24.0f));
+    Canvas::SDFStyle inside = glow;
+    inside.feather_mode = 2;
+    REQUIRE(Canvas::sdf_feather_min_reach(inside) == 0.0f);
+    Canvas::SDFStyle unfeathered = glow;
+    unfeathered.feather_sigma = 0.0f;
+    REQUIRE(Canvas::sdf_feather_min_reach(unfeathered) == 0.0f);
+#ifdef PULP_HAS_SKIA
+    // A 64 px flat arc drawn at (32, 32): its ring's outer edge sits 2 px
+    // inside the rect, so x = 31 is 3 px outside the arc and 1 px outside the
+    // rect, and x = 29 is 3 px outside the rect.
+    constexpr const char* kWhite = "half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }";
+    auto render = [&](float sigma, int mode, float reach, bool* drew) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(128, 128));
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::SDFStyle style;
+        style.stroke_width = 8.0f;
+        style.arc_start = 2.356f;
+        style.arc_sweep = 4.713f;
+        style.feather_sigma = sigma;
+        style.feather_mode = mode;
+        Canvas::ShaderDrawOptions options;
+        options.reach = reach;
+        *drew = canvas.draw_sdf_shape_with_shader(Canvas::SDFShape::flat_arc, 32, 32, 64, 64, style,
+                                                  kWhite, options);
+        return surface;
+    };
+    auto alpha_at = [](const sk_sp<SkSurface>& surface, int x, int y) {
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        return SkColorGetA(pixels.getColor(x, y));
+    };
+
+    bool drew = false;
+    auto glowing = render(8.0f, 1, 24.0f, &drew);
+    REQUIRE(drew);
+    CHECK(alpha_at(glowing, 31, 64) > 40);
+    CHECK(alpha_at(glowing, 29, 64) > 30);
+
+    // Negative: with no feather and no reach nothing reaches past the rect,
+    // so the samples above read glow and not some other paint.
+    auto plain = render(0.0f, 0, 0.0f, &drew);
+    REQUIRE(drew);
+    CHECK(alpha_at(plain, 31, 64) == 0);
+    CHECK(alpha_at(plain, 29, 64) == 0);
+
+    // A glow or outer feather without room for 3 sigma is refused and draws
+    // nothing; a feather that stays inside the shape needs no reach.
+    auto short_glow = render(8.0f, 1, 23.0f, &drew);
+    CHECK_FALSE(drew);
+    CHECK(alpha_at(short_glow, 64, 34) == 0);
+    render(8.0f, 3, 0.0f, &drew);
+    CHECK_FALSE(drew);
+    render(8.0f, 2, 0.0f, &drew);
+    CHECK(drew);
+#else
+    SUCCEED("Skia feather probes require PULP_HAS_SKIA");
 #endif
 }
 
