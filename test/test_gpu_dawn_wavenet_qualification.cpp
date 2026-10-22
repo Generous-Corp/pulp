@@ -293,16 +293,20 @@ Result run() {
     }
     result.generation = plan.preparation_epoch();
 
-    // This one-layer fixture has one causal pad of one sample. Preparation
-    // must allocate and zero exactly one four-byte resident history buffer.
-    // The target-size histogram distinguishes that allocation from the slot
-    // activation buffers and uniforms initialized in the same transaction.
+    // This one-layer fixture has one causal pad of one sample. The provider
+    // keeps the stream state in column rings sized to a power of two holding
+    // the pad plus one block: the layer-input ring is 4 columns (16 bytes) and
+    // the final activation ring, which carries no history, 2 columns (8 bytes).
+    // Preparation zeroes each ring once. In the target-size histogram the 16-byte
+    // bucket also holds the scale uniform, and the 8-byte bucket the two-word
+    // device stream position.
     const auto prepared_transfer = transfer_counter.snapshot();
     constexpr std::size_t expected_history_bytes = sizeof(float);
     result.history_transfer_contract =
         resident_history_bytes == expected_history_bytes &&
-        prepared_transfer.queue_write_buffer_target_size_histogram[expected_history_bytes] == 1 &&
-        prepared_transfer.queue_write_buffer_size_histogram[expected_history_bytes] == 1;
+        prepared_transfer.queue_write_buffer_target_size_histogram[16] == 2 &&
+        prepared_transfer.queue_write_buffer_target_size_histogram[8] == 2 &&
+        prepared_transfer.queue_write_buffer_target_size_histogram[expected_history_bytes] == 0;
 
     transfer_counter.reset();
     float previous = 0.0f;
@@ -426,16 +430,13 @@ Result run() {
     result.reprimed = result.reprimed && result.reprime_generation != result.generation &&
                       second_receipts.size() == 1 && second_receipts.front().terminal;
 
+    // The rings keep history in place and the stream position advances on the
+    // device, so no submission copies state or writes from the host.
     const auto transfer = transfer_counter.snapshot();
     result.resident_state_copies = transfer.copy_buffer_to_buffer_calls;
-    const auto expected_history_copies = (result.submissions + 1u) * 2u;
-    result.history_transfer_contract =
-        result.history_transfer_contract &&
-        transfer.copy_buffer_to_buffer_calls == expected_history_copies &&
-        transfer.copy_buffer_to_buffer_bytes == expected_history_copies * expected_history_bytes &&
-        transfer.copy_buffer_to_buffer_size_histogram[expected_history_bytes] ==
-            expected_history_copies &&
-        transfer.copy_buffer_to_buffer_size_histogram[8] == 0;
+    result.history_transfer_contract = result.history_transfer_contract && result.submissions > 0 &&
+                                       transfer.copy_buffer_to_buffer_calls == 0 &&
+                                       transfer.copy_buffer_to_buffer_bytes == 0;
     result.zero_audio_slot_transfers =
         transfer.queue_write_buffer_calls == 0 && transfer.buffer_map_async_calls == 0 &&
         transfer.buffer_get_mapped_range_calls == 0 && transfer.buffer_unmap_calls == 0 &&
