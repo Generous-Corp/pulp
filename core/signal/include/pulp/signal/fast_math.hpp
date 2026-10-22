@@ -52,8 +52,16 @@ enum class FastTrigProfile : std::uint8_t {
 /// |-------------------|-------------|-------|--------------------------------|
 /// | `tanh()`          | 6.7e-4      | 1x    | at 4: a 6.7e-4 step (a seam)   |
 /// | `tanh_minimax()`  | 3.8e-6      | ~1x   | at 7: slope-matched, 4e-7 step |
-/// | `tanh_accurate()` | 3.0e-7      | ~1.3x | at 9, branch-free              |
+/// | `tanh_accurate()` | 3.0e-7      | ~1.3x*| at 9, branch-free              |
 /// | `std::tanh`       | exact       | ~7-10x| none                           |
+///
+/// (*) Measured with the ladder benchmarks that introduced it, not in the
+/// same block-loop run as the other rows.
+///
+/// The bare [7/6] Padé without `tanh()`'s clamp is 25-35% cheaper but
+/// is not a tanh outside a small range: it exceeds 1 past |x| ~ 5 and grows
+/// without bound (about x/28), so every bounded entry above pays for its
+/// clamp on purpose.
 ///
 /// `tanh()` keeps its results for existing callers; prefer `tanh_minimax()`
 /// where it would be used, and `tanh_accurate()` inside a resonant recursion

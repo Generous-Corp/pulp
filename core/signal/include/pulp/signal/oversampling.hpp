@@ -42,6 +42,12 @@ namespace pulp::signal {
 //   * `linear_phase_fir` — Kaiser-windowed FIR with a transition that ends at
 //     the base-rate Nyquist. `Quality::standard` is a 96 dB design flat to
 //     80% of Nyquist; `Quality::pristine` uses a 140 dB prototype flat to 90%.
+//     Pristine is a deliberately stricter tier than the ~86-90 dB equiripple
+//     half-band designs common elsewhere: its x2 stage is 385 taps (192
+//     samples of latency), so it costs more than such a design and should be
+//     compared with one only at a matched rejection. Standard is the tier to
+//     compare against those designs on cost. Each branch filters a whole
+//     chunk at a time (`detail::LinearPhaseOversamplingBlockStage2x`).
 //
 // A half-band IIR's transition is symmetric about base Nyquist, so content
 // in (0.5, 0.58) Fs (standard) folds onto (0.42, 0.5) Fs with only partial

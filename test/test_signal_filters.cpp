@@ -297,25 +297,31 @@ TEST_CASE("LadderFilter default saturator tracks exact std::tanh", "[signal][lad
         max_abs_dev = std::max(max_abs_dev, std::abs(got - exact));
         REQUIRE(std::isfinite(got));
     }
-#if PULP_SIGNAL_FAST_LADDER_TANH
-    // Opt-in fast build: track the Padé reference, and pin how far it strays
-    // from the exact filter (the character delta the gate protects against).
-    float max_fast_dev = 0.0f;
-    prefix.clear();
-    ladder.reset();
-    for (float s : drive) {
-        prefix.push_back(s);
-        const float got = ladder.process(s);
-        max_fast_dev = std::max(max_fast_dev,
-                                std::abs(got - ladder_reference_fast_tanh(prefix, kSr, kFc, kRes)));
+    // The bound depends on which saturator the build made the default
+    // (PULP_SIGNAL_LADDER_SATURATION / PULP_SIGNAL_FAST_LADDER_TANH).
+    if constexpr (kDefaultLadderSaturation == LadderSaturation::realtime_efficient) {
+        // Track the efficient reference, and pin how far it strays from the
+        // exact filter: under the Lambert seam this was ~5e-4.
+        float max_fast_dev = 0.0f;
+        prefix.clear();
+        ladder.reset();
+        for (float s : drive) {
+            prefix.push_back(s);
+            const float got = ladder.process(s);
+            max_fast_dev = std::max(
+                max_fast_dev, std::abs(got - ladder_reference_fast_tanh(prefix, kSr, kFc, kRes)));
+        }
+        REQUIRE(max_fast_dev < 1e-5f); // tracks the efficient reference
+        REQUIRE(max_abs_dev > 0.0f);   // and is provably NOT the exact filter
+        REQUIRE(max_abs_dev < 2e-5f);  // with no clamp seam
+    } else if constexpr (kDefaultLadderSaturation == LadderSaturation::accurate) {
+        // Within a few times the saturator's 3.0e-7 bound of the exact filter
+        // at +10 dBFS drive.
+        REQUIRE(max_abs_dev < 4e-6f);
+    } else {
+        // Exact std::tanh: the reference loop reproduces it to round-off.
+        REQUIRE(max_abs_dev < 1e-6f);
     }
-    REQUIRE(max_fast_dev < 1e-5f); // tracks the efficient reference
-    REQUIRE(max_abs_dev > 0.0f);   // and is provably NOT the exact filter
-#else
-    // Default build: within a few times the saturator's 3.0e-7 bound of the
-    // exact filter at +10 dBFS drive, far inside the Padé path's ~1e-3 seam.
-    REQUIRE(max_abs_dev < 4e-6f);
-#endif
 }
 
 TEST_CASE("LadderFilter explicit saturation profiles ignore the build default",
@@ -784,7 +790,14 @@ TEST_CASE("LadderFilter default saturator preserves resonance and drive behavior
                 prev_fast = a;
                 prev_exact = b;
             }
-            CHECK(worst < 1.0e-6f);
+            // The bound is the build default's (see kDefaultLadderSaturation):
+            // accurate and exact stay below -120 dBFS; realtime_efficient's
+            // 3.8e-6 saturator error, amplified by the resonant recursion,
+            // stays below -90 dBFS.
+            const float bound =
+                kDefaultLadderSaturation == LadderSaturation::realtime_efficient ? 3.0e-5f
+                                                                                 : 1.0e-6f;
+            CHECK(worst < bound);
             CHECK(crossings_fast == crossings_exact);
         }
     }
