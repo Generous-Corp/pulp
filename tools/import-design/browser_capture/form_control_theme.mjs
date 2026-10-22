@@ -31,7 +31,25 @@ const CONTROL_TAGS = new Set([
 // test/test_importer_differential_lab.py asserts the tables agree.
 const BUTTON_INPUT_TYPES = new Set(["button", "submit", "reset"]);
 const TEXT_INPUT_TYPES = new Set([
-  "", "text", "search", "email", "url", "tel", "password", "number"]);
+  "text", "search", "email", "url", "tel", "password", "number"]);
+
+// Every `type` keyword HTML defines. The attribute is matched ASCII
+// case-insensitively and NOT trimmed, and a missing, empty or unknown value is
+// the Text state: Chromium paints `type="bogus"` and `type=" password "` as
+// plain text fields. `kKnownInputTypes` (../browser_capture_controls.cpp) and
+// KNOWN_INPUT_TYPES (import-validation/importer_differential/form_controls.py)
+// repeat this table and normalisation; test/test_importer_differential_lab.py
+// asserts the three agree.
+const KNOWN_INPUT_TYPES = new Set([
+  "hidden", "text", "search", "tel", "url", "email", "password", "date",
+  "month", "week", "time", "datetime-local", "number", "range", "color",
+  "checkbox", "radio", "file", "submit", "image", "reset", "button"]);
+
+/// The state an `<input>`'s raw `type` attribute selects.
+export function normalizeInputType(raw) {
+  const type = String(raw ?? "").replace(/[A-Z]/gu, (c) => c.toLowerCase());
+  return KNOWN_INPUT_TYPES.has(type) ? type : "text";
+}
 
 /// The author-declared properties that decide the rule, by family.
 function propertyFamily(name) {
@@ -96,7 +114,7 @@ function laidOutControls(snapshot, styleNames) {
     const pairs = attributes[node] ?? [];
     for (let i = 0; i + 1 < pairs.length; i += 2) {
       if (String(strings[pairs[i]] ?? "").toLowerCase() === "type")
-        type = String(strings[pairs[i + 1]] ?? "").trim().toLowerCase();
+        type = String(strings[pairs[i + 1]] ?? "");
     }
     const row = layout.styles?.[layoutIndex] ?? [];
     const appearance = appearanceAt >= 0 && appearanceAt < row.length
@@ -105,7 +123,7 @@ function laidOutControls(snapshot, styleNames) {
       node_index: node,
       backend_node_id: backendNodeId[node],
       tag,
-      type: tag === "input" ? (type || "text") : null,
+      type: tag === "input" ? normalizeInputType(type) : null,
       appearance,
     });
   });

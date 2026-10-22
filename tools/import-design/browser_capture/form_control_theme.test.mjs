@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   evaluateFormControlTheme,
+  normalizeInputType,
   themeVerdict,
 } from "./form_control_theme.mjs";
 
@@ -112,4 +113,35 @@ test("an unresolved control is unknown, never unstyled", async () => {
   const report = await evaluateFormControlTheme(cdp, snapshot, ["appearance"]);
   assert.equal(report.controls[0].theme, null);
   assert.equal(report.controls[0].author_families, null);
+});
+
+test("an input's type is normalised as HTML does", () => {
+  assert.equal(normalizeInputType(undefined), "text");
+  assert.equal(normalizeInputType(""), "text");
+  assert.equal(normalizeInputType("bogus"), "text");
+  assert.equal(normalizeInputType("PASSWORD"), "password");
+  assert.equal(normalizeInputType("Range"), "range");
+  // Not trimmed: Chromium paints type=" password " as a text field.
+  assert.equal(normalizeInputType(" password "), "text");
+  // ASCII case-insensitive only.
+  assert.equal(normalizeInputType("\u0130mage"), "text");
+});
+
+test("an unknown input type is themed as the text field it is", async () => {
+  const author = { inlineStyle: { cssProperties: [
+    { name: "border-top-width", value: "1px" }] } };
+  const snapshot = snapshotWith([
+    { tag: "input", type: "Bogus", appearance: "auto" },
+    { tag: "input", type: "", appearance: "auto" },
+    // Control: a known always-themed type keeps the theme under the same
+    // author border.
+    { tag: "input", type: "checkbox", appearance: "auto" },
+  ]);
+  const report = await evaluateFormControlTheme(fakeCdp({
+    101: author, 102: author, 103: author,
+  }), snapshot, ["appearance"]);
+  assert.deepEqual(report.controls.map((c) => c.type),
+    ["text", "text", "checkbox"]);
+  assert.deepEqual(report.controls.map((c) => c.theme),
+    ["author", "author", "native"]);
 });

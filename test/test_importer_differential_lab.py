@@ -11,6 +11,7 @@ import re
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 
@@ -1780,6 +1781,42 @@ class InputTypeTableTests(unittest.TestCase):
         value_types, text_types, button_types, _ = self.tables()
         self.assertIn("password", text_types)
         self.assertEqual(value_types, (text_types | button_types) - {"password"})
+
+    def test_known_input_type_tables_agree_across_languages(self) -> None:
+        cpp = self.CPP_CONTROLS.read_text(encoding="utf-8")
+        js = self.JS_THEME.read_text(encoding="utf-8")
+        cpp_known = self.string_set(cpp, "kKnownInputTypes = {", "};")
+        js_known = self.string_set(js, "const KNOWN_INPUT_TYPES = new Set([", "]);")
+        self.assertEqual(len(cpp_known), 22)
+        self.assertEqual(cpp_known, js_known)
+        self.assertEqual(cpp_known, set(FORM_CONTROLS.KNOWN_INPUT_TYPES))
+        value_types, text_types, button_types, shadow = self.tables()
+        # Every family is drawn from the known states, so an unknown type can
+        # only ever reach them as `text`.
+        for table in (value_types, text_types, button_types, set(shadow)):
+            self.assertLessEqual(table, cpp_known)
+
+    def test_type_normalisation_follows_html(self) -> None:
+        normalize = FORM_CONTROLS.normalize_input_type
+        self.assertEqual(normalize(None), "text")
+        self.assertEqual(normalize(""), "text")
+        self.assertEqual(normalize("bogus"), "text")
+        self.assertEqual(normalize("PASSWORD"), "password")
+        self.assertEqual(normalize("Range"), "range")
+        # Not trimmed: Chromium paints type=" password " as a text field.
+        self.assertEqual(normalize(" password "), "text")
+        # ASCII case-insensitive only: U+0130 does not fold to "i".
+        self.assertEqual(normalize("\u0130mage"), "text")
+
+    def test_unknown_type_is_a_text_field_for_the_boundary(self) -> None:
+        node = SimpleNamespace(
+            tag="input", index=1, bounds=(0.0, 0.0, 10.0, 10.0),
+            attributes={"type": "bogus"}, styles={"appearance": "auto"})
+        snapshot = {"documents": [], "strings": [], "formControlTheme": {
+            "controls": [{"node_index": 1, "theme": "author"}]}}
+        rows = FORM_CONTROLS.form_controls([node], snapshot)
+        self.assertEqual(rows[0]["type"], "text")
+        self.assertEqual(rows[0]["status"], FORM_CONTROLS.AUTHOR_STYLED)
 
     def test_shadow_part_types_are_outside_both_theme_families(self) -> None:
         _, text_types, button_types, shadow = self.tables()

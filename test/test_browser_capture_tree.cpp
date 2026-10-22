@@ -17,6 +17,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "tools/import-design/browser_capture_controls.hpp"
 #include "tools/import-design/browser_capture_ir.hpp"
 #include "tools/import-design/browser_capture_tree.hpp"
 
@@ -4007,6 +4008,59 @@ bool tree_mentions(const IRNode& node, const std::string& needle) {
 }
 
 }  // namespace
+
+TEST_CASE("an input's type is read as HTML reads it",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=Bogus],
+    // 4 INPUT[type=" password "], 5 INPUT[type=PASSWORD]. An unknown type is
+    // the Text state, the attribute is not trimmed, and it matches ASCII
+    // case-insensitively: Chromium paints the first two as text fields with
+    // their value in clear and masks the third.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2]",
+        .attributes = "[[],[],[],[4,5],[4,6],[4,7]]",
+        .layout_nodes = "[1,2,3,4,5]",
+        .styles = "[[11,17,13,13,13,13,13,13,13,13,16,18,19],"
+                  "[11,17,13,13,13,13,13,13,13,13,16,18,19],"
+                  "[11,12,14,15,14,15,14,14,14,14,16,18,19],"
+                  "[11,12,14,15,14,15,14,14,14,14,16,18,19],"
+                  "[11,12,14,15,14,15,14,14,14,14,16,18,19]]",
+        .bounds = "[[0,0,200,110],[0,0,200,110],[10,10,150,24],"
+                  "[10,40,150,24],[10,70,150,24]]",
+        .paint_orders = "[0,1,2,3,4]",
+        .computed_names =
+            R"(["display","appearance","padding-top","padding-right",)"
+            R"("padding-bottom","padding-left","border-top-width",)"
+            R"("border-right-width","border-bottom-width","border-left-width",)"
+            R"("font-size","color","text-align"])",
+        .strings =
+            R"J("#document","HTML","BODY","INPUT","type","Bogus"," password ",)J"
+            R"J("PASSWORD","bogus-value","spaced-value","upper-secret",)J"
+            R"J("block","auto","0px","1px","6px","13px","none",)J"
+            R"J("rgb(31, 41, 51)","start")J",
+        .extra_nodes =
+            R"(,"nodeValue":[-1,-1,-1,-1,-1,-1])"
+            R"(,"inputValue":{"index":[3,4,5],"value":[8,9,10]})",
+        .extra_top =
+            R"(,"formControlTheme":{"controls":[)"
+            R"({"node_index":3,"theme":"native"},)"
+            R"({"node_index":4,"theme":"native"},)"
+            R"({"node_index":5,"theme":"native"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "input-type-normalisation");
+
+    CHECK(find_by_text(lowered.root, "bogus-value") != nullptr);
+    CHECK(find_by_text(lowered.root, "spaced-value") != nullptr);
+    CHECK(find_by_text(lowered.root, "upper-secret") == nullptr);
+    CHECK(lowered.counts.control_value_text == 2);
+
+    CHECK(detail::normalized_input_type("") == "text");
+    CHECK(detail::normalized_input_type("Bogus") == "text");
+    CHECK(detail::normalized_input_type("CheckBox") == "checkbox");
+    CHECK(detail::normalized_input_type(" password ") == "text");
+}
 
 TEST_CASE("a control masked by -webkit-text-security never draws its value",
           "[browser-capture][native-lowering][form-controls][security]") {

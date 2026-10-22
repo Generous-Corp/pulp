@@ -41,6 +41,24 @@ SHADOW_PART_INPUT_TYPES = frozenset({
     "range", "color", "file", "date", "datetime-local", "month", "time",
     "week"})
 
+# Every `type` keyword HTML defines. The attribute matches ASCII
+# case-insensitively and is NOT trimmed; a missing, empty or unknown value is
+# the Text state, which Chromium paints as a plain text field. Mirrors
+# KNOWN_INPUT_TYPES in form_control_theme.mjs and `kKnownInputTypes` in
+# browser_capture_controls.cpp.
+KNOWN_INPUT_TYPES = frozenset({
+    "hidden", "text", "search", "tel", "url", "email", "password", "date",
+    "month", "week", "time", "datetime-local", "number", "range", "color",
+    "checkbox", "radio", "file", "submit", "image", "reset", "button"})
+
+
+def normalize_input_type(raw: str | None) -> str:
+    """The state an `<input>`'s raw `type` attribute selects."""
+    lowered = "".join(
+        chr(ord(c) + 32) if "A" <= c <= "Z" else c for c in (raw or ""))
+    return lowered if lowered in KNOWN_INPUT_TYPES else "text"
+
+
 UA_DEFAULT_FORM_CHROME = "ua-default-form-chrome"
 UA_SHADOW_FORM_PART = "ua-shadow-form-part"
 AUTHOR_STYLED = "author-styled"
@@ -110,9 +128,8 @@ def form_controls(browser_flat: list[Any],
     for node in browser_flat:
         if node.tag not in FORM_CONTROL_TAGS or node.bounds is None:
             continue
-        input_type = (node.attributes.get("type") or "").strip().lower()
-        if node.tag == "input" and not input_type:
-            input_type = "text"
+        input_type = (normalize_input_type(node.attributes.get("type"))
+                      if node.tag == "input" else "")
         if node.tag == "input" and input_type == "hidden":
             continue
         theme = verdicts.get(node.index) if verdicts is not None else None

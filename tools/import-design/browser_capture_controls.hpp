@@ -24,6 +24,12 @@ namespace pulp::import_design::detail {
 /// reaches here.
 double px_value(const std::string& value);
 
+/// The state an `<input>`'s raw `type` attribute selects. HTML matches the
+/// attribute ASCII case-insensitively without trimming, and a missing, empty or
+/// unknown value is the Text state: Chromium paints `type="bogus"` and
+/// `type=" password "` as plain text fields.
+std::string normalized_input_type(std::string raw);
+
 /// What a form control draws from its own state, and where, or nothing.
 ///
 /// Chrome renders an `<input>`'s value and a closed `<select>`'s selected

@@ -2,7 +2,6 @@
 #include "browser_capture_controls.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -19,17 +18,28 @@ double px_value(const std::string& value) {
     }
 }
 
+std::string normalized_input_type(std::string raw) {
+    // Every `type` keyword HTML defines. KNOWN_INPUT_TYPES in
+    // browser_capture/form_control_theme.mjs and in
+    // import-validation/importer_differential/form_controls.py repeat it;
+    // test/test_importer_differential_lab.py asserts the three agree.
+    static const std::set<std::string> kKnownInputTypes = {
+        "hidden", "text", "search", "tel", "url", "email", "password", "date",
+        "month", "week", "time", "datetime-local", "number", "range", "color",
+        "checkbox", "radio", "file", "submit", "image", "reset", "button"};
+    for (auto& c : raw) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    return kKnownInputTypes.count(raw) != 0 ? raw : std::string("text");
+}
+
 std::optional<ControlValueText> control_value_text(
     const CapturedStyleIndex& index, int node_index, const CapturedBox& box,
     const std::map<std::string, std::string>& computed) {
     const auto tag = index.tag_name(node_index);
     std::string kind;
     if (tag == "input") {
-        auto type = index.attribute(node_index, "type");
-        std::transform(type.begin(), type.end(), type.begin(),
-                       [](unsigned char c) {
-                           return static_cast<char>(std::tolower(c));
-                       });
+        const auto type = normalized_input_type(index.attribute(node_index, "type"));
         // The input types whose value Chrome draws as a string in the
         // content box: the single-line text fields and the button-type
         // inputs. This is TEXT_INPUT_TYPES plus BUTTON_INPUT_TYPES in
@@ -42,7 +52,7 @@ std::optional<ControlValueText> control_value_text(
         // belong to neither table. test/test_importer_differential_lab.py
         // asserts the three tables keep this relationship.
         static const std::set<std::string> kValueTypes = {
-            "", "text", "search", "email", "url", "tel", "number",
+            "text", "search", "email", "url", "tel", "number",
             "button", "submit", "reset"};
         if (kValueTypes.count(type) == 0) return std::nullopt;
         kind = type;
