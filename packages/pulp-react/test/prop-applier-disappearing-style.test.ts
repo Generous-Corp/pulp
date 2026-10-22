@@ -339,8 +339,11 @@ const FIXTURE = resolve(here, 'fixtures', 'style-reset-toggle.json');
 const BOX_BASE = {
     width: 200, height: 96, background: '#20242c', paddingTop: 6, borderRadius: 8,
 };
-/// The calls that re-apply a surviving base key after a shared-slot reset.
-const SURVIVOR_REAPPLY: Call[] = [['setFlex', 'box', 'padding_top', 6], ['setBorderRadius', 'box', 8]];
+/// The call that re-applies each surviving base key after a shared-slot reset.
+const SURVIVOR_REAPPLY: Record<string, Call> = {
+    paddingTop: ['setFlex', 'box', 'padding_top', 6],
+    borderRadius: ['setBorderRadius', 'box', 8],
+};
 const BOX_ACTIVE: Record<string, unknown> = {
     padding: 14,
     marginTop: 10,
@@ -397,24 +400,25 @@ function buildFixture() {
         neutral: mount(BOX_BASE, LABEL_BASE),
         active: mount({ ...BOX_BASE, ...BOX_ACTIVE }, { ...LABEL_BASE, ...LABEL_ACTIVE }),
         deactivate: deactivate([], []),
-        withoutSurvivorReapply: withoutSurvivorReapply(deactivate([], [])),
+        withoutSurvivorReapply: Object.fromEntries(Object.entries(SURVIVOR_REAPPLY)
+            .map(([name, reapply]) => [name, withoutReapply(deactivate([], []), reapply)])),
         leaveOneActive,
     };
 }
 
-/// The deactivation with the survivor re-applies left out: the planted
-/// negative that shows the re-apply reaches the native render.
-function withoutSurvivorReapply(calls: Call[]): Call[] {
+/// The deactivation with one survivor's re-apply left out: the planted
+/// negative that shows that re-apply reaches the native render.
+function withoutReapply(calls: Call[], reapply: Call): Call[] {
     const firstReset = calls.findIndex((c) => c[0] === 'resetStyleProperty');
-    const isReapply = (c: Call) => SURVIVOR_REAPPLY.some((r) => JSON.stringify(r) === JSON.stringify(c));
-    return calls.filter((c, i) => i < firstReset || !isReapply(c));
+    const target = JSON.stringify(reapply);
+    return calls.filter((c, i) => i < firstReset || JSON.stringify(c) !== target);
 }
 
 /// JSON with one bridge call per line, so a diff shows which call changed.
 function formatFixture(fixture: ReturnType<typeof buildFixture>): string {
     const calls = (list: Call[], indent: string) =>
         `[\n${list.map((c) => indent + '  ' + JSON.stringify(c)).join(',\n')}\n${indent}]`;
-    const leave = Object.entries(fixture.leaveOneActive)
+    const group = (lists: Record<string, Call[]>) => Object.entries(lists)
         .map(([name, list]) => `    ${JSON.stringify(name)}: ${calls(list, '    ')}`).join(',\n');
     return '{\n'
         + `  "generator": ${JSON.stringify(fixture.generator)},\n`
@@ -422,8 +426,8 @@ function formatFixture(fixture: ReturnType<typeof buildFixture>): string {
         + `  "neutral": ${calls(fixture.neutral, '  ')},\n`
         + `  "active": ${calls(fixture.active, '  ')},\n`
         + `  "deactivate": ${calls(fixture.deactivate, '  ')},\n`
-        + `  "withoutSurvivorReapply": ${calls(fixture.withoutSurvivorReapply, '  ')},\n`
-        + `  "leaveOneActive": {\n${leave}\n  }\n}\n`;
+        + `  "withoutSurvivorReapply": {\n${group(fixture.withoutSurvivorReapply)}\n  },\n`
+        + `  "leaveOneActive": {\n${group(fixture.leaveOneActive)}\n  }\n}\n`;
 }
 
 describe('@pulp/react prop-applier — style reset pixel-proof fixture', () => {
@@ -435,10 +439,11 @@ describe('@pulp/react prop-applier — style reset pixel-proof fixture', () => {
         expect(readFileSync(FIXTURE, 'utf8')).toBe(text);
     });
 
-    it('re-applies the surviving base keys after their shared slots reset', () => {
+    it('re-applies each surviving base key after its shared slot resets', () => {
         const fixture = buildFixture();
-        expect(fixture.deactivate.length - fixture.withoutSurvivorReapply.length)
-            .toBe(SURVIVOR_REAPPLY.length);
+        for (const [name, calls] of Object.entries(fixture.withoutSurvivorReapply)) {
+            expect(fixture.deactivate.length - calls.length, name).toBe(1);
+        }
     });
 
     it('deactivates every active key in the fixture', () => {

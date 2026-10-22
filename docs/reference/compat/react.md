@@ -57,6 +57,10 @@ reset through their own setter. A surviving key that shares a slot with a
 removed one, and a default the host config gave the widget when it created
 it, are applied again afterwards. A render that omits its `style` prop
 entirely is read as "no style source", not as a removal, and resets nothing.
+That includes a spread that drops the `style` key itself
+(`{...props, ...(active ? {style: s} : {})}`): it cannot be told apart from
+a render that left the style out, so write `style={active ? s : undefined}`
+instead when the removal must reset.
 
 `packages/pulp-react/src/prop-applier-reset.ts` holds the decision for every
 key. Known gaps, each recorded there as `gap`:
