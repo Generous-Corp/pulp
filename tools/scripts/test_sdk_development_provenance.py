@@ -132,6 +132,24 @@ class AdoptionTest(unittest.TestCase):
             stream.write('PULP_SECRET_TOKEN:STRING=never-publish-this\n')
         self.assertNotIn('never-publish-this', str(self.inspect()))
 
+    def test_bridge_exec_reads_the_option_and_treats_absence_as_compiled_in(self):
+        # The fixture cache predates the option: the bridge was compiled in
+        # unconditionally, so the honest answer is True.
+        doc = self.inspect()
+        self.assertNotIn('PULP_DEV_BRIDGE_EXEC', doc['cache_features'])
+        self.assertTrue(doc['bridge_exec'])
+
+        with self.cache.open('a') as stream:
+            stream.write('PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n')
+        doc = self.inspect()
+        self.assertEqual(doc['cache_features']['PULP_DEV_BRIDGE_EXEC'], 'OFF')
+        self.assertFalse(doc['bridge_exec'])
+
+        # Control: ON is reported as present, so False above is the value, not a default.
+        self.cache.write_text(self.cache.read_text().replace(
+            'PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n', 'PULP_DEV_BRIDGE_EXEC:BOOL=ON\n'))
+        self.assertTrue(self.inspect()['bridge_exec'])
+
     def test_release_eligibility_rejected(self):
         for field, value in [('kind', 'release'), ('distribution_eligible', True)]:
             doc = self.inspect()
