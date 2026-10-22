@@ -1856,27 +1856,45 @@ TEST_CASE("WaveNet watchdog stays quiet while a concurrent worker admits mid-cal
     // The worker can admit a block after the callback publishes it but before
     // the callback advances its position, so the watchdog must not read that
     // gap as silence. A healthy provider on a concurrent worker never trips it.
-    // A deep ring and a wide window absorb worker scheduling hiccups; an
-    // unsigned wrap of the silence count would exceed any window.
+    // An unsigned wrap of the silence count would exceed any window.
     Harness h(Tweak{.lead = 2, .capacity = 64, .watchdog_blocks = 32});
     std::atomic<bool> done{false};
-    // Completing on every other pump leaves pumps that see work in flight
-    // and no completion, which is when the watchdog measures silence.
+    std::atomic<std::uint64_t> pumps{0};
+    // The worker spins concurrently with the callback, so it still admits
+    // blocks mid-callback. Completing on every other pump leaves pumps that see
+    // work in flight and no completion, which is when the watchdog measures
+    // silence.
     std::thread worker([&] {
         for (std::uint64_t pump = 0; !done.load(std::memory_order_acquire); ++pump) {
             h.controls[0].complete = pump % 2 == 0;
             (void)h.path.service(h.path.context, 0);
+            pumps.store(pump + 1, std::memory_order_release);
         }
     });
-    // Paced like a fast audio device so the spinning worker keeps up.
-    for (int block = 0; block < 5'000 && h.node.recovery_reason() == GpuAudioRecoveryReason::None;
+    // Paced on the worker's acknowledgement rather than wall-clock time: each
+    // callback waits until the worker has pumped twice since the previous one,
+    // so at least one completing pump follows every block. A descheduled worker
+    // then delays the callback instead of letting silence build up behind it.
+    bool acknowledged = true;
+    for (int block = 0; block < 50'000 && h.node.recovery_reason() == GpuAudioRecoveryReason::None;
          ++block) {
+        const auto seen = pumps.load(std::memory_order_acquire);
         (void)h.callback(float(block));
-        std::this_thread::sleep_for(std::chrono::microseconds(20));
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (pumps.load(std::memory_order_acquire) < seen + 2) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                acknowledged = false;
+                break;
+            }
+            std::this_thread::yield();
+        }
+        if (!acknowledged)
+            break;
     }
     done.store(true, std::memory_order_release);
     worker.join();
     INFO("blocks " << h.sequence << " reason " << int(h.node.recovery_reason()));
+    CHECK(acknowledged);
     CHECK(h.sequence >= 100);
     CHECK(h.node.recovery_reason() != GpuAudioRecoveryReason::ProviderUnresponsive);
 }
