@@ -224,9 +224,9 @@ TEST_CASE("generate_pulp_cpp reports the style properties it cannot lower",
 TEST_CASE("generate_pulp_cpp does not report a style property set to its initial keyword",
           "[view][import][cpp-codegen][fidelity]") {
     // An initial value (`none`, `normal`, `auto`, `clip`) or one the lane
-    // already renders (a solid border, a border of zero width) drops
-    // nothing, so a note claiming it did would send someone hunting a gap that
-    // does not exist.
+    // already renders (a solid border of recorded width, a border of zero
+    // width) drops nothing, so a note claiming it did would send someone
+    // hunting a gap that does not exist.
     const auto unlowered_notes = [](const IRStyle& style) {
         DesignIR ir;
         ir.root.type = "frame";
@@ -265,6 +265,10 @@ TEST_CASE("generate_pulp_cpp does not report a style property set to its initial
     IRStyle unrecorded_hidden_border;
     unrecorded_hidden_border.border_style = "hidden";
     CHECK(unlowered_notes(unrecorded_hidden_border).empty());
+    IRStyle zero_width_solid_border;
+    zero_width_solid_border.border_style = "solid";
+    zero_width_solid_border.border_width = 0.0f;
+    CHECK(unlowered_notes(zero_width_solid_border).empty());
 
     IRStyle live;
     live.mix_blend_mode = "screen";
@@ -302,15 +306,29 @@ TEST_CASE("generate_pulp_cpp does not report a style property set to its initial
         return detail.rfind("border-style is set", 0) == 0;
     }));
 
-    // With no recorded width CSS paints `medium`, which this lane does not draw.
-    IRStyle unrecorded_width_border;
-    unrecorded_width_border.border_style = "dashed";
-    const auto unrecorded_notes = unlowered_notes(unrecorded_width_border);
-    CHECK(std::any_of(unrecorded_notes.begin(), unrecorded_notes.end(),
-                      [](const std::string& detail) {
-                          return detail.rfind("border-style is set", 0) == 0 &&
-                                 detail.find("the border does not render") != std::string::npos;
-                      }));
+    // With no recorded width CSS paints `medium`, which this lane does not draw,
+    // whatever the style.
+    const auto border_note = [&](const IRStyle& style) {
+        const auto notes = unlowered_notes(style);
+        const auto found = std::find_if(notes.begin(), notes.end(), [](const std::string& detail) {
+            return detail.rfind("border-style is set", 0) == 0;
+        });
+        return found == notes.end() ? std::string() : *found;
+    };
+    for (const char* unrecorded_style : {"dashed", "solid"}) {
+        IRStyle unrecorded_width_border;
+        unrecorded_width_border.border_style = unrecorded_style;
+        CAPTURE(unrecorded_style);
+        CHECK(border_note(unrecorded_width_border).find("the border does not render") !=
+              std::string::npos);
+    }
+
+    // A solid border stroked on one side only leaves CSS's `medium` sides bare.
+    IRStyle partial_solid_border;
+    partial_solid_border.border_style = "solid";
+    partial_solid_border.border_top_width = 2.0f;
+    CHECK(border_note(partial_solid_border).find("sides with no recorded width do not render") !=
+          std::string::npos);
 }
 
 TEST_CASE("generate_pulp_cpp lowers a rotation instead of reporting it",

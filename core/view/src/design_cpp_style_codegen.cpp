@@ -267,8 +267,8 @@ bool drops(const std::optional<std::string>& value, std::string_view rendered_ke
 }
 
 struct BorderSides {
-    bool css_draws = false;  // some side has a width CSS paints
-    bool lane_draws = false; // some side has a width this lane strokes
+    bool lane_draws = false; // some side has a recorded width above zero
+    bool unrecorded = false; // some side has no recorded width
 };
 
 // A side takes its own width, else the shorthand's. A side with neither is
@@ -278,9 +278,9 @@ BorderSides border_sides(const IRStyle& style) {
     for (const auto& side : {style.border_top_width, style.border_right_width,
                              style.border_bottom_width, style.border_left_width}) {
         const auto& width = side ? side : style.border_width;
-        if (!width || *width > 0.0f)
-            sides.css_draws = true;
-        if (width && *width > 0.0f)
+        if (!width)
+            sides.unrecorded = true;
+        else if (*width > 0.0f)
             sides.lane_draws = true;
     }
     return sides;
@@ -486,16 +486,24 @@ void report_unlowered_visual_style(const EmitContext& ctx,
     // rather than claiming the whole property was dropped.
     if (drops(style.transform, "none") && !css_transform_rotation(*style.transform))
         note("transform", "the node renders untransformed");
-    // Borders lower as solid strokes of the recorded width. `none` and
-    // `hidden` paint nothing in CSS, so they drop only a width the lane would
-    // stroke; any other style drops whenever CSS paints a side.
-    if (drops(style.border_style, "solid")) {
+    // Borders lower as solid strokes of the recorded width. A non-solid style
+    // on a stroked side renders solid. A side with no recorded width paints at
+    // `medium` in CSS, unless the style is `none` or `hidden`, and this lane
+    // leaves it bare whatever the style.
+    if (style.border_style && !style.border_style->empty()) {
+        const auto& border_style = *style.border_style;
         const auto sides = border_sides(style);
-        const bool hides = is_css_keyword(*style.border_style, "none") ||
-                           is_css_keyword(*style.border_style, "hidden");
-        if (hides ? sides.lane_draws : sides.css_draws)
-            note("border-style",
-                 sides.lane_draws ? "the border renders solid" : "the border does not render");
+        const bool hides =
+            is_css_keyword(border_style, "none") || is_css_keyword(border_style, "hidden");
+        const bool restyled = sides.lane_draws && !is_css_keyword(border_style, "solid");
+        const bool bare = sides.unrecorded && !hides;
+        if (restyled && bare)
+            note("border-style", "recorded sides render solid and the rest do not render");
+        else if (restyled)
+            note("border-style", "the border renders solid");
+        else if (bare)
+            note("border-style", sides.lane_draws ? "sides with no recorded width do not render"
+                                                  : "the border does not render");
     }
     if (drops(style.text_overflow, "clip"))
         note("text-overflow", "overflowing text hard-clips instead of ellipsising");
