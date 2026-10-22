@@ -57,8 +57,8 @@ class ReleaseGate(unittest.TestCase):
             ninja.write("build PulpGpuFaultContinuity_AU: phony\n")
         self.assertEqual(self.run_gate(), 1)
 
-    def test_every_forbidden_identifier_is_caught_in_a_library(self):
-        lib = self.build / "core/gpu_audio/libpulp-gpu-audio.a"
+    def test_every_forbidden_identifier_is_caught_in_a_bundle_binary(self):
+        lib = self.build / "CLAP/PulpGain.clap/Contents/MacOS/PulpGain"
         clean = lib.read_bytes()
         for needle in GATE.FORBIDDEN:
             with self.subTest(needle=needle):
@@ -75,12 +75,35 @@ class ReleaseGate(unittest.TestCase):
         binary.write_bytes(b"\xcf\xfa\xed\xfe resolve_run_config")
         self.assertEqual(self.run_gate(), 1)
 
-    def test_a_hook_in_a_plain_executable_is_caught(self):
+    def test_only_release_artifacts_are_read(self):
+        # Object files, static libraries and tools in the build tree are not
+        # shipped artifacts; the gate stays out of them (they are rewritten by
+        # other build steps while it runs). A single-file bundle is read.
+        lib = self.build / "core/gpu_audio/libpulp-gpu-audio.a"
+        lib.write_bytes(lib.read_bytes() + b"arm_provider_fault")
         exe = self.build / "tools/some-host"
         exe.parent.mkdir(parents=True)
         exe.write_bytes(b"\xcf\xfa\xed\xfe arm_provider_fault")
         os.chmod(exe, 0o755)
+        self.assertEqual(self.run_gate(), 0)
+        single = self.build / "lib/Pulp GPU Fault Continuity.clap"
+        single.parent.mkdir(parents=True)
+        single.write_bytes(b"\x7fELF resolve_run_config")
         self.assertEqual(self.run_gate(), 1)
+
+    def test_a_file_removed_mid_scan_is_not_a_finding(self):
+        gone = self.build / "AU/Gone.component/Contents/MacOS/Gone"
+        real = GATE._candidates
+
+        def candidates(root):
+            yield gone  # listed, then removed by another build step
+            yield from real(root)
+
+        GATE._candidates = candidates
+        try:
+            self.assertEqual(GATE.check(self.build), [])
+        finally:
+            GATE._candidates = real
 
     def test_the_test_au_subtype_in_a_bundle_plist_is_caught(self):
         plist = self.build / "AU/Other.component/Contents/Info.plist"
@@ -97,7 +120,7 @@ class ReleaseGate(unittest.TestCase):
         self.assertIn("AU subtype GpFc", findings[0])
 
     def test_the_four_character_code_alone_in_a_binary_is_not_a_finding(self):
-        lib = self.build / "core/gpu_audio/libpulp-gpu-audio.a"
+        lib = self.build / "CLAP/PulpGain.clap/Contents/MacOS/PulpGain"
         lib.write_bytes(lib.read_bytes() + b"\x00GpFc\x00")
         self.assertEqual(GATE.check(self.build), [])
 
@@ -226,7 +249,7 @@ class ReleaseGate(unittest.TestCase):
         self.assertEqual(self.run_gate(), 0)
 
     def test_an_unreadable_binary_fails_closed(self):
-        lib = self.build / "core/gpu_audio/libpulp-gpu-audio.a"
+        lib = self.build / "CLAP/PulpGain.clap/Contents/MacOS/PulpGain"
         os.chmod(lib, 0)
         try:
             if os.access(lib, os.R_OK):

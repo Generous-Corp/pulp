@@ -9,8 +9,13 @@ meant to ship, or to be the base for one:
 
 1. the configure did not enable PULP_GPU_AUDIO_FAULT_HOOKS;
 2. the generated build declares no fault-continuity target;
-3. no library, plug-in or executable in the build contains any fault-hook
-   symbol or string (byte scan, so mangled and local symbols are covered);
+3. no release artifact contains any fault-hook symbol or string (byte scan,
+   so mangled and local symbols are covered). Release artifacts are plug-in
+   and app bundles (.component, .vst3, .clap, .app, .appex, .aaxplugin,
+   .lv2, every file inside them) and installer archives; object files and
+   static libraries in the build tree are not artifacts and are not read,
+   which keeps the scan short and away from files other build steps are
+   rewriting while it runs;
 4. no plug-in bundle's metadata (Info.plist, moduleinfo.json) names the test
    plug-in, including its AU subtype `GpFc`. The four-character code is
    checked only as a parsed AudioComponents subtype: as raw bytes it would
@@ -54,7 +59,6 @@ FORBIDDEN = (
 TEST_AU_SUBTYPE = "GpFc"
 BUNDLE_METADATA = ("Info.plist", "moduleinfo.json")
 TARGET = re.compile(r"\bPulpGpuFaultContinuity_\w+|\bgpu-fault-continuity-test\b")
-BINARY_SUFFIXES = (".a", ".dylib", ".so", ".o", ".dll", ".lib", ".exe")
 BUNDLES = (".clap", ".vst3", ".component", ".appex", ".app", ".aaxplugin", ".lv2")
 SKIP_DIRS = {"CMakeFiles", "_deps", "Testing", ".cmake"}
 ARCHIVE_SUFFIXES = (".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".pkg", ".dmg")
@@ -97,17 +101,15 @@ def _walk(root: Path):
 
 
 def _candidates(build: Path):
+    """Every file inside a release bundle, and single-file bundles (a Linux
+    .clap, a Windows .vst3 module)."""
     for here, dirs, files in _walk(build):
-        in_bundle = any(part.endswith(BUNDLES) for part in here.parts)
+        in_bundle = any(part.endswith(BUNDLES) for part in here.relative_to(build).parts)
         for name in files:
-            path = here / name
-            if path.is_symlink() and not path.resolve().is_file():
-                continue
-            if name.endswith(BINARY_SUFFIXES) or (in_bundle and here.name in ("MacOS",
-                                                                               "x86_64-win",
-                                                                               "arm64-win")):
-                yield path
-            elif os.access(path, os.X_OK) and not name.endswith((".sh", ".py", ".cmake")):
+            if in_bundle or name.endswith(BUNDLES):
+                path = here / name
+                if path.is_symlink() and not path.resolve().is_file():
+                    continue
                 yield path
 
 
@@ -138,6 +140,10 @@ def _scan(path: Path) -> list[str]:
     reported too (the gate fails closed rather than call it clean)."""
     try:
         data = path.read_bytes()
+    except FileNotFoundError:
+        # Removed between the directory listing and the read (another build
+        # step reinstalling): there is nothing left to ship, so nothing to scan.
+        return []
     except OSError as exc:
         return [f"<unreadable: {exc.strerror or exc}>"]
     return [needle.decode() for needle in FORBIDDEN if needle in data]
