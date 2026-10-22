@@ -111,9 +111,7 @@ public:
 
         const SampleType gain_db = compute_gain(level_db(detector));
 
-        const SampleType coeff = (gain_db < envelope_db_)
-            ? attack_coeff_
-            : release_coeff_;
+        const SampleType coeff = (gain_db < envelope_db_) ? attack_coeff_ : release_coeff_;
         // Snap the recursive gain-reduction envelope: when the signal sits above
         // threshold it settles toward 0 dB and otherwise stalls in denormals
         // with no FTZ guard. No-op above 1e-15.
@@ -148,8 +146,12 @@ public:
     /// Envelope smoothing coefficients in force for the current parameters and
     /// sample rate: the per-sample step toward a lower (attack) or higher
     /// (release) gain target is `coefficient * (target_db - envelope_db)`.
-    SampleType attack_coefficient() const { return attack_coeff_; }
-    SampleType release_coefficient() const { return release_coeff_; }
+    SampleType attack_coefficient() const {
+        return attack_coeff_;
+    }
+    SampleType release_coefficient() const {
+        return release_coeff_;
+    }
 
     SampleType gain_reduction_db() const { return envelope_db_; }
 
@@ -243,10 +245,10 @@ private:
     }
 
     static SampleType ballistic_coeff(SampleType time_ms, SampleType sample_rate) {
-        if (time_ms <= SampleType{0.0f}) return SampleType{1.0f};
+        if (time_ms <= SampleType{0.0f})
+            return SampleType{1.0f};
         return SampleType{1.0f} -
-               std::exp(SampleType{-1.0f} /
-                        (time_ms * SampleType{0.001f} * sample_rate));
+               std::exp(SampleType{-1.0f} / (time_ms * SampleType{0.001f} * sample_rate));
     }
 
     void update_ballistics() {

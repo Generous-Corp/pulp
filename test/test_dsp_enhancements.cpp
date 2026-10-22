@@ -914,7 +914,8 @@ struct BlockAwareGain {
     }
     void process(float* buffer, int n) {
         ++block_calls;
-        for (int i = 0; i < n; ++i) buffer[i] *= gain;
+        for (int i = 0; i < n; ++i)
+            buffer[i] *= gain;
     }
     void reset() {}
 };
@@ -941,8 +942,7 @@ TEST_CASE("ProcessorDuplicator hands whole channels to a block path when one exi
     REQUIRE(ch1[0] == 16.0f);
 }
 
-TEST_CASE("ProcessorDuplicator of Svf matches a per-sample Svf exactly",
-          "[dsp][duplicator][svf]") {
+TEST_CASE("ProcessorDuplicator of Svf matches a per-sample Svf exactly", "[dsp][duplicator][svf]") {
     ProcessorDuplicator<Svf> dup;
     dup.prepare(1, 48000.0f);
     dup.for_each([](Svf& s) {
@@ -959,6 +959,8 @@ TEST_CASE("ProcessorDuplicator of Svf matches a per-sample Svf exactly",
         buffer[i] = expected[i] = std::sin(0.05f * static_cast<float>(i)) + 0.25f;
     float* channels[] = {buffer};
     dup.process(channels, 1, 200);
-    for (float& x : expected) x = reference.process(x);
-    for (int i = 0; i < 200; ++i) REQUIRE(buffer[i] == expected[i]);
+    for (float& x : expected)
+        x = reference.process(x);
+    for (int i = 0; i < 200; ++i)
+        REQUIRE(buffer[i] == expected[i]);
 }

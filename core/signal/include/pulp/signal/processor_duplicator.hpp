@@ -83,7 +83,7 @@ public:
 
     int num_channels() const { return static_cast<int>(processors_.size()); }
 
-private:
+  private:
     static void process_buffer(P& processor, SampleType* buffer, int num_samples) {
         if constexpr (requires { processor.process(buffer, num_samples); }) {
             processor.process(buffer, num_samples);

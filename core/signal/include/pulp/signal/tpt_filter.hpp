@@ -100,8 +100,7 @@ template <typename SampleType = float> class TptFilterT {
 
     /// Process a buffer in place, replacing it with the highpass output.
     void process_highpass(SampleType* buffer, int num_samples) {
-        process_block(buffer, num_samples,
-                      [](SampleType in, SampleType lp) { return in - lp; });
+        process_block(buffer, num_samples, [](SampleType in, SampleType lp) { return in - lp; });
     }
 
     /// Process a buffer in place, replacing it with the allpass output.
@@ -154,8 +153,8 @@ template <typename SampleType = float> class TptFilterT {
         const SampleType two_g = two_g_;
         SampleType s = state_;
         for (int start = 0; start < num_samples; start += kStateSnapInterval) {
-            const int end = num_samples - start < kStateSnapInterval
-                ? num_samples : start + kStateSnapInterval;
+            const int end =
+                num_samples - start < kStateSnapInterval ? num_samples : start + kStateSnapInterval;
             for (int i = start; i < end; ++i) {
                 const SampleType input = buffer[i];
                 const SampleType d = input - s;

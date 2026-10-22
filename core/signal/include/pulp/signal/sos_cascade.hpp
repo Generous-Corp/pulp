@@ -115,8 +115,8 @@ template <typename SampleType = float, std::size_t MaxSections = 16> class SosCa
                                SampleType* right_buffer, std::size_t num_samples) noexcept {
         if (left.size_ == right.size_) {
             BiquadT<SampleType>::process_chain_stereo(left.sections_.data(), right.sections_.data(),
-                                                     left.size_, left_buffer, right_buffer,
-                                                     num_samples);
+                                                      left.size_, left_buffer, right_buffer,
+                                                      num_samples);
             return;
         }
         left.process(left_buffer, num_samples);

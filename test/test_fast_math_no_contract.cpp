@@ -48,9 +48,9 @@ TEST_CASE("Branch-free math holds its bounds without fused multiply-add",
     double exp10_rel = 0.0;
     for (float x = -37.0f; x < 38.0f; x += 1.0e-4f) {
         const double reference = std::pow(10.0, static_cast<double>(x));
-        exp10_rel = std::max(exp10_rel,
-                             std::abs(static_cast<double>(detail::exp10_float(x)) - reference) /
-                                 reference);
+        exp10_rel =
+            std::max(exp10_rel,
+                     std::abs(static_cast<double>(detail::exp10_float(x)) - reference) / reference);
     }
     CHECK(exp10_rel < 2.0e-7);
     CHECK(std::isnan(detail::exp10_float(std::numeric_limits<float>::quiet_NaN())));

@@ -406,8 +406,8 @@ std::vector<float> cascade_busy_signal(std::size_t n) {
         lcg = lcg * 1664525u + 1013904223u;
         const float noise = static_cast<float>(lcg >> 8) / 16777216.0f - 0.5f;
         const float t = static_cast<float>(i) / 48000.0f;
-        s[i] = 0.5f * std::sin(6.2831853f * 220.0f * t) + 0.3f * std::sin(6.2831853f * 3150.0f * t) +
-               0.2f * noise;
+        s[i] = 0.5f * std::sin(6.2831853f * 220.0f * t) +
+               0.3f * std::sin(6.2831853f * 3150.0f * t) + 0.2f * noise;
     }
     return s;
 }
@@ -481,13 +481,15 @@ TEST_CASE("SosCascade block path keeps preserved state across a coefficient inst
     auto a = input;
     auto b = input;
     by_block.process(a.data(), 1000);
-    for (std::size_t i = 0; i < 1000; ++i) b[i] = by_sample.process(b[i]);
+    for (std::size_t i = 0; i < 1000; ++i)
+        b[i] = by_sample.process(b[i]);
     by_block.set_coefficients(std::span<const BiquadCoefficients>(second),
                               SosCascadeTransition::preserve_state);
     by_sample.set_coefficients(std::span<const BiquadCoefficients>(second),
                                SosCascadeTransition::preserve_state);
     by_block.process(a.data() + 1000, a.size() - 1000);
-    for (std::size_t i = 1000; i < b.size(); ++i) b[i] = by_sample.process(b[i]);
+    for (std::size_t i = 1000; i < b.size(); ++i)
+        b[i] = by_sample.process(b[i]);
     CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
 }
 
@@ -506,8 +508,9 @@ TEST_CASE("SosCascade block path flushes a decaying tail without subnormal resid
         SosCascadeT<float, 4> cascade;
         REQUIRE(cascade.prepare(4));
         cascade.set_coefficients(std::span<const BiquadCoefficients>(sections));
-        const auto tail = impulse_tail(
-            [&](float* x, int n) { cascade.process(x, static_cast<std::size_t>(n)); }, kTotal, block);
+        const auto tail =
+            impulse_tail([&](float* x, int n) { cascade.process(x, static_cast<std::size_t>(n)); },
+                         kTotal, block);
         REQUIRE(tail.subnormal_outputs == 0);
         REQUIRE(tail.nonzero_end > 0);
         REQUIRE(tail.nonzero_end < kTotal / 2);
@@ -519,14 +522,18 @@ TEST_CASE("SosCascade stereo path matches two block calls bit for bit",
     static constexpr int kPattern[] = {1, 63, 64, 65, 7, 128, 333, 1024, 2, 512, 31};
     const auto left_in = cascade_busy_signal(8192);
     auto right_in = cascade_busy_signal(8192);
-    for (float& x : right_in) x *= -0.6f;
-    for (auto [left_count, right_count] : {std::pair<std::size_t, std::size_t>{8, 8}, {11, 11}, {3, 3}, {8, 5}}) {
+    for (float& x : right_in)
+        x *= -0.6f;
+    for (auto [left_count, right_count] :
+         {std::pair<std::size_t, std::size_t>{8, 8}, {11, 11}, {3, 3}, {8, 5}}) {
         INFO("sections " << left_count << "/" << right_count);
         auto left_bands = peaking_bands(left_count);
         auto right_bands = peaking_bands(right_count);
-        for (auto& c : right_bands) c.b0 *= 0.9f; // different coefficients per channel
+        for (auto& c : right_bands)
+            c.b0 *= 0.9f; // different coefficients per channel
         SosCascadeT<float, 16> lm, rm, lp, rp;
-        for (auto* c : {&lm, &rm, &lp, &rp}) REQUIRE(c->prepare(16));
+        for (auto* c : {&lm, &rm, &lp, &rp})
+            REQUIRE(c->prepare(16));
         lm.set_coefficients(std::span<const BiquadCoefficients>(left_bands));
         lp.set_coefficients(std::span<const BiquadCoefficients>(left_bands));
         rm.set_coefficients(std::span<const BiquadCoefficients>(right_bands));
@@ -554,25 +561,31 @@ TEST_CASE("SosCascade block and stereo paths track coefficient sweeps bit for bi
     for (const std::size_t step : {std::size_t{32}, std::size_t{256}}) {
         INFO("retune every " << step);
         SosCascadeT<float, 16> by_block, left, right;
-        for (auto* c : {&by_block, &left, &right}) REQUIRE(c->prepare(16));
+        for (auto* c : {&by_block, &left, &right})
+            REQUIRE(c->prepare(16));
         std::vector<Biquad> chain(5);
         auto a = input, l = input, r = input, expected = input;
         for (std::size_t pos = 0; pos < input.size(); pos += step) {
-            const float scale = 0.5f + 0.5f * std::sin(6.2831853f * static_cast<float>(pos) / 8192.0f);
+            const float scale =
+                0.5f + 0.5f * std::sin(6.2831853f * static_cast<float>(pos) / 8192.0f);
             std::vector<BiquadCoefficients> bands;
             for (int k = 0; k < 5; ++k) {
                 Biquad d;
-                d.set_coefficients(Biquad::Type::peaking, (0.6f + scale) * 120.0f * std::pow(2.0f, static_cast<float>(k)),
+                d.set_coefficients(Biquad::Type::peaking,
+                                   (0.6f + scale) * 120.0f * std::pow(2.0f, static_cast<float>(k)),
                                    1.5f, 48000.0f, k % 2 ? -5.0f : 5.0f);
                 bands.push_back(d.coefficients());
                 chain[static_cast<std::size_t>(k)].set_coefficients(bands.back());
             }
             for (auto* c : {&by_block, &left, &right})
-                c->set_coefficients(std::span<const BiquadCoefficients>(bands), SosCascadeTransition::preserve_state);
+                c->set_coefficients(std::span<const BiquadCoefficients>(bands),
+                                    SosCascadeTransition::preserve_state);
             for (std::size_t i = pos; i < pos + step; ++i)
-                for (auto& section : chain) expected[i] = section.process(expected[i]);
+                for (auto& section : chain)
+                    expected[i] = section.process(expected[i]);
             by_block.process(a.data() + pos, step);
-            SosCascadeT<float, 16>::process_stereo(left, right, l.data() + pos, r.data() + pos, step);
+            SosCascadeT<float, 16>::process_stereo(left, right, l.data() + pos, r.data() + pos,
+                                                   step);
         }
         CHECK(std::memcmp(a.data(), expected.data(), a.size() * sizeof(float)) == 0);
         CHECK(std::memcmp(l.data(), expected.data(), l.size() * sizeof(float)) == 0);

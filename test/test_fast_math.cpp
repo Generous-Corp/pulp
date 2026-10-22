@@ -492,8 +492,10 @@ namespace {
 // FastMath::tanh's contract written with early returns: exactly +/-1 beyond
 // |x| = 4, the [7/6] Pade form inside.
 float tanh_reference(float x) {
-    if (x < -4.0f) return -1.0f;
-    if (x > 4.0f) return 1.0f;
+    if (x < -4.0f)
+        return -1.0f;
+    if (x > 4.0f)
+        return 1.0f;
     const float x2 = x * x;
     const float num = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
     const float den = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
@@ -527,12 +529,12 @@ TEST_CASE("FastMath::tanh is bit-identical to its saturating Pade contract",
     CHECK(std::isnan(FastMath::tanh(std::numeric_limits<float>::quiet_NaN())));
 }
 
-TEST_CASE("log10_float stays within a few ulps of libm",
-          "[signal][fast-math][decibel]") {
+TEST_CASE("log10_float stays within a few ulps of libm", "[signal][fast-math][decibel]") {
     double worst_ulps = 0.0;
     for (float x = 1.0e-10f; x < 1.0e6f; x *= 1.0001f) {
         const double reference = std::log10(static_cast<double>(x));
-        const double err = std::abs(static_cast<double>(pulp::signal::detail::log10_float(x)) - reference);
+        const double err =
+            std::abs(static_cast<double>(pulp::signal::detail::log10_float(x)) - reference);
         // Near log10(x) = 0 the result ulp shrinks without bound; hold those
         // inputs to an absolute error instead.
         if (std::abs(reference) < 1.0e-3)
@@ -552,9 +554,9 @@ TEST_CASE("exp10_float stays within a few parts in 1e7 of libm and saturates lik
     double worst = 0.0;
     for (float x = -37.0f; x < 38.0f; x += 1.0e-4f) {
         const double reference = std::pow(10.0, static_cast<double>(x));
-        worst = std::max(worst,
-                         std::abs(static_cast<double>(pulp::signal::detail::exp10_float(x)) - reference) /
-                             reference);
+        worst = std::max(
+            worst, std::abs(static_cast<double>(pulp::signal::detail::exp10_float(x)) - reference) /
+                       reference);
     }
     CHECK(worst < 2.0e-7);
     CHECK(pulp::signal::detail::exp10_float(0.0f) == 1.0f);

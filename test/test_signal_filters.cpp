@@ -602,8 +602,8 @@ std::vector<float> filters_busy_signal(std::size_t n, float sample_rate) {
         lcg = lcg * 1664525u + 1013904223u;
         const float noise = static_cast<float>(lcg >> 8) / 16777216.0f - 0.5f;
         const float t = static_cast<float>(i) / sample_rate;
-        s[i] = 0.5f * std::sin(6.2831853f * 220.0f * t) + 0.3f * std::sin(6.2831853f * 3150.0f * t) +
-               0.2f * noise;
+        s[i] = 0.5f * std::sin(6.2831853f * 220.0f * t) +
+               0.3f * std::sin(6.2831853f * 3150.0f * t) + 0.2f * noise;
     }
     return s;
 }
@@ -625,7 +625,7 @@ bool same_bits(const std::vector<float>& a, const std::vector<float>& b) {
     return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("TptFilter block paths are bit-identical to the sample paths across split blocks",
           "[signal][filter][tpt][determinism]") {
@@ -743,7 +743,8 @@ TEST_CASE("TptFilter block path flushes a decaying tail without subnormal reside
     TptFilter fast;
     fast.prepare(sr);
     fast.set_cutoff(0.2f * sr);
-    const auto tail = impulse_tail([&](float* x, int n) { fast.process_lowpass(x, n); }, kTotal, kTotal);
+    const auto tail =
+        impulse_tail([&](float* x, int n) { fast.process_lowpass(x, n); }, kTotal, kTotal);
     REQUIRE(tail.subnormal_outputs <= static_cast<std::size_t>(TptFilter::kStateSnapInterval));
     REQUIRE(tail.nonzero_end < 1024);
 }
@@ -753,8 +754,8 @@ TEST_CASE("Svf block path is bit-identical to the sample path for every mode",
     constexpr float sr = 48000.0f;
     const auto input = filters_busy_signal(8192, sr);
     const auto schedule = filters_split_schedule(input.size());
-    for (const auto mode : {Svf::Mode::lowpass, Svf::Mode::highpass, Svf::Mode::bandpass,
-                            Svf::Mode::notch}) {
+    for (const auto mode :
+         {Svf::Mode::lowpass, Svf::Mode::highpass, Svf::Mode::bandpass, Svf::Mode::notch}) {
         INFO("mode " << static_cast<int>(mode));
         Svf by_sample;
         Svf by_block;
@@ -783,8 +784,7 @@ TEST_CASE("Svf block path is bit-identical to the sample path for every mode",
     }
 }
 
-TEST_CASE("Svf block path applies a mode change from the next block",
-          "[signal][svf]") {
+TEST_CASE("Svf block path applies a mode change from the next block", "[signal][svf]") {
     constexpr float sr = 48000.0f;
     const auto input = filters_busy_signal(256, sr);
     Svf by_sample;
@@ -839,7 +839,8 @@ TEST_CASE("Svf block path flushes a decaying tail without subnormal residency",
         INFO("block " << block);
         Svf filter;
         filter.configure(Svf::Mode::lowpass, 48000.0f, 20.0f, 0.7071f);
-        const auto tail = impulse_tail([&](float* x, int n) { filter.process(x, n); }, kTotal, block);
+        const auto tail =
+            impulse_tail([&](float* x, int n) { filter.process(x, n); }, kTotal, block);
         REQUIRE(tail.subnormal_outputs == 0);
         REQUIRE(tail.nonzero_end > 0);
         // A one-sample block snaps every sample, as the sample path does; the
@@ -989,9 +990,11 @@ TEST_CASE("LadderBank block processing matches per-sample bank processing",
     by_block.process_block(pointers.data(), 500);
     for (std::size_t n = 0; n < 500; ++n) {
         std::array<float, kVoices> frame{};
-        for (std::size_t v = 0; v < kVoices; ++v) frame[v] = expected[v][n];
+        for (std::size_t v = 0; v < kVoices; ++v)
+            frame[v] = expected[v][n];
         by_sample.process(frame.data(), frame.data());
-        for (std::size_t v = 0; v < kVoices; ++v) expected[v][n] = frame[v];
+        for (std::size_t v = 0; v < kVoices; ++v)
+            expected[v][n] = frame[v];
     }
     for (std::size_t v = 0; v < kVoices; ++v)
         CHECK(std::memcmp(buffers[v].data(), expected[v].data(), 500 * sizeof(float)) == 0);
