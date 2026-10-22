@@ -294,6 +294,11 @@ TEST_CASE("buffer_ops::measure_peak_rms finds a negative peak in every lane",
 TEST_CASE("buffer_ops::measure_peak_rms vector and portable kernels agree bit for bit",
           "[audio][buffer_ops][meter][parity]") {
     namespace detail = pulp::audio::buffer_ops::detail;
+#if defined(__GNUC__) || defined(__clang__)
+    // On these compilers the vector kernel must be the real one; otherwise
+    // the comparison below would be the portable kernel against itself.
+    REQUIRE(detail::has_vector_peak_rms_kernel());
+#endif
     const float specials[] = {
         std::numeric_limits<float>::quiet_NaN(),
         std::numeric_limits<float>::signaling_NaN(),
