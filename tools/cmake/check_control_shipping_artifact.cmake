@@ -1,29 +1,3 @@
-if(NOT EXISTS "${ARTIFACT}" OR NOT EXISTS "${MANIFEST}" OR
-   NOT EXISTS "${SHIPPING_MANIFEST}")
-    message(FATAL_ERROR
-        "control shipping scan requires ARTIFACT, MANIFEST, and SHIPPING_MANIFEST")
-endif()
-
-# The persisted-stamp edge passes its stamp here. A stamp strictly newer than
-# the artifact, both manifests, and this scanner means the artifact's POST_BUILD
-# scan already covered these exact inputs and wrote the report, so a second
-# scan would only repeat it. `IS_NEWER_THAN` is true on equal timestamps, so a
-# tie always rescans.
-if(SKIP_IF_FRESH_STAMP AND EXISTS "${SKIP_IF_FRESH_STAMP}"
-   AND REPORT AND EXISTS "${REPORT}")
-    set(_pulp_scan_stamp_fresh TRUE)
-    foreach(_pulp_scan_input IN ITEMS
-            "${ARTIFACT}" "${MANIFEST}" "${SHIPPING_MANIFEST}"
-            "${CMAKE_CURRENT_LIST_FILE}")
-        if("${_pulp_scan_input}" IS_NEWER_THAN "${SKIP_IF_FRESH_STAMP}")
-            set(_pulp_scan_stamp_fresh FALSE)
-        endif()
-    endforeach()
-    if(_pulp_scan_stamp_fresh)
-        return()
-    endif()
-endif()
-
 # Every marker this scanner looks for is printable ASCII without whitespace
 # and at least this many bytes long. A contiguous byte sequence like that always
 # lies inside one printable run of the binary, so searching the binary's
@@ -59,6 +33,43 @@ function(_pulp_binary_contains strings_var marker out_var)
         set(${out_var} FALSE PARENT_SCOPE)
     endif()
 endfunction()
+
+# Admission check for a single marker, for tests: run the scanner with
+# -DPULP_CONTROL_MARKER_SELFTEST=<marker> and it applies the rule
+# _pulp_binary_contains enforces, then stops without reading any artifact.
+if(DEFINED PULP_CONTROL_MARKER_SELFTEST)
+    set(_pulp_selftest_strings "")
+    _pulp_binary_contains(_pulp_selftest_strings "${PULP_CONTROL_MARKER_SELFTEST}"
+        _pulp_selftest_found)
+    message(STATUS "control shipping marker accepted: ${PULP_CONTROL_MARKER_SELFTEST}")
+    return()
+endif()
+
+if(NOT EXISTS "${ARTIFACT}" OR NOT EXISTS "${MANIFEST}" OR
+   NOT EXISTS "${SHIPPING_MANIFEST}")
+    message(FATAL_ERROR
+        "control shipping scan requires ARTIFACT, MANIFEST, and SHIPPING_MANIFEST")
+endif()
+
+# The persisted-stamp edge passes its stamp here. A stamp strictly newer than
+# the artifact, both manifests, and this scanner means the artifact's POST_BUILD
+# scan already covered these exact inputs and wrote the report, so a second
+# scan would only repeat it. `IS_NEWER_THAN` is true on equal timestamps, so a
+# tie always rescans.
+if(SKIP_IF_FRESH_STAMP AND EXISTS "${SKIP_IF_FRESH_STAMP}"
+   AND REPORT AND EXISTS "${REPORT}")
+    set(_pulp_scan_stamp_fresh TRUE)
+    foreach(_pulp_scan_input IN ITEMS
+            "${ARTIFACT}" "${MANIFEST}" "${SHIPPING_MANIFEST}"
+            "${CMAKE_CURRENT_LIST_FILE}")
+        if("${_pulp_scan_input}" IS_NEWER_THAN "${SKIP_IF_FRESH_STAMP}")
+            set(_pulp_scan_stamp_fresh FALSE)
+        endif()
+    endforeach()
+    if(_pulp_scan_stamp_fresh)
+        return()
+    endif()
+endif()
 
 _pulp_read_binary_strings("${ARTIFACT}" _binary)
 file(READ "${MANIFEST}" _manifest)
@@ -391,10 +402,13 @@ if(_profile STREQUAL "production-stripped")
                 continue()
             endif()
         endif()
+        # Four bytes identify ELF, Mach-O and fat Mach-O; a PE image (a Windows
+        # DLL inside a bundle) is identified by its first two, "MZ", so its
+        # last two hex bytes are free.
         file(READ "${_closure_candidate}" _closure_magic LIMIT 4 HEX)
         string(TOLOWER "${_closure_magic}" _closure_magic)
         if(NOT _closure_magic MATCHES
-           "^(7f454c46|4d5a|cffaedfe|cefaedfe|feedfacf|feedface|cafebabe|bebafeca)$")
+           "^(7f454c46|cffaedfe|cefaedfe|feedfacf|feedface|cafebabe|bebafeca|4d5a[0-9a-f][0-9a-f][0-9a-f][0-9a-f])$")
             continue()
         endif()
         math(EXPR _closure_binary_count "${_closure_binary_count} + 1")
