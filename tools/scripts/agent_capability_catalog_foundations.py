@@ -253,7 +253,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SosCascadeT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:8cdd74d36ba12f1b19d85a28d57b501e5b96f8c3a1eae3f82cd96dbb7f027d79"
+                    "sha256:28924771447f1d35ca80cd1c8ae3be76ddc13f5323bf69cb058b53fd5f156fa7"
                 ),
             )
         ],
