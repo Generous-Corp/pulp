@@ -93,7 +93,7 @@ constexpr std::array<Oversampler64::Factor, 4> kFactors = {
 
 TEST_CASE("Each polyphase quality publishes one stopband figure",
           "[signal][oversampling][polyphase_iir][stopband]") {
-    // The figure every document quotes (94.8 dB standard, 146.3 dB pristine)
+    // The figure every document quotes (113.3 dB standard, 146.3 dB pristine)
     // is the worst stage design's equiripple level. Pin both the published
     // function and its derivation from the stage designs, so the header, the
     // Quality comment, the reference page, and the migration note cannot drift
@@ -108,7 +108,7 @@ TEST_CASE("Each polyphase quality publishes one stopband figure",
         REQUIRE(published == worst);
         // A design whose figure rounds (toward zero) to anything else at one
         // decimal makes every quoted number wrong.
-        const double quoted = quality == Oversampler64::Quality::pristine ? -146.3 : -94.8;
+        const double quoted = quality == Oversampler64::Quality::pristine ? -146.3 : -113.3;
         INFO("quality=" << static_cast<int>(quality) << " published=" << published);
         REQUIRE(published <= quoted);
         REQUIRE(published > quoted - 0.1);
@@ -134,12 +134,12 @@ TEST_CASE("Polyphase IIR stage designs meet their analytic floors",
         for (int stage = 0; stage < 4; ++stage) {
             const auto design = Oversampler64::polyphase_stage_design(quality, stage);
             REQUIRE(design.valid());
-            // Every stage keeps the same absolute base band: 0.42 Fs / 0.45 Fs.
+            // Every stage keeps the same absolute base band: 0.44 Fs / 0.45 Fs.
             const double rate = static_cast<double>(1 << (stage + 1));
-            REQUIRE_THAT(design.passband_edge * rate, WithinAbs(pristine ? 0.45 : 0.42, 1e-12));
+            REQUIRE_THAT(design.passband_edge * rate, WithinAbs(pristine ? 0.45 : 0.44, 1e-12));
             const double stop = pulp::signal::halfband_iir_stopband_db(design);
             INFO("quality=" << pristine << " stage=" << stage << " stopband=" << stop << " dB");
-            REQUIRE(stop < (pristine ? -146.0 : -94.8));
+            REQUIRE(stop < (pristine ? -146.0 : -113.3));
         }
     }
 }
@@ -147,7 +147,7 @@ TEST_CASE("Polyphase IIR stage designs meet their analytic floors",
 TEST_CASE("Polyphase IIR rejects callback content folding into the base band at every stage",
           "[signal][oversampling][polyphase_iir][stopband]") {
     // Stage s decimates from 2^(s+1) Fs, and its stopband in base units starts at
-    // 2^s - edge, where edge is the base passband (0.42 / 0.45). Content there
+    // 2^s - edge, where edge is the base passband (0.44 / 0.45). Content there
     // folds onto the base band through that stage alone, so one window per stage
     // pins every stage independently. Offsets crowd toward the stopband edge,
     // where an equiripple design is no better than anywhere else but where a
@@ -156,8 +156,8 @@ TEST_CASE("Polyphase IIR rejects callback content folding into the base band at 
     for (const auto quality :
          {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
         const bool pristine = quality == Oversampler64::Quality::pristine;
-        const double edge = pristine ? 0.45 : 0.42;
-        const double floor_db = pristine ? 140.0 : 94.0;
+        const double edge = pristine ? 0.45 : 0.44;
+        const double floor_db = pristine ? 140.0 : 113.0;
         for (const auto factor : kFactors) {
             double worst = 1e9;
             double worst_frequency = 0.0;
@@ -240,7 +240,7 @@ TEST_CASE("Polyphase IIR interpolator rejects base-band images by its design flo
          {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
         const bool pristine = quality == Oversampler64::Quality::pristine;
         for (const auto factor : {Oversampler64::Factor::x2, Oversampler64::Factor::x4}) {
-            for (const double frequency : {0.05, 0.2, pristine ? 0.449 : 0.419}) {
+            for (const double frequency : {0.05, 0.2, pristine ? 0.449 : 0.439}) {
                 Oversampler64 oversampler;
                 oversampler.set_kind(Oversampler64::Kind::polyphase_iir);
                 oversampler.set_quality(quality);
@@ -279,7 +279,7 @@ TEST_CASE("Polyphase IIR interpolator rejects base-band images by its design flo
                 }
                 INFO("pristine=" << pristine << " factor=" << f << " f=" << frequency
                                  << " worst image=" << worst_db << " dB");
-                REQUIRE(worst_db < (pristine ? -140.0 : -94.0));
+                REQUIRE(worst_db < (pristine ? -140.0 : -113.0));
             }
         }
     }
@@ -289,7 +289,7 @@ TEST_CASE("Polyphase IIR passband is flat to its advertised edge",
           "[signal][oversampling][polyphase_iir][passband]") {
     for (const auto quality :
          {Oversampler64::Quality::standard, Oversampler64::Quality::pristine}) {
-        const double edge = quality == Oversampler64::Quality::pristine ? 0.45 : 0.42;
+        const double edge = quality == Oversampler64::Quality::pristine ? 0.45 : 0.44;
         for (const auto factor : kFactors) {
             for (const double frequency : {0.01, 0.1, 0.3, edge - 0.001}) {
                 Oversampler64 oversampler;
@@ -318,7 +318,7 @@ TEST_CASE("Polyphase IIR float build holds its stopband against rounding",
         oversampler.set_quality(quality);
         oversampler.set_factor(Oversampler::Factor::x2);
         const bool pristine = quality == Oversampler::Quality::pristine;
-        const double frequency = pristine ? 0.56 : 0.59; // just past each stopband edge
+        const double frequency = pristine ? 0.56 : 0.57; // just past each stopband edge
         std::size_t callback_frame = 0;
         double energy = 0.0;
         constexpr std::size_t frames = 8192;
@@ -335,7 +335,7 @@ TEST_CASE("Polyphase IIR float build holds its stopband against rounding",
         const double rms_db = 10.0 * std::log10(energy / (frames - 2048) / 0.5 + 1e-300);
         INFO("pristine=" << pristine << " float stopband reading=" << rms_db << " dB");
         // Double stage state lets the float build meet the design figure.
-        REQUIRE(rms_db < (pristine ? -146.0 : -94.0));
+        REQUIRE(rms_db < (pristine ? -146.0 : -113.0));
     }
 }
 
@@ -384,9 +384,9 @@ TEST_CASE("Polyphase IIR output decays to exact zero on silence without flush-to
     FlushToZeroOff no_ftz;
     REQUIRE_FALSE(pulp::signal::denormals_are_flushed());
     REQUIRE(std::fpclassify(std::numeric_limits<float>::min() / 4.0f) == FP_SUBNORMAL);
-    // Measured on M3 Ultra: float reaches zero by 768 (standard) / 1664
-    // (pristine) samples; double, whose flush threshold sits ~600 dB lower, by
-    // 6528 / 15744. The bounds leave room without letting a limit cycle pass.
+    // Measured: float reaches zero by 1152 (standard) / 1664 (pristine)
+    // samples; double, whose flush threshold sits ~600 dB lower, by 10240 /
+    // 15744. The bounds leave room without letting a limit cycle pass.
     constexpr long kBound = 4096;
     constexpr long kBound64 = 32768;
     for (const auto quality : {Oversampler::Quality::standard, Oversampler::Quality::pristine}) {

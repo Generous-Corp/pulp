@@ -31,11 +31,11 @@ namespace pulp::signal {
 //   * `polyphase_iir` (default) — elliptic polyphase half-band IIR per 2x
 //     stage (`design_halfband_iir`). Minimum phase, so no constant latency,
 //     and the cheapest of the three: about a sixth of the biquad lane's cost
-//     at x2 while rejecting 88 dB more. Its round trip delays the base band
-//     by 2.66 samples near DC at x2 (3.49 at x4), rising toward the passband
+//     at x2 while rejecting about 106 dB more. Its round trip delays the base band
+//     by 3.39 samples near DC at x2 (4.51 at x4), rising toward the passband
 //     edge, against the biquad lane's 0.97 (1.46). `Quality::standard`
-//     keeps the base band flat (< 1e-8 dB droop) to 0.42 Fs and rejects
-//     images and aliases from 0.58 Fs by 94.8 dB; `Quality::pristine` is
+//     keeps the base band flat (< 1e-8 dB droop) to 0.44 Fs and rejects
+//     images and aliases from 0.56 Fs by 113.3 dB; `Quality::pristine` is
 //     flat to 0.45 Fs and rejects from 0.55 Fs by 146.3 dB, in the float
 //     build too: the stages keep their state in double, so a float round trip
 //     adds only the rounding of its float samples (about -150 dB). Upper
@@ -54,7 +54,7 @@ namespace pulp::signal {
 //     chunk at a time (`detail::LinearPhaseOversamplingBlockStage2x`).
 //
 // A half-band IIR's transition is symmetric about base Nyquist, so content
-// in (0.5, 0.58) Fs (standard) folds onto (0.42, 0.5) Fs with only partial
+// in (0.5, 0.56) Fs (standard) folds onto (0.44, 0.5) Fs with only partial
 // rejection — above the passband, but audible in principle. The linear-phase
 // lane ends its transition at Nyquist instead and has no such region.
 //
@@ -87,7 +87,7 @@ template <typename SampleType = float> class OversamplerT {
     };
 
     enum class Quality {
-        standard, ///< FIR: 96 dB, flat to 0.40 Fs. IIR: 94.8 dB, flat to 0.42 Fs.
+        standard, ///< FIR: 96 dB, flat to 0.40 Fs. IIR: 113.3 dB, flat to 0.44 Fs.
         pristine, ///< FIR: 140 dB, flat to 0.45 Fs. IIR: 146.3 dB, flat to 0.45 Fs.
     };
 
@@ -203,9 +203,9 @@ template <typename SampleType = float> class OversamplerT {
         // absolute band clean at 2^s times the rate, so its edge halves each
         // stage and a much shorter design reaches the same floor.
         const bool pristine = quality == Quality::pristine;
-        constexpr std::array<std::size_t, kMaxStages> kStandardCounts = {6, 3, 2, 2};
+        constexpr std::array<std::size_t, kMaxStages> kStandardCounts = {8, 4, 3, 2};
         constexpr std::array<std::size_t, kMaxStages> kPristineCounts = {11, 5, 4, 3};
-        const double base_edge = pristine ? 0.225 : 0.21;
+        const double base_edge = pristine ? 0.225 : 0.22;
         if (stage < 0 || stage >= static_cast<int>(kMaxStages))
             return {};
         const auto index = static_cast<std::size_t>(stage);
@@ -217,8 +217,8 @@ template <typename SampleType = float> class OversamplerT {
     /// The polyphase lane's stopband floor at `quality`, in dB (negative): the
     /// worst equiripple level over every stage design. Each stage guards the
     /// same absolute base band, so the lane rejects images and aliases into
-    /// that band by at least this much at any factor. -94.85 dB standard,
-    /// -146.34 dB pristine; documentation quotes them as 94.8 and 146.3 dB.
+    /// that band by at least this much at any factor. -113.36 dB standard,
+    /// -146.34 dB pristine; documentation quotes them as 113.3 and 146.3 dB.
     static double polyphase_stopband_db(Quality quality) noexcept {
         double worst = -1e300;
         for (int stage = 0; stage < static_cast<int>(kMaxStages); ++stage)

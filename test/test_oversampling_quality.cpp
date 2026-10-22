@@ -515,10 +515,11 @@ TEST_CASE("Oversampler group delay function matches the measured round trip",
         }
     }
     // Pin the standard x2 DC delay so a design change that moves it is a
-    // deliberate, reviewed edit: 2 * 3.16 / 2 - 1/2 base samples.
+    // deliberate, reviewed edit: (2 * 3.887 - 1) / 2 base samples, from the
+    // stage-0 design's 3.887-sample delay at the 2x rate.
     Oversampler64 x2;
     x2.set_kind(Oversampler64::Kind::polyphase_iir);
-    REQUIRE_THAT(x2.group_delay_samples(1e-6), WithinAbs(2.66, 0.01));
+    REQUIRE_THAT(x2.group_delay_samples(1e-6), WithinAbs(3.39, 0.01));
 }
 
 TEST_CASE("Block processing is identical to per-sample processing for every kind",
