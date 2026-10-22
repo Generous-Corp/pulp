@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 145,
+  "inventory_version": 146,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,21 +43,21 @@
   ],
   "counts": {
     "public_headers": 506,
-    "reviewed_headers": 234,
-    "legacy_unreviewed_headers": 272,
+    "reviewed_headers": 235,
+    "legacy_unreviewed_headers": 271,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 65,
-      "legacy_unreviewed": 272,
+      "infrastructure": 66,
+      "legacy_unreviewed": 271,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
         "public_headers": 113,
-        "reviewed_headers": 11,
-        "legacy_unreviewed_headers": 102,
+        "reviewed_headers": 12,
+        "legacy_unreviewed_headers": 101,
         "unsupported_headers": 0
       },
       "midi": {
@@ -252,11 +252,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/buffer_ops.hpp",
-      "fingerprint": "sha256:9f7a193dd29ab2ef40a3c6d92ded708777885e4099532403ed6b397613666df2",
+      "fingerprint": "sha256:3fbb9aafb8571d0423a6b4aeb7998d7fa0137d87f6772a2f6c52615cf8d17bc3",
       "include": "pulp/audio/buffer_ops.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Allocation-free buffer helpers a processor uses inside process(): gain, copy, mix, a one-pass peak/RMS meter, in-place-aware per-sample mapping, and a constant channel-count dispatch. Authoring infrastructure rather than a generator DSP claim."
     },
     {
       "domain": "audio",
