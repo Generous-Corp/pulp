@@ -76,7 +76,9 @@ function _multiplierFromUnitless(n: number): boolean {
     return n > 0 && n <= 8;
 }
 
-const LENGTH_PATTERN = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(px|em|rem|%)?$/i;
+// Each alternative consumes digits in exactly one way, so a long run of
+// digits that fails at its end is rejected in linear time.
+const LENGTH_PATTERN = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(px|em|rem|%)?$/i;
 
 /// Resolve the element's own font size in pixels from its props, for `em`
 /// and `%` on the other typography lengths.

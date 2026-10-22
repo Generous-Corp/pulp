@@ -64,6 +64,17 @@ describe('typography length resolution', () => {
         expect(resolveTypographyLength('letterSpacing', {}, {})).toBeNull();
     });
 
+    it('rejects a long digit run that fails at its end in linear time', () => {
+        // A pattern that can split one run of digits two ways backtracks
+        // quadratically on '000...0x'; this length takes seconds there.
+        const hostile = '0'.repeat(40000) + 'x';
+        const started = performance.now();
+        expect(resolveTypographyLength('letterSpacing', hostile, {})).toBeNull();
+        expect(performance.now() - started).toBeLessThan(250);
+        // CONTROL: the same digits with a valid ending still resolve.
+        expect(resolveTypographyLength('letterSpacing', '0'.repeat(40000) + '1px', {})).toBe(1);
+    });
+
     it('the dialect decides a bare multiplier-property number, not its size', () => {
         setLengthDialect('dom');
         expect(resolveTypographyLength('lineHeight', 24, { fontSize: 10 })).toBe(240);

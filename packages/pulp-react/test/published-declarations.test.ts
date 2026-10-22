@@ -82,7 +82,9 @@ function diagnostics(consumer: string): string[] {
         ts.flattenDiagnosticMessageText(d.messageText, '\n'));
 }
 
-describe('@pulp/react published declarations', () => {
+// Checking lib.dom and React's declarations with library checking on takes
+// several seconds on a hosted runner, well past vitest's 5 s default.
+describe('@pulp/react published declarations', { timeout: 60_000 }, () => {
     it('resolve through the exports map to dist/index.d.ts', () => {
         const { consumer } = consumerProject();
         const resolved = ts.resolveModuleName('@pulp/react', consumer, OPTIONS, ts.sys);
