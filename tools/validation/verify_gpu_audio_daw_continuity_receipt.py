@@ -149,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--require-quiet-host", action="store_true")
     args = ap.parse_args(argv)
     try:
-        receipt = json.loads(args.receipt.read_text())
+        receipt = json.loads(args.receipt.read_text(encoding="utf-8"))
         _require(isinstance(receipt, dict), "receipt is not a JSON object")
         verdict = verify(receipt, args.run_dir or args.receipt.parent,
                          allow_dry_run=args.allow_dry_run,

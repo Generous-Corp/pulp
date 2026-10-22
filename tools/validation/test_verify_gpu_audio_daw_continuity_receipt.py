@@ -33,11 +33,11 @@ def dry_run(out: Path, fault: str = "force_loss_between", *extra: str) -> int:
         [sys.executable, str(HARNESS), "--mode", "gpu-fault", "--gpu-fault", fault,
          "--dry-run", "--stimulus-frames", str(FRAMES), "--fault-at-sample", str(FAULT),
          "--window-post", str(POST), "--out-dir", str(out), *extra],
-        capture_output=True, text=True, check=False).returncode
+        capture_output=True, text=True, encoding="utf-8", check=False).returncode
 
 
 def load(out: Path) -> dict:
-    return json.loads((out / "receipt.json").read_text())
+    return json.loads((out / "receipt.json").read_text(encoding="utf-8"))
 
 
 def resign(receipt: dict) -> dict:
@@ -150,7 +150,7 @@ class DaWContinuityReceipt(unittest.TestCase):
 
     def test_receipt_matches_the_checked_in_schema(self):
         schema = json.loads((REPO / "docs/contracts/gpu-audio-daw-continuity-v1.schema.json")
-                            .read_text())
+                            .read_text(encoding="utf-8"))
         receipt = load(self.good)
         self.assertEqual(schema["properties"]["schema"]["const"], receipt["schema"])
         self.assertEqual(set(schema["required"]) - set(receipt), set())

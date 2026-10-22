@@ -437,7 +437,7 @@ class ReaperSession:
             caches.extend(self.portable.glob("reaper-*vst*.ini"))
             for cache in caches:
                 try:
-                    if cache_publishes(cache.read_text(errors="replace"), target):
+                    if cache_publishes(cache.read_text(encoding="utf-8", errors="replace"), target):
                         cache_ready = True
                         break
                 except OSError:
@@ -1432,7 +1432,7 @@ def _invoke_control_fault(args: argparse.Namespace, fault: str, sample: int) -> 
     seam so the control op's final shape is a one-place change."""
     import shlex
     argv = [a.format(fault=fault, sample=sample) for a in shlex.split(args.control_inject_cmd)]
-    proc = subprocess.run(argv, capture_output=True, text=True, timeout=30, check=False)
+    proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", timeout=30, check=False)
     try:
         response = json.loads(proc.stdout) if proc.stdout.strip() else None
     except json.JSONDecodeError:
@@ -1495,7 +1495,7 @@ def _finish_gpu_fault(lib, run_dir: Path, args: argparse.Namespace, *, transport
         artifacts=lib.artifact_digests(run_dir, names),
         **identity, **evidence)
     out = run_dir / "receipt.json"
-    out.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+    out.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     log(f"receipt: {out}")
     log(f"host quiet: {receipt['host_quiet']} ({', '.join(preflight.get('reasons', [])) or 'no reasons'})")
     for name, result in evidence["nulls"].items():
@@ -1520,7 +1520,7 @@ def run_gpu_fault_dry_run(args: argparse.Namespace) -> int:
     lib.synthesize_run(run_dir, fault=args.gpu_fault, fault_sample=args.fault_at_sample,
                        frames=args.stimulus_frames, break_fallback=args.dry_run_break_fallback)
     preflight = {"status": "dry_run", "quiet_host": False, "reasons": ["dry_run"]}
-    (run_dir / "preflight.json").write_text(json.dumps(preflight) + "\n")
+    (run_dir / "preflight.json").write_text(json.dumps(preflight) + "\n", encoding="utf-8")
     identity = {"host": {"reaper_version": None, "machine": platform.machine(),
                          "os": platform.platform()},
                 "plugin": {"format": args.format, "name": args.plugin_name or "dry-run",
@@ -1545,7 +1545,7 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     preflight, full = _host_preflight()
     (run_dir / "preflight.json").write_text(json.dumps(full or preflight, indent=2,
-                                                       sort_keys=True, default=str) + "\n")
+                                                       sort_keys=True, default=str) + "\n", encoding="utf-8")
     log(f"host preflight: status={preflight['status']} quiet={preflight['quiet_host']}")
 
     frames = args.stimulus_frames
@@ -1562,7 +1562,7 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
         request.write_text(json.dumps({
             "fault": args.gpu_fault, "at_project_sample": args.fault_at_sample,
             "after_project_sample": args.fault_at_sample + args.window_post,
-        }) + "\n")
+        }) + "\n", encoding="utf-8")
     go = run_dir / "go"
 
     _announce(f'"{args.plugin_name}" ({args.format}) gpu-fault {args.gpu_fault} smoke '
@@ -1620,14 +1620,14 @@ def run_gpu_fault_mode(reaper: Path, args: argparse.Namespace) -> int:
             log("the plug-in did not arm the fault"
                 + (f": {armed.get('reason')}" if armed else "") + " — INCONCLUSIVE")
             return EXIT_INCONCLUSIVE
-        go.write_text("go\n")
+        go.write_text("go\n", encoding="utf-8")
 
         # Realtime playback of the whole stimulus, then the bounce.
         deadline = time.time() + args.timeout + render_end * 4
         done, text = False, ""
         while time.time() < deadline:
             time.sleep(1)
-            text = status.read_text().strip() if status.exists() else ""
+            text = status.read_text(encoding="utf-8").strip() if status.exists() else ""
             if text.startswith(("RENDER_DONE", "RENDER_MISSING", "GO_TIMEOUT")):
                 done = True
                 break

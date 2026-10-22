@@ -591,13 +591,13 @@ class GpuFaultMode(unittest.TestCase):
         session.portable = tmp / "portable"
         session.portable.mkdir(exist_ok=True)
         session.reaper_out = tmp / "reaper.out.txt"
-        session.reaper_out.write_text("REAPER stdout\n")
+        session.reaper_out.write_text("REAPER stdout\n", encoding="utf-8")
         run_dir = pathlib.Path(args.out_dir)
         status = session.portable / "status.txt"
 
         def shown(env, status_path, script, before_scripted):
             # A stale claim from the scan launch must be gone before the real one.
-            (run_dir / "claim").write_text("scan")
+            (run_dir / "claim").write_text("scan", encoding="utf-8")
             before_scripted()
             assert not (run_dir / "claim").exists()
             assert env["PULP_GPU_FAULT_STIMULUS"].endswith("stimulus.wav")
@@ -607,8 +607,8 @@ class GpuFaultMode(unittest.TestCase):
             if refuse:
                 (run_dir / "events.jsonl").write_text(
                     '{"event":"prepared","path":"shared_memory"}\n'
-                    '{"event":"fault_refused","reason":"no seam"}\n')
-            status_path.write_text("RENDER_DONE file=x")
+                    '{"event":"fault_refused","reason":"no seam"}\n', encoding="utf-8")
+            status_path.write_text("RENDER_DONE file=x", encoding="utf-8")
             return None
 
         session.run_until_fx_shown.side_effect = shown
@@ -627,7 +627,7 @@ class GpuFaultMode(unittest.TestCase):
             rc = rs.run_gpu_fault_mode(pathlib.Path("/reaper"), args)
         session.cleanup.assert_called_once_with()
         receipt = pathlib.Path(args.out_dir) / "receipt.json"
-        return rc, (json.loads(receipt.read_text()) if receipt.exists() else None)
+        return rc, (json.loads(receipt.read_text(encoding="utf-8")) if receipt.exists() else None)
 
     def test_mode_and_fault_kinds_are_offered(self):
         ap = rs.build_parser()
@@ -692,7 +692,7 @@ class GpuFaultMode(unittest.TestCase):
             session.cleanup.assert_called_once_with()
 
     def test_the_lua_handshakes_and_renders_only_after_go(self):
-        lua = rs.GPU_FAULT_LUA.read_text()
+        lua = rs.GPU_FAULT_LUA.read_text(encoding="utf-8")
         for needle in ("FX_SHOWN", "PLAYING", "RENDERING", "RENDER_DONE", "GO_TIMEOUT",
                        "PULP_GPU_FAULT_GO", "OnPlayButton", "Main_OnCommand(41824",
                        "TrackFX_Show"):
@@ -716,14 +716,14 @@ class GpuFaultMode(unittest.TestCase):
                 fault = "render_force_loss" if name.startswith("render") else "hang"
                 lib.synthesize_run(run, fault=fault, fault_sample=self.FAULT,
                                    frames=self.FRAMES)
-                events = (run / "events.jsonl").read_text()
+                events = (run / "events.jsonl").read_text(encoding="utf-8")
                 if name.startswith("render"):
                     events = events.replace('"performed": true', '"performed": false')
                 elif old:
                     events = events.replace(old, new)
                 else:
                     events += new + "\n"
-                (run / "events.jsonl").write_text(events)
+                (run / "events.jsonl").write_text(events, encoding="utf-8")
                 result = lib.evaluate_run(run, fault=fault, fault_sample=self.FAULT,
                                           tolerance=1e-4, window_pre=100, window_post=self.POST,
                                           host_alive=True, bounce_path=run / "bounce.wav")
@@ -742,7 +742,7 @@ class GpuFaultMode(unittest.TestCase):
                  "--dry-run", "--stimulus-frames", str(self.FRAMES), "--fault-at-sample",
                  str(self.FAULT), "--window-post", str(self.POST), "--out-dir", tmp,
                  "--reaper-bin", "/nonexistent/REAPER"],
-                capture_output=True, text=True, check=False).returncode
+                capture_output=True, text=True, encoding="utf-8", check=False).returncode
         self.assertEqual(rc, rs.EXIT_PASS)
 
 

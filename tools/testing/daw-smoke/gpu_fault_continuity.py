@@ -583,7 +583,7 @@ def synthesize_run(out_dir: Path, *, fault: str, fault_sample: int, frames: int,
          "issued_project_sample": fault_sample + block, "offline": False},
     ] + ([{"event": "render_loss", "performed": True, "detail": "dry run"}]
          if fault in RENDER_FAULTS else []) + [{"event": "health", "phase": p, "status": s} for p, s in health.items()]
-    with (out_dir / "events.jsonl").open("w") as stream:
+    with (out_dir / "events.jsonl").open("w", encoding="utf-8") as stream:
         for event in events:
             stream.write(json.dumps(event, sort_keys=True) + "\n")
     return {"pdc": pdc, "events": events}
@@ -593,7 +593,7 @@ def load_events(path: Path) -> list[dict[str, Any]]:
     events = []
     if not Path(path).exists():
         return events
-    for line in Path(path).read_text(errors="replace").splitlines():
+    for line in Path(path).read_text(errors="replace", encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
