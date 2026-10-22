@@ -1858,6 +1858,20 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-js-bytecode-embed": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_js_bytecode_embed.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/js-bytecode/embedded_fixture.js"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_js_bytecode_embed.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-lv2-host-discovery": {
    "data": "none",
    "inputs": [],
@@ -2340,6 +2354,7 @@
   "pulp-heritage-c1-c5-calibration-render",
   "pulp-heritage-cyclic-calibration-render",
   "pulp-isolated-scanner-crash-helper",
+  "pulp-js-bytecode",
   "pulp-osc-render-wav",
   "pulp-project-package-mutant-helper",
   "pulp-project-package-publish-helper",
@@ -2706,6 +2721,7 @@
   "pulp-test-interchange",
   "pulp-test-ipc",
   "pulp-test-isolated-scanner",
+  "pulp-test-js-bytecode-embed",
   "pulp-test-latency-contract",
   "pulp-test-lfo-sampling",
   "pulp-test-live-dsp-telemetry",

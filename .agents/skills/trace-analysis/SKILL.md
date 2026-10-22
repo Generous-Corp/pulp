@@ -496,7 +496,9 @@ WHERE s.dur > 2e6 AND s.depth <= r.depth + 3 ORDER BY s.ts;
 Spans Pulp emits on this path: `scripted_ui_document_load`,
 `scripted_ui_probe_realm` (should be ABSENT on a first load — if present the
 document is evaluated twice), `scripted_ui_live_realm`, `script_compile` vs
-`script_bytecode_read` (a warm open should read, not compile),
+`script_bytecode_read` (a warm open should read, not compile; with build-time
+bytecode a fresh process shows `script_embedded_lookup` + `script_bytecode_read`
+instead of `script_precompile`),
 `script_execute`, `runtime_import_parse` / `runtime_import_fonts` /
 `runtime_import_payload_eval` / `runtime_import_inline_eval`,
 `frame_callback_pump` → `raf_flush` (the post-mount settle).

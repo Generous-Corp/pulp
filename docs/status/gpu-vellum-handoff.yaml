@@ -2759,8 +2759,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-analysis/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "da2338fab01ce91494f5d7810a46a4134b26e252",
-          "object_id": "e7f2acf9495d5da8a16aa9386ae5a9f4be5a96eb",
+          "revision": "967c1f6b3c7aa8242f20d91bf0b16fd47ca20190",
+          "object_id": "75ae9f69ba8774975520f21c1e556fa545164a42",
           "object_type": "blob"
         },
         {
@@ -2775,8 +2775,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "c37e8bd6daa256ef93621a9507686720df6a1458",
-          "object_id": "034567f288527bcf875b1e273a54fb2a92ea42f6",
+          "revision": "417ab6139273037f1360bdaae2c7bdcb8b3edf29",
+          "object_id": "9a1d60353f962df69c9c2f07582a6b1bd2f42711",
           "object_type": "blob"
         },
         {
