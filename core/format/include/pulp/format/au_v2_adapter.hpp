@@ -455,6 +455,12 @@ private:
     // `ProcessContext`. Default-constructed so the first process() call
     // after init reports no changes.
     detail::PlayheadSnapshot playhead_prev_{};
+    // Set while Initialize() runs ProcessBufferLists() once on silence to fault
+    // in the validation and buffer-wiring path. The render returns right after
+    // wiring: before the bypass check, the MIDI queue drain, host callbacks and
+    // the Processor, so nothing host- or plug-in-visible moves.
+    bool warming_render_path_ = false;
+    void warm_render_path();
 
     // Host offline-render intent (kAudioUnitProperty_OfflineRender), written by
     // the host before a faster-than-realtime bounce and read each render block.

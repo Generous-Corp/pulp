@@ -1274,3 +1274,17 @@ it waits".
 ## SysEx core storage and representation
 
 SysEx7 test payloads must contain only seven-bit bytes. High-bit bytes belong in explicit malformed-packet tests; helper tests do not prove host runtime support.
+
+## Initialize() warms the render path without rendering
+
+`PulpAUEffect::Initialize()` ends with `warm_render_path()`: one
+`ProcessBufferLists` call over silent buffer lists shaped like the configured
+stream formats, so the validation and channel-pointer wiring code is paged in
+before the host's first real render. The warm-up flag returns **immediately
+after the wiring loops** (and before the reset in the invalid-buffer branch), so
+it never reaches the bypass copy, the MIDI/SysEx drains, the transport/host
+callbacks, `reset_triggers_rt()`, or `Processor::process()`. Anything added to
+`ProcessBufferLists` above that early return runs at Initialize time, so it must
+be side-effect-free too. `test_au_v2_effect.cpp` (`[activation]`) pins this: a
+trigger raised before `DoInitialize()` survives it, the Processor has run zero
+times, and the first real render runs it once and settles the trigger.

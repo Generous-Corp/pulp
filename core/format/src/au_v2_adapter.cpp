@@ -2,6 +2,9 @@
 // Uses Apple's AudioUnitSDK (Apache 2.0) for proper AU v2 hosting contract
 // Subclasses AUEffectBase and overrides ProcessBufferLists for multi-channel
 
+#include <algorithm>
+#include <cstddef>
+#include <vector>
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioToolbox/AudioUnitUtilities.h>
 #include <AudioToolbox/AudioToolbox.h>  // kAudioUnitProperty_CocoaUI, AudioUnitCocoaViewInfo
@@ -532,9 +535,45 @@ OSStatus PulpAUEffect::Initialize()
     input_ptrs_.reserve(static_cast<std::size_t>(Input(0).GetStreamFormat().mChannelsPerFrame));
     output_ptrs_.reserve(static_cast<std::size_t>(Output(0).GetStreamFormat().mChannelsPerFrame));
 
+    warm_render_path();
+
     runtime::log_info("AU v2: initialized with {} channels at {} Hz",
                       GetNumberOfChannels(), GetSampleRate());
     return noErr;
+}
+
+void PulpAUEffect::warm_render_path() {
+    if (!processor_) return;
+    const UInt32 frames = std::min<UInt32>(GetMaxFramesPerSlice(), 64);
+    if (frames == 0) return;
+    // One silent buffer list per side, shaped like the configured stream format
+    // so validation accepts it and the wiring loops run.
+    struct List {
+        std::vector<std::byte> header;
+        std::vector<std::vector<float>> data;
+        AudioBufferList* get() { return reinterpret_cast<AudioBufferList*>(header.data()); }
+    };
+    auto make = [&](const AudioStreamBasicDescription& format) {
+        List list;
+        const bool noninterleaved = (format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0;
+        const UInt32 buffers = noninterleaved ? format.mChannelsPerFrame : 1;
+        const UInt32 per_buffer = noninterleaved ? 1 : format.mChannelsPerFrame;
+        list.header.resize(offsetof(AudioBufferList, mBuffers) +
+                           std::max<UInt32>(buffers, 1) * sizeof(AudioBuffer));
+        list.get()->mNumberBuffers = buffers;
+        for (UInt32 b = 0; b < buffers; ++b) {
+            auto& samples = list.data.emplace_back(static_cast<std::size_t>(frames * per_buffer), 0.0f);
+            list.get()->mBuffers[b] = {per_buffer, static_cast<UInt32>(samples.size() * sizeof(float)),
+                                       samples.data()};
+        }
+        return list;
+    };
+    auto input = make(Input(0).GetStreamFormat());
+    auto output = make(Output(0).GetStreamFormat());
+    AudioUnitRenderActionFlags flags = 0;
+    warming_render_path_ = true;
+    (void)ProcessBufferLists(flags, *input.get(), *output.get(), frames);
+    warming_render_path_ = false;
 }
 
 void PulpAUEffect::Cleanup()
@@ -712,6 +751,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     if (!valid_input || !valid_output) {
         detail::zero_audio_buffer_list(&outBuffer);
         ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
+        if (warming_render_path_) return noErr;
         processor_->set_sidechain(nullptr);
         store_.reset_triggers_rt();
         return noErr;
@@ -744,6 +784,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     for (UInt32 i = 0; i < out_channels; ++i) {
         output_ptrs_[i] = static_cast<float*>(outBuffer.mBuffers[i].mData);
     }
+    if (warming_render_path_) return noErr;
 
     // When the Bypass param is engaged, copy main input to main output
     // (null-guarded), zero any output channel without a matching input, and

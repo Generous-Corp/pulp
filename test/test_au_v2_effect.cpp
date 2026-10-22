@@ -1715,3 +1715,101 @@ TEST_CASE("AU v2 reports no factory-preset property when the plug-in ships none"
     REQUIRE(effect.DispatchGetPropertyInfo(kAudioUnitProperty_FactoryPresets,
                                            kAudioUnitScope_Global, 0, size, writable) != noErr);
 }
+
+// ===========================================================================
+// Initialize() warm-up: one render over silence that stops right after
+// validation and buffer wiring. It must not run the Processor or settle a
+// trigger the host raised before the first real render.
+// ===========================================================================
+namespace {
+
+class CountingTriggerEffect : public pulp::format::Processor {
+public:
+    static constexpr pulp::state::ParamID kTriggerId = 1;
+    static inline int process_calls = 0;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AUWarmUp",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-warm-up",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 2}},
+            .output_buses = {{"Main Out", 2}},
+        };
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        pulp::state::ParamInfo trigger{};
+        trigger.id = kTriggerId;
+        trigger.name = "Reset";
+        trigger.range = {0.0f, 1.0f, 0.0f, 1.0f};
+        trigger.is_trigger = true;
+        store.add_parameter(trigger);
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        ++process_calls;
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_counting_trigger_effect() {
+    return std::make_unique<CountingTriggerEffect>();
+}
+
+}  // namespace
+
+TEST_CASE("AU v2 effect: Initialize warm-up never runs the Processor or settles triggers",
+          "[au][au-v2][effect][activation][rt-safety]")
+{
+    struct Factory {
+        Factory() : previous(pulp::format::registered_factory()) {
+            pulp::format::register_plugin(create_counting_trigger_effect);
+        }
+        ~Factory() { pulp::format::register_plugin(previous); }
+        pulp::format::ProcessorFactory previous;
+    } factory;
+    CountingTriggerEffect::process_calls = 0;
+
+    constexpr UInt32 kFrames = 32;
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(silence_test_format(48000.0, 2)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(silence_test_format(48000.0, 2)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    // Raised before initialization: it must survive the warm-up and settle on
+    // the first real render.
+    REQUIRE(effect.SetParameter(CountingTriggerEffect::kTriggerId,
+                                kAudioUnitScope_Global, 0, 1.0f, 0) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+    REQUIRE(CountingTriggerEffect::process_calls == 0);
+    Float32 trigger = 0.0f;
+    REQUIRE(effect.GetParameter(CountingTriggerEffect::kTriggerId, kAudioUnitScope_Global, 0,
+                                trigger) == noErr);
+    REQUIRE(trigger == 1.0f);
+
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    struct TwoBufferList {
+        AudioBufferList bl;
+        AudioBuffer second;
+    } input{}, output{};
+    input.bl.mNumberBuffers = 2;
+    input.bl.mBuffers[0] = {1, kFrames * sizeof(float), in_l.data()};
+    input.bl.mBuffers[1] = {1, kFrames * sizeof(float), in_r.data()};
+    output.bl.mNumberBuffers = 2;
+    output.bl.mBuffers[0] = {1, kFrames * sizeof(float), out_l.data()};
+    output.bl.mBuffers[1] = {1, kFrames * sizeof(float), out_r.data()};
+    AudioUnitRenderActionFlags flags = 0;
+    REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
+    REQUIRE(CountingTriggerEffect::process_calls == 1);
+    REQUIRE(effect.GetParameter(CountingTriggerEffect::kTriggerId, kAudioUnitScope_Global, 0,
+                                trigger) == noErr);
+    REQUIRE(trigger == 0.0f);
+
+    effect.DoCleanup();
+}
