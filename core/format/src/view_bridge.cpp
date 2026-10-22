@@ -30,7 +30,10 @@ void view_editor_prewarm_scheduler(const Processor::EditorPrewarm& request) {
     copy.materialized_documents.reserve(request.materialized_documents.size());
     for (const auto document : request.materialized_documents)
         copy.materialized_documents.emplace_back(document);
-    view::prewarm_scripted_ui(std::move(copy));
+    // Through the runtime's slot, not prewarm_scripted_ui() itself: naming it
+    // here would link the script runtime into every plug-in with an editor.
+    if (auto run = view::scripted_ui_prewarm_runner().load(std::memory_order_acquire))
+        run(std::move(copy));
 }
 }  // namespace detail
 

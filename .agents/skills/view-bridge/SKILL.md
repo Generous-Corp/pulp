@@ -3558,3 +3558,22 @@ ordered and deterministic, validate generated output with the bridge drift and
 missing-handler controls, and keep inbound commands distinct from outbound
 publications. This seed contract does not replace payload parsing or handler
 registration for existing plugins.
+
+## Editor glue must not name the script runtime
+
+Every plug-in with an editor links `ViewBridge`, the per-format plug views,
+`editor_idle_pump.hpp` and `gpu_host_select.hpp`, but most editors are AutoUi
+and never run a script. A static link keeps the QuickJS engine, the widget
+bridge and the session code (about 5 MB stripped) only when something live
+references them, so this glue reaches a session only through
+`view::ScriptedEditorSession`'s virtual calls (`poll`, `settling`,
+`complete_pending_load`, `release_root`, `set_host_kind`,
+`attach_gpu_surface`, destruction), and schedules editor prewarm through
+`view::scripted_ui_prewarm_runner()`, which `scripted_ui.cpp` fills in when
+session code is linked. `ScopedDeferredDocumentLoad` is header-inline for the
+same reason. A new direct call to a non-virtual `ScriptedUiSession` method (or
+any other view-script symbol) from glue pulls the whole runtime back into every
+plug-in; `plugin-module-no-script-runtime-PulpGain-*` (packaging label) fails
+when that happens, and `-Wl,-why_load` on the module link names the caller.
+A processor that builds its own `ScriptedUiSession` needs no opt-in: its
+constructor call links the runtime, and that also installs the prewarm runner.

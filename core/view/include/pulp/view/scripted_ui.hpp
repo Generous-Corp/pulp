@@ -2,6 +2,7 @@
 
 #include <pulp/state/store.hpp>
 #include <pulp/view/hot_reload.hpp>
+#include <pulp/view/scripted_editor_session.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/script_inspector_port.hpp>
 #include <pulp/view/theme.hpp>
@@ -73,26 +74,33 @@ struct ScriptedUiOptions {
 /// harnesses never hold one, so their document is mounted when either returns.
 class ScopedDeferredDocumentLoad {
 public:
-    ScopedDeferredDocumentLoad();
-    ~ScopedDeferredDocumentLoad();
+    ScopedDeferredDocumentLoad() noexcept : previous_(flag()) { flag() = true; }
+    ~ScopedDeferredDocumentLoad() { flag() = previous_; }
     ScopedDeferredDocumentLoad(const ScopedDeferredDocumentLoad&) = delete;
     ScopedDeferredDocumentLoad& operator=(const ScopedDeferredDocumentLoad&) = delete;
     /// Whether a guard is alive on this thread.
-    static bool active() noexcept;
+    static bool active() noexcept { return flag(); }
 
 private:
+    // Inline: hosts open every embedded editor inside a guard, including
+    // AutoUi editors, and an out-of-line guard would link the script runtime
+    // into each of those plug-ins.
+    static bool& flag() noexcept {
+        static thread_local bool active = false;
+        return active;
+    }
     bool previous_ = false;
 };
 
 // Manages a JS-driven widget tree, optional theme.json overrides, and
 // standalone hot reload semantics with widget value preservation.
-class ScriptedUiSession {
+class ScriptedUiSession : public ScriptedEditorSession {
 public:
     using NativeMessageHandler =
         std::function<std::string(std::string_view envelope_json)>;
 
     ScriptedUiSession(View& root, state::StateStore& store, ScriptedUiOptions options);
-    ~ScriptedUiSession();
+    ~ScriptedUiSession() override;
 
     /// Tear down everything that borrows the root -- the realm, its engine and
     /// bridge, and the accessibility handles over them -- now, while the root
@@ -100,7 +108,7 @@ public:
     /// session borrows its root, so a root destroyed first must be preceded by
     /// this; ViewBridge::close() calls it for the processor's active session
     /// before it destroys the editor root. Idempotent; the destructor runs it.
-    void release_root() noexcept;
+    void release_root() noexcept override;
     /// True when `view` is this session's root.
     bool borrows_root(const View& view) const noexcept { return &root_ == &view; }
 
@@ -126,10 +134,10 @@ public:
     /// commits (see WidgetBridge::pending_runtime_settle_rounds()). Each
     /// poll() serves one. A content-first editor open pumps these before its
     /// first frame so that frame is the settled document, not a partial one.
-    bool settling() const noexcept;
+    bool settling() const noexcept override;
     /// Evaluate a deferred document now (a harness that needs the mounted tree
     /// without pumping frames). Returns whether the document is loaded.
-    bool complete_pending_load(std::string* error = nullptr);
+    bool complete_pending_load(std::string* error = nullptr) override;
     /// Called when a load() -- immediate or deferred -- finishes, with whether
     /// the document mounted and the error when it did not. Set it before load().
     /// The place for work that needs the mounted realm: binding scripts,
@@ -149,7 +157,7 @@ public:
     /// itself: it is where an evaluated realm is discarded, so skipping it
     /// leaves evaluated timers and callbacks live in the realm they were
     /// created in.
-    bool poll(std::string* error = nullptr);
+    bool poll(std::string* error = nullptr) override;
 
     // Explicitly reload the current script in place: rebuilds the widget bridge
     // under the SAME root + GPU surface, preserving widget state, and probes the
@@ -168,7 +176,7 @@ public:
     /// by the session and re-applied to every realm a reload builds, so a hot
     /// reload never forgets it. Set it before load() and the first render
     /// already knows. See WidgetBridge::set_host_kind.
-    void set_host_kind(std::string kind);
+    void set_host_kind(std::string kind) override;
     const std::string& host_kind() const { return host_kind_; }
     /// The clock script timers and performance.now() read (see
     /// WidgetBridge::set_time_source). Kept by the session and applied to
@@ -278,7 +286,7 @@ public:
     // Stored so that a hot-reload-triggered bridge rebuild reattaches the
     // same surface to the new bridge. Pass `nullptr` to detach (called from
     // the host's teardown before the bridge is destroyed).
-    void attach_gpu_surface(render::GpuSurface* gpu_surface);
+    void attach_gpu_surface(render::GpuSurface* gpu_surface) override;
     render::GpuSurface* gpu_surface() const noexcept { return gpu_surface_; }
 
     const std::filesystem::path& script_path() const { return script_path_; }

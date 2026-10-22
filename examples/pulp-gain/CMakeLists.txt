@@ -139,6 +139,17 @@ if(APPLE)
             set_tests_properties(plugin-module-dead-strip-PulpGain-${_fmt} PROPERTIES
                 LABELS "packaging"
                 TIMEOUT 30)
+            # PulpGain's editor is AutoUi, so its module must not carry the
+            # script runtime.
+            add_test(NAME plugin-module-no-script-runtime-PulpGain-${_fmt}
+                COMMAND ${CMAKE_COMMAND}
+                    "-DBINARY=$<TARGET_FILE:PulpGain_${_fmt}>"
+                    "-DCONFIG=$<CONFIG>"
+                    -DMODULE=PulpGain_${_fmt}
+                    -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_no_script_runtime.cmake)
+            set_tests_properties(plugin-module-no-script-runtime-PulpGain-${_fmt} PROPERTIES
+                LABELS "packaging"
+                TIMEOUT 60)
         endif()
     endforeach()
 endif()
