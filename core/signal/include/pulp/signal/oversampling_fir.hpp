@@ -224,9 +224,11 @@ template <typename SampleType> class LinearPhaseOversamplingStage2x {
 /// time. Without one (x86-64's SSE2 baseline, an MSVC build below /arch:AVX2),
 /// std::fma is a library call per tap that also blocks vectorization, which
 /// made this loop more than an order of magnitude slower on an x86-64
-/// baseline build.
-#if defined(__FMA__) || defined(__AVX2__) || defined(__aarch64__) || defined(_M_ARM64) ||          \
-    defined(__ARM_FEATURE_FMA)
+/// baseline build. GCC and Clang announce FMA codegen with __FMA__ (-mfma);
+/// their __AVX2__ alone does not enable it. MSVC's /arch:AVX2 does enable FMA
+/// codegen but defines only __AVX2__, so that spelling counts for MSVC alone.
+#if defined(__FMA__) || (defined(_MSC_VER) && defined(__AVX2__)) || defined(__aarch64__) ||        \
+    defined(_M_ARM64) || defined(__ARM_FEATURE_FMA)
 #define PULP_SIGNAL_HARDWARE_FMA 1
 #else
 #define PULP_SIGNAL_HARDWARE_FMA 0
