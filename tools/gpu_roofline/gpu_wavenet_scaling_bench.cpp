@@ -352,6 +352,7 @@ int main(int argc, char** argv) {
     uint32_t check_instances = 4;
     double sample_rate = 48000.0;
     bool keep_warm = false;
+    std::string timeline_path;
     for (int i = 1; i + 1 < argc; i += 2) {
         const std::string k = argv[i], v = argv[i + 1];
         if (k == "--models")
@@ -374,6 +375,8 @@ int main(int argc, char** argv) {
             json_path = v;
         else if (k == "--keep-warm")
             keep_warm = v == "1";
+        else if (k == "--timeline")
+            timeline_path = v;
         else {
             std::fprintf(stderr, "unknown argument %s\n", k.c_str());
             return 2;
@@ -410,6 +413,10 @@ int main(int argc, char** argv) {
                 dev->wavenet_forward(a.data(), b.data(), 32, 0);
         });
     }
+
+    // --timeline: one CSV row per measured period:
+    // model,block,instances,mode,period,wall_us,cpu_us,gpu_busy_us
+    std::FILE* timeline = nullptr;
 
     std::string json = "[\n";
     bool first_row = true;
@@ -507,8 +514,10 @@ int main(int argc, char** argv) {
                     }
                     // Every 8th batched period carries a GPU timestamp; its second
                     // readback would inflate wall time, so it is kept out of the
-                    // wall/CPU statistics.
-                    const bool timed = mode != "serial" && p % 8u == 7u;
+                    // wall/CPU statistics. With --timeline every period is timed and
+                    // logged (wall then includes the timestamp readback), to tell
+                    // GPU work apart from waiting.
+                    const bool timed = mode != "serial" && (!timeline_path.empty() || p % 8u == 7u);
                     double g = -1.0;
                     const double c0 = thread_cpu_us();
                     const auto t0 = Clock::now();
@@ -524,10 +533,19 @@ int main(int argc, char** argv) {
                     }
                     const auto t1 = Clock::now();
                     const double c1 = thread_cpu_us();
+                    if (p >= warm && !timeline_path.empty()) {
+                        if (!timeline)
+                            timeline = std::fopen(timeline_path.c_str(), "w");
+                        if (timeline)
+                            std::fprintf(timeline, "%s,%u,%u,%s,%u,%.1f,%.1f,%.1f\n",
+                                         m.name.c_str(), B, N, mode.c_str(), p,
+                                         std::chrono::duration<double, std::micro>(t1 - t0).count(),
+                                         c1 - c0, g);
+                    }
                     if (p >= warm) {
                         if (g >= 0.0)
                             gpu_busy.push_back(g);
-                        if (!timed) {
+                        if (!timed || !timeline_path.empty()) {
                             wall.push_back(
                                 std::chrono::duration<double, std::micro>(t1 - t0).count());
                             cpu.push_back(c1 - c0);
@@ -623,6 +641,8 @@ int main(int argc, char** argv) {
             }
         }
     }
+    if (timeline)
+        std::fclose(timeline);
     stop_warm = true;
     if (warm_thread.joinable())
         warm_thread.join();
