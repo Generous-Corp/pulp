@@ -110,7 +110,13 @@ void square_task(void* ctx, std::uint32_t i) noexcept {
 // is woken by the event it is waiting for. Each keeps the deadline the poll it
 // replaced already used, so what changed is the waiting mechanism and not the
 // length of the fuse.
-constexpr auto kParkTimeout = std::chrono::seconds(2);
+// A worker parks after a few milliseconds without work, but only once the
+// scheduler runs it. These workers have not joined a workgroup, so they run at
+// normal priority, while the workers of other pools in concurrently running
+// tests spin at realtime priority and can hold every core for seconds. The
+// bound is a failsafe against a worker that never parks, so it is sized for
+// that contention rather than for an idle machine.
+constexpr auto kParkTimeout = std::chrono::seconds(30);
 // A loaded gate VM (12 cores, two VMs per host) can take seconds to schedule
 // the first batch, and a tight bound turns that scheduling delay into a failed
 // race assertion on unrelated pull requests. The bound is a failsafe against a
