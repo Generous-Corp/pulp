@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <optional>
 #include <span>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/state/stable_sort.hpp>
 #include <cstddef>
 #include <vector>
@@ -623,6 +624,7 @@ bool PulpAUEffect::plugin_produces_midi() const noexcept
 
 OSStatus PulpAUEffect::Initialize()
 {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "au_v2_initialize");
     auto result = AUEffectBase::Initialize();
     if (result != noErr) return result;
     // A host offline-render write older than this session no longer applies.

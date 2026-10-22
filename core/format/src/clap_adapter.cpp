@@ -4,6 +4,7 @@
 #include "clap_remote_controls.hpp"
 #include "clap_note_name.hpp"
 
+#include <pulp/runtime/trace.hpp>
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
@@ -239,6 +240,7 @@ static T load_event(const clap_event_header_t* hdr) {
 }
 
 bool clap_init(const clap_plugin_t* plugin) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "clap_init");
     auto* self = get_self(plugin);
     self->main_thread_id = std::this_thread::get_id();
     self->owner_alive.reset();
@@ -413,6 +415,7 @@ static void clap_warm_render_path(const clap_plugin_t* plugin, PulpClapPlugin* s
 }
 
 bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t max_frames) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "clap_activate");
     auto* self = get_self(plugin);
     self->sample_rate = sr;
     self->max_buffer_size = static_cast<int>(max_frames);

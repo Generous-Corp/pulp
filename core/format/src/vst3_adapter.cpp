@@ -3,6 +3,7 @@
 // Parameters are registered with the VST3 parameter system and synced
 // with the Pulp StateStore during processing
 
+#include <pulp/runtime/trace.hpp>
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
@@ -656,6 +657,7 @@ void PulpVst3Processor::note_id_map_clear() {
 }
 
 tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_initialize");
     auto result = SingleComponentEffect::initialize(context);
     if (result != kResultOk) return result;
 
@@ -986,6 +988,7 @@ tresult PLUGIN_API PulpVst3Processor::terminate() {
 }
 
 IPlugView* PLUGIN_API PulpVst3Processor::createView(FIDString name) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_create_view");
     // VST3 hosts call createView("editor") to get the plugin's GUI
     if (name && strcmp(name, ViewType::kEditor) == 0) {
 #ifdef PULP_VST3_GUI
@@ -1173,6 +1176,7 @@ tresult PLUGIN_API PulpVst3Processor::canProcessSampleSize(int32 symbolicSampleS
 }
 
 tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_setup_processing");
     if (!processor_) return kInternalError;
     refresh_bus_channel_cache();
 
@@ -1504,6 +1508,7 @@ void PulpVst3Processor::schedule_restart_poll_tick() {
 }
 
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_set_active");
     if (state) refresh_bus_channel_cache();
     if (state && processor_ && has_prepared_context_) {
         processor_->prepare(prepared_context_);
