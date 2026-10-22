@@ -564,7 +564,7 @@ tresult PLUGIN_API PulpVst3Processor::getParamStringByValue(
     const auto* info = store_.info(static_cast<state::ParamID>(tag));
     if (info) {
         const float plain =
-            info->range.denormalize(static_cast<float>(valueNormalized));
+            state::value_from_host_normalized(*info, static_cast<float>(valueNormalized));
         const std::string text = format_parameter_text(*info, plain);
         if (text.empty()) return kResultFalse;
         // fromAscii matches the rest of this adapter's String128 handling
@@ -1651,12 +1651,12 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
                         // the store both want the plain (denormalized) value.
                         // Denormalize once here so the shared dual-write pushes
                         // the same plain value to the sample-accurate queue and
-                        // to the RT-safe store path (set_value_rt): identical to
-                        // the prior push + set_normalized_rt pair, which
-                        // denormalized the same value through the same range.
+                        // to the RT-safe store path (set_value_rt). A continuous
+                        // parameter keeps the host's exact value, as it does in
+                        // the plain-value formats.
                         float plain_value = static_cast<float>(value);
                         if (const auto* info = store_.info(param_id)) {
-                            plain_value = info->range.denormalize(plain_value);
+                            plain_value = state::value_from_host_normalized(*info, plain_value);
                         }
                         boundary::apply_param_value(
                             param_events_, store_, param_id,
@@ -2725,7 +2725,9 @@ tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id, ParamValue 
         // The same guard setState() uses: a host-originated write must not be
         // echoed back at the host as editor automation.
         const ScopedHostParameterWrite host_write;
-        store_.set_normalized(static_cast<state::ParamID>(id), static_cast<float>(value));
+        const auto param_id = static_cast<state::ParamID>(id);
+        if (const auto* info = store_.info(param_id))
+            store_.set_value(param_id, state::value_from_host_normalized(*info, static_cast<float>(value)));
     }
     return result;
 }

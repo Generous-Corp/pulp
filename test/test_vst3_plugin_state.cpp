@@ -1127,6 +1127,72 @@ TEST_CASE("VST3 survives repeated initialize activate process deactivate termina
     }
 }
 
+TEST_CASE("VST3 stores a host's exact value for a continuous parameter with a step",
+          "[vst3][param][host]") {
+    // Gain is continuous with a 0.1 dB step and advertises stepCount 0. A host
+    // writing -19.963 dB must store -19.963 dB through both write paths, as
+    // AU and CLAP store it from a plain value; snapping to -20.0 made the same
+    // automation produce different audio per format.
+    constexpr int kFrames = 64;
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    float* inputs[2] = {in_l.data(), in_r.data()};
+    float* outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers input_bus{};
+    input_bus.numChannels = 2;
+    input_bus.channelBuffers32 = inputs;
+    Steinberg::Vst::AudioBusBuffers output_bus{};
+    output_bus.numChannels = 2;
+    output_bus.channelBuffers32 = outputs;
+
+    reset_test_processor(TestVst3Config{});
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    ParameterInfo gain{};
+    REQUIRE(processor.getParameterInfo(0, gain) == Steinberg::kResultOk);
+    REQUIRE(gain.id == kGainParamId);
+    REQUIRE(gain.stepCount == 0);
+
+    const pulp::state::ParamRange range{-60.0f, 24.0f, 0.0f, 0.1f};
+    constexpr float kTarget = -19.963f;
+
+    REQUIRE(processor.setParamNormalized(kGainParamId, range.normalize(kTarget)) ==
+            Steinberg::kResultOk);
+    REQUIRE_THAT(test_processor->state().get_value(kGainParamId), WithinAbs(kTarget, 1e-3));
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = kFrames;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    constexpr float kQueued = 3.337f;
+    Steinberg::Vst::ParameterChanges input_params(1);
+    Steinberg::int32 queue_index = 0;
+    auto* queue = input_params.addParameterData(kGainParamId, queue_index);
+    REQUIRE(queue != nullptr);
+    Steinberg::int32 point_index = 0;
+    REQUIRE(queue->addPoint(0, range.normalize(kQueued), point_index) == Steinberg::kResultTrue);
+    Steinberg::Vst::ProcessData data{};
+    data.symbolicSampleSize = Steinberg::Vst::kSample32;
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = &input_bus;
+    data.outputs = &output_bus;
+    data.inputParameterChanges = &input_params;
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    REQUIRE_THAT(test_processor->state().get_value(kGainParamId), WithinAbs(kQueued, 1e-3));
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
 TEST_CASE("VST3 lifecycle churn preserves state and tolerates bypass toggles",
           "[vst3][lifecycle][churn][state][bypass]") {
     constexpr int kFrames = 64;

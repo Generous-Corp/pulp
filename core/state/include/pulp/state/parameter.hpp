@@ -421,6 +421,18 @@ inline bool is_discrete_param(const ParamInfo& info) {
     return info.kind != ParamKind::Continuous;
 }
 
+/// The plain value a host means by a normalized write. A host sees a
+/// continuous parameter as continuous (no step count), so its value is kept
+/// exactly: `range.step` quantizes what a UI control emits, not host
+/// automation, and plain-value formats (AU, CLAP) store the same exact value.
+/// Discrete parameters still snap to their steps.
+inline float value_from_host_normalized(const ParamInfo& info, float normalized) {
+    if (is_discrete_param(info)) return info.range.denormalize(normalized);
+    ParamRange exact = info.range;
+    exact.step = 0.0f;
+    return exact.denormalize(normalized);
+}
+
 inline bool is_boolean_param(const ParamInfo& info) {
     return info.kind == ParamKind::Toggle;
 }

@@ -1426,3 +1426,16 @@ editor, or nothing to prewarm, costs one virtual call. The editor itself does
 not change: an open that races the worker waits for the in-flight result
 instead of compiling again. Details: `view-bridge`, "What the host shows while
 it waits".
+
+## Host-normalized writes keep continuous values exact
+
+VST3 is the one format whose host writes normalized values, and
+`ParamRange::denormalize` rounds to `range.step`. A `Continuous` parameter
+advertises `stepCount = 0`, so rounding a host write there made the same
+automation land on different values than AU and CLAP, which write plain values
+the store only clamps (a 0.1 dB step turned -19.963 dB into -20.0 dB). Every
+VST3 write path (the process parameter queue, `setParamNormalized`, and the
+value-to-string display) goes through `state::value_from_host_normalized`,
+which drops the step for continuous kinds and still snaps discrete ones. A new
+normalized write path must use it too; `[vst3][param][host]` in
+`test_vst3_plugin_state.cpp` pins both write paths.
