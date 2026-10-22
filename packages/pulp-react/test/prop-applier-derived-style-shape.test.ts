@@ -94,10 +94,10 @@ describe('@pulp/react prop-applier — derived-style shape stability', () => {
         expect(destructive(bridge)).toEqual([]);
     });
 
-    it('still resets non-visual removals across a shape change', () => {
-        // The guard is scoped to derived VISUAL keys. `visible` / `opacity`
-        // are real state and must still clear, or a hidden element stays
-        // hidden forever.
+    it('still resets flat-prop removals across a shape change', () => {
+        // The guard covers only keys the style source supplied. Flat
+        // `visible` / `opacity` are real state and must still clear, or a
+        // hidden element stays hidden forever.
         const oldN = normalizeHostProps('View', {
             style: { background: 'red' },
             visible: false,
@@ -112,6 +112,52 @@ describe('@pulp/react prop-applier — derived-style shape stability', () => {
         expect(bridge.calls.filter((c) => c.fn === 'setOpacity')[0]?.args)
             .toEqual(['n1', 1.0]);
         expect(destructive(bridge)).toEqual([]);
+    });
+
+    it('resets the keys of a whole style object the author sets to undefined', () => {
+        // `style={hidden ? { opacity: 0, padding: 8, fontWeight: 'bold' } : undefined}`:
+        // the style prop is present but empty, so this is an authored removal,
+        // not a render that left the style out. Every key it supplied resets.
+        const oldN = normalizeHostProps('View', {
+            style: { opacity: 0, padding: 8, fontWeight: 'bold' },
+        });
+        const newN = normalizeHostProps('View', { style: undefined });
+
+        applyChangedProps(makeInstance('cond'), oldN, newN);
+
+        expect(bridge.calls.filter((c) => c.fn === 'setOpacity').map((c) => c.args))
+            .toEqual([['cond', 1]]);
+        expect(bridge.calls.filter((c) => c.fn === 'setFontWeight').map((c) => c.args))
+            .toEqual([['cond', 400]]);
+        expect(bridge.calls.filter((c) => c.fn === 'resetStyleProperty').map((c) => c.args))
+            .toContainEqual(['cond', 'padding']);
+    });
+
+    it('resets the keys of a className the author clears', () => {
+        setClassRulesProvider((cls) => (cls === 'dim' ? { opacity: 0.3 } : null));
+        try {
+            const oldN = normalizeHostProps('View', { className: 'dim' });
+            const newN = normalizeHostProps('View', { className: '' });
+            applyChangedProps(makeInstance('cls'), oldN, newN);
+            expect(bridge.calls.filter((c) => c.fn === 'setOpacity').map((c) => c.args))
+                .toEqual([['cls', 1]]);
+        } finally {
+            setClassRulesProvider(null);
+        }
+    });
+
+    it('keeps style-derived opacity, padding and type when a hover render omits the style', () => {
+        // The hover re-render carries no style prop at all: the keys are
+        // absent, not removed, so nothing resets.
+        const oldN = normalizeHostProps('View', {
+            style: { opacity: 0.5, padding: 8, fontWeight: 'bold' },
+        });
+        const newN = normalizeHostProps('View', { onMouseEnter: () => {} });
+
+        applyChangedProps(makeInstance('hover'), oldN, newN);
+
+        expect(bridge.calls.filter((c) => ['setOpacity', 'setFontWeight',
+            'resetStyleProperty'].includes(c.fn))).toEqual([]);
     });
 
     it('still resets when both sides are derived and a key is dropped', () => {

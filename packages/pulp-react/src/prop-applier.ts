@@ -735,12 +735,16 @@ export function normalizeHostProps(
     const hasClassName = typeof rawProps.className === 'string'
         && (rawProps.className as string).length > 0;
     // A render WITHOUT a style/className source yields a differently SHAPED
-    // prop set than one with it: the flattened visual keys (background,
-    // border, textColor) are simply absent rather than removed. The removal
-    // walk in applyChangedProps must not read that absence as a deletion, or
-    // the element is erased instead of restyled. Mark which shape a prop set
-    // came from so the two are separable.
-    if (!hasStyle && !hasClassName) return rawProps;
+    // prop set than one with it: the flattened keys are simply absent rather
+    // than removed. The removal walk in applyChangedProps must not read that
+    // absence as a deletion, or the element is erased instead of restyled.
+    // Mark which shape a prop set came from so the two are separable.
+    //
+    // A source that is present but empty (`style={hidden ? s : undefined}`,
+    // `className=""`) is the author clearing it, not a render that left it
+    // out, so it keeps the flattened shape and its removals still reset.
+    if (!hasStyle && !hasClassName
+        && !('style' in rawProps) && !('className' in rawProps)) return rawProps;
 
     // Use a null-prototype prop map so malformed CSS rules or hostile
     // class-rules JSON carrying `__proto__` / `constructor` /
@@ -916,13 +920,12 @@ export function applyChangedProps(
     if (reclaimOverlayForMovedParent(id, oldProps, newProps)) mutated = true;
 
     // Props hoisted out of `style`/`className` are DERIVED, not authored.
-    // When a render arrives without its style source — the style object is
-    // omitted, or a className token the class-rules provider cannot resolve —
-    // the derived keys are ABSENT rather than deleted, so resetting them here
-    // erases the element (a chip loses fill, border, padding and text in one
-    // frame and reads as "disappeared on hover"). Only honour a removal when
-    // both prop sets came from the same shape. A genuinely author-removed
-    // style — both sides flattened, key dropped from one — still resets.
+    // When a render arrives with no style source at all, the derived keys
+    // are ABSENT rather than deleted, so resetting them here erases the
+    // element (a chip loses fill, border, padding and text in one frame and
+    // reads as "disappeared on hover"). Only honour a removal when both prop
+    // sets came from the same shape. An author-removed style — a key dropped
+    // from a style object, or a style prop set to undefined — still resets.
     const derivedShapeChanged =
         isDerivedStyleProps(oldProps) && !isDerivedStyleProps(newProps);
 
