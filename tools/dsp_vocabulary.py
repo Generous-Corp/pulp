@@ -619,7 +619,9 @@ def public_methods(text: str, cls: str, *, source_is_code: bool = False):
     # retains its existing 14-method compatibility surface while publishing the
     # two measured ladder-profile controls; dropping established preset or
     # lo-fi calls would break generator consumers for an unrelated opt-in.
-    limit = 16 if cls == "TomVoice" else 14
+    # FastMath likewise keeps its established soft_clip call after gaining the
+    # accurate tanh used by the ladder.
+    limit = 16 if cls in ("TomVoice", "FastMath") else 14
     return prioritized[:limit]
 
 
