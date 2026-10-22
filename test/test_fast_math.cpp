@@ -486,3 +486,54 @@ TEST_CASE("FastMath log2 orders common gain ratios", "[signal][fast_math]") {
     REQUIRE(FastMath::log2(1.0f) < FastMath::log2(2.0f));
     REQUIRE(FastMath::log2(2.0f) < FastMath::log2(4.0f));
 }
+
+namespace {
+
+double ulp_of(double value) {
+    const float f = static_cast<float>(std::abs(value));
+    return static_cast<double>(std::nextafter(f, std::numeric_limits<float>::infinity()) - f);
+}
+
+} // namespace
+
+TEST_CASE("log10_float stays within a few ulps of libm",
+          "[signal][fast-math][decibel]") {
+    double worst_ulps = 0.0;
+    for (float x = 1.0e-10f; x < 1.0e6f; x *= 1.0001f) {
+        const double reference = std::log10(static_cast<double>(x));
+        const double err = std::abs(static_cast<double>(pulp::signal::detail::log10_float(x)) - reference);
+        // Near log10(x) = 0 the result ulp shrinks without bound; hold those
+        // inputs to an absolute error instead.
+        if (std::abs(reference) < 1.0e-3)
+            CHECK(err < 1.0e-9);
+        else
+            worst_ulps = std::max(worst_ulps, err / ulp_of(reference));
+    }
+    CHECK(worst_ulps <= 4.0);
+    CHECK(pulp::signal::detail::log10_float(1.0f) == 0.0f);
+    CHECK(pulp::signal::detail::log10_float(1000.0f) == 3.0f);
+    CHECK(pulp::signal::detail::log10_float(1.0e-10f) ==
+          static_cast<float>(std::log10(static_cast<double>(1.0e-10f))));
+}
+
+TEST_CASE("exp10_float stays within a few parts in 1e7 of libm and saturates like pow",
+          "[signal][fast-math][decibel]") {
+    double worst = 0.0;
+    for (float x = -37.0f; x < 38.0f; x += 1.0e-4f) {
+        const double reference = std::pow(10.0, static_cast<double>(x));
+        worst = std::max(worst,
+                         std::abs(static_cast<double>(pulp::signal::detail::exp10_float(x)) - reference) /
+                             reference);
+    }
+    CHECK(worst < 2.0e-7);
+    CHECK(pulp::signal::detail::exp10_float(0.0f) == 1.0f);
+    CHECK(std::isinf(pulp::signal::detail::exp10_float(39.0f)));
+    CHECK(std::isinf(pulp::signal::detail::exp10_float(1.0e30f)));
+    CHECK(pulp::signal::detail::exp10_float(-46.0f) == 0.0f);
+    CHECK(pulp::signal::detail::exp10_float(-1.0e30f) == 0.0f);
+    CHECK_FALSE(std::signbit(pulp::signal::detail::exp10_float(-1.0e30f)));
+    // Gradual underflow keeps the subnormal range, as std::pow does.
+    const float sub = pulp::signal::detail::exp10_float(-40.0f);
+    CHECK(sub > 0.0f);
+    CHECK(std::abs(static_cast<double>(sub) - 1.0e-40) / 1.0e-40 < 1.0e-3);
+}

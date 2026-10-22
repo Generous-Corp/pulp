@@ -4,6 +4,7 @@
 /// Scalar math helpers for real-time audio DSP.
 
 #include <algorithm>  // std::max / std::min, used by clamp()
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -325,5 +326,79 @@ inline double lipschitz_tanh(double v) noexcept {
     const double x2 = x * x;
     return x * (27.0 + x2) / (27.0 + 9.0 * x2);
 }
+
+
+namespace detail {
+
+// Branch-free float log10 / exp10 for decibel conversions in per-sample
+// dynamics paths. Both are plain arithmetic and bit manipulation with no calls
+// and no branches, so a loop over them auto-vectorizes, unlike the libm calls
+// they replace. Accuracy is within a few float ulps of the correctly rounded
+// result over the documented domain, which keeps a compressor's gain within a
+// few parts in 10^7 of the libm path, i.e. a residual below -120 dBFS.
+
+
+/// log10(x) for finite, positive, normal x. Other inputs are outside the
+/// contract (callers clamp to a positive floor first).
+///
+/// x = m * 2^k with m in [sqrt(1/2), sqrt(2)); ln(m) = 2 atanh(s) with
+/// s = (m - 1) / (m + 1), |s| <= 0.1716, from the odd series
+/// 2s (1 + s^2/3 + s^4/5 + ...) truncated after s^8/9; the next term is
+/// below 2e-9 relative, under float resolution.
+inline float log10_float(float x) noexcept {
+    constexpr std::uint32_t kSqrtHalfBits = 0x3f3504f3u; // bits of sqrt(1/2)
+    const std::uint32_t offset = std::bit_cast<std::uint32_t>(x) - kSqrtHalfBits;
+    const float k = static_cast<float>(static_cast<std::int32_t>(offset) >> 23);
+    const float m = std::bit_cast<float>((offset & 0x007fffffu) + kSqrtHalfBits);
+    const float f = m - 1.0f; // exact: m is within a factor of 2 of 1
+    const float s = f / (2.0f + f);
+    const float z = s * s;
+    const float series =
+        z * (1.0f / 3.0f + z * (1.0f / 5.0f + z * (1.0f / 7.0f + z * (1.0f / 9.0f))));
+    const float two_s = 2.0f * s;
+    const float ln_m = two_s * series + two_s;
+    // log10(2) and 1/ln(10). The high part of log10(2) has few enough
+    // significant bits that k * hi is exact for every float exponent.
+    constexpr float kLog10TwoHi = 0.30102539062f;   // 0x3e9a2000
+    constexpr float kLog10TwoLo = 4.6050390e-06f;   // log10(2) - hi
+    constexpr float kInvLn10 = 0.43429448190f;
+    return k * kLog10TwoHi + (ln_m * kInvLn10 + k * kLog10TwoLo);
+}
+
+/// 10^x for finite x. Results beyond the float range saturate to +inf or 0
+/// (through the subnormal range) as std::pow does; a NaN input is outside the
+/// contract.
+///
+/// 10^x = 2^n * 2^r with n = round(x log2(10)) and |r| <= 1/2; r is formed
+/// with a split constant so the product's rounding does not reach it, and 2^r
+/// is its Taylor series through degree 7 (truncation below 6e-9 relative).
+/// 2^n is applied as two normal-range factors so n may run past the float
+/// exponent range and the final product over- or underflows naturally.
+inline float exp10_float(float x) noexcept {
+    constexpr float kLog2Ten = 3.32192809489f;
+    constexpr float kLog2TenHi = 3.3219280243f;   // float(log2(10)), 0x40549a78
+    constexpr float kLog2TenLo = 7.0595370e-08f;  // log2(10) - hi
+    // Past 10^+/-75 (about 250 octaves) the result is inf or 0 anyway;
+    // clamping there keeps each half of 2^n inside the normal exponent range.
+    const float xc = std::fmin(std::fmax(x, -75.0f), 75.0f);
+    const float n = std::nearbyint(xc * kLog2Ten);
+    const float r = (xc * kLog2TenHi - n) + xc * kLog2TenLo;
+    constexpr float c1 = 0.69314718056f;  // ln2
+    constexpr float c2 = 0.24022650695f;  // ln2^2 / 2!
+    constexpr float c3 = 0.05550410866f;  // ln2^3 / 3!
+    constexpr float c4 = 0.00961812911f;  // ln2^4 / 4!
+    constexpr float c5 = 0.00133335581f;  // ln2^5 / 5!
+    constexpr float c6 = 0.00015403530f;  // ln2^6 / 6!
+    constexpr float c7 = 0.00001525273f;  // ln2^7 / 7!
+    const float p =
+        1.0f + r * (c1 + r * (c2 + r * (c3 + r * (c4 + r * (c5 + r * (c6 + r * c7))))));
+    const std::int32_t e = static_cast<std::int32_t>(n);
+    const std::int32_t e_half = e / 2;
+    const float scale_a = std::bit_cast<float>(static_cast<std::uint32_t>(e_half + 127) << 23);
+    const float scale_b = std::bit_cast<float>(static_cast<std::uint32_t>(e - e_half + 127) << 23);
+    return (p * scale_a) * scale_b;
+}
+
+} // namespace detail
 
 } // namespace pulp::signal

@@ -3,11 +3,13 @@
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/dynamics_contract.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <type_traits>
 
 namespace pulp::signal {
 
@@ -44,9 +46,13 @@ public:
         SampleType makeup_db = SampleType{0.0f};       // Makeup gain
     };
 
-    void set_params(const Params& p) { params_ = p; }
+    void set_params(const Params& p) {
+        params_ = p;
+        update_ballistics();
+    }
     void set_sample_rate(SampleType sr) {
         sample_rate_ = sr;
+        update_ballistics();
         configure_sidechain_filter();
         configure_lookahead_buffer();
     }
@@ -103,22 +109,17 @@ public:
             ? sidechain_hpf_.process(sidechain)
             : sidechain;
 
-        const SampleType input_db =
-            SampleType{20.0f} *
-            std::log10(std::max(std::abs(detector), SampleType{1e-10f}));
-        const SampleType gain_db = compute_gain(input_db);
+        const SampleType gain_db = compute_gain(level_db(detector));
 
         const SampleType coeff = (gain_db < envelope_db_)
-            ? attack_coeff()
-            : release_coeff();
+            ? attack_coeff_
+            : release_coeff_;
         // Snap the recursive gain-reduction envelope: when the signal sits above
         // threshold it settles toward 0 dB and otherwise stalls in denormals
         // with no FTZ guard. No-op above 1e-15.
         envelope_db_ = snap_to_zero(envelope_db_ + coeff * (gain_db - envelope_db_));
 
-        const SampleType gain_linear =
-            std::pow(SampleType{10.0f},
-                     (envelope_db_ + params_.makeup_db) / SampleType{20.0f});
+        const SampleType gain_linear = db_to_gain(envelope_db_ + params_.makeup_db);
 
         // Lookahead: push input into the delay, read out the
         // sample-from-the-past, apply the gain that the envelope
@@ -132,18 +133,23 @@ public:
         return input * gain_linear;
     }
 
+    /// Process a block in place; the buffer is also the sidechain.
     void process(SampleType* buffer, int num_samples) {
-        for (int i = 0; i < num_samples; ++i)
-            buffer[i] = process(buffer[i]);
+        process_block(buffer, buffer, num_samples);
     }
 
     /// Process a block with a separate sidechain input. Both buffers
     /// must be at least @p num_samples long.
     void process_with_sidechain(SampleType* buffer, const SampleType* sidechain,
                                 int num_samples) {
-        for (int i = 0; i < num_samples; ++i)
-            buffer[i] = process_with_sidechain(buffer[i], sidechain[i]);
+        process_block(buffer, sidechain, num_samples);
     }
+
+    /// Envelope smoothing coefficients in force for the current parameters and
+    /// sample rate: the per-sample step toward a lower (attack) or higher
+    /// (release) gain target is `coefficient * (target_db - envelope_db)`.
+    SampleType attack_coefficient() const { return attack_coeff_; }
+    SampleType release_coefficient() const { return release_coeff_; }
 
     SampleType gain_reduction_db() const { return envelope_db_; }
 
@@ -162,6 +168,9 @@ private:
     Params params_;
     SampleType sample_rate_ = SampleType{44100.0f};
     SampleType envelope_db_ = SampleType{0.0f};
+
+    SampleType attack_coeff_ = ballistic_coeff(params_.attack_ms, sample_rate_);
+    SampleType release_coeff_ = ballistic_coeff(params_.release_ms, sample_rate_);
 
     SampleType sidechain_hpf_hz_ = SampleType{0.0f};
     bool sidechain_hpf_active_ = false;
@@ -191,44 +200,124 @@ private:
         }
     }
 
+    // Static curve: gain change in dB (<= 0) for a detector level in dB.
+    // Written as selects over precomputed candidates rather than early
+    // returns so the block path's static-curve pass vectorizes; each region's
+    // expression is unchanged.
     SampleType compute_gain(SampleType input_db) const {
-        SampleType knee = params_.knee_db;
-        SampleType threshold = params_.threshold_db;
-        SampleType ratio = params_.ratio;
+        const SampleType knee = params_.knee_db;
+        const SampleType threshold = params_.threshold_db;
+        const SampleType slope = SampleType{1.0f} / params_.ratio - SampleType{1.0f};
+        const SampleType above = (input_db - threshold) * slope;
 
         if (knee <= SampleType{0.0f}) {
             // Hard knee
-            if (input_db <= threshold) return SampleType{0.0f};
-            return (input_db - threshold) *
-                   (SampleType{1.0f} / ratio - SampleType{1.0f});
+            return input_db <= threshold ? SampleType{0.0f} : above;
         }
 
         // Soft knee
-        SampleType half_knee = knee / SampleType{2.0f};
-        if (input_db < threshold - half_knee)
-            return SampleType{0.0f};
-        if (input_db > threshold + half_knee)
-            return (input_db - threshold) *
-                   (SampleType{1.0f} / ratio - SampleType{1.0f});
-
-        // In the knee region
-        SampleType x = input_db - threshold + half_knee;
-        return (SampleType{1.0f} / ratio - SampleType{1.0f}) * x * x /
-               (SampleType{2.0f} * knee);
+        const SampleType half_knee = knee / SampleType{2.0f};
+        const SampleType x = input_db - threshold + half_knee;
+        const SampleType in_knee = slope * x * x / (SampleType{2.0f} * knee);
+        const SampleType upper = input_db > threshold + half_knee ? above : in_knee;
+        return input_db < threshold - half_knee ? SampleType{0.0f} : upper;
     }
 
-    SampleType attack_coeff() const {
-        if (params_.attack_ms <= SampleType{0.0f}) return SampleType{1.0f};
-        return SampleType{1.0f} -
-               std::exp(SampleType{-1.0f} /
-                        (params_.attack_ms * SampleType{0.001f} * sample_rate_));
+    // Detector magnitude in dB, floored at -200 dB. The float path uses the
+    // branch-free log10 so the block path's detector pass vectorizes.
+    static SampleType level_db(SampleType detector) {
+        const SampleType magnitude = std::max(std::abs(detector), SampleType{1e-10f});
+        if constexpr (std::is_same_v<SampleType, float>)
+            return SampleType{20.0f} * detail::log10_float(magnitude);
+        else
+            return SampleType{20.0f} * std::log10(magnitude);
     }
 
-    SampleType release_coeff() const {
-        if (params_.release_ms <= SampleType{0.0f}) return SampleType{1.0f};
+    // Linear gain for a gain change in dB.
+    static SampleType db_to_gain(SampleType db) {
+        const SampleType exponent = db / SampleType{20.0f};
+        if constexpr (std::is_same_v<SampleType, float>)
+            return detail::exp10_float(exponent);
+        else
+            return std::pow(SampleType{10.0f}, exponent);
+    }
+
+    static SampleType ballistic_coeff(SampleType time_ms, SampleType sample_rate) {
+        if (time_ms <= SampleType{0.0f}) return SampleType{1.0f};
         return SampleType{1.0f} -
                std::exp(SampleType{-1.0f} /
-                        (params_.release_ms * SampleType{0.001f} * sample_rate_));
+                        (time_ms * SampleType{0.001f} * sample_rate));
+    }
+
+    void update_ballistics() {
+        attack_coeff_ = ballistic_coeff(params_.attack_ms, sample_rate_);
+        release_coeff_ = ballistic_coeff(params_.release_ms, sample_rate_);
+    }
+
+    // Samples per pass of the block path. Each chunk runs the detector and
+    // static curve over the whole chunk, then the envelope recursion, then the
+    // gain stage, so the transcendental calls in the outer passes are
+    // independent of one another and of the recursion.
+    static constexpr int kBlockChunk = 64;
+
+    void process_block(SampleType* buffer, const SampleType* sidechain, int num_samples) {
+        SampleType level[kBlockChunk];
+        for (int start = 0; start < num_samples; start += kBlockChunk) {
+            const int n = num_samples - start < kBlockChunk ? num_samples - start : kBlockChunk;
+            SampleType* x = buffer + start;
+            const SampleType* sc = sidechain + start;
+
+            // A non-finite sample resets signal history at that exact sample,
+            // which the per-sample path already implements. The scan is a
+            // branch-free OR so it vectorizes; NaN fails the comparison too.
+            constexpr SampleType kMaxFinite = std::numeric_limits<SampleType>::max();
+            unsigned non_finite = 0;
+            for (int i = 0; i < n; ++i)
+                non_finite |= static_cast<unsigned>(!(std::abs(x[i]) <= kMaxFinite)) |
+                              static_cast<unsigned>(!(std::abs(sc[i]) <= kMaxFinite));
+            if (non_finite != 0) {
+                for (int i = 0; i < n; ++i)
+                    x[i] = process_with_sidechain(x[i], sc[i]);
+                continue;
+            }
+
+            if (sidechain_hpf_active_) {
+                for (int i = 0; i < n; ++i)
+                    level[i] = sidechain_hpf_.process(sc[i]);
+                for (int i = 0; i < n; ++i)
+                    level[i] = compute_gain(level_db(level[i]));
+            } else {
+                for (int i = 0; i < n; ++i)
+                    level[i] = compute_gain(level_db(sc[i]));
+            }
+
+            // The envelope is snapped once per chunk: it only alters a level
+            // below 1e-15 dB, and the release pole keeps a chunk-start value
+            // above that out of the subnormal range until the next snap.
+            const SampleType attack = attack_coeff_;
+            const SampleType release = release_coeff_;
+            SampleType envelope = envelope_db_;
+            for (int i = 0; i < n; ++i) {
+                const SampleType coeff = (level[i] < envelope) ? attack : release;
+                envelope = envelope + coeff * (level[i] - envelope);
+                level[i] = envelope;
+            }
+            envelope_db_ = snap_to_zero(envelope);
+
+            const SampleType makeup = params_.makeup_db;
+            if (lookahead_samples_ > 0) {
+                const SampleType delay = static_cast<SampleType>(lookahead_samples_);
+                for (int i = 0; i < n; ++i)
+                    level[i] = db_to_gain(level[i] + makeup);
+                for (int i = 0; i < n; ++i) {
+                    lookahead_buffer_.push(x[i]);
+                    x[i] = lookahead_buffer_.read(delay) * level[i];
+                }
+            } else {
+                for (int i = 0; i < n; ++i)
+                    x[i] = x[i] * db_to_gain(level[i] + makeup);
+            }
+        }
     }
 };
 
