@@ -2,6 +2,7 @@
 
 #include "detail/gpu_audio_transport_trial_observer.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
 
@@ -57,11 +58,11 @@ struct GpuAudioTransportDiagnostics {
     // Host-written at prepare/release, callback-read: the prepared node's
     // primary path is its CPU model, so a CPU-delivered block is not a miss.
     bool cpu_primary = false;
-    // Host-only, prepare/release: the worker-pipelining hook a hosted node
-    // bound at prepare(), so release() undoes exactly that opt-in without
-    // dispatching on the node again. Null when the node does not pipeline.
-    void* pipeline_context = nullptr;
-    RealtimeGpuPipelineHostingFn pipeline_hosting = nullptr;
+    // Host-only, prepare/release: the worker-pipelining link a hosted node
+    // bound at prepare(). release() undoes exactly that opt-in through the
+    // link, which the node detaches if it is destroyed first. Null when the
+    // node does not pipeline.
+    std::shared_ptr<WorkerPipelineLink> pipeline;
 };
 
 } // namespace detail
@@ -114,10 +115,9 @@ void GpuAudioTransport::publish_prepared_configuration() noexcept {
 
 void GpuAudioTransport::release_pipeline_hosting() noexcept {
     auto& d = *diagnostics_;
-    if (d.pipeline_hosting != nullptr)
-        (void)d.pipeline_hosting(d.pipeline_context, false);
-    d.pipeline_context = nullptr;
-    d.pipeline_hosting = nullptr;
+    if (d.pipeline != nullptr)
+        (void)d.pipeline->set_hosting(false);
+    d.pipeline.reset();
 }
 
 bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
@@ -131,11 +131,8 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     // node does not pipeline; release() undoes it only for a pipelining node.
     {
         const auto binding = detail::realtime_gpu_node_binding(node);
-        if (binding.pipeline_hosting != nullptr &&
-            binding.pipeline_hosting(binding.pipeline_context, true)) {
-            diagnostics_->pipeline_context = binding.pipeline_context;
-            diagnostics_->pipeline_hosting = binding.pipeline_hosting;
-        }
+        if (binding.pipeline != nullptr && binding.pipeline->set_hosting(true))
+            diagnostics_->pipeline = binding.pipeline;
     }
     struct HostingGuard {
         GpuAudioTransport& transport;

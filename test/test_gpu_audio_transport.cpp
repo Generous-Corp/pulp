@@ -781,6 +781,32 @@ class GainNode : public GpuAudioNode {
     bool supports_fallback_;
 };
 
+// A staged node that opts into worker pipelining through a link it detaches
+// when destroyed, as GpuConvolver does. `hosted` lives in the node, so a
+// transport reaching a destroyed node writes freed memory (ASan reports it).
+class PipelineGainNode : public GainNode {
+  public:
+    PipelineGainNode(uint32_t channels, uint32_t block)
+        : GainNode(channels, block, 1.0f, MissPolicy::CpuFallback),
+          link_(std::make_shared<detail::WorkerPipelineLink>(this, &PipelineGainNode::set_hosted)) {
+    }
+    ~PipelineGainNode() override {
+        link_->detach();
+    }
+    bool bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept override {
+        binding.pipeline = link_;
+        return true;
+    }
+    bool hosted = false;
+
+  private:
+    static bool set_hosted(void* self, bool hosted) noexcept {
+        static_cast<PipelineGainNode*>(self)->hosted = hosted;
+        return true;
+    }
+    std::shared_ptr<detail::WorkerPipelineLink> link_;
+};
+
 // Per-channel storage with stable float / const-float pointer arrays.
 struct Block {
     Block(uint32_t ch, uint32_t n)
@@ -2285,6 +2311,31 @@ TEST_CASE("GpuAudioTransport status carries the node's provider facts",
     status = validated(t.status_snapshot());
     CHECK(status.gpu_kernel_available);
     CHECK(status.completion_mode == GpuAudioCompletionMode::ProcessEvents);
+}
+
+TEST_CASE("GpuAudioTransport releases a pipelining node it outlived through the detached link",
+          "[gpu_audio][transport][registry][pipeline]") {
+    std::shared_ptr<detail::WorkerPipelineLink> link;
+    GpuAudioTransport transport;
+    {
+        auto node = std::make_unique<PipelineGainNode>(1, 32);
+        REQUIRE(node->prepare());
+        REQUIRE(transport.prepare(node.get(), {8}));
+        CHECK(node->hosted);
+        link = detail::realtime_gpu_node_binding(node.get()).pipeline;
+        REQUIRE(link != nullptr);
+        CHECK(link->attached());
+        // Positive control: releasing while the node lives undoes the opt-in.
+        transport.release();
+        CHECK_FALSE(node->hosted);
+        REQUIRE(transport.prepare(node.get(), {8}));
+        CHECK(node->hosted);
+    }
+    // The host destroyed the node first; release() must reach only the link.
+    CHECK_FALSE(link->attached());
+    CHECK_FALSE(link->set_hosting(false));
+    transport.release();
+    CHECK_FALSE(transport.capability_report().prepared);
 }
 
 TEST_CASE("GpuAudioTransport binds a node it never names through the registry hook",

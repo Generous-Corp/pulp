@@ -26,8 +26,7 @@ SharedIoProviderIdentity realtime_gpu_provider_identity(GpuAudioNode* node) noex
 
 bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
     const auto binding = realtime_gpu_node_binding(node);
-    return binding.pipeline_hosting != nullptr &&
-           binding.pipeline_hosting(binding.pipeline_context, hosted);
+    return binding.pipeline != nullptr && binding.pipeline->set_hosting(hosted);
 }
 
 GpuAudioProvider realtime_gpu_provider(GpuAudioNode* node) noexcept {

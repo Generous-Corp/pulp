@@ -1929,6 +1929,34 @@ class PipelineDeclaringNode : public GpuAudioNode {
 };
 } // namespace
 
+TEST_CASE("A hosted staged GpuConvolver destroyed before its transport detaches its pipeline link",
+          "[gpu_audio][convolver][staged][transport][pipeline]") {
+    constexpr std::uint32_t BS = 64;
+    const auto ir = staged_test_ir();
+    std::shared_ptr<detail::WorkerPipelineLink> link;
+    GpuAudioTransport transport;
+    {
+        auto node = std::make_unique<InjectableConvolver>(1, BS, 48000, ir);
+        REQUIRE(node->prepare());
+        node->adopt_fake(ir, 1.0f, /*hosted=*/false);
+        link = detail::realtime_gpu_node_binding(node.get()).pipeline;
+        REQUIRE(link != nullptr);
+        CHECK(link->attached());
+        // Re-preparing rebuilds the staged state but keeps the node's one link.
+        REQUIRE(node->prepare());
+        node->adopt_fake(ir, 1.0f, /*hosted=*/false);
+        CHECK(detail::realtime_gpu_node_binding(node.get()).pipeline == link);
+        REQUIRE(transport.prepare(node.get(), {/*ring_blocks=*/8}));
+        // Positive control: hosted, the Auto staged path pipelines one block.
+        CHECK(node->pipeline() == 1u);
+    }
+    // ~GpuConvolver detached the link, so the transport's release() reaches
+    // only the link (ASan would report a use of the freed node otherwise).
+    CHECK_FALSE(link->attached());
+    transport.release();
+    CHECK_FALSE(transport.capability_report().prepared);
+}
+
 TEST_CASE("Transport total latency is exactly latency_blocks with and without a worker pipeline",
           "[gpu_audio][convolver][staged][transport]") {
     constexpr std::uint32_t BS = 64;

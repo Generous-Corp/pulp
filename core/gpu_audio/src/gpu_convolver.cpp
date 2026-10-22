@@ -52,6 +52,9 @@ std::string GpuConvolver::backend() const {
 #endif
 
 struct GpuConvolver::StagedReadbackState {
+    // The transport's worker-pipelining opt-in; detached by ~GpuConvolver.
+    std::shared_ptr<detail::WorkerPipelineLink> pipeline_link;
+
     // Settings made before prepare(); survive re-preparation.
     GpuConvolverStagedBreaker breaker{};
 
@@ -211,9 +214,14 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
                            std::vector<float> impulse_response, uint32_t latency_blocks)
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
       latency_blocks_(latency_blocks), ir_(std::move(impulse_response)),
-      staged_readback_(std::make_unique<StagedReadbackState>()) {}
+      staged_readback_(std::make_unique<StagedReadbackState>()) {
+    staged_readback_->pipeline_link = std::make_shared<detail::WorkerPipelineLink>(
+        this, &GpuConvolver::set_staged_pipeline_hosting);
+}
 
 GpuConvolver::~GpuConvolver() {
+    // A transport released after this node reaches only the detached link.
+    staged_readback_->pipeline_link->detach();
     // Destroying the device completes any readback the worker abandoned, and
     // that completion reads the staged state; release the device first.
     gpu_.reset();
@@ -442,6 +450,8 @@ bool GpuConvolver::prepare() {
         auto fresh = std::make_unique<StagedReadbackState>();
         fresh->breaker = staged_readback_->breaker;
         fresh->transport_hosted = staged_readback_->transport_hosted;
+        // The node's one link: a hosting transport keeps it across re-prepare.
+        fresh->pipeline_link = std::move(staged_readback_->pipeline_link);
         staged_readback_ = std::move(fresh);
     }
     if (channels_ == 0 || block_ == 0 || sample_rate_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
@@ -790,8 +800,7 @@ detail::SharedIoProviderIdentity GpuConvolver::provider_identity_for_diagnostics
 }
 
 bool GpuConvolver::bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept {
-    binding.pipeline_context = this;
-    binding.pipeline_hosting = &GpuConvolver::set_staged_pipeline_hosting;
+    binding.pipeline = staged_readback_->pipeline_link;
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     binding.identity_context = this;
     binding.identity = [](const void* self) noexcept {
