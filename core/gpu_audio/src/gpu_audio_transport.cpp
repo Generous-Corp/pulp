@@ -54,6 +54,9 @@ struct GpuAudioTransportConfiguration {
 struct GpuAudioTransportDiagnostics {
     SeqlockCell<GpuAudioTransportConfiguration> configuration;
     RealtimeGpuHealthMirror health;
+    // Host-written at prepare/release, callback-read: the prepared node's
+    // primary path is its CPU model, so a CPU-delivered block is not a miss.
+    bool cpu_primary = false;
 };
 
 } // namespace detail
@@ -98,6 +101,7 @@ void GpuAudioTransport::publish_prepared_configuration() noexcept {
         configuration.block_size = block_size_;
         configuration.latency_blocks = latency_blocks_;
     }
+    diagnostics_->cpu_primary = configuration.provider == GpuAudioProvider::Cpu;
     // Host-only writer, while neither the worker nor a pump caller runs.
     while (!diagnostics_->configuration.publish(configuration)) {
     }
@@ -463,7 +467,8 @@ void GpuAudioTransport::process_shared(const audio::BufferView<const float>& inp
         output.clear();
         delivered = SharedIoDeliveryDisposition::Priming;
     } else if (status != detail::kRealtimeGpuReady) {
-        miss_blocks_.fetch_add(1, std::memory_order_relaxed);
+        if (!diagnostics_->cpu_primary)
+            miss_blocks_.fetch_add(1, std::memory_order_relaxed);
         switch (miss_policy_) {
         case MissPolicy::Silence:
             output.clear();

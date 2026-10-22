@@ -21,8 +21,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -172,6 +174,12 @@ std::array<std::vector<float>, kChannels> direct_reference(FamilyCase c, std::ui
     return reference;
 }
 
+/// Every status the tests read must satisfy the shared status contract.
+GpuAudioStatus validated(const GpuAudioStatus& status) {
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::None);
+    return status;
+}
+
 float max_abs_difference(const std::array<std::vector<float>, kChannels>& a,
                          const std::array<std::vector<float>, kChannels>& b) {
     float worst = 0.0f;
@@ -255,7 +263,8 @@ TEST_CASE("CPU-only families report CPU execution and never open a GPU epoch",
     const auto c = GENERATE(kWaveNetCpu, kTcn, kNamTcn, kSsm, kLstm, kGru, kCustom);
     CAPTURE(c.name);
     Rig rig(c);
-    CHECK(rig.node->status_snapshot().provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK(validated(rig.node->status_snapshot()).provider_state ==
+          GpuAudioProviderState::Uninitialized);
     CHECK(rig.node->epoch() == 0);
     REQUIRE(rig.prepare());
     for (int cycle = 0; cycle < 2; ++cycle) {
@@ -276,7 +285,7 @@ TEST_CASE("CPU-only families report CPU execution and never open a GPU epoch",
         CHECK(capability.fallback_available);
         CHECK(capability.prepared_latency_blocks == kLead);
 
-        const auto status = rig.node->status_snapshot();
+        const auto status = validated(rig.node->status_snapshot());
         CHECK(status.requested_engine == GpuAudioEngine::Cpu);
         CHECK(status.selected_engine == GpuAudioEngine::Cpu);
         CHECK(status.provider_state == GpuAudioProviderState::Ready);
@@ -302,7 +311,7 @@ TEST_CASE("CPU-only families report CPU execution and never open a GPU epoch",
         CHECK_FALSE(health.delivery_epoch_active);
         // Reached through the base class, as a host holding GpuAudioNode* would.
         const GpuAudioNode& base = *rig.node;
-        CHECK(base.status_snapshot().selected_engine == GpuAudioEngine::Cpu);
+        CHECK(validated(base.status_snapshot()).selected_engine == GpuAudioEngine::Cpu);
         CHECK(detail::realtime_gpu_provider(rig.node.get()) == GpuAudioProvider::Cpu);
 
         // The transport hosting the node agrees: CPU path, CPU provider, Ready.
@@ -310,11 +319,14 @@ TEST_CASE("CPU-only families report CPU execution and never open a GPU epoch",
         CHECK(hosted.path == GpuAudioExecutionPath::Cpu);
         CHECK(hosted.provider == GpuAudioProvider::Cpu);
         CHECK(hosted.prepared_lead_blocks == kLead);
-        const auto hosted_status = rig.transport.status_snapshot();
+        const auto hosted_status = validated(rig.transport.status_snapshot());
         CHECK(hosted_status.selected_engine == GpuAudioEngine::Cpu);
         CHECK(hosted_status.provider == GpuAudioProvider::Cpu);
         CHECK(hosted_status.provider_state == GpuAudioProviderState::Ready);
         CHECK(hosted_status.epoch == 0);
+        // The CPU model is this node's primary path, not a fallback for a miss.
+        CHECK(hosted_status.missed_blocks == 0);
+        CHECK(hosted_status.fallback_blocks == 12);
         CHECK(hosted_status.recovery_reason == GpuAudioRecoveryReason::None);
 
         // Reprepare (host reactivation) keeps the stream position.
@@ -340,7 +352,7 @@ TEST_CASE("WaveNet family reports its GPU backend truthfully", "[gpu_audio][neur
         CHECK(capability.gpu_kernel_available);
         // An injected channel is not an authenticated provider.
         CHECK(capability.provider == GpuAudioProvider::Unknown);
-        const auto status = rig.node->status_snapshot();
+        const auto status = validated(rig.node->status_snapshot());
         CHECK(status.requested_engine == GpuAudioEngine::Gpu);
         CHECK(status.selected_engine == GpuAudioEngine::Unknown);
         CHECK(status.provider_state == GpuAudioProviderState::Degraded);
@@ -359,13 +371,23 @@ TEST_CASE("WaveNet family reports its GPU backend truthfully", "[gpu_audio][neur
         CHECK(rig.node->epoch() == 0);
         CHECK(rig.node->capability_report().path == GpuAudioExecutionPath::Cpu);
         CHECK(rig.node->capability_report().provider == GpuAudioProvider::Cpu);
-        const auto status = rig.node->status_snapshot();
+        const auto status = validated(rig.node->status_snapshot());
         CHECK_FALSE(status.gpu_kernel_available);
         CHECK(status.requested_engine == GpuAudioEngine::Gpu);
         CHECK(status.selected_engine == GpuAudioEngine::Cpu);
         CHECK(status.provider_state == GpuAudioProviderState::Degraded);
         CHECK(rig.transport.delivery_snapshot().cpu_fallback_blocks == 6);
         CHECK(rig.plan.submissions == 0);
+        // The hosting transport reports the real path, degraded, with a reason.
+        CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
+        const auto hosted = rig.transport.capability_report();
+        CHECK(hosted.path == GpuAudioExecutionPath::Cpu);
+        CHECK(hosted.provider == GpuAudioProvider::Cpu);
+        const auto hosted_status = validated(rig.transport.status_snapshot());
+        CHECK(hosted_status.provider_state == GpuAudioProviderState::Degraded);
+        CHECK(hosted_status.selected_engine == GpuAudioEngine::Cpu);
+        CHECK(hosted_status.recovery_reason == GpuAudioRecoveryReason::ProviderFailure);
+        CHECK(hosted_status.missed_blocks == 0);
     }
 }
 
@@ -405,6 +427,8 @@ TEST_CASE("WaveNet family stays continuous across provider faults",
     CHECK(delivery.cpu_fallback_blocks > 0);
     CHECK(delivery.silence_blocks == 0);
     CHECK(rig.callback_allocations == 0);
+    // Positive control for the CPU-only rule: a GPU family's misses count.
+    CHECK(validated(rig.transport.status_snapshot()).missed_blocks == delivery.cpu_fallback_blocks);
     if (fault == Fault::Starve) {
         // With no completion watchdog yet, a hung provider is detected only
         // when the ingress ring saturates.
@@ -414,14 +438,14 @@ TEST_CASE("WaveNet family stays continuous across provider faults",
         const bool lost = fault == Fault::ProviderLost || fault == Fault::Unresponsive;
         const auto expected_state =
             lost ? GpuAudioProviderState::Unavailable : GpuAudioProviderState::Degraded;
-        CHECK(rig.node->status_snapshot().provider_state == expected_state);
-        CHECK(rig.transport.status_snapshot().provider_state == expected_state);
+        CHECK(validated(rig.node->status_snapshot()).provider_state == expected_state);
+        CHECK(validated(rig.transport.status_snapshot()).provider_state == expected_state);
         const auto expected_reason =
             fault == Fault::ProviderLost   ? GpuAudioRecoveryReason::ProviderLost
             : fault == Fault::Unresponsive ? GpuAudioRecoveryReason::ProviderUnresponsive
                                            : GpuAudioRecoveryReason::ProviderFailure;
         CHECK(rig.node->recovery_reason() == expected_reason);
-        CHECK(rig.transport.status_snapshot().recovery_reason == expected_reason);
+        CHECK(validated(rig.transport.status_snapshot()).recovery_reason == expected_reason);
     }
 }
 
@@ -833,7 +857,7 @@ TEST_CASE("a failed GPU prewarm degrades to the CPU-only contract",
     CHECK_FALSE(rig.node->gpu_kernel_available());
     CHECK(rig.node->epoch() == 0);
     CHECK(rig.plan.releases >= kChannels);
-    CHECK(rig.node->status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+    CHECK(validated(rig.node->status_snapshot()).provider_state == GpuAudioProviderState::Degraded);
     rig.plan.starve = false;
     rig.render(8);
     CHECK(max_abs_difference(rig.output, direct_reference(kWaveNetGpu, 8ull * kBlock, kBlock, 1)) ==
@@ -872,4 +896,72 @@ TEST_CASE("the node's status projection keeps sustained deadline misses Degraded
     CHECK(detail::provider_state_for_health(health) == GpuAudioProviderState::Unavailable);
     health.recovery_reason = GpuAudioRecoveryReason::None;
     CHECK(detail::provider_state_for_health(health) == GpuAudioProviderState::Ready);
+}
+
+TEST_CASE("non-finite input reaches neither the GPU nor the shadow",
+          "[gpu_audio][neural][realtime]") {
+    const auto c = GENERATE(kWaveNetGpu, kLstm);
+    const bool poison = GENERATE(true, false); // false is the positive control
+    CAPTURE(c.name, poison);
+    Rig rig(c);
+    REQUIRE(rig.prepare());
+    // A few NaN/Inf samples on both channels, early enough to be heard.
+    const auto bad = [&](std::uint32_t ch, std::uint64_t frame) {
+        return poison && (frame == 70 + ch || frame == 300 || frame == 515 - ch);
+    };
+    const auto value = [&](std::uint32_t ch, std::uint64_t frame) {
+        if (!bad(ch, frame))
+            return stimulus(ch, frame);
+        return frame == 300 ? std::numeric_limits<float>::infinity()
+               : ch == 0    ? std::numeric_limits<float>::quiet_NaN()
+                            : -std::numeric_limits<float>::infinity();
+    };
+    constexpr std::uint32_t blocks = 16;
+    std::array<std::vector<float>, kChannels> output;
+    for (std::uint32_t b = 0; b < blocks; ++b) {
+        std::array<std::vector<float>, kChannels> in, out;
+        std::array<const float*, kChannels> in_ptrs{};
+        std::array<float*, kChannels> out_ptrs{};
+        for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
+            in[ch].resize(kBlock);
+            out[ch].assign(kBlock, 0.0f);
+            for (std::uint32_t i = 0; i < kBlock; ++i)
+                in[ch][i] = value(ch, std::uint64_t{b} * kBlock + i);
+            in_ptrs[ch] = in[ch].data();
+            out_ptrs[ch] = out[ch].data();
+        }
+        audio::BufferView<const float> input(in_ptrs.data(), kChannels, kBlock);
+        audio::BufferView<float> result(out_ptrs.data(), kChannels, kBlock);
+        rig.transport.process(input, result, kBlock);
+        for (std::uint32_t ch = 0; ch < kChannels; ++ch)
+            output[ch].insert(output[ch].end(), out[ch].begin(), out[ch].end());
+        for (int i = 0; i < 2; ++i)
+            rig.transport.pump();
+    }
+    // Reference: the same adapter fed zeros where the input was non-finite.
+    FamilyFixture fixture(c.family, kChannels, kBlock, c.nam_tcn);
+    fixture.build_kernels();
+    float worst = 0.0f;
+    bool finite = true;
+    const auto delay = std::uint64_t{kLead} * kBlock;
+    for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
+        const auto& kernel = fixture.kernels[ch];
+        for (std::uint64_t i = 0; i + delay < std::uint64_t{blocks} * kBlock; ++i) {
+            const float x = bad(ch, i) ? 0.0f : stimulus(ch, i);
+            float y = 0.0f;
+            kernel.process(kernel.state, &x, &y, 1);
+            finite = finite && std::isfinite(output[ch][i + delay]);
+            worst = std::max(worst, std::abs(output[ch][i + delay] - y));
+        }
+    }
+    CHECK(finite);
+    CHECK(worst == 0.0f);
+    CHECK(rig.node->sanitized_input_samples() == (poison ? 6u : 0u));
+    if (c.gpu_backend) {
+        // The GPU path delivered (so the provider saw the sanitized block).
+        CHECK(rig.transport.delivery_snapshot().gpu_blocks == blocks - kLead);
+        CHECK(rig.node->recovery_reason() == GpuAudioRecoveryReason::None);
+    }
+    validated(rig.node->status_snapshot());
+    validated(rig.transport.status_snapshot());
 }

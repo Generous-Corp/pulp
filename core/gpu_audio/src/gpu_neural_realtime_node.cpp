@@ -1,5 +1,6 @@
 #include "detail/gpu_neural_model.hpp"
 #include "detail/gpu_neural_realtime_test_access.hpp"
+#include "detail/neural_input_sanitizer.hpp"
 #include "detail/neural_processor.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
@@ -103,6 +104,8 @@ struct GpuNeuralRealtimeNode::Impl {
 
     bool prepared = false;
     PrepareError last_error = PrepareError::None;
+    // Non-finite input samples replaced with zero, counted once per callback.
+    std::atomic<std::uint64_t> sanitized_samples{0};
 
     explicit Impl(Config source) : config(std::move(source)), model(config.model) {}
 
@@ -165,17 +168,12 @@ struct GpuNeuralRealtimeNode::Impl {
         for (std::uint32_t ch = 0; ch < config.channels; ++ch) {
             const float* x = shadow_input.data();
             if (ch < input_channels) {
+                // Same policy as the GPU submission; process() counts it.
                 const float* source = inputs[ch];
-                bool finite = true;
-                for (std::uint32_t i = 0; i < n && finite; ++i)
-                    finite = std::isfinite(source[i]);
-                if (finite) {
+                if (detail::count_nonfinite(source, n) == 0)
                     x = source;
-                } else {
-                    // One non-finite sample must not poison the causal state.
-                    for (std::uint32_t i = 0; i < n; ++i)
-                        shadow_input[i] = std::isfinite(source[i]) ? source[i] : 0.0f;
-                }
+                else
+                    (void)detail::sanitize_nonfinite(source, shadow_input.data(), n);
             } else {
                 std::fill_n(shadow_input.data(), n, 0.0f);
             }
@@ -390,6 +388,9 @@ bool GpuNeuralRealtimeNode::prepare() {
                 return fail(PrepareError::ReleaseFailed);
             }
         }
+        // A GPU family whose provider could not be prepared runs on the CPU,
+        // and says why. Latched once the CPU path is reset below.
+        const bool gpu_unavailable = s.model->backend && !s.backend_active;
 
         // Silent prewarm runs through the shadow too, so its causal history
         // starts at the same stream position as the GPU history.
@@ -412,7 +413,10 @@ bool GpuNeuralRealtimeNode::prepare() {
             s.cpu_recovery.store(detail::SharedIoRecoveryReason::None, std::memory_order_release);
             s.cpu_recovery_sequence.store(std::numeric_limits<std::uint64_t>::max(),
                                           std::memory_order_release);
+            if (gpu_unavailable)
+                s.fail(detail::SharedIoRecoveryReason::ProviderFailure, s.sequence);
         }
+        s.sanitized_samples.store(0, std::memory_order_relaxed);
         s.prepared = true;
         return true;
     } catch (...) {
@@ -514,6 +518,10 @@ bool GpuNeuralRealtimeNode::fenced() const noexcept {
     return impl_->bridge && impl_->bridge->delivery_epoch() == 0;
 }
 
+std::uint64_t GpuNeuralRealtimeNode::sanitized_input_samples() const noexcept {
+    return impl_->sanitized_samples.load(std::memory_order_relaxed);
+}
+
 GpuNeuralRealtimeNode::PrepareError GpuNeuralRealtimeNode::last_prepare_error() const noexcept {
     return impl_->last_error;
 }
@@ -579,6 +587,8 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
     status.epoch = epoch();
     status.delivery_epoch_active = epoch() != 0;
     status.gpu_kernel_available = gpu_kernel_available();
+    // The shadow always runs inline here.
+    status.shadow_mode = GpuAudioShadowMode::Inline;
     // A model with a GPU kernel asked for the GPU; the others asked for CPU.
     status.requested_engine = s.model->backend ? GpuAudioEngine::Gpu : GpuAudioEngine::Cpu;
     if (!s.backend_active) {
@@ -592,12 +602,14 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
                 ? GpuAudioProviderState::Degraded
                 : GpuAudioProviderState::Ready;
         status.fallback_blocks = s.cpu_blocks.load(std::memory_order_relaxed);
+        status.shadow_delivered_blocks = status.fallback_blocks;
         return status;
     }
     const auto telemetry = s.telemetry.snapshot();
     status.produced_blocks = telemetry.delivered_blocks;
     status.missed_blocks = telemetry.deadline_misses;
     status.fallback_blocks = telemetry.fallback_blocks;
+    status.shadow_delivered_blocks = status.fallback_blocks;
     status.resynced_blocks = telemetry.resync_drops;
     status.input_dropped_frames = telemetry.input_drops;
     status.last_block_us = static_cast<double>(telemetry.submit_to_completion_ns) / 1000.0;
@@ -641,6 +653,13 @@ std::uint8_t GpuNeuralRealtimeNode::process(void* self, const audio::BufferView<
     if (!s.backend_active) {
         // CPU-only: no GPU epoch exists, so every block is the shadow's. The
         // transport selects it through the CpuFallback miss policy.
+        if (shape_ok) {
+            std::uint64_t replaced = 0;
+            for (std::uint32_t ch = 0; ch < s.config.channels; ++ch)
+                replaced += detail::count_nonfinite(input.channel_ptr(ch), n);
+            if (replaced != 0)
+                s.sanitized_samples.fetch_add(replaced, std::memory_order_relaxed);
+        }
         if (!shape_ok)
             s.fail(detail::SharedIoRecoveryReason::InvalidCallback, sequence);
         else if (sequence < s.cpu_next_sequence)
@@ -652,11 +671,16 @@ std::uint8_t GpuNeuralRealtimeNode::process(void* self, const audio::BufferView<
         return detail::kRealtimeGpuMissed;
     }
     if (!shape_ok) {
-        s.fail(detail::SharedIoRecoveryReason::InvalidCallback);
+        s.fail(detail::SharedIoRecoveryReason::InvalidCallback, sequence);
         std::fill(s.callback_input.begin(), s.callback_input.end(), 0.0f);
     } else {
+        // The GPU gets exactly what the shadow gets: non-finite samples as 0.
+        std::uint64_t replaced = 0;
         for (std::uint32_t ch = 0; ch < s.config.channels; ++ch)
-            std::copy_n(input.channel_ptr(ch), n, s.callback_input.data() + ch * n);
+            replaced += detail::sanitize_nonfinite(input.channel_ptr(ch),
+                                                   s.callback_input.data() + ch * n, n);
+        if (replaced != 0)
+            s.sanitized_samples.fetch_add(replaced, std::memory_order_relaxed);
     }
     s.callback = s.bridge->begin_callback(s.callback_input, sequence, start);
     const auto delivery = s.bridge->consume_output(s.callback, s.callback_output, nullptr, true);
@@ -730,7 +754,8 @@ bool GpuNeuralRealtimeNode::fence(void* self) noexcept {
     auto& s = *static_cast<GpuNeuralRealtimeNode*>(self)->impl_;
     if (!s.bridge || !s.backend_active)
         return true;
-    s.fail(detail::SharedIoRecoveryReason::OfflineFence);
+    // The callback is idle during the offline fence, so its position is stable.
+    s.fail(detail::SharedIoRecoveryReason::OfflineFence, s.bridge->next_sequence());
     if (!s.model->backend->quiesce())
         return false;
     s.backend_quiesced.store(true, std::memory_order_release);
@@ -771,7 +796,8 @@ void detail::NeuralRealtimeTestAccess::skip_shadow_publish(GpuNeuralRealtimeNode
 
 void detail::NeuralRealtimeTestAccess::request_recovery(GpuNeuralRealtimeNode& node,
                                                         SharedIoRecoveryReason reason) noexcept {
-    node.impl_->fail(reason);
+    auto& s = *node.impl_;
+    s.fail(reason, s.bridge ? s.bridge->next_sequence() : s.cpu_next_sequence);
 }
 
 detail::RealtimeGpuNodePath
