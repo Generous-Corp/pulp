@@ -420,12 +420,17 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->sample_rate = sr;
     self->max_buffer_size = static_cast<int>(max_frames);
     clear_midi_event_buffers(*self);
+    auto desc = self->processor->descriptor();
+    // The SysEx copy pool is 128 separate 4 KiB payloads per direction, the
+    // largest allocation activation makes. A direction with no note port can
+    // receive or emit no SysEx, so it gets no pool; a stray copy there drops
+    // like any other overflow.
     self->midi_in.reserve(kRealtimeMidiEventCapacity,
                           kRealtimeMidiSysexCapacity,
-                          kRealtimeMidiSysexPayloadCapacity);
+                          desc.accepts_midi ? kRealtimeMidiSysexPayloadCapacity : 0);
     self->midi_out.reserve(kRealtimeMidiEventCapacity,
                            kRealtimeMidiSysexCapacity,
-                           kRealtimeMidiSysexPayloadCapacity);
+                           desc.produces_midi ? kRealtimeMidiSysexPayloadCapacity : 0);
     self->midi_in.set_realtime_capacity_limit(true);
     self->midi_out.set_realtime_capacity_limit(true);
     self->mpe.reserve(kRealtimeMidiEventCapacity);
@@ -440,7 +445,6 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     // first block without this reserve (param_snapshot mirrors it above).
     self->output_param_has_event.reserve(self->store.all_params().size());
 
-    auto desc = self->processor->descriptor();
     PrepareContext ctx;
     ctx.sample_rate = sr;
     ctx.max_buffer_size = static_cast<int>(max_frames);

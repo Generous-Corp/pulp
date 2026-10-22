@@ -70,7 +70,8 @@ CLAP note and MIDI events are converted into Pulp's block event surfaces:
 - `CLAP_EVENT_MIDI` carries raw MIDI 1.0 channel messages such as CC, pitch
   bend, channel pressure, poly pressure, and program change
 - `CLAP_EVENT_MIDI_SYSEX` is copied into a preallocated inbound payload arena
-  (128 events per block, 4096 bytes per event); overflow or larger payloads are
+  (128 events per block, 4096 bytes per event), reserved only when the
+  plug-in declares MIDI input; overflow or larger payloads are
   dropped and counted. Outbound processor-owned SysEx emits as
   `CLAP_EVENT_MIDI_SYSEX`
 - `CLAP_EVENT_MIDI2` is routed through `ump_input()` when the plugin opts into

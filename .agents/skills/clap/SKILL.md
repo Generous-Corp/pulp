@@ -386,6 +386,12 @@ into that pool on the realtime-limited process path and drops only when
 the sidecar count or per-payload capacity is exceeded. Keep the happy
 path and overflow case covered in `test_clap_midi_events.cpp`.
 
+The pool is reserved only for a direction that has a note port
+(`accepts_midi` in, `produces_midi` out). It is 128 separate 4 KiB
+vectors, and allocating it was most of `clap_activate()`'s cost for an
+effect with no MIDI. A test processor that copies SysEx through the
+adapter's buffers must declare the matching port, or every copy drops.
+
 If you add a new inbound/outbound MIDI path, cover the overflow case in
 `test_clap_midi_events.cpp`. If you add a test processor that
 captures/forwards sysex while behind the CLAP no-alloc guard, preallocate

@@ -655,6 +655,8 @@ public:
     std::uint32_t observed_event_drops = 0;
     std::uint32_t observed_sysex_drops = 0;
     bool observed_reset_requested = false;
+    // Lets a case model a plug-in with no note input port.
+    static inline bool declares_midi_input = true;
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -662,7 +664,7 @@ public:
         d.manufacturer = "PulpTest";
         d.bundle_id = "com.pulp.test.clap.observing-midi-in";
         d.version = "1.0.0";
-        d.accepts_midi = true;
+        d.accepts_midi = declares_midi_input;
         return d;
     }
     void define_parameters(state::StateStore&) override {}
@@ -4480,6 +4482,33 @@ TEST_CASE("CLAP inbound SysEx drops payloads larger than realtime sidecar storag
     REQUIRE(g_observing_midi_in->observed_sysex_payload_capacity == 4096);
     REQUIRE(g_observing_midi_in->observed_sysex_count == 0);
     REQUIRE(g_observing_midi_in->observed_sysex_drops == 1);
+}
+
+TEST_CASE("CLAP reserves no SysEx payload pool for a plug-in without a note input",
+          "[clap][midi][realtime][sysex]") {
+    ObservingMidiInProcessor::declares_midi_input = false;
+    struct Restore {
+        ~Restore() { ObservingMidiInProcessor::declares_midi_input = true; }
+    } restore;
+    Harness h(make_observing_midi_in);
+    InputEventList in;
+    static const uint8_t kPayload[] = {0xF0, 0x7D, 0x01, 0xF7};
+    clap_event_midi_sysex_t ev{};
+    ev.header = make_header(sizeof(ev), CLAP_EVENT_MIDI_SYSEX, 3);
+    ev.port_index = 0;
+    ev.buffer = kPayload;
+    ev.size = sizeof(kPayload);
+    in.push(ev);
+
+    REQUIRE(h.run(in) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_observing_midi_in != nullptr);
+    REQUIRE(g_observing_midi_in->observed_sysex_payload_capacity == 0);
+    REQUIRE(g_observing_midi_in->observed_sysex_count == 0);
+    REQUIRE(g_observing_midi_in->observed_sysex_drops == 1);
+    // A dropped SysEx carries no note ownership, so the block is not reset.
+    REQUIRE_FALSE(g_observing_midi_in->observed_reset_requested);
+    REQUIRE(g_observing_midi_in->observed_event_capacity ==
+            state::ParameterEventQueue::kCapacity);
 }
 
 TEST_CASE("CLAP outbound MIDI drops past realtime event capacity without growing",
