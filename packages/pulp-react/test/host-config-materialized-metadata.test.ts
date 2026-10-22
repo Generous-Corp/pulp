@@ -200,8 +200,8 @@ describe('host-config materialized metadata', () => {
         expect(applications).toBe(2);
     });
 
-    // A percentage line height is rejected deliberately. The typography
-    // applier parses '50%' as 50px, and this gate must not depend on that.
+    // A percentage line height is rejected deliberately: the gate admits only
+    // the plain pixel and multiplier forms it parses itself.
     it('rejects a percentage line height', () => {
         const host = globalThis as unknown as Record<string, unknown>;
         let applications = 0;

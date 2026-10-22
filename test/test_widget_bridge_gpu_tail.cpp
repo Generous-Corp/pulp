@@ -1090,6 +1090,33 @@ TEST_CASE("repeated geometry reads with no mutation cost one layout pass",
     CHECK(passes <= 1);
 }
 
+// The typography setters take CSS pixels as numbers. A CSS length string is
+// read as its leading number with the unit dropped, so '0.08em' becomes
+// 0.08 px rather than 0.08 of the font size. @pulp/react resolves units
+// before it calls these setters; this pins why it has to.
+TEST_CASE("letter spacing given an em string is read as bare pixels", "[view][bridge][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('caption', 'Caption', '');
+        setFontSize('caption', 20);
+        setLetterSpacing('caption', 1.5);
+    )");
+    auto* caption = dynamic_cast<Label*>(bridge.widget("caption"));
+    REQUIRE(caption != nullptr);
+    // CONTROL: a numeric pixel value lands.
+    REQUIRE(caption->letter_spacing() == Catch::Approx(1.5f));
+
+    // 0.08em at 20 px is 1.6 px in CSS; the bridge stores 0.08.
+    engine.evaluate("setLetterSpacing('caption', '0.08em')");
+    CHECK(caption->letter_spacing() == Catch::Approx(0.08f));
+    CHECK(caption->letter_spacing() != Catch::Approx(1.6f));
+}
+
 // The materialized metadata applier reads each binding's parent and own box
 // metrics and then writes captured geometry. Each read that follows a write
 // lays out the whole root, so the order of reads and writes, not their number,
