@@ -22,6 +22,9 @@ enum class GpuAudioProvider : std::uint8_t {
     Unknown = 0,
     Dawn = 1,
     Metal = 2,
+    /// A CPU implementation with no GPU provider. Appended to preserve the
+    /// established numeric values above.
+    Cpu = 3,
 };
 
 /// Eligibility of the configured transport path. This is not a hard
@@ -29,6 +32,13 @@ enum class GpuAudioProvider : std::uint8_t {
 enum class GpuAudioEligibility : std::uint8_t {
     Unavailable = 0,
     Eligible = 1,
+};
+
+/// Whether a node may re-acquire a lost provider on its own. Manual leaves a
+/// fenced node on its fallback until the host prepares it again.
+enum class GpuAudioRecoveryPolicy : std::uint8_t {
+    Manual = 0,
+    AutoReacquire = 1,
 };
 
 /// Backend-neutral, allocation-free capability snapshot for installed SDK
@@ -48,6 +58,10 @@ struct GpuAudioCapabilityReport {
     // appended to preserve the existing positional field order for SDK
     // consumers and must not be read as algorithmic pipeline lead.
     std::uint32_t prepared_latency_blocks = 0;
+    // Appended: whether this node family has a GPU kernel at all. False for
+    // CPU-only families, which report the Cpu path rather than a GPU miss.
+    bool gpu_kernel_available = false;
+    GpuAudioRecoveryPolicy recovery_policy = GpuAudioRecoveryPolicy::Manual;
 };
 
 } // namespace pulp::gpu_audio

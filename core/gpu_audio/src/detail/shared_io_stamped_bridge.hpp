@@ -19,7 +19,8 @@ enum class SharedIoRecoveryReason : std::uint8_t {
     ProviderFailure,
     ProviderLost,
     OfflineFence,
-    InvalidCallback
+    InvalidCallback,
+    ProviderUnresponsive
 };
 
 // Fixed audio records between one callback producer/consumer and one serialized

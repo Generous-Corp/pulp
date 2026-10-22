@@ -144,6 +144,9 @@ struct GpuWaveNetRealtimeNode::Impl {
             return Reason::InvalidCallback;
         case Recovery::SequenceGap:
             return Reason::SequenceGap;
+        case Recovery::ProviderUnresponsive:
+            // Same mapping as the bridge's trace record for this reason.
+            return Reason::DeadlineExceeded;
         }
         return Reason::None;
     }
@@ -503,6 +506,8 @@ GpuAudioRecoveryReason GpuWaveNetRealtimeNode::recovery_reason() const noexcept 
         return GpuAudioRecoveryReason::OfflineFence;
     case detail::SharedIoRecoveryReason::InvalidCallback:
         return GpuAudioRecoveryReason::InvalidCallback;
+    case detail::SharedIoRecoveryReason::ProviderUnresponsive:
+        return GpuAudioRecoveryReason::ProviderUnresponsive;
     }
     return GpuAudioRecoveryReason::None;
 }
