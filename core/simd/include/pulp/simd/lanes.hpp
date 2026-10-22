@@ -17,7 +17,9 @@
 /// into the caller. Compilers without the extension (MSVC) do not define
 /// `Lanes`; `kHasVectorLanes` (and the `PULP_SIMD_HAS_VECTOR_LANES` macro, for
 /// preprocessor guards) is false there and callers run each lane as a scalar
-/// instead.
+/// instead. Defining `PULP_SIMD_DISABLE_VECTOR_LANES` selects that fallback on
+/// GCC and Clang too, so its parity can be tested where the extension exists;
+/// a program must define it in every translation unit or in none.
 ///
 /// Whether multiply-adds are fused follows the translation unit's floating-
 /// point contraction policy; see tools/cmake/PulpFloatingPointContraction.cmake.
@@ -27,7 +29,7 @@
 
 namespace pulp::simd {
 
-#if defined(__GNUC__) || defined(__clang__)
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(PULP_SIMD_DISABLE_VECTOR_LANES)
 #define PULP_SIMD_HAS_VECTOR_LANES 1
 inline constexpr bool kHasVectorLanes = true;
 

@@ -481,6 +481,13 @@ pulp_add_test_suite(pulp-test-signal-meter GROUP pulp-test-group-core-signal
 # Biquad filter tests
 pulp_add_test_suite(pulp-test-biquad GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
+# The stereo Biquad and cascade paths with vector lanes disabled (the MSVC
+# fallback). Its own binary: the macro changes inline definitions, so it must
+# not share them with a build that has lanes.
+pulp_add_test_suite(pulp-test-biquad-scalar-lanes
+    SOURCES test_biquad_scalar_lanes.cpp
+    LIBRARIES pulp::signal)
+target_compile_definitions(pulp-test-biquad-scalar-lanes PRIVATE PULP_SIMD_DISABLE_VECTOR_LANES)
 pulp_add_test_suite(pulp-test-osc-phase GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 # The BLEP/BLAMP kernels are gated on measured alias rejection, so this suite
