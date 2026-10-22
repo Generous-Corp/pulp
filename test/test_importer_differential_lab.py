@@ -1219,6 +1219,38 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertNotEqual(LAB.canonical_json_sha256(raw),
                             LAB.canonical_json_sha256(json.dumps(first).encode()))
 
+    def test_semantic_dom_digest_sees_content_and_ignores_session_ids(self) -> None:
+        def snapshot(frame: str, theme: str, loader: str = "L1") -> bytes:
+            return json.dumps({
+                "strings": ["about:blank", frame, "INPUT"],
+                "documents": [{"documentURL": 0, "frameId": 1,
+                               "nodes": {"nodeName": [2]},
+                               "loaderId": loader}],
+                "formControlTheme": {"controls": [
+                    {"node_index": 0, "theme": theme}]},
+            }).encode()
+
+        baseline = LAB.semantic_dom_sha256(snapshot("F" * 32, "native"))
+        # Per-session CDP identifiers do not move it.
+        self.assertEqual(baseline, LAB.semantic_dom_sha256(
+            snapshot("A" * 32, "native", loader="L2")))
+        # Content inside the snapshot does, where the canonical capture digest
+        # (which drops the snapshot binding) cannot.
+        self.assertNotEqual(baseline, LAB.semantic_dom_sha256(
+            snapshot("F" * 32, "author")))
+        changed = json.loads(snapshot("F" * 32, "native"))
+        changed["strings"][2] = "SELECT"
+        self.assertNotEqual(baseline, LAB.semantic_dom_sha256(
+            json.dumps(changed).encode()))
+        # Key order and whitespace are not content.
+        self.assertEqual(baseline, LAB.semantic_dom_sha256(json.dumps(
+            json.loads(snapshot("F" * 32, "native")), indent=2,
+            sort_keys=True).encode()))
+
+    def test_semantic_dom_digests_are_determinism_fields(self) -> None:
+        self.assertIn("browser_dom_semantic_sha256", LAB_CLI.DETERMINISM_FIELDS)
+        self.assertIn("native_dom_semantic_sha256", LAB_CLI.DETERMINISM_FIELDS)
+
     def test_canonical_digest_preserves_same_named_fields_outside_capture_document(self) -> None:
         for document in (
             {"documents": [{"snapshot_sha256": "a" * 64}]},

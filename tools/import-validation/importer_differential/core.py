@@ -193,7 +193,7 @@ def canonical_json_sha256(source: Path | bytes) -> str:
     Those fields must not make an otherwise identical campaign appear
     nondeterministic. Browser-capture envelopes also omit their exact snapshot
     binding here: CDP frame IDs vary per capture. Each raw binding is verified
-    separately; this digest does not establish semantic DOM determinism.
+    separately; `semantic_dom_sha256` covers the snapshot's content.
     They also omit the settle loop's iteration counters
     (`provenance.settle.rounds` and `stable_rounds`): how many polls the page
     took to go quiet depends on host load, not on what was captured. Only
@@ -227,6 +227,45 @@ def canonical_json_sha256(source: Path | bytes) -> str:
         scrub(document),
         sort_keys=True,
         separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def semantic_dom_sha256(snapshot_bytes: bytes) -> str:
+    """Hash a DOM snapshot with only its capture-local CDP identifiers fixed.
+
+    `canonical_json_sha256` drops a capture envelope's snapshot binding because
+    the raw snapshot carries a CDP frame ID minted per browser session, so a
+    DOM change, a different form-control theme verdict, or any other content
+    inside the snapshot moved no determinism digest. This one covers the whole
+    snapshot. Each document's `frameId` string is replaced by its document
+    position, and any `loaderId` value by a constant; both are opaque per-run
+    tokens that name no content. Everything else, including the string table
+    and the capture's `formControlTheme` report, enters the digest unchanged.
+    """
+    document = json.loads(snapshot_bytes)
+    if not isinstance(document, dict):
+        raise LabError("DOM snapshot is not a JSON object")
+    strings = list(document.get("strings") or [])
+    documents = document.get("documents") or []
+    for position, entry in enumerate(documents):
+        if not isinstance(entry, dict):
+            continue
+        frame = entry.get("frameId")
+        if isinstance(frame, int) and 0 <= frame < len(strings):
+            strings[frame] = f"<frame:{position}>"
+
+    def scrub(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: ("<loader>" if key == "loaderId" else scrub(item))
+                    for key, item in value.items()}
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        return value
+
+    canonical = json.dumps(
+        scrub({**document, "strings": strings}),
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
 
@@ -1212,6 +1251,10 @@ def integrity_record(
         "native_ir_canonical_sha256": canonical_json_sha256(lanes.native_ir),
         "browser_capture_canonical_sha256": canonical_json_sha256(lanes.capture_bytes),
         "native_capture_canonical_sha256": canonical_json_sha256(lanes.native_capture_bytes),
+        # The snapshot's own content, which the canonical capture digests
+        # cannot see: only per-session CDP identifiers are normalised.
+        "browser_dom_semantic_sha256": semantic_dom_sha256(lanes.browser_snapshot_bytes),
+        "native_dom_semantic_sha256": semantic_dom_sha256(lanes.native_snapshot_bytes),
         "browser_screenshot_sha256": sha256_file(lanes.browser_dir / "browser.png"),
         "native_render_sha256": sha256_file(lanes.native_render),
         "native_layout_sha256": sha256_file(lanes.native_layout),
