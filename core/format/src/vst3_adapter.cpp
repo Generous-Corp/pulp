@@ -1005,6 +1005,9 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
     SpeakerArrangement* inputs, int32 numIns,
     SpeakerArrangement* outputs, int32 numOuts)
 {
+    // Any outcome below may rewrite bus arrangements; process() reads the SDK
+    // buses directly until setActive()/setupProcessing() recaches them.
+    bus_channel_cache_valid_ = false;
     // VST3 hosts call this when the project's channel layout changes
     // (e.g. loading a stereo project over a mono plugin slot) and
     // expect the plug-in to either accept the request and apply it
@@ -1170,6 +1173,7 @@ tresult PLUGIN_API PulpVst3Processor::canProcessSampleSize(int32 symbolicSampleS
 
 tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     if (!processor_) return kInternalError;
+    refresh_bus_channel_cache();
 
     // Native arrangements prepare the processor at the accepted main-bus
     // widths. The silence accommodation is deliberately different: it accepts
@@ -1494,6 +1498,7 @@ void PulpVst3Processor::schedule_restart_poll_tick() {
 }
 
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
+    if (state) refresh_bus_channel_cache();
     if (state && processor_ && has_prepared_context_) {
         processor_->prepare(prepared_context_);
         processor_->prepare_f64_fallback_scratch(prepared_context_, prepared_layout_);
@@ -1673,6 +1678,20 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
     param_events_.sort();
 }
 
+void PulpVst3Processor::refresh_bus_channel_cache() {
+    const auto fill = [](const BusList& buses, std::array<int, kCachedBusCount>& out) {
+        const std::size_t count = std::min<std::size_t>(buses.size(), kCachedBusCount);
+        for (std::size_t b = 0; b < count; ++b) {
+            auto* bus = FCast<AudioBus>(buses.at(static_cast<int32>(b)));
+            out[b] = bus ? static_cast<int>(SpeakerArr::getChannelCount(bus->getArrangement())) : -1;
+        }
+        return count;
+    };
+    cached_in_bus_count_ = fill(audioInputs, expected_in_channels_);
+    cached_out_bus_count_ = fill(audioOutputs, expected_out_channels_);
+    bus_channel_cache_valid_ = true;
+}
+
 bool PulpVst3Processor::process_validate_layout(
     ProcessData& data, bool host_f64, int original_num_samples) {
     const bool descriptor_main_mono = descriptor_main_mono_;
@@ -1698,12 +1717,10 @@ bool PulpVst3Processor::process_validate_layout(
                        : 0);
         }
     };
-    const auto host_bus_is_valid = [&](const AudioBusBuffers& host_bus, AudioBus* declared_bus,
+    const auto host_bus_is_valid = [&](const AudioBusBuffers& host_bus, int expected_channels,
                                        bool allow_mono_stereo_compat, bool input_bus) {
-        if (!declared_bus)
+        if (expected_channels < 0)
             return false;
-        const int expected_channels = static_cast<int>(
-            SpeakerArr::getChannelCount(declared_bus->getArrangement()));
         // A declared audio bus with zero host channels is not a usable
         // ProcessData layout.  Accept zero only for a genuinely channel-less
         // optional bus; otherwise reject before wiring zero-channel views into
@@ -1771,9 +1788,19 @@ bool PulpVst3Processor::process_validate_layout(
         data.numOutputs != static_cast<int32>(audioOutputs.size()) ||
         (data.numInputs > 0 && !data.inputs) ||
         (data.numOutputs > 0 && !data.outputs);
+    // Expected widths come from the cache refreshed whenever the arrangement is
+    // negotiated; a bus past the cache (or a stale cache) asks the SDK bus.
+    const auto expected_width = [&](bool input, int32 b) -> int {
+        const auto& cache = input ? expected_in_channels_ : expected_out_channels_;
+        const std::size_t count = input ? cached_in_bus_count_ : cached_out_bus_count_;
+        if (bus_channel_cache_valid_ && static_cast<std::size_t>(b) < count)
+            return cache[static_cast<std::size_t>(b)];
+        auto* declared = FCast<AudioBus>((input ? audioInputs : audioOutputs).at(b));
+        return declared ? static_cast<int>(SpeakerArr::getChannelCount(declared->getArrangement())) : -1;
+    };
     if (!malformed_layout) {
         for (int32 b = 0; b < data.numInputs; ++b) {
-            if (!host_bus_is_valid(data.inputs[b], FCast<AudioBus>(audioInputs.at(b)),
+            if (!host_bus_is_valid(data.inputs[b], expected_width(true, b),
                                    b == 0 && data.numInputs == 1, true)) {
                 malformed_layout = true;
                 break;
@@ -1782,7 +1809,7 @@ bool PulpVst3Processor::process_validate_layout(
     }
     if (!malformed_layout) {
         for (int32 b = 0; b < data.numOutputs; ++b) {
-            if (!host_bus_is_valid(data.outputs[b], FCast<AudioBus>(audioOutputs.at(b)),
+            if (!host_bus_is_valid(data.outputs[b], expected_width(false, b),
                                    b == 0 && data.numOutputs == 1, false)) {
                 malformed_layout = true;
                 break;
@@ -2223,7 +2250,17 @@ void PulpVst3Processor::process_decode_input_events(ProcessData& data) {
 
 void PulpVst3Processor::process_publish_output_params(
     ProcessData& data, std::span<const state::ParamInfo> all_params) {
+    // Nothing to publish unless the processor emitted explicit events or some
+    // store write landed across process(); the snapshot diff below could only
+    // find changes in the second case.
+    if (output_param_events_.empty() &&
+        store_.state_generation() == pre_process_generation_)
+        return;
+    // The store moved, so the snapshot no longer matches the live values.
+    snapshot_valid_ = false;
     if (data.outputParameterChanges) {
+        output_param_has_event_.assign(all_params.size(), 0);
+        output_param_queue_cache_.assign(all_params.size(), nullptr);
         // (1) Sample-accurate explicit output events. Global-sort by offset so a
         // parameter's multiple points land in ascending order in its VST3 queue
         // (VST3 requires per-queue ascending sample offsets).
@@ -2454,7 +2491,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // output buses beyond the declared/pre-sized set are zero-filled (above)
     // but not routed — the same safe fallback as before.
     static constexpr std::size_t kMaxOutputBuses = BusBufferSet::kMaxBuses;
-    std::array<ProcessBusBufferView<float>, kMaxOutputBuses> output_buses{};
+    auto& output_buses = rt_output_buses_;
     output_buses[0] = {
         .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
                  proc_out, false, data.numOutputs > 0},
@@ -2547,13 +2584,15 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             .buffer = sidechain64_view,
         },
     }};
-    std::array<ProcessBusBufferView<double>, kMaxOutputBuses> output64_buses{};
+    auto& output64_buses = rt_output64_buses_;
     output64_buses[0] = {
         .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
                  proc_out, false, data.numOutputs > 0},
         .buffer = output64_view,
     };
-    for (std::size_t b = 1; b < routed_output_buses; ++b) {
+    // The f64 aux views only feed process_f64(); the float and boundary paths
+    // never read them.
+    for (std::size_t b = 1; native_f64 && b < routed_output_buses; ++b) {
         if (b >= static_cast<std::size_t>(data.numOutputs)) break;
         auto& bus = data.outputs[b];
         auto& ptrs = aux_output64_ptrs_[b - 1];
@@ -2622,9 +2661,16 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // Snapshot parameter values before processing so we can detect
     // plugin-side changes and report them to the host for automation recording
     auto all_params = store_.all_params();
-    boundary::snapshot_param_values(store_, all_params, param_snapshot_);
-    output_param_has_event_.assign(all_params.size(), 0);
-    output_param_queue_cache_.assign(all_params.size(), nullptr);
+    // Refresh the pre-process snapshot only when some store write landed since
+    // it was taken. A refresh that overlapped a concurrent writer is not
+    // trusted, so the next block takes it again.
+    pre_process_generation_ = store_.state_generation();
+    if (!snapshot_valid_ || snapshot_generation_ != pre_process_generation_ ||
+        param_snapshot_.size() != all_params.size()) {
+        boundary::snapshot_param_values(store_, all_params, param_snapshot_);
+        snapshot_generation_ = pre_process_generation_;
+        snapshot_valid_ = store_.state_snapshot_is_current(pre_process_generation_);
+    }
     processor_->set_param_events(&param_events_);
     output_param_events_.clear();
     processor_->set_output_param_events(&output_param_events_);

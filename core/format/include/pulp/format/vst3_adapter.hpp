@@ -377,6 +377,30 @@ private:
     state::ParameterEventQueue output_param_events_;
     std::vector<std::uint8_t> output_param_has_event_;
     std::vector<Steinberg::Vst::IParamValueQueue*> output_param_queue_cache_;
+    // StateStore generation param_snapshot_ was taken at. Every store write
+    // advances the generation, so while it is unchanged the snapshot still
+    // equals the live values and the per-block refresh is skipped; likewise the
+    // post-process diff only runs when the generation moved across process().
+    // snapshot_valid_ is false until the first refresh and after a refresh that
+    // raced a concurrent writer.
+    std::uint64_t snapshot_generation_ = 0;
+    std::uint64_t pre_process_generation_ = 0;
+    bool snapshot_valid_ = false;
+
+    // Bus views handed to the Processor, kept as members so a block only
+    // writes the entries it routes instead of value-initialising every slot.
+    std::array<ProcessBusBufferView<float>, BusBufferSet::kMaxBuses> rt_output_buses_{};
+    std::array<ProcessBusBufferView<double>, BusBufferSet::kMaxBuses> rt_output64_buses_{};
+    // Channel count each declared bus expects, captured when the arrangement
+    // is (re)negotiated so process() validates layout without SDK RTTI string
+    // compares per block. Index past the cached count falls back to the bus.
+    static constexpr std::size_t kCachedBusCount = 32;
+    std::array<int, kCachedBusCount> expected_in_channels_{};
+    std::array<int, kCachedBusCount> expected_out_channels_{};
+    std::size_t cached_in_bus_count_ = 0;
+    std::size_t cached_out_bus_count_ = 0;
+    bool bus_channel_cache_valid_ = false;
+    void refresh_bus_channel_cache();
 
     // ── Per-note expression (MPE) sidecar ───────────────────────────────────
     //

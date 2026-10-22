@@ -169,6 +169,9 @@ struct TestVst3Config {
     };
     bool add_bypass_param = false;
     bool mutate_gain_in_process = false;
+    // When >= 0, the processor writes Gain = -6 dB only on this zero-based
+    // process() call, so a test can interleave idle blocks with one change.
+    int mutate_gain_on_block = -1;
     bool emit_midi_out = false;
     // When set, the test processor emits one of every NON-note channel-voice
     // message the outbound path can carry, so a test can assert each reaches
@@ -348,6 +351,7 @@ public:
     float last_param_event_value = 0.0f;
     float gain_seen_in_process = 0.0f;
     bool flagged_restart_in_process_ = false;
+    int blocks_seen_for_mutation_ = 0;
     // Per-note expression (MPE) sidecar observation, captured each process().
     bool mpe_input_attached = false;
     std::size_t mpe_event_count = 0;
@@ -437,6 +441,10 @@ void TestVst3Processor::process(
     }
 
     if (config_.mutate_gain_in_process) {
+        state().set_value(kGainParamId, -6.0f);
+    }
+    if (config_.mutate_gain_on_block >= 0 &&
+        blocks_seen_for_mutation_++ == config_.mutate_gain_on_block) {
         state().set_value(kGainParamId, -6.0f);
     }
     if (config_.push_output_param_events) {
@@ -2814,6 +2822,87 @@ TEST_CASE("VST3 store-only param change still yields a single offset-0 point",
     REQUIRE(queue->getPoint(0, offset, value) == Steinberg::kResultTrue);
     REQUIRE(offset == 0);
     REQUIRE_THAT(value, WithinAbs((-6.0 + 60.0) / 84.0, 1e-5));  // 54/84
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 publishes only processor-side changes across idle blocks",
+          "[vst3][params][out-events]") {
+    // The adapter skips its per-block snapshot and diff while the store is
+    // unchanged. A host write between blocks must still refresh the snapshot
+    // (so it is never echoed back), and a later processor-side write must be
+    // the only thing published.
+    TestVst3Config config;
+    config.mutate_gain_on_block = 3;
+    config.add_colliding_param = true;
+    config.colliding_param_id = 9;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 32;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 32;
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    float* ins[2] = {in_l.data(), in_r.data()};
+    float* outs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+    ab_in[0].numChannels = 2;
+    ab_in[0].channelBuffers32 = ins;
+    Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+    ab_out[0].numChannels = 2;
+    ab_out[0].channelBuffers32 = outs;
+
+    auto run_block = [&](Steinberg::Vst::ParameterChanges& out_params) {
+        Steinberg::Vst::ProcessData data{};
+        data.numSamples = kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = ab_in;
+        data.outputs = ab_out;
+        data.outputParameterChanges = &out_params;
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    };
+
+    for (int block = 0; block < 2; ++block) {
+        Steinberg::Vst::ParameterChanges out_params(4);
+        run_block(out_params);
+        REQUIRE(out_params.getParameterCount() == 0);
+    }
+
+    // Host-originated write on the main thread between blocks.
+    REQUIRE(processor.setParamNormalized(9, 0.4) == Steinberg::kResultOk);
+    {
+        Steinberg::Vst::ParameterChanges out_params(4);
+        run_block(out_params);  // block 2: nothing to publish
+        REQUIRE(out_params.getParameterCount() == 0);
+    }
+    {
+        Steinberg::Vst::ParameterChanges out_params(4);
+        run_block(out_params);  // block 3: the processor writes Gain
+        REQUIRE(out_params.getParameterCount() == 1);
+        auto* queue = out_params.getParameterData(0);
+        REQUIRE(queue != nullptr);
+        REQUIRE(queue->getParameterId() == kGainParamId);
+        Steinberg::int32 offset = -1;
+        Steinberg::Vst::ParamValue value = 0.0;
+        REQUIRE(queue->getPoint(0, offset, value) == Steinberg::kResultTrue);
+        REQUIRE_THAT(value, WithinAbs((-6.0 + 60.0) / 84.0, 1e-5));
+    }
+    for (int block = 4; block < 6; ++block) {
+        Steinberg::Vst::ParameterChanges out_params(4);
+        run_block(out_params);
+        REQUIRE(out_params.getParameterCount() == 0);
+    }
 
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
