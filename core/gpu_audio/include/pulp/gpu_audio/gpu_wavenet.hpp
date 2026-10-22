@@ -9,6 +9,10 @@
 
 namespace pulp::gpu_audio {
 
+namespace detail {
+struct GpuWaveNetSessionAccess;
+} // namespace detail
+
 // Model-neutral shape accepted by the first provider-owned WaveNet adapter.
 // The execution object remains private to the provider; consumers pass only
 // immutable metadata and the flat weight count through this boundary.
@@ -174,6 +178,7 @@ class GpuWaveNetSession {
     std::uint64_t outstanding_blocks() const noexcept;
 
   private:
+    friend struct detail::GpuWaveNetSessionAccess;
     struct Impl;
     explicit GpuWaveNetSession(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;

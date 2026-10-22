@@ -92,6 +92,21 @@ struct RealtimeGpuNodePath {
     }
 };
 
+using RealtimeGpuIdentityFn = SharedIoProviderIdentity (*)(const void*) noexcept;
+
+// What a node tells the transport about its realtime path. Filled by
+// GpuAudioNode::bind_realtime_path(), so the transport never names node types.
+struct RealtimeGpuNodeBinding {
+    // Active only once the node is ready to run on the realtime path.
+    RealtimeGpuNodePath path;
+    // The node cannot fall back to the untyped staged worker path.
+    bool requires_realtime_path = false;
+    // Non-RT: the identity reported by the provider the node prepared.
+    const void* identity_context = nullptr;
+    RealtimeGpuIdentityFn identity = nullptr;
+};
+
+RealtimeGpuNodeBinding realtime_gpu_node_binding(GpuAudioNode* node) noexcept;
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
 // Concrete SDK nodes that cannot fall back to the untyped legacy FIFO.
 bool requires_realtime_gpu_path(GpuAudioNode* node) noexcept;

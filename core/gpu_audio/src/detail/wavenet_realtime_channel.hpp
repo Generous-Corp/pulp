@@ -1,6 +1,7 @@
 #pragma once
 #include "shared_io_stamped_bridge.hpp"
 #include "shared_io_execution_contract.hpp"
+#include "shared_io_provider_identity.hpp"
 #include "shared_io_trace.hpp"
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <algorithm>
@@ -8,6 +9,11 @@
 #include <vector>
 
 namespace pulp::gpu_audio::detail {
+// Private access to the provider a GpuWaveNetSession prepared.
+struct GpuWaveNetSessionAccess {
+    static SharedIoProviderIdentity provider_identity(const GpuWaveNetSession&) noexcept;
+};
+
 // A provider completion and the admission ticket of the block it completes.
 struct WaveNetChannelCompletion {
     GpuWaveNetBlockResult result;
@@ -31,6 +37,10 @@ class WaveNetRealtimeChannel {
     // submitted to this channel will complete successfully again.
     virtual bool lost() const noexcept {
         return false;
+    }
+    // Non-RT: the identity the channel's provider reports for itself.
+    virtual SharedIoProviderIdentity provider_identity() const noexcept {
+        return {};
     }
 };
 
@@ -75,6 +85,9 @@ class GpuWaveNetSessionChannel final : public WaveNetRealtimeChannel {
     }
     bool lost() const noexcept override {
         return session_->device_lost();
+    }
+    SharedIoProviderIdentity provider_identity() const noexcept override {
+        return GpuWaveNetSessionAccess::provider_identity(*session_);
     }
 
   private:

@@ -789,6 +789,27 @@ detail::SharedIoProviderIdentity GpuConvolver::provider_identity_for_diagnostics
     return {};
 }
 
+bool GpuConvolver::bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    binding.identity_context = this;
+    binding.identity = [](const void* self) noexcept {
+        return static_cast<const GpuConvolver*>(self)->provider_identity_for_diagnostics();
+    };
+    if (has_realtime_shared_io())
+        binding.path = {.context = this,
+                        .process = &GpuConvolver::process_realtime_shared_io,
+                        .service = &GpuConvolver::service_realtime_shared_io,
+                        .fence = &GpuConvolver::fence_realtime_shared_io,
+                        .delivered = &GpuConvolver::complete_realtime_shared_io,
+                        .next_sequence = &GpuConvolver::next_realtime_shared_io_sequence,
+                        .health = &GpuConvolver::realtime_shared_io_health};
+    return true;
+#else
+    (void)binding;
+    return false;
+#endif
+}
+
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
 namespace {
 GpuAudioRecoveryReason public_recovery_reason(detail::SharedIoRecoveryReason reason) noexcept {
@@ -887,9 +908,14 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (has_realtime_shared_io()) {
         const auto telemetry = shared_io_->session->trace_telemetry();
-        status.provider = GpuAudioProvider::Dawn;
-        status.gpu_kernel_available = true;
-        status.selected_engine = GpuAudioEngine::Gpu;
+        // The shared provider names itself; an unauthenticated one is not a
+        // GPU claim.
+        const auto identity = provider_identity_for_diagnostics();
+        status.provider = identity.authenticated ? identity.provider : GpuAudioProvider::Unknown;
+        status.gpu_kernel_available = status.provider != GpuAudioProvider::Unknown;
+        status.selected_engine = status.provider != GpuAudioProvider::Unknown
+                                     ? GpuAudioEngine::Gpu
+                                     : GpuAudioEngine::Unknown;
         status.prepared_lead_blocks = latency_blocks_;
         status.produced_blocks = telemetry.delivered_blocks;
         status.missed_blocks = telemetry.deadline_misses;

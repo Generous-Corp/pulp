@@ -1,4 +1,5 @@
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_stamped_bridge.hpp"
 #include "detail/wavenet_realtime_channel.hpp"
 #include <algorithm>
@@ -279,6 +280,8 @@ struct GpuWaveNetRealtimeNode::Impl {
     std::array<std::atomic<std::uint64_t>, GpuAudioStatus::kTerminalDispositionCount>
         terminal_counts{};
     bool prepared = false, production_provider = false;
+    // Reported by the prepared provider itself; empty for injected channels.
+    detail::SharedIoProviderIdentity provider_identity;
     bool fallback_prepared = false;
 
     explicit Impl(const Config& source)
@@ -606,6 +609,7 @@ bool GpuWaveNetRealtimeNode::prepare() {
         s.fallback_prepared = cpu_fallback_prepared();
         if (s.initialize()) {
             s.production_provider = true;
+            s.provider_identity = s.channels.front()->provider_identity();
             return true;
         }
     } catch (...) {
@@ -617,6 +621,7 @@ bool GpuWaveNetRealtimeNode::release() noexcept {
     auto& s = *impl_;
     s.prepared = false;
     s.production_provider = false;
+    s.provider_identity = {};
     s.fallback_prepared = false;
     if (s.bridge) {
         s.sequence = s.bridge->next_sequence();
@@ -742,6 +747,32 @@ bool GpuWaveNetRealtimeNode::ready() const noexcept {
 }
 bool GpuWaveNetRealtimeNode::authenticated_provider() const noexcept {
     return impl_->prepared && impl_->production_provider;
+}
+bool GpuWaveNetRealtimeNode::bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept {
+    binding.requires_realtime_path = true;
+    binding.identity_context = this;
+    binding.identity = [](const void* self) noexcept {
+        const auto* node = static_cast<const GpuWaveNetRealtimeNode*>(self);
+        return node->authenticated_provider() ? node->impl_->provider_identity
+                                              : detail::SharedIoProviderIdentity{};
+    };
+    if (ready()) {
+        binding.path = {.context = this,
+                        .process = &GpuWaveNetRealtimeNode::process,
+                        .service = &GpuWaveNetRealtimeNode::service,
+                        .fence = &GpuWaveNetRealtimeNode::fence,
+                        .delivered = &GpuWaveNetRealtimeNode::delivered,
+                        .next_sequence = &GpuWaveNetRealtimeNode::next_sequence,
+                        // Serialized non-RT read; the status projection is
+                        // allocation-free and carries the first latched cause.
+                        .health = [](const void* self, detail::RealtimeGpuHealth& out) noexcept {
+                            const auto* node = static_cast<const GpuWaveNetRealtimeNode*>(self);
+                            out = detail::health_from_status(node->status_snapshot());
+                            out.fenced = out.fenced || node->fenced();
+                            return true;
+                        }};
+    }
+    return true;
 }
 std::uint64_t GpuWaveNetRealtimeNode::next_sequence(void* self) noexcept {
     return static_cast<GpuWaveNetRealtimeNode*>(self)->impl_->bridge->next_sequence();

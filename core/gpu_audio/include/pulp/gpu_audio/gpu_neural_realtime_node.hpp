@@ -32,12 +32,9 @@ using GpuNeuralModelHandle = std::shared_ptr<GpuNeuralModel>;
 
 class GpuNeuralRealtimeNode;
 namespace detail {
-struct RealtimeGpuNodePath;
 struct RealtimeGpuHealth;
 struct NeuralRealtimeTestAccess;
-RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode*) noexcept;
-bool requires_realtime_gpu_path(GpuAudioNode*) noexcept;
-GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept;
+struct SharedIoProviderIdentity;
 } // namespace detail
 
 /// Architecture-neutral realtime neural node with a built-in CPU shadow.
@@ -244,6 +241,7 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
     std::uint64_t recovery_sequence() const noexcept;
     /// Allocation-free lifecycle projection.
     GpuAudioStatus status_snapshot() const noexcept override;
+    bool bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept override;
     /// Allocation-free capability projection.
     GpuAudioCapabilityReport capability_report() const noexcept;
     /// Allocation-free shadow diagnostics beyond the public `shadow_*` fields
@@ -255,13 +253,12 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
     struct Impl;
     std::unique_ptr<Impl> impl_;
     friend struct detail::NeuralRealtimeTestAccess;
-    friend detail::RealtimeGpuNodePath detail::realtime_gpu_node_path(GpuAudioNode*) noexcept;
-    friend GpuAudioProvider detail::realtime_gpu_provider(GpuAudioNode*) noexcept;
     bool ready() const noexcept;
     bool authenticated_provider() const noexcept;
     // Provider identity for the transport: Dawn when authenticated, Cpu when
     // prepared without a GPU backend, otherwise Unknown.
     GpuAudioProvider transport_provider() const noexcept;
+    detail::SharedIoProviderIdentity provider_identity_for_transport() const noexcept;
     static std::uint8_t process(void*, const audio::BufferView<const float>&,
                                 audio::BufferView<float>&, std::uint32_t, std::uint64_t, bool,
                                 std::uint64_t) noexcept;

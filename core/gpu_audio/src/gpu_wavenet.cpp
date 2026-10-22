@@ -1,5 +1,7 @@
 #include <pulp/gpu_audio/gpu_wavenet.hpp>
 
+#include "detail/wavenet_realtime_channel.hpp"
+
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
 #include "detail/dawn_wavenet_factory.hpp"
 #include "detail/shared_io_program_session.hpp"
@@ -252,6 +254,18 @@ bool GpuWaveNetSession::device_lost() const noexcept {
             return provider->device_lost();
 #endif
     return false;
+}
+
+detail::SharedIoProviderIdentity
+detail::GpuWaveNetSessionAccess::provider_identity(const GpuWaveNetSession& session) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (session.impl_ && session.impl_->session)
+        if (const auto* provider = session.impl_->session->owned_provider())
+            return provider->provider_identity();
+#else
+    (void)session;
+#endif
+    return {};
 }
 
 std::uint64_t GpuWaveNetSession::outstanding_blocks() const noexcept {

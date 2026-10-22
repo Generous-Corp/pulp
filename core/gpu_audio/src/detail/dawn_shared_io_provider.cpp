@@ -2671,6 +2671,7 @@ SharedIoProviderIdentity DawnSharedIoProvider::provider_identity() const noexcep
         return identity;
     try {
         const auto& adapter = impl_->adapter_identity;
+        identity.provider = GpuAudioProvider::Dawn;
         identity.provider_revision = dawn_revision();
         identity.adapter_name = adapter.name;
         identity.adapter_backend = adapter.backend;

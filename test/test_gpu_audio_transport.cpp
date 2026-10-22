@@ -519,6 +519,21 @@ class RealtimeHookNode : public GpuAudioNode {
         fallback_delay_index_ = (fallback_delay_index_ + 1) % latency_;
     }
 
+    // Registers through the same hook every shipped node uses; the transport
+    // never names this type.
+    bool bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept override {
+        binding.path = path();
+        binding.identity_context = this;
+        binding.identity = [](const void* self) noexcept {
+            const auto* node = static_cast<const RealtimeHookNode*>(self);
+            detail::SharedIoProviderIdentity identity;
+            identity.provider = node->identity_provider;
+            identity.authenticated = node->claims_provider;
+            return identity;
+        };
+        return true;
+    }
+
     detail::RealtimeGpuNodePath path() noexcept {
         return {.context = this,
                 .process = &RealtimeHookNode::process_realtime,
@@ -566,6 +581,9 @@ class RealtimeHookNode : public GpuAudioNode {
     bool external_output_silent_on_rejection = true;
     bool expose_health = false;
     bool claims_provider = false;
+    // The provider kind this node's identity reports; it counts as a GPU
+    // provider only when claims_provider also authenticates it.
+    GpuAudioProvider identity_provider = GpuAudioProvider::Dawn;
     bool health_read_ok = true;
     std::uint32_t health_calls = 0;
     // Hook contract: never called from a host/UI reader thread.
@@ -677,29 +695,13 @@ class RealtimeHookNode : public GpuAudioNode {
 
 namespace pulp::gpu_audio::detail {
 
-RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
-    if (auto* hook = dynamic_cast<test_detail::RealtimeHookNode*>(node))
-        return hook->path();
-    return {};
-}
-
-bool requires_realtime_gpu_path(GpuAudioNode*) noexcept {
-    return false;
-}
-
 // This suite links the transport without the GPU nodes; none of its nodes
 // takes part in worker pipelining.
 bool set_worker_pipeline_hosting(GpuAudioNode*, bool) noexcept {
     return false;
 }
 
-GpuAudioProvider realtime_gpu_provider(GpuAudioNode* node) noexcept {
-    // The test hook has no authenticated provider identity unless a case
-    // explicitly stands in for one to exercise the Ready baseline.
-    auto* hook = dynamic_cast<test_detail::RealtimeHookNode*>(node);
-    return hook != nullptr && hook->claims_provider ? GpuAudioProvider::Dawn
-                                                    : GpuAudioProvider::Unknown;
-}
+} // namespace pulp::gpu_audio::detail
 
 TEST_CASE("GpuAudioTransport capability report is an honest staged snapshot",
           "[gpu_audio][transport][capability]") {
@@ -738,8 +740,6 @@ TEST_CASE("GpuAudioTransport capability report is an honest staged snapshot",
     CHECK(released.path == GpuAudioExecutionPath::Unavailable);
     CHECK_FALSE(released.prepared);
 }
-
-} // namespace pulp::gpu_audio::detail
 
 namespace {
 
@@ -2295,4 +2295,46 @@ TEST_CASE("GpuAudioTransport status carries the node's provider facts",
     status = validated(t.status_snapshot());
     CHECK(status.gpu_kernel_available);
     CHECK(status.completion_mode == GpuAudioCompletionMode::ProcessEvents);
+}
+
+TEST_CASE("GpuAudioTransport binds a node it never names through the registry hook",
+          "[gpu_audio][transport][registry]") {
+    // The transport links the real registry; this node is unknown to it and
+    // registers only by overriding bind_realtime_path().
+    RealtimeHookNode node(1, 32, MissPolicy::CpuFallback, 3);
+    node.claims_provider = true;
+    REQUIRE(node.prepare());
+    CHECK(detail::realtime_gpu_node_path(&node).active());
+    CHECK_FALSE(detail::requires_realtime_gpu_path(&node));
+    CHECK(detail::realtime_gpu_provider(&node) == GpuAudioProvider::Dawn);
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {8}));
+    CHECK(transport.capability_report().provider == GpuAudioProvider::Dawn);
+    transport.release();
+
+    // A CPU provider needs no authentication to be reported as CPU.
+    node.claims_provider = false;
+    node.identity_provider = GpuAudioProvider::Cpu;
+    CHECK(detail::realtime_gpu_provider(&node) == GpuAudioProvider::Cpu);
+
+    // A staged node does not override the hook, so it binds nothing.
+    GainNode staged(1, 32, 1.0f, MissPolicy::CpuFallback);
+    CHECK_FALSE(detail::realtime_gpu_node_path(&staged).active());
+    CHECK_FALSE(detail::requires_realtime_gpu_path(&staged));
+    CHECK(detail::realtime_gpu_provider(&staged) == GpuAudioProvider::Unknown);
+}
+
+TEST_CASE("GpuAudioTransport reports no GPU provider for an unauthenticated identity",
+          "[gpu_audio][transport][registry]") {
+    // Planted negative: the identity names Dawn but does not authenticate,
+    // so it is not a GPU provider claim.
+    RealtimeHookNode node(1, 32, MissPolicy::CpuFallback, 3);
+    node.claims_provider = false;
+    node.identity_provider = GpuAudioProvider::Dawn;
+    REQUIRE(node.prepare());
+    CHECK(detail::realtime_gpu_provider(&node) == GpuAudioProvider::Unknown);
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {8}));
+    CHECK(transport.capability_report().provider == GpuAudioProvider::Unknown);
+    transport.release();
 }

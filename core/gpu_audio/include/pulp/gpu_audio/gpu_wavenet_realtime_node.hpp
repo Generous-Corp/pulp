@@ -8,11 +8,7 @@
 
 namespace pulp::gpu_audio {
 namespace detail {
-struct RealtimeGpuNodePath;
 struct WaveNetRealtimeTestAccess;
-RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode*) noexcept;
-bool requires_realtime_gpu_path(GpuAudioNode*) noexcept;
-GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept;
 } // namespace detail
 
 /// Experimental stamped WaveNet bridge. Provider work runs only on the transport
@@ -79,6 +75,7 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
     /// Allocation-free provider-neutral lifecycle projection for hosts that
     /// own this stamped node directly.
     GpuAudioStatus status_snapshot() const noexcept override;
+    bool bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept override;
     /// Not a legacy FIFO node. GpuAudioTransport rejects an unprepared instance.
     void process_block(const audio::BufferView<const float>&, audio::BufferView<float>&,
                        std::uint32_t) final;
@@ -87,8 +84,6 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
     struct Impl;
     std::unique_ptr<Impl> impl_;
     friend struct detail::WaveNetRealtimeTestAccess;
-    friend detail::RealtimeGpuNodePath detail::realtime_gpu_node_path(GpuAudioNode*) noexcept;
-    friend GpuAudioProvider detail::realtime_gpu_provider(GpuAudioNode*) noexcept;
     bool authenticated_provider() const noexcept;
     static std::uint8_t process(void*, const audio::BufferView<const float>&,
                                 audio::BufferView<float>&, std::uint32_t, std::uint64_t, bool,

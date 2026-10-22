@@ -46,13 +46,10 @@ struct GpuConvolverStagedBreaker {
 class GpuConvolver;
 
 namespace detail {
-struct RealtimeGpuNodePath;
 struct RealtimeGpuHealth;
 struct GpuConvolverTestAccess;
 bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept;
 struct SharedIoProviderIdentity;
-SharedIoProviderIdentity realtime_gpu_provider_identity(GpuAudioNode*) noexcept;
-RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
 struct GpuConvolverTrialConfig;
 struct SharedIoTraceRecord;
 struct SharedIoTraceAdmission;
@@ -252,6 +249,7 @@ class GpuConvolver : public GpuAudioNode {
     /// device is live, the engine is `Cpu` when no device initialized, and a
     /// lost device is `Unavailable` with `ProviderLost`.
     GpuAudioStatus status_snapshot() const noexcept override;
+    bool bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept override;
     /// First latched recovery cause, or None. Same snapshot as status_snapshot().
     GpuAudioRecoveryReason recovery_reason() const noexcept;
     /// True before preparation, or once GPU delivery was fenced or its
@@ -365,10 +363,6 @@ class GpuConvolver : public GpuAudioNode {
     // non-finite readback), else None. A single late block latches nothing.
     // Any thread; the public status accessor reads it.
     GpuAudioRecoveryReason staged_latched_reason() const noexcept;
-
-    friend detail::RealtimeGpuNodePath detail::realtime_gpu_node_path(GpuAudioNode*) noexcept;
-    friend detail::SharedIoProviderIdentity
-    detail::realtime_gpu_provider_identity(GpuAudioNode*) noexcept;
     friend bool
     detail::configure_gpu_convolver_trial(GpuConvolver&,
                                           const detail::GpuConvolverTrialConfig&) noexcept;

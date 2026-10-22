@@ -75,6 +75,10 @@ class WaveNetStreamingBackend final : public StreamingBackend {
     bool device_lost() const noexcept override {
         return lost_;
     }
+    SharedIoProviderIdentity provider_identity() const noexcept override {
+        return channels_.empty() ? SharedIoProviderIdentity{}
+                                 : channels_.front()->provider_identity();
+    }
 
     /// True when the channels are authenticated GpuWaveNetSession providers
     /// rather than an injected test seam.

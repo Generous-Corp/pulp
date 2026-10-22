@@ -172,6 +172,10 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
 
 // No staged device or shared session exists in this build, so nothing is ever
 // latched and no shared health sample is available.
+bool GpuConvolver::bind_realtime_path(detail::RealtimeGpuNodeBinding&) noexcept {
+    return false; // the staged CPU worker is the only path in this build
+}
+
 GpuAudioRecoveryReason GpuConvolver::staged_recovery_reason() const noexcept {
     return GpuAudioRecoveryReason::None;
 }

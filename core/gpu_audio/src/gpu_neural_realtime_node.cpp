@@ -87,6 +87,8 @@ struct GpuNeuralRealtimeNode::Impl {
     // fenced shared path; `backend_quiesced` records that the kernel is gone.
     bool backend_active = false;
     bool production_backend = false; // cached at prepare; read by host threads
+    // Reported by the active backend's provider; cached at prepare.
+    detail::SharedIoProviderIdentity provider_identity;
     std::atomic<bool> backend_quiesced{false};
     // Prewarm leases outlive any failed prewarm until the backend releases.
     std::vector<float> prewarm_input, prewarm_output;
@@ -646,6 +648,7 @@ bool GpuNeuralRealtimeNode::prepare() {
                 s.prewarm_backend(backend)) {
                 s.backend_active = true;
                 s.production_backend = s.model->production_backend();
+                s.provider_identity = backend.provider_identity();
                 s.backend_quiesced.store(false, std::memory_order_release);
             } else if (!backend.release()) {
                 return fail(PrepareError::ReleaseFailed);
@@ -736,6 +739,7 @@ bool GpuNeuralRealtimeNode::release() noexcept {
             return false;
         s.backend_active = false;
         s.production_backend = false;
+        s.provider_identity = {};
     }
     while (!s.processors.empty()) {
         if (!s.processors.back()->release())
@@ -856,10 +860,39 @@ GpuNeuralRealtimeNode::PrepareError GpuNeuralRealtimeNode::last_prepare_error() 
 }
 
 GpuAudioProvider GpuNeuralRealtimeNode::transport_provider() const noexcept {
-    if (authenticated_provider())
-        return GpuAudioProvider::Dawn;
-    return impl_->prepared && !impl_->backend_active ? GpuAudioProvider::Cpu
-                                                     : GpuAudioProvider::Unknown;
+    return provider_identity_for_transport().provider;
+}
+
+detail::SharedIoProviderIdentity
+GpuNeuralRealtimeNode::provider_identity_for_transport() const noexcept {
+    // An authenticated backend reports its own provider; a prepared node with
+    // no active backend runs on the CPU, which needs no authentication.
+    if (authenticated_provider() && impl_->provider_identity.authenticated)
+        return impl_->provider_identity;
+    if (impl_->prepared && !impl_->backend_active) {
+        detail::SharedIoProviderIdentity cpu;
+        cpu.provider = GpuAudioProvider::Cpu;
+        return cpu;
+    }
+    return {};
+}
+
+bool GpuNeuralRealtimeNode::bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) noexcept {
+    binding.requires_realtime_path = true;
+    binding.identity_context = this;
+    binding.identity = [](const void* self) noexcept {
+        return static_cast<const GpuNeuralRealtimeNode*>(self)->provider_identity_for_transport();
+    };
+    if (ready())
+        binding.path = {.context = this,
+                        .process = &GpuNeuralRealtimeNode::process,
+                        .service = &GpuNeuralRealtimeNode::service,
+                        .fence = &GpuNeuralRealtimeNode::fence,
+                        .delivered = &GpuNeuralRealtimeNode::delivered,
+                        .next_sequence = &GpuNeuralRealtimeNode::next_sequence,
+                        .health = &GpuNeuralRealtimeNode::health,
+                        .offline_render = &GpuNeuralRealtimeNode::offline_render};
+    return true;
 }
 
 GpuAudioRecoveryReason GpuNeuralRealtimeNode::recovery_reason() const noexcept {
