@@ -1448,6 +1448,22 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-gpu-render-loss-consumer": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_gpu_render_loss_consumer.cpp"
+   ],
+   "inputs": [
+    "core/gpu_audio/src/detail/render_loss_consumer.hpp",
+    "test/fixtures/gpu_audio/render_loss_consumer"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/harness/rt_allocation_probe.cpp",
+    "test/test_gpu_render_loss_consumer.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-gpu-wavenet-session": {
    "data": "declared",
    "detected_sources": [
@@ -2577,6 +2593,7 @@
   "pulp-test-gpu-health-result",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
+  "pulp-test-gpu-render-loss-consumer",
   "pulp-test-gpu-shared-io-convolution-pipeline",
   "pulp-test-gpu-shared-io-convolution-session",
   "pulp-test-gpu-shared-io-slot-ledger",

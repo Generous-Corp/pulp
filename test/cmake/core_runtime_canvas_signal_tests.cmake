@@ -788,6 +788,19 @@ pulp_add_test_suite(pulp-test-gpu-dawn-submission-tracker GROUP pulp-test-group-
             ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/dawn_submission_tracker.cpp
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Private consumer cursor for a future render-owner loss event. Header-only and
+# Dawn-free; the fixtures are Pulp-side inputs, and no producer exists yet.
+pulp_add_test_suite(pulp-test-gpu-render-loss-consumer
+    SOURCES test_gpu_render_loss_consumer.cpp harness/rt_allocation_probe.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+                 ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/audio/include
+                 ${choc_SOURCE_DIR}
+    COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-gpu-render-loss-consumer NO_DEFINE
+    PATHS test/fixtures/gpu_audio/render_loss_consumer
+          core/gpu_audio/src/detail/render_loss_consumer.hpp)
+
 # Separate full-library link check keeps the private production TU wired into
 # pulp::gpu-audio without burdening every focused lifecycle rebuild.
 pulp_add_test_suite(pulp-test-gpu-shared-io-arena-link GROUP pulp-test-group-core-gpu-audio-private
