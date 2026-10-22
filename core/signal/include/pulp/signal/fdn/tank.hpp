@@ -496,20 +496,63 @@ class FdnTank {
                 const SampleType g = (i & 1) ? -loop_g_ : loop_g_;
                 loop_diffusion_[ui].process_block_fluttered(span[i], n, g, lfo, kFlutterDepth);
             }
+            advance_inactive_cascades(n);
             return;
         }
+        // Every line's stage s ring has one size and advances in lockstep
+        // with the others, so the write position, mask, and the decision
+        // whether mirror upkeep is due are shared per stage; only each ring's
+        // base and its stage delay differ.
+        constexpr int kStages = kLoopDiffusionStages;
+        static_assert(kStages == 4, "run_spans4 is the four-stage kernel");
+        if (n > loop_diffusion_[0].min_delay()) {
+            for (int i = 0; i < active_n_; ++i)
+                loop_diffusion_[static_cast<std::size_t>(i)].process_block(
+                    span[i], n, (i & 1) ? -loop_g_ : loop_g_);
+            advance_inactive_cascades(n);
+            return;
+        }
+        std::size_t write[kStages];
+        std::size_t mask[kStages];
+        bool upkeep[kStages];
+        for (int s = 0; s < kStages; ++s) {
+            auto& line = loop_diffusion_[0].stage(s).line();
+            write[s] = line.write_index();
+            mask[s] = line.mask();
+            upkeep[s] = write[s] < line.mirror_samples() ||
+                        write[s] + static_cast<std::size_t>(n) > line.size();
+        }
         for (int i = 0; i < active_n_; ++i) {
-            const auto ui = static_cast<std::size_t>(i);
-            const SampleType g = (i & 1) ? -loop_g_ : loop_g_;
-            SampleType* delayed[4];
-            SampleType* stored[4];
-            if (loop_diffusion_[ui].spans4(n, delayed, stored)) {
-                AllpassCascade<SampleType>::run_spans4(span[i], n, g, delayed, stored);
-                loop_diffusion_[ui].commit4(n);
-            } else {
-                loop_diffusion_[ui].process_block(span[i], n, g);
+            auto& cascade = loop_diffusion_[static_cast<std::size_t>(i)];
+            SampleType* delayed[kStages];
+            SampleType* stored[kStages];
+            for (int s = 0; s < kStages; ++s) {
+                auto& stage = cascade.stage(s);
+                SampleType* base = stage.line().data();
+                delayed[s] = base + ((write[s] - static_cast<std::size_t>(stage.delay())) & mask[s]);
+                stored[s] = base + write[s];
+            }
+            AllpassCascade<SampleType>::run_spans4(span[i], n, (i & 1) ? -loop_g_ : loop_g_,
+                                                   delayed, stored);
+        }
+        // Inactive lines' rings advance too, so all sixteen stay in lockstep.
+        for (int s = 0; s < kStages; ++s) {
+            for (int i = 0; i < kNumChannels; ++i) {
+                auto& line = loop_diffusion_[static_cast<std::size_t>(i)].stage(s).line();
+                if (upkeep[s])
+                    line.advance(n);
+                else
+                    line.skip(n);
             }
         }
+    }
+
+    // Inactive lines' cascades advance with the active ones so every stage
+    // ring stays in lockstep (diffuse_lines() shares write positions).
+    void advance_inactive_cascades(int n) {
+        for (int i = active_n_; i < kNumChannels; ++i)
+            for (int s = 0; s < loop_diffusion_[static_cast<std::size_t>(i)].num_stages(); ++s)
+                loop_diffusion_[static_cast<std::size_t>(i)].stage(s).line().advance(n);
     }
 
     // Every kHealIntervalSamples: snap decayed recursive state to zero (the

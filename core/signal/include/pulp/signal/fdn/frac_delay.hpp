@@ -198,6 +198,13 @@ class FracDelayT {
     std::size_t write_index() const {
         return write_;
     }
+    // Samples mirrored past the ring's end (see taps_at()).
+    static constexpr std::size_t mirror_samples() { return kMirror; }
+
+    // advance() for a run the caller knows touched neither the ring's first
+    // mirror_samples() samples nor its end: no mirror upkeep is due.
+    void skip(int n) { write_ = (write_ + static_cast<std::size_t>(n)) & mask_; }
+
     // Advance the write position past `n` samples the caller stored directly
     // as one contiguous run from data() + write_index() (which may extend
     // into the mirror past the ring's end, n <= kMaxBlockSamples). Moves any

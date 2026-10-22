@@ -158,6 +158,7 @@ class AllpassCascade {
     }
 
     int num_stages() const { return num_stages_; }
+    AllpassStage<SampleType>& stage(int s) { return stages_[s]; }
 
     // Total delay the cascade contributes to a loop it sits in. An allpass is
     // lossless but not delay-free, and a decay law that ignores it computes the
