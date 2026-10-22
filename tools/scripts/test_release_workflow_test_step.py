@@ -821,11 +821,34 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
         self.assertIn("matrix.platform == 'darwin-arm64' || matrix.platform == 'linux-x64'", self.text)
 
     def test_release_path_builds_bind_to_the_verified_checkout_provider(self) -> None:
+        configures = self.text.count("cmake -S . -B")
+        self.assertGreaterEqual(configures, 3)
         self.assertEqual(
             self.text.count('-DSKIA_DIR="$PWD/external/skia-build"'),
-            2,
-            "both release-path configure calls must consume the provider that "
+            configures,
+            "every release-path configure call must consume the provider that "
             "the preceding receipt/capability step verified",
+        )
+
+    def test_darwin_leg_runs_js_engine_suite_against_sealed_v8(self) -> None:
+        workflow = yaml.safe_load(self.text)
+        steps = [
+            step for step in workflow["jobs"]["release-build"]["steps"]
+            if step.get("name") == "Run [js_engine] suite against the sealed V8"
+        ]
+        self.assertEqual(len(steps), 1)
+        step = steps[0]
+        self.assertEqual(step.get("if"), "matrix.platform == 'darwin-arm64'")
+        run = step["run"]
+        self.assertIn("-DPULP_JS_ENGINE=v8", run)
+        self.assertIn("-DPULP_BUILD_TESTS=ON", run)
+        self.assertIn("--target pulp-test-group-script-view", run)
+        self.assertIn('"$carrier" "[js_engine]"', run)
+        self.assertIn("grep -qi \"skipped\"", run)
+        names = [s.get("name") for s in workflow["jobs"]["release-build"]["steps"]]
+        self.assertLess(
+            names.index("Fetch sealed V8 provider (mixed-provider gate)"),
+            names.index("Run [js_engine] suite against the sealed V8"),
         )
 
     def test_darwin_leg_requires_mixed_provider_render_proof(self) -> None:

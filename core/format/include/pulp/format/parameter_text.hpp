@@ -45,8 +45,10 @@ inline std::string format_parameter_text(const state::ParamInfo& info,
     return result;
 }
 
-/// Parse host text into a constrained plain value. Enum/toggle parameters only
-/// accept declared labels unless the author supplied a custom parser.
+/// Parse host text into a constrained plain value. Enum/toggle parameters with
+/// declared labels accept only those labels unless the author supplied a custom
+/// parser; without labels they are shown as their number, so that number (with
+/// the unit, if any) parses back to the same step.
 inline std::optional<float> parse_parameter_text(const state::ParamInfo& info,
                                                  std::string_view text) {
     if (info.from_string) {
@@ -59,7 +61,8 @@ inline std::optional<float> parse_parameter_text(const state::ParamInfo& info,
     }
 
     if (auto labeled = state::param_value_for_label(info, text)) return labeled;
-    if (info.kind == state::ParamKind::Toggle || info.kind == state::ParamKind::Enum)
+    if ((info.kind == state::ParamKind::Toggle || info.kind == state::ParamKind::Enum) &&
+        !info.value_labels.empty())
         return std::nullopt;
 
     double parsed = 0.0;

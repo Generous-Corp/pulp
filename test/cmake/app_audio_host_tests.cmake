@@ -67,6 +67,29 @@ pulp_add_test_suite(pulp-test-waveform-editor GROUP pulp-test-group-app-view
 # FastMath approximation tests
 pulp_add_test_suite(pulp-test-fast-math GROUP pulp-test-group-app-signal
     LIBRARIES pulp::signal)
+# The same accuracy contracts with multiply-add contraction disabled, as GCC
+# (Pulp's policy), MSVC and x86-64 without FMA compile them. Its own binary:
+# sharing inline functions with a contracting TU would let the linker pick
+# either version.
+pulp_add_test_suite(pulp-test-fast-math-no-contract
+    SOURCES test_fast_math_no_contract.cpp
+    LIBRARIES pulp::signal)
+target_compile_options(pulp-test-fast-math-no-contract PRIVATE
+    $<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>:-ffp-contract=off>)
+# How the ladder-saturator macros select the default, each configuration in
+# its own translation unit (they define the same inline variable differently,
+# so they are compiled but never linked together). A wrong selection, or a
+# PULP_SIGNAL_LADDER_SATURATION outside 0..2, is a static_assert failure at
+# build time.
+add_library(pulp-ladder-saturation-selection-checks OBJECT
+    header_compile/ladder_saturation_default.cpp
+    header_compile/ladder_saturation_fast0.cpp
+    header_compile/ladder_saturation_fast1.cpp
+    header_compile/ladder_saturation_sel0.cpp
+    header_compile/ladder_saturation_sel1.cpp
+    header_compile/ladder_saturation_sel2.cpp
+    header_compile/ladder_saturation_bool_shim.cpp)
+target_link_libraries(pulp-ladder-saturation-selection-checks PRIVATE pulp::signal)
 
 # Polynomial/Matrix math tests
 pulp_add_test_suite(pulp-test-poly-math GROUP pulp-test-group-app-signal

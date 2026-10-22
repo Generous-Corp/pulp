@@ -31,6 +31,21 @@ on:
   # Manual trigger retained for bisecting a regression or re-running
   # after a fix lands without waiting for the next nightly.
   workflow_dispatch:
+    inputs:
+      # Proves a self-hosted Windows lane (the Mac Pro Windows x64 slot,
+      # docs/guides/local-ci.md) on the full Windows suite without spending a
+      # macOS gate VM, which a build.yml dispatch always does. The nightly
+      # never sees an input, so it keeps windows-latest.
+      windows_runner_selector_json:
+        description: "Optional JSON runs-on for the Windows job; empty keeps windows-latest"
+        required: false
+        default: ""
+        type: string
+      windows_only:
+        description: "Run only the Windows job"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -44,8 +59,12 @@ permissions:
 # suites run in parallel, while two runs of the same ref (the nightly on main)
 # still never overlap. A single repo-wide group kept only one pending run, so
 # every branch waited for every other branch's dispatch.
+#
+# A dispatch that sets windows_only or a Windows runner selector is a one-off
+# proof, not the nightly, so it gets its own group per run: a long proof on
+# main must never hold the group a pending nightly on main is waiting for.
 concurrency:
-  group: cross-platform-check-${{ github.ref }}
+  group: cross-platform-check-${{ github.ref }}${{ (inputs.windows_only || inputs.windows_runner_selector_json) && format('-dispatch-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -55,7 +74,7 @@ jobs:
   # ctest filters. GitHub-hosted ubuntu-latest only.
   linux:
     name: Linux build + test
-    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && !inputs.windows_only
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -180,7 +199,7 @@ jobs:
   # windows-latest only.
   linux-arm64:
     name: Linux ARM64 build + test
-    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && !inputs.windows_only
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     env:
@@ -283,10 +302,33 @@ jobs:
   # configure, same UTF-8-code-page-wrapped ctest. GitHub-hosted
   # windows-latest only.
 
+  # Resolves the Windows job's runs-on before any runner is chosen. A
+  # dispatch input that names a macOS or Linux pool (the gate VMs, the Linux
+  # clones, the preamble slot) is refused here, so a typo cannot put a Windows
+  # build on a gate host. Empty keeps windows-latest.
+  windows-runner:
+    name: Resolve Windows runner
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runs_on: ${{ steps.resolve.outputs.runs_on }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: tools/scripts/windows_runner_selector.py
+          sparse-checkout-cone-mode: false
+      - name: Resolve and police the selector
+        id: resolve
+        env:
+          SELECTOR: ${{ inputs.windows_runner_selector_json || '' }}
+        run: python3 tools/scripts/windows_runner_selector.py --selector "$SELECTOR" --github-output
+
   windows:
     name: Windows build + test
+    needs: windows-runner
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
-    runs-on: windows-latest
+    runs-on: ${{ fromJSON(needs.windows-runner.outputs.runs_on) }}
     timeout-minutes: 180
     env:
       PULP_BUILD_DIR: build-windows
@@ -410,7 +452,7 @@ jobs:
   # runners, see android.yml #487) and needs a KVM-capable runner.
   android:
     name: Android NDK build
-    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && !inputs.windows_only
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -512,8 +554,10 @@ jobs:
     name: Maintain per-platform tracking issues
     needs: [linux, linux-arm64, windows, android]
     # The tracking issues describe main. A proof-branch dispatch must neither
-    # open nor close them, and branches now run concurrently with main.
-    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    # open nor close them, and branches now run concurrently with main. A run
+    # that skipped platforms or moved Windows off windows-latest measured
+    # something else, so it leaves the issues alone too.
+    if: ${{ always() && github.ref == 'refs/heads/main' && !inputs.windows_only && !inputs.windows_runner_selector_json }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:

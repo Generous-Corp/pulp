@@ -371,6 +371,65 @@ class BuildListTests(unittest.TestCase):
                 self.assertFalse(p.startswith("/"), p)
 
 
+class ShellRootVariableTests(unittest.TestCase):
+    """A shell test names repository files through a directory variable it
+    derived from its own location. Those reads are inputs; a path under a
+    temp or fixture directory variable is not."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name) / "repo"
+        self.root.mkdir()
+        for rel in ("setup.sh", "tools/cmake/PlantedFetch.cmake", "tools/cmake/PlantedPatch.cmake",
+                    "tools/deps/planted.json", "tools/scripts/planted_helper.py", "tools/scripts/planted_decoy.sh",
+                    "core/planted/ignored.txt", "docs/guides/planted.md"):
+            write(self.root, rel, "x\n")
+
+    def inputs(self, body: str) -> list[str]:
+        entry = write(self.root, "tools/scripts/test_planted.sh", "#!/bin/bash\n" + body)
+        rec = sti.inputs_for({"name": "planted", "command": ["/bin/bash", str(entry)], "properties": []},
+                             self.root, tracked=set())
+        return [p for p in rec["inputs"] if p != "tools/scripts/test_planted.sh"]
+
+    def test_repo_root_reads_are_inputs_in_every_spelling(self) -> None:
+        got = self.inputs(
+            'REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"\n'
+            'SETUP_SH="$REPO_ROOT/setup.sh"\n'
+            'include("${REPO_ROOT}/tools/cmake/PlantedFetch.cmake")\n'
+            'cat "$REPO_ROOT"/tools/deps/planted.json >/dev/null\n'
+            'cat "$REPO_ROOT/tools/cmake/PlantedPatch.cmake"\n')
+        self.assertEqual(got, ["setup.sh", "tools/cmake/PlantedFetch.cmake", "tools/cmake/PlantedPatch.cmake"])
+
+    def test_script_dir_and_chained_and_git_roots_resolve(self) -> None:
+        got = self.inputs(
+            'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"\n'
+            'python3 "$SCRIPT_DIR/planted_helper.py"\n'
+            'TOP="$(cd "$SCRIPT_DIR/../.." && pwd)"\n'
+            'cat "$TOP/setup.sh"\n'
+            'root=$(git rev-parse --show-toplevel)\n'
+            'cat "$root/tools/deps/planted.json"\n')
+        self.assertEqual(got, ["setup.sh", "tools/deps/planted.json", "tools/scripts/planted_helper.py"])
+
+    def test_temp_and_rebound_variables_name_no_inputs(self) -> None:
+        # Negative control: the same relative paths under a variable that is
+        # not derived from the script's location must not be declared, or
+        # every fixture copy would read as a repository input.
+        got = self.inputs(
+            'WORK="$(mktemp -d)"\n'
+            'cat "$WORK/setup.sh" "${WORK}/tools/scripts/planted_decoy.sh" "$UNSET/core/planted/ignored.txt"\n'
+            'ROOT="$(cd "$(dirname "$0")/../.." && pwd)"\n'
+            'cat "$ROOT/setup.sh"\n'
+            'ROOT="$(mktemp -d)"\n'
+            'cat "$ROOT/tools/cmake/PlantedPatch.cmake" "$ROOT/docs/guides/planted.md"\n')
+        # Only the read made while ROOT named the checkout is an input.
+        self.assertEqual(got, ["setup.sh"])
+
+    def test_prose_docs_are_not_inputs(self) -> None:
+        got = self.inputs('R="$(cd "$(dirname "$0")/../.." && pwd)"\ncat "$R/docs/guides/planted.md"\n')
+        self.assertEqual(got, [])
+
+
 def tool_env(*, event: str | None, strict: bool) -> dict[str, str]:
     """Every case pins the event environment the script reads, so the selftest
     gives the same verdict inside a pull-request job, a merge-group job (where

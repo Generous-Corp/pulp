@@ -181,7 +181,7 @@ function(_pulp_min_os_note_linux)
   # packaging) and leave the actual verification to:
   #   tools/scripts/measure_min_os.py --elf <built .so/exe> --max <floor>
   # run over a freshly linked Pulp binary. Floors are architecture-specific:
-  # linux-x64 is portable to glibc 2.34, while the m153 linux-arm64 V8 provider
+  # linux-x64 is portable to glibc 2.34, while the m157 linux-arm64 V8 provider
   # alone measures GLIBC 2.39 / GLIBCXX 3.4.32 and Skia/Dawn remain unmeasured.
   # Never project the x64 floor onto ARM64.
   if(NOT EXISTS "${PULP_MIN_OS_JSON}")

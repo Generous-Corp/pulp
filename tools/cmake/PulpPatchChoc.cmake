@@ -88,6 +88,41 @@ function(pulp_patch_choc_v8 choc_source_dir)
         });"
         _pulp_choc_v8 "${_pulp_choc_v8}")
 
+    # v8ToChoc collects property values inside an Array::Iterate callback and
+    # converts them after it returns. Since V8 15.4 Iterate runs the callback in
+    # its own HandleScope, so those Locals dangle and the next conversion reads
+    # freed handle slots (SIGBUS in KeyAccumulator). Iterate also forbids the JS
+    # execution a getter can trigger through Get(). Walk the names by index.
+    set(_pulp_choc_v8_iterate_original
+"                using IteratorType = decltype (iterator);
+
+                propNames.ToLocalChecked()->Iterate (c, +[] (uint32_t, v8::Local<v8::Value> key, void* i)
+                {
+                    (*static_cast<IteratorType*> (i)) (key);
+                    return v8::Array::CallbackResult::kContinue;
+                },
+                std::addressof (iterator));")
+    set(_pulp_choc_v8_iterate_patched
+"                auto names = propNames.ToLocalChecked();
+
+                for (uint32_t i = 0; i < names->Length(); ++i)
+                {
+                    auto key = names->Get (c, i);
+
+                    if (! key.IsEmpty())
+                        iterator (key.ToLocalChecked());
+                }")
+    string(FIND "${_pulp_choc_v8}" "${_pulp_choc_v8_iterate_patched}" _pulp_choc_v8_iterate_done)
+    if(_pulp_choc_v8_iterate_done EQUAL -1)
+        string(FIND "${_pulp_choc_v8}" "${_pulp_choc_v8_iterate_original}" _pulp_choc_v8_iterate_at)
+        if(_pulp_choc_v8_iterate_at EQUAL -1)
+            message(FATAL_ERROR
+                "Pulp: CHOC V8 v8ToChoc property walk no longer matches the reviewed source; update or retire Pulp's Array::Iterate patch")
+        endif()
+        string(REPLACE "${_pulp_choc_v8_iterate_original}" "${_pulp_choc_v8_iterate_patched}"
+            _pulp_choc_v8 "${_pulp_choc_v8}")
+    endif()
+
     if(NOT _pulp_choc_v8 STREQUAL _pulp_choc_v8_original)
         file(WRITE "${_pulp_choc_v8_header}" "${_pulp_choc_v8}")
         message(STATUS "Pulp: applied CHOC V8 compatibility patch")

@@ -234,7 +234,7 @@ packages are installed on demand via `npm`.
 | **scheduler** | MIT | Cooperative-scheduling runtime pulled in transitively by `react-reconciler` for `@pulp/react`; npm-installed | [github.com/facebook/react](https://github.com/facebook/react) |
 | **simdjson** | Apache-2.0 | JSON parser used by fastgltf; fetched only when `PULP_ENABLE_SCENE3D=ON` | [github.com/simdjson/simdjson](https://github.com/simdjson/simdjson) |
 | **three.js** | MIT | Pinned native WebGPU runtime for demos, tests, and installed-SDK consumers; fetched or supplied through `PULP_THREEJS_RUNTIME_DIR` when `PULP_ENABLE_THREEJS_RUNTIME=ON` (the default with GPU support) | [github.com/mrdoob/three.js](https://github.com/mrdoob/three.js) |
-| **V8** | BSD-3-Clause | Optional JS engine backend, selected with `PULP_JS_ENGINE=v8` (default is QuickJS; JSC is opt-in on Apple with `PULP_JS_ENGINE=jsc`). Sealed prebuilt `libv8` (bundles ICU/zlib/Abseil internally — see NOTICE.md); fetched per-platform via `tools/scripts/fetch_v8_for_release.py`. V8 is unavailable as a Pulp iOS runtime; the m153 jitless simulator framework is retained only for provider/header provenance validation | [github.com/danielraffel/v8-builder](https://github.com/danielraffel/v8-builder) |
+| **V8** | BSD-3-Clause | Optional JS engine backend, selected with `PULP_JS_ENGINE=v8` (default is QuickJS; JSC is opt-in on Apple with `PULP_JS_ENGINE=jsc`). Sealed prebuilt `libv8` (bundles ICU/zlib/Abseil internally — see NOTICE.md); fetched per-platform via `tools/scripts/fetch_v8_for_release.py`. V8 is unavailable as a Pulp iOS runtime; the m157 jitless simulator framework is retained only for provider/header provenance validation | [github.com/danielraffel/v8-builder](https://github.com/danielraffel/v8-builder) |
 
 ### Developer-Only Tooling (not shipped)
 
@@ -403,8 +403,8 @@ copy its runtime, and add metadata to Pulp's existing DesignIR instead.
 
 - **Child-shape metadata, not a new runtime.** Inferno's `VNodeFlags` / `ChildFlags` inspired recording each node's child shape (text, single child, keyed list, unkeyed list) as metadata over DesignIR, so code generation can pick a tight path without normalizing children at run time.
 - **No silent guessing.** Those flags are only safe when compiler and runtime agree, so the plans require an unknown shape to take an explicit, reported fallback rather than a guessed flag.
-- **Measured, not assumed.** Inferno's normalization-free paths and keyed (LIS) diffing are adopted only where measurement justifies them; a general LIS reconciler is deferred because imported lists are small.
-- **Explicit keyed and unkeyed paths.** Following Inferno's separate keyed and non-keyed child patching, Pulp's DesignIR child-update planner matches unique anchors by key and, when anchors are missing or duplicated, reports `ambiguous_keys` and replaces the sibling set wholesale rather than reusing anything by position.
+- **Measured, not assumed.** Inferno's normalization-free paths and keyed (LIS) diffing are adopted only where measurement justifies them. The child-update planner keeps a shared prefix and suffix and the longest increasing run of surviving children in place and moves only the rest, after a named keyed-mutation corpus (after uibench) showed the earlier position-by-position loop moving 49 of 50 children for a single move-to-end.
+- **Explicit keyed and unkeyed paths.** Following Inferno's separate keyed and non-keyed child patching, Pulp's DesignIR child-update planner matches unique anchors by key and, when anchors are missing or duplicated, reports `ambiguous_keys` with a per-child reason (duplicate, missing, or mixed keys) and replaces the sibling set wholesale rather than reusing anything by position.
 
 Pulp contains no Inferno code and does not depend on Inferno.
 

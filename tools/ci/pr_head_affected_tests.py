@@ -25,7 +25,8 @@ with the Shipyard changed-surface families), plus these rules:
     budget is spent, and every test that did not run is listed as skipped;
   * merge-only checks (selected because the diff changes their declared
     inputs, adds or edits their registration, or by a path family) run first,
-    then the tests built from the sources the diff edits. If the budget still pushes one
+    then the Catch2 cases whose lines the diff adds or edits, then the tests
+    built from the sources the diff edits. If the budget still pushes one
     out, the step fails, because nothing else runs it before the merge group.
     An ordinary affected test the budget pushes out is deferred to the merge
     queue, which runs the full suite, and the step stays neutral.
@@ -37,8 +38,10 @@ Compiled tests are never exempted (their binary is this pull request's).
 
 Output: one `::notice title=pr-head-affected-tests::` JSON line
 (`pulp-pr-head-affected-tests/v1`) with the counts and minutes, then any
-failures. Exit 1 when a selected test failed because of this pull request or a
-selected merge-only check was skipped for budget, 0 otherwise (including when
+failures. Exit 1 when a selected test failed because of this pull request, a
+selected merge-only check was skipped for budget, a required path family
+reached by the diff selected no test, or a test such a family selected did
+not run (excluded by label or absent); 0 otherwise (including when
 nothing was selected or only ordinary affected tests were deferred), 2 when an
 input could not be read.
 """
@@ -104,6 +107,18 @@ PATH_FAMILIES = (
     ("no-editor-link-floor",
      re.compile(r"^test/fixtures/no_editor_link_floor/"),
      re.compile(r"^no-editor-plugin-link-floor-artifacts$")),
+    # The sync primitives are included by most of the tree, so an edit to one
+    # selects thousands of tests and the budget reaches their own concurrency
+    # hammers only by luck. The hammers are the one proof those edits did not
+    # break publication ordering, so they run first.
+    ("runtime-sync-hammers",
+     re.compile(r"^core/runtime/include/pulp/runtime/(triple_buffer|seqlock|spsc_queue)\.hpp$"),
+     re.compile(r"^(TripleBuffer|SeqLock|SpscQueue)\b.*\bhammer\b")),
+    # Same shape: buffer_ops.hpp reaches every processor, and its own cases
+    # (named `buffer_ops...`) are what check the helpers it declares.
+    ("audio-buffer-ops",
+     re.compile(r"^core/audio/(include/pulp/audio/buffer_ops\.hpp|src/buffer_ops\.cpp)$"),
+     re.compile(r"^buffer_ops\b")),
 )
 
 
@@ -171,6 +186,19 @@ def source_lane_contract_tests(paths: list[str], names: list[str],
     return [n for n in names if n.startswith("source-selftest-lane-")]
 
 
+# Families whose tests are registered on every platform the step runs on. One
+# of them selecting nothing means its test names drifted from its pattern (a
+# renamed case), which would silently reopen the gap it closes, so the step
+# fails. The other families name platform- or configuration-specific tests
+# that are legitimately absent from some builds.
+REQUIRED_FAMILIES = frozenset({"runtime-sync-hammers", "audio-buffer-ops"})
+
+
+def empty_required_families(families: dict[str, list[str]]) -> list[str]:
+    """Required families the diff reached that select no inventory test."""
+    return sorted(f for f, tests in families.items() if f in REQUIRED_FAMILIES and not tests)
+
+
 def family_tests(paths: list[str], names: list[str]) -> dict[str, list[str]]:
     """Family name → inventory tests it adds for these changed paths."""
     added: dict[str, list[str]] = {}
@@ -216,6 +244,66 @@ def script_input_tests(paths: list[str], root: Path = REPO_ROOT) -> list[str]:
         if any(p == i or p.startswith(i + "/") for p in paths for i in inputs):
             picked.append(name)
     return picked
+
+
+# A Catch2 case header and its name. Discovery registers each case as a ctest
+# of that name, optionally behind a TEST_PREFIX.
+_CATCH_CASE = re.compile(
+    r'\b(?:TEST_CASE|TEST_CASE_METHOD|SCENARIO|TEMPLATE_TEST_CASE|TEMPLATE_TEST_CASE_METHOD)'
+    r'\s*\((?:\s*[\w:<>]+\s*,)?\s*"((?:[^"\\]|\\.)*)"')
+_CATCH_SOURCE_EXTENSIONS = (".cpp", ".cc", ".cxx", ".mm")
+
+
+def catch_case_names(text: str) -> list[tuple[int, str]]:
+    """(1-based line, registered name) for each Catch2 case header in ``text``.
+
+    The name is the string literal with its C++ escapes undone (`\\"` reads
+    as `"`), which is the name catch_discover_tests registers.
+    """
+    return [(text.count("\n", 0, m.start()) + 1, re.sub(r"\\(.)", r"\1", m.group(1)))
+            for m in _CATCH_CASE.finditer(text)]
+
+
+def _matches_case(name: str, case: str) -> bool:
+    """A ctest name registered for Catch2 case ``case``: the bare name, the
+    name behind a TEST_PREFIX, or a TEMPLATE_TEST_CASE instantiation
+    (`case - Type`)."""
+    for candidate in (name, name.split(": ", 1)[1] if ": " in name else None):
+        if candidate is not None and (candidate == case or candidate.startswith(case + " - ")):
+            return True
+    return False
+
+
+def edited_case_tests(paths: list[str], names: dict[str, set[str]],
+                      changes: dict[str, tuple[set[int], list[str]]] | None,
+                      root: Path = REPO_ROOT) -> list[str]:
+    """Ctests for the Catch2 cases whose lines the diff adds or edits.
+
+    A test the pull request writes or rewrites is the one most likely to fail
+    on its head, but a header edit can make the projection select thousands of
+    tests, and the budget then reaches it only by luck. Each case spans from
+    its TEST_CASE line to the next one; a touched line inside that span selects
+    the ctest of that name (or one that ends with it, for a TEST_PREFIX).
+    """
+    if not changes:
+        return []
+    wanted: set[str] = set()
+    for rel in paths:
+        if not rel.startswith("test/") or not rel.endswith(_CATCH_SOURCE_EXTENSIONS):
+            continue
+        touched = changes.get(rel, (set(), []))[0]
+        if not touched:
+            continue
+        try:
+            text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        starts = catch_case_names(text)
+        for index, (line, case) in enumerate(starts):
+            end = starts[index + 1][0] if index + 1 < len(starts) else text.count("\n") + 2
+            if any(line <= t < end for t in touched):
+                wanted.add(case)
+    return sorted(n for n in names if any(_matches_case(n, case) for case in wanted))
 
 
 def own_tests(build: Path, root: Path, paths: list[str]) -> list[str]:
@@ -454,6 +542,9 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     registered = registration_tests(build, paths, root, changes)
     plan["registrations"] = len(registered)
     chosen.extend(registered)
+    edited_cases = edited_case_tests(paths, names, changes, root)
+    plan["edited_cases"] = len(edited_cases)
+    chosen.extend(edited_cases)
     if all(is_non_test_path(p) for p in paths):
         plan["reason"] = "docs, skills, workflows or planning only"
     else:
@@ -472,6 +563,9 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     if lane_tests:
         families["source-selftest-lane"] = lane_tests
     plan["families"] = {k: len(v) for k, v in families.items()}
+    plan["empty_required_families"] = empty_required_families(families)
+    plan["required_family_tests"] = sorted(
+        {t for f, ts in families.items() if f in REQUIRED_FAMILIES for t in ts})
     for tests in families.values():
         chosen.extend(tests)
     # Merge-only checks reach a pull-request head only through their declared
@@ -487,9 +581,15 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     tests = [t for t in chosen if t in names and PR_FAST_LABEL not in names[t]
              and not (t in seen or seen.add(t))]
     plan["merge_only"] = [t for t in tests if t in merge_only]
-    own_first = [t for t in tests if t in set(own) and t not in merge_only]
-    plan["tests"] = plan["merge_only"] + own_first + [
-        t for t in tests if t not in merge_only and t not in set(own)]
+    # The cases the diff itself writes come next, then the tests built from the
+    # sources it edits, then the wider projection.
+    first = set(merge_only)
+    cases_first = [t for t in tests if t in set(edited_cases) and t not in first]
+    first |= set(cases_first)
+    own_first = [t for t in tests if t in set(own) and t not in first]
+    first |= set(own_first)
+    plan["tests"] = plan["merge_only"] + cases_first + own_first + [
+        t for t in tests if t not in first]
     return plan
 
 
@@ -702,9 +802,13 @@ def main(argv: list[str] | None = None) -> int:
           f"families={plan['families']}", flush=True)
     if plan.get("rebuilt_binaries_ignored"):
         print(f"pr-head-affected-tests: {plan['rebuilt_binaries_ignored']}", flush=True)
+    for family in plan.get("empty_required_families", []):
+        print(f"::error title=pr-head-affected-tests::path family {family} matched this diff but "
+              "selected no test: its test-name pattern no longer matches the registered cases "
+              "(a renamed case?); update PATH_FAMILIES so the diff's own checks run")
     if args.dry_run:
         print(json.dumps(plan, indent=2))
-        return 0
+        return 1 if plan.get("empty_required_families") else 0
     if plan.get("selection_unknown"):
         # Keep running selections established by declared inputs, registrations,
         # and the build projection. Only the unknown portion is deferred to the
@@ -741,6 +845,11 @@ def main(argv: list[str] | None = None) -> int:
     # fails the step. An ordinary affected test is deferred to the merge queue.
     merge_only = set(plan.get("merge_only", []))
     blocking = [t for t in results["skipped"] if t in merge_only]
+    # A required family's test that ctest did not run (a label the run
+    # excludes, such as one relabelled `slow`) leaves the edit it guards
+    # unchecked just as a budget skip would.
+    required = set(plan.get("required_family_tests", []))
+    excluded_required = [t for t in results["excluded_or_absent"] if t in required]
     deferred = [t for t in results["skipped"] if t not in merge_only]
     summary = {
         "schema": SCHEMA, "mode": plan["mode"], "reason": plan["reason"],
@@ -752,6 +861,8 @@ def main(argv: list[str] | None = None) -> int:
         "deferred_to_merge_queue": len(deferred),
         "notrun": len(results["notrun"]),
         "excluded_or_absent": len(results["excluded_or_absent"]),
+        "required_family_excluded": len(excluded_required),
+        "empty_required_families": plan.get("empty_required_families", []),
         "minutes": round(results["seconds"] / 60, 2), "budget_minutes": args.budget_secs / 60,
     }
     print(f"::notice title=pr-head-affected-tests::{json.dumps(summary, sort_keys=True)}")
@@ -764,6 +875,10 @@ def main(argv: list[str] | None = None) -> int:
               f"{f' and {more} more' if more > 0 else ''}")
         print(f"::error title=pr-head-affected-tests::{len(blocking)} merge-only check(s) the "
               f"diff selected were skipped for budget: {', '.join(blocking[:10])}")
+    if excluded_required:
+        print(f"::error title=pr-head-affected-tests::{len(excluded_required)} test(s) a required "
+              f"path family selected did not run (excluded by label or absent): "
+              f"{', '.join(excluded_required[:10])}")
     if deferred:
         shown = ", ".join(deferred[:40])
         more = len(deferred) - 40
@@ -783,7 +898,8 @@ def main(argv: list[str] | None = None) -> int:
                    f"reproduce=`{reproduce}`; safe_to_auto_apply=no; "
                    f"verify=`{reproduce}` passes")
         print(f"::error title=pr-head-affected-tests::{message}")
-    return 1 if results["failed"] or blocking else 0
+    return 1 if (results["failed"] or blocking or excluded_required
+                 or plan.get("empty_required_families")) else 0
 
 
 if __name__ == "__main__":

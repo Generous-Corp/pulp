@@ -1085,6 +1085,14 @@ Pulp gates it on `range.step >= 1`). A CONTINUOUS param with a custom
    retain); `inValue == nullptr` means "use the current value".
    Guard from_string with `std::isfinite`. Test:
    `test/test_au_v2_param_display.mm`.
+3. Every string the adapter shows must parse back. All formats share
+   `format_parameter_text` / `parse_parameter_text`; a Toggle or Enum without
+   `value_labels` is shown as its number ("0", "1"), so the parser accepts that
+   number. Only a parameter with declared labels is restricted to them.
+   clap-validator's param-conversions test failed every plug-in whose Bypass
+   was an unlabeled Toggle until this held. Tests: the "toggle without labels"
+   cases in `test_au_v2_param_display.mm` and `test_vst3_param_display.cpp`,
+   and the text round trips in `test_clap_entry.cpp`.
 
 ## Verifying AU v2 tests locally needs the AudioUnitSDK
 

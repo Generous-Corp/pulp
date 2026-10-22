@@ -258,11 +258,11 @@ class StrictPinTests(unittest.TestCase):
 
     def test_mise_binary_must_be_pinned_by_digest(self) -> None:
         source = generate.SOURCE.read_text(encoding="utf-8")
-        digest = '25e38f796fff67fc5f4c44f6963d4b8ed15be82a5d9244f693cc55d40a245ee3'
+        digest = '284869e5b5f57211377f026309910bea91ef65b3a71b934295fa8bd712436dfc'
         cases = (
             (f'macos-arm64 = "{digest}"', f'macos-arm64 = "{digest[:-1]}"', "64-hex"),
             (f'macos-arm64 = "{digest}"', f'macos-arm65 = "{digest}"', "64-hex"),
-            ('path = "~/.local/opt/mise-2026.10.11/bin/mise"', 'path = "/opt/homebrew/bin/mise"', "with its version in the path"),
+            ('path = "~/.local/opt/mise-2026.10.17/bin/mise"', 'path = "/opt/homebrew/bin/mise"', "with its version in the path"),
         )
         for old, new, needle in cases:
             with self.subTest(new=new), tempfile.TemporaryDirectory() as td:
@@ -569,13 +569,14 @@ class StrictPinTests(unittest.TestCase):
             fake.write_text(
                 "#!/bin/sh\n"
                 f'if [ "$1" = --version ]; then echo "{data["mise"]["version"]} macos-arm64"; exit 0; fi\n'
-                f'echo "$1 MISE_DISABLE_UPDATE_WARNING=$MISE_DISABLE_UPDATE_WARNING" >> "{seen}"\n',
+                f'echo "$1 MISE_DISABLE_UPDATE_WARNING=$MISE_DISABLE_UPDATE_WARNING '
+                f'MISE_AUTO_INSTALL=$MISE_AUTO_INSTALL" >> "{seen}"\n',
                 encoding="utf-8")
             fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
             generate.write_mise_lock(root, data, fake)
             lines = seen.read_text(encoding="utf-8").splitlines()
             self.assertTrue(lines)  # control: the lock command ran
-            self.assertTrue(all(line == "lock MISE_DISABLE_UPDATE_WARNING=1" for line in lines), lines)
+            self.assertTrue(all(line == "lock MISE_DISABLE_UPDATE_WARNING=1 MISE_AUTO_INSTALL=0" for line in lines), lines)
 
 
 if __name__ == "__main__":

@@ -75,7 +75,23 @@ Every report has `schema: "pulp-importer-differential-report-v1"` and records
 source hash, browser provenance, source recognition, dynamic blockers, timings,
 layer scores, likely root causes with confidence, an `observability` receipt,
 and an opt-in `timing_budget` verdict,
-and an advisory promotion classification. The receipt paths are relative to
+and an advisory promotion classification. All scores are page-space: the
+observer places the panel-local native import, unmodified, at the
+authored-frame origin both captures sign (`comparison.geometry.registration`)
+inside an observer-only page node. For a panel with page around it, that node
+carries the canvas colour Chromium paints, resolved from the verified DOM
+snapshot by CSS background propagation (`comparison.page_background`); a
+colour the rule cannot resolve is left unpainted and reported `unresolved`. A
+panel that covers the whole page owns its canvas (`importer-owned`), so a
+dropped document colour shows up as a residual instead of being supplied.
+The render receipt records the placement it applied, and the lab rejects a
+receipt whose placement differs from what it requested.
+`comparison.work_counters` judges the observer's own counters from the
+digest-bound render receipt: a tree that outlives its teardown, or a paint
+mutation after the first frame that requested no repaint, makes the fixture
+ineligible. `integrity.*_snapshot_semantic_sha256` hashes each DOM snapshot
+with only its capture-local CDP frame ID removed, which is the digest to
+compare across repeated runs. The receipt paths are relative to
 each fixture output, so they can be copied under `/tmp/pulp-p0a-8458/receipts/`
 without exposing machine-local paths.
 

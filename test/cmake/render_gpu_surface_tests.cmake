@@ -823,3 +823,10 @@
     add_executable(pulp-gpu-roofline-harness
         "${PROJECT_SOURCE_DIR}/tools/gpu_roofline/gpu_roofline_harness.cpp")
     target_link_libraries(pulp-gpu-roofline-harness PRIVATE pulp::render pulp::signal)
+
+    # Multi-instance WaveNet scaling bench (tooling, not a test): per-period wall,
+    # thread CPU and GPU-busy time for N streams via per-instance or batched
+    # forwards, each stream checked against a double-precision CPU reference.
+    add_executable(pulp-gpu-wavenet-scaling-bench
+        "${PROJECT_SOURCE_DIR}/tools/gpu_roofline/gpu_wavenet_scaling_bench.cpp")
+    target_link_libraries(pulp-gpu-wavenet-scaling-bench PRIVATE pulp::render pulp::runtime)

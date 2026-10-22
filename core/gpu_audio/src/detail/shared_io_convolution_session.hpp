@@ -267,6 +267,11 @@ class SharedIoConvolutionSession {
     Config config_{};
     bool prepared_ = false;
     bool failed_ = false;
+    // Set by fence_for_offline(). Kept apart from the recovery reason, which
+    // latches first-wins. prepare() and release clear it defensively, but this
+    // session's pipeline prepares once, so recovery after an offline fence is
+    // a new session from the factory.
+    bool offline_fenced_ = false;
 };
 
 } // namespace pulp::gpu_audio::detail

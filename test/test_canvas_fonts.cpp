@@ -11,6 +11,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <functional>
 #include <string>
@@ -692,6 +693,58 @@ TEST_CASE("a missing glyph does not move the rest of the run",
     CHECK(probe_band.first <= plain_band.second);
     CHECK(probe_band.second >= plain_band.first);
 }
+// ── fillText places the alphabetic baseline at y ─────────────────────────
+//
+// SkParagraph draws a line's glyphs a whole number of units below the
+// paragraph's top, while getAlphabeticBaseline() reports the unrounded
+// ascent. Painting the top at `y - getAlphabeticBaseline()` therefore landed
+// the baseline up to half a unit away from `y`: below it for a face whose
+// ascent rounds up, above it for one that rounds down. Inter's ascent is
+// 0.96875 em, so 13px (12.59, rounds up) and 18px / 22px (17.44 / 21.31,
+// round down) cover both directions.
+//
+// Skia snaps an axis-aligned glyph baseline to a whole pixel, so the probe
+// uses fractional y: at 40.25 a correct baseline snaps to 40 and one pushed
+// down by ~0.4 snaps to 41; at 40.75 a correct baseline snaps to 41 and one
+// pulled up by ~0.4 snaps to 40. 'H' has flat stems ending on the baseline,
+// so the stems must fill row round(y) - 1 and leave row round(y) empty.
+TEST_CASE("fill_text places the alphabetic baseline at y", "[canvas][skia][text][baseline]") {
+    constexpr int kW = 96;
+    constexpr int kH = 64;
+    SkImageInfo info =
+        SkImageInfo::Make(kW, kH, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    for (const float size : {13.0f, 18.0f, 22.0f}) {
+        for (const float y : {40.25f, 40.75f}) {
+            auto surface = SkSurfaces::Raster(info);
+            REQUIRE(surface != nullptr);
+            auto* sk_canvas = surface->getCanvas();
+            sk_canvas->clear(SK_ColorWHITE);
+            {
+                SkiaCanvas canvas(sk_canvas);
+                canvas.set_font_full("Inter", size, 400, /*slant=*/0,
+                                     /*letter_spacing=*/0.0f);
+                canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+                canvas.fill_text("H", 8.0f, y);
+            }
+            SkPixmap pm;
+            REQUIRE(surface->peekPixels(&pm));
+            const auto darkness = [&](int row) {
+                int sum = 0;
+                for (int x = 0; x < kW; ++x)
+                    sum += 255 - SkColorGetR(pm.getColor(x, row));
+                return sum;
+            };
+            const int edge = static_cast<int>(std::lround(y));
+            const int stem = darkness(edge - 3);
+            INFO("size " << size << " y " << y << " row edge-3 " << stem << " row edge-1 "
+                         << darkness(edge - 1) << " row edge " << darkness(edge));
+            REQUIRE(stem > 0);
+            CHECK(darkness(edge - 1) >= stem * 9 / 10);
+            CHECK(darkness(edge) <= stem / 20);
+        }
+    }
+}
+
 // ── Variable-font weight instancing + SkParagraph bridge ────────────────────
 //
 // Root cause fixed here: imported designs register fonts via register_font,

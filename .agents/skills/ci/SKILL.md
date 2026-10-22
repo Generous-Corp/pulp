@@ -4453,6 +4453,17 @@ Need Windows on a specific branch before the nightly:
 ghapp workflow run build.yml --ref <branch>
 ```
 
+A `build.yml` dispatch always includes the macOS leg, so it also spends a macOS
+gate VM. When only Windows matters, dispatch the nightly with `windows_only=true`
+instead. To prove a self-hosted Windows runner (the Mac Pro Windows x64 slot), also
+pass `windows_runner_selector_json` with that slot's labels. The schedule has no
+inputs, so the nightly stays on `windows-latest`. A run with either input set skips
+`tracking-issues`, so a red result on a new runner never files or closes the main
+tracking issue. Read where the job actually ran from the job's `runner_name`.
+The selector passes through `tools/scripts/windows_runner_selector.py` first, which
+refuses macOS, Linux, gate-pool and preamble labels. A dispatch with either input set
+runs in its own concurrency group, so it never displaces a pending nightly.
+
 **Before "fixing" this by putting Windows back on merge_group**, note the trade was
 explicit: up to ~24 h of latency on a Windows regression, bought with merge-queue
 capacity. Revisit only if Windows parity becomes an active workstream rather than a
@@ -8878,7 +8889,7 @@ If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them
 
 `ci/visual-harness.Dockerfile` and `.github/workflows/visual-harness.yml`
 provide the deterministic visual-harness smoke environment. The Docker image
-downloads the pinned Skia `chrome/m153` Linux release asset (from the
+downloads the pinned Skia `chrome/m157` Linux release asset (from the
 `danielraffel/skia-builder` fork — adds iOS/visionOS/mac-x86_64 slices the
 upstream `olilarkin/skia-builder` omits), verifies its SHA-256, installs the
 bundled Pulp fonts into fontconfig, and installs `skia-python==144.0.post2`
@@ -8928,6 +8939,14 @@ exported symbols. After the pin lands, each active Mac build host
 must populate its own immutable SHA-addressed generation through the fetcher
 and prove the second fetch is a no-download hit; do not rsync one runner's
 checkout cache to another.
+
+The required `macos` job builds QuickJS only, so V8-specific behaviour (choc's
+V8 value bridge, the sealed provider's API contracts) is exercised only by the
+darwin-arm64 leg of `release-path-pr-gate.yml`: the provider-identity and cube
+capture step, then "Run [js_engine] suite against the sealed V8", which builds
+just `pulp-test-group-script-view` with `PULP_JS_ENGINE=v8` and fails if the V8
+identity case skipped. That leg is advisory, not a required check, so read it
+on any V8 or choc change before landing.
 
 The `macOS local smoke` job resolves `runs-on` from
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` first and falls back to hosted `macos-15` only
@@ -9908,7 +9927,7 @@ version files and changelog are correctly edited. Let `shipyard pr` create
 the bump commit when possible; if you need to repair it manually, use the
 canonical subject `chore: bump versions`.
 
-**Release-workflow VST3 pin:** `sign-and-release.yml` must clone the same Steinberg tag pinned everywhere else in the repo: `v3.8.0_build_66`. The shorthand `v3.8.0` does not exist upstream and will make tag-time macOS release jobs fail before configure/build even start.
+**Release-workflow VST3 pin:** `sign-and-release.yml` must clone the same Steinberg tag pinned everywhere else in the repo: `v3.8.1_build_84`. The shorthand `v3.8.0` does not exist upstream and will make tag-time macOS release jobs fail before configure/build even start.
 
 **Release-workflow ctest must skip the `validation` label (#720):** the `Test` step in `sign-and-release.yml` MUST pass `-LE validation` to ctest. Without it, the suite includes the `auval-Pulp*` tests that copy a fresh `.component` to `~/Library/Audio/Plug-Ins/Components/` and immediately call `auval`. Hosted GitHub macOS runners' `AudioComponentRegistrar` does not pick up the new bundle reliably, so auval returns `Cannot get Component's Name strings / Error -50`, the Test step exits non-zero, and the entire sign / notarize / publish pipeline silently fails. This was the failure mode of the 30+ consecutive sign-and-release runs preceding v0.41.0. The validation gates are owned by `validate.yml` on PR; do not duplicate them into the release workflow. `tools/scripts/test_release_workflow_test_step.py` (wired into `workflow-lint.yml`) is the regression test that prevents reintroduction.
 
