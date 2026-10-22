@@ -2685,6 +2685,7 @@
   "pulp-test-image-view-fill-gpu",
   "pulp-test-import-design-tool",
   "pulp-test-import-object-coverage",
+  "pulp-test-inline-image-cache-gpu",
   "pulp-test-inspector-audit",
   "pulp-test-inspector-domain-helpers",
   "pulp-test-inspector-session",
