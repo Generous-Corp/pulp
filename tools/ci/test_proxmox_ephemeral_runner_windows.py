@@ -20,10 +20,11 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-CI = ROOT / "tools" / "ci"
-SCRIPT = CI / "proxmox-ephemeral-runner-windows.sh"
-SERVICE = CI / "pulp-windows-ephemeral-pool@.service"
-HEALTH = CI / "proxmox-host-health.sh"
+# Repository-relative literals, so script_test_inputs.py records them as this
+# test's inputs and a change to any of them selects the test.
+SCRIPT = ROOT / "tools/ci/proxmox-ephemeral-runner-windows.sh"
+SERVICE = ROOT / "tools/ci/pulp-windows-ephemeral-pool@.service"
+HEALTH = ROOT / "tools/ci/proxmox-host-health.sh"
 GOLDEN = "ci-runner-golden-20990101"
 JIT_SECRET = "JITCONFIG-SECRET-VALUE"
 
