@@ -4,13 +4,15 @@
 
 #include <pulp/gpu_audio/detail/gpu_ola.hpp>
 
+#include "detail/gpu_convolver_test_access.hpp"
 #include "detail/gpu_convolver_trial_config.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/realtime_gpu_health_mirror.hpp"
+#include "detail/shared_io_convolution_session.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
 #include "detail/dawn_shared_io_convolution_session.hpp"
-#include "detail/shared_io_convolution_session.hpp"
 #include <pulp/signal/fft.hpp>
 #endif
 
@@ -54,6 +56,8 @@ struct GpuConvolver::SharedIoState {
     std::vector<float> callback_input;
     std::vector<float> callback_output;
     std::vector<float> normalized_ir_spectrum;
+    // Latest serialized health sample, readable from host/UI threads.
+    detail::RealtimeGpuHealthMirror health;
 #endif
 };
 
@@ -650,6 +654,166 @@ detail::SharedIoProviderIdentity GpuConvolver::provider_identity_for_diagnostics
         return shared_io_->session->provider_identity();
 #endif
     return {};
+}
+
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+namespace {
+GpuAudioRecoveryReason public_recovery_reason(detail::SharedIoRecoveryReason reason) noexcept {
+    switch (reason) {
+    case detail::SharedIoRecoveryReason::None:
+        return GpuAudioRecoveryReason::None;
+    case detail::SharedIoRecoveryReason::SequenceGap:
+        return GpuAudioRecoveryReason::SequenceGap;
+    case detail::SharedIoRecoveryReason::InputSaturated:
+        return GpuAudioRecoveryReason::InputSaturated;
+    case detail::SharedIoRecoveryReason::ProviderFailure:
+        return GpuAudioRecoveryReason::ProviderFailure;
+    case detail::SharedIoRecoveryReason::ProviderLost:
+        return GpuAudioRecoveryReason::ProviderLost;
+    case detail::SharedIoRecoveryReason::OfflineFence:
+        return GpuAudioRecoveryReason::OfflineFence;
+    case detail::SharedIoRecoveryReason::InvalidCallback:
+        return GpuAudioRecoveryReason::InvalidCallback;
+    case detail::SharedIoRecoveryReason::ProviderUnresponsive:
+        return GpuAudioRecoveryReason::ProviderUnresponsive;
+    }
+    return GpuAudioRecoveryReason::None;
+}
+} // namespace
+#endif
+
+bool GpuConvolver::realtime_shared_io_health(const void* self,
+                                             detail::RealtimeGpuHealth& out) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    const auto* convolver = static_cast<const GpuConvolver*>(self);
+    if (convolver == nullptr || !convolver->shared_io_ || !convolver->shared_io_->session)
+        return false;
+    const auto& session = *convolver->shared_io_->session;
+    detail::RealtimeGpuHealth health;
+    health.recovery_reason = public_recovery_reason(session.recovery_reason());
+    health.recovery_sequence = session.recovery_sequence();
+    health.epoch = session.epoch();
+    health.delivery_epoch_active = session.delivery_epoch() != 0;
+    health.device_lost = session.provider_device_lost();
+    health.fenced = !session.prepared() || session.fenced() || !health.delivery_epoch_active;
+    (void)convolver->shared_io_->health.publish(health);
+    out = health;
+    return true;
+#else
+    (void)self;
+    (void)out;
+    return false;
+#endif
+}
+
+GpuAudioRecoveryReason GpuConvolver::staged_recovery_reason() const noexcept {
+    return gpu_ != nullptr && gpu_->device_lost() ? GpuAudioRecoveryReason::ProviderLost
+                                                  : GpuAudioRecoveryReason::None;
+}
+
+GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
+    GpuAudioStatus status;
+    if (!prepared_) {
+        status.provider_state = GpuAudioProviderState::Uninitialized;
+        return status;
+    }
+    status.requested_engine =
+        provider_policy_ == ProviderPolicy::Auto ? GpuAudioEngine::Unknown : GpuAudioEngine::Gpu;
+    status.fallback_policy = MissPolicy::CpuFallback;
+    status.sample_rate = sample_rate_;
+    status.block_size = block_;
+    status.latency_samples = latency_blocks_ * block_;
+    status.fallback_available = cpu_fallback_prepared();
+    status.diagnostics_available = true;
+
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (has_realtime_shared_io()) {
+        const auto telemetry = shared_io_->session->trace_telemetry();
+        status.provider = GpuAudioProvider::Dawn;
+        status.selected_engine = GpuAudioEngine::Gpu;
+        status.prepared_lead_blocks = latency_blocks_;
+        status.produced_blocks = telemetry.delivered_blocks;
+        status.missed_blocks = telemetry.deadline_misses;
+        status.fallback_blocks = telemetry.fallback_blocks;
+        status.resynced_blocks = telemetry.resync_drops;
+        status.input_dropped_frames = telemetry.input_drops;
+        detail::RealtimeGpuHealth health;
+        if (shared_io_->health.read(health)) {
+            status.provider_state = detail::provider_state_for_health(health);
+            status.recovery_reason = health.recovery_reason;
+            status.recovery_sequence = health.recovery_sequence;
+            status.epoch = health.epoch;
+            status.delivery_epoch_active = health.delivery_epoch_active;
+            for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
+                status.terminal_counts[i] = health.terminal_counts[i];
+        } else {
+            // No serialized sample yet (or none stable): the provider is
+            // authenticated but its delivery state is unverified.
+            status.provider_state = GpuAudioProviderState::Degraded;
+        }
+        return status;
+    }
+#endif
+
+    // Staged path. A live GpuCompute device does not identify the provider or
+    // prove which engine produced a given block, so both stay Unknown; with
+    // no device the worker runs the exact CPU convolution.
+    status.provider = GpuAudioProvider::Unknown;
+    status.selected_engine = gpu_ != nullptr ? GpuAudioEngine::Unknown : GpuAudioEngine::Cpu;
+    status.recovery_reason = staged_recovery_reason();
+    status.provider_state = status.recovery_reason == GpuAudioRecoveryReason::ProviderLost
+                                ? GpuAudioProviderState::Unavailable
+                                : GpuAudioProviderState::Degraded;
+    return status;
+}
+
+render::GpuCompute*
+detail::GpuConvolverTestAccess::staged_compute(GpuConvolver& convolver) noexcept {
+    return convolver.gpu_.get();
+}
+
+void detail::GpuConvolverTestAccess::install_staged_compute(
+    GpuConvolver& convolver, std::unique_ptr<render::GpuCompute> compute) noexcept {
+    convolver.gpu_ = std::move(compute);
+}
+
+bool detail::GpuConvolverTestAccess::install_shared_io_session(
+    GpuConvolver& convolver, std::unique_ptr<SharedIoConvolutionSession> session) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (!convolver.prepared_ || !session || !session->prepared())
+        return false;
+    try {
+        auto state = std::make_unique<GpuConvolver::SharedIoState>();
+        const auto samples = static_cast<std::size_t>(convolver.channels_) * convolver.block_;
+        state->callback_input.assign(samples, 0.0f);
+        state->callback_output.assign(samples, 0.0f);
+        state->session = std::move(session);
+        convolver.gpu_.reset();
+        convolver.shared_io_ = std::move(state);
+        return true;
+    } catch (...) {
+        return false;
+    }
+#else
+    (void)convolver;
+    (void)session;
+    return false;
+#endif
+}
+
+GpuAudioRecoveryReason GpuConvolver::recovery_reason() const noexcept {
+    return status_snapshot().recovery_reason;
+}
+
+bool GpuConvolver::fenced() const noexcept {
+    const auto status = status_snapshot();
+    if (status.provider_state == GpuAudioProviderState::Uninitialized)
+        return true;
+    // Only a sampled, unfenced shared session is Ready; anything else keeps
+    // callbacks on the CPU fallback.
+    if (has_realtime_shared_io())
+        return status.provider_state != GpuAudioProviderState::Ready;
+    return status.recovery_reason != GpuAudioRecoveryReason::None;
 }
 
 void GpuConvolver::process_block(const audio::BufferView<const float>& input,

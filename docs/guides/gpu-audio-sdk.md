@@ -586,6 +586,40 @@ aggregate totals. Do not race preparation or destruction with snapshot readers.
 These aggregate counters complement the per-block tracing identities; they do
 not replace terminal-disposition or deadline analysis.
 
+### Read provider health after a fence
+
+`GpuAudioTransport::status_snapshot()` folds the hosted node's health into
+`provider_state`. A node whose GPU delivery is fenced reports `Degraded` with the
+first latched `recovery_reason` and `recovery_sequence`, for example
+`InputSaturated`, `ProviderFailure`, `OfflineFence` or `InvalidCallback`. While it
+is `Degraded`, the callback continues on the prepared CPU fallback, or emits
+silence for a node that declared no fallback. A lost provider (`ProviderLost`, or
+`ProviderUnresponsive`) is `Unavailable`, because nothing in the current
+preparation can bring it back. A node that also latched an earlier cause still
+reports `Unavailable` and keeps the first cause. `epoch`,
+`delivery_epoch_active` and `terminal_counts` come from the node when it
+supplies them. Today the convolver's shared path supplies the epoch, and no
+node yet supplies per-disposition terminal counts.
+
+The read is allocation-free and safe from a UI thread. For `GpuWaveNetRealtimeNode`
+and the shared `GpuConvolver` path, the transport worker samples node health
+after every service step, and after `prepare()` and the offline fence. Each
+sample is republished as one coherent copy, so a snapshot can trail the node by
+up to one worker pump but never mixes two samples. If no stable copy is
+available, the status is never reported as `Ready`. Staged nodes are asked for
+their own `GpuAudioNode::status_snapshot()`. The base default carries no health,
+so the transport's staged `Degraded` stands.
+
+The convolver family reports the same status directly. `GpuConvolver`,
+`GpuMultiConvolver` and `GpuConvolutionReverb` each gain `status_snapshot()`,
+`recovery_reason()` and `fenced()`. A staged convolver reports `provider` and
+`selected_engine` as `Unknown`, because a live `GpuCompute` device identifies
+neither. Without a device, the engine is reported as `Cpu`. A lost staged device
+is `Unavailable` with `ProviderLost`. `GpuMultiConvolver` declares
+`fallback_policy == Silence` and `fallback_available == false`, so a lost device
+explains silent blocks. `GpuConvolutionReverb::status_snapshot()` returns the
+least healthy lane, and `report().lanes[i].status` carries each lane.
+
 ### Keep host controls separate from callback execution
 
 Musical parameters retain the plugin's existing parameter IDs and automation

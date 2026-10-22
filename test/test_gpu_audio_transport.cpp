@@ -6,12 +6,14 @@
 
 #include "detail/gpu_audio_transport_trial_observer.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <initializer_list>
 #include <thread>
 #include <vector>
 
@@ -520,7 +522,18 @@ class RealtimeHookNode : public GpuAudioNode {
                 .service = &RealtimeHookNode::service_realtime,
                 .fence = &RealtimeHookNode::fence_realtime,
                 .delivered = &RealtimeHookNode::delivered_realtime,
-                .next_sequence = &RealtimeHookNode::get_next_sequence};
+                .next_sequence = &RealtimeHookNode::get_next_sequence,
+                .health = expose_health ? &RealtimeHookNode::health_realtime : nullptr};
+    }
+
+    // Private test hook: latch a recovery cause as the node's worker would.
+    void inject_recovery(GpuAudioRecoveryReason reason, std::uint64_t sequence) noexcept {
+        health.fenced = true;
+        health.delivery_epoch_active = false;
+        if (health.recovery_reason == GpuAudioRecoveryReason::None) {
+            health.recovery_reason = reason;
+            health.recovery_sequence = sequence;
+        }
     }
 
     std::uint64_t last_sequence = 0;
@@ -548,8 +561,27 @@ class RealtimeHookNode : public GpuAudioNode {
     bool callback_shape_valid = true;
     const float* external_output_sample = nullptr;
     bool external_output_silent_on_rejection = true;
+    bool expose_health = false;
+    bool claims_provider = false;
+    bool health_read_ok = true;
+    std::uint32_t health_calls = 0;
+    detail::RealtimeGpuHealth health = [] {
+        detail::RealtimeGpuHealth initial;
+        initial.epoch = 1;
+        initial.delivery_epoch_active = true;
+        return initial;
+    }();
 
   private:
+    static bool health_realtime(const void* self, detail::RealtimeGpuHealth& out) noexcept {
+        auto* node = const_cast<RealtimeHookNode*>(static_cast<const RealtimeHookNode*>(self));
+        ++node->health_calls;
+        if (!node->health_read_ok)
+            return false;
+        out = node->health;
+        return true;
+    }
+
     static std::uint8_t process_realtime(void* self, const BufferView<const float>& input,
                                          BufferView<float>& output, std::uint32_t n,
                                          std::uint64_t sequence, bool input_valid,
@@ -647,9 +679,12 @@ bool requires_realtime_gpu_path(GpuAudioNode*) noexcept {
     return false;
 }
 
-GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept {
-    // The test hook deliberately has no authenticated provider identity.
-    return GpuAudioProvider::Unknown;
+GpuAudioProvider realtime_gpu_provider(GpuAudioNode* node) noexcept {
+    // The test hook has no authenticated provider identity unless a case
+    // explicitly stands in for one to exercise the Ready baseline.
+    auto* hook = dynamic_cast<test_detail::RealtimeHookNode*>(node);
+    return hook != nullptr && hook->claims_provider ? GpuAudioProvider::Dawn
+                                                    : GpuAudioProvider::Unknown;
 }
 
 TEST_CASE("GpuAudioTransport capability report is an honest staged snapshot",
@@ -1678,4 +1713,305 @@ TEST_CASE("GpuAudioTransport delivery snapshot supports concurrent diagnostic re
     CHECK(monotonic.load());
     CHECK(t.delivery_snapshot().gpu_blocks == 10000);
     CHECK(delivery_total(t.delivery_snapshot()) == 10000);
+}
+
+namespace {
+
+constexpr std::size_t slot(GpuAudioTerminalDisposition disposition) noexcept {
+    return static_cast<std::size_t>(disposition);
+}
+
+struct HealthHarness {
+    explicit HealthHarness(bool claims_provider = true, bool expose_health = true)
+        : node(1, 32, MissPolicy::CpuFallback), input(1, 32), output(1, 32) {
+        node.claims_provider = claims_provider;
+        node.expose_health = expose_health;
+        REQUIRE(node.prepare());
+        REQUIRE(transport.prepare(&node, {8}));
+        input.fill(0.25f);
+    }
+    void callback() {
+        auto in = input.cview();
+        auto out = output.view();
+        transport.process(in, out, 32);
+    }
+    RealtimeHookNode node;
+    GpuAudioTransport transport;
+    Block input;
+    Block output;
+};
+
+} // namespace
+
+TEST_CASE("GpuAudioTransport status reports a lost provider as Unavailable after a fence",
+          "[gpu_audio][transport][status][health]") {
+    HealthHarness h;
+
+    // Positive control: the healthy authenticated stand-in is Ready, and the
+    // health sampled at prepare() is already visible.
+    auto status = h.transport.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(status.recovery_sequence == UINT64_MAX);
+    CHECK(status.epoch == 1);
+    CHECK(status.delivery_epoch_active);
+
+    h.node.health.terminal_counts[slot(GpuAudioTerminalDisposition::GpuDelivered)] = 5;
+    h.callback();
+    h.transport.pump();
+    status = h.transport.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.terminal_counts[slot(GpuAudioTerminalDisposition::GpuDelivered)] == 5);
+
+    h.node.inject_recovery(GpuAudioRecoveryReason::ProviderLost, 7);
+    h.node.health.terminal_counts[slot(GpuAudioTerminalDisposition::DeviceLost)] = 1;
+    // The worker samples health after its service step; until then the
+    // snapshot is the previous coherent copy, never a half-applied one.
+    CHECK(h.transport.status_snapshot().provider_state == GpuAudioProviderState::Ready);
+    h.transport.pump();
+
+    status = h.transport.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(status.recovery_sequence == 7);
+    CHECK(status.epoch == 1);
+    CHECK_FALSE(status.delivery_epoch_active);
+    CHECK(status.terminal_counts[slot(GpuAudioTerminalDisposition::DeviceLost)] == 1);
+    // The provider identity is unchanged; the state says it cannot deliver.
+    CHECK(status.provider == GpuAudioProvider::Dawn);
+    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
+
+    h.transport.release();
+    status = h.transport.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+}
+
+TEST_CASE("GpuAudioTransport status maps each recovery cause to Degraded or Unavailable",
+          "[gpu_audio][transport][status][health]") {
+    struct Case {
+        GpuAudioRecoveryReason reason;
+        bool device_lost;
+        GpuAudioProviderState expected;
+    };
+    const std::array<Case, 9> cases{{
+        {GpuAudioRecoveryReason::SequenceGap, false, GpuAudioProviderState::Degraded},
+        {GpuAudioRecoveryReason::InputSaturated, false, GpuAudioProviderState::Degraded},
+        {GpuAudioRecoveryReason::ProviderFailure, false, GpuAudioProviderState::Degraded},
+        {GpuAudioRecoveryReason::OfflineFence, false, GpuAudioProviderState::Degraded},
+        {GpuAudioRecoveryReason::InvalidCallback, false, GpuAudioProviderState::Degraded},
+        {GpuAudioRecoveryReason::ProviderLost, false, GpuAudioProviderState::Unavailable},
+        {GpuAudioRecoveryReason::ProviderUnresponsive, false, GpuAudioProviderState::Unavailable},
+        // A loss observed after an earlier latched cause still makes the
+        // provider unavailable; the first cause is preserved.
+        {GpuAudioRecoveryReason::ProviderFailure, true, GpuAudioProviderState::Unavailable},
+        {GpuAudioRecoveryReason::None, true, GpuAudioProviderState::Unavailable},
+    }};
+    for (const auto& c : cases) {
+        HealthHarness h;
+        if (c.reason != GpuAudioRecoveryReason::None)
+            h.node.inject_recovery(c.reason, 11);
+        h.node.health.device_lost = c.device_lost;
+        h.transport.pump();
+        const auto status = h.transport.status_snapshot();
+        INFO("reason=" << static_cast<int>(c.reason) << " device_lost=" << c.device_lost);
+        CHECK(status.provider_state == c.expected);
+        CHECK(status.recovery_reason == c.reason);
+    }
+
+    // A fenced node with no latched cause (for example between epochs) is
+    // never reported Ready.
+    HealthHarness h;
+    h.node.health.fenced = true;
+    h.transport.pump();
+    CHECK(h.transport.status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+}
+
+TEST_CASE("GpuAudioTransport status without a node health hook cannot see a fence",
+          "[gpu_audio][transport][status][health]") {
+    // Planted negative: the same fenced node, hosted without its health hook,
+    // is indistinguishable from a healthy one. The health read is what makes
+    // the status truthful.
+    HealthHarness h(true, false);
+    h.node.inject_recovery(GpuAudioRecoveryReason::ProviderLost, 3);
+    h.transport.pump();
+    const auto status = h.transport.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+    CHECK(h.node.health_calls == 0);
+}
+
+TEST_CASE("GpuAudioTransport status never reports Ready without a health sample",
+          "[gpu_audio][transport][status][health]") {
+    RealtimeHookNode node(1, 32, MissPolicy::CpuFallback);
+    node.claims_provider = true;
+    node.expose_health = true;
+    node.health_read_ok = false;
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {8}));
+    t.pump();
+    CHECK(node.health_calls >= 2);
+    const auto status = t.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+}
+
+TEST_CASE("GpuAudioTransport status reflects the offline fence without a worker pump",
+          "[gpu_audio][transport][status][health]") {
+    HealthHarness h;
+    // The test node's fence latches OfflineFence the way a stamped bridge does.
+    h.node.fence_result = true;
+    auto in = h.input.cview();
+    auto out = h.output.view();
+    const auto calls_before = h.node.health_calls;
+    h.node.inject_recovery(GpuAudioRecoveryReason::OfflineFence, 0);
+    h.transport.process_offline(in, out, 32);
+    CHECK(h.node.fence_calls == 1);
+    CHECK(h.node.health_calls == calls_before + 1);
+    const auto status = h.transport.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::OfflineFence);
+}
+
+TEST_CASE("GpuAudioTransport health sampling and status reads do not allocate",
+          "[gpu_audio][transport][status][health][rt]") {
+    HealthHarness h;
+    h.node.inject_recovery(GpuAudioRecoveryReason::ProviderLost, 9);
+    std::size_t allocations = 0;
+    GpuAudioStatus status;
+    {
+        pulp::test::RtAllocationProbe probe;
+        h.callback();
+        h.transport.pump();
+        status = h.transport.status_snapshot();
+        allocations = probe.allocation_count();
+    }
+    CHECK(allocations == 0);
+    CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
+
+    // Positive control: the probe sees an allocation in the same scope shape.
+    {
+        pulp::test::RtAllocationProbe probe;
+        // The volatile store keeps the compiler from eliding the allocation.
+        static std::uint64_t* volatile sink = nullptr;
+        sink = new std::uint64_t(1);
+        delete sink;
+        CHECK(probe.saw_allocation());
+    }
+}
+
+TEST_CASE("GpuAudioTransport status reads stay coherent while the worker republishes health",
+          "[gpu_audio][transport][status][health][concurrency]") {
+    HealthHarness h;
+    std::atomic<bool> done{false};
+    std::atomic<std::uint64_t> torn{0};
+    std::atomic<std::uint64_t> reads{0};
+    std::thread reader([&] {
+        while (!done.load(std::memory_order_acquire)) {
+            const auto status = h.transport.status_snapshot();
+            // Every published sample keeps epoch, sequence and the terminal
+            // count equal. Any mix of two samples breaks that invariant.
+            const auto lost = status.terminal_counts[slot(GpuAudioTerminalDisposition::DeviceLost)];
+            if (status.recovery_sequence != UINT64_MAX &&
+                (status.epoch != status.recovery_sequence || lost != status.recovery_sequence))
+                torn.fetch_add(1, std::memory_order_relaxed);
+            reads.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+    for (std::uint64_t i = 1; i <= 20000; ++i) {
+        h.node.health.recovery_reason = (i & 1U) != 0U ? GpuAudioRecoveryReason::ProviderLost
+                                                       : GpuAudioRecoveryReason::SequenceGap;
+        h.node.health.recovery_sequence = i;
+        h.node.health.epoch = i;
+        h.node.health.terminal_counts[slot(GpuAudioTerminalDisposition::DeviceLost)] = i;
+        h.transport.pump();
+    }
+    while (reads.load(std::memory_order_relaxed) < 1000)
+        std::this_thread::yield();
+    done.store(true, std::memory_order_release);
+    reader.join();
+    CHECK(torn.load() == 0);
+    const auto status = h.transport.status_snapshot();
+    CHECK(status.epoch == 20000);
+    CHECK(status.recovery_sequence == 20000);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::SequenceGap);
+}
+
+namespace {
+
+class StatusReportingNode final : public GpuAudioNode {
+  public:
+    GpuAudioNodeDescriptor descriptor() const override {
+        GpuAudioNodeDescriptor d;
+        d.name = "status-reporting";
+        d.input_channels = 1;
+        d.output_channels = 1;
+        d.block_size = 32;
+        d.sample_rate = 48000;
+        d.latency_blocks = 2;
+        return d;
+    }
+    bool prepare() override {
+        return true;
+    }
+    void process_block(const BufferView<const float>&, BufferView<float>& out, uint32_t) override {
+        out.clear();
+    }
+    GpuAudioStatus status_snapshot() const noexcept override {
+        return reported;
+    }
+    GpuAudioStatus reported;
+};
+
+} // namespace
+
+TEST_CASE("GpuAudioTransport status folds in a staged node's own status",
+          "[gpu_audio][transport][status][health]") {
+    StatusReportingNode node;
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {8}));
+
+    // Base default (Uninitialized) carries no health: the staged status holds.
+    auto status = t.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+
+    node.reported.provider_state = GpuAudioProviderState::Unavailable;
+    node.reported.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
+    node.reported.recovery_sequence = 4;
+    status = t.status_snapshot();
+    CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderLost);
+    CHECK(status.recovery_sequence == 4);
+
+    // A node's own Ready never upgrades the unauthenticated staged path.
+    node.reported = {};
+    node.reported.provider_state = GpuAudioProviderState::Ready;
+    CHECK(t.status_snapshot().provider_state == GpuAudioProviderState::Degraded);
+}
+
+TEST_CASE("Least-healthy lane selection prefers the worse state, then a latched cause",
+          "[gpu_audio][transport][status][health]") {
+    GpuAudioStatus ready;
+    ready.provider_state = GpuAudioProviderState::Ready;
+    GpuAudioStatus degraded;
+    degraded.provider_state = GpuAudioProviderState::Degraded;
+    GpuAudioStatus degraded_gap = degraded;
+    degraded_gap.recovery_reason = GpuAudioRecoveryReason::SequenceGap;
+    GpuAudioStatus lost;
+    lost.provider_state = GpuAudioProviderState::Unavailable;
+    lost.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
+
+    const auto pick = [](std::initializer_list<const GpuAudioStatus*> lanes) {
+        return detail::least_healthy_status(lanes.begin(), lanes.size());
+    };
+    CHECK(pick({}) == nullptr);
+    CHECK(pick({nullptr, &ready}) == &ready);
+    CHECK(pick({&ready, &lost}) == &lost);
+    CHECK(pick({&lost, &degraded_gap}) == &lost);
+    CHECK(pick({&degraded, &degraded_gap}) == &degraded_gap);
+    // Ties keep the first lane.
+    GpuAudioStatus degraded_too = degraded;
+    CHECK(pick({&degraded, &degraded_too}) == &degraded);
 }

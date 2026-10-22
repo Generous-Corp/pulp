@@ -138,4 +138,20 @@ TEST_CASE("GPU convolution valid configuration fails closed when the shared prov
     CHECK_FALSE(route.report().authenticated_shared_provider);
 }
 
+TEST_CASE("GPU convolution route status is Uninitialized and fenced until prepared",
+          "[gpu_audio][convolution][status]") {
+    GpuConvolutionReverb route(valid_config());
+    if (route.prepare())
+        SKIP("authenticated shared provider present; covered by the GPU probe");
+    const auto status = route.status_snapshot();
+    CHECK(status.schema_version == pulp::gpu_audio::GpuAudioStatus::kSchemaVersion);
+    CHECK(status.provider_state == pulp::gpu_audio::GpuAudioProviderState::Uninitialized);
+    CHECK(route.recovery_reason() == pulp::gpu_audio::GpuAudioRecoveryReason::None);
+    CHECK(route.fenced());
+    for (const auto& lane : route.report().lanes) {
+        CHECK(lane.status.schema_version == pulp::gpu_audio::GpuAudioStatus::kSchemaVersion);
+        CHECK(lane.status.provider_state == pulp::gpu_audio::GpuAudioProviderState::Uninitialized);
+    }
+}
+
 } // namespace

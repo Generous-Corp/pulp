@@ -866,7 +866,7 @@ if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
         COMPILE_DEFINITIONS PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
 endif()
 pulp_add_test_suite(pulp-test-gpu-convolver GROUP pulp-test-group-core-gpu-audio-private
-    SOURCES test_gpu_convolver.cpp
+    SOURCES test_gpu_convolver.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
     ${_pulp_gpu_convolver_defs}
