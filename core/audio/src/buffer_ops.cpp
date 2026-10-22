@@ -1,5 +1,7 @@
 #include <pulp/audio/buffer_ops.hpp>
 
+#include "peak_rms_kernels.hpp"
+
 #include <pulp/runtime/simd.hpp>
 
 #include <algorithm>
@@ -119,7 +121,9 @@ PeakRms finish_peak_rms(float* peak, float* sum, std::size_t n) noexcept {
 
 } // namespace
 
-PeakRms measure_peak_rms(std::span<const float> samples) noexcept {
+namespace detail {
+
+PeakRms measure_peak_rms_portable(std::span<const float> samples) noexcept {
     const std::size_t n = samples.size();
     if (n == 0)
         return {};
@@ -134,8 +138,45 @@ PeakRms measure_peak_rms(std::span<const float> samples) noexcept {
     float sum[L] = {};
     std::size_t i = 0;
 
+    // std::fabs and a compare-select per lane; the vector kernel performs the
+    // same operations on the same lanes in registers.
+    for (; i + L <= n; i += L) {
+        for (std::size_t k = 0; k < L; ++k) {
+            const float v = x[i + k];
+            peak[k] = fold_peak_scalar(peak[k], v);
+            sum[k] += v * v;
+        }
+    }
+    for (std::size_t k = 0; i < n; ++i, ++k) {
+        const float v = x[i];
+        peak[k] = fold_peak_scalar(peak[k], v);
+        sum[k] += v * v;
+    }
+    return finish_peak_rms(peak, sum, n);
+}
+
+bool has_vector_peak_rms_kernel() noexcept {
 #if defined(__GNUC__) || defined(__clang__)
-    // Same lanes and same per-lane operations as the portable loop below, held
+    return true;
+#else
+    return false;
+#endif
+}
+
+PeakRms measure_peak_rms_vector(std::span<const float> samples) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+    const std::size_t n = samples.size();
+    if (n == 0)
+        return {};
+    const float* x = samples.data();
+
+    constexpr std::size_t L = kPeakRmsLanes;
+    static_assert(L == 16, "the vector kernel below holds four 4-lane groups");
+    float peak[L] = {};
+    float sum[L] = {};
+    std::size_t i = 0;
+
+    // Same lanes and same per-lane operations as the portable kernel, held
     // in registers through the GCC/Clang vector extension: the array form
     // spills its accumulators to the stack. abs clears the sign bit and the
     // peak update is a compare-select, exactly as in the scalar form.
@@ -171,21 +212,25 @@ PeakRms measure_peak_rms(std::span<const float> samples) noexcept {
     std::memcpy(sum + 4, &s1, sizeof s1);
     std::memcpy(sum + 8, &s2, sizeof s2);
     std::memcpy(sum + 12, &s3, sizeof s3);
-#else
-    for (; i + L <= n; i += L) {
-        for (std::size_t k = 0; k < L; ++k) {
-            const float v = x[i + k];
-            peak[k] = fold_peak_scalar(peak[k], v);
-            sum[k] += v * v;
-        }
-    }
-#endif
     for (std::size_t k = 0; i < n; ++i, ++k) {
         const float v = x[i];
         peak[k] = fold_peak_scalar(peak[k], v);
         sum[k] += v * v;
     }
     return finish_peak_rms(peak, sum, n);
+#else
+    return measure_peak_rms_portable(samples);
+#endif
+}
+
+} // namespace detail
+
+PeakRms measure_peak_rms(std::span<const float> samples) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+    return detail::measure_peak_rms_vector(samples);
+#else
+    return detail::measure_peak_rms_portable(samples);
+#endif
 }
 
 PeakRms measure_peak_rms(const BufferView<float>& buffer, std::size_t channel) noexcept {

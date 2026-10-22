@@ -3,9 +3,13 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/buffer_ops.hpp>
 
+#include "../core/audio/src/peak_rms_kernels.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <type_traits>
 #include <utility>
@@ -285,6 +289,72 @@ TEST_CASE("buffer_ops::measure_peak_rms finds a negative peak in every lane",
         REQUIRE(level.peak == 2.0f);
         REQUIRE(level.rms == std::sqrt((39.0f * 0.0625f + 4.0f) / 40.0f));
     }
+}
+
+TEST_CASE("buffer_ops::measure_peak_rms vector and portable kernels agree bit for bit",
+          "[audio][buffer_ops][meter][parity]") {
+    namespace detail = pulp::audio::buffer_ops::detail;
+    const float specials[] = {
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::signaling_NaN(),
+        std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::denorm_min() * 37.0f,
+        -std::numeric_limits<float>::min() * 0.5f, // subnormal
+        -0.0f,
+    };
+    std::vector<std::size_t> sizes;
+    for (std::size_t n = 0; n <= 64; ++n)
+        sizes.push_back(n);
+    for (std::size_t n : {127u, 128u, 129u, 255u, 256u, 257u, 1031u})
+        sizes.push_back(n);
+
+    std::uint32_t state = 0x2545F491u;
+    const auto next = [&state] {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        return (static_cast<float>(state >> 8) / 16777216.0f - 0.5f) * 3.0f;
+    };
+    const auto same_bits = [](const ops::PeakRms& a, const ops::PeakRms& b) {
+        return std::memcmp(&a.peak, &b.peak, sizeof(float)) == 0 &&
+               std::memcmp(&a.rms, &b.rms, sizeof(float)) == 0;
+    };
+
+    std::size_t checked = 0;
+    for (std::size_t n : sizes) {
+        std::vector<float> base(n);
+        for (auto& v : base)
+            v = next();
+        // -1: no special value; otherwise one special at the start of the
+        // vector body, one in the middle, and one in the scalar tail.
+        for (int special = -1; special < static_cast<int>(std::size(specials)); ++special) {
+            std::vector<std::size_t> positions;
+            if (special < 0) {
+                positions.push_back(n); // sentinel: no placement
+            } else if (n > 0) {
+                positions = {0, n / 2, n - 1};
+                if (n > 16)
+                    positions.push_back((n / 16) * 16); // first tail sample
+            }
+            for (std::size_t at : positions) {
+                auto v = base;
+                if (at < n)
+                    v[at] = specials[special];
+                const auto portable = detail::measure_peak_rms_portable(v);
+                const auto vector = detail::measure_peak_rms_vector(v);
+                const auto dispatched = ops::measure_peak_rms(std::span<const float>{v});
+                INFO("n = " << n << ", special = " << special << ", at = " << at
+                            << ", portable = " << portable.peak << "/" << portable.rms
+                            << ", vector = " << vector.peak << "/" << vector.rms);
+                REQUIRE(same_bits(portable, vector));
+                REQUIRE(same_bits(dispatched, vector));
+                ++checked;
+            }
+        }
+    }
+    INFO("vector kernel present: " << detail::has_vector_peak_rms_kernel());
+    REQUIRE(checked >= 1900);
 }
 
 TEST_CASE("buffer_ops::measure_peak_rms of an empty span is zero", "[audio][buffer_ops][meter]") {
