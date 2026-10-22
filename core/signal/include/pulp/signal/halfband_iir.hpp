@@ -72,7 +72,6 @@
 #include <limits>
 #include <span>
 #include <type_traits>
-#include <vector>
 
 namespace pulp::signal {
 
@@ -95,6 +94,11 @@ namespace pulp::signal {
 ///
 /// RT contract: setters, queries, `process()`, and `reset()` are fixed-state
 /// and allocate no memory.
+///
+/// A bare building block: fed silence it settles into a subnormal limit cycle
+/// rather than decaying to zero, like any allpass recurrence in floating
+/// point. Filtering code should use `HalfBandIirStageT` (or the 2x classes
+/// built on it), which flushes that state.
 template <typename SampleType = float>
 class HalfBandAllpassSectionT {
 public:
@@ -327,40 +331,19 @@ inline constexpr std::array<float, 3> kDefaultCoefficientsB = {
     0.8974455911727747f,
 };
 
-namespace detail {
-
-template <typename SampleType>
-inline std::vector<HalfBandAllpassSectionT<SampleType>> make_sections(
-    std::span<const SampleType> coeffs) {
-    std::vector<HalfBandAllpassSectionT<SampleType>> out;
-    out.reserve(coeffs.size());
-    for (SampleType a : coeffs) out.emplace_back(a);
-    return out;
-}
-
-template <typename SampleType>
-inline std::vector<HalfBandAllpassSectionT<SampleType>> make_sections_from_float(
-    std::span<const float> coeffs) {
-    std::vector<HalfBandAllpassSectionT<SampleType>> out;
-    out.reserve(coeffs.size());
-    for (float a : coeffs) out.emplace_back(static_cast<SampleType>(a));
-    return out;
-}
-
-template <typename SampleType>
-inline SampleType run_path(std::vector<HalfBandAllpassSectionT<SampleType>>& path,
-                           SampleType x) {
-    SampleType v = x;
-    for (auto& s : path) v = s.process(v);
-    return v;
-}
-
-// Fixed-storage polyphase half-band stage that filters whole blocks. The
-// per-path section counts are template parameters inside the kernels, so the
-// coefficients and recurrence state live in registers for the length of a
-// block and nothing is zeroed or re-loaded per sample. Each section is
-// evaluated as y = a*x + x1 - a*y1, which leaves a single fused multiply-add
-// on the y1 recurrence. Up and down directions keep separate state.
+/// Fixed-storage polyphase half-band stage that filters whole blocks: the
+/// engine behind `HalfBandUpsampler2xT`, `HalfBandDownsampler2xT`, and the
+/// oversampler's polyphase lane. `configure()` takes a `HalfBandIirDesign`;
+/// an invalid (empty) design leaves the stage emitting silence.
+///
+/// RT contract: no member allocates; `configure()` and `reset()` are
+/// control-thread setup, `upsample()` / `downsample()` are realtime safe.
+///
+/// The per-path section counts are template parameters inside the kernels, so
+/// the coefficients and recurrence state live in registers for the length of a
+/// block and nothing is zeroed or re-loaded per sample. Each section is
+/// evaluated as y = a*x + x1 - a*y1, which leaves a single fused multiply-add
+/// on the y1 recurrence. Up and down directions keep separate state.
 //
 // Fed silence, an allpass recurrence does not decay to zero in floating
 // point: once its state reaches the subnormal range, rounding sustains a
@@ -370,7 +353,7 @@ inline SampleType run_path(std::vector<HalfBandAllpassSectionT<SampleType>>& pat
 // end of each block. Doing it there rather than per sample keeps the
 // recurrence free of compares; a block-sized delay before the flush bites is
 // harmless because anything below the threshold is ~600 dB under full scale.
-template <typename SampleType> class HalfBandIirStage {
+template <typename SampleType = float> class HalfBandIirStageT {
   public:
     static constexpr std::size_t kMaxPath = kHalfBandIirMaxCoefficients / 2;
 
@@ -392,6 +375,16 @@ template <typename SampleType> class HalfBandIirStage {
 
     std::size_t coefficient_count() const noexcept {
         return count_;
+    }
+    std::size_t sections_a() const noexcept {
+        return (count_ + 1) / 2;
+    }
+    std::size_t sections_b() const noexcept {
+        return count_ / 2;
+    }
+    /// True when a valid design is loaded; an unconfigured stage emits silence.
+    bool configured() const noexcept {
+        return count_ > 0;
     }
 
     /// `n` input samples -> `2n` output samples. `output` must not overlap
@@ -568,6 +561,38 @@ template <typename SampleType> class HalfBandIirStage {
     }
 };
 
+using HalfBandIirStage = HalfBandIirStageT<float>;
+using HalfBandIirStage64 = HalfBandIirStageT<double>;
+
+namespace detail {
+
+// A design from caller-supplied per-path coefficients. Every half-band
+// design gives path A the same number of sections as path B or one more
+// (`design_halfband_iir` alternates ascending coefficients A, B, A, ...), at
+// most kHalfBandIirMaxCoefficients / 2 each; any other shape returns an empty
+// design, which leaves a stage silent rather than filtering with a guess.
+// The passband edge of hand-picked coefficients is unknown, so it is 0.
+template <typename Coefficient>
+inline HalfBandIirDesign halfband_design_from_paths(std::span<const Coefficient> a,
+                                                    std::span<const Coefficient> b) noexcept {
+    HalfBandIirDesign design;
+    const std::size_t count = a.size() + b.size();
+    if (count == 0 || count > kHalfBandIirMaxCoefficients || a.size() < b.size() ||
+        a.size() > b.size() + 1)
+        return design;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        design.coefficients[2 * i] = static_cast<double>(a[i]);
+    for (std::size_t i = 0; i < b.size(); ++i)
+        design.coefficients[2 * i + 1] = static_cast<double>(b[i]);
+    design.count = count;
+    return design;
+}
+
+inline HalfBandIirDesign default_halfband_design() noexcept {
+    return halfband_design_from_paths(std::span<const float>(kDefaultCoefficientsA),
+                                      std::span<const float>(kDefaultCoefficientsB));
+}
+
 } // namespace detail
 
 /// 2x half-band upsampler.
@@ -576,64 +601,62 @@ template <typename SampleType> class HalfBandIirStage {
 /// sample and produces two output samples at twice the rate. The two
 /// polyphase outputs are interleaved as (out_lo, out_hi) — out_lo is
 /// time-aligned with x (after the filter's group delay), out_hi is
-/// the new sample inserted between successive inputs.
+/// the new sample inserted between successive inputs. Each path is
+/// individually allpass; the half-band response emerges when the two
+/// outputs are interleaved into a single 2x-rate stream — the path phase
+/// difference is 0 in the passband (samples reinforce) and pi in the
+/// stopband (samples cancel).
 ///
-/// RT contract: constructors allocate section storage. `sections_*()`,
-/// `process()`, `process_block()`, and `reset()` allocate no memory after
-/// construction.
-template <typename SampleType = float>
-class HalfBandUpsampler2xT {
-public:
-    HalfBandUpsampler2xT()
-        : path_a_(detail::make_sections_from_float<SampleType>(
-              std::span<const float>(kDefaultCoefficientsA))),
-          path_b_(detail::make_sections_from_float<SampleType>(
-              std::span<const float>(kDefaultCoefficientsB))) {}
+/// A thin wrapper over `HalfBandIirStageT`, so silence decays to exact zero
+/// (see that class). Custom coefficients must give path A the same number
+/// of sections as path B or one more, at most eight each; any other shape
+/// leaves the upsampler silent and `configured()` false.
+///
+/// RT contract: no member allocates, including the constructors.
+template <typename SampleType = float> class HalfBandUpsampler2xT {
+  public:
+    HalfBandUpsampler2xT() noexcept {
+        stage_.configure(detail::default_halfband_design());
+    }
 
     HalfBandUpsampler2xT(std::span<const SampleType> coeffs_a,
-                         std::span<const SampleType> coeffs_b)
-        : path_a_(detail::make_sections<SampleType>(coeffs_a)),
-          path_b_(detail::make_sections<SampleType>(coeffs_b)) {}
+                         std::span<const SampleType> coeffs_b) noexcept {
+        stage_.configure(detail::halfband_design_from_paths(coeffs_a, coeffs_b));
+    }
 
     /// Number of allpass sections in path A.
-    std::size_t sections_a() const { return path_a_.size(); }
+    std::size_t sections_a() const noexcept {
+        return stage_.sections_a();
+    }
     /// Number of allpass sections in path B.
-    std::size_t sections_b() const { return path_b_.size(); }
+    std::size_t sections_b() const noexcept {
+        return stage_.sections_b();
+    }
+    bool configured() const noexcept {
+        return stage_.configured();
+    }
 
-    void reset() {
-        for (auto& s : path_a_) s.reset();
-        for (auto& s : path_b_) s.reset();
+    void reset() noexcept {
+        stage_.reset();
     }
 
     /// Produce two output samples for one input sample.
-    ///
-    /// out_lo is the polyphase even-phase output (time-aligned with
-    /// the input after the cascade's group delay); out_hi is the new
-    /// odd-phase sample inserted between successive inputs. Each path
-    /// is individually allpass (unity magnitude at every frequency);
-    /// the half-band response emerges when the two outputs are
-    /// interleaved into a single 2x-rate stream — the path phase
-    /// difference is 0 in the passband (samples reinforce) and pi in
-    /// the stopband (samples cancel).
-    void process(SampleType x, SampleType& out_lo, SampleType& out_hi) {
-        const SampleType a = detail::run_path(path_a_, x);
-        const SampleType b = detail::run_path(path_b_, x);
-        out_lo = a;
-        out_hi = b;
+    void process(SampleType x, SampleType& out_lo, SampleType& out_hi) noexcept {
+        SampleType out[2];
+        stage_.upsample(&x, out, 1);
+        out_lo = out[0];
+        out_hi = out[1];
     }
 
-    /// Block helper. `input` length N produces `output` length 2N.
-    void process_block(std::span<const SampleType> input,
-                       std::span<SampleType> output) {
-        const std::size_t n = input.size();
-        for (std::size_t i = 0; i < n; ++i) {
-            process(input[i], output[2 * i], output[2 * i + 1]);
-        }
+    /// Block helper. `input` length N produces `output` length 2N; the two
+    /// must not overlap.
+    void process_block(std::span<const SampleType> input, std::span<SampleType> output) noexcept {
+        const std::size_t n = std::min(input.size(), output.size() / 2);
+        stage_.upsample(input.data(), output.data(), n);
     }
 
-private:
-    std::vector<HalfBandAllpassSectionT<SampleType>> path_a_;
-    std::vector<HalfBandAllpassSectionT<SampleType>> path_b_;
+  private:
+    HalfBandIirStageT<SampleType> stage_;
 };
 
 using HalfBandUpsampler2x = HalfBandUpsampler2xT<float>;
@@ -642,65 +665,62 @@ using HalfBandUpsampler2x64 = HalfBandUpsampler2xT<double>;
 /// 2x half-band downsampler.
 ///
 /// Each call to `process(in_lo, in_hi)` consumes two input samples
-/// at the higher rate and emits one decimated output. The odd-phase
-/// input (`in_hi`) drives path A, the even-phase (`in_lo`) drives
-/// path B. Content in the stopband (above 0.29 of the input rate with
-/// the default coefficients) aliases into the output at or below the
-/// design's stopband floor (-94.8 dB with the default coefficients).
+/// at the higher rate and emits one decimated output. `in_lo` is the
+/// input-stream sample at index 2n and `in_hi` the one at 2n+1, fed in
+/// chronological order. The odd-phase input drives path A and the
+/// even-phase input path B, which is the decimation polyphase identity:
+/// H's output kept at odd phases, one high-rate sample ahead of H's own
+/// delay. Content in the stopband (above 0.29 of the input rate with the
+/// default coefficients) aliases into the output at or below the design's
+/// stopband floor (-94.8 dB with the default coefficients).
 ///
-/// RT contract: constructors allocate section storage. `sections_*()`,
-/// `process()`, `process_block()`, and `reset()` allocate no memory after
-/// construction.
-template <typename SampleType = float>
-class HalfBandDownsampler2xT {
-public:
-    HalfBandDownsampler2xT()
-        : path_a_(detail::make_sections_from_float<SampleType>(
-              std::span<const float>(kDefaultCoefficientsA))),
-          path_b_(detail::make_sections_from_float<SampleType>(
-              std::span<const float>(kDefaultCoefficientsB))) {}
+/// A thin wrapper over `HalfBandIirStageT`; the same coefficient-shape rule
+/// as `HalfBandUpsampler2xT` applies.
+///
+/// RT contract: no member allocates, including the constructors.
+template <typename SampleType = float> class HalfBandDownsampler2xT {
+  public:
+    HalfBandDownsampler2xT() noexcept {
+        stage_.configure(detail::default_halfband_design());
+    }
 
     HalfBandDownsampler2xT(std::span<const SampleType> coeffs_a,
-                           std::span<const SampleType> coeffs_b)
-        : path_a_(detail::make_sections<SampleType>(coeffs_a)),
-          path_b_(detail::make_sections<SampleType>(coeffs_b)) {}
-
-    std::size_t sections_a() const { return path_a_.size(); }
-    std::size_t sections_b() const { return path_b_.size(); }
-
-    void reset() {
-        for (auto& s : path_a_) s.reset();
-        for (auto& s : path_b_) s.reset();
+                           std::span<const SampleType> coeffs_b) noexcept {
+        stage_.configure(detail::halfband_design_from_paths(coeffs_a, coeffs_b));
     }
 
-    /// Consume two input samples (lo = first / even-phase, hi =
-    /// second / odd-phase) and return one decimated output sample.
-    ///
-    /// `in_lo` corresponds to the input-stream sample at index 2n
-    /// and `in_hi` to index 2n+1, i.e. you feed pairs in chronological
-    /// order. The half-band-polyphase form delays the second sample
-    /// by one full-rate sample on its way into the path-with-the-
-    /// "lower-frequency" allpass coefficients, so the wiring runs
-    /// `in_hi → path_a_`, `in_lo → path_b_` to land at the correct
-    /// `z^-1` alignment for the decimation polyphase identity.
-    SampleType process(SampleType in_lo, SampleType in_hi) {
-        const SampleType a = detail::run_path(path_a_, in_hi);
-        const SampleType b = detail::run_path(path_b_, in_lo);
-        return SampleType{0.5f} * (a + b);
+    std::size_t sections_a() const noexcept {
+        return stage_.sections_a();
+    }
+    std::size_t sections_b() const noexcept {
+        return stage_.sections_b();
+    }
+    bool configured() const noexcept {
+        return stage_.configured();
     }
 
-    /// Block helper. `input` length 2N produces `output` length N.
-    void process_block(std::span<const SampleType> input,
-                       std::span<SampleType> output) {
-        const std::size_t n = output.size();
-        for (std::size_t i = 0; i < n; ++i) {
-            output[i] = process(input[2 * i], input[2 * i + 1]);
-        }
+    void reset() noexcept {
+        stage_.reset();
     }
 
-private:
-    std::vector<HalfBandAllpassSectionT<SampleType>> path_a_;
-    std::vector<HalfBandAllpassSectionT<SampleType>> path_b_;
+    /// Consume two input samples (lo = even phase, hi = odd phase) and
+    /// return one decimated output sample.
+    SampleType process(SampleType in_lo, SampleType in_hi) noexcept {
+        const SampleType in[2] = {in_lo, in_hi};
+        SampleType out;
+        stage_.downsample(in, &out, 1);
+        return out;
+    }
+
+    /// Block helper. `input` length 2N produces `output` length N; `output`
+    /// may alias `input`.
+    void process_block(std::span<const SampleType> input, std::span<SampleType> output) noexcept {
+        const std::size_t n = std::min(output.size(), input.size() / 2);
+        stage_.downsample(input.data(), output.data(), n);
+    }
+
+  private:
+    HalfBandIirStageT<SampleType> stage_;
 };
 
 using HalfBandDownsampler2x = HalfBandDownsampler2xT<float>;

@@ -343,6 +343,8 @@ pulp_add_test_suite(pulp-test-signal-mod-voice GROUP pulp-test-group-core-signal
 # analyzers, hence the analysis lib alongside the DSP under test.
 pulp_add_test_suite(pulp-test-oversampling-quality GROUP pulp-test-group-core-analysis
     LIBRARIES pulp::signal pulp::audio-analysis)
+pulp_add_test_suite(pulp-test-oversampling-polyphase GROUP pulp-test-group-core-analysis
+    LIBRARIES pulp::signal pulp::audio-analysis)
 # True-peak look-ahead limiting: independent higher-rate reconstruction oracle,
 # latency, channel-link, deterministic partitioning, and realtime storage.
 pulp_add_test_suite(pulp-test-true-peak-limiter

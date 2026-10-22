@@ -430,7 +430,7 @@ template <typename SampleType = float> class OversamplerT {
 
     // ── polyphase_iir lane ─────────────────────────────────────────────
     std::array<HalfBandIirDesign, kMaxStages> iir_designs_{};
-    std::array<detail::HalfBandIirStage<SampleType>, kMaxStages> iir_stages_;
+    std::array<HalfBandIirStageT<SampleType>, kMaxStages> iir_stages_;
 
     void configure_polyphase_filters() {
         for (std::size_t stage = 0; stage < kMaxStages; ++stage) {
