@@ -248,7 +248,9 @@ resolves, and its worker never waits on the GPU at all.
   directly, `process_block` still returns block N for input block N and
   reports `worker_pipeline_blocks = 0`, deciding each block inside the call
   with a wait bounded to one period minus its CPU cost (with the same CPU
-  routing and breaker).
+  routing and breaker). Because `release()` opts a pipelining convolver back
+  out, that node must outlive the transport's `release()` (or the transport
+  must be released first); a non-pipelining node is never touched there.
 - Every block's input goes to exactly one place: the GPU overlap-add carry when
   its readback is on time, otherwise the worker's CPU partitioned convolution.
   The output is the carry plus whatever the CPU convolution still owes, so a

@@ -355,7 +355,9 @@ block. Measure it for the model size and channel count you ship.
   `worker_pipeline_blocks`, and the transport primes that many fewer blocks, so
   total latency and the reported delay compensation are unchanged. Called
   directly, or with a one-block lead, it decides each block inside the call
-  with a bounded wait.
+  with a bounded wait. A pipelining convolver must outlive the transport's
+  `release()` (or the transport must be released first), because `release()`
+  opts it back out; a node that does not pipeline is never touched there.
 - **Exact routing.** A block whose result is on time and finite uses the GPU.
   Any other block goes to the worker's CPU convolution, so the output is the
   exact continuation of the convolution, never silence. A miss costs one CPU

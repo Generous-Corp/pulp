@@ -316,6 +316,12 @@ class GpuAudioTransport {
     // path leaves it null, so this adds no hot-path work for normal users.
     void* trial_observer_context_ = nullptr;
     TrialDeliveryFn trial_observer_ = nullptr;
+
+    // True only while the hosted node pipelines its worker
+    // (worker_pipeline_blocks > 0 after the opt-in at prepare()). release()
+    // opts such a node back out; any other node is never touched there, so a
+    // host may destroy it before release().
+    bool pipeline_hosted_ = false;
 };
 
 } // namespace pulp::gpu_audio

@@ -2046,3 +2046,25 @@ TEST_CASE("GpuMultiConvolver refuses a lost device and keeps Silence",
     }
 }
 #endif // PULP_TEST_HAS_GPU_COMPUTE
+
+// The node contract lets a host destroy a node before it releases the
+// transport that hosted it. release() may touch the node only to undo worker
+// pipelining, and only a pipelining node is opted in, so a non-pipelining node
+// that is already gone must never be dereferenced. Heap-allocated so ASan sees
+// the freed object if release() reaches it.
+TEST_CASE("Transport release never touches a destroyed non-pipelining node",
+          "[gpu_audio][convolver][transport][lifetime]") {
+    auto node = std::make_unique<GpuConvolver>(1, 64, 48000, std::vector<float>{1.0f, 0.5f, 0.25f});
+    REQUIRE(node->set_provider_policy(GpuConvolver::ProviderPolicy::StagedBlocking));
+    REQUIRE(node->prepare());
+
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(node.get(), {/*ring_blocks=*/8}));
+    // Positive control: this node does not pipeline, so the transport did not
+    // keep it opted in.
+    REQUIRE(node->descriptor().worker_pipeline_blocks == 0u);
+
+    node.reset();
+    transport.release(); // must not dereference the destroyed node
+    CHECK_FALSE(transport.is_prepared());
+}

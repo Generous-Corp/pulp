@@ -25,16 +25,24 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
       staged_readback_(std::make_unique<StagedReadbackState>()) {}
 
 struct GpuConvolver::SharedIoState {};
-namespace detail {
-bool set_worker_pipeline_hosting(GpuAudioNode*, bool) noexcept {
-    return false;
-}
-} // namespace detail
 
 struct GpuConvolver::StagedReadbackState {
     GpuConvolverStagedBreaker breaker{};
     std::atomic<std::uint8_t> reason{0};
+    // Recorded like the render build; without a staged device the node never
+    // pipelines, so it changes nothing else.
+    bool transport_hosted = false;
 };
+
+namespace detail {
+bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
+    auto* convolver = dynamic_cast<GpuConvolver*>(node);
+    if (convolver == nullptr || !convolver->staged_readback_)
+        return false;
+    convolver->staged_readback_->transport_hosted = hosted;
+    return true;
+}
+} // namespace detail
 
 std::uint64_t GpuConvolver::staged_cpu_blocks() const noexcept {
     return 0;

@@ -1348,6 +1348,14 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
                               : staged.cpu_block_ns - staged.cpu_block_ns / 8 + cpu_ns / 8;
 }
 
+std::uint32_t GpuConvolver::staged_pipeline_depth() const noexcept {
+    return staged_readback_->transport_hosted && gpu_ && !trial_configured_ &&
+                   !trial_staged_sync_reference_ &&
+                   provider_policy_ != ProviderPolicy::StagedBlocking && latency_blocks_ >= 2
+               ? latency_blocks_ - 1u
+               : 0u;
+}
+
 void GpuConvolver::configure_staged_pipeline() {
     // When a transport hosts the node, the staged async path gives the GPU all
     // of the lead but one block: the result for block N is judged
@@ -1359,11 +1367,7 @@ void GpuConvolver::configure_staged_pipeline() {
     // the diagnostic trial paths, a node with no staged device and a one-block
     // lead.
     auto& staged = *staged_readback_;
-    staged.pipeline_blocks =
-        staged.transport_hosted && gpu_ && !trial_configured_ && !trial_staged_sync_reference_ &&
-                provider_policy_ != ProviderPolicy::StagedBlocking && latency_blocks_ >= 2
-            ? latency_blocks_ - 1u
-            : 0u;
+    staged.pipeline_blocks = staged_pipeline_depth();
     staged.calls.store(0, std::memory_order_relaxed);
     staged.slot_count = staged.pipeline_blocks + 1u;
     if (staged.slots.size() < staged.slot_count)
@@ -1394,7 +1398,9 @@ bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
     if (staged.transport_hosted == hosted)
         return true;
     staged.transport_hosted = hosted;
-    if (!convolver->prepared_)
+    // Only a change of depth rebuilds the staged state; a node that never
+    // pipelines keeps its block counter and slots across hosting changes.
+    if (!convolver->prepared_ || convolver->staged_pipeline_depth() == staged.pipeline_blocks)
         return true;
     try {
         convolver->configure_staged_pipeline();

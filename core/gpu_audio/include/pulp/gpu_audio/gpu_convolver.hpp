@@ -91,6 +91,12 @@ std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 /// time again. A node prepared with a one-block lead cannot pipeline and waits,
 /// bounded, inside the block instead.
 ///
+/// Lifetime: while a GpuAudioTransport hosts a pipelining GpuConvolver
+/// (descriptor().worker_pipeline_blocks > 0), the transport's release() opts
+/// the node back out of pipelining, so the node must outlive that call (or the
+/// transport must be released first). A non-pipelining node is never touched
+/// by release().
+///
 /// CPU fallback (MissPolicy::CpuFallback). The fallback is a zero-latency
 /// `signal::FixedIrConvolver` per channel that the transport keeps
 /// CONTINUOUSLY fed via prime_fallback() — one direct-FIR or partitioned block
@@ -342,6 +348,8 @@ class GpuConvolver : public GpuAudioNode {
     // size its slots. Called at the end of prepare(); a test that swaps in a
     // scripted device calls it again before the node is attached.
     void configure_staged_pipeline();
+    // Pipeline depth the current hosting, device and policy call for.
+    std::uint32_t staged_pipeline_depth() const noexcept;
     void latch_staged_recovery(GpuAudioRecoveryReason reason) noexcept;
     void update_staged_breaker(StagedReadbackState& staged, bool on_time) noexcept;
     // Blocks for which the staged worker ran its CPU convolution since

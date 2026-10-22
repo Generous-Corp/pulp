@@ -115,7 +115,8 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
 
     // Opt the node into worker pipelining before reading its descriptor; a
     // node that pipelines declares worker_pipeline_blocks only while hosted.
-    // Undone if preparation fails, and by release().
+    // Undone here, while the node is known alive, if preparation fails or the
+    // node does not pipeline; release() undoes it only for a pipelining node.
     detail::set_worker_pipeline_hosting(node, true);
     struct HostingGuard {
         GpuAudioNode* node;
@@ -247,7 +248,12 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         worker_running_.store(true, std::memory_order_release);
         worker_ = std::thread([this] { worker_loop(); });
     }
-    hosting.keep = true;
+    // Keep the opt-in only for a node that actually pipelines; release() must
+    // touch the node for that case alone (the guard undoes it otherwise).
+    if (desc.worker_pipeline_blocks > 0) {
+        hosting.keep = true;
+        pipeline_hosted_ = true;
+    }
     return true;
 }
 
@@ -322,9 +328,12 @@ void GpuAudioTransport::release() noexcept {
     out_fptrs_.clear();
     rejected_input_ptrs_.clear();
     rejected_output_ptrs_.clear();
-    // The worker has stopped: return the node to block-in, block-out use.
-    if (node_ != nullptr)
+    // The worker has stopped: return a pipelining node to block-in,
+    // block-out use. Only such a node is touched here; it must outlive this
+    // call (documented on GpuConvolver). Any other node may already be gone.
+    if (pipeline_hosted_ && node_ != nullptr)
         detail::set_worker_pipeline_hosting(node_, false);
+    pipeline_hosted_ = false;
     node_ = nullptr;
     realtime_gpu_context_ = nullptr;
     realtime_gpu_process_ = nullptr;
