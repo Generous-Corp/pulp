@@ -59,12 +59,11 @@ POSITIVE_CONTROL = "positive_control"
 # audio after the fault (a dropout, a one-quantum misalignment, a stale
 # fallback) and must FAIL; gpu_off keeps the plug-in off the shared-I/O path
 # and must be INCONCLUSIVE on that precondition.
-PLANTED_NEGATIVES = {"no_fallback": "fail", "fallback_misaligned": "fail",
-                     "fallback_stale": "fail", "gpu_off": "inconclusive"}
+PLANTED_NEGATIVES = {**{name: "fail" for name in gfc.PLANTED},
+                     **{name: "inconclusive" for name in gfc.PATH_NEGATIVES}}
 NOT_SHARED_PATH = "not on the shared-I/O GPU path"
 # M2: the GPU must have carried the stream just before the fault.
 GPU_SHARE_PASS = 0.9
-GPU_SHARE_VOID = 0.5
 # A positive control must show the GPU path carried the stream, or every fault
 # row in its column only tested the fallback.
 CONTROL_MAX_FALLBACK_SHARE = 0.01
@@ -154,8 +153,8 @@ def calling_pattern(capture: Any) -> dict[str, Any]:
     callbacks arrived about one block apart; `bursty` means a meaningful share
     came back to back (anticipative FX, Logic prefetch), which turns a GPU
     test into a test of the fallback. `unknown` without callback times."""
-    raw = getattr(capture, "callbacks", None) or []
-    calls = [(c[0], c[1]) for c in raw if not (len(c) > 2 and c[2])]
+    records = getattr(capture, "records", None) or []
+    calls = [(r.get("host_time_ns", 0), r["frames"]) for r in records if not r.get("offline")]
     if len(calls) < 3 or all(t == 0 for t, _ in calls):
         return {"classification": "unknown", "callbacks": len(calls)}
     ratios, bursts = [], 0
@@ -269,47 +268,9 @@ def host_binding(events: Sequence[dict], *, claim_text: str | None, host: dict,
 
 # ── Expectations ──────────────────────────────────────────────────────────
 
-def _disposition(base: dict, capture: Any, events: Sequence[dict],
-                 fault_sample: int) -> dict | None:
-    """WP-h1's per-block delivery analysis (M2), when the library has it."""
-    if base.get("disposition") is not None:
-        return base["disposition"]
-    fn = getattr(gfc, "delivery_disposition", None)
-    if fn is None or capture is None:
-        return None
-    applied = gfc.first_event(events, "provider_fault_applied") or {}
-    prepared = gfc.first_event(events, "prepared") or {}
-    return fn(capture, fault_sample, applied.get("project_sample"),
-              int(prepared.get("lead_blocks", 0)))
-
-
-def fault_delivery_expectation(disposition: dict | None) -> tuple[str, str]:
-    """M2 for a fault cell: `ok`, `degraded` (pre-fault GPU share in
-    [50 %, 90 %): quotable only as a degraded host), or `void` with why."""
-    if disposition is None:
-        return "void", "the capture has no per-block delivery counters (M2)"
-    share = disposition.get("pre_window_gpu_share")
-    if share is None or share < GPU_SHARE_VOID:
-        return "void", f"pre-fault GPU share {share} is under {GPU_SHARE_VOID:.0%}"
-    for key, want, why in (
-            ("gpu_frozen_after_applied", True, "the GPU kept delivering after the applied fault"),
-            ("all_fallback_after", True,
-             "not every block after the applied fault came from the fallback"),
-            ("silence_blocks_delta", 0, "silence blocks were delivered")):
-        if disposition.get(key) != want:
-            return "void", why
-    first = disposition.get("first_fallback_quanta_after_applied")
-    lead = disposition.get("lead_blocks")
-    if first is None or lead is None or first > lead + 1:
-        return "void", (f"the first fallback block came {first} quanta after the fault "
-                        f"(lead {lead})")
-    if share < GPU_SHARE_PASS:
-        return "degraded", f"pre-fault GPU share {share:.3f} is under {GPU_SHARE_PASS:.0%}"
-    return "ok", f"pre-fault GPU share {share:.3f}; fallback took over within {first} quanta"
-
-
-def positive_control_expectation(snapshots: dict[str, dict],
-                                 disposition: dict | None) -> tuple[bool, str]:
+def positive_control_expectation(snapshots: dict[str, dict]) -> tuple[bool, str]:
+    """The column bar on top of WP-h1's per-block delivery: across the whole
+    control run the GPU carried >= 90 % of the quanta, with almost no fallback."""
     missing = [p for p in gfc.HEALTH_PHASES if p not in snapshots]
     if missing:
         return False, "missing health snapshots: " + ", ".join(missing)
@@ -324,36 +285,18 @@ def positive_control_expectation(snapshots: dict[str, dict],
                        f"{GPU_SHARE_PASS:.0%}; this column would only test the fallback")
     if fallback > max(1, CONTROL_MAX_FALLBACK_SHARE * total):
         return False, f"{fallback} fallback quanta during a run with no fault"
-    if disposition is not None:
-        share = disposition.get("pre_window_gpu_share")
-        if share is None or share < GPU_SHARE_PASS:
-            return False, f"pre-window GPU share {share} is under {GPU_SHARE_PASS:.0%}"
     return True, f"GPU delivered {gpu} of {total} quanta; {fallback} fallback"
-
-
-def _event_preconditions(events: Sequence[dict], ir_taps: int) -> list[str]:
-    """The run-level preconditions WP-h1's evaluate_run applies, recomputed
-    here so the v2 verdict does not depend on parsing its reason strings."""
-    out: list[str] = []
-    prepares = [e for e in events if e.get("event") == "prepared"]
-    if not prepares or any(e.get("ok") is not True for e in prepares):
-        out.append("the plug-in did not prepare its GPU engine every time")
-    if any(e.get("path") != "shared_memory" for e in prepares):
-        out.append(f"the plug-in is {NOT_SHARED_PATH} "
-                   f"(paths={sorted({str(e.get('path')) for e in prepares})})")
-    if any(e.get("ir_taps") != ir_taps for e in prepares):
-        out.append("the plug-in loaded a different impulse response")
-    if gfc.first_event(events, "capture_overflow") is not None:
-        out.append("the plug-in dropped capture records")
-    refused = gfc.first_event(events, "fault_refused")
-    if refused is not None:
-        out.append(f"the plug-in refused the request: "
-                   f"{refused.get('reason') or refused.get('detail')}")
-    return out
 
 
 def _usable(run_dir: Path, name: str, listed: Sequence[str] | None) -> bool:
     return (run_dir / name).is_file() and (listed is None or name in listed)
+
+
+# Reasons WP-h1's evaluation gives for a run with the GPU path deliberately
+# off, which the gpu_off path negative expects and nothing else may add to.
+_PATH_NEGATIVE_REASONS = (NOT_SHARED_PATH, "path negative", "per-block delivery",
+                          "the GPU carried", "GPU path delivered no blocks")
+REALTIME_NOT_COMPUTED = "host realtime render null not computed"
 
 
 def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: int,
@@ -361,102 +304,19 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
                 bounce_path: Path | None, realtime_path: Path | None, render_frames: int,
                 nonce: str, host: dict, hosting_mode: str, live_template: bool = False,
                 listed: Sequence[str] | None = None) -> dict[str, Any]:
-    """The v2 evidence for one run. The null analysis, capture checks and
-    health snapshots are WP-h1's (`evaluate_run`); the verdict is recomputed
-    here per control kind, with the host binding and the realtime render."""
+    """The v2 evidence for one run. WP-h1's `evaluate_run` does the whole
+    single-run analysis (the three nulls, per-block delivery, device binding,
+    the input check, planted shapes); this adds what v2 is for and keeps the
+    stricter of the two verdicts: the host binding (M5), the realtime render's
+    distinctness and provenance (M1), the control-kind rules (M3), the
+    positive-control column bar, and GarageBand's plug-in-capture-only cap."""
     if control_kind not in CONTROL_KINDS:
         raise ValueError(f"unknown control kind {control_kind!r}")
-    # evaluate_run judges only WP-h1's fault kinds; a positive control borrows
-    # the render-fault shape (no provider fault expected) for its analysis.
-    base_fault = fault if fault in gfc.FAULT_KINDS else gfc.RENDER_FAULTS[0]
-    base = gfc.evaluate_run(run_dir, fault=base_fault, fault_sample=fault_sample,
-                            tolerance=tolerance, window_pre=window_pre,
-                            window_post=window_post, host_alive=host_alive,
-                            bounce_path=bounce_path, render_frames=render_frames,
-                            nonce=nonce, reaper_pid=None, listed=listed)
-    events = (gfc.load_events(run_dir / "events.jsonl")
-              if _usable(run_dir, "events.jsonl", listed) else [])
-    if fault not in gfc.FAULT_KINDS:
-        # Restore the real fault name the analysis was asked about.
-        base["fault"] = dict(base["fault"], kind=fault)
-    ir = gfc.read_f32(run_dir / "ir.f32") if _usable(run_dir, "ir.f32", listed) else []
-    claim_text = ((run_dir / "claim").read_text(encoding="utf-8")
-                  if _usable(run_dir, "claim", listed) else None)
-    binding = host_binding(events, claim_text=claim_text, host=host,
-                           hosting_mode=hosting_mode, nonce=nonce)
     mismatches: list[str] = []
-    preconditions = _event_preconditions(events, len(ir))
-    if binding["outcome"] == "wrong_daw":
-        mismatches.append(binding["reason"])
-    elif binding["outcome"] == "unbound":
-        preconditions.append(binding["reason"])
-    proc = binding["host_process"] or {}
-    if proc and proc.get("config_source") not in ("env", "rendezvous"):
-        preconditions.append(f"the plug-in had no run configuration "
-                             f"(config_source={proc.get('config_source')!r})")
+    preconditions: list[str] = []
 
-    armed = gfc.first_event(events, "fault_armed") or {}
-    planted = armed.get("planted_negative")
-    if (control_kind == "planted_negative") != (planted in PLANTED_NEGATIVES):
-        mismatches.append(f"control kind {control_kind!r} but the plug-in armed "
-                          f"planted_negative={planted!r}")
-    # gpu_off arms nothing (the GPU path is off, so there is no provider to
-    # fault); every other negative and every fault row rides on a real fault.
-    wants_control_fault = control_kind == POSITIVE_CONTROL or planted == "gpu_off"
-    if wants_control_fault != (fault == POSITIVE_CONTROL):
-        mismatches.append(f"control kind {control_kind!r} (planted={planted!r}) with fault "
-                          f"{fault!r}")
-    if armed and armed.get("after_project_sample") != fault_sample + window_post:
-        mismatches.append("fault_armed observes a different window than the analysis")
-    for name in ("fault_armed", "fault_fired"):
-        event = gfc.first_event(events, name)
-        if event is not None and (event.get("fault") != fault or
-                                  event.get("at_project_sample") != fault_sample):
-            mismatches.append(f"{name} does not match the requested fault and sample")
-
-    capture = None
-    if _usable(run_dir, "capture.bin", listed):
-        try:
-            capture = gfc.read_capture(run_dir / "capture.bin")
-        except ValueError:
-            capture = None
-    disposition = _disposition(base, capture, events, fault_sample)
-
-    fired = gfc.first_event(events, "fault_fired")
-    applied = gfc.first_event(events, "provider_fault_applied")
-    render_loss = gfc.first_event(events, "render_loss")
-    snapshots = base["health"]["snapshots"]
-    delivery, delivery_note = "not_applicable", ""
-    if control_kind == POSITIVE_CONTROL:
-        if applied is not None:
-            mismatches.append("a provider fault was applied during the positive control")
-        took_effect = fired is not None
-        health_ok, health_note = positive_control_expectation(snapshots, disposition)
-    elif planted == "gpu_off":
-        if applied is not None:
-            mismatches.append("a provider fault was applied during gpu_off")
-        took_effect = fired is not None
-        health_ok, health_note = True, "gpu_off: health not judged"
-    else:
-        took_effect = fired is not None and (
-            bool(render_loss and render_loss.get("performed")) if fault in gfc.RENDER_FAULTS
-            else applied is not None)
-        health_ok, health_note = base["health"]["expectation_met"], base["health"]["note"]
-        if control_kind == "fault" and fault in gfc.AUDIO_FAULTS:
-            delivery, delivery_note = fault_delivery_expectation(disposition)
-            if delivery == "void":
-                preconditions.append(f"GPU-in-the-loop bar not met: {delivery_note}")
-    realtime = bool(fired) and not bool(fired.get("offline", True))
-    if control_kind == "offline_fault":
-        # Offline renders run the CPU path by design: this row can only show
-        # that a fault arriving during a bounce leaves it exact.
-        realtime, health_ok = True, True
-        if fired is not None and not fired.get("offline"):
-            mismatches.append("an offline_fault row whose fault fired on a realtime block")
-
-    # M1: the host's own realtime render of the track, nulled like the bounce.
-    nulls = dict(base["nulls"])
-    realtime_null = None
+    # M1: the realtime render is its own artifact with realtime provenance,
+    # checked before it is allowed into the analysis at all.
     if realtime_path is not None and bounce_path is not None and (
             realtime_path.name == bounce_path.name or
             (_usable(run_dir, realtime_path.name, listed) and
@@ -467,68 +327,121 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         # "realtime render" is the bounce, not a second artifact.
         preconditions.append("the host realtime render is the offline bounce itself")
         realtime_path = None
-    provenance_note = ""
     if realtime_path is not None:
-        provenance_note = realtime_provenance_problem(run_dir, realtime_path.name, host,
-                                                      render_frames, listed)
-        if provenance_note:
-            preconditions.append(f"host realtime render provenance: {provenance_note}")
+        problem = realtime_provenance_problem(run_dir, realtime_path.name, host,
+                                              render_frames, listed)
+        if problem:
+            preconditions.append(f"host realtime render provenance: {problem}")
             realtime_path = None
-    if realtime_path is not None and _usable(run_dir, realtime_path.name, listed):
-        _, rendered = gfc.read_wav(realtime_path)
-        _, stimulus = gfc.read_wav(run_dir / "stimulus.wav")
-        reference = gfc.bounce_reference(stimulus, ir, len(rendered[0]))
-        realtime_null = gfc.null_test(rendered, reference, fault_sample, tolerance=tolerance,
-                                      window_pre=window_pre, window_post=window_post,
-                                      required_frames=render_frames).as_dict()
-    nulls["host_realtime"] = realtime_null
-    if (host.get("id") in REALTIME_RENDER_HOSTS and realtime_null is None and
-            control_kind in ("fault", POSITIVE_CONTROL)):
-        preconditions.append("no host realtime render of the fault pass (M1)")
 
+    base = gfc.evaluate_run(run_dir, fault=fault, fault_sample=fault_sample,
+                            tolerance=tolerance, window_pre=window_pre,
+                            window_post=window_post, host_alive=host_alive,
+                            bounce_path=bounce_path, render_frames=render_frames,
+                            nonce=nonce, reaper_pid=None, listed=listed,
+                            realtime_path=realtime_path)
+    events = (gfc.load_events(run_dir / "events.jsonl")
+              if _usable(run_dir, "events.jsonl", listed) else [])
+    claim_text = ((run_dir / "claim").read_text(encoding="utf-8")
+                  if _usable(run_dir, "claim", listed) else None)
+    binding = host_binding(events, claim_text=claim_text, host=host,
+                           hosting_mode=hosting_mode, nonce=nonce)
+    if binding["outcome"] == "wrong_daw":
+        mismatches.append(binding["reason"])
+    elif binding["outcome"] == "unbound":
+        preconditions.append(binding["reason"])
+    proc = binding["host_process"] or {}
+    if proc and proc.get("config_source") not in ("env", "rendezvous"):
+        preconditions.append(f"the plug-in had no run configuration "
+                             f"(config_source={proc.get('config_source')!r})")
+
+    controls = base.get("controls") or {}
+    planted = controls.get("planted_negative")
+    gpu_off = bool(controls.get("gpu_off"))
+    if gpu_off and planted is None:
+        planted = "gpu_off"
+    if (control_kind == "planted_negative") != (planted in PLANTED_NEGATIVES):
+        mismatches.append(f"control kind {control_kind!r} but the plug-in armed "
+                          f"planted_negative={planted!r}")
+    # gpu_off arms nothing (the GPU path is off, so there is no provider to
+    # fault); every other negative and every fault row rides on a real fault.
+    wants_control_fault = control_kind == POSITIVE_CONTROL or planted == "gpu_off"
+    if wants_control_fault != (fault == POSITIVE_CONTROL):
+        mismatches.append(f"control kind {control_kind!r} (planted={planted!r}) with fault "
+                          f"{fault!r}")
+    applied = base["fault"].get("provider_fault_applied")
+    if wants_control_fault and applied is not None:
+        mismatches.append(f"a provider fault was applied during {planted or control_kind}")
+    if control_kind == POSITIVE_CONTROL:
+        ok, note = positive_control_expectation(base["health"]["snapshots"])
+        if not ok:
+            preconditions.append(f"positive control: {note}")
+    if control_kind == "offline_fault" and base["fault"]["realtime_block"]:
+        mismatches.append("an offline_fault row whose fault fired on a realtime block")
+
+    capture = None
+    if _usable(run_dir, "capture.bin", listed):
+        try:
+            capture = gfc.read_capture(run_dir / "capture.bin")
+        except ValueError:
+            capture = None
     live_violations = None
-    if live_template:
+    if live_template or controls.get("input") == "internal":
+        # The plug-in generated its input; WP-h1's stimulus check covers
+        # input=host. Any played sample that is neither the internal stimulus
+        # nor exact silence ("No Input") is host input in capture.bin.
         live_violations = live_input_violations(capture)
         if live_violations != 0:
-            mismatches.append(f"a live-template row captured input that is not the internal "
-                              f"stimulus ({live_violations} samples): host input reached "
-                              f"capture.bin")
+            mismatches.append(f"captured input that is not the internal stimulus "
+                              f"({live_violations} samples): host input reached capture.bin")
 
-    verdict, reasons = gfc.decide(fault=base_fault, plugin_null=nulls["plugin"],
-                                  bounce_null=nulls["bounce"], health_ok=health_ok,
-                                  fault_fired=took_effect, host_alive=host_alive,
-                                  realtime_at_fault=realtime, preconditions=preconditions,
-                                  mismatches=mismatches)
-    if realtime_null is not None and not realtime_null["passed"] and verdict != "fail":
-        verdict, reasons = "fail", [f"host realtime render null failed: max_abs_error="
-                                    f"{realtime_null['max_abs_error']} first="
-                                    f"{realtime_null['first_deviating_sample']}"]
-    if verdict == "fail" and preconditions:
-        # S4: a FAIL still shows the harness preconditions that were also unmet.
-        reasons = reasons + [f"also: {p}" for p in preconditions if p not in reasons]
+    # The stricter of WP-h1's verdict and this one.
+    base_verdict, base_reasons = base["verdict"], list(base["verdict_reasons"])
+    capture_only = (host.get("id") not in REALTIME_RENDER_HOSTS and
+                    base["nulls"].get("host_realtime") is None)
+    if capture_only:
+        # GarageBand cannot render in realtime: the missing realtime null is
+        # expected and the outcome is capped instead (column_outcome).
+        base_reasons = [r for r in base_reasons if r != REALTIME_NOT_COMPUTED]
+        if base_verdict == "inconclusive" and not base_reasons:
+            base_verdict = "pass"
+    if not host_alive:
+        verdict, reasons = "fail", ["host process died during the run"]
+    elif mismatches:
+        verdict, reasons = "fail", (mismatches + [f"also: {p}" for p in preconditions] +
+                                    base_reasons)
+    elif base_verdict == "fail":
+        verdict, reasons = "fail", base_reasons + [f"also: {p}" for p in preconditions]
+    elif preconditions:
+        verdict, reasons = "inconclusive", preconditions + base_reasons
+    else:
+        verdict, reasons = base_verdict, base_reasons
 
+    took_effect = bool(base["fault"]["fired"]) and (
+        bool((base["fault"].get("render_loss") or {}).get("performed"))
+        if fault in gfc.RENDER_FAULTS else
+        True if fault in gfc.CONTROL_FAULTS else applied is not None)
     negative_proved = None
     if control_kind == "planted_negative":
-        # A negative proves something only on an otherwise sound run: the
-        # fault took effect in a process bound to this host, and nothing
-        # else about the run was off.
-        bound = binding["outcome"] == "bound" and not mismatches
+        bound = binding["outcome"] == "bound" and not mismatches and not preconditions
         if PLANTED_NEGATIVES.get(planted) == "fail":
-            # Fired AND applied (the provider fault, or the editor's render loss).
-            sound = bound and took_effect
-            # Proved only by a plug-in null that fails, and not before the
-            # fault: what these negatives corrupt is the fallback.
-            plugin = nulls["plugin"]
+            # Fired and applied, bound, and the FAIL is the corrupted audio
+            # alone: a null failing from the fault sample on, nothing else.
+            plugin = base["nulls"]["plugin"]
             negative_proved = bool(
-                sound and not preconditions and verdict == "fail" and plugin is not None and
-                not plugin["passed"] and plugin["first_deviating_sample"] is not None and
+                bound and took_effect and verdict == "fail" and len(base_reasons) == 1 and
+                base_reasons[0].startswith(("plugin null failed",
+                                            "host realtime render null failed")) and
+                plugin is not None and not plugin["passed"] and
+                plugin["first_deviating_sample"] is not None and
                 plugin["first_deviating_sample"] >= fault_sample)
         else:
-            # gpu_off: fired, bound, and the path precondition is the one and
-            # only thing that kept the run from passing.
+            # gpu_off: fired, bound, and only the GPU-off consequences kept the
+            # run from passing.
             negative_proved = bool(
-                bound and took_effect and verdict == "inconclusive" and
-                len(preconditions) == 1 and NOT_SHARED_PATH in preconditions[0])
+                bound and base["fault"]["fired"] and verdict == "inconclusive" and
+                any(NOT_SHARED_PATH in r for r in base_reasons) and
+                all(any(k in r for k in _PATH_NEGATIVE_REASONS) for r in base_reasons))
     return {
         "fault": base["fault"],
         "pdc_samples": base["pdc_samples"],
@@ -538,12 +451,12 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         "capture": base["capture"],
         "calling_pattern": (calling_pattern(capture) if capture else
                             {"classification": "unknown", "callbacks": 0}),
-        "disposition": disposition,
-        "delivery": {"bar": delivery, "note": delivery_note},
+        "delivery": base.get("delivery"),
+        "controls": controls,
         "offline_path": {k: base.get(k) for k in ("offline_records_in_bounce",
                                                   "offline_path_checked")},
-        "nulls": nulls,
-        "health": {"snapshots": snapshots, "expectation_met": health_ok, "note": health_note},
+        "nulls": base["nulls"],
+        "health": base["health"],
         "host_alive": host_alive,
         "verdict": verdict,
         "verdict_reasons": reasons,
@@ -600,7 +513,9 @@ def column_outcome(evidence: dict, *, control_kind: str, host_id: str) -> str:
         return verdict
     if host_id not in REALTIME_RENDER_HOSTS:
         return "pass_plugin_capture_only"
-    if evidence["delivery"]["bar"] == "degraded":
+    if evidence["nulls"].get("host_realtime") is None:
+        return "inconclusive"
+    if (evidence.get("delivery") or {}).get("degraded_host"):
         return "pass_degraded_host"
     return "pass"
 

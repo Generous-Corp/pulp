@@ -83,7 +83,7 @@ REQUIRED_ARTIFACTS = ("stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "
 # receipt says (an AX snapshot of the insert slot, or REAPER's log).
 LIVE_ARTIFACTS = ("host_evidence.json",)
 RECOMPUTED = ("fault", "pdc_samples", "plugin_identity", "binding", "plugin_process", "capture",
-              "calling_pattern", "disposition", "delivery", "offline_path", "nulls", "health",
+              "calling_pattern", "delivery", "controls", "offline_path", "nulls", "health",
               "host_alive", "verdict", "verdict_reasons", "planted_negative", "negative_proved",
               "live_input_violations")
 FULL_OUTCOMES = ("pass", "control_passed", "negative_proved")
@@ -195,6 +195,31 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
     render_frames = len(stimulus[0]) + window["post"]
     _require(analysis.get("render_frames") == render_frames,
              "analysis.render_frames does not match the bound stimulus")
+
+    # M6: no host input may reach the capture. The input mode comes from the
+    # plug-in's own digest-bound fault_armed event, never from the receipt.
+    # input=host (the track item feeds the plug-in): the captured input must BE
+    # the bound stimulus wherever the plug-in played (WP-h1's check).
+    # input=internal (live templates: track input "No Input", the plug-in
+    # generates its stimulus): every played sample must be that stimulus or
+    # exact silence. Anything else may be a microphone: the receipt is invalid.
+    armed = gfc.first_event(gfc.load_events(run_dir / "events.jsonl"), "fault_armed") or {}
+    input_mode = armed.get("input", "host")
+    if (receipt.get("host_settings") or {}).get("template") == "live":
+        _require(input_mode == "internal",
+                 "a live-template row must run on the plug-in's internal stimulus")
+    try:
+        capture = gfc.read_capture(run_dir / "capture.bin")
+    except ValueError as exc:
+        raise ReceiptError(f"capture.bin unreadable: {exc}") from exc
+    if input_mode == "host":
+        foreign = gfc.captured_input_matches_stimulus(capture, stimulus[0])
+        _require(foreign is None, f"captured input is not the bound stimulus (first difference "
+                                  f"at project sample {foreign}); it may hold host input")
+    else:
+        violations = hosts.live_input_violations(capture)
+        _require(violations == 0, f"captured input is neither the internal stimulus nor "
+                                  f"silence at {violations} samples; it may hold host input")
 
     recomputed = hosts.evaluate_v2(
         run_dir, control_kind=kind, fault=fault_kind,

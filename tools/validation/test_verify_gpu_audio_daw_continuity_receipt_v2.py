@@ -9,9 +9,10 @@ live 1 s post-fault window unless a test says otherwise.
 Each rejection is paired with the receipt it was derived from, and every
 success rule has a planted negative.
 
-WP-h1's per-block delivery analysis (`delivery_disposition`, Fable M2) is
-stubbed here with the shape the v2 evaluation consumes; with the library's
-own implementation absent, a fault cell is INCONCLUSIVE (tested below).
+The single-run analysis (three nulls, per-block delivery from the capture's
+counters, device binding, the stimulus check) is WP-h1's `evaluate_run` and
+is tested there; the M2 tests here override its delivery result to check how
+v2 maps it to an outcome.
 """
 from __future__ import annotations
 
@@ -41,10 +42,7 @@ LOGIC = "/Applications/Logic Pro.app/Contents/MacOS/Logic Pro"
 AUHOSTING = ("/System/Library/Frameworks/AudioToolbox.framework/XPCServices/"
              "AUHostingServiceXPC_arrow.xpc/Contents/MacOS/AUHostingServiceXPC_arrow")
 NAME = "Pulp GPU Fault Continuity"
-GOOD_DISPOSITION = {"pre_window_gpu_share": 1.0, "pre_window_quanta": 96,
-                    "gpu_frozen_after_applied": True, "all_fallback_after": True,
-                    "silence_blocks_delta": 0, "first_fallback_quanta_after_applied": 1,
-                    "lead_blocks": 2}
+
 
 
 def _rewrite_events(run: Path, edit) -> None:
@@ -64,19 +62,22 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
              internal: bool = False) -> dict:
     """Synthesize one run directory and its v2 receipt. `internal` makes the
     plug-in's captured input the internal stimulus (a live-template row)."""
-    synth_fault = "render_force_loss" if fault == hosts.POSITIVE_CONTROL else fault
+    synth_fault = fault
+    if planted is None and kind == "planted_negative":
+        planted = "no_fallback"
     saved = gfc.make_stimulus
     if internal:
         gfc.make_stimulus = lambda frames, *a, **k: hosts.internal_stimulus_span(0, frames)
     try:
+        # WP-h1's planted shapes (dropout, misaligned, stale, gpu_off) when the
+        # run is a planted negative; `break_fallback` alone is a dropout.
         gfc.synthesize_run(run, fault=synth_fault, fault_sample=FAULT, frames=FRAMES,
                            break_fallback=break_fallback, nonce=NONCE, pid=plugin_pid,
-                           tail=POST, window_post=POST)
+                           tail=POST, window_post=POST,
+                           planted=planted if (break_fallback or planted == "gpu_off")
+                           else None)
     finally:
         gfc.make_stimulus = saved
-    if planted is None and kind == "planted_negative":
-        planted = "no_fallback"
-
     def edit(events):
         out = [{"event": "host_process", "pid": plugin_pid, "ppid": 1,
                 "responsible_pid": responsible,
@@ -92,9 +93,8 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
             if event["event"] in ("fault_armed", "fault_fired"):
                 event = dict(event, fault=fault)
             if event["event"] == "fault_armed":
-                event = dict(event, planted_negative=planted)
-            if event["event"] == "prepared" and planted == "gpu_off":
-                event = dict(event, path="staged")
+                event = dict(event, planted_negative=planted, gpu_off=planted == "gpu_off",
+                             input="internal" if internal else "host")
             out.append(event)
         return out
 
@@ -104,8 +104,12 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
         {"status": "ok", "quiet_host": False, "reasons": ["load"]}) + "\n", encoding="utf-8")
     write_host_evidence(run, host_id)
     if realtime:
-        write_realtime_from(run / "bounce.wav", run / "realtime.wav")
+        # The synthesized realtime render (which carries a planted negative's
+        # corruption), kept distinct from the bounce byte-for-byte.
+        write_realtime_from(run / "realtime.wav", run / "realtime.wav")
         write_provenance(run, host_id)
+    else:
+        (run / "realtime.wav").unlink(missing_ok=True)
     return receipt_for(run, kind=kind, fault=fault, mode=mode, host_id=host_id, fmt=fmt,
                        realtime=realtime, template=template)
 
@@ -184,26 +188,43 @@ def receipt_for(run: Path, *, kind: str, fault: str, mode: str, host_id: str = "
     return receipt
 
 
+def rewrite_capture(run: Path, *, inputs=None, outputs=None) -> None:
+    """Rewrite capture.bin record by record, keeping every record's header
+    (position, flags, entry time, delivery counters); `inputs`/`outputs` map
+    (position, value) -> value for the played samples."""
+    cap = gfc.read_capture(run / "capture.bin")
+    blocks = []
+    for rec in cap.records:
+        s, n, pos = rec["stream"], rec["frames"], rec["position"]
+        flags = ((gfc.FLAG_PLAYING if pos >= 0 else 0) |
+                 (gfc.FLAG_OFFLINE if rec["offline"] else 0) |
+                 ((gfc.FLAG_SEGMENT_START | (1 << gfc.PREPARE_INDEX_SHIFT))
+                  if rec["segment_start"] else 0) |
+                 (gfc.FLAG_FAULT_BLOCK if s in cap.fault_block_starts else 0))
+
+        def edit(planes, fn):
+            return [[fn(pos + i, v) if (fn and pos >= 0) else v
+                     for i, v in enumerate(ch[s:s + n])] for ch in planes]
+
+        blocks.append({"position": pos if pos >= 0 else None, "flags": flags,
+                       "inputs": edit(cap.inputs, inputs), "outputs": edit(cap.outputs, outputs),
+                       "host_time_ns": rec["host_time_ns"],
+                       "counters": (rec["gpu"], rec["fallback"], rec["silence"],
+                                    rec["priming"])})
+    gfc.write_capture(run / "capture.bin", cap.sample_rate, blocks)
+
+
 def resign(receipt: dict) -> dict:
     receipt["receipt_sha256"] = gfc.receipt_digest(receipt)
     return receipt
 
 
 class V2Receipt(unittest.TestCase):
-    disposition = GOOD_DISPOSITION
-
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
-        self._had = hasattr(gfc, "delivery_disposition")
-        self._saved = getattr(gfc, "delivery_disposition", None)
-        gfc.delivery_disposition = lambda *a, **k: dict(self.disposition)
 
     def tearDown(self):
-        if self._had:
-            gfc.delivery_disposition = self._saved
-        else:
-            del gfc.delivery_disposition
         self._tmp.cleanup()
 
     def run_dir(self, name: str) -> Path:
@@ -227,7 +248,7 @@ class V2Receipt(unittest.TestCase):
         self.assertEqual(self.main(run), V2.EXIT_OK)
 
     def test_every_fault_kind_passes_in_process(self):
-        for fault in gfc.FAULT_KINDS:
+        for fault in gfc.AUDIO_FAULTS + gfc.RENDER_FAULTS:
             with self.subTest(fault=fault):
                 run = self.run_dir(f"inproc-{fault}")
                 receipt = make_run(run, fault=fault, mode="in_process", plugin_pid=HOST_PID,
@@ -238,7 +259,7 @@ class V2Receipt(unittest.TestCase):
         run = self.run_dir("no-realtime")
         receipt = make_run(run, realtime=False)
         self.assertEqual(self.verify(receipt, run), ("inconclusive", "inconclusive"))
-        self.assertIn("no host realtime render of the fault pass (M1)", receipt["verdict_reasons"])
+        self.assertIn("host realtime render null not computed", receipt["verdict_reasons"])
 
     def test_m1_the_bounce_cannot_stand_in_for_the_realtime_render(self):
         run = self.run_dir("realtime-is-bounce")
@@ -284,7 +305,9 @@ class V2Receipt(unittest.TestCase):
         gfc.synthesize_run(bad, fault="force_loss_before", fault_sample=FAULT, frames=FRAMES,
                            break_fallback=True, nonce=NONCE, pid=PLUGIN_PID, tail=POST,
                            window_post=POST)
-        write_realtime_from(bad / "bounce.wav", run / "realtime.wav")
+        # The planted negative's realtime render carries the corrupted audio
+        # (its offline bounce does not: offline runs the CPU path).
+        write_realtime_from(bad / "realtime.wav", run / "realtime.wav")
         receipt = receipt_for(run, kind="fault", fault="force_loss_before",
                               mode="auhostingservice_arrow")
         self.assertEqual(self.verify(receipt, run)[0], "fail")
@@ -306,38 +329,37 @@ class V2Receipt(unittest.TestCase):
 
     # ── M2: GPU in the loop ────────────────────────────────────────────
 
-    def test_m2_without_the_delivery_analysis_a_fault_cell_is_inconclusive(self):
-        del gfc.delivery_disposition
-        try:
-            run = self.run_dir("no-disposition")
-            receipt = make_run(run)
-            self.assertEqual(self.verify(receipt, run)[0], "inconclusive")
-            self.assertTrue(any("per-block delivery counters" in r
-                                for r in receipt["verdict_reasons"]))
-        finally:
-            gfc.delivery_disposition = lambda *a, **k: dict(self.disposition)
+    def _override_delivery(self, **change):
+        real = gfc.delivery_analysis
 
-    def test_m2_delivery_bar(self):
+        def patched(*a, **k):
+            out = real(*a, **k)
+            out.update(change)
+            return out
+
+        gfc.delivery_analysis = patched
+        self.addCleanup(setattr, gfc, "delivery_analysis", real)
+
+    def test_m2_the_delivery_bar_maps_to_the_outcome(self):
         cases = {
-            "share 0.95": ({"pre_window_gpu_share": 0.95}, "pass", "pass"),
-            "share 0.7 is a degraded host": ({"pre_window_gpu_share": 0.7}, "pass",
-                                             "pass_degraded_host"),
-            "share 0.4 is void": ({"pre_window_gpu_share": 0.4}, "inconclusive", "inconclusive"),
-            "GPU kept delivering": ({"gpu_frozen_after_applied": False}, "inconclusive",
-                                    "inconclusive"),
-            "a non-fallback block after": ({"all_fallback_after": False}, "inconclusive",
-                                           "inconclusive"),
-            "silence delivered": ({"silence_blocks_delta": 2}, "inconclusive", "inconclusive"),
-            "late takeover": ({"first_fallback_quanta_after_applied": 4}, "inconclusive",
-                              "inconclusive"),
+            "met": ({}, "pass", "pass"),
+            "degraded host": (dict(degraded_host=True, pre_fault_gpu_share=0.7), "pass",
+                              "pass_degraded_host"),
+            "void": (dict(void=True, met=False, note="pre-fault GPU share 0.4"),
+                     "inconclusive", "inconclusive"),
+            "not met": (dict(met=False, note="the GPU kept delivering"), "inconclusive",
+                        "inconclusive"),
         }
         for label, (change, verdict, outcome) in cases.items():
             with self.subTest(label):
-                self.disposition = dict(GOOD_DISPOSITION, **change)
-                run = self.run_dir(label.replace(" ", "-"))
+                real = gfc.delivery_analysis
+                self._override_delivery(**change)
+                run = self.run_dir("m2-" + label.replace(" ", "-"))
                 receipt = make_run(run)
+                gfc.delivery_analysis = real
+                self._override_delivery(**change)
                 self.assertEqual(self.verify(receipt, run), (verdict, outcome))
-        self.disposition = GOOD_DISPOSITION
+                gfc.delivery_analysis = real
 
     # ── Controls ───────────────────────────────────────────────────────
 
@@ -378,30 +400,47 @@ class V2Receipt(unittest.TestCase):
         self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], FAULT)
         self.assertEqual(self.main(run), V2.EXIT_OK)
 
+    def test_every_audio_planted_negative_is_proved(self):
+        # Dropout, one-quantum misalignment and a stale fallback: continuous
+        # but wrong audio must FAIL from the fault sample on.
+        for planted in gfc.PLANTED:
+            with self.subTest(planted=planted):
+                run = self.run_dir(f"planted-{planted}")
+                receipt = make_run(run, kind="planted_negative", planted=planted,
+                                   break_fallback=True)
+                self.assertEqual(self.verify(receipt, run), ("fail", "negative_proved"))
+                self.assertGreaterEqual(receipt["nulls"]["plugin"]["first_deviating_sample"],
+                                        FAULT)
+
     def test_a_planted_negative_that_deviates_before_the_fault_is_not_proved(self):
         # A FAIL that starts before the fault is a broken run, not the
         # fallback being corrupted: it proves nothing about the negative.
         run = self.run_dir("negative-early")
         make_run(run, kind="planted_negative", break_fallback=True)
-        cap = gfc.read_capture(run / "capture.bin")
-        early = cap.positions.index(FAULT - 500)
-        blocks, block = [], 128
-        for start in range(0, cap.frames, block):
-            end = min(start + block, cap.frames)
-            pos = cap.positions[start]
-            flags = (gfc.FLAG_PLAYING if pos >= 0 else 0) | (
-                (gfc.FLAG_SEGMENT_START | (1 << gfc.PREPARE_INDEX_SHIFT)) if start == 0 else 0)
-            if start in cap.fault_block_starts:
-                flags |= gfc.FLAG_FAULT_BLOCK
-            outs = [[0.0 if early <= start + i < early + 64 else v
-                     for i, v in enumerate(ch[start:end])] for ch in cap.outputs]
-            blocks.append({"position": pos if pos >= 0 else None, "flags": flags,
-                           "inputs": [ch[start:end] for ch in cap.inputs], "outputs": outs})
-        gfc.write_capture(run / "capture.bin", cap.sample_rate, blocks)
+        rewrite_capture(run, outputs=lambda pos, v: 0.0 if FAULT - 500 <= pos < FAULT - 436
+                        else v)
         receipt = receipt_for(run, kind="planted_negative", fault="force_loss_before",
                               mode="auhostingservice_arrow")
         self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], FAULT - 500)
+        self.assertEqual(len(receipt["verdict_reasons"]), 1)
         self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
+    def test_a_planted_negative_with_another_unmet_precondition_is_not_proved(self):
+        run = self.run_dir("negative-refused")
+        make_run(run, kind="planted_negative", break_fallback=True)
+        _rewrite_events(run, lambda ev: ev + [{"event": "fault_refused", "reason": "planted"}])
+        receipt = receipt_for(run, kind="planted_negative", fault="force_loss_before",
+                              mode="auhostingservice_arrow")
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
+    def test_gpu_off_with_another_unmet_precondition_is_not_proved(self):
+        run = self.run_dir("gpu-off-refused")
+        make_run(run, kind="planted_negative", planted="gpu_off", fault=hosts.POSITIVE_CONTROL)
+        _rewrite_events(run, lambda ev: ev + [{"event": "capture_overflow",
+                                               "dropped_records": 1}])
+        receipt = receipt_for(run, kind="planted_negative", fault=hosts.POSITIVE_CONTROL,
+                              mode="auhostingservice_arrow")
+        self.assertEqual(self.verify(receipt, run), ("inconclusive", "negative_not_proved"))
 
     def test_a_planted_negative_that_never_fired_proves_nothing(self):
         run = self.run_dir("negative-never-fired")
@@ -468,7 +507,6 @@ class V2Receipt(unittest.TestCase):
 
     def test_an_unbound_process_is_inconclusive(self):
         cases = {
-            "claim names another pid": dict(claim_pid=7777),
             "started before the host launched": dict(start=LAUNCH - 1),
             "declared arrow, ran in the plain service": dict(
                 process_path=AUHOSTING.replace("_arrow", "")),
@@ -481,6 +519,15 @@ class V2Receipt(unittest.TestCase):
                 receipt = make_run(run, **kw)
                 self.assertEqual(receipt["binding"]["outcome"], "unbound")
                 self.assertEqual(self.verify(receipt, run)[0], "inconclusive")
+
+    def test_a_claim_by_another_process_never_passes(self):
+        # Fable M5 classes this INCONCLUSIVE (a scanner won the claim); WP-h1's
+        # evaluate_run currently FAILs it. Either way it can never pass, and
+        # v2 records the claim conjunct as failed.
+        run = self.run_dir("claim-other")
+        receipt = make_run(run, claim_pid=7777)
+        self.assertEqual(receipt["binding"]["conjuncts"]["claim_pid"], "failed")
+        self.assertIn(self.verify(receipt, run)[0], ("fail", "inconclusive"))
 
     def test_an_unavailable_responsible_pid_is_bindable_only_in_process(self):
         run = self.run_dir("no-responsible-inproc")
@@ -614,19 +661,30 @@ class V2Receipt(unittest.TestCase):
         self.assertEqual(receipt["live_input_violations"], 0)
         self.assertEqual(self.verify(receipt, run), ("pass", "pass"))
 
-    def test_a_live_row_that_captured_host_input_is_a_fail(self):
+    def test_a_live_row_must_run_on_the_internal_stimulus(self):
         run = self.run_dir("live-host-input")
         receipt = make_run(run, template="live", internal=False)
-        self.assertGreater(receipt["live_input_violations"], 0)
-        self.assertEqual(self.verify(receipt, run)[0], "fail")
-        self.assertTrue(any("host input reached capture.bin" in r
-                            for r in receipt["verdict_reasons"]))
+        with self.assertRaisesRegex(V2.ReceiptError, "internal stimulus"):
+            self.verify(receipt, run)
+
+    def test_foreign_input_makes_the_receipt_invalid(self):
+        # The planted foreign-input test: the plug-in's captured input is not
+        # what the harness bound (a live input reached the plug-in).
+        for internal in (False, True):
+            with self.subTest(internal=internal):
+                run = self.run_dir(f"foreign-{internal}")
+                make_run(run, internal=internal)
+                rewrite_capture(run, inputs=lambda pos, v: v + 0.25 if pos == 3000 else v)
+                receipt = receipt_for(run, kind="fault", fault="force_loss_before",
+                                      mode="auhostingservice_arrow")
+                with self.assertRaisesRegex(V2.ReceiptError, "may hold host input"):
+                    self.verify(receipt, run)
 
 
 class Pattern(unittest.TestCase):
     def _capture(self, times: list[int], frames: int = 512):
         cap = gfc.Capture(48000, 1, [[]], [[]], [], [0])
-        cap.callbacks = [(t, frames, False) for t in times]
+        cap.records = [{"host_time_ns": t, "frames": frames, "offline": False} for t in times]
         return cap
 
     def test_paced_and_bursty_calling(self):
@@ -645,6 +703,13 @@ class Pattern(unittest.TestCase):
                          "unknown")
         self.assertEqual(hosts.calling_pattern(gfc.Capture(48000, 1, [[]], [[]], [], [0]))
                          ["classification"], "unknown")
+
+    def test_a_real_capture_reports_its_pattern(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gfc.synthesize_run(Path(tmp), fault="force_loss_before", fault_sample=FAULT,
+                               frames=FRAMES, tail=POST, window_post=POST)
+            cap = gfc.read_capture(Path(tmp) / "capture.bin")
+            self.assertGreater(hosts.calling_pattern(cap)["callbacks"], 3)
 
 
 if __name__ == "__main__":
