@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-spectr-footprint-20261022-watch",
+  "created_at": "2026-10-22T10:48:36Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "SkiaCanvas::begin_layer compiles its Ganesh offscreen-surface call only when SK_GANESH is defined (the WebGL browser host), matching the guard the image-upload and backend-identity paths already use. Native builds never set the Ganesh context, so their Graphite and raster layer paths are unchanged and output is identical; the link stops keeping Skia's Ganesh backend. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-retained-layer-store",
+    "ctest --test-dir build -R pulp-canvas-native-no-ganesh",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
