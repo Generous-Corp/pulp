@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -18,6 +19,9 @@ enum class SharedIoAdmission : std::uint8_t {
     NotPrepared,
     SequenceGap,
     CapacityFull,
+    // The terminal sequence value has no successor, so admitting it would
+    // wrap the admission epoch back to zero. The owner must re-prepare.
+    SequenceExhausted,
 };
 
 enum class SharedIoCompletion : std::uint8_t { Success, Failed };
@@ -66,10 +70,13 @@ class SharedIoExecutionController {
     // Host/quiescent only. The contract is copied by value so callback code
     // never consults a mutable node descriptor. The logical pipeline depth is
     // the only completion-table capacity and must cover the declared lead.
+    // Each successful prepare opens a new generation; an exhausted generation
+    // space refuses preparation rather than wrapping onto an earlier stream.
     bool prepare(const SharedIoExecutionContract& contract,
                  SharedIoTelemetry* telemetry = nullptr) {
         if (prepared_ || !validate_shared_io_contract(contract).accepted() ||
-            contract.active_path == SharedIoPath::Cpu || contract.pipeline_depth == 0)
+            contract.active_path == SharedIoPath::Cpu || contract.pipeline_depth == 0 ||
+            generation_ == std::numeric_limits<std::uint64_t>::max())
             return false;
         try {
             entries_ = std::make_unique<Entry[]>(contract.pipeline_depth);
@@ -83,6 +90,7 @@ class SharedIoExecutionController {
         next_callback_sequence_ = 0;
         callback_started_ = false;
         in_flight_.store(0, std::memory_order_relaxed);
+        ++generation_;
         prepared_ = true;
         return true;
     }
@@ -105,6 +113,15 @@ class SharedIoExecutionController {
     std::uint32_t algorithmic_lead_blocks() const noexcept {
         return contract_.algorithmic_lead_blocks;
     }
+    // Generation of the current (or most recent) preparation; zero means the
+    // controller was never prepared. release() does not reset it, so a
+    // provider completion deferred across release()/prepare() names a stale
+    // generation and cannot retire a sequence of the next stream. Providers
+    // must capture it when the submission is admitted, never when the
+    // completion runs.
+    std::uint64_t generation() const noexcept {
+        return generation_;
+    }
 
 #if defined(PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS)
     void set_before_publish_test_hook(BeforePublishTestHook hook, void* context) noexcept {
@@ -118,6 +135,9 @@ class SharedIoExecutionController {
     std::uint32_t in_flight_for_testing() const noexcept {
         return in_flight_.load(std::memory_order_relaxed);
     }
+    void set_generation_for_testing(std::uint64_t generation) noexcept {
+        generation_ = generation;
+    }
 #endif
 
     // Non-RT dispatcher operation. Admission is strictly ordered so a missing
@@ -125,6 +145,11 @@ class SharedIoExecutionController {
     SharedIoAdmission admit_submission(std::uint64_t sequence) noexcept {
         if (!prepared_)
             return SharedIoAdmission::NotPrepared;
+        if (sequence == kLastSequence) {
+            if (telemetry_)
+                telemetry_->record_resync_drop();
+            return SharedIoAdmission::SequenceExhausted;
+        }
         if (sequence != next_admission_sequence_.load(std::memory_order_acquire)) {
             if (telemetry_)
                 telemetry_->record_resync_drop();
@@ -187,13 +212,19 @@ class SharedIoExecutionController {
         return SharedIoAdmission::CapacityFull;
     }
 
-    // Provider completion operation. A completion for an unadmitted, stale, or
-    // duplicate sequence is rejected without mutating another sequence.
+    // Provider completion operation. A completion for another generation or
+    // for an unadmitted, stale, or duplicate sequence is rejected without
+    // mutating another sequence.
     bool record_completion(
-        std::uint64_t sequence, SharedIoCompletion completion,
+        std::uint64_t generation, std::uint64_t sequence, SharedIoCompletion completion,
         SharedIoFallbackReason failure_reason = SharedIoFallbackReason::None) noexcept {
         if (!prepared_)
             return false;
+        if (generation != generation_) {
+            if (telemetry_)
+                telemetry_->record_resync_drop();
+            return false;
+        }
         for (std::uint32_t index = 0; index < capacity_; ++index) {
             Entry& entry = entries_[index];
             if (entry.state.load(std::memory_order_acquire) !=
@@ -236,6 +267,20 @@ class SharedIoExecutionController {
         }
         if (telemetry_)
             telemetry_->record_callback_block(false);
+        // Accepting the terminal sequence value would wrap the callback epoch
+        // to zero and silently re-enter priming on the next callback. Latch the
+        // timeline at the terminal value so every later callback is a gap.
+        if (callback_sequence == kLastSequence) {
+            callback_started_ = true;
+            next_callback_sequence_ = kLastSequence;
+            result.path = fallback_path();
+            result.fallback_reason = SharedIoFallbackReason::SequenceGap;
+            if (telemetry_) {
+                telemetry_->record_resync_drop();
+                telemetry_->record_delivery(true, false);
+            }
+            return result;
+        }
         if (callback_started_ && callback_sequence != next_callback_sequence_) {
             const bool forward_gap = callback_sequence > next_callback_sequence_;
             // A timeline discontinuity is itself a miss. Keep the declared
@@ -319,6 +364,8 @@ class SharedIoExecutionController {
     }
 
   private:
+    static constexpr std::uint64_t kLastSequence = std::numeric_limits<std::uint64_t>::max();
+
     enum class EntryState : std::uint8_t { Empty, Writing, Admitted, Completing, Ready, Claimed };
     struct Entry {
         std::atomic<std::uint8_t> state{static_cast<std::uint8_t>(EntryState::Empty)};
@@ -386,6 +433,7 @@ class SharedIoExecutionController {
     std::uint32_t capacity_ = 0;
     std::atomic<std::uint64_t> next_admission_sequence_{0};
     std::uint64_t next_callback_sequence_ = 0;
+    std::uint64_t generation_ = 0;
     bool callback_started_ = false;
     bool prepared_ = false;
 #if defined(PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS)
