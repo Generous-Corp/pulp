@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 141,
+  "inventory_version": 143,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 506,
-    "reviewed_headers": 231,
-    "legacy_unreviewed_headers": 275,
+    "reviewed_headers": 232,
+    "legacy_unreviewed_headers": 274,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 62,
-      "legacy_unreviewed": 275,
+      "infrastructure": 63,
+      "legacy_unreviewed": 274,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 273,
-        "reviewed_headers": 129,
-        "legacy_unreviewed_headers": 144,
+        "reviewed_headers": 130,
+        "legacy_unreviewed_headers": 143,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -2560,11 +2560,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/convolver_non_uniform.hpp",
-      "fingerprint": "sha256:29591426ae6ab0fe96c9d9eaa57a2dacc0bb1ffde3465f08d13aa42b493b620d",
+      "fingerprint": "sha256:e36fe1a2424f6a0f64c30c3f0d395c6884633ebf78cce4b9b834369c2b6f3079",
       "include": "pulp/signal/convolver_non_uniform.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Two-stage zero-latency partitioned convolution: a small-block head beside a K-times-larger tail, both PartitionedConvolver engines. A bounded DSP primitive a processor drives from its own process() at a fixed block size, documented with the convolution engines in the signal guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
