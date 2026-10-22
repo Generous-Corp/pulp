@@ -29,6 +29,11 @@ namespace pulp::gpu_audio::detail {
 ///   BlockScalar: the layer-major block engine on portable four-float lanes.
 ///   BlockSimd:   the same engine on NEON (arm64); equal to BlockScalar elsewhere.
 /// The block kernels use a bounded rational tanh within 3e-7 of std::tanh.
+///
+/// As a per-channel shadow kernel, wrap a loaded artifact in an object with
+/// reset() and process(const float*, float*, uint32_t) (for example holding a
+/// shared_ptr<NamTcnArtifact>) and pass it to bind_neural_cpu_kernel()
+/// (neural_cpu_kernels.hpp). Load and select the kernel before binding.
 enum class NamCpuKernel : std::uint8_t { Reference, BlockScalar, BlockSimd };
 
 class NamTcnArtifact final {
