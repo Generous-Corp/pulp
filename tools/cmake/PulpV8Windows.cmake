@@ -59,9 +59,23 @@
 #                                build tree when empty.
 #   PULP_V8_WIN_LIBCXX_LIB     — the __Cr-ABI libc++.lib to link for the
 #                                out-of-line libc++ runtime (REQUIRED for the
-#                                choc consumer; see point 3 above). Defaults to
-#                                the provider's own lib/libc++.lib beside
-#                                V8_IMPORT_LIBRARY when the archive ships one.
+#                                choc consumer; see point 3 above).
+#
+# The provider archive's own lib/libc++.lib is NOT a substitute for that
+# runtime. It is a static-CRT build (/MT, /DEFAULTLIB:libcmt) that embeds
+# /FAILIFMISMATCH:"_CRT_STDIO_ISO_WIDE_SPECIFIERS=0" and carries no vcruntime
+# exception_ptr glue, while the flags below assume the llvm-project
+# LIBCXX_CXX_ABI=vcruntime build (_CRT_STDIO_ISO_WIDE_SPECIFIERS=1, dynamic CRT
+# via msvcprt.lib). Linking it as-is turns a clear configure error into an
+# LNK2038 mismatch at link time; using it would need both settings switched,
+# which has not been link/run verified on Windows.
+#
+# pulp_v8_windows_apply_abi puts the __Cr libc++ headers on every source in
+# the target it is given (pulp-view-script), while pulp-view-core and the tests
+# compile against the MSVC STL. A non-virtual call that passes std:: types
+# across that boundary therefore names a symbol in one std ABI and resolves it
+# in the other, and will not link. Narrowing the __Cr flags to a target that
+# holds only js_v8_engine.cpp behind a std-free surface is still open.
 set(PULP_V8_WIN_LIBCXX_INCLUDE "" CACHE PATH
     "Chromium-style libc++ header root for the Windows V8 consumer (dir with <vector>, <__config>)")
 set(PULP_V8_WIN_LIBCXX_CONFIG "" CACHE PATH
@@ -94,7 +108,7 @@ function(pulp_v8_windows_require_clang_cl)
             "    -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl \\\n"
             "    -DPULP_JS_ENGINE=v8 -DV8_DIR=<unpacked v8 provider root> \\\n"
             "    -DPULP_V8_WIN_LIBCXX_INCLUDE=<llvm-project>/libcxx/include \\\n"
-            "    [-DPULP_V8_WIN_LIBCXX_LIB=<__Cr libc++.lib; defaults to the provider lib/libc++.lib>]\n"
+            "    -DPULP_V8_WIN_LIBCXX_LIB=<__Cr libc++.lib>\n"
             "See tools/cmake/PulpV8Windows.cmake for the full ABI rationale.")
     endif()
 endfunction()
@@ -168,19 +182,9 @@ function(pulp_v8_windows_apply_abi target)
             "'${PULP_V8_WIN_LIBCXX_INCLUDE}' has no <__config> — not a libc++ "
             "header root.")
     endif()
-    if(NOT PULP_V8_WIN_LIBCXX_LIB AND V8_IMPORT_LIBRARY)
-        # The sealed provider ships its matching static __Cr libc++ runtime
-        # beside the import library (manifest.json "libcxx_lib"); prefer it over
-        # a separately built llvm-project runtime.
-        get_filename_component(_v8_lib_dir "${V8_IMPORT_LIBRARY}" DIRECTORY)
-        if(EXISTS "${_v8_lib_dir}/libc++.lib")
-            set(PULP_V8_WIN_LIBCXX_LIB "${_v8_lib_dir}/libc++.lib")
-        endif()
-    endif()
     if(NOT PULP_V8_WIN_LIBCXX_LIB)
         message(FATAL_ERROR
-            "Pulp Windows V8: PULP_V8_WIN_LIBCXX_LIB is unset and the V8 provider "
-            "next to V8_IMPORT_LIBRARY ships no lib/libc++.lib. The sealed v8.dll "
+            "Pulp Windows V8: PULP_V8_WIN_LIBCXX_LIB is unset. The sealed v8.dll "
             "exports no out-of-line libc++ runtime; supply a __Cr-ABI libc++.lib "
             "(built from llvm-project/runtimes with LIBCXX_ABI_NAMESPACE=__Cr).")
     endif()

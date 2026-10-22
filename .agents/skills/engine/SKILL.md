@@ -455,13 +455,28 @@ Windows). Last runtime proof (m152): choc V8 consumer init +
 The m157 Windows archives have passed structural ABI inspection but not this
 consumer link/run gate.
 
-The archive ships its own `__Cr` runtime as `lib/libc++.lib` (the embedded
-manifest's `libcxx_lib`), so `PulpV8Windows.cmake` now defaults
-`PULP_V8_WIN_LIBCXX_LIB` to the file beside `V8_IMPORT_LIBRARY` and only
-fails when neither exists. The archive ships no libc++ headers, so
-`PULP_V8_WIN_LIBCXX_INCLUDE` must still point at an llvm-project
-`libcxx/include`. Building the runtime yourself (step 4) is now only an
-override. The mac/linux sealed
+The archive also ships a `__Cr` runtime as `lib/libc++.lib` (the embedded
+manifest's `libcxx_lib`), but it is **not** interchangeable with the step 4
+runtime, so `PulpV8Windows.cmake` does not default to it and fails configure
+when `PULP_V8_WIN_LIBCXX_LIB` is unset. The provider lib is a static-CRT build
+(`/MT`, `/DEFAULTLIB:libcmt`), embeds
+`/FAILIFMISMATCH:"_CRT_STDIO_ISO_WIDE_SPECIFIERS=0"`, and carries no vcruntime
+`exception_ptr` glue, while the module's flags assume the llvm-project
+`LIBCXX_CXX_ABI=vcruntime` build (`_CRT_STDIO_ISO_WIDE_SPECIFIERS=1`, dynamic CRT
+via `msvcprt.lib`). The UCRT's `corecrt_stdio_config.h` emits a
+`detect_mismatch` for that define, so pointing at the provider lib produces an
+LNK2038 at link rather than a configure error. Using it would need both
+settings switched, and that is unproven on Windows. The archive ships no
+libc++ headers either, so `PULP_V8_WIN_LIBCXX_INCLUDE` must still point at an
+llvm-project `libcxx/include`.
+
+**ABI boundary trap:** `pulp_v8_windows_apply_abi(pulp-view-script)` puts the
+`__Cr` libc++ headers on every source in `pulp-view-script`, while
+`pulp-view-core` and the tests compile against the MSVC STL. Any non-virtual
+call that passes `std::` types across that boundary names a symbol in one std
+ABI and resolves it in the other, so it will not link. The narrow fix (an
+object library holding only `js_v8_engine.cpp` behind a std-free surface) is
+open work for the local-VM Windows run. The mac/linux sealed
 artifacts use the **system** libc++ (no `__Cr`) and need none of this —
 the `__Cr` contract is Windows-only.
 
