@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "event_id": "20261022-coretext-face-registry",
+  "kind": "change",
+  "created_at": "2026-10-22T08:40:33Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "Apple text measurement and CoreGraphics paint resolve one face: a CoreText face registry (bundled fonts plus register_font faces) that the CoreGraphics canvas paints through and, without Skia, TextShaper measures through, using Skia's CoreText metric definitions. Before it, CTFontCreateWithName answered Helvetica for the bundled Inter, so a CPU-painted label was measured as Inter and painted as Helvetica, and without Skia it was not measured at all. bundled_fonts.cpp reads the embedded font table from a Skia-free TU and also files Skia registrations with the CoreText registry; font_registry_stubs.cpp registers through CoreText on Apple without Skia. Faces stay in Pulp's own table, never CTFontManager. No API is removed and no design-import, Chromium, rendering-backend, packaging, or source-authority boundary moves.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-auto-ui",
+    "ctest --test-dir build -R pulp-test-coretext-text",
+    "ctest --test-dir build -R pulp-test-font-options"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

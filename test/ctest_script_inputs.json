@@ -1518,6 +1518,7 @@
   "pulp-test-group-canvas-text": {
    "data": "declared",
    "detected_sources": [
+    "test/test_coretext_text.cpp",
     "test/test_font_woff2.cpp"
    ],
    "inputs": [
@@ -1528,6 +1529,7 @@
    ],
    "kind": "compiled",
    "sources": [
+    "test/test_coretext_text.cpp",
     "test/test_font_woff2.cpp"
    ],
    "undeclared_sources": []
@@ -6378,6 +6380,28 @@
    ],
    "kind": "shell"
   },
+  "icu-data-subset-deterministic": {
+   "entry": "tools/cmake/scripts/icu_data_subset.py",
+   "inputs": [
+    "tools/cmake/scripts/icu_data_subset.py"
+   ],
+   "kind": "python"
+  },
+  "icu-data-subset-linked": {
+   "entry": "tools/scripts/plugin_footprint_check.py",
+   "inputs": [
+    "tools/scripts/plugin_footprint_check.py"
+   ],
+   "kind": "python"
+  },
+  "icu-data-subset-selftest": {
+   "entry": "tools/cmake/scripts/test_icu_data_subset.py",
+   "inputs": [
+    "tools/cmake/scripts/icu_data_subset.py",
+    "tools/cmake/scripts/test_icu_data_subset.py"
+   ],
+   "kind": "python"
+  },
   "import-design-external-asset-localized": {
    "entry": "test/test_import_design_external_asset.py",
    "inputs": [
@@ -7024,6 +7048,14 @@
     "core/timeline/schema/timeline_schema.json",
     "tools/scripts/negative_capability_allowlist.json",
     "tools/scripts/negative_capability_check.py"
+   ],
+   "kind": "python"
+  },
+  "plugin-footprint-check-selftest": {
+   "entry": "tools/scripts/test_plugin_footprint_check.py",
+   "inputs": [
+    "tools/scripts/plugin_footprint_check.py",
+    "tools/scripts/test_plugin_footprint_check.py"
    ],
    "kind": "python"
   },

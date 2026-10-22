@@ -305,9 +305,17 @@ TEST_CASE("Font registry non-Skia stubs reject registrations but validate bytes"
     REQUIRE_FALSE(validate_font_bytes(bytes, 0));
     REQUIRE(validate_font_bytes(bytes, sizeof(bytes)));
 
+#ifdef __APPLE__
+    // Apple builds without Skia register faces with CoreText, so the
+    // generation is live: a bump is observable, a rejected registration is not.
+    const auto generation = font_registration_generation();
+    bump_font_registration_generation();
+    REQUIRE(font_registration_generation() == generation + 1);
+#else
     REQUIRE(font_registration_generation() == 0);
     bump_font_registration_generation();
     REQUIRE(font_registration_generation() == 0);
+#endif
 }
 
 TEST_CASE("Font cluster_step non-Skia skeleton skips UTF-8 continuation bytes",

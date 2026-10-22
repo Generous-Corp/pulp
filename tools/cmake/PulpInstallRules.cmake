@@ -852,6 +852,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
     # Included by FindSkia.cmake relative to its own directory.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaDawnProvider.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaIcuData.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
     # Every plist template a format helper can reach must ship. PulpPluginFormats
@@ -899,6 +900,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_js_bytecode_main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_portable_binary.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_bundle_relocatable.py"
+    # PulpSkiaIcuData.cmake resolves the ICU data trimmer next to itself.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/icu_data_subset.py"
     # G3 universal-build arch/signature gate. pulp_validate_bundle_architectures
     # (PulpBundleRelocatable.cmake) resolves this next to itself, so ship it in
     # lib/cmake/Pulp/scripts too — the authoritative copy lives at
