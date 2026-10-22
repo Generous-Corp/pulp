@@ -192,14 +192,15 @@ function(_pulp_apply_view_mac_objc_suffix target)
     # display-link class is iOS-only — inside TARGET_OS_IPHONE — so there is no
     # macOS copy to namespace. The .mm's quote-include of the render names header
     # resolves from its own source dir, so no extra include dir is needed.)
-    # A lite editor (pulp_add_plugin's LITE_EDITOR sets _PULP_EDITOR_STACK in
-    # the calling scope) compiles the cluster without the GPU hosts and links
-    # the lite replacement objects; see PulpLiteEditorObjects.cmake.
+    # A lite editor (pulp_add_plugin sets _PULP_EDITOR_STACK in the calling
+    # scope; lite unless the plug-in declares UI_SCRIPT, GPU_UI or FULL_EDITOR)
+    # compiles the cluster without the GPU hosts and links the lite replacement
+    # objects; see PulpLiteEditorObjects.cmake.
     set(_pulp_lite_editor FALSE)
     if(_PULP_EDITOR_STACK STREQUAL "lite")
         if(TARGET pulp-canvas-lite-objects AND TARGET pulp-view-lite-objects)
             set(_pulp_lite_editor TRUE)
-        else()
+        elseif(PLUGIN_LITE_EDITOR)
             message(STATUS
                 "pulp: ${target}: LITE_EDITOR is not available in this build "
                 "(it needs macOS with Skia); linking the full editor stack")

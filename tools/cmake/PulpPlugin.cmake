@@ -89,7 +89,7 @@ endfunction()
 function(pulp_add_plugin target)
     _pulp_resolve_consumer_targets()
     cmake_parse_arguments(PLUGIN
-        "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;LITE_EDITOR;AAX_HEADLESS;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
+        "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;LITE_EDITOR;GPU_UI;FULL_EDITOR;AAX_HEADLESS;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
         ${ARGN}
@@ -168,20 +168,34 @@ function(pulp_add_plugin target)
         set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")
     endif()
 
-    # LITE_EDITOR: the editor's binaries leave out the GPU hosts and link the
-    # lite replacement objects, so they carry no Skia, Dawn or Tint (see
-    # tools/cmake/PulpLiteEditorObjects.cmake). For an editor that paints on the
-    # CoreGraphics host: AutoUi, or C++ views that never ask for the GPU. A
-    # scripted UI needs the GPU host, so UI_SCRIPT keeps the full stack.
-    set(_PULP_EDITOR_STACK full)
-    if(PLUGIN_LITE_EDITOR)
-        if(PLUGIN_UI_SCRIPT)
-            message(FATAL_ERROR
-                "pulp_add_plugin(${target}): LITE_EDITOR cannot be combined with UI_SCRIPT; "
-                "a scripted editor renders on the GPU host")
+    # Editor stack. The lite stack is the default: the editor's binaries leave
+    # out the GPU hosts and link the lite replacement objects, so they carry no
+    # Skia, Dawn or Tint (see tools/cmake/PulpLiteEditorObjects.cmake). That
+    # suits every editor that paints on the CoreGraphics host: AutoUi, and C++
+    # views that never ask for the GPU. The full stack is linked when the editor
+    # needs it, which the plug-in declares:
+    #   UI_SCRIPT    a scripted UI renders on the GPU host;
+    #   GPU_UI       C++ views that need the GPU host (requires_gpu_host());
+    #   FULL_EDITOR  the escape hatch, the full stack for any other reason.
+    # LITE_EDITOR is accepted and states the default explicitly.
+    set(_pulp_full_reasons "")
+    foreach(_kw UI_SCRIPT GPU_UI FULL_EDITOR)
+        if(PLUGIN_${_kw})
+            list(APPEND _pulp_full_reasons ${_kw})
         endif()
+    endforeach()
+    if(PLUGIN_LITE_EDITOR AND _pulp_full_reasons)
+        list(JOIN _pulp_full_reasons ", " _pulp_full_reasons_text)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): LITE_EDITOR cannot be combined with "
+            "${_pulp_full_reasons_text}, which need the full editor stack")
+    endif()
+    if(_pulp_full_reasons)
+        set(_PULP_EDITOR_STACK full)
+    else()
         set(_PULP_EDITOR_STACK lite)
     endif()
+    set(PULP_${target}_EDITOR_STACK "${_PULP_EDITOR_STACK}" CACHE INTERNAL "")
 
     _pulp_normalize_ui_script_path(_PULP_UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_UI_SCRIPT}")
     set(PULP_${target}_UI_SCRIPT "${_PULP_UI_SCRIPT}" CACHE INTERNAL "")

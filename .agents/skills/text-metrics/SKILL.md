@@ -154,6 +154,33 @@ names and advances, before trusting either. A subclass of `SkFontMgr` (or of
 SkParagraph's `TypefaceFontProvider`) must live in a TU built with `-fno-rtti`:
 the prebuilt Skia exports no type info for them and the link fails.
 
+## The CoreGraphics host measures through the face CoreText paints
+
+The rule above has a second half that lives below the family name: the
+measuring backend must resolve the same *face* the painting backend draws.
+The CoreGraphics host paints text through CoreText. A lite editor (the macOS
+default; see the `view-bridge` skill's editor stack section) also measures
+through CoreText (`TextShaper`'s `PULP_TEXT_SHAPER_SKIA == 0` branch), so the
+line box comes from the glyphs actually drawn. That is a deliberate choice:
+measure equals paint.
+
+A full-stack build still measures through Skia's `SkFontMgr`, and for some
+families and weights Skia resolves a different face than CoreText paints:
+
+- "Helvetica Neue" 600 at 12 px: Skia ascent 13.92, width 116.7; the painted
+  face ascent 13.69, width 120.0.
+- JetBrains Mono at 9 px: Skia adds 0.12 px of leading the painted face lacks.
+
+So the same design can place labels 0.5 to 1 logical px apart between a lite
+and a full build: whole labels shift, glyphs are identical. It shows on
+design-imported panels that use system families at non-400 weights
+(PulpDesignSynth, PulpDesignArp); Inter and AutoUi text are unaffected. The
+lite placement is the correct one. Before reading a lite-vs-full capture diff
+as a regression, check that the differing bands are pure vertical shifts
+(shift-search residual near 0), and compare `TextShaper` metrics from one probe
+executable built against each stack (link `pulp::canvas`, and the same plus
+`$<TARGET_OBJECTS:pulp-canvas-lite-objects>`).
+
 ## A Label with element children does not paint at its own origin
 
 A `Label` that carries both text and element children is a flex container whose

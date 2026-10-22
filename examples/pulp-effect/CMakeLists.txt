@@ -13,6 +13,9 @@ endif()
 pulp_add_plugin(PulpEffect
     FORMATS         VST3 AU CLAP
     PLUGIN_NAME     "PulpEffect"
+    # Kept on the full editor stack on purpose: it is the control for the
+    # lite-stack checks and holds the full stack's footprint budget.
+    FULL_EDITOR
     BUNDLE_ID       "com.pulp.effect"
     MANUFACTURER    "Pulp"
     VERSION         "1.0.0"
@@ -99,7 +102,7 @@ if(PULP_HAS_VST3)
     endif()
 endif()
 
-# Control for the lite checks: a plug-in without LITE_EDITOR still carries the full editor stack.
+# Control for the lite checks: a FULL_EDITOR plug-in still carries the full editor stack.
 if(PULP_BUILD_TESTS AND APPLE AND CMAKE_NM AND TARGET pulp-canvas-lite-objects)
     if(TARGET PulpEffect_VST3)
         add_test(NAME editor-stack-PulpEffect_VST3

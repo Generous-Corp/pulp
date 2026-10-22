@@ -19,7 +19,7 @@ bool note_lite_host_gpu_request() {
         "[plugin-gpu-host] this editor asked for the GPU host, but the plug-in was built "
         "with the lite editor stack, which has none; it opens on the CoreGraphics host "
         "instead. A scripted UI, or a view whose requires_gpu_host() is true, needs the "
-        "full stack: remove LITE_EDITOR from its pulp_add_plugin call.");
+        "full stack: declare GPU_UI in its pulp_add_plugin call.");
     return true;
 }
 

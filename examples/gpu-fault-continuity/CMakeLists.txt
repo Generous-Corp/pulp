@@ -19,6 +19,7 @@ endif()
 
 pulp_add_plugin(PulpGpuFaultContinuity
     FORMATS           CLAP VST3 AU
+    GPU_UI
     SOURCES           gpu_fault_continuity.cpp gpu_fault_interposer.cpp gpu_fault_view.cpp
                       gpu_fault_rendezvous.cpp
     PLUGIN_NAME       "Pulp GPU Fault Continuity"

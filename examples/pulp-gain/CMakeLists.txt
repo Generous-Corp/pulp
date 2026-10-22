@@ -21,7 +21,6 @@ endif()
 pulp_add_plugin(PulpGain
     FORMATS         ${PULP_GAIN_FORMATS}
     PLUGIN_NAME     "PulpGain"
-    LITE_EDITOR
     BUNDLE_ID       "com.pulp.gain"
     MANUFACTURER    "Pulp"
     VERSION         "1.0.0"
@@ -36,7 +35,8 @@ pulp_add_plugin(PulpGain
 add_subdirectory(headless)
 
 # ── Footprint ─────────────────────────────────────────────────────────────
-# PulpGain is LITE_EDITOR: its AutoUi editor paints on the CoreGraphics host,
+# PulpGain has the lite editor stack (the default): its AutoUi editor paints
+# on the CoreGraphics host,
 # so its binaries must carry none of Skia, Dawn, Tint, ICU, the GPU host or the
 # script runtime, and stay under the lite budget
 # (tools/scripts/plugin_footprint_budget.json, profile "lite-editor").
@@ -156,7 +156,8 @@ if(APPLE)
     endforeach()
 endif()
 
-# LITE_EDITOR: the AutoUi editor's modules carry no Skia, Dawn, Tint or GPU host.
+# The AutoUi editor gets the lite editor stack by default: its modules carry
+# no Skia, Dawn, Tint or GPU host.
 if(PULP_BUILD_TESTS AND APPLE AND CMAKE_NM AND TARGET pulp-canvas-lite-objects)
     if(TARGET PulpGain_VST3)
         add_test(NAME editor-stack-PulpGain_VST3

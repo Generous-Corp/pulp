@@ -1266,6 +1266,14 @@ add_test(NAME cmake-pulp-add-plugin-unknown-args
 set_tests_properties(cmake-pulp-add-plugin-unknown-args PROPERTIES
     LABELS "cmake;format" TIMEOUT 120)
 
+add_test(NAME cmake-pulp-add-plugin-editor-stack
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/pulp-add-plugin-editor-stack
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_add_plugin_editor_stack.cmake)
+set_tests_properties(cmake-pulp-add-plugin-editor-stack PROPERTIES
+    LABELS "cmake;format" TIMEOUT 120)
+
 add_test(NAME cmake-control-shipping-matrix
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}

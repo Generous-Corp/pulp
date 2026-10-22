@@ -8,8 +8,9 @@
   "capability_families": [
     "render-assets-and-backends"
   ],
-  "rationale": "pulp_add_plugin LITE_EDITOR builds a plug-in's macOS binaries without the GPU plug-in and window hosts and links lite copies of four canvas/view sources (PULP_LITE_EDITOR selects their CoreText and no-op bodies), so those binaries carry no Skia, Dawn or Tint. Binaries that do not opt in, and every library, are unchanged; the full-stack paths are the defaults of the new switches. Lite editors render byte-identically on the CoreGraphics host they already used. No design-import, Chromium, rendering or packaging authority moves.",
+  "rationale": "pulp_add_plugin LITE_EDITOR builds a plug-in's macOS binaries without the GPU plug-in and window hosts and links lite copies of four canvas/view sources (PULP_LITE_EDITOR selects their CoreText and no-op bodies), so those binaries carry no Skia, Dawn or Tint. Libraries are unchanged; the full-stack paths are the defaults of the new switches. In the same range the lite stack becomes the default for macOS plug-ins that declare none of UI_SCRIPT, GPU_UI or FULL_EDITOR, and the in-tree plug-ins whose views need the GPU host declare GPU_UI. Lite editors render byte-identically on the CoreGraphics host they already used. No design-import, Chromium, rendering or packaging authority moves.",
   "tests": [
+    "ctest --test-dir build -R cmake-pulp-add-plugin-editor-stack",
     "ctest --test-dir build -R editor-stack",
     "ctest --test-dir build -R plugin-footprint",
     "ctest --test-dir build -R pulp-test-lite-editor-host-mac",

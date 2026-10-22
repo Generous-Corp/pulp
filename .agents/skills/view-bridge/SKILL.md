@@ -100,6 +100,45 @@ virtuals: additive callbacks such as `process_f64(...)` belong after the
 existing f32 process surface, and descriptor fields added for new capabilities
 should be appended when positional aggregate initializer compatibility matters.
 
+### Editor stack: lite by default, GPU host by declaration
+
+On macOS a plug-in links the **lite editor stack** unless its
+`pulp_add_plugin(...)` declares otherwise. A lite binary has no GPU plug-in or
+window host, no Skia, Dawn or Tint, and its editor always opens on the
+CoreGraphics host (`PluginViewHost::create` in
+`core/view/platform/mac/plugin_view_host_mac.mm`, compiled with
+`PULP_VIEW_LITE_HOST` through `mac_gpu_host_config.h`). Pick the keyword by what
+the editor draws:
+
+| Declare | When |
+|---|---|
+| nothing (or `LITE_EDITOR`) | AutoUi, or C++ views that paint on the CoreGraphics host and never set `requires_gpu_host()` |
+| `UI_SCRIPT` | a scripted UI; it renders on the GPU host, so it always gets the full stack |
+| `GPU_UI` | C++ views that need the GPU host: `requires_gpu_host()` is true, Skia SVG that must composite, shaders, Dawn textures, 3D |
+| `FULL_EDITOR` | the full stack for any other reason (a deliberate control, a GPU feature that does not set the flag) |
+
+`LITE_EDITOR` with any of the other three is a configure error. Other
+platforms always build the full stack.
+
+A lite plug-in whose editor asks for the GPU host anyway (`decide_gpu_host`
+returns `use_gpu`) does not fail: `PluginViewHost::create` calls
+`detail::note_lite_host_gpu_request()`, which logs **one** warning per process
+naming `GPU_UI` and counts every request, and the editor opens on the
+CoreGraphics host, where GPU-only drawing is blank. That warning in a log means
+the plug-in is missing `GPU_UI`. `pulp-test-lite-editor-host-mac` holds this
+behavior; `editor-stack-*` tests check which stack each example module links.
+
+How the stack is cut, so a change does not reattach Skia by accident: the
+per-binary ObjC cluster leaves out the GPU hosts, and the binary links
+`pulp-canvas-lite-objects` / `pulp-view-lite-objects`, copies of
+`text_shaper.cpp`, `font_resolver.cpp`, `canvas_widget.cpp` and
+`asset_manager.cpp` built with `PULP_LITE_EDITOR=1`
+(`tools/cmake/PulpLiteEditorObjects.cmake`). Objects on the link line win over
+the library's archive members. `PULP_LITE_EDITOR` may change function bodies
+only, never a declaration. A new unconditional Skia call in a library function
+a lite editor reaches puts Skia back in every lite binary; the `editor-stack-*`
+symbol checks are what catch it.
+
 ## Editor open: content-first — the host's first image is the mounted document
 
 **Rule: the first thing a host composites of an editor is the settled document

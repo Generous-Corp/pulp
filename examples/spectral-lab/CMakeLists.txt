@@ -64,6 +64,8 @@ if(TARGET pulp::gpu-audio AND TARGET pulp::render)
         FORMATS           VST3 AU CLAP Standalone
         SOURCES           spectral_lab_view.cpp
         PLUGIN_NAME       "SpectralLab"
+        # The editor renders on the GPU host (requires_gpu_host()): link the full editor stack.
+        GPU_UI
         BUNDLE_ID         "com.pulp.spectrallab"
         MANUFACTURER      "Pulp"
         VERSION           "1.0.2"
