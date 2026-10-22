@@ -367,6 +367,7 @@ void emit_shared_io_unresolved_ownership(const SharedIoTraceOwnership& ownership
 // telemetry_error by these numeric values.
 static_assert(static_cast<unsigned>(SharedIoTelemetryError::None) == 0);
 static_assert(static_cast<unsigned>(SharedIoTelemetryError::TelemetryValidationDeferred) == 13);
+static_assert(static_cast<unsigned>(SharedIoTelemetryError::CompletionTimingInvalid) == 14);
 
 SharedIoTraceDrainResult
 drain_shared_io_trace(SharedIoTraceRecorder& recorder,

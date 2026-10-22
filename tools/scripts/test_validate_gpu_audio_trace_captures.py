@@ -369,11 +369,12 @@ class GpuAudioTraceSqlTests(unittest.TestCase):
                   self.arguments[self.counter].items()
                   if key not in ("debug.schema", "debug.engine_id", "debug.generation")}
         # (telemetry_valid, telemetry_error) -> flagged. 0 = None, 12 =
-        # RetirementsExceedSubmissions, 13 = TelemetryValidationDeferred.
+        # RetirementsExceedSubmissions, 13 = TelemetryValidationDeferred,
+        # 14 = CompletionTimingInvalid.
         # An inconsistent pair is flagged even when its error code alone is
         # acceptable: (0, 0) claims no error yet is not valid, (1, 13) claims
         # validity for a deferred snapshot.
-        cases = {(1, 0): False, (0, 13): False, (0, 12): True, (0, 0): True,
+        cases = {(1, 0): False, (0, 13): False, (0, 12): True, (0, 14): True, (0, 0): True,
                  (1, 13): True, (1, None): True, (None, 0): True}
         for (valid, error), flagged in cases.items():
             with self.subTest(valid=valid, error=error):

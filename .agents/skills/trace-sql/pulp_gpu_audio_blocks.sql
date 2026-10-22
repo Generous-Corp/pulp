@@ -342,8 +342,8 @@ GROUP BY t.upid, t.engine_id, t.generation
 UNION ALL
 -- telemetry_error is SharedIoTelemetryError: 0 = None (validated) and
 -- 13 = TelemetryValidationDeferred (a live drain that cannot claim one
--- coherent snapshot). Any other value is a contract violation the producer
--- detected. Captures from producers without the field report both as NULL.
+-- coherent snapshot). Any other value, including 14 = CompletionTimingInvalid,
+-- is a contract violation the producer detected. Captures from producers without the field report both as NULL.
 SELECT 'invalid_telemetry' AS issue, upid, engine_id, generation FROM pulp_gpu_audio_counters
 WHERE (telemetry_valid IS NULL) != (telemetry_error IS NULL)
    OR (telemetry_error IS NOT NULL

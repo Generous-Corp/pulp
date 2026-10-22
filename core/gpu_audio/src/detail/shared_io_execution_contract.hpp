@@ -305,8 +305,9 @@ validate_shared_io_telemetry(const SharedIoTelemetrySnapshot& snapshot) noexcept
     if (snapshot.fallback_blocks > snapshot.delivered_blocks)
         return {SharedIoTelemetryError::FallbacksExceedDelivered};
     // `scheduled_to_completion_ns` is the sum of the two component samples.
-    // Defense in depth behind the validity bit above: a wrapped sum would otherwise look like a valid, tiny latency receipt
-    // and could hide a provider timing failure from health consumers.
+    // Defense in depth behind the validity bit above: a wrapped sum would
+    // otherwise look like a valid, tiny latency receipt and could hide a
+    // provider timing failure from health consumers.
     if (snapshot.scheduled_to_completion_ns < snapshot.pre_submit_delay_ns ||
         snapshot.scheduled_to_completion_ns < snapshot.submit_to_completion_ns)
         return {SharedIoTelemetryError::ScheduledCompletionBeforeComponents};

@@ -169,6 +169,11 @@ class SharedIoConvolutionSession {
     bool last_closed_trace_retention_overflow() const noexcept {
         return last_closed_trace_retention_overflow_;
     }
+    // Result of the final quiescent drain that closed the last generation;
+    // its telemetry_error is the release receipt's validation verdict.
+    SharedIoTraceDrainResult last_close_trace_drain() const noexcept {
+        return last_close_trace_drain_;
+    }
     std::vector<SharedIoTraceRecord> take_last_closed_trace_records() noexcept {
         return std::exchange(last_closed_trace_records_, {});
     }
@@ -255,6 +260,7 @@ class SharedIoConvolutionSession {
     std::vector<SharedIoTraceAdmission> retained_trace_admissions_;
     bool trace_retention_overflow_ = false;
     bool last_closed_trace_retention_overflow_ = false;
+    SharedIoTraceDrainResult last_close_trace_drain_{};
     std::uint64_t provider_starved_ = 0;
     std::optional<SharedIoConvolutionPipeline::Lease> pending_ingress_;
     std::vector<float> terminal_;

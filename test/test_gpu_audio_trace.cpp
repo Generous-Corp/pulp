@@ -1194,6 +1194,61 @@ TEST_CASE("diagnostic overflow never refuses physical session submissions", "[gp
     REQUIRE(fixture.session.trace_stats().invalid == 0);
 }
 
+TEST_CASE("observer-backed session release validates the closing telemetry receipt",
+          "[gpu_audio][trace][observer][telemetry]") {
+    ProductTraceFixture fixture;
+    fixture.prepare();
+    SessionObserverSink sink;
+    const SharedIoTraceDrainObserver observer{.context = &sink,
+                                              .record = &SessionObserverSink::record,
+                                              .admission = &SessionObserverSink::admission};
+    REQUIRE(fixture.session.set_trace_observer(&observer));
+    drive_two_deliveries(fixture);
+    // Negative control: a drain while producers may still run defers.
+    const auto live = fixture.session.drain_trace();
+    CHECK_FALSE(live.telemetry_valid);
+    CHECK(live.telemetry_error == SharedIoTelemetryError::TelemetryValidationDeferred);
+
+    REQUIRE(fixture.session.release());
+    const auto closed = fixture.session.last_close_trace_drain();
+    CHECK(closed.recording_enabled);
+    CHECK(closed.telemetry_valid);
+    CHECK(closed.telemetry_error == SharedIoTelemetryError::None);
+}
+
+TEST_CASE("session close without an observer drains every row into the closed census",
+          "[gpu_audio][trace][telemetry]") {
+    ProductTraceFixture fixture;
+    fixture.prepare();
+    drive_two_deliveries(fixture);
+    REQUIRE(fixture.session.release());
+    REQUIRE_FALSE(fixture.session.last_closed_trace_retention_overflow());
+    const auto closed = fixture.session.last_close_trace_drain();
+    CHECK(closed.telemetry_valid);
+    CHECK(closed.telemetry_error == SharedIoTelemetryError::None);
+    const auto admissions = fixture.session.take_last_closed_trace_admissions();
+    const auto records = fixture.session.take_last_closed_trace_records();
+    REQUIRE(admissions.size() == 2);
+    REQUIRE(records.size() == 6);
+    for (std::uint64_t sequence = 0; sequence < 2; ++sequence) {
+        for (const auto kind : {Kind::Terminal, Kind::Eligible, Kind::Delivery}) {
+            CHECK(std::count_if(records.begin(), records.end(), [&](const auto& r) {
+                      return r.kind == kind && r.sequence == sequence &&
+                             (kind != Kind::Terminal || r.admission_identity_matched);
+                  }) == 1);
+        }
+    }
+
+    // A one-row retention bound keeps a bounded prefix and reports the loss.
+    ProductTraceFixture bounded;
+    bounded.prepare(1);
+    drive_two_deliveries(bounded);
+    REQUIRE(bounded.session.release());
+    CHECK(bounded.session.last_closed_trace_retention_overflow());
+    CHECK(bounded.session.take_last_closed_trace_records().size() == 1);
+    CHECK(bounded.session.take_last_closed_trace_admissions().size() == 1);
+}
+
 TEST_CASE("trial retention drains fixed queues without dropping a long census",
           "[gpu_audio][trace][retention]") {
     constexpr std::uint64_t submissions = SharedIoTraceRecorder::capacity + 512;
@@ -1351,6 +1406,16 @@ TEST_CASE("GPU audio trace persists authoritative positive and planted invalid c
 TEST_CASE("trace drain marks impossible telemetry receipts invalid",
           "[gpu_audio][trace][telemetry][negative]") {
     SharedIoTraceRecorder recorder(config());
+    // Positive control: a coherent quiescent snapshot validates through the
+    // same drain, so the rejection below is caused by the forged counters.
+    SharedIoTelemetrySnapshot coherent;
+    coherent.admitted_blocks = 1;
+    coherent.submitted_blocks = 1;
+    coherent.retired_failure = 1;
+    const auto accepted = drain_shared_io_trace(recorder, coherent, 0, nullptr, true);
+    CHECK(accepted.telemetry_valid);
+    CHECK(accepted.telemetry_error == SharedIoTelemetryError::None);
+
     SharedIoTelemetrySnapshot forged;
     forged.submitted_blocks = 0;
     forged.retired_failure = 1;
