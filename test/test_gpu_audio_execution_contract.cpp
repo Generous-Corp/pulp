@@ -381,3 +381,34 @@ TEST_CASE("shared IO telemetry validates quiescent admission and delivery bounds
     constexpr SharedIoTelemetrySnapshot unconfigured{};
     STATIC_REQUIRE(validate_shared_io_telemetry(unconfigured).accepted());
 }
+
+TEST_CASE("shared IO telemetry validation rejects producer-invalid completion timing first",
+          "[gpu_audio][shared_io][telemetry]") {
+    // Positive control: zeroed timing that the producer marks valid is an
+    // ordinary empty receipt.
+    SharedIoTelemetrySnapshot zero_valid{};
+    zero_valid.completion_timing_valid = true;
+    CHECK(validate_shared_io_telemetry(zero_valid).accepted());
+
+    // Planted negative: the same zeroed triple marked invalid passes every
+    // component comparison, so only the validity bit can reject it.
+    auto zero_invalid = zero_valid;
+    zero_invalid.completion_timing_valid = false;
+    CHECK(validate_shared_io_telemetry(zero_invalid).error ==
+          SharedIoTelemetryError::CompletionTimingInvalid);
+
+    // The validity bit is checked before any counter relation.
+    auto also_inconsistent = zero_invalid;
+    also_inconsistent.delivered_blocks = 1;
+    CHECK(validate_shared_io_telemetry(also_inconsistent).error ==
+          SharedIoTelemetryError::CompletionTimingInvalid);
+
+    // The real producer path: an overflowing sample is published as invalid
+    // and rejected; the next representable sample is accepted again.
+    SharedIoTelemetry telemetry;
+    telemetry.record_completion_timing(UINT64_MAX, 1);
+    CHECK(validate_shared_io_telemetry(telemetry.snapshot()).error ==
+          SharedIoTelemetryError::CompletionTimingInvalid);
+    telemetry.record_completion_timing(10, 20);
+    CHECK(validate_shared_io_telemetry(telemetry.snapshot()).accepted());
+}

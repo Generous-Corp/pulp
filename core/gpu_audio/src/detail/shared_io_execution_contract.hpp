@@ -238,6 +238,9 @@ enum class SharedIoTelemetryError : std::uint8_t {
     // A live snapshot is assembled from independently updated counters and
     // cannot be validated as one coherent receipt until producers quiesce.
     TelemetryValidationDeferred,
+    // The completion-timing triple was marked invalid by its producer: the
+    // aggregate would have wrapped, or no stable snapshot was observed.
+    CompletionTimingInvalid,
 };
 
 struct SharedIoTelemetryValidation {
@@ -253,6 +256,11 @@ struct SharedIoTelemetryValidation {
 // producers may expose telemetry before attaching a scheduling policy.
 constexpr SharedIoTelemetryValidation
 validate_shared_io_telemetry(const SharedIoTelemetrySnapshot& snapshot) noexcept {
+    // The producer's own invalid mark is authoritative and is checked first:
+    // an invalid triple is zeroed, so the component comparison below cannot
+    // detect it on its own.
+    if (!snapshot.completion_timing_valid)
+        return {SharedIoTelemetryError::CompletionTimingInvalid};
     const bool depth_unconfigured =
         snapshot.configured_lead_blocks == 0 && snapshot.configured_pipeline_depth == 0 &&
         snapshot.configured_max_inflight == 0 && snapshot.configured_available_inflight == 0;
@@ -297,7 +305,7 @@ validate_shared_io_telemetry(const SharedIoTelemetrySnapshot& snapshot) noexcept
     if (snapshot.fallback_blocks > snapshot.delivered_blocks)
         return {SharedIoTelemetryError::FallbacksExceedDelivered};
     // `scheduled_to_completion_ns` is the sum of the two component samples.
-    // A wrapped sum would otherwise look like a valid, tiny latency receipt
+    // Defense in depth behind the validity bit above: a wrapped sum would otherwise look like a valid, tiny latency receipt
     // and could hide a provider timing failure from health consumers.
     if (snapshot.scheduled_to_completion_ns < snapshot.pre_submit_delay_ns ||
         snapshot.scheduled_to_completion_ns < snapshot.submit_to_completion_ns)
