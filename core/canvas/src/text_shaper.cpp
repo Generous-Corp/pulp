@@ -9,7 +9,6 @@
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/font_resolver.hpp>
-#include "font_tables.hpp"
 #include <pulp/canvas/font_options.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <algorithm>
@@ -19,6 +18,7 @@
 #include <numeric>
 
 #ifdef PULP_HAS_TEXT_SHAPING
+#include "font_tables.hpp"
 // SkParagraph headers — available when Skia is built with text shaping
 #include "modules/skparagraph/include/ParagraphBuilder.h"
 #include "modules/skparagraph/include/ParagraphStyle.h"
