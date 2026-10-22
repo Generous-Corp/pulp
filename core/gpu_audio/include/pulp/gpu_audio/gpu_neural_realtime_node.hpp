@@ -57,8 +57,15 @@ GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept;
 /// whose provider cannot be prepared runs the same CPU-only contract and
 /// reports a degraded GPU request instead of failing preparation.
 ///
-/// The shadow's cost is paid on the audio thread for every block, including
-/// blocks the GPU delivers. Measure it for the model size you ship.
+/// Where the shadow runs is the ShadowPolicy. Inline runs it on the audio
+/// thread every block, including blocks the GPU delivers. Worker runs it on a
+/// dedicated non-realtime thread: the callback only copies its input in and,
+/// when the GPU misses, copies the shadow's stamped result out. A shadow
+/// result that is late for its slot is dropped, and a block both paths miss
+/// is silent. Auto times one block of the CPU model at prepare() and picks
+/// Inline when that costs at most kAutoInlineMaxCostPct of the block period
+/// per channel, otherwise Worker. Families without a GPU backend always run
+/// Inline, because the CPU model is their output.
 ///
 /// Recovery is manual: any latched cause, including a single invalid
 /// callback, fences GPU delivery until the host prepares the node again. The
@@ -73,6 +80,39 @@ GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept;
 /// UI-safe read is `GpuAudioTransport::status_snapshot()`.
 class GpuNeuralRealtimeNode : public GpuAudioNode {
   public:
+    /// Where the built-in CPU shadow runs.
+    enum class ShadowPolicy : std::uint8_t {
+        Auto = 0,
+        Inline = 1,
+        Worker = 2,
+        /// No shadow: a GPU miss is silent. Requires a prepared GPU backend.
+        None = 3,
+    };
+    /// Auto selects Inline at or below this share of the block period.
+    static constexpr float kAutoInlineMaxCostPct = 15.0f;
+
+    /// Allocation-free shadow diagnostics.
+    struct ShadowStatus {
+        ShadowPolicy requested = ShadowPolicy::Auto;
+        /// The policy in effect; an offline fence moves Worker to Inline.
+        ShadowPolicy active = ShadowPolicy::None;
+        /// One block of the shadow model, as a percentage of the block period
+        /// for one channel, timed on the host thread at prepare(). Negative
+        /// when no shadow was prepared.
+        float inline_cost_pct = -1.0f;
+        /// Blocks substituted from the shadow.
+        std::uint64_t shadow_delivered = 0;
+        /// Worker results that arrived after their slot and were dropped.
+        std::uint64_t shadow_late = 0;
+        /// Blocks both the GPU and the Worker shadow missed (emitted silent).
+        std::uint64_t shadow_double_miss = 0;
+        /// Worker inputs dropped because the shadow queue was full.
+        std::uint64_t shadow_input_dropped = 0;
+        /// True when the shadow runs a different model than the GPU.
+        bool shadow_model_differs = false;
+        bool workgroup_joined = false;
+    };
+
     /// Why the last prepare() returned false.
     enum class PrepareError : std::uint8_t {
         None,
@@ -88,6 +128,10 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
         ShadowUnpublished,
         BridgeFailed,
         ReleaseFailed,
+        /// ShadowPolicy::None without a prepared GPU backend has no output.
+        ShadowRequired,
+        /// The shadow model's channels, block size or sample rate differ.
+        ShadowModelMismatch,
     };
 
     struct Config {
@@ -112,6 +156,16 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
         std::uint64_t completion_service_wait_ns = 0;
         /// Only CpuFallback is accepted: the shadow is built in.
         MissPolicy miss_policy = MissPolicy::CpuFallback;
+        ShadowPolicy shadow_policy = ShadowPolicy::Auto;
+        /// Optional cheaper model for the shadow. Never a default: status
+        /// reports `shadow_model_differs`, and its output will not null
+        /// against the GPU model. Binds like `model`.
+        GpuNeuralModelHandle shadow_model;
+        /// Worker queue depth in blocks, for both directions.
+        std::uint32_t shadow_queue_blocks = 16;
+        /// Borrowed os_workgroup_t of the host's audio thread. The Worker
+        /// shadow thread joins it; without one it runs at USER_INTERACTIVE.
+        void* shadow_audio_workgroup = nullptr;
     };
 
     /// Host thread only.
@@ -168,6 +222,8 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
     GpuAudioStatus status_snapshot() const noexcept override;
     /// Allocation-free capability projection.
     GpuAudioCapabilityReport capability_report() const noexcept;
+    /// Allocation-free shadow projection.
+    ShadowStatus shadow_status() const noexcept;
 
   private:
     struct Impl;

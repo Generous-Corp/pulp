@@ -774,6 +774,12 @@ pulp_add_test_suite(pulp-test-gpu-neural-realtime-node
     LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Shadow placement (Inline, Worker, None, Auto) for the neural node.
+pulp_add_test_suite(pulp-test-gpu-neural-shadow-policy
+    SOURCES test_gpu_neural_shadow_policy.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Plug-in-boundary continuity: a GPU-audio effect driven through the real CLAP
 # adapter and HeadlessHost must null against a CPU reference across injected
 # provider failure/loss, worker starvation, reactivation, bypass, and state
