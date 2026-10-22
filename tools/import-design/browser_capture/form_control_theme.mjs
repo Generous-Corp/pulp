@@ -22,6 +22,13 @@ const MAX_INTERROGATED_CONTROLS = 2000;
 const CONTROL_TAGS = new Set([
   "input", "button", "select", "textarea", "meter", "progress"]);
 
+// The theme rule's two input families. `password` is a text field here, since
+// author box styling drops its theme like any other. The native importer's
+// value-text table (`kValueTypes` in ../browser_capture_controls.cpp) is these
+// two sets without `password`, whose value Chrome masks; the lab's
+// SHADOW_PART_INPUT_TYPES (import-validation/importer_differential/
+// form_controls.py) are the picker types outside both.
+// test/test_importer_differential_lab.py asserts the tables agree.
 const BUTTON_INPUT_TYPES = new Set(["button", "submit", "reset"]);
 const TEXT_INPUT_TYPES = new Set([
   "", "text", "search", "email", "url", "tel", "password", "number"]);

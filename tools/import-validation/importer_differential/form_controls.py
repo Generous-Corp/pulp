@@ -31,6 +31,12 @@ FORM_CONTROL_TAGS = frozenset({
 # Input types whose `appearance: none` rendering still contains parts drawn in a
 # user-agent shadow tree the snapshot does not serialize: a range's thumb, a
 # colour swatch, a file chooser's button, the fields of a date or time picker.
+# They are disjoint from the capture's text-field and button families
+# (TEXT_INPUT_TYPES, BUTTON_INPUT_TYPES in
+# tools/import-design/browser_capture/form_control_theme.mjs) and from the
+# importer's value-text types (`kValueTypes` in
+# tools/import-design/browser_capture_controls.cpp, those two families without
+# the masked `password`). test/test_importer_differential_lab.py asserts this.
 SHADOW_PART_INPUT_TYPES = frozenset({
     "range", "color", "file", "date", "datetime-local", "month", "time",
     "week"})

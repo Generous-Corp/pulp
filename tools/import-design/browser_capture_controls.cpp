@@ -30,6 +30,17 @@ std::optional<ControlValueText> control_value_text(
                        [](unsigned char c) {
                            return static_cast<char>(std::tolower(c));
                        });
+        // The input types whose value Chrome draws as a string in the
+        // content box: the single-line text fields and the button-type
+        // inputs. This is TEXT_INPUT_TYPES plus BUTTON_INPUT_TYPES in
+        // browser_capture/form_control_theme.mjs without `password`: Chrome
+        // paints a password value as one mask glyph per character, so drawing
+        // the captured `inputValue` would both differ from the browser and
+        // show the secret it hides. The picker types in
+        // SHADOW_PART_INPUT_TYPES (import-validation/importer_differential/
+        // form_controls.py) draw shadow-tree parts rather than a string and
+        // belong to neither table. test/test_importer_differential_lab.py
+        // asserts the three tables keep this relationship.
         static const std::set<std::string> kValueTypes = {
             "", "text", "search", "email", "url", "tel", "number",
             "button", "submit", "reset"};

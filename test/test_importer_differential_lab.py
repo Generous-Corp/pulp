@@ -7,6 +7,7 @@ from argparse import Namespace
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -46,6 +47,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools" / "import-validation"))
 from importer_differential import core as LAB  # noqa: E402
 from importer_differential import cli as LAB_CLI  # noqa: E402
+from importer_differential import form_controls as FORM_CONTROLS  # noqa: E402
 
 
 class DifferentialLabTests(unittest.TestCase):
@@ -1721,6 +1723,36 @@ class GeometryGateTests(unittest.TestCase):
         raw = aggregate["diagnostics"]["raw_page_space_geometry"]
         self.assertEqual(raw["role"], "diagnostic")
         self.assertEqual(raw["fixture_count"], 2)
+
+
+class InputTypeTableTests(unittest.TestCase):
+    """The three input-type tables, one per language, must not drift apart."""
+
+    CPP_CONTROLS = REPO / "tools/import-design/browser_capture_controls.cpp"
+    JS_THEME = REPO / "tools/import-design/browser_capture/form_control_theme.mjs"
+
+    @staticmethod
+    def string_set(text: str, opening: str, closing: str) -> set[str]:
+        start = text.index(opening) + len(opening)
+        return set(re.findall(r'"([^"]*)"', text[start:text.index(closing, start)]))
+
+    def tables(self) -> tuple[set[str], set[str], set[str], frozenset[str]]:
+        cpp = self.CPP_CONTROLS.read_text(encoding="utf-8")
+        js = self.JS_THEME.read_text(encoding="utf-8")
+        value_types = self.string_set(cpp, "kValueTypes = {", "};")
+        text_types = self.string_set(js, "const TEXT_INPUT_TYPES = new Set([", "]);")
+        button_types = self.string_set(js, "const BUTTON_INPUT_TYPES = new Set([", "]);")
+        return value_types, text_types, button_types, FORM_CONTROLS.SHADOW_PART_INPUT_TYPES
+
+    def test_value_text_types_are_the_theme_families_without_password(self) -> None:
+        value_types, text_types, button_types, _ = self.tables()
+        self.assertIn("password", text_types)
+        self.assertEqual(value_types, (text_types | button_types) - {"password"})
+
+    def test_shadow_part_types_are_outside_both_theme_families(self) -> None:
+        _, text_types, button_types, shadow = self.tables()
+        self.assertTrue(shadow)
+        self.assertEqual(set(shadow) & (text_types | button_types), set())
 
 
 class FormControlBoundaryTests(unittest.TestCase):
