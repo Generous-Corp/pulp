@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-coretext-face-registry",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "When the Pulp canvas adopts Vellum, resolve CoreGraphics paint and non-Skia text measurement through one CoreText face registry holding the bundled fonts and every registered face (process-local, never CTFontManager), with Skia's CoreText face-metric definitions, so a CPU-painted label is measured with the face it paints.",
+  "evidence": [
+    ".github/vellum-change-events/20261022-coretext-face-registry.json",
+    "pulp-test-coretext-text",
+    "pulp-test-auto-ui",
+    "PulpGain editor capture: 0 of 386,560 px differ with and without Skia"
+  ]
+}

@@ -28,6 +28,7 @@
   "dr_libs": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
   "ffmpeg-static": "developer-supplied SDK outside the build's pins, so a change moves all",
   "Gradle Wrapper": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
+  "ICU": "linked inside the Skia generation's archives (libskunicode_icu.a), not as a target of its own, so a change moves all",
   "Inter": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
   "JetBrains Mono": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
   "Jost": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",

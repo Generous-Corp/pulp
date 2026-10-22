@@ -11,6 +11,9 @@
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
 #include <pulp/canvas/text_shaper.hpp>
+#if !defined(PULP_HAS_TEXT_SHAPING) && defined(__APPLE__)
+#include "coretext_text.hpp"
+#endif
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -754,6 +757,24 @@ struct TextShaper::Impl {
             box.line_height = box.ascent + box.descent + box.leading + safety;
             box.real = true;
         }
+#elif defined(__APPLE__)
+        // Without Skia the CoreGraphics canvas paints through CoreText, so
+        // measure the face it will paint with. The definitions mirror Skia's
+        // CoreText backend: worst-case extents from the font bounding box,
+        // typographic ascent/descent/leading from the font.
+        {
+            const auto m =
+                detail::coretext_face_metrics(font_family, font_size, font_weight, font_slant);
+            if (m.ascent > 0.0f) {
+                box.ascent = std::max(m.top, m.ascent);
+                box.descent = std::max(m.bottom, m.descent);
+                box.typographic_ascent = m.ascent;
+                box.typographic_descent = m.descent;
+                box.leading = std::max(0.0f, m.leading);
+                box.line_height = box.ascent + box.descent + box.leading;
+                box.real = true;
+            }
+        }
 #endif
 
         if (std::getenv("PULP_METRICS_TRACE")) {
@@ -1047,6 +1068,12 @@ struct TextShaper::Impl {
             // build uses, so callers still get a sane positive width.
             width = static_cast<float>(text.size()) * font_size * 0.6f;
         }
+#elif defined(__APPLE__)
+        // Measure with the CoreText face the CoreGraphics canvas paints.
+        width = detail::coretext_advance(text, font_family, font_size, font_weight, font_slant,
+                                         font_features);
+        if (width <= 0.0f && !text.empty())
+            width = static_cast<float>(text.size()) * font_size * 0.6f;
 #else
         // Fallback: character-width estimation
         width = static_cast<float>(text.size()) * font_size * 0.6f;

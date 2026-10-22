@@ -334,6 +334,25 @@
       ]
     },
     {
+      "name": "ICU",
+      "category": "canvas",
+      "license": "Unicode-3.0 (+ ICU, BSD, IPADIC/ICOT notices for bundled dictionaries)",
+      "version": "78.2 (bundled in Skia chrome/m153)",
+      "source_kind": "prebuilt-toolchain",
+      "repository": "https://github.com/unicode-org/icu",
+      "upstream": {
+        "kind": "none"
+      },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "tools/cmake/FindSkia.cmake",
+        "tools/cmake/PulpSkiaIcuData.cmake",
+        "tools/cmake/scripts/icu_data_subset.py"
+      ],
+      "notes": "Linked through Skia's prebuilt libskunicode_icu.a (danielraffel/skia-builder chrome/m157); the embedded data identifies itself as ICU 78.2 (icuver.res, symbol icudt78_dat). License text from unicode-org/icu tag release-78.2. Pulp links the data subsetted by tools/cmake/scripts/icu_data_subset.py (PULP_ICU_DATA_SUBSET): collation, time-zone, currency, display-name, unit, transliteration, spell-out, IDNA, converter and spoof data removed; break-iterator rules and dictionaries (cjdict, lao, burmese, thai, khmer), normalization, properties, converter aliases and locale resolution kept."
+    },
+    {
       "name": "Inter",
       "category": "fonts",
       "license": "SIL OFL 1.1",

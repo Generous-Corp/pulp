@@ -129,6 +129,11 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         std::uint64_t timestamp_submissions = 0;
         std::uint64_t timestamp_samples = 0;
         std::uint64_t timestamp_failures = 0;
+        // Set inside the device-lost callback: steady-clock time of the
+        // callback and the numeric WGPUDeviceLostReason. Zero means no loss
+        // callback has run.
+        std::uint64_t device_lost_callback_ns = 0;
+        std::uint32_t device_lost_reason = 0;
     };
 
     struct GpuTimestamp {

@@ -19,8 +19,13 @@ RAW_LITERAL = re.compile(
     r'R"(?P<delimiter>[^ ()\\\t\r\n]{0,16})\((?P<body>.*?)\)(?P=delimiter)"',
     re.DOTALL,
 )
-ADJACENT_LITERALS = re.compile(r'(?:"(?:\\.|[^"\\])*"\s*){2,}', re.DOTALL)
-STRING_TOKEN = re.compile(r'"((?:\\.|[^"\\])*)"')
+# An ordinary C++ string literal cannot contain an unescaped newline, so a
+# token stops at one. Without that, the closing quote of one #include and the
+# opening quote of the next read as a single "literal" spanning the lines
+# between them, and a framework header name in that span (CoreText.h) looks
+# like a wire name.
+ADJACENT_LITERALS = re.compile(r'(?:"(?:\\.|[^"\\\n])*"\s*){2,}')
+STRING_TOKEN = re.compile(r'"((?:\\.|[^"\\\n])*)"')
 SOURCE_SUFFIXES = {".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".mm", ".rs"}
 NON_PROTOCOL_LITERALS = {
     "A.clap", "AAX.h", "AGENTS.md", "Acme.clap", "App.tsx", "Array.prototype",
@@ -157,6 +162,22 @@ def self_test() -> int:
         failures = unmapped_literals(root, registry)
         if len(failures) != 1 or failures[0][2] != "PhaseEight.unmapped":
             print("self-test failed to reject an adjacent C++ method", file=sys.stderr)
+            return 1
+        cpp_client_source.write_text(
+            'auto method = "PhaseEight."\n    "unmapped";\n', encoding="utf-8"
+        )
+        failures = unmapped_literals(root, registry)
+        if len(failures) != 1 or failures[0][2] != "PhaseEight.unmapped":
+            print("self-test failed to reject a multi-line adjacent C++ method", file=sys.stderr)
+            return 1
+        cpp_client_source.write_text(
+            '#include "a.hpp"\n\n#include "b.hpp"\n\n#import <CoreText/CoreText.h>\n'
+            '#import <Foundation/Foundation.h>\n'
+            'auto empty = "";\nauto other = "z";\n',
+            encoding="utf-8",
+        )
+        if unmapped_literals(root, registry):
+            print("self-test read include directives as one literal", file=sys.stderr)
             return 1
         cpp_client_source.write_text('auto method = "Runtime.app";\n', encoding="utf-8")
         failures = unmapped_literals(root, registry)

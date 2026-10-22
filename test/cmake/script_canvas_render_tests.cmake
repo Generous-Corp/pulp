@@ -25,6 +25,13 @@ pulp_add_test_suite(pulp-test-widget-animation GROUP pulp-test-group-script-view
 # Auto UI tests
 pulp_add_test_suite(pulp-test-auto-ui GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
+if(APPLE)
+    # The CoreGraphics-vs-Skia face parity case decodes both PNGs with ImageIO.
+    target_sources(pulp-test-group-script-view PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/png_rgba_decode_apple.cpp)
+    target_link_libraries(pulp-test-group-script-view PRIVATE
+        "-framework ImageIO" "-framework CoreGraphics" "-framework CoreFoundation")
+endif()
 
 # One executable for the pulp::format suites: HostQuirks, HostVersion and the
 # ViewBridge lifecycle.

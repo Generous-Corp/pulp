@@ -88,9 +88,25 @@ LICENSE_FILE_NAMES = ("LICENSE", "LICENSE.txt", "LICENSE.md", "COPYING", "licens
 # structure is checked per family rather than with one set of markers.
 LICENSE_DISCLAIMER = "THE SOFTWARE IS PROVIDED"
 LICENSE_FAMILIES = (
-    # (family, phrase identifying it, phrase for its inclusion condition)
-    ("MIT", "to deal in the Software without restriction", "shall be included in all"),
-    ("BSL-1.0", "Boost Software License", "must be included in all copies"),
+    # (family, phrase identifying it, phrase for its inclusion condition,
+    #  phrase for its warranty disclaimer). Checked in order and the first
+    # match wins, so a license that shares MIT's grant wording must come
+    # before MIT. Unicode-3.0 (ICU's license) grants "to deal in the Data
+    # Files or Software" and conditions on the notice appearing "with all
+    # copies"; judged as MIT it read as truncated.
+    (
+        "Unicode-3.0",
+        "to deal in the Data Files or Software without restriction",
+        "this copyright and permission notice appear with all copies",
+        'DATA FILES AND SOFTWARE ARE PROVIDED "AS IS"',
+    ),
+    (
+        "MIT",
+        "to deal in the Software without restriction",
+        "shall be included in all",
+        LICENSE_DISCLAIMER,
+    ),
+    ("BSL-1.0", "Boost Software License", "must be included in all copies", LICENSE_DISCLAIMER),
 )
 
 # Match the spelled-out phrase, never a bare "GPL": v3.7.12's LICENSE.txt words
@@ -141,13 +157,13 @@ def find_notice_truncations() -> list[tuple[str, list[str]]]:
     problems: list[tuple[str, list[str]]] = []
     for name, raw_body in parse_notice_entries().items():
         body = flatten(raw_body)
-        for _family, identifier, condition in LICENSE_FAMILIES:
+        for _family, identifier, condition, disclaimer in LICENSE_FAMILIES:
             if identifier not in body:
                 continue
             missing = []
             if condition not in body:
                 missing.append("inclusion condition")
-            if LICENSE_DISCLAIMER not in body:
+            if disclaimer not in body:
                 missing.append("warranty disclaimer")
             if missing:
                 problems.append((name, missing))

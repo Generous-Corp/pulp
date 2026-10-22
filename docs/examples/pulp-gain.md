@@ -19,6 +19,8 @@ The simplest possible Pulp plugin. A stereo gain effect with input gain, output 
 - Format-specific entry point files (`vst3_entry.cpp`, `au_v2_entry.cpp`, `au_v3_entry.cpp`, `clap_entry.cpp`, `aax_entry.cpp`, `main.cpp`)
 - Bundle metadata files (`Info.plist.au`, `Info.plist.vst3`, `moduleinfo.json`)
 - Format validation coverage: CLAP dlopen, AU v2 `auval`, VST3 `pluginval`, and optional AAX validation through `pulp validate`
+- An editor-less variant, `PulpGainHeadless` (`headless/`), built with `pulp_add_plugin(... NO_EDITOR)`: the same DSP and parameters with no view, canvas, Skia, Dawn or JavaScript code linked (about 0.6-0.8 MB per format against about 38 MB for the default-editor build)
+- Footprint budgets for both builds (`plugin-footprint-PulpGain`, `plugin-footprint-PulpGainHeadless`; see [Binary Footprint](../reference/cmake.md#binary-footprint))
 
 ## Try in Browser
 
@@ -58,6 +60,7 @@ runtime-validated there.
 | `au_v3_entry.cpp` | Audio Unit v3 entry point |
 | `au_register.cpp` | AU component registration |
 | `clap_entry.cpp` | CLAP format entry point |
+| `headless/` | `PulpGainHeadless`: the `NO_EDITOR` build of the same processor (VST3, CLAP, AU) |
 | `aax_entry.cpp` | AAX format entry point |
 | `main.cpp` | Standalone application entry point |
 | `test_pulp_gain.cpp` | Unit tests exercising the processor through the headless host |
