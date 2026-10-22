@@ -303,7 +303,7 @@ public:
     void prepare(double sample_rate, int num_channels, const LoudnessChannelRole* roles,
                  MeterFeatures features) {
         features_ = features;
-        prepare(sample_rate, num_channels, roles);
+        prepare_with_features(sample_rate, num_channels, roles);
     }
 
     /// The feature set the meter was prepared with.
@@ -311,12 +311,20 @@ public:
         return features_;
     }
 
-    /// Prepare the loudness meter with an explicit speaker layout. Integrated
-    /// gating uses a prepared 0.01 LU Fenwick histogram: memory and update
-    /// cost remain fixed regardless of measurement duration. Allocation occurs
-    /// only here.
+    /// Prepare the loudness meter with an explicit speaker layout and every
+    /// feature (MeterFeatures::all), whatever an earlier prepare() selected.
+    /// Integrated gating uses a prepared 0.01 LU Fenwick histogram: memory and
+    /// update cost remain fixed regardless of measurement duration. Allocation
+    /// occurs only here.
     void prepare(double sample_rate, int num_channels,
                  const LoudnessChannelRole* roles) {
+        features_ = MeterFeatures::all;
+        prepare_with_features(sample_rate, num_channels, roles);
+    }
+
+  private:
+    void prepare_with_features(double sample_rate, int num_channels,
+                               const LoudnessChannelRole* roles) {
         constexpr double maximum_safe_sample_rate =
             static_cast<double>(std::numeric_limits<int>::max());
         const bool sample_rate_supported = std::isfinite(sample_rate)
@@ -344,6 +352,7 @@ public:
         reset_measurement_state(num_channels_);
     }
 
+  public:
     /// Process a block of interleaved or deinterleaved audio.
     /// channels: array of channel pointers. num_samples: samples per channel.
     void process(const SampleType* const* channels, int num_channels, int num_samples) {

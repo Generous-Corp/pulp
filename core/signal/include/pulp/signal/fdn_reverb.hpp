@@ -48,12 +48,17 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <type_traits>
 
 namespace pulp::signal {
 
 template <typename SampleType = float>
 class FdnReverbT {
-public:
+  public:
+    // The network and the classic tier run in single precision: their block
+    // kernels are four-lane float. A double instantiation keeps the double
+    // buffer interface and converts at the block boundary.
+    using Engine = float;
     using Param = fdn::Param;
     using Mode = fdn::Mode;
 
@@ -172,12 +177,37 @@ public:
     // "the input dipped on that onset" is not inferable from the wet output
     // alone once the tail has smeared it.
     double duck_gain() const { return duck_gain_; }
-    const fdn::FdnTank<SampleType>& tank() const { return tank_; }
+    const fdn::FdnTank<Engine>& tank() const {
+        return tank_;
+    }
 
     // ── Audio ────────────────────────────────────────────────────────────
     // Wet only. `n` may be anything up to the prepared maximum block size.
     void process_block(const SampleType* in_left, const SampleType* in_right,
                        SampleType* out_left, SampleType* out_right, int n) {
+        if constexpr (std::is_same_v<SampleType, Engine>) {
+            process_engine(in_left, in_right, out_left, out_right, n);
+        } else {
+            Engine l[fdn::kMaxBlockSamples];
+            Engine r[fdn::kMaxBlockSamples];
+            for (int offset = 0; offset < n; offset += fdn::kMaxBlockSamples) {
+                const int m = std::min(n - offset, fdn::kMaxBlockSamples);
+                for (int i = 0; i < m; ++i) {
+                    l[i] = static_cast<Engine>(in_left[offset + i]);
+                    r[i] = static_cast<Engine>(in_right[offset + i]);
+                }
+                process_engine(l, r, l, r, m);
+                for (int i = 0; i < m; ++i) {
+                    out_left[offset + i] = static_cast<SampleType>(l[i]);
+                    out_right[offset + i] = static_cast<SampleType>(r[i]);
+                }
+            }
+        }
+    }
+
+  private:
+    void process_engine(const Engine* in_left, const Engine* in_right, Engine* out_left,
+                        Engine* out_right, int n) {
         if (n <= 0) return;
         if (requested_tier_ != active_tier_) {
             active_tier_ = requested_tier_;
@@ -199,7 +229,6 @@ public:
         }
     }
 
-private:
     // tank_rate is stepped and never smoothed, so the requested index is read
     // straight off the target rather than off the smoothing state.
     int rate_index() const {
@@ -297,9 +326,8 @@ private:
         predelay_samples_ =
             std::max(2.0, smoothed_[static_cast<std::size_t>(Param::predelay)] *
                               0.001 * tank_rate);
-        pre_g_ = static_cast<SampleType>(
-            smoothed_[static_cast<std::size_t>(Param::diffusion)] *
-            fdn::kPreDiffusionG);
+        pre_g_ = static_cast<Engine>(smoothed_[static_cast<std::size_t>(Param::diffusion)] *
+                                     fdn::kPreDiffusionG);
         width_ = smoothed_[static_cast<std::size_t>(Param::width)];
         const double drive = smoothed_[static_cast<std::size_t>(Param::drive)];
         if (drive != makeup_drive_) {
@@ -319,15 +347,15 @@ private:
         push_controls();
     }
 
-    void process_chunk(const SampleType* in_left, const SampleType* in_right,
-                       SampleType* out_left, SampleType* out_right, int n) {
+    void process_chunk(const Engine* in_left, const Engine* in_right, Engine* out_left,
+                       Engine* out_right, int n) {
         // Before either resampler leg runs — see the note on apply_tank_rate().
         apply_tank_rate(rate_index());
         const int tank_n = bridge_.host_to_tank(in_left, in_right, n);
-        SampleType* tl = bridge_.tank_input(0);
-        SampleType* tr = bridge_.tank_input(1);
-        SampleType* ol = bridge_.tank_output(0);
-        SampleType* or_ = bridge_.tank_output(1);
+        Engine* tl = bridge_.tank_input(0);
+        Engine* tr = bridge_.tank_input(1);
+        Engine* ol = bridge_.tank_output(0);
+        Engine* or_ = bridge_.tank_output(1);
 
         // Tank-rate work runs in segments that never cross a control tick, so
         // every stage inside a segment sees constant controls. The ticks fall
@@ -360,17 +388,16 @@ private:
                 &output_lp, fdn::lanes::make(static_cast<double>(out_left[i]),
                                              static_cast<double>(out_right[i])));
             const auto scaled = y * makeup;
-            out_left[i] = static_cast<SampleType>(fdn::lanes::lane(scaled, 0));
-            out_right[i] = static_cast<SampleType>(fdn::lanes::lane(scaled, 1));
+            out_left[i] = static_cast<Engine>(fdn::lanes::lane(scaled, 0));
+            out_right[i] = static_cast<Engine>(fdn::lanes::lane(scaled, 1));
         }
         output_lp_ = output_state;
     }
 
     // One segment of at most a control period, all in the tank domain.
-    void process_segment(const SampleType* tl, const SampleType* tr, SampleType* ol,
-                         SampleType* or_, int n) {
-        SampleType l[fdn::kMaxBlockSamples];
-        SampleType r[fdn::kMaxBlockSamples];
+    void process_segment(const Engine* tl, const Engine* tr, Engine* ol, Engine* or_, int n) {
+        Engine l[fdn::kMaxBlockSamples];
+        Engine r[fdn::kMaxBlockSamples];
 
         // Predelay, then the transient ducker, then the low-rate input
         // lowpass. The predelay pushes the whole segment first and reads each
@@ -389,8 +416,8 @@ private:
                 const auto y =
                     input_state.process(&input_lp, fdn::lanes::make(static_cast<double>(l[k]),
                                                                     static_cast<double>(r[k])));
-                l[k] = static_cast<SampleType>(fdn::lanes::lane(y, 0));
-                r[k] = static_cast<SampleType>(fdn::lanes::lane(y, 1));
+                l[k] = static_cast<Engine>(fdn::lanes::lane(y, 0));
+                r[k] = static_cast<Engine>(fdn::lanes::lane(y, 1));
             }
             input_lp_ = input_state;
         }
@@ -398,19 +425,19 @@ private:
         // Pre-diffusion with the coefficient's sign alternated between the
         // rails, so left and right decorrelate from the first reflection.
         pre_diffusion_[0].process_block(l, n, pre_g_);
-        pre_diffusion_[1].process_block(r, n, static_cast<SampleType>(-pre_g_));
+        pre_diffusion_[1].process_block(r, n, static_cast<Engine>(-pre_g_));
 
-        SampleType wet_l[fdn::kMaxBlockSamples];
-        SampleType wet_r[fdn::kMaxBlockSamples];
+        Engine wet_l[fdn::kMaxBlockSamples];
+        Engine wet_r[fdn::kMaxBlockSamples];
         tank_.process_block(l, r, wet_l, wet_r, n);
 
-        const auto makeup = static_cast<SampleType>(drive_makeup_gain_);
-        const auto width = static_cast<SampleType>(width_);
+        const auto makeup = static_cast<Engine>(drive_makeup_gain_);
+        const auto width = static_cast<Engine>(width_);
         for (int k = 0; k < n; ++k) {
-            const SampleType dl = wet_l[k] * makeup;
-            const SampleType dr = wet_r[k] * makeup;
-            const SampleType mid = SampleType{0.5} * (dl + dr);
-            const SampleType side = SampleType{0.5} * (dl - dr) * width;
+            const Engine dl = wet_l[k] * makeup;
+            const Engine dr = wet_r[k] * makeup;
+            const Engine mid = Engine{0.5} * (dl + dr);
+            const Engine side = Engine{0.5} * (dl - dr) * width;
             wet_l[k] = mid + side;
             wet_r[k] = mid - side;
         }
@@ -423,12 +450,12 @@ private:
 
     static constexpr int kNumRails = 2;
 
-    fdn::MultirateBridge<SampleType> bridge_{};
-    std::array<fdn::FracDelayT<SampleType>, kNumRails> predelay_{};
-    std::array<fdn::AllpassCascade<SampleType>, kNumRails> pre_diffusion_{};
-    fdn::FdnTank<SampleType> tank_{};
+    fdn::MultirateBridge<Engine> bridge_{};
+    std::array<fdn::FracDelayT<Engine>, kNumRails> predelay_{};
+    std::array<fdn::AllpassCascade<Engine>, kNumRails> pre_diffusion_{};
+    fdn::FdnTank<Engine> tank_{};
     fdn::TransientDucker ducker_{};
-    fdn::EnsembleChorus<SampleType> ensemble_{};
+    fdn::EnsembleChorus<Engine> ensemble_{};
     // Both rails share each design; the state runs them as one two-lane
     // vector, snapped and sanitized once per block.
     fdn::StereoBiquadState<1> input_lp_{};
@@ -449,11 +476,11 @@ private:
     double smoothing_coeff_ = 1.0;
     double duck_gain_ = 1.0;
     double output_lp_hz_ = 14000.0;
-    SampleType pre_g_ = 0;
+    Engine pre_g_ = 0;
     int max_block_ = 512;
     int control_countdown_ = 0;
     int active_rate_index_ = -1;
-    ClassicReverbT<SampleType> classic_{};
+    ClassicReverbT<Engine> classic_{};
     fdn::Tier requested_tier_ = fdn::Tier::network;
     fdn::Tier active_tier_ = fdn::Tier::network;
     bool input_lp_active_ = false;

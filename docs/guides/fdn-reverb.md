@@ -32,7 +32,10 @@ ratio-dependent causal interpolation bound.
 ## Public API
 
 `FdnReverbT<SampleType>` is the complete engine type;
-`FdnReverb` aliases `FdnReverbT<float>`.
+`FdnReverb` aliases `FdnReverbT<float>`. Both tiers compute in single
+precision (their block kernels are four-lane float), so `FdnReverbT<double>`
+keeps a double buffer interface but converts to float at the block boundary
+and returns float-precision results.
 
 | Method | Contract |
 |---|---|
@@ -51,7 +54,7 @@ ratio-dependent causal interpolation bound.
 | `interpolation_skew_samples() const` | Return the current ratio-dependent bound from the causal four-point interpolation bridge. This is observability, not reported plugin latency. |
 | `tank_rate() const` | Return the configured internal tank rate in hertz. |
 | `duck_gain() const` | Return the transient ducker's most recently applied input gain in `(0, 1]`; after reset it is exactly `1`. Intended for meters, diagnostics, and acceptance tests. |
-| `tank() const` | Return read-only access to the underlying `fdn::FdnTank<SampleType>`. Its telemetry supports structural validation; application code should prefer the façade's controls. |
+| `tank() const` | Return read-only access to the underlying `fdn::FdnTank<float>`. Its telemetry supports structural validation; application code should prefer the façade's controls. |
 | `process_block(const SampleType* in_left, const SampleType* in_right, SampleType* out_left, SampleType* out_right, int sample_count)` | Process true-stereo input into wet-only stereo output. Non-positive counts are no-ops; oversized calls are internally split into prepared-size chunks. |
 
 Call `prepare()` before any other operation. Input and output pointers must

@@ -183,6 +183,15 @@ TEST_CASE("MultiChannelMeter levels-only measures the same levels without loudne
     REQUIRE_FALSE(meter.loudness_supported());
     const auto correlation_only = run(clean, MeterFeatures::correlation);
     REQUIRE_THAT(correlation_only.correlation, WithinAbs(all.correlation, 1e-6));
+
+    // A prepare() without a feature set measures everything again, whatever
+    // an earlier call selected.
+    meter.prepare(kRate, 2, nullptr);
+    REQUIRE(meter.features() == MeterFeatures::all);
+    REQUIRE(meter.loudness_supported());
+    meter.prepare(kRate, 2, nullptr, MeterFeatures::levels);
+    meter.prepare(kRate, 2);
+    REQUIRE(meter.features() == MeterFeatures::all);
 }
 
 TEST_CASE("MultiChannelMeter clamps an over-range float sample inside a block", "[signal][meter]") {
