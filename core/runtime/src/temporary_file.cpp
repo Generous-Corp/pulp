@@ -1,7 +1,17 @@
 #include <pulp/runtime/temporary_file.hpp>
 #include <random>
 #include <sstream>
-#include <fstream>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#include <share.h>
+#include <sys/stat.h>
+#else
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace pulp::runtime {
 
@@ -41,20 +51,41 @@ TemporaryFile::TemporaryFile(std::string_view extension) {
         append_extension(ss, extension);
 
         auto candidate = tmp_dir / ss.str();
-        if (!std::filesystem::exists(candidate)) {
+        // Exclusive creation reserves the path atomically: a name that
+        // appears between a probe and the create is reported as taken
+        // instead of being truncated.
+        if (create_exclusive(candidate)) {
             path_ = candidate;
-            // Create the file so the path is reserved
-            std::ofstream{path_};
             return;
         }
     }
 
-    // Fallback: use a simple timestamp-based name
+    // Fallback: one more random name. The path is recorded only when this
+    // object created it, so the destructor never removes a file it does not
+    // own; an empty path() reports the failure.
     std::ostringstream ss;
     ss << "pulp_tmp_" << std::hex << std::random_device{}();
     append_extension(ss, extension);
-    path_ = tmp_dir / ss.str();
-    std::ofstream{path_};
+    auto candidate = tmp_dir / ss.str();
+    if (create_exclusive(candidate)) path_ = candidate;
+}
+
+bool TemporaryFile::create_exclusive(const std::filesystem::path& path) {
+#ifdef _WIN32
+    int fd = -1;
+    if (_wsopen_s(&fd, path.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+                  _SH_DENYNO, _S_IREAD | _S_IWRITE) != 0 || fd < 0) {
+        return false;
+    }
+    _close(fd);
+    return true;
+#else
+    const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (fd < 0)
+        return false;
+    ::close(fd);
+    return true;
+#endif
 }
 
 TemporaryFile::~TemporaryFile() {
