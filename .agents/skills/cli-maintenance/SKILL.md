@@ -2179,6 +2179,28 @@ a stripped build uses `PULP_BUILD_TESTS=OFF`.
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
 
+## `pulp create` templates: a placeholder or file has four owners
+
+A `{{VAR}}` placeholder or a new template file must be known in four places,
+and missing any one fails somewhere different:
+
+- `tools/cli/cmd_create.cpp` (the substitution map and the file-rename map) and
+  `experimental/pulp-rs/src/cmd/create.rs` (the same two maps for the Rust
+  front end). Missing one scaffolds a project with a literal `{{VAR}}` in it.
+- `test/cmake/create_template_tests.cmake`, which expands the plugin templates
+  at configure time and compiles them as `pulp-test-create-template-*`. An
+  unknown placeholder fails the Pulp configure itself, with the name. A new
+  source file must also be compiled there, or the template's test fails to
+  link (the processor body moved into `processor.cpp.template` hit both).
+- `tools/scripts/verify_create_templates.py` (`KNOWN_TEMPLATE_VARS` and the
+  required-files list), which runs without a build.
+
+The effect and instrument templates keep `process()` in their own source,
+listed under `SOURCES`, and the generated test links `<target>_Core` rather
+than compiling that source again. An edit to the processor body then
+recompiles one object and relinks each format; when the body lived in the
+header, every format's entry TU and the test recompiled it.
+
 ## The macOS CLI force-load list names implementation archives, not modules
 
 `tools/cli/CMakeLists.txt` force-loads a fixed list of static archives into

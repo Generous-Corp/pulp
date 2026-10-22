@@ -67,6 +67,7 @@ KNOWN_TEMPLATE_VARS = frozenset({
     "NAMESPACE",
     "FACTORY_NAME",
     "HEADER_NAME",
+    "SOURCE_NAME",
     "TARGET_NAME",
     "MANUFACTURER",
     "MANUFACTURER_CODE",
@@ -88,6 +89,7 @@ REQUIRED_FILES_BY_TYPE = {
     "effect": {
         "CMakeLists.txt.template",
         "processor.hpp.template",
+        "processor.cpp.template",
         "test.cpp.template",
         "au_v2_entry.cpp.template",
         "clap_entry.cpp.template",
@@ -96,6 +98,7 @@ REQUIRED_FILES_BY_TYPE = {
     "instrument": {
         "CMakeLists.txt.template",
         "processor.hpp.template",
+        "processor.cpp.template",
         "test.cpp.template",
         "au_v2_entry.cpp.template",
         "clap_entry.cpp.template",
