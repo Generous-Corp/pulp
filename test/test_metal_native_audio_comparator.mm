@@ -1,4 +1,7 @@
-// Matched, test-only native Metal controls for the shared GPU-audio multiply.
+// Test-only native Metal controls for the shared GPU-audio multiply. The Dawn
+// row is unmatched: the native modes run the `complex_multiply` kernel, while
+// the Dawn row runs the shared-I/O provider's FFT identity-convolution plan, so
+// the rows are not a like-for-like kernel comparison.
 //
 // This is deliberately outside GpuAudioTransport and never runs from an audio
 // callback. Both modes use the same no-copy buffers, pipeline, two-slot flight
