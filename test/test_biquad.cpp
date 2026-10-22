@@ -576,3 +576,30 @@ TEST_CASE("Biquad stereo path matches two block calls bit for bit",
         CHECK(std::memcmp(r_actual.data(), r_expected.data(), r_actual.size() * sizeof(float)) == 0);
     }
 }
+
+TEST_CASE("Biquad::process_chain matches chained sample paths for any section count",
+          "[signal][biquad][determinism]") {
+    const auto input = busy_signal(4096);
+    // Counts below, at and above one pass, with a remainder pass.
+    for (std::size_t count : {std::size_t{1}, std::size_t{5}, std::size_t{16}, std::size_t{17},
+                              std::size_t{31}}) {
+        INFO("sections " << count);
+        std::vector<Biquad> by_sample(count);
+        for (std::size_t k = 0; k < count; ++k)
+            by_sample[k].set_coefficients(Biquad::Type::peaking,
+                                          31.25f * std::pow(2.0f, static_cast<float>(k % 10)), 1.4f,
+                                          kSampleRate, k % 2 ? -4.0f : 5.0f);
+        auto chained = by_sample;
+        auto expected = input;
+        for (float& x : expected)
+            for (auto& section : by_sample) x = section.process(x);
+        auto actual = input;
+        std::size_t pos = 0;
+        for (int block : split_schedule(actual.size())) {
+            Biquad::process_chain(chained.data(), count, actual.data() + pos,
+                                  static_cast<std::size_t>(block));
+            pos += static_cast<std::size_t>(block);
+        }
+        CHECK(std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)) == 0);
+    }
+}
