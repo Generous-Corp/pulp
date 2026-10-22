@@ -62,7 +62,7 @@ DROPPED_TREES = (
     "translit/",  # transliterators
     "rbnf/",      # rule-based number spell-out
 )
-# Root-level items read only by time-zone services, and the IDNA (UTS #46)
+# Root-level items read only by time-zone services, and the IDNA (UTS 46)
 # mapping, which only domain-name processing reads.
 DROPPED_ROOT_ITEMS = frozenset({
     "zoneinfo64.res",

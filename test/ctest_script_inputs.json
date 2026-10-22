@@ -6344,6 +6344,13 @@
    ],
    "kind": "shell"
   },
+  "icu-data-subset-deterministic": {
+   "entry": "tools/cmake/scripts/icu_data_subset.py",
+   "inputs": [
+    "tools/cmake/scripts/icu_data_subset.py"
+   ],
+   "kind": "python"
+  },
   "icu-data-subset-linked": {
    "entry": "tools/scripts/plugin_footprint_check.py",
    "inputs": [

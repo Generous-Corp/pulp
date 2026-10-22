@@ -222,6 +222,15 @@ retain those fields in the PR/landing evidence.
 
 ## Common traps
 
+- **A Skia bump can move the ICU Pulp ships.** Skia's `libskunicode_icu.a`
+  carries ICU code and data (`icudt<NN>_dat`; `icuver.res` names the exact
+  version, 78.2 for `chrome/m153`). When the symbol or version changes, update
+  the ICU entry in NOTICE.md from that release's `LICENSE` (verbatim, shipped
+  sections only), the ICU rows in DEPENDENCIES.md, `docs/reference/licensing.md`
+  and `tools/deps/manifest.json`, and re-check that
+  `tools/cmake/scripts/icu_data_subset.py` still rewrites the new archive
+  (`icu-data-subset-deterministic`, `pulp-test-icu-data-breaks`).
+
 - On Windows ARM64, a Ninja build using the ARM-hosted x64 MSVC compiler has
   an empty `CMAKE_GENERATOR_PLATFORM` and an ARM64 host processor. Choose the
   Skia release/cache key and wgpu-native asset from
