@@ -131,33 +131,16 @@ public:
     /// when every offset lies in [0, offset_counts.size()) and `scratch` holds
     /// size() events; otherwise sort(). Allocation-free either way.
     void sort(std::span<ParameterEvent> scratch, std::span<std::uint32_t> offset_counts) {
-        std::size_t ordered = 1;
-        bool in_range = size_ == 0 || (events_[0].sample_offset >= 0 &&
-            static_cast<std::size_t>(events_[0].sample_offset) < offset_counts.size());
-        for (std::size_t i = 1; i < size_; ++i) {
-            const auto offset = events_[i].sample_offset;
-            if (ordered == i && events_[i - 1].sample_offset <= offset) ++ordered;
-            if (offset < 0 || static_cast<std::size_t>(offset) >= offset_counts.size())
-                in_range = false;
-        }
-        if (ordered >= size_) return;
-        if (!in_range || scratch.size() < size_) {
-            sort();
+        const auto first = events_.begin();
+        const auto last = events_.begin() + static_cast<std::ptrdiff_t>(size_);
+        if (std::is_sorted(first, last, [](const ParameterEvent& a, const ParameterEvent& b) {
+                return a.sample_offset < b.sample_offset;
+            }))
             return;
-        }
-        std::fill(offset_counts.begin(), offset_counts.end(), 0u);
-        for (std::size_t i = 0; i < size_; ++i)
-            ++offset_counts[static_cast<std::size_t>(events_[i].sample_offset)];
-        std::uint32_t running = 0;
-        for (auto& count : offset_counts) {
-            const auto here = count;
-            count = running;
-            running += here;
-        }
-        for (std::size_t i = 0; i < size_; ++i)
-            scratch[offset_counts[static_cast<std::size_t>(events_[i].sample_offset)]++] = events_[i];
-        std::copy(scratch.begin(), scratch.begin() + static_cast<std::ptrdiff_t>(size_),
-                  events_.begin());
+        if (!stable_counting_sort(first, last,
+                                  [](const ParameterEvent& e) { return e.sample_offset; },
+                                  scratch, offset_counts))
+            sort();
     }
 
     using iterator = std::array<ParameterEvent, kCapacity>::iterator;

@@ -3,6 +3,8 @@
 // Subclasses AUEffectBase and overrides ProcessBufferLists for multi-channel
 
 #include <algorithm>
+#include <optional>
+#include <span>
 #include <pulp/state/stable_sort.hpp>
 #include <cstddef>
 #include <vector>
@@ -185,23 +187,31 @@ SInt32 scheduled_start_offset(const AudioUnitParameterEvent& event) noexcept {
 }
 
 constexpr std::size_t kScheduledRampCapacity = 256;
+constexpr std::size_t kScheduledSortCapacity = 4096;
 
 }  // namespace
 
 // AUBase's version rescans the whole event list at every slice and rewrites
 // every past event into the element map each time, so its cost grows with
-// events x slices. This one sorts once (stably, without allocating, so a
-// host's order for coincident events survives), finds each break point from
-// a cursor, and leaves the per-slice application to ProcessScheduledSlice.
+// events x slices. This one sorts once (stably, so a host's order for
+// coincident events survives; a counting sort over storage reserved in
+// Initialize(), or an in-place merge sort past it -- never an allocation),
+// finds each break point from a cursor, and leaves the per-slice application
+// to ProcessScheduledSlice.
 OSStatus PulpAUEffect::ProcessForScheduledParams(ParameterEventList& events,
                                                  UInt32 frames_to_process,
                                                  void* user_data)
 {
-    state::stable_sort_in_place(
-        events.begin(), events.end(),
-        [](const AudioUnitParameterEvent& a, const AudioUnitParameterEvent& b) {
-            return scheduled_start_offset(a) < scheduled_start_offset(b);
-        });
+    const auto by_start = [](const AudioUnitParameterEvent& a, const AudioUnitParameterEvent& b) {
+        return scheduled_start_offset(a) < scheduled_start_offset(b);
+    };
+    if (!std::is_sorted(events.begin(), events.end(), by_start) &&
+        !state::stable_counting_sort(
+            events.begin(), events.end(),
+            [](const AudioUnitParameterEvent& e) { return scheduled_start_offset(e); },
+            std::span<AudioUnitParameterEvent>(scheduled_sort_scratch_),
+            std::span<std::uint32_t>(scheduled_offset_counts_)))
+        state::stable_sort_in_place(events.begin(), events.end(), by_start);
     scheduled_events_ = &events;
     scheduled_cursor_ = 0;
     scheduled_ramps_.clear();
@@ -258,8 +268,11 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
             user_data, start_frame_in_buffer, slice_frames, total_buffer_frames);
     }
 
+    // Host writes, not editor edits; scoped to the apply phases so a write the
+    // Processor makes during the slice is not mistaken for one.
+    std::optional<ScopedHostParamWrite> host_write;
+    host_write.emplace();
     auto apply_value = [this](state::ParamID param_id, float value) {
-        ScopedHostParamWrite host_write;
         store_.set_value_rt(param_id, value);
     };
     const auto is_global = [](const AudioUnitParameterEvent& event) {
@@ -325,6 +338,7 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
         for (const auto& ramp : scheduled_ramps_) apply_ramp((*events)[ramp.index], ramp.superseded);
     }
     param_events_.sort();
+    host_write.reset();
 
     scheduled_slice_active_ = true;
     slice_frame_offset_ = start_frame_in_buffer;
@@ -338,6 +352,7 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
     // observe the same terminal state as sample-aware processors. Earlier
     // slices need nothing here: the next slice applies its own start.
     if (slice_end >= total_buffer_frames) {
+        host_write.emplace();
         for (std::size_t i = scheduled_cursor_; i < events->size(); ++i) {
             const auto& event = (*events)[i];
             if (event.eventType != kParameterEvent_Immediate || !is_global(event)) continue;
@@ -627,6 +642,8 @@ OSStatus PulpAUEffect::Initialize()
     // configured channel count in AU's non-interleaved float model; reserving to
     // it up front turns the first render / reconfig resize into a no-op realloc.
     scheduled_ramps_.reserve(kScheduledRampCapacity);
+    scheduled_sort_scratch_.resize(kScheduledSortCapacity);
+    scheduled_offset_counts_.resize(static_cast<std::size_t>(GetMaxFramesPerSlice()) + 1);
     input_ptrs_.reserve(static_cast<std::size_t>(Input(0).GetStreamFormat().mChannelsPerFrame));
     output_ptrs_.reserve(static_cast<std::size_t>(Output(0).GetStreamFormat().mChannelsPerFrame));
 

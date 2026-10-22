@@ -426,6 +426,8 @@ private:
     std::size_t scheduled_cursor_ = 0;
     std::vector<ScheduledRamp> scheduled_ramps_;
     bool scheduled_ramps_overflowed_ = false;
+    std::vector<AudioUnitParameterEvent> scheduled_sort_scratch_;
+    std::vector<std::uint32_t> scheduled_offset_counts_;
 
     // Per-block MIDI I/O. Hoisted to members (not constructed per render call)
     // and given reserved, realtime-capacity-limited storage in Initialize() so

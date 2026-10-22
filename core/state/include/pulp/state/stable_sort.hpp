@@ -7,11 +7,14 @@
 // order for coincident events. This sorts blocks of 20 by insertion and
 // merges them with the SymMerge algorithm (Kim and Kutzner): O(n log^2 n)
 // compares and moves, recursion depth O(log n), no scratch storage. Input
-// already in order is detected in one pass and left untouched.
+// already in order is detected in one pass and left untouched. A caller that
+// can lend storage and sorts on a small integer key (a sample offset within
+// a block) uses stable_counting_sort instead: O(n + range).
 
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
+#include <span>
 #include <utility>
 
 namespace pulp::state {
@@ -75,6 +78,34 @@ void stable_sort_in_place(It first, It last, Less less) {
     for (std::size_t width = kBlock; width < n; width *= 2)
         for (std::size_t a = 0; a + width < n; a += 2 * width)
             stable_sort_detail::sym_merge(first, a, a + width, std::min(a + 2 * width, n), less);
+}
+
+/// Stable counting sort of [first, last) on a small non-negative integer key,
+/// O(n + counts.size()) and allocation-free, using caller-lent storage
+/// (typically sized once at prepare time). Returns false, leaving the range
+/// untouched, when `scratch` is too small or some key falls outside
+/// [0, counts.size()); the caller then falls back to stable_sort_in_place.
+template <typename It, typename Key, typename Value, typename Count>
+bool stable_counting_sort(It first, It last, Key key, std::span<Value> scratch,
+                          std::span<Count> counts) {
+    const auto n = static_cast<std::size_t>(std::distance(first, last));
+    if (n > scratch.size()) return false;
+    for (auto it = first; it != last; ++it) {
+        const auto k = key(*it);
+        if (k < 0 || static_cast<std::size_t>(k) >= counts.size()) return false;
+    }
+    std::fill(counts.begin(), counts.end(), Count{0});
+    for (auto it = first; it != last; ++it) ++counts[static_cast<std::size_t>(key(*it))];
+    Count running = 0;
+    for (auto& count : counts) {
+        const auto here = count;
+        count = running;
+        running += here;
+    }
+    for (auto it = first; it != last; ++it)
+        scratch[counts[static_cast<std::size_t>(key(*it))]++] = *it;
+    std::copy(scratch.begin(), scratch.begin() + static_cast<std::ptrdiff_t>(n), first);
+    return true;
 }
 
 }  // namespace pulp::state
