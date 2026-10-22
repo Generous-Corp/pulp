@@ -184,3 +184,20 @@ TEST_CASE("the host-process event names this process", "[gpu-fault-continuity][r
     CHECK(line.find("\"config_source\":\"rendezvous\"") != std::string::npos);
     CHECK(line.find(kNonce) != std::string::npos);
 }
+
+TEST_CASE("the host process reports a start time before its claim",
+          "[gpu-fault-continuity][rendezvous]") {
+    auto process = current_host_process();
+    process.claimed_unix_us = unix_now_us();
+    // The test process started before this line ran, and not in the future.
+    CHECK(process.start_unix_us > 0);
+    CHECK(process.start_unix_us <= process.claimed_unix_us);
+    CHECK(process.claimed_unix_us - process.start_unix_us < 24ll * 3600 * 1'000'000);
+    CHECK(claim_record(process) ==
+          std::to_string(process.pid) + "\n" + std::to_string(process.claimed_unix_us) + "\n");
+    const auto line = host_process_event(process, RunConfig{});
+    CHECK(line.find("\"start_unix_us\":" + std::to_string(process.start_unix_us)) !=
+          std::string::npos);
+    CHECK(line.find("\"claimed_unix_us\":" + std::to_string(process.claimed_unix_us)) !=
+          std::string::npos);
+}

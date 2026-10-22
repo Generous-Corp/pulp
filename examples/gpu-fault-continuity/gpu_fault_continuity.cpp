@@ -310,8 +310,12 @@ void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
     const int fd = ::open(claim.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
     if (fd < 0)
         return;
-    const std::string pid = std::to_string(::getpid()) + "\n";
-    (void)::write(fd, pid.data(), pid.size());
+    // The claim records which process won and when; a receipt binds both to
+    // the host_process event below and to every `prepared` (WP-K).
+    HostProcess process = current_host_process();
+    process.claimed_unix_us = unix_now_us();
+    const std::string record = claim_record(process);
+    (void)::write(fd, record.data(), record.size());
     ::close(fd);
     harness_ = true;
     ring_.reset(kRingBytes);
@@ -323,7 +327,7 @@ void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
     RunConfig config;
     config.source = config_source_;
     config.nonce = nonce_;
-    emit(host_process_event(current_host_process(), config));
+    emit(host_process_event(process, config));
     running_.store(true, std::memory_order_release);
     service_ = std::thread([this] { service_loop(); });
 }

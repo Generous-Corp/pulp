@@ -107,7 +107,7 @@ RunConfig from_rendezvous(const fs::path& root, std::int64_t now_unix) {
     config.request = request;
     config.ir = ir;
     config.nonce = nonce;
-    config.provider_staged = json_string(body, "provider") == "staged";
+    config.internal_stimulus = json_string(body, "stimulus") == "internal";
     config.source = "rendezvous";
     return config;
 }
@@ -135,7 +135,7 @@ RunConfig resolve_run_config(const RunConfigSources& sources) {
         config.request = env("PULP_GPU_FAULT_REQUEST");
         config.ir = env("PULP_GPU_FAULT_IR");
         config.nonce = env("PULP_GPU_FAULT_NONCE").string();
-        config.provider_staged = env("PULP_GPU_FAULT_PROVIDER") == "staged";
+        config.internal_stimulus = env("PULP_GPU_FAULT_INPUT") == "internal";
         config.source = "env";
         return config;
     }
@@ -165,19 +165,37 @@ HostProcess current_host_process() {
     if (auto fn = reinterpret_cast<ResponsibleFn>(
             ::dlsym(RTLD_DEFAULT, "responsibility_get_pid_responsible_for_pid")))
         process.responsible_pid = static_cast<int>(fn(process.pid));
+    proc_bsdinfo info{};
+    if (::proc_pidinfo(process.pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) ==
+        static_cast<int>(sizeof(info)))
+        process.start_unix_us = static_cast<std::int64_t>(info.pbi_start_tvsec) * 1'000'000 +
+                                static_cast<std::int64_t>(info.pbi_start_tvusec);
     using SandboxCheckFn = int (*)(pid_t, const char*, int, ...);
     if (auto fn = reinterpret_cast<SandboxCheckFn>(::dlsym(RTLD_DEFAULT, "sandbox_check")))
         process.sandboxed = fn(process.pid, nullptr, 0) != 0 ? 1 : 0;
     return process;
 }
 
+std::int64_t unix_now_us() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+std::string claim_record(const HostProcess& process) {
+    return std::to_string(process.pid) + "\n" + std::to_string(process.claimed_unix_us) + "\n";
+}
+
 std::string host_process_event(const HostProcess& process, const RunConfig& config) {
     return "{\"event\":\"host_process\",\"pid\":" + std::to_string(process.pid) +
            ",\"ppid\":" + std::to_string(process.ppid) +
            ",\"responsible_pid\":" + std::to_string(process.responsible_pid) +
-           ",\"sandboxed\":" + std::to_string(process.sandboxed) + ",\"process_path\":\"" +
-           escape(process.path) + "\",\"config_source\":\"" + escape(config.source) +
-           "\",\"nonce\":\"" + escape(config.nonce) + "\"}";
+           ",\"sandboxed\":" + std::to_string(process.sandboxed) +
+           ",\"start_unix_us\":" + std::to_string(process.start_unix_us) +
+           ",\"claimed_unix_us\":" + std::to_string(process.claimed_unix_us) +
+           ",\"process_path\":\"" + escape(process.path) + "\",\"config_source\":\"" +
+           escape(config.source) + "\",\"nonce\":\"" + escape(config.nonce) + "\",\"input\":\"" +
+           (config.internal_stimulus ? "internal" : "host") + "\"}";
 }
 
 } // namespace pulp::examples::gpu_fault

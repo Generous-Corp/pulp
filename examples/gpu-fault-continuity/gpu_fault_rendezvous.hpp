@@ -39,10 +39,10 @@ struct RunConfig {
     std::filesystem::path request;
     std::filesystem::path ir;
     std::string nonce;
-    // Staged GPU path instead of shared I/O (the gpu_off path negative, and
-    // the staged rows): env PULP_GPU_FAULT_PROVIDER=staged or rendezvous
-    // "provider":"staged".
-    bool provider_staged = false;
+    // The plug-in processes its own deterministic stimulus (gpu_fault_stimulus.hpp)
+    // and never reads or stores the host's input. Fixed before the first
+    // callback, so a live input is never captured even briefly.
+    bool internal_stimulus = false;
     std::string source = "none"; // "env", "rendezvous" or "none"
     std::string detail;          // why the rendezvous was refused, when it was
 };
@@ -71,10 +71,22 @@ struct HostProcess {
     int ppid = 0;
     int responsible_pid = -1; // -1: unknown
     int sandboxed = -1;       // -1: unknown, 0: no, 1: yes
+    // When the process started and when this instance claimed the run, both
+    // wall-clock microseconds: a receipt requires host launch <= start <= claim,
+    // so a plug-in process left over from before the host launched cannot
+    // claim the run. 0: unknown.
+    std::int64_t start_unix_us = 0;
+    std::int64_t claimed_unix_us = 0;
     std::string path;
 };
 
 HostProcess current_host_process();
+
+// The current wall-clock time in microseconds, as written into the claim.
+std::int64_t unix_now_us();
+
+// The claim file's content: "<pid>\n<claimed_unix_us>\n".
+std::string claim_record(const HostProcess& process);
 
 // One JSON line: {"event":"host_process",...}.
 std::string host_process_event(const HostProcess& process, const RunConfig& config);
