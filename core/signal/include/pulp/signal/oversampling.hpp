@@ -311,8 +311,7 @@ template <typename SampleType = float> class OversamplerT {
             iir_stages_[s].upsample(input, output, n);
             return;
         }
-        for (std::size_t i = 0; i < n; ++i)
-            fir_stages_[s].upsample(input[i], output[2 * i], output[2 * i + 1]);
+        fir_stages_[s].upsample(input, output, n);
     }
 
     void downsample_stage(int stage, const SampleType* input, SampleType* output, std::size_t n) {
@@ -321,8 +320,7 @@ template <typename SampleType = float> class OversamplerT {
             iir_stages_[s].downsample(input, output, n);
             return;
         }
-        for (std::size_t i = 0; i < n; ++i)
-            output[i] = fir_stages_[s].downsample(input[2 * i], input[2 * i + 1]);
+        fir_stages_[s].downsample(input, output, n);
     }
 
     // The biquad lane stays sample by sample. Each biquad is one serial
@@ -436,7 +434,7 @@ template <typename SampleType = float> class OversamplerT {
     }
 
     // ── linear_phase_fir lane ──────────────────────────────────────────
-    std::array<detail::LinearPhaseOversamplingStage2x<SampleType>, kMaxStages> fir_stages_;
+    std::array<detail::LinearPhaseOversamplingBlockStage2x<SampleType>, kMaxStages> fir_stages_;
 };
 
 using Oversampler = OversamplerT<float>;

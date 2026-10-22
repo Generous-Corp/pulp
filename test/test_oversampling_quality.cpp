@@ -975,3 +975,44 @@ TEST_CASE("Polyphase IIR output decays to exact zero on silence without flush-to
         }
     }
 }
+
+TEST_CASE("Block linear-phase stage matches the per-sample stage to rounding",
+          "[signal][oversampling][block]") {
+    // Same prototype, same polyphase split; only the summation order differs
+    // (fixed oldest-first fused multiply-adds against a SIMD dot), so the two
+    // forms must agree to float rounding, never to a filter-design difference.
+    pulp::signal::detail::LinearPhaseOversamplingStage2x<float> per_sample;
+    pulp::signal::detail::LinearPhaseOversamplingBlockStage2x<float> block;
+    per_sample.configure(0.40, 96.0, 129u);
+    block.configure(0.40, 96.0, 129u);
+    REQUIRE(block.taps() == per_sample.taps());
+
+    constexpr std::size_t kFrames = 700; // not a multiple of the 16-lane group
+    std::vector<float> input(kFrames);
+    for (std::size_t i = 0; i < kFrames; ++i)
+        input[i] = 0.6f * std::sin(static_cast<float>(0.37 * static_cast<double>(i))) +
+                   0.3f * std::sin(static_cast<float>(2.9 * static_cast<double>(i)));
+
+    std::vector<float> up_block(2 * kFrames), down_block(kFrames);
+    for (std::size_t offset = 0; offset < kFrames; offset += 100) {
+        const std::size_t count = std::min<std::size_t>(100, kFrames - offset);
+        block.upsample(input.data() + offset, up_block.data() + 2 * offset, count);
+    }
+    for (std::size_t offset = 0; offset < kFrames; offset += 37) {
+        const std::size_t count = std::min<std::size_t>(37, kFrames - offset);
+        block.downsample(up_block.data() + 2 * offset, down_block.data() + offset, count);
+    }
+
+    double worst = 0.0;
+    double worst_up = 0.0;
+    for (std::size_t i = 0; i < kFrames; ++i) {
+        float even = 0.0f, odd = 0.0f;
+        per_sample.upsample(input[i], even, odd);
+        worst_up = std::max({worst_up, std::abs(double(even) - up_block[2 * i]),
+                             std::abs(double(odd) - up_block[2 * i + 1])});
+        const float down = per_sample.downsample(even, odd);
+        worst = std::max(worst, std::abs(double(down) - down_block[i]));
+    }
+    REQUIRE(worst_up < 2e-6);
+    REQUIRE(worst < 2e-6);
+}
