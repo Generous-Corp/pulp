@@ -109,7 +109,8 @@ def verify_artifacts(raw_jsonl: Path, perfetto_json: Path, run_manifest: Path, *
     required = ("source_revision", "binary_sha256", "provider_revision",
                 "provider_asset_sha256", "model_sha256", "resident_plan_sha256", "upid", "session_id",
                 "raw_sha256", "trace_sha256", "expected_admissions")
-    _require(all(isinstance(manifest.get(key), str) and manifest[key] for key in required[:6]),
+    _require(all(isinstance(manifest.get(key), str) and manifest[key]
+                 for key in required if key not in ("upid", "expected_admissions")),
              "run manifest is missing required identity or artifact digest")
     for key in ("source_revision", "provider_revision"):
         _require(len(manifest[key]) == 40 and HEX.fullmatch(manifest[key]) is not None,
@@ -119,7 +120,7 @@ def verify_artifacts(raw_jsonl: Path, perfetto_json: Path, run_manifest: Path, *
                  f"run manifest {key} is not a SHA-256 digest")
     _require(type(manifest.get("expected_admissions")) is int and manifest["expected_admissions"] > 0,
              "run manifest expected_admissions must be positive")
-    _require(type(manifest["upid"]) is int and manifest["upid"] >= 0 and isinstance(manifest["session_id"], str) and manifest["session_id"],
+    _require(type(manifest.get("upid")) is int and manifest["upid"] >= 0,
              "run manifest process/session identity is required")
     _require(_sha256(raw_jsonl) == manifest["raw_sha256"], "raw JSONL digest does not match run manifest")
     _require(_sha256(perfetto_json) == manifest["trace_sha256"], "Perfetto output digest does not match run manifest")
@@ -145,6 +146,7 @@ def verify_artifacts(raw_jsonl: Path, perfetto_json: Path, run_manifest: Path, *
     last_sequence: dict[tuple[str, int, int], int] = {}
     admission_index: dict[tuple[int, int, int], int] = {}
     process_identity: dict[tuple[int, int, int], tuple[Any, Any]] = {}
+    terminal_rows: dict[tuple[int, int, int], dict[str, Any]] = {}
     for index, row in enumerate(rows):
         _require(isinstance(row, dict), f"Perfetto row {index} is not an object")
         key = tuple(row.get(name) for name in ("engine_id", "generation", "sequence"))
@@ -187,6 +189,7 @@ def verify_artifacts(raw_jsonl: Path, perfetto_json: Path, run_manifest: Path, *
         else:
             _require(key in admission_index and index > admission_index[key],
                      f"Perfetto terminal precedes admission for {key}")
+            terminal_rows[key] = row
         if event.endswith("terminal"):
             _require(type(row.get("admission_ns")) is int and row["admission_ns"] >= 0,
                      f"Perfetto row {index} lacks admission timestamp")
@@ -221,7 +224,7 @@ def verify_artifacts(raw_jsonl: Path, perfetto_json: Path, run_manifest: Path, *
     _require(raw_keys == {(key[0], key[1], key[2]) for key in admissions},
              "Perfetto lifecycle identities do not exactly match raw P4 blocks")
     for key in terminals:
-        terminal = next(row for row in rows if (row.get("engine_id"), row.get("generation"), row.get("sequence")) == key and (row.get("event") or row.get("lifecycle_event") or row.get("name", "")).endswith("terminal"))
+        terminal = terminal_rows[key]
         raw_row = raw_by_key[key]
         _require(terminal["gpu_terminal"] == raw_row.get("gpu_terminal") and terminal["delivery"] == raw_row.get("delivery"),
                  f"Perfetto terminal disposition disagrees with raw P4 block {key}")
@@ -273,7 +276,7 @@ def verify_receipt(receipt: Any) -> dict[str, Any]:
 
     admissions: dict[str, dict[str, Any]] = {}
     terminals: dict[str, dict[str, Any]] = {}
-    seen_order: list[tuple[str, str]] = []
+    admission_positions: dict[str, int] = {}
     for index, row in enumerate(rows):
         _require(isinstance(row, dict), f"rows[{index}] must be an object")
         admission_id = row.get("admission_id")
@@ -299,7 +302,11 @@ def verify_receipt(receipt: Any) -> dict[str, Any]:
             _require(disposition in TERMINAL_DISPOSITIONS,
                      f"rows[{index}] has invalid terminal disposition")
         target[admission_id] = row
-        seen_order.append((admission_id, phase))
+        if phase == "admitted":
+            admission_positions[admission_id] = index
+        else:
+            _require(admission_positions.get(admission_id, index) < index,
+                     f"terminal row precedes admission for {admission_id}")
 
     _require(len(admissions) == expected and len(terminals) == expected,
              "admission and terminal row counts do not match expected_admissions")
@@ -310,15 +317,15 @@ def verify_receipt(receipt: Any) -> dict[str, Any]:
         terminal = terminals[admission_id]
         _require(terminal["sequence"] == admission["sequence"],
                  f"terminal sequence mismatch for {admission_id}")
-        _require(seen_order.index((admission_id, "admitted")) < seen_order.index((admission_id, "terminal")),
-                 f"terminal row precedes admission for {admission_id}")
 
     census = receipt.get("disposition_census")
     _require(isinstance(census, dict), "disposition_census must be an object")
     observed = Counter(row["disposition"] for row in terminals.values())
-    normalized = {key: value for key, value in census.items() if value}
+    _require(set(census) <= TERMINAL_DISPOSITIONS,
+             "disposition_census names an unknown disposition")
     _require(all(type(value) is int and value >= 0 for value in census.values()),
              "disposition_census values must be non-negative integers")
+    normalized = {key: value for key, value in census.items() if value}
     _require(dict(observed) == normalized, "disposition census does not match terminal rows")
     return {"verdict": "PASS", "schema": SCHEMA, "admissions": expected,
             "disposition_census": dict(sorted(observed.items()))}
@@ -340,8 +347,8 @@ def main(argv: list[str] | None = None) -> int:
                                       expected_source_revision=args.expected_source_revision)
         else:
             _require(args.receipt is not None, "receipt path is required")
-            result = verify_receipt(json.loads(args.receipt.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError, ReceiptError) as exc:
+            result = verify_receipt(_load_json(args.receipt))
+    except (OSError, ReceiptError) as exc:
         print(json.dumps({"verdict": "FAIL", "reason": str(exc)}, sort_keys=True))
         return 1
     print(json.dumps(result, sort_keys=True))

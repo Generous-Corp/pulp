@@ -61,6 +61,17 @@ bool SharedIoTraceRecord::valid() const noexcept {
         delivery_reason != SharedIoFallbackReason::None ? delivery_reason : gpu_reason;
     if (reason != summary_reason)
         return false;
+    // The emitter projects these as signed trace arguments where a negative
+    // value means "unavailable"; an out-of-range value would wrap into that
+    // sentinel or a fabricated negative time instead of being refused.
+    constexpr auto max_signed_ns =
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    if (callback_ingress_ns > max_signed_ns)
+        return false;
+    if (callback_timing_available &&
+        (callback_end_ns < callback_start_ns || result_visible_ns < callback_end_ns ||
+         result_visible_ns > max_signed_ns))
+        return false;
     bool seen = false;
     std::uint64_t previous = 0;
     for (std::size_t i = 0; i < cpu_ns.size(); ++i) {

@@ -1390,6 +1390,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "advertised generator surface; it carries no capability claim of its own."
         ),
     },
+    {
+        "include": "pulp/signal/convolver_non_uniform.hpp",
+        "fingerprint": "sha256:e36fe1a2424f6a0f64c30c3f0d395c6884633ebf78cce4b9b834369c2b6f3079",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Two-stage zero-latency partitioned convolution: a small-block head beside a "
+            "K-times-larger tail, both PartitionedConvolver engines. A bounded DSP primitive "
+            "a processor drives from its own process() at a fixed block size, documented "
+            "with the convolution engines in the signal guide; it makes no installed agent "
+            "capability claim of its own."
+        ),
+    },
 ]
 SURFACE_TOMBSTONES: list[dict[str, Any]] = []
 CAPABILITY_TOMBSTONES: list[dict[str, Any]] = []

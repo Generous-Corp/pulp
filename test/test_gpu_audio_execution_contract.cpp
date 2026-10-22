@@ -1,6 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <cstdint>
+#include <limits>
+#include <thread>
+
 #include "detail/shared_io_execution_contract.hpp"
+#include "support/thread_progress.hpp"
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
 using namespace pulp::gpu_audio;
@@ -161,7 +167,26 @@ TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing expl
     REQUIRE(before_gpu_timing.pre_submit_delay_ns == 324695);
     REQUIRE(before_gpu_timing.submit_to_completion_ns == 721250);
     REQUIRE(before_gpu_timing.scheduled_to_completion_ns == 1045945);
+    REQUIRE(before_gpu_timing.completion_timing_valid);
     REQUIRE_FALSE(before_gpu_timing.gpu_elapsed_available);
+
+    telemetry.record_completion_timing(std::numeric_limits<std::uint64_t>::max() - 1, 1);
+    const auto boundary_timing = telemetry.snapshot();
+    REQUIRE(boundary_timing.completion_timing_valid);
+    REQUIRE(boundary_timing.scheduled_to_completion_ns ==
+            std::numeric_limits<std::uint64_t>::max());
+
+    telemetry.record_completion_timing(std::numeric_limits<std::uint64_t>::max(), 1);
+    const auto overflowed_timing = telemetry.snapshot();
+    REQUIRE_FALSE(overflowed_timing.completion_timing_valid);
+    REQUIRE(overflowed_timing.scheduled_to_completion_ns == 0);
+    REQUIRE(overflowed_timing.pre_submit_delay_ns == std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(overflowed_timing.submit_to_completion_ns == 1);
+
+    telemetry.record_completion_timing(10, 20);
+    const auto repaired_timing = telemetry.snapshot();
+    REQUIRE(repaired_timing.completion_timing_valid);
+    REQUIRE(repaired_timing.scheduled_to_completion_ns == 30);
 
     telemetry.record_gpu_elapsed_ns(42);
     telemetry.record_gpu_busy_counter(7);
@@ -175,4 +200,94 @@ TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing expl
     REQUIRE(telemetry.snapshot().configured_pipeline_depth == 0);
     REQUIRE(telemetry.snapshot().configured_available_inflight == 0);
     REQUIRE_FALSE(telemetry.snapshot().gpu_elapsed_available);
+    REQUIRE(telemetry.snapshot().completion_timing_valid);
+}
+
+TEST_CASE("shared IO telemetry completion timing snapshots stay coherent under concurrent updates",
+          "[gpu_audio][shared_io]") {
+    // Normal samples satisfy submit == 2 * pre + 1 (odd); overflow samples carry
+    // pre == max and an even submit; reset() publishes all zeros. A snapshot
+    // that mixes fields from different updates matches none of these shapes.
+    constexpr int kSnapshots = 200000;
+    constexpr std::uint64_t kMinOverlappingUpdates = 1000;
+    constexpr auto kMax = std::numeric_limits<std::uint64_t>::max();
+    SharedIoTelemetry telemetry;
+    std::atomic<std::uint64_t> published{0};
+    std::atomic<std::uint64_t> resets{0};
+    std::atomic<bool> stop{false};
+    std::thread recorder([&] {
+        std::uint64_t i = 0;
+        while (!stop.load(std::memory_order_relaxed)) {
+            ++i;
+            const bool sample_published = i % 8 == 0
+                                              ? telemetry.record_completion_timing(kMax, 2 * i)
+                                              : telemetry.record_completion_timing(i, 2 * i + 1);
+            if (sample_published)
+                published.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+    std::thread resetter([&] {
+        while (!stop.load(std::memory_order_relaxed)) {
+            telemetry.reset();
+            resets.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+    });
+    // Require a publication that actually won the guard while reset() was
+    // contending for it, not merely a recorder call that dropped its sample.
+    const bool writers_started = pulp::test::wait_for_condition([&] {
+        return published.load(std::memory_order_relaxed) != 0 &&
+               resets.load(std::memory_order_relaxed) != 0;
+    });
+
+    std::uint64_t incoherent = 0;
+    const auto check_snapshot = [&] {
+        const auto s = telemetry.snapshot();
+        const bool zero = s.pre_submit_delay_ns == 0 && s.submit_to_completion_ns == 0 &&
+                          s.scheduled_to_completion_ns == 0;
+        bool coherent = false;
+        if (s.completion_timing_valid) {
+            coherent = zero || (s.submit_to_completion_ns == 2 * s.pre_submit_delay_ns + 1 &&
+                                s.scheduled_to_completion_ns ==
+                                    s.pre_submit_delay_ns + s.submit_to_completion_ns);
+        } else {
+            // Invalid is either an overflow sample or the fail-closed contended
+            // read, which carries no timing values.
+            coherent =
+                zero || (s.pre_submit_delay_ns == kMax && s.scheduled_to_completion_ns == 0 &&
+                         s.submit_to_completion_ns != 0 && s.submit_to_completion_ns % 2 == 0);
+        }
+        if (!coherent)
+            ++incoherent;
+    };
+    const auto published_before = published.load(std::memory_order_relaxed);
+    const auto resets_before = resets.load(std::memory_order_relaxed);
+    for (int n = 0; writers_started && n < kSnapshots; ++n)
+        check_snapshot();
+    // Keep reading until both writers have advanced during the read phase, so
+    // the coherence check cannot pass without overlapping concurrent updates.
+    // Each predicate evaluation takes a snapshot first, so overlap is never
+    // accepted without a checked read taken after the baseline.
+    const bool overlapped =
+        writers_started && pulp::test::pump_until(
+                               [&] {
+                                   check_snapshot();
+                                   return published.load(std::memory_order_relaxed) >
+                                              published_before + kMinOverlappingUpdates &&
+                                          resets.load(std::memory_order_relaxed) >
+                                              resets_before + kMinOverlappingUpdates;
+                               },
+                               [] { std::this_thread::yield(); });
+    stop.store(true, std::memory_order_relaxed);
+    recorder.join();
+    resetter.join();
+
+    REQUIRE(writers_started);
+    REQUIRE(overlapped);
+    REQUIRE(incoherent == 0);
+
+    REQUIRE(telemetry.record_completion_timing(5, 11));
+    const auto settled = telemetry.snapshot();
+    REQUIRE(settled.completion_timing_valid);
+    REQUIRE(settled.scheduled_to_completion_ns == 16);
 }
