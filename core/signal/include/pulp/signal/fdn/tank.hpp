@@ -294,7 +294,27 @@ class FdnTank {
         // In-loop diffusion per line, along time. Its sign alternates by
         // channel parity so neighbouring lines never diffuse alike.
         diffuse_lines(span, n);
-        for (int k = 0; k < n; ++k) {
+        // Back to sample-major, four samples of four lines per transpose
+        // while every line is active; the tail and reduced line counts go
+        // value by value.
+        int k0 = 0;
+        if (active_n_ == kNumChannels) {
+            for (; k0 + 4 <= n; k0 += 4) {
+                for (int j = 0; j < kNumChannels / 4; ++j) {
+                    lanes::F4 a = lanes::load(&span[4 * j][k0]);
+                    lanes::F4 b = lanes::load(&span[4 * j + 1][k0]);
+                    lanes::F4 c = lanes::load(&span[4 * j + 2][k0]);
+                    lanes::F4 d = lanes::load(&span[4 * j + 3][k0]);
+                    lanes::transpose(a, b, c, d);
+                    const auto col = 4 * static_cast<std::size_t>(j);
+                    lanes::store(&x[static_cast<std::size_t>(k0)][col], a);
+                    lanes::store(&x[static_cast<std::size_t>(k0) + 1][col], b);
+                    lanes::store(&x[static_cast<std::size_t>(k0) + 2][col], c);
+                    lanes::store(&x[static_cast<std::size_t>(k0) + 3][col], d);
+                }
+            }
+        }
+        for (int k = k0; k < n; ++k) {
             for (int i = 0; i < active_n_; ++i)
                 x[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] = span[i][k];
             for (int i = active_n_; i < kNumChannels; ++i)
@@ -449,6 +469,32 @@ class FdnTank {
         const F4 two = lanes::splat(2.0f);
         const F4 one_and_half = lanes::splat(1.5f);
         const F4 onef = lanes::splat(1.0f);
+        // out[j] is lines 4j..4j+3 at one sample. Four consecutive samples'
+        // results are transposed so each vector holds one line across those
+        // samples and lands in the line-major span as one store; a tail of
+        // fewer than four samples is stored lane by lane.
+        F4 pending[4][kNumChannels / 4];
+        int held = 0;
+        const auto flush = [&](int last) {
+            if (held == 4) {
+                for (int j = 0; j < kNumChannels / 4; ++j) {
+                    F4 a = pending[0][j], b = pending[1][j], c = pending[2][j], d = pending[3][j];
+                    lanes::transpose(a, b, c, d);
+                    const int first = last - 3;
+                    lanes::store(&span[4 * j][first], a);
+                    lanes::store(&span[4 * j + 1][first], b);
+                    lanes::store(&span[4 * j + 2][first], c);
+                    lanes::store(&span[4 * j + 3][first], d);
+                }
+            } else {
+                for (int h = 0; h < held; ++h)
+                    for (int j = 0; j < kNumChannels / 4; ++j)
+                        for (int lane = 0; lane < 4; ++lane)
+                            span[4 * j + lane][last - held + 1 + h] =
+                                lanes::lane(pending[h][j], lane);
+            }
+            held = 0;
+        };
         for (int k = 0; k < n; ++k) {
             alignas(16) double m[kNumChannels];
             modulation_.tick(m);
@@ -480,11 +526,12 @@ class FdnTank {
                 const F4 c1 = half * (y1 - ym1);
                 const F4 c2 = ym1 - two_and_half * y0 + two * y1 - half * y2;
                 const F4 c3 = half * (y2 - ym1) + one_and_half * (y0 - y1);
-                const F4 out = ((c3 * t + c2) * t + c1) * t + y0;
-                for (int lane = 0; lane < 4; ++lane)
-                    span[4 * j + lane][k] = lanes::lane(out, lane);
+                pending[held][j] = ((c3 * t + c2) * t + c1) * t + y0;
             }
+            if (++held == 4)
+                flush(k);
         }
+        flush(n - 1);
     }
 
     // The in-loop cascades, each through AllpassCascade::run_spans4 with no
