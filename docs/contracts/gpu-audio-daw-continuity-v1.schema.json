@@ -1,0 +1,632 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.dev/contracts/gpu-audio-daw-continuity-v1.schema.json",
+  "title": "pulp.gpu-audio.daw-continuity.v1",
+  "description": "One GPU fault injected while the GPU fault-continuity test plug-in runs in REAPER with its editor open, and the null of the plug-in's own output, the host's realtime render of the fault pass and its later offline bounce against an independent CPU reference. Produced by tools/testing/daw-smoke/reaper_smoke.py --mode gpu-fault; accepted only by tools/validation/verify_gpu_audio_daw_continuity_receipt.py, which re-derives every number below from the digest-bound artifacts. It does not prove render-owner loss propagation, resource replay or teardown callback suppression.",
+  "type": "object",
+  "required": [
+    "schema",
+    "created_at",
+    "trigger_transport",
+    "control_op",
+    "nonce",
+    "analysis",
+    "bounce_artifact",
+    "preflight",
+    "host_quiet",
+    "artifacts",
+    "host",
+    "plugin",
+    "fault",
+    "pdc_samples",
+    "plugin_identity",
+    "capture",
+    "nulls",
+    "health",
+    "host_alive",
+    "verdict",
+    "verdict_reasons",
+    "receipt_sha256",
+    "host_realtime_artifact",
+    "delivery",
+    "controls",
+    "offline_records_in_bounce",
+    "offline_path_checked"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pulp.gpu-audio.daw-continuity.v1"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "trigger_transport": {
+      "description": "in_process_file: the plug-in read a request file and armed its provider fault interposer; it proves the audio claim, not the control surface. control_op: reserved for WP-A2's gpu_audio_fault_inject once it can reach a plug-in in a DAW. dry_run: synthetic, never DAW evidence.",
+      "enum": [
+        "control_op",
+        "in_process_file",
+        "dry_run"
+      ]
+    },
+    "control_op": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "operation": {
+          "const": "gpu_audio_fault_inject"
+        },
+        "request": {
+          "type": "object"
+        },
+        "response": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "returncode": {
+          "type": "integer"
+        }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "required": [
+        "tolerance",
+        "window",
+        "render_frames"
+      ],
+      "properties": {
+        "tolerance": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 0.01
+        },
+        "window": {
+          "type": "object",
+          "required": [
+            "pre",
+            "post"
+          ],
+          "properties": {
+            "pre": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "post": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "render_frames": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long the bounce must be; the fault window must end inside it."
+        }
+      }
+    },
+    "bounce_artifact": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "preflight": {
+      "type": "object",
+      "required": [
+        "status",
+        "quiet_host",
+        "reasons"
+      ],
+      "properties": {
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quiet_host": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "load1": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ncpu": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "raw_observations_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "host_quiet": {
+      "type": "boolean"
+    },
+    "artifacts": {
+      "type": "object",
+      "required": [
+        "stimulus.wav",
+        "ir.f32",
+        "events.jsonl",
+        "capture.bin",
+        "preflight.json",
+        "realtime.wav"
+      ],
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "host": {
+      "type": "object",
+      "properties": {
+        "reaper_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reaper_bin": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "reaper_pid": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "plugin": {
+      "type": "object",
+      "required": [
+        "format",
+        "name",
+        "executable_sha256"
+      ],
+      "properties": {
+        "format": {
+          "enum": [
+            "clap",
+            "vst3",
+            "au"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "bundle": {
+          "type": "string"
+        },
+        "executable_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "fault": {
+      "type": "object",
+      "required": [
+        "kind",
+        "requested_project_sample",
+        "fired",
+        "fired_project_sample",
+        "issued_project_sample",
+        "realtime_block",
+        "render_loss",
+        "provider_fault_applied"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "force_loss_before",
+            "force_loss_between",
+            "force_loss_after",
+            "delay_completion",
+            "worker_stall",
+            "missing_completion",
+            "render_force_loss",
+            "positive_control"
+          ]
+        },
+        "requested_project_sample": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fired": {
+          "type": "boolean"
+        },
+        "fired_project_sample": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "issued_project_sample": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "realtime_block": {
+          "type": "boolean"
+        },
+        "render_loss": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "provider_fault_applied": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "pdc_samples": {
+      "type": "integer"
+    },
+    "plugin_identity": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quantum": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lead_blocks": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ir_taps": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "required": [
+        "frames",
+        "segments",
+        "offline_samples"
+      ],
+      "properties": {
+        "frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "segments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "offline_samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated_tail_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "nulls": {
+      "type": "object",
+      "required": [
+        "plugin",
+        "host_realtime",
+        "bounce",
+        "bounce_lag_estimate"
+      ],
+      "properties": {
+        "plugin": {
+          "$ref": "#/$defs/null_result"
+        },
+        "bounce": {
+          "$ref": "#/$defs/null_result"
+        },
+        "bounce_lag_estimate": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "host_realtime": {
+          "$ref": "#/$defs/null_result"
+        }
+      }
+    },
+    "health": {
+      "type": "object",
+      "required": [
+        "snapshots",
+        "expectation_met",
+        "note"
+      ],
+      "properties": {
+        "snapshots": {
+          "type": "object",
+          "description": "Transport status before, at and after the fault, with WP-A2 gpu-audio-health-read-v1 field names and enum spellings.",
+          "properties": {
+            "before": {
+              "type": "object"
+            },
+            "at": {
+              "type": "object"
+            },
+            "after": {
+              "type": "object"
+            }
+          }
+        },
+        "expectation_met": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "host_alive": {
+      "type": "boolean"
+    },
+    "verdict": {
+      "enum": [
+        "pass",
+        "fail",
+        "inconclusive"
+      ]
+    },
+    "verdict_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nonce": {
+      "type": "string",
+      "minLength": 16,
+      "description": "Per-run nonce the harness passes to the plug-in; every prepared event must carry it."
+    },
+    "anticipative_fx": {
+      "type": "boolean"
+    },
+    "delivery": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Per-block delivery derived from the v2 capture's counters (pre-fault GPU share over the last 96 quanta, silence blocks, where the fallback took over, GPU blocks after a loss). A PASS needs `met`.",
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "met": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string"
+        },
+        "pre_fault_gpu_share": {
+          "type": "number"
+        },
+        "pre_fault_quanta": {
+          "type": "integer"
+        },
+        "degraded_host": {
+          "type": "boolean"
+        },
+        "void": {
+          "type": "boolean"
+        },
+        "silence_blocks": {
+          "type": "integer"
+        },
+        "first_fallback_project_sample": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeover_deadline_project_sample": {
+          "type": "integer"
+        },
+        "gpu_blocks_after_takeover": {
+          "type": "integer"
+        },
+        "post_fault_gpu_share": {
+          "type": "number"
+        }
+      }
+    },
+    "controls": {
+      "type": "object",
+      "description": "Which test shape ran: a planted negative (must FAIL), the internal stimulus, or the gpu_off path negative (must be INCONCLUSIVE).",
+      "properties": {
+        "planted_negative": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gpu_off": {
+          "type": "boolean"
+        }
+      }
+    },
+    "host_realtime_artifact": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The host's own realtime render of the fault pass (REAPER: an online render). The primary host-side evidence; a PASS needs its null."
+    },
+    "offline_records_in_bounce": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Offline-flagged blocks the plug-in saw during the bounce; null when the bouncing instance does not record (REAPER: a fresh, unclaimed instance)."
+    },
+    "offline_path_checked": {
+      "type": "boolean",
+      "description": "Whether the bounce provably ran the plug-in's offline path."
+    }
+  },
+  "$defs": {
+    "null_result": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "passed",
+        "tolerance",
+        "max_abs_error",
+        "window_max_abs_error",
+        "non_finite_samples",
+        "first_deviating_sample",
+        "last_deviating_sample",
+        "deviating_samples",
+        "window",
+        "compared_samples",
+        "reference_rms",
+        "candidate_rms",
+        "covered",
+        "required_frames",
+        "candidate_frames",
+        "window_reference_rms"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "tolerance": {
+          "type": "number"
+        },
+        "max_abs_error": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "window_max_abs_error": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "non_finite_samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "first_deviating_sample": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "last_deviating_sample": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "deviating_samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "window": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "compared_samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reference_rms": {
+          "type": "number"
+        },
+        "candidate_rms": {
+          "type": "number"
+        },
+        "covered": {
+          "type": "boolean",
+          "description": "The fault window lies inside the compared audio and the candidate is at least required_frames long."
+        },
+        "required_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "candidate_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "window_reference_rms": {
+          "type": "number",
+          "description": "Reference RMS over the fault window; must be at least 1e-3 so a silence substitution cannot null."
+        }
+      }
+    }
+  }
+}

@@ -84,6 +84,12 @@ add_subdirectory(combined-bundle-demo)
 # own repo and consumes Pulp as an SDK:
 # https://github.com/danielraffel/pulp-bitches-brew
 add_subdirectory(super-convolver)
+# GPU fault-continuity test plug-in for the REAPER gpu-fault smoke (WP-h1).
+# Test-only: it can fire GPU faults on request, so it is never built by default.
+option(PULP_GPU_AUDIO_FAULT_HOOKS "Build GPU-audio fault-injection test hooks and plug-ins" OFF)
+if(PULP_GPU_AUDIO_FAULT_HOOKS)
+    add_subdirectory(gpu-fault-continuity)
+endif()
 add_subdirectory(spectral-lab)
 # GPU NAM (Neural Amp Modeler player) lives in its own repo and consumes Pulp as
 # an SDK: https://github.com/danielraffel/pulp-gpu-nam
