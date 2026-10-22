@@ -367,6 +367,7 @@ public:
 
     // The overlap window as `fft_size` real samples, packed into the leading
     // scalars of the history's complex `overlap` storage.
+    // (std::complex<T> is layout-compatible with T[2], [complex.numbers].)
     static SampleType* overlap_samples(ConvolverInputHistoryT<SampleType>& h) {
         return reinterpret_cast<SampleType*>(h.overlap.data());
     }
@@ -427,6 +428,8 @@ public:
 
         // Real inverse in the accumulator's own storage, 1/N folded in; overlap-
         // save keeps the second half of the window.
+        // std::complex<T> is layout-compatible with T[2] ([complex.numbers]),
+        // so the accumulator's N/2+1 complex slots hold the N real samples.
         auto* time = reinterpret_cast<SampleType*>(accum);
         s.fft->inverse_real_half(accum, time);
         std::copy_n(time + s.block_size, s.block_size, output);

@@ -59,7 +59,11 @@ namespace pulp::signal {
 // oversampled sample of the chunk before any decimation. The callback sees
 // exactly the samples, in exactly the order, that per-sample `process()`
 // calls would hand it, and the output is identical — every stage is causal
-// and processes its input in time order either way.
+// and processes its input in time order either way. The one exception: the
+// polyphase stages flush state below ~1e-30 (float) to zero at the end of
+// each chunk so silence decays to exact zero instead of a subnormal limit
+// cycle, and per-sample calls flush every sample, so the two can differ by
+// that much while a signal is dying away.
 //
 template <typename SampleType = float> class OversamplerT {
   public:

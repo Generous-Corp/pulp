@@ -4,6 +4,7 @@
 #include <pulp/signal/rt_work_counter.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <complex>
 #include <cstddef>
@@ -243,6 +244,7 @@ public:
     void forward_real_half(const SampleType* input, std::complex<SampleType>* output,
                            SampleType scale = SampleType{1}) const {
         rt::count_fft();
+        assert(size_ >= 2 && "real transforms need at least two points");
 #if PULP_FFT_HAS_VDSP
         // vDSP's packed real transform needs at least two complex points.
         if constexpr (std::is_same_v<SampleType, float>) {
@@ -266,6 +268,7 @@ public:
     void inverse_real_half(const std::complex<SampleType>* input, SampleType* output,
                            SampleType scale) const {
         rt::count_fft();
+        assert(size_ >= 2 && "real transforms need at least two points");
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             if (size_ >= 4) {
@@ -513,6 +516,9 @@ private:
         const int half = size_ / 2;
         const SampleType nyquist = input[half].real();
         const SampleType dc = input[0].real();
+        // N real samples are N/2 complex values in the same storage
+        // ([complex.numbers] guarantees std::complex<T> is an array of two T),
+        // which is what lets the N/2-point transform run in the output.
         auto* z = reinterpret_cast<std::complex<SampleType>*>(output);
         // Build conj(Z) so the forward transform below acts as the inverse.
         for (int k = 1; k <= half / 2; ++k) {
@@ -663,6 +669,7 @@ private:
             freq_buf_[i] *= ir_freq_[i];
 
         // Real inverse in place, normalised.
+        // std::complex<T> is layout-compatible with T[2] ([complex.numbers]).
         auto* time = reinterpret_cast<SampleType*>(freq_buf_.data());
         fft_->inverse_real_half(freq_buf_.data(), time);
 

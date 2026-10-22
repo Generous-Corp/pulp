@@ -852,50 +852,68 @@ TEST_CASE("Oversampler dispatches x2 and x4 callback phases",
 
 TEST_CASE("Oversampler configured filters reset deterministically",
           "[signal][oversampling][issue-645]") {
-    Oversampler os;
-    os.set_factor(Oversampler::Factor::x4);
-    os.set_sample_rate(48000.0f);
+    // Each kind is named: the default changed once already, and a test that
+    // inherits the default silently stops covering the lane it was written for.
+    for (const auto kind : {Oversampler::Kind::fir_biquad, Oversampler::Kind::polyphase_iir}) {
+        Oversampler os;
+        os.set_kind(kind);
+        os.set_factor(Oversampler::Factor::x4);
+        os.set_sample_rate(48000.0f);
 
-    int callback_count = 0;
-    auto passthrough = [&](float sample) {
-        ++callback_count;
-        return sample;
-    };
+        int callback_count = 0;
+        auto passthrough = [&](float sample) {
+            ++callback_count;
+            return sample;
+        };
 
-    float first = os.process(1.0f, passthrough);
-    float tail = os.process(0.0f, passthrough);
+        float first = os.process(1.0f, passthrough);
+        float tail = os.process(0.0f, passthrough);
 
-    REQUIRE(callback_count == 8);
-    REQUIRE(std::isfinite(first));
-    REQUIRE(std::isfinite(tail));
-    REQUIRE(first > 0.0f);
+        INFO("kind=" << static_cast<int>(kind));
+        REQUIRE(callback_count == 8);
+        REQUIRE(std::isfinite(first));
+        REQUIRE(std::isfinite(tail));
+        // The biquad lane answers an impulse at once; the half-band lane's
+        // first output is still inside its group delay.
+        if (kind == Oversampler::Kind::fir_biquad)
+            REQUIRE(first > 0.0f);
+        else
+            REQUIRE(tail != 0.0f);
 
-    os.reset();
-    callback_count = 0;
-    float after_reset = os.process(1.0f, passthrough);
+        os.reset();
+        callback_count = 0;
+        float after_reset = os.process(1.0f, passthrough);
 
-    REQUIRE(callback_count == 4);
-    REQUIRE_THAT(after_reset, WithinAbs(first, 1e-6));
+        REQUIRE(callback_count == 4);
+        REQUIRE_THAT(after_reset, WithinAbs(first, 1e-6));
+        REQUIRE_THAT(os.process(0.0f, passthrough), WithinAbs(tail, 1e-6));
+    }
 }
 
 TEST_CASE("Oversampler factor and sample-rate setters are order-independent",
           "[signal][oversampling][issue-645]") {
-    Oversampler sample_rate_then_factor;
-    sample_rate_then_factor.set_sample_rate(48000.0f);
-    sample_rate_then_factor.set_factor(Oversampler::Factor::x4);
+    // The biquad lane is the one whose coefficients depend on the sample rate,
+    // so it is the lane this ordering bug can live in; name it explicitly.
+    for (const auto kind : {Oversampler::Kind::fir_biquad, Oversampler::Kind::polyphase_iir}) {
+        Oversampler sample_rate_then_factor;
+        sample_rate_then_factor.set_kind(kind);
+        sample_rate_then_factor.set_sample_rate(48000.0f);
+        sample_rate_then_factor.set_factor(Oversampler::Factor::x4);
 
-    Oversampler factor_then_sample_rate;
-    factor_then_sample_rate.set_factor(Oversampler::Factor::x4);
-    factor_then_sample_rate.set_sample_rate(48000.0f);
+        Oversampler factor_then_sample_rate;
+        factor_then_sample_rate.set_kind(kind);
+        factor_then_sample_rate.set_factor(Oversampler::Factor::x4);
+        factor_then_sample_rate.set_sample_rate(48000.0f);
 
-    auto passthrough = [](float sample) { return sample; };
+        auto passthrough = [](float sample) { return sample; };
 
-    for (int i = 0; i < 32; ++i) {
-        const float input = (i == 0) ? 1.0f : 0.0f;
-        const float a = sample_rate_then_factor.process(input, passthrough);
-        const float b = factor_then_sample_rate.process(input, passthrough);
-        INFO("i=" << i);
-        REQUIRE_THAT(a, WithinAbs(b, 1e-6f));
+        for (int i = 0; i < 32; ++i) {
+            const float input = (i == 0) ? 1.0f : 0.0f;
+            const float a = sample_rate_then_factor.process(input, passthrough);
+            const float b = factor_then_sample_rate.process(input, passthrough);
+            INFO("kind=" << static_cast<int>(kind) << " i=" << i);
+            REQUIRE_THAT(a, WithinAbs(b, 1e-6f));
+        }
     }
 }
 

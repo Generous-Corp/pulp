@@ -69,6 +69,7 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <limits>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -130,6 +131,10 @@ using HalfBandAllpassSection64 = HalfBandAllpassSectionT<double>;
 /// transition width.
 inline constexpr std::size_t kHalfBandIirMaxCoefficients = 16;
 
+/// Smallest passband edge `design_halfband_iir()` accepts, in cycles per
+/// sample at the filter's own rate.
+inline constexpr double kHalfBandIirMinPassbandEdge = 1e-4;
+
 /// Coefficients of one elliptic polyphase half-band filter, ascending.
 /// Path A takes the even indices and path B the odd ones, so path A is never
 /// shorter than path B. `passband_edge` and `stopband_edge()` are in cycles
@@ -163,13 +168,19 @@ struct HalfBandIirDesign {
 /// `coefficient_count` is the number of allpass sections across both paths
 /// (filter order 2 * count + 1) and `passband_edge` the passband edge in
 /// cycles per sample at the filter's own rate, strictly inside (0, 0.25).
-/// Out-of-range arguments return an invalid (`count == 0`) design.
+/// Out-of-range arguments return an invalid (`count == 0`) design, including
+/// passband edges below `kHalfBandIirMinPassbandEdge`, where the selectivity
+/// underflows the theta series and every coefficient would come out zero.
+/// Near the other extreme (16 sections with an edge within ~1e-3 of 0.25) the
+/// transition is so narrow that the double-precision series loses accuracy
+/// and the stopband is no longer quite equiripple; `halfband_iir_stopband_db()`
+/// reports what the coefficients actually achieve.
 /// Not realtime: evaluates trigonometric series; call while configuring.
 inline HalfBandIirDesign design_halfband_iir(std::size_t coefficient_count,
                                              double passband_edge) noexcept {
     HalfBandIirDesign design;
     if (coefficient_count == 0 || coefficient_count > kHalfBandIirMaxCoefficients ||
-        !(passband_edge > 0.0 && passband_edge < 0.25))
+        !(passband_edge >= kHalfBandIirMinPassbandEdge && passband_edge < 0.25))
         return design;
 
     constexpr double kPi = 3.14159265358979323846;
@@ -350,6 +361,15 @@ inline SampleType run_path(std::vector<HalfBandAllpassSectionT<SampleType>>& pat
 // block and nothing is zeroed or re-loaded per sample. Each section is
 // evaluated as y = a*x + x1 - a*y1, which leaves a single fused multiply-add
 // on the y1 recurrence. Up and down directions keep separate state.
+//
+// Fed silence, an allpass recurrence does not decay to zero in floating
+// point: once its state reaches the subnormal range, rounding sustains a
+// limit cycle there indefinitely, which is both a stream of nonzero output
+// and, without flush-to-zero, a large per-sample cost. State whose magnitude
+// is below kFlushThreshold is therefore set to zero when it is stored at the
+// end of each block. Doing it there rather than per sample keeps the
+// recurrence free of compares; a block-sized delay before the flush bites is
+// harmless because anything below the threshold is ~600 dB under full scale.
 template <typename SampleType> class HalfBandIirStage {
   public:
     static constexpr std::size_t kMaxPath = kHalfBandIirMaxCoefficients / 2;
@@ -377,6 +397,10 @@ template <typename SampleType> class HalfBandIirStage {
     /// `n` input samples -> `2n` output samples. `output` must not overlap
     /// `input`.
     void upsample(const SampleType* input, SampleType* output, std::size_t n) noexcept {
+        if (count_ == 0) { // unconfigured or invalid design: silence, never garbage
+            std::fill_n(output, 2 * n, SampleType{0});
+            return;
+        }
         dispatch(count_, [&](auto na, auto nb) {
             upsample_kernel<decltype(na)::value, decltype(nb)::value>(input, output, n);
         });
@@ -384,6 +408,10 @@ template <typename SampleType> class HalfBandIirStage {
 
     /// `2n` input samples -> `n` output samples. `output` may alias `input`.
     void downsample(const SampleType* input, SampleType* output, std::size_t n) noexcept {
+        if (count_ == 0) {
+            std::fill_n(output, n, SampleType{0});
+            return;
+        }
         dispatch(count_, [&](auto na, auto nb) {
             downsample_kernel<decltype(na)::value, decltype(nb)::value>(input, output, n);
         });
@@ -404,6 +432,15 @@ template <typename SampleType> class HalfBandIirStage {
     DirectionState up_;
     DirectionState down_;
     std::size_t count_ = 0;
+
+    // 1e8 smallest normals: about 1e-30 in float, 2e-300 in double. Far below
+    // any audible or measurable signal, far above where the limit cycle lives.
+    static constexpr SampleType kFlushThreshold =
+        std::numeric_limits<SampleType>::min() * SampleType{1e8f};
+
+    static SampleType flush(SampleType v) noexcept {
+        return std::abs(v) < kFlushThreshold ? SampleType{0} : v;
+    }
 
     template <std::size_t N> using Count = std::integral_constant<std::size_t, N>;
 
@@ -492,12 +529,12 @@ template <typename SampleType> class HalfBandIirStage {
             output[2 * i + 1] = run<NB>(b_, xb, yb, v);
         }
         for (std::size_t k = 0; k < NA; ++k) {
-            up_.a.x[k] = xa[k];
-            up_.a.y[k] = ya[k];
+            up_.a.x[k] = flush(xa[k]);
+            up_.a.y[k] = flush(ya[k]);
         }
         for (std::size_t k = 0; k < NB; ++k) {
-            up_.b.x[k] = xb[k];
-            up_.b.y[k] = yb[k];
+            up_.b.x[k] = flush(xb[k]);
+            up_.b.y[k] = flush(yb[k]);
         }
     }
 
@@ -521,12 +558,12 @@ template <typename SampleType> class HalfBandIirStage {
             output[i] = SampleType{0.5f} * (pa + pb);
         }
         for (std::size_t k = 0; k < NA; ++k) {
-            down_.a.x[k] = xa[k];
-            down_.a.y[k] = ya[k];
+            down_.a.x[k] = flush(xa[k]);
+            down_.a.y[k] = flush(ya[k]);
         }
         for (std::size_t k = 0; k < NB; ++k) {
-            down_.b.x[k] = xb[k];
-            down_.b.y[k] = yb[k];
+            down_.b.x[k] = flush(xb[k]);
+            down_.b.y[k] = flush(yb[k]);
         }
     }
 };

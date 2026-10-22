@@ -166,6 +166,11 @@ TEST_CASE("Half-band design is equiripple at the rejection its order predicts",
     REQUIRE_FALSE(design_halfband_iir(17, 0.2).valid());
     REQUIRE_FALSE(design_halfband_iir(4, 0.25).valid());
     REQUIRE_FALSE(design_halfband_iir(4, 0.0).valid());
+    REQUIRE_FALSE(design_halfband_iir(4, kHalfBandIirMinPassbandEdge / 2.0).valid());
+    const auto narrowest = design_halfband_iir(4, kHalfBandIirMinPassbandEdge);
+    REQUIRE(narrowest.valid());
+    for (std::size_t i = 0; i < narrowest.count; ++i)
+        REQUIRE(narrowest.coefficients[i] > 0.0);
 }
 
 TEST_CASE("Measured half-band upsampler image matches the design response", "[signal][halfband]") {
@@ -438,4 +443,18 @@ TEST_CASE("HalfBandUpsampler2x rejects out-of-band images (white-noise check)",
     INFO("white-noise out/in RMS = " << gain_db << " dB");
     REQUIRE(gain_db < 1.0f);
     REQUIRE(gain_db > -1.0f);
+}
+
+TEST_CASE("An unconfigured half-band stage emits silence", "[signal][halfband]") {
+    pulp::signal::detail::HalfBandIirStage<float> stage; // count 0: no design
+    const std::array<float, 4> input = {1.0f, -0.5f, 0.25f, 0.75f};
+    std::array<float, 8> up;
+    up.fill(123.0f);
+    stage.upsample(input.data(), up.data(), input.size());
+    for (const float v : up)
+        REQUIRE(v == 0.0f);
+    std::array<float, 2> down = {7.0f, 7.0f};
+    stage.downsample(input.data(), down.data(), 2);
+    REQUIRE(down[0] == 0.0f);
+    REQUIRE(down[1] == 0.0f);
 }
