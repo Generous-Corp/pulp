@@ -57,12 +57,14 @@ bool write_text(const std::filesystem::path& path, const std::string& text) {
 }
 
 // Moves a panel-local DesignIR to its browser page-space rect, for comparing
-// the render against a full-page Chromium screenshot. The translation is rigid:
-// every coordinate the IR carries relative to the panel origin moves with the
-// authored subtree, including the captured paint rects and raster origins the
-// painters validate against a view's absolute position. Translating the
-// children alone would leave those behind, and the painters would reject them
-// as stale and fall back to unsnapped geometry production never draws.
+// the render against a full-page Chromium screenshot. The translation is rigid
+// for everything recorded relative to the panel origin: the authored subtree
+// and the captured box paint rects the painter validates against a view's
+// absolute position. Translating the children alone would leave those rects
+// behind, and the painter would reject them as stale and fall back to
+// unsnapped geometry production never draws. Captured raster origins are not
+// moved: the sprite pass crops them out of the full-page screenshot, so they
+// are page-space already.
 //
 // The viewport root keeps exactly the background the importer gave it (the
 // document canvas, when the capture proved one); an absent background stays
@@ -82,7 +84,7 @@ void translate_to_page_space(pulp::view::IRNode& root, float dx, float dy) {
             // Unparseable metadata is left for the painter to reject.
         }
     };
-    // Both attribute families are device pixels at their own recorded DPR.
+    // Device pixels at the DPR the capture recorded beside them.
     const auto dpr_of = [](const pulp::view::IRNode& node, const char* key) {
         auto it = node.attributes.find(key);
         if (it == node.attributes.end()) return 0.0;
@@ -95,10 +97,6 @@ void translate_to_page_space(pulp::view::IRNode& root, float dx, float dy) {
             shift(node, "browser_box_paint_right_px", dx * dpr);
             shift(node, "browser_box_paint_top_px", dy * dpr);
             shift(node, "browser_box_paint_bottom_px", dy * dpr);
-        }
-        if (const double dpr = dpr_of(node, "captured_raster_dpr"); dpr > 0.0) {
-            shift(node, "captured_raster_origin_x_px", dx * dpr);
-            shift(node, "captured_raster_origin_y_px", dy * dpr);
         }
         for (auto& child : node.children) self(self, child);
     };
@@ -437,6 +435,10 @@ struct RenderReport {
         std::uint64_t live_views_after_teardown = 0;
     };
     std::optional<Counters> counters;
+    // How the panel was placed in the observed viewport, so the receipt alone
+    // says which registration and page colour produced the pixels.
+    std::optional<std::pair<float, float>> origin;
+    std::string page_background;
 };
 
 // Process-wide View counters at one instant; differences between two
@@ -624,6 +626,13 @@ std::string render_receipt_json(const RenderReport& report) {
         receipt.addMember("gpu", gpu);
     }
 #endif
+    auto placement = choc::value::createObject("");
+    if (report.origin) {
+        placement.addMember("origin_x", choc::value::createFloat64(report.origin->first));
+        placement.addMember("origin_y", choc::value::createFloat64(report.origin->second));
+    }
+    placement.addMember("page_background", choc::value::createString(report.page_background));
+    receipt.addMember("placement", placement);
     if (report.counters) {
         const auto& c = *report.counters;
         auto counters = choc::value::createObject("");
@@ -858,6 +867,8 @@ int main(int argc, char** argv) {
     pulp::view::Label::reset_line_break_path_counts();
     const ViewCounterSnapshot before_render;
     RenderReport report;
+    if (has_origin) report.origin = std::make_pair(origin_x, origin_y);
+    report.page_background = page_background;
     report.requested = backend == Backend::gpu ? "gpu" : "skia";
     report.fault = gpu_fault_name(gpu_fault);
     const auto write_receipt = [&] {

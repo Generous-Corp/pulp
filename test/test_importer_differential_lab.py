@@ -1043,6 +1043,11 @@ class DifferentialLabTests(unittest.TestCase):
         at_threshold = LAB.promotion_recommendation(
             [], perfect, perfect, perfect, {"score": 0.995}, counted)
         self.assertTrue(at_threshold["threshold_eligible"])
+        for bad in (float("nan"), float("inf")):
+            with self.subTest(score=bad):
+                result = LAB.promotion_recommendation(
+                    [], perfect, perfect, perfect, {"score": bad}, counted)
+                self.assertFalse(result["threshold_eligible"])
 
     def test_work_counters_gate_threshold_eligibility(self) -> None:
         perfect = {"score": 1.0}
@@ -1065,6 +1070,15 @@ class DifferentialLabTests(unittest.TestCase):
             "empty tree": {"counters": {**clean, "views_constructed": 0,
                                         "views_destroyed": 0}},
             "incomplete": {"counters": {"schema": LAB.OBSERVER_COUNTER_SCHEMA}},
+            "bool counts": {"counters": {**clean, "views_constructed": True,
+                                         "views_destroyed": True,
+                                         "live_views_after_teardown": False}},
+            "fractional mutation": {"counters": {**clean, "readback": {
+                **clean["readback"], "unmarked_paint_mutations": 0.9}}},
+            "negative count": {"counters": {**clean, "views_destroyed": -1}},
+            "string count": {"counters": {**clean, "views_constructed": "9"}},
+            "missing readback field": {"counters": {**clean, "readback": {
+                "unmarked_paint_mutations": 0}}},
         }
         for name, receipt in planted.items():
             with self.subTest(name):

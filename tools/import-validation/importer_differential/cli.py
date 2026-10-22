@@ -215,6 +215,8 @@ DETERMINISM_FIELDS = (
     "observer_sha256",
     "browser_capture_canonical_sha256",
     "native_capture_canonical_sha256",
+    "browser_snapshot_semantic_sha256",
+    "native_snapshot_semantic_sha256",
     "browser_screenshot_sha256",
     "native_render_sha256",
     "native_layout_sha256",

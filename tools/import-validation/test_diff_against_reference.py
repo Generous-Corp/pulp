@@ -145,13 +145,17 @@ class HelperScoringTests(unittest.TestCase):
 
     @staticmethod
     def _canvas_snapshot(html: dict[str, str], body: dict[str, str]) -> dict[str, object]:
-        names = ["background-color", "background-image"]
+        names = ["background-color", "background-image", "opacity", "filter",
+                 "transform", "mix-blend-mode"]
+        defaults = {"background-image": "none", "opacity": "1", "filter": "none",
+                    "transform": "none", "mix-blend-mode": "normal",
+                    "background-color": "rgba(0, 0, 0, 0)"}
         strings = ["#document", "html", "HTML", "BODY"]
 
         def row(styles: dict[str, str]) -> list[int]:
             out = []
             for name in names:
-                value = styles.get(name, "none" if name == "background-image" else "rgba(0, 0, 0, 0)")
+                value = styles.get(name, defaults[name])
                 if value not in strings:
                     strings.append(value)
                 out.append(strings.index(value))
@@ -185,17 +189,24 @@ class HelperScoringTests(unittest.TestCase):
         self.assertEqual(result["source"], "body-background")
         self.assertEqual(result["color"], "rgb(16, 21, 34)")
 
-    def test_canvas_falls_back_to_the_ua_canvas_for_the_captured_scheme(self) -> None:
-        result = self._canvas({}, {})
-        self.assertEqual(result["source"], "ua-canvas-light")
-        self.assertEqual(result["color"], "rgb(255, 255, 255)")
-        self.assertEqual(self._canvas({}, {}, scheme="dark")["status"], "unresolved")
+    def test_transparent_root_and_body_stay_unresolved(self) -> None:
+        # The UA canvas colour follows the page's own color-scheme, which the
+        # capture does not record; the emulated preference is not enough.
+        for scheme in ("light", "dark"):
+            with self.subTest(scheme=scheme):
+                result = self._canvas({}, {}, scheme=scheme)
+                self.assertEqual(result["status"], "unresolved")
+                self.assertIsNone(result["color"])
 
     def test_canvas_refuses_shapes_it_cannot_reproduce(self) -> None:
         for html, body in (
             ({"background-image": "linear-gradient(red, blue)"}, {}),
             ({}, {"background-color": "rgba(16, 21, 34, 0.5)"}),
             ({"background-color": "hsl(0, 0%, 0%)"}, {}),
+            ({"background-color": "rgb(1, 2, 3)", "filter": "invert(1)"}, {}),
+            ({"background-color": "rgb(1, 2, 3)", "opacity": "0.5"}, {}),
+            ({}, {"background-color": "rgb(1, 2, 3)", "mix-blend-mode": "multiply"}),
+            ({}, {"background-color": "rgb(1, 2, 3)", "transform": "matrix(1, 0, 0, 1, 2, 0)"}),
         ):
             with self.subTest(html=html, body=body):
                 result = self._canvas(html, body)

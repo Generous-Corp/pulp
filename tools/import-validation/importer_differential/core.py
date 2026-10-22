@@ -694,9 +694,19 @@ def authenticated_authored_origin(
     return frame_x, frame_y
 
 
-# Chromium's initial canvas colour when neither the root nor the body paints a
-# background, keyed by the captured color-scheme.
-UA_CANVAS_COLORS = {"light": "rgb(255, 255, 255)"}
+# Styles under which Chromium composites the root or body differently from a
+# flat fill of its background colour. The importer's own canvas rule refuses
+# the same set (browser_capture_canvas_impl.hpp).
+CANVAS_NEUTRAL_STYLES = {
+    "opacity": "1",
+    "filter": "none",
+    "backdrop-filter": "none",
+    "transform": "none",
+    "clip-path": "none",
+    "mask-image": "none",
+    "mix-blend-mode": "normal",
+    "background-image": "none",
+}
 
 
 def document_canvas_background(
@@ -705,11 +715,13 @@ def document_canvas_background(
     """Resolve the colour Chromium paints across the page canvas.
 
     CSS propagates the root element's background to the canvas, and the
-    body's when the root's is transparent; with neither, the UA canvas colour
-    for the captured color-scheme shows. Only a flat, fully opaque or fully
-    transparent colour on a box with no background image is resolved. Any
-    other shape is reported unresolved rather than approximated, so the
-    observer leaves the page uncovered and the residual stays visible.
+    body's when the root's is transparent. Only a flat, fully opaque colour on
+    a box Chromium composites as a plain fill is resolved. Anything else --
+    translucency, an image, a filter or blend, or two transparent boxes
+    (whose UA canvas colour depends on the page's own color-scheme, which the
+    capture does not record) -- is reported unresolved rather than
+    approximated, so the observer leaves the page uncovered and the residual
+    stays visible.
     """
     def unresolved(reason: str) -> dict[str, Any]:
         return {"status": "unresolved", "reason": reason, "color": None}
@@ -756,7 +768,8 @@ def document_canvas_background(
         return unresolved("snapshot lacks a laid-out html/body pair")
 
     def flat_color(styles: dict[str, str]) -> tuple[str, float] | None:
-        if styles.get("background-image", "none") != "none":
+        if any(styles.get(name, neutral) != neutral
+               for name, neutral in CANVAS_NEUTRAL_STYLES.items()):
             return None
         match = re.fullmatch(
             r"rgba?\((\d+), (\d+), (\d+)(?:, ([0-9.]+))?\)",
@@ -769,18 +782,15 @@ def document_canvas_background(
     for label, styles in (("html", html), ("body", body)):
         resolved = flat_color(styles)
         if resolved is None:
-            return unresolved(f"{label} background is not a flat colour")
+            return unresolved(f"{label} is not a plain flat-colour fill")
         color, alpha = resolved
         if alpha == 1.0:
             return {"status": "resolved", "source": f"{label}-background",
                     "color": color}
         if alpha != 0.0:
             return unresolved(f"{label} background is translucent")
-    scheme = capture.get("provenance", {}).get("color_scheme")
-    if scheme in UA_CANVAS_COLORS:
-        return {"status": "resolved", "source": f"ua-canvas-{scheme}",
-                "color": UA_CANVAS_COLORS[scheme]}
-    return unresolved(f"no UA canvas colour for color-scheme {scheme!r}")
+    return unresolved("html and body are transparent; the UA canvas colour "
+                      "depends on a color-scheme the capture does not record")
 
 
 def viewport_dpr_audit(
@@ -1075,26 +1085,38 @@ def work_counter_gate(render_receipt: dict[str, Any]) -> dict[str, Any]:
 
     The counters come from the digest-bound render receipt, so they describe
     the exact native render that was scored. A receipt without them, a tree
-    that outlived its teardown, or a paint change after the first frame that
-    staled a cache without requesting a repaint each blocks threshold
-    eligibility. Build and first-frame mutations are reported but not gated:
-    until a frame has been painted there is no painted state to stale.
+    that outlived its teardown, or a read-back of the painted tree that staled
+    a cache without requesting a repaint each blocks threshold eligibility.
+    Build and first-frame mutations are reported but not gated: until a frame
+    has been painted there is no painted state to stale. The observer paints
+    one frame, so this gate proves complete teardown and a side-effect-free
+    read-back only; steady-state update behaviour is measured by the
+    benchmark's interactive phase, not here.
     """
     counters = render_receipt.get("counters")
     if not isinstance(counters, dict) or counters.get("schema") != OBSERVER_COUNTER_SCHEMA:
         return {"status": "absent", "counters": None,
                 "failures": ["observer receipt carries no work counters"]}
     failures: list[str] = []
+
+    def count(value: Any) -> int:
+        # Counts are non-negative JSON integers; bool, float and string are
+        # malformed, not coercible.
+        if type(value) is not int or value < 0:
+            raise ValueError(value)
+        return value
+
     try:
-        constructed = int(counters["views_constructed"])
-        destroyed = int(counters["views_destroyed"])
-        live = int(counters["live_views_after_teardown"])
-        unmarked = int(counters["readback"]["unmarked_paint_mutations"])
-        for phase in ("build", "first_frame"):
-            int(counters[phase]["unmarked_paint_mutations"])
+        constructed = count(counters["views_constructed"])
+        destroyed = count(counters["views_destroyed"])
+        live = count(counters["live_views_after_teardown"])
+        for phase in ("build", "first_frame", "readback"):
+            for name in ("layout_passes", "damage_requests", "unmarked_paint_mutations"):
+                count(counters[phase][name])
+        unmarked = counters["readback"]["unmarked_paint_mutations"]
     except (KeyError, TypeError, ValueError):
         return {"status": "absent", "counters": counters,
-                "failures": ["observer work counters are incomplete"]}
+                "failures": ["observer work counters are malformed"]}
     if constructed <= 0:
         failures.append("observer built no views")
     if live != 0 or destroyed != constructed:
@@ -1120,9 +1142,11 @@ def promotion_recommendation(
         "typography": typography["score"],
         "visual": visual["score"],
     }
+    # `not (score >= threshold)` so a NaN score fails rather than passing a
+    # `<` comparison that is false for NaN.
     failed = [
         name for name, threshold in PROMOTION_THRESHOLDS.items()
-        if scores[name] < threshold
+        if not (math.isfinite(scores[name]) and scores[name] >= threshold)
     ]
     counter_failures = (
         [] if work_counters.get("status") == "pass"
@@ -1505,6 +1529,10 @@ def compare_one(
         "x": round(authored_x, 6), "y": round(authored_y, 6),
         "source": "authenticated-authored-frame",
         "applied_to": "native-render-and-layout",
+        # Capture snaps box paint edges in panel-local CSS px. Moved by a
+        # fractional origin they no longer equal Chromium's page-space snap,
+        # so edge residuals on such a panel are partly registration.
+        "integral_origin": float(authored_x).is_integer() and float(authored_y).is_integer(),
     }
     comparison = structural_comparison(browser_flat, native_flat)
     matches = comparison["matches"]
