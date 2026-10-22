@@ -223,9 +223,10 @@ TEST_CASE("generate_pulp_cpp reports the style properties it cannot lower",
 
 TEST_CASE("generate_pulp_cpp does not report a style property set to its initial keyword",
           "[view][import][cpp-codegen][fidelity]") {
-    // `none` (and `normal` for blending) is the initial value: nothing is
-    // dropped, so a note claiming the node renders unfiltered or untransformed
-    // would send someone hunting a gap that does not exist.
+    // An initial value (`none`, `normal`, `auto`, `clip`) or one the lane
+    // already renders (a solid border, any border style without a width) drops
+    // nothing, so a note claiming it did would send someone hunting a gap that
+    // does not exist.
     const auto unlowered_notes = [](const IRStyle& style) {
         DesignIR ir;
         ir.root.type = "frame";
@@ -248,7 +249,19 @@ TEST_CASE("generate_pulp_cpp does not report a style property set to its initial
     initial.backdrop_filter = " NONE ";
     initial.clip_path = "None";
     initial.transform = "none";
+    initial.box_shadow = parse_css_box_shadow("none");
+    initial.text_overflow = "clip";
+    initial.pointer_events = "auto";
+    initial.border_style = "solid";
+    initial.border_width = 2.0f;
     CHECK(unlowered_notes(initial).empty());
+
+    IRStyle widthless_border;
+    widthless_border.border_style = "dashed";
+    widthless_border.border_width = 0.0f;
+    CHECK(unlowered_notes(widthless_border).empty());
+    widthless_border.border_style = "none";
+    CHECK(unlowered_notes(widthless_border).empty());
 
     IRStyle live;
     live.mix_blend_mode = "screen";
@@ -256,6 +269,11 @@ TEST_CASE("generate_pulp_cpp does not report a style property set to its initial
     live.backdrop_filter = "blur(8px)";
     live.clip_path = "circle(50%)";
     live.transform = "scale(2)";
+    live.box_shadow = parse_css_box_shadow("0 1px 2px #000");
+    live.text_overflow = "ellipsis";
+    live.pointer_events = "none";
+    live.border_style = "dashed";
+    live.border_top_width = 1.0f;
     const auto notes = unlowered_notes(live);
     const auto noted = [&](std::string_view property) {
         return std::any_of(notes.begin(), notes.end(), [&](const std::string& detail) {
@@ -267,6 +285,19 @@ TEST_CASE("generate_pulp_cpp does not report a style property set to its initial
     CHECK(noted("backdrop-filter"));
     CHECK(noted("clip-path"));
     CHECK(noted("transform"));
+    CHECK(noted("box-shadow"));
+    CHECK(noted("text-overflow"));
+    CHECK(noted("pointer-events"));
+    CHECK(noted("border-style"));
+
+    // `none` hides a border this lane would stroke solid at the declared width.
+    IRStyle hidden_border;
+    hidden_border.border_style = "none";
+    hidden_border.border_width = 2.0f;
+    const auto hidden_notes = unlowered_notes(hidden_border);
+    CHECK(std::any_of(hidden_notes.begin(), hidden_notes.end(), [](const std::string& detail) {
+        return detail.rfind("border-style is set", 0) == 0;
+    }));
 }
 
 TEST_CASE("generate_pulp_cpp lowers a rotation instead of reporting it",

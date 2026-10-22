@@ -260,9 +260,18 @@ bool is_css_keyword(std::string_view value, std::string_view keyword) {
                       });
 }
 
-// An empty value or the property's initial keyword declares nothing to lower.
-bool declares_effect(const std::optional<std::string>& value, std::string_view initial) {
-    return value && !value->empty() && !is_css_keyword(*value, initial);
+// True when the lane drops something: the value is set and is not the one
+// keyword whose rendering the lane already produces (usually the initial value).
+bool drops(const std::optional<std::string>& value, std::string_view rendered_keyword) {
+    return value && !value->empty() && !is_css_keyword(*value, rendered_keyword);
+}
+
+bool has_border_width(const IRStyle& style) {
+    for (const auto& width : {style.border_width, style.border_top_width, style.border_right_width,
+                              style.border_bottom_width, style.border_left_width})
+        if (width && *width > 0.0f)
+            return true;
+    return false;
 }
 
 } // namespace
@@ -452,24 +461,26 @@ void report_unlowered_visual_style(const EmitContext& ctx,
 
     if (!style.box_shadow.empty())
         note("box-shadow", "the node paints flat");
-    if (declares_effect(style.mix_blend_mode, "normal"))
+    if (drops(style.mix_blend_mode, "normal"))
         note("mix-blend-mode", "the node composites as an opaque fill");
-    if (declares_effect(style.filter, "none"))
+    if (drops(style.filter, "none"))
         note("filter", "the node renders unfiltered");
-    if (declares_effect(style.backdrop_filter, "none"))
+    if (drops(style.backdrop_filter, "none"))
         note("backdrop-filter", "the backdrop renders opaque");
-    if (declares_effect(style.clip_path, "none"))
+    if (drops(style.clip_path, "none"))
         note("clip-path", "the node paints its full rectangle");
     // Rotation lowers above. A transform that carries anything else (scale,
     // skew, translate, matrix) still does not, so report only that remainder
     // rather than claiming the whole property was dropped.
-    if (declares_effect(style.transform, "none") && !css_transform_rotation(*style.transform))
+    if (drops(style.transform, "none") && !css_transform_rotation(*style.transform))
         note("transform", "the node renders untransformed");
-    if (style.border_style && !style.border_style->empty())
+    // Borders lower as solid strokes of the declared width. Without a width
+    // neither CSS nor this lane draws one, whatever the style says.
+    if (drops(style.border_style, "solid") && has_border_width(style))
         note("border-style", "the border renders solid");
-    if (style.text_overflow && !style.text_overflow->empty())
+    if (drops(style.text_overflow, "clip"))
         note("text-overflow", "overflowing text hard-clips instead of ellipsising");
-    if (style.pointer_events && !style.pointer_events->empty())
+    if (drops(style.pointer_events, "auto"))
         note("pointer-events", "the node keeps default hit behaviour");
     // design-import-parity: non-lowering-end
 }
