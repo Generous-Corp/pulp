@@ -404,14 +404,12 @@ void StateStore::add_parameter(const ParamInfo& info) {
     params_.push_back(clamped);
     values_.emplace_back(clamped.range.default_value);
     id_to_index_[info.id] = index;
-    if (dense_index_usable_ && info.id < kDenseIndexLimit && index < kNoDenseIndex) {
+    if (info.id < kDenseIndexLimit) {
         if (dense_index_.size() <= info.id)
             dense_index_.resize(std::size_t(info.id) + 1, kNoDenseIndex);
         dense_index_[info.id] = static_cast<std::uint32_t>(index);
-    } else if (dense_index_usable_) {
-        dense_index_usable_ = false;
-        dense_index_.clear();
-        dense_index_.shrink_to_fit();
+    } else {
+        has_sparse_ids_ = true;
     }
     // Cache trigger/momentary params so the audio-thread auto-reset after each
     // block touches only them, allocation-free. A Reset designation implies a

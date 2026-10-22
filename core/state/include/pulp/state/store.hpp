@@ -675,13 +675,14 @@ class StateStore {
     std::unordered_map<ParamID, std::size_t> id_to_index_;
     std::vector<ParamValue> values_;
     // Direct ParamID -> index table for the audio-thread readers and writers.
-    // Parameter IDs are almost always small dense integers, so a vector beats a
-    // hash lookup; it is kept only while every registered ID is below
-    // kDenseIndexLimit and is otherwise empty (lookups fall back to the map).
+    // Parameter IDs are almost always small integers, so a vector beats a hash
+    // lookup. Every ID below kDenseIndexLimit is in the table; only IDs at or
+    // above it (a four-char code, an adapter's synthesized Bypass) are looked
+    // up in the map, so one such ID does not slow every other lookup.
     static constexpr ParamID kDenseIndexLimit = 1u << 14;
     static constexpr std::uint32_t kNoDenseIndex = 0xFFFF'FFFFu;
     std::vector<std::uint32_t> dense_index_;
-    bool dense_index_usable_ = true;
+    bool has_sparse_ids_ = false;
     static constexpr std::size_t kNoIndex = static_cast<std::size_t>(-1);
     // The dense-table hit is the whole inline path; the hash-map fallback is
     // out of line so get_value() stays small enough to inline into a
@@ -691,7 +692,7 @@ class StateStore {
             const std::uint32_t i = dense_index_[id];
             return i == kNoDenseIndex ? kNoIndex : i;
         }
-        return dense_index_usable_ ? kNoIndex : index_of_sparse(id);
+        return id >= kDenseIndexLimit && has_sparse_ids_ ? index_of_sparse(id) : kNoIndex;
     }
     [[gnu::noinline]] std::size_t index_of_sparse(ParamID id) const noexcept;
     using ParameterDisplayNames =
