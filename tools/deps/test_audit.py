@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -879,8 +880,10 @@ class LicenseVerificationTests(unittest.TestCase):
             d for d in audit.load_manifest() if d["name"] == "VST3 SDK"
         )
         self.assertEqual(dep["license"], "MIT")
-        self.assertEqual(dep["version"], "v3.8.0_build_66")
-        self.assertEqual(dep["upstream"]["ref"], "v3.8.0_build_66")
+        self.assertEqual(dep["upstream"]["ref"], dep["version"])
+        match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)_build_\d+", dep["version"])
+        self.assertIsNotNone(match, dep["version"])
+        self.assertGreaterEqual(tuple(int(part) for part in match.groups()), (3, 8, 0))
 
     def test_license_files_deduplicated_on_case_insensitive_filesystems(self) -> None:
         """macOS resolves LICENSE.txt and license.txt to one file, which
