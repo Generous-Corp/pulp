@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <type_traits>
 
@@ -286,40 +287,20 @@ class FdnTank {
                        SampleType* out_r, int n) {
         // Sample-major work area: x[k] holds every line's value at sample k.
         alignas(64) std::array<Lane, kMaxBlockSamples> x;
-        // Line-major read positions: delay[i] is line i's span.
-        alignas(64) double delay[kNumChannels][kMaxBlockSamples];
+        // Line-major spans: span[i] is line i's read, then its diffusion.
+        alignas(64) SampleType span[kNumChannels][kMaxBlockSamples];
+        read_lines(span, n);
 
-        // Modulated read positions, all lines at once per sample.
+        // In-loop diffusion per line, along time. Its sign alternates by
+        // channel parity so neighbouring lines never diffuse alike.
+        diffuse_lines(span, n);
         for (int k = 0; k < n; ++k) {
-            double m[kNumChannels];
-            modulation_.tick(m);
-            for (std::size_t i = 0; i < static_cast<std::size_t>(kNumChannels); ++i)
-                delay[i][k] = current_delay_[i] * (1.0 + mod_depth_ * m[i]);
-        }
-
-        // Per line, along time: modulated read, then the in-loop diffusion.
-        // Its sign alternates by channel parity so neighbouring lines never
-        // diffuse alike.
-        alignas(64) std::array<SampleType, kMaxBlockSamples> span;
-        alignas(64) std::array<double, kMaxBlockSamples> lfo;
-        for (int i = 0; i < active_n_; ++i) {
-            const auto ui = static_cast<std::size_t>(i);
-            lines_[ui].read_hermite_span(delay[ui], span.data(), n);
-            const SampleType g = (i & 1) ? -loop_g_ : loop_g_;
-            if (controls_.flutter) {
-                for (int k = 0; k < n; ++k)
-                    lfo[static_cast<std::size_t>(k)] = flutter_lfo_[ui].tick();
-                loop_diffusion_[ui].process_block_fluttered(span.data(), n, g, lfo.data(),
-                                                            kFlutterDepth);
-            } else {
-                loop_diffusion_[ui].process_block(span.data(), n, g);
-            }
-            for (int k = 0; k < n; ++k)
-                x[static_cast<std::size_t>(k)][ui] = span[static_cast<std::size_t>(k)];
-        }
-        for (int k = 0; k < n; ++k)
+            for (int i = 0; i < active_n_; ++i)
+                x[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] =
+                    span[i][k];
             for (int i = active_n_; i < kNumChannels; ++i)
                 x[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] = SampleType{0};
+        }
 
         // Across lines, one sample at a time, as four 4-lane vectors.
         using lanes::F4;
@@ -430,6 +411,97 @@ class FdnTank {
 
         for (int i = 0; i < active_n_; ++i)
             lines_[static_cast<std::size_t>(i)].push_block(written[i], n);
+    }
+
+    // Modulated reads for every line, one sample at a time across lines. All
+    // sixteen rings share one size and advance in lockstep, so one write index
+    // and mask serve them all; each read's four taps are one 16-byte load
+    // (FracDelayT::taps_at), and the interpolation runs four lines per vector.
+    // Same delays, taps, fractions, and curve as FracDelayT::read_hermite_at.
+    void read_lines(SampleType (&span)[kNumChannels][kMaxBlockSamples], int n) {
+        using lanes::D2;
+        using lanes::F4;
+        using lanes::I2;
+        constexpr int kPairs = kNumChannels / 2;
+        const std::size_t write = lines_[0].write_index();
+        const SampleType* ring[kNumChannels];
+        for (std::size_t i = 0; i < static_cast<std::size_t>(kNumChannels); ++i)
+            ring[i] = lines_[i].taps_at(0);
+        D2 length[kPairs];
+        for (int p = 0; p < kPairs; ++p) length[p] = lanes::load(&current_delay_[2 * static_cast<std::size_t>(p)]);
+        const D2 depth = lanes::splat(mod_depth_);
+        // Each line's delay as integer part and fraction, exactly as
+        // FracDelayT::read_hermite_at derives them.
+        const D2 one = lanes::splat(1.0);
+        const D2 lowest = lanes::splat(2.0);
+        const D2 highest = lanes::splat(static_cast<double>(lines_[0].max_delay()));
+        const I2 mask = lanes::splat_i(static_cast<std::int64_t>(lines_[0].mask()));
+        const F4 half = lanes::splat(0.5f);
+        const F4 two_and_half = lanes::splat(2.5f);
+        const F4 two = lanes::splat(2.0f);
+        const F4 one_and_half = lanes::splat(1.5f);
+        const F4 onef = lanes::splat(1.0f);
+        for (int k = 0; k < n; ++k) {
+            alignas(16) double m[kNumChannels];
+            modulation_.tick(m);
+            const I2 origin = lanes::splat_i(static_cast<std::int64_t>(write + static_cast<std::size_t>(k)) - 2);
+            alignas(16) std::int64_t start[kNumChannels];
+            F4 frac[kNumChannels / 4];
+            for (int j = 0; j < kNumChannels / 4; ++j) {
+                D2 f[2];
+                for (int h = 0; h < 2; ++h) {
+                    const int p = 2 * j + h;
+                    const D2 d = lanes::clamp(length[p] * (one + depth * lanes::load(m + 2 * p)),
+                                              lowest, highest);
+                    const I2 whole = lanes::to_int(d);
+                    f[h] = d - lanes::to_double(whole);
+                    const I2 at = (origin - whole) & mask;
+                    start[2 * p] = lanes::lane(at, 0);
+                    start[2 * p + 1] = lanes::lane(at, 1);
+                }
+                frac[j] = lanes::narrow(f[0], f[1]);
+            }
+            for (int j = 0; j < kNumChannels / 4; ++j) {
+                F4 ym1 = lanes::load(ring[4 * j] + start[4 * j]);
+                F4 y0 = lanes::load(ring[4 * j + 1] + start[4 * j + 1]);
+                F4 y1 = lanes::load(ring[4 * j + 2] + start[4 * j + 2]);
+                F4 y2 = lanes::load(ring[4 * j + 3] + start[4 * j + 3]);
+                lanes::transpose(ym1, y0, y1, y2);
+                const F4 t = onef - frac[j];
+                const F4 c1 = half * (y1 - ym1);
+                const F4 c2 = ym1 - two_and_half * y0 + two * y1 - half * y2;
+                const F4 c3 = half * (y2 - ym1) + one_and_half * (y0 - y1);
+                const F4 out = ((c3 * t + c2) * t + c1) * t + y0;
+                for (int lane = 0; lane < 4; ++lane) span[4 * j + lane][k] = lanes::lane(out, lane);
+            }
+        }
+    }
+
+    // The in-loop cascades, each through AllpassCascade::run_spans4 with no
+    // setup beyond its eight span pointers.
+    void diffuse_lines(SampleType (&span)[kNumChannels][kMaxBlockSamples], int n) {
+        if (controls_.flutter) {
+            alignas(64) double lfo[kMaxBlockSamples];
+            for (int i = 0; i < active_n_; ++i) {
+                const auto ui = static_cast<std::size_t>(i);
+                for (int k = 0; k < n; ++k) lfo[k] = flutter_lfo_[ui].tick();
+                const SampleType g = (i & 1) ? -loop_g_ : loop_g_;
+                loop_diffusion_[ui].process_block_fluttered(span[i], n, g, lfo, kFlutterDepth);
+            }
+            return;
+        }
+        for (int i = 0; i < active_n_; ++i) {
+            const auto ui = static_cast<std::size_t>(i);
+            const SampleType g = (i & 1) ? -loop_g_ : loop_g_;
+            SampleType* delayed[4];
+            SampleType* stored[4];
+            if (loop_diffusion_[ui].spans4(n, delayed, stored)) {
+                AllpassCascade<SampleType>::run_spans4(span[i], n, g, delayed, stored);
+                loop_diffusion_[ui].commit4(n);
+            } else {
+                loop_diffusion_[ui].process_block(span[i], n, g);
+            }
+        }
     }
 
     // Every kHealIntervalSamples: snap decayed recursive state to zero (the

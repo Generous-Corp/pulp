@@ -78,23 +78,13 @@ class AllpassStage {
     }
 
     // Block of up to kMaxBlockSamples, in place. Requires n <= delay(), which
-    // makes the delayed span and the span being written disjoint. A span that
-    // crosses the ring boundary is processed as two contiguous pieces.
+    // makes the delayed span and the span being written disjoint. Both spans
+    // are contiguous: the ring mirrors its start past its end.
     void process_block(SampleType* x, int n, SampleType g) {
         SampleType* buf = line_.data();
-        const std::size_t size = line_.size();
-        const std::size_t mask = line_.mask();
-        std::size_t w = line_.write_index();
-        std::size_t r = (w - static_cast<std::size_t>(delay_)) & mask;
-        int done = 0;
-        while (done < n) {
-            const auto piece = static_cast<int>(
-                std::min<std::size_t>({static_cast<std::size_t>(n - done), size - r, size - w}));
-            run(x + done, buf + r, buf + w, piece, g);
-            done += piece;
-            r = (r + static_cast<std::size_t>(piece)) & mask;
-            w = (w + static_cast<std::size_t>(piece)) & mask;
-        }
+        const std::size_t w = line_.write_index();
+        const std::size_t r = (w - static_cast<std::size_t>(delay_)) & line_.mask();
+        run(x, buf + r, buf + w, n, g);
         line_.advance(n);
     }
 
@@ -229,48 +219,45 @@ class AllpassCascade {
   private:
     // The four-stage cascade (the engine's only shape) as one pass along
     // time. Each stage is the same expression AllpassStage::run applies; only
-    // the loop is shared. The block is cut wherever any stage's read or write
-    // span reaches its ring boundary, so every piece is contiguous in all
-    // eight spans.
+    // the loop is shared.
     void fused4(SampleType* x, int n, SampleType g) {
-        std::size_t r[4];
-        std::size_t w[4];
-        for (int s = 0; s < 4; ++s) {
-            const FracDelayT<SampleType>& line = stages_[s].line();
-            w[s] = line.write_index();
-            r[s] = (w[s] - static_cast<std::size_t>(stages_[s].delay())) & line.mask();
-        }
-        int done = 0;
-        while (done < n) {
-            std::size_t piece = static_cast<std::size_t>(n - done);
-            for (int s = 0; s < 4; ++s) {
-                const std::size_t size = stages_[s].line().size();
-                piece = std::min({piece, size - r[s], size - w[s]});
-            }
-            run4(x + done, static_cast<int>(piece), g, r, w);
-            done += static_cast<int>(piece);
-            for (int s = 0; s < 4; ++s) {
-                const std::size_t mask = stages_[s].line().mask();
-                r[s] = (r[s] + piece) & mask;
-                w[s] = (w[s] + piece) & mask;
-            }
-        }
-        for (int s = 0; s < 4; ++s)
-            stages_[s].line().advance(n);
-    }
-
-    void run4(SampleType* x, int n, SampleType g, const std::size_t* r, const std::size_t* w) {
         SampleType* d[4];
         SampleType* o[4];
+        spans4(n, d, o);
+        run_spans4(x, n, g, d, o);
+        commit4(n);
+    }
+
+public:
+    // The four stages' delayed and stored spans for the next n samples (the
+    // rings mirror their starts, so every span is contiguous). With
+    // commit4(), lets a caller run many cascades through run_spans4() without
+    // per-cascade setup. Requires four stages and n <= min_delay().
+    bool spans4(int n, SampleType** delayed, SampleType** stored) {
+        if (num_stages_ != 4 || n > min_delay_) return false;
         for (int s = 0; s < 4; ++s) {
-            d[s] = stages_[s].line().data() + r[s];
-            o[s] = stages_[s].line().data() + w[s];
+            FracDelayT<SampleType>& line = stages_[s].line();
+            const std::size_t w = line.write_index();
+            const std::size_t r = (w - static_cast<std::size_t>(stages_[s].delay())) & line.mask();
+            delayed[s] = line.data() + r;
+            stored[s] = line.data() + w;
         }
+        return true;
+    }
+
+    void commit4(int n) {
+        for (int s = 0; s < 4; ++s) stages_[s].line().advance(n);
+    }
+
+    // Four stages over one contiguous piece: the expression
+    // AllpassStage::run applies, stage after stage, four samples at a time
+    // as explicit vectors (the compiler cannot prove the eight spans
+    // disjoint, and its runtime checks cost more than a short block saves),
+    // then a scalar tail.
+    static void run_spans4(SampleType* x, int n, SampleType g, SampleType* const* d,
+                           SampleType* const* o) {
         int k = 0;
         if constexpr (std::is_same_v<SampleType, float>) {
-            // Four samples at a time, explicitly: the compiler cannot prove
-            // the eight spans disjoint, and its runtime checks cost more than
-            // a block this short saves.
             const lanes::F4 gv = lanes::splat(g);
             for (; k + 4 <= n; k += 4) {
                 lanes::F4 v = lanes::load(x + k);
@@ -294,6 +281,7 @@ class AllpassCascade {
         }
     }
 
+private:
     // snap_to_zero on four lanes.
     static lanes::F4 snap(lanes::F4 v) {
         return lanes::select(lanes::less(lanes::abs(v), lanes::splat(snap_threshold<float>())),

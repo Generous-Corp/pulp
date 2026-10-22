@@ -109,6 +109,60 @@ inline F4 narrow(D2 lo, D2 hi) {
 
 // The two in-register butterfly stages of a 4-point Hadamard transform:
 // [a+b, a-b, c+d, c-d] (stride 1) and [a+c, b+d, a-c, b-d] (stride 2).
+using I2 = std::int64_t __attribute__((vector_size(16)));
+using M2 = std::int64_t __attribute__((vector_size(16)));
+
+inline double lane_d(D2 v, int i) {
+    return v[i];
+}
+inline std::int64_t lane(I2 v, int i) {
+    return v[i];
+}
+inline I2 splat_i(std::int64_t x) {
+    return I2{x, x};
+}
+// Truncation toward zero, and back.
+inline I2 to_int(D2 v) {
+    return __builtin_convertvector(v, I2);
+}
+inline D2 to_double(I2 v) {
+    return __builtin_convertvector(v, D2);
+}
+inline D2 select(M2 mask, D2 a, D2 b) {
+    return (D2)((mask & (M2)a) | (~mask & (M2)b));
+}
+inline M2 less(D2 a, D2 b) {
+    return a < b;
+}
+inline M2 greater(D2 a, D2 b) {
+    return a > b;
+}
+
+#if defined(__clang__)
+// Transpose four rows of four: rows a..d become columns.
+inline void transpose(F4& a, F4& b, F4& c, F4& d) {
+    const F4 ab_lo = __builtin_shufflevector(a, b, 0, 4, 1, 5);
+    const F4 ab_hi = __builtin_shufflevector(a, b, 2, 6, 3, 7);
+    const F4 cd_lo = __builtin_shufflevector(c, d, 0, 4, 1, 5);
+    const F4 cd_hi = __builtin_shufflevector(c, d, 2, 6, 3, 7);
+    a = __builtin_shufflevector(ab_lo, cd_lo, 0, 1, 4, 5);
+    b = __builtin_shufflevector(ab_lo, cd_lo, 2, 3, 6, 7);
+    c = __builtin_shufflevector(ab_hi, cd_hi, 0, 1, 4, 5);
+    d = __builtin_shufflevector(ab_hi, cd_hi, 2, 3, 6, 7);
+}
+#else
+inline void transpose(F4& a, F4& b, F4& c, F4& d) {
+    const F4 ab_lo = __builtin_shuffle(a, b, M4{0, 4, 1, 5});
+    const F4 ab_hi = __builtin_shuffle(a, b, M4{2, 6, 3, 7});
+    const F4 cd_lo = __builtin_shuffle(c, d, M4{0, 4, 1, 5});
+    const F4 cd_hi = __builtin_shuffle(c, d, M4{2, 6, 3, 7});
+    a = __builtin_shuffle(ab_lo, cd_lo, M4{0, 1, 4, 5});
+    b = __builtin_shuffle(ab_lo, cd_lo, M4{2, 3, 6, 7});
+    c = __builtin_shuffle(ab_hi, cd_hi, M4{0, 1, 4, 5});
+    d = __builtin_shuffle(ab_hi, cd_hi, M4{2, 3, 6, 7});
+}
+#endif
+
 #if defined(__clang__)
 inline F4 swap_pairs(F4 v) {
     return __builtin_shufflevector(v, v, 1, 0, 3, 2);
@@ -245,6 +299,49 @@ inline F4 narrow(D2 lo, D2 hi) {
     return {{static_cast<float>(lo.v[0]), static_cast<float>(lo.v[1]), static_cast<float>(hi.v[0]),
              static_cast<float>(hi.v[1])}};
 }
+struct I2 {
+    std::int64_t v[2];
+};
+struct M2 {
+    bool v[2];
+};
+inline double lane_d(D2 v, int i) {
+    return v.v[i];
+}
+inline std::int64_t lane(I2 v, int i) {
+    return v.v[i];
+}
+inline I2 splat_i(std::int64_t x) {
+    return {{x, x}};
+}
+inline I2 to_int(D2 v) {
+    return {{static_cast<std::int64_t>(v.v[0]), static_cast<std::int64_t>(v.v[1])}};
+}
+inline D2 to_double(I2 v) {
+    return {{static_cast<double>(v.v[0]), static_cast<double>(v.v[1])}};
+}
+inline D2 select(M2 m, D2 a, D2 b) {
+    return {{m.v[0] ? a.v[0] : b.v[0], m.v[1] ? a.v[1] : b.v[1]}};
+}
+inline M2 less(D2 a, D2 b) {
+    return {{a.v[0] < b.v[0], a.v[1] < b.v[1]}};
+}
+inline M2 greater(D2 a, D2 b) {
+    return {{a.v[0] > b.v[0], a.v[1] > b.v[1]}};
+}
+inline I2 operator-(I2 a, I2 b) {
+    return {{a.v[0] - b.v[0], a.v[1] - b.v[1]}};
+}
+inline I2 operator&(I2 a, I2 b) {
+    return {{a.v[0] & b.v[0], a.v[1] & b.v[1]}};
+}
+inline void transpose(F4& a, F4& b, F4& c, F4& d) {
+    const F4 r[4] = {a, b, c, d};
+    a = {{r[0].v[0], r[1].v[0], r[2].v[0], r[3].v[0]}};
+    b = {{r[0].v[1], r[1].v[1], r[2].v[1], r[3].v[1]}};
+    c = {{r[0].v[2], r[1].v[2], r[2].v[2], r[3].v[2]}};
+    d = {{r[0].v[3], r[1].v[3], r[2].v[3], r[3].v[3]}};
+}
 inline F4 swap_pairs(F4 a) {
     return {{a.v[1], a.v[0], a.v[3], a.v[2]}};
 }
@@ -265,6 +362,9 @@ inline F4 min(F4 a, F4 b) {
 }
 inline F4 max(F4 a, F4 b) {
     return select(greater(b, a), b, a);
+}
+inline D2 clamp(D2 x, D2 lo, D2 hi) {
+    return select(greater(x, hi), hi, select(less(x, lo), lo, x));
 }
 inline F4 clamp(F4 x, F4 lo, F4 hi) {
     return min(max(x, lo), hi);

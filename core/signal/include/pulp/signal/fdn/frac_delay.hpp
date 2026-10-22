@@ -47,7 +47,7 @@ class FracDelayT {
         const int needed = std::max(max_delay_samples, 1) + 4;
         std::size_t size = 8;
         while (size < static_cast<std::size_t>(needed)) size <<= 1;
-        buffer_.assign(size + stagger, SampleType{0});
+        buffer_.assign(size + stagger + kMirror, SampleType{0});
         base_ = stagger;
         size_ = size;
         mask_ = size - 1;
@@ -64,6 +64,7 @@ class FracDelayT {
 
     void push(SampleType x) {
         ring()[write_] = x;
+        if (write_ < kMirror) ring()[size_ + write_] = x;
         write_ = (write_ + 1) & mask_;
     }
 
@@ -100,24 +101,24 @@ class FracDelayT {
 
     // Commit `n` samples, oldest first: identical to n calls to push().
     void push_block(const SampleType* x, int n) {
-        SampleType* dst = ring();
-        if (write_ + static_cast<std::size_t>(n) <= size_) {
-            for (int k = 0; k < n; ++k)
-                dst[write_ + static_cast<std::size_t>(k)] = x[k];
-        } else {
-            for (int k = 0; k < n; ++k)
-                dst[(write_ + static_cast<std::size_t>(k)) & mask_] = x[k];
+        for (int done = 0; done < n; done += kMaxBlockSamples) {
+            const int piece = std::min(kMaxBlockSamples, n - done);
+            SampleType* dst = ring() + write_;
+            for (int k = 0; k < piece; ++k) dst[k] = x[done + k];
+            advance(piece);
         }
-        write_ = (write_ + static_cast<std::size_t>(n)) & mask_;
     }
 
     // As push_block(), reading every `stride`-th element of `x`.
     void push_strided(const SampleType* x, std::size_t stride, int n) {
-        for (int k = 0; k < n; ++k) {
-            ring()[write_] = x[static_cast<std::size_t>(k) * stride];
-            write_ = (write_ + 1) & mask_;
-        }
+        for (int k = 0; k < n; ++k) push(x[static_cast<std::size_t>(k) * stride]);
     }
+
+    // Up to kMaxBlockSamples + 4 consecutive samples starting at ring index
+    // `start` (masked), with no wrap: the ring keeps a copy of its first
+    // kMirror samples just past its end. A Hermite read's four taps are one
+    // 16-byte load from here, and a block's span is one contiguous run.
+    const SampleType* taps_at(std::size_t start) const { return ring() + (start & mask_); }
 
     // Single-precision Hermite read against a position `ahead` pushes in the
     // future. Same taps and curve as read(double), evaluated in float: the
@@ -155,7 +156,7 @@ class FracDelayT {
             // relative to it lands in [0, 1) — checked on the fractions the
             // reads would use, so the fast path never disagrees with
             // read_hermite_at().
-            if (start + static_cast<std::size_t>(n) + 3 <= size_ &&
+            if (start + static_cast<std::size_t>(n) + 3 <= size_ + kMirror &&
                 fractions(delays, whole, t, n)) {
                 hermite_run(ring() + start, t, out, n);
                 return;
@@ -172,7 +173,7 @@ class FracDelayT {
         const std::size_t start =
             (write_ - static_cast<std::size_t>(behind) - static_cast<std::size_t>(whole) - 2) &
             mask_;
-        if (start + static_cast<std::size_t>(n) + 3 <= size_) {
+        if (start + static_cast<std::size_t>(n) + 3 <= size_ + kMirror) {
             SampleType t[kMaxBlockSamples];
             const SampleType tk = SampleType{1} - static_cast<SampleType>(d - whole);
             for (int k = 0; k < n; ++k)
@@ -197,9 +198,18 @@ class FracDelayT {
     std::size_t write_index() const {
         return write_;
     }
-    // Advance the write position past `n` samples the caller stored directly.
+    // Advance the write position past `n` samples the caller stored directly
+    // as one contiguous run from data() + write_index() (which may extend
+    // into the mirror past the ring's end, n <= kMaxBlockSamples). Moves any
+    // part written past the end to the ring's start, then refreshes the
+    // mirror if the ring's first samples changed.
     void advance(int n) {
-        write_ = (write_ + static_cast<std::size_t>(n)) & mask_;
+        const std::size_t end = write_ + static_cast<std::size_t>(n);
+        SampleType* r = ring();
+        if (end > size_)
+            for (std::size_t j = size_; j < end; ++j) r[j - size_] = r[j];
+        if (write_ < kMirror || end > size_) refresh_mirror();
+        write_ = end & mask_;
     }
 
     // Fractional read. `delay` is clamped into the window where all four
@@ -218,6 +228,16 @@ class FracDelayT {
     }
 
   private:
+    // Samples copied past the ring's end so a block's span, or its taps,
+    // never wrap.
+    static constexpr std::size_t kMirror = static_cast<std::size_t>(kMaxBlockSamples) + 4;
+
+    void refresh_mirror() {
+        if (size_ == 0) return;
+        SampleType* r = ring();
+        for (std::size_t j = 0; j < kMirror; ++j) r[size_ + j] = r[j];
+    }
+
     SampleType* ring() {
         return buffer_.data() + base_;
     }
