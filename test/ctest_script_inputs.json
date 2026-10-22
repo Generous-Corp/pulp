@@ -1490,7 +1490,8 @@
    "inputs": [
     "examples/design-tool/*.js",
     "templates/ios-auv3/HostApp/ContentView.swift",
-    "templates/ios-auv3/HostApp/Info.plist.in"
+    "templates/ios-auv3/HostApp/Info.plist.in",
+    "templates/ios-auv3/Info.plist.in"
    ],
    "kind": "compiled",
    "sources": [
