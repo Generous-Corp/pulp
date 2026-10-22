@@ -405,7 +405,7 @@ namespace detail {
 // Branch-free float log10 / exp10 for decibel conversions in per-sample
 // dynamics paths. Both are plain arithmetic and bit manipulation with no calls
 // and no branches, so a loop over them auto-vectorizes, unlike the libm calls
-// they replace. log10_float is within 4 ulps (3.3 measured) and exp10_float
+// they replace. log10_float is within 4 ulps (3.47 worst measured) and exp10_float
 // within 1.2e-7 relative of the correctly rounded result over the documented
 // domain, with or without fused multiply-add, which keeps a compressor's gain
 // within a few parts in 10^7 of the libm path, i.e. a residual below
