@@ -6,16 +6,20 @@
   "slices": [
     "retained-ui-kernel"
   ],
-  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); a data:image URI in any format but PNG never drew: the inline loader kept bytes only when a PNG IHDR parse found a size. AssetManager gains decode_data_uri_bytes, which returns the base64 payload of a data URI whatever the image format and leaves dimensions to a decoder; load_image_from_data_uri keeps its PNG-only contract on top of it. ImageView keeps those bytes, sizes them once per source through the new Canvas::measure_image_from_data (header only; the base reads a PNG IHDR, Skia and CoreGraphics read every format their decoders accept), and draws them through the content-keyed inline cache, so JPEG, WebP and GIF hit the cache like PNG. Undecodable bytes are tried once, logged, and paint a placeholder labelled with the media type. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); a data:image URI in any format but PNG never drew: the inline loader kept bytes only when a PNG IHDR parse found a size. AssetManager gains decode_data_uri_bytes, which returns the base64 payload of a data URI whatever the image format and leaves dimensions to a decoder; load_image_from_data_uri keeps its PNG-only contract on top of it. ImageView keeps those bytes, sizes them once per source through the new Canvas::measure_image_from_data (header only; the base reads a PNG IHDR, Skia and CoreGraphics read every format their decoders accept), and draws them through the content-keyed inline cache, so JPEG, WebP and GIF hit the cache like PNG. Undecodable bytes are tried once, logged, and paint a placeholder labelled with the media type. decode_data_uri_bytes follows RFC 2397: only a payload marked ;base64 (case-insensitive) is base64-decoded; any other payload is percent-decoded, and a malformed percent escape yields no bytes so the view takes the fail-once placeholder path. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
   "tests": [
     "Vellum freeze",
     "Vellum trusted freeze",
     "ctest --test-dir build -R 'AssetManager data URI bytes are returned whatever the image format'",
     "ctest --test-dir build -R 'AssetManager data URI decodes PNG dimensions'",
+    "ctest --test-dir build -R 'AssetManager data URI without ;base64 is percent-decoded'",
     "ctest --test-dir build -R 'Canvas default measure_image_from_data reads a PNG header only'",
     "ctest --test-dir build -R 'CoreGraphicsCanvas measures encoded bytes of any ImageIO format'",
     "ctest --test-dir build -R 'ImageView JPEG'",
+    "ctest --test-dir build -R 'ImageView draws a percent-encoded data URI through the keyed entry'",
+    "ctest --test-dir build -R 'ImageView fails a malformed percent-encoded data URI once'",
     "ctest --test-dir build -R 'ImageView fails an undecodable inline payload once'",
+    "ctest --test-dir build -R 'ImageView percent-encoded PNG data URI draws and hits the cache'",
     "ctest --test-dir build -R 'ImageView sizes a non-PNG data URI from the decoder'",
     "ctest --test-dir build -R 'ImageView with an undecodable inline payload attempts one decode'"
   ],

@@ -4,7 +4,7 @@
   "slices": [
     "retained-ui-kernel"
   ],
-  "vellum_obligation": "Vellum's retained UI kernel must keep an inline data:image source's encoded payload whatever its format and take its intrinsic size from the canvas decoder's header read (never a PNG-only parse), drawing it through the content-keyed inline image entry; a payload no decoder accepts must be tried once, reported, and then paint a stable placeholder without further decode attempts.",
+  "vellum_obligation": "Vellum's retained UI kernel must keep an inline data:image source's encoded payload whatever its format and take its intrinsic size from the canvas decoder's header read (never a PNG-only parse), drawing it through the content-keyed inline image entry; a payload no decoder accepts must be tried once, reported, and then paint a stable placeholder without further decode attempts; a data URI payload is base64-decoded only when its metadata ends in ;base64 (RFC 2397, case-insensitive) and percent-decoded otherwise, with a malformed escape treated as undecodable.",
   "evidence": [
     ".github/vellum-change-events/20261022-inline-image-any-format.json",
     "pulp-test-inline-image-cache-gpu",
