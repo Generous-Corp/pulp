@@ -10,6 +10,8 @@
 /// asset collection, and interactive-frame promotion entry points are importer
 /// operations and live in design_ir_io.hpp (`pulp-design-import`).
 
+#include <pulp/view/text_line_metrics.hpp>
+
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -410,13 +412,9 @@ struct IRTextLayoutBasis {
     /// requested family. Empty when the capture recorded no platform font,
     /// which makes the cache unusable rather than usable-on-trust.
     std::string resolved_face;
-    /// The primary font's ascent and descent Chrome laid the lines out with,
-    /// in CSS px, when the capture measured them. A captured line box exactly
-    /// ascent + descent tall is the text fragment itself, so its baseline sits
-    /// `ascent` below its top; these carry the browser's own rounding and any
-    /// per-platform metric adjustment that the font file does not.
-    std::optional<float> ascent;
-    std::optional<float> descent;
+    /// The primary font's line metrics Chrome laid the lines out with, when
+    /// the capture measured them (see text_line_metrics.hpp).
+    std::optional<LineMetrics> line_metrics;
 };
 
 struct IRTextRun {

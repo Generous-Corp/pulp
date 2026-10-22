@@ -187,13 +187,11 @@ TEST_CASE("codegen carries measured line metrics with captured line boxes",
     measured.style.font_family = "Times";
     measured.text_line_boxes.push_back({0.0f, 0.0f, 60.0f, 18.0f, 0, 8});
     measured.text_layout_basis = IRTextLayoutBasis{60.0f, "Times-Roman"};
-    measured.text_layout_basis->ascent = 14.0f;
-    measured.text_layout_basis->descent = 4.0f;
+    measured.text_layout_basis->line_metrics = LineMetrics{14.0f, 4.0f};
     ir.root.children.push_back(measured);
     IRNode derived = measured;
     derived.name = "Derived";
-    derived.text_layout_basis->ascent.reset();
-    derived.text_layout_basis->descent.reset();
+    derived.text_layout_basis->line_metrics.reset();
     ir.root.children.push_back(derived);
 
     CodeGenOptions opts;

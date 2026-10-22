@@ -2406,9 +2406,8 @@ static void emit_js_text_node(const NativeEmit& e) {
         ss << "], " << node.text_layout_basis->width << ", '"
            << js_single_quote_escape(node.text_layout_basis->resolved_face)
            << "', " << (browser_wrap_fallback ? "true" : "false");
-        if (node.text_layout_basis->ascent && node.text_layout_basis->descent)
-            ss << ", " << *node.text_layout_basis->ascent << ", "
-               << *node.text_layout_basis->descent;
+        if (const auto& m = node.text_layout_basis->line_metrics)
+            ss << ", " << m->ascent << ", " << m->descent;
         ss << ");\n";
     }
     // Cache eligibility and stale-cache fallback are separate. Even when a

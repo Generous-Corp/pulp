@@ -12,6 +12,7 @@
 #include <pulp/canvas/text_shaper.hpp> // canvas::ShapedLayout for Label's shaped-layout cache
 #include <pulp/view/accessibility.hpp>
 #include <pulp/view/animation.hpp>
+#include <pulp/view/text_line_metrics.hpp>
 #include <pulp/view/inspector_facts.hpp>
 #include <pulp/view/data_display.hpp>
 #include <pulp/view/caret.hpp>
@@ -494,7 +495,7 @@ class Label : public View, public SelectableText {
     /// at its current font metrics and bounds.
     void clear_cached_line_boxes() {
         cached_line_boxes_.clear();
-        has_cached_line_metrics_ = false;
+        cached_line_metrics_.reset();
         shaped_cache_valid_ = false;
         invalidate_layout();
     }
@@ -503,7 +504,7 @@ class Label : public View, public SelectableText {
     /// fragment itself, and its baseline is then placed `ascent` below the box
     /// top instead of from this Label's own reading of the face. Applies to the
     /// boxes most recently set; setting new boxes forgets it.
-    void set_cached_line_metrics(float ascent, float descent);
+    void set_cached_line_metrics(LineMetrics metrics);
     const std::vector<CachedLineBox>& cached_line_boxes() const {
         return cached_line_boxes_;
     }
@@ -927,9 +928,7 @@ private:
     mutable float measure_wrapped_height_ = -1.0f;
 
     float cached_line_basis_width_ = 0.0f;
-    bool has_cached_line_metrics_ = false;
-    float cached_line_ascent_ = 0.0f;
-    float cached_line_descent_ = 0.0f;
+    std::optional<LineMetrics> cached_line_metrics_;
     std::string cached_line_basis_face_;
     std::string cached_line_basis_text_;
     // Set once the label's copy diverged from the captured basis; the boxes

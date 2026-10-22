@@ -1000,12 +1000,10 @@ TEST_CASE("measured line metrics reach the text basis and survive IR JSON",
             if (m.text_layout_basis) {
                 REQUIRE(p.text_layout_basis);
                 ++with_basis;
-                REQUIRE(m.text_layout_basis->ascent.has_value());
-                REQUIRE(m.text_layout_basis->descent.has_value());
-                CHECK(*m.text_layout_basis->ascent == 12.0f);
-                CHECK(*m.text_layout_basis->descent == 3.0f);
-                CHECK_FALSE(p.text_layout_basis->ascent.has_value());
-                CHECK_FALSE(p.text_layout_basis->descent.has_value());
+                REQUIRE(m.text_layout_basis->line_metrics.has_value());
+                CHECK(m.text_layout_basis->line_metrics->ascent == 12.0f);
+                CHECK(m.text_layout_basis->line_metrics->descent == 3.0f);
+                CHECK_FALSE(p.text_layout_basis->line_metrics.has_value());
             }
             REQUIRE(m.children.size() == p.children.size());
             for (std::size_t i = 0; i < m.children.size(); ++i)
@@ -1019,10 +1017,10 @@ TEST_CASE("measured line metrics reach the text basis and survive IR JSON",
         pulp::view::serialize_design_ir(*measured.design_ir));
     std::function<int(const pulp::view::IRNode&)> count =
         [&](const pulp::view::IRNode& node) {
-            int n = node.text_layout_basis && node.text_layout_basis->ascent &&
-                    *node.text_layout_basis->ascent == 12.0f &&
-                    node.text_layout_basis->descent &&
-                    *node.text_layout_basis->descent == 3.0f ? 1 : 0;
+            const auto& basis = node.text_layout_basis;
+            int n = basis && basis->line_metrics &&
+                    basis->line_metrics->ascent == 12.0f &&
+                    basis->line_metrics->descent == 3.0f ? 1 : 0;
             for (const auto& child : node.children) n += count(child);
             return n;
         };

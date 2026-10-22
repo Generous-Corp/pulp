@@ -868,6 +868,35 @@ TEST_CASE("Label puts a captured text fragment's baseline a rounded ascent below
     CHECK(fills[0].f[1] == Catch::Approx(kTop + std::round(a)).margin(0.001f));
 }
 
+TEST_CASE("LineMetrics is valid only when finite with a positive ascent",
+          "[view][widget][label-cache][typography]") {
+    CHECK(LineMetrics{14.0f, 4.0f}.valid());
+    CHECK(LineMetrics{14.0f, 0.0f}.valid());
+    CHECK_FALSE(LineMetrics{0.0f, 4.0f}.valid());
+    CHECK_FALSE(LineMetrics{14.0f, -1.0f}.valid());
+    CHECK_FALSE(LineMetrics{std::nanf(""), 4.0f}.valid());
+    CHECK_FALSE(LineMetrics{14.0f, INFINITY}.valid());
+    // A Label refuses invalid metrics rather than storing them: its captured
+    // baseline stays where the derived rule puts it.
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    if (face.empty()) SKIP("Inter does not resolve to a real face on this host");
+    auto baseline = [&](LineMetrics m) {
+        Label label("Refused");
+        label.set_font_family("Inter");
+        label.set_font_size(17.0f);
+        label.set_bounds({0, 0, 200, 40});
+        label.set_cached_line_boxes({{0, 2, 120, 20, 0, 7}}, 200.0f, face, false);
+        label.set_cached_line_metrics(m);
+        RecordingCanvas canvas;
+        label.paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return fills[0].f[1];
+    };
+    CHECK(baseline({13.0f, 7.0f}) == Catch::Approx(15.0f).margin(0.001f));
+    CHECK(baseline({-13.0f, 33.0f}) == Catch::Approx(baseline({0.0f, 0.0f})).margin(0.001f));
+}
+
 TEST_CASE("Label places a captured baseline from the browser's measured ascent",
           "[view][widget][label-cache][alignment][typography]") {
     // The browser can lay a face out with metrics its font file does not
@@ -896,7 +925,7 @@ TEST_CASE("Label places a captured baseline from the browser's measured ascent",
         label.set_bounds({0, 0, 200, 40});
         label.set_cached_line_boxes(
             {{0, kTop, 120, box_h, 0, 8}}, 200.0f, face, false);
-        if (recorded) label.set_cached_line_metrics(kAscent, kDescent);
+        if (recorded) label.set_cached_line_metrics({kAscent, kDescent});
         RecordingCanvas canvas;
         label.paint(canvas);
         const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
@@ -942,7 +971,7 @@ TEST_CASE("Label snaps a captured baseline to a whole CSS px in root space",
         if (captured) {
             label->set_cached_line_boxes(
                 {{0, 0, 120, kAscent + kDescent, 0, 4}}, 200.0f, face, false);
-            label->set_cached_line_metrics(kAscent, kDescent);
+            label->set_cached_line_metrics({kAscent, kDescent});
         }
         Label* raw = label.get();
         parent->add_child(std::move(label));

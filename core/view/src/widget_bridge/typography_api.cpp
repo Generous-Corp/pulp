@@ -201,13 +201,10 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         // neither; Label validates them against the boxes it just accepted.
         if (args.numArgs >= 7 && args[5] && args[6] &&
             (args[5]->isFloat() || args[5]->isInt()) &&
-            (args[6]->isFloat() || args[6]->isInt())) {
-            float ascent = 0.0f;
-            float descent = 0.0f;
-            if (finite_float(args.get<double>(5, 0.0), ascent) &&
-                finite_float(args.get<double>(6, 0.0), descent))
-                label->set_cached_line_metrics(ascent, descent);
-        }
+            (args[6]->isFloat() || args[6]->isInt()))
+            label->set_cached_line_metrics(
+                {static_cast<float>(args.get<double>(5, 0.0)),
+                 static_cast<float>(args.get<double>(6, 0.0))});
         return choc::value::Value();
     });
 

@@ -488,12 +488,10 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
                                    v.isFloat32() || v.isFloat64();
                         };
                         if (numeric(ascent) && numeric(descent)) {
-                            CapturedLineMetrics m;
-                            m.ascent = ascent.getWithDefault<double>(0.0);
-                            m.descent = descent.getWithDefault<double>(0.0);
-                            if (std::isfinite(m.ascent) &&
-                                std::isfinite(m.descent) && m.ascent > 0.0 &&
-                                m.descent >= 0.0)
+                            const pulp::view::LineMetrics m{
+                                static_cast<float>(ascent.getWithDefault<double>(0.0)),
+                                static_cast<float>(descent.getWithDefault<double>(0.0))};
+                            if (m.valid())
                                 index.layout_line_metrics_[layout_index] = m;
                         }
                     }
@@ -554,7 +552,7 @@ std::string CapturedStyleIndex::resolved_face_for_layout(int layout_index) const
     return it == layout_resolved_face_.end() ? std::string{} : it->second;
 }
 
-std::optional<CapturedLineMetrics> CapturedStyleIndex::line_metrics_for_layout(
+std::optional<pulp::view::LineMetrics> CapturedStyleIndex::line_metrics_for_layout(
     int layout_index) const {
     const auto it = layout_line_metrics_.find(layout_index);
     if (it == layout_line_metrics_.end()) return std::nullopt;
