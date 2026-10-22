@@ -43,7 +43,11 @@ inline constexpr T snap_threshold() { return T(1e-15); }
 template<typename T>
 inline T snap_to_zero(T x) {
 #if PULP_DSP_ENABLE_SNAP_TO_ZERO
-    return (x < snap_threshold<T>() && x > -snap_threshold<T>()) ? T(0) : x;
+    // One comparison on |x| rather than two joined by &&: the same result for
+    // every input (NaN fails it and passes through; -0 becomes +0 as before),
+    // and no short-circuit for a compiler to turn into control flow, which
+    // keeps loops that snap vectorizable under GCC.
+    return std::abs(x) < snap_threshold<T>() ? T(0) : x;
 #else
     return x;
 #endif

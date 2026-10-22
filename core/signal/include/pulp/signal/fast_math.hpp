@@ -3,10 +3,13 @@
 /// @file fast_math.hpp
 /// Scalar math helpers for real-time audio DSP.
 
+#include <pulp/signal/denormal.hpp>
+
 #include <algorithm>  // std::max / std::min, used by clamp()
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 #include <cmath>
 
 #if defined(__APPLE__) && defined(__clang__)
@@ -174,6 +177,18 @@ struct FastMath {
         // Clamping x^2 rather than x keeps the sign path short; past |x| = 9
         // the ratio exceeds 1 and the output clamp saturates it.
         const float u = std::fmin(x * x, 81.0f);
+        // Ordered compares rather than fmin/fmax: a NaN fails both and
+        // propagates, as std::tanh's does, instead of becoming a full-scale
+        // constant that hides the upstream fault.
+        const float r = tanh_accurate_rational(x, u);
+        const float upper = r > 1.0f ? 1.0f : r;
+        return upper < -1.0f ? -1.0f : upper;
+    }
+
+    /// The unsaturated rational inside tanh_accurate(): x * P(u) / Q(u) with
+    /// u = min(x^2, 81). tanh_accurate() is this clamped to [-1, 1]; exposed so
+    /// a vectorized caller can apply the same clamp with its own selects.
+    static float tanh_accurate_rational(float x, float u) {
         const float u2 = u * u;
         // Both polynomials in Estrin form: shorter dependency chains than
         // Horner, which matters inside a serial per-sample recursion.
@@ -181,12 +196,7 @@ struct FastMath {
                         u2 * ((0.00349475497f + u * 2.05960245e-05f) + u2 * 1.33379685e-08f);
         const float q = (1.0f + u * 0.467136322f) +
                         u2 * ((0.0258737793f + u * 0.000328429886f) + u2 * 7.7694232e-07f);
-        // Ordered compares rather than fmin/fmax: a NaN fails both and
-        // propagates, as std::tanh's does, instead of becoming a full-scale
-        // constant that hides the upstream fault.
-        const float r = x * p / q;
-        const float upper = r > 1.0f ? 1.0f : r;
-        return upper < -1.0f ? -1.0f : upper;
+        return x * p / q;
     }
 
     /// Fast sin approximation (Bhaskara-style, max error ~0.001 for any x).
@@ -343,13 +353,15 @@ inline constexpr LadderSaturation kDefaultLadderSaturation =
                                          : LadderSaturation::accurate;
 #elif defined(PULP_SIGNAL_FAST_LADDER_TANH)
 inline constexpr LadderSaturation kDefaultLadderSaturation =
-    PULP_SIGNAL_FAST_LADDER_TANH ? LadderSaturation::realtime_efficient : LadderSaturation::exact;
+    PULP_SIGNAL_FAST_LADDER_TANH ? LadderSaturation::realtime_efficient
+                                 : LadderSaturation::exact;
 #else
 inline constexpr LadderSaturation kDefaultLadderSaturation = LadderSaturation::accurate;
 #endif
 
 /// The ladder's `float` saturator for an explicit choice.
-template <LadderSaturation Saturation> inline float ladder_tanh_profiled(float x) {
+template <LadderSaturation Saturation>
+inline float ladder_tanh_profiled(float x) {
     if constexpr (Saturation == LadderSaturation::realtime_efficient)
         return FastMath::tanh(x);
     else if constexpr (Saturation == LadderSaturation::accurate)
@@ -397,6 +409,7 @@ inline double lipschitz_tanh(double v) noexcept {
     return x * (27.0 + x2) / (27.0 + 9.0 * x2);
 }
 
+
 namespace detail {
 
 // Branch-free float log10 / exp10 for decibel conversions in per-sample
@@ -407,6 +420,41 @@ namespace detail {
 // domain, with or without fused multiply-add, which keeps a compressor's gain
 // within a few parts in 10^7 of the libm path, i.e. a residual below
 // -120 dBFS.
+
+
+/// `condition ? if_true : if_false` as bit operations. Same value as the
+/// conditional for every input, including NaN payloads and signed zeros, but
+/// with no control flow: GCC with its default -ftrapping-math will not
+/// if-convert a float conditional whose arms it may sink, which leaves loops
+/// over per-voice state unvectorized; this form vectorizes under GCC and
+/// Clang alike.
+template <typename T>
+inline T select_bits(bool condition, T if_true, T if_false) noexcept {
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8);
+    using U = std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>;
+    const U mask = U{0} - static_cast<U>(condition);
+    return std::bit_cast<T>((std::bit_cast<U>(if_true) & mask) |
+                            (std::bit_cast<U>(if_false) & ~mask));
+}
+
+/// snap_to_zero() as bit operations (see select_bits()).
+template <typename T>
+inline T snap_to_zero_bits(T x) noexcept {
+#if PULP_DSP_ENABLE_SNAP_TO_ZERO
+    return select_bits(std::abs(x) < snap_threshold<T>(), T(0), x);
+#else
+    return x;
+#endif
+}
+
+/// FastMath::tanh_accurate() with its clamps as bit operations; the same
+/// value for every input.
+inline float tanh_accurate_bits(float x) noexcept {
+    const float u = std::fmin(x * x, 81.0f);
+    const float r = FastMath::tanh_accurate_rational(x, u);
+    const float upper = select_bits(r > 1.0f, 1.0f, r);
+    return select_bits(upper < -1.0f, -1.0f, upper);
+}
 
 /// log10(x) for finite, positive, normal x, within 4 ulps. Other inputs are
 /// outside the contract (callers clamp to a positive floor first).
@@ -429,8 +477,8 @@ inline float log10_float(float x) noexcept {
     const float ln_m = two_s * series + two_s;
     // log10(2) and 1/ln(10). The high part of log10(2) has few enough
     // significant bits that k * hi is exact for every float exponent.
-    constexpr float kLog10TwoHi = 0.30102539062f; // 0x3e9a2000
-    constexpr float kLog10TwoLo = 4.6050390e-06f; // log10(2) - hi
+    constexpr float kLog10TwoHi = 0.30102539062f;   // 0x3e9a2000
+    constexpr float kLog10TwoLo = 4.6050390e-06f;   // log10(2) - hi
     constexpr float kInvLn10 = 0.43429448190f;
     return k * kLog10TwoHi + (ln_m * kInvLn10 + k * kLog10TwoLo);
 }
@@ -449,8 +497,8 @@ inline float log10_float(float x) noexcept {
 /// over- or underflows naturally.
 inline float exp10_float(float x) noexcept {
     constexpr float kLog2Ten = 3.32192809489f;
-    constexpr float kLog10TwoHi = 0.30102539062f; // 0x3e9a2000, 11 significant bits
-    constexpr float kLog10TwoLo = 4.6050390e-06f; // log10(2) - hi
+    constexpr float kLog10TwoHi = 0.30102539062f;  // 0x3e9a2000, 11 significant bits
+    constexpr float kLog10TwoLo = 4.6050390e-06f;  // log10(2) - hi
     constexpr float kLnTen = 2.30258509299f;
     // Past 10^+/-75 (about 250 octaves) the result is inf or 0 anyway;
     // clamping there keeps |n| <= 250 (so n * hi stays exact) and each half
@@ -461,10 +509,11 @@ inline float exp10_float(float x) noexcept {
     const float t = d * kLnTen;
     const float p =
         1.0f +
-        t * (1.0f + t * (0.5f + t * (1.0f / 6.0f +
-                                     t * (1.0f / 24.0f +
-                                          t * (1.0f / 120.0f +
-                                               t * (1.0f / 720.0f + t * (1.0f / 5040.0f)))))));
+        t * (1.0f +
+             t * (0.5f +
+                  t * (1.0f / 6.0f +
+                       t * (1.0f / 24.0f +
+                            t * (1.0f / 120.0f + t * (1.0f / 720.0f + t * (1.0f / 5040.0f)))))));
     const std::int32_t e = static_cast<std::int32_t>(n);
     const std::int32_t e_half = e / 2;
     const float scale_a = std::bit_cast<float>(static_cast<std::uint32_t>(e_half + 127) << 23);
