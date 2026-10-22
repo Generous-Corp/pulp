@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-gpu-submit-and-chart-reach-watch",
+  "slices": [
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "Carry the checked readback-flush submission (InsertStatus judged, failure reported, submit result returned from the GPU wait) and the chart-shader reach rule (draw rect padded by reach, glow/outer feathers under 3 sigma refused) into Vellum's render and canvas backends when the corresponding Pulp targets adopt Vellum.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261022-gpu-submit-and-chart-reach-watch.json",
+    "ctest --test-dir build -R 'SDF chart glow paints past the shape rect out to its reach'",
+    "ctest --test-dir build -R 'SkiaSurface readback fails when Graphite rejects the flushed recording'",
+    "ctest --test-dir build -R 'WidgetBridge knob chart glow paints outside the widget rect'"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261022-canvas-chart-reach",
+  "kind": "change",
+  "created_at": "2026-10-22T05:04:34Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); SkiaCanvas::draw_sdf_shape_with_shader now grows its draw rect by the declared reach exactly as draw_with_sksl already does, refuses a glow or outer feather whose reach is under 3 sigma, and Canvas::sdf_feather_min_reach() exposes that floor as a pure function. Pixels inside the shape rect are unchanged; only the feather that was previously cut at the rect edge now paints. No design-import, Chromium, packaging or authority boundary moves; the Pulp canvas target has not adopted a Vellum package.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'SDF chart glow paints past the shape rect out to its reach'",
+    "ctest --test-dir build -R 'WidgetBridge knob chart glow paints outside the widget rect'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}
