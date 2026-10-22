@@ -8918,6 +8918,14 @@ must populate its own immutable SHA-addressed generation through the fetcher
 and prove the second fetch is a no-download hit; do not rsync one runner's
 checkout cache to another.
 
+The required `macos` job builds QuickJS only, so V8-specific behaviour (choc's
+V8 value bridge, the sealed provider's API contracts) is exercised only by the
+darwin-arm64 leg of `release-path-pr-gate.yml`: the provider-identity and cube
+capture step, then "Run [js_engine] suite against the sealed V8", which builds
+just `pulp-test-group-script-view` with `PULP_JS_ENGINE=v8` and fails if the V8
+identity case skipped. That leg is advisory, not a required check, so read it
+on any V8 or choc change before landing.
+
 The `macOS local smoke` job resolves `runs-on` from
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` first and falls back to hosted `macos-15` only
 when the local selector variable is absent. On the persistent local runner,
