@@ -344,6 +344,38 @@ TEST_CASE("LadderFilter explicit saturation profiles ignore the build default",
     REQUIRE(std::abs(reference_output - efficient_output) > 1e-5f);
 }
 
+TEST_CASE("ladder_tanh_profiled boolean form keeps its exact and Pade meanings",
+          "[signal][ladder][fast_math]") {
+    // At this drive the three saturators disagree, so a boolean argument that
+    // resolved to the wrong enumerator (true taken as accurate, value 1) fails.
+    constexpr float kDrive = 2.5f;
+    const float exact = ladder_tanh_profiled<LadderSaturation::exact>(kDrive);
+    const float accurate = ladder_tanh_profiled<LadderSaturation::accurate>(kDrive);
+    const float efficient = ladder_tanh_profiled<LadderSaturation::realtime_efficient>(kDrive);
+    REQUIRE(efficient != accurate);
+    REQUIRE(efficient != exact);
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    CHECK(ladder_tanh_profiled<false>(kDrive) == exact);
+    CHECK(ladder_tanh_profiled<true>(kDrive) == efficient);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+}
+
 TEST_CASE("LadderFilter double instantiation still uses libm tanh", "[signal][ladder]") {
     // FastMath::tanh is float-only; the double path must remain exact enough
     // that a strict tanh-based reference matches to double tolerance.
