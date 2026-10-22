@@ -881,7 +881,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:605bf3df3ea2937f290f83e8430baf9ef7f3c605faf08cfdbb5b7db206cea736",
+        "fingerprint": "sha256:6d6c680ae9ce6f82cc796d8fcaab3d61d25f9c9eaea26318e698c0b85df0440d",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1367,7 +1367,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fir_filter.hpp",
-        "fingerprint": "sha256:1f3e4bda478177961e284380af65de670de421902e114be6ef55820dead438b7",
+        "fingerprint": "sha256:6f7610684f4b26bb9cd9cf258ec7131f6ecd9bf69fce36e4fa43caf22a1876df",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1379,7 +1379,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fixed_ir_convolver.hpp",
-        "fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "fingerprint": "sha256:7e281e2fd29e841f14910708d17b40d77a9f34354adfef46a30e5e9bbbee6544",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1441,7 +1441,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver_messages.hpp",
-        "fingerprint": "sha256:f12dc10a6090a81966552ece2a5ebf26b7370cd59d3a310b66e84d2616b36c2f",
+        "fingerprint": "sha256:13c0cdc65296220448802702ad25141e704d9d0c9d780f6575e222e1e6fa78ce",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
