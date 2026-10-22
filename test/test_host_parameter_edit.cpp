@@ -42,15 +42,9 @@ struct EditLog {
 
     HostParameterEditBridge::Callbacks callbacks() {
         return {
-            [this](ParamID id) {
-                entries.push_back({Entry::Kind::begin, id, 0.0f});
-            },
-            [this](ParamID id, float n) {
-                entries.push_back({Entry::Kind::value, id, n});
-            },
-            [this](ParamID id) {
-                entries.push_back({Entry::Kind::end, id, 0.0f});
-            },
+            [this](ParamID id) { entries.push_back({Entry::Kind::begin, id, 0.0f}); },
+            [this](ParamID id, float n, float) { entries.push_back({Entry::Kind::value, id, n}); },
+            [this](ParamID id) { entries.push_back({Entry::Kind::end, id, 0.0f}); },
         };
     }
 
@@ -123,6 +117,30 @@ TEST_CASE("every reported edit carries one coherent normalized snapshot",
         // results to two different host calls.
         REQUIRE(e.normalized == 0.25f);
     }
+}
+
+TEST_CASE("an edit is reported with the value it wrote, not a later host write",
+          "[host-parameter-edit][automation]") {
+    StateStore store;
+    add_unit_param(store, kGain, "Gain");
+    // Registered before the bridge, so it runs first on the editor's write:
+    // host automation lands between the edit and the bridge's report.
+    auto automation = store.add_listener(
+        [&store](ParamID id, float) {
+            if (id != kGain || pulp::format::in_non_editor_parameter_write())
+                return;
+            const pulp::format::ScopedHostParameterWrite host_write;
+            store.set_normalized(kGain, 0.9f);
+        },
+        pulp::state::ListenerThread::Audio);
+    EditLog log;
+    HostParameterEditBridge bridge(store, log.callbacks());
+
+    store.begin_gesture(kGain);
+    store.set_normalized(kGain, 0.25f);
+    REQUIRE(log.stream() == "B V");
+    REQUIRE(log.entries.back().normalized == 0.25f);
+    REQUIRE(store.get_normalized(kGain) == 0.9f);
 }
 
 TEST_CASE("host automation during an open gesture is NOT echoed back",

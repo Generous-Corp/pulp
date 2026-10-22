@@ -3343,6 +3343,23 @@ TEST_CASE("StateStore quantizes explicitly typed parameters on every write path"
     REQUIRE_THAT(store.get_value(2), WithinAbs(0.6, 0.0001));
 }
 
+TEST_CASE("A host-normalized write keeps continuous values exact and snaps discrete ones",
+          "[state][param-kind][host]") {
+    // Continuous with a UI step: a host sees it as continuous, so the value it
+    // sends is the value stored, exactly as a plain-value host would store it.
+    auto gain = make_param_info(1, "Gain", "dB", {-60.0f, 24.0f, 0.0f, 0.1f});
+    const float target = -19.963f;
+    const float normalized = gain.range.normalize(target);
+    REQUIRE_THAT(value_from_host_normalized(gain, normalized), WithinAbs(target, 1e-4));
+    // The UI path still quantizes to the step.
+    REQUIRE_THAT(gain.range.denormalize(normalized), WithinAbs(-20.0, 1e-4));
+
+    auto steps = make_param_info(2, "Steps", "", {0.0f, 8.0f, 0.0f, 1.0f});
+    steps.kind = ParamKind::Integer;
+    REQUIRE_THAT(value_from_host_normalized(steps, steps.range.normalize(3.4f)),
+                 WithinAbs(3.0, 1e-6));
+}
+
 TEST_CASE("ParamReader reads the live base value without an ID lookup", "[state][param-reader]") {
     StateStore store;
     store.add_parameter({.id = 7, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});

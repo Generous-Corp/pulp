@@ -1426,3 +1426,37 @@ editor, or nothing to prewarm, costs one virtual call. The editor itself does
 not change: an open that races the worker waits for the in-flight result
 instead of compiling again. Details: `view-bridge`, "What the host shows while
 it waits".
+
+## Host-normalized writes keep continuous values exact
+
+VST3 is the one format whose host writes normalized values, and
+`ParamRange::denormalize` rounds to `range.step`. A `Continuous` parameter
+advertises `stepCount = 0`, so rounding a host write there made the same
+automation land on different values than AU and CLAP, which write plain values
+the store only clamps (a 0.1 dB step turned -19.963 dB into -20.0 dB). Every
+VST3 write path (the process parameter queue, `setParamNormalized`, and the
+value-to-string display) goes through `state::value_from_host_normalized`,
+which drops the step for continuous kinds and still snaps discrete ones. A new
+normalized write path must use it too; `[vst3][param][host]` in
+`test_vst3_plugin_state.cpp` pins both write paths.
+
+The mapping is done in double precision for a linear range, and every value
+the adapter reports back (the default, output parameters, editor edits, the
+post-restore sync) goes through its inverse, `state::host_normalized_from_value`.
+In single precision, with fused multiply-add, a host's own 0 dB on a -60..24
+range came back as 1.4e-6 dB: a gain of 1 + 1 ulp, and a failed null test.
+Two more rules keep unity bit-exact. `setParamNormalized` skips the store write
+when the value is an echo of what the store already holds, because the double
+round trip can differ from it in the last bit. `setState` syncs only the VST3
+parameter objects (`SingleComponentEffect::setParamNormalized`), never
+rewriting the restored store. `[null-test]` cases in
+`test_vst3_plugin_state.cpp`, `test_au_v2_effect.cpp` and `test_clap_entry.cpp`
+null PulpGain at 0 dB through all three formats. They live in core tests on
+purpose: the required macOS gate builds with examples off, so a null test kept
+in `examples/pulp-gain` would never run there.
+
+The editor edit callback maps the bridge's snapshot (`plain`), never a fresh
+`store_.get_value()`: another listener on the same write can run a host
+automation write first, and a re-read would report the host's value to the host
+as the user's edit. `[vst3][editor][automation]` in `test_vst3_plugin_state.cpp`
+interleaves exactly that.
