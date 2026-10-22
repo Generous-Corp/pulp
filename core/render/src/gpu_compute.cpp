@@ -570,6 +570,8 @@ static constexpr const char* kWavenetLayerShader = R"wgsl(
 // One WaveNet layer: z = dilated_conv(in)[Z] + bias + input_mixin*cond (Z), then
 // a = (gated ? tanh(z[:C])*sigmoid(z[C:]) : tanh(z[:C])) (C); head += a;
 // out = in + (layer1x1_bias + layer1x1_W * a). condition_size is 1 (mono input).
+// head_init = 1 assigns the head sum instead of accumulating (first layer of the
+// first array), so the sum needs no per-block clear.
 //
 // Block-parallel dispatch: each workgroup handles S consecutive samples
 // (S = p.S, chosen by the host so S*Z fills the WG lanes; S = 1 when Z > 32),
@@ -588,7 +590,7 @@ static constexpr const char* kWavenetLayerShader = R"wgsl(
 // of two, so the u32 wrap of the stream position keeps column indices exact.
 struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, in_mask:u32,
            conv_w:u32, conv_b:u32, mix_w:u32, l1_w:u32, l1_b:u32,
-           out_mask:u32, S:u32, p2:u32, p3:u32 };
+           out_mask:u32, S:u32, head_init:u32, p3:u32 };
 @group(0) @binding(0) var<storage, read>       wts     : array<f32>;
 @group(0) @binding(1) var<storage, read>       ina     : array<f32>;  // C*(in_mask+1)
 @group(0) @binding(2) var<storage, read_write> outa    : array<f32>;  // C*(out_mask+1)
@@ -655,7 +657,14 @@ fn main(@builtin(workgroup_id) wid : vec3u,
         let oc = i - s * C;
         let t = t0 + s;
         if (t < p.B) {
-            headacc[t * C + oc] = headacc[t * C + oc] + abuf[i];
+            // The first layer of the first array starts the head sum; every other
+            // layer adds to it (a later array's sum arrives pre-seeded with the
+            // previous array's head output).
+            if (p.head_init == 1u) {
+                headacc[t * C + oc] = abuf[i];
+            } else {
+                headacc[t * C + oc] = headacc[t * C + oc] + abuf[i];
+            }
             let n = st.x + t;
             var r = wts[p.l1_b + oc];
             let rrow = p.l1_w + oc * C;
@@ -2557,11 +2566,12 @@ class DawnGpuCompute : public GpuCompute {
                 na.act.push_back(std::move(buf));
                 na.act_mask.push_back(cols - 1u);
             }
-            na.headacc = create_storage_buffer(C * B * 4u,
-                wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
-            na.headout = create_storage_buffer(H * B * 4u,
-                wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
-            if (!na.headacc || !na.headout) return false;
+            na.headacc = create_storage_buffer(C * B * 4u, wgpu::BufferUsage::Storage);
+            if (!na.headacc) return false;
+            if (a + 1 == num_arrays) {
+                na.headout = create_storage_buffer(H * B * 4u, wgpu::BufferUsage::Storage);
+                if (!na.headout) return false;
+            }
 
             // rechannel offset (consumed first in the array).
             const uint32_t rc_w = static_cast<uint32_t>(woff);
@@ -2598,7 +2608,7 @@ class DawnGpuCompute : public GpuCompute {
                              conv_w, conv_b, mix_w, l1_w, l1_b, out_mask, S, p2, p3; }
                     lyu{C, K, B, s.dilations[l], Z, s.gated, na.act_mask[l],
                         conv_w, conv_b, mix_w, l1_w, l1_b, na.act_mask[l + 1],
-                        na.samples_per_group, 0, 0};
+                        na.samples_per_group, (a == 0 && l == 0) ? 1u : 0u, 0};
                 queue_.WriteBuffer(u, 0, &lyu, sizeof(lyu));
                 wgpu::BindGroup bg = create_bind_group(wavenet_layer_pipeline_,
                     {plan.weights, na.act[l], na.act[l + 1], plan.input, na.headacc, u,
@@ -2617,11 +2627,19 @@ class DawnGpuCompute : public GpuCompute {
             struct HdU { uint32_t C, H, B, hr_w, hr_b, head_bias, p0, p1; }
                 hdu{C, H, B, hr_w, hr_b, s.head_bias, 0, 0};
             queue_.WriteBuffer(na.head_u, 0, &hdu, sizeof(hdu));
-            na.head_bg = create_bind_group(wavenet_head_pipeline_,
-                {plan.weights, na.headacc, na.headout, na.head_u});
-            if (!na.head_bg) return false;
 
             plan.arrays.push_back(std::move(na));
+        }
+        // A head rechannel writes straight into the next array's head sum (its
+        // seed: head_size == next channels), so arrays chain with no copy; the
+        // last array writes its own head output for the scale pass.
+        for (std::size_t a = 0; a < plan.arrays.size(); ++a) {
+            WavenetArray& na = plan.arrays[a];
+            const wgpu::Buffer& dst = (a + 1 < plan.arrays.size()) ? plan.arrays[a + 1].headacc
+                                                                   : na.headout;
+            na.head_bg = create_bind_group(wavenet_head_pipeline_,
+                {plan.weights, na.headacc, dst, na.head_u});
+            if (!na.head_bg) return false;
         }
 
         // Final scale pass over the last array's head output (head_size==1 in the
@@ -2651,7 +2669,13 @@ class DawnGpuCompute : public GpuCompute {
         queue_.WriteBuffer(plan.input, 0, in_block, blk_bytes);
         wgpu::CommandEncoderDescriptor enc_desc{};
         auto encoder = device_.CreateCommandEncoder(&enc_desc);
-        encode_wavenet(encoder, plan, plan.readback, 0);
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            encode_wavenet(pass, plan);
+            pass.End();
+        }
+        encoder.CopyBufferToBuffer(plan.output, 0, plan.readback, 0, blk_bytes);
         auto cmd = encoder.Finish();
         queue_.Submit(1, &cmd);
 
@@ -2708,9 +2732,15 @@ class DawnGpuCompute : public GpuCompute {
             pass.End();
         };
         if (timed) timestamp_pass(true);
+        {
+            wgpu::ComputePassDescriptor pd{};
+            auto pass = encoder.BeginComputePass(&pd);
+            for (uint32_t i = 0; i < count; ++i) encode_wavenet(pass, *wavenet_batch_plans_[i]);
+            pass.End();
+        }
         for (uint32_t i = 0; i < count; ++i)
-            encode_wavenet(encoder, *wavenet_batch_plans_[i], wavenet_batch_readback_,
-                           blk_bytes * i);
+            encoder.CopyBufferToBuffer(wavenet_batch_plans_[i]->output, 0, wavenet_batch_readback_,
+                                       blk_bytes * i, blk_bytes);
         if (timed) {
             timestamp_pass(false);
             encoder.ResolveQuerySet(dev_ts_qs_, 0, 2, dev_ts_resolve_, 0);
@@ -3902,41 +3932,18 @@ private:
     std::vector<float> wavenet_batch_scratch_;
 
     // Encodes one WaveNet block for `plan` (whose input buffer already holds the
-    // block): the stream-position write, every array's passes, the final scale
-    // and a copy of the output into `readback` at `readback_offset`. Advances the
-    // plan's stream position, so call it exactly once per submitted block.
-    void encode_wavenet(wgpu::CommandEncoder& encoder, WavenetPlan& plan,
-                        const wgpu::Buffer& readback, uint64_t readback_offset) {
+    // block) into `pass`: the stream-position write, every array's dispatches and
+    // the final scale. All of a block's work is plain dispatches, so any number of
+    // instances can share one compute pass (WebGPU orders storage writes between
+    // dispatches in a pass). Advances the plan's stream position, so call it
+    // exactly once per submitted block; the caller copies `plan.output` out after
+    // the pass ends.
+    void encode_wavenet(wgpu::ComputePassEncoder& pass, WavenetPlan& plan) {
         const uint32_t B = plan.B;
-        const uint32_t blk_bytes = B * 4u;
         const uint32_t wg = (B + 255u) / 256u;
         const uint32_t stream[4] = {plan.position, 0u, 0u, 0u};
         queue_.WriteBuffer(plan.stream_u, 0, stream, sizeof(stream));
-        // Array 0's head accumulator starts at zero; every later array is seeded
-        // from the previous array's head output below, so only array 0 needs
-        // clearing. An on-GPU ClearBuffer replaces a per-block CPU→GPU upload of
-        // zeros for every array — the later uploads were dead work, immediately
-        // overwritten by the seed copy.
-        if (!plan.arrays.empty())
-            encoder.ClearBuffer(plan.arrays[0].headacc, 0,
-                                static_cast<uint64_t>(plan.arrays[0].channels) * B * 4u);
-
-        // One compute pass per array: rechannel → layers → head run as
-        // consecutive dispatches in a single pass (WebGPU orders storage
-        // read/write between dispatches within a pass), collapsing ~L+2 pass
-        // objects per array into one. The inter-array seed copy is an
-        // encoder-level command, so it sits between passes; rechannel writes
-        // only act[0] and the seed writes only headacc, so seeding before the
-        // pass is order-independent of rechannel.
-        for (uint32_t a = 0; a < plan.arrays.size(); ++a) {
-            WavenetArray& na = plan.arrays[a];
-            if (a > 0) {  // seed this array's head accumulator with the previous head output
-                const WavenetArray& prev = plan.arrays[a - 1];
-                encoder.CopyBufferToBuffer(prev.headout, 0, na.headacc, 0,
-                                           static_cast<uint64_t>(na.channels) * B * 4u);
-            }
-            wgpu::ComputePassDescriptor pd{};
-            auto pass = encoder.BeginComputePass(&pd);
+        for (const WavenetArray& na : plan.arrays) {
             pass.SetPipeline(wavenet_rechannel_pipeline_);
             pass.SetBindGroup(0, na.rechannel_bg);
             pass.DispatchWorkgroups(wg);
@@ -3951,17 +3958,10 @@ private:
             pass.SetPipeline(wavenet_head_pipeline_);
             pass.SetBindGroup(0, na.head_bg);
             pass.DispatchWorkgroups(wg);
-            pass.End();
         }
-        {
-            wgpu::ComputePassDescriptor pd{};
-            auto pass = encoder.BeginComputePass(&pd);
-            pass.SetPipeline(wavenet_scale_pipeline_);
-            pass.SetBindGroup(0, plan.scale_bg);
-            pass.DispatchWorkgroups(wg);
-            pass.End();
-        }
-        encoder.CopyBufferToBuffer(plan.output, 0, readback, readback_offset, blk_bytes);
+        pass.SetPipeline(wavenet_scale_pipeline_);
+        pass.SetBindGroup(0, plan.scale_bg);
+        pass.DispatchWorkgroups(wg);
 
         // The activation rings keep the history in place, so streaming
         // continuity needs no copies: the next block simply starts B samples on.
