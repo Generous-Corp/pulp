@@ -444,7 +444,9 @@ struct FloatDoubleDelta {
 
 // Renders the same seeded noise through the shipping float model and a
 // double twin prepared at twin_fs, and reports how far apart they land.
-FloatDoubleDelta float_vs_double_delta(double twin_fs) {
+// A non-zero output_bits rounds the float output to that many bits of
+// full scale before comparing, standing in for a precision-losing build.
+FloatDoubleDelta float_vs_double_delta(double twin_fs, int output_bits = 0) {
     SpeakerModel single;
     SpeakerModel64 twin;
     single.set_compression_amount(0.0);
@@ -468,6 +470,11 @@ FloatDoubleDelta float_vs_double_delta(double twin_fs) {
     }
     single.process(in_f.data(), out_f.data(), kN);
     twin.process(in_d.data(), out_d.data(), kN);
+    if (output_bits > 0) {
+        const float scale = std::ldexp(1.0f, output_bits - 1);
+        for (auto& y : out_f)
+            y = std::round(y * scale) / scale;
+    }
 
     double worst = 0.0;
     double sum_sq = 0.0;
@@ -480,9 +487,23 @@ FloatDoubleDelta float_vs_double_delta(double twin_fs) {
     return {amplitude_db(worst), 10.0 * std::log10(std::max(sum_sq / kN, 1e-300))};
 }
 
-// Agreement bounds shared by the agreement check and its negative control.
+// Agreement bounds shared by the agreement check and its negative controls.
+// The float chain's deviation depends on whether its multiply-adds round once
+// or twice. Clang on arm64 contracts them into hardware FMA (the build pins
+// -ffp-contract=on there), and the deviation measures worst -102.2 dBFS, RMS
+// -112.7 dBFS, so the bounds sit about 4 dB above that. Every other build
+// rounds each multiply-add twice: GCC is pinned to -ffp-contract=off on every
+// architecture, MSVC does not contract, and x86-64 has no FMA in the baseline
+// ISA. Those sit about 6 dB higher, with a worst sample that wanders by a few
+// dB with the seed, so the RMS carries the tight bound and the worst sample is
+// held to one signed 16-bit step.
+#if defined(__aarch64__) && defined(__clang__) && !defined(_MSC_VER)
+constexpr double kFloatDoubleRmsBoundDb = -108.0;
+constexpr double kFloatDoubleWorstBoundDb = -98.0;
+#else
 constexpr double kFloatDoubleRmsBoundDb = -100.0;
 constexpr double kFloatDoubleWorstBoundDb = -90.3;
+#endif
 
 } // namespace
 
@@ -502,14 +523,10 @@ TEST_CASE("Float and double instantiations agree", "[signal][speaker]") {
     const auto delta = float_vs_double_delta(kFs);
     INFO("float-vs-double difference: worst " << delta.worst_db << " dBFS, rms " << delta.rms_db
                                               << " dBFS");
-    // The float build's deviation is rounding noise, so it is bounded by its
-    // RMS, with the single worst sample held to one signed 16-bit step. On
-    // x86-64 without hardware FMA the float chain rounds every multiply-add
-    // twice and sits about 6 dB above arm64: over this stimulus with twelve
-    // seeds it measured worst -98.1 to -94.1 dBFS and RMS -107.0 to -105.2
-    // dBFS (arm64: worst near -102, RMS near -112.7). The worst sample of a
-    // noise process moves by a few dB with the seed and the length, so it
-    // cannot carry a tight bound; the RMS can.
+    // The float build's deviation is rounding noise, bounded per build (see
+    // the bound constants). Where multiply-adds round twice, on x86-64 over
+    // this stimulus with twelve seeds, it measured worst -98.1 to -94.1 dBFS
+    // and RMS -107.0 to -105.2 dBFS.
     REQUIRE(delta.rms_db < kFloatDoubleRmsBoundDb);
     REQUIRE(delta.worst_db < kFloatDoubleWorstBoundDb);
 }
@@ -522,6 +539,16 @@ TEST_CASE("Float and double agreement bounds reject a detuned twin", "[signal][s
     const auto delta = float_vs_double_delta(kFs * 1.0001);
     INFO("detuned difference: worst " << delta.worst_db << " dBFS, rms " << delta.rms_db
                                       << " dBFS");
+    REQUIRE(delta.rms_db > kFloatDoubleRmsBoundDb);
+    REQUIRE(delta.worst_db > kFloatDoubleWorstBoundDb);
+}
+
+TEST_CASE("Float and double agreement bounds reject a 12-bit float output", "[signal][speaker]") {
+    // Negative control: the same filter at the same rate, with the float
+    // output rounded to 12 bits, models a build that loses precision rather
+    // than one that changed the filter. Both bounds must flag it.
+    const auto delta = float_vs_double_delta(kFs, 12);
+    INFO("12-bit difference: worst " << delta.worst_db << " dBFS, rms " << delta.rms_db << " dBFS");
     REQUIRE(delta.rms_db > kFloatDoubleRmsBoundDb);
     REQUIRE(delta.worst_db > kFloatDoubleWorstBoundDb);
 }
