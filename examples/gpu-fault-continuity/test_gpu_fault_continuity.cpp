@@ -445,9 +445,19 @@ TEST_CASE("planted negatives keep audio flowing but break the null", "[gpu-fault
             CHECK(r.events.find(std::string("\"planted_negative\":\"") + planted + "\"") !=
                   std::string::npos);
             CHECK(r.run.allocations == 0);
-            // The planted shape must be caught: the output no longer nulls.
-            CHECK(max_error(r.run.output, reference(x, ir, static_cast<std::size_t>(r.pdc))) >
-                  1e-2);
+            // The planted shape must be caught: the output no longer nulls...
+            const auto want = reference(x, ir, static_cast<std::size_t>(r.pdc));
+            CHECK(max_error(r.run.output, want) > 1e-2);
+            // ...and never before the fault sample (4000): a planted deviation
+            // that started early would not prove the null caught the fault.
+            std::size_t first = r.run.output.size();
+            for (std::size_t i = 0; i < r.run.output.size(); ++i) {
+                if (std::abs(static_cast<double>(r.run.output[i]) - want[i]) > 1e-4) {
+                    first = i;
+                    break;
+                }
+            }
+            CHECK(first >= 4000u);
         }
     }
 }

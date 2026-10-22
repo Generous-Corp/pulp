@@ -486,13 +486,14 @@ void GpuFaultContinuityProcessor::process(audio::BufferView<float>& output,
                         : 0u);
     segment_start_ = false;
     const std::int64_t fault_at = fault_at_.load(std::memory_order_acquire);
+    bool fault_block = false;
     if (playing && fault_at >= position && fault_at < position + n &&
         armed_kind_.load(std::memory_order_acquire) != 0 &&
         !fire_pending_.load(std::memory_order_relaxed)) {
         flags |= kFlagFaultBlock;
         fire_offline_.store(offline, std::memory_order_relaxed);
         fire_pending_.store(true, std::memory_order_release);
-        planted_live_ = true;
+        fault_block = true;
     }
     const auto planted = static_cast<Planted>(planted_.load(std::memory_order_relaxed));
     const bool internal = internal_stimulus_.load(std::memory_order_relaxed);
@@ -540,6 +541,11 @@ void GpuFaultContinuityProcessor::process(audio::BufferView<float>& output,
             run_quantum(ready, offline, planted);
         }
     }
+    // A planted negative starts with the callback AFTER the fault block, so
+    // every corrupted output sample is emitted after the fault sample and a
+    // planted deviation can never begin before it.
+    if (fault_block)
+        planted_live_ = true;
     for (std::uint32_t ch = kChannels; ch < out_ch; ++ch)
         std::fill_n(output.channel_ptr(ch), n, 0.0f);
 
