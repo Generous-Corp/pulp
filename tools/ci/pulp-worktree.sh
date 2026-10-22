@@ -39,6 +39,12 @@ fi
 SKIA_CACHE_KEYING="${PULP_SKIA_CACHE_KEYING:-1}"
 SKIA_CACHE_ROOT="${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}"
 CCACHE_MAX_SIZE="${PULP_CCACHE_MAX_SIZE:-200G}"
+# The host's own ccache configuration. Every gate VM mounts $CACHE_ROOT/ccache
+# read-write, and ccache otherwise reads $CCACHE_DIR/ccache.conf, so a guest
+# that wrote `prefix_command` there would have it run by the next host build.
+# Host ccache reads this file instead (CCACHE_CONFIGPATH), which sits beside
+# the mounted directory, never inside it.
+HOST_CCACHE_CONFIG="${PULP_HOST_CCACHE_CONFIG:-$CACHE_ROOT/ccache-host.conf}"
 
 # CCACHE_BASEDIR is the COMMON PARENT of the repo and every worktree so a hit
 # in /a/pulp-worktrees/X normalizes against /a/pulp-worktrees/Y and the primary
@@ -48,6 +54,12 @@ BASEDIR="$(dirname "$WT_ROOT")"
 
 note() { printf '\033[36m• %s\033[0m\n' "$*" >&2; }
 die()  { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+
+case "$HOST_CCACHE_CONFIG" in
+  "$CACHE_ROOT/ccache"|"$CACHE_ROOT/ccache/"*)
+    die "PULP_HOST_CCACHE_CONFIG must not be inside the guest-writable $CACHE_ROOT/ccache"
+    ;;
+esac
 
 resolve_skia_cache_dir() {
   local repo="$1"
@@ -90,8 +102,11 @@ ensure_cache() {
       --cache-lock-timeout "${PULP_SKIA_CACHE_LOCK_TIMEOUT_SECS:-300}") || \
       die "shared Skia cache validation/provisioning failed"
   fi
+  mkdir -p "$(dirname "$HOST_CCACHE_CONFIG")"
+  [ -f "$HOST_CCACHE_CONFIG" ] || : > "$HOST_CCACHE_CONFIG"
   command -v ccache >/dev/null 2>&1 && \
-    CCACHE_DIR="$CACHE_ROOT/ccache" ccache --set-config "max_size=$CCACHE_MAX_SIZE" 2>/dev/null || true
+    CCACHE_DIR="$CACHE_ROOT/ccache" CCACHE_CONFIGPATH="$HOST_CCACHE_CONFIG" \
+      ccache --set-config "max_size=$CCACHE_MAX_SIZE" 2>/dev/null || true
 }
 
 cache_env() {  # emit the env every worktree build should use
@@ -100,6 +115,8 @@ cache_env() {  # emit the env every worktree build should use
   skia_cache_dir="$(resolve_skia_cache_dir "$repo")"
   cat <<ENV
 export CCACHE_DIR="$CACHE_ROOT/ccache"
+# Never the cache directory's own ccache.conf: gate VMs can write that file.
+export CCACHE_CONFIGPATH="$HOST_CCACHE_CONFIG"
 export CCACHE_BASEDIR="$BASEDIR"
 export CCACHE_NOHASHDIR=true
 # Depend mode OFF + content compiler keying — the #3504 correctness combo, the
@@ -199,7 +216,8 @@ cmd_list() {
   echo "--- build-dir sizes ---"
   for wt in "$WT_ROOT"/*/; do [ -d "$wt/build" ] && du -sh "$wt/build" 2>/dev/null; done
   echo "--- ccache ---"
-  CCACHE_DIR="$CACHE_ROOT/ccache" ccache --show-stats 2>/dev/null | grep -iE "cache size|hit rate|hits|misses" || true
+  CCACHE_DIR="$CACHE_ROOT/ccache" CCACHE_CONFIGPATH="$HOST_CCACHE_CONFIG" \
+    ccache --show-stats 2>/dev/null | grep -iE "cache size|hit rate|hits|misses" || true
 }
 cmd_gc() {
   local apply=0 max_age="" max_total="" merged=0
