@@ -1092,7 +1092,7 @@ Pulp gates it on `range.step >= 1`). A CONTINUOUS param with a custom
    clap-validator's param-conversions test failed every plug-in whose Bypass
    was an unlabeled Toggle until this held. Tests: the "toggle without labels"
    cases in `test_au_v2_param_display.mm` and `test_vst3_param_display.cpp`,
-   and the text round trips in `test_clap_entry.cpp` and PulpGain's tests.
+   and the text round trips in `test_clap_entry.cpp`.
 
 ## Verifying AU v2 tests locally needs the AudioUnitSDK
 

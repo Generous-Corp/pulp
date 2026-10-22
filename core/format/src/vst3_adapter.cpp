@@ -737,14 +737,14 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     edit_bridge_ = std::make_unique<HostParameterEditBridge>(
         store_, HostParameterEditBridge::Callbacks{
                     [this](state::ParamID id) { beginEdit(static_cast<ParamID>(id)); },
-                    [this](state::ParamID id, float normalized) {
-                        // Report the editor's value in double precision so the host
-                        // writes back exactly what the store holds; a float-normalized
-                        // 0 dB comes back 1.4e-6 dB off.
+                    [this](state::ParamID id, float normalized, float plain) {
+                        // Report the edited value (the bridge's snapshot, never a
+                        // re-read of the store) in double precision so the host
+                        // writes back exactly what the editor set; a
+                        // float-normalized 0 dB comes back 1.4e-6 dB off.
                         ParamValue host_value = static_cast<ParamValue>(normalized);
                         if (const auto* info = store_.info(id))
-                            host_value =
-                                state::host_normalized_from_value(*info, store_.get_value(id));
+                            host_value = state::host_normalized_from_value(*info, plain);
                         performEdit(static_cast<ParamID>(id), host_value);
                         setParamNormalized(static_cast<ParamID>(id), host_value);
                     },

@@ -209,6 +209,11 @@ struct TestVst3Config {
     // even when the block is bypassed.
     bool add_reset_trigger_param = false;
     int gain_group_id = 8;
+    // When set, an inline listener registered before the adapter's edit bridge
+    // answers an editor write to Gain with a host automation write to this
+    // value, so the store already holds the host's value when the bridge
+    // reports the edit.
+    std::optional<float> automation_during_editor_edit;
 };
 
 class TestVst3Processor : public pulp::format::Processor {
@@ -229,6 +234,16 @@ public:
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
+        if (const auto automated = config_.automation_during_editor_edit) {
+            automation_listener_ = store.add_listener(
+                [&store, automated = *automated](pulp::state::ParamID id, float) {
+                    if (id != kGainParamId || pulp::format::in_non_editor_parameter_write())
+                        return;
+                    const pulp::format::ScopedHostParameterWrite host_write;
+                    store.set_value(kGainParamId, automated);
+                },
+                pulp::state::ListenerThread::Audio);
+        }
         store.add_group({.id = 7, .name = "Dynamics"});
         store.add_group({.id = 8, .name = "Advanced", .parent_id = 7});
         store.add_group({.id = 20, .name = "Cycle A", .parent_id = 21});
@@ -345,6 +360,7 @@ public:
 private:
     TestVst3Config config_;
     mutable int bus_layout_check_count_ = 0;
+    pulp::state::ListenerToken automation_listener_;
 };
 
 TestVst3Processor* TestVst3Processor::g_last_processor = nullptr;
@@ -1010,6 +1026,33 @@ TEST_CASE("VST3 does not echo host automation back during an open gesture",
 
     REQUIRE(view->removed() == Steinberg::kResultOk);
     view->release();
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 reports the editor's value even if automation lands before the report",
+          "[vst3][editor][gesture][automation]") {
+    // The edit bridge reports an editor write from a listener on that write.
+    // Another listener on the same write can run a host automation write
+    // first, so the store already holds the host's value when the report is
+    // built. The host must still receive the value the user set.
+    TestVst3Config config;
+    config.automation_during_editor_edit = 6.0f;
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    GestureEditRecorder recorder;
+    REQUIRE(processor.setComponentHandler(&recorder) == Steinberg::kResultOk);
+    auto& store = TestVst3Processor::g_last_processor->state();
+
+    store.begin_gesture(kGainParamId);
+    store.set_value(kGainParamId, -12.0f);
+    REQUIRE_FALSE(recorder.edits.empty());
+    // The edit, -12 dB on -60..24, not the automated +6 dB (66/84).
+    REQUIRE(recorder.edits.front().id == kGainParamId);
+    REQUIRE(recorder.edits.front().value == Catch::Approx(48.0 / 84.0).margin(1e-9));
+    store.end_gesture(kGainParamId);
+
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 

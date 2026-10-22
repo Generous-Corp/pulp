@@ -1450,5 +1450,13 @@ when the value is an echo of what the store already holds, because the double
 round trip can differ from it in the last bit. `setState` syncs only the VST3
 parameter objects (`SingleComponentEffect::setParamNormalized`), never
 rewriting the restored store. `[null-test]` cases in
-`test_vst3_plugin_state.cpp`, `test_au_v2_effect.cpp` and PulpGain's own tests
-null PulpGain at 0 dB through all three formats.
+`test_vst3_plugin_state.cpp`, `test_au_v2_effect.cpp` and `test_clap_entry.cpp`
+null PulpGain at 0 dB through all three formats. They live in core tests on
+purpose: the required macOS gate builds with examples off, so a null test kept
+in `examples/pulp-gain` would never run there.
+
+The editor edit callback maps the bridge's snapshot (`plain`), never a fresh
+`store_.get_value()`: another listener on the same write can run a host
+automation write first, and a re-read would report the host's value to the host
+as the user's edit. `[vst3][editor][automation]` in `test_vst3_plugin_state.cpp`
+interleaves exactly that.
