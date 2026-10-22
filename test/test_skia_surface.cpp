@@ -234,6 +234,75 @@ TEST_CASE("SkiaSurface retains cacheable layers across frame canvases",
 #endif
 }
 
+TEST_CASE("SkiaSurface readback fails when Graphite rejects the flushed recording",
+          "[render][skia][checked-submit]") {
+#ifdef PULP_HAS_SKIA
+    auto gpu = GpuSurface::create_dawn();
+    if (!gpu)
+        SKIP(kNoGpu);
+
+    GpuSurface::Config gpu_config{};
+    gpu_config.width = 64;
+    gpu_config.height = 64;
+    if (!gpu->initialize(gpu_config))
+        SKIP(kNoGpu);
+    if (gpu->adapter_info().backend_type == "Null")
+        SKIP("Dawn Null backend cannot produce raster output");
+
+    auto skia = SkiaSurface::create(*gpu, {.width = 64, .height = 64});
+    if (!skia || !skia->is_available())
+        SKIP(kNoSkiaSurface);
+
+    // Restores the production path even when an assertion below throws.
+    struct HookGuard {
+        explicit HookGuard(SkiaSurface::InsertOutcomeHook hook) {
+            SkiaSurface::set_insert_outcome_hook_for_testing(hook);
+        }
+        ~HookGuard() {
+            SkiaSurface::set_insert_outcome_hook_for_testing(nullptr);
+        }
+    };
+
+    auto draw_red_frame = [&]() {
+        REQUIRE(gpu->begin_frame());
+        auto* canvas = skia->begin_frame();
+        REQUIRE(canvas != nullptr);
+        canvas->set_fill_color(pulp::canvas::Color::rgba8(255, 0, 0));
+        canvas->fill_rect(0.0f, 0.0f, 64.0f, 64.0f);
+    };
+
+    std::vector<uint8_t> pixels;
+    uint32_t pixel_width = 0;
+    uint32_t pixel_height = 0;
+
+    // Control: an accepted flush captures the frame and the frame succeeds.
+    draw_red_frame();
+    REQUIRE(skia->read_current_rgba(pixels, pixel_width, pixel_height));
+    REQUIRE(pixels.at((32u * pixel_width + 32u) * 4u) > 200);
+    REQUIRE(skia->end_frame() == FrameOutcome::offscreen);
+    REQUIRE(skia->wait_for_submitted_work());
+    gpu->end_frame();
+
+    // A rejected flush is a failed capture, and the frame it belonged to is a
+    // failed frame rather than one whose work "already reached the GPU".
+    {
+        HookGuard reject([](bool) { return false; });
+        draw_red_frame();
+        REQUIRE_FALSE(skia->read_current_rgba(pixels, pixel_width, pixel_height));
+        REQUIRE(skia->end_frame() == FrameOutcome::failed);
+        gpu->end_frame();
+    }
+
+    // Removing the hook restores normal captures on the same surface.
+    draw_red_frame();
+    REQUIRE(skia->read_current_rgba(pixels, pixel_width, pixel_height));
+    REQUIRE(skia->end_frame() == FrameOutcome::offscreen);
+    gpu->end_frame();
+#else
+    REQUIRE(true);
+#endif
+}
+
 TEST_CASE("SkiaCanvas retained stores isolate handles and open layers",
           "[render][skia][layer-cache]") {
 #ifdef PULP_HAS_SKIA
