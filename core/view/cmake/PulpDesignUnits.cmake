@@ -75,6 +75,7 @@ add_library(pulp-design-import STATIC
     src/design_import_png.cpp
     src/design_binding_metadata.cpp
     src/design_ir_json.cpp
+    src/design_ir_json_text.cpp
     src/design_ir_normalize.cpp
     src/recognition_resolver.cpp
     src/design_ir_analysis.cpp

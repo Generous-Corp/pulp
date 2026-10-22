@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <choc/text/choc_JSON.h>
+#include <sstream>
 
 #include <pulp/view/design_import.hpp>
 
@@ -158,6 +159,12 @@ std::string json_escape(std::string_view text);
 // a recognition concern slated to move to the recognition module; this
 // declaration keeps the report pass decoupled in the meantime.)
 const char* interactive_kind_id(InteractiveElementKind k);
+
+// A text node's captured line boxes and their basis (`lineBoxes` /
+// `lineBoxBasis`); defined in design_ir_json_text.cpp.
+void parse_ir_text_line_layout(IRNode& node, const choc::value::ValueView& obj);
+void write_ir_text_line_layout(std::ostringstream& out, bool& first,
+                               const IRNode& node);
 
 // Parse the DesignIR token table; defined in design_ir_json.cpp.
 IRTokens parse_ir_tokens(const choc::value::ValueView& obj);
