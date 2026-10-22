@@ -5,14 +5,23 @@
 // Every kernel is written once over an `Isa` policy and instantiated twice:
 // `ScalarIsa` (plain arrays of four floats; builds everywhere) and, on arm64,
 // `NeonIsa`. Both perform the same operations in the same order per output
-// lane, and every multiply-add is spelled explicitly (madd) rather than left
-// to compiler contraction. Where the target has a fused multiply-add the
-// two instantiations are therefore bit-identical; elsewhere madd rounds
-// twice. `DefaultIsa` is what production paths use.
+// lane, and every kernel multiply-add is spelled explicitly (madd) rather
+// than left to compiler contraction, so on FMA targets the two agree to the
+// bit outside tanh. The scalar tanh is signal::FastMath::tanh_accurate as
+// the compiler contracts it; the NEON lane fuses the same multiply-adds.
+// `DefaultIsa` is what production paths use.
 //
 // Realtime: nothing here allocates, locks, or calls into the platform.
+//
+// Inputs are finite by contract: the realtime node sanitizes non-finite
+// samples before they reach a CPU model. NaN still propagates (tanh_accurate
+// keeps it), so a contract breach is visible rather than masked; debug
+// builds assert on it at each kernel's entry.
+
+#include <pulp/signal/fast_math.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -44,26 +53,26 @@ constexpr std::uint32_t pad_lanes(std::uint32_t count) noexcept {
     return (count + kLanes - 1) / kLanes * kLanes;
 }
 
-/// tanh within 3.0e-7 absolute of std::tanh for every float, bounded to
-/// [-1, 1], odd, and branch-free. x * P(x^2) / Q(x^2) with degree-4
-/// polynomials fitted for minimax absolute error on [0, 9]; the same
-/// coefficients as the signal library's accurate ladder saturator. The error
-/// budget is what lets a block kernel null against std::tanh at 1e-6.
+/// signal::FastMath::tanh_accurate: within 3.0e-7 of std::tanh, bounded to
+/// [-1, 1], odd, NaN-propagating. That error budget is what lets a block
+/// kernel null against std::tanh at 1e-6.
 inline float tanh_bounded(float x) noexcept {
-    const float u = std::fmin(x * x, 81.0f);
-    const float u2 = u * u;
-    // Estrin form: (c0 + u c1) + u2 ((c2 + u c3) + u2 c4).
-    const float p = madd(madd(1.0f, u, 0.133803148f), u2,
-                         madd(madd(0.00349475497f, u, 2.05960245e-05f), u2, 1.33379685e-08f));
-    const float q = madd(madd(1.0f, u, 0.467136322f), u2,
-                         madd(madd(0.0258737793f, u, 0.000328429886f), u2, 7.7694232e-07f));
-    return std::fmin(std::fmax(x * p / q, -1.0f), 1.0f);
+    return signal::FastMath::tanh_accurate(x);
 }
 
 /// Logistic sigmoid through the tanh identity, within 1.5e-7 of the exact
 /// value.
 inline float sigmoid_bounded(float x) noexcept {
     return madd(0.5f, 0.5f, tanh_bounded(0.5f * x));
+}
+
+/// Debug-only check of the finite-input contract.
+inline void assert_finite([[maybe_unused]] const float* x,
+                          [[maybe_unused]] std::uint32_t n) noexcept {
+#ifndef NDEBUG
+    for (std::uint32_t i = 0; i < n; ++i)
+        assert(std::isfinite(x[i]) && "neural CPU kernel input must be finite");
+#endif
 }
 
 /// Portable four-lane policy. Lane loops are fixed-trip, so optimizers are
@@ -177,7 +186,8 @@ struct NeonIsa {
     static V tanh(V x) noexcept {
         const V u = vminnmq_f32(vmulq_f32(x, x), vdupq_n_f32(81.0f));
         const V u2 = vmulq_f32(u, u);
-        // Same operations, in the same order, as tanh_bounded().
+        // The rational of FastMath::tanh_accurate_rational, with each
+        // multiply-add fused as -ffp-contract=on fuses the scalar form.
         const V p =
             vfmaq_f32(vfmaq_n_f32(vdupq_n_f32(1.0f), u, 0.133803148f), u2,
                       vfmaq_n_f32(vfmaq_n_f32(vdupq_n_f32(0.00349475497f), u, 2.05960245e-05f), u2,
@@ -187,7 +197,10 @@ struct NeonIsa {
                       vfmaq_n_f32(vfmaq_n_f32(vdupq_n_f32(0.0258737793f), u, 0.000328429886f), u2,
                                   7.7694232e-07f));
         const V r = vdivq_f32(vmulq_f32(x, p), q);
-        return vminnmq_f32(vmaxnmq_f32(r, vdupq_n_f32(-1.0f)), vdupq_n_f32(1.0f));
+        // Ordered compares, as tanh_accurate: a NaN fails both and survives.
+        const V one = vdupq_n_f32(1.0f), minus_one = vdupq_n_f32(-1.0f);
+        const V upper = vbslq_f32(vcgtq_f32(r, one), one, r);
+        return vbslq_f32(vcltq_f32(upper, minus_one), minus_one, upper);
     }
     static V sigmoid(V x) noexcept {
         const V half = vdupq_n_f32(0.5f);
