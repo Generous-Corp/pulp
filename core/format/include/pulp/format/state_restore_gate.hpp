@@ -17,15 +17,19 @@
 /// filter coefficients, wavetables — has no such protection, and the contract
 /// above tells plug-in authors they may assume there is none needed.
 ///
-/// Mechanism, the same one `reload::ProcessorHotSwapSlot` uses for its own
-/// "quiescence before publish" requirement:
+/// Mechanism:
 ///
-///   - The audio thread takes a NON-BLOCKING shared lock around its call into
-///     `Processor::process()`. On contention (a restore is installing) it
-///     renders nothing and the adapter emits silence for that block. It never
-///     blocks, never allocates.
-///   - The restoring thread takes the unique lock. Acquiring it *proves* no
-///     audio reader is inside `process()`, so the restore is safe.
+///   - The audio thread registers itself as an in-flight render with one atomic
+///     increment around its call into `Processor::process()`. If a restore has
+///     already claimed the gate it backs out and the adapter emits silence (or
+///     a passthrough) for that block. It never blocks, never takes a mutex,
+///     never allocates.
+///   - The restoring thread raises the "restoring" flag on the same atomic and
+///     then waits for the in-flight render count to drain to zero. Both sides
+///     read-modify-write one atomic word, so every render either registered
+///     before the flag went up (and the restore waits for it) or sees the flag
+///     (and refuses). Once the count is zero, no audio reader is inside
+///     `process()` and the restore is safe.
 ///
 /// The gate is deliberately separate from `ProcessorHotSwapSlot`: that type
 /// owns and swaps the `Processor`, whereas a format adapter only borrows one it
@@ -37,7 +41,7 @@
 #include <cstdint>
 #include <atomic>
 #include <mutex>
-#include <shared_mutex>
+#include <thread>
 
 namespace pulp::format {
 
@@ -85,29 +89,63 @@ public:
     /// restore holds the gate and this block must not enter `process()`.
     class [[nodiscard]] RenderLock {
     public:
-        explicit RenderLock(std::shared_mutex& m) noexcept
-            : lock_(m, std::try_to_lock) {}
+        RenderLock(const RenderLock&) = delete;
+        RenderLock& operator=(const RenderLock&) = delete;
+        ~RenderLock() {
+            if (gate_) gate_->state_.fetch_sub(1, std::memory_order_release);
+        }
 
-        explicit operator bool() const noexcept { return lock_.owns_lock(); }
+        explicit operator bool() const noexcept { return gate_ != nullptr; }
 
     private:
-        std::shared_lock<std::shared_mutex> lock_;
+        friend class StateRestoreGate;
+        explicit RenderLock(StateRestoreGate* gate) noexcept : gate_(gate) {}
+        StateRestoreGate* gate_;
     };
 
-    /// Audio-thread entry. Non-blocking; hold for the whole `process()` body,
-    /// because a reader already inside `process()` is invisible to a gate taken
-    /// only around entry.
+    /// Control-thread hold. Keeps the audio thread out of `process()` until it
+    /// is destroyed.
+    class [[nodiscard]] RestoreLock {
+    public:
+        RestoreLock(const RestoreLock&) = delete;
+        RestoreLock& operator=(const RestoreLock&) = delete;
+        ~RestoreLock() {
+            gate_.state_.fetch_and(~kRestoring, std::memory_order_release);
+        }
+
+    private:
+        friend class StateRestoreGate;
+        RestoreLock(StateRestoreGate& gate, std::unique_lock<std::mutex> writer) noexcept
+            : gate_(gate), writer_(std::move(writer)) {}
+        StateRestoreGate& gate_;
+        // Released after the flag is cleared (members destroy after the body),
+        // so a second restorer can never observe a half-released gate.
+        std::unique_lock<std::mutex> writer_;
+    };
+
+    /// Audio-thread entry. Lock-free and wait-free; hold for the whole
+    /// `process()` body, because a reader already inside `process()` is
+    /// invisible to a gate taken only around entry.
     RenderLock lock_for_render() noexcept {
-        RenderLock lock(mutex_);
-        if (!lock) contended_blocks_.fetch_add(1, std::memory_order_relaxed);
-        return lock;
+        const std::uint32_t prev = state_.fetch_add(1, std::memory_order_acquire);
+        if ((prev & kRestoring) != 0) {
+            state_.fetch_sub(1, std::memory_order_relaxed);
+            contended_blocks_.fetch_add(1, std::memory_order_relaxed);
+            return RenderLock(nullptr);
+        }
+        return RenderLock(this);
     }
 
     /// Control-thread entry. Blocks until every in-flight `process()` call has
     /// returned, then keeps the audio thread out until the returned lock is
-    /// released. Never call this from `process()`.
-    [[nodiscard]] std::unique_lock<std::shared_mutex> lock_for_restore() {
-        return std::unique_lock<std::shared_mutex>(mutex_);
+    /// released. Restores are serialized against each other. Never call this
+    /// from `process()`.
+    RestoreLock lock_for_restore() {
+        std::unique_lock<std::mutex> writer(writer_mutex_);
+        state_.fetch_or(kRestoring, std::memory_order_acq_rel);
+        while ((state_.load(std::memory_order_acquire) & kRenderMask) != 0)
+            std::this_thread::yield();
+        return RestoreLock(*this, std::move(writer));
     }
 
     /// Blocks that rendered silence because a restore held the gate. A healthy
@@ -118,7 +156,15 @@ public:
     }
 
 private:
-    std::shared_mutex mutex_;
+    static constexpr std::uint32_t kRestoring = 0x8000'0000u;
+    static constexpr std::uint32_t kRenderMask = ~kRestoring;
+    static_assert(std::atomic<std::uint32_t>::is_always_lock_free,
+                  "the render side of the gate must be lock-free");
+
+    // High bit: a restore holds (or is acquiring) the gate. Low bits: renders
+    // currently inside process().
+    std::atomic<std::uint32_t> state_{0};
+    std::mutex writer_mutex_;
     std::atomic<std::uint64_t> contended_blocks_{0};
 };
 
