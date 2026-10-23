@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 148,
+  "inventory_version": 149,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,21 +42,21 @@
     }
   ],
   "counts": {
-    "public_headers": 508,
-    "reviewed_headers": 241,
+    "public_headers": 509,
+    "reviewed_headers": 242,
     "legacy_unreviewed_headers": 267,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 72,
+      "infrastructure": 73,
       "legacy_unreviewed": 267,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
-        "public_headers": 113,
-        "reviewed_headers": 12,
+        "public_headers": 114,
+        "reviewed_headers": 13,
         "legacy_unreviewed_headers": 101,
         "unsupported_headers": 0
       },
@@ -533,6 +533,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/restored_path.hpp",
+      "fingerprint": "sha256:11e3b82c52e43deb3ef2093b786b59f443c3e6568f1267f1812ca1bdf0509a01",
+      "include": "pulp/audio/restored_path.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Confinement gate for file paths that arrive through restored host or preset state: resolves symlinks and admits a path only inside the directory the plugin may read from. Shared safety infrastructure for state restore, not an advertised generator capability."
     },
     {
       "domain": "audio",

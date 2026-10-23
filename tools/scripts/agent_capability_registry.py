@@ -1402,6 +1402,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/audio/restored_path.hpp",
+        "fingerprint": "sha256:11e3b82c52e43deb3ef2093b786b59f443c3e6568f1267f1812ca1bdf0509a01",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Confinement gate for file paths that arrive through restored host or preset "
+            "state: resolves symlinks and admits a path only inside the directory the "
+            "plugin may read from. Shared safety infrastructure for state restore, not an "
+            "advertised generator capability."
+        ),
+    },
+    {
         "include": "pulp/signal/convolver_messages.hpp",
         "fingerprint": "sha256:f12dc10a6090a81966552ece2a5ebf26b7370cd59d3a310b66e84d2616b36c2f",
         "disposition": "infrastructure",
