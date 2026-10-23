@@ -430,6 +430,40 @@ class ShellRootVariableTests(unittest.TestCase):
         self.assertEqual(got, [])
 
 
+class WrappedCommandTests(unittest.TestCase):
+    """Commands whose script sits behind a wrapper the classifier unwraps."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name) / "repo"
+        self.root.mkdir()
+        write(self.root, "tools/scripts/planted_helper.py", "X = 1\n")
+        write(self.root, "tools/scripts/boundary.py", "import planted_helper\n")
+        write(self.root, "test/test_verify_planted.py", "import planted_helper\n")
+        write(self.root, "test/test_other.py", "\n")
+
+    def inputs(self, command: list[str]) -> list[str] | None:
+        rec = sti.inputs_for({"name": "t", "command": command, "properties": []},
+                             self.root, tracked=set())
+        return None if rec is None else rec["inputs"]
+
+    def test_cmake_env_wrapper_declares_the_wrapped_script(self) -> None:
+        got = self.inputs(["/usr/bin/cmake", "-E", "env", "PYTHONUTF8=1", "python3",
+                           str(self.root / "tools/scripts/boundary.py"), "--repo", str(self.root)])
+        self.assertEqual(got, ["tools/scripts/boundary.py", "tools/scripts/planted_helper.py"])
+
+    def test_unittest_discover_declares_the_matching_file(self) -> None:
+        got = self.inputs(["/usr/bin/python3", "-m", "unittest", "discover",
+                           "-s", str(self.root / "test"), "-p", "test_verify_planted.py"])
+        self.assertEqual(got, ["test/test_verify_planted.py", "tools/scripts/planted_helper.py"])
+
+    def test_control_other_cmake_commands_stay_undeclarable(self) -> None:
+        self.assertIsNone(self.inputs(["/usr/bin/cmake", "-P", str(self.root / "x.cmake")]))
+        self.assertIsNone(self.inputs(["/usr/bin/python3", "-m", "unittest", "discover",
+                                       "-s", str(self.root / "test"), "-p", "nothing_*.py"]))
+
+
 def tool_env(*, event: str | None, strict: bool) -> dict[str, str]:
     """Every case pins the event environment the script reads, so the selftest
     gives the same verdict inside a pull-request job, a merge-group job (where
