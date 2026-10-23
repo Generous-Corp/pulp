@@ -1,5 +1,6 @@
 #include "detail/shared_io_arena.hpp"
 #include "detail/shared_io_slot_ledger.hpp"
+#include "harness/fake_shared_io_provider.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -314,327 +315,7 @@ TEST_CASE("shared IO submission rejects the wrong generation without claiming th
 
 namespace {
 
-class FakeSharedIoProvider final : public SharedIoArenaProvider {
-  public:
-    SharedIoProviderIdentity identity;
-    SharedIoProviderCapabilities capabilities;
-
-    SharedIoProviderIdentity provider_identity() const noexcept override {
-        return identity;
-    }
-    SharedIoProviderCapabilities provider_capabilities() const noexcept override {
-        return capabilities;
-    }
-
-    struct Allocation {
-        std::uint32_t slot = 0;
-        std::unique_ptr<std::byte[]> input;
-        std::unique_ptr<std::byte[]> output;
-        bool partial = false;
-    };
-
-    struct Pending {
-        SlotToken token;
-        std::shared_ptr<SharedIoTerminalInbox> inbox;
-        bool accepted = false;
-        bool terminal = false;
-        bool completion_pending = false;
-        SharedIoTerminalStatus completion_status = SharedIoTerminalStatus::RetiredFailed;
-        std::byte* output = nullptr;
-    };
-
-    bool create_slot(std::uint32_t slot, std::size_t input_bytes, std::size_t output_bytes,
-                     SlotResources& resources) noexcept override {
-        ++create_calls;
-        if (slot == refuse_creation_at)
-            return false;
-        try {
-            pending.resize(static_cast<std::size_t>(slot) + 1);
-            previous.resize(static_cast<std::size_t>(slot) + 1);
-            retiring.resize(static_cast<std::size_t>(slot) + 1, nullptr);
-        } catch (...) {
-            return false;
-        }
-        auto allocation = std::unique_ptr<Allocation>(new (std::nothrow) Allocation);
-        if (!allocation)
-            return false;
-        allocation->slot = slot;
-        allocation->input.reset(new (std::nothrow) std::byte[input_bytes]);
-        if (!allocation->input)
-            return false;
-        resources.input = allocation->input.get();
-        resources.input_size = input_bytes;
-        resources.input_lifecycle = {
-            .allocated = true,
-            .import_attempted = true,
-            .import_succeeded = true,
-        };
-        if (slot == fail_after_partial_at) {
-            allocation->partial = true;
-            resources.opaque = allocation.release();
-            ++partial_allocations_created;
-            ++live_allocations;
-            return false;
-        }
-        allocation->output.reset(new (std::nothrow) std::byte[output_bytes]);
-        if (!allocation->output) {
-            resources.opaque = allocation.release();
-            ++live_allocations;
-            return false;
-        }
-        if (slot == fail_output_import_at) {
-            allocation->partial = true;
-            resources.output = allocation->output.get();
-            resources.output_size = output_bytes;
-            resources.output_lifecycle = {
-                .allocated = true,
-                .import_attempted = true,
-                .import_succeeded = false,
-            };
-            resources.opaque = allocation.release();
-            ++partial_allocations_created;
-            ++live_allocations;
-            return false;
-        }
-        resources = {
-            .input = allocation->input.get(),
-            .input_size = input_bytes,
-            .output = allocation->output.get(),
-            .output_size = output_bytes,
-            .opaque = allocation.release(),
-            .input_lifecycle =
-                {
-                    .allocated = true,
-                    .import_attempted = true,
-                    .import_succeeded = true,
-                },
-            .output_lifecycle =
-                {
-                    .allocated = true,
-                    .import_attempted = true,
-                    .import_succeeded = true,
-                },
-        };
-        resources.storage_kind = storage_kind;
-        if (storage_kind == StorageKind::Staged) {
-            resources.input_lifecycle.import_attempted = false;
-            resources.input_lifecycle.import_succeeded = false;
-            resources.output_lifecycle.import_attempted = false;
-            resources.output_lifecycle.import_succeeded = false;
-        }
-        if (false_import_claim)
-            resources.output_lifecycle.import_attempted = true;
-        ++live_allocations;
-        if (slot == malformed_success_at)
-            resources.output = nullptr;
-        return true;
-    }
-
-    void retire_slot(SlotResources& resources) noexcept override {
-        if (resources.opaque == nullptr)
-            return;
-        auto* allocation = static_cast<Allocation*>(resources.opaque);
-        retiring[allocation->slot] = &resources;
-        ++retire_calls;
-    }
-
-    void destroy_slot(SlotResources& resources) noexcept override {
-        if (resources.opaque == nullptr)
-            return;
-        auto* allocation = static_cast<Allocation*>(resources.opaque);
-        const auto disposal_ready = [](const AllocationLifecycle& lifecycle) {
-            return !lifecycle.import_attempted || lifecycle.dispose_observed;
-        };
-        if (!disposal_ready(resources.input_lifecycle) ||
-            !disposal_ready(resources.output_lifecycle)) {
-            destroy_before_dispose = true;
-        }
-        resources.input_lifecycle.host_freed = resources.input_lifecycle.allocated;
-        resources.output_lifecycle.host_freed = resources.output_lifecycle.allocated;
-        host_frees += static_cast<std::uint32_t>(resources.input_lifecycle.allocated) +
-                      static_cast<std::uint32_t>(resources.output_lifecycle.allocated);
-        if (allocation->partial)
-            ++partial_allocations_freed;
-        delete allocation;
-        resources.input = nullptr;
-        resources.input_size = 0;
-        resources.output = nullptr;
-        resources.output_size = 0;
-        resources.opaque = nullptr;
-        ++destroy_calls;
-        --live_allocations;
-    }
-
-    bool submit(const SlotResources& resources, SlotToken token,
-                std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept override {
-        if (reject_submissions) {
-            if (hold_stale_claim_on_reject) {
-                auto attempt = inbox->try_claim(token.slot);
-                if (attempt.claim) {
-                    held_claim = *attempt.claim;
-                    held_inbox = std::move(inbox);
-                    held_stale_token = token;
-                    if (held_stale_token.slot_generation > 0)
-                        --held_stale_token.slot_generation;
-                } else {
-                    held_claim_failed = true;
-                }
-            }
-            return false;
-        }
-        if (token.slot >= pending.size())
-            return false;
-        Pending& request = pending[token.slot];
-        if (request.accepted && !request.terminal)
-            return false;
-        if (request.accepted)
-            previous[token.slot] = request;
-        request = Pending{
-            .token = token,
-            .inbox = std::move(inbox),
-            .accepted = true,
-            .output = resources.output,
-        };
-        return true;
-    }
-
-    void poll() noexcept override {
-        ++poll_calls;
-        if (!complete_on_poll)
-            return;
-        for (std::size_t index = 0; index < pending.size(); ++index) {
-            auto& request = pending[index];
-            if (!request.accepted || (request.terminal && !request.completion_pending))
-                continue;
-            const auto status =
-                request.completion_pending ? request.completion_status : completion_on_poll;
-            if (complete(index, status) == SharedIoTerminalInbox::PushResult::Busy)
-                ++poll_busy_publications;
-        }
-    }
-
-    bool drain() noexcept override {
-        ++drain_calls;
-        if (force_drain_failure)
-            return false;
-        for (auto& request : pending) {
-            if (!request.accepted || request.terminal)
-                continue;
-            const auto result =
-                request.inbox->push(request.token, SharedIoTerminalStatus::RetiredFailed);
-            if (result != SharedIoTerminalInbox::PushResult::Accepted) {
-                drain_push_failed = true;
-                continue;
-            }
-            request.terminal = true;
-        }
-        for (auto*& resource : retiring) {
-            if (resource == nullptr)
-                continue;
-            if (resource->input_lifecycle.import_attempted &&
-                !resource->input_lifecycle.dispose_observed) {
-                resource->input_lifecycle.dispose_observed = true;
-                ++disposals_observed;
-            }
-            if (resource->output_lifecycle.import_attempted &&
-                !resource->output_lifecycle.dispose_observed) {
-                resource->output_lifecycle.dispose_observed = true;
-                ++disposals_observed;
-            }
-            resource = nullptr;
-        }
-        return !drain_push_failed;
-    }
-
-    SharedIoTerminalInbox::PushResult complete(std::size_t index, SharedIoTerminalStatus status) {
-        Pending& request = pending.at(index);
-        if (!request.accepted)
-            return SharedIoTerminalInbox::PushResult::Rejected;
-        // The payload must be fully visible before Ready is release-published.
-        if (status == SharedIoTerminalStatus::RetiredSuccess && request.output)
-            request.output[0] = std::byte{0x6b};
-        // Finish the success path's access to Pending before publishing Ready.
-        // Immediate dispatcher reuse after the release store may overwrite this
-        // record. Busy publishes nothing, so that path may safely restore the
-        // retained retry state afterward.
-        request.completion_status = status;
-        request.completion_pending = false;
-        request.terminal = true;
-        const auto inbox = request.inbox;
-        const auto token = request.token;
-        const auto result = inbox->push(token, status);
-        if (result == SharedIoTerminalInbox::PushResult::Busy) {
-            request.terminal = false;
-            request.completion_pending = true;
-        }
-        return result;
-    }
-
-    SharedIoTerminalInbox::PushResult replay(std::size_t index, SharedIoTerminalStatus status) {
-        Pending& old = previous.at(index);
-        Pending& request = old.accepted ? old : pending.at(index);
-        if (!request.accepted)
-            return SharedIoTerminalInbox::PushResult::Rejected;
-        return request.inbox->push(request.token, status);
-    }
-
-    SharedIoTerminalInbox::PushResult finish_held_stale_claim() {
-        if (!held_claim || !held_inbox)
-            return SharedIoTerminalInbox::PushResult::Rejected;
-        const auto result = held_inbox->finish_claim(*held_claim, held_stale_token,
-                                                     SharedIoTerminalStatus::RetiredFailed);
-        held_claim.reset();
-        held_inbox.reset();
-        return result;
-    }
-
-    bool hold_stale_completion_claim(std::size_t index) {
-        Pending& request = pending.at(index);
-        if (!request.accepted || held_claim || held_inbox)
-            return false;
-        auto attempt = request.inbox->try_claim(request.token.slot);
-        if (!attempt.claim)
-            return false;
-        held_claim = *attempt.claim;
-        held_inbox = request.inbox;
-        held_stale_token = request.token;
-        if (held_stale_token.slot_generation > 0)
-            --held_stale_token.slot_generation;
-        return true;
-    }
-
-    std::uint32_t refuse_creation_at = std::numeric_limits<std::uint32_t>::max();
-    std::uint32_t fail_after_partial_at = std::numeric_limits<std::uint32_t>::max();
-    std::uint32_t fail_output_import_at = std::numeric_limits<std::uint32_t>::max();
-    std::uint32_t malformed_success_at = std::numeric_limits<std::uint32_t>::max();
-    bool reject_submissions = false;
-    StorageKind storage_kind = StorageKind::ImportedHostPointer;
-    bool false_import_claim = false;
-    bool hold_stale_claim_on_reject = false;
-    bool held_claim_failed = false;
-    bool complete_on_poll = false;
-    SharedIoTerminalStatus completion_on_poll = SharedIoTerminalStatus::RetiredSuccess;
-    std::uint32_t create_calls = 0;
-    std::uint32_t destroy_calls = 0;
-    std::uint32_t retire_calls = 0;
-    std::uint32_t live_allocations = 0;
-    std::uint32_t poll_calls = 0;
-    std::uint32_t poll_busy_publications = 0;
-    std::uint32_t drain_calls = 0;
-    std::uint32_t partial_allocations_created = 0;
-    std::uint32_t partial_allocations_freed = 0;
-    std::uint32_t disposals_observed = 0;
-    std::uint32_t host_frees = 0;
-    bool drain_push_failed = false;
-    bool force_drain_failure = false;
-    bool destroy_before_dispose = false;
-    std::vector<Pending> pending;
-    std::vector<Pending> previous;
-    std::vector<SlotResources*> retiring;
-    std::optional<SharedIoTerminalInbox::CompletionClaim> held_claim;
-    std::shared_ptr<SharedIoTerminalInbox> held_inbox;
-    SlotToken held_stale_token;
-};
+using pulp::test::FakeSharedIoProvider;
 
 constexpr SharedIoArena::Config arena_config(std::uint32_t slots = 2) {
     return {.slots = slots, .input_bytes_per_slot = 64, .output_bytes_per_slot = 64};
@@ -1124,7 +805,7 @@ TEST_CASE("shared IO arena preserves imported ownership across a failed drain",
 TEST_CASE("shared IO arena submission rejection returns reserved terminal credit",
           "[gpu_audio][shared_io][arena][admission]") {
     FakeSharedIoProvider provider;
-    provider.reject_submissions = true;
+    provider.accept_submissions = false;
     SharedIoArena arena;
     REQUIRE(arena.prepare(provider, arena_config(1)));
     const auto lease = arena.grant_write(500);
@@ -1138,7 +819,7 @@ TEST_CASE("shared IO arena submission rejection returns reserved terminal credit
 TEST_CASE("shared IO arena retains rejection rollback across a stale completion claim",
           "[gpu_audio][shared_io][arena][admission][concurrency]") {
     FakeSharedIoProvider provider;
-    provider.reject_submissions = true;
+    provider.accept_submissions = false;
     provider.hold_stale_claim_on_reject = true;
     SharedIoArena arena;
     REQUIRE(arena.prepare(provider, arena_config(1)));
@@ -1459,14 +1140,14 @@ TEST_CASE("prepared Pulp bookkeeping and fake shared IO provider allocate nothin
             ok = arena.discard(expired->token) && ok;
         }
 
-        provider.reject_submissions = true;
+        provider.accept_submissions = false;
         const auto rejected = arena.grant_write(902);
         ok = rejected.has_value() && ok;
         if (rejected) {
             ok = arena.publish_written({rejected->token}) && ok;
             ok = !arena.submit(rejected->token) && ok;
         }
-        provider.reject_submissions = false;
+        provider.accept_submissions = true;
 
         arena.begin_retirement();
         ok = arena.quiescent() && arena.reset_when_quiescent() && ok;

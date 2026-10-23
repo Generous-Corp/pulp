@@ -99,6 +99,128 @@ function requestedFont(snapshot, styleNames, layoutIndex) {
   };
 }
 
+/// The primary font's line metrics as Blink resolved them for an element.
+///
+/// A text fragment's box is the content area Blink built from the primary
+/// font's ascent and descent, and its baseline sits exactly `ascent` below
+/// the box top. Those metrics are not derivable from the font file alone: Blink
+/// rounds them, and on some platforms adjusts them per face before rounding.
+/// Canvas `fontBoundingBoxAscent` / `fontBoundingBoxDescent` report the same
+/// primary-font metrics for the same font request, and asking for them does
+/// not touch the document, so the captured layout cannot be perturbed.
+///
+/// Runs in an isolated world so page script cannot shadow the canvas or style
+/// APIs it relies on. Any request the canvas font cannot express exactly
+/// answers null, and a consumer then falls back to its own metrics.
+export const LINE_METRICS_FUNCTION = `function(pseudo) {
+  if (!(this instanceof Element)) return null;
+  const s = getComputedStyle(this, pseudo || null);
+  if (s.fontSizeAdjust && s.fontSizeAdjust !== 'none') return null;
+  const stretches = {
+    '50%': 'ultra-condensed', '62.5%': 'extra-condensed',
+    '75%': 'condensed', '87.5%': 'semi-condensed', '100%': 'normal',
+    '112.5%': 'semi-expanded', '125%': 'expanded',
+    '150%': 'extra-expanded', '200%': 'ultra-expanded',
+  };
+  const stretch = stretches[s.fontStretch];
+  if (!stretch) return null;
+  const canvas = new OffscreenCanvas(1, 1);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const request = s.fontStyle + ' ' + s.fontWeight + ' ' + s.fontSize + ' ' +
+                  s.fontFamily;
+  // An unparseable request leaves the previous font in place, which would
+  // report that font's metrics as this element's. Comparing the result with
+  // the font it replaced cannot tell a rejection from a request that
+  // serializes to the same string (\`normal 400 10px sans-serif\` is the
+  // canvas default), so the request is applied over two different fonts: an
+  // accepted request reads back the same either way, a rejected one reads back
+  // whichever font was already there.
+  ctx.font = request;
+  const overDefault = ctx.font;
+  ctx.font = '13px serif';
+  ctx.font = request;
+  if (ctx.font !== overDefault) return null;
+  ctx.fontStretch = stretch;
+  const m = ctx.measureText('H');
+  const ascent = m.fontBoundingBoxAscent;
+  const descent = m.fontBoundingBoxDescent;
+  if (!Number.isFinite(ascent) || !Number.isFinite(descent)) return null;
+  return { ascent, descent };
+}`;
+
+/// Where to ask for a run's computed font: the owning element itself, or, for
+/// generated content (::before, ::after, ::marker), the element that hosts the
+/// pseudo-element, asked for that pseudo-element's style. Null when the owner
+/// cannot be addressed that way.
+function metricsTarget(snapshot, candidate) {
+  const document = snapshot.documents?.[0];
+  const nodes = document?.nodes ?? {};
+  const strings = snapshot.strings ?? [];
+  const pseudo = nodes.pseudoType;
+  const at = (pseudo?.index ?? []).indexOf(candidate.owner_node_index);
+  if (at < 0) {
+    return { backend: candidate.backend_node_id, pseudo: "" };
+  }
+  const name = strings[pseudo.value?.[at] ?? -1] ?? "";
+  if (!["before", "after", "marker"].includes(name)) return null;
+  const host = (nodes.parentIndex ?? [])[candidate.owner_node_index] ?? -1;
+  const backend = (nodes.backendNodeId ?? [])[host];
+  if (typeof backend !== "number") return null;
+  return { backend, pseudo: `::${name}` };
+}
+
+function metricsKey(target) {
+  return `${target.backend}|${target.pseudo}`;
+}
+
+async function measureLineMetrics(cdp, targets) {
+  const metrics = new Map();
+  if (targets.length === 0) return metrics;
+  let contextId;
+  try {
+    const tree = await cdp.call("Page.getFrameTree");
+    const frameId = tree.frameTree?.frame?.id;
+    if (!frameId) return metrics;
+    const world = await cdp.call("Page.createIsolatedWorld", {
+      frameId, worldName: "pulp-line-metrics",
+    });
+    contextId = world.executionContextId;
+  } catch {
+    return metrics;
+  }
+  for (const target of targets) {
+    let objectId;
+    try {
+      const resolved = await cdp.call("DOM.resolveNode", {
+        backendNodeId: target.backend, executionContextId: contextId,
+      });
+      objectId = resolved.object?.objectId;
+      if (!objectId) continue;
+      const measured = await cdp.call("Runtime.callFunctionOn", {
+        objectId,
+        functionDeclaration: LINE_METRICS_FUNCTION,
+        arguments: [{ value: target.pseudo }],
+        returnByValue: true,
+      });
+      const value = measured.result?.value;
+      if (value && Number.isFinite(value.ascent) &&
+          Number.isFinite(value.descent)) {
+        metrics.set(metricsKey(target),
+                    { ascent: value.ascent, descent: value.descent });
+      }
+    } catch {
+      // A node that cannot be resolved or measured answers nothing; its run
+      // records null rather than a guess.
+    } finally {
+      if (objectId) {
+        await cdp.call("Runtime.releaseObject", { objectId }).catch(() => {});
+      }
+    }
+  }
+  return metrics;
+}
+
 function normalizeFonts(fonts) {
   return (fonts ?? []).map((font) => ({
     family_name: font.familyName ?? "",
@@ -170,10 +292,21 @@ export async function evaluatePlatformFonts(cdp, snapshot, styleNames) {
     }
   }
 
+  const targets = new Map();
+  const targetOf = new Map();
+  for (const candidate of interrogated) {
+    const target = metricsTarget(snapshot, candidate);
+    if (!target) continue;
+    targets.set(metricsKey(target), target);
+    targetOf.set(candidate.layout_index, metricsKey(target));
+  }
+  const lineMetrics = await measureLineMetrics(cdp, [...targets.values()]);
+
   const runs = interrogated.map((candidate) => ({
     ...candidate,
     requested: requestedFont(snapshot, styleNames, candidate.layout_index),
     resolved: fontsByBackend.get(candidate.backend_node_id) ?? null,
+    line_metrics: lineMetrics.get(targetOf.get(candidate.layout_index)) ?? null,
   }));
 
   const resolvedRuns = runs.filter((run) => run.resolved !== null);

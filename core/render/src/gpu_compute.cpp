@@ -20,6 +20,7 @@
 #endif
 
 #include "gpu_compute_pool.hpp"
+#include "wavenet_layer_wgsl.hpp"
 
 #include <algorithm>
 #include <array>
@@ -538,14 +539,14 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 
 // Every WaveNet pass also runs over a group of independent same-shape instances:
 // workgroup_id.y / global_invocation_id.y is the instance, and every buffer
-// holds one fixed-size slice per instance (weights: st.y floats; input/output:
+// holds one fixed-size slice per instance (weights: st[1] floats; input/output:
 // B; a ring: channels*(mask+1); a head sum: C*B; a head output: H*B). A plan
 // with one instance is simply a group of one. `st` is the per-block stream
-// state shared by the group: x = stream position, y = weight slice length.
+// state shared by the group: [0] = stream position, [1] = weight slice length.
 static constexpr const char* kWavenetRechannelShader = R"wgsl(
 // 1x1 rechannel (no bias): dst[t] = W * src[t]. Activations are column rings:
-// sample n of the stream lives in column (n & mask), where n = st.x + t and
-// st.x is the stream position of the block's first sample. The mono input is
+// sample n of the stream lives in column (n & mask), where n = st[0] + t and
+// st[0] is the stream position of the block's first sample. The mono input is
 // block-local (src_ring = 0, column t); a deeper array reads the previous
 // array's last activation ring (src_ring = 1).
 struct P { in_ch:u32, out_ch:u32, B:u32, w_off:u32, src_mask:u32, dst_mask:u32, src_ring:u32, p1:u32 };
@@ -553,19 +554,19 @@ struct P { in_ch:u32, out_ch:u32, B:u32, w_off:u32, src_mask:u32, dst_mask:u32, 
 @group(0) @binding(1) var<storage, read>       src : array<f32>;
 @group(0) @binding(2) var<storage, read_write> dst : array<f32>;
 @group(0) @binding(3) var<uniform>             p   : P;
-@group(0) @binding(4) var<uniform>             st  : vec4u;
+@group(0) @binding(4) var<storage, read>       st  : array<u32>;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid : vec3u) {
     let t = gid.x;
     if (t >= p.B) { return; }
     let inst = gid.y;
-    let n = st.x + t;
+    let n = st[0] + t;
     let src0 = select(inst * p.B, inst * p.in_ch * (p.src_mask + 1u), p.src_ring == 1u);
     let scol = src0 + select(t, n & p.src_mask, p.src_ring == 1u) * p.in_ch;
     let dcol = inst * p.out_ch * (p.dst_mask + 1u) + (n & p.dst_mask) * p.out_ch;
     for (var oc = 0u; oc < p.out_ch; oc = oc + 1u) {
         var acc = 0.0;
-        let wrow = inst * st.y + p.w_off + oc * p.in_ch;
+        let wrow = inst * st[1] + p.w_off + oc * p.in_ch;
         for (var ic = 0u; ic < p.in_ch; ic = ic + 1u) {
             acc = acc + wts[wrow + ic] * src[scol + ic];
         }
@@ -574,136 +575,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
-static constexpr const char* kWavenetLayerShader = R"wgsl(
-// One WaveNet layer: z = dilated_conv(in)[Z] + bias + input_mixin*cond (Z), then
-// a = (gated ? tanh(z[:C])*sigmoid(z[C:]) : tanh(z[:C])) (C); head += a;
-// out = in + (layer1x1_bias + layer1x1_W * a). condition_size is 1 (mono input).
-// head_init = 1 assigns the head sum instead of accumulating (first layer of the
-// first array), so the sum needs no per-block clear.
-//
-// Block-parallel dispatch: each workgroup handles S consecutive samples
-// (S = p.S, chosen by the host so S*Z fills the WG lanes; S = 1 when Z > 32),
-// and the host dispatches ceil(B/S) workgroups. Lane work items are
-// (sample, channel) pairs: in each phase a lane owns whole output channels of
-// one sample and walks that channel's K*C reduction in the SAME serial
-// arithmetic order as the scalar path, so every output element is bit-identical
-// whatever S is. Narrow models (C = 2..16) would otherwise leave most of the 64
-// lanes idle with one sample per workgroup. zbuf/abuf are workgroup shared
-// memory so the activation and 1x1 stages can read every channel the conv
-// stage produced for their sample; S*Z <= 128 and S*C <= 64 by construction.
-//
-// Weight layout (p.wt): with wt = 1 the conv and 1x1 weights are stored
-// output-channel-minor ([k][ic][oc] and [ic][oc]; the host transposes the blob
-// at prepare), so the lanes of one sample, which own consecutive output
-// channels, read consecutive weights on every step of their reductions. That
-// wins once a large group keeps the GPU throughput-bound. With wt = 0 they keep
-// the blob's [oc][ic][k] / [oc][ic] order, where each lane walks one contiguous
-// row; that is faster when few instances leave each dispatch latency-bound.
-// Either way every reduction runs in the same order, so results are identical.
-//
-// Activations are column rings (see the rechannel shader): ina holds this
-// layer's input with at least dil*(K-1) columns of history before the block,
-// outa receives the layer output at the block's columns. Ring sizes are powers
-// of two, so the u32 wrap of the stream position keeps column indices exact.
-struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, in_mask:u32,
-           conv_w:u32, conv_b:u32, mix_w:u32, l1_w:u32, l1_b:u32,
-           out_mask:u32, S:u32, head_init:u32, wt:u32 };
-@group(0) @binding(0) var<storage, read>       wts     : array<f32>;
-@group(0) @binding(1) var<storage, read>       ina     : array<f32>;  // C*(in_mask+1)
-@group(0) @binding(2) var<storage, read_write> outa    : array<f32>;  // C*(out_mask+1)
-@group(0) @binding(3) var<storage, read>       cond    : array<f32>;  // B mono input
-@group(0) @binding(4) var<storage, read_write> headacc : array<f32>;  // C*B
-@group(0) @binding(5) var<uniform>             p       : P;
-@group(0) @binding(6) var<uniform>             st      : vec4u;  // per-instance slices: see above
-
-const WG : u32 = 64u;                    // lanes per workgroup
-var<workgroup> zbuf : array<f32, 128>;   // S*Z <= 128 (Zmax = 2*Cmax at S = 1)
-var<workgroup> abuf : array<f32, 64>;    // S*C <= 64
-
-@compute @workgroup_size(WG)
-fn main(@builtin(workgroup_id) wid : vec3u,
-        @builtin(local_invocation_id) lid : vec3u) {
-    let S = p.S;
-    let t0 = wid.x * S;                  // first sample of this workgroup
-    let inst = wid.y;                    // instance within the group
-    // Uniform guard: workgroup_id is identical for every lane, so the whole
-    // workgroup returns together — barriers below stay in uniform control flow.
-    // Samples past B inside the last workgroup are masked per item instead.
-    if (t0 >= p.B) { return; }
-    let lane = lid.x;
-    let C = p.C; let K = p.K; let Z = p.Z;
-    let w0 = inst * st.y;                        // this instance's weight slice
-    let in0 = inst * C * (p.in_mask + 1u);       // this instance's input ring
-    let out0 = inst * C * (p.out_mask + 1u);     // this instance's output ring
-    let h0 = inst * C * p.B;                     // this instance's head sum
-    // Conv stage — dilated conv + input mixin, one item per (sample, output channel).
-    for (var i = lane; i < S * Z; i = i + WG) {
-        let s = i / Z;
-        let oc = i - s * Z;
-        let t = t0 + s;
-        if (t < p.B) {
-            let n = st.x + t;
-            var acc = wts[w0 + p.conv_b + oc];
-            for (var k = 0u; k < K; k = k + 1u) {
-                let back = p.dil * (K - 1u - k);   // valid: ring history >= max back
-                let base = in0 + ((n - back) & p.in_mask) * C;
-                // wt == 1: [k][ic][oc] (stride Z per ic); else [oc][ic][k] (stride K).
-                let wbase = w0 + p.conv_w + select(oc * C * K + k, k * C * Z + oc, p.wt == 1u);
-                let wstep = select(K, Z, p.wt == 1u);
-                for (var ic = 0u; ic < C; ic = ic + 1u) {
-                    acc = acc + wts[wbase + ic * wstep] * ina[base + ic];
-                }
-            }
-            acc = acc + wts[w0 + p.mix_w + oc] * cond[inst * p.B + t];   // input_mixin (condition_size == 1)
-            zbuf[i] = acc;
-        }
-    }
-    workgroupBarrier();
-    // Activation stage — one item per (sample, channel).
-    for (var i = lane; i < S * C; i = i + WG) {
-        let s = i / C;
-        let c = i - s * C;
-        if (t0 + s < p.B) {
-            // WGSL tanh may return NaN for large |x| (Metal does); float tanh is
-            // already exactly +-1 at |x| = 15, so the clamp changes no finite result.
-            // Keep the sigmoid a named reciprocal multiplied after tanh: written
-            // as a * (1 / x) the shader compiler contracts it differently and
-            // gated outputs move by a few ULP.
-            if (p.gated == 0u) {
-                abuf[i] = tanh(clamp(zbuf[s * Z + c], -15.0, 15.0));
-            } else {
-                let g = 1.0 / (1.0 + exp(-zbuf[s * Z + C + c]));
-                abuf[i] = tanh(clamp(zbuf[s * Z + c], -15.0, 15.0)) * g;
-            }
-        }
-    }
-    workgroupBarrier();
-    // Output stage — head accumulate + 1x1 output, one item per (sample, channel).
-    for (var i = lane; i < S * C; i = i + WG) {
-        let s = i / C;
-        let oc = i - s * C;
-        let t = t0 + s;
-        if (t < p.B) {
-            // The first layer of the first array starts the head sum; every other
-            // layer adds to it (a later array's sum arrives pre-seeded with the
-            // previous array's head output).
-            if (p.head_init == 1u) {
-                headacc[h0 + t * C + oc] = abuf[i];
-            } else {
-                headacc[h0 + t * C + oc] = headacc[h0 + t * C + oc] + abuf[i];
-            }
-            let n = st.x + t;
-            var r = wts[w0 + p.l1_b + oc];
-            let a0 = s * C;
-            for (var ic = 0u; ic < C; ic = ic + 1u) {
-                r = r + wts[w0 + p.l1_w + select(oc * C + ic, ic * C + oc, p.wt == 1u)] *
-                            abuf[a0 + ic];
-            }
-            outa[out0 + (n & p.out_mask) * C + oc] = ina[in0 + (n & p.in_mask) * C + oc] + r;
-        }
-    }
-}
-)wgsl";
+static constexpr const char* kWavenetLayerShader = detail::kWavenetLayerWgsl;
 
 static constexpr const char* kWavenetHeadShader = R"wgsl(
 // head rechannel (1x1, optional bias): headout[t] = (bias?) + W * headacc[t].
@@ -712,13 +584,13 @@ struct P { C:u32, H:u32, B:u32, hr_w:u32, hr_b:u32, head_bias:u32, p0:u32, p1:u3
 @group(0) @binding(1) var<storage, read>       headacc : array<f32>;  // C*B
 @group(0) @binding(2) var<storage, read_write> headout : array<f32>;  // H*B
 @group(0) @binding(3) var<uniform>             p       : P;
-@group(0) @binding(4) var<uniform>             st      : vec4u;
+@group(0) @binding(4) var<storage, read>       st      : array<u32>;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid : vec3u) {
     let t = gid.x;
     if (t >= p.B) { return; }
     let inst = gid.y;
-    let w0 = inst * st.y;
+    let w0 = inst * st[1];
     let ic0 = inst * p.C * p.B + t * p.C;
     let oc0 = inst * p.H * p.B + t * p.H;
     for (var oc = 0u; oc < p.H; oc = oc + 1u) {
@@ -741,13 +613,13 @@ struct P { B:u32, H:u32, p0:u32, p1:u32 };
 @group(0) @binding(1) var<storage, read_write> outp    : array<f32>;  // B
 @group(0) @binding(2) var<uniform>             p       : P;
 @group(0) @binding(3) var<storage, read>       wts     : array<f32>;
-@group(0) @binding(4) var<uniform>             st      : vec4u;
+@group(0) @binding(4) var<storage, read>       st      : array<u32>;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid : vec3u) {
     let t = gid.x;
     if (t >= p.B) { return; }
     let inst = gid.y;
-    let scale = wts[inst * st.y + st.y - 1u];
+    let scale = wts[inst * st[1] + st[1] - 1u];
     outp[inst * p.B + t] = headout[inst * p.H * p.B + t * p.H] * scale;
 }
 )wgsl";
@@ -3855,6 +3727,9 @@ private:
     // Groups at least this large store layer weights output-channel-minor (see
     // the layer shader); smaller plans keep the blob's row order.
     static constexpr uint32_t kWavenetTransposedWeightsMinGroup = 32;
+    // Largest `dilation*(K-1) + B` a WaveNet layer may carry; every history
+    // ring is then at most 2^20 columns (about 22 s at 48 kHz).
+    static constexpr uint64_t kWavenetMaxRingColumns = uint64_t{1} << 20;
     struct WavenetPlan {
         uint32_t B = 0;
         uint32_t count = 1;              // same-shape instances run together
@@ -3948,6 +3823,15 @@ private:
                 return false;
             if (a > 0 && arrays[a - 1].head_size != s.channels)
                 return false; // head chain
+            // Each layer keeps its history in a power-of-two ring of at least
+            // `dilation*(K-1) + B` columns. Bound that before anything is sized,
+            // in 64-bit arithmetic, so an untrusted model cannot wrap the ring
+            // math or request a multi-gigabyte buffer.
+            for (uint32_t l = 0; l < s.num_layers; ++l) {
+                const uint64_t reach = static_cast<uint64_t>(s.dilations[l]) * (s.kernel - 1u);
+                if (s.dilations[l] == 0 || reach + B > kWavenetMaxRingColumns)
+                    return false;
+            }
             const uint64_t Z = s.gated ? 2ull * s.channels : s.channels;
             need += static_cast<uint64_t>(s.channels) * s.input_size; // rechannel
             for (uint32_t l = 0; l < s.num_layers; ++l)
@@ -4005,18 +3889,38 @@ private:
 
         // Per-block stream position (sample index of the block's first sample),
         // read by every ring-indexed pass. Written by encode_wavenet().
-        plan.stream_u = make_uniform(16);
+        plan.stream_u =
+            create_storage_buffer(16, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
         if (!plan.stream_u)
             return false;
         plan.weight_stride = static_cast<uint32_t>(need);
         // A ring holds `history + B` columns, rounded up to a power of two so the
         // shader can wrap with a mask and the u32 stream position never skews it.
-        auto ring_columns = [B](uint32_t history) {
-            uint32_t r = 1;
+        auto ring_columns = [B](uint64_t history) {
+            uint64_t r = 1;
             while (r < history + B)
                 r <<= 1;
             return r;
         };
+        // Refuse, before allocating any ring, one this device cannot bind as a
+        // single storage buffer.
+        {
+            wgpu::Limits limits{};
+            if (device_.GetLimits(&limits) != wgpu::Status::Success)
+                return false;
+            for (uint32_t a = 0; a < num_arrays; ++a) {
+                const WavenetLayerArraySpec& s = arrays[a];
+                for (uint32_t l = 0; l <= s.num_layers; ++l) {
+                    const uint64_t history =
+                        l < s.num_layers ? static_cast<uint64_t>(s.dilations[l]) * (s.kernel - 1u)
+                                         : 0u;
+                    const uint64_t bytes =
+                        uint64_t{s.channels} * ring_columns(history) * 4u * count;
+                    if (bytes > limits.maxStorageBufferBindingSize || bytes > 0xffffffffull)
+                        return false;
+                }
+            }
+        }
 
         uint64_t woff = 0;
 
@@ -4037,8 +3941,9 @@ private:
             // last activation only feeds the next array's rechannel at the
             // current samples, so it carries no history.
             for (uint32_t l = 0; l <= s.num_layers; ++l) {
-                const uint32_t history = (l < s.num_layers) ? s.dilations[l] * (K - 1u) : 0u;
-                const uint32_t cols = ring_columns(history);
+                const uint64_t history =
+                    (l < s.num_layers) ? static_cast<uint64_t>(s.dilations[l]) * (K - 1u) : 0u;
+                const uint32_t cols = static_cast<uint32_t>(ring_columns(history));
                 const uint64_t bytes64 = static_cast<uint64_t>(C) * cols * 4u * count;
                 if (bytes64 > 0xffffffffull)
                     return false;

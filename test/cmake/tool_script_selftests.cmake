@@ -9,6 +9,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME audio-glitch-trace-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/audio/test_glitch_trace.py")
     set_tests_properties(audio-glitch-trace-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    # check_android_jni_exports.py: every Kotlin/Java native the Android app
+    # declares must be a dynamic export of libpulp.so. Over assembled ELF
+    # images: a dropped or hidden native fails and is named, each APK ABI is
+    # checked on its own, and finding no natives is an error, never a pass.
+    add_test(NAME android-jni-exports-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_android_jni_exports.py")
+    set_tests_properties(android-jni-exports-selftest PROPERTIES LABELS "tools;selftest;android" TIMEOUT 120)
     # catch_test_name_guard.py: CTest runs each Catch2 case as
     # `<binary> "<name>"`, and Catch2 reads that argument as a test spec. A
     # name starting with `~` is an exclusion, so its entry runs every OTHER
@@ -99,9 +106,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME import-validation-visual-residual-diagnostic-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_visual_residual_diagnostic.py")
     set_tests_properties(import-validation-visual-residual-diagnostic-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120 SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/import-validation")
+    add_test(NAME import-validation-importer-differential-registration-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_importer_differential_registration.py")
+    set_tests_properties(import-validation-importer-differential-registration-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     add_test(NAME import-validation-score-native-panel-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_score_native_panel.py")
     set_tests_properties(import-validation-score-native-panel-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME import-validation-text-raster-decomposition-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_text_raster_decomposition.py")
+    set_tests_properties(import-validation-text-raster-decomposition-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120 SKIP_RETURN_CODE 77)
     add_test(NAME import-validation-source-contract-schema-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_source_contract_schema.py")
     set_tests_properties(import-validation-source-contract-schema-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)

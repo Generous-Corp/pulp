@@ -425,6 +425,17 @@ do the same, or it will run a floor grant at default QoS and take CPU the host
 never agreed to give. A grant larger than the request, or one without a
 `lease_size_cores`, is released and treated as the original denial.
 
+### The browser-capture runtime file list is duplicated across both CLIs
+
+`tools/cli/upgrade_install.hpp` (`browser_capture_runtime_files`) and the Rust
+`experimental/pulp-rs/src/install_import_design.rs`
+(`BROWSER_CAPTURE_RUNTIME_FILES`) each pin the browser-capture modules an
+upgrade installs, and their tests compare against
+`tools/import-design/browser_capture/runtime_manifest.txt`. A module added to
+the manifest alone passes a source build and fails both upgrade tests; the
+release `common_cli_members` in `tools/scripts/release_product_matrix.json`
+needs it too. Update all four together.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source
