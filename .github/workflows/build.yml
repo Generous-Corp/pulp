@@ -2676,6 +2676,21 @@ jobs:
         shell: bash
         run: python3 tools/ci/a2t_headroom_annotation.py "$RUNNER_TEMP/a2t-scope-headroom.json"
 
+      # On a push to main, hand the same measurement to a2t-headroom-issue
+      # below, which keeps the one tracking issue. Only the Linux leg runs the
+      # full suite on a push, and only it uploads, so the artifact name is unique.
+      - name: Upload A2T scope-history headroom
+        if: >-
+          always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+          && runner.os == 'Linux' && steps.ctest.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: a2t-scope-headroom
+          path: ${{ runner.temp }}/a2t-scope-headroom.json
+          if-no-files-found: warn
+          retention-days: 7
+
       # SHADOW instruments for the merge group, one step (tools/ci/
       # merge_group_shadows.py): binary identity vs the PR head's receipt,
       # the graph's affected-test set, flake exoneration of a failed ctest,
@@ -3763,6 +3778,42 @@ jobs:
   # (tools/ci/ci_cause_notices.sh), on the release tools/shipyard.toml pins,
   # verified against tools/toolchain/shipyard.sha256. It is advisory: it never
   # gates the run, and none of its failures fail it.
+  # The A2T early warning as an issue, not only an annotation: on each push to
+  # main, open or update ONE tracking issue while the scope-history window is at
+  # or past the early-warning share, and close it once a re-pin brings it back
+  # under (tools/ci/a2t_headroom_annotation.py --reconcile-issue). Advisory: a
+  # missing measurement or an API failure warns and never fails the run.
+  a2t-headroom-issue:
+    name: a2t-headroom-issue (advisory)
+    needs: [build]
+    if: >-
+      always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/a2t_headroom_annotation.py
+          sparse-checkout-cone-mode: false
+      - name: Download A2T scope-history headroom
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: a2t-scope-headroom
+          path: ${{ runner.temp }}/a2t
+      - name: Reconcile the A2T headroom tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 tools/ci/a2t_headroom_annotation.py --reconcile-issue
+          --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/a2t/a2t-scope-headroom.json"
+
   ci-cause:
     name: ci-cause (advisory)
     needs: [build, macos, macos-merge-group, linux, windows]
