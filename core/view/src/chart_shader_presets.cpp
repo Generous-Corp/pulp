@@ -73,13 +73,13 @@ float3 pulpPresetNormal(PulpChart g, float slope) {
     float2 n = float2(g.tan.y, -g.tan.x);
     return normalize(float3(-slope * n, 1.0));
 }
-float pulpPresetLambert(float3 N) {
-    float3 L = pulpPresetLight();
-    return (0.35 + 0.65 * max(dot(N, L), 0.0)) / (0.35 + 0.65 * L.z);
+float pulpPresetLambert(float3 surfaceNormal) {
+    float3 lightDir = pulpPresetLight();
+    return (0.35 + 0.65 * max(dot(surfaceNormal, lightDir), 0.0)) / (0.35 + 0.65 * lightDir.z);
 }
-float pulpPresetSpecular(float3 N, float shininess) {
-    float3 H = normalize(pulpPresetLight() + float3(0.0, 0.0, 1.0));
-    return pow(max(dot(N, H), 0.0), shininess);
+float pulpPresetSpecular(float3 surfaceNormal, float shininess) {
+    float3 halfVector = normalize(pulpPresetLight() + float3(0.0, 0.0, 1.0));
+    return pow(max(dot(surfaceNormal, halfVector), 0.0), shininess);
 }
 half4 pulpPresetOut(float3 linearRgb, float alpha) {
     return half4(half3(pulpPresetEncode(linearRgb) * alpha), half(alpha));
@@ -187,12 +187,12 @@ half4 shade(PulpChart g) {
 std::string tube(const ChartShaderPresetOptions& o) {
     return profile_functions(o.profile) + R"(
 half4 shade(PulpChart g) {
-    float3 N = pulpPresetNormal(g, pulpPresetSlope(pulpPresetU(g)));
+    float3 surfaceNormal = pulpPresetNormal(g, pulpPresetSlope(pulpPresetU(g)));
     float3 base = pulpPresetLinear()" +
            rgb_literal(o.color) + R"();
-    float3 c = base * pulpPresetLambert(N) +
+    float3 c = base * pulpPresetLambert(surfaceNormal) +
                float3()" +
-           lit(0.45f * o.intensity) + R"( * pulpPresetSpecular(N, 48.0));
+           lit(0.45f * o.intensity) + R"( * pulpPresetSpecular(surfaceNormal, 48.0));
     return pulpPresetOut(c, )" +
            lit(o.color.a) + R"( * pulpPresetCoverage(g));
 }
@@ -205,13 +205,13 @@ std::string light_pipe(const ChartShaderPresetOptions& o) {
     return profile_functions(o.profile) + R"(
 half4 shade(PulpChart g) {
     float u = pulpPresetU(g);
-    float3 N = pulpPresetNormal(g, pulpPresetSlope(u));
+    float3 surfaceNormal = pulpPresetNormal(g, pulpPresetSlope(u));
     float3 core = pulpPresetLinear()" +
            rgb_literal(o.accent) + R"() *
                   ()" +
            lit(o.intensity) + R"( * (0.25 + 0.75 * pulpPresetHeight(u)));
     float3 c = core + float3()" +
-           lit(0.5f * o.intensity) + R"( * pulpPresetSpecular(N, 24.0));
+           lit(0.5f * o.intensity) + R"( * pulpPresetSpecular(surfaceNormal, 24.0));
     return pulpPresetOut(c, )" +
            lit(o.accent.a) + R"( * pulpPresetCoverage(g));
 }
