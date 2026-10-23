@@ -817,7 +817,11 @@ tools:
     away.
   caveat: Only the regions you hand it. Anything outside a declared rect is UNCHECKED, and the built-in
     defaults are hand-authored percent rects for one specific design (Spectr) — pointing it at another
-    design silently scores the wrong boxes. Each region still scores by the position-blind metric above.
+    design silently scores the wrong boxes. The score itself is the position-blind metric above. The
+    ink-coverage gates catch reference ink the candidate left empty (a missing control shows as one
+    uncovered patch at its own size), but only in regions that declare coverage_floor or max_uncovered_px,
+    only for presence (wrong colour and extra ink pass), and in pixels of the --size frame, so changing
+    --size means retuning them.
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
