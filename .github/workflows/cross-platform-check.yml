@@ -341,23 +341,44 @@ jobs:
         shell: bash
         run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
 
-      - name: Install ccache (Windows)
-        continue-on-error: true
-        run: choco install ccache --no-progress -y
+      # Ninja + cl from the developer environment, and ccache when the runner
+      # has it (see tools/ci/windows_build_env.ps1).
+      - name: Prepare the Windows build environment (Ninja, cl, ccache)
+        shell: pwsh
+        run: tools/ci/windows_build_env.ps1
+
+      - name: Configure ccache remote storage
+        shell: bash
+        run: python3 tools/ci/ccache_remote_storage.py --github-env "$GITHUB_ENV"
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
         shell: bash
 
+      # A runner that keeps a persistent Skia cache (a baked golden) names its
+      # root in PULP_SKIA_CACHE_ROOT; the fetcher validates the generation's
+      # receipt there and downloads only on a miss. Unset, the archive is
+      # fetched into the checkout as before.
       - name: Fetch pinned Skia/Dawn (Windows software-GPU proof)
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/scripts/fetch_skia_for_release.py windows-x64 \
-            --dest external/skia-build \
-            --cache-lock-timeout 300
-          test -s external/skia-build/build/win-gpu/lib/Release/skia.lib
-          test -s external/skia-build/build/win-gpu/lib/Release/dawn_combined.lib
+          if [ -n "${PULP_SKIA_CACHE_ROOT:-}" ]; then
+            skia_dir="$(python3 tools/scripts/fetch_skia_for_release.py windows-x64 \
+              --cache-root "$PULP_SKIA_CACHE_ROOT" --print-cache-dest)"
+            skia_dir="${skia_dir//\\//}"
+            python3 tools/scripts/fetch_skia_for_release.py windows-x64 \
+              --cache-root "$PULP_SKIA_CACHE_ROOT" \
+              --cache-lock-timeout 300
+          else
+            skia_dir="$GITHUB_WORKSPACE/external/skia-build"
+            python3 tools/scripts/fetch_skia_for_release.py windows-x64 \
+              --dest external/skia-build \
+              --cache-lock-timeout 300
+          fi
+          test -s "$skia_dir/build/win-gpu/lib/Release/skia.lib"
+          test -s "$skia_dir/build/win-gpu/lib/Release/dawn_combined.lib"
+          echo "PULP_WINDOWS_SKIA_DIR=$skia_dir" >> "$GITHUB_ENV"
 
       - name: Configure
         shell: bash
@@ -369,19 +390,38 @@ jobs:
           # cancelled build instead of the cross-platform signal it exists to
           # provide. Example compile coverage stays with nightly-full-build
           # (macOS, examples ON) and examples-validation.
-          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
+          cmake -S . -B "$PULP_BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl \
             -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=ON \
-            -DPULP_ENABLE_SCENE3D=ON -DSKIA_DIR="$GITHUB_WORKSPACE/external/skia-build"
+            -DPULP_ENABLE_SCENE3D=ON -DSKIA_DIR="$PULP_WINDOWS_SKIA_DIR"
 
       - name: Build
         shell: bash
         id: build
-        # The wrapper is invoked from Git Bash on the hosted Windows runner;
-        # it preserves the MSBuild configuration while owning parallelism and
-        # the build-directory lock.
+        # The wrapper is invoked from Git Bash on the Windows runner; it owns
+        # parallelism and the build-directory lock. `--config Release` is
+        # ignored by the single-configuration Ninja build.
         run: |
           set -euo pipefail
+          # Snapshot the ccache counters so "Ccache stats" can print this job's
+          # own calls (tools/ci/ccache_job_delta.py).
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --print-stats > "$RUNNER_TEMP/ccache-before.txt" || true
+          fi
           tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release 2>&1 | tee build-windows.log
+
+      - name: Ccache stats
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --print-stats > "$RUNNER_TEMP/ccache-after.txt" || true
+            python3 tools/ci/ccache_job_delta.py \
+              "$RUNNER_TEMP/ccache-before.txt" "$RUNNER_TEMP/ccache-after.txt" || true
+          else
+            echo "ccache not available; skipping stats"
+          fi
 
       - name: Test (UTF-8 code page wrapped)
         # Runs after a build that finished with errors, not only after a clean

@@ -846,6 +846,95 @@ run green on the new one; rolling back to it is the recovery. The evaluation
 license expires 180 days after installation (`slmgr /dlv` shows the time left),
 so install a fresh evaluation into a new golden before then.
 
+#### Windows build caches: what the workflows read, and the operator runbook
+
+Both Windows lanes keep nothing between jobs (the macpro slot rolls every disk
+back; the m5s ARM64 lane discards its overlay), so a cache only helps when it is
+baked into the golden or served by the host. The workflows already read the
+three hooks below; each is inert until a runner sets it:
+
+| Variable (runner job environment) | Read by | Unset |
+|---|---|---|
+| `PULP_SKIA_CACHE_ROOT` | `build.yml` configure (`PulpSkiaCache.cmake`) and the `cross-platform-check.yml` Windows Skia step (`fetch_skia_for_release.py --cache-root`) | `build.yml` uses `~/.cache/pulp/skia`; cross-platform-check fetches into `external/skia-build` as before |
+| `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` | `setup.sh` (`fetchcontent_cache_root`) | `%LOCALAPPDATA%\Pulp\fetchcontent-src` |
+| `PULP_CCACHE_REMOTE_STORAGE` | `tools/ci/ccache_remote_storage.py`, which sets `CCACHE_REMOTE_STORAGE` | nothing is written; ccache, when present, uses only its job-local cache |
+
+Both Windows jobs build with Ninja and `cl` from the developer environment
+(`tools/ci/windows_build_env.ps1`), because the Visual Studio generator ignores
+the compiler launcher: under it ccache counted `cacheable 0`, against 2394 for
+the same build under Ninja. The script uses a `ccache` already on `PATH`,
+installs one with `choco` when `choco` exists, and otherwise builds without a
+compiler cache and says so (the macpro golden has no `choco`).
+
+`ccache_remote_storage.py` gives write access only to code already on `main`:
+`push` and `schedule` on `refs/heads/main`, `workflow_dispatch` on
+`refs/heads/main`, and `merge_group`. Every other job gets the same URL with
+ccache's `|read-only` attribute. That attribute is honored by ccache, not
+enforced by the server, so it only separates honest jobs. Today the local
+Windows lanes run only operator dispatches. If pull-request code is ever routed
+to them, give PR jobs a separate pool and a storage endpoint they cannot write,
+as the Linux `pulp-trusted-*` and `pulp-pr-safe-*` pools are separated.
+
+**Operator runbook.** Apply this when the fleet freeze lifts. None of it is
+applied yet, and every step is a host or golden change.
+
+1. **Bake the Skia/Dawn generation and the source prime into the x64 golden.**
+   Follow "Refreshing the golden" above. While the VM is booted from the current
+   golden, in the guest as `ci`:
+
+   ```powershell
+   git clone --depth 1 https://github.com/Generous-Corp/pulp.git C:\pulp-bake
+   cd C:\pulp-bake
+   $env:PULP_SHARED_FETCHCONTENT_SOURCE_DIR = 'C:\pulp-cache\fetchcontent-src'
+   bash ./setup.sh --ci --deps-only
+   python tools/scripts/fetch_skia_for_release.py windows-x64 --cache-root C:/pulp-cache/skia
+   python tools/scripts/fetch_skia_for_release.py windows-x64 --cache-root C:/pulp-cache/skia --validate-only
+   ```
+
+   Then add these lines to `B:\actions-runner\.env`. The runner exports its
+   `.env` to every job.
+
+   ```
+   PULP_SKIA_CACHE_ROOT=C:/pulp-cache/skia
+   PULP_SHARED_FETCHCONTENT_SOURCE_DIR=C:/pulp-cache/fetchcontent-src
+   ```
+
+   Remove `C:\pulp-bake` afterwards. Install ccache in the guest too (the portable release zip from
+   ccache's GitHub releases, unpacked into a directory on the machine `PATH`).
+   Check thin-pool room with `macpro-governor.sh status` first: the source prime
+   is about 2.2 GB and the Skia generation about 0.4 GB. Snapshot under a new
+   dated name and switch `PULP_WINDOWS_GOLDEN_SNAPSHOT`, as in "Refreshing the
+   golden".
+
+   Because the caches live on a snapshot disk, a job can read them but anything
+   it writes there is rolled back. A pin bump therefore costs a fetch on every
+   job until the next bake, never a stale build: the Skia generation is keyed by
+   the asset sha256 and `setup.sh` re-fetches a source whose ref changed.
+
+2. **Serve a shared ccache from the lane host.** On macpro, run an HTTP server
+   that supports ccache's `http` remote storage (GET, PUT and HEAD; nginx with
+   `dav_methods PUT; create_full_put_path on;` is enough). Root it on host
+   storage outside `local-lvm` snapshots, listen only on the address the slot's
+   VM reaches (pin the VM's DHCP lease), and prune it on a timer, since the
+   server does not evict. Then add `PULP_CCACHE_REMOTE_STORAGE=http://<host
+   address>:<port>/pulp-windows-x64` to `B:\actions-runner\.env` in the golden.
+   Use one path per architecture and toolset.
+
+3. **The m5s ARM64 lane** needs the same golden steps on
+   `.shipyard/vm-image.windows.toml`'s image (`vcvarsarm64.bat` is selected
+   automatically), plus a reviewed change to that manifest's `[cache] mode =
+   "guest-local"` before any shared storage is attached. It also needs its
+   `qemu-runner-windows` LaunchAgent reinstalled: it is not running today.
+
+4. **Prove it.** Use at most three `cross-platform-check.yml` dispatches with
+   `windows_only=true` and the macpro selector (no macOS gate VM is taken):
+   - Skia: the log shows `OK: immutable Skia cache generation ready at
+     C:/pulp-cache/skia/...` and no `Downloading ->`.
+   - Sources: there are no `Priming shared ... source cache` lines.
+   - ccache: run the same commit twice, cold then warm. The second shows
+     `ccache remote storage: read-write` and a hit rate near the cacheable
+     count. The Build step needs a compiling `main`.
+
 ## Windows runs nightly, not per merge
 
 Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no

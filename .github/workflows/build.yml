@@ -1797,10 +1797,21 @@ jobs:
           echo "::error::brew install ccache failed after 3 attempts"
           exit 1
 
-      - name: Install ccache (Windows)
+      # Ninja + cl from the developer environment, and ccache when the runner
+      # has it: the Visual Studio generator ignores the compiler launcher, so
+      # under it ccache saw no compiles ("ccache per-job: cacheable 0").
+      - name: Prepare the Windows build environment (Ninja, cl, ccache)
         if: runner.os == 'Windows'
-        continue-on-error: true
-        run: choco install ccache --no-progress -y
+        shell: pwsh
+        run: tools/ci/windows_build_env.ps1
+
+      # A self-hosted Windows VM keeps nothing between jobs, so a host that
+      # serves a shared ccache names it in PULP_CCACHE_REMOTE_STORAGE. Unset,
+      # this writes nothing; set, only code already on main may store objects.
+      - name: Configure ccache remote storage (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python3 tools/ci/ccache_remote_storage.py --github-env "$GITHUB_ENV"
 
       # ── Caches (#420) ──────────────────────────────────────────────────
       # The local macOS runner keeps these paths on disk between jobs.
@@ -2206,8 +2217,9 @@ jobs:
           set -euo pipefail
           # macOS builds with Ninja — it schedules parallelism more
           # precisely and is meaningfully faster on the warm/incremental
-          # builds that are the self-hosted M1's common case. Linux and
-          # Windows keep their default generator. Self-hosted runners
+          # builds that are the self-hosted M1's common case. Windows uses
+          # Ninja with cl so ccache sees its compiles; Linux keeps its
+          # default generator. Self-hosted runners
           # reuse warm build dirs (clean: false), and CMake refuses to
           # reconfigure a dir created with a different generator, so the
           # build dir is recreated when its cached generator no longer
@@ -2242,6 +2254,10 @@ jobs:
             # root short so nested wgpu prebuilt-populate targets configure
             # reliably on GitHub-hosted Windows runners.
             cmake_extra=(-DFETCHCONTENT_BASE_DIR="$PWD/fc")
+            # Ninja with cl from the developer environment the "Prepare the
+            # Windows build environment" step entered.
+            gen=(-G Ninja)
+            cmake_extra+=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl)
           fi
           # Every event that reaches this job publishes the required `macos`
           # context, so every event must configure the same way. Turning the GPU

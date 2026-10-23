@@ -945,6 +945,21 @@ release name, which is why an identical `stable` is selected with
 sha and branch flag 1 only) and never fails the checkout. Do not widen it to a
 parent directory or add `trusted_config_paths` roots (contract row 28).
 
+## Local Windows lanes keep nothing between jobs
+
+The macpro x64 slot rolls every disk back to its golden before and after each
+job, and the m5s ARM64 lane discards its overlay, so `actions/cache` and any
+"warm build dir" idea do nothing there. Caches reach a local Windows job only
+through the runner's job environment: `PULP_SKIA_CACHE_ROOT` and
+`PULP_SHARED_FETCHCONTENT_SOURCE_DIR` (pointing into the golden), and
+`PULP_CCACHE_REMOTE_STORAGE` (a host-served ccache;
+`tools/ci/ccache_remote_storage.py` makes non-main jobs read-only). The jobs
+build with Ninja and `cl` (`tools/ci/windows_build_env.ps1`), because the Visual
+Studio generator ignores the ccache launcher. If a Windows job's `ccache per-job`
+line reads `cacheable 0`, check for `-- Building for: Visual Studio` in its
+configure log before checking the cache. The bake and server steps are in
+`docs/guides/local-ci.md`, "Windows build caches".
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both
