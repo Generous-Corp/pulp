@@ -6891,6 +6891,23 @@ stroke IS there. Both consumers already understand the literal string `none`
 clear), so emit it. Found by looking at the render; no IR-level assertion could
 have caught it.
 
+**Stroke style reaches the IR from AUTHORED declarations, so a stylesheet-set
+cap is still invisible.** `stroke-linecap`, `stroke-linejoin`,
+`stroke-miterlimit` and `stroke-dashoffset` are not in the captured property
+list, so `svg_shape_lowering.cpp` resolves them from inline `style` and
+presentation attributes up the ancestor chain (Lucide declares them once on the
+root `<svg>`, so reading only the shape gets every Lucide icon wrong). That
+covers the attribute idiom icon sets use; a `.icon path { stroke-linecap:
+round }` rule stays butt until the property is collected, after which the
+computed value wins automatically (`has_property`). Two traps when consuming
+the attributes: the canvas miter limit defaults to 10 where SVG's is 4, which
+is why `svg_stroke_miterlimit` is always written under a miter join; and a
+shape's own `opacity` is already folded into `svg_fill`/`svg_stroke` alpha
+(multiplied into an `rgba()` alpha, never replacing it), so applying it again
+in paint double-dims the icon. A shape with BOTH paints and an opacity refuses
+as `svg-shape-opacity`, because one layer composite is not two per-paint
+alphas where the stroke overlaps the fill.
+
 **Shapes share ONE box, and it is the `<svg>`'s.** The shapes of one icon share
 one user-coordinate space (the root `viewBox`), so every vector node is placed
 at the `<svg>` element's own box and carries the same viewBox. Giving each
