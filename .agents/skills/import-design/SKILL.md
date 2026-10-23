@@ -4657,6 +4657,17 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   horizons (64 frames); on a loaded gate VM those frames stretch to several
   hundred ms each, and the repeat alone ran the capture past its deadline in the
   same-frame-capture phase. A new hidden-paint plate goes through that helper.
+- **Only a horizon's decisive frames carry the caller's encoding.** The verdict
+  and the shipped bytes depend on the last `STABLE_RUN_FRAMES` (3) of
+  `SCREENSHOT_HORIZON_FRAMES` (32) frames alone, so the 29 before them are
+  taken as quality-1 JPEG with the caller's clip, `captureBeyondViewport` and
+  `fromSurface` untouched; they still wait for a fresh presentation each. Keep
+  the stable run equal to the decisive frame count, or a presentation frame
+  could extend the run that decides. A capture whose motion receipt lists an
+  animated image (`volatile_sources`) takes every frame in the caller's
+  encoding (`horizonPresentationEncoding`), because that image runs on the
+  decoder's wall clock and a faster horizon would move when the decisive
+  frames land; `provenance.motion.horizon_presentation_format` records which.
 - **Integration deadlines come from `capture_integration_support.mjs`.** Every
   capture in the `*.integration.test.mjs` files runs under
   `CAPTURE_DEADLINE_MS` (30 s), and each case's node:test timeout is

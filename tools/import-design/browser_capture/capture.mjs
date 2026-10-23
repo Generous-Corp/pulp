@@ -34,6 +34,7 @@ import {
   disableMotion,
   freezeAndMeasureDocumentExtent,
   freezeMotion,
+  horizonPresentationEncoding,
   installDynamicWorkTracker,
   MAX_LOGICAL_CAPTURE_DIMENSION,
   measureClippedControls,
@@ -608,7 +609,8 @@ async function verifyCanvasRasterSignatures(
   }
 }
 
-async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
+async function captureCanvasAssets(
+  cdp, snapshot, screenshotOptions, presentationEncoding) {
   const canvases = capturedCanvasNodes(snapshot);
 
   const assets = [];
@@ -717,7 +719,7 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
       });
       const bytes = await captureStableScreenshot(cdp, {
         ...screenshotOptions,
-      }, 6, 16, 2);
+      }, 6, 16, 2, presentationEncoding);
       if (!bytes) throw new Error(
         `canvas backend node ${backendNodeId} did not present a stable isolated frame`);
       const dimensions = pngDimensions(bytes);
@@ -1808,6 +1810,10 @@ async function runCapture(options) {
     // the motion the stylesheet and scheduler stubs above cannot stop. The
     // page-settle passes above already settled what existed at load.
     const motion = await freezeMotion(cdp);
+    const presentationEncoding = horizonPresentationEncoding(motion);
+    motion.horizon_presentation_format = presentationEncoding?.format ?? null;
+    const stableScreenshot = (options) => captureStableScreenshot(cdp, options,
+      undefined, undefined, undefined, presentationEncoding);
     const materializedDocument = await captureMaterializedDocument(cdp);
     // Pause page virtual time before collecting any sidecar. Canvas/WebGL
     // requestAnimationFrame callbacks and timers must not advance while DOM,
@@ -2024,14 +2030,14 @@ async function runCapture(options) {
     // complete bounded horizon, then require a byte-identical trailing run;
     // an early A,A plateau must not hide a later B,B presentation.
     let screenshotBytes =
-      await captureStableScreenshot(cdp, screenshotOptions);
+      await stableScreenshot(screenshotOptions);
     // A compositor can miss the required identical tail at the very end of a
     // bounded horizon even though its next horizon is completely still. Give
     // that observable proof one fresh bounded attempt; keeping the common path
     // at 32 frames avoids spending the whole capture deadline on pages that
     // were already stable.
     if (!screenshotBytes)
-      screenshotBytes = await captureStableScreenshot(cdp, screenshotOptions);
+      screenshotBytes = await stableScreenshot(screenshotOptions);
     if (!screenshotBytes) {
       const error = new Error(
         "the visual frame did not stabilize while capture evidence was collected");
@@ -2070,7 +2076,8 @@ async function runCapture(options) {
     // assets with the accepted stable browser pixels, not with the earlier
     // pre-presentation backing stores; otherwise the chrome plate and canvas
     // layers are individually valid but can never reconstruct browser.png.
-    canvasAssets = await captureCanvasAssets(cdp, snapshot, screenshotOptions);
+    canvasAssets = await captureCanvasAssets(
+      cdp, snapshot, screenshotOptions, presentationEncoding);
     if (materializedDocument) {
       materializedDocument.canvas_bindings = canvasAssets.map(
         (asset, index) => ({
@@ -2113,7 +2120,7 @@ async function runCapture(options) {
     let staticScreenshotBytes = screenshotBytes;
     if (hiddenIndicatorCount > 0) {
       staticScreenshotBytes =
-        await captureStableScreenshot(cdp, screenshotOptions);
+        await stableScreenshot(screenshotOptions);
       await cdp.call("Runtime.evaluate", {
         expression: `(() => {
           for (const entry of (window.__pulpCaptureIndicatorStyles || [])) {
@@ -2156,7 +2163,8 @@ async function runCapture(options) {
       returnByValue: true,
     });
     const chromeBytes = await captureStableFrameWithHiddenPaint(
-      cdp, screenshotOptions, screenshotBytes, hiddenCanvases.result?.value);
+      cdp, screenshotOptions, screenshotBytes, hiddenCanvases.result?.value,
+      presentationEncoding);
     await cdp.call("Runtime.evaluate", {
       expression: `(() => {
         for (const item of globalThis.__pulpCanvasVisibilityRestore || []) {

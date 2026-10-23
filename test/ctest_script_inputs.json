@@ -7659,6 +7659,7 @@
     "tools/import-design/browser_capture/capture.integration.test.mjs",
     "tools/import-design/browser_capture/capture_frame_fitting.integration.test.mjs",
     "tools/import-design/browser_capture/capture_geometry.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_horizon.integration.test.mjs",
     "tools/import-design/browser_capture/capture_integration_support.mjs",
     "tools/import-design/browser_capture/capture_interaction_guards.integration.test.mjs",
     "tools/import-design/browser_capture/capture_interactions.integration.test.mjs",
