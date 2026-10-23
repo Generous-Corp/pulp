@@ -79,6 +79,10 @@ enum class GpuAudioProgramError : std::uint8_t {
     // validate_gpu_audio_capability). Appended like the values above.
     InvalidEnumValue = 22,
     CapabilityInvalid = 23,
+    // A staged or shared-memory descriptor naming the CPU provider, which
+    // validate_gpu_audio_capability() rejects as CpuProviderOnGpuPath, so
+    // such a program could never bind. Appended.
+    CpuProviderOnGpuPath = 24,
 };
 
 /// Backend-neutral metadata for a typed program prepared for a fixed audio
@@ -148,6 +152,11 @@ validate_gpu_audio_program(const GpuAudioProgramDescriptor& program) noexcept {
         if (program.provider_slots == 0)
             return {GpuAudioProgramError::MissingProviderSlots};
     }
+
+    if ((program.path == GpuAudioExecutionPath::Staged ||
+         program.path == GpuAudioExecutionPath::SharedMemory) &&
+        program.provider == GpuAudioProvider::Cpu)
+        return {GpuAudioProgramError::CpuProviderOnGpuPath};
 
     if (program.path == GpuAudioExecutionPath::SharedMemory) {
         if (program.provider == GpuAudioProvider::Unknown)

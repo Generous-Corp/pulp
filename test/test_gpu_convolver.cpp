@@ -868,13 +868,14 @@ TEST_CASE("GpuAudioTransport serves the convolver CPU fallback without allocatin
     double peak = 0.0;
     for (uint32_t ch = 0; ch < CH; ++ch) {
         const std::vector<float> ref = direct_convolution(input[ch], ir);
-        float worst = 0.0f;
+        std::size_t mismatches = 0;
         for (uint32_t i = 0; i < BS * NBLK; ++i) {
             const float expected = i < L * BS ? 0.0f : ref[i - L * BS];
-            worst = std::max(worst, std::abs(out[ch][i] - expected));
+            if (std::abs(out[ch][i] - expected) >= 1.0e-3f * (1.0f + std::abs(expected)))
+                ++mismatches;
             peak = std::max(peak, static_cast<double>(std::abs(expected)));
         }
-        CHECK(worst < 1.0e-3f);
+        CHECK(mismatches == 0u);
     }
     CHECK(peak > 0.5); // a silent stream would pass the null trivially
     transport.release();

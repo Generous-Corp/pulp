@@ -236,6 +236,18 @@ TEST_CASE("validate_gpu_audio_program rejects descriptor enums outside their dom
     program.miss_policy = out_of_domain<MissPolicy>();
     CHECK(validate_gpu_audio_program(program).error == GpuAudioProgramError::InvalidEnumValue);
 
+    // A GPU path cannot name the CPU provider; the CPU path keeps its
+    // established ProviderOnCpu rule for any named provider.
+    for (const auto path : {GpuAudioExecutionPath::Staged, GpuAudioExecutionPath::SharedMemory}) {
+        program = path == GpuAudioExecutionPath::Staged ? staged_program() : shared_program();
+        CHECK(validate_gpu_audio_program(program).accepted());
+        program.provider = GpuAudioProvider::Cpu;
+        CHECK(validate_gpu_audio_program(program).error ==
+              GpuAudioProgramError::CpuProviderOnGpuPath);
+    }
+    program = shared_program();
+    program.miss_policy = out_of_domain<MissPolicy>();
+
     // The two-argument overload reports the descriptor error first.
     CHECK(validate_gpu_audio_program(program, transport_shared_dawn()).error ==
           GpuAudioProgramError::InvalidEnumValue);
