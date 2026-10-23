@@ -1369,17 +1369,33 @@ struct RefreshPalette {
 };
 
 constexpr canvas::Color argb8(uint32_t argb) {
-    return canvas::Color::rgba8(
-        static_cast<uint8_t>((argb >> 16) & 0xFF), // token-lint:allow -- UA theme palette
-        static_cast<uint8_t>((argb >> 8) & 0xFF), static_cast<uint8_t>(argb & 0xFF),
-        static_cast<uint8_t>((argb >> 24) & 0xFF));
+    const auto a = static_cast<uint8_t>((argb >> 24) & 0xFF);
+    const auto r = static_cast<uint8_t>((argb >> 16) & 0xFF);
+    const auto g = static_cast<uint8_t>((argb >> 8) & 0xFF);
+    const auto b = static_cast<uint8_t>(argb & 0xFF);
+    return canvas::Color::rgba8(r, g, b, a); // token-lint:allow -- UA theme palette
+}
+
+// An author accent for `state`, as Chromium resolves it: the accent itself at
+// rest, shifted 0.11 in HSL lightness for hover (darker in light schemes) and
+// press (lighter), the direction reversed in dark schemes.
+canvas::Color refresh_accent_for_state(canvas::Color accent, UaControlState state, bool dark) {
+    if (state == UaControlState::normal || state == UaControlState::disabled)
+        return accent;
+    float shift = state == UaControlState::pressed ? kRefreshAccentLightnessShift
+                                                   : -kRefreshAccentLightnessShift;
+    if (dark)
+        shift = -shift;
+    auto hsl = accent.to_hsl();
+    hsl.l = std::clamp(hsl.l + shift, 0.0f, 1.0f);
+    return canvas::Color::from_hsl(hsl, accent.a);
 }
 
 // Chromium's default web-native control colours per state; the slider thumb
 // shares the value-bar colour. These reproduce the browser's UA theme, so they
 // are deliberately not theme tokens.
-RefreshPalette refresh_palette(RangeSlider::ControlState state, bool dark) {
-    using S = RangeSlider::ControlState;
+RefreshPalette refresh_palette(UaControlState state, bool dark) {
+    using S = UaControlState;
     if (dark) {
         switch (state) {
         case S::disabled:
@@ -1407,6 +1423,21 @@ RefreshPalette refresh_palette(RangeSlider::ControlState state, bool dark) {
 }
 
 } // namespace
+
+UaColorScheme ua_scheme_for_accent(canvas::Color accent, UaColorScheme scheme,
+                                   canvas::Color contrast_light, canvas::Color contrast_dark) {
+    // Chromium's minimum visible contrast ratio.
+    constexpr float kMinimumVisibleContrast = 3.0f;
+    const float with_light = contrast_ratio(accent, contrast_light);
+    const float with_dark = contrast_ratio(accent, contrast_dark);
+    if (scheme == UaColorScheme::dark) {
+        if (with_dark < kMinimumVisibleContrast && with_dark < with_light)
+            return UaColorScheme::light;
+    } else if (with_light < kMinimumVisibleContrast && with_light < with_dark) {
+        return UaColorScheme::dark;
+    }
+    return scheme;
+}
 
 RangeSlider::ChromiumRefreshParts
 RangeSlider::chromium_refresh_parts(Rect bounds, float position, bool vertical, ControlState state,
@@ -1467,24 +1498,18 @@ RangeSlider::chromium_refresh_parts(Rect bounds, float position, bool vertical, 
                         full.height};
     }
 
+    // An accent next to a track it barely contrasts with flips the palette,
+    // judged against the resting track colour so hover cannot flicker it.
+    if (accent && state != ControlState::disabled)
+        scheme = ua_scheme_for_accent(*accent, scheme, argb8(0xFFEFEFEF), argb8(0xFF3B3B3B));
+    p.scheme = scheme;
     const bool dark = scheme == ColorScheme::dark;
     const auto palette = refresh_palette(state, dark);
     p.track_fill = palette.fill;
     p.border_color = palette.border;
     p.value_fill = palette.value;
-    if (accent && state != ControlState::disabled) {
-        canvas::Color c = *accent;
-        if (state != ControlState::normal) {
-            float shift = state == ControlState::pressed ? kRefreshAccentLightnessShift
-                                                         : -kRefreshAccentLightnessShift;
-            if (dark)
-                shift = -shift;
-            auto hsl = c.to_hsl();
-            hsl.l = std::clamp(hsl.l + shift, 0.0f, 1.0f);
-            c = canvas::Color::from_hsl(hsl, c.a);
-        }
-        p.value_fill = c;
-    }
+    if (accent && state != ControlState::disabled)
+        p.value_fill = refresh_accent_for_state(*accent, state, dark);
     p.thumb_fill = p.value_fill;
     return p;
 }
@@ -1749,7 +1774,171 @@ void Toggle::paint(canvas::Canvas& canvas) {
 
 // ── Checkbox ────────────────────────────────────────────────────────────────
 
+namespace {
+
+struct RefreshCheckPalette {
+    canvas::Color border, accent, background, lighten;
+};
+
+// Chromium's checkbox / radio colours per state: border, default accent,
+// control background (also the check and dash colour) and the disabled
+// lighten layer.
+RefreshCheckPalette refresh_check_palette(UaControlState state, bool dark) {
+    using S = UaControlState;
+    if (dark) {
+        const auto bg = argb8(0xFF3B3B3B);
+        switch (state) {
+        case S::disabled:
+            return {argb8(0xFF626262), argb8(0xFF757575), bg, bg};
+        case S::hovered:
+            return {argb8(0xFFACACAC), argb8(0xFFD1E6FF), bg, bg};
+        case S::pressed:
+            return {argb8(0xFF6E6E6E), argb8(0xFF61A9FF), bg, bg};
+        case S::normal:
+            break;
+        }
+        return {argb8(0xFF858585), argb8(0xFF99C8FF), bg, bg};
+    }
+    const auto lighten = argb8(0x33A9A9A9);
+    switch (state) {
+    case S::disabled:
+        return {argb8(0x4D767676), argb8(0x4D767676), argb8(0x99FFFFFF), lighten};
+    case S::hovered:
+        return {argb8(0xFF4F4F4F), argb8(0xFF005CC8), argb8(0xFFFFFFFF), lighten};
+    case S::pressed:
+        return {argb8(0xFF8D8D8D), argb8(0xFF3793FF), argb8(0xFFFFFFFF), lighten};
+    case S::normal:
+        break;
+    }
+    return {argb8(0xFF767676), argb8(0xFF0075FF), argb8(0xFFFFFFFF), lighten};
+}
+
+} // namespace
+
+Checkbox::ChromiumRefreshParts
+Checkbox::chromium_refresh_parts(Rect bounds, Kind kind, bool checked, bool indeterminate,
+                                 ControlState state, ColorScheme scheme,
+                                 std::optional<canvas::Color> accent) {
+    ChromiumRefreshParts p;
+    const bool is_checkbox = kind == Kind::checkbox;
+    if (!is_checkbox)
+        indeterminate = false;
+    const bool marked = checked || indeterminate;
+
+    const float side = std::max(0.0f, std::min(bounds.width, bounds.height));
+    p.box = {bounds.center_x() - side * 0.5f, bounds.center_y() - side * 0.5f, side, side};
+    p.radius = is_checkbox ? std::min(2.0f, side * 0.5f) : side * 0.5f;
+
+    // A checked, enabled control flips its palette when the accent would not
+    // stand out against the control background.
+    if (accent && checked && state != ControlState::disabled)
+        scheme = ua_scheme_for_accent(*accent, scheme, argb8(0xFFFFFFFF), argb8(0xFF3B3B3B));
+    p.scheme = scheme;
+    const bool dark = scheme == ColorScheme::dark;
+    const auto palette = refresh_check_palette(state, dark);
+    const canvas::Color accent_now = accent && state != ControlState::disabled
+                                         ? refresh_accent_for_state(*accent, state, dark)
+                                         : palette.accent;
+
+    constexpr float kBorderWidth = 1.0f;
+    p.background_rect = {p.box.x + 0.2f * kBorderWidth, p.box.y + 0.2f * kBorderWidth,
+                         std::max(0.0f, side - 0.4f * kBorderWidth),
+                         std::max(0.0f, side - 0.4f * kBorderWidth)};
+    if (state == ControlState::disabled)
+        p.lighten = palette.lighten;
+    p.background = palette.background;
+    p.border_rect = {p.box.x + 0.5f * kBorderWidth, p.box.y + 0.5f * kBorderWidth,
+                     std::max(0.0f, side - kBorderWidth), std::max(0.0f, side - kBorderWidth)};
+    if (!is_checkbox || !marked)
+        p.border = checked ? accent_now : palette.border;
+
+    if (is_checkbox) {
+        p.mark = palette.background;
+        if (marked)
+            p.accent_fill = accent_now;
+        if (indeterminate) {
+            // An 8x2 dash centred in the 13px reference box, scaled with it.
+            const float sx = side / 13.0f;
+            p.dash =
+                Rect{p.box.x + 2.5f * sx, p.box.y + 5.5f * sx, side - 5.0f * sx, side - 11.0f * sx};
+        } else if (checked) {
+            p.has_check = true;
+            p.check = {Point{p.box.x + side * 0.2f, p.box.center_y()},
+                       Point{p.box.x + side * 0.4f, p.box.center_y() + side * 0.2f},
+                       Point{p.box.right() - side * 0.2f, p.box.y + side * 0.2f}};
+            p.check_width = side * 0.16f;
+        }
+    } else if (checked) {
+        p.mark = accent_now;
+        p.dot = Rect{p.box.x + side * 0.2f, p.box.y + side * 0.2f, side * 0.6f, side * 0.6f};
+    }
+    return p;
+}
+
+Checkbox::ControlState Checkbox::control_state() const {
+    if (!enabled())
+        return ControlState::disabled;
+    if (is_hovered())
+        return ControlState::hovered;
+    return ControlState::normal;
+}
+
+Checkbox::ChromiumRefreshParts Checkbox::chromium_refresh_parts() const {
+    return chromium_refresh_parts(local_bounds(), kind_, checked_, indeterminate_, control_state(),
+                                  color_scheme_, accent_color_);
+}
+
+void Checkbox::paint_chromium_refresh_(canvas::Canvas& canvas) {
+    const auto p = chromium_refresh_parts();
+    if (p.box.width <= 0.0f)
+        return;
+    // A box of 2px or less is a plain square in the border colour.
+    if (p.box.width <= 2.0f) {
+        canvas.set_fill_color(p.border.value_or(p.accent_fill.value_or(p.mark)));
+        canvas.fill_rect(p.box.x, p.box.y, p.box.width, p.box.height);
+        return;
+    }
+    const auto& bg = p.background_rect;
+    if (p.lighten) {
+        canvas.set_fill_color(*p.lighten);
+        canvas.fill_rounded_rect(bg.x, bg.y, bg.width, bg.height, p.radius);
+    }
+    canvas.set_fill_color(p.background);
+    canvas.fill_rounded_rect(bg.x, bg.y, bg.width, bg.height, p.radius);
+    if (p.border) {
+        canvas.set_stroke_color(*p.border);
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(p.border_rect.x, p.border_rect.y, p.border_rect.width,
+                                   p.border_rect.height, p.radius);
+    }
+    if (p.accent_fill) {
+        canvas.set_fill_color(*p.accent_fill);
+        canvas.fill_rounded_rect(p.box.x, p.box.y, p.box.width, p.box.height, p.radius);
+    }
+    if (p.dash) {
+        canvas.set_fill_color(p.mark);
+        canvas.fill_rounded_rect(p.dash->x, p.dash->y, p.dash->width, p.dash->height,
+                                 std::min(p.radius, 0.5f * p.dash->height));
+    } else if (p.has_check) {
+        const canvas::Canvas::Point2D pts[3] = {{p.check[0].x, p.check[0].y},
+                                                {p.check[1].x, p.check[1].y},
+                                                {p.check[2].x, p.check[2].y}};
+        canvas.set_stroke_color(p.mark);
+        canvas.set_line_width(p.check_width);
+        canvas.set_line_cap(canvas::LineCap::butt);
+        canvas.set_line_join(canvas::LineJoin::miter);
+        canvas.stroke_path(pts, 3);
+    } else if (p.dot) {
+        canvas.set_fill_color(p.mark);
+        canvas.fill_circle(p.dot->center_x(), p.dot->center_y(), 0.5f * p.dot->width);
+    }
+}
+
 void Checkbox::paint(canvas::Canvas& canvas) {
+    if (skin_ == Skin::chromium_refresh) {
+        paint_chromium_refresh_(canvas);
+        return;
+    }
     auto b = local_bounds();
     float size = std::min(b.width, b.height);
     float cx = b.width * 0.5f;
@@ -1778,8 +1967,32 @@ void Checkbox::paint(canvas::Canvas& canvas) {
 }
 
 void Checkbox::on_mouse_down(Point) {
-    checked_ = !checked_;
-    if (on_change) on_change(checked_);
+    if (indeterminate_)
+        set_indeterminate(false);
+    if (kind_ == Kind::radio) {
+        if (checked_)
+            return; // clicking the selected radio keeps it selected
+        set_checked(true);
+        if (radio_group_ != 0) {
+            if (auto* p = parent()) {
+                for (size_t i = 0; i < p->child_count(); ++i) {
+                    auto* sib = dynamic_cast<Checkbox*>(p->child_at(i));
+                    if (sib && sib != this && sib->kind_ == Kind::radio &&
+                        sib->radio_group_ == radio_group_ && sib->checked_) {
+                        sib->set_checked(false);
+                        if (sib->on_change)
+                            sib->on_change(false);
+                    }
+                }
+            }
+        }
+        if (on_change)
+            on_change(true);
+        return;
+    }
+    set_checked(!checked_);
+    if (on_change)
+        on_change(checked_);
 }
 
 // ── ToggleButton ────────────────────────────────────────────────────────────

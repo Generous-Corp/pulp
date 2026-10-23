@@ -21,6 +21,8 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 using namespace pulp::view;
@@ -1306,8 +1308,17 @@ TEST_CASE("RangeSlider chromium_refresh palette tracks state, scheme and accent"
                                          RS::ColorScheme::light, accent);
     REQUIRE(rgba8_of(on.value_fill) == std::array<int, 4>{71, 180, 235, 255});
     REQUIRE(rgba8_of(on.thumb_fill) == rgba8_of(on.value_fill));
-    REQUIRE(rgba8_of(on.track_fill) == std::array<int, 4>{0xEF, 0xEF, 0xEF, 0xFF});
-    REQUIRE(rgba8_of(on.border_color) == std::array<int, 4>{0x76, 0x76, 0x76, 0x80});
+    // This light accent has under 3:1 contrast with the light track, so the
+    // control paints in the dark palette, as Chromium does.
+    REQUIRE(on.scheme == RS::ColorScheme::dark);
+    REQUIRE(rgba8_of(on.track_fill) == std::array<int, 4>{0x3B, 0x3B, 0x3B, 0xFF});
+    REQUIRE(rgba8_of(on.border_color) == std::array<int, 4>{0x85, 0x85, 0x85, 0xFF});
+    // A dark accent contrasts with the light track: the light palette stays.
+    auto deep = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.5f, false, RS::ControlState::normal,
+                                           RS::ColorScheme::light, Color::rgba8(20, 40, 120));
+    REQUIRE(deep.scheme == RS::ColorScheme::light);
+    REQUIRE(rgba8_of(deep.track_fill) == std::array<int, 4>{0xEF, 0xEF, 0xEF, 0xFF});
+    REQUIRE(rgba8_of(deep.border_color) == std::array<int, 4>{0x76, 0x76, 0x76, 0x80});
 
     // Without an accent the default blue applies.
     auto plain = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.5f, false, RS::ControlState::normal,
@@ -1315,13 +1326,19 @@ TEST_CASE("RangeSlider chromium_refresh palette tracks state, scheme and accent"
     REQUIRE(rgba8_of(plain.value_fill) == std::array<int, 4>{0x00, 0x75, 0xFF, 0xFF});
 
     // Hover darkens a light-scheme accent by 0.11 HSL lightness; press lightens.
-    const float l = accent.to_hsl().l;
+    const auto dark_accent = Color::rgba8(20, 40, 120);
+    const float dl = dark_accent.to_hsl().l;
     auto hov = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.5f, false, RS::ControlState::hovered,
-                                          RS::ColorScheme::light, accent);
+                                          RS::ColorScheme::light, dark_accent);
     auto prs = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.5f, false, RS::ControlState::pressed,
-                                          RS::ColorScheme::light, accent);
-    REQUIRE_THAT(hov.value_fill.to_hsl().l, WithinAbs(l - 0.11f, 1e-3));
-    REQUIRE_THAT(prs.value_fill.to_hsl().l, WithinAbs(l + 0.11f, 1e-3));
+                                          RS::ColorScheme::light, dark_accent);
+    REQUIRE_THAT(hov.value_fill.to_hsl().l, WithinAbs(dl - 0.11f, 1e-3));
+    REQUIRE_THAT(prs.value_fill.to_hsl().l, WithinAbs(dl + 0.11f, 1e-3));
+    // The light accent above paints in the dark palette, so its hover lightens.
+    const float l = accent.to_hsl().l;
+    auto flipped_hov = RS::chromium_refresh_parts(
+        {0, 0, 90, 16}, 0.5f, false, RS::ControlState::hovered, RS::ColorScheme::light, accent);
+    REQUIRE_THAT(flipped_hov.value_fill.to_hsl().l, WithinAbs(l + 0.11f, 1e-3));
 
     // Dark scheme has its own palette and flips the accent shift.
     auto dark_off = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.0f, false,
@@ -1446,15 +1463,142 @@ TEST_CASE("RangeSlider chromium_refresh disabled raster composites like Chromium
     CHECK(near(at(179, 16), {6, 8, 12}));
 
     // Opt-in artifact for comparing against a browser capture of the same
-    // control: the 2x RGBA of the slider group alone, without the panel.
+    // control: the 2x RGBA of the panel painted black, then white, so a
+    // comparison can recover the slider group's own colour and coverage.
     if (const char* out = std::getenv("PULP_RANGE_SLIDER_SKIN_DUMP")) {
-        panel.set_background_color(Color::rgba8(0, 0, 0, 0));
-        uint32_t dw = 0, dh = 0;
-        const auto group_px = render_to_rgba(panel, 90, 16, 2.0f, &dw, &dh);
         std::FILE* f = std::fopen(out, "wb");
         REQUIRE(f != nullptr);
-        std::fwrite(group_px.data(), 1, group_px.size(), f);
+        for (const auto bg : {Color::rgba8(0, 0, 0), Color::rgba8(255, 255, 255)}) {
+            panel.set_background_color(bg);
+            uint32_t dw = 0, dh = 0;
+            const auto dump = render_to_rgba(panel, 90, 16, 2.0f, &dw, &dh);
+            std::fwrite(dump.data(), 1, dump.size(), f);
+        }
         std::fclose(f);
+    }
+}
+
+namespace {
+
+// The form-control scene a Chromium oracle is captured from: a 600x200 dark
+// panel (rgb 6,8,12) whose right half is white, with ranges, checkboxes and
+// radios at fixed CSS px positions in each state. Every control wears `skin`;
+// `hovered` names the one control under the pointer, if any.
+struct UaControlScene {
+    std::unique_ptr<View> root;
+    std::vector<std::pair<std::string, View*>> controls;
+    View* find(const std::string& id) const {
+        for (const auto& [name, view] : controls)
+            if (name == id)
+                return view;
+        return nullptr;
+    }
+};
+
+UaControlScene build_ua_control_scene(UaSkin skin) {
+    UaControlScene scene;
+    scene.root = std::make_unique<View>();
+    scene.root->set_bounds({0, 0, 600, 200});
+    scene.root->set_background_color(Color::rgba8(6, 8, 12));
+    auto light = std::make_unique<View>();
+    light->set_bounds({300, 0, 300, 200});
+    light->set_background_color(Color::rgba8(255, 255, 255));
+    scene.root->add_child(std::move(light));
+    const auto accent = Color::rgba8(71, 180, 235);
+
+    auto range = [&](const char* id, float x, float y, float value, bool disabled, bool accented) {
+        auto r = std::make_unique<RangeSlider>();
+        r->set_bounds({x, y, 90, 16});
+        r->set_skin(skin);
+        r->set_max(1.0f);
+        r->set_step(0.001f);
+        r->set_value(value);
+        if (accented)
+            r->set_accent_color(accent);
+        r->set_enabled(!disabled);
+        scene.controls.emplace_back(id, r.get());
+        scene.root->add_child(std::move(r));
+    };
+    range("r_default", 20, 20, 0.5f, false, false);
+    range("r_accent", 20, 50, 0.5f, false, true);
+    range("r_disabled", 20, 80, 0.0f, true, true);
+    range("r_hover", 20, 110, 0.5f, false, true);
+    range("r_light", 320, 20, 0.25f, false, false);
+
+    auto box = [&](const char* id, Checkbox::Kind kind, float x, float y, bool checked,
+                   bool disabled, bool accented, bool indeterminate = false) {
+        auto c = std::make_unique<Checkbox>();
+        c->set_bounds({x, y, 13, 13});
+        c->set_kind(kind);
+        c->set_skin(skin);
+        c->set_checked(checked);
+        c->set_indeterminate(indeterminate);
+        if (accented)
+            c->set_accent_color(accent);
+        c->set_enabled(!disabled);
+        scene.controls.emplace_back(id, c.get());
+        scene.root->add_child(std::move(c));
+    };
+    using K = Checkbox::Kind;
+    box("c_off", K::checkbox, 140, 20, false, false, false);
+    box("c_on", K::checkbox, 160, 20, true, false, false);
+    box("c_off_dis", K::checkbox, 180, 20, false, true, false);
+    box("c_on_dis", K::checkbox, 200, 20, true, true, false);
+    box("c_on_accent", K::checkbox, 220, 20, true, false, true);
+    box("c_ind", K::checkbox, 240, 20, false, false, false, true);
+    box("c_hover_off", K::checkbox, 140, 50, false, false, false);
+    box("c_hover_on", K::checkbox, 160, 50, true, false, false);
+    box("c_light_off", K::checkbox, 340, 60, false, false, false);
+    box("c_light_on", K::checkbox, 360, 60, true, false, false);
+    box("o_off", K::radio, 140, 80, false, false, false);
+    box("o_on", K::radio, 160, 80, true, false, false);
+    box("o_off_dis", K::radio, 180, 80, false, true, false);
+    box("o_on_dis", K::radio, 200, 80, true, true, false);
+    box("o_on_accent", K::radio, 220, 80, true, false, true);
+    box("o_hover_off", K::radio, 140, 110, false, false, false);
+    box("o_hover_on", K::radio, 160, 110, true, false, false);
+    box("o_light_off", K::radio, 340, 100, false, false, false);
+    box("o_light_on", K::radio, 360, 100, true, false, false);
+    return scene;
+}
+
+// The scene's 2x render, with `hovered` under the pointer.
+std::vector<uint8_t> render_ua_scene(UaControlScene& scene, const char* hovered) {
+    for (const auto& [name, view] : scene.controls)
+        view->set_hovered(hovered != nullptr && name == hovered);
+    uint32_t w = 0, h = 0;
+    auto px = render_to_rgba(*scene.root, 600, 200, 2.0f, &w, &h);
+    REQUIRE(w == 1200);
+    REQUIRE(h == 400);
+    return px;
+}
+
+} // namespace
+
+TEST_CASE("Chromium-refresh form-control scene renders and can be dumped for comparison",
+          "[view][widget][range-skin]") {
+    if (!raw_rgba_render_available()) {
+        SKIP("this build has no raw-RGBA raster backend");
+    }
+    auto scene = build_ua_control_scene(UaSkin::chromium_refresh);
+    const auto rest = render_ua_scene(scene, nullptr);
+    REQUIRE(rest.size() == size_t{1200} * 400 * 4);
+
+    // Opt-in artifact: one raw 1200x400 RGBA frame per state, for comparing
+    // against Chromium screenshots of the same scene.
+    if (const char* dir = std::getenv("PULP_UA_SKIN_SCENE_DUMP")) {
+        auto write = [&](const std::string& name, const std::vector<uint8_t>& px) {
+            const std::string path = std::string(dir) + "/" + name + ".rgba";
+            std::FILE* f = std::fopen(path.c_str(), "wb");
+            REQUIRE(f != nullptr);
+            std::fwrite(px.data(), 1, px.size(), f);
+            std::fclose(f);
+        };
+        write("rest", rest);
+        for (const char* id : {"r_hover", "c_hover_off", "c_hover_on", "o_hover_off", "o_hover_on"})
+            write(std::string("hover-") + id, render_ua_scene(scene, id));
+        auto platform = build_ua_control_scene(UaSkin::platform);
+        write("platform-rest", render_ua_scene(platform, nullptr));
     }
 }
 
