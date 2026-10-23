@@ -2,11 +2,13 @@
 
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
+#include <pulp/runtime/log.hpp>
+#if !defined(__EMSCRIPTEN__)
 #include <pulp/host/scan_blacklist.hpp>
 #include <pulp/host/scan_cache.hpp>
 #include <pulp/host/scanner.hpp>
-#include <pulp/runtime/log.hpp>
 #include <pulp/runtime/safe_relative_path.hpp>
+#endif
 
 #include <choc/text/choc_JSON.h>
 
@@ -1097,6 +1099,20 @@ std::string GraphSerializer::to_json(
 
 namespace {
 
+#if defined(__EMSCRIPTEN__)
+// The web build compiles this serializer without the plugin scanner and has
+// no plugin bundles to load, so every plugin node stays an unresolved
+// placeholder: nothing is opened and no scanner symbol is referenced.
+class PluginNodeResolver {
+  public:
+    explicit PluginNodeResolver(const GraphLoadOptions&) {}
+
+    std::optional<std::string> resolve(const PluginInfo&, std::string& reason) {
+        reason = "hosted plugins are not loadable in the web build";
+        return std::nullopt;
+    }
+};
+#else
 // Resolves plugin nodes for one from_json call. The scan of the known roots
 // is run at most once per format, and only when a node's path hint does not
 // already lie inside a root.
@@ -1210,6 +1226,7 @@ class PluginNodeResolver {
     const GraphLoadOptions& options_;
     std::unordered_map<PluginFormat, ScanReport> scans_;
 };
+#endif // __EMSCRIPTEN__
 
 } // namespace
 
