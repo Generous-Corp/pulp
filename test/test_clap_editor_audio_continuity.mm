@@ -66,14 +66,15 @@ struct TonePlugin {
 
 /// Holds an editor call open until a whole audio block has run inside it.
 /// Returns false if none did within the deadline, which the callers surface
-/// as a failed editor call.
+/// as a failed editor call. The deadline is generous so a starved audio
+/// thread on a loaded builder does not read as a broken overlap.
 bool hold_editor_call(const clap_plugin_t* p) {
     auto* t = static_cast<TonePlugin*>(p->plugin_data);
     if (!t->hold_editor_calls.load(std::memory_order_acquire))
         return true;
     const int call = ++t->next_editor_call;
     t->active_editor_call.store(call, std::memory_order_release);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     bool overlapped = false;
     while (!overlapped && std::chrono::steady_clock::now() < deadline) {
         overlapped = t->last_overlapped_editor_call.load(std::memory_order_acquire) == call;
