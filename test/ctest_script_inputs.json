@@ -1464,6 +1464,22 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-gpu-render-loss-consumer": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_gpu_render_loss_consumer.cpp"
+   ],
+   "inputs": [
+    "core/gpu_audio/src/detail/render_loss_consumer.hpp",
+    "test/fixtures/gpu_audio/render_loss_consumer"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/harness/rt_allocation_probe.cpp",
+    "test/test_gpu_render_loss_consumer.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-gpu-wavenet-session": {
    "data": "declared",
    "detected_sources": [
@@ -2661,8 +2677,10 @@
   "pulp-test-gpu-neural-realtime-node",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
+  "pulp-test-gpu-render-loss-consumer",
   "pulp-test-gpu-shared-io-convolution-pipeline",
   "pulp-test-gpu-shared-io-convolution-session",
+  "pulp-test-gpu-shared-io-provider-conformance",
   "pulp-test-gpu-shared-io-slot-ledger",
   "pulp-test-gpu-shared-io-wavenet-spec",
   "pulp-test-gpu-surface",
@@ -3304,6 +3322,14 @@
    ],
    "kind": "python"
   },
+  "android-jni-exports-selftest": {
+   "entry": "tools/scripts/test_check_android_jni_exports.py",
+   "inputs": [
+    "tools/scripts/check_android_jni_exports.py",
+    "tools/scripts/test_check_android_jni_exports.py"
+   ],
+   "kind": "python"
+  },
   "android-smoke": {
    "entry": "tools/scripts/android_smoke.sh",
    "inputs": [
@@ -3360,6 +3386,7 @@
     "test/cmake/test_gpu_audio_sdk_consumer.cmake",
     "test/ctest_script_inputs.json",
     "tools/ci/base_poison_detector.py",
+    "tools/ci/fixtures/base_poison_2026-10-23.json",
     "tools/ci/install_visual_python_deps.sh",
     "tools/ci/test_base_poison_detector.py",
     "tools/motion/visual/requirements.lock",
@@ -4400,6 +4427,14 @@
    ],
    "kind": "python"
   },
+  "convolver-crossover-table": {
+   "entry": "tools/scripts/convolver_crossover_check.py",
+   "inputs": [
+    "core/signal/include/pulp/signal/fixed_ir_convolver.hpp",
+    "tools/scripts/convolver_crossover_check.py"
+   ],
+   "kind": "python"
+  },
   "create-templates-verify": {
    "entry": "tools/scripts/test_verify_create_templates.py",
    "inputs": [
@@ -4961,6 +4996,7 @@
   "foundation-include-lint": {
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -5199,6 +5235,20 @@
    "entry": "tools/validation/test_verify_gpu_audio_p5_receipt.py",
    "inputs": [
     "tools/validation/test_verify_gpu_audio_p5_receipt.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-provider-conformance-fake-receipt-verify": {
+   "entry": "tools/validation/verify_gpu_audio_provider_conformance.py",
+   "inputs": [
+    "tools/validation/verify_gpu_audio_provider_conformance.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-provider-conformance-verifier-selftest": {
+   "entry": "tools/validation/test_verify_gpu_audio_provider_conformance.py",
+   "inputs": [
+    "tools/validation/test_verify_gpu_audio_provider_conformance.py"
    ],
    "kind": "python"
   },
@@ -7875,6 +7925,7 @@
   "pulp-view-core-include-boundary": {
    "entry": "tools/scripts/include_boundary.py",
    "inputs": [
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7894,6 +7945,8 @@
    "entry": "tools/scripts/test_include_boundary.py",
    "inputs": [
     "core/audio/include/pulp/audio/buffer.hpp",
+    "core/content/include/pulp/state/content_registry.hpp",
+    "core/state/include/pulp/state/store.hpp",
     "core/view/include/pulp/view/view.hpp",
     "core/view/src/view.cpp",
     "tools/scripts/test_include_boundary.py"
@@ -7922,6 +7975,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7960,6 +8014,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7989,6 +8044,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8027,6 +8083,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8069,6 +8126,7 @@
     "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
     "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/render/include/pulp/render/gpu_compute.hpp",
@@ -12277,6 +12335,23 @@
    ],
    "kind": "python"
   },
+  "toolchain-host_sync-selftest": {
+   "entry": "tools/toolchain/test_host_sync.py",
+   "inputs": [
+    ".githooks/post-checkout",
+    ".github/workflows",
+    ".github/workflows/build.yml",
+    "experimental/pulp-rs",
+    "experimental/pulp-rs/rust-toolchain.toml",
+    "tools/ci",
+    "tools/ci/provide_pinned_rust.sh",
+    "tools/toolchain/check_env.py",
+    "tools/toolchain/expected.json",
+    "tools/toolchain/host_sync.py",
+    "tools/toolchain/test_host_sync.py"
+   ],
+   "kind": "python"
+  },
   "toolchain-mise_golden_layer-selftest": {
    "entry": "tools/ci/test_mise_golden_layer.py",
    "inputs": [
@@ -12301,6 +12376,7 @@
   "toolchain-test_generate-selftest": {
    "entry": "tools/toolchain/test_generate.py",
    "inputs": [
+    "experimental/pulp-rs/rust-toolchain.toml",
     "tools/cmake",
     "tools/deps/manifest.json",
     "tools/shipyard.toml",
@@ -12318,6 +12394,7 @@
    "entry": "tools/toolchain/test_update.py",
    "inputs": [
     "experimental/pulp-rs",
+    "experimental/pulp-rs/rust-toolchain.toml",
     "tools/shipyard.toml",
     "tools/toolchain",
     "tools/toolchain/check_env.py",
@@ -12415,6 +12492,8 @@
    "entry": "tools/scripts/vellum_boundary_lint.py",
    "inputs": [
     "core/view",
+    "core/view/audio/src",
+    "core/view/platform",
     "core/view/src",
     "tools/import-design/pulp-package.json",
     "tools/scripts/vellum_boundary_lint.py",
@@ -12425,6 +12504,8 @@
   "vellum-boundary-lint-negative-contract": {
    "entry": "tools/scripts/test_vellum_boundary_lint.py",
    "inputs": [
+    "core/view/audio/include",
+    "core/view/platform/mac/window_host_mac_internal.hpp",
     "tools/import-design",
     "tools/import-design/pulp-package.json",
     "tools/scripts/test_vellum_boundary_lint.py",

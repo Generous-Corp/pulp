@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 78,
+  "manifest_revision": 79,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -12139,12 +12139,34 @@
             "methods": [
               "process(SampleType input)",
               "process(SampleType* data, int num_samples)",
+              "process(const SampleType* input, SampleType* output, int num_samples)",
               "reset()",
               "set_coefficients(std::vector<SampleType> coeffs)",
               "order()",
               "coefficients()",
               "lowpass(int num_taps, SampleType cutoff_hz, SampleType sample_rate)",
               "highpass(int num_taps, SampleType cutoff_hz, SampleType sample_rate)"
+            ],
+            "enums": []
+          }
+        ],
+        "fixed_ir_convolver.hpp": [
+          {
+            "class": "FixedIrConvolverT",
+            "qualified_name": "pulp::signal::FixedIrConvolverT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process(const SampleType* input, SampleType* output, std::size_t num_samples)",
+              "reset()",
+              "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size)",
+              "load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size, ConvolutionBackend engine)",
+              "choose_backend(std::size_t ir_length, std::size_t block_size)",
+              "direct_fir_limit(std::size_t block_size)",
+              "is_loaded()",
+              "block_size()",
+              "latency()",
+              "block_size_violations()",
+              "backend()"
             ],
             "enums": []
           }
