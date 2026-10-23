@@ -125,6 +125,16 @@ own work; the registry is the source of truth, and a coverage sweep in
 `tools/scripts/tools_registry_check.py` fails CI if a tool lands here without
 an entry — so nothing can go quiet the way `fidelity_diff.py` did.
 
+**A region score near 1.0 does not mean the region's controls are drawn.**
+`diff_against_reference_regions.py` scored Spectr's bottom toolbar 0.990 with
+its range slider missing, because the bar's background dominates both the
+histogram and the mean-pixel term. Whole-panel ink coverage could not see it
+either (0.978). Read `largest_uncovered_px`: a missing element shows as one
+uncovered patch at its own size (967 px there, 16 px with the slider pasted
+back, 0 between two Chromium captures). Animated regions, like Spectr's
+spectrum canvas, disagree on patches of thousands of pixels between two
+captures, so gate those on `coverage_floor` only.
+
 **Run `check_contracts.py` on every agent-authored panel before importing
 it — its `realtime` gate is the one check here that sees frame cost.** A React
 state setter inside `onPointerMove` / `onMouseMove` / `onWheel` (either phase),
