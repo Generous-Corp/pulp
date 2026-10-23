@@ -741,13 +741,35 @@ Calling `layout_children()` on a sub-panel before it has been assigned bounds by
 
 ### JNI Symbol Export
 
-Use `--whole-archive` when linking `libpulp.so` to ensure JNI symbols are exported:
+A `Java_*` function in a static library that nothing in `libpulp.so` calls is
+dropped at link time. The build stays green, `JNI_OnLoad` still logs, and the
+app throws `UnsatisfiedLinkError` the first time Java calls the native. The
+MIDI natives in `core/midi/platform/android/android_midi.cpp` shipped that way:
+a freshly booted emulator delivers a MIDI device-removed callback within the
+app's first second, and the app died there.
 
-```cmake
-target_link_options(pulp-jni PRIVATE
-    -Wl,--whole-archive $<TARGET_FILE:pulp-platform> -Wl,--no-whole-archive
-)
-```
+Two ways keep the object, and the repo uses both:
+
+- `--whole-archive` for libraries that are mostly JNI glue (`pulp-platform`,
+  `pulp-audio`, `pulp-render`), in the root `CMakeLists.txt`:
+
+  ```cmake
+  target_link_options(pulp-jni PRIVATE
+      -Wl,--whole-archive $<TARGET_FILE:pulp-platform> -Wl,--no-whole-archive
+  )
+  ```
+
+- `-Wl,--undefined=<Java_symbol>` for one object inside a larger library
+  (`pulp-view` accessibility, the `pulp-midi` BLE and Android MIDI natives).
+  Whole-archiving `pulp-view` pulls in SDL3's `JNI_OnLoad`, and whole-archiving
+  `pulp-midi` pulls in every MIDI object.
+
+Adding a native to the Kotlin shell means doing one of these in the same change.
+`tools/scripts/check_android_jni_exports.py --sources android/app/src/main
+--apk <apk>` checks that every declared native is exported by every ABI's
+`libpulp.so` (`android.yml` runs it on the built APK). The emulator job also
+requires the process to be alive 8 s after launch with no `AndroidRuntime`
+fatal, because the `JNI_OnLoad` marker is logged before such a crash.
 
 ### GPU adapter identity — the name Dawn reports on Android is SYNTHETIC
 
