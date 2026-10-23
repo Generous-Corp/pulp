@@ -14,6 +14,7 @@ import importlib.util
 import io
 import json
 import pathlib
+import re
 import stat
 import subprocess
 import sys
@@ -178,6 +179,18 @@ class ManifestTests(unittest.TestCase):
         rebuild = json.loads(self.manifest.read_text(encoding="utf-8"))["rebuild"]
         self.assertFalse(rebuild["identical"])
         self.assertEqual(rebuild["kind"], "same-build-dir")
+
+    def test_verify_can_require_an_identical_separate_rebuild(self):
+        self.assertEqual(self.describe()[0], 0)
+        code, err = self.verify("--require-identical-rebuild")
+        self.assertEqual(code, 1)
+        self.assertIn("no identical rebuild", err)
+        self.assertEqual(self.rebuild("build", "build-rebuild", b"!<arch>\ndifferent\n")[0], 0)
+        self.assertEqual(self.verify("--require-identical-rebuild")[0], 1)
+        self.assertEqual(self.rebuild("build", "build", self.archive.read_bytes())[0], 0)
+        self.assertEqual(self.verify("--require-identical-rebuild")[0], 1)
+        self.assertEqual(self.rebuild("build", "build-rebuild", self.archive.read_bytes())[0], 0)
+        self.assertEqual(self.verify("--require-identical-rebuild")[0], 0)
 
     def test_describe_refuses_a_rebuild_it_cannot_place(self):
         stray = self.root / "stray.a"
@@ -358,22 +371,22 @@ class WorkflowContractTests(unittest.TestCase):
         else:
             cls.doc = yaml.safe_load(cls.text)
 
-    def test_only_a_dispatch_with_a_required_source_sha_runs_it(self):
+    def test_it_builds_only_its_own_commit_of_main(self):
         if self.doc is None:
             self.skipTest("pyyaml not installed")
         triggers = self.doc.get("on", self.doc.get(True))
-        self.assertEqual(list(triggers), ["workflow_dispatch"])
-        source = triggers["workflow_dispatch"]["inputs"]["source_sha"]
-        self.assertTrue(source["required"])
-
-    def test_request_is_pinned_to_a_full_commit_on_main(self):
-        self.assertIn("^[0-9a-f]{40}$", self.text)
+        self.assertEqual(triggers, {"push": {"branches": ["main"]}, "workflow_dispatch": {}})
+        # No input can name another commit, and no checkout overrides the ref.
+        self.assertNotIn("inputs.", self.text)
+        self.assertEqual(self.doc["env"]["SOURCE_SHA"], "${{ github.sha }}")
+        self.assertEqual(self.doc["env"]["TAG"], "artifact/pulp-view-audio/${{ github.sha }}")
+        for job in self.doc["jobs"].values():
+            for step in job["steps"]:
+                if str(step.get("uses", "")).startswith("actions/checkout@"):
+                    self.assertNotIn("ref", step.get("with", {}), step)
+                    self.assertNotIn("repository", step.get("with", {}), step)
+                    self.assertFalse(step["with"]["persist-credentials"], step)
         self.assertIn('"${GITHUB_REF}" != "refs/heads/main"', self.text)
-        self.assertIn("compare/${SOURCE_SHA}...main", self.text)
-        self.assertIn("ahead|identical) ;;", self.text)
-        self.assertIn("ref: ${{ needs.request.outputs.source_sha }}", self.text)
-        self.assertIn('repos/${REPO}/commits/${SOURCE_SHA}" --jq .sha', self.text)
-        self.assertEqual(self.text.count("inputs.source_sha"), 2)  # concurrency group, REQUESTED
         self.assertIn('test "$(git rev-parse HEAD)" = "${SOURCE_SHA}"', self.text)
 
     def jobs(self):
@@ -436,14 +449,13 @@ class WorkflowContractTests(unittest.TestCase):
     def test_every_published_file_is_attested_and_released_immutably(self):
         steps = self.steps(self.jobs()["publish"])
         attest = steps["Attest the archive and its manifest"]
-        self.assertEqual(attest["uses"], "actions/attest@v4")
+        self.assertTrue(attest["uses"].startswith("actions/attest@"))
         subjects = attest["with"]["subject-path"].split()
         for name in ("libpulp-view-audio.a", "pulp-view-audio-archive.manifest.json",
                      "pulp-view-audio-symbol-floor.txt", "pulp-view-audio-symbol-floor-gate.txt",
                      "SHA256SUMS"):
             self.assertIn(f"out/{name}", subjects)
-        self.assertEqual(self.jobs()["publish"]["env"]["TAG"],
-                         "artifact/pulp-view-audio/${{ needs.request.outputs.source_sha }}")
+        self.assertNotIn("TAG", self.jobs()["publish"]["env"])
         publish = steps["Publish the immutable release"]["run"]
         self.assertIn("--draft --prerelease --latest=false", publish)
         self.assertIn("--draft=false --prerelease --latest=false", publish)
@@ -466,12 +478,41 @@ class WorkflowContractTests(unittest.TestCase):
     def test_the_documented_check_is_token_free_and_ref_pinned(self):
         consumer = self.steps(self.jobs()["publish"])["Verify the release the way a consumer does"]["run"]
         for flag in ("env -u GH_TOKEN -u GITHUB_TOKEN", "--bundle", "--source-ref refs/heads/main",
+                     '--source-digest "${SOURCE_SHA}"',
                      "--signer-workflow", "--deny-self-hosted-runners"):
             self.assertIn(flag, consumer)
         header = self.text.split("\non:", 1)[0]
         for flag in ("--bundle pulp-view-audio-archive.sigstore.json", "--source-ref refs/heads/main",
                      "--source-sha <expected commit> --require-gate-pass"):
             self.assertIn(flag, header)
+
+    def test_the_build_job_restores_no_cache(self):
+        # The build runs this commit's setup.sh and build with the runner's
+        # cache token in reach of the actions it uses. That is harmless only
+        # while nothing in the job reads or writes the Actions cache.
+        for step in self.jobs()["build"]["steps"]:
+            uses = str(step.get("uses", ""))
+            self.assertFalse(uses.startswith(("actions/cache", "namespacelabs/")), uses)
+            if "/setup-" in uses:
+                self.fail(f"{uses}: setup actions can restore a cache; the build job uses none")
+            for key in (step.get("with") or {}):
+                self.assertNotIn(key, ("cache", "cache-dependency-path", "actions-cache-folder",
+                                       "package-manager-cache", "bundler-cache"), uses)
+            self.assertNotIn("ACTIONS_CACHE", step.get("run", ""))
+            self.assertNotIn("ACTIONS_RUNTIME_TOKEN", step.get("run", ""))
+
+    def test_every_action_is_pinned_to_a_commit(self):
+        uses = re.findall(r"^\s*(?:-\s*)?uses:\s*(\S+)(.*)$", self.text, re.M)
+        self.assertGreaterEqual(len(uses), 5)
+        for ref, comment in uses:
+            self.assertRegex(ref, r"@[0-9a-f]{40}$", ref)
+            self.assertRegex(comment.strip(), r"^# v\d+(\.\d+)*$", ref)
+
+    def test_both_verifications_require_an_identical_rebuild(self):
+        build = self.steps(self.jobs()["build"])["Describe the archive"]["run"]
+        publish = self.steps(self.jobs()["publish"])["Re-verify the build's bytes"]["run"]
+        for body in (build, publish):
+            self.assertIn("--require-identical-rebuild", body)
 
     def test_a_published_release_is_never_rebuilt(self):
         self.assertIn("already published", self.text)

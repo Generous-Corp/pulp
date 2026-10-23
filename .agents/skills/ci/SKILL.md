@@ -2236,11 +2236,22 @@ that lacks `--retry-all-errors`.
 
 ### Per-commit `pulp-view-audio` archives are immutable release assets
 
-`view-audio-archive.yml` (dispatch from `main`, `source_sha` must be a full
-commit on `main`) publishes `libpulp-view-audio.a`, its manifest, symbol floor,
-floor-gate verdict, `SHA256SUMS` and the Sigstore bundle as an immutable
-prerelease tagged `artifact/pulp-view-audio/<sha>`. Things that look optional
-are not:
+`view-audio-archive.yml` runs on every push to `main` (and can be re-dispatched
+on `main`) and builds only the commit it runs on. It publishes
+`libpulp-view-audio.a`, its manifest, symbol floor, floor-gate verdict,
+`SHA256SUMS` and the Sigstore bundle as an immutable prerelease tagged
+`artifact/pulp-view-audio/<sha>`. Things that look optional are not:
+
+- **There is no commit input, on purpose.** An input naming the commit to
+  check out made CodeQL's cache-poisoning query fire on the build job (a
+  default-branch job running a checked-out tree that an input chose), and
+  validating the input in an earlier job did not change that. Building
+  `github.sha` removes the input, so an archive exists only for commits that
+  reached `main` after this workflow did; a consumer pins one of those.
+- **The build job must never touch the Actions cache.** It runs this commit's
+  `setup.sh` and build in a job whose actions can write the default branch's
+  cache scope. A contract test fails on any `actions/cache`, `setup-*` action
+  or cache input in that job.
 
 - **`ZERO_AR_DATE=1` is load-bearing.** Apple `ar`/`ranlib` stamp member and
   symbol-table times. The workflow's `rebuild` field records a second clean
@@ -2253,18 +2264,20 @@ are not:
   Generous-Corp/pulp/.github/workflows/view-audio-archive.yml --source-ref
   refs/heads/main` works without a token only because of `--bundle`, and only
   `--source-ref` rejects a modified copy of the workflow dispatched from a
-  branch. The attestation names the main tip that ran the workflow, so the
-  binding to `source_sha` is `view_audio_archive_manifest.py verify
-  --source-sha <sha> --require-gate-pass` on the attested manifest.
+  branch. Add `--source-digest <sha>`, then run `view_audio_archive_manifest.py
+  verify --source-sha <sha> --require-gate-pass --require-identical-rebuild`
+  on the attested manifest, which carries the gate verdict and the rebuild
+  comparison the signature alone does not.
 - **Build and publish are separate jobs.** The build job has `contents: read`
   and no token or OIDC grant, so nothing `setup.sh` fetches can sign; the
   publish job re-verifies the uploaded bytes before attesting them. A failing
-  floor gate stops in the build job, before any tag exists.
+  floor gate, or a rebuild that is not byte-identical, stops in the build job
+  before any tag exists.
 - **The tag must stay outside `v*`, and is therefore unprotected.** `v*` is the
   protected release-tag ruleset and the trigger for `release-cli.yml` /
   `sign-and-release.yml`; a tag such as `view-audio-...` would match that glob.
   Because `artifact/*` has no ruleset, the publish job refuses an existing tag
-  or draft that does not point at `source_sha` (or a draft with unexpected
+  or draft that does not point at the commit (or a draft with unexpected
   assets) and afterwards checks the tag, `immutable: true` and every asset
   digest. Keep the release a prerelease with `--latest=false` so
   `/releases/latest` and `pulp upgrade` never see it.

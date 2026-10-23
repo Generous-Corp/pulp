@@ -1,32 +1,36 @@
 name: View-audio archive
 
-# Builds the pulp-view-audio static archive at one exact commit of main on a
-# clean GitHub-hosted runner and publishes it as assets of an immutable
-# prerelease tagged artifact/pulp-view-audio/<source_sha>.
+# Builds the pulp-view-audio static archive at the commit this workflow runs
+# on, which is always a commit of main, on a clean GitHub-hosted runner, and
+# publishes it as assets of an immutable prerelease tagged
+# artifact/pulp-view-audio/<sha>. It runs on every push to main and can be
+# re-dispatched from main; there is no input naming another commit, so the
+# workflow only ever builds code that is already on the protected branch.
 #
 # A downstream package that carries a view unit (Vellum's mirror inertness
 # proof) needs the symbols this archive defines. It downloads the assets
-# anonymously and must check both of these, because neither is enough alone:
+# anonymously and must check both of these:
 #
 #   gh attestation verify libpulp-view-audio.a \
 #     --bundle pulp-view-audio-archive.sigstore.json \
 #     --repo Generous-Corp/pulp \
 #     --signer-workflow Generous-Corp/pulp/.github/workflows/view-audio-archive.yml \
-#     --source-ref refs/heads/main --deny-self-hosted-runners
+#     --source-ref refs/heads/main --source-digest <expected commit> \
+#     --deny-self-hosted-runners
 #   (the same for pulp-view-audio-archive.manifest.json)
 #
 #   python3 tools/scripts/view_audio_archive_manifest.py verify \
 #     --archive libpulp-view-audio.a \
 #     --manifest pulp-view-audio-archive.manifest.json \
-#     --source-sha <expected commit> --require-gate-pass
+#     --source-sha <expected commit> --require-gate-pass --require-identical-rebuild
 #
 # --bundle makes the attestation check work without a GitHub token, and
 # --source-ref pins the signer to this file as it exists on main: anyone who
 # can push a branch could dispatch a modified copy of this workflow from it,
-# and that copy would carry the same workflow path. The attestation's source
-# commit is the main tip that ran the workflow, not source_sha; the only thing
-# that binds the archive to source_sha is the attested manifest, which is why
-# `verify --source-sha` is part of the check.
+# and that copy would carry the same workflow path. Because the workflow
+# builds its own commit, the attestation's source digest is the archive's
+# source commit; the attested manifest records the same commit along with the
+# floor-gate verdict and the rebuild comparison.
 #
 # The release, not an Actions artifact, is the durable copy: artifacts expire
 # and need a token to download even from a public repository, while a
@@ -34,40 +38,38 @@ name: View-audio archive
 # The tag does not match the protected `v*` release namespace, so no release
 # automation reacts to it, and the release is never marked latest. Because
 # artifact/* tags are not protected, the publish job refuses a tag or draft
-# that does not already point at source_sha, and checks the published release
-# afterwards.
+# that does not already point at this commit, and checks the published
+# release afterwards.
 #
-# The request job validates source_sha (full commit, on main, resolved by the
-# API) and later jobs check out only that resolved value, never the raw input.
 # The build job holds no write token and cannot mint an OIDC token, so nothing
-# the build downloads or runs can sign or publish. The publish job only
-# re-verifies the build's bytes, attests them and releases them.
+# the build downloads or runs can sign or publish, and nothing in this
+# workflow restores a cache. The publish job only re-verifies the build's
+# bytes, attests them and releases them.
 #
 # Identity is the manifest plus its attestation. The archive bytes depend on
-# the runner image's Xcode, so a later dispatch for the same commit is refused
-# once a release exists rather than publishing a second, different archive.
+# the runner image's Xcode, so a later run for the same commit is refused once
+# a release exists rather than publishing a second, different archive.
 
 on:
-  workflow_dispatch:
-    inputs:
-      source_sha:
-        description: 'Full 40-hex commit on main to build pulp-view-audio from'
-        required: true
-        type: string
+  push:
+    branches: [main]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
 
 concurrency:
-  group: view-audio-archive-${{ inputs.source_sha }}
+  group: view-audio-archive-${{ github.sha }}
   cancel-in-progress: false
 
 env:
   REPO: ${{ github.repository }}
+  SOURCE_SHA: ${{ github.sha }}
+  TAG: artifact/pulp-view-audio/${{ github.sha }}
 
 jobs:
   request:
-    name: Validate the request
+    name: Check the request
     if: github.repository == 'Generous-Corp/pulp'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -75,42 +77,21 @@ jobs:
       contents: read
     outputs:
       published: ${{ steps.request.outputs.published }}
-      source_sha: ${{ steps.request.outputs.source_sha }}
     steps:
-      - name: Validate the request
+      - name: Check the request
         id: request
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
-          SOURCE_SHA="${REQUESTED}"
-          TAG="artifact/pulp-view-audio/${SOURCE_SHA}"
-          if ! [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::source_sha must be a full 40-hex lowercase commit, got '${SOURCE_SHA}'"
-            exit 1
-          fi
           # Not a security boundary (a branch copy of this file can drop it);
-          # consumers pin --source-ref refs/heads/main. It keeps an honest
-          # dispatch from publishing something consumers will reject.
+          # consumers pin --source-ref refs/heads/main. It keeps a dispatch
+          # from another branch from publishing something consumers reject.
           if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
-            echo "::error::dispatch this workflow from main; consumers verify --source-ref refs/heads/main"
+            echo "::error::run this workflow on main; consumers verify --source-ref refs/heads/main"
             exit 1
           fi
-          status=$(gh api "repos/${REPO}/compare/${SOURCE_SHA}...main" --jq .status)
-          case "${status}" in
-            ahead|identical) ;;
-            *) echo "::error::${SOURCE_SHA} is not on main (compare status: ${status})"; exit 1 ;;
-          esac
-          # The later jobs build only the commit GitHub resolves here, never
-          # the raw input.
-          resolved=$(gh api "repos/${REPO}/commits/${SOURCE_SHA}" --jq .sha)
-          if [ "${resolved}" != "${SOURCE_SHA}" ]; then
-            echo "::error::${SOURCE_SHA} resolves to ${resolved}"
-            exit 1
-          fi
-          echo "source_sha=${resolved}" >>"${GITHUB_OUTPUT}"
           if state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null) \
               && [ "${state}" = "false" ]; then
             echo "::notice::${TAG} is already published; its assets are the archive of record."
@@ -128,7 +109,6 @@ jobs:
     permissions:
       contents: read
     env:
-      SOURCE_SHA: ${{ needs.request.outputs.source_sha }}
       # Apple ar/ranlib write member and symbol-table timestamps unless asked
       # not to; without this two builds of one commit can never match.
       ZERO_AR_DATE: '1'
@@ -158,16 +138,9 @@ jobs:
             echo "PULP_CONFIGURE_CHECK_CACHE_DIR=$root/cc"
           } >> "$GITHUB_ENV"
 
-      - name: Check out the tooling
-        uses: actions/checkout@v7
+      - name: Check out this commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: tooling
-          persist-credentials: false
-
-      - name: Check out the source commit
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.request.outputs.source_sha }}
           path: source
           lfs: true
           persist-credentials: false
@@ -224,7 +197,7 @@ jobs:
             configure_flags+=("--configure=${arg}")
           done <"${RUNNER_TEMP}/configure-args.txt"
           lib=source/build/core/view
-          python3 tooling/tools/scripts/view_audio_archive_manifest.py describe \
+          python3 source/tools/scripts/view_audio_archive_manifest.py describe \
             --archive "${OUT}/libpulp-view-audio.a" \
             --source-sha "${SOURCE_SHA}" \
             --source-root source \
@@ -242,13 +215,14 @@ jobs:
           cat "${OUT}/pulp-view-audio-archive.manifest.json"
           # A failing floor gate must not reach the publish job: the commit's
           # immutable tag could never be used again.
-          python3 tooling/tools/scripts/view_audio_archive_manifest.py verify \
+          python3 source/tools/scripts/view_audio_archive_manifest.py verify \
             --archive "${OUT}/libpulp-view-audio.a" \
             --manifest "${OUT}/pulp-view-audio-archive.manifest.json" \
             --floor "${OUT}/pulp-view-audio-symbol-floor.txt" \
             --gate "${OUT}/pulp-view-audio-symbol-floor-gate.txt" \
             --source-sha "${SOURCE_SHA}" \
-            --require-gate-pass
+            --require-gate-pass \
+            --require-identical-rebuild
           (cd "${OUT}" && shasum -a 256 \
             libpulp-view-audio.a \
             pulp-view-audio-archive.manifest.json \
@@ -257,9 +231,9 @@ jobs:
           cat "${OUT}/SHA256SUMS"
 
       - name: Hand the archive to the publish job
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: pulp-view-audio-${{ needs.request.outputs.source_sha }}
+          name: pulp-view-audio-${{ github.sha }}
           path: out/
           if-no-files-found: error
           retention-days: 30
@@ -275,20 +249,18 @@ jobs:
       id-token: write
       attestations: write
     env:
-      SOURCE_SHA: ${{ needs.request.outputs.source_sha }}
-      TAG: artifact/pulp-view-audio/${{ needs.request.outputs.source_sha }}
       OUT: ${{ github.workspace }}/out
     steps:
       - name: Check out the tooling
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: tooling
           persist-credentials: false
 
       - name: Receive the archive
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: pulp-view-audio-${{ needs.request.outputs.source_sha }}
+          name: pulp-view-audio-${{ github.sha }}
           path: out
 
       - name: Re-verify the build's bytes
@@ -302,7 +274,8 @@ jobs:
             --floor "${OUT}/pulp-view-audio-symbol-floor.txt" \
             --gate "${OUT}/pulp-view-audio-symbol-floor-gate.txt" \
             --source-sha "${SOURCE_SHA}" \
-            --require-gate-pass
+            --require-gate-pass \
+            --require-identical-rebuild
 
       - name: Refuse a tag or draft that points elsewhere
         id: existing
@@ -328,7 +301,7 @@ jobs:
 
       - name: Attest the archive and its manifest
         id: attest
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             out/libpulp-view-audio.a
@@ -358,9 +331,9 @@ jobs:
           notes="pulp-view-audio static archive (darwin-arm64, Release) built from ${SOURCE_SHA} by ${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}.
 
           Verify both, without a token:
-            gh attestation verify libpulp-view-audio.a --bundle pulp-view-audio-archive.sigstore.json --repo ${REPO} --signer-workflow ${REPO}/.github/workflows/view-audio-archive.yml --source-ref refs/heads/main --deny-self-hosted-runners
-            python3 tools/scripts/view_audio_archive_manifest.py verify --archive libpulp-view-audio.a --manifest pulp-view-audio-archive.manifest.json --source-sha ${SOURCE_SHA} --require-gate-pass
-          The attestation's source commit is the main tip that ran the workflow; the manifest binds the archive to ${SOURCE_SHA}."
+            gh attestation verify libpulp-view-audio.a --bundle pulp-view-audio-archive.sigstore.json --repo ${REPO} --signer-workflow ${REPO}/.github/workflows/view-audio-archive.yml --source-ref refs/heads/main --source-digest ${SOURCE_SHA} --deny-self-hosted-runners
+            python3 tools/scripts/view_audio_archive_manifest.py verify --archive libpulp-view-audio.a --manifest pulp-view-audio-archive.manifest.json --source-sha ${SOURCE_SHA} --require-gate-pass --require-identical-rebuild
+          The workflow builds its own commit, so the attestation's source digest and the manifest both name ${SOURCE_SHA}."
           # A published release is immutable, so every asset is attached while
           # it is still a draft and the publish flip comes last.
           if [ "${DRAFT_EXISTS}" = "true" ]; then
@@ -405,5 +378,6 @@ jobs:
               --repo "${REPO}" \
               --signer-workflow "${REPO}/.github/workflows/view-audio-archive.yml" \
               --source-ref refs/heads/main \
+              --source-digest "${SOURCE_SHA}" \
               --deny-self-hosted-runners
           done

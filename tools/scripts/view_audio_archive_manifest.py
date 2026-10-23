@@ -12,7 +12,7 @@ and checks an archive against a manifest:
 
     view_audio_archive_manifest.py verify --archive libpulp-view-audio.a
         --manifest manifest.json --source-sha <40-hex> [--floor floor.txt]
-        [--gate gate.txt] [--require-gate-pass]
+        [--gate gate.txt] [--require-gate-pass] [--require-identical-rebuild]
 
     view_audio_archive_manifest.py check-draft --releases releases.json
         --out <asset dir> --source-sha <40-hex>
@@ -351,6 +351,10 @@ def verify(args: argparse.Namespace) -> int:
             errors.append(f"symbol floor gate sha256 {gate_sha} != manifest")
     if args.require_gate_pass and gate.get("exit_code") != 0:
         errors.append(f"symbol floor gate exit code is {gate.get('exit_code')!r}, not 0")
+    if args.require_identical_rebuild:
+        rebuild = manifest.get("rebuild") or {}
+        if rebuild.get("kind") != "separate-build-dir" or rebuild.get("identical") is not True:
+            errors.append(f"no identical rebuild in a separate build directory was recorded: {rebuild or None}")
     for error in errors:
         print(f"view-audio-archive: {error}", file=sys.stderr)
     if not errors:
@@ -392,6 +396,8 @@ def main(argv: list[str] | None = None) -> int:
     ver.add_argument("--gate", type=pathlib.Path, help="the floor gate output to check")
     ver.add_argument("--require-gate-pass", action="store_true",
                      help="fail unless the recorded floor gate exited 0")
+    ver.add_argument("--require-identical-rebuild", action="store_true",
+                     help="fail unless a separate-build-dir rebuild was recorded byte-identical")
     ver.set_defaults(func=verify)
 
     for name, func, help_text in (("check-draft", check_draft, "refuse a draft that is not exactly ours"),
