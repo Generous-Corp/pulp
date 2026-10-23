@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import secrets
 import stat
 import sys
@@ -228,8 +229,12 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         seed = secrets.token_bytes(32)
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(seed.hex() + "\n", encoding="ascii")
-        args.out.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        # Owner-only from the first byte: exclusive create at 0600 rather than
+        # write-then-chmod, which leaves a readable window and follows a
+        # pre-planted file.
+        fd = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IRUSR | stat.S_IWUSR)
+        with os.fdopen(fd, "w", encoding="ascii") as out:
+            out.write(seed.hex() + "\n")
         print(f"seed written to {args.out} (keep it private; back it up)")
         print(f"public key: {public_key(seed).hex()}")
         print("pin it as kPinnedRegistrySignerPublicKeyHex in tools/cli/package_registry_trust.hpp")
