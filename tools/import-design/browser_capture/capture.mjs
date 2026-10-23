@@ -318,12 +318,12 @@ function withTimeout(promise, milliseconds, label) {
   ]).finally(() => clearTimeout(timer));
 }
 
+// Speaks CDP over the browser's debugging pipe. Commands go to the attached
+// page session unless a caller names another session.
 class Cdp {
-  constructor(webSocketUrl, timeoutMs, progress = createCaptureProgress()) {
-    if (typeof WebSocket !== "function") {
-      throw new Error("Node.js 22 or newer is required (WebSocket unavailable)");
-    }
-    this.socket = new WebSocket(webSocketUrl);
+  constructor(pipe, timeoutMs, progress = createCaptureProgress()) {
+    this.pipe = pipe;
+    this.sessionId = undefined;
     this.timeoutMs = timeoutMs;
     this.progress = progress;
     this.nextId = 1;
@@ -332,14 +332,10 @@ class Cdp {
   }
 
   async open() {
-    await withTimeout(new Promise((resolve, reject) => {
-      this.socket.addEventListener("open", resolve, { once: true });
-      this.socket.addEventListener("error", reject, { once: true });
-    }), this.timeoutMs, "CDP WebSocket connection");
-    this.socket.addEventListener("message", (event) => {
+    this.pipe.onMessage((data) => {
       let message;
       try {
-        message = JSON.parse(String(event.data));
+        message = JSON.parse(data);
       } catch {
         return;
       }
@@ -359,21 +355,33 @@ class Cdp {
         }
         return;
       }
+      // Browser-session events carry no sessionId. Listeners here handle the
+      // page session and the child sessions it auto-attaches, nothing else.
+      if (!message.sessionId) return;
       for (const listener of this.listeners.get(message.method) ?? []) {
         Promise.resolve(listener(message.params ?? {})).catch(() => {});
       }
     });
-    this.socket.addEventListener("close", () => {
+    this.pipe.onClose(() => {
       for (const pending of this.pending.values()) {
         clearTimeout(pending.timer);
         pending.settle(false);
-        pending.reject(new Error("CDP WebSocket closed"));
+        pending.reject(new Error("CDP pipe closed"));
       }
       this.pending.clear();
     });
   }
 
-  call(method, params = {}, sessionId = undefined) {
+  async attachToPage() {
+    const target = await pageTarget(
+      (method, params) => this.call(method, params, null), this.timeoutMs);
+    const { sessionId } = await this.call(
+      "Target.attachToTarget", { targetId: target.targetId, flatten: true }, null);
+    this.sessionId = sessionId;
+  }
+
+  // `sessionId` defaults to the attached page; null addresses the browser.
+  call(method, params = {}, sessionId = this.sessionId) {
     const id = this.nextId++;
     const settle = this.progress.begin(method);
     return new Promise((resolve, reject) => {
@@ -383,12 +391,19 @@ class Cdp {
         reject(new Error(`${method} timed out`));
       }, this.timeoutMs);
       this.pending.set(id, { resolve, reject, settle, timer, method });
-      this.socket.send(JSON.stringify({
-        id,
-        method,
-        params,
-        ...(sessionId ? { sessionId } : {}),
-      }));
+      try {
+        this.pipe.send(JSON.stringify({
+          id,
+          method,
+          params,
+          ...(sessionId ? { sessionId } : {}),
+        }));
+      } catch (error) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        settle(false);
+        reject(error);
+      }
     });
   }
 
@@ -410,10 +425,7 @@ class Cdp {
   }
 
   close() {
-    if (this.socket.readyState === WebSocket.OPEN ||
-        this.socket.readyState === WebSocket.CONNECTING) {
-      this.socket.close();
-    }
+    this.pipe.close();
   }
 }
 
@@ -1013,8 +1025,8 @@ async function captureMaterializedDocument(cdp) {
   materialized.font_bindings = fontBindings;
 
   // Production bundles include Babel/React/font payloads. Returning them all
-  // in one Runtime.evaluate result can exceed Chrome's DevTools WebSocket
-  // message budget and close the connection without a protocol error. Read
+  // in one Runtime.evaluate result can exceed Chrome's DevTools message
+  // budget and close the connection without a protocol error. Read
   // each bounded blob independently and assemble the durable sidecar here.
   for (let index = 0; index < materialized.assets.length; index += 1) {
     const payload = await cdp.call("Runtime.evaluate", {
@@ -1282,9 +1294,9 @@ async function runProbe(options) {
     launched = await launchBrowser(
       browserPath, profileDir, timeoutMs,
       (child) => browserCustody.adopt(child));
-    const target = await pageTarget(launched.endpoint.port, timeoutMs);
-    cdp = new Cdp(target.webSocketDebuggerUrl, timeoutMs, progress);
+    cdp = new Cdp(launched.pipe, timeoutMs, progress);
     await cdp.open();
+    await cdp.attachToPage();
     progress.enterPhase("page-configuration");
     const version = await cdp.call("Browser.getVersion");
     browser = reportBrowser(version);
@@ -1426,9 +1438,9 @@ async function runCapture(options) {
             `--host-resolver-rules=${
               hostResolverRules(resolvedExternalOrigins)}`,
           ]);
-    const target = await pageTarget(launched.endpoint.port, timeoutMs);
-    cdp = new Cdp(target.webSocketDebuggerUrl, timeoutMs, progress);
+    cdp = new Cdp(launched.pipe, timeoutMs, progress);
     await cdp.open();
+    await cdp.attachToPage();
 
     progress.enterPhase("page-configuration");
     browser = reportBrowser(await cdp.call("Browser.getVersion"));

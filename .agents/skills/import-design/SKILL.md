@@ -7100,11 +7100,20 @@ browser you launched yourself:
 import { createEmptyProfile, launchBrowser, pageTarget, terminateBrowser }
   from "./browser_capture/browser_process.mjs";
 import { semanticExpression } from "./browser_capture/semantics.mjs";
-// launch -> Page.navigate to a fixture -> Runtime.evaluate(semanticExpression([]))
+// launch -> pageTarget(call) -> Target.attachToTarget {flatten: true}
+//   -> Page.navigate to a fixture -> Runtime.evaluate(semanticExpression([]))
 ```
 
-Node 22 ships a built-in `WebSocket`, so the CDP client is a few dozen lines and
-needs no dependency. Importing the merged copy alongside the patched one and
+The browser is driven over `--remote-debugging-pipe`, never a debugging port: a
+port is an unauthenticated endpoint any local process could attach to while a
+capture runs. `launchBrowser` returns `{ child, pipe }`; `pipe` is a `CdpPipe`
+(NUL-terminated JSON on the browser's fds 3 and 4, carried through the POSIX
+anchor) that is the BROWSER session, so there is no `/json/list` and no
+`webSocketDebuggerUrl`. Find the page with `pageTarget(call, timeoutMs)` and
+attach with `Target.attachToTarget {flatten: true}`; page commands then carry
+the returned `sessionId`. `browser_pipe.integration.test.mjs` holds the minimal
+client and fails if the launched process group listens on TCP or writes
+`DevToolsActivePort`. Importing the merged copy alongside the patched one and
 evaluating BOTH against the same loaded page yields a before/after table that
 re-running one build can never fake — and it is what tells you the two
 already-working controls did not move.
