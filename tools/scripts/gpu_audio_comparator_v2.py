@@ -49,6 +49,10 @@ PARITY_TOLERANCE = 1e-4
 # Allowance for the Metal GPU-clock to host-clock conversion.
 CLOCK_MARGIN_NS = 50_000
 WAKE_GPU_END_UNORDERED = "metal_shared_event_gpu_end_not_ordered_before_visible"
+SHARED_EVENT_LANES = frozenset({
+    "metal_shared_event",
+    "metal_shared_event_unguarded_robustness_probe",
+})
 GATING_ROBUSTNESS = "tint_equivalent"
 ROBUSTNESS_PROBE_ROLE = "robustness_cost_probe"
 ROBUSTNESS_PROBE_LANE = "metal_shared_event_unguarded_robustness_probe"
@@ -134,9 +138,11 @@ def cell_metrics(cell: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]
             misses += 1
         if s["gpu_busy_ns"][i] >= 0:
             busy.append(s["gpu_busy_ns"][i])
-            if ok:
+            if ok and timed_wake:
                 # Submit-to-visible minus GPU busy: an upper bound on wake
-                # latency where no host-domain completion time exists.
+                # latency where no host-domain completion time exists. Not
+                # applicable where GPU end may trail visibility: busy time can
+                # then exceed the latency and the "bound" would go negative.
                 wake_bound.append(visible - submit - s["gpu_busy_ns"][i])
         if ok and timed_wake and s["gpu_end_ns"][i] >= 0:
             wake.append(visible - s["gpu_end_ns"][i])
@@ -184,15 +190,22 @@ def gpu_end_precedes_visible(cell: dict[str, Any]) -> bool:
     A completed handler runs after the command buffer completes, so its GPU
     end precedes visibility. A shared-event listener can fire before the
     command buffer records GPUEndTime (paravirtual GPUs show this), so for
-    those cells GPU end bounds nothing about wake or latency.
+    those cells GPU end bounds nothing about wake or latency. The exemption
+    follows the lane, not the receipt's own label: only a shared-event lane
+    may claim it, and any other cell claiming it is refused in _check_samples.
     """
-    return cell.get("wake_domain") != WAKE_GPU_END_UNORDERED
+    return not (cell.get("wake_domain") == WAKE_GPU_END_UNORDERED and
+                cell.get("lane") in SHARED_EVENT_LANES)
 
 
 def _check_samples(cell: dict[str, Any], refusals: list[str]) -> None:
     """Refuse a cell whose timeline is impossible."""
     s = cell["samples"]
     tag = f"{cell['lane']}:{cell['frames']}:{cell['load']}"
+    if (cell.get("wake_domain") == WAKE_GPU_END_UNORDERED and
+            cell.get("lane") not in SHARED_EVENT_LANES):
+        refusals.append(f"wake_domain_not_shared_event_lane:{tag}")
+        return
     ordered = gpu_end_precedes_visible(cell)
     for i in range(cell["blocks"]):
         release, submit = s["release_ns"][i], s["submit_ns"][i]

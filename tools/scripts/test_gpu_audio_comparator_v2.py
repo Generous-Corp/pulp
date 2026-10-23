@@ -452,6 +452,43 @@ class ComparatorV2Tests(unittest.TestCase):
                        and m["load"] == "idle")
         self.assertEqual(metrics["wake_ns"]["count"], 0)
 
+    def test_completed_handler_cannot_claim_the_unordered_domain(self):
+        r = receipt()
+        c = find(r, "metal_completed_handler", 128)
+        c["wake_domain"] = comparator.WAKE_GPU_END_UNORDERED
+        c["samples"]["gpu_end_ns"][7] = c["samples"]["visible_ns"][7] + 500_000
+        result = evaluate(seal(r))
+        self.assertEqual(result["verdict"], "REFUSED")
+        self.assertIn("wake_domain_not_shared_event_lane:metal_completed_handler:128:idle",
+                      result["reasons"])
+
+    def test_unordered_exemption_follows_the_lane(self):
+        claimed = {"lane": "metal_completed_handler",
+                   "wake_domain": comparator.WAKE_GPU_END_UNORDERED}
+        self.assertTrue(comparator.gpu_end_precedes_visible(claimed))
+        shared = {"lane": "metal_shared_event",
+                  "wake_domain": comparator.WAKE_GPU_END_UNORDERED}
+        self.assertFalse(comparator.gpu_end_precedes_visible(shared))
+
+    def test_shared_event_wake_bound_is_not_applicable(self):
+        r = receipt()
+        c = find(r, "metal_shared_event", 64)
+        for i in range(c["blocks"]):
+            c["samples"]["gpu_end_ns"][i] = c["samples"]["visible_ns"][i] + 100_000
+            c["samples"]["gpu_busy_ns"][i] = (c["samples"]["visible_ns"][i] -
+                                              c["samples"]["submit_ns"][i] + 80_000)
+        result = evaluate(seal(r))
+        metrics = next(m for m in result["campaigns"][0]["metrics"]
+                       if m["lane"] == "metal_shared_event" and m["frames"] == 64
+                       and m["load"] == "idle")
+        self.assertEqual(metrics["wake_upper_bound_ns"]["count"], 0)
+        self.assertIsNone(metrics["wake_upper_bound_ns"]["p99"])
+        # Ordered lanes keep their bound, and it is never negative.
+        handler = next(m for m in result["campaigns"][0]["metrics"]
+                       if m["lane"] == "metal_completed_handler" and m["frames"] == 64
+                       and m["load"] == "idle")
+        self.assertGreaterEqual(handler["wake_upper_bound_ns"]["p50"], 0)
+
     def test_shared_event_gpu_end_before_submit_is_refused(self):
         r = receipt()
         c = find(r, "metal_shared_event", 64)

@@ -134,7 +134,10 @@ time can be no longer than the latency.
 
 Shared-event cells are exempt from those last two checks. Their listener can
 fire before the command buffer records `GPUEndTime`, so the GPU end may trail
-visibility. Paravirtual CI GPUs show this.
+visibility. Paravirtual CI GPUs show this. The exemption follows the lane:
+any other cell that claims the shared-event wake domain is refused. Shared-event
+cells also report no wake upper bound (submit→visible minus GPU busy), because
+GPU busy time can exceed their latency.
 
 - **Submit→visible**: p50, p99, p99.9 and max, on the host clock.
 - **GPU busy time**: Metal measures command-buffer start to end; Dawn measures
