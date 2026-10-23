@@ -588,6 +588,16 @@ set_tests_properties(cmake-faust-rt-sdk-consumer PROPERTIES
 pulp_add_test_suite(pulp-test-convolver GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 
+# FixedIrConvolver's direct-engine table must be the one its committed
+# crossover receipts give (docs/validation/convolver-crossover/).
+if(Python3_Interpreter_FOUND)
+    add_test(NAME convolver-crossover-table
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/convolver_crossover_check.py"
+            --repo-root "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(convolver-crossover-table PROPERTIES LABELS "signal;convolver;docs")
+endif()
+
 # Background-IR-swap tests for PartitionedConvolver. Lock-free
 # pointer-shuttle hand-off from worker thread → audio thread, including
 # a concurrent stage/swap hammer test.

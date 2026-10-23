@@ -42,12 +42,22 @@ absolute time.
 | [m5-ultra.csv](convolver-crossover/m5-ultra.csv) | Apple M5 Ultra (Mac17,15) | 6, one quiet | 5.1-11.7 (7.5) |
 
 Each chip gives a crossover per block size: the largest measured IR length
-up to which the direct engine is no slower than the FFT, in the median paired
-ratio, at every instance count. The table takes the lowest of the three.
+up to which the direct engine's median cost is no higher than the FFT's at
+every instance count, for every shorter measured length too. The table takes
+the lowest of the three. The `convolver-crossover-table` test recomputes it
+from these files with `tools/scripts/convolver_crossover_check.py` and fails
+if the header and the data disagree.
 
 Regret is the policy's engine cost over the cheaper engine's in each of the
-748 cells (taps x block x instances). Out of sample, fitting on two chips and
-scoring the third:
+748 cells (taps x block x instances). With the shipped table, in sample:
+
+| Chip | Regret geomean | p95 | Worst cell | Cells over 1.1 |
+|---|---|---|---|---|
+| M1 Max | 1.002 | 1.000 | 1.22 (640 taps, 16 frames, 16 instances) | 7 |
+| M5 Max | 1.003 | 1.000 | 1.26 (640 taps, 16 frames, 8 instances) | 11 |
+| M5 Ultra | 1.001 | 1.000 | 1.30 (640 taps, 16 frames, 32 instances) | 3 |
+
+Out of sample, fitting on two chips and scoring the third:
 
 | Held-out chip | Regret geomean | p95 | Worst cell | Cells over 1.1 |
 |---|---|---|---|---|
@@ -76,9 +86,10 @@ the table is fitted on.
 - From 16 frames up the real-input FFT wins early: 576 taps at 16 frames,
   128 at 32 and 64, and 64 from 128 frames up. The limits held at 1, 8, 16
   and 32 instances.
-- Without the Accelerate backend the policy keeps the FFT engine, because the
-  scalar direct kernel is an order of magnitude slower; other backends need
-  their own measurements before the table applies to them.
+- The table applies only where it was measured: single precision on Apple
+  Silicon Macs with the Accelerate backend. Everywhere else, double precision
+  included, the policy keeps the FFT engine for every IR until that target
+  has its own measurements.
 
 ## Reopen when
 
