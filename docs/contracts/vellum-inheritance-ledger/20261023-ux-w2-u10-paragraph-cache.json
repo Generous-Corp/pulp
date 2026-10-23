@@ -1,0 +1,14 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-ux-w2-u10-paragraph-cache",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "The canvas kernel must cache laid-out paragraphs across per-frame canvases under a key that holds every input the paragraph build reads (text, resolved family stack, primary typeface, size, weight, slant, letter spacing, direction, OpenType features and the font-registration generation), bounded by entries and bytes and invalidated by font registration; the paint must not be part of the key and must be applied at draw time, never by updating a cached paragraph's foreground paint, and a cached draw must be pixel-identical to an uncached one.",
+  "evidence": [
+    ".github/vellum-change-events/20261023-ux-w2-u10-paragraph-cache.json",
+    "pulp-test-design-import-benchmark-contracts [benchmark]",
+    "pulp-test-paragraph-cache [paragraph-cache]",
+    "pulp-test-paragraph-cache-gpu [gpu]"
+  ]
+}
