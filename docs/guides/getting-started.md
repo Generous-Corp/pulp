@@ -493,6 +493,8 @@ Try changing the background color or adding a second knob. The scripted standalo
 
 This is currently the supported live-reload path for scripted UI. Plugin targets can load the same `UI_SCRIPT`, but live JS/theme reload is not yet a cross-host guarantee.
 
+Hot reload works because `pulp build` (and `pulp dev`, `pulp loop`, `pulp run`, and the project `pulp create` scaffolds) configures with `-DPULP_DEV_BUILD=ON`, which compiles the on-disk `ui/main.js` path into the dev build so the standalone host can watch it. The script's bytes are always embedded into every format target as well, and a shipped artifact uses only those: `pulp ship sign` and `pulp ship package` refuse a build dir configured with `PULP_DEV_BUILD=ON`. To make a build shippable, reconfigure it once with `cmake -B build -DPULP_DEV_BUILD=OFF` and rebuild; `pulp build` keeps that setting.
+
 `pulp create` verifies the fresh project path by scaffolding, configuring, building the default native outputs for the platform, and running the generated tests. Use `pulp build` after `pulp create` when you want to rebuild, select explicit targets, or materialize optional deliverables after changing configuration. Browser targets such as WAM/WebCLAP are separate lanes and are not emitted by default by the generated project.
 
 ## Step 9: Apply a Theme

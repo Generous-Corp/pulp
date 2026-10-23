@@ -2468,6 +2468,63 @@ is false, because choc's watcher needs macOS `FSEventStream*`), the flag is
 accepted and file-watch reload is inert. `ScriptedUiSession` logs once in that
 case so the degradation is visible rather than mysterious.
 
+## The UI_SCRIPT editor is embedded; the on-disk path is a dev-build override
+
+`pulp_add_plugin(UI_SCRIPT)` no longer ships a plug-in that reads `ui.js` from
+the developer's absolute source path at every editor open. The script's bytes
+(and a `theme.json` beside it, when one exists at configure time) are encoded
+with `pulp_add_binary_data` into one `pulp_ui_embed_<hash>` library per
+distinct script, and a generated `*_register.cpp` -- compiled as a direct
+source of each format target so its static initializer survives the link --
+installs them through `pulp::format::register_embedded_editor_ui()`. The
+default editor reads `embedded_editor_ui()`; `select_editor_ui_source()` in
+`editor_ui.hpp` is the pure decision and `test_headless.cpp` tests its matrix.
+
+Gotchas:
+
+- **Hot reload needs the dev path, and only a dev build compiles it in.**
+  `PULP_UI_SCRIPT_PATH`, `PULP_UI_THEME_PATH` and `PULP_UI_ASSET_ROOTS` are
+  defined only when `PULP_DEV_BUILD` is on. In the checkout it is a root
+  option defaulting to `PULP_BUILD_TESTS`; `PulpUiAssets.cmake` declares it
+  OFF for an installed-SDK consumer, and the `pulp` CLI's configure
+  (`pulp build`/`dev`/`loop`/`run`, and `pulp create`'s project configure)
+  passes `-DPULP_DEV_BUILD=ON` on a fresh dir or one that never recorded it,
+  keeping a recorded value. `pulp ship sign|package` refuse a dev build dir
+  (`tools/cli/ship_dev_build_guard.hpp`, `--allow-dev-build` overrides);
+  `cmake -B build -DPULP_DEV_BUILD=OFF` is the shippable configure. The
+  release profile module owns the option once it lands. At run time
+  `select_editor_ui_source()` honors the path only for a hot-reloading editor
+  (standalone, or `PULP_DEV_HOT_RELOAD=1`) and only while the file exists, so
+  a stale path falls back to the embedded bytes rather than to AutoUi.
+  `cmake-ui-script-embed` proves both halves: bytes embedded and registered
+  with no path, and the path present under `PULP_DEV_BUILD=ON`.
+- **An embedded session is path-less.** `script_path()` is empty,
+  `uses_embedded_source()` is true, `theme_path()` is empty (never a
+  `theme.json` relative to the host's cwd), the script base dir is not an
+  asset root, and `enable_hot_reload` creates no `HotReloader`
+  (`hot_reload_watching()` is false; it logs once). Log lines name the
+  script through `script_label()`. `reload()` re-evaluates the bytes;
+  `reload_from({})` returns to them, which is how `ScriptedUiSwapUnit` rolls
+  an embedded editor back (its `prev_script_` is empty).
+- **The old mechanism depended on a weak-symbol override.** The compiled-in
+  path only reached `ViewBridge` (in `pulp-format-view`, built without the
+  define) when a plug-in TU that includes `editor_ui.hpp` -- `clap_entry.hpp`
+  -- supplied a competing definition of the inline builder. The registry is
+  explicit, so VST3/AU/Standalone no longer rely on link order.
+- **Relative assets have no home in a shipped editor.** The embedded session
+  has no script directory and a non-dev build compiles in no asset roots, so
+  `__loadAssetSync__` / `resolve_script_relative` find nothing beside the
+  script; configure warns when images or fonts sit next to `UI_SCRIPT`.
+  Inline them as `data:` URLs. (`pulp_embed_files` serves native code only;
+  the bridge has no embedded-asset hook.)
+- **The script directory is a configure dependency**, so adding `theme.json`
+  (or the script itself) after configure re-runs CMake on the next build; the
+  encode itself re-runs on every build when the file changes.
+- **Two registrations in one image resolve by priority.** `pulp_use_kit_ui`
+  registers at 1 and `UI_SCRIPT` at 0, mirroring the definition order the
+  helper replaced; static-initializer order between the two units is
+  unspecified, which is why priority rather than arrival decides.
+
 ## Scripted UI joins a unified live-swap transaction (SwapUnit)
 
 `ScriptedUiSwapUnit` (`core/format/include/pulp/format/reload/scripted_ui_swap_unit.hpp`)

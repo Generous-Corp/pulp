@@ -233,7 +233,7 @@ format_limitations:
 scripted_ui:
   ui_script_target_wiring:
     status: usable
-    notes: UI_SCRIPT is threaded through VST3, AU, CLAP, and Standalone targets via PULP_UI_SCRIPT_PATH.
+    notes: UI_SCRIPT bytes (plus a sibling theme.json) are embedded into VST3, AU, CLAP, Standalone and control-host targets and registered at load; PULP_UI_SCRIPT_PATH is compiled in only by a dev build (PULP_DEV_BUILD) and read only by a hot-reloading editor while the file exists.
   scripted_editor_loading:
     macos: usable
     windows: partial

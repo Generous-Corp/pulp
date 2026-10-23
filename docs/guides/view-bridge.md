@@ -84,8 +84,33 @@ public:
 ### Default AutoUi editor
 
 Do nothing. `Processor::create_view()` returns `nullptr`, and ViewBridge
-builds the AutoUi (or scripted UI, if one is configured via
-`PULP_UI_SCRIPT_PATH`). Every plugin gets a working editor for free.
+builds the AutoUi (or the scripted UI `pulp_add_plugin(UI_SCRIPT)` embedded
+into the image). Every plugin gets a working editor for free.
+
+#### Where the default scripted editor's document comes from
+
+`pulp_add_plugin(... UI_SCRIPT ui.js)` compiles the script's bytes, and the
+`theme.json` beside it when one exists at configure time, into every format
+target; a generated unit registers them through
+`pulp::format::register_embedded_editor_ui()` when the image loads. The default
+editor (`build_editor_ui`) evaluates those bytes through
+`ScriptedUiOptions::script_source`: nothing is read from disk, the session's
+`script_path()` is empty, relative asset lookups resolve against the configured
+asset roots alone, and a `theme.json` relative to the host's working directory
+is never consulted.
+
+`select_editor_ui_source()` in `editor_ui.hpp` is the pure decision and is
+tested as such. The compiled-in path (`PULP_UI_SCRIPT_PATH`, present only in a
+dev build: `PULP_DEV_BUILD`, defaulting to `PULP_BUILD_TESTS`) is honored only
+by a hot-reloading editor and only while that file exists, so the standalone
+host and a DAW launched with `PULP_DEV_HOT_RELOAD=1` keep reading the file a
+developer is editing, while a tests-off or SDK build depends on no path at all.
+
+An embedded session asked for `enable_hot_reload` has nothing to watch: it
+keeps the flag, creates no `HotReloader` (`hot_reload_watching()` stays false),
+and logs once. `reload()` re-evaluates the embedded bytes; `reload_from(path)`
+switches to a file and `reload_from({})` returns to the embedded source, which
+is how `ScriptedUiSwapUnit` rolls an embedded editor back.
 
 ### Custom view tree
 
