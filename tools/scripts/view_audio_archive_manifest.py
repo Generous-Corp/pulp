@@ -11,12 +11,18 @@ and checks an archive against a manifest:
         --gate-out gate.txt [--check NAME=ARCHIVE ...] --output manifest.json
 
     view_audio_archive_manifest.py verify --archive libpulp-view-audio.a
-        --manifest manifest.json [--floor floor.txt] [--source-sha <40-hex>]
+        --manifest manifest.json --source-sha <40-hex> [--floor floor.txt]
+        [--gate gate.txt] [--require-gate-pass]
 
 The symbol floor is the demangled list of symbols the archive defines, read
 from `nm -A -P -g` with the same rule view_audio_symbol_floor.py applies: every
 listed type except U, w and v is a definition. The gate output is that script's
 own verdict, run from the source checkout against the named libraries.
+
+The manifest is what binds the archive to its source commit: the build
+attestation names the commit that ran the producing workflow, not the one the
+archive was built from. A consumer therefore runs `verify --source-sha` on the
+attested manifest as well as checking the attestation.
 
 Exit codes: 0 = ok, 1 = verification mismatch, 2 = unusable input.
 """
@@ -193,7 +199,8 @@ def describe(args: argparse.Namespace) -> int:
     }
     if args.rebuild_archive:
         rebuilt = sha256_file(args.rebuild_archive)
-        manifest["rebuild"] = {"sha256": rebuilt, "identical": rebuilt == manifest["archive"]["sha256"]}
+        manifest["rebuild"] = {"kind": args.rebuild_kind, "sha256": rebuilt,
+                               "identical": rebuilt == manifest["archive"]["sha256"]}
     args.output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"view-audio-archive: {args.archive.name} sha256={manifest['archive']['sha256']} "
           f"floor={manifest['symbol_floor']['symbols']} symbols gate_exit={gate_status}")
@@ -225,6 +232,13 @@ def verify(args: argparse.Namespace) -> int:
         floor_sha = sha256_file(args.floor)
         if manifest.get("symbol_floor", {}).get("sha256") != floor_sha:
             errors.append(f"symbol floor sha256 {floor_sha} != manifest")
+    gate = manifest.get("symbol_floor_gate", {})
+    if args.gate:
+        gate_sha = sha256_file(args.gate)
+        if gate.get("sha256") != gate_sha:
+            errors.append(f"symbol floor gate sha256 {gate_sha} != manifest")
+    if args.require_gate_pass and gate.get("exit_code") != 0:
+        errors.append(f"symbol floor gate exit code is {gate.get('exit_code')!r}, not 0")
     for error in errors:
         print(f"view-audio-archive: {error}", file=sys.stderr)
     if not errors:
@@ -250,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
     desc.add_argument("--cmake-cache", type=pathlib.Path)
     desc.add_argument("--rebuild-archive", type=pathlib.Path,
                       help="a second build of the same source, compared byte for byte")
+    desc.add_argument("--rebuild-kind", default="separate-build-dir",
+                      help="how the second build differs from the first")
     desc.add_argument("--nm")
     desc.add_argument("--cxxfilt")
     desc.set_defaults(func=describe)
@@ -259,6 +275,9 @@ def main(argv: list[str] | None = None) -> int:
     ver.add_argument("--manifest", type=pathlib.Path, required=True)
     ver.add_argument("--floor", type=pathlib.Path)
     ver.add_argument("--source-sha")
+    ver.add_argument("--gate", type=pathlib.Path, help="the floor gate output to check")
+    ver.add_argument("--require-gate-pass", action="store_true",
+                     help="fail unless the recorded floor gate exited 0")
     ver.set_defaults(func=verify)
 
     args = parser.parse_args(argv)

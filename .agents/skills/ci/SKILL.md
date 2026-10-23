@@ -2239,16 +2239,35 @@ that lacks `--retry-all-errors`.
 `view-audio-archive.yml` (dispatch from `main`, `source_sha` must be a full
 commit on `main`) publishes `libpulp-view-audio.a`, its manifest, symbol floor,
 floor-gate verdict, `SHA256SUMS` and the Sigstore bundle as an immutable
-prerelease tagged `artifact/pulp-view-audio/<sha>`. Three things that look
-optional are not:
+prerelease tagged `artifact/pulp-view-audio/<sha>`. Things that look optional
+are not:
 
 - **`ZERO_AR_DATE=1` is load-bearing.** Apple `ar`/`ranlib` stamp member and
-  symbol-table times; with it two clean builds of one commit in different build
-  dirs match byte for byte, without it a rebuild of the same objects differs.
-- **The tag must stay outside `v*`.** `v*` is the protected release-tag ruleset
-  and the trigger for `release-cli.yml` / `sign-and-release.yml`; a tag such as
-  `view-audio-...` would match that glob. Keep the release a prerelease with
-  `--latest=false` so `/releases/latest` and `pulp upgrade` never see it.
+  symbol-table times. The workflow's `rebuild` field records a second clean
+  configure and build of the same checkout into a separate build directory on
+  the same runner (`kind: separate-build-dir`); without the variable that
+  second archive differs. It says nothing about another runner image.
+- **A consumer must check the ref and the manifest, not just the signature.**
+  `gh attestation verify <file> --bundle pulp-view-audio-archive.sigstore.json
+  --repo Generous-Corp/pulp --signer-workflow
+  Generous-Corp/pulp/.github/workflows/view-audio-archive.yml --source-ref
+  refs/heads/main` works without a token only because of `--bundle`, and only
+  `--source-ref` rejects a modified copy of the workflow dispatched from a
+  branch. The attestation names the main tip that ran the workflow, so the
+  binding to `source_sha` is `view_audio_archive_manifest.py verify
+  --source-sha <sha> --require-gate-pass` on the attested manifest.
+- **Build and publish are separate jobs.** The build job has `contents: read`
+  and no token or OIDC grant, so nothing `setup.sh` fetches can sign; the
+  publish job re-verifies the uploaded bytes before attesting them. A failing
+  floor gate stops in the build job, before any tag exists.
+- **The tag must stay outside `v*`, and is therefore unprotected.** `v*` is the
+  protected release-tag ruleset and the trigger for `release-cli.yml` /
+  `sign-and-release.yml`; a tag such as `view-audio-...` would match that glob.
+  Because `artifact/*` has no ruleset, the publish job refuses an existing tag
+  or draft that does not point at `source_sha` (or a draft with unexpected
+  assets) and afterwards checks the tag, `immutable: true` and every asset
+  digest. Keep the release a prerelease with `--latest=false` so
+  `/releases/latest` and `pulp upgrade` never see it.
 - **Never delete one of these releases.** A published immutable release burns
   its tag name forever; the workflow refuses to rebuild a commit that already
   has one, because a second build on a newer runner image is different bytes.
