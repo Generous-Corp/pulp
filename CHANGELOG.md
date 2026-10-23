@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v010120"></a>
+## [0.1012.0] - 2026-10-23
+
+- release/version bump ([#10804](https://github.com/Generous-Corp/pulp/pull/10804))
+- ci/a2t headroom tracking issue ([#10786](https://github.com/Generous-Corp/pulp/pull/10786))
+- codex/signalgraph live swap 20261022 ([#10774](https://github.com/Generous-Corp/pulp/pull/10774))
+- feature/gpu audio wp k real hosts 20261022 ([#10745](https://github.com/Generous-Corp/pulp/pull/10745))
+
 <a id="v010110"></a>
 ## [0.1011.0] - 2026-10-23
 
@@ -11344,6 +11352,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.1012.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1012.0
 [0.1011.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1011.0
 [0.1010.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1010.0
 [0.1009.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1009.0
