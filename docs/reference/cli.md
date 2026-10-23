@@ -3117,7 +3117,7 @@ Subcommands:
 
 | Subcommand | What it does |
 |------------|--------------|
-| `validate <path>` | Validate a `.pulpcontent` archive or `content-pack` directory without executing package code. An archive is refused before extraction when its declared decompressed size exceeds the pack cap (4 GiB total, 1 GiB per entry by default); `--max-pack-bytes <n>` lowers both caps |
+| `validate <path>` | Validate a `.pulpcontent` archive or `content-pack` directory without executing package code. An archive is refused before extraction when its declared decompressed size exceeds the pack cap (4 GiB total, 1 GiB per entry, 65536 entries by default); `--max-pack-bytes <n>` lowers both byte caps |
 | `preview <path> --plugin-runtime <manifest>` | Preview compatibility and reload/restart policy without installing anything |
 | `install <path> --plugin <id> --yes` | Copy a validated content pack into the plugin-specific user content root and update the content index with `plugin_id` and `manifest_sha256`; accepts `--max-pack-bytes <n>` |
 | `update <path> --plugin <id> --yes` | Replace or add a validated local content pack, write the target plugin id and new manifest digest, and roll back a replaced version on failure; accepts `--max-pack-bytes <n>` |

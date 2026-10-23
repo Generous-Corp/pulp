@@ -111,10 +111,11 @@ separators or colons in file names therefore fails validation everywhere.
 
 A `.pulpcontent` archive declares each entry's decompressed size, so
 `ContentSizeBudget` (`core/state/include/pulp/state/content_install_limits.hpp`)
-admits the whole pack from metadata before anything is inflated: 4 GiB total and
-1 GiB per entry by default, `--max-pack-bytes <n>` on `validate` / `install` /
-`update` to lower both. The runtime installer takes the same
-`ContentInstallLimits`. The budget runs *before* the `files.sha256.json` hash
+admits the whole pack from metadata before anything is inflated: 4 GiB total,
+1 GiB per entry and 65536 entries by default, `--max-pack-bytes <n>` on
+`validate` / `install` / `update` to lower both byte caps. The entry-count cap is what bounds the hash
+check's cross-reference of archived against declared files, so it is not a
+knob. The runtime installer takes the same `ContentInstallLimits`. The budget runs *before* the `files.sha256.json` hash
 check, because that check inflates every declared file onto the heap. A refusal
 names the entry (`archive-size: entry ... above the per-entry cap`); miniz
 enforces the declared size during extraction, so a stream that inflates past its

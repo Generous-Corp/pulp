@@ -1671,6 +1671,20 @@ TEST_CASE("runtime content installer refuses an archive above the decompressed-s
         REQUIRE_FALSE(fs::exists(data_root / "Content"));
     }
 
+    SECTION("entry-count cap") {
+        // The pack holds the manifest, a preset, two themes and the hash list;
+        // a cap of two refuses it from the central directory, naming the third.
+        ContentInstallLimits limits;
+        limits.max_entries = 2;
+        auto preview = preview_content_pack_install(archive, manifest, data_root, limits);
+        REQUIRE_FALSE(preview.ok);
+        REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& i) {
+            return i.rfind("archive-size:", 0) == 0 &&
+                   i.find("entry-count cap of 2") != std::string::npos;
+        }));
+        REQUIRE_FALSE(fs::exists(data_root / "Content"));
+    }
+
     SECTION("positive control: the default caps admit the same pack") {
         auto preview = preview_content_pack_install(archive, manifest, data_root);
         REQUIRE(preview.ok);
@@ -1681,6 +1695,22 @@ TEST_CASE("runtime content installer refuses an archive above the decompressed-s
         REQUIRE(fs::exists(extracted));
         REQUIRE(fs::file_size(extracted) == padded.size());
     }
+}
+
+TEST_CASE("content install limits count entries",
+          "[state][preset][content]") {
+    // The budget counts admitted entries and refuses the one past the cap even
+    // when it carries no bytes at all.
+    ContentInstallLimits limits;
+    limits.max_entries = 2;
+    ContentSizeBudget budget(limits);
+    REQUIRE(budget.admit("a.json", 10).empty());
+    REQUIRE(budget.admit("b.json", 0).empty());
+    REQUIRE(budget.admitted_entries() == 2);
+    const auto refused = budget.admit("c.json", 0);
+    REQUIRE(refused.find("`c.json`") != std::string::npos);
+    REQUIRE(refused.find("entry-count cap of 2") != std::string::npos);
+    REQUIRE(budget.admitted_entries() == 2); // a refused entry is not counted
 }
 
 TEST_CASE("runtime content installer rejects pulpcontent archives without hash manifests",

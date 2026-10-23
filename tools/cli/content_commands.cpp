@@ -745,8 +745,8 @@ void print_usage() {
                  "explicit local path and rolls back a replaced version on failure. Rescan "
                  "rebuilds the metadata index only. They do not execute package code.\n"
               << "An archive is refused before extraction when its declared decompressed size "
-                 "exceeds the pack cap (default 4 GiB total, 1 GiB per entry); --max-pack-bytes "
-                 "lowers both caps to <n>.\n";
+                 "exceeds the pack cap (default 4 GiB total, 1 GiB per entry, 65536 entries); "
+                 "--max-pack-bytes lowers both caps to <n>.\n";
 }
 
 // Parse a `--max-pack-bytes` value into limits: it caps the pack total and

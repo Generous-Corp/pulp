@@ -1970,7 +1970,7 @@ commands:
     summary: Validate, preview, install, update, list, rescan, remove, and reveal data-only content packs for installed plugins. Content packs are the end-user data lane and never execute package code.
     subcommands:
       - name: validate
-        summary: Validate a .pulpcontent archive or content-pack directory without executing package code. Archives must include files.sha256.json, every payload file must be listed there, and hashes must match. An archive whose declared decompressed size exceeds the pack cap (4 GiB total, 1 GiB per entry by default) is refused before anything is extracted.
+        summary: Validate a .pulpcontent archive or content-pack directory without executing package code. Archives must include files.sha256.json, every payload file must be listed there, and hashes must match. An archive whose declared decompressed size or entry count exceeds the pack cap (4 GiB total, 1 GiB per entry, 65536 entries by default) is refused before anything is extracted.
         args:
           - name: path
             kind: positional
