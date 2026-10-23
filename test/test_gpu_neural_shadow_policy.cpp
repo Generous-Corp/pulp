@@ -143,6 +143,11 @@ struct Rig {
         // one the descriptor declared.
         CHECK(hosted.fallback_policy == own.fallback_policy);
         CHECK(hosted.fallback_available == own.fallback_available);
+        const auto hosted_capability = transport.capability_report();
+        const auto own_capability = node->capability_report();
+        CHECK(hosted_capability.fallback_policy == own_capability.fallback_policy);
+        CHECK(hosted_capability.fallback_available == own_capability.fallback_available);
+        CHECK(hosted_capability.gpu_kernel_available == own_capability.gpu_kernel_available);
         return own;
     }
     Mode mode() const {

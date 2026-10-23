@@ -1052,7 +1052,20 @@ GpuAudioCapabilityReport GpuAudioTransport::capability_report() const noexcept {
     detail::GpuAudioTransportConfiguration configuration;
     if (!diagnostics_->configuration.read(configuration))
         return {};
-    return capability_from(configuration);
+    auto report = capability_from(configuration);
+    // The node's facts come from the same health sample status_snapshot()
+    // reads: whether a GPU kernel is prepared, and the miss substitute in
+    // effect. Without a sample neither is claimed.
+    detail::RealtimeGpuHealth health;
+    if (report.prepared && (configuration.realtime_health || configuration.staged_health) &&
+        diagnostics_->health.read(health)) {
+        report.gpu_kernel_available = health.gpu_kernel_available;
+        if (health.reports_fallback) {
+            report.fallback_policy = health.fallback_policy;
+            report.fallback_available = health.fallback_available;
+        }
+    }
+    return report;
 }
 
 } // namespace pulp::gpu_audio

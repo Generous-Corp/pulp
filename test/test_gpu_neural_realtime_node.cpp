@@ -409,6 +409,12 @@ TEST_CASE("WaveNet family reports its GPU backend truthfully", "[gpu_audio][neur
         CHECK(status.delivery_epoch_active);
         CHECK(status.fallback_available);
         CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+        // The hosting transport's capability and status agree that a GPU
+        // kernel is prepared.
+        const auto hosted = rig.transport.capability_report();
+        CHECK(hosted.path != GpuAudioExecutionPath::Cpu);
+        CHECK(hosted.gpu_kernel_available);
+        CHECK(validated(rig.transport.status_snapshot()).gpu_kernel_available);
     }
     SECTION("provider unavailable degrades to the CPU-only contract") {
         Rig rig(kWaveNetGpu, kBlock, /*fail_backend=*/true);
@@ -430,6 +436,7 @@ TEST_CASE("WaveNet family reports its GPU backend truthfully", "[gpu_audio][neur
         const auto hosted = rig.transport.capability_report();
         CHECK(hosted.path == GpuAudioExecutionPath::Cpu);
         CHECK(hosted.provider == GpuAudioProvider::Cpu);
+        CHECK_FALSE(hosted.gpu_kernel_available);
         const auto hosted_status = validated(rig.transport.status_snapshot());
         CHECK(hosted_status.provider_state == GpuAudioProviderState::Degraded);
         CHECK(hosted_status.selected_engine == GpuAudioEngine::Cpu);
