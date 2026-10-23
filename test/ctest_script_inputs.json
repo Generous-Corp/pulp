@@ -4662,15 +4662,41 @@
   "design-unit-boundary": {
    "entry": "tools/scripts/design_unit_boundary_check.py",
    "inputs": [
-    "tools/scripts/design_unit_boundary_check.py"
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
+    "tools/scripts/design_unit_boundary_check.py",
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
   "design-unit-boundary-selftest": {
    "entry": "tools/scripts/test_design_unit_boundary_check.py",
    "inputs": [
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
     "tools/scripts/design_unit_boundary_check.py",
-    "tools/scripts/test_design_unit_boundary_check.py"
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/test_design_unit_boundary_check.py",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -5050,7 +5076,6 @@
   "foundation-include-lint": {
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -5063,7 +5088,8 @@
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/reload_exports.cpp",
     "tools/scripts/foundation_include_lint.py",
-    "tools/scripts/include_boundary.py"
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8054,7 +8080,6 @@
   "pulp-view-core-include-boundary": {
    "entry": "tools/scripts/include_boundary.py",
    "inputs": [
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8066,7 +8091,8 @@
     "core/view/include",
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/reload_exports.cpp",
-    "tools/scripts/include_boundary.py"
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8078,7 +8104,8 @@
     "core/state/include/pulp/state/store.hpp",
     "core/view/include/pulp/view/view.hpp",
     "core/view/src/view.cpp",
-    "tools/scripts/test_include_boundary.py"
+    "tools/scripts/test_include_boundary.py",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8105,7 +8132,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8126,7 +8152,8 @@
     "tools/cmake/scripts/encode_binary_data.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8144,7 +8171,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8165,7 +8191,8 @@
     "tools/cmake/scripts/encode_binary_data.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8174,7 +8201,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8195,7 +8221,8 @@
     "tools/cmake/scripts/encode_binary_data.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8213,7 +8240,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8235,7 +8261,8 @@
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_closure_allowlist.json",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8257,7 +8284,6 @@
     "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
     "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/render/include/pulp/render/gpu_compute.hpp",
@@ -8297,14 +8323,29 @@
     "tools/scripts/vellum_closure_allowlist.json",
     "tools/scripts/vellum_d3_units.json",
     "tools/scripts/vellum_mirror_edge_patterns.json",
-    "tools/scripts/vellum_mirror_edge_table.py"
+    "tools/scripts/vellum_mirror_edge_table.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
   "pulp.vellum-view-core-pulp-kept": {
    "entry": "tools/scripts/vellum_view_core_pulp_kept_check.py",
    "inputs": [
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
+    "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.py",
     "tools/scripts/vellum_view_core_pulp_kept_check.py"
    ],
    "kind": "python"
@@ -12717,6 +12758,7 @@
    "inputs": [
     "core/view/audio/include",
     "core/view/platform/mac/window_host_mac_internal.hpp",
+    "core/view/src/view.cpp",
     "tools/import-design",
     "tools/import-design/pulp-package.json",
     "tools/scripts/test_vellum_boundary_lint.py",
