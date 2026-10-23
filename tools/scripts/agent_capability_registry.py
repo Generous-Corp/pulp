@@ -804,7 +804,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:5ab88172c743644bf38e89c96241ec4a44b0c0fbb5bc52b749c9f80871d18420",
+        "fingerprint": "sha256:57ae1a537b1ef14942fee81b63a99e5f5f6bed816e1d4fa11f1d7e76a7a1c73d",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
