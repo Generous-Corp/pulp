@@ -397,6 +397,7 @@
     "fixtures/packages/gain-dsp-kit",
     "fixtures/packages/simple-plugin-template",
     "tools/packages/registry.json",
+    "tools/templates/effect",
     "tools/templates/gain",
     "tools/templates/standalone"
    ],
