@@ -6728,6 +6728,7 @@
     "tools/import-validation/importer_differential/form_controls.py",
     "tools/import-validation/importer_differential/geometry_gate.py",
     "tools/import-validation/importer_differential/model.py",
+    "tools/import-validation/importer_differential/native_transform.py",
     "tools/import-validation/importer_differential/recognition.py",
     "tools/import-validation/importer_differential/reports.py",
     "tools/import-validation/importer_differential/snapshot.py",
@@ -6745,6 +6746,7 @@
     "tools/import-validation/importer_differential/form_controls.py",
     "tools/import-validation/importer_differential/geometry_gate.py",
     "tools/import-validation/importer_differential/model.py",
+    "tools/import-validation/importer_differential/native_transform.py",
     "tools/import-validation/importer_differential/recognition.py",
     "tools/import-validation/importer_differential/reports.py",
     "tools/import-validation/importer_differential/snapshot.py",
@@ -7600,6 +7602,7 @@
    "inputs": [
     "tools/import-design/browser_capture/document_canvas.mjs",
     "tools/import-design/browser_capture/document_canvas.test.mjs",
+    "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture/form_control_theme.test.mjs",
     "tools/import-design/browser_capture/health.mjs",
     "tools/import-design/browser_capture/health.test.mjs",

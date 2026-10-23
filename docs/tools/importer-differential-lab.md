@@ -110,8 +110,9 @@ mutation after the first frame that requested no repaint, or (counter schema
 v2) a read-back that decoded, uploaded or rebuilt an image makes the fixture
 ineligible. v1 receipts carry no resource counters and are judged without
 them; the verdict says `resources: absent`. `integrity.*_snapshot_semantic_sha256` hashes each DOM snapshot
-with only its capture-local CDP frame ID removed, which is the digest to
-compare across repeated runs. The receipt paths are relative to
+with only its capture-local CDP identifiers fixed (the frame ID, loader IDs,
+and backend node IDs, which Chromium numbers in a run-dependent order), which
+is the digest to compare across repeated runs. The receipt paths are relative to
 each fixture output, so they can be copied under `/tmp/pulp-p0a-8458/receipts/`
 without exposing machine-local paths.
 
@@ -135,6 +136,15 @@ python3 tools/import-validation/importer_differential_lab.py benchmark \
   --runs 5 \
   --output /tmp/importer-differential/benchmark
 ```
+
+`--input` walks the directory recursively but skips anything under a
+`holdout/` directory, so iterating on the corpus root never scores held-out
+panels; pass `--include-holdout`, or point `--input` at the holdout directory
+itself, to score them. `compare` and `benchmark` take `--viewport
+WIDTHxHEIGHT` for panels taller than the default 1280x800 (manifest fixtures
+declare theirs). Every comparison reads PNGs, so the commands check for Pillow
+once before running and name `tools/ci/install_visual_python_deps.sh` when it is
+missing.
 
 The benchmark preserves the caller's `--cache-state` declaration on every
 run; it does not infer `cold` or `warm` from run order. The `first_invocation`
@@ -550,6 +560,15 @@ the full-frame score and outside-frame residual are always reported so panel
 placement, background, overflow, and shadow defects remain visible. Missing or
 disagreeing frame metadata fails closed rather than silently mixing registered
 and unregistered metrics.
+
+Chromium reports a transformed element's bounding box after its transform and
+every ancestor's, while the native layout snapshot reports untransformed View
+boxes. Native lowering applies a lone `rotate(<n>deg)` as a rotation about the
+View's centre (the importer folds the authored `transform-origin` into the box
+position), so the lab compares the bounding box of each native box under the
+composed rotations of the node and its ancestors. A transform that native
+lowering does not rotate, such as a list or a non-degree unit, keeps its
+layout box on both counts.
 
 P3 passes only when every in-scope fixture has authenticated three-run receipts,
 structure >=0.99; frame placement |recorded origin - observed Chromium

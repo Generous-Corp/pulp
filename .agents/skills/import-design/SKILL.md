@@ -143,6 +143,24 @@ baselines. On macOS the skia screenshot backend lives in
 is the non-Apple path, so a surface change made only there never reaches a
 macOS render.
 
+### DesignIR JSON floats are shortest round-trip, not six digits
+
+`write_float_member` (`design_ir_json_primitives.hpp`) writes each float with
+`std::to_chars`, the shortest text that reads back as the same float. A plain
+`out << value` uses the stream's six significant digits, which silently cut
+Chromium's 1/64 px layout to 0.1 px from 1000 px up (a 1006.703125 px panel
+became 1006.7 and the differential lab refused it as a different frame). Never
+add a float member that bypasses the shared writer.
+
+### Rotated nodes: compare bounding boxes, not layout boxes
+
+A Chromium DOMSnapshot bound is the box after its own and its ancestors' CSS
+transforms; the native layout snapshot is the untransformed View box. Native
+lowering turns a lone `rotate(<n>deg)` into `View::set_rotation` about the
+box centre, so the differential lab maps each native box through the composed
+rotations (`importer_differential/native_transform.py`) before measuring
+geometry. A diagonal ADSR segment otherwise reads as a 90 px geometry failure.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
