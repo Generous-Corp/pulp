@@ -6,6 +6,7 @@
 #include <complex>
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -506,6 +507,144 @@ TEST_CASE("FFT forward_real equals the half spectrum mirrored", "[signal][fft][r
             REQUIRE(full[static_cast<std::size_t>(n - k)] ==
                     std::conj(half[static_cast<std::size_t>(k)]));
     }
+}
+
+TEST_CASE("FFT packed split spectrum holds the half spectrum's bins",
+          "[signal][fft][real][split]") {
+    const auto check = [](auto tag, int n) {
+        using T = decltype(tag);
+        const auto x = real_fft_stimulus<T>(n);
+        FftT<T> fft(n);
+        const auto half = static_cast<std::size_t>(n / 2);
+        std::vector<std::complex<T>> bins(half + 1);
+        fft.forward_real_half(x.data(), bins.data(), T(0.37));
+        const T sentinel = std::numeric_limits<T>::quiet_NaN();
+        std::vector<T> re(half + 2, sentinel), im(half + 2, sentinel);
+        detail::FftRealSplit::forward(fft, x.data(), re.data(), im.data(), T(0.37));
+        INFO("n=" << n << " double=" << (std::is_same_v<T, double>));
+        REQUIRE(re[0] == bins[0].real());
+        REQUIRE(im[0] == bins[half].real());
+        for (std::size_t k = 1; k < half; ++k) {
+            REQUIRE(re[k] == bins[k].real());
+            REQUIRE(im[k] == bins[k].imag());
+        }
+        REQUIRE(std::isnan(re[half]));
+        REQUIRE(std::isnan(im[half]));
+    };
+    for (const int n : {2, 4, 8, 64, 512, 4096}) {
+        check(float{}, n);
+        check(double{}, n);
+    }
+}
+
+TEST_CASE("FFT packed split round trip recovers the signal", "[signal][fft][real][split]") {
+    for (const int n : {2, 4, 8, 32, 512, 4096}) {
+        const auto half = static_cast<std::size_t>(n / 2);
+        const auto x32 = real_fft_stimulus<float>(n);
+        Fft fft(n);
+        std::vector<float> re(half), im(half), back(static_cast<std::size_t>(n));
+        detail::FftRealSplit::forward(fft, x32.data(), re.data(), im.data(), 1.0f);
+        detail::FftRealSplit::inverse(fft, re.data(), im.data(), back.data(),
+                                      1.0f / static_cast<float>(n));
+        INFO("n=" << n);
+        REQUIRE(signal_error_db(back.data(), x32) < -130.0);
+        // Scale 1 is the unnormalised inverse: N times the signal.
+        std::vector<float> unscaled(static_cast<std::size_t>(n));
+        detail::FftRealSplit::inverse(fft, re.data(), im.data(), unscaled.data(), 1.0f);
+        for (auto& v : unscaled)
+            v /= static_cast<float>(n);
+        REQUIRE(signal_error_db(unscaled.data(), x32) < -130.0);
+
+        const auto x64 = real_fft_stimulus<double>(n);
+        Fft64 fft64(n);
+        std::vector<double> re64(half), im64(half), back64(static_cast<std::size_t>(n));
+        detail::FftRealSplit::forward(fft64, x64.data(), re64.data(), im64.data(), 1.0);
+        detail::FftRealSplit::inverse(fft64, re64.data(), im64.data(), back64.data(), 1.0 / n);
+        REQUIRE(signal_error_db(back64.data(), x64) < -280.0);
+    }
+}
+
+namespace {
+
+// Circular convolution of x and h through packed split spectra, against a
+// long-double direct sum. `whole_slot_zero` multiplies slot 0 as one complex
+// number, the mistake the packed DC/Nyquist slot invites.
+template <typename T>
+double packed_split_convolution_error_db(int n, bool in_place, bool accumulate,
+                                         bool whole_slot_zero = false) {
+    const auto half = static_cast<std::size_t>(n / 2);
+    const auto x = real_fft_stimulus<T>(n);
+    std::vector<T> h(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i)
+        h[static_cast<std::size_t>(i)] =
+            static_cast<T>(std::cos(0.7 * i + 0.2) * std::exp(-0.03 * i));
+    std::vector<long double> expected(static_cast<std::size_t>(n), 0.0L);
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            expected[static_cast<std::size_t>((i + j) % n)] +=
+                static_cast<long double>(x[static_cast<std::size_t>(i)]) *
+                h[static_cast<std::size_t>(j)];
+
+    FftT<T> fft(n);
+    std::vector<T> xr(half), xi(half), hr(half), hi(half), out_r(half), out_i(half);
+    detail::FftRealSplit::forward(fft, x.data(), xr.data(), xi.data(), T(1));
+    detail::FftRealSplit::forward(fft, h.data(), hr.data(), hi.data(), T(1));
+    T* pr = out_r.data();
+    T* pi = out_i.data();
+    if (whole_slot_zero) {
+        for (std::size_t k = 0; k < half; ++k) {
+            out_r[k] = xr[k] * hr[k] - xi[k] * hi[k];
+            out_i[k] = xr[k] * hi[k] + xi[k] * hr[k];
+        }
+    } else if (accumulate) {
+        // Two accumulations of half the product each.
+        std::fill(out_r.begin(), out_r.end(), T(0));
+        std::fill(out_i.begin(), out_i.end(), T(0));
+        std::vector<T> half_r(half), half_i(half);
+        for (std::size_t k = 0; k < half; ++k) {
+            half_r[k] = T(0.5) * hr[k];
+            half_i[k] = T(0.5) * hi[k];
+        }
+        detail::multiply_accumulate_packed_split(xr.data(), xi.data(), half_r.data(), half_i.data(),
+                                                 pr, pi, n / 2);
+        detail::multiply_accumulate_packed_split(xr.data(), xi.data(), half_r.data(), half_i.data(),
+                                                 pr, pi, n / 2);
+    } else if (in_place) {
+        detail::multiply_packed_split(xr.data(), xi.data(), hr.data(), hi.data(), xr.data(),
+                                      xi.data(), n / 2);
+        pr = xr.data();
+        pi = xi.data();
+    } else {
+        detail::multiply_packed_split(xr.data(), xi.data(), hr.data(), hi.data(), pr, pi, n / 2);
+    }
+    std::vector<T> y(static_cast<std::size_t>(n));
+    detail::FftRealSplit::inverse(fft, pr, pi, y.data(), T(1) / T(n));
+    long double err = 0, ref = 0;
+    for (std::size_t i = 0; i < y.size(); ++i) {
+        const long double d = static_cast<long double>(y[i]) - expected[i];
+        err += d * d;
+        ref += expected[i] * expected[i];
+    }
+    return 10.0 * std::log10(static_cast<double>(err / ref) + 1e-300);
+}
+
+} // namespace
+
+TEST_CASE("Packed split product is the spectrum of the circular convolution",
+          "[signal][fft][real][split]") {
+    for (const int n : {2, 4, 8, 64, 512}) {
+        for (const bool in_place : {false, true}) {
+            INFO("n=" << n << " in_place=" << in_place);
+            REQUIRE(packed_split_convolution_error_db<float>(n, in_place, false) < -120.0);
+            REQUIRE(packed_split_convolution_error_db<double>(n, in_place, false) < -270.0);
+        }
+        INFO("n=" << n << " accumulate");
+        REQUIRE(packed_split_convolution_error_db<float>(n, false, true) < -120.0);
+        REQUIRE(packed_split_convolution_error_db<double>(n, false, true) < -270.0);
+    }
+    // Negative control: treating slot 0 as one complex bin mixes DC and
+    // Nyquist, which the same measurement must see.
+    REQUIRE(packed_split_convolution_error_db<float>(64, false, false, true) > -60.0);
 }
 
 TEST_CASE("Convolver with identity IR", "[signal][convolver]") {

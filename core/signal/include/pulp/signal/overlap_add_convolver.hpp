@@ -6,7 +6,6 @@
 #include <pulp/signal/fft.hpp>
 
 #include <algorithm>
-#include <complex>
 #include <memory>
 #include <vector>
 
@@ -25,11 +24,12 @@ template <typename SampleType = float> class ConvolverT {
     void load_ir(const SampleType* ir, int ir_length, int block_size = 0) {
         if (ir == nullptr || ir_length <= 0) {
             fft_.reset();
-            ir_freq_.clear();
+            ir_spectrum_.clear();
             input_buf_.clear();
             output_buf_.clear();
             overlap_.clear();
-            freq_buf_.clear();
+            spectrum_.clear();
+            time_.clear();
             fft_size_ = 0;
             block_size_ = 0;
             pos_ = 0;
@@ -46,19 +46,23 @@ template <typename SampleType = float> class ConvolverT {
 
         fft_ = std::make_unique<FftT<SampleType>>(fft_size_);
 
-        // Transform IR
-        ir_freq_.resize(fft_size_);
-        for (int i = 0; i < fft_size_; ++i)
-            ir_freq_[i] = i < ir_length
-                              ? std::complex<SampleType>(ir[i], SampleType{0.0f})
-                              : std::complex<SampleType>(SampleType{0.0f}, SampleType{0.0f});
-        fft_->forward(ir_freq_.data());
+        // Transform the zero-padded IR into packed split form. Every block
+        // takes its input transform at scale 2 and inverts at scale 1 (both
+        // free on vDSP, whose real transform has a gain of 2), so the IR
+        // carries the remaining 1/(2N) that makes the round trip exact.
+        time_.assign(fft_size_, SampleType{0.0f});
+        std::copy_n(ir, ir_length, time_.begin());
+        ir_spectrum_.assign(fft_size_, SampleType{0.0f});
+        const int half = fft_size_ / 2;
+        detail::FftRealSplit::forward(*fft_, time_.data(), ir_spectrum_.data(),
+                                      ir_spectrum_.data() + half,
+                                      SampleType{1} / static_cast<SampleType>(2 * fft_size_));
 
         // Buffers
         input_buf_.assign(fft_size_, SampleType{0.0f});
         output_buf_.assign(fft_size_, SampleType{0.0f});
         overlap_.assign(fft_size_, SampleType{0.0f});
-        freq_buf_.assign(fft_size_, {});
+        spectrum_.assign(fft_size_, SampleType{0.0f});
         pos_ = 0;
     }
 
@@ -98,27 +102,28 @@ template <typename SampleType = float> class ConvolverT {
     int block_size_ = 0;
     int pos_ = 0;
 
-    std::vector<std::complex<SampleType>> ir_freq_;
+    // Packed split spectra (detail::FftRealSplit): N/2 real parts, then
+    // N/2 imaginary parts.
+    std::vector<SampleType> ir_spectrum_;
+    std::vector<SampleType> spectrum_;
     std::vector<SampleType> input_buf_;
     std::vector<SampleType> output_buf_;
     std::vector<SampleType> overlap_;
-    std::vector<std::complex<SampleType>> freq_buf_;
+    std::vector<SampleType> time_;
 
     void process_block() {
         // input_buf_ is already zero past block_size_ (cleared after every
         // block), so it is the zero-padded real frame as it stands.
-        fft_->forward_real_half(input_buf_.data(), freq_buf_.data());
-
-        // Multiply in frequency domain; both spectra are Hermitian, so only
-        // DC..Nyquist carries information.
-        const int bins = fft_->real_bins();
-        for (int i = 0; i < bins; ++i)
-            freq_buf_[i] *= ir_freq_[i];
-
-        // Real inverse in place, normalised.
-        // std::complex<T> is layout-compatible with T[2] ([complex.numbers]).
-        auto* time = reinterpret_cast<SampleType*>(freq_buf_.data());
-        fft_->inverse_real_half(freq_buf_.data(), time);
+        // Both spectra are Hermitian, so only DC..Nyquist carries
+        // information, and they stay in split form from transform to inverse.
+        const int half = fft_size_ / 2;
+        SampleType* re = spectrum_.data();
+        SampleType* im = re + half;
+        detail::FftRealSplit::forward(*fft_, input_buf_.data(), re, im, SampleType{2});
+        detail::multiply_packed_split(re, im, ir_spectrum_.data(), ir_spectrum_.data() + half, re,
+                                      im, half);
+        SampleType* time = time_.data();
+        detail::FftRealSplit::inverse(*fft_, re, im, time, SampleType{1});
 
         // Overlap-add. The tail of an IR longer than one block reaches several
         // blocks ahead, so the pending overlap is accumulated and shifted down
