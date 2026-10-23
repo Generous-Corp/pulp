@@ -518,6 +518,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
     target_link_libraries(${target}_AAX PRIVATE ${target}_Core)
     if(NOT headless)
         target_link_libraries(${target}_AAX PRIVATE ${PULP_${target}_VIEW_TARGET})
+        _pulp_apply_ui_script_definition(${target}_AAX "${PULP_${target}_UI_SCRIPT}")
     endif()
     target_include_directories(${target}_AAX PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(${target}_AAX PRIVATE

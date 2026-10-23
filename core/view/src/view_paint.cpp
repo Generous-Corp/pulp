@@ -10,6 +10,7 @@
 // view.hpp, so the move needs no friend decls or header churn.
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/border_style.hpp>
 #include <pulp/view/tracing_badge.hpp>
 #include <pulp/view/capability_fallback.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -106,16 +107,12 @@ void build_per_corner_rounded_rect_path(
     pulp::canvas::Canvas& canvas,
     float w, float h,
     float tl, float tr, float bl, float br) {
-    const float half_w = w * 0.5f;
-    const float half_h = h * 0.5f;
-    auto clamp = [&](float r) {
-        const float lim = std::min(half_w, half_h);
-        return std::max(0.0f, std::min(r, lim));
-    };
-    tl = clamp(tl);
-    tr = clamp(tr);
-    bl = clamp(bl);
-    br = clamp(br);
+    const auto fitted =
+        pulp::view::fit_corner_radii(w, h, pulp::view::CornerRadii::circular(tl, tr, br, bl));
+    tl = fitted.tl_x;
+    tr = fitted.tr_x;
+    bl = fitted.bl_x;
+    br = fitted.br_x;
     // Cubic kappa for quarter-circle approximation.
     constexpr float k = 0.5522847498f;
 
@@ -684,11 +681,14 @@ void View::apply_overflow_clip(canvas::Canvas& canvas) {
             // overflow:hidden with border-radius clips to the rounded border box,
             // so a square clip saws the corners off (an imported card lost its
             // rounded top and bottom once it opted into clip). Clip to the same
-            // rounded rect the background paints. Each radius is clamped to half
-            // the shorter side so a large radius cannot self-cross the path.
-            const float m = 0.5f * std::min(clip_w, clip_h);
-            ctl = std::min(ctl, m); ctr = std::min(ctr, m);
-            cbl = std::min(cbl, m); cbr = std::min(cbr, m);
+            // rounded rect the background paints, its radii fitted the same way
+            // so a large radius cannot self-cross the path.
+            const auto fitted =
+                fit_corner_radii(clip_w, clip_h, CornerRadii::circular(ctl, ctr, cbr, cbl));
+            ctl = fitted.tl_x;
+            ctr = fitted.tr_x;
+            cbl = fitted.bl_x;
+            cbr = fitted.br_x;
             std::ostringstream d;
             d << "M " << ctl << " 0"
               << " H " << (clip_w - ctr) << " A " << ctr << " " << ctr << " 0 0 1 " << clip_w << " " << ctr
@@ -1526,6 +1526,30 @@ void View::paint_border(canvas::Canvas& canvas, float paint_w, float paint_h,
     const Color cb = edge_c(border_bottom_color_set_, border_bottom_.color);
     const Color cl = edge_c(border_left_color_set_, border_left_.color);
 
+    // Shaded and multi-line styles are bands of per-side colour, painted by
+    // border_style.cpp. A per-corner path that is not circular (a continuous
+    // corner curve) is approximated by its circular radii there.
+    if (is_banded_border_style(border_style_)) {
+        BandedBorder banded;
+        banded.style = border_style_;
+        banded.width = w;
+        banded.height = h;
+        banded.top = wt;
+        banded.right = wr;
+        banded.bottom = wb;
+        banded.left = wl;
+        banded.top_color = ct;
+        banded.right_color = cr;
+        banded.bottom_color = cb;
+        banded.left_color = cl;
+        banded.radius_tl = use_per_corner ? eff_tl : eff_r;
+        banded.radius_tr = use_per_corner ? eff_tr : eff_r;
+        banded.radius_br = use_per_corner ? eff_br : eff_r;
+        banded.radius_bl = use_per_corner ? eff_bl : eff_r;
+        paint_banded_border(canvas, banded);
+        return;
+    }
+
     if (wt == wr && wr == wb && wb == wl && ct == cr && cr == cb && cb == cl) {
         const float bw = wt;
         const float half = bw * 0.5f;
@@ -1546,13 +1570,15 @@ void View::paint_border(canvas::Canvas& canvas, float paint_w, float paint_h,
         }
 
         if (use_per_corner) {
+            // Fit the OUTER radii to the border box before insetting, so the
+            // stroke's outer edge is the background's curve.
+            const auto outer =
+                fit_corner_radii(w, h, CornerRadii::circular(eff_tl, eff_tr, eff_br, eff_bl));
             canvas.save();
             canvas.translate(half, half);
-            build_corner_path(w - bw, h - bw,
-                              std::max(0.0f, eff_tl - half),
-                              std::max(0.0f, eff_tr - half),
-                              std::max(0.0f, eff_bl - half),
-                              std::max(0.0f, eff_br - half));
+            build_corner_path(w - bw, h - bw, std::max(0.0f, outer.tl_x - half),
+                              std::max(0.0f, outer.tr_x - half), std::max(0.0f, outer.bl_x - half),
+                              std::max(0.0f, outer.br_x - half));
             canvas.stroke_current_path();
             canvas.restore();
         } else if (eff_r > 0) {

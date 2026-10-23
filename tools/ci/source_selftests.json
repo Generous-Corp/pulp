@@ -381,6 +381,24 @@
       ]
     },
     {
+      "name": "gpu-audio-daw-continuity-v2-receipt-verifier-selftest",
+      "argv": [
+        "{repo}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py"
+      ]
+    },
+    {
+      "name": "gpu-fault-real-host-driver-selftest",
+      "argv": [
+        "{repo}/tools/testing/daw-smoke/test_real_host_smoke.py"
+      ]
+    },
+    {
+      "name": "gpu-fault-hooks-release-gate-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_fault_hooks_release_gate.py"
+      ]
+    },
+    {
       "name": "gpu-audio-trace-validator-selftest",
       "argv": [
         "{repo}/tools/scripts/test_validate_gpu_audio_trace_captures.py"

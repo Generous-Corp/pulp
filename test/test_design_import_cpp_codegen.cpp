@@ -7394,6 +7394,7 @@ TEST_CASE("baked C++ exporter emits ownable C++ source artifacts",
     REQUIRE(result.source.find("->set_default_value(0.75f);") != std::string::npos);
     REQUIRE(result.source.find("std::make_unique<pulp::view::Knob>()") != std::string::npos);
     REQUIRE(result.source.find("->set_subpixel_layout(true);") != std::string::npos);
+    REQUIRE(result.source.find("->set_captured_frame_root(true);") != std::string::npos);
     REQUIRE(result.source.find("build_native_view_tree") == std::string::npos);
     REQUIRE(result.source.find("serialize_design_ir") == std::string::npos);
 

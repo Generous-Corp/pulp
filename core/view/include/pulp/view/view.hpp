@@ -99,17 +99,18 @@ public:
     LayoutMode layout_mode() const { return layout_mode_; }
 
     /// Opt this view's layout pass out of Yoga's whole-pixel grid rounding.
-    /// Yoga's default pointScaleFactor of 1.0 rounds every solved box to the
-    /// nearest whole pixel. For flowed UI that keeps box edges seam-free, but
-    /// a replayed design (Figma import) arrives with SOLVED fractional
-    /// geometry, and per-node rounding moves siblings RELATIVE to each other
-    /// by up to ~0.7px per axis — enough to visibly de-center a knob's
-    /// value-ring arc from its body ellipse. The flag is honored when ANY
-    /// view inside a layout pass sets it (one Yoga pass has one config, so
-    /// sub-pixel is pass-wide); imported-design roots set it, everything
-    /// else keeps the pixel-grid default.
+    /// A replayed design arrives with solved fractional geometry that per-node
+    /// rounding would shift by up to ~0.7px per axis. Honored when ANY view in
+    /// a layout pass sets it (one Yoga pass has one config).
     void set_subpixel_layout(bool v) { subpixel_layout_ = v; }
     bool subpixel_layout() const { return subpixel_layout_; }
+    /// Root of an imported frame: captured text snaps baselines to its grid.
+    void set_captured_frame_root(bool v) {
+        captured_frame_root_ = v;
+    }
+    bool captured_frame_root() const {
+        return captured_frame_root_;
+    }
 
     // ── Child management ─────────────────────────────────────────────────
 
@@ -588,6 +589,11 @@ public:
     virtual void on_meter_frame(const MeterFrame& frame, float dt) {
         (void)frame;
         (void)dt;
+    }
+    /// `meter_frame()` changed: repaint this view (a live binding alone does not
+    /// composite). Meter owns its invalidation in `on_meter_frame` and overrides it.
+    virtual void on_meter_snapshot_changed() {
+        request_repaint();
     }
 
     // ── Transient-animation glue ─────────────────────────────────────────────
@@ -1224,22 +1230,20 @@ public:
         return corner_radius_;
     }
 
-    /// CSS / RN border-style. Skia path effect dispatches on style at paint
-    /// time. CG falls through to solid (the cg_canvas.mm path inherits the
-    /// canvas-base no-op set_line_dash). Values that Pulp doesn't render
-    /// natively (`double` / `groove` / `ridge` / `inset` / `outset`) degrade
-    /// to solid. `none` / `hidden` skip the stroke entirely.
+    /// CSS / RN border-style. `dashed` / `dotted` are a stroke dash (no-op on
+    /// CG). The double and 3D styles paint as bands of per-side colour (see
+    /// border_style.hpp). `none` / `hidden` skip the border entirely.
     enum class BorderStyle {
-        solid,    ///< Default — single continuous line.
-        dashed,   ///< SkDashPathEffect with 3w/3w on/off pattern.
-        dotted,   ///< SkDashPathEffect with w/2w on/off pattern (round caps).
-        double_,  ///< Two parallel lines — degrades to solid for now.
-        groove,   ///< Carved-in look — degrades to solid for now.
-        ridge,    ///< Raised look — degrades to solid for now.
-        inset,    ///< 3D-shaded inset — degrades to solid for now.
-        outset,   ///< 3D-shaded outset — degrades to solid for now.
-        none,     ///< No border drawn (paint short-circuits).
-        hidden,   ///< Same as none for paint purposes.
+        solid,   ///< Default — single continuous line.
+        dashed,  ///< Dash of 2w on, 1w off.
+        dotted,  ///< Dash of 1w on, 1w off.
+        double_, ///< Two lines in the side colour with a gap between.
+        groove,  ///< Outer half shaded as inset, inner half as outset.
+        ridge,   ///< Outer half shaded as outset, inner half as inset.
+        inset,   ///< Top/left darkened, bottom/right lightened.
+        outset,  ///< Top/left lightened, bottom/right darkened.
+        none,    ///< No border drawn (paint short-circuits).
+        hidden,  ///< Same as none for paint purposes.
     };
     void set_border_style(BorderStyle s) { border_style_ = s; invalidate_subtree_caches_up(); }
     BorderStyle border_style() const { return border_style_; }
@@ -2915,6 +2919,7 @@ private:
     GridStyle grid_{};
     LayoutMode layout_mode_ = LayoutMode::flex;
     bool subpixel_layout_ = false;
+    bool captured_frame_root_ = false;
     Theme theme_;
     std::shared_ptr<WidgetPainter> painter_;
     std::shared_ptr<WidgetMetrics> metrics_;

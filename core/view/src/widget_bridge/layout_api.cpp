@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "layout_baselines.hpp"
 
 #include "../import_validation_bridge.hpp"
 
@@ -103,6 +104,7 @@ void BridgeRegistrars::register_layout_grid_api(WidgetBridge& self) {
         auto key = args.get<std::string>(1, "");
         auto* v = self.widget(id);
         if (!v) return choc::value::Value();
+        capture_layout_baseline(*v);
 
         if (key == "template_columns") {
             auto tmpl = args.get<std::string>(2, "");
@@ -250,6 +252,7 @@ void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
         if (key.rfind("padding", 0) == 0 && self.scroll_wrapper(id) != nullptr) {
             if (auto* content = self.widget(id)) v = content;
         }
+        capture_layout_baseline(*v);
         auto& f = v->flex();
         const auto previous = f;
         auto val = args.get<double>(2, 0);
@@ -824,6 +827,7 @@ void BridgeRegistrars::register_layout_box_model_api(WidgetBridge& self) {
         auto kw = args.get<std::string>(1, "content-box");
         auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (!v) return choc::value::Value();
+        capture_layout_baseline(*v);
         auto& f = v->flex();
         if (kw == "border-box") {
             f.box_sizing = BoxSizing::border_box;
@@ -878,6 +882,18 @@ void BridgeRegistrars::register_layout_position_api(WidgetBridge& self) {
         if (v) v->set_subpixel_layout(args.get<bool>(1, true));
         return choc::value::Value();
     });
+
+    // setCapturedFrameRoot(id, enabled) — mark this view as the root of a
+    // captured frame (View::set_captured_frame_root), the grid captured text
+    // baselines snap to. Design-import codegen emits it on the imported root.
+    register_bridge_function(api, "setCapturedFrameRoot",
+                             [&self](choc::javascript::ArgumentList args) {
+                                 auto id = args.get<std::string>(0, "");
+                                 auto* v = id.empty() ? &self.root_ : self.widget(id);
+                                 if (v)
+                                     v->set_captured_frame_root(args.get<bool>(1, true));
+                                 return choc::value::Value();
+                             });
 
     // setTop/setRight/setBottom/setLeft(id, px-or-percent) — CSS positioning
     // offsets. Accept either a number ("50" -> px) or a percentage string

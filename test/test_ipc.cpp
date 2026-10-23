@@ -20,6 +20,7 @@
 #ifdef _WIN32
 #include <process.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #ifdef __APPLE__
 #include <fcntl.h>
@@ -375,6 +376,44 @@ TEST_CASE("IPC named pipe exchanges framed messages without self-consuming",
     server.disconnect();
 }
 
+#ifndef _WIN32
+TEST_CASE("IPC named pipe server creates owner-only FIFOs",
+          "[events][ipc][named-pipe][permissions]") {
+    const auto pipe_name = unique_pipe_name("pulp_ipc_named_pipe_mode");
+    InterprocessConnection server;
+    InterprocessConnection client;
+
+    std::atomic<bool> server_started{false};
+    std::atomic<bool> server_ok{false};
+    std::thread server_thread([&] {
+        server_started.store(true);
+        server_ok.store(server.create_server(pipe_name, IpcTransport::NamedPipe));
+    });
+
+    wait_for_named_pipe_server_ready(pipe_name, server_started);
+
+    std::vector<mode_t> modes;
+    for (const auto& fifo : {pipe_name, pipe_name + ".reply"}) {
+        struct stat status{};
+        if (::lstat(fifo.c_str(), &status) == 0 && S_ISFIFO(status.st_mode))
+            modes.push_back(status.st_mode & 0777);
+    }
+
+    const bool client_ok = client.connect(pipe_name, IpcTransport::NamedPipe);
+    if (!client_ok)
+        server.disconnect();
+    server_thread.join();
+    client.disconnect();
+    server.disconnect();
+
+    REQUIRE(client_ok);
+    REQUIRE(server_ok.load());
+    REQUIRE(modes.size() == 2);
+    REQUIRE(modes[0] == 0600);
+    REQUIRE(modes[1] == 0600);
+}
+#endif
+
 TEST_CASE("IPC named pipe observes graceful peer disconnect",
           "[events][ipc][named-pipe]") {
     const auto pipe_name = unique_pipe_name("pulp_ipc_named_pipe_disconnect");
@@ -516,6 +555,79 @@ TEST_CASE("IPC server stops after binding an ephemeral TCP port", "[events][ipc]
     REQUIRE(server.bound_port() != 0);
     server.stop();
     REQUIRE_FALSE(server.is_running());
+}
+
+TEST_CASE("IPC server with an omitted host listens on loopback only",
+          "[events][ipc][network-exposure]") {
+    InterprocessConnectionServer server;
+    REQUIRE(server.start("0", IpcTransport::Socket));
+    REQUIRE(server.bound_port() != 0);
+    REQUIRE(server.bound_address() == "127.0.0.1");
+    server.stop();
+    REQUIRE(server.bound_address().empty());
+
+    // Positive control: the literal all-interfaces address still binds all.
+    REQUIRE(server.start("0.0.0.0:0", IpcTransport::Socket));
+    REQUIRE(server.bound_address() == "0.0.0.0");
+    server.stop();
+}
+
+namespace {
+
+// Picks a port the OS currently reports free so the blocking single-client
+// create_server() below can be reached by a client that knows the port.
+std::optional<uint16_t> reserve_free_loopback_port() {
+    Socket probe;
+    if (!probe.create(SocketType::TCP) || !probe.bind("127.0.0.1", 0))
+        return std::nullopt;
+    const auto port = probe.local_port();
+    probe.close();
+    if (port == 0)
+        return std::nullopt;
+    return port;
+}
+
+// Runs a blocking single-client socket server, unblocks it with a loopback
+// client, and returns the address the server reports binding to.
+std::string single_client_server_bind_address(const std::string& host_prefix) {
+    const auto port = reserve_free_loopback_port();
+    REQUIRE(port.has_value());
+    const auto endpoint = host_prefix + std::to_string(*port);
+
+    InterprocessConnection server;
+    std::atomic<bool> server_ok{false};
+    std::thread server_thread(
+        [&] { server_ok.store(server.create_server(endpoint, IpcTransport::Socket)); });
+
+    InterprocessConnection client;
+    bool client_ok = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!client_ok && std::chrono::steady_clock::now() < deadline) {
+        client_ok = client.connect("127.0.0.1:" + std::to_string(*port), IpcTransport::Socket,
+                                   std::chrono::milliseconds(200));
+        if (!client_ok)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (!client_ok)
+        server.disconnect();
+    server_thread.join();
+    REQUIRE(client_ok);
+    REQUIRE(server_ok.load());
+
+    const auto address = server.server_bind_address();
+    client.disconnect();
+    server.disconnect();
+    return address;
+}
+
+} // namespace
+
+TEST_CASE("IPC single-client server with an omitted host listens on loopback only",
+          "[events][ipc][network-exposure]") {
+    REQUIRE(single_client_server_bind_address("") == "127.0.0.1");
+
+    // Positive control: the literal all-interfaces address still binds all.
+    REQUIRE(single_client_server_bind_address("0.0.0.0:") == "0.0.0.0");
 }
 
 TEST_CASE("IPC local server authenticates the kernel-observed peer",

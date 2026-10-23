@@ -6,6 +6,14 @@
 /// key derived from their static address and size, so they cannot collide
 /// with a filesystem path.
 ///
+/// Inline encoded bytes (a `data:image/*` source, a retained scene image blob)
+/// live in a separate pool keyed by the caller's SHA-256 of the bytes, never
+/// their address, because a freed buffer's address is reused for different
+/// bytes. That pool is bounded by bytes (the retained encoded copy plus the
+/// decoded or uploaded pixels), not by entry count, so a panel with many
+/// distinct inline images cannot evict file images or pin unbounded memory;
+/// an image larger than the whole budget is built and drawn uncached.
+///
 /// `SkiaCanvas::draw_image_from_file` used to re-read the PNG/JPEG bytes off
 /// disk (`SkData::MakeFromFileName`), re-decode them
 /// (`SkImages::DeferredFromEncodedData`), AND re-upload a fresh GPU texture
@@ -70,15 +78,42 @@ public:
         const void* backend_key,
         const std::function<sk_sp<SkImage>()>& build);
 
+    /// Default byte budget of the inline pool: room for a few retina-sized
+    /// panel backdrops (encoded copy plus 4 bytes per pixel each).
+    static constexpr std::size_t kDefaultInlineByteBudget = 96u * 1024u * 1024u;
+
+    /// Inline-bytes counterpart of `get_or_build`, keyed by @p content_key (a
+    /// digest of the bytes) and @p backend_key in a pool separate from the
+    /// path pool. @p encoded_size is the size of the encoded copy @p build
+    /// retains; the entry costs that plus the built image's pixel bytes. The
+    /// pool evicts least-recently-used entries to stay within its byte budget.
+    /// An image whose cost alone exceeds the budget is returned but not
+    /// stored, so it is rebuilt on every call instead of flushing the pool.
+    sk_sp<SkImage> get_or_build_inline(const std::string& content_key, const void* backend_key,
+                                       std::size_t encoded_size,
+                                       const std::function<sk_sp<SkImage>()>& build);
+
     struct Stats {
         std::uint64_t hits = 0;    ///< Cache hits (decode + upload skipped).
         std::uint64_t builds = 0;  ///< Cache misses (image rebuilt).
         std::size_t size = 0;      ///< Live entries.
     };
+    /// Counters for the path pool.
     Stats stats() const;
+
+    struct InlineStats {
+        std::uint64_t hits = 0;        ///< Cache hits (decode + upload skipped).
+        std::uint64_t builds = 0;      ///< Builds, cached or not.
+        std::uint64_t over_budget = 0; ///< Builds not retained: larger than the budget.
+        std::size_t size = 0;          ///< Live entries.
+        std::size_t bytes = 0;         ///< Retained cost of live entries.
+    };
+    /// Counters for the inline pool.
+    InlineStats inline_stats() const;
+    /// Reset the counters of both pools.
     void reset_stats();
 
-    /// Drop all cached images. The invalidation hook for on-disk file mutation
+    /// Drop all cached images from both pools. The invalidation hook for on-disk file mutation
     /// (see the semantic-change note above) and for GPU-context teardown.
     /// Stop painting before calling this; it waits for every in-flight build.
     void clear();
@@ -95,9 +130,14 @@ public:
     void set_enabled(bool enabled);
     bool enabled() const;
 
+    /// Entry cap of the path pool.
     void set_capacity(std::size_t capacity);
 
-private:
+    /// Byte budget of the inline pool; evicts down to it immediately.
+    void set_inline_byte_budget(std::size_t bytes);
+    std::size_t inline_byte_budget() const;
+
+  private:
     ImageFileCache() = default;
     struct Impl;
     // Defined in image_file_cache.cpp; stateful members live there to keep this
