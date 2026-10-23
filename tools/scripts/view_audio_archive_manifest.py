@@ -37,10 +37,10 @@ be immutable, a prerelease, at a commit tag on the source commit, with exactly
 these assets.
 
 The symbol floor is the demangled list of symbols the archive provides, read
-from `nm -A -P -g` through nm_symbols: strong definitions and weak ones (W/V),
+from `nm -A -P -g` through nm_symbols.defined_any(): every type except U, w
+and v, so weak (W/V), GNU unique (u) and indirect (i) definitions count,
 because a class's typeinfo or vtable is often weak and is still the archive's.
-That is deliberately wider than the dependency gate, which counts only strong
-definitions. The gate output is view_audio_symbol_floor.py's own verdict, run
+It is the same rule as the view-audio floor gate and Vellum's inertness floor. The gate output is view_audio_symbol_floor.py's own verdict, run
 from the source checkout against the named libraries.
 
 The attestation binds the files to the workflow run; the manifest records the
@@ -91,8 +91,8 @@ def run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 
 def defined_symbols(listing: str) -> list[str]:
-    """Sorted symbols an `nm -A -P -g` listing provides, weak definitions included."""
-    return sorted(nm_symbols.defined(listing, include_weak=True))
+    """Sorted symbols an `nm -A -P -g` listing provides: every type but U/w/v."""
+    return sorted(nm_symbols.defined_any(listing))
 
 
 def demangle(symbols: list[str], cxxfilt: str | None) -> list[str]:
@@ -310,7 +310,7 @@ def describe(args: argparse.Namespace) -> int:
         "configure": args.configure,
         "archive": {"name": args.archive.name, "sha256": sha256_file(args.archive),
                     "size": args.archive.stat().st_size},
-        "symbol_floor": {"name": args.floor_out.name, "rule": "nm -A -P -g; strong (TDBRSCG) and weak (WV) definitions; demangled",
+        "symbol_floor": {"name": args.floor_out.name, "rule": "nm -A -P -g; every type except U, w, v (weak, unique and indirect definitions included); demangled",
                          "sha256": sha256_file(args.floor_out),
                          "symbols": floor_text.count("\n")},
         "symbol_floor_gate": {"name": args.gate_out.name, "script": "tools/scripts/view_audio_symbol_floor.py",

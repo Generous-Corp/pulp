@@ -2261,9 +2261,11 @@ commit was dispatched. It publishes
   second archive differs. It says nothing about another runner image.
 - **The floor and the dependency gate count weak symbols differently, on
   purpose.** Both read `nm` through `tools/scripts/nm_symbols.py`. The floor
-  keeps weak definitions (`W`/`V`), because a class's typeinfo or vtable is
-  often weak and is still the archive's; the closure gate drops them, because
-  two archives emitting the same inline function do not depend on each other.
+  is a contamination check and uses `defined_any()` (every type but U/w/v, so
+  weak `W`/`V`, GNU unique `u` and indirect `i` all count): a class's typeinfo
+  or vtable is often weak and is still the archive's. The closure gate uses
+  `defined_strong()`, because two archives emitting the same inline function
+  do not depend on each other.
 - **A consumer must check the ref and the manifest, not just the signature.**
   `view_audio_archive_manifest.py verify-release --dir <assets> --source-sha
   <sha> --repository Generous-Corp/pulp` is the whole check in one command, and

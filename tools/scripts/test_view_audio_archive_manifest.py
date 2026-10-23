@@ -130,10 +130,22 @@ class ManifestTests(ManifestFixture):
         self.assertEqual(tool.defined_symbols(LISTING), [
             "_ZN4pulp4view12WaveformView5paintEv",
             "__ZN4pulp4view5Meter9set_levelEff",
+            "__ZN4pulp4view6IndirectEv",
             "__ZN4pulp4view6InlineEv",
             "__ZTIN4pulp4view5MeterE",
             "__ZTVN4pulp4view12WaveformViewE",
         ])
+
+    def test_the_floor_keeps_gnu_unique_and_indirect_definitions(self):
+        # GNU nm on ELF: `u` (unique global) and `i` (indirect function) are
+        # definitions, and Vellum's inertness floor counts them too.
+        listing = (
+            "libpulp-view-audio.a[m.o]: _ZZN4pulp4view5Meter8instanceEvE1s u 0000000000000000 0000000000000008\n"
+            "libpulp-view-audio.a[m.o]: _ZN4pulp4view13resolve_simdEv i 0000000000000080 0000000000000004\n"
+            "libpulp-view-audio.a[m.o]: _ZN4pulp4view4View5paintEv U\n"
+        )
+        self.assertEqual(tool.defined_symbols(listing),
+                         ["_ZN4pulp4view13resolve_simdEv", "_ZZN4pulp4view5Meter8instanceEvE1s"])
 
     def test_describe_records_archive_floor_and_gate(self):
         code, err = self.describe()
@@ -144,7 +156,7 @@ class ManifestTests(ManifestFixture):
         self.assertEqual(manifest["archive"]["sha256"], tool.sha256_file(self.archive))
         self.assertEqual(manifest["archive"]["size"], self.archive.stat().st_size)
         self.assertEqual(manifest["configure"], ["-DCMAKE_BUILD_TYPE=Release"])
-        self.assertEqual(manifest["symbol_floor"]["symbols"], 5)
+        self.assertEqual(manifest["symbol_floor"]["symbols"], 6)
         self.assertEqual(manifest["symbol_floor"]["sha256"], tool.sha256_file(self.floor))
         self.assertTrue(all(line.startswith("dm:") for line in self.floor.read_text(encoding="utf-8").splitlines()))
         self.assertEqual(manifest["symbol_floor_gate"]["exit_code"], 0)
@@ -435,12 +447,12 @@ class NmSymbolsTests(unittest.TestCase):
         "plain D 0 0\n"
     )
 
-    def test_weak_definitions_count_only_when_asked_for(self):
+    def test_the_floor_rule_is_defined_any(self):
         sys.path.insert(0, str(MODULE_PATH.parent))
         import nm_symbols
-        self.assertEqual(nm_symbols.defined(self.LISTING, include_weak=False), {"strong", "plain"})
-        self.assertEqual(nm_symbols.defined(self.LISTING, include_weak=True),
-                         {"strong", "plain", "weak", "weakobj"})
+        self.assertEqual(nm_symbols.defined_strong(self.LISTING), {"strong", "plain"})
+        self.assertEqual(nm_symbols.defined_any(self.LISTING),
+                         {"strong", "plain", "weak", "weakobj", "indirect"})
         self.assertEqual(nm_symbols.undefined(self.LISTING), {"needed", "weakref"})
         self.assertEqual([m for m, _, _ in nm_symbols.entries(self.LISTING)][:2], ["a.o", "a.o"])
 
