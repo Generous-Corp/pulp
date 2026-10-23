@@ -29,6 +29,8 @@ Run:
 
 ```sh
 ./tools/windows/open-utm-rdp.sh
+# Optional local safety check (does not start a guest):
+./tools/windows/test_helpers.sh
 ```
 
 The guest is a bounded development/demo VM and is not a GitHub runner.
