@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import plistlib
 import shutil
 import sys
 import tempfile
@@ -28,6 +29,31 @@ QUIET = {"status": "ok", "quiet_host": True, "reasons": []}
 UNARMED = {"input": "No Input", "record_armed": False, "input_monitoring": False}
 
 
+class FakeDefaults:
+    """`defaults` over an in-memory store, with `import` merging the way the
+    real one does (keys missing from the file are kept)."""
+
+    def __init__(self):
+        self.domains: dict[str, dict] = {}
+        self.calls: list[list[str]] = []
+        self.import_works = True
+
+    def __call__(self, args: list[str]) -> None:
+        self.calls.append(list(args))
+        verb, domain = args[0], args[1]
+        if verb == "export":
+            Path(args[2]).write_bytes(plistlib.dumps(self.domains.get(domain, {}),
+                                                     fmt=plistlib.FMT_BINARY))
+        elif verb == "import":
+            if self.import_works:
+                self.domains.setdefault(domain, {}).update(
+                    plistlib.loads(Path(args[2]).read_bytes()))
+        elif verb == "delete":
+            del self.domains[domain][args[2]]
+        else:
+            raise AssertionError(f"unexpected defaults verb {verb}")
+
+
 class Env(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -43,6 +69,10 @@ class Env(unittest.TestCase):
         os.environ["PULP_REAL_HOST_COMPONENTS_DIR"] = str(self.components)
         self.procs: list[tuple[int, str]] = []
         self.locked = False
+        # No test may reach this user's real preference domains.
+        self.prefs = FakeDefaults()
+        real, rhs.defaults = rhs.defaults, self.prefs
+        self.addCleanup(setattr, rhs, "defaults", real)
 
     def tearDown(self):
         for key, value in self._env.items():
@@ -333,6 +363,58 @@ class Revert(Env):
         finally:
             rhs.HOSTS["bitwig"]["prefs_dir"] = saved
 
+    def logic_run_that_rewrites_prefs(self) -> dict:
+        original = {"recent": "~/Music/Logic/Owner.logicx", "zoom": 150, "kept": [1, 2]}
+        self.prefs.domains["com.apple.logic10"] = dict(original)
+        self.assertTrue(self.preflight()[0])
+        rhs.snapshot_prefs(self.run, "logic")
+        # What one launch did in the live window: a recent project, a
+        # changed value, a new key and (here) a removed one.
+        logic = self.prefs.domains["com.apple.logic10"]
+        logic.update(recent="EmptySong", zoom=100, NewTrackSettingsV1={"Audio": {"In": -1}})
+        del logic["kept"]
+        return original
+
+    def test_logic_prefs_are_restored_including_keys_the_launch_added(self):
+        original = self.logic_run_that_rewrites_prefs()
+        rhs.revert(self.run)
+        self.assertEqual(self.prefs.domains["com.apple.logic10"], original)
+        self.assertIn(["delete", "com.apple.logic10", "NewTrackSettingsV1"], self.prefs.calls)
+        self.assertEqual(rhs.unreverted(self.run), [])
+
+    def test_unchanged_prefs_are_not_imported(self):
+        self.prefs.domains["com.apple.logic10"] = {"zoom": 150}
+        self.assertTrue(self.preflight()[0])
+        rhs.snapshot_prefs(self.run, "logic")
+        rhs.revert(self.run)
+        self.assertEqual([c[0] for c in self.prefs.calls], ["export", "export"])
+
+    def test_a_restore_that_does_not_match_stays_unreverted(self):
+        self.logic_run_that_rewrites_prefs()
+        self.prefs.import_works = False
+        with self.assertRaisesRegex(RuntimeError, "REFUSING TO MARK com.apple.logic10"):
+            rhs.revert(self.run)
+        self.assertEqual([e["kind"] for e in rhs.unreverted(self.run)],
+                         ["prefs_domain_snapshot"])
+        ok, reasons = rhs.preflight("logic", self.runs / "run-2", runs_parent=self.runs,
+                                    processes=lambda: [], host_preflight=lambda: dict(QUIET),
+                                    locked=lambda: False)
+        self.assertFalse(ok, reasons)
+
+    def test_a_missing_export_leaves_the_prefs_untouched(self):
+        self.logic_run_that_rewrites_prefs()
+        shutil.rmtree(self.run / "prefs-before")
+        with self.assertRaisesRegex(RuntimeError, "saved export .* is missing"):
+            rhs.revert(self.run)
+        self.assertNotIn("import", [c[0] for c in self.prefs.calls])
+
+    def test_garageband_exports_its_own_domain(self):
+        self.assertTrue(self.preflight("garageband")[0])
+        saved = rhs.snapshot_prefs(self.run, "garageband")
+        self.assertEqual(self.prefs.calls,
+                         [["export", "com.apple.garageband10",
+                           str(saved / "com.apple.garageband10.plist")]])
+
 
 class Safety(Env):
     """Each guard that protects the owner's machine, with the case it stops."""
@@ -390,6 +472,18 @@ class Safety(Env):
         self.assertTrue((self.root / "active.json").exists())
         self.assertFalse(Path(st["plugin_run"]).exists())
         self.assertTrue(any(e.get("note", "").startswith("left in place") for e in entries))
+
+    def test_logic_is_not_launched_before_its_prefs_are_saved(self):
+        self.assertTrue(self.preflight()[0])
+        rhs.stage(self.run, fault="force_loss_before", at_sample=FAULT, window_post=POST,
+                  stimulus_frames=FRAMES)
+        launched: list[list[str]] = []
+        with self.assertRaisesRegex(SystemExit, "snapshot-prefs"):
+            rhs.launch(self.run, processes=lambda: [], execute=launched.append, timeout=0.05)
+        self.assertEqual(launched, [])
+        rhs.snapshot_prefs(self.run, "logic")
+        with self.assertRaisesRegex(SystemExit, "already holds a prefs snapshot"):
+            rhs.snapshot_prefs(self.run, "logic")
 
     def test_no_revert_while_the_host_is_running(self):
         self.assertTrue(self.preflight()[0])
@@ -449,6 +543,7 @@ class EndToEnd(Env):
         self.assertTrue(self.preflight()[0])
         st = rhs.stage(self.run, fault="force_loss_before", at_sample=FAULT, window_post=POST,
                        stimulus_frames=FRAMES)
+        rhs.snapshot_prefs(self.run, "logic")
         launched: list[list[str]] = []
 
         def execute(cmd):

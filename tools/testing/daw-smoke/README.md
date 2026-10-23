@@ -236,13 +236,17 @@ through cmux-cua by accessibility element, with the host launched by
 
 1. `preflight --host H --run DIR` refuses a running DAW, a locked console, an
    active rendezvous or an unreverted run.
-2. For an AU host, `install-au`; for Bitwig, `snapshot-prefs`. Logic and
-   GarageBand preferences are not snapshotted by the driver yet: before the
-   launch, `defaults export com.apple.logic10 DIR/logic10.before.plist`; after
-   the quit, `defaults import com.apple.logic10 DIR/logic10.before.plist` and
-   `defaults delete` each key the export did not have (`import` merges, so an
-   added key such as `NewTrackSettingsV1` survives it). Compare a fresh export
-   with the backup before calling it restored.
+2. For an AU host, `install-au`; then `snapshot-prefs`. Bitwig's prefs
+   directory is copied; Logic's and GarageBand's preference domains
+   (`com.apple.logic10`, `com.apple.garageband10`) are exported with
+   `defaults`, and `launch` refuses Logic or GarageBand without that export,
+   because the launch alone rewrites them (recent projects, the plug-in list,
+   `NewTrackSettingsV1`). `revert` imports the export, deletes each key the run
+   added (`defaults import` merges, so they would survive it), exports again
+   and compares with the saved export byte for byte in a canonical form; a
+   difference leaves the run unreverted and the next preflight refuses.
+   GarageBand is sandboxed and had never run on the test machine, so its
+   domain exports empty until it has.
 3. Templates (`real_host_templates.json`) are authored once per host into the
    temp directory and fingerprinted with `template-manifest`. No kind is
    record-armed: Logic refuses to arm a No Input track ("No input source

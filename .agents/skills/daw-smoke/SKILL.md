@@ -161,10 +161,12 @@ REAPER session untouched.
   - Save a template with the `save-as-plan` steps (Cmd-Shift-S, then
     Cmd-Shift-G in the sheet, with the host briefly in front). Pressing File >
     Save As by accessibility does not open Logic's save sheet.
-  - The driver does not snapshot Logic's preferences yet. `defaults export`
-    before the launch, then `defaults import` plus `defaults delete` for each
-    added key after the quit, because `import` only merges. Logic's launch also
-    rewrites `~/Music/Audio Music Apps/Databases`, which is expected.
+  - Launching Logic rewrites its preferences, so `snapshot-prefs` exports
+    `com.apple.logic10` (GarageBand: `com.apple.garageband10`) and `launch`
+    refuses without it. `revert` restores the domain, deleting keys the run
+    added because `defaults import` only merges, and stays unreverted unless a
+    fresh export matches the saved one. Logic's launch also rewrites
+    `~/Music/Audio Music Apps/Databases`, which is expected.
   - In a REAPER run the host render deviates exactly the declared PDC (1536)
     earlier than the plug-in capture, not the status `latency_samples` (1024,
     the GPU lead alone). The v2 verifier requires that offset at both ends of

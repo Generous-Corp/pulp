@@ -25,6 +25,7 @@ unnoticed.
 
     real_host_smoke.py preflight  --host logic --run DIR
     real_host_smoke.py install-au --run DIR --component PATH.component
+    real_host_smoke.py snapshot-prefs --run DIR      (before launch; required for Logic, GarageBand)
     real_host_smoke.py stage      --run DIR --fault force_loss_before --at 96000 [...]
     real_host_smoke.py launch     --run DIR
     real_host_smoke.py await-claim --run DIR
@@ -42,6 +43,7 @@ import argparse
 import ctypes
 import json
 import os
+import plistlib
 import secrets
 import shutil
 import signal
@@ -89,6 +91,7 @@ HOSTS: dict[str, dict[str, Any]] = {
         # the user's last project next to the throwaway one.
         "open_args": ("--args", "-ApplePersistenceIgnoreState", "YES"),
         "project_suffix": ".logicx",
+        "prefs_domains": ("com.apple.logic10",),
     },
     "garageband": {
         "app": "/Applications/GarageBand.app",
@@ -97,6 +100,7 @@ HOSTS: dict[str, dict[str, Any]] = {
         "formats": ("au",),
         "open_args": ("--args", "-ApplePersistenceIgnoreState", "YES"),
         "project_suffix": ".band",
+        "prefs_domains": ("com.apple.garageband10",),
     },
     "bitwig": {
         "app": "/Applications/Bitwig Studio.app",
@@ -147,12 +151,16 @@ def console_locked() -> bool:
     need pixel clicks on a visible window, which a locked screen blocks."""
     out = subprocess.run(["ioreg", "-n", "Root", "-d1", "-a"], capture_output=True, text=True,
                          encoding="utf-8", check=False).stdout
-    import plistlib
     try:
         doc = plistlib.loads(out.encode("utf-8"))
     except Exception:  # noqa: BLE001 - unknown is treated as locked (fail closed)
         return True
     return bool(doc.get("IOConsoleLocked", True)) if isinstance(doc, dict) else True
+
+
+def defaults(args: list[str]) -> None:
+    """This user's `defaults` (export, import, delete on one domain)."""
+    subprocess.run(["/usr/bin/defaults", *args], capture_output=True, check=True)
 
 
 def responsible_pid(pid: int) -> int:
@@ -262,6 +270,37 @@ def _restore_prefs(target: Path, saved: Path) -> None:
         shutil.rmtree(aside) if aside.is_dir() and not aside.is_symlink() else aside.unlink()
 
 
+def _canonical_plist(path: Path) -> bytes:
+    """A preference export in one canonical byte form (XML, sorted keys), so
+    two exports of the same preferences compare equal byte for byte."""
+    return plistlib.dumps(plistlib.loads(path.read_bytes()), fmt=plistlib.FMT_XML,
+                          sort_keys=True)
+
+
+def _restore_domain(domain: str, saved: Path) -> None:
+    """Put a preference domain back to its export. `defaults import` merges,
+    so keys the run added are deleted one by one; the result is exported
+    again and must equal the saved export byte for byte (canonical form), or
+    the entry stays unreverted and the next preflight refuses."""
+    if not saved.is_file():
+        raise RuntimeError(f"cannot restore {domain}: the saved export {saved} is missing; the "
+                           "current preferences were left untouched")
+    before = plistlib.loads(saved.read_bytes())
+    with tempfile.TemporaryDirectory(prefix="wpk-prefs-") as tmp:
+        now = Path(tmp) / "now.plist"
+        defaults(["export", domain, str(now)])
+        if _canonical_plist(now) == _canonical_plist(saved):
+            return
+        added = sorted(plistlib.loads(now.read_bytes()).keys() - before.keys())
+        defaults(["import", domain, str(saved)])
+        for key in added:
+            defaults(["delete", domain, key])
+        defaults(["export", domain, str(now)])
+        if _canonical_plist(now) != _canonical_plist(saved):
+            raise RuntimeError(f"REFUSING TO MARK {domain} REVERTED: after the restore it still "
+                               f"differs from {saved}. Compare them by hand before the next run.")
+
+
 def _revert_entry(entry: dict) -> None:
     kind = entry["kind"]
     if kind == "rendezvous_active":
@@ -279,6 +318,8 @@ def _revert_entry(entry: dict) -> None:
             refresh_au_registry(path.parent)
     elif kind == "prefs_snapshot":
         _restore_prefs(Path(entry["path"]), Path(entry["saved"]))
+    elif kind == "prefs_domain_snapshot":
+        _restore_domain(entry["domain"], Path(entry["saved"]))
     elif kind == "throwaway_project":
         shutil.rmtree(entry["path"], ignore_errors=True)
     else:
@@ -407,22 +448,40 @@ def install_au(run: Path, component: Path) -> Path:
     return target
 
 
+PREFS_SNAPSHOT_KINDS = ("prefs_snapshot", "prefs_domain_snapshot")
+
+
 def snapshot_prefs(run: Path, host_id: str) -> Path | None:
-    """Before any host preference changes (Bitwig hosting mode): keep a byte
-    copy to restore, recorded in the revert log."""
-    prefs = HOSTS[host_id].get("prefs_dir")
-    if not prefs:
+    """Before the host can change its preferences: keep a copy to restore,
+    recorded in the revert log. Bitwig's prefs directory is copied byte for
+    byte; Logic's and GarageBand's preference domains are exported with
+    `defaults` (the launch alone rewrites them: recent projects, the plug-in
+    list, new-track settings)."""
+    host = HOSTS[host_id]
+    if not host.get("prefs_dir") and not host.get("prefs_domains"):
         return None
-    source = Path(os.path.expanduser(prefs))
     saved = run / "prefs-before"
     # One snapshot per run: a second one would capture prefs this run already
     # changed and make revert restore those.
-    if saved.exists() or any(e["kind"] == "prefs_snapshot"
+    if saved.exists() or any(e["kind"] in PREFS_SNAPSHOT_KINDS
                              for e in _read_json(run / "revert_log.json", [])):
         raise SystemExit("snapshot-prefs: this run already holds a prefs snapshot")
-    shutil.copytree(source, saved, symlinks=True)
-    record_change(run, "prefs_snapshot", path=str(source), saved=str(saved))
+    if host.get("prefs_dir"):
+        source = Path(os.path.expanduser(host["prefs_dir"]))
+        shutil.copytree(source, saved, symlinks=True)
+        record_change(run, "prefs_snapshot", path=str(source), saved=str(saved))
+        return saved
+    saved.mkdir()
+    for domain in host["prefs_domains"]:
+        export = saved / f"{domain}.plist"
+        defaults(["export", domain, str(export)])
+        record_change(run, "prefs_domain_snapshot", domain=domain, saved=str(export),
+                      sha256=gfc.sha256_file(export))
     return saved
+
+
+def prefs_snapshot_taken(run: Path) -> bool:
+    return any(e["kind"] in PREFS_SNAPSHOT_KINDS for e in _read_json(run / "revert_log.json", []))
 
 
 TEMPLATE_MANIFEST = "template.manifest.json"
@@ -579,6 +638,9 @@ def launch(run: Path, *, rosetta: bool = False, timeout: float = 60.0,
     process this launch started."""
     st = state(run)
     host = HOSTS[st["host"]]
+    if host.get("prefs_domains") and not prefs_snapshot_taken(run):
+        raise SystemExit("launch: run `snapshot-prefs` first; launching the host rewrites its "
+                         "preferences")
     before = {pid for pid, path in processes() if path == host["executable"]}
     if before:
         raise SystemExit("launch: the host is already running")
