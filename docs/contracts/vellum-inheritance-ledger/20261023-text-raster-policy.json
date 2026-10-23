@@ -1,0 +1,22 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-text-raster-policy",
+  "slices": [
+    "canvas-kernel",
+    "capture-primitives"
+  ],
+  "vellum_obligation": "Every Skia surface a frame's text can pass through (frame target, offscreen and scene targets, retained layers, raster and GPU captures) must be created with the same explicit text raster policy, legacy (Skia default contrast and gamma) or chromium (contrast 0, gamma 1), chosen per surface and never as a global constant; a surface holding any antialiased text node is chromium; text through a retained layer or the scene target must match direct paint under each policy, and the default must equal a props-less surface.",
+  "evidence": [
+    ".github/vellum-change-events/20261023-text-raster-policy.json",
+    "ctest --test-dir build -R 'a GPU surface carries its text raster policy into retained layers'",
+    "ctest --test-dir build -R 'a chromium surface changes how text rasterizes'",
+    "ctest --test-dir build -R 'an auto span on a chromium surface stays within the ink band'",
+    "ctest --test-dir build -R 'changing a SkiaSurface'",
+    "ctest --test-dir build -R 'legacy surface props are the props a surface gets without any'",
+    "ctest --test-dir build -R 'text raster policy turns chromium when any text node is antialiased'",
+    "ctest --test-dir build -R 'text raster tuples are the measured contrast and gamma'",
+    "ctest --test-dir build -R 'text through a retained layer matches direct paint under each policy'",
+    "ctest --test-dir build -R 'the persistent scene target carries the surface'",
+    "ctest --test-dir build -R 'the widget gallery renders unchanged under the default policy'"
+  ]
+}

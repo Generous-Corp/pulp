@@ -1,0 +1,21 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-text-raster-policy-watch",
+  "slices": [
+    "visual-proof-harness"
+  ],
+  "vellum_obligation": "Carry the per-surface text raster policy into Vellum's capture and render backends when the corresponding Pulp targets adopt Vellum: captures of a panel holding antialiased text render under the chromium tuple (contrast 0, gamma 1) on every surface they create, and the default stays the props-less legacy tuple.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261023-text-raster-policy-watch.json",
+    "ctest --test-dir build -R 'a GPU surface carries its text raster policy into retained layers'",
+    "ctest --test-dir build -R 'a chromium surface changes how text rasterizes'",
+    "ctest --test-dir build -R 'an auto span on a chromium surface stays within the ink band'",
+    "ctest --test-dir build -R 'changing a SkiaSurface'",
+    "ctest --test-dir build -R 'legacy surface props are the props a surface gets without any'",
+    "ctest --test-dir build -R 'text raster policy turns chromium when any text node is antialiased'",
+    "ctest --test-dir build -R 'text raster tuples are the measured contrast and gamma'",
+    "ctest --test-dir build -R 'text through a retained layer matches direct paint under each policy'",
+    "ctest --test-dir build -R 'the persistent scene target carries the surface'",
+    "ctest --test-dir build -R 'the widget gallery renders unchanged under the default policy'"
+  ]
+}
