@@ -6,6 +6,7 @@
 // the corresponding paint/style contract.
 
 import { call, _resolveVar } from './prop-applier-internal.js';
+import { writeVisibility } from './prop-applier-visibility.js';
 
 interface _ParsedBorder {
     width: number;
@@ -333,7 +334,7 @@ export function applyPaintProp(
             return true;
         }
         case 'opacity':      call('setOpacity', id, value as number); return true;
-        case 'visible':      call('setVisible', id, value as boolean); return true;
+        case 'visible':      writeVisibility(id, value as boolean); return true;
         // `boxShadow` accepts:
         //  • `'none'` / `''` -> clearBoxShadow
         //  • `null` / `undefined` -> no-op in the generic dispatcher
