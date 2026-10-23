@@ -747,6 +747,19 @@
             endif()
             add_dependencies(pulp-gpu-dawn-wavenet-qualification
                 pulp-gpu-dawn-shared-io-provider-probe)
+            # Real-Dawn campaign for the WaveNet node's watchdog window: per-block
+            # silence in callback blocks and wall time behind the production
+            # session and transport worker, true-hang detection latency, and
+            # which cause latches first at each capacity. A measurement tool,
+            # not a ctest.
+            add_executable(pulp-gpu-dawn-wavenet-watchdog-campaign
+                test_gpu_dawn_wavenet_watchdog_campaign.mm)
+            target_link_libraries(pulp-gpu-dawn-wavenet-watchdog-campaign PRIVATE
+                pulp::gpu-audio "-framework Foundation")
+            target_include_directories(pulp-gpu-dawn-wavenet-watchdog-campaign PRIVATE
+                ../core/gpu_audio/src)
+            target_compile_definitions(pulp-gpu-dawn-wavenet-watchdog-campaign PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
             # Bind this qualification executable to the exact provider inputs
             # just as the shared-I/O probe is bound. A passing runtime result
             # is not sufficient when the executable could have been relinked
