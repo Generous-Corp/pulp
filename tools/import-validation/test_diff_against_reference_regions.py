@@ -657,6 +657,7 @@ class TestInkCoverage(unittest.TestCase):
         cov = regions_mod.ink_coverage(FakeImage([(9, 9, 9)] * 4, size=(2, 2)), FakeImage([(200, 0, 0)] * 4, size=(2, 2)))
         self.assertEqual(cov["covered"], 1.0)
         self.assertEqual(cov["candidate_ink_px"], 4)
+        self.assertEqual(cov["ink_ratio"], 4.0)
         empty = regions_mod.ink_coverage(FakeImage([], size=(0, 0)), FakeImage([], size=(0, 0)))
         self.assertEqual(empty["reference_ink_px"], 0)
         self.assertEqual(empty["covered"], 1.0)

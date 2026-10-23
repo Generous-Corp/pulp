@@ -263,12 +263,11 @@ def ink_coverage(ref: Image.Image, cand: Image.Image, ink_threshold: int = 8) ->
                             stack.append(j)
         largest = max(largest, area)
 
-    denominator = max(reference_ink, 1)
     return {
         "reference_ink_px": reference_ink,
         "candidate_ink_px": candidate_ink,
         "covered": 1.0 if reference_ink == 0 else (reference_ink - len(uncovered)) / reference_ink,
-        "ink_ratio": 1.0 if reference_ink == 0 else candidate_ink / denominator,
+        "ink_ratio": candidate_ink / max(reference_ink, 1),
         "largest_uncovered_px": largest,
         "reference_modal_rgb": [int(round(v)) for v in modal],
     }
