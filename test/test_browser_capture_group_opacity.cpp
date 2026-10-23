@@ -25,9 +25,11 @@
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/view.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -245,9 +247,14 @@ TEST_CASE("alpha pushed into each descendant fails only where descendants overla
     // over an OPAQUE fill, then halves the result: a/2 over black. Per child, the
     // chip is halved over a half-strength fill: a/2 + (1 - 1/2) * f/2, lighter by
     // f/4 = 50 levels for f = 200, and by 3f/16 = 37.5 inside the nested group.
-    for (const auto& patch : kOverlapping) {
+    constexpr double kPredicted[] = {50.0, 37.5};
+    for (std::size_t i = 0; i < std::size(kOverlapping); ++i) {
+        const auto& patch = kOverlapping[i];
         CHECK_FALSE(matches(r.reference, r.multiplied, patch));
-        CHECK(lighter_by(r.reference, r.multiplied, patch) >= 12.0);
+        const double lighter = lighter_by(r.reference, r.multiplied, patch);
+        INFO(patch.what << ": lighter by " << lighter << ", predicted " << kPredicted[i]);
+        CHECK(lighter >= 12.0);
+        CHECK(std::abs(lighter - kPredicted[i]) < 5.0);
     }
 }
 
