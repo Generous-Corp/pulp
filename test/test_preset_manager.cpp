@@ -705,6 +705,54 @@ TEST_CASE("PresetManager user preset scan ignores non-json files and records nes
     REQUIRE(presets[1].folder.empty());
 }
 
+TEST_CASE("PresetManager save and rename reject names that leave the presets directory",
+          "[state][preset][path-escape]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-path-escape");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    const fs::path user_dir = pm.user_presets_dir();
+    const fs::path outside = user_dir.parent_path();
+
+    REQUIRE_FALSE(pm.save("../escape"));
+    REQUIRE_FALSE(fs::exists(outside / "escape.json"));
+    REQUIRE_FALSE(pm.save("nested/escape"));
+    REQUIRE_FALSE(fs::exists(user_dir / "nested" / "escape.json"));
+    REQUIRE_FALSE(pm.save("Mix", ".."));
+    REQUIRE_FALSE(fs::exists(outside / "Mix.json"));
+    REQUIRE_FALSE(pm.save("Mix", "Keys/../bank"));
+    REQUIRE_FALSE(fs::exists(user_dir / "bank" / "Mix.json"));
+    REQUIRE_FALSE(pm.save("Mix", "/abs"));
+    REQUIRE_FALSE(pm.save("Mix", "../bank"));
+    REQUIRE_FALSE(fs::exists(outside / "bank" / "Mix.json"));
+    REQUIRE_FALSE(pm.save(std::string("nul\0name", 8)));
+    REQUIRE_FALSE(pm.save(".."));
+    REQUIRE_FALSE(pm.save("NUL"));
+    REQUIRE_FALSE(pm.save("com1.json"));
+    REQUIRE_FALSE(pm.save("Mix", "con"));
+    REQUIRE_FALSE(pm.save(""));
+    REQUIRE(pm.current_preset_name().empty());
+
+    // Positive control: ordinary names and folders still save, including
+    // a name that merely contains dots.
+    REQUIRE(pm.save("Soft Pad", "Keys/Analog"));
+    REQUIRE(fs::exists(user_dir / "Keys" / "Analog" / "Soft Pad.json"));
+    REQUIRE(pm.save("Normal Name"));
+    REQUIRE(fs::exists(user_dir / "Normal Name.json"));
+    REQUIRE(pm.save("v1..2", "Bank"));
+    REQUIRE(fs::exists(user_dir / "Bank" / "v1..2.json"));
+
+    auto normal = require_user_preset(pm, "Normal Name");
+    REQUIRE_FALSE(pm.rename(normal, "../renamed"));
+    REQUIRE(fs::exists(normal.path));
+    REQUIRE_FALSE(fs::exists(outside / "renamed.json"));
+    REQUIRE_FALSE(pm.rename(normal, "sub/renamed"));
+    REQUIRE(fs::exists(normal.path));
+    REQUIRE(pm.rename(normal, "Renamed"));
+    REQUIRE(fs::exists(user_dir / "Renamed.json"));
+}
+
 TEST_CASE("PresetManager rename and delete update current preset and callbacks", "[state][preset]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-rename-delete");
     StateStore store;

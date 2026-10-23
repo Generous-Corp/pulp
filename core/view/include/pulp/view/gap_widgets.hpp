@@ -167,6 +167,13 @@ public:
     float intrinsic_height() const override { return 36.0f; }
 private:
     void commit_edit_();
+    // Every edit-state change goes through here: the caret blinks from the
+    // frame clock, so an editing field must keep continuous frames on, and
+    // must release them once the edit ends.
+    void set_editing_(bool editing) {
+        editing_ = editing;
+        set_continuous_repaint(editing);
+    }
     int zone_at_(float x) const;   ///< 0 = minus, 1 = plus, -1 = center/none
     double value_ = 0.0, min_ = -24.0, max_ = 24.0, step_ = 1.0;
     double wheel_step_ = 0.0;   ///< 0 = use step_; set from typed decimal precision
@@ -276,8 +283,17 @@ private:
 // is driven; set_progress(p in [0,1]) pins a determinate arc covering that
 // fraction. Paints entirely from theme tokens (control.track + accent.primary).
 class Spinner : public View {
-public:
-    void set_progress(float p) { progress_ = p; }   ///< <0 = indeterminate (spins)
+  public:
+    // An indeterminate spinner rotates from advance_animations(), so it needs
+    // per-vsync frames for as long as it spins; a determinate one is static.
+    Spinner() {
+        set_continuous_repaint(true);
+    }
+    void set_progress(float p) { ///< <0 = indeterminate (spins)
+        progress_ = p;
+        set_continuous_repaint(p < 0.0f);
+        request_repaint();
+    }
     float progress() const { return progress_; }
     void advance_animations(float dt) override { phase_ += dt; }
     float phase() const { return phase_; }
@@ -323,6 +339,13 @@ public:
     float intrinsic_height() const override { return 32.0f; }
 private:
     void commit_edit_();
+    // Every edit-state change goes through here: the caret blinks from the
+    // frame clock, so an editing field must keep continuous frames on, and
+    // must release them once the edit ends.
+    void set_editing_(bool editing) {
+        editing_ = editing;
+        set_continuous_repaint(editing);
+    }
     int zone_at_(float x) const;   ///< 0 = ‹ decrement, 1 = › increment, -1 = center/none
     double value_ = 0.0, min_ = -24.0, max_ = 24.0, step_ = 1.0;
     std::string suffix_;

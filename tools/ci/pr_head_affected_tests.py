@@ -21,7 +21,7 @@ with the Shipyard changed-surface families), plus these rules:
     `cmake-*` fixture tests, and the wide non-native tier's manifest, classifier
     or any ctest registration under `test/` reaches `wide-non-native-selftest`,
     and `experimental/pulp-rs/**` or a file the crate embeds reaches the
-    `pulp-rust-cli-{cargo,doc}-tests`;
+    `pulp-rust-*` tests;
   * `pr-fast` members already ran and are left out;
   * the extra time is capped: tests run in batches, no batch starts once the
     budget is spent, and every test that did not run is listed as skipped;
@@ -146,7 +146,7 @@ PATH_FAMILIES = (
      re.compile(r"^(experimental/pulp-rs/(?!(README|UPSTREAM_SYNC)\.md$)"
                 r"|(" + "|".join(re.escape(p) for p in
                                  PULP_RS_EXTERNAL_INPUTS + PULP_RS_TEST_TIME_INPUTS) + r")$)"),
-     re.compile(r"^pulp-rust-cli-(cargo|doc)-tests$")),
+     re.compile(r"^pulp-rust-")),
     # The sync primitives are included by most of the tree, so an edit to one
     # selects thousands of tests and the budget reaches their own concurrency
     # hammers only by luck. The hammers are the one proof those edits did not
@@ -360,11 +360,9 @@ def own_tests(build: Path, root: Path, paths: list[str]) -> list[str]:
     edited = {p for p in paths if os.path.splitext(p)[1] in inventory.SOURCE_EXTENSIONS}
     owners = {t.name for t in model.targets.values()
               if t.type == "EXECUTABLE" and edited & set(t.sources)}
-    artifacts = {os.path.normpath(a) for t in model.targets.values() if t.name in owners
-                 for a in t.artifacts}
+    index = inventory.artifact_index(model)
     entries = inventory.load_projection_ctest_entries(build) or []
-    return sorted({e.name for e in entries
-                   if any(os.path.normpath(c) in artifacts for c in e.command)})
+    return sorted({e.name for e in entries if inventory.command_owners(e.command, index) & owners})
 
 
 # A diff reaches only a handful of test executables through a CMake or
@@ -441,9 +439,11 @@ def rebuilt_binary_tests(build: Path, why: list[str] | None = None) -> list[str]
                    f"{REBUILT_EXECUTABLE_CAP}, so the directory's history drove the "
                    "build, not this diff")
         return []
+    # A rebuilt binary inside a bundle is reached through the bundle path too.
+    rebuilt |= {bundle for artifact in rebuilt for bundle in inventory.bundle_dirs(artifact)}
     selected = []
     for entry in entries:
-        if any(key(command) in rebuilt for command in entry.command):
+        if any(key(ref) in rebuilt for ref in inventory.command_path_refs(entry.command)):
             selected.append(entry.name)
     return sorted(set(selected))
 
@@ -478,11 +478,9 @@ def registration_tests(build: Path, paths: list[str], root: Path = REPO_ROOT,
         names |= reached.tests
         targets |= reached.targets
     if targets and inventory.codemodel_reply_available(build):
-        model = inventory.load_codemodel_targets(build)
-        artifacts = {os.path.normpath(a) for t in model.targets.values()
-                     if t.name in targets for a in t.artifacts}
+        index = inventory.artifact_index(inventory.load_codemodel_targets(build))
         for entry in inventory.load_projection_ctest_entries(build) or []:
-            if any(os.path.normpath(c) in artifacts for c in entry.command):
+            if inventory.command_owners(entry.command, index) & targets:
                 names.add(entry.name)
     return sorted(names)
 

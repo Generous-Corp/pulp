@@ -474,6 +474,81 @@ TEST_CASE("a View subclass reads a published scalar from paint()",
     root->set_frame_clock(nullptr);
 }
 
+TEST_CASE("a source-bound View subclass asks for a repaint only when its snapshot changes",
+          "[view][meter-source][idle-gate]") {
+    // A live binding keeps the clock ticking, but the hosts composite only what
+    // was dirtied. A plain View that paints from meter_frame()/scalar_value()
+    // must therefore be dirtied by the binding when the reading changes, and
+    // must cost nothing while it does not.
+    RepaintCountingHost host;
+    FrameClock clock;
+    auto root = std::make_unique<View>();
+    root->set_window_host(&host);
+    root->set_frame_clock(&clock);
+    auto panel = std::make_unique<MeterPanel>();
+    MeterPanel* p = panel.get();
+    root->add_child(std::move(panel));
+
+    auto src = std::make_shared<MeterSource>();
+    auto scalar = std::make_shared<ScalarSource>();
+    p->set_meter_source(src, 0);
+    p->set_scalar_source(scalar);
+    const int base = host.repaints;
+
+    src->publish(stereo(0.25f, 0.75f));
+    clock.tick(0.016f);
+    CHECK(host.repaints == base + 1);
+
+    // The same reading again, frame after frame: no further repaints.
+    for (int i = 0; i < 60; ++i)
+        clock.tick(0.016f);
+    CHECK(host.repaints == base + 1);
+
+    scalar->publish(0.5f);
+    clock.tick(0.016f);
+    CHECK(host.repaints == base + 2);
+    for (int i = 0; i < 60; ++i)
+        clock.tick(0.016f);
+    CHECK(host.repaints == base + 2);
+
+    src->publish(stereo(0.1f, 0.2f));
+    scalar->publish(0.25f);
+    clock.tick(0.016f);
+    CHECK(host.repaints >= base + 3);
+
+    root->set_frame_clock(nullptr);
+}
+
+TEST_CASE("a source-bound Meter leaves its invalidation to its ballistics",
+          "[view][meter-source][idle-gate]") {
+    // Meter overrides on_meter_snapshot_changed: a changed snapshot whose level
+    // the ballistics hold (a reading below the held display) must not repaint.
+    RepaintCountingHost host;
+    FrameClock clock;
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 200, 100});
+    root->set_window_host(&host);
+    auto meter = std::make_unique<Meter>();
+    Meter* m = meter.get();
+    m->set_bounds({10, 10, 20, 80});
+    root->add_child(std::move(meter));
+    auto src = std::make_shared<MeterSource>();
+    m->set_source(src, 0);
+    root->set_frame_clock(&clock);
+
+    src->publish(stereo(0.0f, 0.0f));
+    clock.tick(1.0f / 60.0f);
+    const int base = host.repaints;
+    // A changed snapshot whose channel the meter does not read (channel 1).
+    MeterFrame f = stereo(0.0f, 0.0f);
+    f.peak[1] = 0.9f;
+    src->publish(f);
+    clock.tick(1.0f / 60.0f);
+    CHECK(host.repaints == base);
+
+    root->set_frame_clock(nullptr);
+}
+
 TEST_CASE("an unbound View reads a zeroed frame and a zero scalar",
           "[view][meter-source]") {
     // The getters must be safe on the overwhelming majority of views, which

@@ -35,6 +35,12 @@ public:
         return "http://127.0.0.1:" + std::to_string(port_) + std::string(path);
     }
 
+    // Addresses the plain-http listener with an https scheme so the client
+    // attempts a TLS handshake against a peer that speaks no TLS.
+    std::string https_url(std::string_view path) const {
+        return "https://127.0.0.1:" + std::to_string(port_) + std::string(path);
+    }
+
 private:
     int port_ = 0;
     std::thread thread_;
@@ -182,6 +188,46 @@ TEST_CASE("HTTP request enforces its timeout after a healthy control request",
     REQUIRE_FALSE(response.error.empty());
     REQUIRE(response.error.find("timeout-sensitive-marker") == std::string::npos);
     REQUIRE(elapsed < 2500ms);
+}
+
+TEST_CASE("HTTPS request to a closed port reports an error without throwing",
+          "[runtime][http][tls]") {
+    HttpResponse response;
+    REQUIRE_NOTHROW(response = http_get("https://127.0.0.1:1/", 2));
+
+    REQUIRE_FALSE(response.ok());
+    REQUIRE(response.status_code == 0);
+    REQUIRE_FALSE(response.error.empty());
+}
+
+TEST_CASE("HTTPS request to a plain-http loopback server fails the TLS handshake",
+          "[runtime][http][tls]") {
+    LoopbackServer loopback;
+    std::mutex received_mutex;
+    size_t handled_requests = 0;
+    loopback.server.Get("/tls", [&](const httplib::Request&, httplib::Response& response) {
+        {
+            std::lock_guard lock(received_mutex);
+            ++handled_requests;
+        }
+        response.set_content("plaintext", "text/plain");
+    });
+    loopback.start();
+
+    // Control: the same listener serves the same path over plain http.
+    REQUIRE(http_get(loopback.url("/tls"), 2).ok());
+
+    HttpResponse response;
+    REQUIRE_NOTHROW(response = http_get(loopback.https_url("/tls"), 2));
+
+    REQUIRE_FALSE(response.ok());
+    REQUIRE(response.status_code == 0);
+    REQUIRE_FALSE(response.error.empty());
+    REQUIRE(response.body.empty());
+    {
+        std::lock_guard lock(received_mutex);
+        REQUIRE(handled_requests == 1);
+    }
 }
 
 TEST_CASE("legacy HTTP GET and POST overloads retain buffered behavior",

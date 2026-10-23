@@ -1069,6 +1069,53 @@ bool SkiaCanvas::draw_image_from_static_data_rect(const uint8_t* data, size_t si
     return true;
 }
 
+sk_sp<SkImage> SkiaCanvas::image_from_keyed_data_cached(const std::string& content_key,
+                                                        const uint8_t* data, size_t size) const {
+    // Inline bytes live in their own byte-budgeted pool. The byte count rides
+    // along with the digest as a cheap extra guard.
+    const std::string key =
+        std::string("\0inline-sha256:", 15) + content_key + ":" + std::to_string(size);
+    return ImageFileCache::instance().get_or_build_inline(
+        key, image_cache_backend_key(), size, [&]() -> sk_sp<SkImage> {
+            // The cached image can outlive the caller's buffer, and a raster
+            // canvas keeps the decode deferred, so own a copy of the bytes.
+            auto bytes = SkData::MakeWithCopy(data, size);
+            auto decoded = SkImages::DeferredFromEncodedData(bytes);
+            return decoded ? ensure_gpu_image(std::move(decoded)) : nullptr;
+        });
+}
+
+bool SkiaCanvas::draw_image_from_keyed_data(const std::string& content_key, const uint8_t* data,
+                                            size_t size, float x, float y, float w, float h) {
+    if (content_key.empty())
+        return draw_image_from_data(data, size, x, y, w, h);
+    if (!canvas_ || !data || size == 0)
+        return false;
+    auto image = image_from_keyed_data_cached(content_key, data, size);
+    if (!image)
+        return false;
+    canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
+                           sampling_options_for_image_smoothing());
+    return true;
+}
+
+bool SkiaCanvas::draw_image_from_keyed_data_rect(const std::string& content_key,
+                                                 const uint8_t* data, size_t size, float sx,
+                                                 float sy, float sw, float sh, float dx, float dy,
+                                                 float dw, float dh) {
+    if (content_key.empty())
+        return draw_image_from_data_rect(data, size, sx, sy, sw, sh, dx, dy, dw, dh);
+    if (!canvas_ || !data || size == 0)
+        return false;
+    auto image = image_from_keyed_data_cached(content_key, data, size);
+    if (!image)
+        return false;
+    canvas_->drawImageRect(image, SkRect::MakeXYWH(sx, sy, sw, sh),
+                           SkRect::MakeXYWH(dx, dy, dw, dh), sampling_options_for_image_smoothing(),
+                           nullptr, SkCanvas::kStrict_SrcRectConstraint);
+    return true;
+}
+
 bool SkiaCanvas::draw_image_from_file_rect(const std::string& path,
                                             float sx, float sy, float sw, float sh,
                                             float dx, float dy, float dw, float dh) {

@@ -46,6 +46,10 @@ struct ScriptedUiOptions {
     /// allowing a generated @pulp/react bundle to materialize a captured,
     /// executable browser document in this exact live realm.
     bool enable_runtime_import = false;
+    /// Heap ceiling for every realm this session creates, in bytes
+    /// (0 = unlimited). Enforced by the QuickJS backend; see
+    /// JsEngine::set_memory_limit.
+    std::size_t js_memory_limit_bytes = kDefaultJsMemoryLimitBytes;
 };
 
 /// Present while the SDK has view-first document loading (ScopedDeferredDocumentLoad,
@@ -302,6 +306,7 @@ private:
     bool hot_reload_enabled_ = false;
     bool theme_reload_enabled_ = false;
     bool runtime_import_enabled_ = false;
+    std::size_t js_memory_limit_bytes_ = kDefaultJsMemoryLimitBytes;
     ValueChannelAccess value_channel_access_;
 
     std::unique_ptr<ScriptEngine> engine_;

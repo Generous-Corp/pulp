@@ -84,6 +84,11 @@ public:
     // Pump any engine-specific message loop / microtask queue.
     void pump_message_loop();
 
+    // Cap the realm's heap in bytes (0 = unlimited); false when the active
+    // backend cannot enforce one. Every backend starts at
+    // kDefaultJsMemoryLimitBytes where it can enforce a cap at all.
+    bool set_memory_limit(std::size_t bytes);
+
     // Whether the active backend can cooperatively abort a running evaluation
     // from another thread (QuickJS can; see JsEngine::request_interrupt).
     bool supports_interrupt() const;

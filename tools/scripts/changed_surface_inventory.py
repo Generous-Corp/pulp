@@ -754,6 +754,66 @@ class CTestEntry:
     properties: dict[str, Any]
 
 
+# A test names a file in more forms than a bare argument: a CMake script takes
+# it as -D<VAR>=<path> (a `|` or `;` list when it takes several), a tool as
+# --flag=<path>, and `cmake -E env` as NAME=<path>.
+_ASSIGNED_VALUE = re.compile(r"^(?:-D|--?)?[A-Za-z_][\w.-]*(?::[A-Za-z]+)?=(.+)$", re.DOTALL)
+_PATH_LIST_SEPARATOR = re.compile(r"[|;]")
+# A validator or link-floor probe often takes a bundle directory, while the
+# file API records the binary inside it as the target's artifact.
+BUNDLE_SUFFIXES = (".app", ".appex", ".aaxplugin", ".bundle", ".clap", ".component",
+                   ".framework", ".lv2", ".vst3")
+
+
+def command_path_refs(command: Iterable[str]) -> list[str]:
+    """Every path a test command names: each argument, plus the value of each
+    ``-DVAR=``, ``--flag=`` or ``NAME=`` assignment, split on list separators.
+
+    Values are normalized; whether one is a build output or a source file is
+    the caller's lookup."""
+    refs: list[str] = []
+    for token in command:
+        if not token:
+            continue
+        refs.append(os.path.normpath(token))
+        assigned = _ASSIGNED_VALUE.match(token)
+        if assigned:
+            refs.extend(os.path.normpath(value)
+                        for value in _PATH_LIST_SEPARATOR.split(assigned.group(1)) if value)
+    return refs
+
+
+def bundle_dirs(artifact: str) -> list[str]:
+    """The bundle directories an artifact sits inside, innermost first."""
+    found: list[str] = []
+    parent = os.path.dirname(artifact)
+    while parent and parent != os.path.dirname(parent):
+        if parent.endswith(BUNDLE_SUFFIXES):
+            found.append(parent)
+        parent = os.path.dirname(parent)
+    return found
+
+
+def artifact_index(model: "CodeModel") -> dict[str, set[str]]:
+    """Path -> owning targets, for every artifact and every bundle directory
+    that contains one."""
+    index: dict[str, set[str]] = {}
+    for target in model.targets.values():
+        for artifact in target.artifacts:
+            index.setdefault(artifact, set()).add(target.name)
+            for bundle in bundle_dirs(artifact):
+                index.setdefault(bundle, set()).add(target.name)
+    return index
+
+
+def command_owners(command: Iterable[str], index: dict[str, set[str]]) -> set[str]:
+    """Targets whose build output (or its bundle) a test command names."""
+    owners: set[str] = set()
+    for ref in command_path_refs(command):
+        owners |= index.get(ref, set())
+    return owners
+
+
 @dataclass
 class Selection:
     mode: str
@@ -1249,7 +1309,7 @@ def family_projection(families: Iterable[dict[str, Any]], changed: Iterable[str]
 
 
 def follow_fixtures(tests: set[str], inventory: list[CTestEntry],
-                    artifact_owner: dict[str, str]) -> tuple[set[str], set[str]]:
+                    index: dict[str, set[str]]) -> tuple[set[str], set[str]]:
     """Close ``tests`` over FIXTURES_REQUIRED; return (tests, targets building fixtures)."""
     by_name: dict[str, list[CTestEntry]] = {}
     setups: dict[str, list[CTestEntry]] = {}
@@ -1265,10 +1325,7 @@ def follow_fixtures(tests: set[str], inventory: list[CTestEntry],
         for entry in by_name.get(name, []):
             for fixture in _as_list(entry.properties.get("FIXTURES_REQUIRED")):
                 for setup in setups.get(fixture, []):
-                    for path in setup.command:
-                        owner = artifact_owner.get(os.path.normpath(path))
-                        if owner is not None:
-                            fixture_targets.add(owner)
+                    fixture_targets |= command_owners(setup.command, index)
                     if setup.name not in result:
                         result.add(setup.name)
                         pending.append(setup.name)
@@ -1360,25 +1417,21 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
     selected |= {t for t in family_targets if t in model.targets}
     selected = {t for t in selected if t in model.targets}
     if inventory is not None:
-        artifact_owner: dict[str, str] = {}
-        for target in model.targets.values():
-            for artifact in target.artifacts:
-                artifact_owner[artifact] = target.name
+        index = artifact_index(model)
         changed_abs = {os.path.normpath(os.path.join(model.source_root, f)) for f in changed}
         by_test_target: dict[str, set[str]] = {}
         known_names = {entry.name for entry in inventory}
         for entry in inventory:
-            cmd_paths = [os.path.normpath(c) for c in entry.command]
-            for path in cmd_paths:
-                owner = artifact_owner.get(path)
-                if owner is not None:
+            refs = command_path_refs(entry.command)
+            for ref in refs:
+                for owner in index.get(ref, ()):
                     by_test_target.setdefault(owner, set()).add(entry.name)
-            if any(p in changed_abs for p in cmd_paths):
+            if any(ref in changed_abs for ref in refs):
                 file_selected_tests.add(entry.name)
         tests: set[str] = set(file_selected_tests) | (family_tests & known_names)
         for name in selected:
             tests |= by_test_target.get(name, set())
-        tests, fixture_targets = follow_fixtures(tests, inventory, artifact_owner)
+        tests, fixture_targets = follow_fixtures(tests, inventory, index)
         selected |= {t for t in fixture_targets if t in model.targets}
     else:
         tests = set()

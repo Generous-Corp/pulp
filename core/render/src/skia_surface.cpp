@@ -93,10 +93,17 @@ const char* wgpu_texture_format_name(wgpu::TextureFormat format) {
 // Installed by set_insert_outcome_hook_for_testing(); null in production.
 SkiaSurface::InsertOutcomeHook g_insert_outcome_hook = nullptr;
 
+// Cleared by set_async_readback_for_testing(false); true in production.
+bool g_async_readback_enabled = true;
+
 }  // namespace
 
 void SkiaSurface::set_insert_outcome_hook_for_testing(InsertOutcomeHook hook) {
     g_insert_outcome_hook = hook;
+}
+
+void SkiaSurface::set_async_readback_for_testing(bool enabled) {
+    g_async_readback_enabled = enabled;
 }
 
 class SkiaSurfaceImpl : public SkiaSurface {
@@ -527,7 +534,7 @@ public:
             state->finished.store(true, std::memory_order_release);
         };
 
-        if (context_) {
+        if (context_ && g_async_readback_enabled) {
             // The callback owns this heap context. On a timeout, do not free it:
             // Graphite may still deliver a late callback, and a tiny leaked
             // shared_ptr is safer than reintroducing a callback use-after-free.
@@ -560,7 +567,12 @@ public:
 
         pixels.resize(static_cast<size_t>(pixel_width) * static_cast<size_t>(pixel_height) * 4u);
         SkPixmap pixmap(info, pixels.data(), row_bytes);
-        auto image = source->makeImageSnapshot();
+        // A copy, not makeImageSnapshot: the blit takes AsImage views of the
+        // scene surface, and Graphite warns on every later AsImage of a
+        // surface that has ever handed out a legacy snapshot.
+        auto image = SkSurfaces::AsImageCopy(sk_ref_sp(source));
+        if (!image)
+            image = source->makeImageSnapshot();
         if (image && image->readPixels(pixmap, 0, 0)) {
             return true;
         }
@@ -724,7 +736,15 @@ private:
             return false;
         }
 
-        sk_sp<SkImage> snapshot = scene_surface_->makeImageSnapshot();
+        // AsImage shares the scene's texture instead of copying it (Graphite's
+        // makeImageSnapshot always copies). The view aliases a surface the
+        // next frame draws into, which is safe because the view lives only in
+        // this function: the blit is recorded into this frame's recording,
+        // ahead of every later scene draw in queue order. A scene that is not
+        // textureable has no view and is copied instead.
+        sk_sp<SkImage> snapshot = SkSurfaces::AsImage(scene_surface_);
+        if (!snapshot)
+            snapshot = scene_surface_->makeImageSnapshot();
         if (!snapshot) {
             runtime::log_error(
                 "SkiaSurface: retained scene produced no snapshot — nothing "
@@ -780,6 +800,7 @@ std::unique_ptr<SkiaSurface> SkiaSurface::create(GpuSurface&, const Config&) {
     return nullptr;
 }
 void SkiaSurface::set_insert_outcome_hook_for_testing(InsertOutcomeHook) {}
+void SkiaSurface::set_async_readback_for_testing(bool) {}
 }
 
 #endif

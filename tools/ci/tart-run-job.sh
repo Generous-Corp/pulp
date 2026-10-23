@@ -142,5 +142,8 @@ set -e
 
 note "in-guest exit=$RC"
 echo "=== host ccache after job (durable across clones) ==="
-CCACHE_DIR="$CACHE_ROOT/ccache" ccache --show-stats 2>/dev/null | grep -iE 'cache size|hits|misses|hit rate' || true
+# The guest just wrote $CACHE_ROOT/ccache, ccache.conf included: read the host's
+# own config, never that one (see pulp-worktree.sh, HOST_CCACHE_CONFIG).
+CCACHE_DIR="$CACHE_ROOT/ccache" CCACHE_CONFIGPATH="${PULP_HOST_CCACHE_CONFIG:-$CACHE_ROOT/ccache-host.conf}" \
+  ccache --show-stats 2>/dev/null | grep -iE 'cache size|hits|misses|hit rate' || true
 exit $RC
