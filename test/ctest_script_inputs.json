@@ -7589,6 +7589,7 @@
    "inputs": [
     "tools/import-design/browser_capture/document_canvas.mjs",
     "tools/import-design/browser_capture/document_canvas.test.mjs",
+    "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture/form_control_theme.test.mjs",
     "tools/import-design/browser_capture/health.mjs",
     "tools/import-design/browser_capture/health.test.mjs",
