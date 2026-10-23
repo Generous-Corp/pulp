@@ -17,7 +17,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 |------|---------|---------|----------|-----------|-------|
 | AudioUnitSDK | 1.3.0 | Apache-2.0 | AU v2 plugin format adapter (AUEffectBase, factory) | pulp-format | 2026-03-24 |
 | Babel parser | 7.29.7 | MIT | JSX/TSX source-contract extraction for `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`; npm-installed for import tooling, not bundled into the C++ runtime | import tooling | 2026-05-27 |
-| Catch2 | 3.7.1 | BSL-1.0 | Unit testing framework | test | 2026-03-24 |
+| Catch2 | 3.16.1 | BSL-1.0 | Unit testing framework | test | 2026-03-24 |
 | CHOC | pulp-webview-dnd-poc1 (fork of f0f5cdf5a938) | ISC | JS engine abstraction, MIDI utilities, audio helpers, WebView drag-and-drop | multiple | 2026-03-24 |
 | CLAP | 1.2.10 | MIT | CLAP plugin format headers | pulp-format | 2026-03-24 |
 | command-group | 5.0.1 | Apache-2.0 | Cross-platform process-tree containment and termination for bounded Rust CLI trace analysis (Unix process groups; Windows Job Objects) | pulp-rs | 2026-08-30 |

@@ -69,10 +69,10 @@
       "name": "Catch2",
       "category": "test",
       "license": "BSL-1.0",
-      "version": "v3.7.1",
+      "version": "v3.16.1",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/catchorg/Catch2.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.7.1" },
+      "upstream": { "kind": "git-tag", "ref": "v3.16.1" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [

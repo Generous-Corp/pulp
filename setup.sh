@@ -1466,7 +1466,7 @@ ensure_shared_git_source_with_retry "Yoga" "https://github.com/facebook/yoga.git
     "v3.2.1" "$(fetchcontent_cache_dir_name "yoga" "v3.2.1")"
 
 ensure_shared_git_source_with_retry "Catch2" "https://github.com/catchorg/Catch2.git" \
-    "v3.7.1" "$(fetchcontent_cache_dir_name "catch2" "v3.7.1")"
+    "v3.16.1" "$(fetchcontent_cache_dir_name "catch2" "v3.16.1")"
 
 # three.js is by far the largest FetchContent source (~2.2 GB of history). Left
 # unseeded it clones per BUILD DIRECTORY, not per machine, so every worktree
