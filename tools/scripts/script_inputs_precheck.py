@@ -8,12 +8,17 @@ in CI and every miss cost a round-trip. This reads the CMake files the range
 adds or edits, finds `add_test(NAME <name> COMMAND ...)` calls that are new at
 the head and run a script, and fails when a name has no entry.
 
-It reports, and never passes, what a static read cannot decide: a NAME built
-from a variable or generator expression, and the old `add_test(<name> <cmd>)`
-form. The configured drift check stays the authority for those, for
-registrations behind an option the gate configure turns off, and for stale
-entries. A deliberate exclusion carries `# script-inputs: not-gated <reason>`
-on a line of the call or the line above it.
+Whether a registration is in the gate configure at all depends on options and
+include chains a static read cannot evaluate (examples, GPU and scene3d probes,
+platform-only tests are left out of it on purpose). So a missing entry fails
+only when the test's own scope (the innermost if/elseif/else branch, or the
+file's top level) already holds a test the inventory lists: that scope is
+evidently configured by the gate. A test in a scope with no such neighbour is
+reported as NOT CHECKED, as is a NAME built from a variable or generator
+expression and the old `add_test(<name> <cmd>)` form. The configured drift check
+stays the authority for those and for stale entries. A deliberate exclusion
+carries `# script-inputs: not-gated <reason>` on a line of the call or the line
+above it.
 
     python3 tools/scripts/script_inputs_precheck.py --base origin/main
 
@@ -35,13 +40,18 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "ci"))
 
 import cmake_registration_impact as registrations  # noqa: E402
+import script_test_inputs  # noqa: E402
 
 INPUTS_LIST = "test/ctest_script_inputs.json"
 EXCLUSION = re.compile(r"#\s*script-inputs:\s*not-gated\b")
-SCRIPT_SUFFIXES = (".py", ".sh", ".bash", ".mjs", ".js")
-INTERPRETER = re.compile(
-    r"(?:^|[/{])(?:python[0-9.]*|Python3?_EXECUTABLE|PYTHON_EXECUTABLE|node|NODE_EXECUTABLE|"
-    r"_PULP_NODE_FOR_TESTS|bash|sh|zsh)(?:\.exe)?}?$")
+# What the CMake variables a registration names expand to, for classifying the
+# unexpanded command with the configured check's own rule.
+EXPANSIONS = {
+    "${Python3_EXECUTABLE}": "python3", "${PYTHON_EXECUTABLE}": "python3",
+    "${Python_EXECUTABLE}": "python3", "${CMAKE_COMMAND}": "cmake",
+    "${_PULP_NODE_FOR_TESTS}": "node", "${NODE_EXECUTABLE}": "node",
+    "${BASH}": "bash", "${BASH_EXECUTABLE}": "bash",
+}
 REGENERATE = (
     "regenerate it from a gate-profile configure:\n"
     "    npm ci --prefix tools/import-design/jsx-runtime\n"
@@ -49,7 +59,11 @@ REGENERATE = (
     "-DPULP_BUILD_EXAMPLES=OFF\n"
     "    python3 tools/scripts/script_test_inputs.py --build-dir build --write\n"
     "    git add test/ctest_script_inputs.json\n"
-    "  (on a gate host, configure on a TARTCI_ROLE=light host such as m1, or a VM)")
+    "  (on a gate host, configure on a TARTCI_ROLE=light host such as m1, or a VM)\n"
+    "  If the gate configure deliberately leaves the test out (an option it turns off,\n"
+    "  a platform guard), regenerating cannot add it: mark the call instead with\n"
+    "    # script-inputs: not-gated <reason>\n"
+    "  on the add_test line or the line above it.")
 
 
 def _git(root: Path, *args: str) -> str:
@@ -69,29 +83,16 @@ def is_cmake_file(path: str) -> bool:
     return path.endswith(".cmake") or os.path.basename(path) == "CMakeLists.txt"
 
 
-def runs_script(command: list[str]) -> bool:
-    """Whether a ctest COMMAND runs a Python, shell or Node script.
+def script_kind(command: list[str], root: Path = Path(".")) -> str:
+    """How script_test_inputs.classify, the configured check's own rule, sees a
+    ctest COMMAND once its interpreter variables are expanded: "python",
+    "node", "shell", "python-module" or "undeclarable"."""
+    expanded = [EXPANSIONS.get(token, token) for token in command if token]
+    return script_test_inputs.classify(expanded, root)[0]
 
-    Mirrors script_test_inputs.classify on the unexpanded CMake tokens: an
-    interpreter, optionally behind `cmake -E env NAME=VALUE...`, or a script
-    named directly."""
-    tokens = list(command)
-    if (len(tokens) > 3 and re.search(r"(?:^|[/{])(?:cmake|CMAKE_COMMAND)}?$", tokens[0])
-            and tokens[1:3] == ["-E", "env"]):
-        tokens = tokens[3:]
-        while tokens and ("=" in tokens[0].split("/", 1)[0] or tokens[0].startswith("--unset")):
-            tokens = tokens[1:]
-    if not tokens:
-        return False
-    first = tokens[0]
-    if first.endswith(SCRIPT_SUFFIXES):
-        return True
-    if not INTERPRETER.search(first):
-        return False
-    rest = [t for t in tokens[1:] if t]
-    if rest and (rest[0] == "-c" or rest[0].startswith("-c")) and not rest[0].startswith("--"):
-        return False  # an inline snippet has no repository entry
-    return True
+
+def runs_script(command: list[str], root: Path = Path(".")) -> bool:
+    return script_kind(command, root) != "undeclarable"
 
 
 def new_registrations(head_text: str, base_text: str) -> list[registrations.Call]:
@@ -120,6 +121,69 @@ def _command(call: registrations.Call) -> list[str] | None:
     return command
 
 
+# Conditions every gate configure satisfies. A block guarded only by these is
+# transparent: its tests share the enclosing scope's evidence.
+GATE_TRUE = {"Python3_Interpreter_FOUND", "Python3_FOUND", "PULP_BUILD_TESTS", "AND"}
+
+
+def _scope(call: registrations.Call, siblings: list[registrations.Call]) -> tuple[int, int]:
+    """(innermost non-transparent block, branch) a call sits in; elseif/else
+    start a new branch."""
+    block = call.block
+    anchor = call
+    while (block is not None and block.header.command == "if"
+           and set(block.header.args) <= GATE_TRUE
+           and not any(other.command in ("elseif", "else") and other.block is block
+                       for other in siblings)):
+        anchor = block.header
+        block = block.header.block
+    branch = sum(1 for other in siblings
+                 if other.command in ("elseif", "else") and other.block is block
+                 and other.first < anchor.first)
+    return id(block), branch
+
+
+def judge(path: str, text: str, new_names: set[str], listed: set[str],
+          root: Path = Path(".")) -> tuple[list[str], list[str]]:
+    """(missing, advisories) for the registrations in ``text`` named in ``new_names``."""
+    lines = text.splitlines()
+    every = registrations.calls(text)
+    registrations._blocks(every)
+    listed_scopes = {_scope(call, every) for call in every
+                     if call.command == "add_test" and _name(call) in listed}
+    missing: list[str] = []
+    advisories: list[str] = []
+    for call in every:
+        if call.command != "add_test" or _name(call) not in new_names:
+            continue
+        where = f"{path}:{call.first}"
+        if any(EXCLUSION.search(line) for line in lines[max(call.first - 2, 0):call.last]):
+            continue
+        command = _command(call)
+        if command is None:
+            advisories.append(f"{where}: add_test without NAME/COMMAND; not checked here")
+            continue
+        kind = script_kind(command, root)
+        if kind == "undeclarable":
+            continue
+        name = _name(call)
+        if kind == "python-module" and name not in listed:
+            # `python -m <module>` is declared only when the module resolves to
+            # a file, which depends on the test's working directory and path.
+            advisories.append(f"{where}: {name} runs `python -m`; not checked here")
+        elif "${" in name or "$<" in name:
+            advisories.append(f"{where}: test name {name!r} is computed; not checked here")
+        elif name in listed:
+            continue
+        elif _scope(call, every) in listed_scopes:
+            missing.append(f"{where}: {name}")
+        else:
+            advisories.append(f"{where}: {name} has no entry, and nothing else in its "
+                              "if/else branch is in the gate inventory, so the gate "
+                              "configure may not register it")
+    return missing, advisories
+
+
 def check(root: Path, base: str, head: str = "HEAD") -> tuple[list[str], list[str]]:
     """(missing, advisories) for the range base...head."""
     changed = [path for path in _git(root, "diff", "--name-only", "--no-renames",
@@ -133,24 +197,11 @@ def check(root: Path, base: str, head: str = "HEAD") -> tuple[list[str], list[st
     advisories: list[str] = []
     for path in changed:
         head_text = _show(root, head, path)
-        head_lines = head_text.splitlines()
-        for call in new_registrations(head_text, _show(root, merge_base, path)):
-            where = f"{path}:{call.first}"
-            span = head_lines[max(call.first - 2, 0):call.last]
-            if any(EXCLUSION.search(line) for line in span):
-                continue
-            command = _command(call)
-            if command is None:
-                advisories.append(f"{where}: add_test without NAME/COMMAND; not checked here")
-                continue
-            if not runs_script(command):
-                continue
-            name = _name(call)
-            if "${" in name or "$<" in name:
-                advisories.append(f"{where}: test name {name!r} is computed; not checked here")
-                continue
-            if name not in listed:
-                missing.append(f"{where}: {name}")
+        new_names = {_name(call) for call in
+                     new_registrations(head_text, _show(root, merge_base, path))}
+        found, noted = judge(path, head_text, new_names, listed, root)
+        missing.extend(found)
+        advisories.extend(noted)
     return missing, advisories
 
 
@@ -177,7 +228,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {line}", file=sys.stderr)
         print(f"  CI's script-test-inputs-drift fails on this; {REGENERATE}", file=sys.stderr)
         return 1
-    print("script-inputs-precheck: ok (every new script-driven ctest has an entry)")
+    if advisories:
+        print(f"script-inputs-precheck: ok with {len(advisories)} not checked (no new "
+              "script-driven ctest in a gate-configured scope lacks an entry)")
+    else:
+        print("script-inputs-precheck: ok (every new script-driven ctest has an entry)")
     return 0
 
 
