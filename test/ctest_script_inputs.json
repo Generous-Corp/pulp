@@ -2677,6 +2677,10 @@
   "pulp-test-gpu-neural-realtime-node",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
+  "pulp-test-gpu-proc-installer",
+  "pulp-test-gpu-proc-installer-host-owned",
+  "pulp-test-gpu-proc-installer-host-owned-registered",
+  "pulp-test-gpu-proc-installer-host-policy",
   "pulp-test-gpu-render-loss-consumer",
   "pulp-test-gpu-shared-io-convolution-pipeline",
   "pulp-test-gpu-shared-io-convolution-session",
@@ -4541,6 +4545,13 @@
    "entry": "tools/testing/daw-smoke/test_sample_region_native_smoke.py",
    "inputs": [
     "tools/testing/daw-smoke/test_sample_region_native_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "dawn-proc-setter-absent-when-host-owned": {
+   "entry": "test/verify_dawn_proc_setter_absent.py",
+   "inputs": [
+    "test/verify_dawn_proc_setter_absent.py"
    ],
    "kind": "python"
   },
