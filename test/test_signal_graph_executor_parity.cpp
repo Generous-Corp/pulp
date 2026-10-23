@@ -16,6 +16,7 @@
 #include <pulp/format/process_block.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_executor_contract.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/midi/block_ops.hpp>
 
@@ -31,10 +32,12 @@
 
 namespace {
 
+using pulp::host::build_signal_graph_executor_routing;
+using pulp::host::ExecutorTopologyValidationCode;
+using pulp::host::signal_graph_executor_eligible;
 using pulp::host::SignalGraph;
 using pulp::host::SignalGraphExecutorRouting;
-using pulp::host::build_signal_graph_executor_routing;
-using pulp::host::signal_graph_executor_eligible;
+using pulp::host::validate_signal_graph_executor_topology;
 
 // Defined with the other wide-graph helpers below; declared here because the
 // publication-race regression test intentionally sits beside the other
@@ -599,6 +602,12 @@ TEST_CASE("Executor routing build fails closed for oversized otherwise-eligible 
     REQUIRE(g.prepare(kSr, kFrames));
 
     CHECK(signal_graph_executor_eligible(g));
+    const auto validation = validate_signal_graph_executor_topology(g.nodes(), g.connections());
+    CHECK_FALSE(validation);
+    CHECK(validation.code == ExecutorTopologyValidationCode::NodeLimitExceeded);
+    CHECK(validation.actual == g.nodes().size());
+    CHECK(validation.actual > validation.limit);
+    CHECK(validation.limit == pulp::graph::GraphRuntimeLimits{}.max_nodes);
     SignalGraphExecutorRouting routing;
     CHECK_FALSE(build_signal_graph_executor_routing(g, routing));
     CHECK_FALSE(routing.valid);
