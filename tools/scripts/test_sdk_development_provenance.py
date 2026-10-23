@@ -98,7 +98,7 @@ class AdoptionTest(unittest.TestCase):
             self.inspect()
 
     def test_cache_source_drift_rejected(self):
-        self.cache.write_text(self.cache.read_text().replace(str(self.source), str(self.prefix)))
+        self.cache.write_text(self.cache.read_text(encoding='utf-8').replace(str(self.source), str(self.prefix)))
         with self.assertRaisesRegex(tool.ProvenanceError, 'cache source'):
             self.inspect()
 
@@ -146,8 +146,8 @@ class AdoptionTest(unittest.TestCase):
         self.assertFalse(doc['bridge_exec'])
 
         # Control: ON is reported as present, so False above is the value, not a default.
-        self.cache.write_text(self.cache.read_text().replace(
-            'PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n', 'PULP_DEV_BRIDGE_EXEC:BOOL=ON\n'))
+        self.cache.write_text(self.cache.read_text(encoding='utf-8').replace(
+            'PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n', 'PULP_DEV_BRIDGE_EXEC:BOOL=ON\n'), encoding='utf-8')
         self.assertTrue(self.inspect()['bridge_exec'])
 
     def test_release_eligibility_rejected(self):
