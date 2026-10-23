@@ -375,6 +375,15 @@ blocks, 150 at 64 frames and 48 kHz; see the WaveNet node guide). Both report
 `Unavailable`, with `ProviderLost` or `ProviderUnresponsive` as the reason,
 and the CPU model carries the stream.
 
+A WaveNet node keeps up to two GPU blocks in flight by default:
+`Config::max_inflight = 0` selects two when the model's backend admits two
+(`GpuNeuralModelRequest::gpu_max_inflight`, which by default is two for a
+session with at least two slots) and the ring holds two blocks past the lead,
+else one. One block in flight keeps up only while a block's round trip fits in
+its period; at 64 frames on an M1 Max it does not (see the measured table in
+the WaveNet node guide). The lead, and so the latency, does not change. Set
+`max_inflight = 1` to keep single flight.
+
 Where the shadow runs is `Config::shadow_policy`. The policy governs only
 what happens on a realtime GPU miss:
 - `Inline` runs the CPU model on the audio thread for every block, even when

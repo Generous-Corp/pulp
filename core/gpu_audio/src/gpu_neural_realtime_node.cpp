@@ -140,6 +140,11 @@ struct GpuNeuralRealtimeNode::Impl {
         : config(std::move(source)), model(config.model), shadow_model(config.shadow_model) {
         if (shadow_model == model)
             shadow_model.reset();
+        if (config.max_inflight == 0)
+            config.max_inflight = model != nullptr && model->backend && backend_admits(2) &&
+                                          config.capacity >= config.lead_blocks + 2
+                                      ? 2
+                                      : 1;
     }
 
     // The shadow_* projection shared by status_snapshot() and the health hook
@@ -1177,6 +1182,7 @@ std::uint32_t GpuNeuralRealtimeNode::service(void* self, std::uint64_t) noexcept
         }
         ++s.next_input;
         ++s.pending_count;
+        s.telemetry.observe_in_flight(s.pending_count);
     }
     s.bridge->end_worker_admission();
     // A completion seen only in this tail pass is progress too: the next
@@ -1287,6 +1293,11 @@ std::size_t detail::NeuralRealtimeTestAccess::pump_shadow(GpuNeuralRealtimeNode&
 std::uint64_t
 detail::NeuralRealtimeTestAccess::shadow_processed(const GpuNeuralRealtimeNode& node) noexcept {
     return node.impl_->worker.counters().processed;
+}
+
+std::uint64_t
+detail::NeuralRealtimeTestAccess::in_flight_high_water(const GpuNeuralRealtimeNode& node) noexcept {
+    return node.impl_->telemetry.snapshot().in_flight_high_water;
 }
 
 bool detail::NeuralRealtimeTestAccess::gpu_lagging(const GpuNeuralRealtimeNode& node) noexcept {

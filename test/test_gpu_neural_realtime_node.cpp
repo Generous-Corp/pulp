@@ -1536,3 +1536,66 @@ TEST_CASE("a WaveNet node prepares its GPU backend when the session is created",
         CHECK(MissingSession::created == 1);
     }
 }
+
+TEST_CASE("the neural WaveNet node keeps two blocks in flight by default when it can",
+          "[gpu_audio][neural][depth]") {
+    // max_inflight = 0 resolves to two when the backend admits two and the
+    // ring holds two blocks past the lead, else one; an explicit value is
+    // kept. A backend left at zero takes two from the session's slots. The
+    // lead, and so the reported latency, does not change.
+    struct Case {
+        std::uint32_t node_inflight, backend_inflight, capacity;
+        std::uint64_t expected_depth;
+    };
+    for (const auto c :
+         {Case{0, 2, kLead + 3, 2}, Case{0, 0, kLead + 3, 2}, Case{0, 2, kLead + 1, 1},
+          Case{0, 1, kLead + 3, 1}, Case{1, 2, kLead + 3, 1}}) {
+        CAPTURE(c.node_inflight, c.backend_inflight, c.capacity);
+        FamilyFixture fixture(NeuralFamily::WaveNet, kChannels, kBlock);
+        ChannelPlan plan;
+        WaveNetShape shape;
+        auto request = fixture.request();
+        request.backend =
+            make_fake_wavenet_backend(plan, shape, kChannels, kBlock, c.backend_inflight);
+        auto build = detail::make_neural_model(std::move(request));
+        REQUIRE(build);
+        GpuNeuralRealtimeNode node({.family = NeuralFamily::WaveNet,
+                                    .model = build.model,
+                                    .channels = kChannels,
+                                    .lead_blocks = kLead,
+                                    .capacity = c.capacity,
+                                    .max_inflight = c.node_inflight,
+                                    .shadow_policy = GpuNeuralRealtimeNode::ShadowPolicy::Inline,
+                                    .watchdog_blocks = 64});
+        REQUIRE(node.prepare());
+        GpuAudioTransport transport;
+        REQUIRE(transport.prepare(&node, {}));
+        // Nothing completes, so the worker admits up to its depth and stops.
+        plan.starve = true;
+        std::array<std::vector<float>, kChannels> in, out;
+        std::array<const float*, kChannels> in_ptrs{};
+        std::array<float*, kChannels> out_ptrs{};
+        for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
+            in[ch].assign(kBlock, 0.25f);
+            out[ch].assign(kBlock, 0.0f);
+            in_ptrs[ch] = in[ch].data();
+            out_ptrs[ch] = out[ch].data();
+        }
+        audio::BufferView<const float> input(in_ptrs.data(), kChannels, kBlock);
+        audio::BufferView<float> result(out_ptrs.data(), kChannels, kBlock);
+        for (std::uint32_t b = 0; b + 1 < c.capacity; ++b) {
+            transport.process(input, result, kBlock);
+            transport.pump();
+            transport.pump();
+        }
+        CHECK(plan.submissions == c.expected_depth * kChannels);
+        CHECK(detail::NeuralRealtimeTestAccess::in_flight_high_water(node) == c.expected_depth);
+        const auto status = node.status_snapshot();
+        CHECK(validate_gpu_audio_status(status).accepted());
+        CHECK(validate_gpu_audio_status(transport.status_snapshot()).accepted());
+        CHECK(status.prepared_lead_blocks == kLead);
+        CHECK(status.latency_samples == kLead * kBlock);
+        transport.release();
+        REQUIRE(node.release());
+    }
+}

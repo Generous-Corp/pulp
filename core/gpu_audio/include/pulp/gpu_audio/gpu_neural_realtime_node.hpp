@@ -155,8 +155,12 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
         /// GPU ring depth. Must exceed lead_blocks.
         std::uint32_t capacity = 8;
         /// Maximum GPU blocks in flight; at most capacity - lead_blocks and
-        /// at most the backend's provider slots.
-        std::uint32_t max_inflight = 1;
+        /// at most the backend's own in-flight capacity. Zero selects two
+        /// when the backend admits two and the ring holds two blocks past the
+        /// lead, else one: one block in flight cannot keep up when a block's
+        /// round trip exceeds its period (64 frames on an M1 Max). The lead,
+        /// and so the latency, is unchanged.
+        std::uint32_t max_inflight = 0;
         /// Silent blocks run through the GPU and the CPU shadow at prepare so
         /// both histories begin at the same stream position.
         std::uint32_t prewarm_blocks = 0;

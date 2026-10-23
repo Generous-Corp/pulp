@@ -42,7 +42,9 @@ class WaveNetStreamingBackend final : public StreamingBackend {
     struct Config {
         GpuWaveNetSession::Config session{};
         std::uint32_t channels = 1;
-        std::uint32_t max_inflight = 1;
+        /// Blocks the backend holds at once; at most the session's slots.
+        /// Zero selects two when the session has at least two slots, else one.
+        std::uint32_t max_inflight = 0;
     };
     /// Builds one provider channel. Returning null fails prepare(); the
     /// production factory wraps GpuWaveNetSession::create().

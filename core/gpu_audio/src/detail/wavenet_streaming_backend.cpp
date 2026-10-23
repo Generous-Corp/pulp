@@ -28,6 +28,8 @@ WaveNetStreamingBackend::WaveNetStreamingBackend(const Config& config, ChannelFa
     }
     config_.session.descriptor.layers = layers_;
     config_.session.weights = weights_;
+    if (config_.max_inflight == 0)
+        config_.max_inflight = config_.session.slots >= 2 ? 2 : 1;
 }
 
 WaveNetStreamingBackend::~WaveNetStreamingBackend() {
