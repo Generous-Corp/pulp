@@ -62,7 +62,9 @@ public:
     /// Save current state as a named preset in the user presets folder.
     /// @param name Preset name (used as filename, .json appended)
     /// @param folder Optional subfolder within user presets directory
-    /// @return True on success.
+    /// @return True on success. A name or folder that is not a single path
+    ///   component (contains a separator, is "." or "..", or embeds NUL)
+    ///   is rejected.
     bool save(const std::string& name, const std::string& folder = "");
 
     /// Load a preset from a PresetInfo (sets all parameter values).
@@ -75,7 +77,8 @@ public:
     /// Delete a user preset file. Factory presets cannot be deleted.
     bool delete_preset(const PresetInfo& preset);
 
-    /// Rename a user preset. Factory presets cannot be renamed.
+    /// Rename a user preset. Factory presets cannot be renamed, and the new
+    /// name must be a single path component (see save()).
     bool rename(const PresetInfo& preset, const std::string& new_name);
 
     /// Import a preset file from an external location into user presets.
