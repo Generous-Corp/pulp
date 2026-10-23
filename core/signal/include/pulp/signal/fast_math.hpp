@@ -195,7 +195,7 @@ struct FastMath {
     ///   - monotone to within its error bound (float rounding can step down by
     ///     a few ulps near saturation);
     ///   - no branches or calls, so loops over it vectorize.
-    /// About 2.4x the throughput of std::tanh inside a ladder recursion.
+    /// Faster than std::tanh inside a ladder recursion.
     static float tanh_accurate(float x) {
         // Clamping x^2 rather than x keeps the sign path short; past |x| = 9
         // the ratio exceeds 1 and the output clamp saturates it.
@@ -267,12 +267,11 @@ struct FastMath {
     /// scalar loop the compiler may vectorise elsewhere). A clamped lane
     /// evaluates the rational at ±7, about 4e-7 short of ±1, so beyond
     /// the clamp this differs from the scalar form by that much and inside it
-    /// not at all; both stay within the 3.8e-6 bound. On Apple Silicon it
-    /// costs ~1.2x the unclamped [7/6] Padé per element, which is the price of
-    /// the two clamp instructions on a nine-instruction rational: that form
-    /// has no clamp and grows without bound past |x| ~ 5. With
+    /// not at all; both stay within the 3.8e-6 bound. The two clamp
+    /// instructions cost a little over the unclamped [7/6] Padé, which has
+    /// no clamp and grows without bound past |x| ~ 5. With
     /// auto-vectorisation disabled it holds its speed while the scalar forms
-    /// slow by about 3x. The result for a NaN input is unspecified.
+    /// slow down. The result for a NaN input is unspecified.
     static void tanh_minimax(const float* input, float* output, std::size_t count) noexcept {
         std::size_t i = 0;
 #if defined(__clang__) || defined(__GNUC__)
@@ -538,8 +537,7 @@ public:
 ///   amplifies the saturator's error; the exact reference's own libm tanh
 ///   differs by platform). Tested with about 2 dB of margin. Harmonic
 ///   and alias levels match to 0.001 dB and resonant ringing frequency and
-///   decay are unchanged. About 2.4x the throughput of std::tanh. This is the
-///   default.
+///   decay are unchanged. Faster than std::tanh. This is the default.
 /// - `realtime_efficient`: `FastMath::tanh_minimax`, within 3.8e-6 of
 ///   std::tanh for every input and continuous in value and slope where it
 ///   clamps at |x| = 7. Cheapest per evaluation at normal levels; under heavy
