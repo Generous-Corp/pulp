@@ -1997,13 +1997,13 @@ public:
     /// Paint order is track fill, value bar (the track rounded rect clipped to
     /// `value_clip`), border stroke, thumb.
     struct ChromiumRefreshParts {
-        Rect track;              ///< rounded track, already shortened 1px per end
+        Rect track;              ///< rounded track, shortened one device pixel per end
         float track_radius = 0;  ///< corner radius of `track` (half its thickness)
         Rect value_clip;         ///< clip for the value bar; the thumb covers its open end
         Rect border;             ///< `track` inset by half the border width
         float border_radius = 0; ///< corner radius of `border`
         float border_width = 1.0f;
-        Rect thumb;                              ///< the circle's bounds (16px part inset by 0.5px)
+        Rect thumb; ///< the circle's bounds (16px part inset half a device pixel)
         ColorScheme scheme = ColorScheme::light; ///< palette used, after the accent flip
         canvas::Color track_fill{};
         canvas::Color value_fill{};
@@ -2017,13 +2017,17 @@ public:
     /// `accent` paints the value bar and thumb (hover and press shift its HSL
     /// lightness), and flips the palette to the other scheme when it lacks
     /// contrast with the track (`ua_scheme_for_accent`), as Chromium does.
+    /// Chromium paints the range in device pixels, so its two small insets
+    /// (track ends, thumb edge) are device pixels: `device_scale` is device
+    /// pixels per local unit (`Canvas::backing_scale()` when painting).
     static ChromiumRefreshParts
     chromium_refresh_parts(Rect bounds, float position, bool vertical, ControlState state,
-                           ColorScheme scheme, std::optional<canvas::Color> accent = std::nullopt);
+                           ColorScheme scheme, std::optional<canvas::Color> accent = std::nullopt,
+                           float device_scale = 1.0f);
 
     /// `chromium_refresh_parts()` for this slider's current box, value,
     /// orientation, state, scheme and accent.
-    ChromiumRefreshParts chromium_refresh_parts() const;
+    ChromiumRefreshParts chromium_refresh_parts(float device_scale = 1.0f) const;
 
     /// The state the `chromium_refresh` palette resolves for this slider now:
     /// disabled when not enabled, pressed while dragged, hovered under the

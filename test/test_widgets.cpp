@@ -1266,6 +1266,15 @@ TEST_CASE("RangeSlider chromium_refresh geometry follows Chromium's form-control
     REQUIRE_THAT(hi.thumb.x, WithinAbs(74.5, 1e-4));
     REQUIRE_THAT(hi.value_clip.width, WithinAbs(86.0, 1e-4));
 
+    // The track-end and thumb insets are device pixels: at 2x they halve.
+    auto hidpi = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.0f, false, RS::ControlState::normal,
+                                            RS::ColorScheme::light, std::nullopt, 2.0f);
+    REQUIRE_THAT(hidpi.track.x, WithinAbs(0.5, 1e-4));
+    REQUIRE_THAT(hidpi.track.width, WithinAbs(89.0, 1e-4));
+    REQUIRE_THAT(hidpi.thumb.x, WithinAbs(0.25, 1e-4));
+    REQUIRE_THAT(hidpi.thumb.width, WithinAbs(15.5, 1e-4));
+    REQUIRE_THAT(hidpi.border_width, WithinAbs(1.0, 1e-4));
+
     // A taller box keeps the fixed 8px track and 16px thumb, centred.
     auto tall = RS::chromium_refresh_parts({10, 20, 90, 30}, 0.5f, false, RS::ControlState::normal,
                                            RS::ColorScheme::light);
@@ -1459,8 +1468,9 @@ TEST_CASE("RangeSlider chromium_refresh disabled raster composites like Chromium
     CHECK(near(at(16, 16), {thumb(6), thumb(8), thumb(12)}));
     // Above the track and right of the thumb only the panel shows.
     CHECK(near(at(120, 4), {6, 8, 12}));
-    // The track stops 1 CSS px short of the box end: device column 178+ is bare.
+    // The track stops one device pixel short of the box end.
     CHECK(near(at(179, 16), {6, 8, 12}));
+    CHECK_FALSE(near(at(178, 16), {6, 8, 12}));
 
     // Opt-in artifact for comparing against a browser capture of the same
     // control: the 2x RGBA of the panel painted black, then white, so a
@@ -1495,20 +1505,32 @@ struct UaControlScene {
     }
 };
 
+// Pin a child at an absolute CSS px box so the scene's layout pass keeps it there.
+void place_absolute(View& v, float x, float y, float w, float h) {
+    v.set_bounds({x, y, w, h});
+    v.set_position(View::Position::absolute);
+    v.set_left(x);
+    v.set_top(y);
+    v.flex().preferred_width = w;
+    v.flex().preferred_height = h;
+    v.flex().dim_width = {w, DimensionUnit::px};
+    v.flex().dim_height = {h, DimensionUnit::px};
+}
+
 UaControlScene build_ua_control_scene(UaSkin skin) {
     UaControlScene scene;
     scene.root = std::make_unique<View>();
     scene.root->set_bounds({0, 0, 600, 200});
     scene.root->set_background_color(Color::rgba8(6, 8, 12));
     auto light = std::make_unique<View>();
-    light->set_bounds({300, 0, 300, 200});
+    place_absolute(*light, 300, 0, 300, 200);
     light->set_background_color(Color::rgba8(255, 255, 255));
     scene.root->add_child(std::move(light));
     const auto accent = Color::rgba8(71, 180, 235);
 
     auto range = [&](const char* id, float x, float y, float value, bool disabled, bool accented) {
         auto r = std::make_unique<RangeSlider>();
-        r->set_bounds({x, y, 90, 16});
+        place_absolute(*r, x, y, 90, 16);
         r->set_skin(skin);
         r->set_max(1.0f);
         r->set_step(0.001f);
@@ -1528,7 +1550,7 @@ UaControlScene build_ua_control_scene(UaSkin skin) {
     auto box = [&](const char* id, Checkbox::Kind kind, float x, float y, bool checked,
                    bool disabled, bool accented, bool indeterminate = false) {
         auto c = std::make_unique<Checkbox>();
-        c->set_bounds({x, y, 13, 13});
+        place_absolute(*c, x, y, 13, 13);
         c->set_kind(kind);
         c->set_skin(skin);
         c->set_checked(checked);
@@ -1573,7 +1595,178 @@ std::vector<uint8_t> render_ua_scene(UaControlScene& scene, const char* hovered)
     return px;
 }
 
+// Device pixels of the scene, read from Chrome for Testing 151.0.7922.47 headless
+// at device scale 2 with software compositing and an sRGB colour profile (the
+// flags the design-import browser capture uses), rendering the same controls
+// as HTML inputs. Eight samples per control cover its fill, border, mark and
+// the panel just outside it. Hover samples come from a frame with the pointer
+// over that control.
+struct UaOracleSample {
+    const char* id;
+    int x, y;
+    std::array<int, 3> rgb;
+};
+constexpr UaOracleSample kUaOracleSamples[] = {
+    {"r_default", 130, 56, {0, 117, 255}},      {"r_default", 46, 56, {0, 117, 255}},
+    {"r_default", 154, 56, {239, 239, 239}},    {"r_default", 190, 56, {239, 239, 239}},
+    {"r_default", 190, 48, {178, 178, 178}},    {"r_default", 190, 63, {178, 178, 178}},
+    {"r_default", 217, 56, {178, 178, 178}},    {"r_default", 190, 42, {6, 8, 12}},
+    {"r_accent", 130, 116, {71, 180, 235}},     {"r_accent", 46, 116, {71, 180, 235}},
+    {"r_accent", 154, 116, {59, 59, 59}},       {"r_accent", 190, 116, {59, 59, 59}},
+    {"r_accent", 190, 108, {133, 133, 133}},    {"r_accent", 190, 123, {133, 133, 133}},
+    {"r_accent", 217, 116, {133, 133, 133}},    {"r_accent", 190, 102, {6, 8, 12}},
+    {"r_disabled", 56, 176, {203, 203, 203}},   {"r_disabled", 46, 176, {203, 203, 203}},
+    {"r_disabled", 80, 176, {76, 77, 80}},      {"r_disabled", 190, 176, {76, 77, 80}},
+    {"r_disabled", 190, 168, {89, 89, 91}},     {"r_disabled", 190, 183, {89, 89, 91}},
+    {"r_disabled", 217, 176, {89, 89, 91}},     {"r_disabled", 190, 162, {6, 8, 12}},
+    {"r_hover", 130, 236, {122, 201, 241}},     {"r_hover", 46, 236, {122, 201, 241}},
+    {"r_hover", 154, 236, {59, 59, 59}},        {"r_hover", 190, 236, {59, 59, 59}},
+    {"r_hover", 190, 228, {172, 172, 172}},     {"r_hover", 190, 243, {172, 172, 172}},
+    {"r_hover", 217, 236, {172, 172, 172}},     {"r_hover", 190, 222, {6, 8, 12}},
+    {"r_light", 693, 56, {0, 117, 255}},        {"r_light", 646, 56, {0, 117, 255}},
+    {"r_light", 717, 56, {239, 239, 239}},      {"r_light", 790, 56, {239, 239, 239}},
+    {"r_light", 790, 48, {178, 178, 178}},      {"r_light", 790, 63, {178, 178, 178}},
+    {"r_light", 817, 56, {178, 178, 178}},      {"r_light", 790, 42, {255, 255, 255}},
+    {"c_off", 293, 53, {255, 255, 255}},        {"c_off", 281, 53, {118, 118, 118}},
+    {"c_off", 293, 41, {118, 118, 118}},        {"c_off", 284, 44, {255, 255, 255}},
+    {"c_off", 289, 53, {255, 255, 255}},        {"c_off", 296, 56, {255, 255, 255}},
+    {"c_off", 300, 48, {255, 255, 255}},        {"c_off", 286, 60, {255, 255, 255}},
+    {"c_on", 333, 53, {255, 255, 255}},         {"c_on", 321, 53, {0, 117, 255}},
+    {"c_on", 333, 41, {0, 117, 255}},           {"c_on", 324, 44, {0, 117, 255}},
+    {"c_on", 329, 53, {2, 118, 255}},           {"c_on", 336, 56, {0, 117, 255}},
+    {"c_on", 340, 48, {206, 228, 255}},         {"c_on", 326, 60, {0, 117, 255}},
+    {"c_off_dis", 373, 53, {168, 169, 170}},    {"c_off_dis", 361, 53, {153, 154, 154}},
+    {"c_off_dis", 373, 41, {153, 154, 154}},    {"c_off_dis", 364, 44, {168, 169, 170}},
+    {"c_off_dis", 369, 53, {168, 169, 170}},    {"c_off_dis", 376, 56, {168, 169, 170}},
+    {"c_off_dis", 380, 48, {168, 169, 170}},    {"c_off_dis", 366, 60, {168, 169, 170}},
+    {"c_on_dis", 413, 53, {214, 214, 214}},     {"c_on_dis", 401, 53, {153, 154, 154}},
+    {"c_on_dis", 413, 41, {153, 154, 154}},     {"c_on_dis", 404, 44, {153, 154, 154}},
+    {"c_on_dis", 409, 53, {153, 154, 154}},     {"c_on_dis", 416, 56, {153, 154, 154}},
+    {"c_on_dis", 420, 48, {202, 203, 203}},     {"c_on_dis", 406, 60, {153, 154, 154}},
+    {"c_on_accent", 453, 53, {59, 59, 59}},     {"c_on_accent", 441, 53, {71, 180, 235}},
+    {"c_on_accent", 453, 41, {71, 180, 235}},   {"c_on_accent", 444, 44, {71, 180, 235}},
+    {"c_on_accent", 449, 53, {70, 178, 233}},   {"c_on_accent", 456, 56, {71, 180, 235}},
+    {"c_on_accent", 460, 48, {60, 82, 92}},     {"c_on_accent", 446, 60, {71, 180, 235}},
+    {"c_ind", 493, 53, {255, 255, 255}},        {"c_ind", 481, 53, {0, 117, 255}},
+    {"c_ind", 493, 41, {0, 117, 255}},          {"c_ind", 484, 44, {0, 117, 255}},
+    {"c_ind", 489, 53, {255, 255, 255}},        {"c_ind", 496, 56, {0, 117, 255}},
+    {"c_ind", 500, 48, {0, 117, 255}},          {"c_ind", 486, 60, {0, 117, 255}},
+    {"c_hover_off", 293, 113, {255, 255, 255}}, {"c_hover_off", 281, 113, {79, 79, 79}},
+    {"c_hover_off", 293, 101, {79, 79, 79}},    {"c_hover_off", 284, 104, {255, 255, 255}},
+    {"c_hover_off", 289, 113, {255, 255, 255}}, {"c_hover_off", 296, 116, {255, 255, 255}},
+    {"c_hover_off", 300, 108, {255, 255, 255}}, {"c_hover_off", 286, 120, {255, 255, 255}},
+    {"c_hover_on", 333, 113, {255, 255, 255}},  {"c_hover_on", 321, 113, {0, 92, 200}},
+    {"c_hover_on", 333, 101, {0, 92, 200}},     {"c_hover_on", 324, 104, {0, 92, 200}},
+    {"c_hover_on", 329, 113, {2, 93, 200}},     {"c_hover_on", 336, 116, {0, 92, 200}},
+    {"c_hover_on", 340, 108, {206, 223, 245}},  {"c_hover_on", 326, 120, {0, 92, 200}},
+    {"c_light_off", 693, 133, {255, 255, 255}}, {"c_light_off", 681, 133, {118, 118, 118}},
+    {"c_light_off", 693, 121, {118, 118, 118}}, {"c_light_off", 684, 124, {255, 255, 255}},
+    {"c_light_off", 689, 133, {255, 255, 255}}, {"c_light_off", 696, 136, {255, 255, 255}},
+    {"c_light_off", 700, 128, {255, 255, 255}}, {"c_light_off", 686, 140, {255, 255, 255}},
+    {"c_light_on", 733, 133, {255, 255, 255}},  {"c_light_on", 721, 133, {0, 117, 255}},
+    {"c_light_on", 733, 121, {0, 117, 255}},    {"c_light_on", 724, 124, {0, 117, 255}},
+    {"c_light_on", 729, 133, {2, 118, 255}},    {"c_light_on", 736, 136, {0, 117, 255}},
+    {"c_light_on", 740, 128, {206, 228, 255}},  {"c_light_on", 726, 140, {0, 117, 255}},
+    {"o_off", 293, 173, {255, 255, 255}},       {"o_off", 281, 173, {118, 118, 118}},
+    {"o_off", 293, 161, {118, 118, 118}},       {"o_off", 284, 164, {118, 118, 118}},
+    {"o_off", 289, 173, {255, 255, 255}},       {"o_off", 296, 176, {255, 255, 255}},
+    {"o_off", 300, 168, {255, 255, 255}},       {"o_off", 286, 180, {255, 255, 255}},
+    {"o_on", 333, 173, {0, 117, 255}},          {"o_on", 321, 173, {0, 117, 255}},
+    {"o_on", 333, 161, {0, 117, 255}},          {"o_on", 324, 164, {0, 117, 255}},
+    {"o_on", 329, 173, {0, 117, 255}},          {"o_on", 336, 176, {0, 117, 255}},
+    {"o_on", 340, 168, {255, 255, 255}},        {"o_on", 326, 180, {255, 255, 255}},
+    {"o_off_dis", 373, 173, {168, 169, 170}},   {"o_off_dis", 361, 173, {153, 154, 154}},
+    {"o_off_dis", 373, 161, {153, 154, 154}},   {"o_off_dis", 364, 164, {153, 154, 154}},
+    {"o_off_dis", 369, 173, {168, 169, 170}},   {"o_off_dis", 376, 176, {168, 169, 170}},
+    {"o_off_dis", 380, 168, {168, 169, 170}},   {"o_off_dis", 366, 180, {168, 169, 170}},
+    {"o_on_dis", 413, 173, {153, 154, 154}},    {"o_on_dis", 401, 173, {153, 154, 154}},
+    {"o_on_dis", 413, 161, {153, 154, 154}},    {"o_on_dis", 404, 164, {153, 154, 154}},
+    {"o_on_dis", 409, 173, {153, 154, 154}},    {"o_on_dis", 416, 176, {153, 154, 154}},
+    {"o_on_dis", 420, 168, {168, 169, 170}},    {"o_on_dis", 406, 180, {168, 169, 170}},
+    {"o_on_accent", 453, 173, {71, 180, 235}},  {"o_on_accent", 441, 173, {71, 180, 235}},
+    {"o_on_accent", 453, 161, {71, 180, 235}},  {"o_on_accent", 444, 164, {71, 180, 235}},
+    {"o_on_accent", 449, 173, {71, 180, 235}},  {"o_on_accent", 456, 176, {71, 180, 235}},
+    {"o_on_accent", 460, 168, {59, 59, 59}},    {"o_on_accent", 446, 180, {59, 59, 59}},
+    {"o_hover_off", 293, 233, {255, 255, 255}}, {"o_hover_off", 281, 233, {79, 79, 79}},
+    {"o_hover_off", 293, 221, {79, 79, 79}},    {"o_hover_off", 284, 224, {79, 79, 79}},
+    {"o_hover_off", 289, 233, {255, 255, 255}}, {"o_hover_off", 296, 236, {255, 255, 255}},
+    {"o_hover_off", 300, 228, {255, 255, 255}}, {"o_hover_off", 286, 240, {255, 255, 255}},
+    {"o_hover_on", 333, 233, {0, 92, 200}},     {"o_hover_on", 321, 233, {0, 92, 200}},
+    {"o_hover_on", 333, 221, {0, 92, 200}},     {"o_hover_on", 324, 224, {0, 92, 200}},
+    {"o_hover_on", 329, 233, {0, 92, 200}},     {"o_hover_on", 336, 236, {0, 92, 200}},
+    {"o_hover_on", 340, 228, {255, 255, 255}},  {"o_hover_on", 326, 240, {255, 255, 255}},
+    {"o_light_off", 693, 213, {255, 255, 255}}, {"o_light_off", 681, 213, {118, 118, 118}},
+    {"o_light_off", 693, 201, {118, 118, 118}}, {"o_light_off", 684, 204, {118, 118, 118}},
+    {"o_light_off", 689, 213, {255, 255, 255}}, {"o_light_off", 696, 216, {255, 255, 255}},
+    {"o_light_off", 700, 208, {255, 255, 255}}, {"o_light_off", 686, 220, {255, 255, 255}},
+    {"o_light_on", 733, 213, {0, 117, 255}},    {"o_light_on", 721, 213, {0, 117, 255}},
+    {"o_light_on", 733, 201, {0, 117, 255}},    {"o_light_on", 724, 204, {0, 117, 255}},
+    {"o_light_on", 729, 213, {0, 117, 255}},    {"o_light_on", 736, 216, {0, 117, 255}},
+    {"o_light_on", 740, 208, {255, 255, 255}},  {"o_light_on", 726, 220, {255, 255, 255}},
+};
+
+bool is_hover_control(const std::string& id) {
+    return id == "r_hover" || id == "c_hover_off" || id == "c_hover_on" || id == "o_hover_off" ||
+           id == "o_hover_on";
+}
+
+// Samples of `scene` that differ from Chromium by more than 2 levels on a
+// channel. `rest_only` skips the hover samples.
+std::vector<std::string> ua_oracle_mismatches(UaControlScene& scene, bool rest_only) {
+    std::vector<std::string> misses;
+    const auto rest = render_ua_scene(scene, nullptr);
+    std::string hovered;
+    std::vector<uint8_t> hover_frame;
+    for (const auto& sample : kUaOracleSamples) {
+        const std::string id = sample.id;
+        const bool hover = is_hover_control(id);
+        if (hover && rest_only)
+            continue;
+        if (hover && hovered != id) {
+            hovered = id;
+            hover_frame = render_ua_scene(scene, id.c_str());
+        }
+        const auto& px = hover ? hover_frame : rest;
+        const size_t i = (static_cast<size_t>(sample.y) * 1200 + static_cast<size_t>(sample.x)) * 4;
+        for (int c = 0; c < 3; ++c) {
+            if (std::abs(static_cast<int>(px[i + c]) - sample.rgb[c]) > 2) {
+                misses.push_back(id + " @" + std::to_string(sample.x) + "," +
+                                 std::to_string(sample.y));
+                break;
+            }
+        }
+    }
+    return misses;
+}
+
 } // namespace
+
+TEST_CASE("Chromium-refresh skins match Chromium's own paint of each control state",
+          "[view][widget][range-skin]") {
+    if (!raw_rgba_render_available()) {
+        SKIP("this build has no raw-RGBA raster backend");
+    }
+    auto scene = build_ua_control_scene(UaSkin::chromium_refresh);
+    const auto misses = ua_oracle_mismatches(scene, false);
+    INFO("first mismatch: " << (misses.empty() ? std::string("none") : misses.front()));
+    CHECK(misses.size() == 0);
+}
+
+TEST_CASE("Pulp's platform form-control look does not pass for Chromium's",
+          "[view][widget][range-skin]") {
+    if (!raw_rgba_render_available()) {
+        SKIP("this build has no raw-RGBA raster backend");
+    }
+    // Negative control for the oracle comparison: the same scene in the
+    // platform skin must miss most samples, or the samples cannot tell skins apart.
+    auto scene = build_ua_control_scene(UaSkin::platform);
+    const auto misses = ua_oracle_mismatches(scene, true);
+    size_t rest_samples = 0;
+    for (const auto& sample : kUaOracleSamples)
+        if (!is_hover_control(sample.id))
+            ++rest_samples;
+    CHECK(misses.size() * 2 > rest_samples);
+}
 
 TEST_CASE("Chromium-refresh form-control scene renders and can be dumped for comparison",
           "[view][widget][range-skin]") {
