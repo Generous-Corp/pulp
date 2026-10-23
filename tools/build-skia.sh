@@ -11,7 +11,7 @@
 #   ./tools/build-skia.sh all      # Build all platforms
 #
 # Prerequisites: python3, ninja, git
-# Output: external/skia-build/{platform}/lib/ + include/
+# Output: external/skia-build/build/{include,share,<platform>-gpu}/ (skia-builder layout)
 
 set -e
 
@@ -111,6 +111,20 @@ if [ "$(uname)" = "Darwin" ]; then
     ulimit -n 2048
 fi
 
+# skia-builder writes everything under its build/ directory: the Skia checkout
+# (build/src/skia, with Dawn under third_party/externals), the headers
+# (build/include), ICU data (build/share), and one slice per platform
+# (build/<platform>-gpu/lib/Release/...). The checkout and build/tmp are reused
+# as caches across runs; the outputs are not. Clear this run's outputs first so
+# nothing an older revision left behind (a header, an arch subdirectory) can be
+# mistaken for this build.
+BUILDER_OUT="$SKIA_BUILDER_DIR/build"
+SKIA_SOURCE_DIR="$BUILDER_OUT/src/skia"
+rm -rf "$BUILDER_OUT/include" "$BUILDER_OUT/share"
+for build_platform in "${BUILD_PLATFORMS[@]}"; do
+    rm -rf "$BUILDER_OUT/$build_platform-gpu"
+done
+
 # Build
 cd "$SKIA_BUILDER_DIR"
 
@@ -122,13 +136,16 @@ done
 # skia-builder checks out the revision itself; verify the source it actually
 # built, and the Dawn that git-sync-deps resolved from that revision's DEPS,
 # before any output reaches $SKIA_BUILD_OUTPUT.
-actual_skia_commit="$(git -C "$SKIA_BUILDER_DIR/src/skia" rev-parse HEAD)"
+actual_skia_commit=""
+if [ -e "$SKIA_SOURCE_DIR/.git" ]; then
+    actual_skia_commit="$(git -C "$SKIA_SOURCE_DIR" rev-parse HEAD)"
+fi
 if [ "$actual_skia_commit" != "$SKIA_EXPECTED_COMMIT" ]; then
-    echo "ERROR: built Skia commit $actual_skia_commit does not match pinned $SKIA_EXPECTED_COMMIT" >&2
+    echo "ERROR: built Skia commit ${actual_skia_commit:-<missing>} does not match pinned $SKIA_EXPECTED_COMMIT" >&2
     echo "Use the verified release asset, or explicitly override SKIA_EXPECTED_COMMIT for a development-only build." >&2
     exit 1
 fi
-dawn_src="$SKIA_BUILDER_DIR/src/skia/third_party/externals/dawn"
+dawn_src="$SKIA_SOURCE_DIR/third_party/externals/dawn"
 # Test for Dawn's own .git first: git -C on a plain directory inside the Skia
 # checkout would otherwise report the Skia HEAD.
 actual_dawn_commit=""
@@ -140,23 +157,52 @@ if [ "$actual_dawn_commit" != "$DAWN_EXPECTED_COMMIT" ]; then
     exit 1
 fi
 
-# Copy output to Pulp's expected location
+# Publish the verified generation as $SKIA_BUILD_OUTPUT/build, the skia-builder
+# release layout FindSkia probes first. Only this run's headers, ICU data, and
+# platform slices are published, and the whole directory replaces the previous
+# one: it is staged in a sibling directory and renamed into place, so a slice
+# from another revision cannot survive next to this one and a failed copy
+# leaves the previous generation untouched.
+PUBLISH_DIR="$SKIA_BUILD_OUTPUT/build"
 echo ""
-echo "Copying build output to $SKIA_BUILD_OUTPUT..."
+echo "Publishing verified build output to $PUBLISH_DIR..."
 mkdir -p "$SKIA_BUILD_OUTPUT"
-
-# Copy headers
-if [ -d "$SKIA_BUILDER_DIR/build/include" ]; then
-    cp -R "$SKIA_BUILDER_DIR/build/include" "$SKIA_BUILD_OUTPUT/"
-fi
-
-# Copy platform libraries
-for plat in mac ios win linux wasm; do
-    if [ -d "$SKIA_BUILDER_DIR/build/$plat" ]; then
-        mkdir -p "$SKIA_BUILD_OUTPUT/$plat"
-        cp -R "$SKIA_BUILDER_DIR/build/$plat/lib" "$SKIA_BUILD_OUTPUT/$plat/"
+stage_dir="$(mktemp -d "$SKIA_BUILD_OUTPUT/.build.staging.XXXXXX")"
+retired_dir=""
+cleanup_publish() {
+    rm -rf "$stage_dir"
+    if [ -n "$retired_dir" ] && [ -e "$retired_dir" ] && [ ! -e "$PUBLISH_DIR" ]; then
+        mv "$retired_dir" "$PUBLISH_DIR"
     fi
+}
+trap cleanup_publish EXIT
+
+if [ ! -d "$BUILDER_OUT/include" ]; then
+    echo "ERROR: skia-builder produced no headers at $BUILDER_OUT/include" >&2
+    exit 1
+fi
+cp -R "$BUILDER_OUT/include" "$stage_dir/include"
+if [ -d "$BUILDER_OUT/share" ]; then
+    cp -R "$BUILDER_OUT/share" "$stage_dir/share"
+fi
+for build_platform in "${BUILD_PLATFORMS[@]}"; do
+    if [ ! -d "$BUILDER_OUT/$build_platform-gpu/lib" ]; then
+        echo "ERROR: skia-builder produced no $build_platform libraries at $BUILDER_OUT/$build_platform-gpu/lib" >&2
+        exit 1
+    fi
+    cp -R "$BUILDER_OUT/$build_platform-gpu" "$stage_dir/$build_platform-gpu"
 done
+
+if [ -e "$PUBLISH_DIR" ]; then
+    retired_dir="$SKIA_BUILD_OUTPUT/.build.retired.$$"
+    rm -rf "$retired_dir"
+    mv "$PUBLISH_DIR" "$retired_dir"
+fi
+mv "$stage_dir" "$PUBLISH_DIR"
+if [ -n "$retired_dir" ]; then
+    rm -rf "$retired_dir"
+fi
+trap - EXIT
 
 echo ""
 echo "=== Skia build complete ==="

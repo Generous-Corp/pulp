@@ -35,14 +35,17 @@ parser.add_argument("-revision", help="Immutable Skia commit to build")
 parser.add_argument("--shallow", action="store_true")
 args = parser.parse_args()
 
-base = pathlib.Path(__file__).resolve().parent
-with (base / "invocations.log").open("a") as log:
+# Same layout as skia-builder: everything lives under build/.
+base = pathlib.Path(__file__).resolve().parent / "build"
+base.mkdir(exist_ok=True)
+with (base.parent / "invocations.log").open("a", encoding="utf-8") as log:
     log.write(" ".join(sys.argv[1:]) + "\n")
 
 
 def git(*command, cwd=None):
     return subprocess.run(
-        ["git", *command], cwd=cwd, check=True, capture_output=True, text=True
+        ["git", *command], cwd=cwd, check=True, capture_output=True, text=True,
+        encoding="utf-8",
     ).stdout.strip()
 
 
@@ -60,14 +63,19 @@ else:
 dawn = src / "third_party" / "externals" / "dawn"
 if not dawn.exists():
     git("clone", os.environ["FAKE_DAWN_URL"], str(dawn))
-git("checkout", "--detach", (src / "DAWN_PIN").read_text().strip(), cwd=dawn)
+git("checkout", "--detach", (src / "DAWN_PIN").read_text(encoding="utf-8").strip(), cwd=dawn)
 
-out = base / "build"
-(out / "include").mkdir(parents=True, exist_ok=True)
-(out / "include" / "SkFake.h").write_text("// fake\n")
-lib = out / args.platform / "lib"
+(base / "include").mkdir(parents=True, exist_ok=True)
+(base / "include" / "SkFake.h").write_text("// fake\n", encoding="utf-8")
+(base / "share").mkdir(parents=True, exist_ok=True)
+(base / "share" / "icudtl.dat").write_text("icu\n", encoding="utf-8")
+lib = base / (args.platform + "-gpu") / "lib" / "Release" / "arm64"
 lib.mkdir(parents=True, exist_ok=True)
-(lib / "libskia.a").write_text(git("rev-parse", "HEAD", cwd=src) + "\n")
+(lib / "libskia.a").write_text(git("rev-parse", "HEAD", cwd=src) + "\n", encoding="utf-8")
+if os.environ.get("FAKE_UNREADABLE_OUTPUT") == "1":
+    unreadable = lib / "libdawn_combined.a"
+    unreadable.write_text("dawn\n", encoding="utf-8")
+    unreadable.chmod(0)
 '''
 
 # A builder revision from before skia-builder accepted an exact commit.
@@ -80,7 +88,7 @@ parser.add_argument("platform")
 parser.add_argument("-branch", default="main")
 parser.add_argument("--shallow", action="store_true")
 parser.parse_args()
-(pathlib.Path(__file__).resolve().parent / "invocations.log").write_text("ran\n")
+(pathlib.Path(__file__).resolve().parent / "invocations.log").write_text("ran\n", encoding="utf-8")
 '''
 
 
@@ -130,7 +138,13 @@ class SkiaSourceFallbackPinTests(unittest.TestCase):
 
     def _git(self, *command: str, cwd: Path) -> str:
         return subprocess.run(
-            ["git", *command], cwd=cwd, env=self.env, check=True, capture_output=True, text=True
+            ["git", *command],
+            cwd=cwd,
+            env=self.env,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         ).stdout.strip()
 
     def _repo(self, name: str, branch: str) -> Path:
@@ -176,23 +190,98 @@ class SkiaSourceFallbackPinTests(unittest.TestCase):
             cwd=self.pulp,
             env=env,
             text=True,
+            encoding="utf-8",
             capture_output=True,
             check=False,
         )
 
     @property
+    def published(self) -> Path:
+        return self.pulp / "external" / "skia-build" / "build"
+
+    @property
+    def builder_out(self) -> Path:
+        return self.pulp / "external" / "skia-builder" / "build"
+
+    @property
     def output_lib(self) -> Path:
-        return self.pulp / "external" / "skia-build" / "mac" / "lib" / "libskia.a"
+        return self.published / "mac-gpu" / "lib" / "Release" / "arm64" / "libskia.a"
+
+    def _plant(self, path: Path, content: str) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def _previous_generation(self) -> list[Path]:
+        """A generation published earlier, which a new publish must replace whole."""
+        return [
+            self._plant(self.published / "include" / "SkOld.h", "// old\n"),
+            self._plant(self.published / "ios-gpu" / "lib" / "Release" / "libskia.a", "old ios\n"),
+            self._plant(self.output_lib, "old mac\n"),
+        ]
 
     def test_moved_branch_head_still_builds_the_exact_pin(self) -> None:
         self._manifest(self._builder(FAKE_BUILDER))
         result = self._run()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.output_lib.read_text().strip(), self.skia_pinned)
+        self.assertEqual(self.output_lib.read_text(encoding="utf-8").strip(), self.skia_pinned)
         self.assertNotEqual(self.skia_pinned, self.skia_head)
-        invocations = (self.pulp / "external" / "skia-builder" / "invocations.log").read_text()
+        invocations = (self.pulp / "external" / "skia-builder" / "invocations.log").read_text(
+            encoding="utf-8"
+        )
         self.assertIn(f"-revision {self.skia_pinned}", invocations)
-        self.assertTrue((self.pulp / "external" / "skia-build" / "include" / "SkFake.h").exists())
+        self.assertTrue((self.published / "include" / "SkFake.h").exists())
+        self.assertTrue((self.published / "share" / "icudtl.dat").exists())
+
+    def test_only_slices_built_in_this_run_are_published(self) -> None:
+        builder_ref = self._builder(FAKE_BUILDER)
+        self._manifest(builder_ref)
+        # A persistent builder tree from an older revision: another platform's
+        # slice, an extra arch under this platform, and a stale header.
+        self._git("clone", "-q", (self.tmp / "builder").as_uri(),
+                  str(self.pulp / "external" / "skia-builder"), cwd=self.tmp)
+        self._plant(self.builder_out / "ios-gpu" / "lib" / "Release" / "libskia.a", "stale ios\n")
+        self._plant(
+            self.builder_out / "mac-gpu" / "lib" / "Release" / "x86_64" / "libskia.a", "stale arch\n"
+        )
+        self._plant(self.builder_out / "include" / "SkStale.h", "// stale\n")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.output_lib.read_text(encoding="utf-8").strip(), self.skia_pinned)
+        self.assertFalse((self.published / "ios-gpu").exists())
+        self.assertFalse((self.published / "mac-gpu" / "lib" / "Release" / "x86_64").exists())
+        self.assertFalse((self.published / "include" / "SkStale.h").exists())
+
+    def test_publish_replaces_the_previous_generation_whole(self) -> None:
+        self._manifest(self._builder(FAKE_BUILDER))
+        old_header, old_ios, _ = self._previous_generation()
+        tracked_header = self._plant(
+            self.pulp / "external" / "skia-build" / "include" / "SkTracked.h", "// tracked\n"
+        )
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.output_lib.read_text(encoding="utf-8").strip(), self.skia_pinned)
+        self.assertFalse(old_header.exists())
+        self.assertFalse(old_ios.exists())
+        # Files outside the published build/ directory are not this script's.
+        self.assertTrue(tracked_header.exists())
+        leftovers = [p.name for p in (self.pulp / "external" / "skia-build").iterdir()
+                     if p.name.startswith(".build.")]
+        self.assertEqual(leftovers, [])
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can read mode-0 files")
+    def test_failed_copy_leaves_the_previous_generation_intact(self) -> None:
+        self._manifest(self._builder(FAKE_BUILDER))
+        previous = self._previous_generation()
+        result = self._run(FAKE_UNREADABLE_OUTPUT="1")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path, content in zip(previous, ["// old\n", "old ios\n", "old mac\n"]):
+            self.assertEqual(path.read_text(encoding="utf-8"), content)
+        self.assertFalse((self.published / "include" / "SkFake.h").exists())
+        self.assertFalse((self.published / "share").exists())
+        leftovers = [p.name for p in (self.pulp / "external" / "skia-build").iterdir()
+                     if p.name.startswith(".build.")]
+        self.assertEqual(leftovers, [])
 
     def test_builder_that_builds_the_branch_head_fails_before_copy(self) -> None:
         self._manifest(self._builder(FAKE_BUILDER))

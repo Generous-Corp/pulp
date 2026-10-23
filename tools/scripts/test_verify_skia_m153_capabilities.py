@@ -80,7 +80,7 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
         build_boundary = script.index('python3 build-skia.py "$build_platform"')
         verification = script.index('actual_skia_commit="$(git -C')
         dawn_verification = script.index('actual_dawn_commit" != "$DAWN_EXPECTED_COMMIT')
-        copy_boundary = script.index('echo "Copying build output to $SKIA_BUILD_OUTPUT..."')
+        copy_boundary = script.index('echo "Publishing verified build output to $PUBLISH_DIR..."')
         self.assertLess(revision_support, build_boundary)
         self.assertLess(build_boundary, verification)
         self.assertLess(verification, copy_boundary)
