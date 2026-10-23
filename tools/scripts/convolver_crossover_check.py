@@ -28,7 +28,7 @@ DATA = pathlib.Path("docs/validation/convolver-crossover")
 
 def fit(path: pathlib.Path) -> dict[int, int]:
     cost: dict[tuple[int, int, int, str], float] = {}
-    with path.open(newline="") as fh:
+    with path.open(newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             cost[(int(row["taps"]), int(row["block"]), int(row["instances"]), row["arm"])] = float(
                 row["mean_ns_frame"]
@@ -87,7 +87,7 @@ def main() -> int:
     fits = {f.name: fit(f) for f in files}
     blocks = sorted(next(iter(fits.values())))
     expected = {b: min(f[b] for f in fits.values()) for b in blocks}
-    table = header_table((root / HEADER).read_text())
+    table = header_table((root / HEADER).read_text(encoding="utf-8"))
 
     mismatches = []
     for b in blocks:
