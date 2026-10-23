@@ -69,6 +69,12 @@ on a real PR. Do them in order.
      One edit can owe BOTH events. A committed event whose rationale is still
      the `<REPLACE: ...>` placeholder also fails here, because CI accepts it.
 
+   - **node ABI virtual order** (`node_abi_gate.py`) — the append-only check
+     covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
+     surface. New GPU-audio virtual hooks belong at the end of that class;
+     inserting one in the middle shifts existing slots even though the SDK
+     remains source-rebuild oriented.
+
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
    on its own for just the Vellum verdict.
