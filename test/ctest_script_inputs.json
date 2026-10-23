@@ -4111,6 +4111,7 @@
   "cli-package-registry-signing-helper": {
    "entry": "tools/scripts/test_sign_package_registry.py",
    "inputs": [
+    "tools/scripts/sign_package_registry.py",
     "tools/scripts/test_sign_package_registry.py"
    ],
    "kind": "python"

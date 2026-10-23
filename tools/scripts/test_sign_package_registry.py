@@ -4,18 +4,13 @@ trip over registry bytes, and refusal of a tampered registry."""
 
 from __future__ import annotations
 
-import importlib.util
 import pathlib
 import sys
 import tempfile
 import unittest
 
-SCRIPT = pathlib.Path(__file__).resolve().parent / "sign_package_registry.py"
-spec = importlib.util.spec_from_file_location("sign_package_registry", SCRIPT)
-assert spec and spec.loader
-spr = importlib.util.module_from_spec(spec)
-sys.modules["sign_package_registry"] = spr
-spec.loader.exec_module(spr)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import sign_package_registry as spr  # noqa: E402
 
 # RFC 8032 §7.1 test vectors 1 and 2.
 RFC_VECTORS = [
