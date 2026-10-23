@@ -5250,9 +5250,11 @@ bisectable.
   `runner.sh`, `ccache:` and `configure-checks:`), and PR gate VMs run PR code
   with the same mounts. The FetchContent seed is mounted read-only, but host
   jobs write it. A release that read any of these could link an object or
-  source a PR planted. The configure-check cache is the sharpest of them:
-  `PulpConfigureCheckCache.cmake` `include()`s its files (SDL3 always calls it
-  on Apple), so a planted file runs CMake inside the release configure. Every
+  source a PR planted. The configure-check cache matters too:
+  `PulpConfigureCheckCache.cmake` replays its files (SDL3 always calls it on
+  Apple). It parses them strictly and ignores, with a STATUS line, any file
+  holding a line its writer would not emit, so a planted file cannot run
+  CMake, but a well-formed one still feeds check answers into the configure. Every
   job that signs, notarizes, attests or deploys and also compiles sets
   job-level `CCACHE_DISABLE: "1"` and runs "Isolate the build from shared
   caches" before its first build step. That step uses a fresh `RUNNER_TEMP`
@@ -5986,7 +5988,11 @@ down this list before touching build code:
    `PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON` and the exclusive
    `pulp-release-pr-gate` label; its legacy fallback to the tagged-release
    selector is migration-only and must remain until the separate selector has
-   been deployed and proven. The TartCI release supervisor scans tagged-release
+   been deployed and proven. A fork pull request never reaches that chain:
+   `resolve_release_runners.py --fork-pr-gate-route` gives it GitHub-hosted
+   `["macos-15"]` and reads no repo variable, because every self-hosted pool
+   on the chain (the `pulp-release-pr-gate` VMs included) shares caches with
+   trusted builds; this is build.yml's fork rule. The TartCI release supervisor scans tagged-release
    demand before PR-gate demand, registers a runner with only the selected
    class label, and force-refreshes higher-priority demand immediately before
    minting a lower-priority runner. GitHub remains FIFO within each class. Do

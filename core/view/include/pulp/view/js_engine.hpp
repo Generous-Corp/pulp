@@ -8,6 +8,7 @@
 #include <optional>
 #include <memory>
 #include <vector>
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <unordered_set>
@@ -70,6 +71,12 @@ constexpr std::string_view engine_type_name(JsEngineType type) {
     }
     return "unknown";
 }
+
+// Heap ceiling applied to every newly created engine, in bytes. Sized well
+// above the largest in-repo scripted-UI bundle so ordinary editors never meet
+// it, while a runaway or hostile script hits a JS error instead of growing
+// until the hosting process is OOM-killed. 0 means unlimited.
+constexpr std::size_t kDefaultJsMemoryLimitBytes = std::size_t{512} * 1024 * 1024;
 
 // Abstract JS engine backend.
 // Each backend implements this interface to provide a uniform scripting API.
@@ -168,6 +175,14 @@ public:
 
     // Hint that now is a good time to collect garbage (advisory)
     virtual void gc_hint() {}
+
+    // Cap the heap this realm may allocate, in bytes (0 = unlimited). Backends
+    // that enforce the cap raise a JS "out of memory" error on the allocation
+    // that would exceed it. Returns false on backends that cannot enforce one,
+    // leaving the realm unbounded.
+    virtual bool set_memory_limit(std::size_t) {
+        return false;
+    }
 
     // Pump any engine-specific message loop / microtask queue. This is a no-op
     // for engines that do not expose an explicit pump hook.

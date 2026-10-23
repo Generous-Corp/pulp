@@ -128,8 +128,18 @@ jobs:
           # Opt-in (exactly `1`/`true`): append `pulp-release-pr-gate` to a
           # self-hosted selector. Unset = the selector below, verbatim.
           PULP_RELEASE_CLASS_TOKENS: ${{ vars.PULP_RELEASE_CLASS_TOKENS }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           set -euo pipefail
+          # Repo variables resolve for fork runs. A fork pull request gets
+          # GitHub-hosted macos-15 whatever they say (build.yml's rule), never
+          # the chain below, whose self-hosted pools share caches with
+          # trusted builds.
+          fork_route="$(python3 tools/scripts/resolve_release_runners.py --fork-pr-gate-route)"
+          if [ "$fork_route" != "same-repo" ]; then
+            echo "runs_on_json=${fork_route}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ -n "${PR_GATE_JSON:-}" ]; then
             selector="${PR_GATE_JSON}"
             echo "Routing macOS release-path PR gate via PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON: ${PR_GATE_JSON}"

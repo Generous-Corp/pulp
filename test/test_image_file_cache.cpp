@@ -11,16 +11,22 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include "include/core/SkImage.h"
 #include "include/core/SkBitmap.h"
+#include "include/core/SkImageGenerator.h"
 #include "include/core/SkSurface.h"
 
 #include <array>
 #include <atomic>
 #include <condition_variable>
+#include <limits>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <vector>
 
 using namespace pulp::canvas;
 
@@ -32,7 +38,175 @@ sk_sp<SkImage> make_dummy_image() {
     return surface ? surface->makeImageSnapshot() : nullptr;
 }
 
+sk_sp<SkImage> make_image(int w, int h) {
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(w, h));
+    return surface ? surface->makeImageSnapshot() : nullptr;
+}
+
+// Restores the process-wide cache defaults however a test case exits.
+struct CacheDefaults {
+    ~CacheDefaults() {
+        auto& cache = ImageFileCache::instance();
+        cache.set_enabled(true);
+        cache.set_capacity(32);
+        cache.set_inline_byte_budget(ImageFileCache::kDefaultInlineByteBudget);
+        cache.clear();
+    }
+};
+
+// One frame of a panel: ten file images, then @p inline_count distinct
+// inline images. With @p inline_in_path_pool the inline images go through
+// the path pool instead, which is the sharing the separate pool prevents.
+void paint_mixed_frame(int inline_count, bool inline_in_path_pool) {
+    auto& cache = ImageFileCache::instance();
+    const void* backend = reinterpret_cast<const void*>(0x5EED);
+    for (int i = 0; i < 10; ++i)
+        cache.get_or_build("/tmp/file-" + std::to_string(i) + ".png", backend,
+                           [] { return make_image(8, 8); });
+    for (int i = 0; i < inline_count; ++i) {
+        const std::string key = "inline-" + std::to_string(i);
+        if (inline_in_path_pool)
+            cache.get_or_build(key, backend, [] { return make_image(8, 8); });
+        else
+            cache.get_or_build_inline(key, backend, 64, [] { return make_image(8, 8); });
+    }
+}
+
 } // namespace
+
+TEST_CASE("Many inline images leave file-image hits untouched",
+          "[canvas][image-cache][inline-image]") {
+    CacheDefaults restore;
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+
+    for (int frame = 0; frame < 3; ++frame)
+        paint_mixed_frame(30, false);
+    CHECK(cache.stats().builds == 10);
+    CHECK(cache.stats().hits == 20);
+    CHECK(cache.inline_stats().builds == 30);
+    CHECK(cache.inline_stats().hits == 60);
+
+    // Control: the same frames with inline images in the 32-entry path pool
+    // cycle it, so the file images stop hitting. This is what the counters
+    // above would show if the pools were shared.
+    cache.clear();
+    cache.reset_stats();
+    for (int frame = 0; frame < 3; ++frame)
+        paint_mixed_frame(30, true);
+    CHECK(cache.stats().hits == 0);
+}
+
+TEST_CASE("Inline pool stays within its byte budget, evicting least recently used",
+          "[canvas][image-cache][inline-image]") {
+    CacheDefaults restore;
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    // Each entry: 16x16 N32 pixels (1024 bytes) + 100 encoded bytes.
+    constexpr std::size_t kEntry = 16 * 16 * 4 + 100;
+    cache.set_inline_byte_budget(3 * kEntry);
+    const void* backend = nullptr;
+    auto build = [] { return make_image(16, 16); };
+
+    for (int i = 0; i < 5; ++i)
+        cache.get_or_build_inline("k" + std::to_string(i), backend, 100, build);
+    auto stats = cache.inline_stats();
+    CHECK(stats.size == 3);
+    CHECK(stats.bytes == 3 * kEntry);
+    CHECK(stats.bytes <= cache.inline_byte_budget());
+    CHECK(stats.over_budget == 0);
+
+    // k4, k3, k2 survive; k0 was evicted first.
+    cache.get_or_build_inline("k4", backend, 100, build);
+    CHECK(cache.inline_stats().hits == 1);
+    cache.get_or_build_inline("k0", backend, 100, build);
+    CHECK(cache.inline_stats().builds == 6);
+
+    // Shrinking the budget evicts down to it at once.
+    cache.set_inline_byte_budget(kEntry);
+    CHECK(cache.inline_stats().size == 1);
+    CHECK(cache.inline_stats().bytes <= kEntry);
+}
+
+TEST_CASE("An inline image larger than the byte budget draws correctly uncached",
+          "[canvas][image-cache][inline-image]") {
+    CacheDefaults restore;
+    // The 2x1 red/blue PNG from the cases above.
+    static constexpr std::uint8_t red_blue_png[] = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0xf4,
+        0x22, 0x7f, 0x8a, 0x00, 0x00, 0x00, 0x0e, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8,
+        0xcf, 0xc0, 0x00, 0x42, 0xff, 0x01, 0x0f, 0xf9, 0x03, 0xfd, 0x85, 0x11, 0x99, 0x76, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    };
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    // Room for the small resident entry, not for the PNG's encoded copy plus
+    // its decoded pixels.
+    cache.set_inline_byte_budget(sizeof(red_blue_png) + 4);
+    cache.get_or_build_inline("resident", nullptr, 0, [] { return make_image(1, 1); });
+    REQUIRE(cache.inline_stats().size == 1);
+
+    const auto key = pulp::runtime::sha256_hex(red_blue_png, sizeof(red_blue_png));
+    for (int frame = 0; frame < 2; ++frame) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(2, 1));
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        REQUIRE(
+            canvas.draw_image_from_keyed_data(key, red_blue_png, sizeof(red_blue_png), 0, 0, 2, 1));
+        SkBitmap pixels;
+        REQUIRE(pixels.tryAllocN32Pixels(2, 1));
+        REQUIRE(surface->readPixels(pixels, 0, 0));
+        CHECK(SkColorGetR(pixels.getColor(0, 0)) > 200);
+        CHECK(SkColorGetB(pixels.getColor(1, 0)) > 200);
+    }
+    const auto stats = cache.inline_stats();
+    CHECK(stats.over_budget == 2); // built every draw, never retained
+    CHECK(stats.size == 1);        // and the resident entry was not evicted
+    cache.get_or_build_inline("resident", nullptr, 0, [] { return make_image(1, 1); });
+    CHECK(cache.inline_stats().hits == 1);
+}
+
+TEST_CASE("Inline entry cost saturates instead of wrapping to a small value",
+          "[canvas][image-cache][inline-image]") {
+    CacheDefaults restore;
+    // A lazily generated image with the largest valid dimensions: it is never
+    // decoded, but its pixel size (about 2^60 bytes) is what the pool charges.
+    struct HugeGenerator : SkImageGenerator {
+        HugeGenerator()
+            : SkImageGenerator(SkImageInfo::MakeN32Premul((1 << 29) - 1, (1 << 29) - 1)) {}
+    };
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const std::size_t max = std::numeric_limits<std::size_t>::max();
+    cache.set_inline_byte_budget(max - 1);
+    std::size_t pixel_bytes = 0;
+    auto build = [&] {
+        auto image = SkImages::DeferredFromGenerator(std::make_unique<HugeGenerator>());
+        if (image)
+            pixel_bytes = image->imageInfo().computeMinByteSize();
+        return image;
+    };
+
+    // An encoded size that passes the budget on its own but overflows size_t
+    // once the pixel bytes are added.
+    const std::size_t encoded = max - (std::size_t{1} << 59);
+    auto image = cache.get_or_build_inline("huge", nullptr, encoded, build);
+    REQUIRE(image != nullptr);
+    REQUIRE(pixel_bytes > (std::size_t{1} << 59)); // the sum really overflows
+    const auto stats = cache.inline_stats();
+    CHECK(stats.over_budget == 1);
+    CHECK(stats.size == 0);
+    CHECK(stats.bytes == 0);
+}
 
 TEST_CASE("Static embedded sprite decodes once across canvas frames",
           "[canvas][image-cache][embedded]") {
@@ -107,6 +281,67 @@ TEST_CASE("Static embedded sprites key distinct bytes with the same size",
     REQUIRE(first[1] != second[1]);
     REQUIRE(cache.stats().builds == 2);
     REQUIRE(cache.stats().hits == 0);
+}
+
+TEST_CASE("Keyed inline bytes decode once per content key on a raster canvas",
+          "[canvas][image-cache][inline-image]") {
+    // The same 2x1 red/blue PNG as above, held in a short-lived heap buffer:
+    // the cached image must own its bytes, and the key is the content digest.
+    static constexpr std::uint8_t red_blue_png[] = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0xf4,
+        0x22, 0x7f, 0x8a, 0x00, 0x00, 0x00, 0x0e, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8,
+        0xcf, 0xc0, 0x00, 0x42, 0xff, 0x01, 0x0f, 0xf9, 0x03, 0xfd, 0x85, 0x11, 0x99, 0x76, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    };
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    const auto key = pulp::runtime::sha256_hex(red_blue_png, sizeof(red_blue_png));
+
+    auto draw = [&](const std::string& k) {
+        std::vector<std::uint8_t> bytes(std::begin(red_blue_png), std::end(red_blue_png));
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(2, 1));
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        REQUIRE(canvas.draw_image_from_keyed_data(k, bytes.data(), bytes.size(), 0, 0, 2, 1));
+        bytes.assign(bytes.size(), 0); // the cache must not read this buffer later
+        SkBitmap pixels;
+        REQUIRE(pixels.tryAllocN32Pixels(2, 1));
+        REQUIRE(surface->readPixels(pixels, 0, 0));
+        return std::array<SkColor, 2>{pixels.getColor(0, 0), pixels.getColor(1, 0)};
+    };
+    for (int frame = 0; frame < 3; ++frame) {
+        const auto px = draw(key);
+        REQUIRE(SkColorGetR(px[0]) > 200);
+        REQUIRE(SkColorGetB(px[1]) > 200);
+    }
+    REQUIRE(cache.inline_stats().builds == 1);
+    REQUIRE(cache.inline_stats().hits == 2);
+
+    // An empty key draws through the uncached path and never touches the cache.
+    const auto px = draw(std::string{});
+    REQUIRE(SkColorGetR(px[0]) > 200);
+    REQUIRE(cache.inline_stats().builds == 1);
+    REQUIRE(cache.inline_stats().hits == 2);
+}
+
+TEST_CASE("Recording canvas records keyed inline bytes like unkeyed bytes",
+          "[canvas][image-cache][inline-image]") {
+    const std::uint8_t bytes[] = {1, 2, 3, 4};
+    RecordingCanvas keyed, plain;
+    REQUIRE(keyed.draw_image_from_keyed_data("k", bytes, sizeof(bytes), 1, 2, 3, 4));
+    REQUIRE(plain.draw_image_from_data(bytes, sizeof(bytes), 1, 2, 3, 4));
+    REQUIRE(
+        keyed.draw_image_from_keyed_data_rect("k", bytes, sizeof(bytes), 0, 0, 1, 1, 1, 2, 3, 4));
+    REQUIRE(plain.draw_image_from_data_rect(bytes, sizeof(bytes), 0, 0, 1, 1, 1, 2, 3, 4));
+    REQUIRE(keyed.commands().size() == plain.commands().size());
+    for (size_t i = 0; i < keyed.commands().size(); ++i) {
+        REQUIRE(keyed.commands()[i].type == plain.commands()[i].type);
+        REQUIRE(keyed.commands()[i].text == plain.commands()[i].text);
+        REQUIRE(keyed.commands()[i].floats == plain.commands()[i].floats);
+    }
 }
 
 TEST_CASE("ImageFileCache: miss builds, hit reuses", "[canvas][image-cache][issue-6223]") {

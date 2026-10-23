@@ -11,6 +11,7 @@
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/capability_fallback.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
@@ -118,7 +119,12 @@ void ImageView::paint(canvas::Canvas& canvas) {
     const bool is_inline_image = path_.starts_with("data:image/");
     if (is_inline_image && cached_data_.empty()) {
         auto decoded = AssetManager::instance().load_image_from_data_uri(path_);
-        if (decoded.valid()) cached_data_ = std::move(decoded.pixels);
+        if (decoded.valid()) {
+            cached_data_ = std::move(decoded.pixels);
+            // Hash once per source so a caching backend can keep the decoded
+            // texture across paints, keyed by content rather than address.
+            cached_data_key_ = runtime::sha256_hex(cached_data_.data(), cached_data_.size());
+        }
     }
     const bool valid_inline_png = [&] {
         static constexpr uint8_t kPngSignature[] = {
@@ -300,10 +306,9 @@ void ImageView::paint(canvas::Canvas& canvas) {
             std::abs(src.width  - img_w) > 0.001f ||
             std::abs(src.height - img_h) > 0.001f) {
             if (is_inline_image) {
-                drawn = canvas.draw_image_from_data_rect(
-                    cached_data_.data(), cached_data_.size(),
-                    src.x, src.y, src.width, src.height,
-                    dst.x, dst.y, dst.width, dst.height);
+                drawn = canvas.draw_image_from_keyed_data_rect(
+                    cached_data_key_, cached_data_.data(), cached_data_.size(), src.x, src.y,
+                    src.width, src.height, dst.x, dst.y, dst.width, dst.height);
             } else {
                 drawn = canvas.draw_image_from_file_rect(
                     fs_path,
@@ -312,9 +317,9 @@ void ImageView::paint(canvas::Canvas& canvas) {
             }
         } else {
             if (is_inline_image) {
-                drawn = canvas.draw_image_from_data(
-                    cached_data_.data(), cached_data_.size(),
-                    dst.x, dst.y, dst.width, dst.height);
+                drawn = canvas.draw_image_from_keyed_data(cached_data_key_, cached_data_.data(),
+                                                          cached_data_.size(), dst.x, dst.y,
+                                                          dst.width, dst.height);
             } else {
                 drawn = canvas.draw_image_from_file(
                     fs_path, dst.x, dst.y, dst.width, dst.height);

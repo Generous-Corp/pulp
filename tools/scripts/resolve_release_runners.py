@@ -124,6 +124,38 @@ def apply_class_label_raw(raw: str, label: str, env: dict[str, str]) -> str:
     return json.dumps(updated, separators=(",", ":"))
 
 
+# release-path-pr-gate.yml picks its macOS selector from a chain of repo
+# variables, and repo variables (unlike secrets) resolve for fork runs. Every
+# self-hosted pool on that chain, the PR-gate one included, shares caches with
+# trusted builds, so a fork pull request gets GitHub-hosted macos-15 whatever
+# the variables say (the same rule as build.yml's fork guard).
+PR_EVENTS = ("pull_request", "pull_request_target")
+FORK_HOSTED = '["macos-15"]'
+SAME_REPO = "same-repo"
+
+
+def is_fork_pull_request(env: dict[str, str]) -> bool:
+    """True for a pull request whose head is not this repository. A missing
+    head (the fork was deleted) counts as a fork."""
+    if (env.get("GITHUB_EVENT_NAME") or "").strip() not in PR_EVENTS:
+        return False
+    head = (env.get("PR_HEAD_REPO") or "").strip()
+    return not head or head != (env.get("GITHUB_REPOSITORY") or "").strip()
+
+
+def fork_pr_gate_route(env: dict[str, str]) -> str:
+    """`same-repo` when this is not a fork pull request (the workflow's own
+    chain applies, unchanged). For a fork, the hosted selector; no repo
+    variable is read."""
+    if not is_fork_pull_request(env):
+        return SAME_REPO
+    head = (env.get("PR_HEAD_REPO") or "").strip() or "deleted head"
+    print(f"::notice::fork pull request ({head}): routing the darwin-arm64 "
+          f"release-path leg to GitHub-hosted macos-15; fork code never runs "
+          f"on the self-hosted Macs.", file=sys.stderr)
+    return FORK_HOSTED
+
+
 def resolve(env: dict[str, str]) -> dict[str, object]:
     """platform -> runs-on. Pure: takes the environment, returns the map."""
     out: dict[str, object] = {}
@@ -194,9 +226,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="print --selector with LABEL applied when "
                          f"{CLASS_TOKENS_VAR} opts in (verbatim otherwise)")
     ap.add_argument("--selector", help="runs-on JSON for --apply-class-label")
+    ap.add_argument("--fork-pr-gate-route", action="store_true",
+                    help=f"print `{SAME_REPO}`, or the hosted selector a fork "
+                         "pull request uses")
     args = ap.parse_args(argv)
 
     env = dict(os.environ)
+    if args.fork_pr_gate_route:
+        print(fork_pr_gate_route(env))
+        return 0
     if args.apply_class_label:
         if args.selector is None:
             ap.error("--apply-class-label requires --selector")

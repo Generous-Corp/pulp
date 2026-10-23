@@ -21,9 +21,13 @@ struct GpuConvolverTestAccess {
     // Replace the staged GpuCompute device. Null leaves the CPU worker path.
     static void install_staged_compute(GpuConvolver&, std::unique_ptr<render::GpuCompute>) noexcept;
     // Replace the provider with an already prepared private session. False
-    // when shared-I/O support is not compiled into this build.
+    // when shared-I/O support is not compiled into this build, in which case
+    // `session` is left with the caller. Taken by rvalue reference so a build
+    // that sees only the forward declaration never destroys the session:
+    // under the MSVC ABI a by-value unique_ptr parameter is destroyed by the
+    // callee, which needs the complete type (C2027).
     static bool install_shared_io_session(GpuConvolver&,
-                                          std::unique_ptr<SharedIoConvolutionSession>) noexcept;
+                                          std::unique_ptr<SharedIoConvolutionSession>&&) noexcept;
 };
 
 } // namespace pulp::gpu_audio::detail
