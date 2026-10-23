@@ -37,6 +37,8 @@ name: View-audio archive
 # that does not already point at source_sha, and checks the published release
 # afterwards.
 #
+# The request job validates source_sha (full commit, on main, resolved by the
+# API) and later jobs check out only that resolved value, never the raw input.
 # The build job holds no write token and cannot mint an OIDC token, so nothing
 # the build downloads or runs can sign or publish. The publish job only
 # re-verifies the build's bytes, attests them and releases them.
@@ -61,8 +63,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  SOURCE_SHA: ${{ inputs.source_sha }}
-  TAG: artifact/pulp-view-audio/${{ inputs.source_sha }}
   REPO: ${{ github.repository }}
 
 jobs:
@@ -75,14 +75,18 @@ jobs:
       contents: read
     outputs:
       published: ${{ steps.request.outputs.published }}
+      source_sha: ${{ steps.request.outputs.source_sha }}
     steps:
       - name: Validate the request
         id: request
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
+          SOURCE_SHA="${REQUESTED}"
+          TAG="artifact/pulp-view-audio/${SOURCE_SHA}"
           if ! [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::source_sha must be a full 40-hex lowercase commit, got '${SOURCE_SHA}'"
             exit 1
@@ -99,6 +103,14 @@ jobs:
             ahead|identical) ;;
             *) echo "::error::${SOURCE_SHA} is not on main (compare status: ${status})"; exit 1 ;;
           esac
+          # The later jobs build only the commit GitHub resolves here, never
+          # the raw input.
+          resolved=$(gh api "repos/${REPO}/commits/${SOURCE_SHA}" --jq .sha)
+          if [ "${resolved}" != "${SOURCE_SHA}" ]; then
+            echo "::error::${SOURCE_SHA} resolves to ${resolved}"
+            exit 1
+          fi
+          echo "source_sha=${resolved}" >>"${GITHUB_OUTPUT}"
           if state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null) \
               && [ "${state}" = "false" ]; then
             echo "::notice::${TAG} is already published; its assets are the archive of record."
@@ -116,6 +128,7 @@ jobs:
     permissions:
       contents: read
     env:
+      SOURCE_SHA: ${{ needs.request.outputs.source_sha }}
       # Apple ar/ranlib write member and symbol-table timestamps unless asked
       # not to; without this two builds of one commit can never match.
       ZERO_AR_DATE: '1'
@@ -154,7 +167,7 @@ jobs:
       - name: Check out the source commit
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ needs.request.outputs.source_sha }}
           path: source
           lfs: true
           persist-credentials: false
@@ -201,7 +214,6 @@ jobs:
           cmake -S . -B build-rebuild "${configure[@]}"
           tools/ci/governed-build.sh cmake --build build-rebuild --config Release \
             --target pulp-view-audio
-          cp build-rebuild/core/view/libpulp-view-audio.a "${RUNNER_TEMP}/libpulp-view-audio.rebuild.a"
 
       - name: Describe the archive
         shell: bash
@@ -223,8 +235,9 @@ jobs:
             --check "view-script=${lib}/libpulp-view-script.a" \
             --check "design-import=${lib}/libpulp-design-import.a" \
             --cmake-cache source/build/CMakeCache.txt \
-            --rebuild-archive "${RUNNER_TEMP}/libpulp-view-audio.rebuild.a" \
-            --rebuild-kind separate-build-dir \
+            --build-dir source/build \
+            --rebuild-dir source/build-rebuild \
+            --rebuild-archive source/build-rebuild/core/view/libpulp-view-audio.a \
             "${configure_flags[@]}"
           cat "${OUT}/pulp-view-audio-archive.manifest.json"
           # A failing floor gate must not reach the publish job: the commit's
@@ -246,7 +259,7 @@ jobs:
       - name: Hand the archive to the publish job
         uses: actions/upload-artifact@v7
         with:
-          name: pulp-view-audio-${{ inputs.source_sha }}
+          name: pulp-view-audio-${{ needs.request.outputs.source_sha }}
           path: out/
           if-no-files-found: error
           retention-days: 30
@@ -262,6 +275,8 @@ jobs:
       id-token: write
       attestations: write
     env:
+      SOURCE_SHA: ${{ needs.request.outputs.source_sha }}
+      TAG: artifact/pulp-view-audio/${{ needs.request.outputs.source_sha }}
       OUT: ${{ github.workspace }}/out
     steps:
       - name: Check out the tooling
@@ -273,7 +288,7 @@ jobs:
       - name: Receive the archive
         uses: actions/download-artifact@v8
         with:
-          name: pulp-view-audio-${{ inputs.source_sha }}
+          name: pulp-view-audio-${{ needs.request.outputs.source_sha }}
           path: out
 
       - name: Re-verify the build's bytes
@@ -306,37 +321,10 @@ jobs:
             fi
           fi
           gh api "repos/${REPO}/releases" --paginate \
-            --jq ".[] | select(.tag_name == env.TAG) | {id, draft, target_commitish, assets: [.assets[] | {name, digest}]}" \
-            >"${RUNNER_TEMP}/existing.jsonl"
-          python3 - "${RUNNER_TEMP}/existing.jsonl" "${OUT}" <<'PY'
-          import hashlib, json, os, pathlib, sys
-          rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
-          out = pathlib.Path(sys.argv[2])
-          # The bytes this run will publish, except the Sigstore bundle, which
-          # every attestation run mints afresh.
-          ours = {p.name: "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
-                  for p in out.iterdir() if p.is_file()}
-          bundle = "pulp-view-audio-archive.sigstore.json"
-          if len(rows) > 1:
-              raise SystemExit(f"::error::{len(rows)} releases already use {os.environ['TAG']}")
-          draft = "false"
-          if rows:
-              row = rows[0]
-              if not row["draft"]:
-                  raise SystemExit(f"::error::{os.environ['TAG']} is already published")
-              if row["target_commitish"] != os.environ["SOURCE_SHA"]:
-                  raise SystemExit(f"::error::draft targets {row['target_commitish']}, not {os.environ['SOURCE_SHA']}")
-              # Nothing is ever uploaded onto a draft. One is reused only when it
-              # already holds exactly these bytes and a bundle; anything else is
-              # refused for a human to delete (deleting a draft burns no tag).
-              theirs = {a["name"]: a.get("digest") for a in row["assets"]}
-              if set(theirs) != set(ours) | {bundle} or any(theirs[n] != d for n, d in ours.items()):
-                  raise SystemExit(f"::error::draft {row['id']} for {os.environ['TAG']} holds other assets: "
-                                   f"{sorted(theirs.items())}; delete it and re-dispatch")
-              draft = "true"
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              out.write(f"draft={draft}\n")
-          PY
+            --jq '.[] | select(.tag_name == env.TAG)' | jq -s . >"${RUNNER_TEMP}/existing.json"
+          python3 tooling/tools/scripts/view_audio_archive_manifest.py check-draft \
+            --releases "${RUNNER_TEMP}/existing.json" --out "${OUT}" \
+            --source-sha "${SOURCE_SHA}" >>"${GITHUB_OUTPUT}"
 
       - name: Attest the archive and its manifest
         id: attest
@@ -366,6 +354,7 @@ jobs:
             "${OUT}/SHA256SUMS"
             "${OUT}/pulp-view-audio-archive.sigstore.json"
           )
+          title="pulp-view-audio archive ${SOURCE_SHA:0:12}"
           notes="pulp-view-audio static archive (darwin-arm64, Release) built from ${SOURCE_SHA} by ${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}.
 
           Verify both, without a token:
@@ -382,11 +371,11 @@ jobs:
               --pattern pulp-view-audio-archive.sigstore.json --dir "${RUNNER_TEMP}/draft-bundle"
             cp "${RUNNER_TEMP}/draft-bundle/pulp-view-audio-archive.sigstore.json" \
               "${OUT}/pulp-view-audio-archive.sigstore.json"
-            gh release edit "${TAG}" --repo "${REPO}" --notes "${notes}"
+            gh release edit "${TAG}" --repo "${REPO}" --title "${title}" --notes "${notes}"
           else
             gh release create "${TAG}" "${assets[@]}" --repo "${REPO}" \
               --target "${SOURCE_SHA}" --draft --prerelease --latest=false \
-              --title "pulp-view-audio archive ${SOURCE_SHA:0:12}" --notes "${notes}"
+              --title "${title}" --notes "${notes}"
           fi
           gh release edit "${TAG}" --repo "${REPO}" --draft=false --prerelease --latest=false
 
@@ -399,29 +388,9 @@ jobs:
           gh api "repos/${REPO}/git/ref/tags/${TAG}" --jq '[.object.type, .object.sha] | @tsv' >"${RUNNER_TEMP}/tag.tsv"
           gh api "repos/${REPO}/releases" --paginate \
             --jq '.[] | select(.tag_name == env.TAG)' | jq -s . >"${RUNNER_TEMP}/release.json"
-          python3 - "${RUNNER_TEMP}/tag.tsv" "${RUNNER_TEMP}/release.json" "${OUT}" <<'PY'
-          import hashlib, json, os, pathlib, sys
-          kind, sha = open(sys.argv[1], encoding="utf-8").read().split()
-          releases = json.load(open(sys.argv[2], encoding="utf-8"))
-          out = pathlib.Path(sys.argv[3])
-          problems = []
-          if len(releases) != 1:
-              raise SystemExit(f"::error::{len(releases)} releases use {os.environ['TAG']}")
-          release = releases[0]
-          if (kind, sha) != ("commit", os.environ["SOURCE_SHA"]):
-              problems.append(f"tag resolves to {kind} {sha}")
-          for key, want in (("immutable", True), ("draft", False), ("prerelease", True)):
-              if release.get(key) is not want:
-                  problems.append(f"release {key} is {release.get(key)!r}")
-          published = {a["name"]: a.get("digest") for a in release.get("assets", [])}
-          expected = {p.name: "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
-                      for p in out.iterdir() if p.is_file()}
-          if published != expected:
-              problems.append(f"assets {sorted(published.items())} != {sorted(expected.items())}")
-          if problems:
-              raise SystemExit("::error::" + "; ".join(problems))
-          print(f"{os.environ['TAG']}: immutable, at {sha}, {len(published)} assets match")
-          PY
+          python3 tooling/tools/scripts/view_audio_archive_manifest.py check-release \
+            --releases "${RUNNER_TEMP}/release.json" --tag-ref "${RUNNER_TEMP}/tag.tsv" \
+            --out "${OUT}" --source-sha "${SOURCE_SHA}"
 
       - name: Verify the release the way a consumer does
         shell: bash

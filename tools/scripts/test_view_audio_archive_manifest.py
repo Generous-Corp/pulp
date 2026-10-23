@@ -97,6 +97,8 @@ class ManifestTests(unittest.TestCase):
             "--configure=-DCMAKE_BUILD_TYPE=Release", *extra])
 
     def verify(self, *extra: str) -> tuple[int, str]:
+        if "--source-sha" not in extra:
+            extra = (*extra, "--source-sha", self.sha)
         return self.call(["verify", "--archive", str(self.archive),
                           "--manifest", str(self.manifest), *extra])
 
@@ -154,17 +156,50 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("defines no symbol", err)
 
-    def test_describe_compares_a_rebuild(self):
-        same = self.root / "same.a"
-        same.write_bytes(self.archive.read_bytes())
-        self.assertEqual(self.describe("--rebuild-archive", str(same))[0], 0)
+    def build_dir(self, name: str) -> pathlib.Path:
+        directory = self.root / name
+        (directory / "core/view").mkdir(parents=True, exist_ok=True)
+        (directory / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=Release\n", encoding="utf-8")
+        return directory
+
+    def rebuild(self, first: str, second: str, data: bytes) -> tuple[int, str]:
+        rebuilt = self.build_dir(second) / "core/view/libpulp-view-audio.a"
+        rebuilt.write_bytes(data)
+        return self.describe("--build-dir", str(self.build_dir(first)),
+                             "--rebuild-dir", str(self.root / second), "--rebuild-archive", str(rebuilt))
+
+    def test_describe_derives_the_rebuild_kind_from_its_directories(self):
+        self.assertEqual(self.rebuild("build", "build-rebuild", self.archive.read_bytes())[0], 0)
         rebuild = json.loads(self.manifest.read_text(encoding="utf-8"))["rebuild"]
         self.assertTrue(rebuild["identical"])
         self.assertEqual(rebuild["kind"], "separate-build-dir")
-        other = self.root / "other.a"
-        other.write_bytes(b"!<arch>\ndifferent\n")
-        self.assertEqual(self.describe("--rebuild-archive", str(other))[0], 0)
-        self.assertFalse(json.loads(self.manifest.read_text(encoding="utf-8"))["rebuild"]["identical"])
+        self.assertEqual((rebuild["build_dir"], rebuild["rebuild_dir"]), ("build", "build-rebuild"))
+        self.assertEqual(self.rebuild("build", "build", b"!<arch>\ndifferent\n")[0], 0)
+        rebuild = json.loads(self.manifest.read_text(encoding="utf-8"))["rebuild"]
+        self.assertFalse(rebuild["identical"])
+        self.assertEqual(rebuild["kind"], "same-build-dir")
+
+    def test_describe_refuses_a_rebuild_it_cannot_place(self):
+        stray = self.root / "stray.a"
+        stray.write_bytes(self.archive.read_bytes())
+        code, err = self.describe("--rebuild-archive", str(stray))
+        self.assertEqual(code, 2)
+        self.assertIn("--build-dir and --rebuild-dir", err)
+        code, err = self.describe("--build-dir", str(self.build_dir("build")),
+                                  "--rebuild-dir", str(self.build_dir("build-rebuild")),
+                                  "--rebuild-archive", str(stray))
+        self.assertEqual(code, 2)
+        self.assertIn("was not produced in", err)
+        code, err = self.describe("--build-dir", str(self.build_dir("build")),
+                                  "--rebuild-dir", str(self.root), "--rebuild-archive", str(stray))
+        self.assertEqual(code, 2)
+        self.assertIn("not a configured build directory", err)
+
+    def test_verify_requires_the_expected_source_commit(self):
+        self.assertEqual(self.describe()[0], 0)
+        with self.assertRaises(SystemExit) as caught, contextlib.redirect_stderr(io.StringIO()):
+            tool.main(["verify", "--archive", str(self.archive), "--manifest", str(self.manifest)])
+        self.assertEqual(caught.exception.code, 2)
 
     def test_verify_accepts_the_described_archive(self):
         self.assertEqual(self.describe()[0], 0)
@@ -226,6 +261,92 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(self.verify()[0], 2)
 
 
+SOURCE = "a" * 40
+BUNDLE_ASSET = {"name": "pulp-view-audio-archive.sigstore.json", "digest": "sha256:bundle"}
+
+
+class ReleaseCheckTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = pathlib.Path(self.tmp.name) / "out"
+        self.out.mkdir()
+        for name in ("libpulp-view-audio.a", "SHA256SUMS"):
+            (self.out / name).write_bytes(name.encode())
+        self.ours = tool.asset_digests(self.out)
+        self.assets = [{"name": n, "digest": d} for n, d in self.ours.items()]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def draft(self, **overrides):
+        row = {"id": 7, "draft": True, "target_commitish": SOURCE,
+               "assets": self.assets + [BUNDLE_ASSET]}
+        row.update(overrides)
+        return tool.draft_problems([row], self.ours, SOURCE)
+
+    def test_no_release_needs_a_fresh_draft(self):
+        self.assertEqual(tool.draft_problems([], self.ours, SOURCE), ([], False))
+
+    def test_a_draft_holding_exactly_these_bytes_is_reused(self):
+        self.assertEqual(self.draft(), ([], True))
+
+    def test_a_draft_at_another_commit_is_refused(self):
+        problems, reusable = self.draft(target_commitish="main")
+        self.assertFalse(reusable)
+        self.assertIn("draft targets 'main'", problems[0])
+
+    def test_a_draft_with_an_extra_asset_is_refused(self):
+        problems, reusable = self.draft(assets=self.assets + [BUNDLE_ASSET, {"name": "evil.a", "digest": "x"}])
+        self.assertFalse(reusable)
+        self.assertTrue(any("draft assets" in p for p in problems), problems)
+
+    def test_a_draft_missing_an_asset_is_refused(self):
+        problems, _ = self.draft(assets=self.assets)
+        self.assertTrue(any("draft assets" in p for p in problems), problems)
+
+    def test_a_draft_with_other_bytes_is_refused(self):
+        other = [{"name": "libpulp-view-audio.a", "digest": "sha256:other"},
+                 {"name": "SHA256SUMS", "digest": self.ours["SHA256SUMS"]}, BUNDLE_ASSET]
+        problems, _ = self.draft(assets=other)
+        self.assertTrue(any("other bytes for ['libpulp-view-audio.a']" in p for p in problems), problems)
+
+    def test_a_published_release_or_two_releases_are_refused(self):
+        self.assertIn("already published", self.draft(draft=False)[0][0])
+        row = {"id": 1, "draft": True, "target_commitish": SOURCE, "assets": []}
+        self.assertIn("2 releases", tool.draft_problems([row, row], self.ours, SOURCE)[0][0])
+
+    def release(self, tag=f"commit\t{SOURCE}\n", **overrides):
+        row = {"immutable": True, "draft": False, "prerelease": True, "assets": self.assets}
+        row.update(overrides)
+        return tool.release_problems([row], tag, self.ours, SOURCE)
+
+    def test_the_published_release_must_be_exactly_ours(self):
+        self.assertEqual(self.release(), [])
+        self.assertIn("release immutable is False", self.release(immutable=False))
+        self.assertIn("release draft is True", self.release(draft=True))
+        self.assertIn("release prerelease is False", self.release(prerelease=False))
+        self.assertTrue(self.release(tag=f"commit\t{'b' * 40}\n")[0].startswith("tag resolves"))
+        self.assertTrue(self.release(tag=f"tag\t{SOURCE}\n")[0].startswith("tag resolves"))
+        extra = self.release(assets=self.assets + [{"name": "evil.a", "digest": "x"}])
+        self.assertTrue(any("published assets" in p for p in extra), extra)
+        changed = self.release(assets=[{"name": "libpulp-view-audio.a", "digest": "sha256:x"},
+                                       {"name": "SHA256SUMS", "digest": self.ours["SHA256SUMS"]}])
+        self.assertTrue(any("published assets" in p for p in changed), changed)
+
+    def test_the_cli_writes_the_draft_output_and_exits_nonzero_on_refusal(self):
+        releases = pathlib.Path(self.tmp.name) / "releases.json"
+        releases.write_text("[]", encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = tool.main(["check-draft", "--releases", str(releases), "--out", str(self.out),
+                              "--source-sha", SOURCE])
+        self.assertEqual((code, out.getvalue()), (0, "draft=false\n"))
+        releases.write_text(json.dumps([{"id": 1, "draft": False}]), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(tool.main(["check-draft", "--releases", str(releases), "--out", str(self.out),
+                                        "--source-sha", SOURCE]), 1)
+
+
 class WorkflowContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -250,7 +371,9 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('"${GITHUB_REF}" != "refs/heads/main"', self.text)
         self.assertIn("compare/${SOURCE_SHA}...main", self.text)
         self.assertIn("ahead|identical) ;;", self.text)
-        self.assertIn("ref: ${{ inputs.source_sha }}", self.text)
+        self.assertIn("ref: ${{ needs.request.outputs.source_sha }}", self.text)
+        self.assertIn('repos/${REPO}/commits/${SOURCE_SHA}" --jq .sha', self.text)
+        self.assertEqual(self.text.count("inputs.source_sha"), 2)  # concurrency group, REQUESTED
         self.assertIn('test "$(git rev-parse HEAD)" = "${SOURCE_SHA}"', self.text)
 
     def jobs(self):
@@ -284,7 +407,9 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("cmake -S . -B build-rebuild", rebuild)
         self.assertIn("--build build-rebuild", rebuild)
         self.assertNotIn("rm ", rebuild)
-        self.assertIn("--rebuild-kind separate-build-dir", steps["Describe the archive"]["run"])
+        describe = steps["Describe the archive"]["run"]
+        self.assertIn("--rebuild-dir source/build-rebuild", describe)
+        self.assertIn("--rebuild-archive source/build-rebuild/", describe)
 
     def test_a_failing_floor_gate_stops_before_publish(self):
         describe = self.steps(self.jobs()["build"])["Describe the archive"]["run"]
@@ -317,7 +442,8 @@ class WorkflowContractTests(unittest.TestCase):
                      "pulp-view-audio-symbol-floor.txt", "pulp-view-audio-symbol-floor-gate.txt",
                      "SHA256SUMS"):
             self.assertIn(f"out/{name}", subjects)
-        self.assertEqual(self.doc["env"]["TAG"], "artifact/pulp-view-audio/${{ inputs.source_sha }}")
+        self.assertEqual(self.jobs()["publish"]["env"]["TAG"],
+                         "artifact/pulp-view-audio/${{ needs.request.outputs.source_sha }}")
         publish = steps["Publish the immutable release"]["run"]
         self.assertIn("--draft --prerelease --latest=false", publish)
         self.assertIn("--draft=false --prerelease --latest=false", publish)
@@ -327,18 +453,15 @@ class WorkflowContractTests(unittest.TestCase):
         existing = self.steps(self.jobs()["publish"])["Refuse a tag or draft that points elsewhere"]["run"]
         self.assertIn("git/ref/tags/${TAG}", existing)
         self.assertIn('"${sha}" != "${SOURCE_SHA}"', existing)
-        self.assertIn('row["target_commitish"] != os.environ["SOURCE_SHA"]', existing)
-        self.assertIn("set(theirs) != set(ours) | {bundle}", existing)
-        self.assertIn("theirs[n] != d", existing)
+        self.assertIn("view_audio_archive_manifest.py check-draft", existing)
         self.assertNotIn("--clobber", self.text)
         publish = self.steps(self.jobs()["publish"])["Publish the immutable release"]["run"]
         draft_path = publish.split('if [ "${DRAFT_EXISTS}" = "true" ]; then', 1)[1].split("else", 1)[0]
         self.assertNotIn("gh release upload", draft_path)
-        self.assertIn('--notes "${notes}"', draft_path)
+        self.assertIn('--title "${title}" --notes "${notes}"', draft_path)
         checked = self.steps(self.jobs()["publish"])["Check the published release"]["run"]
-        self.assertIn('("commit", os.environ["SOURCE_SHA"])', checked)
-        self.assertIn('("immutable", True)', checked)
-        self.assertIn("published != expected", checked)
+        self.assertIn("git/ref/tags/${TAG}", checked)
+        self.assertIn("view_audio_archive_manifest.py check-release", checked)
 
     def test_the_documented_check_is_token_free_and_ref_pinned(self):
         consumer = self.steps(self.jobs()["publish"])["Verify the release the way a consumer does"]["run"]

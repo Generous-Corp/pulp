@@ -14,6 +14,18 @@ and checks an archive against a manifest:
         --manifest manifest.json --source-sha <40-hex> [--floor floor.txt]
         [--gate gate.txt] [--require-gate-pass]
 
+    view_audio_archive_manifest.py check-draft --releases releases.json
+        --out <asset dir> --source-sha <40-hex>
+    view_audio_archive_manifest.py check-release --releases releases.json
+        --tag-ref tag.tsv --out <asset dir> --source-sha <40-hex>
+
+check-draft and check-release read what the GitHub API reports for the
+release tag (every release using it, and the tag ref) and hold it to the
+assets in --out: a draft may be reused only if it targets the source commit
+and holds exactly these bytes plus a Sigstore bundle; a published release must
+be immutable, a prerelease, at a commit tag on the source commit, with exactly
+these assets.
+
 The symbol floor is the demangled list of symbols the archive defines, read
 from `nm -A -P -g` with the same rule view_audio_symbol_floor.py applies: every
 listed type except U, w and v is a definition. The gate output is that script's
@@ -156,6 +168,107 @@ def git_head(root: pathlib.Path) -> str:
     return proc.stdout.strip()
 
 
+def describe_rebuild(build_dir: pathlib.Path | None, rebuild_dir: pathlib.Path | None,
+                     rebuilt: pathlib.Path, archive_sha: str) -> dict:
+    """What the second build was, derived from where it ran rather than declared."""
+    if build_dir is None or rebuild_dir is None:
+        raise InputError("--rebuild-archive needs --build-dir and --rebuild-dir")
+    first, second = build_dir.resolve(), rebuild_dir.resolve()
+    for directory in (first, second):
+        if not (directory / "CMakeCache.txt").is_file():
+            raise InputError(f"{directory} is not a configured build directory")
+    if second not in rebuilt.resolve().parents:
+        raise InputError(f"{rebuilt} was not produced in {second}")
+    sha = sha256_file(rebuilt)
+    return {"kind": "same-build-dir" if first == second else "separate-build-dir",
+            "build_dir": first.name, "rebuild_dir": second.name,
+            "sha256": sha, "identical": sha == archive_sha}
+
+
+BUNDLE = "pulp-view-audio-archive.sigstore.json"
+
+
+def asset_digests(out: pathlib.Path) -> dict[str, str]:
+    return {path.name: "sha256:" + sha256_file(path) for path in sorted(out.iterdir()) if path.is_file()}
+
+
+def releases_for_tag(path: pathlib.Path) -> list[dict]:
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise InputError(f"cannot read {path}: {exc}") from exc
+    if not isinstance(rows, list):
+        raise InputError(f"{path} is not a list of releases")
+    return rows
+
+
+def published_assets(release: dict) -> dict[str, str | None]:
+    return {asset["name"]: asset.get("digest") for asset in release.get("assets", [])}
+
+
+def draft_problems(rows: list[dict], ours: dict[str, str], source_sha: str) -> tuple[list[str], bool]:
+    """(refusals, whether a reusable draft exists) for the releases using the tag."""
+    if not rows:
+        return [], False
+    if len(rows) > 1:
+        return [f"{len(rows)} releases already use the tag"], False
+    row = rows[0]
+    if not row.get("draft"):
+        return ["the release is already published"], False
+    problems = []
+    if row.get("target_commitish") != source_sha:
+        problems.append(f"draft targets {row.get('target_commitish')!r}, not {source_sha}")
+    # Nothing is ever uploaded onto a draft: it is reused only when it already
+    # holds exactly these bytes plus a bundle, which every attestation mints anew.
+    theirs = published_assets(row)
+    if set(theirs) != set(ours) | {BUNDLE}:
+        problems.append(f"draft assets {sorted(theirs)} are not {sorted(set(ours) | {BUNDLE})}")
+    changed = sorted(name for name, digest in ours.items() if name in theirs and theirs[name] != digest)
+    if changed:
+        problems.append(f"draft holds other bytes for {changed}")
+    return problems, not problems
+
+
+def release_problems(rows: list[dict], tag_ref: str, ours: dict[str, str], source_sha: str) -> list[str]:
+    problems = []
+    if tag_ref.split() != ["commit", source_sha]:
+        problems.append(f"tag resolves to {tag_ref.strip()!r}, not commit {source_sha}")
+    if len(rows) != 1:
+        return problems + [f"{len(rows)} releases use the tag"]
+    release = rows[0]
+    for key, want in (("immutable", True), ("draft", False), ("prerelease", True)):
+        if release.get(key) is not want:
+            problems.append(f"release {key} is {release.get(key)!r}")
+    if published_assets(release) != ours:
+        problems.append(f"published assets {sorted(published_assets(release).items())} "
+                        f"!= {sorted(ours.items())}")
+    return problems
+
+
+def check_draft(args: argparse.Namespace) -> int:
+    problems, reusable = draft_problems(releases_for_tag(args.releases), asset_digests(args.out),
+                                        args.source_sha)
+    for problem in problems:
+        print(f"view-audio-archive: {problem}", file=sys.stderr)
+    if not problems:
+        print(f"draft={'true' if reusable else 'false'}")
+    return 1 if problems else 0
+
+
+def check_release(args: argparse.Namespace) -> int:
+    try:
+        tag_ref = args.tag_ref.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise InputError(f"cannot read {args.tag_ref}: {exc}") from exc
+    problems = release_problems(releases_for_tag(args.releases), tag_ref, asset_digests(args.out),
+                                args.source_sha)
+    for problem in problems:
+        print(f"view-audio-archive: {problem}", file=sys.stderr)
+    if not problems:
+        print(f"view-audio-archive: release is immutable at {args.source_sha} with its exact assets")
+    return 1 if problems else 0
+
+
 def describe(args: argparse.Namespace) -> int:
     if not SHA_RE.fullmatch(args.source_sha):
         raise InputError(f"--source-sha must be a full 40-hex commit, got {args.source_sha!r}")
@@ -198,9 +311,8 @@ def describe(args: argparse.Namespace) -> int:
                      "server_url": env.get("GITHUB_SERVER_URL")},
     }
     if args.rebuild_archive:
-        rebuilt = sha256_file(args.rebuild_archive)
-        manifest["rebuild"] = {"kind": args.rebuild_kind, "sha256": rebuilt,
-                               "identical": rebuilt == manifest["archive"]["sha256"]}
+        manifest["rebuild"] = describe_rebuild(args.build_dir, args.rebuild_dir,
+                                               args.rebuild_archive, manifest["archive"]["sha256"])
     args.output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"view-audio-archive: {args.archive.name} sha256={manifest['archive']['sha256']} "
           f"floor={manifest['symbol_floor']['symbols']} symbols gate_exit={gate_status}")
@@ -264,8 +376,10 @@ def main(argv: list[str] | None = None) -> int:
     desc.add_argument("--cmake-cache", type=pathlib.Path)
     desc.add_argument("--rebuild-archive", type=pathlib.Path,
                       help="a second build of the same source, compared byte for byte")
-    desc.add_argument("--rebuild-kind", default="separate-build-dir",
-                      help="how the second build differs from the first")
+    desc.add_argument("--build-dir", type=pathlib.Path,
+                      help="the build directory the archive came from")
+    desc.add_argument("--rebuild-dir", type=pathlib.Path,
+                      help="the build directory --rebuild-archive came from")
     desc.add_argument("--nm")
     desc.add_argument("--cxxfilt")
     desc.set_defaults(func=describe)
@@ -274,11 +388,23 @@ def main(argv: list[str] | None = None) -> int:
     ver.add_argument("--archive", type=pathlib.Path, required=True)
     ver.add_argument("--manifest", type=pathlib.Path, required=True)
     ver.add_argument("--floor", type=pathlib.Path)
-    ver.add_argument("--source-sha")
+    ver.add_argument("--source-sha", required=True)
     ver.add_argument("--gate", type=pathlib.Path, help="the floor gate output to check")
     ver.add_argument("--require-gate-pass", action="store_true",
                      help="fail unless the recorded floor gate exited 0")
     ver.set_defaults(func=verify)
+
+    for name, func, help_text in (("check-draft", check_draft, "refuse a draft that is not exactly ours"),
+                                  ("check-release", check_release, "check the published release")):
+        chk = sub.add_parser(name, help=help_text)
+        chk.add_argument("--releases", type=pathlib.Path, required=True,
+                         help="JSON list of every release using the tag")
+        chk.add_argument("--out", type=pathlib.Path, required=True, help="the assets this run publishes")
+        chk.add_argument("--source-sha", required=True)
+        if name == "check-release":
+            chk.add_argument("--tag-ref", type=pathlib.Path, required=True,
+                             help="'<object type> <sha>' of the tag ref")
+        chk.set_defaults(func=func)
 
     args = parser.parse_args(argv)
     if args.command == "describe" and not args.check:
