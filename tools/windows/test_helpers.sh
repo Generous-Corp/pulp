@@ -104,6 +104,7 @@ echo '4243 qemu-system-x86_64 -drive file=overlay.qcow2,if=none'
 EOF
 cat >"$fakebin/lsof" <<EOF
 #!/bin/sh
+echo 'fcwd'
 echo 'n$resize_tmp'
 EOF
 relative_output="$({ PATH="$fakebin:$PATH" "$repo_root/tools/windows/expand-qemu-overlay.sh" \
@@ -112,6 +113,22 @@ relative_output="$({ PATH="$fakebin:$PATH" "$repo_root/tools/windows/expand-qemu
   --disposable-root "$resize_tmp"; } 2>&1 || true)"
 [[ "$relative_output" == *"live overlay resize"* ]] || {
   echo "expand-qemu-overlay.sh accepted a relative live QEMU image" >&2
+  exit 1
+}
+cat >"$fakebin/ps" <<'EOF'
+#!/bin/sh
+echo '4245 qemu-system-x86_64 -M virt -S'
+EOF
+cat >"$fakebin/lsof" <<EOF
+#!/bin/sh
+echo 'n$live_link'
+EOF
+open_alias_output="$({ PATH="$fakebin:$PATH" "$repo_root/tools/windows/expand-qemu-overlay.sh" \
+  --overlay "$resize_tmp/overlay.qcow2" \
+  --backup "$resize_tmp/open-alias-backup.qcow2" \
+  --disposable-root "$resize_tmp"; } 2>&1 || true)"
+[[ "$open_alias_output" == *"has open"* ]] || {
+  echo "expand-qemu-overlay.sh accepted an open-file-only live QEMU alias" >&2
   exit 1
 }
 cat >"$fakebin/ps" <<EOF

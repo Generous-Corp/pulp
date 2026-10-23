@@ -59,26 +59,43 @@ elif [[ -e "$backup_abs" ]]; then
 fi
 
 # A running QEMU may hold the overlay open even when the guest looks idle.
-# Match both the spelling in its command line and the resolved path. The latter
-# matters when QEMU was started through a symlink or with a relative `file=`
-# argument. The helper is deliberately fail-closed when process inspection is
-# unavailable: resizing a live disk is never an acceptable fallback.
+# Match both the spelling in its command line and every path QEMU has open. The
+# latter matters when QEMU was started through a symlink, an opaque `-blockdev`
+# argument, or a relative `file=` argument. The helper is deliberately
+# fail-closed when process inspection is unavailable: resizing a live disk is
+# never an acceptable fallback.
 python3 - "$overlay_abs" "$overlay_input_abs" <<'PY'
 import pathlib, shlex, subprocess, sys
 
 overlay = pathlib.Path(sys.argv[1]).resolve()
 input_path = pathlib.Path(sys.argv[2])
 
-def process_cwd(pid):
+def process_open_paths(pid):
     try:
         raw = subprocess.check_output(
-            ["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"],
+            ["lsof", "-a", "-p", pid, "-Fn"],
             text=True, stderr=subprocess.DEVNULL)
-        for line in raw.splitlines():
-            if line.startswith("n"):
-                return pathlib.Path(line[1:])
-    except (OSError, subprocess.CalledProcessError):
-        return None
+    except (OSError, subprocess.CalledProcessError) as exc:
+        print(f"refusing to inspect open QEMU paths for pid {pid}: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    paths = []
+    cwd = None
+    descriptor = None
+    for line in raw.splitlines():
+        if line.startswith("f"):
+            descriptor = line[1:]
+            continue
+        if line.startswith("n"):
+            name = line[1:].removesuffix(" (deleted)")
+            if name:
+                path = pathlib.Path(name)
+                paths.append(path)
+                if descriptor == "cwd":
+                    cwd = path
+    if not paths:
+        print(f"refusing to inspect open QEMU paths for pid {pid}: lsof returned no paths", file=sys.stderr)
+        raise SystemExit(1)
+    return paths, cwd
 
 try:
     listing = subprocess.check_output(
@@ -100,7 +117,15 @@ for line in listing.splitlines():
         tokens = shlex.split(command)
     except ValueError:
         tokens = command.split()
-    cwd = process_cwd(pid)
+    open_paths, cwd = process_open_paths(pid)
+    for open_path in open_paths:
+        try:
+            if open_path.resolve() == overlay:
+                print(f"refusing live overlay resize; QEMU pid {pid} has open {open_path} resolving to {overlay}", file=sys.stderr)
+                raise SystemExit(1)
+        except OSError as exc:
+            print(f"refusing to resolve open QEMU path for pid {pid}: {open_path}: {exc}", file=sys.stderr)
+            raise SystemExit(1)
     for token in tokens:
         candidates = []
         for field in ("file=", "filename="):
@@ -119,8 +144,9 @@ for line in listing.splitlines():
                 if path.resolve() == overlay:
                     print(f"refusing live overlay resize; QEMU pid {pid} resolves {path} to {overlay}", file=sys.stderr)
                     raise SystemExit(1)
-            except OSError:
-                continue
+            except OSError as exc:
+                print(f"refusing to resolve QEMU disk path for pid {pid}: {path}: {exc}", file=sys.stderr)
+                raise SystemExit(1)
 PY
 
 # Require a real differencing image and refuse an image used by another disk.
