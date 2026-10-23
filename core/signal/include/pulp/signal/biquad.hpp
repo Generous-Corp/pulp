@@ -238,7 +238,10 @@ public:
     // Double SampleType keeps a DF2T block path: the feedback-last order
     //     y = b0 x + s1;  s1 = (-a1) y + (b1 x + s2);  s2 = b2 x - a2 y
     // for designs whose poles are at most kFeedbackLastMaxPoleRadius from the
-    // origin, and the sample path's own order (bit-identical to it) above.
+    // origin, and the sample path's own order above. That order is
+    // bit-identical to the sample path while the state stays above the
+    // 1e-15 snap threshold; below it the block path snaps once per chunk
+    // (snap_chunks()) where the sample path snaps every sample.
     //
     // State continuity: the sample path's DF2T state and the block path's DF1
     // history describe the same filter. A block call that follows sample
@@ -305,12 +308,11 @@ public:
     ///   - longer passes, and every double pass, run the feedback-last DF2T
     ///     order when every section's largest pole radius is at most
     ///     kFeedbackLastMaxPoleRadius (its error then stays close to the
-    ///     sample path's), and the sample path's
-    ///     order, bit-identical to chaining the sections' per-sample
-    ///     process(), otherwise.
-    /// Measured on Apple M3 (ns per sample, contraction on): sample order
-    /// 3.8 / 6.2 / 4.2 / 4.7 for 1 / 3 / 6 / 8 sections, feedback-last
-    /// 2.0 / 2.3 / 2.7 / 3.2, DF1 double 1.9 / 2.2 / 3.7 / 6.0.
+    ///     sample path's), and the sample path's order otherwise, which is
+    ///     bit-identical to chaining the sections' per-sample process() while
+    ///     the state stays above the 1e-15 snap threshold.
+    /// The DF1 and feedback-last forms are faster than the sample order; the
+    /// DSP throughput benchmark tracks the figures.
     static void process_chain(BiquadT* sections, std::size_t count, SampleType* buffer,
                               std::size_t num_samples) noexcept {
         for (std::size_t first = 0; first < count; first += kChainSectionsPerPass) {
@@ -364,7 +366,7 @@ public:
     // unit circle that order's RMS error against an exact DF2T grows past the
     // sample path's (low shelves, allpasses and notches near 20-100 Hz and
     // high-Q bells), so those designs keep the sample path's order, which the
-    // tests hold bit-identical.
+    // tests hold bit-identical above the snap threshold.
     static constexpr double kFeedbackLastMaxPoleRadius = 0.995;
 
     // Reset state (call on discontinuities)

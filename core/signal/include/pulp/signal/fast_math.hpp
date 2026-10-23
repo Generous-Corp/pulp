@@ -177,10 +177,12 @@ struct FastMath {
         return x < -4.0f ? -1.0f : hi;
     }
 
-    /// tanh within 3.0e-7 absolute of std::tanh for every float input when
-    /// the compiler fuses multiply-adds, and within 3.6e-7 when it does not
-    /// (-ffp-contract=off, MSVC, x86-64 without FMA); both measured over every
-    /// float. Cheap enough for a saturator inside a per-sample feedback loop.
+    /// tanh within 3.0e-7 absolute of std::tanh when the compiler fuses
+    /// multiply-adds, and within 3.6e-7 when it does not (-ffp-contract=off,
+    /// MSVC, x86-64 without FMA), over the inputs the tests scan: every 64th
+    /// non-negative finite float bit pattern, with odd symmetry covering the
+    /// negatives. Cheap enough for a saturator inside a per-sample feedback
+    /// loop.
     ///
     /// x * P(x^2) / Q(x^2) with both polynomials of degree 4 and P(0) = Q(0)
     /// = 1, fitted for minimax absolute error on [0, 9]; x^2 is clamped to 81
@@ -527,7 +529,7 @@ public:
 ///
 /// - `exact`: std::tanh. The reference the others are measured against.
 /// - `accurate`: `FastMath::tanh_accurate`, within 3.0e-7 (3.6e-7 without
-///   fused multiply-add) of std::tanh for every input. Against the
+///   fused multiply-add) of std::tanh over the inputs its tests scan. Against the
 ///   exact-saturator ladder, over cutoffs of 300 Hz to 6 kHz, resonance 0 to
 ///   1 and sine input of 110 Hz to 7 kHz at 48 kHz, the pointwise output
 ///   difference is at most -124 dBFS for input up to 0 dBFS, -107 dBFS at
@@ -539,7 +541,7 @@ public:
 ///   and alias levels match to 0.001 dB and resonant ringing frequency and
 ///   decay are unchanged. Faster than std::tanh. This is the default.
 /// - `realtime_efficient`: `FastMath::tanh_minimax`, within 3.8e-6 of
-///   std::tanh for every input and continuous in value and slope where it
+///   std::tanh over the inputs its tests scan, and continuous in value and slope where it
 ///   clamps at |x| = 7. Cheapest per evaluation at normal levels; under heavy
 ///   drive `accurate` can be faster, because this form's division is on the
 ///   recursion's critical path for every argument below 7. The Lambert

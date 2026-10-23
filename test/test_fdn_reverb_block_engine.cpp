@@ -8,9 +8,9 @@
 //  1. An output fingerprint: the 40 ms RMS envelope of the impulse response,
 //     per rail, for nine voicings (every mode, drive and flutter), recorded
 //     from v0.1004.0's sample-at-a-time engine by
-//     tools/audio/fdn_reference/generate.sh. The block engine reproduces every
-//     one within 1e-4 dB on Apple clang; the tolerance here is 0.01 dB, and a
-//     2% decay change moves it by half a decibel (the negative control).
+//     tools/audio/fdn_reference/generate.sh. The block engine must reproduce
+//     every one within 0.01 dB, and a 2% decay change moves it by half a
+//     decibel (the negative control).
 //  2. Decay and density measured with support/reverb_metrics.hpp — band T60
 //     and the echo-density mixing time — against the same reference, each with
 //     a control that moves the metric past its tolerance.
