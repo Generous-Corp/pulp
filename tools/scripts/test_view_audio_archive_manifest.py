@@ -328,7 +328,13 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("git/ref/tags/${TAG}", existing)
         self.assertIn('"${sha}" != "${SOURCE_SHA}"', existing)
         self.assertIn('row["target_commitish"] != os.environ["SOURCE_SHA"]', existing)
-        self.assertIn("unexpected assets", existing)
+        self.assertIn("set(theirs) != set(ours) | {bundle}", existing)
+        self.assertIn("theirs[n] != d", existing)
+        self.assertNotIn("--clobber", self.text)
+        publish = self.steps(self.jobs()["publish"])["Publish the immutable release"]["run"]
+        draft_path = publish.split('if [ "${DRAFT_EXISTS}" = "true" ]; then', 1)[1].split("else", 1)[0]
+        self.assertNotIn("gh release upload", draft_path)
+        self.assertIn('--notes "${notes}"', draft_path)
         checked = self.steps(self.jobs()["publish"])["Check the published release"]["run"]
         self.assertIn('("commit", os.environ["SOURCE_SHA"])', checked)
         self.assertIn('("immutable", True)', checked)

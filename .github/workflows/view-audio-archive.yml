@@ -136,9 +136,9 @@ jobs:
           root="${RUNNER_TEMP:?}/pulp-isolated-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           rm -rf "$root"
           mkdir -p "$root/src" "$root/fc" "$root/cc"
-          # PulpConfigureCheckCache.cmake include()s the files it finds in
-          # PULP_CONFIGURE_CHECK_CACHE_DIR, so a shared directory would run
-          # CMake an earlier job wrote.
+          # Current PulpConfigureCheckCache.cmake parses the files it finds in
+          # PULP_CONFIGURE_CHECK_CACHE_DIR; older source commits include() them.
+          # A fresh directory makes both cases safe.
           {
             echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/src"
             echo "PULP_FETCHCONTENT_BASE_DIR=$root/fc"
@@ -306,14 +306,17 @@ jobs:
             fi
           fi
           gh api "repos/${REPO}/releases" --paginate \
-            --jq ".[] | select(.tag_name == env.TAG) | {id, draft, target_commitish, assets: [.assets[].name]}" \
+            --jq ".[] | select(.tag_name == env.TAG) | {id, draft, target_commitish, assets: [.assets[] | {name, digest}]}" \
             >"${RUNNER_TEMP}/existing.jsonl"
-          python3 - "${RUNNER_TEMP}/existing.jsonl" <<'PY'
-          import json, os, sys
+          python3 - "${RUNNER_TEMP}/existing.jsonl" "${OUT}" <<'PY'
+          import hashlib, json, os, pathlib, sys
           rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
-          expected = {"libpulp-view-audio.a", "pulp-view-audio-archive.manifest.json",
-                      "pulp-view-audio-symbol-floor.txt", "pulp-view-audio-symbol-floor-gate.txt",
-                      "SHA256SUMS", "pulp-view-audio-archive.sigstore.json"}
+          out = pathlib.Path(sys.argv[2])
+          # The bytes this run will publish, except the Sigstore bundle, which
+          # every attestation run mints afresh.
+          ours = {p.name: "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
+                  for p in out.iterdir() if p.is_file()}
+          bundle = "pulp-view-audio-archive.sigstore.json"
           if len(rows) > 1:
               raise SystemExit(f"::error::{len(rows)} releases already use {os.environ['TAG']}")
           draft = "false"
@@ -323,9 +326,13 @@ jobs:
                   raise SystemExit(f"::error::{os.environ['TAG']} is already published")
               if row["target_commitish"] != os.environ["SOURCE_SHA"]:
                   raise SystemExit(f"::error::draft targets {row['target_commitish']}, not {os.environ['SOURCE_SHA']}")
-              extra = sorted(set(row["assets"]) - expected)
-              if extra:
-                  raise SystemExit(f"::error::draft carries unexpected assets {extra}")
+              # Nothing is ever uploaded onto a draft. One is reused only when it
+              # already holds exactly these bytes and a bundle; anything else is
+              # refused for a human to delete (deleting a draft burns no tag).
+              theirs = {a["name"]: a.get("digest") for a in row["assets"]}
+              if set(theirs) != set(ours) | {bundle} or any(theirs[n] != d for n, d in ours.items()):
+                  raise SystemExit(f"::error::draft {row['id']} for {os.environ['TAG']} holds other assets: "
+                                   f"{sorted(theirs.items())}; delete it and re-dispatch")
               draft = "true"
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               out.write(f"draft={draft}\n")
@@ -368,7 +375,13 @@ jobs:
           # A published release is immutable, so every asset is attached while
           # it is still a draft and the publish flip comes last.
           if [ "${DRAFT_EXISTS}" = "true" ]; then
-            gh release upload "${TAG}" "${assets[@]}" --repo "${REPO}" --clobber
+            # The draft already holds exactly these bytes (checked above); only
+            # the notes are regenerated so they name this run. Its bundle is the
+            # earlier attestation of the same digests and is what gets published.
+            gh release download "${TAG}" --repo "${REPO}" \
+              --pattern pulp-view-audio-archive.sigstore.json --dir "${RUNNER_TEMP}/draft-bundle"
+            cp "${RUNNER_TEMP}/draft-bundle/pulp-view-audio-archive.sigstore.json" \
+              "${OUT}/pulp-view-audio-archive.sigstore.json"
             gh release edit "${TAG}" --repo "${REPO}" --notes "${notes}"
           else
             gh release create "${TAG}" "${assets[@]}" --repo "${REPO}" \
