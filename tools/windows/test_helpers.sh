@@ -11,18 +11,21 @@ done
 
 missing_config_output="$({ env -u SPECTR_WINDOWS_UTM_UUID -u SPECTR_WINDOWS_SSH_PORT \
   -u SPECTR_WINDOWS_RDP_PORT "$open_helper"; } 2>&1 || true)"
-[[ "$missing_config_output" == *"set SPECTR_WINDOWS_UTM_UUID"* ]] || {
+[[ "$missing_config_output" == *"set guest values"* ]] || {
   echo "open-utm-rdp.sh did not reject missing guest identity" >&2
   exit 1
 }
 
 missing_secret_dir="$(mktemp -d "${TMPDIR:-/tmp}/pulp-windows-helper.XXXXXX")"
 missing_secret="$missing_secret_dir/secret"
-trap 'rm -f "$missing_secret"; rmdir "$missing_secret_dir" 2>/dev/null || true' EXIT
+config_file="$missing_secret_dir/config"
+printf '%s\n' \
+  'SPECTR_WINDOWS_UTM_UUID=fixture' \
+  'SPECTR_WINDOWS_SSH_PORT=1' \
+  'SPECTR_WINDOWS_RDP_PORT=2' >"$config_file"
+trap 'rm -f "$missing_secret" "$config_file"; rmdir "$missing_secret_dir" 2>/dev/null || true' EXIT
 missing_secret_output="$({ \
-  SPECTR_WINDOWS_UTM_UUID=fixture \
-  SPECTR_WINDOWS_SSH_PORT=1 \
-  SPECTR_WINDOWS_RDP_PORT=2 \
+  SPECTR_WINDOWS_UTM_CONFIG="$config_file" \
   SPECTR_WINDOWS_UTM_SECRET="$missing_secret" \
   "$open_helper"; } 2>&1 || true)"
 [[ "$missing_secret_output" == *"missing credential file"* ]] || {

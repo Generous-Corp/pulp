@@ -7,6 +7,13 @@ set -euo pipefail
 # runner and does not create another disk image.
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 utmctl="/Applications/UTM.app/Contents/MacOS/utmctl"
+config_file="${SPECTR_WINDOWS_UTM_CONFIG:-$HOME/.config/pulp/windows-utm.env}"
+if [[ -f "$config_file" ]]; then
+  # This file contains only machine-local UUID/forwarding values. Credentials
+  # are read separately below and are never sourced from this file.
+  # shellcheck disable=SC1090
+  source "$config_file"
+fi
 utm_uuid="${SPECTR_WINDOWS_UTM_UUID:-}"
 ssh_port="${SPECTR_WINDOWS_SSH_PORT:-}"
 rdp_port="${SPECTR_WINDOWS_RDP_PORT:-}"
@@ -15,7 +22,7 @@ secret_file="${SPECTR_WINDOWS_UTM_SECRET:-$HOME/.config/pulp/secrets/spectr-wind
 
 for required in utm_uuid ssh_port rdp_port; do
   [[ -n "${!required}" ]] || {
-    echo "set SPECTR_WINDOWS_UTM_UUID, SPECTR_WINDOWS_SSH_PORT, and SPECTR_WINDOWS_RDP_PORT for the verified guest" >&2
+  echo "set guest values in $config_file or SPECTR_WINDOWS_UTM_UUID, SPECTR_WINDOWS_SSH_PORT, and SPECTR_WINDOWS_RDP_PORT" >&2
     exit 2
   }
 done
