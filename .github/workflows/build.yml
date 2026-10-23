@@ -980,6 +980,8 @@ jobs:
       a2t_receipt_verification_required: ${{ steps.classify.outputs.verify }}
       a2t_receipt_attestation_required: ${{ steps.classify.outputs.issue }}
       a2t_evidence_head: ${{ steps.classify.outputs.head }}
+      queue_breaker_blocked_prs: ${{ steps.queue_breaker.outputs.blocked_prs }}
+      queue_breaker_reason: ${{ steps.queue_breaker.outputs.reason }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -1024,6 +1026,47 @@ jobs:
           GH_TOKEN="${{ github.token }}" python3 "$hold_check" \
             --repo "$GITHUB_REPOSITORY" \
             --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+      # The merge-queue circuit breaker (tools/ci/queue_breaker.py). While the
+      # PULP_QUEUE_BREAKER repository variable names a test failing on main,
+      # fail every merge group that carries neither its fix nor a trusted
+      # `queue-unblock` label, before any VM: a failed classify fails `macos`
+      # closed. It never skips a group (skipped reads as green). Like the HOLD
+      # check it runs the protected base branch's copy, and it fails open: a
+      # variable or group it cannot read lets the group proceed. On a pull
+      # request, PULP_QUEUE_BREAKER_CONTROL is judged report-only against the
+      # pull request itself, the positive control that the variable reaches here.
+      - name: Merge-queue circuit breaker
+        id: queue_breaker
+        if: ${{ github.event_name == 'merge_group' || github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.event.merge_group.base_ref || format('refs/heads/{0}', github.event.pull_request.base.ref) }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          QUEUE_BREAKER: ${{ github.event_name == 'merge_group' && vars.PULP_QUEUE_BREAKER || vars.PULP_QUEUE_BREAKER_CONTROL }}
+        run: |
+          set -uo pipefail
+          title="queue-breaker"
+          if [ -z "$QUEUE_BREAKER" ]; then
+            echo "queue breaker: unset; proceeding"
+            exit 0
+          fi
+          if ! git fetch --no-tags --depth=1 origin "$BASE_REF" 2>/dev/null ||
+             ! git cat-file -e "FETCH_HEAD:tools/ci/queue_breaker.py" 2>/dev/null; then
+            echo "::warning title=$title::queue breaker: no protected copy on $BASE_REF; proceeding (fails open)"
+            exit 0
+          fi
+          breaker=$(mktemp)
+          trap 'rm -f "$breaker"' EXIT
+          git show "FETCH_HEAD:tools/ci/queue_breaker.py" >"$breaker"
+          if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            GH_TOKEN="${{ github.token }}" python3 "$breaker" check-group \
+              --repo "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT" \
+              --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+          else
+            GH_TOKEN="${{ github.token }}" python3 "$breaker" check-group \
+              --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --report-only
+          fi
       - id: classify
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
         # a push diffs the tip it moved away from. `origin/main` is correct for
@@ -1251,6 +1294,36 @@ jobs:
             echo "ios_compile_required=$ios_compile_required"
             echo "agent_capability_installed_sdk_required=$agent_capability_installed_sdk_required"
           } >> "$GITHUB_OUTPUT"
+
+  # Tells each pull request in a group the circuit breaker failed why, once
+  # per breaker state. A job of its own so the comment-writing token never
+  # shares a job with a queue entry's code: it checks out only the protected
+  # base branch, without persisted credentials.
+  queue-breaker-notify:
+    needs: classify
+    if: ${{ always() && github.event_name == 'merge_group' && needs.classify.outputs.queue_breaker_blocked_prs != '' }}
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.merge_group.base_ref }}
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+      - name: Comment on the blocked pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUEUE_BREAKER: ${{ vars.PULP_QUEUE_BREAKER }}
+          BLOCKED_PRS: ${{ needs.classify.outputs.queue_breaker_blocked_prs }}
+          REASON: ${{ needs.classify.outputs.queue_breaker_reason }}
+        run: |
+          python3 tools/ci/queue_breaker.py notify --repo "$GITHUB_REPOSITORY" \
+            --prs "$BLOCKED_PRS" --reason "$REASON"
 
   protected-receipt-reuse:
     if: ${{ github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true') }}

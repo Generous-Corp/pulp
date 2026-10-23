@@ -600,6 +600,42 @@ cascade: attribute it with `queue_batch_attribute.py`, and check whether the
 landing batch that produced main's current tree reused a receipt (three steps,
 green, ran nothing) — if it did, main's tree has never been tested.
 
+### Main is red: set the merge-queue circuit breaker while the fix lands
+
+When a test fails on main itself, every group the queue forms inherits it and
+burns a gate VM. The agent opening the fix sets the breaker with one call
+(writing a repository variable needs repo admin, or an App token with
+Variables write):
+
+```bash
+until=$(date -u -v+3H +%Y-%m-%dT%H:%M:%SZ)   # GNU: date -u -d '+3 hours' ...
+ghapp api -X POST repos/Generous-Corp/pulp/actions/variables -f name=PULP_QUEUE_BREAKER \
+  -f value="{\"test\":\"<ctest name>\",\"fix_pr\":<fix-pr>,\"until\":\"$until\"}"
+# lift early, or after the fix lands if you set no fix_pr:
+ghapp api -X DELETE repos/Generous-Corp/pulp/actions/variables/PULP_QUEUE_BREAKER
+```
+
+While it is live, classify fails every merge group (`queue-breaker` error
+annotation, plus a comment on each pull request) that carries neither the fix
+nor a `queue-unblock` label. Gotchas:
+- Only reviewers and team-lead apply `queue-unblock`, and it counts only when
+  the fleet App or a repo admin/maintainer applied it last. The name is exact
+  and case-sensitive; tartci's queue tier reads the same string, so tell the
+  tartci owner before renaming it.
+- Set `fix_pr` to the base health detector's `candidate_fix_pr` (`shipyard
+  base-health --repo Generous-Corp/pulp`, or the `base-poison-signal`
+  artifact) when it names one, so the fix Shipyard would jump is the one the
+  breaker admits; a different `fix_pr` leaves the jumped fix blocked.
+- An `until` more than 3 h ahead is IGNORED, not clamped. Re-set it to extend.
+- The breaker lifts by itself once `fix_pr` merges; with no `fix_pr` it holds
+  until `until` or the delete.
+- It fails open: a malformed value or an unreadable group proceeds with a
+  notice. Read the classify log, not the absence of an error, to confirm it is
+  live. `PULP_QUEUE_BREAKER_CONTROL` (same JSON) is judged report-only on every
+  pull_request classify run, the positive control that the variable arrives.
+- Shipyard's steward does not yet know about it and may re-arm ejected pull
+  requests; each re-arm costs a classify run, not a VM.
+
 ### Main is red: land the fix first by jumping it to the head of the queue
 
 When `base_poison_detector.py` says `poisoned`, or the same failing test name

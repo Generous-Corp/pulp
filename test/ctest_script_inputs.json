@@ -8360,6 +8360,15 @@
    ],
    "kind": "python"
   },
+  "queue-breaker-selftest": {
+   "entry": "tools/ci/test_queue_breaker.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/queue_breaker.py",
+    "tools/ci/test_queue_breaker.py"
+   ],
+   "kind": "python"
+  },
   "rack-acid-behavior": {
    "entry": "tools/rack/test_acid_behavior.py",
    "inputs": [
