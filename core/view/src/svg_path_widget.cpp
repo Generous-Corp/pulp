@@ -925,9 +925,9 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
     }
     // An explicit SVG stroke style resolves unset parts to SVG's defaults
     // (butt, miter, limit 4). The canvas has no getter for its sticky stroke
-    // state, so the style is never left set: a solid stroke goes through
-    // stroke_path, which keeps it local to the draw, and a gradient stroke
-    // resets the canvas defaults after drawing.
+    // state and its save/restore does not stack it, so a styled stroke, solid
+    // or gradient, goes through stroke_path, which keeps the style local to the
+    // draw and applies the active stroke gradient.
     const bool styled = stroke_cap_ || stroke_join_ || stroke_miter_limit_;
     canvas::StrokeStyle style;
     style.width = stroke_width_;
@@ -947,19 +947,13 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
                                                   pg->colors.data(),
                                                   pg->positions.data(),
                                                   static_cast<int>(pg->colors.size()));
-                canvas.set_line_width(stroke_width_);
                 if (styled) {
-                    canvas.set_line_cap(style.cap);
-                    canvas.set_line_join(style.join);
-                    canvas.set_miter_limit(style.miter_limit);
+                    canvas.stroke_path(stroke_geometry(), style);
+                } else {
+                    canvas.set_line_width(stroke_width_);
+                    canvas.stroke_current_path();
                 }
-                canvas.stroke_current_path();
                 canvas.clear_stroke_gradient();
-                if (styled) {
-                    canvas.set_line_cap(canvas::LineCap::butt);
-                    canvas.set_line_join(canvas::LineJoin::miter);
-                    canvas.set_miter_limit(10.0f);
-                }
                 stroke_gradient_applied = true;
             }
         }
