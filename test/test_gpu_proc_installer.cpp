@@ -60,6 +60,7 @@ TEST_CASE("Dawn proc installer: the default runs once when two threads race",
         std::vector<std::thread> threads;
         for (int t = 0; t < 2; ++t) {
             threads.emplace_back([&] {
+                // unbounded-wait: allow the main thread sets go unconditionally right after spawning; no code under test publishes it
                 while (!go.load(std::memory_order_acquire)) {
                 }
                 if (registry.ensure(nullptr))
