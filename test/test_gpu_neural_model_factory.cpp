@@ -207,12 +207,19 @@ TEST_CASE("a WaveNet model with a GPU session reports its real path",
                                     .dilation = 1,
                                     .tanh_activation = true};
     std::array<float, 9> weights{};
+    // The serialized blob ends with the head scale, which the provider checks
+    // against the descriptor's (1.0). An all-zero blob is refused on every
+    // host, which would leave the probe below proving nothing.
+    weights.back() = 1.0f;
     const GpuWaveNetSession::Config session{.descriptor = {.block_size = kBlock,
                                                            .sample_rate = 48000,
                                                            .stream_instances = 1,
                                                            .layers = {&layer, 1},
                                                            .weight_count = weights.size()},
                                             .weights = weights};
+    INFO("descriptor error " << static_cast<int>(
+             validate_gpu_wavenet_descriptor(session.descriptor).error));
+    REQUIRE(validate_gpu_wavenet_descriptor(session.descriptor).accepted());
     auto request = request_for(NeuralFamily::WaveNet, kernels);
     request.wavenet_gpu = &session;
     auto result = make_gpu_neural_model(request);
@@ -231,6 +238,17 @@ TEST_CASE("a WaveNet model with a GPU session reports its real path",
         CHECK(status.provider == GpuAudioProvider::Dawn);
         CHECK(status.provider_state == GpuAudioProviderState::Ready);
     } else {
+        // Degraded is right only on a host that cannot create the session. If
+        // the session creates here, the factory's GPU path is broken and this
+        // branch must not pass on its own.
+        const auto probe = GpuWaveNetSession::create(session);
+        CHECK_FALSE(static_cast<bool>(probe));
+        // ...and it must fail for want of a provider, not because this test's
+        // session is malformed, or the probe would prove nothing.
+        INFO("GpuWaveNetSession::create error " << static_cast<int>(probe.error));
+        CHECK((probe.error == GpuWaveNetSessionError::ProviderUnavailable ||
+               probe.error == GpuWaveNetSessionError::ProgramUnavailable ||
+               probe.error == GpuWaveNetSessionError::PreparationFailed));
         // No provider here: the CPU model plays, reported Degraded with why.
         CHECK(status.provider == GpuAudioProvider::Cpu);
         CHECK(status.provider_state == GpuAudioProviderState::Degraded);
