@@ -294,8 +294,12 @@ const unsigned char kEmbeddedScript[] = "createLabel('embedded-editor', 'ok', ''
 const unsigned char kEmbeddedTheme[] = R"({"colors":{"bg.primary":"#00ff00"}})";
 
 constexpr pulp::format::EmbeddedEditorUi make_embedded(int priority, const char* name = "ui.js") {
-    return {name, kEmbeddedScript, sizeof(kEmbeddedScript) - 1,
-            kEmbeddedTheme, sizeof(kEmbeddedTheme) - 1, priority};
+    return {name,
+            kEmbeddedScript,
+            sizeof(kEmbeddedScript) - 1,
+            kEmbeddedTheme,
+            sizeof(kEmbeddedTheme) - 1,
+            priority};
 }
 
 // Leaves the process without a registered embedded editor on exit, so the
@@ -304,7 +308,9 @@ struct ScopedEmbeddedEditorUi {
     explicit ScopedEmbeddedEditorUi(const pulp::format::EmbeddedEditorUi* ui) {
         pulp::format::register_embedded_editor_ui(ui);
     }
-    ~ScopedEmbeddedEditorUi() { pulp::format::register_embedded_editor_ui(nullptr); }
+    ~ScopedEmbeddedEditorUi() {
+        pulp::format::register_embedded_editor_ui(nullptr);
+    }
 };
 
 std::filesystem::path write_temp_script(const char* stem) {

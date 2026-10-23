@@ -78,20 +78,21 @@ struct EditorUiSource {
 /// edit-and-see loop keeps reading the file the build points at while a
 /// shipped image never depends on the developer's source tree. Without an
 /// embedded script the path is used as before.
-inline EditorUiSource select_editor_ui_source(
-    const EmbeddedEditorUi* embedded,
-    const std::optional<std::filesystem::path>& dev_script_path,
-    bool enable_hot_reload) {
+inline EditorUiSource
+select_editor_ui_source(const EmbeddedEditorUi* embedded,
+                        const std::optional<std::filesystem::path>& dev_script_path,
+                        bool enable_hot_reload) {
     EditorUiSource source;
     // The dev-build profile gate wraps this decision once it lands: a
     // release-profile build then compiles in no path for this to honor.
     const bool dev_file_present = [&] {
-        if (!dev_script_path || dev_script_path->empty()) return false;
+        if (!dev_script_path || dev_script_path->empty())
+            return false;
         std::error_code ec;
         return std::filesystem::is_regular_file(*dev_script_path, ec) && !ec;
     }();
-    if (embedded != nullptr && embedded->script != nullptr && embedded->script_size > 0
-        && !(enable_hot_reload && dev_file_present)) {
+    if (embedded != nullptr && embedded->script != nullptr && embedded->script_size > 0 &&
+        !(enable_hot_reload && dev_file_present)) {
         source.script_source.assign(reinterpret_cast<const char*>(embedded->script),
                                     embedded->script_size);
         if (embedded->theme != nullptr && embedded->theme_size > 0)
@@ -100,7 +101,8 @@ inline EditorUiSource select_editor_ui_source(
         source.script_name = embedded->script_name ? embedded->script_name : "ui.js";
         return source;
     }
-    if (dev_script_path) source.script_path = *dev_script_path;
+    if (dev_script_path)
+        source.script_path = *dev_script_path;
     return source;
 }
 
@@ -132,8 +134,8 @@ inline std::vector<std::filesystem::path> configured_ui_asset_roots() {
 inline EditorUiInstance build_editor_ui_with_value_channel_access(
     state::StateStore& store, bool enable_hot_reload, std::string* error,
     view::ValueChannelAccess value_channel_access) {
-    auto source = select_editor_ui_source(
-        embedded_editor_ui(), configured_ui_script_path(), enable_hot_reload);
+    auto source = select_editor_ui_source(embedded_editor_ui(), configured_ui_script_path(),
+                                          enable_hot_reload);
     if (source.available()) {
         auto root = std::make_unique<view::View>();
         root->set_theme(view::Theme::dark());
@@ -167,12 +169,13 @@ inline EditorUiInstance build_editor_ui_with_value_channel_access(
         // fallback goes INTO the root instead of replacing it.
         if (view::ScopedDeferredDocumentLoad::active()) {
             scripted_ui->set_document_loaded_callback(
-                [root_ptr = root.get(), &store, label = source.label()](
-                    bool loaded, const std::string& load_error) {
-                    if (loaded) return;
-                    runtime::log_error(
-                        "Scripted editor UI failed to load from '{}': {}. "
-                        "Falling back to AutoUi.", label, load_error);
+                [root_ptr = root.get(), &store,
+                 label = source.label()](bool loaded, const std::string& load_error) {
+                    if (loaded)
+                        return;
+                    runtime::log_error("Scripted editor UI failed to load from '{}': {}. "
+                                       "Falling back to AutoUi.",
+                                       label, load_error);
                     if (auto fallback = view::AutoUi::build(store))
                         root_ptr->add_child(std::move(fallback));
                 });
@@ -183,8 +186,9 @@ inline EditorUiInstance build_editor_ui_with_value_channel_access(
             return {std::move(root), std::move(scripted_ui), true};
         }
 
-        runtime::log_error("Scripted editor UI failed to load from '{}': {}. Falling back to AutoUi.",
-                           source.label(), load_error);
+        runtime::log_error(
+            "Scripted editor UI failed to load from '{}': {}. Falling back to AutoUi.",
+            source.label(), load_error);
         if (error && error->empty()) {
             *error = load_error;
         }

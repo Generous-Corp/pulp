@@ -15,8 +15,7 @@ std::string create_standalone_configure_command(const fs::path& source_dir,
            " -DCMAKE_BUILD_TYPE=" + shell_quote(create_build_config(debug_build)) +
            // A scaffolded project is the developer loop: compile the on-disk
            // ui.js hot-reload path in (see configure_defaults.hpp).
-           " -DPULP_DEV_BUILD=ON" +
-           " -DCMAKE_PREFIX_PATH=" + shell_quote(sdk_dir);
+           " -DPULP_DEV_BUILD=ON" + " -DCMAKE_PREFIX_PATH=" + shell_quote(sdk_dir);
 }
 
 std::string create_standalone_ctest_command(const fs::path& build_dir,

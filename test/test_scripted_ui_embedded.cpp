@@ -1,5 +1,5 @@
-#include <catch2/catch_test_macros.hpp>
 #include "support/unique_temp_dir.hpp"
+#include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
 #include <pulp/view/scripted_ui.hpp>
@@ -54,8 +54,7 @@ TEST_CASE("ScriptedUiSession loads an embedded script source without a file",
     REQUIRE(label_text(session, "embedded-status") == "ok");
 }
 
-TEST_CASE("an embedded session refuses to load an empty source",
-          "[view][scripted-ui][embedded]") {
+TEST_CASE("an embedded session refuses to load an empty source", "[view][scripted-ui][embedded]") {
     View root;
     root.set_bounds({0, 0, 320, 240});
     StateStore store;
@@ -98,10 +97,9 @@ TEST_CASE("an embedded session with hot reload enabled creates no file watcher",
         const auto temp_dir = pulp::test::make_unique_temp_dir("pulp-scripted-embed-control");
         const auto script_path = temp_dir / "main.js";
         write_text(script_path, "createLabel('s', 'file', '');");
-        ScriptedUiSession session(root, store,
-                                  {.script_path = script_path,
-                                   .enable_hot_reload = true,
-                                   .enable_theme_reload = false});
+        ScriptedUiSession session(
+            root, store,
+            {.script_path = script_path, .enable_hot_reload = true, .enable_theme_reload = false});
         std::string error;
         REQUIRE(session.load(&error));
         REQUIRE(error.empty());
@@ -180,10 +178,9 @@ TEST_CASE("reload_from an empty path fails closed without an embedded source",
     View root;
     root.set_bounds({0, 0, 320, 240});
     StateStore store;
-    ScriptedUiSession session(root, store,
-                              {.script_path = script_path,
-                               .enable_hot_reload = false,
-                               .enable_theme_reload = false});
+    ScriptedUiSession session(
+        root, store,
+        {.script_path = script_path, .enable_hot_reload = false, .enable_theme_reload = false});
     std::string error;
     REQUIRE(session.load(&error));
     REQUIRE_FALSE(session.reload_from(fs::path{}, &error));

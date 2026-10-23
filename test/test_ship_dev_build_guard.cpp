@@ -29,7 +29,7 @@ void write_cache(const fs::path& build_dir, const std::string& text) {
     f << text;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("a cache recording PULP_DEV_BUILD=ON is a dev build", "[ship][dev-build]") {
     auto build = unique_dir("on");

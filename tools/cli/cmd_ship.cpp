@@ -103,7 +103,8 @@ static int print_ship_help() {
     std::cout << "             --version 1.0.0\n";
     std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";
     std::cout << "             --allow-tracing  (override the guard that refuses a PULP_TRACING=ON build)\n";
-    std::cout << "             --allow-dev-build  (override the guard that refuses a PULP_DEV_BUILD=ON build; sign honors it too)\n";
+    std::cout << "             --allow-dev-build  (override the guard that refuses a "
+                 "PULP_DEV_BUILD=ON build; sign honors it too)\n";
     std::cout << "             --ship-inspector  (acknowledge an exactly declared inspector endpoint)\n";
     std::cout << "             --ship-inspector-runtime-eval  (separate unsafe-eval acknowledgement)\n";
     std::cout << "             --json  (emit inspector capability evidence)\n";
@@ -230,20 +231,20 @@ static int enforce_no_tracing(const std::vector<fs::path>& roots,
 // artifact would name, and read from, the developer's source tree. Returns 0
 // when the build dir is not a dev build or `allow_dev_build` overrides.
 static int enforce_no_dev_build(const fs::path& build_dir, bool allow_dev_build) {
-    if (!pulp::cli::build_dir_is_dev_build(build_dir)) return 0;
+    if (!pulp::cli::build_dir_is_dev_build(build_dir))
+        return 0;
     if (allow_dev_build) {
         std::cerr << "⚠︎  pulp ship: " << build_dir.string()
                   << " was configured with PULP_DEV_BUILD=ON — proceeding because "
                      "--allow-dev-build was passed.\n";
         return 0;
     }
-    std::cerr
-        << "Error: refusing to ship a build configured with PULP_DEV_BUILD=ON.\n"
-        << "  Build dir: " << build_dir.string() << "\n"
-        << "  A dev build compiles the on-disk ui.js hot-reload path (and the\n"
-        << "  theme / asset-root source paths) into the artifact. Reconfigure\n"
-        << "  with `cmake -B " << build_dir.string() << " -DPULP_DEV_BUILD=OFF`,\n"
-        << "  rebuild, and re-run; or pass --allow-dev-build to override deliberately.\n";
+    std::cerr << "Error: refusing to ship a build configured with PULP_DEV_BUILD=ON.\n"
+              << "  Build dir: " << build_dir.string() << "\n"
+              << "  A dev build compiles the on-disk ui.js hot-reload path (and the\n"
+              << "  theme / asset-root source paths) into the artifact. Reconfigure\n"
+              << "  with `cmake -B " << build_dir.string() << " -DPULP_DEV_BUILD=OFF`,\n"
+              << "  rebuild, and re-run; or pass --allow-dev-build to override deliberately.\n";
     return 1;
 }
 
@@ -338,7 +339,7 @@ static int ship_sign(const std::vector<std::string>& args,
         std::string sign_path;  // --path: sign one explicit desktop artifact (not .pkg)
         std::string entitlements = default_entitlements(root).string();
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
-        bool allow_dev_build = false;  // override the PULP_DEV_BUILD ship guard
+        bool allow_dev_build = false; // override the PULP_DEV_BUILD ship guard
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--identity") {
                 if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
@@ -606,7 +607,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
         std::string icon_path;     // Linux AppImage: optional .png icon
         bool per_user = false, apk_only = false, aab_only = false;
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
-        bool allow_dev_build = false;  // override the PULP_DEV_BUILD ship guard
+        bool allow_dev_build = false; // override the PULP_DEV_BUILD ship guard
         bool ship_inspector = false;
         bool ship_inspector_runtime_eval = false;
         // macOS packaging. DEFAULT: one component-selectable installer — a single
@@ -660,7 +661,8 @@ static int ship_package_impl(const std::vector<std::string>& args,
             else if (args[i] == "--dmg") want_dmg = true;
             else if (args[i] == "--separate") want_separate = true;
             else if (args[i] == "--allow-tracing") allow_tracing = true;
-            else if (args[i] == "--allow-dev-build") allow_dev_build = true;
+            else if (args[i] == "--allow-dev-build")
+                allow_dev_build = true;
             else if (args[i] == "--ship-inspector") ship_inspector = true;
             else if (args[i] == "--ship-inspector-runtime-eval")
                 ship_inspector_runtime_eval = true;

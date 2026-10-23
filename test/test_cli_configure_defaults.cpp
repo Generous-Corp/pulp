@@ -30,9 +30,9 @@ TEST_CASE("fresh source configure pins Ninja, Release, and examples off",
     ConfigureDefaults in;
     in.ninja_available = true;
     in.source_checkout = true;
-    REQUIRE(configure_default_args(in)
-            == std::vector<std::string>{"-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
-                                        "-DPULP_BUILD_EXAMPLES=OFF", "-DPULP_DEV_BUILD=ON"});
+    REQUIRE(configure_default_args(in) ==
+            std::vector<std::string>{"-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
+                                     "-DPULP_BUILD_EXAMPLES=OFF", "-DPULP_DEV_BUILD=ON"});
 }
 
 TEST_CASE("the developer loop compiles the dev build in; a recorded value is kept",
@@ -44,8 +44,7 @@ TEST_CASE("the developer loop compiles the dev build in; a recorded value is kep
     // A cache from before the option existed is healed on its next configure.
     ConfigureDefaults unrecorded;
     unrecorded.existing_cache = "CMAKE_BUILD_TYPE:STRING=Release\n";
-    REQUIRE(configure_default_args(unrecorded)
-            == std::vector<std::string>{"-DPULP_DEV_BUILD=ON"});
+    REQUIRE(configure_default_args(unrecorded) == std::vector<std::string>{"-DPULP_DEV_BUILD=ON"});
 
     // A deliberate OFF (the shippable configure) is never flipped back.
     ConfigureDefaults off;

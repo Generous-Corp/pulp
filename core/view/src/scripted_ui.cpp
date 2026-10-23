@@ -96,37 +96,36 @@ void load_script_before_deadline(WidgetBridge& bridge, ScriptEngine& engine,
 
 } // namespace
 
-ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, ScriptedUiOptions options)
-    : identity_(next_scripted_ui_identity.fetch_add(1, std::memory_order_relaxed) + 1)
-    , root_(root)
-    , store_(store)
-    , script_path_(options.script_source.empty() ? std::move(options.script_path)
-                                                 : std::filesystem::path{})
-    // An embedded source has no sibling directory to look in: a theme.json
-    // relative to the process's working directory is not the plug-in's.
-    , theme_path_(!options.theme_path.empty() ? std::move(options.theme_path)
+ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store,
+                                     ScriptedUiOptions options)
+    : identity_(next_scripted_ui_identity.fetch_add(1, std::memory_order_relaxed) + 1), root_(root),
+      store_(store), script_path_(options.script_source.empty() ? std::move(options.script_path)
+                                                                : std::filesystem::path{})
+      // An embedded source has no sibling directory to look in: a theme.json
+      // relative to the process's working directory is not the plug-in's.
+      ,
+      theme_path_(!options.theme_path.empty() ? std::move(options.theme_path)
                   : script_path_.empty()      ? std::filesystem::path{}
-                                              : script_path_.parent_path() / "theme.json")
-    , script_source_(std::move(options.script_source))
-    , theme_source_(std::move(options.theme_source))
-    // An in-memory source given alongside a path keeps the path's file name as
-    // its label; the path itself is not read.
-    , script_name_(options.script_name.empty() && !options.script_path.empty()
+                                              : script_path_.parent_path() / "theme.json"),
+      script_source_(std::move(options.script_source)),
+      theme_source_(std::move(options.theme_source))
+      // An in-memory source given alongside a path keeps the path's file name as
+      // its label; the path itself is not read.
+      ,
+      script_name_(options.script_name.empty() && !options.script_path.empty()
                        ? options.script_path.filename().string()
-                       : std::move(options.script_name))
-    , asset_roots_(std::move(options.asset_roots))
-    , granted_capabilities_(options.granted_capabilities)
-    , hot_reload_enabled_(options.enable_hot_reload)
-    , theme_reload_enabled_(options.enable_theme_reload)
-    , runtime_import_enabled_(options.enable_runtime_import)
-    , value_channel_access_(
+                       : std::move(options.script_name)),
+      asset_roots_(std::move(options.asset_roots)),
+      granted_capabilities_(options.granted_capabilities),
+      hot_reload_enabled_(options.enable_hot_reload),
+      theme_reload_enabled_(options.enable_theme_reload),
+      runtime_import_enabled_(options.enable_runtime_import),
+      value_channel_access_(
           options.value_channel_access
               ? std::move(options.value_channel_access)
-              : ValueChannelAccess{
-                    [channels = options.value_channels](
-                        const ValueChannelVisitor& visitor) { visitor(channels); }})
-    , log_callback_(default_log_callback())
-{
+              : ValueChannelAccess{[channels = options.value_channels](
+                                       const ValueChannelVisitor& visitor) { visitor(channels); }}),
+      log_callback_(default_log_callback()) {
     if (const auto make_port = script_inspector_port_factory()) {
         inspector_port_ = make_port();
         if (inspector_port_)
@@ -293,12 +292,11 @@ bool ScriptedUiSession::load(std::string* error) {
     if (elapsed_ms >= kBlockingLoadWarningMs) {
         static std::once_flag warned;
         std::call_once(warned, [&] {
-            runtime::log_warn(
-                "Scripted UI '{}' evaluated its document inside the host's "
-                "view-creation call ({:.0f} ms); the host shows no editor until "
-                "it returns. Call load_deferrable() and do post-load work in "
-                "set_document_loaded_callback() to return the view first.",
-                script_label(), elapsed_ms);
+            runtime::log_warn("Scripted UI '{}' evaluated its document inside the host's "
+                              "view-creation call ({:.0f} ms); the host shows no editor until "
+                              "it returns. Call load_deferrable() and do post-load work in "
+                              "set_document_loaded_callback() to return the view first.",
+                              script_label(), elapsed_ms);
         });
     }
     return loaded;
@@ -315,14 +313,16 @@ bool ScriptedUiSession::load_deferrable(std::string* error) {
         // a caller's fallback (AutoUi) still runs for the cheap error.
         if (uses_embedded_source()) {
             if (script_source_.empty()) {
-                if (error) *error = "embedded script source is empty: " + script_label();
+                if (error)
+                    *error = "embedded script source is empty: " + script_label();
                 return false;
             }
         } else {
             std::error_code ec;
-            if (!std::filesystem::is_regular_file(script_path_, ec)
-                || std::filesystem::file_size(script_path_, ec) == 0 || ec) {
-                if (error) *error = "could not read script file: " + script_path_.string();
+            if (!std::filesystem::is_regular_file(script_path_, ec) ||
+                std::filesystem::file_size(script_path_, ec) == 0 || ec) {
+                if (error)
+                    *error = "could not read script file: " + script_path_.string();
                 return false;
             }
         }
@@ -419,7 +419,8 @@ bool ScriptedUiSession::reload(std::string* error) {
     // A reload before the deferred first load ran is that first load.
     if (document_load_pending_) return load_now(error);
     auto code = current_script_code(error);
-    if (code.empty()) return false;
+    if (code.empty())
+        return false;
     // preserve_state=true: keep widget values across the rebuild; rebuild_from_code
     // probes the new code on a throwaway tree first, so a bad reload leaves the
     // current UI intact.
@@ -428,19 +429,21 @@ bool ScriptedUiSession::reload(std::string* error) {
 
 bool ScriptedUiSession::reload_from(std::filesystem::path script_path, std::string* error) {
     if (script_path.empty() && script_source_.empty()) {
-        if (error) *error = "reload_from: no script path and no embedded script source";
+        if (error)
+            *error = "reload_from: no script path and no embedded script source";
         return false;
     }
     script_path_ = std::move(script_path);
-    theme_path_ = script_path_.empty() ? std::filesystem::path{}
-                                       : script_path_.parent_path() / "theme.json";
+    theme_path_ =
+        script_path_.empty() ? std::filesystem::path{} : script_path_.parent_path() / "theme.json";
     last_theme_exists_ = !theme_path_.empty() && std::filesystem::exists(theme_path_);
     last_theme_write_time_ = last_theme_exists_ ? safe_last_write_time(theme_path_) : std::nullopt;
     return reload(error);
 }
 
 std::string ScriptedUiSession::script_label() const {
-    if (!script_path_.empty()) return script_path_.string();
+    if (!script_path_.empty())
+        return script_path_.string();
     return script_name_.empty() ? std::string{"<embedded script>"} : script_name_;
 }
 
@@ -468,8 +471,8 @@ bool ScriptedUiSession::poll(std::string* error) {
         }
         std::string load_error;
         if (!load_now(&load_error)) {
-            runtime::log_error("Scripted UI document failed to load from '{}': {}",
-                               script_label(), load_error);
+            runtime::log_error("Scripted UI document failed to load from '{}': {}", script_label(),
+                               load_error);
             if (error) *error = load_error;
             return false;
         }
@@ -584,9 +587,8 @@ bool ScriptedUiSession::poll(std::string* error) {
 std::string ScriptedUiSession::reset_after_runtime_evaluation(
     ScriptInspectorPort::EvaluationDeadline deadline) {
     std::string reset_error;
-    if (!last_good_code_.empty()
-        && rebuild_from_code(
-            last_good_code_, last_good_script_path_, true, &reset_error, deadline)) {
+    if (!last_good_code_.empty() &&
+        rebuild_from_code(last_good_code_, last_good_script_path_, true, &reset_error, deadline)) {
         post_evaluation_reset_callback_pending_ = true;
         return {};
     }
@@ -969,14 +971,15 @@ bool ScriptedUiSession::resolve_theme_override(
         }
     } else {
         if (!std::filesystem::exists(theme_path_)) {
-            out_merged = base;          // no override file → the base theme as-is
+            out_merged = base; // no override file → the base theme as-is
             out_exists = false;
             out_write_time.reset();
             return true;
         }
         json = read_text_file(theme_path_);
         if (json.empty()) {
-            if (error) *error = "could not read theme file: " + theme_path_.string();
+            if (error)
+                *error = "could not read theme file: " + theme_path_.string();
             return false;
         }
     }

@@ -23,7 +23,8 @@ namespace pulp::cli {
 inline bool cmake_cache_flag_on(std::string_view value) {
     std::string upper;
     upper.reserve(value.size());
-    for (char c : value) upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    for (char c : value)
+        upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
     return upper == "ON" || upper == "TRUE" || upper == "YES" || upper == "Y" || upper == "1";
 }
 
@@ -31,7 +32,8 @@ inline bool cmake_cache_flag_on(std::string_view value) {
 // no cache or the cache never recorded the option.
 inline std::optional<std::string> dev_build_cache_value(const std::filesystem::path& build_dir) {
     const auto cache = read_cmake_cache(build_dir);
-    if (!cache) return std::nullopt;
+    if (!cache)
+        return std::nullopt;
     return cmake_cache_value(*cache, kDevBuildCacheName);
 }
 
@@ -42,4 +44,4 @@ inline bool build_dir_is_dev_build(const std::filesystem::path& build_dir) {
     return value && cmake_cache_flag_on(*value);
 }
 
-}  // namespace pulp::cli
+} // namespace pulp::cli

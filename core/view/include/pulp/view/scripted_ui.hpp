@@ -295,7 +295,9 @@ public:
     const std::filesystem::path& theme_path() const { return theme_path_; }
     /// True when the document comes from `ScriptedUiOptions::script_source`
     /// rather than a file on disk.
-    bool uses_embedded_source() const noexcept { return script_path_.empty(); }
+    bool uses_embedded_source() const noexcept {
+        return script_path_.empty();
+    }
     /// What log lines call this document: the script path, or the embedded
     /// script's name.
     std::string script_label() const;
@@ -303,7 +305,9 @@ public:
     /// True once a loaded session owns a file watcher. Stays false for an
     /// embedded source, which has no file to watch, even with
     /// `enable_hot_reload`.
-    bool hot_reload_watching() const noexcept { return reloader_ != nullptr; }
+    bool hot_reload_watching() const noexcept {
+        return reloader_ != nullptr;
+    }
     bool hot_reload_pending() const {
         return reloader_ && reloader_->has_pending_reload();
     }
