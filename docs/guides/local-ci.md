@@ -2206,7 +2206,40 @@ expected versions (exit 3), becomes a warning annotation, never a failed step.
 The build legs also set `RUSTUP_AUTO_INSTALL=0`: a rustup proxy would
 otherwise download, mid-build, whatever toolchain `rust-toolchain.toml` names
 when the runner lacks it. With it off, a missing toolchain fails the cargo step
-by name, and the image or the resolve step has to provide it.
+by name, and the image or the resolve step has to provide it. The
+"Provide the pinned Rust toolchain" step is that resolve step:
+`tools/ci/provide_pinned_rust.sh --fallback-to-default` runs before configure
+and logs which branch it took as `rust: branch=<name>`:
+
+- `present`: the image has the exact Rust the generated
+  `experimental/pulp-rs/rust-toolchain.toml` names, with its components and
+  targets. Nothing to do; the steady state once the golden bakes the pin by
+  name.
+- `stable-alias`: the image's `stable` is that same release with every pinned
+  part, so the job selects it by name (`RUSTUP_TOOLCHAIN=stable`) with no
+  download. rustup refuses to `toolchain link` an official release name, so
+  this is how an identical `stable` stands in for it.
+- `install`: rustup downloads the pin, before the build, with three spaced
+  retries.
+- `fallback`: the download failed on a GitHub-hosted leg. The step warns,
+  naming both versions, writes a step summary line, uploads its receipt as the
+  `rust-toolchain-fallback-<leg>` artifact, and sets `RUSTUP_TOOLCHAIN=stable`
+  (or the runner default) for the rest of the job.
+
+Every branch writes a JSON receipt (`$RUNNER_TEMP/pulp-rust-toolchain.json`:
+pinned, branch, toolchain, rustc, reason, attempts) and the step outputs
+`branch` and `receipt`. The fallback is refused, and the step fails, on a
+self-hosted leg (the required gate's VMs) and on a pull request that changes
+`experimental/pulp-rs`. The gate VMs reach the network through a proxy that
+refuses `static.rust-lang.org`, so they can never download the pin: their
+images must carry it by name (`present`) or as an identical `stable`
+(`stable-alias`), and a gate log showing `install` means the golden drifted.
+When tartci bakes the pin by name into the live golden, the next change
+removes `--fallback-to-default` from `build.yml` and every leg fails closed
+(decisions contract row 29). A cargo without rustup (Homebrew Rust) ignores
+`rust-toolchain.toml`; the step warns and receipts it as `no-rustup`. The
+release lanes (`release-cli.yml`, `release-path-pr-gate.yml`) run the same
+script without the fallback.
 
 ## Build-time Node dependencies are installed before the build, never inside it
 

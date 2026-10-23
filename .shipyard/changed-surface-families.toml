@@ -7630,6 +7630,7 @@ tests = [
   "timeline-sync-soak-verifier-self-test",
   "tmp-leak-guard-selftest",
   "tool-registry-reminder-hook",
+  "toolchain-host_sync-selftest",
   "tools-registry-check",
   "tools-registry-check-selftest",
   "trace-span-category-lint",

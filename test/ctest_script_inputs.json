@@ -12276,6 +12276,23 @@
    ],
    "kind": "python"
   },
+  "toolchain-host_sync-selftest": {
+   "entry": "tools/toolchain/test_host_sync.py",
+   "inputs": [
+    ".githooks/post-checkout",
+    ".github/workflows",
+    ".github/workflows/build.yml",
+    "experimental/pulp-rs",
+    "experimental/pulp-rs/rust-toolchain.toml",
+    "tools/ci",
+    "tools/ci/provide_pinned_rust.sh",
+    "tools/toolchain/check_env.py",
+    "tools/toolchain/expected.json",
+    "tools/toolchain/host_sync.py",
+    "tools/toolchain/test_host_sync.py"
+   ],
+   "kind": "python"
+  },
   "toolchain-mise_golden_layer-selftest": {
    "entry": "tools/ci/test_mise_golden_layer.py",
    "inputs": [
@@ -12300,6 +12317,7 @@
   "toolchain-test_generate-selftest": {
    "entry": "tools/toolchain/test_generate.py",
    "inputs": [
+    "experimental/pulp-rs/rust-toolchain.toml",
     "tools/cmake",
     "tools/deps/manifest.json",
     "tools/shipyard.toml",
@@ -12317,6 +12335,7 @@
    "entry": "tools/toolchain/test_update.py",
    "inputs": [
     "experimental/pulp-rs",
+    "experimental/pulp-rs/rust-toolchain.toml",
     "tools/shipyard.toml",
     "tools/toolchain",
     "tools/toolchain/check_env.py",

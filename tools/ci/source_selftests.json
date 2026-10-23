@@ -1059,6 +1059,12 @@
       ]
     },
     {
+      "name": "toolchain-host_sync-selftest",
+      "argv": [
+        "{repo}/tools/toolchain/test_host_sync.py"
+      ]
+    },
+    {
       "name": "toolchain-mise_golden_layer-selftest",
       "argv": [
         "{repo}/tools/ci/test_mise_golden_layer.py"

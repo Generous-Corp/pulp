@@ -33,8 +33,9 @@ class GenerateTests(unittest.TestCase):
         (root / ".shipyard/vm-image.intel.toml").write_text(body, encoding="utf-8")
         for name in (
             generate.MISE_CONFIG, generate.MISE_TOOLS_CONFIG, generate.MISE_LOCK, generate.EXPECTED,
-            generate.SHIPYARD_PIN, generate.SHIPYARD_SUMS,
+            generate.SHIPYARD_PIN, generate.SHIPYARD_SUMS, generate.RUST_TOOLCHAIN,
         ):
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_bytes((REPO / name).read_bytes())
 
     def test_five_runs_are_byte_identical(self) -> None:
@@ -245,6 +246,42 @@ class StrictPinTests(unittest.TestCase):
             path = root / generate.EXPECTED
             path.write_text(path.read_text(encoding="utf-8").replace('"cmake": "4.3.3"', '"cmake": "4.4.3"'), encoding="utf-8")
             self.assert_check_refuses(root, "stale or hand-edited")
+
+    def test_hand_edited_rust_toolchain_refuses(self) -> None:
+        # rustup reads this file, so a floating channel typed back into it
+        # would let every host build with its own `stable` again.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            generate.generate(root, None, True)  # control: the copy is current
+            path = root / generate.RUST_TOOLCHAIN
+            path.write_text(path.read_text(encoding="utf-8").replace('channel = "1.', 'channel = "stable" # 1.'), encoding="utf-8")
+            self.assert_check_refuses(root, "rust-toolchain.toml: differs from tools/toolchain/manifest.toml")
+
+    def test_rust_toolchain_pins_the_manifest_rust_exactly(self) -> None:
+        data, _ = generate.load()
+        tc = data["toolchain"]
+        pinned = tomllib.loads((REPO / generate.RUST_TOOLCHAIN).read_text(encoding="utf-8"))["toolchain"]
+        self.assertEqual(tc["rust"], pinned["channel"])
+        self.assertRegex(pinned["channel"], generate.EXACT)
+        self.assertEqual(tc["rust_components"], pinned["components"])
+        self.assertEqual(tc["rust_targets"], pinned["targets"])
+        self.assertEqual("minimal", pinned["profile"])
+        expected = json.loads((REPO / generate.EXPECTED).read_text(encoding="utf-8"))
+        self.assertEqual(tc["rust_components"], expected["rust_components"])
+        self.assertEqual(tc["rust_targets"], expected["rust_targets"])
+
+    def test_a_rust_bump_moves_the_toolchain_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            manifest = self.manifest(root)
+            manifest.write_text(re.sub(r'(?m)^rust = "[^"]*"', 'rust = "1.98.0"', manifest.read_text(encoding="utf-8"), count=1), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                generate.update_rust_toolchain(root / generate.RUST_TOOLCHAIN, generate.load(manifest)[0], True)
+            generate.generate(root, None, False)
+            self.assertIn('channel = "1.98.0"', (root / generate.RUST_TOOLCHAIN).read_text(encoding="utf-8"))
+            generate.generate(root, None, True)
 
     def test_expectation_carries_the_checked_pins(self) -> None:
         import json
