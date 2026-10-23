@@ -6985,17 +6985,20 @@ stroke IS there. Both consumers already understand the literal string `none`
 clear), so emit it. Found by looking at the render; no IR-level assertion could
 have caught it.
 
-**Stroke style reaches the IR from AUTHORED declarations, so a stylesheet-set
-cap is still invisible.** `stroke-linecap`, `stroke-linejoin`,
-`stroke-miterlimit` and `stroke-dashoffset` are not in the captured property
-list, so `svg_shape_lowering.cpp` resolves them from inline `style` and
-presentation attributes up the ancestor chain (Lucide declares them once on the
-root `<svg>`, so reading only the shape gets every Lucide icon wrong). That
-covers the attribute idiom icon sets use; a `.icon path { stroke-linecap:
-round }` rule stays butt until the property is collected, after which the
-computed value wins automatically (`has_property`). Two traps when consuming
-the attributes: the canvas miter limit defaults to 10 where SVG's is 4, which
-is why `svg_stroke_miterlimit` is always written under a miter join; and a
+**Stroke style: Chromium's computed value first, then authored declarations.**
+`stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit` and
+`stroke-dashoffset` are in the captured property list, so a stylesheet-set cap
+(`.icon path { stroke-linecap: round }`) arrives as computed style and wins
+(`has_property`). An older capture without them still resolves inline `style`
+and presentation attributes up the ancestor chain (Lucide declares them once on
+the root `<svg>`, so reading only the shape gets every Lucide icon wrong).
+Paint consumes them through `svg_stroke_style_attributes()`
+(`design_import_svg_stroke.hpp`) in both the native lane and the baked C++
+lane; `SvgPathWidget::set_stroke_cap` / `_join` / `_miter_limit` keep the style
+local to the draw, because the canvas has no getter to restore its sticky
+stroke state. The JS bridge has no stroke-style setter yet. Two traps when
+consuming the attributes: the canvas miter limit defaults to 10 where SVG's is
+4, which is why `svg_stroke_miterlimit` is always written under a miter join; and a
 shape's own `opacity` is already folded into `svg_fill`/`svg_stroke` alpha
 (multiplied into an `rgba()` alpha, never replacing it), so applying it again
 in paint double-dims the icon. A shape with BOTH paints and an opacity refuses
@@ -7049,11 +7052,9 @@ wrote a newline between them, which a literal `== "xMidYMid meet"` reads as a
 third unknown value and refuses. Per SVG, `meetOrSlice` is ignored once the
 alignment is `none`, so `none`, `none meet` and `none slice` are one mapping.
 
-**Not carried, and not refused:** `stroke-linecap`, `stroke-linejoin` and the
-miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick
-stroke renders with butt caps. Measured on a 1.8-unit stroke this moved ink
-coverage by <1%, which is why it is accepted rather than sent to the fallback —
-refusing on it would capture most real icons. Revisit if a design shows it.
+**Stroke cap, join and miter limit are carried, not refused:** they reach
+`SvgPathWidget` through `svg_stroke_*` (see the stroke-style note above), so a
+round-capped icon keeps the half-disc at each end.
 
 ## Inline `<svg>` — the geometry is captured, the PAINT was not
 
@@ -7217,11 +7218,9 @@ wrote a newline between them, which a literal `== "xMidYMid meet"` reads as a
 third unknown value and refuses. Per SVG, `meetOrSlice` is ignored once the
 alignment is `none`, so `none`, `none meet` and `none slice` are one mapping.
 
-**Not carried, and not refused:** `stroke-linecap`, `stroke-linejoin` and the
-miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick
-stroke renders with butt caps. Measured on a 1.8-unit stroke this moved ink
-coverage by <1%, which is why it is accepted rather than sent to the fallback —
-refusing on it would capture most real icons. Revisit if a design shows it.
+**Stroke cap, join and miter limit are carried, not refused:** they reach
+`SvgPathWidget` through `svg_stroke_*` (see the stroke-style note above), so a
+round-capped icon keeps the half-disc at each end.
 
 ## A marked indicator's colour comes from PAINT, and `fill` is a trap
 
