@@ -1,8 +1,8 @@
 #pragma once
 
 #include "shared_io_arena.hpp"
-#include "shared_io_execution_predictor.hpp"
 #include "shared_io_execution_contract.hpp"
+#include "shared_io_execution_predictor.hpp"
 
 #include <cstddef>
 #include <cstdint>

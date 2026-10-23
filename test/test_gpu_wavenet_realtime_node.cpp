@@ -1,6 +1,6 @@
-#include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/gpu_audio_provider_pool_test_access.hpp"
 #include "detail/provider_pool_key.hpp"
+#include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_stamped_bridge.hpp"
 #include "detail/shared_io_trace.hpp"
@@ -8,18 +8,17 @@
 #include "harness/rt_allocation_probe.hpp"
 #include "support/wavenet_program_session_channel.hpp"
 #include <algorithm>
-#include <climits>
 #include <array>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
+#include <climits>
 #include <pulp/gpu_audio/gpu_audio_program.hpp>
 #include <pulp/gpu_audio/gpu_audio_provider_pool.hpp>
-#include <chrono>
-#include <thread>
-#include <pulp/gpu_audio/gpu_audio_program.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <string_view>
+#include <thread>
 
 using namespace pulp::gpu_audio;
 namespace {

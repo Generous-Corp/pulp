@@ -227,7 +227,7 @@ class RecentGpuDelivery {
 inline GpuAudioProviderState lower_for_lagging(GpuAudioProviderState state,
                                                bool gpu_lagging) noexcept {
     return gpu_lagging && state == GpuAudioProviderState::Ready ? GpuAudioProviderState::Degraded
-                                                                 : state;
+                                                                : state;
 }
 
 // A node's provider state and delivering engine from its own facts, the same
@@ -247,8 +247,7 @@ inline NodeStateProjection project_node_state(bool device_lost, GpuAudioRecovery
     health.recovery_reason = reason;
     health.fenced = !authenticated_unfenced;
     NodeStateProjection projection;
-    projection.provider_state =
-        lower_for_lagging(provider_state_for_health(health), gpu_lagging);
+    projection.provider_state = lower_for_lagging(provider_state_for_health(health), gpu_lagging);
     projection.selected_engine = delivering_engine(projection.provider_state, GpuAudioEngine::Gpu,
                                                    fallback_policy, fallback_available);
     return projection;

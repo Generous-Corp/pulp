@@ -540,7 +540,8 @@ TEST_CASE("neural node whose GPU results all arrive late reads as not GPU-delive
     CHECK(rig.node->recovery_reason() == GpuAudioRecoveryReason::None);
     auto recovered = validated(rig.node->status_snapshot());
     CHECK(recovered.provider_state == GpuAudioProviderState::Ready);
-    CHECK(recovered.selected_engine == GpuAudioEngine::Gpu);    // The callback records each block without allocating.
+    CHECK(recovered.selected_engine ==
+          GpuAudioEngine::Gpu); // The callback records each block without allocating.
     CHECK(rig.callback_allocations == 0);
 }
 
@@ -1057,8 +1058,9 @@ TEST_CASE("a GPU the miss substitute carries reads Degraded on the substitute's 
     CHECK(silent.provider_state == GpuAudioProviderState::Degraded);
     CHECK(silent.selected_engine == GpuAudioEngine::Unknown);
     // Loss stays Unavailable.
-    CHECK(project_node_state(true, none, true, MissPolicy::CpuFallback, true, true).provider_state ==
-          GpuAudioProviderState::Unavailable);
+    CHECK(
+        project_node_state(true, none, true, MissPolicy::CpuFallback, true, true).provider_state ==
+        GpuAudioProviderState::Unavailable);
 }
 
 TEST_CASE("non-finite input reaches neither the GPU nor the shadow",

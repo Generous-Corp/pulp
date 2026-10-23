@@ -1,12 +1,12 @@
 #pragma once
 #include "shared_io_completion_notifier.hpp"
-#include "shared_io_stamped_bridge.hpp"
 #include "shared_io_execution_contract.hpp"
 #include "shared_io_provider_identity.hpp"
+#include "shared_io_stamped_bridge.hpp"
 #include "shared_io_trace.hpp"
-#include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <algorithm>
 #include <memory>
+#include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <string>
 #include <type_traits>
 #include <vector>

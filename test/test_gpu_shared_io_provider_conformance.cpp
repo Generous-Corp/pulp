@@ -223,8 +223,8 @@ TEST_CASE("fake shared IO provider passes the provider conformance kit",
     receipt.add(pair);
 
     // Optional row: a provider with an event source proves the notifier fires.
-    const auto notified = conformance::run_completion_notifier(
-        notifying_fake_provider(true, true, true), spec);
+    const auto notified =
+        conformance::run_completion_notifier(notifying_fake_provider(true, true, true), spec);
     INFO(notified.reason);
     CHECK(notified.verdict == Verdict::Passed);
     receipt.capacity += 1;
@@ -503,14 +503,12 @@ TEST_CASE("completion notifier scenario proves a provider's wakes",
     result = conformance::run_completion_notifier(fake_provider(), spec);
     CHECK(result.verdict == Verdict::Passed);
     CHECK(result.reason == "no_spontaneous_completion_source");
-    result =
-        conformance::run_completion_notifier(notifying_fake_provider(false, true, true), spec);
+    result = conformance::run_completion_notifier(notifying_fake_provider(false, true, true), spec);
     CHECK(result.verdict == Verdict::Failed);
     CHECK(result.reason == "notifier_not_installed");
 
     // A provider that installs the notifier but never fires it fails.
-    result =
-        conformance::run_completion_notifier(notifying_fake_provider(true, false, true), spec);
+    result = conformance::run_completion_notifier(notifying_fake_provider(true, false, true), spec);
     CHECK(result.verdict == Verdict::Failed);
     CHECK(result.reason == "notify_missing_for_submission");
 }

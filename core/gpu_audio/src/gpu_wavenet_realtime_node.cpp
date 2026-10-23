@@ -1195,7 +1195,8 @@ detail::WaveNetRealtimeTestAccess::telemetry(const GpuWaveNetRealtimeNode& node)
 bool detail::WaveNetRealtimeTestAccess::gpu_lagging(const GpuWaveNetRealtimeNode& node) noexcept {
     return node.impl_->recent.lagging();
 }
-void detail::WaveNetRealtimeTestAccess::assume_authenticated(GpuWaveNetRealtimeNode& node) noexcept {
+void detail::WaveNetRealtimeTestAccess::assume_authenticated(
+    GpuWaveNetRealtimeNode& node) noexcept {
     node.impl_->production_provider = true;
 }
 detail::SharedIoTraceDrainResult

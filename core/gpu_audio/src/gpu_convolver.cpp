@@ -834,7 +834,6 @@ bool GpuConvolver::bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) n
     return true;
 }
 
-
 bool GpuConvolver::set_realtime_shared_io_notifier(
     void* self, detail::SharedIoCompletionNotifier notifier) noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)

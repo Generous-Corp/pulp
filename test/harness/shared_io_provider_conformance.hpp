@@ -19,8 +19,8 @@
 #include "detail/shared_io_provider_identity.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -1194,8 +1194,7 @@ inline ScenarioResult completion_notifier(const ProviderUnderTest& provider,
             return run.failed("completion_missing");
         // The wake may trail the inbox by the backend's callback hop; bound it.
         const auto deadline = Clock::now() + provider.completion_timeout;
-        while (counter.wakes.load(std::memory_order_relaxed) < block + 1 &&
-               Clock::now() < deadline)
+        while (counter.wakes.load(std::memory_order_relaxed) < block + 1 && Clock::now() < deadline)
             std::this_thread::sleep_for(std::chrono::microseconds(200));
         if (counter.wakes.load(std::memory_order_relaxed) < block + 1)
             return run.failed("notify_missing_for_submission");

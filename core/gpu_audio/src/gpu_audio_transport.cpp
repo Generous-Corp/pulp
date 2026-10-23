@@ -2,9 +2,9 @@
 
 #include "detail/gpu_audio_transport_trial_observer.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
-#include "detail/worker_pipeline_hosting.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
 #include "detail/worker_wake.hpp"
 
 #include <algorithm>
@@ -1049,9 +1049,9 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
     // and its engine is the substitute's.
     if (capability.path != GpuAudioExecutionPath::Cpu && diagnostics_->recent.lagging())
         lower_to(GpuAudioProviderState::Degraded);
-    status.selected_engine = detail::delivering_engine(
-        status.provider_state, status.selected_engine, status.fallback_policy,
-        status.fallback_available);
+    status.selected_engine =
+        detail::delivering_engine(status.provider_state, status.selected_engine,
+                                  status.fallback_policy, status.fallback_available);
     status.reacquire_attempts = reacquire_attempts_.load(std::memory_order_relaxed);
     status.reacquire_successes = reacquire_successes_.load(std::memory_order_relaxed);
     status.last_reacquire_to_gpu_ns = last_reacquire_to_gpu_ns_.load(std::memory_order_relaxed);
