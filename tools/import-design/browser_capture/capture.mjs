@@ -14,6 +14,7 @@ import {
   authorizeInput,
   hostResolverRules,
   installNetworkGuard,
+  maskSecretText,
   normalizeDeclaredHttpsOrigins,
   resolvePublicHttpsOrigins,
   sanitizeCaptureError,
@@ -66,6 +67,7 @@ import {
   createCaptureProgress,
 } from "./lifecycle.mjs";
 import { evaluateDesignTokens } from "./tokens.mjs";
+import { evaluateFormControlTheme } from "./form_control_theme.mjs";
 import { evaluatePlatformFonts } from "./platform_fonts.mjs";
 import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs";
 import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
@@ -677,15 +679,26 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
           if (body) body.style.setProperty('visibility', 'hidden', 'important');
           for (const item of backgrounds)
             item.element.style.setProperty('background', 'transparent', 'important');
+          // Chromium draws a canvas bitmap into the element's CONTENT box;
+          // the border and padding around it belong to the element's own box
+          // paint. Placing the overlay on the border box would stretch the
+          // bitmap across the border and shift every stroke inward.
+          const computed = getComputedStyle(this);
+          const px = name => parseFloat(computed.getPropertyValue(name)) || 0;
+          const insetLeft = px('border-left-width') + px('padding-left');
+          const insetTop = px('border-top-width') + px('padding-top');
+          const insetRight = px('border-right-width') + px('padding-right');
+          const insetBottom = px('border-bottom-width') + px('padding-bottom');
           const overlay = document.createElement('img');
           overlay.src = this.toDataURL('image/png');
           overlay.style.cssText = [
             'position:absolute', 'display:block', 'visibility:visible',
             'pointer-events:none', 'margin:0', 'padding:0', 'border:0',
             'max-width:none', 'max-height:none', 'object-fit:fill',
-            'left:' + (rect.left + window.scrollX) + 'px',
-            'top:' + (rect.top + window.scrollY) + 'px',
-            'width:' + rect.width + 'px', 'height:' + rect.height + 'px'
+            'left:' + (rect.left + window.scrollX + insetLeft) + 'px',
+            'top:' + (rect.top + window.scrollY + insetTop) + 'px',
+            'width:' + Math.max(0, rect.width - insetLeft - insetRight) + 'px',
+            'height:' + Math.max(0, rect.height - insetTop - insetBottom) + 'px'
           ].join(';');
           root.appendChild(overlay);
           globalThis.__pulpCanvasIsolationRestore = {
@@ -1909,6 +1922,9 @@ async function runCapture(options) {
       includeBlendedBackgroundColors: true,
       includeTextColorOpacities: true,
     });
+    // Before anything reads it: every sidecar below and the persisted bytes
+    // (and so their hash binding) see masked strings, never the secret.
+    maskSecretText(snapshot, COMPUTED_STYLES);
     // Canvas paint is captured after the final presented browser frame below;
     // the DOMSnapshot already provides its stable backend-node identities.
     let canvasAssets = [];
@@ -1948,6 +1964,11 @@ async function runCapture(options) {
     // Read before time resumes, like every other DOM-derived sidecar: the
     // faces reported have to be the ones the frozen frame was shaped with.
     const platformFontReport = await evaluatePlatformFonts(
+      cdp, snapshot, COMPUTED_STYLES);
+    // Whether the native theme painted each form control is decided by who
+    // styled it, which only matched-rule origins can say. Written INTO the
+    // snapshot below, so the verdict is bound by the same hash as the boxes.
+    const formControlTheme = await evaluateFormControlTheme(
       cdp, snapshot, COMPUTED_STYLES);
     if (materializedDocument) {
       materializedDocument.layout_bindings = buildMaterializedLayoutBindings(
@@ -2166,6 +2187,7 @@ async function runCapture(options) {
     const snapshotBytes = Buffer.from(serializeJson({
       ...sanitizedSnapshot,
       computedStyleNames: COMPUTED_STYLES,
+      formControlTheme,
     }), "utf8");
     const interactionReportBytes = interactionReport
       ? serializeJson(interactionReport)

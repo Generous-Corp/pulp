@@ -36,6 +36,29 @@ and records thousands of unmarked mutations. If the control ever reports zero
 identity changes, the counter is blind, not the plan retained. `--plant-leak`
 holds one subtree past the fixture's destruction to prove the readback fails.
 
+`--warmup-frames` excludes warmup frames from every statistic, the cumulative
+counters (`paint_calls`, `paint_commands_total`, `layout_passes`, bridge and
+invalidation counts) included: they start at the first sampled frame.
+
+### A DOM node's own layout row: one rule per language
+
+Chromium's DOMSnapshot emits several layout rows for one DOM node: a
+`::before`/`::after` box is followed by a zero-size generated-content row, a
+list marker by its paint record, and a split inline by one row per line box.
+The node's own box is the first row with positive area (a node whose rows are
+all empty keeps its first). In C++ that rule is
+`CapturedStyleIndex::own_layout_row`, which every per-node lookup and the
+document-canvas proof read; in the differential lab it is
+`principal_layout_rows`, read through `snapshot.DomSnapshot`. Never build a
+`{node: row}` map from `layout.nodeIndex` directly: the last row wins and a
+split inline's continuation or a pseudo's empty row silently stands in for
+the node. `test/fixtures/browser-capture-layout-rows` pins both readers to the
+same rows.
+
+The lab's `rescore` subcommand replays a finished corpus's stored artifacts
+through `compare_one` with no browser or importer build. Compare two
+`rescore.json` files with `cmp` to prove a scoring refactor changed nothing.
+
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
 ### Preconverted vector artwork is validation-only
@@ -84,6 +107,17 @@ records three agreeing source, importer, observer, font, capture, PNG, layout,
 and native render receipt digests. Short campaigns remain unverified, and the
 raw visual threshold is not relaxed by calibration or renderer disagreement.
 
+### Captured line metrics travel as one `LineMetrics`
+
+The capture's measured ascent/descent ride the line-box basis as
+`std::optional<LineMetrics>` (`pulp/view/text_line_metrics.hpp`), and every
+producer and consumer gates on `LineMetrics::valid()`: the sidecar parse, the
+IR JSON parse, `Label::set_cached_line_metrics` and the bridge. The basis's
+JSON (`lineBoxes` / `lineBoxBasis`) is read and written in
+`design_ir_json_text.cpp`, with the shared field readers and member writers in
+`design_ir_json_primitives.hpp`; add a basis field there, not in
+`design_ir_json.cpp`, which is a frozen hotspot.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
@@ -93,6 +127,15 @@ manifest plus the materialized JSX siblings
 the release provenance handoff hashes the complete tree and rejects a missing
 sibling or an undeclared extra. Validate the archive with
 `python3 tools/scripts/test_release_artifact_contents.py` before publishing.
+
+A new module `capture.mjs` imports must be named in FOUR lists, not one:
+`browser_capture/runtime_manifest.txt` (the source of truth CMake installs
+from), `tools/cli/upgrade_install.hpp` (`browser_capture_runtime_files`),
+`experimental/pulp-rs/src/install_import_design.rs`
+(`BROWSER_CAPTURE_RUNTIME_FILES`), and `tools/scripts/release_product_matrix.json`
+(`common_cli_members`). A source build passes with only the first; the miss
+surfaces as the upgrade-manifest tests (C++ and Rust) or, worse, as an
+upgraded SDK whose capture cannot resolve its own module graph.
 
 ## TOOLS THIS SKILL ALREADY SHIPS — reach for these before hand-rolling (read this first)
 
@@ -508,6 +551,33 @@ knowing before you touch that file:
 - **`native_tree_root_children` / `native_tree_depth` are the shape.** A depth
   of 1 means the lowering reflattened and every per-node count still looks
   right, so check the shape, not only the census.
+- **A captured `<canvas>` does NOT by itself flatten the panel.** Canvas panels
+  lower hierarchically first (hoisting already covers a canvas that paints
+  before its parent) and switch to the flat paint-order list only when that
+  hierarchy reports `overlapping_reorders > 0`; the count that forced it is
+  recorded as `native_tree_flattened_overlapping_reorders`. Always flattening
+  on a canvas cost static canvas panels their sections for no fidelity gain.
+- **A canvas snapshot is a VIEWPORT PLANE, not an element raster.** Capture
+  composites the canvas bitmap into its content box on a transparent,
+  capture-sized PNG. Native lowering keeps the canvas as a box (its border and
+  background paint normally) holding the plane as an `image` child at the page
+  origin, clipped to the content box and anchored `<canvas anchor>/layer[0]`.
+  Drawing the plane into the canvas box with `fill` shrinks the whole page
+  into the canvas. Only an asset whose pixel size matches the capture is
+  treated as a plane.
+- **Every lowered node, SVG shapes included, carries `backend_node_id`.** A
+  vector node's box is its root `<svg>`'s box (the viewBox frame), never the
+  shape's ink box, so anything comparing geometry by identity must compare a
+  shape against Chromium's `<svg>` box (the differential lab labels these rows
+  `reference_frame: svg-viewport`).
+- **A node can own several DOMSnapshot layout rows.** A pseudo-element's own
+  box is followed by a zero-size row for its generated content at the page
+  origin; a reader that keeps the last row per node sees every `::before` as
+  empty. Use the first positive-area row.
+- **Clips snap with the box paint.** A clipper's box paints on
+  `floor(edge + 0.5)` CSS edges, and so does Chromium's overflow clip; lowering
+  snaps the stored clip the same way (only when a device scale is known), or a
+  rounded track's clipped fill lands one device row off at half-pixel offsets.
 - **Clipping travels with the node, NOT with its place in the tree — never put
   `overflow` back on a lowered node.** A tree that carries `overflow` clips by
   DOM parentage, because a renderer applies it to whatever the node's children
@@ -617,8 +687,13 @@ knowing before you touch that file:
   both transparent is `unresolved`, since the UA colour follows a
   color-scheme the capture does not record) and supplies only for a panel with
   page around it. A whole-page panel owns its canvas: the importer stamps it on
-  the root, and filling underneath would hide a dropped stamp. Never translate
-  the browser nodes as well; that registers the panel twice.
+  the root, and filling underneath would hide a dropped stamp. Page-space
+  comparisons must not translate the browser nodes as well; that registers the
+  panel twice. The registered geometry gate instead moves BOTH sides back into
+  the panel frame (Chromium's boxes by `register_browser_nodes_to_native_frame`,
+  the native layout by `native_nodes_in_panel_space` with the receipt's
+  placement origin), and `frame_placement_check` and
+  `verify_native_authored_frame` read native rects relative to that origin.
 
   **Counter gotcha:** the observer's render receipt carries its own work
   counters (`pulp-design-ir-observer-counters-v1`), phased as `build`,
@@ -3804,6 +3879,25 @@ their siblings). Two traps:
   (hoist promote + demote + indicator-geometry capture + materializer forwarding,
   pure, no I/O) + the GPU harness (end-to-end skin + interactivity).
 
+### Shaded and double CSS borders, and themed form controls
+
+- `border-style: outset | inset | groove | ridge | double` are painted by View
+  in per-side bands (`border_shades` / `border_bands` / `border_band_color` in
+  `pulp/view/border_style.hpp`, pure and public). Every lowering parses the
+  keyword through the one `border_style_from_css()` table there; dropping a
+  keyword paints a flat solid frame. The shading rule was fitted
+  to Chrome 151 renders and checked on 189 colours — re-measure with a probe
+  page before changing it, never from a fixture. Pure black is not special in
+  the code: any colour no brighter than rgb(32,32,32) by relative luminance is
+  lightened once before shading, which is why black shades to 168/84.
+- A user-agent `<button>` computes `2px outset rgb(0, 0, 0)`. Chromium paints
+  that border with CSS only when the author styled the box (background, border,
+  or radius); otherwise its native theme paints the control and the computed
+  border is not what is drawn. Whether the theme painted is recorded per control
+  in the DOM snapshot's `formControlTheme` (from matched-rule origins) — read it
+  instead of re-deriving it from computed `appearance`, which stays `auto` in
+  both cases.
+
 ### Rasterized-vector image: suppress its baked stroke as a CSS border
 
 A Figma vector exported as a PNG (the FILTER & EQ curve `Vector 3`, every grid
@@ -6314,7 +6408,11 @@ correctness bug before it was made explicit; treat them as invariants.
   laid-out boxes — imported roots opt out via
   `View::set_subpixel_layout(true)` (set by `build_native_view_tree` and
   by the emitted `setSubpixelLayout('', true)` bridge call in generated
-  JS; discovered pass-wide in yoga_layout.cpp). When diagnosing a
+  JS; discovered pass-wide in yoga_layout.cpp). The same roots are also
+  marked `set_captured_frame_root(true)` / `setCapturedFrameRoot('', true)`,
+  a separate flag Label snaps captured baselines to; a new import lane must
+  set both, since sub-pixel layout no longer implies a captured frame
+  (see the `text-metrics` skill). When diagnosing a
   "shape misregistered by <1px" report, check BOTH layers before touching
   paint code — `--dump-layout` shows the post-Yoga truth, and integer-only
   x/y/width/height there means the opt-out is not reaching the pass.

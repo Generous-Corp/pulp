@@ -17,6 +17,7 @@
 
 #ifdef PULP_HAS_SKIA
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cctype>
@@ -37,6 +38,7 @@
 #endif
 
 #include "include/core/SkData.h"
+#include "include/core/SkFontArguments.h"
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkFontParameters.h"
 #include "include/core/SkString.h"

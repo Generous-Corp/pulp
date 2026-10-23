@@ -21,6 +21,7 @@
 
 set(PULP_DESIGN_IR_HEADERS
     include/pulp/view/design_ir.hpp
+    include/pulp/view/design_line_metrics.hpp
     include/pulp/view/design_source_types.hpp
 )
 
@@ -75,6 +76,7 @@ add_library(pulp-design-import STATIC
     src/design_import_png.cpp
     src/design_binding_metadata.cpp
     src/design_ir_json.cpp
+    src/design_ir_json_text.cpp
     src/design_ir_normalize.cpp
     src/recognition_resolver.cpp
     src/design_ir_analysis.cpp
