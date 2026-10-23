@@ -54,6 +54,7 @@
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/font_resolver.hpp>
+#include "font_tables.hpp"
 #include <pulp/canvas/font_options.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #ifdef PULP_HAS_SKIA
@@ -98,6 +99,18 @@ struct PreparedParagraph {
     std::unique_ptr<skia::textlayout::Paragraph> paragraph;
     float advance = 0;
     float alphabetic_baseline = 0;
+    // Where paint() actually puts the first baseline below the paragraph
+    // origin. With hinting on, SkParagraph snaps that baseline to a whole
+    // unit in paragraph space while getAlphabeticBaseline() still reports
+    // the face's unrounded ascent, so offsetting by the reported value lands
+    // the glyphs up to half a unit away from the requested y.
+    float painted_baseline = 0;
+    // Space SkParagraph puts in front of the first glyph. It splits CSS
+    // letter-spacing evenly around every glyph, while CSS (and Chromium) add
+    // it after each glyph, so the run's leading edge sits half a spacing off
+    // the requested x. The total advance is the same either way. Measured
+    // for left-to-right text only, so right-to-left keeps zero.
+    float leading_spacing = 0;
 };
 
 PreparedParagraph make_paragraph(const std::string& text,
@@ -118,39 +131,20 @@ PreparedParagraph make_paragraph(const std::string& text,
     skia::textlayout::ParagraphStyle pstyle;
     pstyle.setTextDirection(ltr ? skia::textlayout::TextDirection::kLtr
                                 : skia::textlayout::TextDirection::kRtl);
+    // The paragraph is laid out at infinite width and the caller aligns the
+    // run itself, so the line must start at the paragraph's left edge. Left to
+    // its default, `start`, an RTL line is aligned to the right edge, which is
+    // at infinity, and nothing it paints lands on the canvas.
+    pstyle.setTextAlign(skia::textlayout::TextAlign::kLeft);
     skia::textlayout::TextStyle tstyle;
     std::vector<SkString> families;
     // `family` can be a comma-separated CSS fallback list ("Inter,
     // sans-serif"). Passing the whole string as one SkString makes
     // SkParagraph treat it as a single literal family name and miss the
-    // fallback resolution. Split on commas and strip surrounding whitespace
-    // + optional quote marks so each entry resolves independently in the
-    // font collection.
-    if (!family.empty()) {
-        size_t cursor = 0;
-        while (cursor < family.size()) {
-            size_t comma = family.find(',', cursor);
-            std::string entry = family.substr(cursor,
-                comma == std::string::npos ? std::string::npos : comma - cursor);
-            // Trim ASCII whitespace.
-            size_t lo = entry.find_first_not_of(" \t\n\r\f\v");
-            size_t hi = entry.find_last_not_of(" \t\n\r\f\v");
-            if (lo != std::string::npos && hi != std::string::npos) {
-                entry = entry.substr(lo, hi - lo + 1);
-                // Strip a single matching pair of single or double quotes.
-                if (entry.size() >= 2
-                    && (entry.front() == '"' || entry.front() == '\'')
-                    && entry.front() == entry.back()) {
-                    entry = entry.substr(1, entry.size() - 2);
-                }
-                if (!entry.empty()) {
-                    families.emplace_back(entry.c_str());
-                }
-            }
-            if (comma == std::string::npos) break;
-            cursor = comma + 1;
-        }
-    }
+    // fallback resolution, so each entry resolves on its own: an unquoted
+    // generic keyword as the platform family it names, anything else by name.
+    for (const auto& entry : split_css_font_family_list(family))
+        families.emplace_back(platform_family_for_css_family(entry).c_str());
     const std::string emoji_family = ctx->emoji_family_name();
     if (!emoji_family.empty()) {
         families.emplace_back(emoji_family.c_str());
@@ -158,11 +152,20 @@ PreparedParagraph make_paragraph(const std::string& text,
     }
     if (families.empty()) families.emplace_back("");
     tstyle.setFontFamilies(families);
-    tstyle.setFontSize(size > 0 ? size : 14.0f);
+    const float paragraph_size = size > 0 ? size : 14.0f;
+    const SkFont primary = make_font(family, paragraph_size, weight, slant);
+    tstyle.setFontSize(paragraph_size);
+    apply_auto_optical_size(tstyle, primary.getTypeface(), paragraph_size);
     SkFontStyle sk_style{weight, SkFontStyle::kNormal_Width,
                          skia_slant(slant)};
     tstyle.setFontStyle(sk_style);
-    if (letter_spacing != 0.0f) tstyle.setLetterSpacing(letter_spacing);
+    // The primary face's AAT tracking is spacing the browser adds on top of
+    // CSS letter-spacing, split around each glyph the same way SkParagraph
+    // splits letter-spacing, so it rides along with it. Only the CSS part is
+    // taken back out of the leading edge below.
+    const float tracking = aat_tracking_px(primary.getTypeface(), paragraph_size);
+    if (letter_spacing + tracking != 0.0f)
+        tstyle.setLetterSpacing(letter_spacing + tracking);
     if (foreground_paint.has_value()) {
         tstyle.setForegroundPaint(*foreground_paint);
     }
@@ -220,13 +223,10 @@ PreparedParagraph make_paragraph(const std::string& text,
     // need the full advance, so keep whichever metric is wider.
     result.advance = std::max(paragraph->getLongestLine(),
                               paragraph->getMaxIntrinsicWidth());
-    // Callers paint the paragraph's top at `y - alphabetic_baseline` so its
-    // baseline lands on `y`. SkParagraph draws a line's glyphs a whole number
-    // of units below the paragraph top -- getAlphabeticBaseline() rounded --
-    // whatever ParagraphStyle's rounding hack says, so subtracting the
-    // unrounded value set every fillText up to half a unit off `y`, high or
-    // low depending on the face and size.
-    result.alphabetic_baseline = std::round(paragraph->getAlphabeticBaseline());
+    result.alphabetic_baseline = paragraph->getAlphabeticBaseline();
+    result.leading_spacing = ltr ? letter_spacing * 0.5f : 0.0f;
+    result.painted_baseline =
+        pstyle.hintingIsOn() ? std::round(result.alphabetic_baseline) : result.alphabetic_baseline;
     result.paragraph = std::move(paragraph);
     return result;
 }
@@ -242,14 +242,43 @@ bool contains_variation_selector(std::string_view text) {
         || text.find(kEmojiPresentation) != std::string_view::npos;
 }
 
-bool needs_paragraph_for_text_metrics(
-    std::string_view text,
-    const std::vector<Canvas::FontFeature>& features,
-    float letter_spacing) {
-    return !features.empty()
-        || letter_spacing != 0.0f
-        || pulp::canvas::contains_emoji(text)
-        || contains_variation_selector(text);
+// A face with AAT tracking is drawn through SkParagraph with that tracking
+// applied, so it has to be measured there too.
+bool needs_paragraph_for_text_metrics(std::string_view text,
+                                      const std::vector<Canvas::FontFeature>& features,
+                                      float letter_spacing, const SkTypeface* typeface,
+                                      float size) {
+    return !features.empty() || letter_spacing != 0.0f || pulp::canvas::contains_emoji(text) ||
+           contains_variation_selector(text) || aat_tracking_px(typeface, size) != 0.0f;
+}
+
+// SkParagraph paint(canvas, x, y) places the paragraph top at (x, y);
+// Canvas2D puts the alphabetic baseline at y and the first glyph's leading
+// edge at x.
+void paint_prepared(const PreparedParagraph& prepared, SkCanvas* canvas, float x, float y) {
+    prepared.paragraph->paint(canvas, x - prepared.leading_spacing, y - prepared.painted_baseline);
+}
+
+// The ink box of a prepared paragraph's glyphs where paint_prepared puts them,
+// relative to the Canvas2D origin. Empty when no glyph has ink.
+std::optional<SkRect> painted_ink_bounds(const PreparedParagraph& prepared) {
+    SkRect ink = SkRect::MakeEmpty();
+    prepared.paragraph->extendedVisit(
+        [&](int, const skia::textlayout::Paragraph::ExtendedVisitorInfo* info) {
+            if (!info)
+                return;
+            for (int i = 0; i < info->count; ++i) {
+                SkRect glyph = info->bounds[i];
+                if (glyph.isEmpty())
+                    continue;
+                glyph.offset(info->origin + info->positions[i]);
+                ink.join(glyph);
+            }
+        });
+    if (ink.isEmpty())
+        return std::nullopt;
+    ink.offset(-prepared.leading_spacing, -prepared.painted_baseline);
+    return ink;
 }
 
 } // namespace
@@ -534,9 +563,8 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // which lacks Unicode arrows/dashes/etc.), partition the text into runs by
     // typeface and shape each separately. ASCII text bypasses the scan; it's
     // virtually always covered by any Latin typeface.
-    //
-    const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+    const bool needs_paragraph = needs_paragraph_for_text_metrics(
+        text, font_features_, letter_spacing_, font.getTypeface(), font_size_);
 
     // For plain letter_spacing_ == 0 text only, route missing-glyph text
     // through SkShaper-based per-run fallback for best kerning / ligature
@@ -579,11 +607,7 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
             float draw_x = x;
             if (text_align_ == TextAlign::center) draw_x -= prepared.advance * 0.5f;
             else if (text_align_ == TextAlign::right) draw_x -= prepared.advance;
-            // SkParagraph paint(canvas, x, y) places the paragraph TOP
-            // at (x, y); Canvas2D fillText puts the alphabetic baseline
-            // at y. Translate so the baseline lands on `y`.
-            prepared.paragraph->paint(canvas_, draw_x,
-                                       y - prepared.alphabetic_baseline);
+            paint_prepared(prepared, canvas_, draw_x, y);
             return;
         }
     }
@@ -799,19 +823,17 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
     // emoji typefaces typically have CBDT/COLR bitmaps with no outline
     // tables, so strokeText effectively leaves them unchanged (CSS
     // behavior). Latin text in mixed-emoji runs still gets the stroke.
-    const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+    const bool needs_paragraph = needs_paragraph_for_text_metrics(
+        text, font_features_, letter_spacing_, font.getTypeface(), font_size_);
     if (needs_paragraph) {
-        auto prepared = make_paragraph(text, font_family_, font_size_,
-                                        font_weight_, font_slant_,
-                                        letter_spacing_, /*ltr=*/true,
-                                        stroke_paint, font_features_);
+        auto prepared = make_paragraph(
+            text, font_family_, font_size_, font_weight_, font_slant_, letter_spacing_,
+            /*ltr=*/direction_ != TextDirection::rtl, stroke_paint, font_features_);
         if (prepared.paragraph) {
             float draw_x = x;
             if (text_align_ == TextAlign::center) draw_x -= prepared.advance * 0.5f;
             else if (text_align_ == TextAlign::right) draw_x -= prepared.advance;
-            prepared.paragraph->paint(canvas_, draw_x,
-                                       y - prepared.alphabetic_baseline);
+            paint_prepared(prepared, canvas_, draw_x, y);
             if (needs_restore) canvas_->restore();
             return;
         }
@@ -955,13 +977,12 @@ float SkiaCanvas::measure_text(const std::string& text) {
     // the same input. Anything emoji-bearing or feature-tagged still
     // goes through SkParagraph so the measured width matches what
     // fill_text actually draws.
-    const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+    const bool needs_paragraph = needs_paragraph_for_text_metrics(
+        text, font_features_, letter_spacing_, font.getTypeface(), font_size_);
     if (needs_paragraph) {
-        auto prepared = make_paragraph(text, font_family_, font_size_,
-                                        font_weight_, font_slant_,
-                                        letter_spacing_, /*ltr=*/true,
-                                        std::nullopt, font_features_);
+        auto prepared = make_paragraph(
+            text, font_family_, font_size_, font_weight_, font_slant_, letter_spacing_,
+            /*ltr=*/direction_ != TextDirection::rtl, std::nullopt, font_features_);
         if (prepared.paragraph) {
             return prepared.advance;
         }
@@ -1073,15 +1094,18 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     // fill_text actually draws. ASCII / no-feature labels keep the
     // SkFont measurement above — same width fill_text emits via the
     // per-glyph fallback path.
-    const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+    const bool needs_paragraph = needs_paragraph_for_text_metrics(
+        text, font_features_, letter_spacing_, font.getTypeface(), font_size_);
     if (needs_paragraph) {
-        auto prepared = make_paragraph(text, font_family_, font_size_,
-                                        font_weight_, font_slant_,
-                                        letter_spacing_, /*ltr=*/true,
-                                        std::nullopt, font_features_);
+        auto prepared = make_paragraph(
+            text, font_family_, font_size_, font_weight_, font_slant_, letter_spacing_,
+            /*ltr=*/direction_ != TextDirection::rtl, std::nullopt, font_features_);
         if (prepared.paragraph) {
             advance = prepared.advance;
+            // The SkFont box has no letter-spacing or tracking between its
+            // glyphs; the shaped glyphs carry both.
+            if (const auto ink = painted_ink_bounds(prepared))
+                bounds = *ink;
         }
     }
 #endif

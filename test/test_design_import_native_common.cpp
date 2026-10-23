@@ -582,12 +582,29 @@ TEST_CASE("border_style dashed reaches View::BorderStyle in the native materiali
     REQUIRE(root != nullptr);
     CHECK(root->border_style() == View::BorderStyle::dashed);
 
-    // Solid (and any keyword View degrades to solid) keeps the default.
+    // Solid keeps the default.
     DesignIR solid = ir;
     solid.root.style.border_style = "solid";
     auto solid_root = build_native_view_tree(solid, {}, {});
     REQUIRE(solid_root != nullptr);
     CHECK(solid_root->border_style() == View::BorderStyle::solid);
+
+    // The shaded and double styles reach View too, which paints them in
+    // per-side bands; dropped here, a user-agent button's `2px outset` drew as
+    // a flat black frame.
+    const std::pair<const char*, View::BorderStyle> banded[] = {
+        {"double", View::BorderStyle::double_}, {"groove", View::BorderStyle::groove},
+        {"ridge", View::BorderStyle::ridge},    {"inset", View::BorderStyle::inset},
+        {"outset", View::BorderStyle::outset},
+    };
+    for (const auto& [keyword, expected] : banded) {
+        INFO("border-style " << keyword);
+        DesignIR styled = ir;
+        styled.root.style.border_style = keyword;
+        auto styled_root = build_native_view_tree(styled, {}, {});
+        REQUIRE(styled_root != nullptr);
+        CHECK(styled_root->border_style() == expected);
+    }
 }
 
 TEST_CASE("an unparseable CSS color leaves the paint site untouched",
@@ -1229,6 +1246,8 @@ TEST_CASE("build_native_view_tree opts the imported root into sub-pixel layout",
     auto root = build_native_view_tree(ir, {}, {});
     REQUIRE(root != nullptr);
     REQUIRE(root->subpixel_layout());
+    // The import root is also the captured frame its text baselines snap to.
+    CHECK(root->captured_frame_root());
 }
 
 TEST_CASE("sub-pixel layout keeps concentric siblings on one centre",

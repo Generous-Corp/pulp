@@ -2487,7 +2487,11 @@ runtime bridge, and (when `PULP_BUILD_WEBVIEW=ON`) the optional
 `ScriptedUiSession`, `WidgetBridge`, or `@pulp/react` but must not load a browser
 runtime should link `pulp::view-native`; `pulp_add_plugin(... NATIVE_UI)` selects
 that composition for every requested format and uses
-`pulp::standalone-native` for Standalone. Baked UI code that constructs `View`
+`pulp::standalone-native` for Standalone. `pulp::view-native` is a composition
+over `pulp::view-platform`, which holds the native scripted view stack and the
+WebView backend probe with no audio, MIDI or recognition-pack dependency; the
+`pulp::view-native` umbrella adds `pulp::view-audio` and
+`pulp::design-import-audio-pack`. Baked UI code that constructs `View`
 trees directly and does not evaluate JS can link `pulp::view-core`.
 
 `pulp::view-core` links no audio, signal or host target. The audio-dependent

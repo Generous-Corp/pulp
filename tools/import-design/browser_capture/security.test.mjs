@@ -22,6 +22,7 @@ import {
   hostResolverRules,
   installNetworkGuard,
   isPublicAddress,
+  maskSecretText,
   normalizeDeclaredHttpsOrigins,
   sanitizeCaptureError,
   sanitizeSnapshot,
@@ -670,3 +671,85 @@ while :; do sleep 1; done
     survivors.map((found) => found.command), [],
     "capture deadline left processes running");
 }));
+
+/// A snapshot holding every place a masked string can sit, plus a clear twin.
+function maskedSnapshot() {
+  // strings: 0 #document 1 INPUT 2 type 3 password 4 value 5 hunter2pw
+  // 6 TEXTAREA 7 DIV 8 #text 9 hunter2ts 10 none 11 disc 12 square
+  // 13 hunter2div 14 text 15 PaSsWoRd 16 hunter2mixed 17 hunter2hidden
+  // 18 shared-secret 19 SPAN 20 " password ". Style rows hold only
+  // -webkit-text-security.
+  return {
+    strings: [
+      "#document", "INPUT", "type", "password", "value", "hunter2pw",
+      "TEXTAREA", "DIV", "#text", "hunter2ts", "none", "disc", "square",
+      "hunter2div", "text", "PaSsWoRd", "hunter2mixed", "hunter2hidden",
+      "shared-secret", "SPAN", " password "],
+    documents: [{
+      nodes: {
+        // 0 #document, 1 INPUT[type=password value=hunter2pw],
+        // 2 INPUT[type=text] masked by style, value hunter2ts,
+        // 3 DIV masked by style, 4 its #text hunter2div,
+        // 5 INPUT[type=PaSsWoRd] value hunter2mixed,
+        // 6 INPUT[type=text] not laid out, value hunter2hidden,
+        // 7 INPUT[type=password] holding shared-secret,
+        // 8 SPAN, 9 its #text shared-secret painted in clear,
+        // 10 INPUT[type=" password "], a text field in HTML, value "text".
+        parentIndex: [-1, 0, 0, 0, 3, 0, 0, 0, 0, 8, 0],
+        nodeType: [9, 1, 1, 1, 3, 1, 1, 1, 1, 3, 1],
+        nodeName: [0, 1, 1, 7, 8, 1, 1, 1, 19, 8, 1],
+        nodeValue: [-1, -1, -1, -1, 13, -1, -1, -1, -1, 18, -1],
+        attributes: [[], [2, 3, 4, 5], [2, 14, 4, 9], [], [], [2, 15, 4, 16],
+          [2, 14, 4, 17], [2, 3], [], [], [2, 20, 4, 14]],
+        inputValue: { index: [1, 2, 5, 6, 7, 10], value: [5, 9, 16, 17, 18, 14] },
+      },
+      layout: {
+        nodeIndex: [1, 2, 3, 4, 5, 7, 8, 9, 10],
+        styles: [[11], [11], [12], [12], [11], [11], [10], [10], [10]],
+        text: [-1, -1, -1, 13, -1, -1, -1, 18, -1],
+      },
+    }],
+  };
+}
+
+test("maskSecretText masks every masked value and keeps clear text clear", () => {
+  const snapshot = maskedSnapshot();
+  const report = maskSecretText(snapshot, ["-webkit-text-security"]);
+  const bytes = JSON.stringify(snapshot);
+  for (const secret of [
+    "hunter2pw", "hunter2ts", "hunter2div", "hunter2mixed", "hunter2hidden"]) {
+    assert.equal(bytes.includes(secret), false, secret);
+  }
+  const { strings } = snapshot;
+  const nodes = snapshot.documents[0].nodes;
+  const layout = snapshot.documents[0].layout;
+  // Chromium's glyph per keyword, one per UTF-16 code unit, so text-box
+  // offsets still index the masked run.
+  assert.equal(strings[nodes.inputValue.value[0]], "•".repeat(9));
+  assert.equal(strings[nodes.nodeValue[4]], "■".repeat(10));
+  assert.equal(strings[layout.text[3]], "■".repeat(10));
+  // Positive control: the same string painted in clear by a span survives,
+  // even though a password field shared its string-table entry.
+  assert.equal(strings[nodes.nodeValue[9]], "shared-secret");
+  assert.equal(strings[layout.text[7]], "shared-secret");
+  assert.equal(strings[nodes.inputValue.value[4]], "•".repeat(13));
+  // " password " is not the password state in HTML (no trimming), and
+  // Chromium paints that field's value in clear.
+  assert.equal(strings[nodes.inputValue.value[5]], "text");
+  assert.ok(report.masked_slots >= 9);
+  // Deterministic: the same input masks to the same bytes.
+  const again = maskedSnapshot();
+  maskSecretText(again, ["-webkit-text-security"]);
+  assert.equal(JSON.stringify(again), bytes);
+});
+
+test("maskSecretText without the style column still masks password fields", () => {
+  const snapshot = maskedSnapshot();
+  maskSecretText(snapshot, []);
+  const bytes = JSON.stringify(snapshot);
+  assert.equal(bytes.includes("hunter2pw"), false);
+  assert.equal(bytes.includes("hunter2mixed"), false);
+  assert.equal(bytes.includes("hunter2hidden"), false);
+  // Without the property a style-masked run cannot be recognised.
+  assert.equal(bytes.includes("hunter2div"), true);
+});

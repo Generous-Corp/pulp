@@ -897,6 +897,9 @@ TEST_CASE("generated JS opts its layout pass into sub-pixel geometry", "[view][i
     const auto js = generate_pulp_js(ir, opts);
     REQUIRE(js.find("if (typeof setSubpixelLayout === 'function') "
                     "setSubpixelLayout('', true);") != std::string::npos);
+    // The same root is marked as the captured frame its text snaps to.
+    REQUIRE(js.find("if (typeof setCapturedFrameRoot === 'function') "
+                    "setCapturedFrameRoot('', true);") != std::string::npos);
 }
 
 TEST_CASE("generate_pulp_cpp re-opens a promoted button so its interactive child stays reachable") {

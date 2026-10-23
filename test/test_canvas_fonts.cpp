@@ -65,6 +65,7 @@ using namespace pulp::canvas;
 #include "modules/skparagraph/include/ParagraphStyle.h"
 #include "modules/skparagraph/include/TextStyle.h"
 #include "../core/canvas/src/skia_unicode.hpp"
+#include "../core/canvas/src/font_tables.hpp"
 #include <cstdlib>
 #include <string>
 #if defined(__APPLE__)
@@ -692,6 +693,192 @@ TEST_CASE("a missing glyph does not move the rest of the run",
     // ascent below it.
     CHECK(probe_band.first <= plain_band.second);
     CHECK(probe_band.second >= plain_band.first);
+}
+// ── fill_text puts the alphabetic baseline at y ─────────────────────────────
+//
+// Canvas2D fillText places the alphabetic baseline at y. SkiaCanvas draws
+// through SkParagraph, whose paint() takes the paragraph TOP, so fill_text
+// offsets by the paragraph's first baseline. With hinting on, SkParagraph
+// snaps that baseline to a whole unit while getAlphabeticBaseline() keeps
+// reporting the face's unrounded ascent; offsetting by the reported value
+// moves the glyphs by the rounding error, up to half a pixel, in a direction
+// that depends on the face and size. Bundled Inter at 18px has a fractional
+// ascent (17.4375), so a sweep of sub-pixel baselines exposes the error:
+// SkCanvas::drawSimpleText with the same face is the reference, since its
+// origin IS the baseline.
+TEST_CASE("SkiaCanvas::fill_text rasterizes the baseline where it was asked",
+          "[canvas][skia][text][baseline]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    if (!mgr)
+        SKIP("no platform font manager on this build");
+    const SkFontStyle upright{SkFontStyle::kNormal_Weight, SkFontStyle::kNormal_Width,
+                              SkFontStyle::kUpright_Slant};
+    auto face = pulp::canvas::match_bundled_typeface(mgr.get(), "Inter", upright);
+    REQUIRE(face != nullptr);
+
+    constexpr int kW = 96;
+    constexpr int kH = 64;
+    constexpr float kSize = 18.0f;
+    constexpr float kX = 8.0f;
+    SkImageInfo info =
+        SkImageInfo::Make(kW, kH, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    // Last row carrying ink: 'H' sits flat on its baseline.
+    auto last_ink_row = [](const SkPixmap& pm) {
+        int last = -1;
+        for (int y = 0; y < pm.height(); ++y)
+            for (int x = 0; x < pm.width(); ++x)
+                if (SkColorGetR(pm.getColor(x, y)) < 250) {
+                    last = y;
+                    break;
+                }
+        return last;
+    };
+
+    int mismatches = 0;
+    for (int step = 0; step < 10; ++step) {
+        const float baseline = 36.0f + 0.1f * static_cast<float>(step);
+
+        auto ref_surface = SkSurfaces::Raster(info);
+        REQUIRE(ref_surface != nullptr);
+        ref_surface->getCanvas()->clear(SK_ColorWHITE);
+        SkFont font(face, kSize);
+        SkPaint ink;
+        ink.setColor(SK_ColorBLACK);
+        ink.setAntiAlias(true);
+        ref_surface->getCanvas()->drawSimpleText("H", 1, SkTextEncoding::kUTF8, kX, baseline, font,
+                                                 ink);
+        SkPixmap ref_pm;
+        REQUIRE(ref_surface->peekPixels(&ref_pm));
+
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        {
+            SkiaCanvas canvas(surface->getCanvas());
+            canvas.set_font_full("Inter", kSize, 400, /*slant=*/0,
+                                 /*letter_spacing=*/0.0f);
+            canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_text("H", kX, baseline);
+        }
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+
+        const int want = last_ink_row(ref_pm);
+        const int got = last_ink_row(pm);
+        REQUIRE(want >= 0);
+        REQUIRE(got >= 0);
+        INFO("baseline " << baseline << ": reference last ink row " << want
+                         << ", fill_text last ink row " << got);
+        CHECK(got == want);
+        if (got != want)
+            ++mismatches;
+    }
+    CHECK(mismatches == 0);
+}
+
+// ── letter-spacing goes after each glyph ───────────────────────────────────
+//
+// CSS letter-spacing adds space AFTER every typographic character, so the
+// first glyph of a run sits at the run's x whatever the spacing, and each
+// later glyph moves by one spacing per glyph before it. SkParagraph instead
+// splits the spacing evenly around every glyph, which slides a whole run by
+// half a spacing; fill_text has to take that back out.
+TEST_CASE("SkiaCanvas::fill_text adds letter-spacing after each glyph",
+          "[canvas][skia][text][letter-spacing]") {
+    SkImageInfo info =
+        SkImageInfo::Make(400, 64, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto first_ink_col = [](const SkPixmap& pm) {
+        for (int x = 0; x < pm.width(); ++x)
+            for (int y = 0; y < pm.height(); ++y)
+                if (SkColorGetR(pm.getColor(x, y)) < 160)
+                    return x;
+        return -1;
+    };
+    auto last_ink_col = [](const SkPixmap& pm) {
+        for (int x = pm.width() - 1; x >= 0; --x)
+            for (int y = 0; y < pm.height(); ++y)
+                if (SkColorGetR(pm.getColor(x, y)) < 160)
+                    return x;
+        return -1;
+    };
+    struct Ink {
+        int first;
+        int last;
+    };
+    auto draw = [&](const char* text, float spacing) {
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        {
+            SkiaCanvas canvas(surface->getCanvas());
+            canvas.set_font_full("Inter", 32.0f, 400, /*slant=*/0, spacing);
+            canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_text(text, 100.0f, 40.0f);
+        }
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        return Ink{first_ink_col(pm), last_ink_col(pm)};
+    };
+
+    // Integer spacings keep both edges on the same pixel phase as the
+    // unspaced reference, so the expectations are exact.
+    for (float spacing : {-8.0f, 8.0f}) {
+        INFO("letter-spacing " << spacing);
+        const Ink plain_one = draw("H", 0.0f);
+        const Ink spaced_one = draw("H", spacing);
+        const Ink plain_two = draw("HH", 0.0f);
+        const Ink spaced_two = draw("HH", spacing);
+        REQUIRE(plain_one.first >= 0);
+        // The first glyph does not move.
+        CHECK(spaced_one.first == plain_one.first);
+        CHECK(spaced_one.last == plain_one.last);
+        CHECK(spaced_two.first == plain_two.first);
+        // The second glyph moves by exactly one spacing.
+        CHECK(spaced_two.last - plain_two.last == static_cast<int>(spacing));
+    }
+}
+
+// measure_text_full shapes letter-spaced text the way fill_text does, in the
+// canvas's direction. It used to shape left-to-right whatever the direction,
+// and the two directions place the tracking differently, so an RTL canvas
+// reported ink 4px left of what it drew here. The paint side needed a fix too:
+// an RTL paragraph aligned to its own right edge at infinite width, so RTL
+// text that went through the paragraph path drew nothing at all.
+TEST_CASE("measure_text_full's ink matches the paint in either direction",
+          "[canvas][skia][text][letter-spacing][rtl]") {
+    SkImageInfo info =
+        SkImageInfo::Make(400, 64, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    for (auto dir : {Canvas::TextDirection::ltr, Canvas::TextDirection::rtl}) {
+        INFO("direction " << (dir == Canvas::TextDirection::rtl ? "rtl" : "ltr"));
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        Canvas::TextMetrics m;
+        {
+            SkiaCanvas canvas(surface->getCanvas());
+            canvas.set_direction(dir);
+            canvas.set_font_full("Inter", 32.0f, 400, /*slant=*/0,
+                                 /*letter_spacing=*/8.0f);
+            canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_text("HH", 100.0f, 40.0f);
+            m = canvas.measure_text_full("HH");
+        }
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        int first = -1, last = -1;
+        for (int x = 0; x < pm.width(); ++x)
+            for (int y = 0; y < pm.height(); ++y)
+                if (SkColorGetR(pm.getColor(x, y)) < 250) {
+                    if (first < 0)
+                        first = x;
+                    last = x;
+                }
+        REQUIRE(first >= 0);
+        // Any ink at all, so the edge pixel is counted; a pixel of slack
+        // covers antialiasing, well under the 4px the directions differ by.
+        CHECK(std::abs(first - (100.0f - m.actual_bounding_box_left)) <= 1.0f);
+        CHECK(std::abs(last + 1 - (100.0f + m.actual_bounding_box_right)) <= 1.0f);
+    }
 }
 // ── fillText places the alphabetic baseline at y ─────────────────────────
 //
@@ -1488,6 +1675,513 @@ TEST_CASE("Painted text adds letter-spacing after every glyph",
         CHECK_THAT(spaced - tight,
                    Catch::Matchers::WithinAbs(spacing * glyphs, 2.0));
     }
+}
+
+// ── CSS generic families resolve to the browser's platform faces ────────────
+//
+// `system-ui`, `sans-serif`, `monospace` ... are keywords, not family names,
+// and the macOS font manager matches none of them. Unmapped, Canvas text fell
+// back to Helvetica and paragraph text to the collection's default face, so a
+// panel styled `font-family: system-ui` drew in a face the browser never used.
+// Chromium's macOS defaults are the reference.
+TEST_CASE("CSS generic families resolve to the browser's platform faces",
+          "[canvas][skia][text][generic-family]") {
+#if !defined(__APPLE__)
+    SKIP("the generic-family table covers macOS");
+#else
+    CHECK(pulp::canvas::platform_family_for_css_generic("system-ui") == ".AppleSystemUIFont");
+    CHECK(pulp::canvas::platform_family_for_css_generic("Monospace") == "Menlo");
+    CHECK(pulp::canvas::platform_family_for_css_generic("serif") == "Times");
+    // A quoted name is a family literally called that, never the keyword.
+    CHECK(pulp::canvas::platform_family_for_css_generic("'serif'").empty());
+    // Keywords Chromium does not support here stay unmapped so the list walk
+    // moves on, as it does in the browser.
+    CHECK(pulp::canvas::platform_family_for_css_generic("ui-monospace").empty());
+    CHECK(pulp::canvas::platform_family_for_css_generic("Inter").empty());
+
+    // The identity a captured layout is validated against, for each weight.
+    CHECK(pulp::canvas::resolved_face_identity("system-ui, sans-serif", 400.0f) == ".SFNS-Regular");
+    // A named instance the platform matched at the requested weight keeps its
+    // own name rather than becoming a synthetic wght clone.
+    CHECK(pulp::canvas::resolved_face_identity("system-ui, sans-serif", 700.0f) == ".SFNS-Bold");
+    CHECK(pulp::canvas::resolved_face_identity("ui-monospace, monospace", 400.0f) ==
+          "Menlo-Regular");
+    CHECK(pulp::canvas::resolved_face_identity("sans-serif", 400.0f) == "Helvetica");
+
+    // The paragraph path shapes with the same face: a generic and its platform
+    // family measure identically, and differently from a face it is not.
+    auto& shaper = pulp::canvas::global_text_shaper();
+    const auto generic = shaper.prepare("Hamburgefons", "ui-monospace, monospace", 20.0f, 400, 0);
+    const auto platform = shaper.prepare("Hamburgefons", "Menlo", 20.0f, 400, 0);
+    const auto other = shaper.prepare("Hamburgefons", "Jost", 20.0f, 400, 0);
+    CHECK(generic.total_width() == Catch::Approx(platform.total_width()).margin(0.01));
+    CHECK(std::abs(other.total_width() - platform.total_width()) > 1.0f);
+#endif
+}
+
+// ── Optical size and AAT tracking, as the browser applies them ─────────────
+//
+// `font-optical-sizing: auto` (the CSS default) sets a variable font's `opsz`
+// axis to the font size in CSS px, and macOS browsers apply a face's AAT
+// `trak` table, half before and half after each glyph. The system UI font has
+// both, so without them its text came out a size-dependent few percent wide
+// or narrow. The fixture font is self-authored with analytic answers: `H` is
+// 600 units at the opsz default (12) and 800 at its maximum (72), and the
+// normal track is -100 units at 10 px and +100 at 20 px, at 1000 units/em.
+#ifdef PULP_TEST_OPSZ_TRAK_FONT_PATH
+namespace {
+sk_sp<SkTypeface> opsz_trak_face() {
+    auto mgr = pulp::canvas::platform_font_manager();
+    if (!mgr)
+        return nullptr;
+    return mgr->makeFromFile(PULP_TEST_OPSZ_TRAK_FONT_PATH);
+}
+float h_advance(const sk_sp<SkTypeface>& face, float size) {
+    SkFont font(face, size);
+    font.setLinearMetrics(true);
+    const SkGlyphID glyph = face->unicharToGlyph('H');
+    SkScalar width = 0;
+    font.getWidths(SkSpan<const SkGlyphID>(&glyph, 1), SkSpan<SkScalar>(&width, 1));
+    return width;
+}
+} // namespace
+
+TEST_CASE("aat_tracking_px reads the normal track of a trak table",
+          "[canvas][skia][text][tracking]") {
+    auto face = opsz_trak_face();
+    if (!face)
+        SKIP("no platform font manager to load the fixture font");
+    using pulp::canvas::aat_tracking_px;
+    // At the table's sizes, between them, and held at the ends beyond them.
+    CHECK(aat_tracking_px(face.get(), 10.0f) == Catch::Approx(-1.0f).margin(1e-4));
+    CHECK(aat_tracking_px(face.get(), 15.0f) == Catch::Approx(0.0f).margin(1e-4));
+    CHECK(aat_tracking_px(face.get(), 20.0f) == Catch::Approx(2.0f).margin(1e-4));
+    CHECK(aat_tracking_px(face.get(), 30.0f) == Catch::Approx(3.0f).margin(1e-4));
+    CHECK(aat_tracking_px(face.get(), 5.0f) == Catch::Approx(-0.5f).margin(1e-4));
+    // A face without the table tracks nothing.
+    auto mgr = pulp::canvas::platform_font_manager();
+    auto plain = mgr->makeFromFile(PULP_TEST_FONT_PATH);
+    REQUIRE(plain != nullptr);
+    CHECK(aat_tracking_px(plain.get(), 20.0f) == 0.0f);
+}
+
+TEST_CASE("typeface_at_auto_optical_size sets opsz to the font size",
+          "[canvas][skia][text][optical-size]") {
+    auto face = opsz_trak_face();
+    if (!face)
+        SKIP("no platform font manager to load the fixture font");
+    using pulp::canvas::typeface_at_auto_optical_size;
+    // The default instance: the control every expectation below differs from.
+    REQUIRE(h_advance(face, 100.0f) == Catch::Approx(60.0f).margin(0.01));
+    // opsz 42 is halfway from the default to the maximum: 700 units.
+    CHECK(h_advance(typeface_at_auto_optical_size(face, 42.0f), 100.0f) ==
+          Catch::Approx(70.0f).margin(0.01));
+    // Clamped to the axis range at both ends.
+    CHECK(h_advance(typeface_at_auto_optical_size(face, 200.0f), 100.0f) ==
+          Catch::Approx(80.0f).margin(0.01));
+    CHECK(h_advance(typeface_at_auto_optical_size(face, 4.0f), 100.0f) ==
+          Catch::Approx(60.0f).margin(0.01));
+    // A face without an opsz axis comes back as itself.
+    auto mgr = pulp::canvas::platform_font_manager();
+    auto plain = mgr->makeFromFile(PULP_TEST_FONT_PATH);
+    REQUIRE(plain != nullptr);
+    CHECK(typeface_at_auto_optical_size(plain, 42.0f).get() == plain.get());
+}
+
+TEST_CASE("SkiaCanvas measures text at its optical size with AAT tracking",
+          "[canvas][skia][text][optical-size][tracking]") {
+    if (!opsz_trak_face())
+        SKIP("no platform font manager to load the fixture font");
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_OPSZ_TRAK_FONT_PATH, "Pulp Test Opsz Trak"));
+    SkImageInfo info =
+        SkImageInfo::Make(64, 64, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    canvas.set_font_full("Pulp Test Opsz Trak", 42.0f, 400, /*slant=*/0,
+                         /*letter_spacing=*/0.0f);
+    // Two H at opsz 42 (700 units -> 29.4px each) plus the track held at its
+    // 20px end (+100 units -> 4.2px) on each glyph. Without optical sizing it
+    // would be 2 x 25.2 + 8.4; without tracking 2 x 29.4.
+    CHECK(canvas.measure_text("HH") == Catch::Approx(67.2f).margin(0.05));
+}
+
+TEST_CASE("measure_text_full's ink box includes AAT tracking", "[canvas][skia][text][tracking]") {
+    if (!opsz_trak_face())
+        SKIP("no platform font manager to load the fixture font");
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_OPSZ_TRAK_FONT_PATH, "Pulp Test Opsz Trak"));
+    SkImageInfo info =
+        SkImageInfo::Make(64, 64, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    canvas.set_font_full("Pulp Test Opsz Trak", 42.0f, 400, /*slant=*/0,
+                         /*letter_spacing=*/0.0f);
+    const auto one = canvas.measure_text_full("H");
+    const auto two = canvas.measure_text_full("HH");
+    // The second H's ink starts one advance (29.4px at opsz 42) plus one
+    // track (4.2px) after the first's.
+    CHECK(two.actual_bounding_box_right - one.actual_bounding_box_right ==
+          Catch::Approx(33.6f).margin(0.05));
+    CHECK(two.actual_bounding_box_left == Catch::Approx(one.actual_bounding_box_left).margin(0.01));
+    // Half a track sits in front of the first glyph, where paint puts it.
+    SkFont font(pulp::canvas::typeface_at_auto_optical_size(opsz_trak_face(), 42.0f), 42.0f);
+    font.setLinearMetrics(true);
+    SkRect glyph;
+    font.measureText("H", 1, SkTextEncoding::kUTF8, &glyph);
+    CHECK(one.actual_bounding_box_left == Catch::Approx(-(glyph.fLeft + 2.1f)).margin(0.05));
+    CHECK(one.actual_bounding_box_ascent == Catch::Approx(-glyph.fTop).margin(0.51));
+}
+
+// Sizes that animate or auto-fit reach these caches at a new float every
+// frame. Optical size is asked for on a quarter-pixel grid, and both caches
+// evict, so neither grows with the number of distinct sizes drawn.
+TEST_CASE("optical-size and tracking caches stay bounded across many sizes",
+          "[canvas][skia][text][optical-size][tracking]") {
+    if (!opsz_trak_face())
+        SKIP("no platform font manager to load the fixture font");
+    using pulp::canvas::kFontTableCacheCapacity;
+    using pulp::canvas::typeface_at_auto_optical_size;
+
+    // Sizes within an eighth of a pixel share one clone.
+    auto face = opsz_trak_face();
+    CHECK(typeface_at_auto_optical_size(face, 20.01f).get() ==
+          typeface_at_auto_optical_size(face, 20.1f).get());
+    CHECK(typeface_at_auto_optical_size(face, 20.01f).get() !=
+          typeface_at_auto_optical_size(face, 20.2f).get());
+
+    // Three separately loaded copies are three faces to the caches, which is
+    // more face-and-coordinate pairs than either cache holds.
+    std::vector<sk_sp<SkTypeface>> faces{opsz_trak_face(), opsz_trak_face(), opsz_trak_face()};
+    REQUIRE(faces[0]->uniqueID() != faces[1]->uniqueID());
+    REQUIRE(faces[1]->uniqueID() != faces[2]->uniqueID());
+    for (const auto& source : faces) {
+        for (int i = 0; i < 2000; ++i) {
+            const float size = 10.0f + static_cast<float>(i) * 0.031f;
+            const auto clone = typeface_at_auto_optical_size(source, size);
+            (void)pulp::canvas::aat_tracking_px(clone.get(), size);
+        }
+    }
+    const auto sizes = pulp::canvas::font_table_cache_sizes();
+    CHECK(sizes.optical_size_clones <= kFontTableCacheCapacity);
+    CHECK(sizes.track_tables <= kFontTableCacheCapacity);
+
+    // SkParagraph's FontCollection keeps a clone per argument set, so the
+    // paragraph path asks for no more distinct arguments than the grid has
+    // points in the axis range, and none for a face without opsz.
+    SkFontParameters::Variation::Axis axis;
+    REQUIRE(face->getVariationDesignParameters(SkSpan(&axis, 1)) == 1);
+    REQUIRE(axis.tag == SkSetFourByteTag('o', 'p', 's', 'z'));
+    const auto grid_points = static_cast<std::size_t>((axis.max - axis.min) * 4.0f) + 1;
+    std::vector<skia::textlayout::FontArguments> distinct;
+    for (int i = 0; i < 2000; ++i) {
+        skia::textlayout::TextStyle style;
+        pulp::canvas::apply_auto_optical_size(style, face.get(),
+                                              10.0f + static_cast<float>(i) * 0.031f);
+        REQUIRE(style.getFontArguments().has_value());
+        const auto& args = *style.getFontArguments();
+        if (std::find(distinct.begin(), distinct.end(), args) == distinct.end())
+            distinct.push_back(args);
+    }
+    CHECK(distinct.size() <= grid_points);
+    auto plain = pulp::canvas::platform_font_manager()->makeFromFile(PULP_TEST_FONT_PATH);
+    REQUIRE(plain != nullptr);
+    skia::textlayout::TextStyle plain_style;
+    pulp::canvas::apply_auto_optical_size(plain_style, plain.get(), 20.0f);
+    CHECK_FALSE(plain_style.getFontArguments().has_value());
+}
+#endif
+
+// ── Optical sizing on a face that already sits on other axes ────────────────
+//
+// The macOS system UI font is variable on wght and opsz, so its bold is a
+// position on the wght axis. Setting opsz must leave that position alone, or
+// bold text at a display size would come out regular.
+namespace {
+constexpr SkFourByteTag kWghtTag = SkSetFourByteTag('w', 'g', 'h', 't');
+constexpr SkFourByteTag kOpszTag = SkSetFourByteTag('o', 'p', 's', 'z');
+float coordinate_of(const std::vector<SkFontArguments::VariationPosition::Coordinate>& position,
+                    SkFourByteTag axis) {
+    for (const auto& c : position)
+        if (c.axis == axis)
+            return c.value;
+    return -1.0f;
+}
+std::vector<SkFontArguments::VariationPosition::Coordinate> position_of(const SkTypeface* face) {
+    std::vector<SkFontArguments::VariationPosition::Coordinate> position(16);
+    const int n = face ? face->getVariationDesignPosition(SkSpan(position)) : 0;
+    position.resize(n > 0 && n <= 16 ? static_cast<std::size_t>(n) : 0u);
+    return position;
+}
+} // namespace
+
+TEST_CASE("an optical-size clone keeps a weight instance's weight",
+          "[canvas][skia][text][optical-size]") {
+#if !defined(__APPLE__)
+    SKIP("needs the macOS system UI font, which is variable on wght and opsz");
+#else
+    auto mgr = pulp::canvas::platform_font_manager();
+    REQUIRE(mgr != nullptr);
+    auto regular = mgr->matchFamilyStyle(".AppleSystemUIFont", SkFontStyle::Normal());
+    REQUIRE(regular != nullptr);
+    const SkFontArguments::VariationPosition::Coordinate wght{kWghtTag, 700.0f};
+    SkFontArguments args;
+    args.setVariationDesignPosition({&wght, 1});
+    auto bold = regular->makeClone(args);
+    REQUIRE(bold != nullptr);
+    REQUIRE(coordinate_of(position_of(bold.get()), kWghtTag) == 700.0f);
+
+    // The position handed to makeClone carries the weight with the size.
+    const auto position = pulp::canvas::auto_optical_size_position(bold.get(), 40.0f);
+    CHECK(coordinate_of(position, kWghtTag) == 700.0f);
+    CHECK(coordinate_of(position, kOpszTag) == 40.0f);
+
+    // SkFont path: the clone sits at both coordinates.
+    const auto sized = position_of(pulp::canvas::typeface_at_auto_optical_size(bold, 40.0f).get());
+    CHECK(coordinate_of(sized, kWghtTag) == 700.0f);
+    CHECK(coordinate_of(sized, kOpszTag) == 40.0f);
+
+    // Paragraph path: the style carries only opsz, and the face SkParagraph
+    // matches at weight 700 keeps its weight when it is cloned.
+    auto ctx = pulp::canvas::TextFontContext::shared();
+    auto collection = ctx->font_collection();
+    REQUIRE(collection != nullptr);
+    skia::textlayout::TextStyle style;
+    style.setFontFamilies({SkString(".AppleSystemUIFont")});
+    style.setFontSize(40.0f);
+    style.setFontStyle(SkFontStyle(700, SkFontStyle::kNormal_Width, SkFontStyle::kUpright_Slant));
+    pulp::canvas::apply_auto_optical_size(style, bold.get(), 40.0f);
+    skia::textlayout::ParagraphStyle paragraph_style;
+    paragraph_style.setTextStyle(style);
+    auto collection_use = ctx->lock_font_collection_use();
+    auto builder = skia::textlayout::ParagraphBuilder::make(paragraph_style, collection,
+                                                            pulp::canvas::shared_sk_unicode());
+    REQUIRE(builder != nullptr);
+    builder->addText("Hamburgefons");
+    auto paragraph = builder->Build();
+    REQUIRE(paragraph != nullptr);
+    paragraph->layout(SK_ScalarInfinity);
+    const auto fonts = paragraph->getFonts();
+    REQUIRE_FALSE(fonts.empty());
+    const auto shaped = position_of(fonts.front().fFont.getTypeface());
+    CHECK(coordinate_of(shaped, kWghtTag) == 700.0f);
+    CHECK(coordinate_of(shaped, kOpszTag) == 40.0f);
+#endif
+}
+
+// ── system-ui through CoreText's UI-font API ─────────────────────────────────
+//
+// The system font's family name is private, and a lookup by it stops working
+// for the rest of the process once a weight between its named instances has
+// been asked for. Resolving through CTFontCreateUIFontForLanguage keeps every
+// weight on the system font and keeps the `.SFNS-*` identities a captured
+// layout is compared against.
+TEST_CASE("system-ui resolves to the system font at every weight",
+          "[canvas][skia][text][generic-family]") {
+#if !defined(__APPLE__)
+    SKIP("the system UI font lookup covers macOS");
+#else
+    pulp::canvas::FontResolver::instance().clear_cache();
+    auto resolve = [](float weight) {
+        pulp::canvas::FontOptions options;
+        options.weight = weight;
+        options.family_stack = {"system-ui"};
+        return pulp::canvas::FontResolver::instance().resolve_family_list(options);
+    };
+    // A weight between named instances, then named ones after it.
+    for (float weight : {250.0f, 400.0f, 700.0f, 650.0f, 900.0f}) {
+        INFO("weight " << weight);
+        const auto resolved = resolve(weight);
+        REQUIRE(resolved.typeface != nullptr);
+        SkString postscript;
+        resolved.typeface->getPostScriptName(&postscript);
+        CHECK(std::string(postscript.c_str()).rfind(".SFNS-", 0) == 0);
+        CHECK(resolved.typeface->fontStyle().weight() == static_cast<int>(weight));
+        REQUIRE_FALSE(resolved.trace.empty());
+        CHECK(resolved.trace.back().note == "system UI font");
+    }
+    CHECK(pulp::canvas::resolved_face_identity("system-ui", 400.0f) == ".SFNS-Regular");
+    CHECK(pulp::canvas::resolved_face_identity("system-ui", 700.0f) == ".SFNS-Bold");
+    CHECK(pulp::canvas::resolved_face_identity(
+              "BlinkMacSystemFont", 700.0f, pulp::canvas::FontSlant::Italic) == ".SFNS-BoldItalic");
+#endif
+}
+
+TEST_CASE("Canvas text keeps a generic family that leads a family list",
+          "[canvas][skia][text][generic-family]") {
+#if !defined(__APPLE__)
+    SKIP("the generic-family table covers macOS");
+#else
+    // The system font's family name (".AppleSystemUIFont") shares nothing with
+    // "system-ui", so a name-overlap check alone reads it as a platform
+    // default and walks on to sans-serif.
+    SkImageInfo info =
+        SkImageInfo::Make(64, 64, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    auto width_in = [&](const char* family) {
+        canvas.set_font_full(family, 20.0f, 400, /*slant=*/0, /*letter_spacing=*/0.0f);
+        return canvas.measure_text("Hamburgefons");
+    };
+    const float system_ui = width_in("system-ui");
+    const float sans_serif = width_in("sans-serif");
+    REQUIRE(std::abs(system_ui - sans_serif) > 1.0f);
+    CHECK(width_in("system-ui, sans-serif") == Catch::Approx(system_ui).margin(0.01));
+#endif
+}
+
+TEST_CASE("an optical-size clone of the system font's bold keeps weight 700",
+          "[canvas][skia][text][optical-size][generic-family]") {
+#if !defined(__APPLE__)
+    SKIP("needs the macOS system UI font, which is variable on wght and opsz");
+#else
+    pulp::canvas::FontOptions options;
+    options.weight = 700.0f;
+    options.family_stack = {"system-ui"};
+    const auto resolved = pulp::canvas::FontResolver::instance().resolve_family_list(options);
+    REQUIRE(resolved.typeface != nullptr);
+    SkString postscript;
+    resolved.typeface->getPostScriptName(&postscript);
+    REQUIRE(std::string(postscript.c_str()) == ".SFNS-Bold");
+
+    const auto sized = pulp::canvas::typeface_at_auto_optical_size(resolved.typeface, 40.0f);
+    REQUIRE(sized != nullptr);
+    CHECK(sized->fontStyle().weight() == 700);
+    const auto position = position_of(sized.get());
+    CHECK(coordinate_of(position, kWghtTag) == 700.0f);
+    CHECK(coordinate_of(position, kOpszTag) == 40.0f);
+#endif
+}
+
+// ── A quoted generic keyword is a family name ───────────────────────────────
+//
+// CSS `font-family: "serif", Inter` names a family literally called "serif",
+// which no host has, so the text is Inter; unquoted, `serif` is the generic and
+// the text is Times. The Canvas font, the paragraph shaper, the TextShaper's
+// widths and its line metrics, and the face identity each had their own list
+// walk, and the ones that stripped the quotes before looking for a generic
+// painted Times for the quoted form while the rest measured Inter.
+TEST_CASE("a quoted generic family is a literal name on every text path",
+          "[canvas][skia][text][generic-family]") {
+#if !defined(__APPLE__)
+    SKIP("the generic-family table covers macOS");
+#else
+    CHECK(parse_css_font_family(" 'serif' ").quoted);
+    CHECK(parse_css_font_family(" 'serif' ").name == "serif");
+    CHECK_FALSE(parse_css_font_family("serif").quoted);
+    CHECK(split_css_font_family_list(" \"serif\" , Inter,, ") ==
+          std::vector<std::string>{"\"serif\"", "Inter"});
+    CHECK(platform_family_for_css_family("serif") == "Times");
+    CHECK(platform_family_for_css_family("\"serif\"") == "serif");
+
+    FontResolver::instance().clear_cache();
+    SkImageInfo info =
+        SkImageInfo::Make(64, 64, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    const std::string text = "Hamburgefons";
+    struct Reading {
+        float font = 0, paragraph = 0, shaper = 0, ascent = 0;
+        std::string face;
+    };
+    auto read = [&](const char* family) {
+        Reading r;
+        canvas.set_font_full(family, 20.0f, 400, 0, 0.0f);
+        r.font = canvas.measure_text(text);
+        // Letter-spacing routes the measurement through SkParagraph.
+        canvas.set_font_full(family, 20.0f, 400, 0, 1.0f);
+        r.paragraph = canvas.measure_text(text);
+        TextShaper shaper;
+        const auto prepared = shaper.prepare(text, family, 20.0f);
+        r.shaper = prepared.total_width();
+        r.ascent = prepared.typographic_ascent();
+        r.face = resolved_face_identity(family, 400.0f);
+        return r;
+    };
+    const Reading inter = read("Inter");
+    const Reading times = read("Times");
+    // Control: the two faces are told apart on every path.
+    REQUIRE(std::abs(inter.font - times.font) > 1.0f);
+    REQUIRE(std::abs(inter.paragraph - times.paragraph) > 1.0f);
+    REQUIRE(std::abs(inter.shaper - times.shaper) > 1.0f);
+    REQUIRE(std::abs(inter.ascent - times.ascent) > 0.1f);
+    REQUIRE(inter.face != times.face);
+
+    const auto same_as = [](const Reading& got, const Reading& want) {
+        CHECK(got.font == Catch::Approx(want.font).margin(0.01));
+        CHECK(got.paragraph == Catch::Approx(want.paragraph).margin(0.01));
+        CHECK(got.shaper == Catch::Approx(want.shaper).margin(0.01));
+        CHECK(got.ascent == Catch::Approx(want.ascent).margin(0.01));
+        CHECK(got.face == want.face);
+    };
+    SECTION("quoted: a family named serif, which falls through to Inter") {
+        same_as(read("\"serif\", Inter"), inter);
+        same_as(read("'serif', Inter"), inter);
+    }
+    SECTION("unquoted: the generic, which is Times") {
+        same_as(read("serif, Inter"), times);
+    }
+#endif
+}
+
+// ── A generic is held to the family it maps to ──────────────────────────────
+//
+// When a generic's platform family is missing, the font manager answers with
+// its default face. Accepting any face for a generic stopped the list walk
+// there, so `math, Inter` drew the default and never tried Inter, and the
+// generic exemption also let the face through Deterministic mode.
+TEST_CASE("a generic whose platform family is missing falls through the list",
+          "[canvas][skia][text][generic-family]") {
+    CHECK(platform_face_is_family("Helvetica", "Helvetica Neue"));
+    CHECK(platform_face_is_family("helvetica neue", "Helvetica"));
+    CHECK(platform_face_is_family(".AppleSystemUIFont", ".SF NS"));
+    CHECK_FALSE(platform_face_is_family("STIX Two Math", "Helvetica"));
+    CHECK_FALSE(platform_face_is_family("", "Helvetica"));
+
+    struct Override {
+        Override() {
+            set_css_generic_family_override("math", "Pulp Absent Family 2c1f");
+            FontResolver::instance().clear_cache();
+        }
+        ~Override() {
+            set_css_generic_family_override("math", "");
+            FontResolver::instance().clear_cache();
+        }
+    } override_math;
+    REQUIRE(platform_family_for_css_family("math") == "Pulp Absent Family 2c1f");
+
+    SkImageInfo info =
+        SkImageInfo::Make(64, 64, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    auto width_in = [&](const char* family) {
+        canvas.set_font_full(family, 20.0f, 400, 0, 0.0f);
+        return canvas.measure_text("Hamburgefons");
+    };
+    const float inter = width_in("Inter");
+    // Control: the face a lone `math` gets is not Inter, so landing on Inter
+    // below is the walk moving on, not the two faces agreeing.
+    REQUIRE(std::abs(width_in("math") - inter) > 1.0f);
+    CHECK(width_in("math, Inter") == Catch::Approx(inter).margin(0.01));
+
+    FontOptions options;
+    options.family_stack = {"math", "Inter"};
+    options.fallback_mode = FallbackMode::Deterministic;
+    CHECK(FontResolver::instance().resolve_family_list(options).actual_family == "Inter");
+
+#if defined(__APPLE__)
+    // CoreText returns nothing for an unknown name, so the resolver never sees
+    // a face for the absent family above. It does answer "System Font" with a
+    // face of another family, .SF NS, which is the case the generic exemption
+    // waved through Deterministic mode.
+    set_css_generic_family_override("math", "System Font");
+    FontResolver::instance().clear_cache();
+    CHECK(FontResolver::instance().resolve_family_list(options).actual_family == "Inter");
+    CHECK(width_in("math, Inter") == Catch::Approx(inter).margin(0.01));
+#endif
 }
 
 #endif  // PULP_HAS_SKIA

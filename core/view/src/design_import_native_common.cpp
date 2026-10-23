@@ -4,6 +4,7 @@
 #include "design_binding_metadata.hpp"
 #include "design_import_document_checks.hpp"
 
+#include <pulp/view/border_style.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/css_gradient.hpp>
@@ -1635,17 +1636,11 @@ void apply_visual_style(View& view, const IRStyle& style,
             if (auto color = parse_any_css_color(*style.border_left_color))
                 view.set_border_left_color(*color);
         }
-        // CSS border-style keyword → View::BorderStyle, same table the bridge's
-        // setBorderStyle uses. A Figma dashPattern lowers to "dashed" at the
-        // producers; without this the native materializer painted it solid
-        // while the JS-bridge lane dashed it. Unknown keywords keep the solid
-        // default (View degrades double/groove/... to solid anyway).
+        // The same keyword table the bridge's setBorderStyle uses; an unknown
+        // keyword keeps the solid default.
         if (style.border_style) {
-            const std::string& bs = *style.border_style;
-            if (bs == "dashed")      view.set_border_style(View::BorderStyle::dashed);
-            else if (bs == "dotted") view.set_border_style(View::BorderStyle::dotted);
-            else if (bs == "none")   view.set_border_style(View::BorderStyle::none);
-            else if (bs == "hidden") view.set_border_style(View::BorderStyle::hidden);
+            if (auto bs = border_style_from_css(*style.border_style))
+                view.set_border_style(*bs);
         }
     }
     if (style.border_top_left_radius) view.set_corner_radius_tl(*style.border_top_left_radius);
@@ -2275,6 +2270,8 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                     std::move(boxes), node.text_layout_basis->width,
                     node.text_layout_basis->resolved_face,
                     wrap_on_cache_miss);
+                if (const auto& m = node.text_layout_basis->line_metrics)
+                    label->set_cached_line_metrics(*m);
                 if (!explicit_nowrap && node.text_line_boxes.size() > 1)
                     label->set_multi_line(true);
             }
@@ -3147,6 +3144,8 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
         // is discovered pass-wide, so setting it on the imported root also
         // covers a host that embeds this tree under its own layout root.
         root->set_subpixel_layout(true);
+        // Captured text snaps its baselines to this frame's grid.
+        root->set_captured_frame_root(true);
         if (options.diagnostics_out != nullptr) {
             options.diagnostics_out->insert(options.diagnostics_out->end(),
                                             materialize_diagnostics.begin(),
