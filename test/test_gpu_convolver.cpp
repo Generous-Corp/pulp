@@ -807,6 +807,79 @@ TEST_CASE("GpuAudioTransport fallback stream matches reference convolution",
     REQUIRE(s.miss_blocks > 0); // we really exercised the miss path
 }
 
+TEST_CASE("GpuAudioTransport serves the convolver CPU fallback without allocating",
+          "[gpu_audio][convolver][transport][rt-safety]") {
+    using pulp::gpu_audio::GpuAudioTransport;
+    // The shipped fallback (prime_fallback + process_cpu_fallback) is otherwise
+    // probed only by a hardware-gated example, so a GPU-less builder never
+    // checks it. Never pumping the transport keeps every block on the
+    // fallback, with or without a device.
+    constexpr uint32_t CH = 2, BS = 64, SR = 48000;
+    constexpr uint32_t NBLK = 48;
+    constexpr int M = 300; // longer than one block: exercises the partition tail
+    std::vector<float> ir(M);
+    for (int i = 0; i < M; ++i)
+        ir[i] = std::cos(0.05f * i) * std::exp(-0.01f * i);
+
+    GpuConvolver node(CH, BS, SR, ir);
+    REQUIRE(node.prepare());
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {/*ring_blocks=*/8}));
+    const uint32_t L = transport.latency_samples() / BS;
+    REQUIRE(L > 0);
+    REQUIRE(L < NBLK);
+
+    std::vector<std::vector<float>> input(CH, std::vector<float>(BS * NBLK));
+    for (uint32_t ch = 0; ch < CH; ++ch)
+        for (uint32_t i = 0; i < BS * NBLK; ++i)
+            input[ch][i] = std::sin((0.07f + 0.03f * ch) * i) + 0.25f * std::sin(0.43f * i);
+    std::vector<std::vector<float>> out(CH, std::vector<float>(BS * NBLK, 0.0f));
+
+    const auto run_block = [&](uint32_t b) {
+        const float* in_ptr[CH];
+        float* out_ptr[CH];
+        for (uint32_t ch = 0; ch < CH; ++ch) {
+            in_ptr[ch] = input[ch].data() + b * BS;
+            out_ptr[ch] = out[ch].data() + b * BS;
+        }
+        BufferView<const float> iv(in_ptr, CH, BS);
+        BufferView<float> ov(out_ptr, CH, BS);
+        transport.process(iv, ov, BS);
+    };
+
+    // One block outside the probe settles any first-call state; every block
+    // after it must be allocation-free. Nothing that allocates (Catch's
+    // assertion machinery included) runs inside the probe window.
+    run_block(0);
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (uint32_t b = 1; b < NBLK; ++b)
+            run_block(b);
+        allocations = probe.allocation_count();
+    }
+    CHECK(allocations == 0);
+
+    // The stream is the reference convolution delayed by the reported PDC,
+    // so the probe measured the real fallback, not a silent shortcut.
+    const auto delivery = transport.delivery_snapshot();
+    CHECK(delivery.gpu_blocks == 0);
+    CHECK(delivery.cpu_fallback_blocks >= NBLK - L);
+    double peak = 0.0;
+    for (uint32_t ch = 0; ch < CH; ++ch) {
+        const std::vector<float> ref = direct_convolution(input[ch], ir);
+        float worst = 0.0f;
+        for (uint32_t i = 0; i < BS * NBLK; ++i) {
+            const float expected = i < L * BS ? 0.0f : ref[i - L * BS];
+            worst = std::max(worst, std::abs(out[ch][i] - expected));
+            peak = std::max(peak, static_cast<double>(std::abs(expected)));
+        }
+        CHECK(worst < 1.0e-3f);
+    }
+    CHECK(peak > 0.5); // a silent stream would pass the null trivially
+    transport.release();
+}
+
 TEST_CASE("GpuConvolver full-tail oracle matrix", "[gpu_audio][convolver][p2][gpu]") {
     constexpr std::size_t input_size = 384;
     const auto ir = make_oracle_ir();
