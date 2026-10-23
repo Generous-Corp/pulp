@@ -2234,6 +2234,26 @@ without a registration and a `setup.sh` priming call.
 `test_setup_source_cache.sh` fails on that drift, and on any `setup.sh` curl
 that lacks `--retry-all-errors`.
 
+### Per-commit `pulp-view-audio` archives are immutable release assets
+
+`view-audio-archive.yml` (dispatch from `main`, `source_sha` must be a full
+commit on `main`) publishes `libpulp-view-audio.a`, its manifest, symbol floor,
+floor-gate verdict, `SHA256SUMS` and the Sigstore bundle as an immutable
+prerelease tagged `artifact/pulp-view-audio/<sha>`. Three things that look
+optional are not:
+
+- **`ZERO_AR_DATE=1` is load-bearing.** Apple `ar`/`ranlib` stamp member and
+  symbol-table times; with it two clean builds of one commit in different build
+  dirs match byte for byte, without it a rebuild of the same objects differs.
+- **The tag must stay outside `v*`.** `v*` is the protected release-tag ruleset
+  and the trigger for `release-cli.yml` / `sign-and-release.yml`; a tag such as
+  `view-audio-...` would match that glob. Keep the release a prerelease with
+  `--latest=false` so `/releases/latest` and `pulp upgrade` never see it.
+- **Never delete one of these releases.** A published immutable release burns
+  its tag name forever; the workflow refuses to rebuild a commit that already
+  has one, because a second build on a newer runner image is different bytes.
+  Downstream identity is the attested manifest, not a rebuild.
+
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
 Making a skip visible is safe. Removing the skip is not, and the two must not
