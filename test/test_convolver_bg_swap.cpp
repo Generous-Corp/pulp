@@ -863,12 +863,16 @@ TEST_CASE("FixedIrConvolver process and reset do not allocate on either engine",
         REQUIRE(conv.backend() == engine);
         INFO("backend " << static_cast<int>(engine));
 
-        std::vector<float> input(block, 0.25f), output(block);
+        std::vector<float> input(block + 1, 0.25f), output(block + 1);
+        // The direct engine takes any count up to its block, the FFT engine
+        // exactly its block; one past each limit is its fail-closed path.
+        const std::size_t wrong = engine == ConvolutionBackend::direct_fir ? block + 1 : block - 1;
         {
             pulp::test::RtAllocationProbe probe;
             for (int b = 0; b < 64; ++b)
                 conv.process(input.data(), output.data(), block);
-            conv.process(input.data(), output.data(), block - 1); // fail-closed path
+            conv.process(input.data(), output.data(), block - 1); // a short block
+            conv.process(input.data(), output.data(), wrong);     // fail-closed path
             conv.reset();
             conv.process(input.data(), input.data(), block); // in-place
             REQUIRE_FALSE(probe.saw_allocation());

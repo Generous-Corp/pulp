@@ -167,10 +167,15 @@ TEST_CASE("Convolver: block size is rounded to a processable power of two",
     REQUIRE_THAT(single_output[0], WithinAbs(single_input[0], 1e-5f));
 }
 
+// The table is measured in single precision only; double keeps the FFT engine
+// everywhere.
+static_assert(FixedIrConvolver64::direct_fir_limit(8) == 0);
+static_assert(FixedIrConvolver64::direct_fir_limit(512) == 0);
+
 TEST_CASE("FixedIrConvolver crossover edges follow the measured per-block table",
           "[signal][convolver][fixed-ir]") {
     using Backend = ConvolutionBackend;
-#if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
+#if PULP_FIXED_IR_MEASURED_TABLE
     // At 8-frame callbacks and below the direct engine covers the whole
     // measured range; longer IRs keep the FFT engine.
     for (const std::size_t block :
@@ -195,7 +200,7 @@ TEST_CASE("FixedIrConvolver crossover edges follow the measured per-block table"
         REQUIRE(FixedIrConvolver::choose_backend(e.limit + 1, e.block) == Backend::partitioned_fft);
     }
 #else
-    // Backends without their own measurements keep the partitioned engine.
+    // Targets without their own measurements keep the partitioned engine.
     for (const std::size_t block : {std::size_t{1}, std::size_t{16}, std::size_t{512}}) {
         REQUIRE(FixedIrConvolver::direct_fir_limit(block) == 0);
         REQUIRE(FixedIrConvolver::choose_backend(1, block) == Backend::partitioned_fft);
@@ -287,18 +292,77 @@ TEST_CASE("FixedIrConvolver direct and partitioned paths match a streamed FIR",
 
 TEST_CASE("FixedIrConvolver direct processing remains stable across history wrap",
           "[signal][convolver][fixed-ir][rt]") {
+    // In place, 49 blocks of 32 cross the FIR's 512-sample history compaction
+    // three times; every output must still be the streamed convolution.
     constexpr std::size_t block = 32;
-    const std::vector<float> ir(65, 0.01f);
+    constexpr std::size_t blocks = 49;
+    std::vector<float> ir(65);
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        ir[i] = 0.02f * std::cos(0.31f * static_cast<float>(i)) /
+                (1.0f + 0.05f * static_cast<float>(i));
+    std::vector<float> input(block * blocks);
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] =
+            0.5f * std::sin(0.043f * static_cast<float>(i)) + ((i % 37u) == 0u ? 0.3f : 0.0f);
+
     FixedIrConvolver conv;
     conv.load_ir(ir.data(), ir.size(), block, ConvolutionBackend::direct_fir);
-    std::vector<float> data(block, 0.25f);
-    conv.process(data.data(), data.data(), data.size());
+    std::vector<float> data = input;
+    for (std::size_t b = 0; b < blocks; ++b)
+        conv.process(data.data() + b * block, data.data() + b * block, block);
 
-    // Exercise repeated blocks, including the direct FIR history
-    // wrap/compact boundary.
-    for (int i = 0; i < 48; ++i)
-        conv.process(data.data(), data.data(), data.size());
+    for (std::size_t n = 0; n < input.size(); ++n) {
+        double expected = 0.0;
+        for (std::size_t k = 0; k < ir.size() && k <= n; ++k)
+            expected += static_cast<double>(ir[k]) * input[n - k];
+        INFO("sample " << n);
+        REQUIRE_THAT(data[n], WithinAbs(expected, 1e-5));
+    }
     REQUIRE(conv.block_size_violations() == 0);
+}
+
+TEST_CASE("FixedIrConvolver direct engine streams any block size up to its maximum",
+          "[signal][convolver][fixed-ir]") {
+    // The direct FIR has no partitioning, so a host whose callback is not a
+    // power of two (48, 37, 480 frames) or varies from call to call gets the
+    // same stream as a FirFilter, with no violations.
+    std::vector<float> ir(100);
+    for (std::size_t i = 0; i < ir.size(); ++i)
+        ir[i] = 0.03f * std::sin(0.17f * static_cast<float>(i) + 0.4f) /
+                (1.0f + 0.02f * static_cast<float>(i));
+    for (const std::size_t block : {std::size_t{48}, std::size_t{37}, std::size_t{480}}) {
+        INFO("block " << block);
+        FixedIrConvolver conv;
+        conv.load_ir(ir.data(), ir.size(), block, ConvolutionBackend::direct_fir);
+        REQUIRE(conv.block_size() >= block);
+        FirFilter reference;
+        reference.set_coefficients(ir);
+
+        std::vector<float> input(block * 23);
+        for (std::size_t i = 0; i < input.size(); ++i)
+            input[i] = 0.6f * std::sin(0.029f * static_cast<float>(i)) +
+                       0.2f * std::cos(0.41f * static_cast<float>(i));
+        std::vector<float> got(input.size()), want(input.size());
+        for (std::size_t at = 0; at < input.size(); at += block) {
+            // Alternate a full and a shorter call, as a varying host would.
+            const std::size_t first = (at / block) % 2 ? block / 3 + 1 : block;
+            conv.process(input.data() + at, got.data() + at, first);
+            if (first < block)
+                conv.process(input.data() + at + first, got.data() + at + first, block - first);
+        }
+        reference.process(input.data(), want.data(), static_cast<int>(input.size()));
+        for (std::size_t n = 0; n < input.size(); ++n)
+            REQUIRE_THAT(got[n], WithinAbs(want[n], 1e-6));
+        REQUIRE(conv.block_size_violations() == 0);
+    }
+
+    // More than the prepared maximum still fails closed.
+    FixedIrConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), 48, ConvolutionBackend::direct_fir);
+    std::vector<float> big(conv.block_size() + 1, 1.0f), out(big.size(), 9.0f);
+    conv.process(big.data(), out.data(), big.size());
+    REQUIRE(conv.block_size_violations() == 1);
+    REQUIRE(std::all_of(out.begin(), out.end(), [](float v) { return v == 0.0f; }));
 }
 
 TEST_CASE(
@@ -428,7 +492,8 @@ TEST_CASE("FixedIrConvolver direct path recovers cleanly after a wrong block siz
     for (std::size_t i = 0; i < block; ++i)
         REQUIRE_THAT(first_output[i], WithinAbs(first_expected[i], 3e-5));
 
-    const std::size_t wrong_size = block - 7;
+    // The direct engine takes any count up to its block; only more fails.
+    const std::size_t wrong_size = block + 7;
     std::vector<float> bad_input(wrong_size, 0.8f);
     std::vector<float> bad_output(wrong_size, -1.0f);
     conv.process(bad_input.data(), bad_output.data(), wrong_size);

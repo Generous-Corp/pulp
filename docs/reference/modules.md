@@ -931,8 +931,10 @@ a working convolution and would hide the bug. Assert
 When the IR is fixed for a whole preparation, `FixedIrConvolver` runs whichever
 engine is cheaper for that IR length and block size: a vectorized direct FIR or
 the same partitioned FFT. It chooses once in `load_ir()`, never on the audio
-thread, and keeps the same zero latency, `block_size()`, and fail-closed
-contract. It has no live IR swap; use `PartitionedConvolver` for that, and
+thread, and keeps the same zero latency and fail-closed contract. The FFT
+engine still needs exactly `block_size()` frames per call; the direct engine
+takes any count up to `block_size()`, so a host with a non-power-of-two or
+varying callback works without re-blocking. It has no live IR swap; use `PartitionedConvolver` for that, and
 `ZeroLatencyConvolver` or `NonUniformPartitionedConvolver` for long IRs at small
 callbacks.
 
@@ -946,8 +948,9 @@ fixed.process(input, output, fixed.block_size());
 ```
 
 The choice comes from `FixedIrConvolver::choose_backend()`, a pure function
-measured on Apple Silicon with the Accelerate backend; other SIMD backends keep
-the FFT engine until they have their own measurements. Pass a
+measured in single precision on Apple Silicon Macs with the Accelerate backend;
+other targets, and `FixedIrConvolver64`, keep the FFT engine until they have
+their own measurements. Pass a
 `ConvolutionBackend` as the fourth `load_ir()` argument to pin an engine you
 have measured on your target.
 

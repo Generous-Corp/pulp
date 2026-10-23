@@ -10,7 +10,21 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <vector>
+
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+// The direct-engine table was measured on Apple Silicon Macs with the
+// Accelerate backend in single precision; it applies only there.
+#if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE) && defined(__aarch64__) &&                       \
+    defined(TARGET_OS_OSX) && TARGET_OS_OSX
+#define PULP_FIXED_IR_MEASURED_TABLE 1
+#else
+#define PULP_FIXED_IR_MEASURED_TABLE 0
+#endif
 
 namespace pulp::signal {
 
@@ -27,9 +41,12 @@ enum class ConvolutionBackend : std::uint8_t {
 ///
 /// `load_ir()` chooses the engine once, from the pure `choose_backend()`
 /// policy; the choice never changes on the audio thread. Both engines are
-/// zero latency, allocation-free in `process()` and `reset()`, and accept
-/// exactly `block_size()` frames per call: any other count emits silence,
-/// counts a violation, and the next valid block starts from fresh history.
+/// zero latency and allocation-free in `process()` and `reset()`. The direct
+/// engine accepts any frame count from 1 to `block_size()` per call, so a
+/// host with a non-power-of-two or varying callback works unchanged. The FFT
+/// engine accepts exactly `block_size()` frames. A count an engine cannot take
+/// emits silence, counts a violation, and the next valid block starts from
+/// fresh history.
 ///
 /// Pick this over `PartitionedConvolverT` when the IR is fixed and the block
 /// size is known; it has no live IR swap or crossfade. For long IRs at small
@@ -80,32 +97,40 @@ template <typename SampleType = float> class FixedIrConvolverT {
 
     /// The longest IR run on the direct engine for a block size.
     ///
-    /// The table is measured on Apple Silicon with the Accelerate backend
-    /// (M1 Max, M5 Max and M5 Ultra), single and multi-instance, for IRs of 8
-    /// to 4096 taps (receipt: docs/validation/convolver-crossover/). Each
-    /// limit is the lowest of the three chips' crossovers. At 8-frame
-    /// callbacks and below the direct engine beat the uniform FFT at every
-    /// measured length, so the limit there is the end of the measured range;
-    /// longer IRs keep the FFT engine until they are measured. From 16 frames
-    /// up the real-input FFT wins early: about 576 taps at 16 frames, 128 at
-    /// 32 and 64, and 64 from 128 frames up. Other backends keep the FFT
-    /// engine until they have their own measurements; a scalar direct kernel
-    /// is an order of magnitude slower.
+    /// The table is measured in single precision on Apple Silicon Macs with
+    /// the Accelerate backend (M1 Max, M5 Max and M5 Ultra), single and
+    /// multi-instance, for IRs of 8 to 4096 taps (receipt:
+    /// docs/validation/convolver-crossover/; a test recomputes it from those
+    /// files). Each limit is the lowest of the three chips' crossovers. At
+    /// 8-frame callbacks and below the direct engine beat the uniform FFT at
+    /// every measured length, so the limit there is the end of the measured
+    /// range; longer IRs keep the FFT engine until they are measured. From 16
+    /// frames up the real-input FFT wins early: about 576 taps at 16 frames,
+    /// 128 at 32 and 64, and 64 from 128 frames up.
+    ///
+    /// Everywhere else (other architectures and operating systems, other SIMD
+    /// backends, double precision) the limit is 0 and the FFT engine runs every
+    /// IR, as it did before the table existed, until that target is measured.
     static constexpr std::size_t direct_fir_limit(std::size_t block_size) noexcept {
-#if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
-        switch (detail::convolver_block_size(block_size)) {
-        case 1:
-        case 2:
-        case 4:
-        case 8:
-            return 4096;
-        case 16:
-            return 576;
-        case 32:
-        case 64:
-            return 128;
-        default:
-            return 64;
+#if PULP_FIXED_IR_MEASURED_TABLE
+        if constexpr (!std::is_same_v<SampleType, float>) {
+            (void)block_size;
+            return 0;
+        } else {
+            switch (detail::convolver_block_size(block_size)) {
+            case 1:
+            case 2:
+            case 4:
+            case 8:
+                return 4096;
+            case 16:
+                return 576;
+            case 32:
+            case 64:
+                return 128;
+            default:
+                return 64;
+            }
         }
 #else
         (void)block_size;
@@ -131,7 +156,9 @@ template <typename SampleType = float> class FixedIrConvolverT {
             partitioned_.process(input, output, num_samples);
             return;
         case ConvolutionBackend::direct_fir:
-            if (num_samples != block_size_) {
+            // A direct FIR has no partitioning, so any count up to the
+            // prepared maximum continues the stream.
+            if (num_samples > block_size_) {
                 std::fill_n(output, num_samples, SampleType{0});
                 ++violations_;
                 direct_.reset();
@@ -153,16 +180,19 @@ template <typename SampleType = float> class FixedIrConvolverT {
     [[nodiscard]] bool is_loaded() const noexcept {
         return backend_ != ConvolutionBackend::none;
     }
-    /// The block size `process()` requires: the `load_ir()` request rounded
-    /// up to a power of two. Zero when no IR is loaded.
+    /// The `load_ir()` request rounded up to a power of two: the exact frame
+    /// count the FFT engine requires, and the largest the direct engine
+    /// accepts. Zero when no IR is loaded.
     [[nodiscard]] std::size_t block_size() const noexcept {
         return block_size_;
     }
     [[nodiscard]] std::size_t latency() const noexcept {
         return 0;
     }
-    /// Calls to `process()` with a frame count other than `block_size()`
-    /// since the last `load_ir()` or `reset()`. Nonzero means a caller bug.
+    /// Calls to `process()` with a frame count the engine cannot take (any
+    /// other than `block_size()` for the FFT engine, more than `block_size()`
+    /// for the direct engine) since the last `load_ir()` or `reset()`. Nonzero
+    /// means a caller bug.
     [[nodiscard]] std::uint64_t block_size_violations() const noexcept {
         return violations_;
     }
