@@ -1,8 +1,9 @@
 # The GPU device layer sits below the 2D renderer as two targets.
 #
-#   pulp-gpu-device-api  INTERFACE. The six device headers (gpu_surface,
-#                        gpu_compute, gpu_diagnostics, gpu_startup_report,
-#                        gpu_render_time, bench/perf_counters). They expose
+#   pulp-gpu-device-api  INTERFACE. The seven device headers (gpu_surface,
+#                        gpu_compute, gpu_diagnostics, gpu_proc_installer,
+#                        gpu_startup_report, gpu_render_time,
+#                        bench/perf_counters). They expose
 #                        opaque handles only, so this target names no Dawn,
 #                        WebGPU or Skia dependency and no Pulp module.
 #   pulp-gpu-device      The device implementation: the Dawn surface and
@@ -32,6 +33,8 @@ add_library(pulp-gpu-device)
 add_library(pulp::gpu-device ALIAS pulp-gpu-device)
 target_sources(pulp-gpu-device PRIVATE
     src/gpu_diagnostics.cpp
+    src/gpu_proc_installer.cpp
+    src/gpu_proc_installer_native.cpp
     src/gpu_startup_report.cpp
     src/gpu_surface_dawn.cpp
     src/render_observer.cpp

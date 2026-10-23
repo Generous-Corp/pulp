@@ -11,12 +11,13 @@
 #include <pulp/render/gpu_diagnostics.hpp>
 #include <pulp/runtime/log.hpp>
 
-// Dawn's *native* implementation headers: the instance factory and the C proc
-// table. emdawnwebgpu implements webgpu.h over the browser's navigator.gpu and
-// provides neither — see create_instance() for the two-arm seam.
+// Dawn's *native* instance factory, and the seam that installs Dawn's
+// process-global proc table before it is used. emdawnwebgpu implements webgpu.h
+// over the browser's navigator.gpu and needs neither — see create_instance()
+// for the two-arm seam.
 #if !defined(__EMSCRIPTEN__)
 #include "dawn/native/DawnNative.h"
-#include "dawn/dawn_proc.h"
+#include <pulp/render/gpu_proc_installer.hpp>
 #endif
 
 #include "gpu_compute_pool.hpp"
@@ -4806,8 +4807,11 @@ private:
     void pump_events() {}
 #else
     bool create_instance() {
-        const DawnProcTable& procs = dawn::native::GetProcs();
-        dawnProcSetProcs(&procs);
+        std::string proc_error;
+        if (!ensure_dawn_procs(&proc_error)) {
+            runtime::log_error("GpuCompute: Dawn proc table unavailable: " + proc_error);
+            return false;
+        }
 
         wgpu::InstanceDescriptor inst_desc{};
         native_instance_ = std::make_unique<dawn::native::Instance>(
