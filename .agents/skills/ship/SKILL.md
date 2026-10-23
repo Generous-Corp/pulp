@@ -250,6 +250,20 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
+## PULP_DEV_BUILD ship guard
+
+`sign` and `package` (and so `release`) **refuse** a build dir whose
+`CMakeCache.txt` records `PULP_DEV_BUILD=ON`: that build compiles the on-disk
+`UI_SCRIPT` path, theme path and asset roots into the artifact so a
+hot-reloading editor reads the developer's source tree. The `pulp` CLI turns
+the option on for every developer-loop configure, so a plain `pulp build` dir
+is a dev build. The fix is `cmake -B build -DPULP_DEV_BUILD=OFF` then a
+rebuild (`pulp build` keeps a recorded value); `--allow-dev-build` overrides
+deliberately. The reader lives in `tools/cli/ship_dev_build_guard.hpp`
+(unit-tested in `test/test_ship_dev_build_guard.cpp`).
+`tools/scripts/build_combined_installer.sh` takes finished artifacts, not a
+build dir, and does not configure, so it carries no such check.
+
 ## Development-SDK ship guard
 
 `package`, `notarize`, `release`, and `share` **refuse** a project configured
