@@ -250,11 +250,11 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
     auto theme_thumb = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
     const bool active = enabled();
     auto fill_color = active && has_accent_color_ ? accent_color_ : theme_fill;
-    auto thumb_color =
-        active && has_accent_color_
-            ? canvas::Color::rgba8(
-                  248, 248, 248) // token-lint:allow -- Chromium accented-range keyline material
-            : theme_thumb;
+    // clang-format off
+    auto thumb_color = active && has_accent_color_
+        ? canvas::Color::rgba8(248, 248, 248) // token-lint:allow -- Chromium accented-range keyline material
+        : theme_thumb;
+    // clang-format on
     // One thumb: while modulated, the fill and thumb sit at the value
     // playing in the modulation colour; the base is a tick (below).
     auto keyline_color = thumb_color;
@@ -539,7 +539,7 @@ void Checkbox::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color(fill);
         canvas.fill_rounded_rect(cx - r, cy - r, r * 2, r * 2, corner);
         // Check glyph (simple checkmark using lines)
-        canvas.set_stroke_color(canvas::Color::rgba8(30, 30, 40));
+        canvas.set_stroke_color(resolve_color("control.check", canvas::Color::rgba8(30, 30, 40)));
         canvas.set_line_width(2.0f);
         canvas.stroke_line(cx - r * 0.35f, cy, cx - r * 0.05f, cy + r * 0.3f);
         canvas.stroke_line(cx - r * 0.05f, cy + r * 0.3f, cx + r * 0.4f, cy - r * 0.3f);
