@@ -421,8 +421,12 @@ def geometry_metrics_with_registration(
         or row["max_abs_delta"] > max_abs_delta
     ]
     coverage_floor = PROMOTION_THRESHOLDS["structural"]
-    reference_node_count = sum(1 for node in reference_nodes if has_reference_box(node))
-    coverage = (registered["matched_bounds"] / reference_node_count
+    measurable = {node.index for node in reference_nodes if has_reference_box(node)}
+    reference_node_count = len(measurable)
+    # Numerator and denominator count the same population: a matched row whose
+    # reference has no measurable box would otherwise lift coverage past 1.
+    matched_measurable = len({row["browser_node"] for row in registered["rows"]} & measurable)
+    coverage = (matched_measurable / reference_node_count
                 if reference_node_count > 0 else 0.0)
     if frame_placement is None:
         frame_placement = {"ok": False, "reason": "not evaluated"}
@@ -453,6 +457,7 @@ def geometry_metrics_with_registration(
             "coverage": round(coverage, 6),
             "floor": coverage_floor,
             "matched_bounds": registered["matched_bounds"],
+            "matched_measurable": matched_measurable,
             "reference_node_count": reference_node_count,
             "unmeasurable_reference_count": len(reference_nodes) - reference_node_count,
         },

@@ -1814,7 +1814,7 @@ class GeometryGateTests(unittest.TestCase):
 
     def build(self, *, native_child=None, recorded_shift=0.0, html_shift=0.0,
               root_shift=0.0, provide_placement=True, unmatched_reference=0,
-              boxless_reference=0):
+              boxless_reference=0, matched_zero_area=0):
         snapshot = surface_snapshot(self.FRAME, [self.CHILD])
         capture = {"reference": {"authored_frame": dict(
             zip(("x", "y", "width", "height"), self.FRAME))}}
@@ -1853,6 +1853,17 @@ class GeometryGateTests(unittest.TestCase):
         native = LAB.native_nodes_in_panel_space(native_page, (ox, oy))
         registered = list(zip(registered_browser, native, [100.0, 100.0]))
         raw = list(zip(browser_raw, native_page, [100.0, 100.0]))
+        # Matched pairs whose reference box has no area (a collapsed span):
+        # exact on both sides, so only the coverage arithmetic can see them.
+        zero_area = []
+        for i in range(matched_zero_area):
+            box = (40.0 + i, 30.0, 0.0, 18.0)
+            browser = LAB.BrowserNode(300 + i, "span", 3, "", {}, box, {})
+            pair = (browser, LAB.NativeNode(f"{self.ROOT_ANCHOR}/b[{i}]", "frame", "b", "",
+                                            None, {}, box, 300 + i), 100.0)
+            zero_area.append(browser)
+            registered.append(pair)
+            raw.append(pair)
         placement = (LAB.frame_placement_check(snapshot, ir, layout, registered, capture)
                      if provide_placement else None)
         # Reference nodes no native box matched: laid-out boxes, and elements
@@ -1863,7 +1874,7 @@ class GeometryGateTests(unittest.TestCase):
                    for i in range(boxless_reference)]
         return LAB.geometry_metrics_with_registration(
             raw, registered, registration, placement,
-            reference_nodes=registered_browser + unmatched + boxless)
+            reference_nodes=registered_browser + unmatched + boxless + zero_area)
 
     def test_known_good_panel_local_import_passes_with_raw_reported(self) -> None:
         geometry = self.build()
@@ -1986,6 +1997,22 @@ class GeometryGateTests(unittest.TestCase):
                 self.assertAlmostEqual(
                     geometry["gate"]["checks"]["registered_coverage"]["coverage"], 2 / 3,
                     places=5)
+
+    def test_matched_zero_area_boxes_cannot_lift_coverage(self) -> None:
+        # Two exact boxes of three measurable fail the floor. Matched boxes the
+        # denominator excludes must not count in the numerator either, or two
+        # collapsed spans turn 2/3 into 4/3 and the page passes.
+        for zero_area in (0, 2):
+            with self.subTest(zero_area=zero_area):
+                geometry = self.build(unmatched_reference=1, matched_zero_area=zero_area)
+                self.assertEqual(geometry["gate"]["failed"], ["registered_coverage"])
+                coverage = geometry["gate"]["checks"]["registered_coverage"]
+                self.assertAlmostEqual(coverage["coverage"], 2 / 3, places=5)
+                self.assertEqual(coverage["matched_measurable"], 2)
+                self.assertEqual(coverage["matched_bounds"], 2 + zero_area)
+        # Coverage is a fraction of measurable boxes, never above 1.
+        coverage = self.build(matched_zero_area=2)["gate"]["checks"]["registered_coverage"]
+        self.assertEqual(coverage["coverage"], 1.0)
 
     def test_reference_box_predicate_follows_layout(self) -> None:
         node = LAB.BrowserNode(1, "div", 0, "", {}, (0.0, 0.0, 4.0, 4.0), {})
