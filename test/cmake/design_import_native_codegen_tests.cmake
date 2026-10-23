@@ -393,6 +393,7 @@ add_executable(pulp-test-design-import-benchmark-contracts
     ${CMAKE_SOURCE_DIR}/tools/import-design/design_import_benchmark_ir.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/design_import_benchmark_measure.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/design_import_benchmark_targets.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/design_import_retained_plan.cpp
     harness/rt_allocation_probe.cpp)
 target_include_directories(pulp-test-design-import-benchmark-contracts PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-test-design-import-benchmark-contracts

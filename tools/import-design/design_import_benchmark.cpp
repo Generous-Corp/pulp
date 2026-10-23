@@ -11,6 +11,7 @@
 #include "tools/import-design/design_import_benchmark_fixture.hpp"
 #include "tools/import-design/design_import_benchmark_measure.hpp"
 #include "tools/import-design/design_import_benchmark_targets.hpp"
+#include "tools/import-design/design_import_retained_plan.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -550,6 +551,80 @@ private:
     std::unique_ptr<View> root_;
 };
 
+// The retained typed-plan experiment over the same panel: the IR is
+// materialized once and a plan compiled from it resolves each dynamic slot to
+// its widget and typed setter, so a step is an indexed list of typed writes
+// with no tree walk or dynamic_cast. It writes the same values as the
+// baked-native lane, which it is measured against.
+class RetainedPlanFixture final : public BenchmarkFixture {
+  public:
+    RetainedPlanFixture() {
+        const auto ir = build_baked_ir();
+        NativeMaterializeOptions options;
+        std::vector<ImportDiagnostic> diagnostics;
+        options.diagnostics_out = &diagnostics;
+        root_ = build_native_view_tree(ir, ir.asset_manifest, options);
+        if (!diagnostics.empty())
+            throw std::runtime_error("retained-plan materialization emitted diagnostics");
+        if (!root_)
+            throw std::runtime_error("retained-plan materialization returned null root");
+        root_->set_bounds(
+            {0, 0, static_cast<float>(kFixtureWidth), static_cast<float>(kFixtureHeight)});
+        root_->layout_children();
+
+        plan_ = retained::RetainedPlan::compile(ir, *root_);
+        if (!plan_.diagnostics().empty())
+            throw std::runtime_error("retained-plan compile refused: " +
+                                     plan_.diagnostics().front());
+        const auto slot = [&](std::string_view anchor, retained::SlotKind kind) {
+            const auto found = plan_.find(anchor, kind);
+            if (!found)
+                throw std::runtime_error("retained-plan missing slot " + std::string(anchor));
+            return retained::SlotUpdate{*found};
+        };
+        updates_ = {
+            slot("drive", retained::SlotKind::scalar),
+            slot("tone", retained::SlotKind::scalar),
+            slot("mix", retained::SlotKind::scalar),
+            slot("output", retained::SlotKind::level),
+            slot("shape", retained::SlotKind::vector),
+            slot("preset-content", retained::SlotKind::offset),
+        };
+        content_left_ = plan_.slots()[updates_[5].slot].view->left();
+    }
+
+    View& root() override {
+        return *root_;
+    }
+
+    // The frame lays out after every step, so an offset write needs no layout
+    // of its own here.
+    void step(int frame) override {
+        const float t = static_cast<float>(frame) / 60.0f;
+        const float output = 0.55f + 0.35f * std::sin(t * 1.3f);
+        updates_[0].a = 0.5f + 0.45f * std::sin(t * 1.7f);
+        updates_[1].a = 0.5f + 0.35f * std::cos(t * 1.1f);
+        updates_[2].a = 0.5f + 0.45f * std::sin(t * 0.9f);
+        updates_[3].a = output;
+        updates_[3].b = std::max(0.0f, output - 0.18f);
+        updates_[4].a = 0.5f + 0.45f * std::sin(t * 0.7f);
+        updates_[4].b = 0.5f + 0.45f * std::cos(t * 0.8f);
+        updates_[5].a = content_left_;
+        updates_[5].b = -static_cast<float>((frame * 3) % 180);
+        plan_.apply(updates_);
+    }
+
+    int js_evaluation_count() const override {
+        return 0;
+    }
+
+  private:
+    std::unique_ptr<View> root_;
+    retained::RetainedPlan plan_;
+    std::vector<retained::SlotUpdate> updates_;
+    float content_left_ = 0.0f;
+};
+
 // Control lane for the structural retained experiment. This deliberately
 // rebuilds the same imported DesignIR on every interactive step, so any
 // retained-vs-rebuild claim has a real full-rematerialization comparator. It
@@ -862,6 +937,8 @@ std::unique_ptr<BenchmarkFixture> make_fixture(const Config& config) {
     if (lane == "baked-native-rebuild")
         return std::make_unique<BakedNativeRebuildFixture>();
     if (lane == "baked-cpp") return std::make_unique<BakedCppFixture>();
+    if (lane == "retained-plan")
+        return std::make_unique<RetainedPlanFixture>();
     return nullptr;
 }
 
@@ -1409,7 +1486,8 @@ std::string make_json(const Config& config, const std::optional<IrProvenance>& i
     out << "  \"interaction_model\": \"value drag plus overflow-panel scroll offset; live lane "
            "mutates through JS bridge, baked-native materializes once and uses direct native "
            "setters, baked-native-rebuild rematerializes the same IR per interactive step, "
-           "baked-cpp mutates generated-style native widgets directly; with --ir every lane "
+           "baked-cpp mutates generated-style native widgets directly, retained-plan applies "
+           "a precompiled typed slot plan to the once-materialized tree; with --ir every lane "
            "writes the IR's anchored text slots instead\",\n";
     out << "  \"steady_state_gate\": {\n";
     out << "    \"status\": \"" << run.steady_state.status << "\",\n";
@@ -1436,7 +1514,7 @@ std::string make_json(const Config& config, const std::optional<IrProvenance>& i
 
 void print_usage(std::ostream& out) {
     out << "usage: pulp-design-import-bench "
-           "[--lane=live|baked-native|baked-native-rebuild|baked-cpp] "
+           "[--lane=live|baked-native|baked-native-rebuild|baked-cpp|retained-plan] "
            "[--idle-ms=N] [--interactive-ms=N] [--target-fps=N] [--warmup-frames=N] "
            "[--output=PATH] "
            "[--ir=DESIGN_IR_JSON] [--bundle=MATERIALIZED_BUNDLE_JS] [--frames=N] "
@@ -1567,11 +1645,12 @@ std::optional<Config> parse_args(int argc, char** argv) {
         }
     }
     if (config.lane != "live" && config.lane != "baked-native" &&
-        config.lane != "baked-native-rebuild" && config.lane != "baked-cpp")
+        config.lane != "baked-native-rebuild" && config.lane != "baked-cpp" &&
+        config.lane != "retained-plan")
         return std::nullopt;
-    // baked-cpp is compiled code; it cannot be built from a DesignIR at run
-    // time, so it cannot claim to have measured one.
-    if (!config.ir_path.empty() && config.lane == "baked-cpp") {
+    // baked-cpp is compiled code and the retained plan's slots are the built-in
+    // panel's; neither can claim to have measured another DesignIR.
+    if (!config.ir_path.empty() && (config.lane == "baked-cpp" || config.lane == "retained-plan")) {
         std::cerr << "--ir applies to live, baked-native and baked-native-rebuild; the "
                   << config.lane << " lane cannot be built from a DesignIR\n";
         return std::nullopt;

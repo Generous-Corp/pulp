@@ -1252,3 +1252,38 @@ TEST_CASE("design-import benchmark steady-state gate fails a planted per-frame d
                     .has_value());
     std::filesystem::remove(output);
 }
+
+TEST_CASE("design-import benchmark retained-plan lane writes what baked-native writes",
+          "[design-import][benchmark][retained]") {
+    auto baked = make_fixture(lane_config("baked-native"));
+    auto plan = make_fixture(lane_config("retained-plan"));
+    REQUIRE(baked != nullptr);
+    REQUIRE(plan != nullptr);
+    for (int frame : {0, 1, 17, 59, 60, 333}) {
+        baked->step(frame);
+        plan->step(frame);
+        // Same tree, same writes: the two frames must paint the same stream.
+        CHECK(render_frame(baked->root()) == render_frame(plan->root()));
+        for (const char* id : {"drive", "tone", "mix"}) {
+            auto* a = dynamic_cast<Knob*>(find_by_id(baked->root(), id));
+            auto* b = dynamic_cast<Knob*>(find_by_id(plan->root(), id));
+            if (a && b)
+                CHECK(a->value() == Catch::Approx(b->value()));
+        }
+        auto* meter_a = dynamic_cast<Meter*>(find_by_id(baked->root(), "output"));
+        auto* meter_b = dynamic_cast<Meter*>(find_by_id(plan->root(), "output"));
+        REQUIRE(meter_a != nullptr);
+        REQUIRE(meter_b != nullptr);
+        CHECK(meter_a->display_rms() == Catch::Approx(meter_b->display_rms()));
+        CHECK(meter_a->display_peak() == Catch::Approx(meter_b->display_peak()));
+        auto* pad_a = dynamic_cast<XYPad*>(find_by_id(baked->root(), "shape"));
+        auto* pad_b = dynamic_cast<XYPad*>(find_by_id(plan->root(), "shape"));
+        REQUIRE(pad_a != nullptr);
+        REQUIRE(pad_b != nullptr);
+        CHECK(pad_a->x_value() == Catch::Approx(pad_b->x_value()));
+        CHECK(pad_a->y_value() == Catch::Approx(pad_b->y_value()));
+        CHECK(find_by_id(baked->root(), "preset-content")->bounds().y ==
+              Catch::Approx(find_by_id(plan->root(), "preset-content")->bounds().y));
+    }
+    CHECK_FALSE(parse_args_vec({"bench", "--lane=retained-plan", "--ir=x.ir.json"}).has_value());
+}

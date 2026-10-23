@@ -208,6 +208,7 @@ add_executable(pulp-design-import-bench
     design_import_benchmark_ir.cpp
     design_import_benchmark_measure.cpp
     design_import_benchmark_targets.cpp
+    design_import_retained_plan.cpp
     ${CMAKE_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
 target_include_directories(pulp-design-import-bench PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-design-import-bench PRIVATE

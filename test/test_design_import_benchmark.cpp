@@ -140,7 +140,8 @@ TEST_CASE("design-import benchmark emits all declared lane JSON", "[design-impor
     const auto bin = bench_binary();
     REQUIRE(fs::exists(bin));
 
-    for (const auto& lane : {"live", "baked-native", "baked-native-rebuild", "baked-cpp"}) {
+    for (const auto& lane :
+         {"live", "baked-native", "baked-native-rebuild", "baked-cpp", "retained-plan"}) {
         const auto out = unique_output_path(lane);
         fs::remove(out);
         std::vector<std::string> args = {
