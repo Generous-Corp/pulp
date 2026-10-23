@@ -55,6 +55,9 @@ jobs:
       # Apple ar/ranlib write member and symbol-table timestamps unless asked
       # not to; without this two builds of one commit can never match.
       ZERO_AR_DATE: '1'
+      # Every object is compiled in this job; nothing an earlier job wrote is
+      # read back into an attested archive.
+      CCACHE_DISABLE: '1'
       OUT: ${{ github.workspace }}/out
     steps:
       - name: Validate the request
@@ -84,6 +87,27 @@ jobs:
             echo "draft=true" >>"${GITHUB_OUTPUT}"
           fi
           echo "published=false" >>"${GITHUB_OUTPUT}"
+
+      - name: Isolate the build from shared caches
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A per-dependency source override would bypass the fresh root.
+          if overrides="$(env | grep '^PULP_FETCHCONTENT_SOURCE_DIR_' | cut -d= -f1)"; then
+            echo "::error::runner environment overrides dependency sources: ${overrides//$'\n'/ }"
+            exit 1
+          fi
+          root="${RUNNER_TEMP:?}/pulp-isolated-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$root"
+          mkdir -p "$root/src" "$root/fc" "$root/cc"
+          # PulpConfigureCheckCache.cmake include()s the files it finds in
+          # PULP_CONFIGURE_CHECK_CACHE_DIR, so a shared directory would run
+          # CMake an earlier job wrote.
+          {
+            echo "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=$root/src"
+            echo "PULP_FETCHCONTENT_BASE_DIR=$root/fc"
+            echo "PULP_CONFIGURE_CHECK_CACHE_DIR=$root/cc"
+          } >> "$GITHUB_ENV"
 
       - name: Check out the tooling
         if: steps.request.outputs.published != 'true'
@@ -117,8 +141,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # The archive must come from this runner's compiler alone, so no
-          # compiler cache is read or written.
           configure=(
             -G Ninja
             -DCMAKE_BUILD_TYPE=Release
