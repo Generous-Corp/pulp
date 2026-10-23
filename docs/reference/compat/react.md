@@ -45,36 +45,6 @@ Follow-up: enumerate observed React features (concurrent rendering,
 suspense boundaries, transition state, error boundaries, portal
 targets) and populate per-feature entries.
 
-## Removed style keys
-
-A style key that disappears from a commit, or whose value becomes `null` or
-`undefined`, hands its native slots back to the widget's starting value, so
-the conditional spread `style={{...base, ...(active ? activeStyle : {})}}`
-and a whole conditional `style={hidden ? s : undefined}` both undo what the
-active style painted. Layout slots reset through `resetStyleProperty`, which
-restores the value the widget had before its first layout write; other keys
-reset through their own setter. A surviving key that shares a slot with a
-removed one, and a default the host config gave the widget when it created
-it, are applied again afterwards. A render that omits its `style` prop
-entirely is read as "no style source", not as a removal, and resets nothing.
-That includes a spread that drops the `style` key itself
-(`{...props, ...(active ? {style: s} : {})}`): it cannot be told apart from
-a render that left the style out, so write `style={active ? s : undefined}`
-instead when the removal must reset.
-
-`packages/pulp-react/src/prop-applier-reset.ts` holds the decision for every
-key. Known gaps, each recorded there as `gap`:
-
-- `top`, `right`, `bottom`, `left`, `inset*`, `start` and `end` are not
-  reset, so a hover lift written `{position: 'relative', top: -2}` stays
-  lifted after the hover ends. View has no way to clear an inset once set.
-- Text colour, and border, outline and decoration colours, have no unset
-  argument; text colour stays painted, and borders and outlines are hidden
-  by width instead.
-- Label typography (font size, weight, letter spacing, alignment) resets to
-  the Label's constructed value as its own value, so it stops inheriting
-  that property from an ancestor.
-
 ## Hit-test-only props
 
 `hitSlop` is applied by `prop-applier-paint.ts` and reaches
