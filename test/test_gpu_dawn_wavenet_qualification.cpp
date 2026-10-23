@@ -589,7 +589,9 @@ struct FaultedSession {
     }
     std::unique_ptr<pulp::test::ProgramSessionChannel> channel;
     bool submit_block(std::span<const float> input, std::uint64_t sequence) noexcept {
-        return channel->submit(input, sequence);
+        // The outer session channel keeps the node's ticket; this shim only
+        // needs the block's sequence.
+        return channel->submit(input, admit_submission(0, sequence));
     }
     std::size_t service(std::uint64_t now) noexcept {
         channel->service(now);
@@ -601,7 +603,7 @@ struct FaultedSession {
     }
     std::optional<pulp::gpu_audio::GpuWaveNetBlockResult>
     receive(std::span<float> output) noexcept {
-        return channel->receive(output);
+        return channel->receive_result(output);
     }
     bool release() noexcept {
         return channel->release();
