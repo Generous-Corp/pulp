@@ -31,8 +31,14 @@ except ImportError:  # pragma: no cover - environment guard
     sys.exit(77)
 
 THIS_DIR = Path(__file__).resolve().parent
-SCRIPT = THIS_DIR / "text_raster_decomposition.py"
-FIXTURE = THIS_DIR.parent.parent / "test" / "fixtures" / "browser-capture-text-raster"
+# Keep repository-relative dependencies explicit so the ctest input generator
+# records the helper and fixture directory even though the test resolves them
+# from its own location at runtime.
+SCRIPT_REPO_PATH = "tools/import-validation/text_raster_decomposition.py"
+FIXTURE_REPO_PATH = "test/fixtures/browser-capture-text-raster"
+SCRIPT = THIS_DIR / Path(SCRIPT_REPO_PATH).name
+FIXTURE = THIS_DIR.parent.parent / Path(FIXTURE_REPO_PATH)
+assert SCRIPT.resolve() == (THIS_DIR.parent.parent / SCRIPT_REPO_PATH).resolve()
 SPEC = importlib.util.spec_from_file_location("text_raster_decomposition", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 trd = importlib.util.module_from_spec(SPEC)
