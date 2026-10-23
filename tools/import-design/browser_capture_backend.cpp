@@ -926,6 +926,8 @@ CaptureResult capture_document(
     args.push_back(request.pinned_width ? "--width" : "--initial-width");
     args.push_back(std::to_string(capture_width));
     if (request.fit_authored_frame) args.push_back("--fit-authored-frame");
+    if (!request.capture_materialized_document)
+        args.push_back("--omit-materialized-document");
     if (request.interaction_plan) {
         args.push_back("--interactions");
         args.push_back(request.interaction_plan->string());
