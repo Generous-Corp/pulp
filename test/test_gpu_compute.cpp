@@ -1687,6 +1687,49 @@ TEST_CASE("GpuCompute wavenet_forward streams many blocks continuously against a
     }
 }
 
+TEST_CASE("GpuCompute prepare_wavenet bounds each layer's causal reach before allocating",
+          "[render][gpu][compute]") {
+    // Each layer's history is a power-of-two ring of at least
+    // dilation*(kernel-1) + block columns. Untrusted model files can carry any
+    // dilation, so preparation must refuse a reach past 2^20 samples at once,
+    // including reaches that wrap 32-bit arithmetic, instead of sizing (or
+    // never finishing sizing) the ring.
+    auto compute = GpuCompute::create();
+    if (!compute || !compute->initialize_standalone())
+        SKIP(kNoGpu);
+
+    const auto prepare = [&](uint32_t kernel, uint32_t dilation, uint32_t block) {
+        std::vector<uint32_t> dilations = {dilation};
+        GpuCompute::WavenetLayerArraySpec spec;
+        spec.input_size = 1;
+        spec.condition_size = 1;
+        spec.channels = 1;
+        spec.kernel = kernel;
+        spec.head_size = 1;
+        spec.gated = 0;
+        spec.head_bias = 0;
+        spec.dilations = dilations.data();
+        spec.num_layers = 1;
+        const uint32_t need = wavenet_single_array_len(1, kernel, 1, 1, false);
+        std::vector<float> weights = wavenet_weight_blob(need);
+        return compute->prepare_wavenet(&spec, 1, weights.data(), need, block, 0.5f);
+    };
+    constexpr uint32_t block = 64;
+    constexpr uint32_t limit = 1u << 20;
+
+    // Exactly at the bound: a 2^20-column ring (4 MB) is accepted.
+    REQUIRE(prepare(2, limit - block, block));
+    // One sample past it is refused.
+    REQUIRE_FALSE(prepare(2, limit - block + 1u, block));
+
+    // A crafted capture (kernel 3, dilation 2^30, block 64) and one whose reach
+    // wraps 32 bits (kernel 3, dilation 2^31) are refused promptly.
+    const auto started = std::chrono::steady_clock::now();
+    REQUIRE_FALSE(prepare(3, 1u << 30, block));
+    REQUIRE_FALSE(prepare(3, 1u << 31, block));
+    REQUIRE(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
+}
+
 TEST_CASE("GpuCompute wavenet_forward_batch matches per-instance forwards bit-for-bit",
           "[render][gpu][compute]") {
     // Batching only changes how the work is submitted and read back. Every

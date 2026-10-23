@@ -91,6 +91,10 @@ void ScriptEngine::pump_message_loop() {
     engine_->pump_message_loop();
 }
 
+bool ScriptEngine::set_memory_limit(std::size_t bytes) {
+    return engine_ && engine_->set_memory_limit(bytes);
+}
+
 bool ScriptEngine::supports_interrupt() const {
     return engine_ && engine_->supports_interrupt();
 }

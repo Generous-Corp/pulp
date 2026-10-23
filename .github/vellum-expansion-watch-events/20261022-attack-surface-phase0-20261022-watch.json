@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-attack-surface-phase0-20261022-watch",
+  "created_at": "2026-10-22T20:34:15Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Attack-surface hardening Phase 0: FormatRegistry gains DecodeLimits so FLAC/MP3/OGG/AIFF/WAV/CoreAudio readers refuse header claims before allocating; bridge localStorage and style presets move from the temp dir to a per-user, per-bridge store; QuickJS realms get a heap ceiling; drop-event dispatch escapes data; IPC servers default to loopback. Asset loading, image/font decoding, design import, Chromium capture, rendering and packaging authority are untouched; the render-assets-and-backends touch is the storage_assets_api.cpp key-value store only.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-format-registry-limits",
+    "ctest --test-dir build -R pulp-test-http",
+    "ctest --test-dir build -R pulp-test-ipc",
+    "ctest --test-dir build -R pulp-test-js-engine",
+    "ctest --test-dir build -R pulp-test-ogg-reader",
+    "ctest --test-dir build -R pulp-test-preset-manager",
+    "ctest --test-dir build -R pulp-test-runtime-utils",
+    "ctest --test-dir build -R pulp-test-style-pack",
+    "ctest --test-dir build -R pulp-test-widget-bridge-capabilities",
+    "ctest --test-dir build -R pulp-test-widget-bridge-dispatch-document-event",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

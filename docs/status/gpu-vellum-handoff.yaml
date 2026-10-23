@@ -309,8 +309,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_trace_overhead_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "d9886f6b5e1ffdc6cb57d961591b0c43391e4fa4",
-          "object_id": "fd5ca8f248b1fd75e4ec4f08cedc6e324a677349",
+          "revision": "adc3d93800544bab0f30093b10af5faf83f399b1",
+          "object_id": "50eff417fc7c4cbd4389a50d079e7f9b7e5d4f5d",
           "object_type": "blob"
         },
         {
@@ -2027,8 +2027,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/render/src/skia_surface.cpp",
           "state": "framework-authoritative-transferred-compatibility",
-          "revision": "fa7d60146d35e364dea3dae8771570918c03c64a",
-          "object_id": "d9e871ef205f9bc79251b96ffeace4eb55157247",
+          "revision": "f1fb090a27480212913002e41a6e737ad9628ea3",
+          "object_id": "470dcb98434a1bf32eb0e262afcb34dce1dc8c84",
           "object_type": "blob"
         },
         {
@@ -2508,8 +2508,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/render/include/pulp/render/skia_surface.hpp",
           "state": "framework-authoritative-transferred-compatibility",
-          "revision": "204054afe31e18f35424ca065af9d0eee2942ca4",
-          "object_id": "dba35909007019e1e1252e26cb49cc5573d0e7ee",
+          "revision": "f1fb090a27480212913002e41a6e737ad9628ea3",
+          "object_id": "058f01492d7a3e10cbdbb21b34a0e6cb4840ff2e",
           "object_type": "blob"
         },
         {
@@ -2711,8 +2711,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/daw-smoke/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "a894b85124a810122134c3d0d59cbf95f763c39c",
-          "object_id": "72b134e00cb2f52765f3a17240e91329ae3081c4",
+          "revision": "ed0463992ce79229e5b3e71be566ea43494c4127",
+          "object_id": "77896c9388d60e9a1e190b35db628488f91643f9",
           "object_type": "blob"
         },
         {

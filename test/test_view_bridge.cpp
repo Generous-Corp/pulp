@@ -13,12 +13,14 @@
 #include <optional>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
+#include <pulp/format/editor_assets.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/registry.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/store.hpp>
@@ -1020,6 +1022,79 @@ TEST_CASE("Editor open: a missing script still fails inside open()",
     // falls back to the AutoUi editor instead of a blank deferred root.
     REQUIRE(bridge.open());
     CHECK_FALSE(bridge.uses_script_ui());
+}
+
+namespace {
+
+// Restores the binary-wide editor assets and the keyed registry a case changed.
+struct EditorAssetsScope {
+    ~EditorAssetsScope() {
+        format::reset_editor_assets_for_testing();
+        format::reset_registry_for_testing();
+    }
+};
+
+} // namespace
+
+TEST_CASE("ViewBridge builds the scripted editor the plug-in binary registers",
+          "[view_bridge][scripted-ui][editor-assets]") {
+    EditorAssetsScope scope;
+    const std::string script = write_editor_script("pulp-editor-assets-binary",
+                                                   "createLabel('status', 'registered', '');\n")
+                                   .string();
+
+    state::StateStore store;
+    StubProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    // Nothing registered: the plug-in's editor is AutoUi.
+    {
+        format::ViewBridge bridge(p, store);
+        REQUIRE(bridge.open());
+        CHECK_FALSE(bridge.uses_script_ui());
+        CHECK(std::string(format::decide_gpu_host(bridge).mode) == "autoui");
+    }
+
+    // The per-target registration source records the UI_SCRIPT path at static
+    // init; every adapter's ViewBridge then builds the scripted editor from it.
+    format::register_editor_assets({script.c_str(), nullptr, nullptr});
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    CHECK(bridge.uses_script_ui());
+    REQUIRE(bridge.scripted_ui() != nullptr);
+    const auto decision = format::decide_gpu_host(bridge);
+    CHECK(std::string(decision.mode) == "scripted");
+    CHECK(decision.wants_gpu);
+}
+
+TEST_CASE("A bundle entry's editor assets apply to its own plug-in only",
+          "[view_bridge][scripted-ui][editor-assets]") {
+    EditorAssetsScope scope;
+    const std::string script =
+        write_editor_script("pulp-editor-assets-keyed", "createLabel('status', 'keyed', '');\n")
+            .string();
+    format::register_plugin(format::PluginRegistration{
+        .id = "com.acme.stub",
+        .factory = nullptr,
+        .ui_script = script.c_str(),
+    });
+
+    CHECK(std::string(format::editor_assets_for("com.acme.stub").script_path) == script);
+    CHECK(format::editor_assets_for("com.acme.other").script_path == nullptr);
+
+    state::StateStore store;
+    StubProcessor stub; // bundle id com.acme.stub
+    stub.set_state_store(&store);
+    stub.define_parameters(store);
+    format::ViewBridge keyed(stub, store);
+    REQUIRE(keyed.open());
+    CHECK(keyed.uses_script_ui());
+
+    // A keyed entry that declares nothing falls back to the binary-wide record.
+    format::register_plugin(format::PluginRegistration{.id = "com.acme.bare", .factory = nullptr});
+    format::register_editor_assets({script.c_str(), nullptr, nullptr});
+    CHECK(std::string(format::editor_assets_for("com.acme.bare").script_path) == script);
 }
 
 TEST_CASE("Processor scripted UI accessors default to null", "[view_bridge][scripted-ui]") {
