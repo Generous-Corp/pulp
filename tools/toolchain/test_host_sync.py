@@ -177,7 +177,7 @@ class HostSyncTests(unittest.TestCase):
     def git(self, *args: str) -> str:
         out = subprocess.run(
             ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "core.hooksPath=/dev/null", *args],
-            env=self.env, capture_output=True, text=True, check=True,
+            env=self.env, capture_output=True, text=True, encoding="utf-8", check=True,
         )
         return out.stdout.strip()
 
@@ -401,7 +401,7 @@ class HostSyncTests(unittest.TestCase):
 
         lock = self.home / host_sync.LOCK
         lock.parent.mkdir(parents=True)
-        with open(lock, "a+") as handle:
+        with open(lock, "a+", encoding="utf-8") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             out = self.sync()
         self.assertEqual(4, out.returncode, out.stdout + out.stderr)
@@ -574,7 +574,7 @@ class PostCheckoutTrustHookTests(unittest.TestCase):
 
     def git(self, *args: str, **env: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
-                              env=dict(self.env, **env), capture_output=True, text=True, check=True)
+                              env=dict(self.env, **env), capture_output=True, text=True, encoding="utf-8", check=True)
 
     def log(self) -> List[str]:
         path = self.home / "mise.log"
@@ -585,7 +585,7 @@ class PostCheckoutTrustHookTests(unittest.TestCase):
         if path:
             run_env["PATH"] = path
         return subprocess.run(["/bin/sh", str(REPO / ".githooks/post-checkout"), *args], cwd=cwd, env=run_env,
-                              capture_output=True, text=True, check=False)
+                              capture_output=True, text=True, encoding="utf-8", check=False)
 
     def test_a_new_worktree_trusts_exactly_its_own_config(self) -> None:
         worktree = self.root / "wt"

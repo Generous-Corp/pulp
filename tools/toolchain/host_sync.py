@@ -166,7 +166,7 @@ def ran(name: str, argv: List[str], result: Result) -> Step:
 def held_lock(path: Path) -> Iterator[bool]:
     """True while this process holds the lock, False when another run does."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle = open(path, "a+")
+    handle = open(path, "a+", encoding="utf-8")
     try:
         try:
             if os.name == "nt":
