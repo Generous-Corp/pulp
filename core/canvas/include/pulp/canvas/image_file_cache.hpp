@@ -14,6 +14,18 @@
 /// distinct inline images cannot evict file images or pin unbounded memory;
 /// an image larger than the whole budget is built and drawn uncached.
 ///
+/// The path pool is bounded by entry count and by bytes (decoded or uploaded
+/// pixels). Its rule for an image larger than the whole budget differs from
+/// the inline pool's: the newest entry is always kept, alone, so a large
+/// backdrop drawn every frame is decoded and uploaded once rather than every
+/// frame.
+///
+/// Both pools remember a build that returned null for `kFailureRetryDelay`:
+/// lookups of that key inside the window return null without building, so a
+/// missing or corrupt asset is not read and decoded on every paint. After the
+/// window the next lookup builds again. `clear()` and `clear_backend()` drop
+/// the remembered failures with the entries.
+///
 /// `SkiaCanvas::draw_image_from_file` used to re-read the PNG/JPEG bytes off
 /// disk (`SkData::MakeFromFileName`), re-decode them
 /// (`SkImages::DeferredFromEncodedData`), AND re-upload a fresh GPU texture
@@ -45,12 +57,13 @@
 /// by paying the full cost on every static repaint too.
 ///
 /// Painting is on the UI thread (not the realtime audio thread), so a small
-/// mutex is acceptable; the cache is process-global with an LRU cap. Values are
+/// mutex is acceptable; the cache is process-global with LRU caps. Values are
 /// shared `sk_sp<SkImage>` — immutable once built and safe to share across the
 /// per-frame `SkiaCanvas` instances that reuse the same recorder.
 
 #ifdef PULP_HAS_SKIA
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -70,13 +83,21 @@ public:
     /// miss via @p build (which decodes the file and performs any GPU upload).
     /// The backend token distinguishes GPU-context-bound textures from each
     /// other and from the CPU raster image, so the same path drawn through two
-    /// contexts caches two entries. A null build result is returned but NOT
-    /// stored (a transient read/decode failure does not poison the cache).
+    /// contexts caches two entries. A null build result is returned but not
+    /// stored; lookups of that key return null without building until
+    /// `kFailureRetryDelay` has passed, then the next one builds again.
     /// When disabled, always rebuilds and stores nothing.
     sk_sp<SkImage> get_or_build(
         const std::string& path,
         const void* backend_key,
         const std::function<sk_sp<SkImage>()>& build);
+
+    /// Default byte budget of the path pool: a few retina-sized backdrops at 4
+    /// bytes per pixel.
+    static constexpr std::size_t kDefaultFileByteBudget = 64u * 1024u * 1024u;
+
+    /// How long a failed build is remembered before its key is built again.
+    static constexpr std::chrono::milliseconds kFailureRetryDelay{1000};
 
     /// Default byte budget of the inline pool: room for a few retina-sized
     /// panel backdrops (encoded copy plus 4 bytes per pixel each).
@@ -97,6 +118,7 @@ public:
         std::uint64_t hits = 0;    ///< Cache hits (decode + upload skipped).
         std::uint64_t builds = 0;  ///< Cache misses (image rebuilt).
         std::size_t size = 0;      ///< Live entries.
+        std::size_t bytes = 0;     ///< Pixel bytes of live entries.
     };
     /// Counters for the path pool.
     Stats stats() const;
@@ -133,9 +155,18 @@ public:
     /// Entry cap of the path pool.
     void set_capacity(std::size_t capacity);
 
+    /// Byte budget of the path pool; evicts down to it immediately, keeping
+    /// the most recently used entry even when it alone exceeds the budget.
+    void set_byte_budget(std::size_t bytes);
+    std::size_t byte_budget() const;
+
     /// Byte budget of the inline pool; evicts down to it immediately.
     void set_inline_byte_budget(std::size_t bytes);
     std::size_t inline_byte_budget() const;
+
+    /// Replace the time source of the failure memo; null restores the steady
+    /// clock. Lets a test cross the retry window without sleeping.
+    void set_clock_for_testing(std::function<std::chrono::steady_clock::time_point()> now);
 
   private:
     ImageFileCache() = default;
