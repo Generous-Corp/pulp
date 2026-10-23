@@ -3,7 +3,12 @@
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/headless.hpp>
 #include <pulp/format/registry.hpp>
+#include "support/unique_temp_dir.hpp"
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <optional>
+#include <string>
 #include <cmath>
 #include <cstdint>
 #include <utility>
@@ -283,11 +288,127 @@ TEST_CASE("format registry stores and replaces the processor factory",
     REQUIRE(pulp::format::registered_factory() == previous);
 }
 
+namespace {
+
+const unsigned char kEmbeddedScript[] = "createLabel('embedded-editor', 'ok', '');";
+const unsigned char kEmbeddedTheme[] = R"({"colors":{"bg.primary":"#00ff00"}})";
+
+constexpr pulp::format::EmbeddedEditorUi make_embedded(int priority, const char* name = "ui.js") {
+    return {name, kEmbeddedScript, sizeof(kEmbeddedScript) - 1,
+            kEmbeddedTheme, sizeof(kEmbeddedTheme) - 1, priority};
+}
+
+// Leaves the process without a registered embedded editor on exit, so the
+// AutoUi fallback case below measures the same binary unregistered.
+struct ScopedEmbeddedEditorUi {
+    explicit ScopedEmbeddedEditorUi(const pulp::format::EmbeddedEditorUi* ui) {
+        pulp::format::register_embedded_editor_ui(ui);
+    }
+    ~ScopedEmbeddedEditorUi() { pulp::format::register_embedded_editor_ui(nullptr); }
+};
+
+std::filesystem::path write_temp_script(const char* stem) {
+    const auto dir = pulp::test::make_unique_temp_dir(stem);
+    const auto path = dir / "main.js";
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << "createLabel('on-disk-editor', 'ok', '');";
+    return path;
+}
+
+} // namespace
+
+TEST_CASE("select_editor_ui_source prefers the embedded script over the dev path",
+          "[format][editor_ui][embedded]") {
+    const auto embedded = make_embedded(0);
+    const auto on_disk = write_temp_script("pulp-editor-ui-source");
+    const std::filesystem::path missing = on_disk.parent_path() / "missing.js";
+
+    SECTION("embedded only") {
+        const auto source = pulp::format::select_editor_ui_source(&embedded, std::nullopt, false);
+        REQUIRE(source.available());
+        REQUIRE(source.script_path.empty());
+        REQUIRE(source.script_source == reinterpret_cast<const char*>(kEmbeddedScript));
+        REQUIRE(source.theme_source == reinterpret_cast<const char*>(kEmbeddedTheme));
+        REQUIRE(source.script_name == "ui.js");
+        REQUIRE(source.label() == "ui.js");
+    }
+    SECTION("embedded wins over an existing dev path when not hot reloading") {
+        const auto source = pulp::format::select_editor_ui_source(&embedded, on_disk, false);
+        REQUIRE(source.script_path.empty());
+        REQUIRE_FALSE(source.script_source.empty());
+    }
+    SECTION("a hot-reloading editor reads the dev path while it exists") {
+        const auto source = pulp::format::select_editor_ui_source(&embedded, on_disk, true);
+        REQUIRE(source.script_path == on_disk);
+        REQUIRE(source.script_source.empty());
+        REQUIRE(source.label() == on_disk.string());
+    }
+    SECTION("a missing dev path never beats the embedded script") {
+        const auto source = pulp::format::select_editor_ui_source(&embedded, missing, true);
+        REQUIRE(source.script_path.empty());
+        REQUIRE_FALSE(source.script_source.empty());
+    }
+    SECTION("without an embedded script the path is used as before, even when missing") {
+        const auto source = pulp::format::select_editor_ui_source(nullptr, missing, false);
+        REQUIRE(source.available());
+        REQUIRE(source.script_path == missing);
+    }
+    SECTION("nothing configured") {
+        const auto source = pulp::format::select_editor_ui_source(nullptr, std::nullopt, true);
+        REQUIRE_FALSE(source.available());
+    }
+    std::filesystem::remove_all(on_disk.parent_path());
+}
+
+TEST_CASE("register_embedded_editor_ui keeps the higher priority and clears on nullptr",
+          "[format][editor_ui][embedded]") {
+    static const auto plugin_script = make_embedded(0, "plugin.js");
+    static const auto kit_script = make_embedded(1, "kit.js");
+    ScopedEmbeddedEditorUi scoped(&plugin_script);
+    REQUIRE(pulp::format::embedded_editor_ui() == &plugin_script);
+    // Link order between the two generated units is unspecified, so either
+    // arrival order must leave the kit's registration in place.
+    pulp::format::register_embedded_editor_ui(&kit_script);
+    REQUIRE(pulp::format::embedded_editor_ui() == &kit_script);
+    pulp::format::register_embedded_editor_ui(&plugin_script);
+    REQUIRE(pulp::format::embedded_editor_ui() == &kit_script);
+    pulp::format::register_embedded_editor_ui(nullptr);
+    REQUIRE(pulp::format::embedded_editor_ui() == nullptr);
+}
+
+TEST_CASE("build_editor_ui evaluates a registered embedded script without reading a file",
+          "[format][editor_ui][embedded]") {
+    static const auto embedded = make_embedded(0);
+    ScopedEmbeddedEditorUi scoped(&embedded);
+
+    pulp::format::HeadlessHost host(create_test_gain);
+    std::string error;
+    auto ui = pulp::format::build_editor_ui(host.state(), false, &error);
+
+    REQUIRE(ui.root != nullptr);
+    REQUIRE(ui.uses_script_ui);
+    REQUIRE(ui.scripted_ui != nullptr);
+    REQUIRE(ui.scripted_ui->uses_embedded_source());
+    REQUIRE(ui.scripted_ui->script_label() == "ui.js");
+    REQUIRE_FALSE(ui.scripted_ui->hot_reload_watching());
+    REQUIRE(ui.scripted_ui->bridge() != nullptr);
+    REQUIRE(ui.scripted_ui->bridge()->widget("embedded-editor") != nullptr);
+    // The embedded theme override reached the root.
+    const auto bg = ui.root->theme().color("bg.primary");
+    REQUIRE(bg.has_value());
+    REQUIRE(bg->g8() == 0xFF);
+    REQUIRE(bg->r8() == 0x00);
+    REQUIRE(error.empty());
+    // The session borrows the root; tear it down first.
+    ui.scripted_ui.reset();
+}
+
 TEST_CASE("build_editor_ui falls back to AutoUi when no script path is configured",
           "[format][editor_ui]") {
     if (pulp::format::configured_ui_script_path().has_value()) {
         SKIP("AutoUi fallback requires a build without PULP_UI_SCRIPT_PATH");
     }
+    REQUIRE(pulp::format::embedded_editor_ui() == nullptr);
 
     pulp::format::HeadlessHost host(create_test_gain);
     std::string error = "preexisting";
