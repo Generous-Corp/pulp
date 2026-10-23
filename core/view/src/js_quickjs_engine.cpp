@@ -45,6 +45,15 @@ static void set_quickjs_stack_size(
         JS_SetMaxStackSize(context.runtime, size);
 }
 
+// QuickJS accounts every allocation against the runtime's malloc limit and
+// throws InternalError("out of memory") past it; its own default is unlimited
+// (SIZE_MAX), which is what 0 maps back to here.
+static void set_quickjs_memory_limit(choc::javascript::quickjs::QuickJSContext& context,
+                                     size_t bytes) {
+    if (context.runtime)
+        JS_SetMemoryLimit(context.runtime, bytes == 0 ? static_cast<size_t>(-1) : bytes);
+}
+
 // Drive QuickJS's pending-job queue ourselves: CHOC's pumpMessageLoop() is
 // an empty no-op for QuickJS (issue #746), so queueMicrotask / Promise.then /
 // async-await never drain unless we run JS_ExecutePendingJob to completion.
@@ -778,6 +787,7 @@ public:
         backend_ = backend.get();
         context_ = choc::javascript::Context(std::move(backend));
         set_quickjs_stack_size(*backend_, 1024 * 1024);  // 1MB (up from 256KB)
+        set_quickjs_memory_limit(*backend_, kDefaultJsMemoryLimitBytes);
         // Surface unhandled promise failures through the host's console path.
         install_quickjs_rejection_tracker(*backend_);
         setup_console();
@@ -958,6 +968,11 @@ public:
     // whether the engine reports interruption support; we don't gate on it here
     // because supports_interrupt() already advertises the capability.
     bool supports_interrupt() const override { return true; }
+    bool set_memory_limit(std::size_t bytes) override {
+        set_quickjs_memory_limit(*backend_, bytes);
+        return true;
+    }
+
     void request_interrupt() override { context_.cancel(); }
     bool clear_pending_interrupt() override {
         return backend_->shouldCancel.exchange(false, std::memory_order_acq_rel);

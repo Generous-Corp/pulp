@@ -62,6 +62,11 @@ class DawnTransferCallCounter {
         std::uint64_t buffer_unmap_calls = 0;
         std::uint64_t queue_submit_calls = 0;
         std::uint64_t submitted_command_buffers = 0;
+        // Texture allocations and texture-to-texture copies. A per-frame
+        // snapshot copy that Graphite recycles from its scratch pool creates
+        // no texture but is still one encoded copy.
+        std::uint64_t device_create_texture_calls = 0;
+        std::uint64_t copy_texture_to_texture_calls = 0;
     };
 
     explicit DawnTransferCallCounter(InstallMode mode = InstallMode::InstallAndRestore)
@@ -78,6 +83,8 @@ class DawnTransferCallCounter {
         interposed_->bufferGetMappedRange = &count_buffer_get_mapped_range;
         interposed_->bufferUnmap = &count_buffer_unmap;
         interposed_->queueSubmit = &count_queue_submit;
+        interposed_->deviceCreateTexture = &count_device_create_texture;
+        interposed_->commandEncoderCopyTextureToTexture = &count_copy_texture_to_texture;
         if (mode_ == InstallMode::InstallAndRestore)
             dawnProcSetProcs(interposed_.get());
     }
@@ -129,6 +136,10 @@ class DawnTransferCallCounter {
             .buffer_unmap_calls = buffer_unmap_calls_.load(std::memory_order_relaxed),
             .queue_submit_calls = queue_submit_calls_.load(std::memory_order_relaxed),
             .submitted_command_buffers = submitted_command_buffers_.load(std::memory_order_relaxed),
+            .device_create_texture_calls =
+                device_create_texture_calls_.load(std::memory_order_relaxed),
+            .copy_texture_to_texture_calls =
+                copy_texture_to_texture_calls_.load(std::memory_order_relaxed),
         };
     }
 
@@ -152,6 +163,8 @@ class DawnTransferCallCounter {
         buffer_unmap_calls_.store(0, std::memory_order_relaxed);
         queue_submit_calls_.store(0, std::memory_order_relaxed);
         submitted_command_buffers_.store(0, std::memory_order_relaxed);
+        device_create_texture_calls_.store(0, std::memory_order_relaxed);
+        copy_texture_to_texture_calls_.store(0, std::memory_order_relaxed);
     }
 
   private:
@@ -307,6 +320,23 @@ class DawnTransferCallCounter {
         counter.original_.queueSubmit(queue, command_count, commands);
     }
 
+    static WGPUTexture count_device_create_texture(WGPUDevice device,
+                                                   const WGPUTextureDescriptor* descriptor) {
+        auto& counter = active();
+        add_saturating(counter.device_create_texture_calls_, 1);
+        return counter.original_.deviceCreateTexture(device, descriptor);
+    }
+
+    static void count_copy_texture_to_texture(WGPUCommandEncoder command_encoder,
+                                              const WGPUTexelCopyTextureInfo* source,
+                                              const WGPUTexelCopyTextureInfo* destination,
+                                              const WGPUExtent3D* copy_size) {
+        auto& counter = active();
+        add_saturating(counter.copy_texture_to_texture_calls_, 1);
+        counter.original_.commandEncoderCopyTextureToTexture(command_encoder, source, destination,
+                                                             copy_size);
+    }
+
     static_assert(std::is_same_v<decltype(&count_queue_write_buffer), WGPUProcQueueWriteBuffer>);
     static_assert(
         std::is_same_v<decltype(&count_device_create_buffer), WGPUProcDeviceCreateBuffer>);
@@ -317,6 +347,10 @@ class DawnTransferCallCounter {
     static_assert(
         std::is_same_v<decltype(&count_buffer_get_mapped_range), WGPUProcBufferGetMappedRange>);
     static_assert(std::is_same_v<decltype(&count_buffer_unmap), WGPUProcBufferUnmap>);
+    static_assert(
+        std::is_same_v<decltype(&count_device_create_texture), WGPUProcDeviceCreateTexture>);
+    static_assert(std::is_same_v<decltype(&count_copy_texture_to_texture),
+                                 WGPUProcCommandEncoderCopyTextureToTexture>);
 
     InstallMode mode_ = InstallMode::InstallAndRestore;
     DawnProcTable original_{};
@@ -341,6 +375,8 @@ class DawnTransferCallCounter {
     std::atomic<std::uint64_t> buffer_unmap_calls_{0};
     std::atomic<std::uint64_t> queue_submit_calls_{0};
     std::atomic<std::uint64_t> submitted_command_buffers_{0};
+    std::atomic<std::uint64_t> device_create_texture_calls_{0};
+    std::atomic<std::uint64_t> copy_texture_to_texture_calls_{0};
 
     inline static std::atomic<DawnTransferCallCounter*> active_{nullptr};
 };

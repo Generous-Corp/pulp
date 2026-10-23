@@ -37,7 +37,9 @@ unset(_pulp_choc_patch_key)
 FetchContent_Declare(
     choc
     GIT_REPOSITORY https://github.com/danielraffel/choc.git
-    GIT_TAG pulp-webview-dnd-poc1  # df148a41 — fork of Tracktion/choc#64 PoC
+    # Pinned to the commit the shared-cache REF above names, so the fetched
+    # tree and the cache key cannot drift apart (tag pulp-webview-dnd-poc1).
+    GIT_TAG df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60  # tag pulp-webview-dnd-poc1 on the danielraffel/choc fork
 )
 FetchContent_MakeAvailable(choc)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake)

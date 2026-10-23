@@ -5,6 +5,7 @@
 #include "widget_bridge/registrars.hpp"
 #include "widget_bridge/gpu_common.hpp"
 #include "widget_bridge/bridge_dispatch.hpp"
+#include "widget_bridge/layout_baselines.hpp"
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/motion.hpp>
@@ -656,6 +657,14 @@ WidgetBridge::~WidgetBridge() {
         callback_alive_->retire_dispatch();
     }
     release_all_param_gesture_routes();
+    // Saved starting layouts belong to widgets this bridge no longer reaches.
+    {
+        std::vector<std::uint64_t> ids;
+        ids.reserve(owned_widgets_.size());
+        for (const auto& owned : owned_widgets_)
+            ids.push_back(owned.instance_id);
+        forget_layout_baselines(ids);
+    }
     // quarantine_realm() already detached this bridge's callback. A replacement
     // realm may have installed its own callback on the shared root while this
     // bridge awaited owner teardown, so do not erase it here.
@@ -1378,6 +1387,7 @@ void WidgetBridge::register_api() {
         // Extended API: containers, layout, all widgets, themes, canvas.
         {std::nullopt,                     &BridgeRegistrars::register_widget_factory_container_api},
         {std::nullopt,                     &BridgeRegistrars::register_layout_flex_api},
+        {std::nullopt,                     &BridgeRegistrars::register_style_reset_api},
         {std::nullopt,                     &BridgeRegistrars::register_dom_api},
         {std::nullopt,                     &BridgeRegistrars::register_layout_query_api},
         {std::nullopt,                     &BridgeRegistrars::register_widget_style_interaction_api},

@@ -16,6 +16,7 @@ import { applyPaintProp } from './prop-applier-paint.js';
 import { applyTypographyProp } from './prop-applier-typography.js';
 import { applyTransformProp } from './prop-applier-transform.js';
 import { applyEventProp, reclaimOverlayForMovedParent } from './prop-applier-events.js';
+import { resetRemovedStyleKeys } from './prop-applier-reset.js';
 
 // Per-domain handler modules own layout, paint, typography, transform,
 // and declarative event-routing props. `applyOne` below is the thin
@@ -138,6 +139,11 @@ function orderedPropKeys(type: string, props: Record<string, unknown>): string[]
         .map((key, index) => ({ key, index }))
         .sort((a, b) => virtualListPropRank(a.key) - virtualListPropRank(b.key) || a.index - b.index)
         .map((item) => item.key);
+}
+
+/// A prop that is missing, or present with nothing to apply.
+function isAbsent(props: Record<string, unknown>, key: string): boolean {
+    return !(key in props) || props[key] === undefined || props[key] === null;
 }
 
 function isVirtualListType(type: string): boolean {
@@ -514,9 +520,8 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             if (key === 'selectionMode') call('setVirtualListSelectionMode', id, 'single');
             if (key === 'selected') call('setVirtualListSelected', id, -1);
         }
-        // No-op — Pulp has no "unset" for most setters; rely on React
-        // unmount + recreate for full clears. Selective resets can be
-        // added per-prop here if a regression appears.
+        // Nothing to write; applyChangedProps resets the slots of a prop
+        // whose value became null or undefined (prop-applier-reset.ts).
         return;
     }
 
@@ -687,26 +692,20 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
 // Merge precedence: className rules < inline style < explicit flat
 // props. Later overrides earlier.
 
-/// Non-enumerable flag stamped on prop sets produced by style/className
-/// flattening. Distinguishes DERIVED visual props from author-written ones.
+/// Non-enumerable slot on prop sets produced by style/className flattening,
+/// holding the keys that came from the style source. Distinguishes DERIVED
+/// props from author-written ones.
 const DERIVED_STYLE_MARKER = '__pulpDerivedStyle';
-
-/// Visual keys that only ever reach the bridge by being hoisted out of
-/// `style`/`className`. Their absence is meaningful only when both prop
-/// sets came from the same shape.
-function isDerivedVisualKey(key: string): boolean {
-    return (
-        key === 'background' || key === 'backgroundGradient'
-        || key === 'textColor'
-        || key === 'border' || key === 'borderColor' || key === 'borderWidth'
-        || key === 'borderTop' || key === 'borderRight'
-        || key === 'borderBottom' || key === 'borderLeft'
-    );
-}
 
 /// True when `props` was produced by normalizeHostProps' flattening path.
 function isDerivedStyleProps(props: Record<string, unknown>): boolean {
-    return props[DERIVED_STYLE_MARKER] === true;
+    return props[DERIVED_STYLE_MARKER] instanceof Set;
+}
+
+/// Whether `key` was hoisted out of `style`/`className` into `props`.
+function isDerivedKey(props: Record<string, unknown>, key: string): boolean {
+    const keys = props[DERIVED_STYLE_MARKER];
+    return keys instanceof Set && keys.has(key);
 }
 
 type ClassRulesProvider = (className: string) => Record<string, unknown> | null;
@@ -736,12 +735,16 @@ export function normalizeHostProps(
     const hasClassName = typeof rawProps.className === 'string'
         && (rawProps.className as string).length > 0;
     // A render WITHOUT a style/className source yields a differently SHAPED
-    // prop set than one with it: the flattened visual keys (background,
-    // border, textColor) are simply absent rather than removed. The removal
-    // walk in applyChangedProps must not read that absence as a deletion, or
-    // the element is erased instead of restyled. Mark which shape a prop set
-    // came from so the two are separable.
-    if (!hasStyle && !hasClassName) return rawProps;
+    // prop set than one with it: the flattened keys are simply absent rather
+    // than removed. The removal walk in applyChangedProps must not read that
+    // absence as a deletion, or the element is erased instead of restyled.
+    // Mark which shape a prop set came from so the two are separable.
+    //
+    // A source that is present but empty (`style={hidden ? s : undefined}`,
+    // `className=""`) is the author clearing it, not a render that left it
+    // out, so it keeps the flattened shape and its removals still reset.
+    if (!hasStyle && !hasClassName
+        && !('style' in rawProps) && !('className' in rawProps)) return rawProps;
 
     // Use a null-prototype prop map so malformed CSS rules or hostile
     // class-rules JSON carrying `__proto__` / `constructor` /
@@ -758,6 +761,7 @@ export function normalizeHostProps(
     const isSafeKey = (k: string): boolean =>
         k !== '__proto__' && k !== 'constructor' && k !== 'prototype';
 
+    const derived = new Set<string>();
     if (hasClassName && _classRulesProvider) {
         const tokens = (rawProps.className as string)
             .split(/\s+/).filter(t => t.length > 0);
@@ -765,14 +769,19 @@ export function normalizeHostProps(
             const rules = _classRulesProvider(tok);
             if (!rules) continue;
             for (const k of Object.keys(rules)) {
-                if (isSafeKey(k)) out[k] = (rules as Record<string, unknown>)[k];
+                if (!isSafeKey(k)) continue;
+                out[k] = (rules as Record<string, unknown>)[k];
+                derived.add(k);
             }
         }
     }
 
     if (hasStyle) {
         const style = rawProps.style as Record<string, unknown>;
-        for (const k of Object.keys(style)) out[k] = style[k];
+        for (const k of Object.keys(style)) {
+            out[k] = style[k];
+            derived.add(k);
+        }
     }
 
     for (const k of Object.keys(rawProps)) {
@@ -783,9 +792,15 @@ export function normalizeHostProps(
     // Non-enumerable so the marker never reaches a bridge setter, a key
     // walk, or a shallow diff.
     Object.defineProperty(out, DERIVED_STYLE_MARKER, {
-        value: true, enumerable: false,
+        value: derived, enumerable: false,
     });
     return out;
+}
+
+/// Apply a style object to a widget the host config is creating, through the
+/// same per-key setters an authored prop uses.
+export function applyStyleProps(id: string, type: string, style: Record<string, unknown>): void {
+    for (const key of Object.keys(style)) applyOne(id, type, key, style[key], style);
 }
 
 /// Apply ALL props for first-attach. Called from appendInitialChild /
@@ -904,93 +919,70 @@ export function applyChangedProps(
     // nothing, leaving a lifted submenu nested on the menu it just left.
     if (reclaimOverlayForMovedParent(id, oldProps, newProps)) mutated = true;
 
-    // Visual props hoisted out of `style`/`className` are DERIVED, not
-    // authored. When a render arrives without its style source — the style
-    // object is omitted, or a className token the class-rules provider
-    // cannot resolve — the derived keys are ABSENT rather than deleted, so
-    // resetting them here erases the element (a chip loses fill, border and
-    // text in one frame and reads as "disappeared on hover"). Only honour a
-    // removal when both prop sets came from the same shape. A genuinely
-    // author-removed style — both sides flattened, key dropped from one —
-    // still resets.
+    // Props hoisted out of `style`/`className` are DERIVED, not authored.
+    // When a render arrives with no style source at all, the derived keys
+    // are ABSENT rather than deleted, so resetting them here erases the
+    // element (a chip loses fill, border, padding and text in one frame and
+    // reads as "disappeared on hover"). Only honour a removal when both prop
+    // sets came from the same shape. An author-removed style — a key dropped
+    // from a style object, or a style prop set to undefined — still resets.
     const derivedShapeChanged =
         isDerivedStyleProps(oldProps) && !isDerivedStyleProps(newProps);
 
-    // Walk old props — clear anything that disappeared (best-effort —
-    // most setters have no inverse; visible/opacity are obvious cases)
+    // Walk old props — every key that disappeared hands its native slots back
+    // to the widget's starting value (prop-applier-reset.ts). A key whose
+    // value became null or undefined is gone too: the walk above skips it,
+    // because applyOne has nothing to write for an absent value.
+    const removed: Array<{ key: string; oldValue: unknown }> = [];
     for (const key of Object.keys(oldProps)) {
         if (isReactInternal(key)) continue;
         if (key === 'children') continue;
         if (svgPathStrokeChanged && (key === 'stroke' || key === 'strokeGradient')) continue;
-        if (derivedShapeChanged && isDerivedVisualKey(key)) continue;
-        if (!(key in newProps)) {
-            if (isEventHandler(key)) {
-                applyEventHandler(id, key, undefined);
-                mutated = true;
-                continue;
-            }
-            // Specific resets we can do meaningfully
-            if (key === 'visible')  { call('setVisible', id, true); mutated = true; }
-            if (key === 'opacity')  { call('setOpacity', id, 1.0); mutated = true; }
-            // When overlay flips off or disappears from props, release
-            // the global overlay slot so the platform host does not keep
-            // routing clicks to a stale popover.
-            if (key === 'overlay' && oldProps[key]) {
-                call('releaseOverlay', id);
-                mutated = true;
-            }
-            // Visual cluster keys must clear when they fall out of
-            // newProps. The conditional-spread idiom
-            //   style={{ ...base, ...(active ? activeStyle : {}) }}
-            // contributes nothing to the spread on the inactive side, so
-            // the active-only keys vanish from newProps but the bridge
-            // keeps painting them. Reset to the canonical "no visual"
-            // value here so the next paint reflects React's intent.
-            // Any imported design using the same conditional-spread
-            // pattern needs this reset path.
-            if (key === 'background' || key === 'backgroundGradient') {
-                call('setBackground', id, 'transparent');
-                mutated = true;
-            }
-            if (key === 'border' || key === 'borderColor' || key === 'borderWidth') {
-                // Width-zero collapses the painted edge regardless of the
-                // color slot; cheaper than a 4-arg setBorder reset and
-                // keeps borderRadius (a separate slot) untouched.
-                call('setBorderWidth', id, 0);
-                mutated = true;
-            }
-            if (key === 'borderTop' || key === 'borderRight' || key === 'borderBottom' || key === 'borderLeft') {
-                const side = key.slice('border'.length).toLowerCase();
-                call('setBorderSide', id, side, 0, 'transparent');
-                mutated = true;
-            }
-            if (key === 'textColor') {
-                // Empty string is the bridge-side "use default" sentinel.
-                call('setTextColor', id, '');
-                mutated = true;
-            }
-            // `<Image>` whose `src` is removed clears the ImageView back
-            // to the empty placeholder, matching the web-compat
-            // removeAttribute('src') reset semantics. Empty string is the
-            // bridge-side "no source" sentinel.
-            // `type` is typed as keyof IntrinsicElementMap (which lists 'Image'
-            // but not the lowercase 'img' intrinsic — host-config routes 'img'
-            // through its string-fallback switch). Cast for the 'img' compare so
-            // the clear-on-removal seam matches the same element types as the
-            // set seam above.
-            if (key === 'src' && ((type as string) === 'img' || type === 'Image')) {
-                call('setImageSource', id, '');
-                mutated = true;
-            }
-            if (isVirtualListType(type) && key === 'selectionMode') {
-                call('setVirtualListSelectionMode', id, 'single');
-                mutated = true;
-            }
-            if (isVirtualListType(type) && key === 'selected') {
-                call('setVirtualListSelected', id, -1);
-                mutated = true;
-            }
-            // Other setters: no-op — let the next mount cycle handle it
+        if (derivedShapeChanged && isDerivedKey(oldProps, key)) continue;
+        if (isEventHandler(key)) {
+            if (key in newProps) continue;
+            applyEventHandler(id, key, undefined);
+            mutated = true;
+            continue;
+        }
+        if (!isAbsent(newProps, key) || isAbsent(oldProps, key)) continue;
+        // `<Image>` whose `src` is removed clears the ImageView back to the
+        // empty placeholder, matching the web-compat removeAttribute('src')
+        // reset semantics. Empty string is the bridge-side "no source"
+        // sentinel. `type` is typed as keyof IntrinsicElementMap (which lists
+        // 'Image' but not the lowercase 'img' intrinsic); cast for the 'img'
+        // compare so the clear-on-removal seam matches the set seam.
+        if (key === 'src' && ((type as string) === 'img' || type === 'Image')) {
+            call('setImageSource', id, '');
+            mutated = true;
+            continue;
+        }
+        // A null selection value was already reset by applyOne above.
+        if (isVirtualListType(type) && (key === 'selectionMode' || key === 'selected')
+            && key in newProps) continue;
+        if (isVirtualListType(type) && key === 'selectionMode') {
+            call('setVirtualListSelectionMode', id, 'single');
+            mutated = true;
+            continue;
+        }
+        if (isVirtualListType(type) && key === 'selected') {
+            call('setVirtualListSelected', id, -1);
+            mutated = true;
+            continue;
+        }
+        removed.push({ key, oldValue: oldProps[key] });
+    }
+    if (removed.length > 0) {
+        const survivors = orderedPropKeys(type, newProps).filter((key) =>
+            !isReactInternal(key) && key !== 'children' && !isEventHandler(key)
+            && !isAbsent(newProps, key));
+        const creationStyle = instance.creationStyle;
+        if (resetRemovedStyleKeys(id, type, removed, survivors, creationStyle,
+            (key, value, fromCreation) => {
+                if (fromCreation) applyOne(id, type, key, value, creationStyle);
+                else applyOne(id, type, key, newProps[key], newProps);
+            })) {
+            mutated = true;
         }
     }
 

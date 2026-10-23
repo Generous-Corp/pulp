@@ -19,7 +19,9 @@ public:
 
 /// Create and open a pipe as server (creates the pipe).
 /// On POSIX, name is a filesystem path and the implementation owns a paired
-/// reply FIFO beside it. On Windows, it's a pipe name.
+    /// reply FIFO beside it. On Windows, it's a pipe name. POSIX FIFOs are
+    /// created owner-only (0600): a peer must run as the same user, so a
+    /// cross-account helper needs a different transport.
     bool create_server(std::string_view name);
 
     /// Connect to an existing pipe as client.
