@@ -7,6 +7,7 @@
 
 #if defined(PULP_HAS_SKIA)
 #include <pulp/canvas/image_file_cache.hpp>
+#include <pulp/canvas/paragraph_cache.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
@@ -141,6 +142,15 @@ std::unique_ptr<FrameTarget> make_frame_target(std::string_view name, std::uint3
     else
         error = "unknown canvas '" + std::string(name) + "'";
     return nullptr;
+}
+
+bool set_paragraph_cache_enabled(bool enabled) {
+#if defined(PULP_HAS_SKIA)
+    canvas::ParagraphCache::instance().set_enabled(enabled);
+    return true;
+#else
+    return !enabled;
+#endif
 }
 
 ResourceSample sample_resources() {

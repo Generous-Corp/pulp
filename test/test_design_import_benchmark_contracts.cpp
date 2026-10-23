@@ -1170,12 +1170,52 @@ TEST_CASE("design-import benchmark Skia lane counts per-frame resource work",
     CHECK(steady_state_gate(recorded, recorded, false).status == "blind");
     CHECK(steady_state_gate(phase, phase, true).status == "fail");
 
-    // Text shapes a paragraph on every Skia paint.
+    // Text is shaped on the first paint and served from the paragraph cache
+    // after it. Switching the cache off (which also empties it) restores a
+    // shape per run per paint, and the steady-state gate then fails on text.
     auto bench = make_fixture(lane_config("baked-cpp"));
+    REQUIRE(set_paragraph_cache_enabled(false));
+    const auto uncached = run_phase(*bench, 0, 3, 60, false, 0, options);
+    REQUIRE(set_paragraph_cache_enabled(true));
     const auto text = run_phase(*bench, 0, 3, 60, false, 0, options);
     CHECK(text.resources.paragraph_builds.per_frame_max > 0);
-    CHECK(text.resources.paragraph_builds.frames_after_first_with_work == 2);
+    CHECK(text.resources.paragraph_builds.frames_after_first_with_work == 0);
     CHECK(text.resources.image_decodes.total == 0);
+    CHECK(steady_state_gate(text, text, true).status == "pass");
+    CHECK(uncached.resources.paragraph_builds.per_frame_max ==
+          text.resources.paragraph_builds.per_frame_max);
+    CHECK(uncached.resources.paragraph_builds.frames_after_first_over_budget == 2);
+    CHECK(steady_state_gate(uncached, uncached, true).status == "fail");
+}
+
+TEST_CASE("design-import benchmark text budget allows only the runs a step wrote",
+          "[design-import][benchmark]") {
+    std::string error;
+    auto target = make_frame_target("skia-raster", 200, 80, error);
+    if (!target)
+        SKIP("skia-raster target unavailable: " + error);
+    PhaseOptions options;
+    options.target = target.get();
+    const auto path = write_slot_ir("pulp-bench-text-budget.ir.json");
+    Config config = lane_config("baked-native");
+    config.ir_path = path;
+    auto fixture = make_fixture(config);
+    REQUIRE(fixture != nullptr);
+    REQUIRE(fixture->text_runs_written_per_step() == 2);
+
+    // Each step writes both slots, so each frame shapes exactly those two.
+    const auto phase = run_phase(*fixture, 0, 4, 60, true, 0, options);
+    const auto& builds = phase.resources.paragraph_builds;
+    CHECK(builds.per_frame_budget == 2);
+    CHECK(builds.frames_after_first_with_work == 3);
+    CHECK(builds.frames_after_first_over_budget == 0);
+    CHECK(steady_state_gate(phase, phase, true).status == "pass");
+
+    // Idle frames write nothing, so their budget is zero.
+    const auto idle = run_phase(*fixture, 0, 4, 60, false, 0, options);
+    CHECK(idle.resources.paragraph_builds.per_frame_budget == 0);
+    CHECK(idle.resources.paragraph_builds.frames_after_first_over_budget == 0);
+    std::filesystem::remove(path);
 }
 
 TEST_CASE("design-import benchmark Skia lane counts scene-cache records and replays",

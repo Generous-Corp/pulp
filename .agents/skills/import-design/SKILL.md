@@ -2558,9 +2558,14 @@ Benchmark receipt (`pulp-design-import-benchmark-v2`) gotchas:
   shaping** — RecordingCanvas records commands and does none of that work.
   Resource claims need `--canvas=skia-raster` (or `skia-graphite` where a Dawn
   adapter exists); `--require-steady-state` exits 4 on a `blind` gate rather
-  than passing it. `paragraph_builds` is reported but never gated: SkiaCanvas
-  shapes every label on every paint until it has a paragraph cache, so a
-  gate on it would fail every text fixture today.
+  than passing it. `paragraph_builds` is gated against a per-frame budget,
+  not zero: a step that writes N text slots legitimately shapes N new runs
+  (the IR fixtures write fresh `slot i frame N` strings every frame), so the
+  budget is the fixture's `text_runs_written_per_step()` and idle frames get
+  0. A new fixture that writes text must declare it, or the gate fails it.
+  `--paragraph-cache=off` is the uncached text path and the gate's planted
+  negative; compare cached vs uncached with `--baseline-arg` /
+  `--candidate-arg` on the same lane.
 - **`--lane=live --ir` (optionally `--bundle`) is the production JS path over
   importer output.** The runtime's `__pulpRuntimeSettle__` called from
   `engine.evaluate` only records a budget; `WidgetBridge::load_script` drains

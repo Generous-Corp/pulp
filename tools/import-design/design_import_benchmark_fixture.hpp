@@ -50,6 +50,11 @@ class BenchmarkFixture {
     virtual std::uint64_t slot_text_mismatch_count() const {
         return 0;
     }
+    // Text runs each `step(frame)` gives new content. A steady-state frame may
+    // shape these and nothing else.
+    virtual std::uint64_t text_runs_written_per_step() const {
+        return 0;
+    }
     // Untimed check that the update `step(frame)` made is what the tree now
     // holds. run_phase calls it outside every clock, so verification cost
     // never lands in update or frame time.
@@ -110,6 +115,9 @@ class IrBoundFixture final : public BenchmarkFixture {
     std::uint64_t slot_text_mismatch_count() const override {
         return text_mismatches_;
     }
+    std::uint64_t text_runs_written_per_step() const override {
+        return loaded_.slot_anchors.size();
+    }
     view::View& tree() {
         return *root_;
     }
@@ -168,6 +176,9 @@ class IrLiveFixture final : public BenchmarkFixture {
     }
     std::uint64_t slot_text_mismatch_count() const override {
         return text_mismatches_;
+    }
+    std::uint64_t text_runs_written_per_step() const override {
+        return loaded_.slot_anchors.size();
     }
     const LoadedIr& loaded() const {
         return loaded_;

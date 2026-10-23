@@ -73,4 +73,9 @@ struct ResourceSample {
 };
 ResourceSample sample_resources();
 
+// Turns the canvas's laid-out paragraph cache on or off for the process, so a
+// run can measure the uncached text path. Returns false when this build has
+// no paragraph cache to switch.
+bool set_paragraph_cache_enabled(bool enabled);
+
 } // namespace pulp::design_import_bench
