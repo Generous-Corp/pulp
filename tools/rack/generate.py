@@ -636,14 +636,25 @@ def _real_home() -> str:
 
 
 def _darwin_user_dir() -> str:
-    """The per-user Darwin directory (.../0), or "" where there is none."""
-    try:
-        out = subprocess.run(["/usr/bin/getconf", "DARWIN_USER_DIR"],
-                             capture_output=True, text=True, encoding="utf-8",
-                             timeout=10).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    """The per-user Darwin directory (.../0), or "" where there is none.
+
+    confstr(_CS_DARWIN_USER_DIR) directly, what `getconf DARWIN_USER_DIR`
+    prints, without spawning anything while the gate is being set up.
+    """
+    if sys.platform != "darwin":
         return ""
-    return os.path.realpath(out) if out else ""
+    import ctypes
+    import ctypes.util
+    _CS_DARWIN_USER_DIR = 65536
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        buf = ctypes.create_string_buffer(1024)
+        if libc.confstr(_CS_DARWIN_USER_DIR, buf, len(buf)) == 0:
+            return ""
+    except OSError:
+        return ""
+    path = buf.value.decode("utf-8", "replace")
+    return os.path.realpath(path) if path else ""
 
 
 def _sbpl_string(path: str) -> str:
@@ -753,7 +764,8 @@ const char* forge_output_name(int) { return ""; }
              *_includes(), "-DARCH_MAC",
              os.path.join(SDK, "libRack.dylib"),
              *_signal_platform_link_args()],
-            capture_output=True, text=True)
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace")
         if result.returncode != 0:
             raise BehaviourGateUnavailable(
                 "the behavioural gate could not be built before generation:\n" +
