@@ -74,6 +74,9 @@ struct Rig {
     std::uint64_t frame = 0;
     std::array<std::vector<float>, kChannels> output;
     std::size_t callback_allocations = 0;
+    // The mechanics tests pin the window to the ring (capacity - 1); zero
+    // selects the node's time-based default.
+    std::uint32_t watchdog_blocks = kLead + 2;
 
     explicit Rig(FamilyCase c, std::uint32_t block = kBlock, bool fail_backend = false,
                  bool skip_publish = false, std::uint32_t prewarm = 0)
@@ -86,11 +89,13 @@ struct Rig {
     struct GpuShadow {
         FamilyCase shadow;
         std::uint32_t max_inflight = 1;
+        std::uint32_t watchdog_blocks = kLead + 2;
     };
     explicit Rig(GpuShadow gpu)
         : which(kWaveNetGpu), fixture(NeuralFamily::WaveNet, kChannels, kBlock) {
         const auto shadow = gpu.shadow;
         const auto max_inflight = gpu.max_inflight;
+        watchdog_blocks = gpu.watchdog_blocks;
         if (shadow.family != NeuralFamily::WaveNet) {
             shadow_fixture =
                 std::make_unique<FamilyFixture>(shadow.family, kChannels, kBlock, shadow.nam_tcn);
@@ -119,7 +124,8 @@ struct Rig {
             .max_inflight = max_inflight,
             .prewarm_blocks = prewarm,
             .shadow_policy = GpuNeuralRealtimeNode::ShadowPolicy::Inline,
-            .shadow_model = shadow});
+            .shadow_model = shadow,
+            .watchdog_blocks = watchdog_blocks});
         detail::NeuralRealtimeTestAccess::skip_shadow_publish(*node, skip_publish);
     }
 
@@ -1231,6 +1237,50 @@ TEST_CASE("the watchdog counts a pump's completions before judging silence",
                                               : GpuAudioRecoveryReason::ProviderUnresponsive));
     validated(rig.node->status_snapshot());
     validated(rig.transport.status_snapshot());
+    CHECK(rig.callback_allocations == 0);
+}
+
+TEST_CASE("the default watchdog is 200 ms of callback blocks and outlasts the ring",
+          "[gpu_audio][neural][realtime][loss]") {
+    // 200 ms at 48 kHz in 64-frame blocks is 150 callback blocks, and the
+    // ring grows to hold them: a provider that stalls for 150 callbacks and
+    // then completes is slow; one more stalled callback is a hang, reported
+    // as ProviderUnresponsive rather than as a saturated ring.
+    // Positive control: the same rig with an explicit 4-block window latches
+    // after 5 stalled callbacks, so only the default's size is under test.
+    const auto stalled = GENERATE(150u, 151u, 5u);
+    CAPTURE(stalled);
+    Rig rig(Rig::GpuShadow{.shadow = kWaveNetGpu, .watchdog_blocks = stalled == 5 ? 4u : 0u});
+    REQUIRE(rig.prepare());
+    rig.render(8);
+    rig.plan.starve = true;
+    rig.render(stalled);
+    rig.plan.starve = false;
+    rig.render(8);
+    CHECK(rig.node->recovery_reason() == (stalled == 150
+                                              ? GpuAudioRecoveryReason::None
+                                              : GpuAudioRecoveryReason::ProviderUnresponsive));
+    validated(rig.node->status_snapshot());
+    validated(rig.transport.status_snapshot());
+    CHECK(rig.callback_allocations == 0);
+}
+
+TEST_CASE("a ring saturated behind a hung provider is reported as the hang",
+          "[gpu_audio][neural][realtime][loss]") {
+    // A window wider than the ring: the input ring fills while the oldest
+    // in-flight block has seen no completion since its admission.
+    const auto window = GENERATE(64u, 3u);
+    CAPTURE(window);
+    // 64 is wider than the ring; 3, inside it, is the positive control: the
+    // watchdog itself reports the same hang.
+    Rig rig(Rig::GpuShadow{.shadow = kWaveNetGpu, .watchdog_blocks = window});
+    REQUIRE(rig.prepare());
+    rig.render(8);
+    rig.plan.starve = true;
+    rig.render(16);
+    CHECK(rig.node->recovery_reason() == GpuAudioRecoveryReason::ProviderUnresponsive);
+    CHECK(rig.node->status_snapshot().provider_state == GpuAudioProviderState::Unavailable);
+    validated(rig.node->status_snapshot());
     CHECK(rig.callback_allocations == 0);
 }
 

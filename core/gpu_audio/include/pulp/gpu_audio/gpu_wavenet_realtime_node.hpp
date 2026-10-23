@@ -46,9 +46,13 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
         bool supports_cpu_fallback = false;
         /// Callback blocks that may pass with work in flight and no completion
         /// before the node latches `GpuAudioRecoveryReason::ProviderUnresponsive`.
-        /// Zero selects `capacity - 1`, which fires before the input ring
-        /// saturates while the worker keeps up with the callback. A provider
-        /// that keeps completing, however late, is never unresponsive.
+        /// Zero selects 200 ms converted to blocks at prepare() (at 48 kHz:
+        /// 150 blocks of 64 frames, 75 of 128, 38 of 256), or `capacity - 1`
+        /// if that is larger, and grows the input ring to hold the window and
+        /// the lead, so a hang trips the watchdog before the ring saturates. A
+        /// non-zero value is used as given with the configured capacity. A
+        /// provider that keeps completing, however late, is never
+        /// unresponsive.
         std::uint32_t watchdog_blocks = 0;
         /// Optional host-owned pool that keeps this node's providers warm
         /// across release() and prepare(). The pool must outlive every node

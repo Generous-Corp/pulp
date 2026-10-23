@@ -7,6 +7,7 @@
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_execution_contract.hpp"
 #include "detail/shared_io_stamped_bridge.hpp"
+#include "detail/shared_io_watchdog.hpp"
 
 #include <pulp/gpu_audio/gpu_neural_realtime_node.hpp>
 
@@ -39,12 +40,15 @@ struct GpuNeuralRealtimeNode::Impl {
         Terminal disposition = Terminal::Cancelled;
         bool occupied = false;
         bool done = false;
+        // The worker's completion count when this block was admitted.
+        std::uint64_t completions_at_admit = 0;
 
         void reset() noexcept {
             stamp = {};
             disposition = Terminal::Cancelled;
             occupied = false;
             done = false;
+            completions_at_admit = 0;
         }
     };
 
@@ -90,6 +94,17 @@ struct GpuNeuralRealtimeNode::Impl {
     std::atomic<bool> device_lost{false};
     std::atomic<std::uint64_t> callback_next{0};
     std::uint64_t watchdog_limit = 0, completion_mark = 0; // worker only
+    // Worker only: completions collected since prepare(), and whether a
+    // latched InputSaturated has been classified.
+    std::uint64_t completions = 0;
+    bool saturation_classified = false;
+    // Ingress ring capacity in effect (see size_provider_watchdog()).
+    std::uint32_t ring_capacity = 0;
+    // Written by the worker once: the input ring saturated while the oldest
+    // in-flight block had seen no completion since its admission, so the node
+    // reports ProviderUnresponsive at that block.
+    std::atomic<bool> saturated_unresponsive{false};
+    std::atomic<std::uint64_t> unresponsive_sequence{std::numeric_limits<std::uint64_t>::max()};
     std::atomic<std::uint64_t> cpu_recovery_sequence{std::numeric_limits<std::uint64_t>::max()};
 
     bool prepared = false;
@@ -402,7 +417,10 @@ struct GpuNeuralRealtimeNode::Impl {
     bool initialize_bridge() {
         const auto& c = config;
         bridge = std::make_unique<Bridge>();
-        if (!bridge->prepare({.capacity = c.capacity,
+        const auto sizing = detail::size_provider_watchdog(
+            c.capacity, c.lead_blocks, c.watchdog_blocks, block_size(), model->sample_rate);
+        ring_capacity = sizing.ring_blocks;
+        if (!bridge->prepare({.capacity = ring_capacity,
                               .channels = c.channels,
                               .block_size = block_size(),
                               .lead_blocks = c.lead_blocks},
@@ -419,8 +437,13 @@ struct GpuNeuralRealtimeNode::Impl {
         pending_head = pending_count = 0;
         next_input = sequence;
         callback_next.store(sequence, std::memory_order_relaxed);
-        watchdog_limit = c.watchdog_blocks != 0 ? c.watchdog_blocks : c.capacity - 1;
+        watchdog_limit = sizing.window_blocks;
         completion_mark = sequence;
+        completions = 0;
+        saturation_classified = false;
+        saturated_unresponsive.store(false, std::memory_order_relaxed);
+        unresponsive_sequence.store(std::numeric_limits<std::uint64_t>::max(),
+                                    std::memory_order_relaxed);
         device_lost.store(false, std::memory_order_relaxed);
         telemetry.reset();
         bridge->set_trace(nullptr, &telemetry);
@@ -447,11 +470,14 @@ struct GpuNeuralRealtimeNode::Impl {
     }
     // Device loss is the root cause of the failures and silence it produces,
     // so once observed it replaces those latched symptoms. Independent causes
-    // (a sequence gap, an invalid callback) stay first.
+    // (a sequence gap, an invalid callback) stay first. A ring saturated
+    // behind a hung provider is reported as the hang.
     detail::SharedIoRecoveryReason recovery() const noexcept {
         using Recovery = detail::SharedIoRecoveryReason;
-        const auto latched =
-            bridge ? bridge->recovery_reason() : cpu_recovery.load(std::memory_order_acquire);
+        const auto latched = bridge ? detail::saturated_projection(
+                                          bridge->recovery_reason(),
+                                          saturated_unresponsive.load(std::memory_order_acquire))
+                                    : cpu_recovery.load(std::memory_order_acquire);
         if (device_lost.load(std::memory_order_acquire) &&
             (latched == Recovery::ProviderFailure || latched == Recovery::ProviderUnresponsive))
             return Recovery::ProviderLost;
@@ -471,6 +497,7 @@ struct GpuNeuralRealtimeNode::Impl {
                                  : detail::SharedIoRecoveryReason::ProviderFailure;
         detail::StreamingTerminal terminal;
         while (backend.receive(terminal)) {
+            ++completions;
             auto* pending = find_pending(terminal.stamp);
             if (pending == nullptr) {
                 fail(failure, terminal.stamp.sequence);
@@ -516,6 +543,7 @@ struct GpuNeuralRealtimeNode::Impl {
     // admission, so an idle stretch never counts against it, and a provider
     // that keeps completing, however late, is slow rather than unresponsive.
     void watch_provider(bool progressed) noexcept {
+        classify_saturation();
         const auto position = callback_next.load(std::memory_order_acquire);
         if (progressed) {
             completion_mark = position;
@@ -529,6 +557,35 @@ struct GpuNeuralRealtimeNode::Impl {
         const auto silent = position > since ? position - since : 0;
         if (silent >= watchdog_limit)
             fail(detail::SharedIoRecoveryReason::ProviderUnresponsive, first_undelivered());
+    }
+    // The input ring fills when the worker stops admitting. If it filled during
+    // the silence of an in-flight block that has seen no completion since its
+    // admission, the provider, not the worker, stopped the stream: report the
+    // hang. Runs after this pump's completions are collected.
+    void classify_saturation() noexcept {
+        if (saturation_classified ||
+            bridge->recovery_reason() != detail::SharedIoRecoveryReason::InputSaturated)
+            return;
+        saturation_classified = true;
+        if (pending_count == 0 || completions != pending_ring[pending_head].completions_at_admit)
+            return;
+        // The ring must have filled during this block's silence. A provider
+        // that completes every block, only slower than the callback, fills it
+        // from a backlog while each block's own silence stays short: that is
+        // saturation, not a hang.
+        const auto position = callback_next.load(std::memory_order_acquire);
+        const auto since = std::max(completion_mark, first_undelivered() + 1);
+        const auto silent = position > since ? position - since : 0;
+        if (silent + config.lead_blocks + 1 < ring_capacity)
+            return;
+        unresponsive_sequence.store(first_undelivered(), std::memory_order_release);
+        saturated_unresponsive.store(true, std::memory_order_release);
+    }
+    std::uint64_t latched_sequence() const noexcept {
+        if (bridge->recovery_reason() == detail::SharedIoRecoveryReason::InputSaturated &&
+            saturated_unresponsive.load(std::memory_order_acquire))
+            return unresponsive_sequence.load(std::memory_order_acquire);
+        return bridge->recovery_sequence();
     }
 };
 
@@ -883,7 +940,7 @@ GpuAudioRecoveryReason GpuNeuralRealtimeNode::recovery_reason() const noexcept {
 
 std::uint64_t GpuNeuralRealtimeNode::recovery_sequence() const noexcept {
     if (impl_->bridge)
-        return impl_->bridge->recovery_sequence();
+        return impl_->latched_sequence();
     return impl_->cpu_recovery_sequence.load(std::memory_order_acquire);
 }
 
@@ -1093,6 +1150,7 @@ std::uint32_t GpuNeuralRealtimeNode::service(void* self, std::uint64_t) noexcept
         auto& pending = s.pending_ring[(s.pending_head + s.pending_count) % s.pending_ring.size()];
         pending.reset();
         pending.occupied = true;
+        pending.completions_at_admit = s.completions;
         pending.stamp = {.epoch = stamp.epoch, .sequence = stamp.sequence};
         // The backend contract retains both spans until the terminal, so the
         // block owns copies rather than the bridge's ingress lease.

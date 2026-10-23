@@ -314,7 +314,9 @@ class GpuFirEffect final : public format::Processor {
             .capacity = kLeadBlocks + 3,
             .max_inflight = 1,
             .miss_policy = g_options.miss_policy,
-            .supports_cpu_fallback = g_options.miss_policy == MissPolicy::CpuFallback};
+            .supports_cpu_fallback = g_options.miss_policy == MissPolicy::CpuFallback,
+            // Faults are simulated in a short run: keep the ring-sized window.
+            .watchdog_blocks = kLeadBlocks + 2};
         node_ = std::make_unique<ShadowFirNode>(config, quantum_, g_options.shadow_delay_blocks);
         std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
         for (std::uint32_t ch = 0; ch < kChannels; ++ch)

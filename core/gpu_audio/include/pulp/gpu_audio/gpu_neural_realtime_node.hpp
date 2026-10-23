@@ -177,10 +177,12 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
         void* shadow_audio_workgroup = nullptr;
         /// GPU watchdog budget in callback blocks: a provider that completes
         /// nothing for this many blocks while work is in flight latches
-        /// ProviderUnresponsive. Zero selects `capacity - 1`, which fires
-        /// before the ingress ring saturates while the worker keeps up with
-        /// the callback. A provider that keeps completing, however late, is
-        /// never unresponsive.
+        /// ProviderUnresponsive. Zero selects 200 ms converted to blocks at
+        /// prepare() (at 48 kHz: 150 blocks of 64 frames, 75 of 128, 38 of
+        /// 256), or `capacity - 1` if that is larger, and grows the ingress
+        /// ring to hold the window and the lead. A non-zero value is used as
+        /// given with the configured capacity. A provider that keeps
+        /// completing, however late, is never unresponsive.
         std::uint32_t watchdog_blocks = 0;
     };
 

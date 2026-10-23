@@ -370,7 +370,8 @@ to one node.
 On the GPU path the node detects device loss through the provider's loss
 query, which outranks the failed completions the loss causes. It detects a
 hung provider with a completion watchdog: `Config::watchdog_blocks` callback
-blocks with nothing completed while work is in flight. Both report
+blocks with nothing completed while work is in flight (by default 200 ms of
+blocks, 150 at 64 frames and 48 kHz; see the WaveNet node guide). Both report
 `Unavailable`, with `ProviderLost` or `ProviderUnresponsive` as the reason,
 and the CPU model carries the stream.
 

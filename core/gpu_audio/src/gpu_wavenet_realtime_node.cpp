@@ -1,6 +1,7 @@
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_stamped_bridge.hpp"
+#include "detail/shared_io_watchdog.hpp"
 #include "detail/wavenet_realtime_channel.hpp"
 #include <algorithm>
 #include <array>
@@ -36,6 +37,8 @@ struct GpuWaveNetRealtimeNode::Impl {
         bool trace_pending = false;
         bool suppress = false;
         bool counted = false;
+        // The worker's completion count when this block was admitted.
+        std::uint64_t completions_at_admit = 0;
 
         Bridge::Stamp stamp() const noexcept {
             return {ticket.generation, ticket.sequence};
@@ -48,6 +51,7 @@ struct GpuWaveNetRealtimeNode::Impl {
             trace_pending = false;
             suppress = false;
             counted = false;
+            completions_at_admit = 0;
             trace_record = {};
         }
     };
@@ -166,14 +170,22 @@ struct GpuWaveNetRealtimeNode::Impl {
     }
     // Device loss is the root cause of the completion failures and silence it
     // produces, so once loss is observed it replaces those latched symptoms.
-    // Other causes stay first: they are independent of the device.
+    // Other causes stay first: they are independent of the device. A ring
+    // saturated behind a hung provider is reported as the hang.
     detail::SharedIoRecoveryReason recovery() const noexcept {
         using Recovery = detail::SharedIoRecoveryReason;
-        const auto latched = bridge->recovery_reason();
+        const auto latched = detail::saturated_projection(
+            bridge->recovery_reason(), saturated_unresponsive.load(std::memory_order_acquire));
         if (device_lost.load(std::memory_order_acquire) &&
             (latched == Recovery::ProviderFailure || latched == Recovery::ProviderUnresponsive))
             return Recovery::ProviderLost;
         return latched;
+    }
+    std::uint64_t latched_sequence() const noexcept {
+        if (bridge->recovery_reason() == detail::SharedIoRecoveryReason::InputSaturated &&
+            saturated_unresponsive.load(std::memory_order_acquire))
+            return unresponsive_sequence.load(std::memory_order_acquire);
+        return bridge->recovery_sequence();
     }
     void latch_loss(std::uint64_t sequence) noexcept {
         device_lost.store(true, std::memory_order_release);
@@ -276,6 +288,19 @@ struct GpuWaveNetRealtimeNode::Impl {
     // Worker-only watchdog state, in callback blocks: the worker's pump rate is
     // a poll interval, not an audio clock.
     std::uint64_t watchdog_limit = 0, completion_mark = 0;
+    // Input ring capacity in effect: the configured capacity, grown to hold
+    // the default watchdog window (see size_provider_watchdog()).
+    std::uint32_t ring_capacity = 0;
+    // Worker only: completions collected since prepare(), and whether a
+    // latched InputSaturated has been classified.
+    std::uint64_t completions = 0;
+    bool saturation_classified = false;
+    // Written by the worker once: the input ring saturated during the silence
+    // of an in-flight block that had seen no completion since its admission.
+    // That is a hung provider, so the node reports ProviderUnresponsive at
+    // that block.
+    std::atomic<bool> saturated_unresponsive{false};
+    std::atomic<std::uint64_t> unresponsive_sequence{std::numeric_limits<std::uint64_t>::max()};
     // The sequence after the last callback whose delivery was reported.
     std::atomic<std::uint64_t> delivered_next{0};
     // Worker only: provider failures awaiting their consumer's fallback.
@@ -343,7 +368,11 @@ struct GpuWaveNetRealtimeNode::Impl {
             return false;
         recent.reset();
         bridge = std::make_unique<Bridge>();
-        if (!bridge->prepare({.capacity = c.capacity,
+        const auto sizing = detail::size_provider_watchdog(
+            c.capacity, c.lead_blocks, c.watchdog_blocks, c.session.descriptor.block_size,
+            c.session.descriptor.sample_rate);
+        ring_capacity = sizing.ring_blocks;
+        if (!bridge->prepare({.capacity = ring_capacity,
                               .channels = c.channels,
                               .block_size = c.session.descriptor.block_size,
                               .lead_blocks = c.lead_blocks,
@@ -366,8 +395,13 @@ struct GpuWaveNetRealtimeNode::Impl {
         callback_next.store(sequence, std::memory_order_relaxed);
         delivered_next.store(sequence, std::memory_order_relaxed);
         deferred_fallbacks = deferred_until = 0;
-        watchdog_limit = c.watchdog_blocks != 0 ? c.watchdog_blocks : c.capacity - 1;
+        watchdog_limit = sizing.window_blocks;
         completion_mark = sequence;
+        completions = 0;
+        saturation_classified = false;
+        saturated_unresponsive.store(false, std::memory_order_relaxed);
+        unresponsive_sequence.store(std::numeric_limits<std::uint64_t>::max(),
+                                    std::memory_order_relaxed);
         warmup_blocks = history_warmup_blocks();
         warmup_until = warm_start ? sequence + warmup_blocks : sequence;
         warm_start = false;
@@ -387,7 +421,7 @@ struct GpuWaveNetRealtimeNode::Impl {
             contract.block_size = c.session.descriptor.block_size;
             contract.sample_rate = c.session.descriptor.sample_rate;
             contract.algorithmic_lead_blocks = c.lead_blocks;
-            contract.pipeline_depth = c.capacity;
+            contract.pipeline_depth = ring_capacity;
             contract.provider_slots = c.session.slots;
             contract.max_inflight = c.max_inflight;
             contract.requested_path = detail::SharedIoRequest::RequireSharedHostPointer;
@@ -445,6 +479,7 @@ struct GpuWaveNetRealtimeNode::Impl {
                 if (!completion)
                     break;
                 ++received;
+                ++completions;
                 if (progressed)
                     *progressed = true;
                 const auto* result = &completion->result;
@@ -544,6 +579,7 @@ struct GpuWaveNetRealtimeNode::Impl {
     // idle stretch with nothing in flight never counts against it. A provider
     // that keeps completing, however late, is slow, not unresponsive.
     void watch_provider(bool progressed) noexcept {
+        classify_saturation();
         const auto position = callback_next.load(std::memory_order_acquire);
         if (progressed) {
             completion_mark = position;
@@ -558,6 +594,30 @@ struct GpuWaveNetRealtimeNode::Impl {
         const auto silent = position > since ? position - since : 0;
         if (silent >= watchdog_limit)
             fail(detail::SharedIoRecoveryReason::ProviderUnresponsive, first_undelivered());
+    }
+    // The input ring fills when the worker stops admitting. If it filled during
+    // the silence of an in-flight block that has seen no completion since its
+    // admission, the provider, not the worker, stopped the stream: report the
+    // hang. Runs after this pump's completions are collected, so a block that
+    // completed late keeps the saturation as reported.
+    void classify_saturation() noexcept {
+        if (saturation_classified ||
+            bridge->recovery_reason() != detail::SharedIoRecoveryReason::InputSaturated)
+            return;
+        saturation_classified = true;
+        if (pending_count == 0 || completions != pending_ring[pending_head].completions_at_admit)
+            return;
+        // The ring must have filled during this block's silence. A provider
+        // that completes every block, only slower than the callback, fills it
+        // from a backlog while each block's own silence stays short: that is
+        // saturation, not a hang.
+        const auto position = callback_next.load(std::memory_order_acquire);
+        const auto since = std::max(completion_mark, first_undelivered() + 1);
+        const auto silent = position > since ? position - since : 0;
+        if (silent + config.lead_blocks + 1 < ring_capacity)
+            return;
+        unresponsive_sequence.store(first_undelivered(), std::memory_order_release);
+        saturated_unresponsive.store(true, std::memory_order_release);
     }
     // Blocks of input that fully refill every layer's causal history.
     std::uint32_t history_warmup_blocks() const noexcept {
@@ -881,8 +941,7 @@ GpuAudioRecoveryReason GpuWaveNetRealtimeNode::recovery_reason() const noexcept 
     return detail::public_recovery_reason(impl_->recovery());
 }
 std::uint64_t GpuWaveNetRealtimeNode::recovery_sequence() const noexcept {
-    return impl_->bridge ? impl_->bridge->recovery_sequence()
-                         : std::numeric_limits<std::uint64_t>::max();
+    return impl_->bridge ? impl_->latched_sequence() : std::numeric_limits<std::uint64_t>::max();
 }
 GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     GpuAudioStatus status;
@@ -1076,6 +1135,7 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
         auto& pending = s.pending_ring[(s.pending_head + s.pending_count) % s.pending_ring.size()];
         pending.reset();
         pending.occupied = true;
+        pending.completions_at_admit = s.completions;
         const auto stamp = input->stamp();
         s.trace_admit(pending, *input);
         if (stamp.epoch != s.bridge->delivery_epoch() || stamp.sequence != s.next_input) {
@@ -1172,8 +1232,12 @@ detail::WaveNetRealtimeTestAccess::recovery_reason(const GpuWaveNetRealtimeNode&
 }
 std::uint64_t
 detail::WaveNetRealtimeTestAccess::recovery_sequence(const GpuWaveNetRealtimeNode& node) noexcept {
-    return node.impl_->bridge ? node.impl_->bridge->recovery_sequence()
+    return node.impl_->bridge ? node.impl_->latched_sequence()
                               : std::numeric_limits<std::uint64_t>::max();
+}
+void detail::WaveNetRealtimeTestAccess::hold_callback_position(GpuWaveNetRealtimeNode& node,
+                                                               std::uint64_t position) noexcept {
+    node.impl_->callback_next.store(position, std::memory_order_release);
 }
 std::uint64_t
 detail::WaveNetRealtimeTestAccess::stale_completions(const GpuWaveNetRealtimeNode& node) noexcept {

@@ -536,7 +536,10 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
         .channels = 1,
         .lead_blocks = 1,
         .capacity = 4,
-        .max_inflight = 1};
+        .max_inflight = 1,
+        // Hang detection within this receipt's short run: the ring-sized
+        // window. The time-based default has its own campaign receipt.
+        .watchdog_blocks = 3};
     ga::GpuWaveNetRealtimeNode node(config);
     std::vector<std::unique_ptr<WaveNetRealtimeChannel>> channels;
     channels.push_back(std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)));
@@ -751,7 +754,9 @@ NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_tabl
          .channels = 1,
          .lead_blocks = 1,
          .capacity = 4,
-         .shadow_policy = ga::GpuNeuralRealtimeNode::ShadowPolicy::Inline});
+         .shadow_policy = ga::GpuNeuralRealtimeNode::ShadowPolicy::Inline,
+         // As run_node_fault: the ring-sized window for a short run.
+         .watchdog_blocks = 3});
     // The fault must hit a node that is on the GPU, not one that fell back to
     // its CPU model. (The injected provider is not the authenticated one, so
     // the status says Degraded; the strict Ready receipt is the public one.)

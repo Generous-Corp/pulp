@@ -190,6 +190,9 @@ struct WaveNetRealtimeTestAccess {
     static void set_channel_factory(GpuWaveNetRealtimeNode&, ChannelFactory, void*) noexcept;
     static std::size_t quarantined_channels(const GpuWaveNetRealtimeNode&) noexcept;
     static std::uint32_t warmup_blocks(const GpuWaveNetRealtimeNode&) noexcept;
+    // Holds the callback position at `position`, as a callback preempted after
+    // publishing its block but before advancing the position leaves it.
+    static void hold_callback_position(GpuWaveNetRealtimeNode&, std::uint64_t position) noexcept;
     // Places a channel in the re-acquire quarantine, as if it failed to drain.
     static void quarantine_for_testing(GpuWaveNetRealtimeNode&,
                                        std::unique_ptr<WaveNetRealtimeChannel>);

@@ -4,6 +4,7 @@
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_stamped_bridge.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "detail/shared_io_watchdog.hpp"
 #include "detail/wavenet_realtime_channel.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include "support/wavenet_program_session_channel.hpp"
@@ -297,13 +298,18 @@ struct Shape {
                 .lead_blocks = lead,
                 .capacity = lead + 3,
                 .max_inflight = max_inflight,
-                .completion_service_wait_ns = wait_ns};
+                .completion_service_wait_ns = wait_ns,
+                // The mechanics tests pin the window to the ring (capacity - 1);
+                // the time-based default has its own tests.
+                .watchdog_blocks = lead + 2};
     }
 };
 struct Tweak {
     std::uint32_t lead = 1, capacity = 0, channels = 1;
     std::uint32_t watchdog_blocks = 0;
     bool trace = false;
+    // Leave watchdog_blocks at zero: the node's time-based default.
+    bool default_watchdog = false;
 };
 struct Harness {
     Shape shape;
@@ -327,7 +333,9 @@ struct Harness {
         auto config = shape.config(tweak.lead, tweak.channels);
         if (tweak.capacity != 0)
             config.capacity = tweak.capacity;
-        config.watchdog_blocks = tweak.watchdog_blocks;
+        config.watchdog_blocks = tweak.default_watchdog       ? 0
+                                 : tweak.watchdog_blocks != 0 ? tweak.watchdog_blocks
+                                                              : config.capacity - 1;
         return config;
     }
     void start(bool trace) {
@@ -487,6 +495,7 @@ TEST_CASE("WaveNet depth telemetry reports bounded multi-flight",
     const auto run = [&](std::uint32_t capacity) {
         auto config = shape.config(1, 1, 0, capacity - 1);
         config.capacity = capacity;
+        config.watchdog_blocks = capacity - 1;
         GpuWaveNetRealtimeNode node(config);
         REQUIRE(node.configure_trace({.enabled = true,
                                       .capture_admissions = true,
@@ -1558,7 +1567,7 @@ struct HangRun {
 // Healthy warmup, then a provider that stops completing. Each round is
 // `callbacks` callbacks followed by `pumps` worker pumps.
 HangRun run_hang(const Tweak& tweak, std::uint32_t callbacks, std::uint32_t pumps,
-                 std::uint32_t resume_after = UINT32_MAX) {
+                 std::uint32_t resume_after = UINT32_MAX, std::uint32_t rounds = 16) {
     Harness h(tweak);
     for (int block = 0; block < 4; ++block) {
         h.callback(float(block));
@@ -1568,7 +1577,7 @@ HangRun run_hang(const Tweak& tweak, std::uint32_t callbacks, std::uint32_t pump
     // The block submitted by the last healthy pump is the first that hangs.
     run.hung_sequence = h.sequence - 1;
     h.controls[0].hang = true;
-    for (std::uint32_t round = 0; round < 16; ++round) {
+    for (std::uint32_t round = 0; round < rounds; ++round) {
         for (std::uint32_t i = 0; i < callbacks; ++i) {
             pulp::test::RtAllocationProbe probe;
             (void)h.callback(float(h.sequence));
@@ -1618,6 +1627,105 @@ TEST_CASE("WaveNet watchdog honors its configured block budget",
     const auto five = run_hang({.capacity = 16, .watchdog_blocks = 5}, 1, 1);
     CHECK(five.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
     CHECK(five.blocks_after_hang == 5);
+}
+
+TEST_CASE("WaveNet default watchdog window is 200 ms converted to callback blocks",
+          "[gpu_audio][wavenet][realtime][hang]") {
+    // 200 ms in blocks of 64, 128 and 256 frames: 138/69/35 at 44.1 kHz,
+    // 150/75/38 at 48 kHz, 300/150/75 at 96 kHz. The ring grows to hold the
+    // window, the lead and one more block; an explicit window leaves the
+    // configured ring alone, and a larger ring keeps its capacity - 1 window.
+    using detail::size_provider_watchdog;
+    struct Rate {
+        std::uint32_t sample_rate, blocks_64, blocks_128, blocks_256;
+    };
+    for (const auto rate :
+         {Rate{44100, 138, 69, 35}, Rate{48000, 150, 75, 38}, Rate{96000, 300, 150, 75}}) {
+        CAPTURE(rate.sample_rate);
+        CHECK(size_provider_watchdog(8, 2, 0, 64, rate.sample_rate).window_blocks ==
+              rate.blocks_64);
+        CHECK(size_provider_watchdog(8, 2, 0, 128, rate.sample_rate).window_blocks ==
+              rate.blocks_128);
+        CHECK(size_provider_watchdog(8, 2, 0, 256, rate.sample_rate).window_blocks ==
+              rate.blocks_256);
+        CHECK(size_provider_watchdog(8, 2, 0, 64, rate.sample_rate).ring_blocks ==
+              rate.blocks_64 + 3);
+    }
+    CHECK(size_provider_watchdog(8, 2, 3, 64, 48000).window_blocks == 3);
+    CHECK(size_provider_watchdog(8, 2, 3, 64, 48000).ring_blocks == 8);
+    CHECK(size_provider_watchdog(400, 2, 0, 256, 48000).window_blocks == 399);
+    CHECK(size_provider_watchdog(400, 2, 0, 256, 48000).ring_blocks == 402);
+
+    // The harness's 2-frame blocks make the default 4800 callback blocks. A
+    // hang trips it at exactly that silence, as ProviderUnresponsive at the
+    // hung block, and the grown ring never saturates first.
+    const auto hang = run_hang({.default_watchdog = true}, 1, 1, UINT32_MAX, 6000);
+    CHECK(hang.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
+    CHECK(hang.sequence == hang.hung_sequence);
+    CHECK(hang.blocks_after_hang == 4800);
+    CHECK(hang.state == GpuAudioProviderState::Unavailable);
+    CHECK(hang.allocations == 0);
+    // Positive control: the same harness trips an explicit 5-block window at
+    // exactly 5 blocks, so only the default's size is under test above.
+    const auto control = run_hang({.capacity = 16, .watchdog_blocks = 5}, 1, 1);
+    CHECK(control.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
+    CHECK(control.blocks_after_hang == 5);
+    // A stall that ends one block short of the window latches nothing.
+    const auto stall = run_hang({.default_watchdog = true}, 1, 1, 4799, 6000);
+    CHECK(stall.reason == GpuAudioRecoveryReason::None);
+    CHECK(stall.state != GpuAudioProviderState::Unavailable);
+}
+
+TEST_CASE("WaveNet ring saturated behind a hung provider is reported as the hang",
+          "[gpu_audio][wavenet][realtime][hang]") {
+    // A window wider than the ring: the input ring fills first. The oldest
+    // in-flight block has seen no completion since its admission, so the
+    // saturation is the hang's symptom and the node reports the hang.
+    const auto run = run_hang({.capacity = 4, .watchdog_blocks = 16}, 1, 1);
+    CHECK(run.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
+    CHECK(run.sequence == run.hung_sequence);
+    CHECK(run.state == GpuAudioProviderState::Unavailable);
+    CHECK(run.blocks_after_hang < 16);
+    CHECK(run.allocations == 0);
+    // Positive control: the same hang with the window inside the ring trips
+    // the watchdog itself, at the same block.
+    const auto control = run_hang({.capacity = 4, .watchdog_blocks = 2}, 1, 1);
+    CHECK(control.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
+    CHECK(control.sequence == control.hung_sequence);
+}
+
+TEST_CASE("WaveNet ring saturated by a provider slower than the callback stays saturation",
+          "[gpu_audio][wavenet][realtime][hang]") {
+    // Two callbacks per pump: the provider completes every block, but the
+    // backlog grows by one each round until the ring saturates. The block in
+    // flight at that moment has not completed yet, and its own silence is a
+    // couple of callbacks, far short of the ring: saturation, not a hang.
+    Harness h(Tweak{.lead = 1, .capacity = 8, .watchdog_blocks = 16});
+    for (int block = 0; block < 4; ++block) {
+        h.callback(float(block));
+        h.service();
+    }
+    bool saturated = false;
+    for (int round = 0; round < 64 && !saturated; ++round) {
+        h.callback(float(h.sequence));
+        h.callback(float(h.sequence));
+        saturated = h.node.recovery_reason() == GpuAudioRecoveryReason::InputSaturated;
+        // The pump that classifies the saturation finds its block in flight.
+        h.controls[0].hang = saturated;
+        h.service();
+        h.controls[0].hang = false;
+    }
+    REQUIRE(saturated);
+    for (int pump = 0; pump < 4; ++pump)
+        h.service();
+    CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::InputSaturated);
+    CHECK(checked_status(h.node).provider_state != GpuAudioProviderState::Unavailable);
+
+    // Positive control: the same ring and window behind a true hang. The ring
+    // fills during the hung block's silence, so the saturation is the hang.
+    const auto hang = run_hang({.capacity = 8, .watchdog_blocks = 16}, 1, 1);
+    CHECK(hang.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
+    CHECK(hang.sequence == hang.hung_sequence);
 }
 
 TEST_CASE("WaveNet provider that stalls inside the watchdog budget is not unresponsive",
@@ -2025,6 +2133,48 @@ TEST_CASE("WaveNet status reports the configured completion mode",
     }
 }
 
+// Bounds for the concurrent-worker smoke test below. The race it samples is
+// pinned deterministically by "WaveNet watchdog reads a position behind the
+// oldest admission as no silence".
+constexpr int kWatchdogRaceBlocks = 4000;
+constexpr int kWatchdogRaceMinBlocks = 1000;
+
+TEST_CASE("WaveNet watchdog reads a position behind the oldest admission as no silence",
+          "[gpu_audio][wavenet][realtime][hang]") {
+    // The worker can admit a block after the callback publishes it but before
+    // the callback advances its position. Hold the position there, behind the
+    // oldest admission: the silence is zero, never an unsigned wrap.
+    for (const bool held : {true, false}) {
+        CAPTURE(held);
+        Harness h(Tweak{.lead = 1, .capacity = 16, .watchdog_blocks = 3});
+        for (int block = 0; block < 4; ++block) {
+            h.callback(float(block));
+            h.service();
+        }
+        // Block 3, admitted by the last healthy pump, never completes.
+        h.controls[0].hang = true;
+        h.callback(4.0f);
+        h.service();
+        if (held) {
+            // As if the callback that published block 3 were preempted before
+            // advancing its position: the position is the oldest admission's
+            // own sequence, one short of where its silence starts.
+            detail::WaveNetRealtimeTestAccess::hold_callback_position(h.node, 3);
+            for (int pump = 0; pump < 8; ++pump)
+                h.service();
+            CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::None);
+        } else {
+            // Positive control: the same hang, with the callback advancing,
+            // trips the watchdog once three blocks pass in silence.
+            for (int block = 0; block < 4; ++block) {
+                h.callback(float(5 + block));
+                h.service();
+            }
+            CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderUnresponsive);
+        }
+    }
+}
+
 TEST_CASE("WaveNet watchdog stays quiet while a concurrent worker admits mid-callback",
           "[gpu_audio][wavenet][realtime][hang]") {
     // The worker can admit a block after the callback publishes it but before
@@ -2049,27 +2199,27 @@ TEST_CASE("WaveNet watchdog stays quiet while a concurrent worker admits mid-cal
     // callback waits until the worker has pumped twice since the previous one,
     // so at least one completing pump follows every block. A descheduled worker
     // then delays the callback instead of letting silence build up behind it.
-    bool acknowledged = true;
-    for (int block = 0; block < 50'000 && h.node.recovery_reason() == GpuAudioRecoveryReason::None;
-         ++block) {
+    // The run is bounded by blocks and by one overall deadline, so a slow
+    // sanitizer build ends with a verdict rather than a ctest timeout.
+    constexpr int kBlocks = kWatchdogRaceBlocks;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    int acknowledged = 0;
+    while (acknowledged < kBlocks && h.node.recovery_reason() == GpuAudioRecoveryReason::None &&
+           std::chrono::steady_clock::now() < deadline) {
         const auto seen = pumps.load(std::memory_order_acquire);
-        (void)h.callback(float(block));
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (pumps.load(std::memory_order_acquire) < seen + 2) {
-            if (std::chrono::steady_clock::now() >= deadline) {
-                acknowledged = false;
-                break;
-            }
+        (void)h.callback(float(acknowledged));
+        while (pumps.load(std::memory_order_acquire) < seen + 2 &&
+               std::chrono::steady_clock::now() < deadline)
             std::this_thread::yield();
-        }
-        if (!acknowledged)
-            break;
+        if (pumps.load(std::memory_order_acquire) >= seen + 2)
+            ++acknowledged;
     }
     done.store(true, std::memory_order_release);
     worker.join();
-    INFO("blocks " << h.sequence << " reason " << int(h.node.recovery_reason()));
-    CHECK(acknowledged);
-    CHECK(h.sequence >= 100);
+    INFO("acknowledged blocks " << acknowledged << " reason " << int(h.node.recovery_reason()));
+    // Enough acknowledged blocks for the mid-callback race to have happened
+    // many times; the watchdog must not have tripped on any of them.
+    CHECK(acknowledged >= kWatchdogRaceMinBlocks);
     CHECK(h.node.recovery_reason() != GpuAudioRecoveryReason::ProviderUnresponsive);
 }
 

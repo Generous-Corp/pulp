@@ -103,16 +103,39 @@ produces, so once it is observed it replaces an earlier `ProviderFailure` or
 independent earlier cause, such as `InputSaturated`, stays the reported reason.
 
 A watchdog on the worker latches `ProviderUnresponsive` when the provider
-completes nothing for `watchdog_blocks` callback blocks (default
-`capacity - 1`) while work is in flight. Silence is counted from the later of
-the last completion and the oldest in-flight admission, in callback blocks
-rather than worker pumps, because the worker wakes on a poll interval. The
-default window ends before the input ring saturates as long as the worker keeps
-up with the callback, so a hung provider is reported as unresponsive rather
-than as `InputSaturated`. A provider that keeps completing, however late, is
-slow, not unresponsive: its results retire as late, and if it falls behind for
-good the input ring saturates. If the worker itself stops, the callback latches
-`InputSaturated` when the ring fills.
+completes nothing for `watchdog_blocks` callback blocks while work is in
+flight. Silence is counted from the later of the last completion and the oldest
+in-flight admission, in callback blocks rather than worker pumps, because the
+worker wakes on a poll interval. A provider that keeps completing, however
+late, is slow, not unresponsive: its results retire as late, and if it falls
+behind for good the input ring saturates. If the worker itself stops, the
+callback latches `InputSaturated` when the ring fills.
+
+The default window (`watchdog_blocks = 0`) is 200 ms, converted to callback
+blocks at `prepare()` so the callback stays integer-only:
+
+| Block size | 44.1 kHz | 48 kHz | 96 kHz |
+|---|---|---|---|
+| 64 frames | 138 blocks | 150 blocks | 300 blocks |
+| 128 frames | 69 blocks | 75 blocks | 150 blocks |
+| 256 frames | 35 blocks | 38 blocks | 75 blocks |
+
+If `capacity - 1` is larger it is used instead, and the input ring grows to
+hold the window, the lead and one more block, so a hang trips the watchdog
+before the ring saturates. A false trip costs the GPU path until the provider
+is replaced, while a late detection of a true hang costs only telemetry,
+because the miss policy carries every block; so the default is generous. On
+real Dawn the longest completion silence measured for an accepted block was
+86 ms (M1 Max, host load around 20, 64-frame blocks) and 65 ms on an M3 Ultra;
+the default is more than twice that. A true hang is reported 200 ms after its
+block was admitted. A non-zero `watchdog_blocks` is used as given, with the
+configured capacity.
+
+Whatever the window, a ring that saturates while the oldest in-flight block has
+seen no completion since its admission is the hang's symptom, not the cause:
+the node reports `ProviderUnresponsive` at that block, not `InputSaturated`. A
+worker that stops while its provider keeps completing still reports
+`InputSaturated`.
 
 A refused submission latches `ProviderFailure` at the refused block in the
 worker pump that sees it, or `ProviderLost` if the device is gone. A refused

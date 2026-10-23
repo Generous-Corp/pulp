@@ -149,6 +149,16 @@ inline GpuAudioEngine delivering_engine(GpuAudioProviderState state, GpuAudioEng
                : GpuAudioEngine::Unknown;
 }
 
+// A ring that saturated during the silence of a hung provider's in-flight
+// block (the node's worker sets `saturated_unresponsive`) is reported as the
+// hang. Applied before the public mapping; loss precedence applies on top.
+constexpr SharedIoRecoveryReason saturated_projection(SharedIoRecoveryReason latched,
+                                                      bool saturated_unresponsive) noexcept {
+    return latched == SharedIoRecoveryReason::InputSaturated && saturated_unresponsive
+               ? SharedIoRecoveryReason::ProviderUnresponsive
+               : latched;
+}
+
 // The one private-to-public recovery-reason mapping, shared by every node
 // that reads a stamped bridge.
 inline GpuAudioRecoveryReason public_recovery_reason(SharedIoRecoveryReason reason) noexcept {
