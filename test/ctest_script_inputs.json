@@ -6975,6 +6975,14 @@
    ],
    "kind": "python"
   },
+  "migration-note-guard-selftest": {
+   "entry": "tools/scripts/test_migration_note_guard.py",
+   "inputs": [
+    "tools/scripts/migration_note_guard.py",
+    "tools/scripts/test_migration_note_guard.py"
+   ],
+   "kind": "python"
+  },
   "minblep-table-reproducible": {
    "entry": "tools/scripts/generate_minblep_table.py",
    "inputs": [

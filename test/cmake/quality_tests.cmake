@@ -1585,6 +1585,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME fold-migration-notes-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_fold_migration_notes.py")
 
+    # A pull request may not add docs/migrations/vX.Y.Z.md by hand; only the
+    # version-at-land bump commit adds one. Throwaway git ranges.
+    add_test(NAME migration-note-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_migration_note_guard.py")
+
     # GitHub's itemTypes-filtered timelineItems connection reports totalCount
     # over EVERY timeline item, so a filtered totalCount reads a never-queued
     # PR as ejected. Fails if any tracked query selects it, and proves the scan

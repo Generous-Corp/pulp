@@ -19,6 +19,11 @@ note into `v<version>.md` and writes `version` and `applies_if` for it
 unreleased notes are appended to it. Unreleased notes are validated when
 `pulp-cli` builds but are not embedded until they are folded.
 
+A pull request that adds `vX.Y.Z.md` itself is refused by
+`tools/scripts/migration_note_guard.py` (pre-push, `gates.sh`, and CI's
+`Enforce version & skill sync`); only the version-at-land bump commit may add
+one. Correcting a released note is still allowed.
+
 ## File layout
 
 One file per release that ships notes, plus the unreleased notes waiting for

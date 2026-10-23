@@ -71,11 +71,15 @@ the self-tests for the compiler-asymmetry lints:
 | `win32_include_lint.py` | raw `<windows.h>` in an installed header — leaks the `min`/`max` macros, `C2589` on MSVC |
 | `safe_path_guard_lint.py` | an untrusted-path guard in `core/` or `tools/cli/` that trusts `is_absolute()`, which on Windows accepts `/x`, `\x` and `C:x`, instead of calling `pulp::runtime::is_safe_relative_path` |
 | `text_encoding_lint.py` | Python text I/O (`read_text`, `write_text`, `open`, `subprocess` with `text=True`) without `encoding=`, which decodes with cp1252 on Windows; the existing backlog is held by a per-file baseline (`text_encoding_baseline.json`) that can only go down |
+| `migration_note_guard.py` | a pull request adding `docs/migrations/vX.Y.Z.md` by hand. The release version is assigned after the change lands, so the note belongs in `docs/migrations/unreleased/<topic>.md`, which the version-at-land bump folds; only a bump commit (one with the `Version-Bump-Applied:` marker) may add a released note. Editing a released note is allowed |
 | `python_floor_syntax_check.py` | a tracked `*.py` file that Python 3.12 parses but 3.11, the gates' floor, rejects: an f-string field that reuses the enclosing quote or holds a backslash (including a line continuation, or in a nested f-string's text), comment or (single-quoted) line break. CI runs 3.12, so only a 3.11 run (CMake's default on a stock Homebrew Mac) would see it |
 
 `gates.sh` runs `designated_initializer_lint.py` diff-scoped and
 `win32_include_lint.py` over `core/*/include` before a push, and
-`safe_path_guard_lint.py` over `core/` and `tools/cli/`. All are canaries,
+`safe_path_guard_lint.py` over `core/` and `tools/cli/`. `gates.sh` and the
+pre-push hook also run `text_encoding_lint.py --base`, the same invocation as
+CI's `Enforce version & skill sync`, so a missing `encoding="utf-8"` fails
+before the push rather than in CI. All are canaries,
 not substitutes for building on the target: they check what a regex can check
 without a compiler, which for designated initializers means duplicates but not
 declaration order.

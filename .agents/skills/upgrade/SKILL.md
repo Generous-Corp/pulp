@@ -311,7 +311,8 @@ user already on `X` or later who is upgrading into the real release, and the
 note is never shown, while the index generator, which only checks that the
 file name matches the `version` field, stays green. Guessing the next version
 instead goes stale whenever another release lands first, and two PRs guessing
-the same one collide on `vX.Y.Z.md`. So a PR never picks `X`: it writes
+the same one collide on `vX.Y.Z.md`. So a PR never picks `X` (`tools/scripts/migration_note_guard.py` refuses a
+hand-added `vX.Y.Z.md`): it writes
 `docs/migrations/unreleased/<topic>.md` with only `breaking` and `summary`, and
 the version-at-land bump that assigns the SDK version folds it into
 `v<assigned>.md` with the canonical `applies_if`

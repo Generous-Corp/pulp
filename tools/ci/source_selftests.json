@@ -1109,6 +1109,12 @@
       ]
     },
     {
+      "name": "migration-note-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_migration_note_guard.py"
+      ]
+    },
+    {
       "name": "fold-migration-notes-selftest",
       "argv": [
         "{repo}/tools/scripts/test_fold_migration_notes.py"

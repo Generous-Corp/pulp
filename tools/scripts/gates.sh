@@ -1124,6 +1124,22 @@ EOF
     done
 fi
 
+# ── 21. migration notes and text encoding (diff-scoped) ────────────────────
+# Both run in CI's required `Enforce version & skill sync` job and cost about a
+# second here. A hand-written docs/migrations/vX.Y.Z.md guesses a version that
+# version-at-land assigns later; the text-encoding lint refuses text I/O without
+# encoding= beyond the committed baseline. Each went red in CI on a push the
+# local gates had called clean.
+for local_gate in migration_note_guard.py text_encoding_lint.py; do
+    local_path="$ROOT/tools/scripts/$local_gate"
+    [ -f "$local_path" ] || continue
+    echo "" >&2
+    echo "▸ ${local_gate%.py}" >&2
+    if ! "$PYTHON" "$local_path" --root "$ROOT" --base "$BASE" >&2; then
+        fail=1
+    fi
+done
+
 # ── Summary ────────────────────────────────────────────────────────────────
 diff_cover_hint() {
     if [ "$gate_host_builds_skipped" -eq 1 ]; then

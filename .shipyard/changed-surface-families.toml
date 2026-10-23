@@ -3969,6 +3969,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-3f34094e685a"
+paths = ["tools/scripts/test_migration_note_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "migration-note-guard-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-ab00cd3f57c4"
 paths = ["tools/scripts/test_minos_registry_absent.py"]
 tests = [
@@ -7265,6 +7299,7 @@ paths = [
   "tools/scripts/test_merge_cobertura.py",
   "tools/scripts/test_merge_cobertura_extra.py",
   "tools/scripts/test_merge_stall_watchdog.py",
+  "tools/scripts/test_migration_note_guard.py",
   "tools/scripts/test_minos_registry_absent.py",
   "tools/scripts/test_mkdocs_hooks.py",
   "tools/scripts/test_node_abi_gate.py",
@@ -7494,6 +7529,7 @@ tests = [
   "interchange-tables-drift",
   "mac-objc-source-list-guard",
   "mac-objc-source-list-guard-selftest",
+  "migration-note-guard-selftest",
   "minos-registry-absent-selftest",
   "msvc-string-literal-guard",
   "planning-gitlink-guard-selftest",
@@ -7824,6 +7860,7 @@ paths = [
   "tools/scripts/test_merge_cobertura.py",
   "tools/scripts/test_merge_cobertura_extra.py",
   "tools/scripts/test_merge_stall_watchdog.py",
+  "tools/scripts/test_migration_note_guard.py",
   "tools/scripts/test_minos_registry_absent.py",
   "tools/scripts/test_mkdocs_hooks.py",
   "tools/scripts/test_node_abi_gate.py",

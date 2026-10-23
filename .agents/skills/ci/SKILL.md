@@ -1255,6 +1255,14 @@ near-instant bootstrap. The job writes decision notes for `macos` and `linux`
 in file-name order, so the log prints `linux` first; `shipyard landing` shows
 both.
 
+### Lints `Enforce version & skill sync` runs that pre-push also runs
+
+`text_encoding_lint.py --base` and `migration_note_guard.py --base` run in the
+pre-push hook and `gates.sh` as well as in this job. Three PRs on 2026-10-22
+went red here on the encoding lint after the local gates reported clean,
+because only CI ran it. A new lint in this job that needs no build belongs in
+the hook too.
+
 ### `Enforce version & skill sync` compares against the merge-base
 
 The workflow's "Resolve diff base" step hands every gate `git merge-base
