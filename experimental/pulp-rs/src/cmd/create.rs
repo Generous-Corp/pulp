@@ -757,12 +757,16 @@ pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
         )
         .map_err(io)?;
     }
+    // The generated CMakeLists.txt pins `find_package(Pulp <SDK_VERSION>)`, so
+    // this must be the SDK version the CLI was built from (the C++ path uses
+    // PULP_SDK_VERSION, which CMake also hands Cargo as PULP_RS_BUILD_VERSION).
+    let sdk_version = crate::build_info::cli_version_string();
     scaffold(
         args,
         &out_dir,
         &templates_base,
         project_root.as_deref(),
-        "0.0.0-pulp-rs",
+        &sdk_version,
         out,
     )?;
     writeln!(out, "\nScaffolding complete at {}", out_dir.display()).map_err(io)?;

@@ -64,14 +64,21 @@ target_compile_definitions(pulp-test-cli-configure-defaults PRIVATE
 catch_discover_tests(pulp-test-cli-configure-defaults)
 
 # CLI create shell-out edge tests. These launch the built CLI but stay on
-# fail-fast paths that do not run doctor, configure, build, or network setup.
+# fail-fast paths that do not run doctor, build, or network setup. One case
+# configures a --ci project against a stub SDK, with Catch2 served from this
+# build's own source copy so the configure stays offline.
 add_executable(pulp-test-cli-create-shellout test_cli_create_shellout.cpp)
 target_link_libraries(pulp-test-cli-create-shellout PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULP_CMAKE_COMMAND="${CMAKE_COMMAND}")
+if(catch2_SOURCE_DIR)
+    target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
+        PULP_CATCH2_SOURCE_DIR="${catch2_SOURCE_DIR}")
+endif()
 catch_discover_tests(pulp-test-cli-create-shellout)
 # `pulp create` reads the package kits and the built-in gain template (and
 # checks for a standalone variant of it), and the dependency-kit case copies
@@ -80,6 +87,7 @@ pulp_test_data(pulp-test-cli-create-shellout NO_DEFINE PATHS
     fixtures/packages/simple-plugin-template
     fixtures/packages/gain-dsp-kit
     tools/templates/gain
+    tools/templates/effect
     tools/templates/standalone
     tools/packages/registry.json
     # The package dependency root is found by a packages.lock.json probe.

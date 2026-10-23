@@ -662,3 +662,93 @@ TEST_CASE("pulp create rejects non-template kits passed as template paths",
     REQUIRE_FALSE(fs::exists(out_dir));
     REQUIRE(r.stderr_output.find("does not declare kind `template`") != std::string::npos);
 }
+
+#if defined(PULP_CMAKE_COMMAND) && defined(PULP_CATCH2_SOURCE_DIR) && defined(PULP_RUST_CLI_BINARY)
+namespace {
+
+// The Rust front end (`<build>/pulp`) owns the native --ci scaffold; the C++
+// delegate the other cases launch has its own create path.
+pulp::platform::ProcessResult run_rust_cli(const std::vector<std::string>& args,
+                                           const fs::path& working_dir) {
+    pulp::platform::ProcessOptions options;
+    options.working_directory = native_path_string(working_dir);
+    options.timeout_ms = pulp_test_cli::shellout_timeout_ms();
+    ScopedEnvVar disable_update("PULP_UPDATE_CHECK_DISABLED", "1");
+    ScopedEnvVar no_bootstrap("PULP_SKIP_DEPENDENCY_BOOTSTRAP", "1");
+    return pulp::platform::ChildProcess::run(PULP_RUST_CLI_BINARY, args, options);
+}
+
+} // namespace
+
+TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configures",
+          "[cli][create][shellout][configure]") {
+    // The generated `find_package(Pulp <version> REQUIRED)` must carry the SDK
+    // version the CLI was built from: CMake rejects a non-numeric version as an
+    // invalid argument, so a placeholder leaves the project unable to configure.
+    // Configure the generated project for real (cmake, no build) against a stub
+    // SDK whose version file accepts exactly the version the CLI reports, so a
+    // placeholder, a malformed version or a drifted one all fail here.
+    std::error_code exists_ec;
+    if (!fs::is_regular_file(PULP_RUST_CLI_BINARY, exists_ec)) {
+        SKIP("Rust pulp front end not built");
+    }
+    TempDir tmp("pulp-create-ci-configure");
+
+    auto version = run_rust_cli({"version"}, tmp.path);
+    const std::string version_text = version.stdout_output + version.stderr_output;
+    INFO(version_text);
+    std::smatch m;
+    REQUIRE(std::regex_search(version_text, m, std::regex(R"(pulp v(\d+\.\d+\.\d+))")));
+    const std::string sdk_version = m[1].str();
+
+    const auto sdk = tmp.path / "stub-sdk";
+    const auto cfg = sdk / "lib" / "cmake" / "Pulp";
+    write_file(cfg / "PulpConfigVersion.cmake",
+               "set(PACKAGE_VERSION \"" + sdk_version +
+                   "\")\n"
+                   "if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)\n"
+                   "  set(PACKAGE_VERSION_COMPATIBLE TRUE)\n"
+                   "  set(PACKAGE_VERSION_EXACT TRUE)\n"
+                   "else()\n"
+                   "  set(PACKAGE_VERSION_COMPATIBLE FALSE)\n"
+                   "endif()\n");
+    write_file(cfg / "PulpConfig.cmake",
+               "if(NOT TARGET Pulp::format)\n"
+               "  add_library(Pulp::format INTERFACE IMPORTED)\n"
+               "endif()\n"
+               "function(pulp_add_plugin target)\n"
+               "  set_property(GLOBAL APPEND PROPERTY PULP_STUB_PLUGINS \"${target}\")\n"
+               "endfunction()\n");
+
+    const auto out_dir = tmp.path / "CiGain";
+    auto r = run_rust_cli({"create", "CiGain", "--type", "effect", "--output",
+                           native_path_string(out_dir), "--no-build", "--ci"},
+                          source_root());
+    INFO(r.stdout_output);
+    INFO(r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    const auto cmake_lists = read_file(out_dir / "CMakeLists.txt");
+    CHECK(cmake_lists.find("find_package(Pulp " + sdk_version + " REQUIRED)") != std::string::npos);
+    CHECK(read_file(out_dir / "pulp.toml").find("sdk_version = \"" + sdk_version + "\"") !=
+          std::string::npos);
+
+    pulp::platform::ProcessOptions options;
+    options.working_directory = native_path_string(tmp.path);
+    options.timeout_ms = pulp_test_cli::shellout_timeout_ms();
+    auto configure = pulp::platform::ChildProcess::run(
+        PULP_CMAKE_COMMAND,
+        {"-S", native_path_string(out_dir), "-B", native_path_string(out_dir / "build"),
+         "-DCMAKE_PREFIX_PATH=" + native_path_string(sdk),
+         "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
+         "-DFETCHCONTENT_SOURCE_DIR_CATCH2=" PULP_CATCH2_SOURCE_DIR,
+         "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"},
+        options);
+    INFO(configure.stdout_output);
+    INFO(configure.stderr_output);
+    REQUIRE_FALSE(configure.timed_out);
+    REQUIRE(configure.exit_code == 0);
+    CHECK(read_file(out_dir / "build" / "CMakeCache.txt")
+              .find("Pulp_DIR:PATH=" + native_path_string(cfg)) != std::string::npos);
+}
+#endif
