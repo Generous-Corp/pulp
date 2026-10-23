@@ -55,6 +55,33 @@ Usage
 ``--geometry`` defaults to the dump's ``<stem>.geometry.json`` sibling, which is
 where ``--dump-layout`` puts it. Exit 0 = parity, 1 = findings, 2 = bad usage.
 
+HTML imports
+------------
+For an HTML/JSX import the ground truth is Chromium's own layout, which the
+browser capture already recorded: ``dom-snapshot.json`` holds a CSS-px box for
+every laid-out DOM node, keyed by ``backendNodeId``. The DesignIR carries that
+id on each node it lowered (``attributes.backend_node_id``) next to the
+``stable_anchor_id`` the rendered view is named by, so the IR is the join::
+
+    pulp-import-design --file panel.html --emit ir-json --output panel.pulp.json \
+        --native-panel-lowering
+    pulp-design-ir-observe --input panel.pulp.json --render r.png \
+        --layout observed.json --width W --height H
+    tools/import-design/layout_parity.py --capture panel.pulp-browser-capture \
+        --observer-layout observed.json
+
+``--ir`` defaults to the capture directory's ``<stem>.json`` sibling, which is
+where the import writes it. The capture and the IR must come from the SAME
+import: backend ids are per browser session, so a foreign capture would join
+every id to the wrong element and still look plausible. The IR records the
+content hash of each capture image it consumed, and a mismatch is a usage error.
+
+Parents are the DOM's, not the IR's: a native panel is lowered flat (every node
+a child of the root), and attributing deltas against that root would cluster
+the whole page under one parent. IR nodes without a backend id (the root, the
+canvas layers) are import scaffolding with no DOM counterpart and are tallied
+as synthetic, never as EXTRA.
+
 ``--gate-px N`` separates what BLOCKS from what merely reports; see
 DEFAULT_GATE_PX. Measured on the reference design: a correct import tops out at
 12px (gap rounding, icon sizing), while a dropped auto-layout contract produces
@@ -66,6 +93,7 @@ the borderline cases.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import sys
@@ -167,6 +195,181 @@ def load_layout(path: pathlib.Path) -> dict[str, Rect]:
         # A node id maps to one source node; if codegen emitted several views
         # for it (a widget and its wrapper), the first is the node's own box.
         rects.setdefault(node_id, rect)
+    return rects
+
+
+CAPTURE_SCHEMA = "pulp-browser-capture-v1"
+CAPTURE_URI = "pulp-capture:///"
+CAPTURE_DIR_SUFFIX = "-browser-capture"
+
+
+class CaptureInputError(Exception):
+    """The capture, IR or observer layout cannot be compared as given."""
+
+
+def default_ir_path(capture_dir: pathlib.Path) -> pathlib.Path:
+    """The IR the import wrote next to its capture: ``x.pulp-browser-capture``
+    belongs to ``x.pulp.json``."""
+    name = capture_dir.name
+    if name.endswith(CAPTURE_DIR_SUFFIX):
+        name = name[: -len(CAPTURE_DIR_SUFFIX)]
+    return capture_dir.with_name(name + ".json")
+
+
+def _walk_ir(node: dict, out: list[dict]) -> None:
+    out.append(node)
+    for child in node.get("children") or []:
+        _walk_ir(child, out)
+
+
+def _verify_pairing(ir: dict, capture_dir: pathlib.Path) -> int:
+    """Prove the IR was lowered from THIS capture; return the files checked.
+
+    Every capture image the import consumed is listed in the IR's asset
+    manifest with its content hash, so a byte comparison is the session
+    identity check. Backend ids are small sequential integers, so a capture
+    from another run of the same page joins almost every id to SOME element
+    and produces a believable, wrong report.
+    """
+    checked = 0
+    for asset in (ir.get("assetManifest") or {}).get("assets") or []:
+        uri = asset.get("original_uri") or ""
+        expected = asset.get("content_hash") or ""
+        if not uri.startswith(CAPTURE_URI) or not expected:
+            continue
+        path = capture_dir / uri[len(CAPTURE_URI):]
+        if not path.is_file():
+            continue
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != expected:
+            raise CaptureInputError(
+                f"{path.name} in {capture_dir} does not match the IR's recorded hash; "
+                "the IR was lowered from a different capture session")
+        checked += 1
+    if checked == 0:
+        raise CaptureInputError(
+            f"cannot prove the IR was lowered from {capture_dir}: none of the IR's "
+            f"{CAPTURE_URI} assets is present there to compare")
+    return checked
+
+
+def _load_snapshot(capture_dir: pathlib.Path) -> dict:
+    envelope_path = capture_dir / "capture.json"
+    if not envelope_path.is_file():
+        raise CaptureInputError(f"not a browser capture (no capture.json): {capture_dir}")
+    envelope = json.loads(envelope_path.read_text())
+    if envelope.get("schema") != CAPTURE_SCHEMA:
+        raise CaptureInputError(
+            f"unsupported capture schema {envelope.get('schema')!r} (expected {CAPTURE_SCHEMA})")
+    documents = envelope.get("documents") or [{}]
+    snapshot_path = capture_dir / (documents[0].get("snapshot_asset") or "dom-snapshot.json")
+    if not snapshot_path.is_file():
+        raise CaptureInputError(f"capture has no DOM snapshot: {snapshot_path}")
+    raw = snapshot_path.read_bytes()
+    expected = documents[0].get("snapshot_sha256")
+    if expected and hashlib.sha256(raw).hexdigest() != expected:
+        raise CaptureInputError(
+            f"{snapshot_path.name} does not match capture.json's snapshot_sha256")
+    snapshot = json.loads(raw)
+    # The importer lowers the top document only; nested documents' boxes are
+    # relative to their own frame and cannot share this coordinate space.
+    return snapshot["documents"][0]
+
+
+def load_capture_geometry(
+        capture_dir: pathlib.Path, ir_path: pathlib.Path,
+) -> tuple[dict[str, Rect], dict[str, dict], dict[str, Any]]:
+    """Chromium's boxes for every IR node, keyed by the node's anchor id.
+
+    Returns the rects and metadata in ``load_geometry``'s shape plus a
+    ``source`` summary: how many IR nodes joined, which are import scaffolding
+    (no backend id), and which carry a backend id Chromium laid out no box for.
+    """
+    ir = json.loads(ir_path.read_text())
+    root = ir.get("root")
+    if not isinstance(root, dict):
+        raise CaptureInputError(f"not a DesignIR document (no root): {ir_path}")
+    pairing_checked = _verify_pairing(ir, capture_dir)
+    document = _load_snapshot(capture_dir)
+
+    dom = document["nodes"]
+    backend_ids = dom["backendNodeId"]
+    parents = dom["parentIndex"]
+    dom_index = {backend: i for i, backend in enumerate(backend_ids)}
+    layout = document["layout"]
+    box_of: dict[int, list[float]] = {}
+    for k, dom_i in enumerate(layout["nodeIndex"]):
+        # A node can own several layout objects (continuation boxes); the
+        # first is the element's own box.
+        box_of.setdefault(dom_i, layout["bounds"][k])
+
+    # The import frames the panel at the authored surface, so a DOM box at the
+    # surface origin is a view at (0, 0).
+    root_attrs = root.get("attributes") or {}
+    origin_x = float(root_attrs.get("browser_authored_frame_x") or 0.0)
+    origin_y = float(root_attrs.get("browser_authored_frame_y") or 0.0)
+
+    nodes: list[dict] = []
+    _walk_ir(root, nodes)
+    rects: dict[str, Rect] = {}
+    meta: dict[str, dict] = {}
+    anchor_of_dom: dict[int, str] = {}
+    synthetic: list[str] = []
+    unlaid_out: list[str] = []
+    for node in nodes:
+        anchor = node.get("stable_anchor_id")
+        if not anchor:
+            continue
+        raw_backend = (node.get("attributes") or {}).get("backend_node_id")
+        if raw_backend in (None, ""):
+            synthetic.append(anchor)
+            continue
+        dom_i = dom_index.get(int(raw_backend))
+        box = box_of.get(dom_i) if dom_i is not None else None
+        if box is None:
+            unlaid_out.append(anchor)
+            continue
+        x, y, w, h = box
+        rects[anchor] = Rect(x - origin_x, y - origin_y, w, h)
+        meta[anchor] = {"name": node.get("name") or "", "type": node.get("type") or "",
+                        "parent_id": None, "dom_index": dom_i}
+        anchor_of_dom.setdefault(dom_i, anchor)
+
+    # The design's hierarchy is the DOM's: a node's parent is its nearest DOM
+    # ancestor that the import also lowered.
+    for anchor, info in meta.items():
+        i = parents[info.pop("dom_index")]
+        while i >= 0 and i not in anchor_of_dom:
+            i = parents[i]
+        info["parent_id"] = anchor_of_dom.get(i) if i >= 0 else None
+
+    source = {
+        "kind": "browser-capture",
+        "capture": str(capture_dir),
+        "ir": str(ir_path),
+        "ir_nodes": len(nodes),
+        "pairing_assets_verified": pairing_checked,
+        "synthetic": sorted(synthetic),
+        "unlaid_out": sorted(unlaid_out),
+    }
+    return rects, meta, source
+
+
+def load_observer_layout(path: pathlib.Path) -> dict[str, Rect]:
+    """A ``visual-layout-snapshot-v1`` (``pulp-design-ir-observe --layout``),
+    keyed by view id, which the observer sets to the node's anchor id."""
+    doc = json.loads(path.read_text())
+    if "nodes" not in doc:
+        raise CaptureInputError(
+            f"not an observer layout (expected a visual-layout-snapshot 'nodes' list): {path}")
+    rects: dict[str, Rect] = {}
+    for view in doc["nodes"]:
+        node_id = view.get("id")
+        box = view.get("rect") or {}
+        if not node_id or any(box.get(k) is None for k in ("x", "y", "w", "h")):
+            continue
+        rects.setdefault(node_id, Rect(float(box["x"]), float(box["y"]),
+                                       float(box["w"]), float(box["h"])))
     return rects
 
 
@@ -317,15 +520,37 @@ def compare(geometry_path: pathlib.Path, layout_path: pathlib.Path,
             tol: float = DEFAULT_TOLERANCE,
             gate_px: float = DEFAULT_GATE_PX) -> dict:
     design, meta = load_geometry(geometry_path)
-    pulp = load_layout(layout_path)
+    return compare_rects(design, meta, load_layout(layout_path), tol, gate_px)
 
+
+def compare_capture(capture_dir: pathlib.Path, ir_path: pathlib.Path,
+                    observer_layout_path: pathlib.Path,
+                    tol: float = DEFAULT_TOLERANCE,
+                    gate_px: float = DEFAULT_GATE_PX) -> dict:
+    """Chromium's captured layout vs the observer's laid-out views."""
+    design, meta, source = load_capture_geometry(capture_dir, ir_path)
+    pulp = load_observer_layout(observer_layout_path)
+    report = compare_rects(design, meta, pulp, tol, gate_px,
+                           synthetic_ids=frozenset(source["synthetic"]))
+    report["source"] = source
+    return report
+
+
+def compare_rects(design: dict[str, Rect], meta: dict[str, dict],
+                  pulp: dict[str, Rect], tol: float = DEFAULT_TOLERANCE,
+                  gate_px: float = DEFAULT_GATE_PX,
+                  synthetic_ids: frozenset[str] = frozenset()) -> dict:
     dropped = sorted(set(design) - set(pulp))
     unmatched = sorted(set(pulp) - set(design))
-    # Known-synthetic import nodes (mask-scope wrappers) are expected to have no
-    # design counterpart; they are tallied separately so EXTRA stays a real
+    # Known-synthetic import nodes (mask-scope wrappers, the IR nodes an HTML
+    # import adds with no DOM element) are expected to have no design
+    # counterpart; they are tallied separately so EXTRA stays a real
     # completeness signal rather than a fixed background of false positives.
-    extra = [n for n in unmatched if not _is_synthetic(n)]
-    synthetic_extra = [n for n in unmatched if _is_synthetic(n)]
+    def synthetic(node_id: str) -> bool:
+        return node_id in synthetic_ids or _is_synthetic(node_id)
+
+    extra = [n for n in unmatched if not synthetic(n)]
+    synthetic_extra = [n for n in unmatched if synthetic(n)]
     deltas = compute_deltas(design, pulp, meta)
     findings = cluster_findings(deltas, meta, tol)
 
@@ -362,6 +587,14 @@ def render_report(report: dict, max_findings: int) -> str:
     lines.append(f"Layout parity — {report['matched']} node(s) matched "
                  f"({report['design_nodes']} in the design, {report['pulp_nodes']} in the render), "
                  f"tolerance ±{report['tolerance_px']:.0f}px")
+    source = report.get("source")
+    if source:
+        # The join is the claim everything else rests on, so its coverage is
+        # printed: IR nodes the capture could not place are not compared.
+        lines.append(f"Chromium capture vs observer — {source['ir_nodes']} IR node(s): "
+                     f"{len(source['synthetic'])} without a DOM element, "
+                     f"{len(source['unlaid_out'])} with no Chromium box; "
+                     f"pairing verified on {source['pairing_assets_verified']} capture file(s)")
 
     if report["dropped"]:
         lines.append("")
@@ -386,7 +619,7 @@ def render_report(report: dict, max_findings: int) -> str:
         # it was written for, and a surprising number here is itself a signal.
         lines.append("")
         lines.append(f"(ignored {len(report['synthetic_extra'])} synthetic "
-                     f"mask-scope node(s) the import adds by design)")
+                     f"node(s) the import adds by design)")
 
     def render_findings(heading: str, group: list[dict]) -> None:
         if not group:
@@ -420,14 +653,56 @@ def render_report(report: dict, max_findings: int) -> str:
     return "\n".join(lines)
 
 
+def _run_capture(args: argparse.Namespace) -> dict | None:
+    """Capture mode: Chromium's DOM boxes vs the observer's views."""
+    ir = args.ir or default_ir_path(args.capture)
+    for path, what in ((args.capture, "browser capture"), (ir, "DesignIR"),
+                       (args.observer_layout, "observer layout")):
+        if not path.exists():
+            print(f"error: {what} not found: {path}", file=sys.stderr)
+            if path is ir and args.ir is None:
+                print("hint: pass --ir; the import writes x.pulp.json next to "
+                      "x.pulp-browser-capture.", file=sys.stderr)
+            return None
+    try:
+        return compare_capture(args.capture, ir, args.observer_layout,
+                               args.tolerance, args.gate_px)
+    except CaptureInputError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return None
+
+
+def _run_dump(args: argparse.Namespace) -> dict | None:
+    """Dump mode: a design's solved geometry vs ``--dump-layout``."""
+    geometry = args.geometry
+    if geometry is None:
+        geometry = args.layout.with_suffix("").with_suffix(".geometry.json")
+    for path, what in ((args.layout, "layout dump"), (geometry, "geometry")):
+        if not path.exists():
+            print(f"error: {what} not found: {path}", file=sys.stderr)
+            if path is geometry and args.geometry is None:
+                print("hint: pass --geometry, or re-run the import with --dump-layout "
+                      "(which writes this sidecar next to the dump).", file=sys.stderr)
+            return None
+    return compare(geometry, args.layout, args.tolerance, args.gate_px)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Diff a design's own solved rects against Pulp's laid-out view tree.")
-    ap.add_argument("layout", type=pathlib.Path,
+    ap.add_argument("layout", type=pathlib.Path, nargs="?",
                     help="the --dump-layout JSON from pulp-import-design")
     ap.add_argument("--geometry", type=pathlib.Path, default=None,
                     help="the design's solved rects (default: the layout dump's "
                          "<stem>.geometry.json sibling, where --dump-layout writes it)")
+    ap.add_argument("--capture", type=pathlib.Path, default=None,
+                    help="an HTML import's browser-capture directory; its DOM snapshot "
+                         "is the design side (requires --observer-layout)")
+    ap.add_argument("--observer-layout", type=pathlib.Path, default=None,
+                    help="the pulp-design-ir-observe --layout JSON for the capture's IR")
+    ap.add_argument("--ir", type=pathlib.Path, default=None,
+                    help="the DesignIR lowered from --capture (default: the capture "
+                         "directory's <stem>.json sibling, where the import writes it)")
     ap.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE,
                     help=f"per-axis tolerance in design px (default: {DEFAULT_TOLERANCE:g})")
     ap.add_argument("--gate-px", type=float, default=DEFAULT_GATE_PX,
@@ -441,18 +716,23 @@ def main(argv: list[str] | None = None) -> int:
                     help="also write the full report as JSON here")
     args = ap.parse_args(argv)
 
-    geometry = args.geometry
-    if geometry is None:
-        geometry = args.layout.with_suffix("").with_suffix(".geometry.json")
-    for path, what in ((args.layout, "layout dump"), (geometry, "geometry")):
-        if not path.exists():
-            print(f"error: {what} not found: {path}", file=sys.stderr)
-            if path is geometry and args.geometry is None:
-                print("hint: pass --geometry, or re-run the import with --dump-layout "
-                      "(which writes this sidecar next to the dump).", file=sys.stderr)
-            return EXIT_USAGE
+    capture_mode = args.capture is not None or args.observer_layout is not None
+    if capture_mode:
+        if args.layout is not None or args.geometry is not None:
+            ap.error("--capture compares against the observer layout; "
+                     "do not also pass a layout dump or --geometry")
+        if args.capture is None or args.observer_layout is None:
+            ap.error("--capture and --observer-layout go together")
+        report = _run_capture(args)
+    else:
+        if args.ir is not None:
+            ap.error("--ir only applies with --capture")
+        if args.layout is None:
+            ap.error("pass a --dump-layout JSON, or --capture with --observer-layout")
+        report = _run_dump(args)
+    if report is None:
+        return EXIT_USAGE
 
-    report = compare(geometry, args.layout, args.tolerance, args.gate_px)
     print(render_report(report, args.max_findings))
     if args.json:
         args.json.write_text(json.dumps(report, indent=2) + "\n")

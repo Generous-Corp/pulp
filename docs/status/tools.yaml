@@ -913,7 +913,10 @@ tools:
   use_when: An import "looks off" and you need the NODE and the exact pixel delta, not a score.
   invocation: python3 tools/import-design/layout_parity.py <layout.json> [--gate-px 16] [--json report.json]
   inputs: The --dump-layout JSON from pulp-import-design, plus the design's own solved rects (its <stem>.geometry.json
-    sibling, which --dump-layout writes for you).
+    sibling, which --dump-layout writes for you). For an HTML/JSX import, `--capture <x.pulp-browser-capture>
+    --observer-layout <json>` instead takes Chromium's DOM-snapshot boxes as the design side, joined to the
+    pulp-design-ir-observe --layout views through the IR's backend_node_id (--ir defaults to the capture's
+    x.pulp.json sibling); an IR from a different capture session is refused, exit 2.
   outputs: Per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE
     naming the parent; unmatched ids listed as dropped/extra (the import's synthetic `/mask-scope` clip
     wrappers are tallied separately as synthetic_extra, never as EXTRA). Exit 1 on findings; --gate-px

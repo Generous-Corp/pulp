@@ -228,6 +228,28 @@ while a dropped auto-layout contract produces ten findings above 16px. The
 `import-layout-parity-gate` ctest runs the whole pipeline on
 `test/fixtures/imports/fig/synthetic.fig` and is strict (exact parity).
 
+**HTML/JSX imports have the same check, with Chromium as the design side.**
+The browser capture already holds Chromium's box for every laid-out node
+(`dom-snapshot.json`, keyed by `backendNodeId`), and the IR stamps that id on
+each node it lowers, so no adapter script is needed:
+
+```bash
+pulp-import-design --file p.html --emit ir-json --output p.pulp.json --native-panel-lowering
+pulp-design-ir-observe --input p.pulp.json --render r.png --layout obs.json --width W --height H
+python3 tools/import-design/layout_parity.py --capture p.pulp-browser-capture --observer-layout obs.json
+```
+
+Three things that are not obvious. Parents come from the DOM, not the IR: a
+native panel is lowered FLAT under `browser:root`, so IR parents would cluster
+the whole page into one finding. The capture must be the IR's OWN capture:
+backend ids are small sequential integers, and a second capture of the same
+page joined all 105 of Spectr's ids cleanly — a wrong pairing looks right — so
+the tool compares the IR's recorded capture-image hashes and exits 2 on a
+mismatch. And a "share offset … alignment/padding dropped" cluster compares
+dx/dy only: on Spectr it named three SVG paths whose real fault was their SIZE
+(primitives boxed at the SVG viewport), so read each child's dw/dh before
+trusting the diagnosis.
+
 **It validates BOXES, not the ink inside them.** A label whose glyphs are shoved
 to one side of a correctly-placed box, an icon drawn at the wrong scale inside
 right-sized bounds, a colour, a gradient — all invisible to it, by construction.
