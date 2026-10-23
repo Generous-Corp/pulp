@@ -4,12 +4,13 @@
   "slices": [
     "render-assets-and-backends"
   ],
-  "vellum_obligation": "Carry the copy-free Graphite persistent-scene blit and retained-layer seal (SkSurfaces::AsImage, the blit recorded before the next frame's scene draws, a copy only for a non-textureable surface) into Vellum's render and canvas backends when the corresponding Pulp targets adopt Vellum.",
+  "vellum_obligation": "Carry the copy-free Graphite persistent-scene blit and retained-layer seal (SkSurfaces::AsImage, the blit recorded before the next frame's scene draws, a copy only for a non-textureable surface), and a scene readback that copies with AsImageCopy rather than taking a legacy snapshot, into Vellum's render and canvas backends when the corresponding Pulp targets adopt Vellum.",
   "evidence": [
     ".github/vellum-expansion-watch-events/20261022-render-surface-as-image-watch.json",
     "ctest --test-dir build -R 'Graphite AsImage view of a surface sees later draws into it'",
     "ctest --test-dir build -R 'SkiaCanvas Graphite layer seal shares the layer texture'",
     "ctest --test-dir build -R 'SkiaSurface persistent-scene blit presents each frame.s own scene'",
-    "ctest --test-dir build -R 'SkiaSurface persistent-scene frames do not copy the scene'"
+    "ctest --test-dir build -R 'SkiaSurface persistent-scene frames do not copy the scene'",
+    "ctest --test-dir build -R 'SkiaSurface readback fallback keeps the scene blit free of snapshot warnings'"
   ]
 }
