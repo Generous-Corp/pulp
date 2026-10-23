@@ -65,6 +65,8 @@ struct GpuAudioTransportConfiguration {
 struct GpuAudioTransportDiagnostics {
     SeqlockCell<GpuAudioTransportConfiguration> configuration;
     RealtimeGpuHealthMirror health;
+    // Callback-written per delivered block, read by status_snapshot().
+    RecentGpuDelivery recent;
     // Host-written at prepare/release, callback-read: the prepared node's
     // primary path is its CPU model, so a CPU-delivered block is not a miss.
     bool cpu_primary = false;
@@ -161,6 +163,8 @@ void GpuAudioTransport::steward_reacquire() noexcept {
         (void)resume_pending_from_ns_.compare_exchange_strong(expected, outage_started_ns_,
                                                               std::memory_order_acq_rel);
         resume_armed_ = true;
+        // The window described the provider just replaced.
+        diagnostics_->recent.reset();
         refresh_node_health();
     }
 }
@@ -312,6 +316,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     blocks_owed_ = 0;
     last_block_ns_.store(0, std::memory_order_relaxed);
     avg_block_ns_.store(0, std::memory_order_relaxed);
+    diagnostics_->recent.reset();
     delivery_gpu_.store(0, std::memory_order_relaxed);
     delivery_worker_.store(0, std::memory_order_relaxed);
     delivery_fallback_.store(0, std::memory_order_relaxed);
@@ -864,6 +869,7 @@ void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {
 void GpuAudioTransport::record_delivery(std::uint8_t disposition, bool worker_output) noexcept {
     static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
     using D = detail::SharedIoDeliveryDisposition;
+    diagnostics_->recent.record(static_cast<D>(disposition));
     switch (static_cast<D>(disposition)) {
     case D::GpuDelivered:
         (worker_output ? delivery_worker_ : delivery_gpu_).fetch_add(1, std::memory_order_relaxed);
@@ -1039,6 +1045,10 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
         // node that reports no health keeps the staged state above.
         lower_to(GpuAudioProviderState::Degraded);
     }
+    // A GPU path whose recent blocks the miss substitute carried is not Ready,
+    // and its engine is the substitute's.
+    if (capability.path != GpuAudioExecutionPath::Cpu && diagnostics_->recent.lagging())
+        lower_to(GpuAudioProviderState::Degraded);
     status.selected_engine = detail::delivering_engine(
         status.provider_state, status.selected_engine, status.fallback_policy,
         status.fallback_available);

@@ -801,6 +801,42 @@ TEST_CASE("WaveNet late retirement leaves a sequence hole without resetting vali
         }
 }
 
+TEST_CASE("WaveNet node whose GPU results all arrive late reads as not GPU-delivering",
+          "[gpu_audio][wavenet][realtime][status]") {
+    Harness h;
+    detail::WaveNetRealtimeTestAccess::assume_authenticated(h.node);
+    const auto run = [&h](int blocks) {
+        for (int i = 0; i < blocks; ++i) {
+            h.callback(float(i + 1));
+            h.service();
+            h.service();
+        }
+    };
+    // Positive control: a provider that keeps up delivers every block.
+    run(40);
+    CHECK_FALSE(detail::WaveNetRealtimeTestAccess::gpu_lagging(h.node));
+    auto healthy = checked_status(h.node);
+    CHECK(healthy.provider_state == GpuAudioProviderState::Ready);
+    CHECK(healthy.selected_engine == GpuAudioEngine::Gpu);
+    // Stuck late: it keeps completing, too late for every consumer, so the
+    // substitute carries the stream although no recovery cause latches.
+    h.controls[0].late = true;
+    run(40);
+    CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::None);
+    CHECK(detail::WaveNetRealtimeTestAccess::gpu_lagging(h.node));
+    auto late = checked_status(h.node);
+    CHECK(late.provider_state == GpuAudioProviderState::Degraded);
+    // The harness delivers silence for a miss, and the node declares no fallback.
+    CHECK(late.selected_engine != GpuAudioEngine::Gpu);
+    // Recovery: once the GPU delivers most recent blocks again, it is no
+    // longer lagging.
+    h.controls[0].late = false;
+    run(40);
+    CHECK_FALSE(detail::WaveNetRealtimeTestAccess::gpu_lagging(h.node));
+    CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::None);
+    CHECK(checked_status(h.node).provider_state == GpuAudioProviderState::Ready);
+}
+
 TEST_CASE("WaveNet owned trace closes each worker admission without inventing GPU timing",
           "[gpu_audio][wavenet][trace]") {
     Harness h(1, 2, 0, true);
@@ -2251,6 +2287,40 @@ TEST_CASE("WaveNet re-acquire replaces a lost provider in a new epoch on the sam
     CHECK(
         status.terminal_counts[static_cast<std::size_t>(GpuAudioTerminalDisposition::Cancelled)] >=
         1);
+}
+
+TEST_CASE("WaveNet re-acquire that delivers again clears the stuck-late state",
+          "[gpu_audio][wavenet][realtime][reacquire][status]") {
+    Harness h;
+    detail::WaveNetRealtimeTestAccess::assume_authenticated(h.node);
+    ChannelFactory factory{.control = &h.controls[1]};
+    factory.install(h.node);
+    const auto run = [&h](int blocks) {
+        for (int i = 0; i < blocks; ++i) {
+            h.callback(float(h.sequence + 1));
+            h.service();
+            h.service();
+        }
+    };
+    run(10);
+    CHECK(checked_status(h.node).provider_state == GpuAudioProviderState::Ready);
+    // Stuck late, then the provider is lost.
+    h.controls[0].late = true;
+    run(40);
+    REQUIRE(detail::WaveNetRealtimeTestAccess::gpu_lagging(h.node));
+    CHECK(checked_status(h.node).provider_state == GpuAudioProviderState::Degraded);
+    h.controls[0].lost = true;
+    h.service();
+    REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderLost);
+    REQUIRE(h.path.reprepare(h.path.context, 1'000'000'000));
+    // Adoption and warmup miss, then the new provider's GPU delivers: a few
+    // of its blocks read Ready, though most of the last 32 were not GPU.
+    run(8);
+    CHECK_FALSE(detail::WaveNetRealtimeTestAccess::gpu_lagging(h.node));
+    const auto status = checked_status(h.node);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
 }
 
 TEST_CASE("WaveNet re-acquire quarantines a provider that cannot drain",

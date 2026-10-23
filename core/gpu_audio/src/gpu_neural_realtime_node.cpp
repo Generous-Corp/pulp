@@ -116,6 +116,8 @@ struct GpuNeuralRealtimeNode::Impl {
     std::vector<float> shadow_take; // Worker result copied out by the callback
     bool shadow_hit = false;
     std::atomic<std::uint64_t> shadow_delivered{0}, shadow_double_miss{0};
+    // Callback-written per delivered GPU-path block, read by status_snapshot().
+    detail::RecentGpuDelivery recent;
     // Declared last so its thread is joined before the processors it steps die.
     detail::NeuralShadowWorker worker;
 
@@ -666,6 +668,7 @@ bool GpuNeuralRealtimeNode::prepare() {
         s.first_sequence = s.sequence;
         s.shadow_hit = false;
         s.shadow_delivered.store(0, std::memory_order_relaxed);
+        s.recent.reset();
         s.shadow_double_miss.store(0, std::memory_order_relaxed);
         if (s.worker_fed()) {
             s.shadow_take.assign(static_cast<std::size_t>(channels) * n, 0.0f);
@@ -971,6 +974,11 @@ GpuAudioStatus GpuNeuralRealtimeNode::status_snapshot() const noexcept {
     status.provider_state = detail::provider_state_for_health(health);
     if (status.provider_state == GpuAudioProviderState::Ready && !authenticated_provider())
         status.provider_state = GpuAudioProviderState::Degraded;
+    // A GPU the shadow carries is not Ready, and the engine is the shadow's.
+    status.provider_state = detail::lower_for_lagging(status.provider_state, s.recent.lagging());
+    status.selected_engine =
+        detail::delivering_engine(status.provider_state, status.selected_engine,
+                                  status.fallback_policy, status.fallback_available);
     return status;
 }
 
@@ -1183,6 +1191,7 @@ void GpuNeuralRealtimeNode::delivered(void* self, std::uint64_t sequence, std::u
             s.cpu_blocks.fetch_add(1, std::memory_order_relaxed);
         return;
     }
+    s.recent.record(actual);
     if (s.callback.stamp.sequence == sequence)
         (void)s.bridge->complete_callback_delivery(s.callback, actual, end, visible);
 }
@@ -1220,6 +1229,14 @@ std::size_t detail::NeuralRealtimeTestAccess::pump_shadow(GpuNeuralRealtimeNode&
 std::uint64_t
 detail::NeuralRealtimeTestAccess::shadow_processed(const GpuNeuralRealtimeNode& node) noexcept {
     return node.impl_->worker.counters().processed;
+}
+
+bool detail::NeuralRealtimeTestAccess::gpu_lagging(const GpuNeuralRealtimeNode& node) noexcept {
+    return node.impl_->recent.lagging();
+}
+
+void detail::NeuralRealtimeTestAccess::assume_authenticated(GpuNeuralRealtimeNode& node) noexcept {
+    node.impl_->production_backend = true;
 }
 
 void detail::NeuralRealtimeTestAccess::skip_shadow_publish(GpuNeuralRealtimeNode& node,

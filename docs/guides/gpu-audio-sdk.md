@@ -778,7 +778,14 @@ preparation can bring it back. A loss observed after the `ProviderFailure`,
 the state is not `Ready`, `selected_engine` names the engine that actually delivers. That is
 `Cpu` for a node with a CPU fallback, and `Unknown` for a node that emits
 silence; it is never `Gpu`. `provider` still names the provider that was
-prepared. `epoch`,
+prepared. A provider that keeps completing, but too late for every block, latches
+no recovery cause, yet the substitute carries the stream. So `Ready` on the `Gpu`
+engine also requires the GPU to have delivered at least half of the last 32
+callback blocks (once at least 8 were counted; priming blocks are not counted).
+Below that the status reads `Degraded`, with `recovery_reason` `None`, and returns
+to `Ready` once the GPU carries half the window again; a re-acquire starts a
+new window. The own statuses of `GpuWaveNetRealtimeNode`,
+`GpuNeuralRealtimeNode` and the shared `GpuConvolver` path apply the same rule. `epoch`,
 `delivery_epoch_active` and `terminal_counts` come from the node when it
 supplies them. The shared `GpuConvolver` path supplies the epoch and counts one
 terminal disposition per admitted GPU block. A refused or failed block is counted

@@ -300,6 +300,8 @@ struct GpuWaveNetRealtimeNode::Impl {
     // `epoch` for status readers on another thread; the worker may advance it.
     std::atomic<std::uint64_t> published_epoch{0};
     std::atomic<std::uint64_t> reacquire_attempts{0}, reacquire_successes{0};
+    // Callback-written per delivered block, read by status_snapshot().
+    detail::RecentGpuDelivery recent;
     bool prepared = false, production_provider = false;
     // Reported by the prepared provider itself; empty for injected channels.
     detail::SharedIoProviderIdentity provider_identity;
@@ -335,6 +337,7 @@ struct GpuWaveNetRealtimeNode::Impl {
         if (prepared || !valid_config(false) || channels.size() != c.channels ||
             (c.miss_policy == MissPolicy::CpuFallback && !fallback_prepared))
             return false;
+        recent.reset();
         bridge = std::make_unique<Bridge>();
         if (!bridge->prepare({.capacity = c.capacity,
                               .channels = c.channels,
@@ -662,6 +665,8 @@ struct GpuWaveNetRealtimeNode::Impl {
         published_epoch.store(epoch, std::memory_order_release);
         reacquire_successes.fetch_add(1, std::memory_order_relaxed);
         awaiting_epoch = true;
+        // The window described the provider just replaced.
+        recent.reset();
         device_lost.store(false, std::memory_order_release);
         completion_mark = callback_next.load(std::memory_order_acquire);
         return true;
@@ -916,7 +921,8 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     // it delivers; otherwise the prepared CPU shadow, or none when silent.
     const auto projection = detail::project_node_state(
         impl_->device_lost.load(std::memory_order_acquire), status.recovery_reason,
-        authenticated_provider() && !fenced(), status.fallback_policy, status.fallback_available);
+        authenticated_provider() && !fenced(), status.fallback_policy, status.fallback_available,
+        impl_->recent.lagging());
     status.provider_state = projection.provider_state;
     status.selected_engine = projection.selected_engine;
     return status;
@@ -1125,6 +1131,7 @@ void GpuWaveNetRealtimeNode::delivered(void* self, std::uint64_t sequence, std::
     if (s.callback.stamp.sequence != sequence)
         return;
     const auto actual = static_cast<detail::SharedIoDeliveryDisposition>(disposition);
+    s.recent.record(actual);
     // The bridge records this delivery in telemetry before it is counted here.
     if (s.bridge->complete_callback_delivery(s.callback, actual, end, visible) &&
         actual == detail::SharedIoDeliveryDisposition::GpuDelivered)
@@ -1164,6 +1171,12 @@ detail::WaveNetRealtimeTestAccess::trace_stats(const GpuWaveNetRealtimeNode& nod
 detail::SharedIoTelemetrySnapshot
 detail::WaveNetRealtimeTestAccess::telemetry(const GpuWaveNetRealtimeNode& node) noexcept {
     return node.impl_->telemetry.snapshot();
+}
+bool detail::WaveNetRealtimeTestAccess::gpu_lagging(const GpuWaveNetRealtimeNode& node) noexcept {
+    return node.impl_->recent.lagging();
+}
+void detail::WaveNetRealtimeTestAccess::assume_authenticated(GpuWaveNetRealtimeNode& node) noexcept {
+    node.impl_->production_provider = true;
 }
 detail::SharedIoTraceDrainResult
 detail::WaveNetRealtimeTestAccess::last_trace_drain(const GpuWaveNetRealtimeNode& node) noexcept {

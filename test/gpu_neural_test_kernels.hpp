@@ -418,6 +418,7 @@ struct ChannelPlan {
     bool fail_completions = false;
     bool reject_submissions = false;
     bool starve = false; // completions withheld (a hung provider)
+    bool late = false;   // completions arrive, each too late for its consumer
     bool lost = false;   // the device is gone: lost() is true, work fails
     // One slow block: this sequence completes only once cleared.
     std::uint64_t hold = std::numeric_limits<std::uint64_t>::max();
@@ -479,7 +480,8 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
         for (std::size_t i = 0; i < output.size(); ++i)
             output[i] = plan_.gain * oldest->data[i];
         return detail::WaveNetChannelCompletion{
-            GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::GpuDelivered, false},
+            GpuWaveNetBlockResult{oldest->sequence, GpuWaveNetBlockStatus::GpuDelivered,
+                                  plan_.late},
             oldest->ticket};
     }
     bool lost() const noexcept override {

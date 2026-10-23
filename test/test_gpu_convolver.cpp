@@ -1095,6 +1095,44 @@ TEST_CASE("GpuConvolver registers its shared path and provider identity through 
     CHECK(validated(convolver->status_snapshot()).provider == GpuAudioProvider::Dawn);
 }
 
+TEST_CASE("GpuConvolver shared path the CPU fallback carries reads as CPU-delivering",
+          "[gpu_audio][convolver][status][health]") {
+    LossProvider* provider = nullptr;
+    auto convolver = convolver_with_loss_provider(provider);
+    if (!convolver)
+        SKIP("shared-I/O provider state is not compiled into this build");
+    using D = pulp::gpu_audio::detail::SharedIoDeliveryDisposition;
+    const auto path = pulp::gpu_audio::detail::realtime_gpu_node_path(convolver.get());
+    REQUIRE(path.active());
+    // The node's own status reads the health sample its hook publishes.
+    pulp::gpu_audio::detail::RealtimeGpuHealth health;
+    REQUIRE(path.health(path.context, health));
+    std::uint64_t sequence = 0;
+    const auto deliver = [&](D disposition, int blocks) {
+        for (int i = 0; i < blocks; ++i)
+            path.delivered(path.context, sequence++, static_cast<std::uint8_t>(disposition), 0, 0);
+    };
+    // Positive control: an authenticated session whose GPU delivers is Ready.
+    deliver(D::GpuDelivered, 40);
+    auto status = validated(convolver->status_snapshot());
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
+    // Stuck late: the fallback carries every block and no cause latches.
+    deliver(D::CpuFallbackDelivered, 40);
+    status = validated(convolver->status_snapshot());
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.selected_engine == GpuAudioEngine::Cpu);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+    // Priming is no evidence either way.
+    deliver(D::Priming, 40);
+    CHECK(validated(convolver->status_snapshot()).selected_engine == GpuAudioEngine::Cpu);
+    // Recovery once the GPU carries half the window again.
+    deliver(D::GpuDelivered, 16);
+    status = validated(convolver->status_snapshot());
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
+}
+
 TEST_CASE("GpuConvolver shared-path status reports provider loss through the transport",
           "[gpu_audio][convolver][status][health]") {
     LossProvider* provider = nullptr;

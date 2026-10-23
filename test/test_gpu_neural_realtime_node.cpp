@@ -505,6 +505,45 @@ TEST_CASE("WaveNet family stays continuous across provider faults",
     }
 }
 
+TEST_CASE("neural node whose GPU results all arrive late reads as not GPU-delivering",
+          "[gpu_audio][neural][realtime][status]") {
+    Rig rig(kWaveNetGpu);
+    REQUIRE(rig.prepare());
+    detail::NeuralRealtimeTestAccess::assume_authenticated(*rig.node);
+    // Priming blocks are no evidence: the window stays empty until delivery.
+    rig.render(kLead);
+    CHECK_FALSE(detail::NeuralRealtimeTestAccess::gpu_lagging(*rig.node));
+    // Positive control: a provider that keeps up delivers every block.
+    rig.render(40);
+    CHECK(rig.transport.delivery_snapshot().gpu_blocks > 0);
+    CHECK_FALSE(detail::NeuralRealtimeTestAccess::gpu_lagging(*rig.node));
+    auto healthy = validated(rig.node->status_snapshot());
+    CHECK(healthy.provider_state == GpuAudioProviderState::Ready);
+    CHECK(healthy.selected_engine == GpuAudioEngine::Gpu);
+    // Stuck late: it keeps completing, too late for every consumer, so the
+    // shadow carries the stream although no recovery cause latches.
+    rig.plan.late = true;
+    const auto gpu_before = rig.transport.delivery_snapshot().gpu_blocks;
+    rig.render(40);
+    // Only the blocks already completed in time when the delay began.
+    CHECK(rig.transport.delivery_snapshot().gpu_blocks <= gpu_before + kLead);
+    CHECK(rig.node->recovery_reason() == GpuAudioRecoveryReason::None);
+    CHECK(detail::NeuralRealtimeTestAccess::gpu_lagging(*rig.node));
+    auto status = validated(rig.node->status_snapshot());
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.selected_engine == GpuAudioEngine::Cpu);
+    CHECK(validated(rig.transport.status_snapshot()).selected_engine != GpuAudioEngine::Gpu);
+    // Recovery: the GPU carries the window again.
+    rig.plan.late = false;
+    rig.render(40);
+    CHECK_FALSE(detail::NeuralRealtimeTestAccess::gpu_lagging(*rig.node));
+    CHECK(rig.node->recovery_reason() == GpuAudioRecoveryReason::None);
+    auto recovered = validated(rig.node->status_snapshot());
+    CHECK(recovered.provider_state == GpuAudioProviderState::Ready);
+    CHECK(recovered.selected_engine == GpuAudioEngine::Gpu);    // The callback records each block without allocating.
+    CHECK(rig.callback_allocations == 0);
+}
+
 TEST_CASE("offline rendering fences the GPU and keeps the shadow timeline",
           "[gpu_audio][neural][realtime]") {
     const auto c = GENERATE(kWaveNetGpu, kLstm);
@@ -977,6 +1016,49 @@ TEST_CASE("a degraded node delivers CPU only from a prepared fallback",
     CHECK(lost.selected_engine == GpuAudioEngine::Cpu);
     CHECK(detail::public_recovery_reason(detail::SharedIoRecoveryReason::ProviderLost) ==
           GpuAudioRecoveryReason::ProviderLost);
+}
+
+TEST_CASE("a GPU the miss substitute carries reads Degraded on the substitute's engine",
+          "[gpu_audio][neural][status]") {
+    using detail::project_node_state;
+    using D = detail::SharedIoDeliveryDisposition;
+    const auto none = GpuAudioRecoveryReason::None;
+    detail::RecentGpuDelivery recent;
+    // Too few counted blocks are no evidence; priming is never counted.
+    for (int i = 0; i < detail::RecentGpuDelivery::kMinBlocks - 1; ++i)
+        recent.record(D::CpuFallbackDelivered);
+    for (int i = 0; i < 64; ++i)
+        recent.record(D::Priming);
+    CHECK_FALSE(recent.lagging());
+    recent.record(D::CpuFallbackDelivered);
+    CHECK(recent.lagging());
+    // Half the window delivered by the GPU is not lagging; one block fewer is.
+    recent.reset();
+    for (int i = 0; i < 16; ++i)
+        recent.record(D::GpuDelivered);
+    for (int i = 0; i < 16; ++i)
+        recent.record(D::SilenceDelivered);
+    CHECK_FALSE(recent.lagging());
+    recent.record(D::PassthroughDelivered);
+    CHECK(recent.lagging());
+    // Recovery: the GPU carrying the window again.
+    for (int i = 0; i < 16; ++i)
+        recent.record(D::GpuDelivered);
+    CHECK_FALSE(recent.lagging());
+
+    // Positive control: an authenticated, healthy provider whose GPU delivers.
+    auto delivering = project_node_state(false, none, true, MissPolicy::CpuFallback, true, false);
+    CHECK(delivering.provider_state == GpuAudioProviderState::Ready);
+    CHECK(delivering.selected_engine == GpuAudioEngine::Gpu);
+    auto lagging = project_node_state(false, none, true, MissPolicy::CpuFallback, true, true);
+    CHECK(lagging.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(lagging.selected_engine == GpuAudioEngine::Cpu);
+    auto silent = project_node_state(false, none, true, MissPolicy::Silence, false, true);
+    CHECK(silent.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(silent.selected_engine == GpuAudioEngine::Unknown);
+    // Loss stays Unavailable.
+    CHECK(project_node_state(true, none, true, MissPolicy::CpuFallback, true, true).provider_state ==
+          GpuAudioProviderState::Unavailable);
 }
 
 TEST_CASE("non-finite input reaches neither the GPU nor the shadow",

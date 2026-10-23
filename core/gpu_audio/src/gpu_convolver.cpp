@@ -140,6 +140,8 @@ struct GpuConvolver::SharedIoState {
     std::vector<float> normalized_ir_spectrum;
     // Latest serialized health sample, readable from host/UI threads.
     detail::RealtimeGpuHealthMirror health;
+    // Callback-written per delivered block, read by status_snapshot().
+    detail::RecentGpuDelivery recent;
 #endif
 };
 
@@ -779,6 +781,7 @@ void GpuConvolver::complete_realtime_shared_io(void* self, std::uint64_t sequenc
     if (!convolver || !convolver->shared_io_ || !convolver->shared_io_->session)
         return;
     auto& state = *convolver->shared_io_;
+    state.recent.record(static_cast<detail::SharedIoDeliveryDisposition>(disposition));
     if (state.callback.valid() && state.callback.stamp.sequence == sequence)
         (void)state.session->complete_callback_delivery(
             state.callback, static_cast<detail::SharedIoDeliveryDisposition>(disposition),
@@ -951,9 +954,13 @@ GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
             // authenticated but its delivery state is unverified.
             status.provider_state = GpuAudioProviderState::Degraded;
         }
-        // Fenced or lost: the continuously primed CPU fallback is delivering.
-        status.selected_engine = detail::delivering_engine(
-            status.provider_state, status.selected_engine, status.fallback_policy);
+        // Fenced, lost, or a GPU the fallback carries: the continuously primed
+        // CPU fallback is delivering.
+        status.provider_state =
+            detail::lower_for_lagging(status.provider_state, shared_io_->recent.lagging());
+        status.selected_engine =
+            detail::delivering_engine(status.provider_state, status.selected_engine,
+                                      status.fallback_policy, status.fallback_available);
         return status;
     }
 #endif

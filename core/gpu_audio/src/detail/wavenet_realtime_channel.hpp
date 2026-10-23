@@ -176,6 +176,9 @@ struct WaveNetRealtimeTestAccess {
     static void observe_trace(GpuWaveNetRealtimeNode&, SharedIoTraceDrainObserver) noexcept;
     static SharedIoTraceStats trace_stats(const GpuWaveNetRealtimeNode&) noexcept;
     static SharedIoTelemetrySnapshot telemetry(const GpuWaveNetRealtimeNode&) noexcept;
+    static bool gpu_lagging(const GpuWaveNetRealtimeNode&) noexcept;
+    // Planted: project status as for an authenticated production provider.
+    static void assume_authenticated(GpuWaveNetRealtimeNode&) noexcept;
     static SharedIoTraceDrainResult last_trace_drain(const GpuWaveNetRealtimeNode&) noexcept;
     static SharedIoTraceRecord last_terminal(const GpuWaveNetRealtimeNode&) noexcept;
     static std::uint64_t trace_engine(const GpuWaveNetRealtimeNode&) noexcept;

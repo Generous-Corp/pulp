@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -172,24 +173,82 @@ inline GpuAudioRecoveryReason public_recovery_reason(SharedIoRecoveryReason reas
     return GpuAudioRecoveryReason::None;
 }
 
+// Which recent callback blocks the GPU delivered, so a status does not read
+// Ready on the GPU while the miss substitute carries the stream (a provider
+// that keeps completing, but too late for every consumer, latches no cause).
+// One realtime writer records each block; any thread reads. The word holds the
+// last 32 counted blocks: the low half marks GPU deliveries, the high half
+// marks counted blocks. Priming and rejected blocks are not counted.
+class RecentGpuDelivery {
+  public:
+    static constexpr int kWindowBlocks = 32;
+    // Fewer counted blocks than this are not evidence either way.
+    static constexpr int kMinBlocks = 8;
+
+    // Realtime, single writer: two relaxed word accesses, no read-modify-write.
+    void record(SharedIoDeliveryDisposition disposition) noexcept {
+        std::uint64_t gpu = 0;
+        switch (disposition) {
+        case SharedIoDeliveryDisposition::GpuDelivered:
+            gpu = 1;
+            break;
+        case SharedIoDeliveryDisposition::CpuFallbackDelivered:
+        case SharedIoDeliveryDisposition::SilenceDelivered:
+        case SharedIoDeliveryDisposition::PassthroughDelivered:
+            break;
+        default:
+            return;
+        }
+        constexpr std::uint64_t kHalf = 0xffff'ffffu;
+        const auto bits = bits_.load(std::memory_order_relaxed);
+        const auto delivered = (((bits & kHalf) << 1) | gpu) & kHalf;
+        const auto counted = (((bits >> 32) << 1) | 1u) & kHalf;
+        bits_.store((counted << 32) | delivered, std::memory_order_relaxed);
+    }
+    // Any thread. Against a concurrent record() one of the two may be lost,
+    // which only delays the window by a block; the word is never torn.
+    void reset() noexcept {
+        bits_.store(0, std::memory_order_relaxed);
+    }
+    // The GPU delivered fewer than half of enough recent blocks.
+    bool lagging() const noexcept {
+        const auto bits = bits_.load(std::memory_order_relaxed);
+        const int counted = std::popcount(static_cast<std::uint32_t>(bits >> 32));
+        const int delivered = std::popcount(static_cast<std::uint32_t>(bits));
+        return counted >= kMinBlocks && delivered * 2 < counted;
+    }
+
+  private:
+    std::atomic<std::uint64_t> bits_{0};
+};
+
+// A provider that is otherwise Ready but whose GPU is not carrying the stream
+// reads Degraded, so its engine is the miss substitute that delivers.
+inline GpuAudioProviderState lower_for_lagging(GpuAudioProviderState state,
+                                               bool gpu_lagging) noexcept {
+    return gpu_lagging && state == GpuAudioProviderState::Ready ? GpuAudioProviderState::Degraded
+                                                                 : state;
+}
+
 // A node's provider state and delivering engine from its own facts, the same
 // projection the transport applies to a health sample: Unavailable when the
 // provider is lost or stalled, Ready only for an authenticated, unfenced
-// provider, Degraded otherwise.
+// provider whose GPU delivers most recent blocks, Degraded otherwise.
 struct NodeStateProjection {
     GpuAudioProviderState provider_state = GpuAudioProviderState::Degraded;
     GpuAudioEngine selected_engine = GpuAudioEngine::Unknown;
 };
 inline NodeStateProjection project_node_state(bool device_lost, GpuAudioRecoveryReason reason,
                                               bool authenticated_unfenced,
-                                              MissPolicy fallback_policy,
-                                              bool fallback_available) noexcept {
+                                              MissPolicy fallback_policy, bool fallback_available,
+                                              bool gpu_lagging = false) noexcept {
     RealtimeGpuHealth health;
     health.device_lost = device_lost;
     health.recovery_reason = reason;
     health.fenced = !authenticated_unfenced;
     NodeStateProjection projection;
-    projection.provider_state = provider_state_for_health(health);
+    projection.provider_state =
+        lower_for_lagging(provider_state_for_health(health), gpu_lagging);
     projection.selected_engine = delivering_engine(projection.provider_state, GpuAudioEngine::Gpu,
                                                    fallback_policy, fallback_available);
     return projection;

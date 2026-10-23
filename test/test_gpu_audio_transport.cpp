@@ -605,6 +605,7 @@ class RealtimeHookNode : public GpuAudioNode {
                 .delivered = &RealtimeHookNode::delivered_realtime,
                 .next_sequence = &RealtimeHookNode::get_next_sequence,
                 .health = expose_health ? &RealtimeHookNode::health_realtime : nullptr,
+                .reprepare = expose_reprepare ? &RealtimeHookNode::reprepare_realtime : nullptr,
                 .set_completion_notifier =
                     expose_notifier ? &RealtimeHookNode::set_notifier_realtime : nullptr};
     }
@@ -645,6 +646,8 @@ class RealtimeHookNode : public GpuAudioNode {
     const float* external_output_sample = nullptr;
     bool external_output_silent_on_rejection = true;
     bool expose_health = false;
+    bool expose_reprepare = false;
+    std::uint32_t reprepare_calls = 0;
     // Worker wake-latency probe (benchmarks): set by a test thread, consumed
     // by the worker's service step. Reserve capacity before the worker runs.
     std::atomic<std::uint64_t> completion_ready_ns{0};
@@ -703,6 +706,19 @@ class RealtimeHookNode : public GpuAudioNode {
             node->installed_context.store(notifier.context, std::memory_order_release);
             node->installed_notify.store(notifier.notify, std::memory_order_release);
         }
+        return true;
+    }
+
+    // A successful re-acquire: a new, unfenced epoch whose GPU delivers.
+    static bool reprepare_realtime(void* self, std::uint64_t) noexcept {
+        auto* node = static_cast<RealtimeHookNode*>(self);
+        ++node->reprepare_calls;
+        node->health.fenced = false;
+        node->health.delivery_epoch_active = true;
+        node->health.recovery_reason = GpuAudioRecoveryReason::ProviderReacquired;
+        node->health.recovery_sequence = node->next_sequence;
+        ++node->health.epoch;
+        node->realtime_status = detail::kRealtimeGpuReady;
         return true;
     }
 
@@ -1911,6 +1927,90 @@ struct HealthHarness {
 };
 
 } // namespace
+
+TEST_CASE("GpuAudioTransport status reads a GPU the fallback carries as CPU-delivering",
+          "[gpu_audio][transport][status][health]") {
+    HealthHarness h;
+    const auto run = [&h](int blocks) {
+        for (int i = 0; i < blocks; ++i)
+            h.callback();
+    };
+    // Positive control: the GPU delivers every block.
+    run(40);
+    auto status = validated(h.transport.status_snapshot());
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
+
+    // Stuck late: every block misses and the CPU fallback carries it, with no
+    // recovery cause latched. Half the window still on the GPU is Ready.
+    h.node.realtime_status = detail::kRealtimeGpuMissed;
+    run(16);
+    CHECK(validated(h.transport.status_snapshot()).selected_engine == GpuAudioEngine::Gpu);
+    run(1);
+    status = validated(h.transport.status_snapshot());
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.selected_engine == GpuAudioEngine::Cpu);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+    run(40);
+    CHECK(validated(h.transport.status_snapshot()).selected_engine == GpuAudioEngine::Cpu);
+    // Priming blocks are no evidence either way.
+    h.node.realtime_status = detail::kRealtimeGpuPriming;
+    run(40);
+    CHECK(validated(h.transport.status_snapshot()).selected_engine == GpuAudioEngine::Cpu);
+
+    // Recovery: the GPU delivers again and reads Ready once it carries half
+    // the window.
+    h.node.realtime_status = detail::kRealtimeGpuReady;
+    run(15);
+    CHECK(validated(h.transport.status_snapshot()).selected_engine == GpuAudioEngine::Cpu);
+    run(1);
+    status = validated(h.transport.status_snapshot());
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
+}
+
+TEST_CASE("GpuAudioTransport re-acquire that delivers again clears the stuck-late state",
+          "[gpu_audio][transport][status][health][reacquire]") {
+    RealtimeHookNode node(1, 32, MissPolicy::CpuFallback);
+    node.claims_provider = true;
+    node.expose_health = true;
+    node.expose_reprepare = true;
+    node.health.gpu_kernel_available = true;
+    REQUIRE(node.prepare());
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {.ring_blocks = 8,
+                                      .recovery_policy = GpuAudioRecoveryPolicy::AutoReacquire,
+                                      .reacquire_backoff_ns = 0}));
+    Block input(1, 32), output(1, 32);
+    input.fill(0.25f);
+    const auto run = [&](int blocks) {
+        for (int i = 0; i < blocks; ++i) {
+            auto in = input.cview();
+            auto out = output.view();
+            transport.process(in, out, 32);
+        }
+    };
+    run(40);
+    CHECK(validated(transport.status_snapshot()).provider_state == GpuAudioProviderState::Ready);
+    // Stuck late, then the provider is lost.
+    node.realtime_status = detail::kRealtimeGpuMissed;
+    run(40);
+    auto status = validated(transport.status_snapshot());
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.selected_engine == GpuAudioEngine::Cpu);
+    node.inject_recovery(GpuAudioRecoveryReason::ProviderLost, node.next_sequence);
+    transport.pump();
+    REQUIRE(node.reprepare_calls == 1);
+    // The window describes the replaced provider no longer: a few GPU blocks
+    // from the new epoch read Ready, though most of the last 32 were not GPU.
+    run(4);
+    transport.pump();
+    status = validated(transport.status_snapshot());
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
+    transport.release();
+}
 
 TEST_CASE("GpuAudioTransport status reports a lost provider as Unavailable after a fence",
           "[gpu_audio][transport][status][health]") {
