@@ -268,6 +268,7 @@ YOGA_ORACLE_PIN="$ROOT/tools/scripts/check_yoga_oracle_pin.py"
 SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 MIGRATION_NOTE_GUARD="$ROOT/tools/scripts/migration_note_guard.py"
 TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
+SCRIPT_INPUTS_PRECHECK="$ROOT/tools/scripts/script_inputs_precheck.py"
 SURFACE_FAMILIES="$ROOT/tools/scripts/changed_surface_script_families.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
@@ -807,6 +808,18 @@ if [ -f "$TEXT_ENCODING_LINT" ]; then
         0) ;;
         1) echo "[pre-push] text-encoding lint: pass encoding=\"utf-8\" to the calls listed above; never raise the baseline." >&2; fail=1 ;;
         *) gate_could_not_run "text_encoding_lint" "$gate_rc"; fail=1 ;;
+    esac
+fi
+
+# A new script-driven add_test() with no test/ctest_script_inputs.json entry.
+# CI's script-test-inputs-drift needs a configured build; this reads only the
+# CMake text the push adds, so it runs on any host, including a gate host.
+if [ -f "$SCRIPT_INPUTS_PRECHECK" ]; then
+    run_gate_captured "$PYTHON" "$SCRIPT_INPUTS_PRECHECK" --root "$ROOT" --base "$BASE"
+    gate_rc=$?; case $gate_rc in
+        0) ;;
+        1) echo "[pre-push] script inputs: regenerate test/ctest_script_inputs.json (commands above)." >&2; fail=1 ;;
+        *) gate_could_not_run "script_inputs_precheck" "$gate_rc"; fail=1 ;;
     esac
 fi
 

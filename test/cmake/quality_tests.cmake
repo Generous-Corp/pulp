@@ -1590,6 +1590,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME migration-note-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_migration_note_guard.py")
 
+    # The build-free pre-push stand-in for script-test-inputs-drift: a new
+    # script-driven add_test needs a ctest_script_inputs.json entry.
+    add_test(NAME script-inputs-precheck-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_inputs_precheck.py")
+
     # GitHub's itemTypes-filtered timelineItems connection reports totalCount
     # over EVERY timeline item, so a filtered totalCount reads a never-queued
     # PR as ejected. Fails if any tracked query selects it, and proves the scan

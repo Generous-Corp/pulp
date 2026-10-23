@@ -1109,6 +1109,12 @@
       ]
     },
     {
+      "name": "script-inputs-precheck-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_script_inputs_precheck.py"
+      ]
+    },
+    {
       "name": "migration-note-guard-selftest",
       "argv": [
         "{repo}/tools/scripts/test_migration_note_guard.py"

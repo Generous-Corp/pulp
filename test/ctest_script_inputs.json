@@ -11489,6 +11489,16 @@
    ],
    "kind": "python"
   },
+  "script-inputs-precheck-selftest": {
+   "entry": "tools/scripts/test_script_inputs_precheck.py",
+   "inputs": [
+    "test/ctest_script_inputs.json",
+    "tools/ci/cmake_registration_impact.py",
+    "tools/scripts/script_inputs_precheck.py",
+    "tools/scripts/test_script_inputs_precheck.py"
+   ],
+   "kind": "python"
+  },
   "script-test-inputs-drift": {
    "entry": "tools/scripts/script_test_inputs.py",
    "inputs": [
