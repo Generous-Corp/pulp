@@ -23,6 +23,7 @@
 
 namespace pulp::host {
 
+class HostScanCache;
 class ScanBlacklist;
 
 // How from_json turns a plugin node's stored identity into a loaded slot.
@@ -61,8 +62,15 @@ struct GraphLoadOptions {
     // the machine's installed plugin collection.
     bool include_default_plugin_roots = true;
     // Bundles recorded here (a prior scan crash) are reported missing rather
-    // than loaded. Caller-owned; must outlive from_json.
-    const ScanBlacklist* blacklist = nullptr;
+    // than loaded, and a scan run for `scan_mode` records its own crash and
+    // timeout verdicts into it, so the caller can persist them. Caller-owned;
+    // must outlive from_json.
+    ScanBlacklist* blacklist = nullptr;
+    // Earlier scan results, consulted by a `scan_mode` scan so an unchanged
+    // bundle is never handed to a worker again: without it a stale last_path
+    // costs one worker per installed bundle on every load. Caller-owned; must
+    // outlive from_json.
+    HostScanCache* scan_cache = nullptr;
     // When false no plugin node is loaded at all: each stays an unresolved
     // placeholder with its identity, which is what a caller that cannot use
     // plugin slots anyway (pulp bake) wants, since loading would run code

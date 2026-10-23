@@ -14,6 +14,7 @@
 
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/scan_blacklist.hpp>
+#include <pulp/host/scan_cache.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include "support/unique_temp_dir.hpp"
@@ -26,6 +27,9 @@
 
 #ifndef PULP_SCAN_FIXTURE_PROBE_CLAP
 #error "PULP_SCAN_FIXTURE_PROBE_CLAP must point at the probe CLAP fixture"
+#endif
+#ifndef PULP_SCAN_FIXTURE_ABORT_CLAP
+#error "PULP_SCAN_FIXTURE_ABORT_CLAP must point at the aborting CLAP fixture"
 #endif
 #ifndef PULP_SCAN_WORKER_PATH
 #error "PULP_SCAN_WORKER_PATH must point at the pulp-scan-worker binary"
@@ -351,6 +355,102 @@ TEST_CASE("a rooted last_path whose bundle holds a different plugin is refused",
     const auto* node = plugin_node(graph);
     REQUIRE(node != nullptr);
     REQUIRE(node->plugin == nullptr);
+}
+
+TEST_CASE("a symlink inside a root that points outside it is refused and never opened",
+          "[host][graph][serializer][plugin-resolution]") {
+    ScratchDir scratch("symlink-escape");
+    const auto outside = copy_bundle(PULP_SCAN_FIXTURE_PROBE_CLAP, scratch.path / "outside");
+    const auto root = scratch.path / "root";
+    fs::create_directories(root);
+    const auto link = root / "Linked.clap";
+    std::error_code ec;
+    if (fs::is_directory(outside))
+        fs::create_directory_symlink(outside, link, ec);
+    else
+        fs::create_symlink(outside, link, ec);
+    if (ec)
+        SKIP("cannot create a symlink here: " << ec.message());
+    const auto marker = scratch.path / "dlopen-marker";
+    ScopedEnv marker_env("PULP_TEST_DLOPEN_MARKER");
+    marker_env.set(marker.string());
+    auto options = hermetic_options();
+    options.plugin_roots.push_back(root.string());
+
+    SignalGraph graph;
+    const auto result =
+        GraphSerializer::from_json(graph, graph_with_plugin(kProbeId, link.string()), options);
+
+    // The path is lexically inside the root; its real target is not.
+    REQUIRE(result.ok);
+    REQUIRE(result.missing_plugins.size() == 1);
+    REQUIRE_THAT(result.missing_plugins.front(),
+                 ContainsSubstring("outside the known plugin roots"));
+    REQUIRE_FALSE(fs::exists(marker));
+    REQUIRE(plugin_node(graph)->plugin == nullptr);
+}
+
+TEST_CASE("an identity scan records crashing bundles into the caller's own blacklist",
+          "[host][graph][serializer][plugin-resolution][blacklist]") {
+    ScratchDir scratch("blacklist-writeback");
+    const auto root = scratch.path / "root";
+    const auto aborting = copy_bundle(PULP_SCAN_FIXTURE_ABORT_CLAP, root);
+    ScanBlacklist blacklist;
+    auto options = hermetic_options();
+    options.plugin_roots.push_back(root.string());
+    options.scan_mode = GraphPluginScanMode::isolated_only;
+    options.scan_worker_path = PULP_SCAN_WORKER_PATH;
+    options.blacklist = &blacklist;
+
+    SignalGraph graph;
+    const auto result = GraphSerializer::from_json(
+        graph, graph_with_plugin("dev.pulp.test.never-installed", "/nonexistent/Gone.clap"),
+        options);
+
+    REQUIRE(result.ok);
+    REQUIRE(result.missing_plugins.size() == 1);
+    // The verdict reached the object the caller handed in, not a copy.
+    REQUIRE(blacklist.is_blacklisted(aborting.string()));
+    REQUIRE_THAT(blacklist.get(aborting.string())->reason, ContainsSubstring("abnormally"));
+}
+
+TEST_CASE("an identity scan serves unchanged bundles from the caller's scan cache without a worker",
+          "[host][graph][serializer][plugin-resolution][scan-cache]") {
+    if (!no_editor_clap_available()) {
+        SKIP("editor-less link-floor CLAP not built in this configuration");
+    }
+    const fs::path bundle = PULP_TEST_NO_EDITOR_CLAP;
+    HostScanCache cache;
+    auto options = hermetic_options();
+    options.plugin_roots.push_back(bundle.parent_path().string());
+    options.scan_mode = GraphPluginScanMode::isolated_only;
+    options.scan_worker_path = PULP_SCAN_WORKER_PATH;
+    options.scan_cache = &cache;
+
+    SignalGraph first;
+    const auto warm = GraphSerializer::from_json(
+        first, graph_with_plugin(kNoEditorId, "/nonexistent/Moved Elsewhere.clap"), options);
+    REQUIRE(warm.ok);
+    REQUIRE(warm.missing_plugins.empty());
+    REQUIRE(cache.get(bundle.string()).has_value());
+
+    // No worker exists for the second load; the cache alone resolves it.
+    options.scan_worker_path = (bundle.parent_path() / "no-such-worker").string();
+    SignalGraph second;
+    const auto cached = GraphSerializer::from_json(
+        second, graph_with_plugin(kNoEditorId, "/nonexistent/Moved Elsewhere.clap"), options);
+    REQUIRE(cached.ok);
+    REQUIRE(cached.missing_plugins.empty());
+    REQUIRE(plugin_node(second)->plugin != nullptr);
+
+    // The same load without the cache has nothing to answer with.
+    options.scan_cache = nullptr;
+    SignalGraph third;
+    const auto uncached = GraphSerializer::from_json(
+        third, graph_with_plugin(kNoEditorId, "/nonexistent/Moved Elsewhere.clap"), options);
+    REQUIRE(uncached.ok);
+    REQUIRE(uncached.missing_plugins.size() == 1);
+    REQUIRE_THAT(uncached.missing_plugins.front(), ContainsSubstring("no scan worker found"));
 }
 
 TEST_CASE("a stale last_path is re-resolved by (format, unique_id) in the registered roots",

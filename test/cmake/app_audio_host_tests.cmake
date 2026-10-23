@@ -954,10 +954,12 @@ if(PULP_HAS_CLAP AND NOT IOS AND NOT ANDROID)
         LIBRARIES pulp::host
         COMPILE_DEFINITIONS
             PULP_SCAN_FIXTURE_PROBE_CLAP="$<TARGET_FILE:pulp-test-fixture-clap-probe>"
+            PULP_SCAN_FIXTURE_ABORT_CLAP="$<TARGET_FILE:pulp-test-fixture-clap-abort>"
             PULP_SCAN_WORKER_PATH="$<TARGET_FILE:pulp-scan-worker>"
             PULP_TEST_NO_EDITOR_CLAP="${CMAKE_BINARY_DIR}/CLAP/Pulp No Editor Link Floor.clap")
     pulp_test_spawns(pulp-test-graph-plugin-resolution
         pulp-test-fixture-clap-probe
+        pulp-test-fixture-clap-abort
         pulp-scan-worker
         PulpNoEditorLinkFloor_CLAP)
 endif()

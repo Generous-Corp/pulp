@@ -1,5 +1,7 @@
 #include <pulp/host/scan_blacklist.hpp>
 
+#include "bundle_file_stamp.hpp"
+
 #include <cctype>
 #include <chrono>
 #include <cstdint>
@@ -14,54 +16,10 @@ namespace fs = std::filesystem;
 
 namespace {
 
-struct FileStamp {
-    int64_t mtime = 0;
-    int64_t size = 0;
-    bool ok = false;
-};
-
-// A bundle directory's own mtime and size say nothing about the code inside
-// it (rebuilding the binary in place leaves both alone), so a directory is
-// stamped through its largest regular file, which is the executable.
-fs::path stamped_file(const fs::path& path) {
-    std::error_code ec;
-    if (!fs::is_directory(path, ec))
-        return path;
-    fs::path best;
-    std::uintmax_t best_size = 0;
-    for (fs::recursive_directory_iterator
-             it(path, fs::directory_options::skip_permission_denied, ec),
-         end;
-         !ec && it != end; it.increment(ec)) {
-        if (!it->is_regular_file(ec))
-            continue;
-        const auto size = it->file_size(ec);
-        if (ec)
-            continue;
-        if (best.empty() || size > best_size) {
-            best = it->path();
-            best_size = size;
-        }
-    }
-    return best.empty() ? path : best;
-}
+using FileStamp = detail::BundleFileStamp;
 
 FileStamp stamp_of(const std::string& path) {
-    FileStamp out;
-    std::error_code ec;
-    if (!fs::exists(path, ec) || ec) return out;
-    const auto file = stamped_file(path);
-    auto mtime = fs::last_write_time(file, ec);
-    if (ec) return out;
-    out.mtime = std::chrono::duration_cast<std::chrono::seconds>(
-        mtime.time_since_epoch()).count();
-    if (fs::is_regular_file(file, ec)) {
-        out.size = static_cast<int64_t>(fs::file_size(file, ec));
-        if (ec)
-            return out;
-    }
-    out.ok = true;
-    return out;
+    return detail::bundle_file_stamp(path);
 }
 
 // Replace `|` and newlines in a stored field with percent-escapes so

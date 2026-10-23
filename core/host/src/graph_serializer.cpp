@@ -3,6 +3,7 @@
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/host/scan_blacklist.hpp>
+#include <pulp/host/scan_cache.hpp>
 #include <pulp/host/scanner.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/safe_relative_path.hpp>
@@ -1191,12 +1192,10 @@ class PluginNodeResolver {
         scan.extra_paths = options_.plugin_roots;
         scan.only_extra_paths = !options_.include_default_plugin_roots;
         scan.scan_worker_path = options_.scan_worker_path;
-        // The scan records any bundle that crashes its worker; that goes
-        // into a copy so the caller's blacklist stays theirs to persist.
-        ScanBlacklist blacklist;
-        if (options_.blacklist)
-            blacklist = *options_.blacklist;
-        scan.blacklist = &blacklist;
+        // The scan records any bundle that crashes its worker into the
+        // caller's own blacklist, and reads and feeds the caller's cache.
+        scan.blacklist = options_.blacklist;
+        scan.scan_cache = options_.scan_cache;
         auto report = PluginScanner{}.scan_report(scan);
         if (report.clap_skipped_no_worker &&
             options_.scan_mode == GraphPluginScanMode::allow_in_process) {

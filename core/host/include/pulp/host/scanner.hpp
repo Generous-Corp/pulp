@@ -113,14 +113,23 @@ struct ScanOptions {
     // Per-bundle budget for the isolated worker; a bundle that exceeds it is
     // recorded as a timeout in `blacklist`.
     int scan_worker_timeout_ms = 5000;
+
+    // Optional cache of earlier CLAP scan results keyed by bundle path and
+    // file stamp. A bundle whose entry still matches is served from here
+    // and never handed to a worker; a bundle the worker enumerates to exactly
+    // one descriptor is recorded. With a cache and no worker, cached bundles
+    // are still listed; only the uncached ones are skipped. Caller-owned;
+    // must outlive scan().
+    class HostScanCache* scan_cache = nullptr;
 };
 
 // What a scan found, and what it refused to do.
 struct ScanReport {
     std::vector<PluginInfo> plugins;
-    // CLAP enumeration was skipped because no `pulp-scan-worker` was found
-    // and ScanOptions::in_process_clap was false. `error` says where the
-    // scanner looked and how to opt into in-process enumeration.
+    // CLAP enumeration was skipped (except for bundles ScanOptions::scan_cache
+    // already knew) because no `pulp-scan-worker` was found and
+    // ScanOptions::in_process_clap was false. `error` says where the scanner
+    // looked and how to opt into in-process enumeration.
     bool clap_skipped_no_worker = false;
     std::string error;
 };

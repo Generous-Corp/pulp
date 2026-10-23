@@ -5,6 +5,7 @@
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/isolated_scanner.hpp>
 #include <pulp/host/scan_blacklist.hpp>
+#include <pulp/host/scan_cache.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
 #include <filesystem>
@@ -279,8 +280,10 @@ std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir, Pl
 
     if (format == PluginFormat::BuiltIn) return results;
     // Without a worker, a CLAP entry point runs here; only a caller who asked
-    // for that gets it.
-    if (format == PluginFormat::CLAP && !isolated && !options.in_process_clap)
+    // for that gets it. With a cache the walk still serves cached bundles.
+    const bool clap_cache_only =
+        format == PluginFormat::CLAP && !isolated && !options.in_process_clap;
+    if (clap_cache_only && !options.scan_cache)
         return results;
 
     std::error_code ec;
@@ -295,6 +298,18 @@ std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir, Pl
         if (options.blacklist && options.blacklist->is_blacklisted(path))
             continue;
 
+        if (format == PluginFormat::CLAP && options.scan_cache) {
+            // An unchanged bundle's earlier verdict stands; nothing is run for
+            // it. Only bundles enumerated to one descriptor are cached, so a
+            // hit is the whole answer.
+            if (auto cached = options.scan_cache->get(path)) {
+                results.push_back(std::move(*cached));
+                continue;
+            }
+            if (clap_cache_only)
+                continue;
+        }
+
         if (format == PluginFormat::CLAP && isolated) {
             // The bundle's entry point runs in the worker; this process only
             // reads the descriptors it printed. A crash or hang is the
@@ -304,6 +319,8 @@ std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir, Pl
             case ScanStatus::Ok:
                 results.insert(results.end(), outcome.descriptors.begin(),
                                outcome.descriptors.end());
+                if (options.scan_cache && outcome.descriptors.size() == 1)
+                    options.scan_cache->put(path, outcome.descriptors.front());
                 break;
             case ScanStatus::Crash:
             case ScanStatus::Timeout:
@@ -327,6 +344,8 @@ std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir, Pl
         }
 
         auto found = scan_bundle(path, format);
+        if (format == PluginFormat::CLAP && options.scan_cache && found.size() == 1)
+            options.scan_cache->put(path, found.front());
         results.insert(results.end(), found.begin(), found.end());
     }
 
@@ -365,7 +384,9 @@ ScanReport PluginScanner::scan_report(const ScanOptions& options) {
         if (!worker.empty()) {
             isolated.emplace(worker);
         } else {
-            scan_clap = false;
+            // A cache still answers for bundles it already knows; the
+            // directory walk below serves those and nothing else.
+            scan_clap = options.scan_cache != nullptr;
             report.clap_skipped_no_worker = true;
             report.error =
                 "no scan worker found" +
