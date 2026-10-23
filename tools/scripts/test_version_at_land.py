@@ -1795,5 +1795,115 @@ class MigrationNoteFoldTest(unittest.TestCase):
         self.assertIn("could not fold", err.getvalue())
 
 
+class MigrationFoldRouteTest(unittest.TestCase):
+    """The fold runs inside the real bump transaction on both routes.
+
+    A bare origin, a landed `feat:` with an unreleased note, and the real
+    `apply_and_push` / `apply_via_pr` (only `gh` is faked); the assertions read
+    what reached the remote."""
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="pulp-val-fold-"))
+        self.seed = self.root / "seed"
+        self.seed.mkdir()
+        Fixture(self.seed).init()
+        self.origin = self.root / "origin.git"
+        subprocess.run(["git", "clone", "--bare", "-q", str(self.seed), str(self.origin)],
+                       check=True)
+        self.land = self._clone("land", "dev")
+        self._orig_gh = val._gh
+
+    def tearDown(self) -> None:
+        val._gh = self._orig_gh
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _clone(self, name: str, who: str) -> Path:
+        path = self.root / name
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(path)], check=True)
+        _git(path, "config", "user.email", f"{who}@example.com")
+        _git(path, "config", "user.name", who)
+        _git(path, "config", "commit.gpgsign", "false")
+        # A host-wide tag.gpgsign would make `git tag` demand a message.
+        _git(path, "config", "tag.gpgsign", "false")
+        return path
+
+    def _land_feat(self, topic: str) -> None:
+        _git(self.land, "pull", "-q", "--ff-only", "origin", "main")
+        note = self.land / f"docs/migrations/unreleased/{topic}.md"
+        note.parent.mkdir(parents=True, exist_ok=True)
+        note.write_text(f'---\nsummary = "{topic} changed"\n---\n\n- migrate {topic}\n',
+                        encoding="utf-8")
+        src = self.land / f"core/runtime/src/{topic}.cpp"
+        src.write_text(f"int {topic}(){{return 1;}}\n", encoding="utf-8")
+        _git(self.land, "add", "--", str(note), str(src))
+        _git(self.land, "commit", "-q", "-m", f"feat(core): {topic}\n\nVersion-Bump: sdk=minor\n")
+        _git(self.land, "push", "-q", "origin", "HEAD:main")
+
+    def _show(self, ref: str, path: str) -> str | None:
+        out = subprocess.run(["git", "-C", str(self.origin), "show", f"{ref}:{path}"],
+                             capture_output=True, text=True)
+        return out.stdout if out.returncode == 0 else None
+
+    def _cfg(self, repo: Path):
+        return load_config(repo / "tools/scripts/versioning.json")
+
+    def test_push_route_commits_the_folded_note_and_removes_the_source(self) -> None:
+        self._land_feat("knob")
+        bot = self._clone("bot", "release-bot")
+        status, _ = val.apply_and_push(bot, self._cfg(bot))
+        self.assertEqual(status, "applied")
+        released = self._show("main", "docs/migrations/v0.2.0.md")
+        self.assertIsNotNone(released, "the bump commit must carry the folded note")
+        self.assertIn('version = "0.2.0"', released)
+        self.assertIn("knob changed", released)
+        self.assertIsNone(self._show("main", "docs/migrations/unreleased/knob.md"))
+
+    def test_pr_route_commits_the_folded_note_on_the_bump_branch(self) -> None:
+        self._land_feat("knob")
+        bot = self._clone("bot", "release-bot")
+        val._gh = _FakeGh(open_prs=0)
+        status, _ = val.apply_via_pr(bot, self._cfg(bot))
+        self.assertEqual(status, "pr-opened")
+        released = self._show(val.BUMP_BRANCH, "docs/migrations/v0.2.0.md")
+        self.assertIsNotNone(released)
+        self.assertIn("knob changed", released)
+        self.assertIsNone(self._show(val.BUMP_BRANCH, "docs/migrations/unreleased/knob.md"))
+        # main is untouched until the bump PR merges.
+        self.assertIsNotNone(self._show("main", "docs/migrations/unreleased/knob.md"))
+
+    def _bump_pr_lands_after(self, late_topic: str, tag: bool) -> Path:
+        """Cut a bump PR, land another change, then merge the bump PR (and tag
+        its release) the way the merge queue would."""
+        self._land_feat("knob")
+        bot = self._clone("bot", "release-bot")
+        val._gh = _FakeGh(open_prs=0)
+        self.assertEqual(val.apply_via_pr(bot, self._cfg(bot))[0], "pr-opened")
+        self._land_feat(late_topic)
+        merger = self._clone("merger", "queue")
+        _git(merger, "fetch", "-q", "origin", val.BUMP_BRANCH)
+        _git(merger, "merge", "-q", "--no-ff", "-m", "Merge bump PR", f"origin/{val.BUMP_BRANCH}")
+        _git(merger, "push", "-q", "origin", "HEAD:main")
+        if tag:
+            _git(merger, "tag", "v0.2.0")
+            _git(merger, "push", "-q", "origin", "v0.2.0")
+        next_bot = self._clone("bot2", "release-bot")
+        self.assertEqual(val.apply_and_push(next_bot, self._cfg(next_bot))[0], "applied")
+        return next_bot
+
+    def test_a_change_merged_while_the_bump_pr_waited_keys_to_that_release(self) -> None:
+        self._bump_pr_lands_after("fader", tag=True)
+        # fader's code is in the v0.2.0 tag, so its note belongs to 0.2.0.
+        released = self._show("main", "docs/migrations/v0.2.0.md")
+        self.assertIn("knob changed", released)
+        self.assertIn("fader changed", released)
+        self.assertIsNone(self._show("main", "docs/migrations/v0.3.0.md"))
+        self.assertIsNone(self._show("main", "docs/migrations/unreleased/fader.md"))
+
+    def test_control_without_the_release_tag_the_note_takes_the_next_version(self) -> None:
+        self._bump_pr_lands_after("fader", tag=False)
+        self.assertIn("fader changed", self._show("main", "docs/migrations/v0.3.0.md") or "")
+        self.assertNotIn("fader changed", self._show("main", "docs/migrations/v0.2.0.md") or "")
+
+
 if __name__ == "__main__":
     unittest.main()

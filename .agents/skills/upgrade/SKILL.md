@@ -315,9 +315,12 @@ the same one collide on `vX.Y.Z.md`. So a PR never picks `X`: it writes
 `docs/migrations/unreleased/<topic>.md` with only `breaking` and `summary`, and
 the version-at-land bump that assigns the SDK version folds it into
 `v<assigned>.md` with the canonical `applies_if`
-(`tools/scripts/fold_migration_notes.py`). A note sitting in `unreleased/` is
-not shown by `pulp upgrade --notes` until that fold; confirm after release that
-`v<assigned>.md` exists and that `git merge-base --is-ancestor <merge> vX.Y.Z`
+(`tools/scripts/fold_migration_notes.py`). A change merged while a bump PR
+waited ships in the release tagged on that bump's merge, so the next fold keys
+its note to that earlier release (the earliest `vX.Y.Z` tag containing the
+commit that added the note), appending to its `vX.Y.Z.md`. A note sitting in
+`unreleased/` is not shown by `pulp upgrade --notes` until that fold; confirm
+after release that `v<assigned>.md` exists and that `git merge-base --is-ancestor <merge> vX.Y.Z`
 is true against that tag and false against the previous one.
 
 ## Common breaking-change patterns
