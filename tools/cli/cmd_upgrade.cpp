@@ -10,6 +10,8 @@
 
 #include "cli_common.hpp"
 #include "migration_index.hpp"
+#include "release_checksum.hpp"
+#include "release_floors_gen.h"
 #include "update_check.hpp"
 #include "upgrade_install.hpp"
 #include "upgrade_url.hpp"
@@ -328,6 +330,31 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         std::cerr << "Download failed. Check: https://github.com/Generous-Corp/pulp/releases/tag/v" << version << "\n";
         run("rm -rf " + tmp_dir);
         return 1;
+    }
+
+    {
+        namespace relcheck = pulp::cli::release_checksum;
+        const std::string sums_name(relcheck::kManifestAssetName);
+        const fs::path sums_path = fs::path(tmp_dir) / sums_name;
+        std::optional<std::string> sums;
+        if (run("curl -fsL -o " + shell_quote(sums_path) + " " +
+                shell_quote(pulp::cli::pulp_release_asset_url(version, sums_name))) == 0)
+            sums = read_file_contents(sums_path);
+        const auto verdict =
+            relcheck::verify_release_archive(fs::path(tmp_dir) / tarball, tarball, version,
+                                             PULP_RELEASE_CHECKSUM_MANIFEST_FLOOR, sums);
+        if (!verdict.ok()) {
+            std::cerr << "Error: " << verdict.message << "\n";
+            std::cerr
+                << "  Verify by hand from: https://github.com/Generous-Corp/pulp/releases/tag/v"
+                << version << "\n";
+            run("rm -rf " + tmp_dir);
+            return 1;
+        }
+        if (verdict.status == relcheck::Status::unverified_legacy)
+            std::cerr << "WARNING: " << verdict.message << "\n";
+        else
+            std::cout << "  " << verdict.message << "\n";
     }
 
     rc = run("tar -xzf " + tmp_dir + "/" + tarball + " -C " + tmp_dir);

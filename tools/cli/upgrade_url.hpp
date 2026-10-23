@@ -24,15 +24,18 @@ struct UpgradeUrlPair {
     std::string url;
 };
 
+// Download URL of any asset on the release tagged `v<version>`; the
+// SHA256SUMS manifest and the SDK archives share this shape.
+inline std::string pulp_release_asset_url(const std::string& version, const std::string& asset) {
+    return "https://github.com/Generous-Corp/pulp/releases/download/v" + version + "/" + asset;
+}
+
 inline UpgradeUrlPair pulp_upgrade_url_for(const std::string& version,
                                            const std::string& platform,
                                            const std::string& arch) {
     const std::string ext = (platform == "windows") ? "zip" : "tar.gz";
     const std::string asset = "pulp-" + platform + "-" + arch + "." + ext;
-    const std::string url =
-        "https://github.com/Generous-Corp/pulp/releases/download/v"
-        + version + "/" + asset;
-    return {asset, url};
+    return {asset, pulp_release_asset_url(version, asset)};
 }
 
 }  // namespace pulp::cli
