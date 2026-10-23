@@ -492,16 +492,16 @@ if(PULP_TEXT_SHAPING AND NOT PULP_ENABLE_GPU)
 endif()
 
 # SDL3 — cross-platform windowing, input, GPU context (zlib license)
-pulp_register_fetchcontent_source(SDL3 DIR sdl3 REF release-3.2.12)
+pulp_register_fetchcontent_source(SDL3 DIR sdl3 REF release-3.4.18)
 FetchContent_Declare(
     SDL3
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-    GIT_TAG release-3.2.12
+    GIT_TAG release-3.4.18
     GIT_SHALLOW TRUE
 )
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
-set(SDL_TEST OFF CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
 # SDL3 precompiles src/SDL_internal.h into every one of its ~400 objects. A
 # TU compiled against a PCH is uncacheable for ccache unless the cache runs
 # with pch_defines sloppiness, and the PCH itself embeds the build path, so

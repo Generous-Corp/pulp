@@ -1454,7 +1454,7 @@ if [ -n "$WGPU_RUNTIME_NAME" ]; then
 fi
 
 ensure_shared_git_source_with_retry "SDL3" "https://github.com/libsdl-org/SDL.git" \
-    "release-3.2.12" "$(fetchcontent_cache_dir_name "sdl3" "release-3.2.12")"
+    "release-3.4.18" "$(fetchcontent_cache_dir_name "sdl3" "release-3.4.18")"
 
 ensure_shared_git_source_with_retry "CLAP" "https://github.com/free-audio/clap.git" \
     "1.2.10" "$(fetchcontent_cache_dir_name "clap" "1.2.10")"
