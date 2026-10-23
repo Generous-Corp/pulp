@@ -577,21 +577,35 @@ TEST_CASE("Compressor decoupled detector distorts low tones less",
 
 TEST_CASE("Compressor defaults to the branching ballistics", "[signal][compressor][compat]") {
     // The default keeps the previous detector, so existing products and
-    // saved patches render exactly as before; decoupled is opt-in.
+    // saved patches render as before; decoupled is opt-in. A compressor left
+    // at its default is held to the previous one-pole formula (the reference
+    // model's branching form), not to another instance of itself, and that
+    // reference is shown to tell the two forms apart.
     const auto input = loud_program(16384, 48000.0f);
+    double separation = 0.0;
     for (const auto& k : kCompressorCases) {
+        INFO("threshold " << k.threshold_db << " knee " << k.knee_db << " hpf " << k.hpf_hz
+                          << " lookahead " << k.lookahead_ms);
         Compressor by_default;
-        Compressor explicit_branching;
         configure(by_default, k, 48000.0f);
-        configure(explicit_branching, k, 48000.0f);
-        explicit_branching.set_ballistics(CompressorBallistics::branching);
         CHECK(by_default.ballistics() == CompressorBallistics::branching);
-        auto a = input;
-        auto b = input;
-        by_default.process(a.data(), static_cast<int>(a.size()));
-        explicit_branching.process(b.data(), static_cast<int>(b.size()));
-        CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
+        auto output = input;
+        by_default.process(output.data(), static_cast<int>(output.size()));
+        const auto previous =
+            reference_compress(input, k, 48000.0f, CompressorBallistics::branching);
+        const auto decoupled =
+            reference_compress(input, k, 48000.0f, CompressorBallistics::decoupled);
+        double worst = 0.0;
+        for (std::size_t i = 0; i < output.size(); ++i) {
+            worst = std::max(
+                worst, std::abs(static_cast<double>(output[i]) - static_cast<double>(previous[i])));
+            separation = std::max(separation, std::abs(static_cast<double>(previous[i]) -
+                                                       static_cast<double>(decoupled[i])));
+        }
+        CHECK(worst < 1.0e-6);
     }
+    // The two forms differ by far more than the tolerance on this program.
+    CHECK(separation > 1.0e-3);
     CHECK(CompressorBallistics{} == CompressorBallistics::branching);
 }
 
