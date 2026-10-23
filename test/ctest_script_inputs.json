@@ -260,6 +260,7 @@
    "data": "declared",
    "detected_sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_ir.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
@@ -272,6 +273,7 @@
    "kind": "compiled",
    "sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_ir.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
