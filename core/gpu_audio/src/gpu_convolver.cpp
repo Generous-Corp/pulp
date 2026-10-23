@@ -1306,7 +1306,7 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
     // added to exactly one of two accumulators, never both and never neither:
     //   - the GPU carry (overlap-add of h * x_k, fft_size long, shifted one
     //     block per call) when its readback is on time and finite, or
-    //   - the worker's CPU partitioned convolution, a zero-latency
+    //   - the worker's CPU convolution (FixedIrConvolver), a zero-latency
     //     implementation of the same h, fed x_k when the GPU did not deliver
     //     it and silence otherwise.
     // Both accumulators advance one block per call on the same timeline, so

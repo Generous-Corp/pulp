@@ -81,7 +81,7 @@ std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 /// the default lead of 2). That pipeline sits inside the reported latency, so
 /// total latency and PDC are unchanged. A late result is discarded.
 /// Every block's input lands in exactly one place: the GPU overlap-add carry
-/// when its result is on time, otherwise the worker's CPU partitioned
+/// when its result is on time, otherwise the worker's zero-latency CPU
 /// convolution. The output is the carry plus whatever the CPU convolution still
 /// owes, so a late, failed, non-finite or device-lost block is the exact
 /// continuation, never silence. The CPU convolution runs only for a missed

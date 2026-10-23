@@ -97,7 +97,7 @@ Not covered:
 A block whose GPU result is not ready by its deadline is substituted from a
 continuously primed, latency-aligned CPU path without waiting, for these nodes:
 
-- `GpuConvolver`: the callback's continuously fed partitioned CPU convolution
+- `GpuConvolver`: the callback's continuously fed CPU convolution
   covers a block the worker did not deliver. On the staged path the worker also
   routes each late, failed, non-finite or device-lost block to its own CPU
   convolution, so the worker's output is the exact continuation of the

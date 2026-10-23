@@ -252,7 +252,7 @@ resolves, and its worker never waits on the GPU at all.
   out, that node must outlive the transport's `release()` (or the transport
   must be released first); a non-pipelining node is never touched there.
 - Every block's input goes to exactly one place: the GPU overlap-add carry when
-  its readback is on time, otherwise the worker's CPU partitioned convolution.
+  its readback is on time, otherwise the worker's zero-latency CPU convolution.
   The output is the carry plus whatever the CPU convolution still owes, so a
   late, failed, non-finite or device-lost block is the exact continuation of
   the convolution, never silence.
@@ -479,7 +479,7 @@ compatibility.
 
 ## Layer 3 — ready-made processors (`pulp::gpu_audio`)
 
-- `GpuConvolver` — FFT overlap-add convolution with a fixed IR; a continuously-fed, zero-latency `signal::PartitionedConvolver` CPU fallback that stays latency-aligned so a GPU miss is filled seamlessly.
+- `GpuConvolver` — FFT overlap-add convolution with a fixed IR; a continuously-fed, zero-latency `signal::FixedIrConvolver` CPU fallback that stays latency-aligned so a GPU miss is filled seamlessly.
 - `GpuStft` — STFT/ISTFT (windowed analyze / synthesize) — the spectral toolkit base.
 - `GpuSpectralFreeze` — capture + sustain a spectral frame (infinite pad).
 - `GpuSpectralMorph` — blend between two captured spectra (t ∈ [0,1]).
