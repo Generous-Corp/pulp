@@ -127,6 +127,19 @@ class SymbolFloorTests(unittest.TestCase):
         rc, out = self._run("--check", f"view-core={core}")
         self.assertEqual(rc, 1, out)
 
+    def test_only_symbol_lines_are_read(self):
+        listing = (
+            "libpulp-view-audio.a[m.o]:\n"
+            "libpulp-view-audio.a[m.o]: __ZTIN4pulp4view5MeterE W 0 0\n"
+            "plain_symbol T 1f 8\n"
+            "undefined_only U\n"
+            "not a symbol line\n"
+            "warning: something odd happened\n"
+            "libpulp-view-audio.a[m.o]: also not a symbol line\n"
+        )
+        self.assertEqual(nm_symbols.defined_any(listing), {"__ZTIN4pulp4view5MeterE", "plain_symbol"})
+        self.assertEqual(nm_symbols.undefined(listing), {"undefined_only"})
+
     def test_the_registered_gate_counts_weak_definitions(self):
         # The ctest calls archive_symbol_closure_check.py directly, so it must
         # ask for the same rule this wrapper uses.

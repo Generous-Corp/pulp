@@ -23,21 +23,31 @@ still relocations that may resolve from another archive.
 
 from __future__ import annotations
 
+import re
 from typing import Iterator
 
 STRONG_DEFINED = frozenset("TDBRSCG")
 UNDEFINED = frozenset("Uwv")
+_HEX = re.compile(r"[0-9a-fA-F]+")
+
+
+def _is_symbol_line(name: str, kind: str, rest: list[str]) -> bool:
+    # `-P` writes "name type [value [size]]" with hexadecimal value and size,
+    # so anything else (a header, a warning, prose) is not a symbol line.
+    return (len(kind) == 1 and kind.isalpha() and not name.endswith(":")
+            and len(rest) <= 2 and all(_HEX.fullmatch(field) for field in rest))
 
 
 def entries(listing: str) -> Iterator[tuple[str | None, str, str]]:
     """(member or None, symbol, type letter) for every symbol line."""
     for line in listing.splitlines():
         fields = line.split()
-        if len(fields) >= 3 and len(fields[2]) == 1 and fields[0].endswith(":"):
+        if len(fields) >= 3 and fields[0].endswith(":"):
             prefix = fields[0][:-1]
             member = prefix[prefix.index("[") + 1:-1] if prefix.endswith("]") and "[" in prefix else None
-            yield member, fields[1], fields[2]
-        elif len(fields) >= 2 and len(fields[1]) == 1 and not fields[0].endswith(":"):
+            if _is_symbol_line(fields[1], fields[2], fields[3:]):
+                yield member, fields[1], fields[2]
+        elif len(fields) >= 2 and _is_symbol_line(fields[0], fields[1], fields[2:]):
             yield None, fields[0], fields[1]
 
 
