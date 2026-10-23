@@ -14,7 +14,9 @@
 #      later step through GITHUB_ENV;
 #   3. makes sure ninja is on PATH, installing it with choco when it is missing.
 #
-# Run it as one pwsh step before Configure.
+# Run it as one `shell: powershell` step before Configure. It is written for
+# Windows PowerShell 5.1, which every Windows image has; the macpro golden has
+# no PowerShell 7 (pwsh).
 
 $ErrorActionPreference = 'Stop'
 
@@ -47,10 +49,16 @@ if (-not $vs) { throw "no Visual Studio installation with $component" }
 $vcvars = Join-Path $vs "VC\Auxiliary\Build\$vcvarsName"
 if (-not (Test-Path $vcvars)) { throw "$vcvarsName not found under $vs" }
 Write-Host "Entering the developer environment: $vcvars"
-cmd /c "`"$vcvars`" >nul && set" | ForEach-Object {
-    if ($_ -match '^([^=]+)=(.*)$') {
-        "$($Matches[1])=$($Matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-    }
+# Written without a byte-order mark: Windows PowerShell 5.1's
+# `Out-File -Encoding utf8` can emit one, which would corrupt the first name.
+$lines = cmd /c "`"$vcvars`" >nul && set" | Where-Object { $_ -match '^[^=]+=' }
+if (-not $lines) { throw "$vcvarsName printed no environment" }
+[System.IO.File]::AppendAllText($env:GITHUB_ENV, (($lines -join "`n") + "`n"),
+    (New-Object System.Text.UTF8Encoding $false))
+# The exported PATH applies from the next step on; adopt it here too, so the
+# ninja check below also finds the copy Visual Studio ships.
+foreach ($line in $lines) {
+    if ($line -match '^Path=(.*)$') { $env:Path = $Matches[1] }
 }
 
 if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {

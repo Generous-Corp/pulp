@@ -344,7 +344,7 @@ jobs:
       # Ninja + cl from the developer environment, and ccache when the runner
       # has it (see tools/ci/windows_build_env.ps1).
       - name: Prepare the Windows build environment (Ninja, cl, ccache)
-        shell: pwsh
+        shell: powershell
         run: tools/ci/windows_build_env.ps1
 
       - name: Configure ccache remote storage

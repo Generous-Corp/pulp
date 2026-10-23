@@ -1802,7 +1802,7 @@ jobs:
       # under it ccache saw no compiles ("ccache per-job: cacheable 0").
       - name: Prepare the Windows build environment (Ninja, cl, ccache)
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: powershell
         run: tools/ci/windows_build_env.ps1
 
       # A self-hosted Windows VM keeps nothing between jobs, so a host that
