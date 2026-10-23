@@ -55,6 +55,7 @@ enum class SharedIoContractError : std::uint8_t {
     ProviderUnavailable,
     RequestedPathUnavailable,
     MissingProviderSlots,
+    InvalidMaxInflight,
 };
 
 // The callback lead consumes completion-table entries before a submitted
@@ -111,6 +112,10 @@ validate_shared_io_contract(const SharedIoExecutionContract& contract) noexcept 
         return {SharedIoContractError::MissingPipelineDepth};
     if (gpu_path && contract.pipeline_depth <= contract.algorithmic_lead_blocks)
         return {SharedIoContractError::InsufficientPipelineDepth};
+    if (gpu_path &&
+        (contract.max_inflight == 0 ||
+         contract.max_inflight > contract.pipeline_depth - contract.algorithmic_lead_blocks))
+        return {SharedIoContractError::InvalidMaxInflight};
     if (gpu_path && contract.provider_slots == 0)
         return {SharedIoContractError::MissingProviderSlots};
     if (contract.active_path == SharedIoPath::SharedHostPointer &&
@@ -185,6 +190,9 @@ enum class SharedIoTelemetryError : std::uint8_t {
     ScheduledCompletionBeforeComponents,
     // Appended to preserve the numeric values of existing diagnostic errors.
     RetirementsExceedSubmissions,
+    // A live snapshot is assembled from independently updated counters and
+    // cannot be validated as one coherent receipt until producers quiesce.
+    TelemetryValidationDeferred,
 };
 
 struct SharedIoTelemetryValidation {

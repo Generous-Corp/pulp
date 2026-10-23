@@ -764,6 +764,25 @@ TEST_CASE("WaveNet owned trace discloses callback queue loss and preserves faile
           detail::SharedIoGpuTerminalDisposition::CancelledTeardown);
 }
 
+TEST_CASE("WaveNet rejects malformed trace observers before draining",
+          "[gpu_audio][wavenet][trace][negative]") {
+    Harness h(1, 1, 0, true);
+    TraceCapture capture;
+    const detail::SharedIoTraceDrainObserver malformed{
+        .context = &capture,
+        .record = [](void*, std::uint64_t, const detail::SharedIoTraceRecord&) noexcept {},
+    };
+    detail::WaveNetRealtimeTestAccess::observe_trace(h.node, malformed);
+    h.callback(1);
+    h.service();
+    h.service();
+    REQUIRE(h.node.release());
+    CHECK(capture.admission_count == 0);
+    CHECK(capture.record_count == 0);
+    CHECK(detail::WaveNetRealtimeTestAccess::trace_stats(h.node).admissions_drained > 0);
+    CHECK(detail::WaveNetRealtimeTestAccess::trace_stats(h.node).drained > 0);
+}
+
 TEST_CASE("Stamped ingress timestamps survive reuse without changing stream identity",
           "[gpu_audio][wavenet][trace]") {
     using Bridge = detail::SharedIoStampedBridge;

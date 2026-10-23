@@ -104,10 +104,12 @@ bool SharedIoConvolutionSession::prepare_trace_generation() noexcept {
     return true;
 }
 
-SharedIoTraceDrainResult SharedIoConvolutionSession::drain_trace(std::uint32_t budget) noexcept {
+SharedIoTraceDrainResult
+SharedIoConvolutionSession::drain_trace(std::uint32_t budget, bool telemetry_quiescent) noexcept {
     if (!trace_recorder_)
         return {};
-    return drain_shared_io_trace(*trace_recorder_, trace_telemetry_.snapshot(), budget);
+    return drain_shared_io_trace(*trace_recorder_, trace_telemetry_.snapshot(), budget,
+                                 trace_observer_, telemetry_quiescent);
 }
 
 void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
@@ -115,7 +117,7 @@ void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
         return;
     for (std::uint32_t attempt = 0; attempt < 4; ++attempt) {
         const auto before = trace_recorder_->stats();
-        (void)drain_trace(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity));
+        (void)drain_trace(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity), true);
         const auto after = trace_recorder_->stats();
         if (after.enqueued == after.drained &&
             after.admissions_enqueued == after.admissions_drained)
@@ -127,7 +129,17 @@ void SharedIoConvolutionSession::drain_trace_until_empty() noexcept {
 }
 
 void SharedIoConvolutionSession::drain_trace_to_retention() noexcept {
-    if (!trace_recorder_ || trace_template_.retention_capacity == 0)
+    if (!trace_recorder_)
+        return;
+    if (trace_observer_) {
+        // A campaign observer is the sole owner of drained rows. Keep the
+        // worker service path on the same serialized drain seam so rows do not
+        // disappear into the legacy retention vectors before the observer can
+        // see them.
+        (void)drain_trace(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity));
+        return;
+    }
+    if (trace_template_.retention_capacity == 0)
         return;
     const auto limit = static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity);
     const auto retention = trace_template_.retention_capacity;
@@ -152,71 +164,97 @@ void SharedIoConvolutionSession::close_trace_generation() noexcept {
     last_closed_trace_admissions_.clear();
     last_closed_trace_retention_overflow_ = trace_retention_overflow_;
     if (trace_recorder_) {
-        try {
-            last_closed_trace_records_ = std::move(retained_trace_records_);
-            last_closed_trace_admissions_ = std::move(retained_trace_admissions_);
-            const auto retention = trace_template_.retention_capacity;
-            last_closed_trace_records_.reserve(
-                last_closed_trace_records_.size() +
-                (retention != 0 ? retention : SharedIoTraceRecorder::capacity));
-            last_closed_trace_admissions_.reserve(
-                last_closed_trace_admissions_.size() +
-                (retention != 0 ? retention : SharedIoTraceRecorder::capacity));
+        if (trace_observer_) {
+            // Streaming campaign sinks own the rows after each bounded worker
+            // drain. Do not copy them into the session vectors as a second
+            // unbounded retention path; close only the records still queued.
             for (;;) {
-                const auto drained = trace_recorder_->drain_admissions(
-                    static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
-                    [&](const SharedIoTraceAdmission& admission) {
-                        if (retention == 0 || last_closed_trace_admissions_.size() < retention)
-                            last_closed_trace_admissions_.push_back(admission);
-                        else
-                            last_closed_trace_retention_overflow_ = true;
-                    });
-                if (drained < SharedIoTraceRecorder::capacity)
+                const auto before = trace_recorder_->stats();
+                (void)drain_trace(static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity));
+                const auto after = trace_recorder_->stats();
+                if (after.drained == before.drained &&
+                    after.admissions_drained == before.admissions_drained)
+                    break;
+                if (after.enqueued == after.drained &&
+                    after.admissions_enqueued == after.admissions_drained)
                     break;
             }
-            for (;;) {
-                const auto drained = drain_trace_records(
-                    static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
-                    [&](const SharedIoTraceRecord& record) {
-                        if (retention == 0 || last_closed_trace_records_.size() < retention)
-                            last_closed_trace_records_.push_back(record);
-                        else
-                            last_closed_trace_retention_overflow_ = true;
-                    });
-                if (drained < SharedIoTraceRecorder::capacity)
-                    break;
-            }
-            std::vector<bool> admission_used(last_closed_trace_admissions_.size(), false);
-            for (auto& record : last_closed_trace_records_) {
-                const auto stats = trace_recorder_->stats();
-                record.admissions_attempted = stats.admissions_attempted;
-                record.admissions_enqueued = stats.admissions_enqueued;
-                record.admissions_dropped = stats.admissions_dropped;
-                record.trace_attempted = stats.attempted;
-                record.trace_enqueued = stats.enqueued;
-                record.trace_dropped = stats.dropped;
-                record.trace_sampled_out = stats.sampled_out;
-                record.trace_invalid = stats.invalid;
-                record.admission_identity_matched = false;
-                if (record.kind != SharedIoTraceKind::Terminal)
-                    continue;
-                for (std::size_t i = 0; i < last_closed_trace_admissions_.size(); ++i) {
-                    const auto& admission = last_closed_trace_admissions_[i];
-                    if (!admission_used[i] && admission.generation == record.generation &&
-                        admission.sequence == record.sequence) {
-                        admission_used[i] = true;
-                        record.admission_identity_matched = true;
+            const auto stats = trace_recorder_->stats();
+            if (stats.dropped != 0 || stats.admissions_dropped != 0)
+                last_closed_trace_retention_overflow_ = true;
+        } else {
+            try {
+                last_closed_trace_records_ = std::move(retained_trace_records_);
+                last_closed_trace_admissions_ = std::move(retained_trace_admissions_);
+                const auto retention = trace_template_.retention_capacity;
+                last_closed_trace_records_.reserve(
+                    last_closed_trace_records_.size() +
+                    (retention != 0 ? retention : SharedIoTraceRecorder::capacity));
+                last_closed_trace_admissions_.reserve(
+                    last_closed_trace_admissions_.size() +
+                    (retention != 0 ? retention : SharedIoTraceRecorder::capacity));
+                for (;;) {
+                    const auto drained = trace_recorder_->drain_admissions(
+                        static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
+                        [&](const SharedIoTraceAdmission& admission) {
+                            if (retention == 0 || last_closed_trace_admissions_.size() < retention)
+                                last_closed_trace_admissions_.push_back(admission);
+                            else
+                                last_closed_trace_retention_overflow_ = true;
+                        });
+                    if (drained < SharedIoTraceRecorder::capacity)
                         break;
+                }
+                for (;;) {
+                    const auto drained = drain_trace_records(
+                        static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
+                        [&](const SharedIoTraceRecord& record) {
+                            if (retention == 0 || last_closed_trace_records_.size() < retention)
+                                last_closed_trace_records_.push_back(record);
+                            else
+                                last_closed_trace_retention_overflow_ = true;
+                        });
+                    if (drained < SharedIoTraceRecorder::capacity)
+                        break;
+                }
+                std::vector<bool> admission_used(last_closed_trace_admissions_.size(), false);
+                for (auto& record : last_closed_trace_records_) {
+                    const auto stats = trace_recorder_->stats();
+                    record.admissions_attempted = stats.admissions_attempted;
+                    record.admissions_enqueued = stats.admissions_enqueued;
+                    record.admissions_dropped = stats.admissions_dropped;
+                    record.trace_attempted = stats.attempted;
+                    record.trace_enqueued = stats.enqueued;
+                    record.trace_dropped = stats.dropped;
+                    record.trace_sampled_out = stats.sampled_out;
+                    record.trace_invalid = stats.invalid;
+                    record.admission_identity_matched = false;
+                    if (record.kind != SharedIoTraceKind::Terminal)
+                        continue;
+                    for (std::size_t i = 0; i < last_closed_trace_admissions_.size(); ++i) {
+                        const auto& admission = last_closed_trace_admissions_[i];
+                        if (!admission_used[i] && admission.generation == record.generation &&
+                            admission.sequence == record.sequence) {
+                            admission_used[i] = true;
+                            record.admission_identity_matched = true;
+                            break;
+                        }
                     }
                 }
+            } catch (...) {
+                last_closed_trace_records_.clear();
+                last_closed_trace_admissions_.clear();
+                last_closed_trace_retention_overflow_ = true;
             }
-        } catch (...) {
-            last_closed_trace_records_.clear();
-            last_closed_trace_admissions_.clear();
-            last_closed_trace_retention_overflow_ = true;
         }
     }
-    drain_trace_until_empty();
+    if (!trace_observer_)
+        drain_trace_until_empty();
+    if (trace_recorder_) {
+        const auto stats = trace_recorder_->stats();
+        if (stats.dropped != 0 || stats.admissions_dropped != 0 || stats.invalid != 0)
+            last_closed_trace_retention_overflow_ = true;
+    }
     last_closed_trace_stats_ = trace_recorder_ ? trace_recorder_->stats() : SharedIoTraceStats{};
     retained_trace_records_.clear();
     retained_trace_admissions_.clear();
@@ -246,7 +284,8 @@ void SharedIoConvolutionSession::trace_admit(SharedIoSlotLedger::SlotToken token
     // reads a diagnostic clock.
     slot.record.set(SharedIoTraceStage::Scheduled, trace_now_ns());
     slot.record.set(SharedIoTraceStage::WorkerEntry, trace_now_ns());
-    (void)trace_recorder_->publish_admission(token.preparation_epoch, token.stream_sequence);
+    slot.record.admission_identity_matched =
+        trace_recorder_->publish_admission(token.preparation_epoch, token.stream_sequence);
 }
 
 void SharedIoConvolutionSession::trace_stage(SharedIoSlotLedger::SlotToken token,

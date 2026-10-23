@@ -19,9 +19,12 @@ void print_usage() {
     std::cout << "  html     Generic runnable HTML evaluated in isolated Chromium\n";
     std::cout << "  designmd Google DESIGN.md design-system spec (tokens only)\n";
     std::cout << "  jsx      Precompiled React JSX runtime bundle for live pass-through or baked snapshots\n\n";
+    std::cout << "  preconverted-svg  Validated SVG plus control-map sidecar (validation-only)\n";
     std::cout << "Options:\n";
     std::cout << "  --from <source>   Design source override. Runnable HTML is detected automatically.\n";
     std::cout << "  --file <path>     Input file path. Repeatable with --from figma-plugin:\n";
+    std::cout << "  --manifest <path> Control-map sidecar for --from preconverted-svg\n";
+    std::cout << "  --validate-only   Validate a preconverted SVG sidecar without writing files\n";
     std::cout << "                    one already-exported envelope per state captures a\n";
     std::cout << "                    multi-state design into one view. Order sets the frame\n";
     std::cout << "                    index a \"swap <n>\" button targets (the first --file is\n";

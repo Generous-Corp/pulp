@@ -67,6 +67,10 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_dspx07_projection_installed_sdk.py")
 
+    add_test(NAME gpu-audio-p5-unified-receipt-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_p5_receipt.py")
+
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include
