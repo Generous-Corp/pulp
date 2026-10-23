@@ -1024,7 +1024,8 @@ TEST_CASE("SuperConvolver loads an IR file as the base impulse response",
     proc2.define_parameters(store2);
     proc2.set_ir_restore_root(std::filesystem::temp_directory_path());
     REQUIRE(proc2.deserialize_plugin_state(blob));
-    REQUIRE(proc2.ir_path() == path);
+    // The restore adopts the resolved path (the temp dir is a symlink on macOS).
+    REQUIRE(proc2.ir_path() == std::filesystem::weakly_canonical(path).string());
 
     // Render an impulse and confirm the convolution is the loaded IR.
     DirectDriver d(proc, BLOCK, SR);
@@ -1231,12 +1232,32 @@ TEST_CASE("SuperConvolver refuses a restored IR path outside its restore root",
         pulp::state::StateStore store;
         make_proc(proc, store);
         REQUIRE(proc.deserialize_plugin_state(v2_path_blob(inside)));
-        REQUIRE(proc.ir_path() == inside);
+        REQUIRE(proc.ir_path() == std::filesystem::weakly_canonical(inside).string());
         proc.prepare(ctx);
         REQUIRE(proc.source_decode_count() == 1);
         proc.release();
     }
     std::filesystem::remove(inside);
+
+    // A relative restored path is read from the root, not from the host's
+    // working directory: the blob names "sc_confine_rel/ir.wav", the file sits
+    // under the root, and the process cwd (the build dir) has no such file.
+    const auto rel_dir = root / "sc_confine_rel";
+    std::filesystem::create_directories(rel_dir);
+    const std::string rel_inside = (rel_dir / "ir.wav").string();
+    REQUIRE(pulp::audio::write_wav_file(rel_inside, data, pulp::audio::WavBitDepth::Float32));
+    REQUIRE_FALSE(std::filesystem::exists("sc_confine_rel/ir.wav"));
+    {
+        SuperConvolverProcessor proc;
+        pulp::state::StateStore store;
+        make_proc(proc, store);
+        REQUIRE(proc.deserialize_plugin_state(v2_path_blob("sc_confine_rel/ir.wav")));
+        REQUIRE(proc.ir_path() == std::filesystem::weakly_canonical(rel_inside).string());
+        proc.prepare(ctx);
+        REQUIRE(proc.source_decode_count() == 1); // decoded the file under the root
+        proc.release();
+    }
+    std::filesystem::remove_all(rel_dir);
 }
 
 // load_ir_path() forces a reload even when the chosen path equals the current

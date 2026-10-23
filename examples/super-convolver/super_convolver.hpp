@@ -2357,8 +2357,10 @@ private:
     /// the source. Otherwise the path is admitted only when it resolves inside
     /// ir_restore_root(); a refused path is logged and the synthetic IR takes
     /// its place, so a hostile session cannot make the plugin read a file of
-    /// its author's choosing. The original spelling is kept as the active path
-    /// (the check resolved it, the loader reads the same file).
+    /// its author's choosing. The active path becomes the resolved canonical
+    /// path, never the blob's spelling: a relative spelling is resolved against
+    /// the root here, and the loader must open that same file rather than
+    /// re-resolve it against whatever the host's working directory happens to be.
     void restore_ir_path(std::string path) {
         if (path.empty()) {
             set_ir_path(std::string());
@@ -2370,7 +2372,8 @@ private:
             std::lock_guard<std::mutex> lock(ir_path_mutex_);
             root = ir_restore_root_;
         }
-        if (!audio::confine_restored_path(path, root)) {
+        const auto confined = audio::confine_restored_path(path, root);
+        if (!confined) {
             runtime::log_warn(
                 "SuperConvolver: ignoring restored IR path '{}' outside the restore root '{}'; "
                 "using the built-in synthetic IR instead.",
@@ -2378,8 +2381,10 @@ private:
             set_built_in_ir(0);
             return;
         }
-#endif
+        set_ir_path(confined->string());
+#else
         set_ir_path(std::move(path));
+#endif
     }
 
 #if !defined(PULP_WASM)
