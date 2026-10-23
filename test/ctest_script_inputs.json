@@ -137,6 +137,7 @@
     "tools/cli/package_commands_search.cpp",
     "tools/cli/package_commands_util.cpp",
     "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp",
     "tools/cli/project_bump.cpp",
     "tools/cli/projects_registry.cpp",
     "tools/cli/pulp_cli.cpp",
