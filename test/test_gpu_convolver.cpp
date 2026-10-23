@@ -2128,6 +2128,52 @@ TEST_CASE("Transport output stays continuous when the staged device is lost",
     CHECK(validate_gpu_audio_status(node.status_snapshot()).accepted());
 }
 
+TEST_CASE("A transport-hosted pipelining GpuConvolver callback never allocates",
+          "[gpu_audio][convolver][staged][transport][rt-safety]") {
+    // The staged pipeline against the scripted device needs no GPU hardware.
+    // The worker (pump) is non-realtime and runs outside the probe; only the
+    // audio callback is measured, over worker hits, misses served by the CPU
+    // fallback, and the resync drain after them.
+    constexpr std::uint32_t BS = 64;
+    constexpr std::size_t NBLK = 48;
+    const auto ir = staged_test_ir();
+    InjectableConvolver node(1, BS, 48000, ir);
+    REQUIRE(node.prepare());
+    node.adopt_fake(ir, 1.0f);
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {/*ring_blocks=*/8}));
+    REQUIRE(node.pipeline() > 0u);
+    const std::uint32_t L = transport.latency_samples() / BS;
+
+    const auto input = staged_test_input(BS * NBLK);
+    const auto ref = direct_convolution(input, ir);
+    std::vector<float> out(input.size(), -9.0f);
+    std::size_t allocations = 0;
+    for (std::size_t b = 0; b < NBLK; ++b) {
+        const float* in_ptr[1] = {input.data() + b * BS};
+        float* out_ptr[1] = {out.data() + b * BS};
+        BufferView<const float> iv(in_ptr, 1, BS);
+        BufferView<float> ov(out_ptr, 1, BS);
+        {
+            pulp::test::RtAllocationProbe probe;
+            transport.process(iv, ov, BS);
+            allocations += probe.allocation_count();
+        }
+        if (b % 6 < 4) // two skipped worker runs in every six blocks
+            transport.pump();
+    }
+    CHECK(allocations == 0);
+
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        const float expected = i < L * BS ? 0.0f : ref[i - L * BS];
+        REQUIRE(std::abs(out[i] - expected) < 1.0e-3f * (1.0f + std::abs(expected)));
+    }
+    const auto d = transport.delivery_snapshot();
+    CHECK(d.worker_output_blocks > 0u);
+    CHECK(d.cpu_fallback_blocks > 0u);
+    CHECK(transport.stats().resynced_blocks > 0u);
+}
+
 // Worker cost per block, for the record (hidden; run with "[staged-bench]").
 // The fake skips its reference convolution here so only the node's own work is
 // timed. "GPU hit" is the default path when the readback is on time; "CPU
