@@ -176,6 +176,9 @@ class Meter : public View,
   private:
     // Drive the ballistic path from the frame the View base snapshotted for us.
     void on_meter_frame(const MeterFrame& frame, float dt) override;
+    /// update() already invalidates the meter's own rect whenever its
+    /// ballistics move, which a changed snapshot alone does not imply.
+    void on_meter_snapshot_changed() override {}
 
     Orientation orientation_ = Orientation::vertical;
     MeterBallistics ballistics_;

@@ -32,7 +32,7 @@ use `bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`; a relative
 The WebCLAP deploy (`wclap-cloudflare.yml`) publishes a site, and the GPU-audio
 proof runs on shared self-hosted Macs where PR jobs also run. Neither may build
 from anything an earlier job could have written. choc is fetched at an exact
-commit (`CHOC_COMMIT`, the `pulp-webview-dnd-poc1` tag's commit) into
+commit (`CHOC_COMMIT`, the `pulp-webview-dnd-poc2` tag's commit) into
 `RUNNER_TEMP`, and the step checks the checked-out HEAD equals it. The Skia wasm
 slice archive is checked against the manifest digest on every run (one left at
 `$HOME/.cache/pulp/skia-wasm/<sha256>.zip` is reused only after it passes, else
@@ -455,7 +455,10 @@ target already compiles, so nothing looks missing — but the definition is in a
 TU the web source list may not name, and wasm-ld reports it only when something
 calls it. `press_reach.cpp` defines `View::simulate_context_click` and is listed
 in both files for this reason. The rule: if the symbol is `View::something`,
-grep the web list before assuming `view.cpp` carries it.
+grep the web list before assuming `view.cpp` carries it. The same holds for a
+free function `view_paint.cpp` calls: `border_style.cpp` (the border band and
+shade math `View::paint_border` uses) and `text_line_metrics.cpp` (the captured
+baseline `Label` places) are listed in both.
 
 Same shape as the font list below: whenever a list is duplicated for the web
 target, the web copy is the one that silently rots.

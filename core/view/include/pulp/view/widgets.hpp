@@ -12,6 +12,7 @@
 #include <pulp/canvas/text_shaper.hpp> // canvas::ShapedLayout for Label's shaped-layout cache
 #include <pulp/view/accessibility.hpp>
 #include <pulp/view/animation.hpp>
+#include <pulp/view/text_line_metrics.hpp>
 #include <pulp/view/inspector_facts.hpp>
 #include <pulp/view/data_display.hpp>
 #include <pulp/view/caret.hpp>
@@ -494,9 +495,16 @@ class Label : public View, public SelectableText {
     /// at its current font metrics and bounds.
     void clear_cached_line_boxes() {
         cached_line_boxes_.clear();
+        cached_line_metrics_.reset();
         shaped_cache_valid_ = false;
         invalidate_layout();
     }
+    /// The primary font's ascent and descent the browser laid the cached lines
+    /// out with. A captured line box exactly ascent + descent tall is the text
+    /// fragment itself, and its baseline is then placed `ascent` below the box
+    /// top instead of from this Label's own reading of the face. Applies to the
+    /// boxes most recently set; setting new boxes forgets it.
+    void set_cached_line_metrics(LineMetrics metrics);
     const std::vector<CachedLineBox>& cached_line_boxes() const {
         return cached_line_boxes_;
     }
@@ -920,6 +928,7 @@ private:
     mutable float measure_wrapped_height_ = -1.0f;
 
     float cached_line_basis_width_ = 0.0f;
+    std::optional<LineMetrics> cached_line_metrics_;
     std::string cached_line_basis_face_;
     std::string cached_line_basis_text_;
     // Set once the label's copy diverged from the captured basis; the boxes
@@ -2294,6 +2303,10 @@ public:
             path_ = uri;
             loaded_ = false;
             cached_data_.clear();
+            cached_data_key_.clear();
+            cached_data_width_ = 0.0f;
+            cached_data_height_ = 0.0f;
+            inline_decode_failed_ = false;
         }
     }
     const std::string& image_source() const { return path_; }
@@ -2347,6 +2360,10 @@ private:
     std::string path_;
     bool loaded_ = false;
     std::vector<uint8_t> cached_data_;  // File bytes cached after first successful load
+    std::string cached_data_key_;       // SHA-256 hex of cached_data_; empty when unset
+    float cached_data_width_ = 0.0f;    // Intrinsic size of cached_data_; 0 until measured
+    float cached_data_height_ = 0.0f;
+    bool inline_decode_failed_ = false; // Inline bytes no decoder accepted; never retried
     ImageCache* cache_ = nullptr;       // optional; owned externally
     float fill_value_ = -1.0f;          // <0 disables the silhouette fill overlay
     canvas::Color fill_color_ = canvas::Color::rgba(0.49f, 0.42f, 1.0f, 0.55f);

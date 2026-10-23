@@ -5,6 +5,7 @@
 #error "the GPU fault-continuity test plug-in builds only with PULP_GPU_FAULT_TEST_ONLY"
 #endif
 #include "gpu_fault_interposer.hpp"
+#include "gpu_fault_rendezvous.hpp"
 #include "gpu_fault_seam.hpp"
 #include "gpu_fault_stimulus.hpp"
 
@@ -116,11 +117,6 @@ void write_all(int fd, const void* data, std::size_t size) {
         p += wrote;
         size -= static_cast<std::size_t>(wrote);
     }
-}
-
-std::filesystem::path env_path(const char* name) {
-    const char* value = std::getenv(name);
-    return value ? std::filesystem::path(value) : std::filesystem::path();
 }
 
 // The request file is written by the harness: {"fault": "...", "at_project_sample": N,
@@ -290,17 +286,18 @@ std::size_t CaptureRing::drain(std::vector<std::uint8_t>& out) {
 // ── Processor ────────────────────────────────────────────────────────────
 
 GpuFaultContinuityProcessor::GpuFaultContinuityProcessor() {
-    run_dir_ = env_path("PULP_GPU_FAULT_RUN_DIR");
-    request_path_ = env_path("PULP_GPU_FAULT_REQUEST");
-    ir_path_ = env_path("PULP_GPU_FAULT_IR");
-    if (const char* nonce = std::getenv("PULP_GPU_FAULT_NONCE"))
-        nonce_ = nonce;
-    if (const char* provider = std::getenv("PULP_GPU_FAULT_PROVIDER"))
-        gpu_off_ = std::string(provider) == "staged";
+    // The environment (REAPER) or, for hosts that cannot pass it on, the
+    // rendezvous file (gpu_fault_rendezvous.hpp).
+    const RunConfig config = resolve_run_config();
+    run_dir_ = config.run_dir;
+    request_path_ = config.request;
+    ir_path_ = config.ir;
+    nonce_ = config.nonce;
+    config_source_ = config.source;
+    gpu_off_ = config.provider_staged;
     // Fixed here, before any callback, so a run never captures a single host
     // input sample before switching to the internal stimulus.
-    if (const char* input = std::getenv("PULP_GPU_FAULT_INPUT"))
-        internal_stimulus_.store(std::string(input) == "internal", std::memory_order_relaxed);
+    internal_stimulus_.store(config.internal_stimulus, std::memory_order_relaxed);
 }
 
 void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
@@ -310,19 +307,37 @@ void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
     if (harness_ || run_dir_.empty())
         return;
     const auto claim = run_dir_ / "claim";
-    const int fd = ::open(claim.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
+    // O_EXCL refuses an existing path, a symlink included.
+    const int fd = ::open(claim.c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0644);
     if (fd < 0)
         return;
-    const std::string pid = std::to_string(::getpid()) + "\n";
-    (void)::write(fd, pid.data(), pid.size());
+    // The claim records which process won and when; a receipt binds both to
+    // the host_process event below and to every `prepared` (WP-K).
+    HostProcess process = current_host_process();
+    process.claimed_unix_us = unix_now_us();
+    const std::string record = claim_record(process);
+    write_all(fd, record.data(), record.size());
     ::close(fd);
+    // Start the capture and the event log without following a planted link.
+    const int capture = open_nofollow(run_dir_ / "capture.bin", O_WRONLY | O_CREAT | O_TRUNC);
+    if (capture < 0)
+        return;
+    const int events = open_nofollow(run_dir_ / "events.jsonl", O_WRONLY | O_CREAT | O_TRUNC);
+    if (events < 0) {
+        ::close(capture);
+        return;
+    }
+    const std::uint32_t header[4] = {kCaptureVersion, sample_rate, kChannels, 0u};
+    write_all(capture, kCaptureMagic, 4);
+    write_all(capture, header, sizeof(header));
+    ::close(capture);
+    ::close(events);
     harness_ = true;
     ring_.reset(kRingBytes);
-    std::ofstream capture(run_dir_ / "capture.bin", std::ios::binary | std::ios::trunc);
-    const std::uint32_t header[4] = {kCaptureVersion, sample_rate, kChannels, 0u};
-    capture.write(kCaptureMagic, 4);
-    capture.write(reinterpret_cast<const char*>(header), sizeof(header));
-    std::ofstream(run_dir_ / "events.jsonl", std::ios::trunc);
+    RunConfig config;
+    config.source = config_source_;
+    config.nonce = nonce_;
+    emit(host_process_event(process, config));
     running_.store(true, std::memory_order_release);
     service_ = std::thread([this] { service_loop(); });
 }

@@ -147,14 +147,24 @@ struct HostFrameTick {
     /// The measured dt for this frame. EVERY time-integrating consumer this
     /// frame must be advanced with exactly this value.
     float dt = 0.0f;
-    /// True if the host should composite this frame.
+    /// True if the host should advance this frame (`advance_host_frame`). Whether
+    /// it then composites is `host_frame_composites`.
     bool should_render = false;
     /// True if the tree still wants continuous per-vsync frames (something is
     /// animating, or a render subscriber is live) — i.e. `should_render` would
     /// stay true next tick even without the host's own dirty flag. Hosts use
-    /// this to keep their continuous-frame/dirty-tracker state armed. Computed
-    /// once here so the tree walk happens exactly once per tick.
+    /// this to keep their vsync gate open so the FrameClock keeps ticking.
+    /// Computed once here so the tree walk happens exactly once per tick.
     bool continuous = false;
+    /// True if the tree paints something new every frame WITHOUT requesting a
+    /// repaint (`needs_continuous_frames`: an opted-in continuous view, a
+    /// running widget/CSS animation, a time-driven shader). A subset of
+    /// `continuous`: a live FrameClock subscriber alone (a source-bound meter,
+    /// a scalar binding) keeps the clock ticking but is NOT a reason to
+    /// composite — a subscriber that changes what it draws asks for a repaint,
+    /// so a silent meter costs a tick and no frame. Hosts re-arm their dirty
+    /// flag only from this, never from `continuous`.
+    bool animating = false;
     /// True if this frame was a resume (first frame or wake-from-idle).
     bool resumed = false;
 };
@@ -204,6 +214,16 @@ HostFrameTick begin_host_frame(View* root, FrameClock& clock, HostFramePump& pum
 /// so it already measures real time and must keep using ONE epoch with those
 /// events. Feeding it the host's presentation clock would mix epochs.
 void advance_host_frame(View* root, FrameClock& clock, float dt);
+
+/// Step 3 of a host tick, after `advance_host_frame`: does this frame
+/// composite? `damaged` is the host's dirty flag read AFTER the advance, so it
+/// carries every repaint requested this tick — by input, by an activity probe,
+/// or by a FrameClock subscriber whose content moved. A tick that advanced only
+/// because a subscriber is live, and that no subscriber dirtied, composites
+/// nothing: the surface already shows the right pixels.
+inline bool host_frame_composites(const HostFrameTick& tick, bool damaged) noexcept {
+    return damaged || tick.animating;
+}
 
 /// Advance the built-in widget animations and the CSS animation timeline for
 /// `view` and every descendant. Shared by all hosts so the set of animated

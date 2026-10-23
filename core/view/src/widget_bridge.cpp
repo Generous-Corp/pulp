@@ -5,6 +5,7 @@
 #include "widget_bridge/registrars.hpp"
 #include "widget_bridge/gpu_common.hpp"
 #include "widget_bridge/bridge_dispatch.hpp"
+#include "widget_bridge/layout_baselines.hpp"
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/motion.hpp>
@@ -80,244 +81,9 @@ bool subtree_contains_view(View& node, const View* target) {
 // Element.prototype._registerNativeEvent does for addEventListener
 // callers, but on the lower-level `on()` channel that @pulp/react and
 // other native bridges use directly.
-// MSVC caps a single string literal at 16380 bytes (C2026), and this preamble
-// grew past it, so it is stored in two parts and joined at the call site.
-// The ARM64 cross-compiler enforces the cap where the x64 host compiler does
-// not, so an over-long preamble breaks only the windows-arm64 build. The split
-// point is arbitrary and only has to avoid cutting a token; keep each part well
-// under the cap when adding to the preamble.
-static const char* kJSPreamblePart1 = R"(
-var __callbacks__ = {};
-var __nativeRegistered__ = {};
-var __pulpEventPropagation__ = {};
-var __pulpEventPropagationOrder__ = [];
-
-function __pulpPropagationKey__(eventName, args) {
-    var data = args && args.length ? args[0] : null;
-    var token = data && typeof data === 'object'
-        ? data.__pulpDispatchToken
-        : 0;
-    return (typeof token === 'number' && token > 0)
-        ? String(token) + ':' + eventName
-        : '';
-}
-
-function __pulpPropagationLevel__(result) {
-    var level = result && typeof result === 'object'
-        ? result.__pulpEventPropagation
-        : 0;
-    return level === 2 ? 2 : level === 1 ? 1 : 0;
-}
-
-function __pulpRememberPropagation__(key, level) {
-    if (!key || level <= 0) return;
-    if (!Object.prototype.hasOwnProperty.call(__pulpEventPropagation__, key)) {
-        __pulpEventPropagationOrder__.push(key);
-    }
-    if ((__pulpEventPropagation__[key] || 0) < level) {
-        __pulpEventPropagation__[key] = level;
-    }
-    // Native dispatch tokens are monotonic, so old entries can never affect a
-    // later delivery. Bound retained state for long-running editor sessions.
-    while (__pulpEventPropagationOrder__.length > 128) {
-        delete __pulpEventPropagation__[__pulpEventPropagationOrder__.shift()];
-    }
-}
-//
-// Fan out events targeting the synthetic '__global__' id into
-// window._listeners[eventName] — `window.addEventListener('keydown',
-// fn)` is the standard DOM API, but without this fan-out the native
-// keydown only fed __callbacks__['__global__:keydown'] (a per-id
-// channel nothing subscribes to). With it, Spectr-style global key
-// listeners just work.
-function __dispatchCallbackOnly__(id, eventName) {
-    var args = Array.prototype.slice.call(arguments, 2);
-    var propagationKey = __pulpPropagationKey__(eventName, args);
-    var priorLevel = propagationKey
-        ? (__pulpEventPropagation__[propagationKey] || 0)
-        : 0;
-    if (priorLevel > 0) return priorLevel;
-    var key = id + ':' + eventName;
-    var cb = __callbacks__[key];
-    // The React host keeps the current closure in its own registry so a
-    // retained DOM/materialized node can survive native subtree replacement.
-    // If native callback cleanup ran during that replacement, recover the
-    // live handler from the authoritative React registry instead of dropping
-    // the first semantic event delivered before listener replay.
-    if (!cb && typeof globalThis !== 'undefined'
-        && globalThis.__pulpReactEventCallbacks__ instanceof Map) {
-        cb = globalThis.__pulpReactEventCallbacks__.get(key);
-    }
-    var level = 0;
-    if (cb) {
-        // Keep handler exceptions inside the JS dispatch boundary. If a React
-        // handler throws out of evaluate(), it can unwind the C++ caller and
-        // kill requestAnimationFrame's self-rescheduling chain. Surface the
-        // error via __dispatchError__ if defined so handlers can throw without
-        // halting the frame loop.
-        try { level = __pulpPropagationLevel__(cb.apply(null, args)); }
-        catch (e) {
-            if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
-        }
-    }
-    __pulpRememberPropagation__(propagationKey, level);
-    return level;
-}
-function __dispatch__(id, eventName) {
-    var args = Array.prototype.slice.call(arguments, 2);
-    var callbackPropagation = __dispatchCallbackOnly__.apply(null, arguments);
-    if (id === '__global__' && typeof window !== 'undefined' && window._listeners) {
-        var list = window._listeners[eventName];
-        if (list && list.length) {
-            var ev = args && args.length ? args[0] : {};
-            if (ev && typeof ev === 'object') {
-                ev.type = eventName;
-                if (typeof ev.preventDefault !== 'function') ev.preventDefault = function() { this.defaultPrevented = true; };
-                if (typeof ev.stopPropagation !== 'function') ev.stopPropagation = function() {};
-            }
-            for (var i = 0; i < list.length; i++) {
-                try { list[i](ev); }
-                catch (e) {
-                    if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
-                }
-            }
-        }
-    }
-    // Fan out to document-level listeners. React click-outside patterns
-    // (`document.addEventListener('mousedown', onDoc)`) are the common
-    // close-the-popover idiom; the framework fires synthetic outside-click
-    // events on Esc / overlay dismiss through this path, so any React popover
-    // using the pattern closes without per-app wiring.
-    if (id === 'document' && typeof document !== 'undefined' && document.dispatchEvent) {
-        var devt = args && args.length ? args[0] : {};
-        if (devt && typeof devt === 'object') {
-            devt.type = eventName;
-            document.dispatchEvent(devt);
-        }
-    }
-    // For pointer/mouse/click events, also call dispatchEvent on the JS Element
-    // for `id`. This bypasses the single-slot __callbacks__[id:event] table
-    // that _registerNativeEvent can clobber when React-DOM calls
-    // element.addEventListener(...). Without this, native platform events fire
-    // the low-level on() callback but never re-enter the DOM bubble walk where
-    // React-DOM's delegated root listener lives.
-    if (typeof __nativeElements__ !== 'undefined') {
-        var el = __nativeElements__[id];
-        // Materialized-state upgrades may replace a native View subtree while
-        // retaining the corresponding live DOM nodes. The cleanup correctly
-        // retires stale callbacks, but older upgrade paths can temporarily
-        // drop the native-id map entry before the retained node is appended
-        // again. Recover by identity from the live document so semantic
-        // events such as `dismiss` are never lost during that bounded seam.
-        if (!el && typeof document !== 'undefined' && document.querySelectorAll) {
-            var liveNodes = document.querySelectorAll('*');
-            for (var ni = 0; ni < liveNodes.length; ++ni) {
-                if (liveNodes[ni] && liveNodes[ni]._id === id) {
-                    el = liveNodes[ni];
-                    __nativeElements__[id] = el;
-                    break;
-                }
-            }
-        }
-        if (typeof globalThis.__pulpDispatchHits__ === 'undefined') globalThis.__pulpDispatchHits__ = { byType: {}, missingElement: 0, dispatched: 0, rootListenersFired: 0, lastErr: null, total: 0 };
-        var stats = globalThis.__pulpDispatchHits__;
-        stats.total = (stats.total || 0) + 1;
-        if (el && el.dispatchEvent &&
-            /^(pointerdown|pointermove|pointerup|pointercancel|click|mousedown|mousemove|mouseup|wheel|dismiss)$/.test(eventName)) {
-            stats.byType[eventName] = (stats.byType[eventName] || 0) + 1;
-            try {
-                var data = args && args.length ? args[0] : {};
-                // Older wheel producers supplied positional (dx, dy) values.
-                // Normalize them here, at the sole DOM dispatch path, rather
-                // than dispatching once from the registered callback and once
-                // again from this generic element fan-out.
-                if (eventName === 'wheel' && (typeof data !== 'object' || data === null)) {
-                    data = { deltaX: data || 0, deltaY: (args && args.length > 1 ? args[1] : 0) || 0 };
-                }
-                var ev = (typeof _makeEvent === 'function')
-                    ? _makeEvent(eventName, el, data || {})
-                    : {
-                        type: eventName, target: el, currentTarget: el,
-                        bubbles: true, cancelable: true,
-                        clientX: (data && data.clientX) || 0,
-                        clientY: (data && data.clientY) || 0,
-                        button: (data && data.button) || 0,
-                        buttons: (data && data.buttons !== undefined) ? data.buttons
-                            : (eventName === 'pointerup' || eventName === 'mouseup') ? 0 : 1,
-                        pointerId: (data && data.pointerId) || 0,
-                        pointerType: (data && data.pointerType) || 'mouse',
-                        isPrimary: true,
-                        preventDefault: function () { this.defaultPrevented = true; },
-                        stopPropagation: function () { this._stopped = true; },
-                        stopImmediatePropagation: function () {
-                            this._stopped = true;
-                            this._stoppedImmediate = true;
-                        }
-                    };
-                // A direct @pulp/react handler runs before this web-compat
-                // target fan-out. stopPropagation still permits other target
-                // listeners; stopImmediatePropagation suppresses them too.
-                if (callbackPropagation === 1) ev._stopped = true;
-                else if (callbackPropagation === 2) {
-                    ev._stopped = true;
-                    ev._stoppedImmediate = true;
-                }
-                // Pre-dispatch instrumentation: confirm event reaches root.
-                var pathLen = 0;
-                var rootInPath = false;
-                var p = el;
-                while (p) { pathLen++; if (p._id === '__root__') rootInPath = true; p = p._parentElement; }
-                var rootListeners = (typeof __eventListeners__ !== 'undefined' && __eventListeners__['__root__'] && __eventListeners__['__root__'][eventName]) ? __eventListeners__['__root__'][eventName].length : 0;
-                stats.lastPathLen = pathLen;
-                stats.lastRootInPath = rootInPath;
-                stats.lastRootListeners = rootListeners;
-                // Verbose dispatch log is gated on __spectrLog being present.
-                if (eventName === 'pointerdown' || eventName === 'mousedown' || eventName === 'click') {
-                    if (typeof __spectrLog === 'function') {
-                        __spectrLog('[disp] ' + eventName + ' id=' + id + ' pathLen=' + pathLen + ' rootInPath=' + rootInPath + ' rootListeners=' + rootListeners);
-                    }
-                }
-                if (callbackPropagation !== 2) {
-                    el.dispatchEvent(ev);
-                    stats.dispatched = (stats.dispatched || 0) + 1;
-                }
-                var propagationKey = __pulpPropagationKey__(eventName, args);
-                var observedPropagation = callbackPropagation;
-                if (ev._stoppedImmediate) observedPropagation = 2;
-                else if (ev._stopped && observedPropagation < 1) observedPropagation = 1;
-                __pulpRememberPropagation__(propagationKey, observedPropagation);
-                // Fan the bubbling pointer event to document-level listeners.
-                // In a real DOM, document is the top of the bubble path, but
-                // here `document` is a separate object with its own listener
-                // map that the element bubble (_parentElement chain) never
-                // reaches. Code that does `ownerDocument.addEventListener(
-                // 'pointermove'/'pointerup', ...)` therefore never fires —
-                // notably Three.js OrbitControls, which on pointerdown MOVES its
-                // drag/pinch move+up listeners onto the document. Without this
-                // fan-out OrbitControls receives the initial pointerdown on the
-                // canvas but no subsequent moves, so touch orbit/pinch is inert.
-                // Only pointer events are fanned; the separately delivered
-                // mouse event stays element-only to preserve document-mouse
-                // semantics.
-                if (typeof document !== 'undefined' && document.dispatchEvent &&
-                    !ev._stopped &&
-                    /^(pointerdown|pointermove|pointerup|pointercancel)$/.test(eventName)) {
-                    document.dispatchEvent(ev);
-                }
-                // Pointer registrars emit the corresponding mouse event as a
-                // separate bridge dispatch so direct @pulp/react listeners and
-                // web-compat share one source. Do not synthesize it again here.
-            } catch (e) {
-                stats.lastErr = String(e && e.stack ? e.stack.slice(0, 200) : e);
-                if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
-            }
-        } else if (!el) {
-            stats.missingElement = (stats.missingElement || 0) + 1;
-        }
-    }
-}
-)";
-
+// The event-dispatch half of the preamble (__dispatch__ and its helpers) lives
+// in widget_bridge/bridge_dispatch.cpp beside the C++ that calls it, and is
+// joined with this half at the call site.
 static const char* kJSPreamblePart2 = R"(
 function __ensureNativeRegistered__(id, group) {
     var key = id + ':' + group;
@@ -569,8 +335,7 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // most as long as the bridge.
     repaint_callback_ = [&root] { root.request_repaint(); };
     register_api();
-    eval_or_throw(engine_, "kJSPreamble",
-                  std::string(kJSPreamblePart1) + kJSPreamblePart2);
+    eval_or_throw(engine_, "kJSPreamble", dispatch_prelude_js() + kJSPreamblePart2);
     eval_or_throw(engine_, "css_colors", preludes::css_colors);
     eval_or_throw(engine_, "css_parser", preludes::css_parser);
     eval_or_throw(engine_, "web_compat_element", preludes::web_compat_element);
@@ -656,6 +421,14 @@ WidgetBridge::~WidgetBridge() {
         callback_alive_->retire_dispatch();
     }
     release_all_param_gesture_routes();
+    // Saved starting layouts belong to widgets this bridge no longer reaches.
+    {
+        std::vector<std::uint64_t> ids;
+        ids.reserve(owned_widgets_.size());
+        for (const auto& owned : owned_widgets_)
+            ids.push_back(owned.instance_id);
+        forget_layout_baselines(ids);
+    }
     // quarantine_realm() already detached this bridge's callback. A replacement
     // realm may have installed its own callback on the shared root while this
     // bridge awaited owner teardown, so do not erase it here.
@@ -1378,6 +1151,7 @@ void WidgetBridge::register_api() {
         // Extended API: containers, layout, all widgets, themes, canvas.
         {std::nullopt,                     &BridgeRegistrars::register_widget_factory_container_api},
         {std::nullopt,                     &BridgeRegistrars::register_layout_flex_api},
+        {std::nullopt,                     &BridgeRegistrars::register_style_reset_api},
         {std::nullopt,                     &BridgeRegistrars::register_dom_api},
         {std::nullopt,                     &BridgeRegistrars::register_layout_query_api},
         {std::nullopt,                     &BridgeRegistrars::register_widget_style_interaction_api},

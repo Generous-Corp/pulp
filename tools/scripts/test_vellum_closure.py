@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import contextlib
 import io
+import os
 import subprocess
 import unittest
 import unittest.mock
@@ -20,7 +21,6 @@ from vellum_closure import (
     policy_include_forbidden,
     policy_target_forbidden,
     receipt_path_violations,
-    symbol_closure,
     unit_header_manifests,
     unit_public_headers,
 )
@@ -39,10 +39,6 @@ class ClosurePolicyTests(unittest.TestCase):
         self.assertTrue(policy_include_forbidden("pulp/content/registry.hpp"))
         self.assertFalse(policy_include_forbidden("pulp/canvas/canvas.hpp"))
         self.assertFalse(policy_include_forbidden("pulp/audiofx/effect.hpp"))
-
-    def test_symbol_policy_negative_control(self):
-        self.assertEqual(symbol_closure(["_ZN5pulp14ContentRegistryE", "_ZN5pulp6CanvasE"]), ["_ZN5pulp14ContentRegistryE"])
-        self.assertEqual(symbol_closure(["_ZN5pulp14ContentRegistryE"], ["_ZN5pulp14ContentRegistryE"]), [])
 
     def test_unknown_build_tree_input_is_rejected(self):
         manifest = {
@@ -78,13 +74,12 @@ class ClosurePolicyTests(unittest.TestCase):
             source.write_text("#include <pulp/audio/secret.hpp>\n", encoding="utf-8")
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root),
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root),
                 "files": ["core/platform/src/android/jni_motion.cpp"],
                 "targets": [],
-                "undefined_symbols": [],
             }), encoding="utf-8")
             args = Namespace(
-                manifest=[str(manifest)], allow=[], allow_include_path=[],
+                manifest=[str(manifest)], allow=[],
                 allow_include_edge=[("core/platform/src/android/jni_motion.cpp", "pulp/view/motion.hpp")],
                 allow_include_prefix=[], allow_root_prefix=[], report_only=False,
                 allowlist=None, generate=False, unit_manifest=None, target=None,
@@ -95,7 +90,7 @@ class ClosurePolicyTests(unittest.TestCase):
 
 def gate_args(manifest, allowlist=None):
     return Namespace(
-        manifest=[str(manifest)], allow=[], allow_include_path=[], allow_include_edge=[],
+        manifest=[str(manifest)], allow=[], allow_include_edge=[],
         allow_include_prefix=[], allow_root_prefix=[], report_only=False,
         allowlist=str(allowlist) if allowlist else None, generate=False, unit_manifest=None,
         target=None, source_root=None, build_dir=None,
@@ -117,7 +112,7 @@ class EdgeAllowlistTests(unittest.TestCase):
             root = Path(td)
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": [], "external_inputs": [], "undefined_symbols": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": [], "external_inputs": [],
                 "targets": [{"name": "pulp-view-native", "link_targets": ["pulp-audio"]}],
             }), encoding="utf-8")
             allowlist = root / "allowlist.json"
@@ -143,8 +138,8 @@ class ImportDirectiveTests(unittest.TestCase):
             source.write_text(f"{directive} <pulp/audio/buffer.hpp>\n", encoding="utf-8")
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": ["core/canvas/platform/mac/cg_canvas.mm"],
-                "targets": [], "undefined_symbols": [], "external_inputs": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": ["core/canvas/platform/mac/cg_canvas.mm"],
+                "targets": [], "external_inputs": [],
             }), encoding="utf-8")
             return run_gate(manifest)
 
@@ -355,7 +350,7 @@ class ClosureHostPathTests(unittest.TestCase):
             root = Path(td)
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": [], "targets": [], "undefined_symbols": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": [], "targets": [],
                 "external_inputs": [], "public_include_dirs": ["/Users/agent/Library/Caches/Pulp/fetchcontent-src/yoga-v3.2.1"],
             }), encoding="utf-8")
             rc, out = run_gate(manifest)
@@ -656,7 +651,7 @@ class SystemIdentityTests(unittest.TestCase):
             manifest = root / "manifest.json"
             dirs = [resolver.portable(p) for p in ("/usr/include/freetype2", "/usr/include/libpng16")]
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": [], "undefined_symbols": [], "external_inputs": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": [], "external_inputs": [],
                 "public_include_dirs": dirs, "targets": [{"name": "pulp-canvas", "link_targets": [], "include_dirs": dirs}],
             }), encoding="utf-8")
             rc, out = run_gate(manifest)
@@ -792,8 +787,8 @@ class ProducerAttributionTests(unittest.TestCase):
     def gate(self, files, generated):
         with tempfile.TemporaryDirectory() as td:
             manifest = Path(td) / "manifest.json"
-            manifest.write_text(json.dumps({"source_root": str(REPO_ROOT), "files": files, "targets": [],
-                                            "undefined_symbols": [], "external_inputs": [], "generated_inputs": generated}),
+            manifest.write_text(json.dumps({"schema": "pulp.vellum.closure.v1", "source_root": str(REPO_ROOT), "files": files, "targets": [],
+                                            "external_inputs": [], "generated_inputs": generated}),
                                 encoding="utf-8")
             return run_gate(manifest)
 
@@ -868,7 +863,7 @@ class MirroredLinkTests(unittest.TestCase):
                           "pulp-gpu-device", "?pulp-skia-chromium-raw-ptr-compat",
                           "pulp-canvas", "pulp-bundled-fonts", "?pulp-bundled-noto-color-emoji", "pulp-render",
                           "pulp-state", "pulp-view-core", "pulp-design-import",
-                          "pulp-view-script", "pulp-view-native", "pulp-jsx-runtime-materialized-contract",
+                          "pulp-view-script", "pulp-view-platform", "pulp-jsx-runtime-materialized-contract",
                           "pulp-jsx-runtime-materialized-emitter"])
 
     def test_duplicate_target_requires_an_explicit_alias(self):
@@ -962,12 +957,26 @@ class MirroredLinkTests(unittest.TestCase):
         planted = {"targets": [{"name": "pulp-canvas", "link_targets": ["pulp-timebase"]}]}
         self.assertEqual(unmirrored_link_violations(planted, mirrored, edges, set()), ["unmirrored Pulp target pulp-canvas -> pulp-timebase"])
 
-    def test_approved_view_audio_edges_are_exact_and_scoped(self):
-        entries = {e["id"]: e for e in load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")}
-        for name in ("pulp-timebase", "pulp-sample-bank-manifest"):
-            entry = next(e for e in entries.values() if e["match"] == f"pulp-view-native->{name}")
-            self.assertEqual((entry["kind"], entry["owner"], entry["approver"]), ("edge", "carve-p4", "team-lead 2026-10-13"))
-            self.assertTrue(entry["platforms"])
+    def test_view_platform_is_carried_by_the_audio_free_target(self):
+        # pulp-view-native is the Pulp-kept umbrella that adds the audio widgets;
+        # the view-platform unit carries pulp-view-platform, and no allowlist
+        # entry admits an audio edge from either.
+        from vellum_closure import unit_manifest_targets
+        self.assertEqual(unit_manifest_targets(self.UNITS, "view-platform"), ["pulp-view-platform"])
+        entries = load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")
+        self.assertEqual([e["id"] for e in entries if e["debt_id"] == "P4-view-audio"], [])
+        self.assertEqual([e["id"] for e in entries if e.get("match", "").startswith(("pulp-view-native->", "pulp-view-platform->"))], [])
+
+    def test_empty_allowlist_loads_and_malformed_entries_fail(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "a.json"
+            path.write_text(json.dumps({"schema": "pulp.vellum.closure.allowlist.v1", "entries": []}), encoding="utf-8")
+            self.assertEqual(load_allowlist(path), [])
+            for payload in ({"schema": "pulp.vellum.closure.allowlist.v1"},
+                            {"schema": "pulp.vellum.closure.allowlist.v1", "entries": {}}):
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, "entries must be a list"):
+                    load_allowlist(path)
 
     def test_raw_ptr_compat_is_a_linux_and_windows_target_below_every_skia_consumer(self):
         from vellum_closure import unit_layer_violations, unit_manifest_layout, unmirrored_link_violations
@@ -1066,7 +1075,7 @@ class PlatformScopedAllowlistTests(unittest.TestCase):
             root = Path(td)
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": [], "undefined_symbols": [], "external_inputs": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": [], "external_inputs": [],
                 "targets": [{"name": "pulp-view-native", "link_targets": [link] if link else []}],
                 "configure": gpu_configure(system=system),
             }), encoding="utf-8")
@@ -1095,7 +1104,7 @@ class GateScopeTests(unittest.TestCase):
     def test_cmake_closure_requires_the_unit_manifest(self):
         with tempfile.TemporaryDirectory() as td:
             manifest = Path(td) / "manifest.json"
-            manifest.write_text(json.dumps({"schema": "pulp.vellum.closure.v1", "source_root": td, "files": [], "external_inputs": [],
+            manifest.write_text(json.dumps({"schema": "pulp.vellum.closure.v1", "source_root": td, "build_dir": td, "files": [], "external_inputs": [],
                                             "targets": [{"name": "pulp-runtime", "link_targets": []}]}), encoding="utf-8")
             rc, out = run_gate(manifest)
             self.assertEqual(rc, 1)
@@ -1569,8 +1578,8 @@ class AllowlistGateTests(unittest.TestCase):
             root = Path(td)
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({
-                "source_root": str(root), "files": [], "targets": [],
-                "undefined_symbols": [], "external_inputs": [],
+                "schema": "pulp.vellum.closure.v1", "source_root": str(root), "files": [], "targets": [],
+                "external_inputs": [],
             }), encoding="utf-8")
             allowlist = root / "allowlist.json"
             allowlist.write_text(json.dumps({
@@ -1579,7 +1588,7 @@ class AllowlistGateTests(unittest.TestCase):
                              "kind": "root", "match": "core/nothing/"}],
             }), encoding="utf-8")
             args = Namespace(
-                manifest=[str(manifest)], allow=[], allow_include_path=[], allow_include_edge=[],
+                manifest=[str(manifest)], allow=[], allow_include_edge=[],
                 allow_include_prefix=[], allow_root_prefix=[], report_only=False,
                 allowlist=str(allowlist), generate=False, unit_manifest=None, target=None,
                 source_root=None, build_dir=None,
@@ -1647,6 +1656,179 @@ class UnitHeaderManifestTests(unittest.TestCase):
         parsed = unit_header_manifests(build)
         self.assertEqual(parsed["pulp-rt"][1], ["include/pulp/rt/used.hpp", "include/pulp/rt/result.hpp"])
         self.assertEqual(parsed["pulp-gpu"][1], [])
+
+
+class GateFailClosedTests(unittest.TestCase):
+    """Every gate branch that can pass by reading nothing must fail instead."""
+
+    def gate(self, data, allowlist=None, files=None, root=None):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            for rel, text in (files or {}).items():
+                (base / rel).parent.mkdir(parents=True, exist_ok=True)
+                (base / rel).write_text(text, encoding="utf-8")
+            payload = {"schema": "pulp.vellum.closure.v1", "source_root": str(root or base), "files": [], "targets": [],
+                       "missing_targets": [], "external_inputs": [], **data}
+            payload = {k: v for k, v in payload.items() if v is not ...}
+            manifest = base / "manifest.json"
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+            allowlist_path = None
+            if allowlist is not None:
+                allowlist_path = base / "allowlist.json"
+                allowlist_path.write_text(json.dumps({"schema": "pulp.vellum.closure.allowlist.v1", "entries": allowlist}),
+                                          encoding="utf-8")
+            return run_gate(manifest, allowlist_path)
+
+    def test_valid_empty_closure_passes(self):
+        rc, out = self.gate({})
+        self.assertEqual(rc, 0, out)
+
+    def test_schema_is_required(self):
+        for schema in (..., "garbage", "pulp.vellum.closure.v2"):
+            rc, out = self.gate({"schema": schema})
+            self.assertEqual(rc, 1, out)
+            self.assertIn("closure schema must be pulp.vellum.closure.v1", out)
+
+    def test_missing_source_root_fails(self):
+        for root in (..., "", "/nonexistent/vellum-closure-root"):
+            rc, out = self.gate({"source_root": root, "files": ["core/view/src/a.cpp"]})
+            self.assertEqual(rc, 1, out)
+            self.assertIn("closure source_root is not an existing directory", out)
+
+    def test_unreadable_listed_file_is_a_violation(self):
+        for rel in ("core/view/src/gone.cpp", "core/view/gone.cmake"):
+            rc, out = self.gate({"files": [rel]})
+            self.assertEqual(rc, 1, out)
+            self.assertIn(f"unreadable closure file {rel}", out)
+
+    def test_listed_file_is_scanned(self):
+        files = {"core/view/src/a.cpp": "#include <pulp/view/view.hpp>\n"}
+        rc, out = self.gate({"files": list(files)}, files=files)
+        self.assertEqual(rc, 0, out)
+        files = {"core/view/src/a.cpp": "#include <pulp/audio/engine.hpp>\n"}
+        rc, out = self.gate({"files": list(files)}, files=files)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("forbidden include core/view/src/a.cpp:1: pulp/audio/engine.hpp", out)
+
+    def test_forbidden_root_is_refused_without_a_readable_source_root(self):
+        rc, out = self.gate({"files": ["core/audio/src/engine.cpp"]}, root="/nonexistent/vellum-closure-root")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("forbidden closure root core/audio/src/engine.cpp", out)
+
+    def test_forbidden_root_is_refused_unless_allowlisted(self):
+        files = {"core/audio/src/engine.cpp": "int x;\n"}
+        rc, out = self.gate({"files": list(files)}, files=files)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("forbidden closure root core/audio/src/engine.cpp", out)
+        entry = {"id": "audio-root", "owner": "test", "debt_id": "t", "kind": "root", "match": "core/audio/src/engine.cpp"}
+        rc, out = self.gate({"files": list(files)}, allowlist=[entry], files=files)
+        self.assertEqual(rc, 0, out)
+
+    def test_missing_target_fails(self):
+        rc, out = self.gate({"missing_targets": ["pulp-canvas"]})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("missing target: pulp-canvas", out)
+
+    def test_undefined_symbols_are_not_silently_accepted(self):
+        rc, out = self.gate({"undefined_symbols": []})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("undefined_symbols is not graded by the closure gate", out)
+
+    def test_dot_source_root_is_this_checkout_from_any_cwd(self):
+        rel = "core/canvas/include/pulp/canvas/affine_transform.hpp"
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as td:
+            os.chdir(td)
+            try:
+                rc, out = self.gate({"source_root": ".", "files": [rel]})
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(rc, 0, out)
+
+    def test_allow_include_path_is_not_an_option(self):
+        proc = subprocess.run(["python3", str(Path(__file__).with_name("vellum_closure.py")), "gate", "--manifest", "m.json",
+                               "--allow-include-path", "core/"], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("--allow-include-path", proc.stderr)
+
+
+class ExportIntegrityTests(unittest.TestCase):
+    def repo(self, td):
+        repo = Path(td) / "repo"
+        repo.mkdir()
+        git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
+        git("init", "-q")
+        (repo / "a.txt").write_text("a\n", encoding="utf-8")
+        git("add", "a.txt")
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "a")
+        (repo / "untracked.txt").write_text("u\n", encoding="utf-8")
+        return repo, git("rev-parse", "HEAD")
+
+    def test_untracked_closure_file_is_an_export_error(self):
+        from vellum_closure import git_blob_rows
+        with tempfile.TemporaryDirectory() as td:
+            repo, head = self.repo(td)
+            self.assertEqual([r["path"] for r in git_blob_rows(repo, head, ["a.txt"])], ["a.txt"])
+            with self.assertRaisesRegex(SystemExit, "not a tracked file at .*: untracked.txt"):
+                git_blob_rows(repo, head, ["a.txt", "untracked.txt"])
+            self.assertEqual([r["path"] for r in git_blob_rows(repo, head, ["a.txt", "untracked.txt"], strict=False)], ["a.txt"])
+
+    def test_commit_map_must_come_from_the_rewrite(self):
+        from vellum_closure import export_commit_map
+        pulp_sha, mirror_sha = "1" * 40, "2" * 40
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "commit-map"
+            with self.assertRaisesRegex(SystemExit, "wrote no commit map"):
+                export_commit_map(path, pulp_sha, mirror_sha)
+            path.write_text(f"old new\n{pulp_sha} {'3' * 40}\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "does not map"):
+                export_commit_map(path, pulp_sha, mirror_sha)
+            path.write_text(f"old new\n{pulp_sha} {mirror_sha}\n", encoding="utf-8")
+            self.assertEqual(export_commit_map(path, pulp_sha, mirror_sha), path.read_bytes())
+
+    @unittest.skipUnless(shutil.which("git-filter-repo"), "git-filter-repo is not installed")
+    def test_filter_repo_commit_map_maps_the_exported_commit(self):
+        from vellum_closure import export_commit_map
+        with tempfile.TemporaryDirectory() as td:
+            repo, head = self.repo(td)
+            out = Path(td) / "out"
+            subprocess.run(["git", "clone", "-q", "--no-local", str(repo), str(out)], check=True)
+            git = lambda *a: subprocess.run(["git", "-C", str(out), *a], check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
+            git("update-ref", "refs/heads/export-source", head)
+            git("checkout", "-q", "--detach", "export-source")
+            subprocess.run(["git-filter-repo", "--force", "--path", "a.txt", "--path-rename", "a.txt:mirror/a.txt",
+                            "--refs", "export-source"], cwd=out, check=True, capture_output=True)
+            mirror_sha = git("rev-parse", "refs/heads/export-source")
+            self.assertNotEqual(mirror_sha, head)
+            export_commit_map(out / ".git" / "filter-repo" / "commit-map", head, mirror_sha)
+
+    def test_an_existing_export_is_never_overwritten(self):
+        from vellum_closure import claim_export_paths
+        with tempfile.TemporaryDirectory() as td:
+            receipt = Path(td) / "receipts" / "20261023-0123456789ab.json"
+            claim_export_paths([receipt])
+            receipt.parent.mkdir()
+            receipt.write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "an export with this id already exists"):
+                claim_export_paths([Path(td) / "closures" / "20261023-0123456789ab", receipt])
+
+
+class ClosureCtestWiringTests(unittest.TestCase):
+    def test_manifest_readers_require_the_boundary_fixture(self):
+        # DEPENDS only orders tests; a filtered run would grade a stale manifest.
+        import re
+        text = (REPO_ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        gpu_branch = text[text.index("add_test(NAME pulp.vellum-closure-boundary"):text.index("    else()\n        # Register the gate")]
+
+        def props(test):
+            match = re.search(r"set_tests_properties\(" + re.escape(test) + r" PROPERTIES(.*?)\)", gpu_branch, re.S)
+            self.assertIsNotNone(match, test)
+            return match.group(1)
+
+        self.assertIn("FIXTURES_SETUP pulp-vellum-closure-manifest", props("pulp.vellum-closure-boundary"))
+        for test in ("pulp.vellum-closure-gate", "pulp.vellum-view-core-pulp-kept"):
+            self.assertIn("FIXTURES_REQUIRED pulp-vellum-closure-manifest", props(test), test)
+            self.assertNotIn("DEPENDS", props(test), test)
 
 
 if __name__ == "__main__":

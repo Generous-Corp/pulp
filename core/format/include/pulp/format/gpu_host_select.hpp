@@ -39,7 +39,7 @@ struct GpuHostDecision {
 /// `[plugin-gpu-host]` debug-parity adapter log (mirrors `[gpu-host]`).
 ///
 /// GPU is wanted when the editor renders through the Skia/Dawn pipeline:
-///   - the framework scripted-UI path (`PULP_UI_SCRIPT_PATH`), detected via
+///   - the framework scripted-UI path (the plug-in's `UI_SCRIPT`), detected via
 ///     `ViewBridge::uses_script_ui()`, or
 ///   - a custom `Processor::create_view()` whose view set
 ///     `View::set_requires_gpu_host(true)` (e.g. ChainerSynth).

@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "event_id": "20261022-importer-next-20261021-reconcile",
+  "kind": "change",
+  "created_at": "2026-10-22T09:46:47Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "Canvas text keeps the hinting-aware painted baseline (equal to main's rounded baseline whenever hinting is on) and main's typographic_ascent/typographic_descent accessors, folding in this branch's equivalent font_ascent pair. No canvas API moves beyond that rename of a branch-only accessor and no authority boundary changes; the change serves Pulp's design-import parity work under the freeze contract's design-import inheritance exception, so it is Pulp-only.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-browser-capture-ir",
+    "ctest --test-dir build -R pulp-test-browser-capture-text-metrics",
+    "ctest --test-dir build -R pulp-test-browser-capture-tree",
+    "ctest --test-dir build -R pulp-test-canvas-fonts",
+    "ctest --test-dir build -R pulp-test-design-cpp-codegen-golden",
+    "ctest --test-dir build -R pulp-test-design-import-benchmark-contracts",
+    "ctest --test-dir build -R pulp-test-design-import-codegen-layout-text",
+    "ctest --test-dir build -R pulp-test-design-import-codegen-paint",
+    "ctest --test-dir build -R pulp-test-design-import-cpp-codegen",
+    "ctest --test-dir build -R pulp-test-design-import-native-common",
+    "ctest --test-dir build -R pulp-test-view-border-render",
+    "ctest --test-dir build -R pulp-test-widget-bridge-captured-lines",
+    "ctest --test-dir build -R pulp-test-widget-bridge-yoga",
+    "ctest --test-dir build -R pulp-test-widgets-label",
+    "node --test tools/import-design/browser_capture/capture.integration.test.mjs",
+    "node --test tools/import-design/browser_capture/capture_paint.integration.test.mjs",
+    "node --test tools/import-design/browser_capture/form_control_theme.test.mjs",
+    "node --test tools/import-design/browser_capture/platform_fonts.test.mjs",
+    "node --test tools/import-design/browser_capture/security.test.mjs",
+    "node --test tools/import-design/browser_capture/semantics.test.mjs",
+    "python3 test/test_importer_differential_lab.py",
+    "python3 tools/import-validation/test_diff_against_reference.py",
+    "python3 tools/import-validation/test_importer_differential_registration.py"
+  ],
+  "disposition": "pulp-only"
+}

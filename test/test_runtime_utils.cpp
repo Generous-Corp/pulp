@@ -403,6 +403,38 @@ TEST_CASE("TemporaryFile supports extensionless paths", "[runtime][temp_file]") 
     REQUIRE_FALSE(std::filesystem::exists(path));
 }
 
+#ifndef _WIN32
+TEST_CASE("TemporaryFile creates owner-only files", "[runtime][temp_file][permissions]") {
+    TemporaryFile tmp(".secret");
+    const auto perms = std::filesystem::status(tmp.path()).permissions();
+    REQUIRE((perms & std::filesystem::perms::owner_read) != std::filesystem::perms::none);
+    REQUIRE((perms & std::filesystem::perms::owner_write) != std::filesystem::perms::none);
+    REQUIRE((perms & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) ==
+            std::filesystem::perms::none);
+}
+#endif
+
+TEST_CASE("TemporaryFile exclusive creation leaves an existing file intact",
+          "[runtime][temp_file]") {
+    TemporaryFile existing(".keep");
+    {
+        std::ofstream out(existing.path(), std::ios::binary);
+        out << "payload";
+    }
+    REQUIRE(std::filesystem::file_size(existing.path()) == 7);
+
+    REQUIRE_FALSE(TemporaryFile::create_exclusive(existing.path()));
+    REQUIRE(std::filesystem::file_size(existing.path()) == 7);
+
+    // Positive control: a fresh path is created.
+    const auto fresh = existing.path().string() + ".fresh";
+    REQUIRE_FALSE(std::filesystem::exists(fresh));
+    REQUIRE(TemporaryFile::create_exclusive(fresh));
+    REQUIRE(std::filesystem::exists(fresh));
+    REQUIRE(std::filesystem::file_size(fresh) == 0);
+    std::filesystem::remove(fresh);
+}
+
 TEST_CASE("TemporaryFile treats separator characters as extension text", "[runtime][temp_file]") {
     TemporaryFile tmp("nested/name\\raw");
 

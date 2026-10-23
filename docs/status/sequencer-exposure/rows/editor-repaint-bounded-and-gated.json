@@ -1,0 +1,56 @@
+{
+  "id": "editor-repaint-bounded-and-gated",
+  "title": "Editor meters and AutoUi readouts repaint only what changed",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "editor-repaint-bounded-and-gated-20261022",
+  "owned_paths": [
+    "core/view/audio/include/pulp/view/audio_widgets.hpp",
+    "core/view/src/auto_ui.cpp",
+    "test/test_auto_ui.cpp",
+    "docs/status/sequencer-exposure/rows/editor-repaint-bounded-and-gated.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/view/audio/include/pulp/view/audio_widgets.hpp",
+      "needles": [
+        "void on_meter_snapshot_changed() override {}"
+      ]
+    },
+    {
+      "path": "core/view/src/auto_ui.cpp",
+      "needles": [
+        "value->flex().preferred_width = kTileWidth;",
+        "value->set_text_align(LabelAlign::center);"
+      ]
+    },
+    {
+      "path": "test/test_auto_ui.cpp",
+      "needles": [
+        "AutoUi value rows repaint their own box when a value changes"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No SDK type or call is added for musicians or plug-in authors to use; Meter overrides an existing View hook so its own ballistics keep owning its invalidation, and AutoUi's value row keeps its text and position."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline command is added or altered; the change is when an editor repaints."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation is added, removed or changed."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No product control, grant or policy projection is created; parameter values, automation and gestures are unchanged."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time authoring capability is added or altered."
+    }
+  }
+}

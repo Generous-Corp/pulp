@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.1009.0
+    VERSION 1.0.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -620,7 +620,12 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --build-dir "${CMAKE_BINARY_DIR}"
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
                 --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
+        # The boundary test writes vellum-closure.json. The gate and the
+        # Pulp-kept check grade that file, so they require it as a fixture:
+        # DEPENDS only orders tests, and a filtered run would grade whatever
+        # manifest an earlier configure left behind.
         set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+            FIXTURES_SETUP pulp-vellum-closure-manifest
             LABELS "pr")
         add_test(NAME pulp.vellum-closure-gate
             COMMAND "${Python3_EXECUTABLE}"
@@ -633,7 +638,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --build-dir "${CMAKE_BINARY_DIR}"
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json")
         set_tests_properties(pulp.vellum-closure-gate PROPERTIES
-            DEPENDS pulp.vellum-closure-boundary
+            FIXTURES_REQUIRED pulp-vellum-closure-manifest
             LABELS "pr")
         add_test(NAME pulp.vellum-view-core-pulp-kept
             COMMAND "${Python3_EXECUTABLE}"
@@ -642,7 +647,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
                 --source-root "${CMAKE_CURRENT_SOURCE_DIR}")
         set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
-            DEPENDS pulp.vellum-closure-boundary
+            FIXTURES_REQUIRED pulp-vellum-closure-manifest
             LABELS "pr")
         # The units exported so far, and render, hold no forbidden mirror
         # edge in any file, comments included; export refuses one.
@@ -718,7 +723,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     add_test(NAME pulp.vellum-closure-external-input-negative
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/confirm_failure.sh"
             --file "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json"
-            --break "perl -0pi -e 's/https:\\/\\/github.com\\/danielraffel\\/choc.git/build-tree/; s/df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60/unresolved/'"
+            --break "perl -0pi -e 's/https:\\/\\/github.com\\/danielraffel\\/choc.git/build-tree/; s/b586f33d1c9e8bee98c2b420a5b20bf525c3c7be/unresolved/'"
             --no-build
             --test "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure.py gate --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_closure_external_input_fixture.json")
     set_tests_properties(pulp.vellum-closure-external-input-negative PROPERTIES
@@ -873,6 +878,7 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
     add_subdirectory(test/fixtures/data_display_editor)
+    add_subdirectory(test/fixtures/ui_script_plugin)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
