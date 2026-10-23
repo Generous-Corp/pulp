@@ -7,8 +7,10 @@
 // capabilities (the untrusted posture), caps the realm's heap where the
 // backend can enforce one, and arms a watchdog that interrupts the realm after
 // a short deadline so a `while (true)` is a rejected script rather than a
-// libFuzzer timeout report. Exceptions out of the bridge are the documented
-// failure path for a bad script and are not findings.
+// libFuzzer timeout report. The bridge reports a bad script as a
+// std::runtime_error (its documented failure path), which is not a finding;
+// any other exception, bad_alloc and logic errors included, propagates so
+// libFuzzer reports it.
 
 #include <pulp/state/store.hpp>
 #include <pulp/view/js_engine.hpp>
@@ -21,8 +23,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <typeinfo>
 
 namespace {
 
@@ -51,7 +55,11 @@ template <typename Body> void run_with_deadline(pulp::view::ScriptEngine& engine
 
     try {
         body();
-    } catch (...) {
+    } catch (const std::runtime_error& error) {
+        // Exactly the bridge's script-error type; a derived exception is not
+        // a rejected script and is rethrown.
+        if (typeid(error) != typeid(std::runtime_error))
+            throw;
     }
 
     {
