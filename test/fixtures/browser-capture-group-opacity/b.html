@@ -1,0 +1,42 @@
+<!doctype html>
+<style>
+  html, body { margin: 0; background: #000; }
+  #panel { position: relative; width: 400px; height: 200px; overflow: hidden;
+           background: #000; font: 700 30px/1 sans-serif; }
+  /* Three groups at opacity .5 over black. Every fill is opaque and flat, so
+     each region's expected colour is one value Chromium computed. */
+  .g { position: absolute; top: 15px; width: 110px; height: 110px; opacity: .5; }
+  #g1 { left: 10px; } #g2 { left: 145px; } #g3 { left: 280px; }
+  .sq { position: absolute; width: 40px; height: 40px; }
+  /* (i) two children that do not overlap: group and per-child alpha agree. */
+  #a { left: 10px; top: 10px; background: rgb(200, 200, 200); }
+  #b { left: 60px; top: 60px; background: rgb(0, 200, 255); }
+  /* (ii) a bordered button whose chip and label overlap its own fill. */
+  .btn { position: absolute; left: 5px; top: 5px; width: 100px; height: 100px;
+         box-sizing: border-box; background: rgb(200, 200, 200);
+         border: 4px solid rgb(255, 255, 255); color: rgb(255, 40, 40); }
+  .chip { left: 25px; top: 46px; width: 42px; height: 42px; background: rgb(255, 40, 40); }
+  .label { position: absolute; left: 10px; top: 8px; }
+  /* (iii) a group nested in a group: the inner pair composites at .5 of .5. */
+  .inner { position: absolute; inset: 0; opacity: .5; }
+  /* A canvas that Chromium paints after the in-flow band overlapping it. A
+     nested tree draws the canvas before that band, so the panel lowers flat. */
+  #bottom { position: absolute; left: 0; top: 140px; width: 400px; }
+  #pa { height: 60px; background: rgb(32, 32, 32); }
+  #cv { position: relative; display: block; }
+  #pb { height: 20px; margin-top: -40px; background: rgb(64, 64, 64); }
+</style>
+<div id="panel">
+<div class="g" id="g1"><div class="sq" id="a"></div><div class="sq" id="b"></div></div>
+<div class="g" id="g2"><div class="btn"><div class="sq chip"></div><span class="label">Ag</span></div></div>
+<div class="g" id="g3"><div class="inner"><div class="btn"><div class="sq chip"></div><span class="label">Ag</span></div></div></div>
+<div id="bottom">
+  <div id="pa"><canvas id="cv" width="300" height="40"></canvas></div>
+  <div id="pb"></div>
+</div>
+</div>
+<script>
+  const ctx = document.getElementById("cv").getContext("2d");
+  ctx.fillStyle = "rgb(240, 200, 0)";
+  ctx.fillRect(0, 0, 300, 40);
+</script>

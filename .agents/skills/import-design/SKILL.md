@@ -634,6 +634,20 @@ knowing before you touch that file:
   hierarchy reports `overlapping_reorders > 0`; the count that forced it is
   recorded as `native_tree_flattened_overlapping_reorders`. Always flattening
   on a canvas cost static canvas panels their sections for no fidelity gain.
+- **The flat list still nests at compositing groups, and must not multiply
+  alpha instead.** An `opacity < 1`, `mix-blend-mode`, `filter`,
+  `backdrop-filter` or mask root keeps its descendants as children so the
+  View composites them as one layer; hung off the root they paint at full
+  strength beside an empty translucent box (Spectr's dimmed captions and
+  disabled ▸A/▸B came out 2.3-3.6x too bright). Pushing the group's alpha
+  into each descendant is only right where they do not overlap: a chip over
+  its button's fill comes out `f/4` levels lighter (50 for a 200 fill).
+  `native_tree_isolating_groups_nested` counts kept groups;
+  `native_tree_isolating_groups_refused` counts groups left flat, each with
+  `isolating_group_refused` (`interleaved-paint-order`,
+  `descendant-ink-outside-group` because the View's layer is bounded by the
+  root's box, `descendant-escapes-group-clip`, `transform`). A refused group
+  is still wrong on screen; the reason says what to fix.
 - **A canvas snapshot is a VIEWPORT PLANE, not an element raster.** Capture
   composites the canvas bitmap into its content box on a transparent,
   capture-sized PNG. Native lowering keeps the canvas as a box (its border and
