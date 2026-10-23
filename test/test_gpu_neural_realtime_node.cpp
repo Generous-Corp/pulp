@@ -20,12 +20,15 @@
 #include <pulp/gpu_audio/gpu_neural_realtime_node.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -1158,5 +1161,121 @@ TEST_CASE("an invalid callback is counted, not latched, on the CPU-only path",
         CHECK(status.provider_state == GpuAudioProviderState::Ready);
         CHECK(validated(rig.transport.status_snapshot()).provider_state ==
               GpuAudioProviderState::Ready);
+    }
+}
+
+namespace {
+// A session with GpuWaveNetSession's surface and no GPU: each block returns
+// its input. `Outcome` picks what create() reports.
+template <GpuWaveNetSessionError Outcome, bool WithSession> struct FakeSession {
+    struct CreateResult {
+        std::unique_ptr<FakeSession> session;
+        GpuWaveNetSessionError error = GpuWaveNetSessionError::None;
+        explicit operator bool() const noexcept {
+            return session != nullptr && error == GpuWaveNetSessionError::None;
+        }
+    };
+    static inline int created = 0, released = 0;
+    static CreateResult create(const GpuWaveNetSession::Config&) {
+        ++created;
+        return {WithSession ? std::make_unique<FakeSession>() : nullptr, Outcome};
+    }
+    std::array<float, 4096> held{};
+    std::optional<std::uint64_t> pending;
+    bool submit_block(std::span<const float> input, std::uint64_t sequence) noexcept {
+        if (pending)
+            return false;
+        std::copy(input.begin(), input.end(), held.begin());
+        pending = sequence;
+        return true;
+    }
+    std::size_t service(std::uint64_t) noexcept {
+        return 0;
+    }
+    std::size_t service_until(std::uint64_t) noexcept {
+        return 0;
+    }
+    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept {
+        if (!pending)
+            return std::nullopt;
+        std::copy_n(held.begin(), output.size(), output.begin());
+        const GpuWaveNetBlockResult result{.sequence = *pending,
+                                           .status = GpuWaveNetBlockStatus::GpuDelivered};
+        pending.reset();
+        return result;
+    }
+    bool release() noexcept {
+        ++released;
+        return true;
+    }
+    bool device_lost() const noexcept {
+        return false;
+    }
+};
+using CreatedSession = FakeSession<GpuWaveNetSessionError::None, true>;
+using PartialSession = FakeSession<GpuWaveNetSessionError::PreparationFailed, true>;
+using MissingSession = FakeSession<GpuWaveNetSessionError::ProviderUnavailable, false>;
+
+template <class Session> std::unique_ptr<detail::WaveNetStreamingBackend> session_backend() {
+    static const WaveNetShape shape;
+    return std::make_unique<detail::WaveNetStreamingBackend>(
+        detail::WaveNetStreamingBackend::Config{.session = shape.session(kBlock, 48000),
+                                                .channels = kChannels},
+        detail::WaveNetStreamingBackend::ChannelFactory{},
+        &detail::create_session_channel<Session>);
+}
+} // namespace
+
+/// A WaveNet node over a substituted session creator, prepared.
+template <class Session> struct SessionNode {
+    FamilyFixture fixture{NeuralFamily::WaveNet, kChannels, kBlock};
+    std::unique_ptr<GpuNeuralRealtimeNode> node;
+    bool prepared = false;
+    SessionNode() {
+        Session::created = Session::released = 0;
+        auto request = fixture.request();
+        request.backend = session_backend<Session>();
+        auto build = detail::make_neural_model(std::move(request));
+        REQUIRE(build);
+        node = std::make_unique<GpuNeuralRealtimeNode>(
+            GpuNeuralRealtimeNode::Config{.family = NeuralFamily::WaveNet,
+                                          .model = build.model,
+                                          .channels = kChannels,
+                                          .lead_blocks = kLead,
+                                          .capacity = kLead + 3});
+        prepared = node->prepare();
+    }
+};
+
+TEST_CASE("a WaveNet node prepares its GPU backend when the session is created",
+          "[gpu_audio][neural][wavenet-session]") {
+    SECTION("a created session is adopted and the node runs the GPU path") {
+        SessionNode<CreatedSession> rig;
+        REQUIRE(rig.prepared);
+        CHECK(CreatedSession::created == static_cast<int>(kChannels));
+        CHECK(rig.node->gpu_kernel_available());
+        const auto status = rig.node->status_snapshot();
+        CHECK(validate_gpu_audio_status(status).accepted());
+        CHECK(status.gpu_kernel_available);
+        CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+        CHECK(status.provider_state != GpuAudioProviderState::Unavailable);
+        REQUIRE(rig.node->release());
+        CHECK(CreatedSession::released == static_cast<int>(kChannels));
+    }
+    SECTION("a session created with an error is refused, then released") {
+        SessionNode<PartialSession> rig;
+        // The node still prepares, on its CPU model, and says why.
+        REQUIRE(rig.prepared);
+        CHECK_FALSE(rig.node->gpu_kernel_available());
+        CHECK(rig.node->status_snapshot().recovery_reason ==
+              GpuAudioRecoveryReason::ProviderFailure);
+        CHECK(PartialSession::created == 1);
+        CHECK(PartialSession::released == 1);
+    }
+    SECTION("no session at all is refused") {
+        SessionNode<MissingSession> rig;
+        REQUIRE(rig.prepared);
+        CHECK_FALSE(rig.node->gpu_kernel_available());
+        CHECK(MissingSession::created == 1);
     }
 }

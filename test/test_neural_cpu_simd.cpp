@@ -9,6 +9,9 @@
 #include "detail/tcn_cpu_adapter.hpp"
 #include "harness/scoped_rt_process_probe.hpp"
 
+#include <pulp/gpu_audio/gpu_audio_transport.hpp>
+#include <pulp/gpu_audio/gpu_neural_model.hpp>
+#include <pulp/gpu_audio/gpu_neural_realtime_node.hpp>
 #include <pulp/gpu_audio/gpu_wavenet.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 
@@ -488,6 +491,122 @@ TEST_CASE("NAM SIMD shadow matches the GPU WaveNet session within its parity mar
         CHECK(gpu_vs_shadow <= kReferenceParity);
         CHECK(gpu_vs_reference <= kReferenceParity);
     }
+}
+
+// The public WaveNet node on a real provider: when the session can be created
+// on this host, the node must prepare its GPU path, report it, and deliver GPU
+// blocks that null against the CPU model within the parity margin.
+TEST_CASE("a public WaveNet node runs its GPU path when the provider is available",
+          "[gpu_audio][neural][nam][gpu]") {
+    using namespace pulp::gpu_audio;
+    constexpr std::uint32_t kChannels = 2, kBlock = 64, kLead = 4, kBlocks = 400;
+    const auto path = fixture_path();
+    auto descriptor_source = load_nam(path, NamCpuKernel::Reference);
+    std::vector<GpuWaveNetLayerDescriptor> layers;
+    std::vector<std::vector<std::uint32_t>> dilations;
+    std::vector<float> weights;
+    GpuWaveNetDescriptor descriptor;
+    REQUIRE(descriptor_source->make_gpu_wavenet_descriptor(kBlock, descriptor, layers, dilations,
+                                                           weights));
+    const GpuWaveNetSession::Config session{
+        .descriptor = descriptor, .weights = weights, .slots = 4};
+    {
+        auto probe = GpuWaveNetSession::create(session);
+        if (!probe)
+            SKIP("GPU WaveNet provider unavailable (error=" << static_cast<int>(probe.error)
+                                                            << ")");
+        REQUIRE(probe.session->release());
+    }
+    std::array<std::unique_ptr<NamTcnArtifact>, kChannels> shadows, oracles;
+    std::array<GpuNeuralCpuKernel, kChannels> kernels{};
+    for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
+        shadows[ch] = load_nam(path, NamCpuKernel::BlockSimd);
+        oracles[ch] = load_nam(path, NamCpuKernel::Reference);
+        kernels[ch] = {shadows[ch].get(),
+                       [](void* state) noexcept {
+                           static_cast<NamTcnArtifact*>(state)->reset();
+                           return true;
+                       },
+                       [](void* state, const float* in, float* out, std::uint32_t n) noexcept {
+                           static_cast<NamTcnArtifact*>(state)->process(in, out, n);
+                       },
+                       [](void* state) noexcept { static_cast<NamTcnArtifact*>(state)->reset(); }};
+    }
+    GpuNeuralModelRequest request;
+    request.family = NeuralFamily::WaveNet;
+    request.manifest = {.model_id = "fixture.example",
+                        .architecture = "nam.wavenet",
+                        .model_version = "1",
+                        .artifact_id = "example.nam",
+                        .artifact_sha256 =
+                            "66bda2b379289eff079c0755588bc9a92760654d9cc9af1b97cf30d0e92b167d",
+                        .license = "MIT",
+                        .runtime = "pulp.nam.v1",
+                        .artifact_size_bytes = 1024,
+                        .sample_rate_hz = 48000,
+                        .redistributable = true};
+    request.block_size = kBlock;
+    request.channel_kernels = kernels;
+    request.wavenet_gpu = &session;
+    auto model = make_gpu_neural_model(request);
+    REQUIRE(model);
+    GpuNeuralRealtimeNode node({.family = NeuralFamily::WaveNet,
+                                .model = model.model,
+                                .channels = kChannels,
+                                .lead_blocks = kLead,
+                                .capacity = kLead + 4,
+                                .shadow_policy = GpuNeuralRealtimeNode::ShadowPolicy::Inline});
+    REQUIRE(node.prepare());
+    // The session was created here, so the node must be on the GPU.
+    REQUIRE(node.gpu_kernel_available());
+    auto status = node.status_snapshot();
+    CHECK(validate_gpu_audio_status(status).accepted());
+    CHECK(status.provider == GpuAudioProvider::Dawn);
+    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {.ring_blocks = kLead + 2}));
+    const auto x = stimulus(kBlocks * kBlock, 211, 4096);
+    std::array<std::vector<float>, kChannels> out;
+    std::array<float, kBlock> in_block{};
+    std::array<std::array<float, kBlock>, kChannels> out_block{};
+    for (std::uint32_t b = 0; b < kBlocks; ++b) {
+        std::copy_n(x.begin() + static_cast<std::ptrdiff_t>(b) * kBlock, kBlock, in_block.begin());
+        std::array<const float*, kChannels> ins{in_block.data(), in_block.data()};
+        std::array<float*, kChannels> outs{out_block[0].data(), out_block[1].data()};
+        pulp::audio::BufferView<const float> input(ins.data(), kChannels, kBlock);
+        pulp::audio::BufferView<float> output(outs.data(), kChannels, kBlock);
+        transport.process(input, output, kBlock);
+        for (std::uint32_t ch = 0; ch < kChannels; ++ch)
+            out[ch].insert(out[ch].end(), out_block[ch].begin(), out_block[ch].end());
+        // Give the provider a real chance at every slot before the next callback.
+        for (int i = 0; i < 20; ++i) {
+            transport.pump();
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+    }
+    const auto delivery = transport.delivery_snapshot();
+    status = node.status_snapshot();
+    std::printf("[gpu-node] gpu_blocks=%llu fallback_blocks=%llu missed=%llu\n",
+                static_cast<unsigned long long>(delivery.gpu_blocks),
+                static_cast<unsigned long long>(status.fallback_blocks),
+                static_cast<unsigned long long>(status.missed_blocks));
+    CHECK(delivery.gpu_blocks >= kBlocks / 2);
+    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    // Every emitted block, GPU or shadow, nulls against the model delayed by
+    // the lead.
+    const std::size_t delay = std::size_t{kLead} * kBlock;
+    for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
+        std::vector<float> expected(out[ch].size(), 0.0f), reference(out[ch].size() - delay);
+        oracles[ch]->process(x.data(), reference.data(),
+                             static_cast<std::uint32_t>(reference.size()));
+        std::copy(reference.begin(), reference.end(), expected.begin() + delay);
+        CHECK(max_abs_diff(out[ch], expected) <= kReferenceParity);
+    }
+    transport.release();
+    REQUIRE(node.release());
 }
 #endif
 

@@ -6,33 +6,6 @@
 namespace pulp::gpu_audio::detail {
 namespace {
 
-class SessionChannel final : public WaveNetRealtimeChannel {
-  public:
-    explicit SessionChannel(std::unique_ptr<GpuWaveNetSession> session)
-        : session_(std::move(session)) {}
-    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
-        return session_->submit_block(input, sequence);
-    }
-    void service(std::uint64_t now) noexcept override {
-        session_->service(now);
-    }
-    void service_until(std::uint64_t, std::uint64_t deadline) noexcept override {
-        session_->service_until(deadline);
-    }
-    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
-        return session_->receive(output);
-    }
-    bool release() noexcept override {
-        return session_->release();
-    }
-    bool lost() const noexcept override {
-        return session_->device_lost();
-    }
-
-  private:
-    std::unique_ptr<GpuWaveNetSession> session_;
-};
-
 std::uint64_t now_ns() noexcept {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                           std::chrono::steady_clock::now().time_since_epoch())
@@ -41,8 +14,11 @@ std::uint64_t now_ns() noexcept {
 
 } // namespace
 
-WaveNetStreamingBackend::WaveNetStreamingBackend(const Config& config, ChannelFactory factory)
-    : config_(config), factory_(std::move(factory)), production_(!factory_),
+WaveNetStreamingBackend::WaveNetStreamingBackend(const Config& config, ChannelFactory factory,
+                                                 SessionCreator creator)
+    : config_(config), factory_(std::move(factory)),
+      creator_(creator != nullptr ? creator : &create_session_channel<GpuWaveNetSession>),
+      production_(!factory_ && creator == nullptr),
       layers_(config.session.descriptor.layers.begin(), config.session.descriptor.layers.end()),
       weights_(config.session.weights.begin(), config.session.weights.end()) {
     dilations_.reserve(layers_.size());
@@ -76,13 +52,7 @@ bool WaveNetStreamingBackend::prepare(const StreamingPrepareContext& context) no
             if (factory_) {
                 channel = factory_(ch);
             } else {
-                auto result = GpuWaveNetSession::create(c.session);
-                // Retain a partially prepared session so release() can retry
-                // its physical drain.
-                if (result.session)
-                    channels_.push_back(
-                        std::make_unique<SessionChannel>(std::move(result.session)));
-                if (!result) {
+                if (!creator_(c.session, channels_)) {
                     (void)release();
                     return false;
                 }
