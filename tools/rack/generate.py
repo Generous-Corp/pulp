@@ -621,10 +621,18 @@ def _signal_platform_link_args() -> list[str]:
 
 
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+# The explicit, logged way to run the gate without sandbox-exec.
+UNSANDBOXED_GATE_OPT_OUT = "FORGE_UNSANDBOXED_GATE"
 
 # Variables the gate process keeps. Everything else in the generator's
 # environment -- API keys, tokens, the user's HOME -- is dropped.
 GATE_ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR")
+
+
+def _real_home() -> str:
+    """The account's home directory, whatever HOME says."""
+    import pwd
+    return os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
 
 
 def _sbpl_string(path: str) -> str:
@@ -638,12 +646,14 @@ def gate_launch(exe: str, scratch: str):
     process() execute natively before anyone has looked at the code. So it
     runs with a scrubbed environment (HOME is the scratch directory, no keys
     or tokens), and on macOS under sandbox-exec with no network, no process
-    spawning and file writes confined to the scratch directory. It still reads
-    whatever the user can read -- the Rack SDK and its own objects live all
-    over -- so this bounds what injected code can do or send, not what it sees.
+    spawning, writes confined to the scratch directory, and reads under the
+    home directory allowed only where it must (scratch, the Rack SDK, this
+    toolchain), so injected code cannot read the person's files and print
+    them into the output that feeds the next prompt.
 
     sandbox-exec is deprecated but present on every supported macOS. Where it
-    is missing the gate runs unsandboxed, as before, and says so on stderr.
+    is missing the gate refuses (BehaviourGateUnavailable) unless
+    FORGE_UNSANDBOXED_GATE=1 opts out, which is logged.
     DYLD_* is stripped when a protected binary like sandbox-exec is launched,
     so the library path is set by /usr/bin/env inside the sandbox instead.
     """
@@ -651,9 +661,17 @@ def gate_launch(exe: str, scratch: str):
     env = {k: os.environ[k] for k in GATE_ENV_KEEP if k in os.environ}
     env["HOME"] = scratch
     if sys.platform != "darwin" or not os.path.exists(SANDBOX_EXEC):
-        if sys.platform == "darwin":
-            print("  note: sandbox-exec is unavailable; the behaviour gate "
-                  "runs unsandboxed", file=sys.stderr)
+        # FAIL CLOSED. Model-written code does not run unfenced by accident;
+        # an operator who means it says so, and the run says it loudly.
+        if os.environ.get(UNSANDBOXED_GATE_OPT_OUT) != "1":
+            raise BehaviourGateUnavailable(
+                "the behavioural gate runs model-written code and needs "
+                f"{SANDBOX_EXEC} to fence it, which is not available here. "
+                f"Set {UNSANDBOXED_GATE_OPT_OUT}=1 to run it unsandboxed "
+                "anyway.")
+        print(f"  WARNING: {UNSANDBOXED_GATE_OPT_OUT}=1: the behaviour gate "
+              "runs model-written code UNSANDBOXED, with this user's file "
+              "and network access", file=sys.stderr)
         env["DYLD_LIBRARY_PATH"] = SDK
         return [exe], env
     profile = "\n".join([
@@ -665,6 +683,15 @@ def gate_launch(exe: str, scratch: str):
         f"(allow process-exec (literal \"/usr/bin/env\") (literal {_sbpl_string(os.path.realpath(exe))}))",
         "(deny file-write*)",
         f"(allow file-write* (subpath {_sbpl_string(scratch)}) (literal \"/dev/null\") (literal \"/dev/stdout\") (literal \"/dev/stderr\") (literal \"/dev/tty\"))",
+        # Nothing under the person's home is readable except what the gate
+        # needs: its scratch directory, the Rack SDK and this toolchain (the
+        # pack lives inside it). The gate's output goes back into the next
+        # prompt, so a readable ~/.ssh or secrets store would be one print()
+        # away from the model. System locations stay readable for dyld.
+        f"(deny file-read* (subpath {_sbpl_string(_real_home())}))",
+        "(allow file-read* " + " ".join(
+            f"(subpath {_sbpl_string(p)})"
+            for p in (scratch, os.path.realpath(SDK), os.path.realpath(ROOT))) + ")",
     ])
     return ([SANDBOX_EXEC, "-p", profile, "/usr/bin/env",
              "DYLD_LIBRARY_PATH=" + SDK, os.path.realpath(exe)], env)

@@ -7,6 +7,8 @@ they need clang and (on macOS) sandbox-exec, but no Rack install.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import shutil
 import subprocess
@@ -36,6 +38,7 @@ int main(int argc, char** argv) {
         return connect(s, (sockaddr*)&a, sizeof a) == 0 ? 0 : 3;
     }
     if (!strcmp(what, "write")) return fopen(argv[2], "w") ? 0 : 3;
+    if (!strcmp(what, "read")) return fopen(argv[2], "r") ? 0 : 3;
     if (!strcmp(what, "spawn")) {
         pid_t pid;
         char* av[] = {(char*)"/bin/echo", (char*)"hi", nullptr};
@@ -51,6 +54,7 @@ class GateEnvironmentTests(unittest.TestCase):
     def test_secrets_and_home_do_not_reach_the_gate(self):
         with tempfile.TemporaryDirectory() as scratch:
             env = {"PATH": "/usr/bin:/bin", "HOME": "/Users/someone",
+                   generate.UNSANDBOXED_GATE_OPT_OUT: "1",
                    "ANTHROPIC_API_KEY": "sk-secret", "OPENAI_API_KEY": "sk-2",
                    "FORGE_CLAUDE_BIN": "/opt/claude", "LANG": "en_US.UTF-8"}
             with mock.patch.dict(os.environ, env, clear=True):
@@ -66,6 +70,27 @@ class GateEnvironmentTests(unittest.TestCase):
             self.assertTrue(
                 "DYLD_LIBRARY_PATH=" + generate.SDK in argv
                 or gate_env.get("DYLD_LIBRARY_PATH") == generate.SDK)
+
+
+class GateFailsClosedTests(unittest.TestCase):
+    def test_no_sandbox_means_no_gate_unless_opted_out(self):
+        with tempfile.TemporaryDirectory() as scratch, \
+                mock.patch.object(generate, "SANDBOX_EXEC",
+                                  "/nonexistent/sandbox-exec"):
+            with mock.patch.dict(os.environ, {"PATH": "/usr/bin:/bin"},
+                                 clear=True):
+                with self.assertRaises(generate.BehaviourGateUnavailable):
+                    generate.gate_launch("/bin/true", scratch)
+            err = io.StringIO()
+            with mock.patch.dict(os.environ,
+                                 {"PATH": "/usr/bin:/bin",
+                                  generate.UNSANDBOXED_GATE_OPT_OUT: "1"},
+                                 clear=True), \
+                    contextlib.redirect_stderr(err):
+                argv, env = generate.gate_launch("/bin/true", scratch)
+            self.assertEqual(argv, ["/bin/true"])
+            self.assertEqual(env["DYLD_LIBRARY_PATH"], generate.SDK)
+            self.assertIn("UNSANDBOXED", err.getvalue())
 
 
 @unittest.skipUnless(sys.platform == "darwin" and
@@ -103,9 +128,40 @@ class GateSandboxTests(unittest.TestCase):
             self.assertNotEqual(self.run_canary(scratch, "write", outside), 0)
             self.assertFalse(os.path.exists(outside))
 
+    def run_unsandboxed(self, *args):
+        return subprocess.run([self.exe, *args], capture_output=True,
+                              timeout=30).returncode
+
     def test_no_network(self):
+        # Positive control first: an offline machine refuses the connect
+        # with or without the sandbox, which would prove nothing.
+        if self.run_unsandboxed("net") != 0:
+            self.skipTest("no network here, so a refusal would prove nothing")
         with tempfile.TemporaryDirectory() as scratch:
             self.assertNotEqual(self.run_canary(scratch, "net"), 0)
+
+    def test_nothing_under_home_is_readable_but_what_the_gate_needs(self):
+        # The gate's output feeds the next prompt, so a readable home is a
+        # way to print a secret to the model.
+        home = generate._real_home()
+        caches = os.path.join(home, "Library", "Caches")
+        os.makedirs(caches, exist_ok=True)
+        private = tempfile.mkdtemp(prefix="pulp-gate-sandbox-", dir=caches)
+        self.addCleanup(shutil.rmtree, private, True)
+        secret = os.path.join(private, "secret.txt")
+        with open(secret, "w", encoding="utf-8") as f:
+            f.write("token")
+        self.assertEqual(self.run_unsandboxed("read", secret), 0)  # control
+        with tempfile.TemporaryDirectory() as scratch:
+            self.assertNotEqual(self.run_canary(scratch, "read", secret), 0)
+            # What the gate needs stays readable: its own scratch, and this
+            # toolchain.
+            mine = os.path.join(scratch, "mine.txt")
+            with open(mine, "w", encoding="utf-8") as f:
+                f.write("ok")
+            self.assertEqual(self.run_canary(scratch, "read", mine), 0)
+            self.assertEqual(self.run_canary(
+                scratch, "read", os.path.abspath(generate.__file__)), 0)
 
     def test_no_child_processes(self):
         with tempfile.TemporaryDirectory() as scratch:

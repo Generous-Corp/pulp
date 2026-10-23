@@ -1761,6 +1761,16 @@ class FailedGenerationTransaction(SdkIsolatedTestCase):
 
 
 class BehaviourGateInfrastructureSafety(SdkIsolatedTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        # These drive the gate with subprocess mocked. Off macOS the gate
+        # fails closed without sandbox-exec, so take the logged opt-out here;
+        # on macOS it changes nothing. test_gate_sandbox.py holds the fence.
+        opt_out = mock.patch.dict(
+            os.environ, {generate.UNSANDBOXED_GATE_OPT_OUT: "1"})
+        opt_out.start()
+        self.addCleanup(opt_out.stop)
+
     @unittest.skipUnless(sys.platform == "darwin", "Mach-O dependency proof")
     def test_real_plugin_records_accelerate_load_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as root:
