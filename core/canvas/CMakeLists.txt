@@ -401,6 +401,7 @@ set(PULP_CANVAS_UNIT_HEADERS
     include/pulp/canvas/path_to_sdf.hpp
     include/pulp/canvas/psdf_atlas.hpp
     include/pulp/canvas/recording_canvas.hpp
+    include/pulp/canvas/resource_counters.hpp
     include/pulp/canvas/rectangle_list.hpp
     include/pulp/canvas/scene/scene.hpp
     include/pulp/canvas/scene/scene_group.hpp
