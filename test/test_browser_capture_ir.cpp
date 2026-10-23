@@ -621,6 +621,38 @@ TEST_CASE("producer-bound native document canvas changes only root background",
         change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
         expected_background = "rgb(255, 255, 255)";
     }
+    // The UA canvas follows the root's used color-scheme; the capture records
+    // the colour Chromium resolved for it.
+    const auto with_canvas_report = [&](std::string_view report) {
+        REQUIRE(snapshot.front() == '{');
+        snapshot.insert(1, "\"documentCanvas\":" + std::string(report) + ",");
+    };
+    constexpr std::string_view dark_report =
+        R"j({"schema":"pulp-document-canvas-v1","root_color_scheme":"dark",)j"
+        R"j("canvas_color":"rgb(18, 18, 18)"})j";
+    SECTION("transparent document canvas takes the recorded UA canvas colour") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        with_canvas_report(dark_report);
+        expected_background = "rgb(18, 18, 18)";
+    }
+    SECTION("a canvas report that is not an opaque colour keeps Chromium white") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        with_canvas_report(R"j({"schema":"pulp-document-canvas-v1",)j"
+                           R"j("canvas_color":"rgba(18, 18, 18, 0.5)"})j");
+        expected_background = "rgb(255, 255, 255)";
+    }
+    SECTION("a canvas report from another schema keeps Chromium white") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        with_canvas_report(R"j({"schema":"pulp-document-canvas-v0",)j"
+                           R"j("canvas_color":"rgb(18, 18, 18)"})j");
+        expected_background = "rgb(255, 255, 255)";
+    }
+    SECTION("an opaque root background outranks the UA canvas report") {
+        with_canvas_report(dark_report);
+    }
     SECTION("opaque body paints a transparent HTML canvas") {
         change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
         change_canvas_style(snapshot, 2, "background-color", "rgb(1, 2, 3)");

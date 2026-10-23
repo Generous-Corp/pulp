@@ -52,6 +52,49 @@ test("indicator-free capture removes only declared moving art",
     }
   });
 
+// The UA canvas follows the root's used color-scheme, set by CSS or by a
+// color-scheme meta tag; the capture records the colour Chromium resolved,
+// and it must be the colour Chromium painted outside every box.
+test("capture records the UA canvas colour Chromium painted",
+  { timeout: captureCaseTimeout(4) }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) return context.skip("no compatible system browser is installed");
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-ua-canvas-"));
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    const panel = "main{width:20px;height:20px;background:#357}</style><main></main>";
+    const cases = [
+      ["light", `<!doctype html><style>${panel}`, "rgb(255, 255, 255)"],
+      ["root-dark", `<!doctype html><style>:root{color-scheme:dark}${panel}`,
+        "rgb(18, 18, 18)"],
+      ["meta-dark",
+        `<!doctype html><meta name="color-scheme" content="dark"><style>${panel}`,
+        "rgb(18, 18, 18)"],
+      // The canvas takes the root's scheme, not the body's.
+      ["body-dark", `<!doctype html><style>body{color-scheme:dark}${panel}`,
+        "rgb(255, 255, 255)"],
+    ];
+    try {
+      for (const [name, html, expected] of cases) {
+        const input = path.join(root, `${name}.html`);
+        const output = path.join(root, name);
+        await writeFile(input, html);
+        await runCapture(script, browser, input, root, output, 120, 80);
+        const snapshot = JSON.parse(
+          await readFile(path.join(output, "dom-snapshot.json"), "utf8"));
+        const painted = rgbaPixel(
+          await readFile(path.join(output, "browser.png"), null), 230, 150);
+        assert.equal(snapshot.documentCanvas?.schema, "pulp-document-canvas-v1", name);
+        assert.equal(snapshot.documentCanvas.canvas_color, expected, name);
+        assert.equal(snapshot.documentCanvas.canvas_color,
+          `rgb(${painted.slice(0, 3).join(", ")})`, `${name} painted`);
+        // The probe left nothing behind in the captured tree.
+        assert.ok(!snapshot.strings.includes("PULP-DOCUMENT-CANVAS-PROBE"), name);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("a panel without declared indicators reuses its exact screenshot",
   { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();

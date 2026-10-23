@@ -696,9 +696,13 @@ knowing before you touch that file:
   it from the full-page screenshot, so it is page-space already. The page node,
   never the panel root, carries `--page-background`, which the lab resolves
   from the verified DOM snapshot by CSS canvas propagation (html, else body;
-  both transparent is `unresolved`, since the UA colour follows a
-  color-scheme the capture does not record) and supplies only for a panel with
-  page around it. A whole-page panel owns its canvas: the importer stamps it on
+  both transparent takes the UA canvas colour the capture recorded as
+  `documentCanvas`, and is `unresolved` without that report) and supplies only
+  for a panel with page around it. The UA canvas is the `Canvas` system colour
+  of the ROOT's used color-scheme (`rgb(18, 18, 18)` dark in Chrome 151), set
+  by root CSS or a color-scheme meta tag; a body's color-scheme never reaches
+  it, and the root's computed `color-scheme` reads `normal` under a dark meta,
+  so the capture asks Chromium with a probe rather than mapping the property. A whole-page panel owns its canvas: the importer stamps it on
   the root, and filling underneath would hide a dropped stamp. Page-space
   comparisons must not translate the browser nodes as well; that registers the
   panel twice. The registered geometry gate instead moves BOTH sides back into
@@ -5759,7 +5763,9 @@ capture envelope, not signing, independent authentication, background-compositin
 correctness, or Chromium/Skia pixel parity.
 
 Native browser lowering can add the computed opaque HTML canvas colour to the
-existing synthetic root, including a panel-sized root. This requires a declared
+existing synthetic root, including a panel-sized root. With html and body both
+transparent it takes the snapshot's `documentCanvas.canvas_color`, and opaque
+white for a capture without that report. This requires a declared
 verified snapshot hash, unique HTML/body identity, complete supported paint
 facts, and consistent origin-aligned viewport/document/authored geometry. Body
 must be transparent or the same opaque colour; effects, root/body pseudos,
