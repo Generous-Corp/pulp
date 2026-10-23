@@ -12,20 +12,22 @@ desktop through the installed macOS helper so the guest uses the active RDP
 session rather than UTM's emulated framebuffer:
 
 ```sh
-cd "$HOME/Library/Application Support/Pulp/WindowsDemo"
+cd /path/to/pulp
+export SPECTR_WINDOWS_UTM_UUID='<verified-uuid>'
+export SPECTR_WINDOWS_SSH_PORT='<verified-local-ssh-port>'
+export SPECTR_WINDOWS_RDP_PORT='<verified-local-rdp-port>'
 ./tools/windows/open-utm-rdp.sh
 ```
 
-The helper starts the selected guest when needed, repairs RDP over the
-authenticated SSH channel, and reads the credential from
+The versioned helper starts the selected guest when needed, repairs RDP over
+the authenticated SSH channel, and reads the credential from
 `~/.config/pulp/secrets/spectr-windows-utm-admin`. Its UTM UUID, forwarded
 ports, and Windows account are machine-local configuration; discover them with
-`utmctl list` and the helper's installed README instead of copying values from
-this guide. The account is written as `PULP-WIN\admin` (the domain and user are
-passed separately to RDP). If the helper's configured UUID is absent from
-`utmctl list`, stop and repair the local installation or set the documented
-`SPECTR_WINDOWS_UTM_UUID` override after verifying the guest identity. Once the
-RDP desktop is visible, start REAPER from its shortcut and insert
+`utmctl list` before running the command. The account is written as
+`PULP-WIN\admin` (the domain and user are passed separately to RDP). If the
+configured UUID is absent from `utmctl list`, stop and repair the local
+configuration rather than trying another guest. Once the RDP desktop is
+visible, start REAPER from its shortcut and insert
 `VST3: Spectr (Pulp)`.
 
 Interactive evidence must be driven from that RDP desktop. An SSH service
