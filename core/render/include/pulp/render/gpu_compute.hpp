@@ -446,8 +446,11 @@ public:
     /// per-array/per-layer device-resident activation + head buffers for
     /// `block_size` samples, and compile the fused passes. Returns false on
     /// invalid args (channels > 64, condition_size != 1, an array-chaining shape
-    /// mismatch, a weight-count mismatch) or GPU failure. Call once before
-    /// wavenet_forward(block_size).
+    /// mismatch, a weight-count mismatch, a zero dilation, a layer whose causal
+    /// reach dilation*(kernel-1) plus `block_size` exceeds 2^20 samples, or a
+    /// history buffer larger than the device can bind) or GPU failure. The reach
+    /// bound is checked before anything is allocated, so an untrusted model
+    /// cannot stall preparation. Call once before wavenet_forward(block_size).
     ///
     /// `instance` selects an independent plan slot on THIS device: two instances
     /// (e.g. stereo channels) prepared with the same `block_size` get separate
