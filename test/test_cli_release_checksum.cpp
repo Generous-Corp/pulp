@@ -144,7 +144,7 @@ TEST_CASE("missing manifest is refused at the floor and warned below it",
     fs::remove_all(dir);
 }
 
-TEST_CASE("only a plain M.m.p release version may reach a URL, path, or shell",
+TEST_CASE("only a plain M.m.p release version may reach a URL or path or shell",
           "[cli][release-checksum][upgrade]") {
     CHECK(pulp::cli::pulp_release_version_is_well_formed("0.663.1"));
     CHECK(pulp::cli::pulp_release_version_is_well_formed("1.0.0"));
