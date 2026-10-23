@@ -40,26 +40,23 @@ public:
         pixel_width_ = pixel_width;
         pixel_height_ = pixel_height;
         encoded_bytes_.clear();
+        encoded_key_.clear();
         file_path_.clear();
         mark_dirty();
     }
 
-    /// Attach an encoded image blob (PNG/JPEG bytes). Backends call
-    /// `Canvas::draw_image_from_data` at paint time.
-    void set_encoded_bytes(std::vector<uint8_t> bytes) {
-        encoded_bytes_ = std::move(bytes);
-        rgba_pixels_.clear();
-        file_path_.clear();
-        pixel_width_ = 0;
-        pixel_height_ = 0;
-        mark_dirty();
-    }
+    /// Attach an encoded image blob (PNG/JPEG bytes). The SHA-256 of the
+    /// bytes is computed here, once, and paint draws through
+    /// `Canvas::draw_image_from_keyed_data`, so a caching backend decodes and
+    /// uploads the blob once rather than on every paint.
+    void set_encoded_bytes(std::vector<uint8_t> bytes);
 
     /// Attach a path to an encoded image on disk.
     void set_file_path(std::string path) {
         file_path_ = std::move(path);
         rgba_pixels_.clear();
         encoded_bytes_.clear();
+        encoded_key_.clear();
         pixel_width_ = 0;
         pixel_height_ = 0;
         mark_dirty();
@@ -67,6 +64,10 @@ public:
 
     const std::vector<uint8_t>& rgba_pixels() const { return rgba_pixels_; }
     const std::vector<uint8_t>& encoded_bytes() const { return encoded_bytes_; }
+    /// Lowercase hex SHA-256 of `encoded_bytes()`; empty when none are set.
+    const std::string& encoded_bytes_key() const {
+        return encoded_key_;
+    }
     const std::string& file_path() const { return file_path_; }
     int pixel_width() const { return pixel_width_; }
     int pixel_height() const { return pixel_height_; }
@@ -79,6 +80,7 @@ private:
     float x_ = 0, y_ = 0, w_ = 0, h_ = 0;
     std::vector<uint8_t> rgba_pixels_;
     std::vector<uint8_t> encoded_bytes_;
+    std::string encoded_key_;
     std::string file_path_;
     int pixel_width_ = 0;
     int pixel_height_ = 0;
