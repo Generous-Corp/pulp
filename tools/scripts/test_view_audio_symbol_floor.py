@@ -140,6 +140,24 @@ class SymbolFloorTests(unittest.TestCase):
         self.assertEqual(nm_symbols.defined_any(listing), {"__ZTIN4pulp4view5MeterE", "plain_symbol"})
         self.assertEqual(nm_symbols.undefined(listing), {"undefined_only"})
 
+    def test_gnu_unique_and_indirect_definitions_count_toward_the_floor(self):
+        # GNU nm on ELF: `u` is a unique global and `i` an indirect function,
+        # both definitions; Vellum's inertness floor reads the same set.
+        listing = (
+            "libpulp-view-audio.a[m.o]: _ZN4pulp4view5Meter9set_levelEff T 0000000000000040 0000000000000010\n"
+            "libpulp-view-audio.a[m.o]: _ZZN4pulp4view5Meter8instanceEvE1s u 0000000000000000 0000000000000008\n"
+            "libpulp-view-audio.a[m.o]: _ZN4pulp4view13resolve_simdEv i 0000000000000080 0000000000000004\n"
+            "libpulp-view-audio.a[m.o]: _ZN4pulp4view4View5paintEv U\n"
+        )
+        self.assertEqual(nm_symbols.defined_any(listing), {
+            "_ZN4pulp4view5Meter9set_levelEff", "_ZZN4pulp4view5Meter8instanceEvE1s",
+            "_ZN4pulp4view13resolve_simdEv"})
+        self.assertEqual(nm_symbols.defined_strong(listing), {"_ZN4pulp4view5Meter9set_levelEff"})
+        self._archive("audio.a", listing)
+        core = self._archive("core.a", "libpulp-view-core.a[x.o]: _ZZN4pulp4view5Meter8instanceEvE1s U\n")
+        rc, out = self._run("--check", f"view-core={core}")
+        self.assertEqual(rc, 1, out)
+
     def test_the_registered_gate_counts_weak_definitions(self):
         # The ctest calls archive_symbol_closure_check.py directly, so it must
         # ask for the same rule this wrapper uses.
