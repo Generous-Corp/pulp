@@ -1181,9 +1181,7 @@ class GateProfileTests(unittest.TestCase):
                                (dict(PULP_SANITIZER="address", CMAKE_BUILD_TYPE="Debug"), "PULP_SANITIZER=address"),
                                (dict(CMAKE_BUILD_TYPE="Debug"), "CMAKE_BUILD_TYPE=Debug"),
                                (dict(PULP_HAS_VST3="FALSE"), "PULP_HAS_VST3=FALSE"),
-                               (dict(PULP_HAS_AUSDK="FALSE"), "PULP_HAS_AUSDK=FALSE"),
-                               (dict(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF="ON"),
-                                "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON")):
+                               (dict(PULP_HAS_AUSDK="FALSE"), "PULP_HAS_AUSDK=FALSE")):
             with self.subTest(reason=reason), tempfile.TemporaryDirectory() as tmp:
                 repo = Repo(Path(tmp)); compiled_evidence(repo)
                 self.assertEqual(self.run_tool(repo, "--write").returncode, 0)   # no cache: the gate's
@@ -1202,6 +1200,65 @@ class GateProfileTests(unittest.TestCase):
                 proc = self.run_tool(repo, "--write")
                 self.assertEqual(proc.returncode, 2)
                 self.assertIn("refusing to write", proc.stderr)
+
+
+class GpuProofTests(unittest.TestCase):
+    """The arm64 gate configures the exact-provider proof ON. Its hardware
+    registrations carry `gpu-proof` and never run in CI, so they are not
+    tracked; every other registration is judged exactly as before."""
+
+    def run_tool(self, repo: Repo, *args: str, inventory: dict) -> subprocess.CompletedProcess[str]:
+        inv = repo.build / "inv.json"
+        inv.write_text(json.dumps(inventory), encoding="utf-8")
+        return subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root),
+                               "--build-dir", str(repo.build), "--inventory-json", str(inv), *args],
+                              capture_output=True, text=True, timeout=60,
+                              env=tool_env(event="pull_request", strict=False))
+
+    def proof_repo(self, tmp: str) -> Repo:
+        repo = Repo(Path(tmp)); compiled_evidence(repo)
+        write(repo.build, "CMakeCache.txt",
+              "CMAKE_BUILD_TYPE:STRING=Release\nPULP_BUILD_EXAMPLES:BOOL=OFF\n"
+              "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF:BOOL=ON\n")
+        future = time.time() + 60
+        os.utime(repo.build / "CMakeCache.txt", (future, future))
+        return repo
+
+    def with_script(self, repo: Repo, labels: list[str]) -> dict:
+        write(repo.root, "tools/scripts/proof_identity.py", "import alpha_lib\n")
+        inventory = repo.inventory()
+        inventory["tests"].append({
+            "name": "proof-identity",
+            "command": ["/usr/bin/python3", f"{repo.root}/tools/scripts/proof_identity.py"],
+            "properties": [{"name": "LABELS", "value": labels}] if labels else []})
+        return inventory
+
+    def test_a_proof_configure_is_gate_shaped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.proof_repo(tmp)
+            self.assertEqual(sti.outside_gate_profile_build(repo.build), [])
+
+    def test_a_gpu_proof_script_is_ignored_and_an_unlabelled_one_still_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.proof_repo(tmp)
+            self.assertEqual(self.run_tool(repo, "--write", inventory=repo.inventory()).returncode, 0)
+            labelled = self.run_tool(repo, "--check", "--full",
+                                     inventory=self.with_script(repo, ["gpu-proof"]))
+            self.assertEqual(labelled.returncode, 0, labelled.stdout + labelled.stderr)
+            unlabelled = self.run_tool(repo, "--check", "--full", inventory=self.with_script(repo, []))
+            self.assertEqual(unlabelled.returncode, 1, unlabelled.stdout + unlabelled.stderr)
+            self.assertIn("missing from list: proof-identity", unlabelled.stdout)
+
+    def test_a_gpu_proof_executable_is_not_scanned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.proof_repo(tmp)
+            index = repo.build / "test" / "test-data" / "executables.json"
+            doc = json.loads(index.read_text(encoding="utf-8"))
+            self.assertIn("pulp-test-b", sti.test_executables(repo.build))
+            doc["executables"]["pulp-test-b"]["gpu_proof"] = True
+            index.write_text(json.dumps(doc), encoding="utf-8")
+            self.assertNotIn("pulp-test-b", sti.test_executables(repo.build))
+            self.assertIn("pulp-test-a", sti.test_executables(repo.build))
 
 
 class GatePlatformTests(unittest.TestCase):

@@ -227,7 +227,7 @@
             PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}"
             PULP_GPU_AUDIO_BUILD_TYPE="$<CONFIG>")
         if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
-            get_property(_pulp_gpu_proof_tests_before DIRECTORY PROPERTY TESTS)
+            pulp_gpu_proof_begin()
             find_package(Python3 REQUIRED COMPONENTS Interpreter)
             set_property(TARGET pulp-gpu-host-mapped-pointer-probe APPEND PROPERTY
                 LINK_DEPENDS
@@ -284,7 +284,7 @@
             set_tests_properties(pulp-gpu-audio-provider-identity PROPERTIES
                 FIXTURES_SETUP pulp_gpu_audio_provider_identity
                 TIMEOUT 60)
-            pulp_mark_gpu_proof_tests_since("${_pulp_gpu_proof_tests_before}")
+            pulp_gpu_proof_end()
         endif()
         add_test(NAME pulp-gpu-host-mapped-pointer-probe
             COMMAND pulp-gpu-host-mapped-pointer-probe)
@@ -326,7 +326,7 @@
                 SKIP_RETURN_CODE 77
                 TIMEOUT 20)
         if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
-            get_property(_pulp_gpu_proof_tests_before DIRECTORY PROPERTY TESTS)
+            pulp_gpu_proof_begin()
             set_tests_properties(
                 pulp-gpu-host-mapped-pointer-probe
                 pulp-gpu-host-mapped-pointer-oracle-negative-control
@@ -881,7 +881,7 @@
                         TIMEOUT 180)
                 endif()
             endif()
-            pulp_mark_gpu_proof_tests_since("${_pulp_gpu_proof_tests_before}")
+            pulp_gpu_proof_end()
         endif()
 
         unset(_pulp_gpu_audio_asset_sha256)
