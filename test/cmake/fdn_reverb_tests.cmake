@@ -18,7 +18,7 @@ pulp_add_test_suite(pulp-test-fdn-reverb
     SOURCES test_fdn_reverb.cpp test_fdn_reverb_acceptance.cpp
             test_fdn_reverb_block_engine.cpp test_classic_reverb.cpp
     LIBRARIES pulp::signal pulp::audio-analysis
-    TEST_SPEC "~[slow]"
+    TEST_SPEC "~[slow]~[performance]"
     TIMEOUT 900)
 pulp_scaled_test_timeout(_pulp_fdn_slow_timeout 900)
 catch_discover_tests(pulp-test-fdn-reverb
@@ -26,6 +26,13 @@ catch_discover_tests(pulp-test-fdn-reverb
     TEST_PREFIX "slow::"
     LABELS slow
     PROPERTIES TIMEOUT "${_pulp_fdn_slow_timeout}")
+# Instruction-count budgets: a retired-instruction count is steadier than wall
+# time, but still moves with the toolchain and the host, so these run off the
+# required gate under the performance label.
+catch_discover_tests(pulp-test-fdn-reverb
+    TEST_SPEC "[performance]"
+    TEST_PREFIX "performance::"
+    LABELS performance)
 
 # The catalog node. Same RT-probe wiring as the lo-fi catalog: proves every
 # declared knob reaches the baked DSP over the production injection path, and
@@ -43,7 +50,8 @@ pulp_add_test_suite(pulp-test-simd-lanes-portable
 pulp_add_test_suite(pulp-test-fdn-reverb-portable-lanes
     SOURCES test_fdn_reverb_block_engine.cpp test_classic_reverb.cpp
             test_multi_channel_meter_block.cpp
-    LIBRARIES pulp::signal pulp::audio-analysis pulp::audio)
+    LIBRARIES pulp::signal pulp::audio-analysis pulp::audio
+    TEST_SPEC "~[performance]")
 target_compile_definitions(pulp-test-fdn-reverb-portable-lanes PRIVATE PULP_SIMD_LANES_PORTABLE)
 # The plain-struct path's partition exactness assumes, as with MSVC's default
 # /fp:precise, that a scalar tail's a * b + c is computed unfused, like the
