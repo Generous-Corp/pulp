@@ -6754,6 +6754,13 @@
    ],
    "kind": "python"
   },
+  "import-validation-text-raster-decomposition-selftest": {
+   "entry": "tools/import-validation/test_text_raster_decomposition.py",
+   "inputs": [
+    "tools/import-validation/test_text_raster_decomposition.py"
+   ],
+   "kind": "python"
+  },
   "import-validation-undefined-names": {
    "entry": "tools/scripts/test_undefined_names_check.py",
    "inputs": [
