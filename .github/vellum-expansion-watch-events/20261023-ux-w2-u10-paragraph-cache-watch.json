@@ -13,12 +13,16 @@
   "rationale": "SkiaCanvas keeps laid-out paragraphs in a bounded process-wide cache keyed by every shaping input, and draws them with each call's own paint, so a static label is shaped once instead of on every paint. The design-import benchmark gates paragraph builds in its steady-state gate against the text runs a frame's update wrote, adds --paragraph-cache=off as the uncached path and planted negative, and lets --compare pass arguments to one side. Rendering output is unchanged (cached and uncached frames are byte-identical); no import, Chromium capture, materialization, rendering, packaging or source-authority boundary moves.",
   "tests": [
     "ctest --test-dir build -R 'Paragraph cache applies each draw.s own paint'",
+    "ctest --test-dir build -R 'Paragraph cache canonicalises non-finite and signed-zero spacing'",
     "ctest --test-dir build -R 'Paragraph cache drops its entries when a font registers'",
+    "ctest --test-dir build -R 'Paragraph cache holds script text runs with NaN and signed-zero spacing'",
+    "ctest --test-dir build -R 'Paragraph cache keeps a static label through text that changes every frame'",
     "ctest --test-dir build -R 'Paragraph cache keys every shaping input'",
     "ctest --test-dir build -R 'Paragraph cache on Graphite reads back the uncached frames'",
     "ctest --test-dir build -R 'Paragraph cache paints the uncached pixels and builds once'",
+    "ctest --test-dir build -R 'Paragraph cache stays correct and bounded under concurrent painting'",
     "ctest --test-dir build -R 'design-import benchmark Skia lane counts per-frame resource work'",
-    "ctest --test-dir build -R 'design-import benchmark text budget allows only the runs a step wrote'",
+    "ctest --test-dir build -R 'design-import benchmark text gate allows only the text a step wrote'",
     "python3 tools/scripts/test_design_import_benchmark.py",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
