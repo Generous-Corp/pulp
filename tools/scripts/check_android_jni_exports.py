@@ -40,6 +40,9 @@ def declared_natives(path: Path) -> list[str]:
     object's methods bind to its outer class, and a Kotlin file's top-level
     functions to <File>Kt."""
     text = path.read_text(encoding="utf-8")
+    # Block comments go first (newlines kept, so line structure survives): a
+    # commented-out `external fun` declares nothing.
+    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
     package = re.search(r"^\s*package\s+([\w.]+)", text, re.M)
     prefix = "Java_" + ("_".join(mangle(p) for p in package.group(1).split(".")) + "_" if package else "")
     out: list[str] = []

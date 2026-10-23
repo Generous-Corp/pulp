@@ -32,6 +32,9 @@ class PulpMidiManager {
         @JvmStatic external fun nativeStatic(): Int
     }
     private external fun nativeOnDeviceRemoved(id: Int)
+    /* A retired native, kept for reference:
+       private external fun nativeRetired(): Int */
+    // private external fun nativeLineCommented(): Int
 }
 
 private external fun nativeTopLevel(): Int
@@ -47,6 +50,7 @@ JAVA = """package com.pulp.audio;
 
 public class PulpEngine {
     private static native int nativeStart(int rate);
+    /* private static native int nativeOld(int rate); */
 }
 """
 
@@ -59,8 +63,9 @@ EXPECTED = [
 ]
 
 
-def elf_so(exports: list[str], hidden: list[str] = (), undefined: list[str] = ()) -> bytes:
-    names = [*exports, *hidden, *undefined]
+def elf_so(exports: list[str], hidden: list[str] = (), undefined: list[str] = (),
+           local: list[str] = ()) -> bytes:
+    names = [*exports, *hidden, *undefined, *local]
     dynstr, offsets = b"\0", {}
     for n in names:
         offsets[n] = len(dynstr)
@@ -70,6 +75,8 @@ def elf_so(exports: list[str], hidden: list[str] = (), undefined: list[str] = ()
     syms += b"".join(struct.pack("<IBBHQQ", offsets[n], 0x12, 2, 1, 0x1000, 4) for n in hidden)
     # An undefined reference: GLOBAL, default visibility, section index 0.
     syms += b"".join(struct.pack("<IBBHQQ", offsets[n], 0x12, 0, 0, 0, 0) for n in undefined)
+    # A defined LOCAL-binding symbol (st_info bind 0), default visibility.
+    syms += b"".join(struct.pack("<IBBHQQ", offsets[n], 0x02, 0, 1, 0x1000, 4) for n in local)
     shstr = b"\0.dynstr\0.dynsym\0.shstrtab\0"
     body = dynstr + b"\0" * (-len(dynstr) % 8)
     sym_at = 64 + len(body)
@@ -83,6 +90,30 @@ def elf_so(exports: list[str], hidden: list[str] = (), undefined: list[str] = ()
     sections += struct.pack("<IIQQQQIIQQ", 1, 3, 0, 0, 64, len(dynstr), 0, 0, 1, 0)
     sections += struct.pack("<IIQQQQIIQQ", 9, 11, 0, 0, sym_at, len(syms), 1, 1, 8, 24)
     sections += struct.pack("<IIQQQQIIQQ", 17, 3, 0, 0, shstr_at, len(shstr), 0, 0, 1, 0)
+    return header + body + sections
+
+
+def elf32_so(exports: list[str]) -> bytes:
+    """A little-endian ELF32 ARM shared object (armeabi-v7a layout)."""
+    dynstr, offsets = b"\0", {}
+    for n in exports:
+        offsets[n] = len(dynstr)
+        dynstr += n.encode() + b"\0"
+    syms = struct.pack("<IIIBBH", 0, 0, 0, 0, 0, 0)
+    syms += b"".join(struct.pack("<IIIBBH", offsets[n], 0x1000, 4, 0x12, 0, 1) for n in exports)
+    shstr = b"\0.dynstr\0.dynsym\0.shstrtab\0"
+    body = dynstr + b"\0" * (-len(dynstr) % 4)
+    sym_at = 52 + len(body)
+    body += syms
+    shstr_at = 52 + len(body)
+    body += shstr + b"\0" * (-len(shstr) % 4)
+    shoff = 52 + len(body)
+    header = b"\x7fELF" + bytes([1, 1, 1, 0]) + b"\0" * 8
+    header += struct.pack("<HHIIIIIHHHHHH", 3, 40, 1, 0, 0, shoff, 0, 52, 0, 0, 40, 4, 3)
+    sections = struct.pack("<IIIIIIIIII", *[0] * 10)
+    sections += struct.pack("<IIIIIIIIII", 1, 3, 0, 0, 52, len(dynstr), 0, 0, 1, 0)
+    sections += struct.pack("<IIIIIIIIII", 9, 11, 0, 0, sym_at, len(syms), 1, 1, 4, 16)
+    sections += struct.pack("<IIIIIIIIII", 17, 3, 0, 0, shstr_at, len(shstr), 0, 0, 1, 0)
     return header + body + sections
 
 
@@ -104,9 +135,10 @@ class CheckAndroidJniExportsTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(SCRIPT), "--sources", str(self.sources), *args],
                               capture_output=True, text=True, encoding="utf-8")
 
-    def lib(self, name: str, exports: list[str], hidden: list[str] = (), undefined: list[str] = ()) -> Path:
+    def lib(self, name: str, exports: list[str], hidden: list[str] = (), undefined: list[str] = (),
+            local: list[str] = ()) -> Path:
         path = self.root / name
-        path.write_bytes(elf_so(exports, hidden, undefined))
+        path.write_bytes(elf_so(exports, hidden, undefined, local))
         return path
 
     def test_declarations_bind_to_the_jni_names_the_vm_looks_up(self):
@@ -135,6 +167,24 @@ class CheckAndroidJniExportsTest(unittest.TestCase):
         # it) lists it in .dynsym with section index 0; that is not an export.
         lib = self.lib("libpulp.so", EXPECTED[1:], undefined=EXPECTED[:1])
         res = self.run_checker("--lib", str(lib))
+        self.assertEqual(res.returncode, 1)
+        self.assertIn(EXPECTED[0], res.stdout)
+
+    def test_a_local_binding_is_not_an_export(self):
+        # A LOCAL symbol in .dynsym is defined but invisible to the VM's lookup.
+        lib = self.lib("libpulp.so", EXPECTED[1:], local=EXPECTED[:1])
+        res = self.run_checker("--lib", str(lib))
+        self.assertEqual(res.returncode, 1)
+        self.assertIn(EXPECTED[0], res.stdout)
+
+    def test_a_32_bit_library_is_read(self):
+        # armeabi-v7a images are ELF32; their exports count, and a missing one fails.
+        good = self.root / "libpulp32.so"
+        good.write_bytes(elf32_so(EXPECTED))
+        self.assertEqual(self.run_checker("--lib", str(good)).returncode, 0)
+        bad = self.root / "libpulp32-missing.so"
+        bad.write_bytes(elf32_so(EXPECTED[1:]))
+        res = self.run_checker("--lib", str(bad))
         self.assertEqual(res.returncode, 1)
         self.assertIn(EXPECTED[0], res.stdout)
 

@@ -528,6 +528,16 @@ jobs:
             exit 1
           fi
 
+      # Same check as android.yml android-build: every native method the app
+      # declares must be a dynamic export of libpulp.so.
+      - name: Verify libpulp.so exports every declared JNI native
+        shell: bash
+        run: |
+          python3 tools/scripts/check_android_jni_exports.py \
+            --sources android/app/src/main \
+            --apk android/app/build/outputs/apk/debug/app-debug.apk \
+            --require-abi arm64-v8a
+
       - name: Upload Android build logs + APK
         if: always()
         uses: actions/upload-artifact@v7
