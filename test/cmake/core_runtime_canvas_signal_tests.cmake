@@ -808,10 +808,54 @@ pulp_add_test_suite(pulp-test-gpu-shared-io-slot-ledger
     LIBRARIES Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Provider conformance kit (test/harness/shared_io_provider_conformance.hpp)
+# instantiated for the deterministic fake provider, with a planted violation
+# per scenario. Dawn-free so it runs on every CI lane; the Dawn instantiation
+# is the host-only pulp-test-gpu-dawn-shared-io-provider-conformance.
+pulp_add_test_suite(pulp-test-gpu-shared-io-provider-conformance
+    SOURCES test_gpu_shared_io_provider_conformance.cpp harness/rt_allocation_probe.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_arena.cpp
+    LIBRARIES Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+if(Python3_Interpreter_FOUND)
+    # The receipt the fake instantiation writes must pass the standalone
+    # verifier; the verifier's own planted negatives run in its self-test.
+    set(_provider_conformance_receipt
+        "${CMAKE_CURRENT_BINARY_DIR}/gpu-audio-provider-conformance-fake.json")
+    add_test(NAME gpu-audio-provider-conformance-fake-receipt
+        COMMAND ${CMAKE_COMMAND} -E env
+            "PULP_PROVIDER_CONFORMANCE_RECEIPT=${_provider_conformance_receipt}"
+            $<TARGET_FILE:pulp-test-gpu-shared-io-provider-conformance>
+            "fake shared IO provider passes the provider conformance kit")
+    set_tests_properties(gpu-audio-provider-conformance-fake-receipt PROPERTIES
+        FIXTURES_SETUP pulp_gpu_audio_provider_conformance_fake_receipt
+        TIMEOUT 60)
+    add_test(NAME gpu-audio-provider-conformance-fake-receipt-verify
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/verify_gpu_audio_provider_conformance.py"
+            "${_provider_conformance_receipt}" --forbid-skips --require-pair --require-kind fake)
+    set_tests_properties(gpu-audio-provider-conformance-fake-receipt-verify PROPERTIES
+        FIXTURES_REQUIRED pulp_gpu_audio_provider_conformance_fake_receipt
+        TIMEOUT 30)
+endif()
+
 pulp_add_test_suite(pulp-test-gpu-dawn-submission-tracker GROUP pulp-test-group-core-gpu-shared-io-private
     SOURCES test_gpu_dawn_submission_tracker.cpp
             ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/dawn_submission_tracker.cpp
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# Private consumer cursor for a future render-owner loss event. Header-only and
+# Dawn-free; the fixtures are Pulp-side inputs, and no producer exists yet.
+pulp_add_test_suite(pulp-test-gpu-render-loss-consumer
+    SOURCES test_gpu_render_loss_consumer.cpp harness/rt_allocation_probe.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+                 ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/audio/include
+                 ${choc_SOURCE_DIR}
+    COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-gpu-render-loss-consumer NO_DEFINE
+    PATHS test/fixtures/gpu_audio/render_loss_consumer
+          core/gpu_audio/src/detail/render_loss_consumer.hpp)
 
 # Separate full-library link check keeps the private production TU wired into
 # pulp::gpu-audio without burdening every focused lifecycle rebuild.

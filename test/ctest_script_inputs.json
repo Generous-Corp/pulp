@@ -1464,6 +1464,22 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-gpu-render-loss-consumer": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_gpu_render_loss_consumer.cpp"
+   ],
+   "inputs": [
+    "core/gpu_audio/src/detail/render_loss_consumer.hpp",
+    "test/fixtures/gpu_audio/render_loss_consumer"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/harness/rt_allocation_probe.cpp",
+    "test/test_gpu_render_loss_consumer.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-gpu-wavenet-session": {
    "data": "declared",
    "detected_sources": [
@@ -2661,8 +2677,10 @@
   "pulp-test-gpu-neural-realtime-node",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
+  "pulp-test-gpu-render-loss-consumer",
   "pulp-test-gpu-shared-io-convolution-pipeline",
   "pulp-test-gpu-shared-io-convolution-session",
+  "pulp-test-gpu-shared-io-provider-conformance",
   "pulp-test-gpu-shared-io-slot-ledger",
   "pulp-test-gpu-shared-io-wavenet-spec",
   "pulp-test-gpu-surface",
@@ -5198,6 +5216,20 @@
    "entry": "tools/validation/test_verify_gpu_audio_p5_receipt.py",
    "inputs": [
     "tools/validation/test_verify_gpu_audio_p5_receipt.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-provider-conformance-fake-receipt-verify": {
+   "entry": "tools/validation/verify_gpu_audio_provider_conformance.py",
+   "inputs": [
+    "tools/validation/verify_gpu_audio_provider_conformance.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-provider-conformance-verifier-selftest": {
+   "entry": "tools/validation/test_verify_gpu_audio_provider_conformance.py",
+   "inputs": [
+    "tools/validation/test_verify_gpu_audio_provider_conformance.py"
    ],
    "kind": "python"
   },
