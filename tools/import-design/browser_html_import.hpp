@@ -1,5 +1,7 @@
 #pragma once
 
+#include "browser_lane_timing.hpp"
+
 #include <pulp/view/design_ir.hpp>
 
 #include <filesystem>
@@ -66,6 +68,8 @@ struct BrowserHtmlCaptured {
     /// reason the CALLER can fix — carried out so the CLI prints it rather
     /// than leaving it in a node attribute nobody reads.
     std::vector<std::string> warnings;
+    /// Wall-clock stages from intake through lowering, in pipeline order.
+    std::vector<BrowserLaneStage> timings;
 };
 
 using BrowserHtmlImportResult = std::variant<

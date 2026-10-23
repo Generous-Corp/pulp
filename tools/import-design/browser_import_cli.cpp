@@ -8,6 +8,7 @@
 #include "render_artifact_path.hpp"
 #include "sprite_skins.hpp"
 
+#include <choc/text/choc_JSON.h>
 #include <pulp/view/design_sources.hpp>
 
 #include <algorithm>
@@ -15,6 +16,8 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <iterator>
+#include <optional>
 #include <sstream>
 
 namespace pulp::import_design {
@@ -267,6 +270,94 @@ bool collect_staged_asset_publications(
     if (ec) {
         error = "could not enumerate localized asset staging: " +
                 ec.message();
+        return false;
+    }
+    return true;
+}
+
+double rounded_ms(double ms) {
+    return std::round(ms * 10.0) / 10.0;
+}
+
+choc::value::Value stage_json(const BrowserLaneStage& stage) {
+    auto entry = choc::value::createObject("");
+    entry.addMember("name", stage.name);
+    entry.addMember("ms", rounded_ms(stage.elapsed_ms));
+    if (!stage.parts.empty()) {
+        auto parts = choc::value::createEmptyArray();
+        for (const auto& part : stage.parts)
+            parts.addArrayElement(stage_json(part));
+        entry.addMember("parts", parts);
+    }
+    return entry;
+}
+
+// The capture script times its own phases inside the subprocess. They become
+// the parts of the browser-capture stage, and whatever the subprocess spent
+// outside them (Node startup, writing capture.json, closing Chromium) is named
+// rather than left as a gap between the parts and the stage.
+std::optional<choc::value::Value> attach_capture_phases(const fs::path& capture_directory,
+                                                        std::vector<BrowserLaneStage>& stages) {
+    std::ifstream input(capture_directory / "capture.json", std::ios::binary);
+    if (!input)
+        return std::nullopt;
+    const std::string text{std::istreambuf_iterator<char>(input), {}};
+    choc::value::Value envelope;
+    try {
+        envelope = choc::json::parse(text);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    if (!envelope.isObject() || !envelope.hasObjectMember("provenance"))
+        return std::nullopt;
+    const auto provenance = envelope["provenance"];
+    if (!provenance.isObject() || !provenance.hasObjectMember("timings"))
+        return std::nullopt;
+    const auto timings = provenance["timings"];
+    if (!timings.isObject() || !timings.hasObjectMember("phases") || !timings["phases"].isObject())
+        return std::nullopt;
+
+    auto stage = std::find_if(stages.begin(), stages.end(),
+                              [](const auto& s) { return s.name == "browser-capture"; });
+    if (stage != stages.end()) {
+        stage->parts.clear();
+        double attributed = 0.0;
+        const auto phases = timings["phases"];
+        for (uint32_t i = 0; i < phases.size(); ++i) {
+            const auto member = phases.getObjectMemberAt(i);
+            if (!member.value.isFloat() && !member.value.isInt())
+                continue;
+            const double ms = member.value.get<double>();
+            attributed += ms;
+            stage->parts.push_back({member.name, ms, {}});
+        }
+        if (stage->elapsed_ms > attributed)
+            stage->parts.push_back({"process-overhead", stage->elapsed_ms - attributed, {}});
+    }
+    return choc::value::Value(timings);
+}
+
+// `import-timings.json` sits beside capture.json in the published capture
+// directory. It is a measurement of one run, never an input to anything the
+// import produces.
+bool write_browser_lane_timings(const fs::path& capture_directory,
+                                std::vector<BrowserLaneStage>& stages, std::string& error) {
+    const auto capture_timings = attach_capture_phases(capture_directory, stages);
+    auto document = choc::value::createObject("");
+    document.addMember("schema", "pulp-browser-import-timings-v1");
+    document.addMember("total_ms", rounded_ms(browser_lane_total_ms(stages)));
+    auto entries = choc::value::createEmptyArray();
+    for (const auto& stage : stages)
+        entries.addArrayElement(stage_json(stage));
+    document.addMember("stages", entries);
+    if (capture_timings && capture_timings->hasObjectMember("steps"))
+        document.addMember("capture_steps", (*capture_timings)["steps"]);
+
+    std::ofstream output(capture_directory / "import-timings.json",
+                         std::ios::binary | std::ios::trunc);
+    output << choc::json::toString(document, true) << "\n";
+    if (!output) {
+        error = "could not write import-timings.json";
         return false;
     }
     return true;
@@ -623,10 +714,13 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .require_canvas_ink = request.require_canvas_ink},
         content);
 
+    BrowserLaneClock clock;
+    std::vector<BrowserLaneStage> lane_stages;
     std::vector<std::shared_ptr<BrowserCaptureWorkspace>> workspaces;
     if (auto* captured =
             std::get_if<BrowserHtmlCaptured>(&browser_import)) {
         workspaces = std::move(captured->workspaces);
+        lane_stages = std::move(captured->timings);
         std::cout << "HTML intake: " << captured->shape
                   << " — evaluating with isolated Chromium\n";
         design_ir = std::move(captured->design_ir);
@@ -779,6 +873,8 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
             {diff_path, published_diff_path, true});
     }
 
+    clock.lap("publication-preflight");
+
     // The reference must be registered against the render before it is scored.
     // That rect is resolved from the IR inside validate_capture, because the
     // registration has to hold for every caller of the comparison and not just
@@ -799,6 +895,7 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         std::cerr << "Validation error: " << comparison.error << "\n";
         return BrowserImportFailure{1};
     }
+    clock.lap("validation").parts = comparison.stages;
 
     // Native validation must see the capture's absolute transient paths.
     // Once those source pixels pass, localize the publishable IR beside the
@@ -841,6 +938,7 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
                                std::make_move_iterator(asset_paths.begin()),
                                std::make_move_iterator(asset_paths.end()));
     }
+    clock.lap("asset-localization");
 
     const auto retained_proof_root =
         request.dry_run
@@ -890,6 +988,13 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         !(comparison.scored && comparison.passes)) {
         similarity_failed = true;
     }
+
+    for (auto& stage : clock.take_stages())
+        lane_stages.push_back(std::move(stage));
+    std::string timing_error;
+    if (!write_browser_lane_timings(transient_capture, lane_stages, timing_error))
+        std::cout << "Warning: " << timing_error << "\n";
+    std::cout << format_browser_lane_timing_line(lane_stages) << "\n";
 
     return internal::BrowserImportCliResultBuilder::make(
         std::move(design_ir), render_width, render_height, similarity_failed,
