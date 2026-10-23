@@ -58,7 +58,7 @@ An argument `pulp_add_plugin()` does not recognise (a misspelled keyword, a keyw
 | `AAX_NATIVE_CODE` | AAX only | -- | 4-character stable AAX Native identifier |
 | `SOURCES` | No | -- | Source files for the core object library |
 | `PROCESSOR_FACTORY` | No | -- | Factory function name (for generated entry points) |
-| `UI_SCRIPT` | No | -- | Path to a JavaScript UI entry file. Pulp applies it to created format targets via `PULP_UI_SCRIPT_PATH`; the Standalone macOS lane owns runtime validation for live JS/theme reload. |
+| `UI_SCRIPT` | No | -- | Path to a JavaScript UI entry file. Each created VST3, CLAP, AU, AAX and Standalone target registers the absolute path at load time through a generated source (`pulp::format::register_editor_assets()`), and every adapter's editor opens that script. AUv3 is not given the path, because an iOS app extension cannot resolve a build-machine path; ship the script inside the extension instead; the Standalone macOS lane owns runtime validation for live JS/theme reload. |
 | `ICON` | No | -- | A 1024x1024 PNG, converted to an `.icns` and bundled into every macOS bundle the call creates (Standalone, VST3, AU, CLAP, AAX). Mutually exclusive with `ICNS`. |
 | `ICNS` | No | -- | A finished `.icns`, bundled as-is into the same set. Prefer this when the asset is laid out per size; the `ICON` path downscales with `sips`, whose kernel rings small tiles. **Scope:** this fills `CFBundleIconFile` and ships the asset. macOS does not render that key for a non-`.app` bundle, so no icon appears in Finder for the plug-in formats; see the product-icon comment in `PulpUtils.cmake`. |
 | `CONTENT_CAPABILITIES` | No | -- | Runtime content capabilities the plugin actually consumes, such as `content.presets.v1`. Use this when the plugin can load installed content packs. Must be paired with `CONTENT_KINDS`. |
@@ -103,10 +103,11 @@ pulp_use_kit_ui(MyPlugin pulp_kit_dev_pulp_fixtures_basic_ui_kit)
 
 `pulp_use_kit_ui(<plugin-target> <kit-target> [SCRIPT <exported-path>] [TOKENS <exported-path>])`
 reads the reviewed kit target's `PULP_UI_SCRIPTS`, `PULP_DESIGN_TOKENS`, and
-`PULP_ASSETS` properties. The selected script is applied to existing format
-targets through `PULP_UI_SCRIPT_PATH`; the selected token/theme file is applied
-through `PULP_UI_THEME_PATH`; declared asset directories are applied through
-`PULP_UI_ASSET_ROOTS`. Scripted editors can then use `__loadAssetSync__` with
+`PULP_ASSETS` properties. The selected script, the selected token/theme file,
+and the declared asset directories are recorded on the existing format targets
+as the `PULP_UI_SCRIPT_PATH`, `PULP_UI_THEME_PATH`, and `PULP_UI_ASSET_ROOTS`
+target properties, which each target's generated editor-asset source registers
+at load time (`pulp/format/editor_assets.hpp`). Scripted editors can then use `__loadAssetSync__` with
 relative paths into those reviewed asset roots. Kits with multiple scripts or
 token files require the matching `SCRIPT` / `TOKENS` argument so the project
 makes the choice intentionally. The helper does not apply kits automatically

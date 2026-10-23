@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-gpu-submit-and-chart-reach-watch",
+  "created_at": "2026-10-22T05:07:19Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Two generic render-backend fixes. SkiaSurface's readback flush now judges Graphite's InsertStatus as end_frame() does, so a rejected recording fails the capture instead of returning stale texture pixels, and wait_for_submitted_work() reports the submit result; pixel output of accepted frames is unchanged. The chart-shader draw rect is padded by its declared reach, so a glow or outer feather paints past the shape rect instead of being cut off there, and a glow or outer feather whose reach is under 3 sigma is refused on the chart path (draw_with_sksl still accepts a short reach). The knob's chart draw now carries the feather declared with its shader geometry, so feathered knob charts change pixels inside the knob too, and a knob chart refused for a short reach falls through to the knob's body shader instead of painting the clipped chart. Pulp continues to own these targets under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits both when the targets adopt the Vellum package. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'SDF chart glow paints past the shape rect out to its reach'",
+    "ctest --test-dir build -R 'SkiaSurface readback fails when Graphite rejects the flushed recording'",
+    "ctest --test-dir build -R 'WidgetBridge knob chart glow paints outside the widget rect'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}

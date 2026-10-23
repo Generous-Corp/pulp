@@ -652,6 +652,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-e7c8a37a549c"
+paths = ["tools/scripts/gpu_fault_hooks_release_gate.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-fault-hooks-release-gate",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-341c9b25bfb8"
 paths = ["tools/scripts/link_floor_selftest.py"]
 tests = [
@@ -1489,6 +1523,40 @@ paths = ["tools/scripts/test_build_time_report.py"]
 tests = [
   "build-parallelism-guard",
   "build-time-report-selftest",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-cf2c9ebf97dc"
+paths = ["tools/scripts/test_bump_fastpath.py"]
+tests = [
+  "build-parallelism-guard",
+  "bump-fastpath-selftest",
   "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
@@ -3336,6 +3404,75 @@ tests = [
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-dpr-web-adapter-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-c632f935d948"
+paths = ["tools/scripts/test_gpu_fault_hooks_release_gate.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-fault-hooks-release-gate-macos-selftest",
+  "gpu-fault-hooks-release-gate-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-2706c509c1ab"
+paths = ["tools/scripts/test_gpu_fault_hooks_release_gate_macos.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-fault-hooks-release-gate-macos-selftest",
   "gpu-first-visible-acceptance-selftest",
   "gpu-first-visible-campaign-selftest",
   "gpu-first-visible-external-adapter-selftest",
@@ -7005,6 +7142,7 @@ paths = [
   "tools/scripts/github_app_jwt.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
+  "tools/scripts/gpu_fault_hooks_release_gate.py",
   "tools/scripts/host_quirks_staleness.py",
   "tools/scripts/install_shipyard_token_check.py",
   "tools/scripts/iwyu_annotate.py",
@@ -7070,6 +7208,7 @@ paths = [
   "tools/scripts/test_build_speed_scorecard.py",
   "tools/scripts/test_build_time_report.py",
   "tools/scripts/test_build_workflow.py",
+  "tools/scripts/test_bump_fastpath.py",
   "tools/scripts/test_capability_contract_gate.py",
   "tools/scripts/test_catch_discover_timeout_guard.py",
   "tools/scripts/test_catch_multilabel_properties.py",
@@ -7190,6 +7329,8 @@ paths = [
   "tools/scripts/test_gpu_dpr_runner.py",
   "tools/scripts/test_gpu_dpr_v2_evidence.py",
   "tools/scripts/test_gpu_dpr_web_adapter.py",
+  "tools/scripts/test_gpu_fault_hooks_release_gate.py",
+  "tools/scripts/test_gpu_fault_hooks_release_gate_macos.py",
   "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
   "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
   "tools/scripts/test_gpu_first_visible_a3_campaign.py",
@@ -7563,6 +7704,7 @@ paths = [
   "tools/scripts/github_app_jwt.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
+  "tools/scripts/gpu_fault_hooks_release_gate.py",
   "tools/scripts/host_quirks_staleness.py",
   "tools/scripts/install_shipyard_token_check.py",
   "tools/scripts/iwyu_annotate.py",
@@ -7628,6 +7770,7 @@ paths = [
   "tools/scripts/test_build_speed_scorecard.py",
   "tools/scripts/test_build_time_report.py",
   "tools/scripts/test_build_workflow.py",
+  "tools/scripts/test_bump_fastpath.py",
   "tools/scripts/test_capability_contract_gate.py",
   "tools/scripts/test_catch_discover_timeout_guard.py",
   "tools/scripts/test_catch_multilabel_properties.py",
@@ -7748,6 +7891,8 @@ paths = [
   "tools/scripts/test_gpu_dpr_runner.py",
   "tools/scripts/test_gpu_dpr_v2_evidence.py",
   "tools/scripts/test_gpu_dpr_web_adapter.py",
+  "tools/scripts/test_gpu_fault_hooks_release_gate.py",
+  "tools/scripts/test_gpu_fault_hooks_release_gate_macos.py",
   "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
   "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
   "tools/scripts/test_gpu_first_visible_a3_campaign.py",

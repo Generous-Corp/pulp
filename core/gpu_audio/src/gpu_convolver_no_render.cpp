@@ -129,7 +129,7 @@ void detail::GpuConvolverTestAccess::install_staged_compute(
 }
 
 bool detail::GpuConvolverTestAccess::install_shared_io_session(
-    GpuConvolver&, std::unique_ptr<SharedIoConvolutionSession>) noexcept {
+    GpuConvolver&, std::unique_ptr<SharedIoConvolutionSession>&&) noexcept {
     return false; // shared-I/O support is not compiled into this build
 }
 

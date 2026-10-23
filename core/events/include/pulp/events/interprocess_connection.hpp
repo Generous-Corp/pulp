@@ -49,8 +49,14 @@ public:
 
     /// Create a server that listens for one client connection.
     /// Blocks until a client connects (or timeout_ms expires, 0 = infinite).
+    /// For sockets an omitted host ("9100") listens on 127.0.0.1 only; pass
+    /// "0.0.0.0:9100" explicitly to accept connections from other hosts.
     bool create_server(std::string_view name, IpcTransport transport = IpcTransport::NamedPipe,
                        int timeout_ms = 0);
+
+    /// Address the most recent socket create_server() bound its listener to
+    /// (e.g. "127.0.0.1"), or empty when no socket listener was bound.
+    std::string server_bind_address() const;
 
     /// Attach to a duplicate of an already-connected OS-local socket handle.
     /// Callbacks must be installed first. Unsupported platforms fail closed.
@@ -171,7 +177,9 @@ public:
     InterprocessConnectionServer();
     virtual ~InterprocessConnectionServer();
 
-    /// Start listening on the given name.
+    /// Start listening on the given name. For sockets an omitted host
+    /// ("9100") listens on 127.0.0.1 only; pass "0.0.0.0:9100" explicitly to
+    /// accept connections from other hosts.
     bool start(std::string_view name, IpcTransport transport = IpcTransport::Socket);
 
     /// Stop listening and disconnect all clients.
@@ -188,6 +196,10 @@ public:
     /// Actual TCP port after binding, including an OS-assigned port requested
     /// with `host:0`. Returns zero for local, pipe, or unbound servers.
     std::uint16_t bound_port() const;
+
+    /// Actual bound IPv4 address after binding (e.g. "127.0.0.1" or
+    /// "0.0.0.0"). Returns empty for local, pipe, or unbound servers.
+    std::string bound_address() const;
 
     /// Called when a new client connects. Override to handle.
     /// The returned connection is owned by the server.

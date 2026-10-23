@@ -29,36 +29,108 @@ function _normalizeFontWeight(value: unknown): number {
     return Number.isFinite(n) ? n : 400;
 }
 
-// Resolve a `lineHeight` value with optional unitless multiplier semantics.
-// CSS spec: a unitless number on `line-height` means "multiply by the
-// element's font-size" (e.g. `line-height: 1.5` with `font-size: 16` -> 24px).
-// We detect unitless
-// multipliers by treating values <= 8 as ratios (RN ports + design-tool
-// exports virtually always emit either `lineHeight: 24` (px) or
-// `lineHeight: 1.5` (multiplier); the threshold of 8 leaves room for
-// extremely large ratios while keeping common px values like 16 / 24 /
-// 32 unambiguous). Scaled by the live `fontSize` from props (defaults
-// to 14 — same Label default the bridge uses when no fontSize is
-// present). Numeric strings ("1.5") are treated like numbers; px-suffix
-// strings ("24px") strip the suffix and treat as absolute.
-function _resolveLineHeight(value: unknown, props: Record<string, unknown> | undefined): number {
-    let n: number;
-    if (typeof value === 'number') {
-        n = value;
-    } else {
-        const s = String(value).trim();
-        const sp = s.endsWith('px') ? s.slice(0, -2) : s;
-        n = parseFloat(sp);
+/// How a bare number reads on a length property whose CSS unitless form is
+/// a multiplier (today: `lineHeight`).
+///
+/// - `'dom'`: React DOM / CSS. `lineHeight: 1.5` and `lineHeight: 24` are
+///   both multipliers of the font size.
+/// - `'native'`: React Native. Every number is a pixel length.
+/// - `'auto'` (default): mixed sources. A number `<= 8` is a multiplier and a
+///   larger one is pixels, because RN ports and design-tool exports emit
+///   `lineHeight: 24` (px) and `lineHeight: 1.5` (ratio) side by side.
+///
+/// Strings carry their own unit and never consult the dialect, except a bare
+/// numeric string on a multiplier property, which follows it like a number.
+export type LengthDialect = 'dom' | 'native' | 'auto';
+
+let lengthDialect: LengthDialect = 'auto';
+
+/// Select how bare numbers on multiplier properties are read. Returns the
+/// previous dialect so a caller can restore it.
+export function setLengthDialect(dialect: LengthDialect): LengthDialect {
+    const previous = lengthDialect;
+    if (dialect === 'dom' || dialect === 'native' || dialect === 'auto') lengthDialect = dialect;
+    return previous;
+}
+
+/// The font size a Label paints at when none is set, and the CSS root font
+/// size `rem` resolves against.
+const DEFAULT_FONT_SIZE = 14;
+const ROOT_FONT_SIZE = 16;
+
+/// What each typography length means when it has no unit, a `%`, or the
+/// `normal` keyword. `em` and `%` resolve against the element's own font size
+/// for every property except `fontSize`, where they resolve against the
+/// inherited size (the applier does not see the parent, so Pulp's default
+/// Label size stands in). `normal: null` means the keyword is not valid there.
+const TYPOGRAPHY_LENGTHS: Record<string, { unitless: 'px' | 'multiplier'; normal: number | null }> = {
+    fontSize:      { unitless: 'px',         normal: null },
+    letterSpacing: { unitless: 'px',         normal: 0 },
+    // 0 is the bridge's "no fixed line height": the Label uses its font's.
+    lineHeight:    { unitless: 'multiplier', normal: 0 },
+};
+
+function _multiplierFromUnitless(n: number): boolean {
+    if (lengthDialect === 'dom') return true;
+    if (lengthDialect === 'native') return false;
+    return n > 0 && n <= 8;
+}
+
+// Each alternative consumes digits in exactly one way, so a long run of
+// digits that fails at its end is rejected in linear time.
+const LENGTH_PATTERN = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(px|em|rem|%)?$/i;
+
+/// Resolve the element's own font size in pixels from its props, for `em`
+/// and `%` on the other typography lengths.
+function _ownFontSize(props: Record<string, unknown> | undefined): number {
+    const size = props ? resolveTypographyLength('fontSize', props.fontSize, undefined) : null;
+    return size !== null && size > 0 ? size : DEFAULT_FONT_SIZE;
+}
+
+/// Resolve a typography length (`fontSize`, `letterSpacing`, `lineHeight`) to
+/// the pixel number its bridge setter takes. Units come from the value and the
+/// property table, never from the value's magnitude, except for a bare number
+/// on a multiplier property under the `'auto'` dialect. Returns null when the
+/// value is not a length this resolver understands (for example `calc()`), so
+/// the caller leaves the native value alone rather than writing a guess.
+export function resolveTypographyLength(
+    property: string,
+    value: unknown,
+    props: Record<string, unknown> | undefined,
+): number | null {
+    const rule = TYPOGRAPHY_LENGTHS[property];
+    if (!rule) return null;
+    const resolved = _resolveVar(value);
+    const base = () => property === 'fontSize' ? DEFAULT_FONT_SIZE : _ownFontSize(props);
+    if (typeof resolved === 'number') {
+        if (!Number.isFinite(resolved)) return null;
+        if (rule.unitless === 'multiplier' && _multiplierFromUnitless(resolved))
+            return resolved * base();
+        return resolved;
     }
-    if (!Number.isFinite(n)) return 0;
-    if (n > 0 && n <= 8) {
-        // Unitless multiplier — scale by current font-size.
-        const fs = (props && typeof props.fontSize === 'number')
-            ? (props.fontSize as number)
-            : 14;
-        return n * fs;
+    if (typeof resolved !== 'string') return null;
+    const text = resolved.trim();
+    if (text.toLowerCase() === 'normal') return rule.normal;
+    const match = LENGTH_PATTERN.exec(text);
+    if (!match) return null;
+    const n = Number(match[1]);
+    if (!Number.isFinite(n)) return null;
+    switch ((match[2] || '').toLowerCase()) {
+        case 'px':  return n;
+        case 'em':  return n * base();
+        case 'rem': return n * ROOT_FONT_SIZE;
+        case '%':   return n / 100 * base();
+        default:
+            if (rule.unitless === 'multiplier' && _multiplierFromUnitless(n))
+                return n * base();
+            return n;
     }
-    return n;
+}
+
+function _callLength(verb: string, id: string, key: string, value: unknown,
+                     props: Record<string, unknown> | undefined): void {
+    const px = resolveTypographyLength(key, value, props);
+    if (px !== null) call(verb, id, px);
 }
 
 /// Apply a text/typography prop. Returns true if handled.
@@ -116,17 +188,16 @@ export function applyTypographyProp(
         // default. Resolve `var(--mono)` before forwarding because the bridge
         // expects a real family name, not a CSS variable expression.
         case 'fontFamily':      call('setFontFamily', id, _resolveVar(value) as string); return true;
-        case 'fontSize':        call('setFontSize', id, value as number); return true;
+        // Length strings ('0.08em', '1.5rem', '120%', 'normal') resolve to
+        // pixels here: the bridge setters take numbers and read a string as
+        // its leading number with the unit dropped.
+        case 'fontSize':        _callLength('setFontSize', id, key, value, props); return true;
         case 'fontWeight':      call('setFontWeight', id, _normalizeFontWeight(value)); return true;
         case 'fontStyle':       call('setFontStyle', id, value as string); return true;
-        case 'letterSpacing':   call('setLetterSpacing', id, value as number); return true;
-        // `lineHeight` accepts CSS unitless-multiplier semantics. A value
-        // `<= 8` is treated as a multiplier of the current `fontSize` from
-        // props (defaults to 14 when absent, matching the Label default).
-        // Larger values flow through as absolute pixels. Px-suffix strings
-        // strip the suffix and pass through as absolute too. The bridge setter
-        // signature is unchanged; it always sees a number.
-        case 'lineHeight':      call('setLineHeight', id, _resolveLineHeight(value, props)); return true;
+        case 'letterSpacing':   _callLength('setLetterSpacing', id, key, value, props); return true;
+        // A bare `lineHeight` number is a font-size multiplier or pixels by
+        // the active LengthDialect; a unit-bearing string is never re-read.
+        case 'lineHeight':      _callLength('setLineHeight', id, key, value, props); return true;
         // line-clamp + webkit-line-clamp wiring. Both line-clamp keys funnel
         // through the same setter. 0 / non-finite clears the slot.
         case 'lineClamp':

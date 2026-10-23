@@ -2670,8 +2670,10 @@ last 60 push runs were cancelled with zero jobs started, and the Linux/Windows
 cache-save steps ran at most once per stuck window. With the leg omitted, a push
 run finishes on hosted runners and the caches publish on every merge.
 
-`a2t-protected-event`, the one other push-only job, runs on GitHub-hosted
-`macos-15` for the same reason: its verifier needs only macOS, git and python3.
+`a2t-protected-event`, a push-only job, runs on GitHub-hosted `macos-15` for the
+same reason: its verifier needs only macOS, git and python3. `a2t-headroom-issue`,
+the other push-only job, runs on `ubuntu-latest`; it only reads an artifact and
+calls the GitHub API.
 `tools/scripts/test_fork_pr_runner_routing.py` (run by `workflow-lint.yml`,
 which installs PyYAML) walks every `build.yml` job reachable on push and fails
 if any routes to a runner that is not a GitHub-hosted label or a hosted lane
@@ -2926,6 +2928,27 @@ fork PRs, non-bump branches, stale bases, force-push races, and merge commits
 with extra content all keep the full path. The variable is read by the
 workflow, never by PR content; a base verifier that predates the flag rejects
 it and the run keeps the full path.
+
+Every run on the release bot's bump reports the outcome as a `bump-fast-path`
+notice on the `classify` job, and in its step summary: `taken`, or `refused:`
+followed by the reason. The reason is the verifier's own line (`verifier: ...`),
+`shape: no trusted verifier base` when the group or pull-request base resolves
+no trusted base (for example, main moved more than one queue entry past the
+bump's parent, a case the verifier is never asked about), or `the protected
+base has no verifier`. Only the bump is reported; other runs print nothing.
+`tools/scripts/bump_fastpath_report.py` counts the notices
+(`--days 7` by default), and `.github/workflows/bump-fastpath-weekly.yml` runs
+it every Monday into its job summary. A run from before the notice existed
+counts as `unreported`, never as taken.
+
+The four advisory workflows that `pull_request: auto_merge_enabled` starts
+(`coverage.yml`, `control-shipping-native.yml`, `examples-validation.yml`,
+`intel-portability.yml`) skip every job on `release/version-bump`: the bump's
+tree is main's plus version files, which they already ran on, and none of
+their contexts is required. Each job's condition is
+`github.head_ref != 'release/version-bump' && (<its own condition>)`, so every
+other pull request, schedule and dispatch runs exactly as before. This also
+keeps bump pull requests off GitHub-hosted Windows runners.
 
 The current provenance boundary is GitHub's valid SSH-signature record plus the
 `danielraffel` signer/account and exact release-bot author/committer identity.
@@ -3465,6 +3488,18 @@ re-pin, a `::notice` with the numbers below that, and a warning when the
 measurement is missing after the suite ran. The fix is always the re-pin in
 decisions contract row 22: move only `A2T_SCOPE_HISTORY_BASE` on protected
 main, never the limit.
+
+An annotation is easy to miss, and main once reached the 75% failure with the
+warning printed and unread. So every push to main also keeps one tracking
+issue. The Linux leg uploads the measurement as the `a2t-scope-headroom`
+artifact, and the advisory `a2t-headroom-issue` job runs
+`tools/ci/a2t_headroom_annotation.py --reconcile-issue`. From the same 60% mark
+(headroom below 20% of the guard's budget), it opens the issue, or updates it in
+place. The title carries the check name, the count and limit, and the re-pin,
+and the body the full instruction. The job closes the issue on the first push
+after a re-pin brings the count back under. The issue is found by a hidden
+marker, so a hand-written issue with the same title is never touched, and a
+missing measurement never opens or closes it.
 
 ## A2T evidence receipts get a nonterminal required-job attestation
 
@@ -5801,7 +5836,7 @@ These are the same inputs already documented above; they are listed
 here for completeness alongside the repo-variable knobs.
 
 For a trusted Linux-only Mac Pro proof during hosted saturation, disable the
-otherwise-default hosted Windows leg explicitly:
+Windows leg explicitly:
 
 ```bash
 gh workflow run build.yml --ref <trusted-branch> \
@@ -5810,7 +5845,29 @@ gh workflow run build.yml --ref <trusted-branch> \
 ```
 
 This switch affects only `workflow_dispatch`; automatic events keep their
-documented matrix policy, and ordinary manual dispatches still include Windows.
+documented matrix policy.
+
+GitHub-hosted Windows is opt-in. A `build.yml` dispatch or a push to `main`
+schedules no hosted Windows job (the `Windows (x64)` leg and the three
+`windows-latest` compile gates) unless one of these is set:
+
+- `-f allow_hosted_windows=true` on the dispatch;
+- `-f windows_runner_selector_json=...` naming a self-hosted runner (a list
+  with `"self-hosted"`), which runs the leg there, not on a hosted image;
+- the repository variable `PULP_ALLOW_HOSTED_WINDOWS=1`, which also lets a push
+  run it.
+
+`resolve-provider` prints `resolve-provider: Windows leg omitted: GitHub-hosted
+Windows is opt-in ...` when it leaves the leg out, and the advisory `windows`
+alias then passes with that line. `android.yml` leaves its `windows-latest`
+row out on every event but the nightly schedule unless
+`PULP_ALLOW_HOSTED_WINDOWS=1`; no required context reads it. `windows-cli-compile.yml` is the one
+listed exception: its push verdict on `main` is the release backstop
+`auto-release.yml`'s pre-tag check reads. Schedules and pull requests keep
+their documented Windows policy. `tools/scripts/test_windows_runner_policy.py`
+(`HostedWindowsOptInTests`) scans every workflow and fails on a job that can
+start a hosted `windows-*` runner on a push, or a `build.yml` dispatch, without
+`vars.PULP_ALLOW_HOSTED_WINDOWS == '1'` in its condition.
 
 ### Reverting
 

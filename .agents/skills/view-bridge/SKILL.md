@@ -41,6 +41,35 @@ installed and does not cross a PRIVATE static-library link. The proofs live in
 `test/fixtures/data_display_editor/` (plug-in editor and hot reload, both with
 the registry cleared first) and `cmake-view-audio-sdk-consumer`.
 
+### The UI_SCRIPT selection is a runtime value, never a compile definition
+
+`pulp_add_plugin(UI_SCRIPT ...)` and `pulp_use_kit_ui()` record the script,
+theme, and asset roots as target properties, and one generated source per
+format target (`<build>/pulp_editor_assets/<target>.cpp`) registers them at
+load time through `pulp::format::register_editor_assets()`. ViewBridge reads
+them back with `editor_assets_for(<bundle id>)`: a keyed bundle entry's
+`ui_*` fields win, then the binary-wide record. That precedence is what lets
+each plug-in in a multi-plug-in bundle carry its own editor; a single-plug-in
+binary has no keyed entry and uses its own record.
+
+The registered paths are absolute paths on the build machine. `UI_SCRIPT`
+therefore applies to VST3, CLAP, AU, AAX, Standalone and ControlHost targets
+and deliberately not to AUv3: an iOS app extension cannot open a path from the
+machine that built it, so an AUv3 editor ships its script inside the extension
+and loads it from there. `pulp_use_kit_ui()` applies to every format target
+that already exists, AUv3 included, which only resolves when the editor runs on
+the machine that built it.
+
+Do not reintroduce a `#ifdef PULP_UI_SCRIPT_PATH` reader. ViewBridge is
+compiled once into the shared format library, so a per-target compile
+definition never reaches it, and every plug-in format silently opens AutoUi
+with no test failing. An inline
+function whose body depends on a per-TU define is also an ODR hazard: the
+linker keeps whichever copy it sees first. The proof is
+`ui-script-plugin-editor-{vst3,clap,au}` (built bundles opened through
+`PluginSlot`, asserting `mode=scripted`, `gpu=true`, and the script's own
+console line) plus `ui-script-plugin-editor-installed-sdk`.
+
 ### Native scripted UI is not a WebView
 
 When a materialized canvas is retained as the native paint and hit-test
@@ -3054,6 +3083,75 @@ or a probe that cannot see damage passes every budget
 host that clips to bounded damage would paint exactly what the probe reports;
 the macOS plug-in host still repaints in full, so on that host the win is the
 avoided layout and commit, and the bound is what a partial-repaint host uses.
+
+## A live clock subscriber ticks the editor; only damage composites it
+
+`begin_host_frame` reports two things: `continuous` (anything wants FrameClock
+ticks: a running animation, or a live render subscriber such as a source-bound
+`Meter`) and `animating` (the tree paints new pixels every frame on its own:
+`needs_continuous_frames`). The macOS plug-in hosts and the standalone GPU
+window keep their vsync gate open for `continuous`, but composite a frame only
+for `animating` or real damage (`host_frame_composites`). So:
+
+- A FrameClock subscriber that changes what it draws must request a repaint.
+  `animate()`, the caret blinks and `LottieView` already do; the value-source
+  bindings repaint their owner when the snapshot changes
+  (`View::on_meter_snapshot_changed`, default whole-view; `Meter` overrides it
+  and keeps its own bounded, ballistics-gated invalidation). A subscriber that
+  silently mutates paint state is now a frozen view, not a slow one.
+- A paint that reads time (`frame_clock()->time()`, a shader clock) must keep
+  the view in `needs_continuous_frames` (continuous repaint / a registered
+  predicate), or it stops on the first frame nothing dirtied. `Stepper` and
+  `NumberBox` draw their typing caret from the clock's time, so they hold
+  `set_continuous_repaint` equal to their editing state through
+  `set_editing_()` and release it on commit, cancel, focus loss and a scrub;
+  an indeterminate `Spinner` holds it while it spins. A new caret or
+  time-driven widget needs the same, plus a headless test that
+  `needs_continuous_frames()` follows the state.
+- A permanent FrameClock subscriber that republishes on every audio block
+  defeats gating. If it posts a new frame of data into the script (a spectrum,
+  a scope trace) whenever the DSP's sequence number advances, the host's
+  silence still advances it, and every post becomes a commit, then damage, then
+  a composite at the display rate. One imported analyzer editor stayed at
+  ~62 composited frames per second and ~40% CPU while idle. Publish only when
+  the data changes at display resolution (quantize like a meter readout), and
+  unsubscribe while there is nothing to show. To tell this apart from a
+  host-side gap, stop the host's render calls with the editor idle (edbench's
+  `editor-idle-stopped` phase): frames dropping to zero means the product
+  is publishing per block.
+- Before this split, an editor with one bound meter re-composited its whole
+  surface every vsync through silence. Measured with an 8-knob, 16-meter
+  editor at 60 Hz on an M5 Max (process CPU, editor open and silent, host
+  baseline about 1.5%): CPU host 4.8% -> 2.5%; GPU host 7.3% -> 2.5% and 62
+  -> 0 presented drawables per second.
+
+The CPU (CoreGraphics) plug-in host draws from its display link, bounded:
+
+- While the link runs, `repaint()` records damage and opens the frame gate;
+  the paint half of the tick hands it to AppKit. Marking the NSView directly
+  let AppKit re-rasterize at the end of every run-loop turn that carried a
+  request, i.e. at the automation or pointer event rate, not the display's.
+- `request_repaint(Rect)` reaches `-setNeedsDisplayInRect:` through the design
+  viewport transform, so AppKit re-rasterizes only that region of the layer's
+  backing store (RGBA16F on a Retina/XDR display, so a whole-editor redraw is
+  expensive). A layer-backed NSView redraws the bounding box of several dirty
+  rects, so a frame's bounded requests union into one rect on purpose.
+- Requests made from the idle half (host automation reaching the editor
+  through the store listeners) stay bounded; they used to be escalated to a
+  whole-view redraw, so a knob following automation redrew the whole editor.
+- Held drag motion only opens the gate (`onNeedsDisplay`); the motion the
+  frame delivers repaints what it moved.
+- A rect-less `request_repaint()` is still whole-view. Widgets on a value hot
+  path must use `request_repaint_self()` (Knob, Fader, Meter do), or each tick
+  redraws the editor.
+- `drawRect:` lays out with `layout_children_if_needed()`, like the GPU host; a
+  geometry change that does not bump the layout generation is not re-laid out
+  there either.
+
+Measure redraw rate and area from outside the plug-in: count
+`-[NSViewBackingLayer display]` calls and the area passed to
+`-setNeedsDisplayInRect:` / `-setNeedsDisplay:` per second in the host
+process. Process CPU alone hides whether a frame was full or bounded.
 
 ## Present pacing on macOS: Mailbox is Fifo, and acquire waits on drawables
 

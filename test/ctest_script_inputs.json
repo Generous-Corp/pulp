@@ -1,10 +1,25 @@
 {
  "executable_targets": {
   "Pulp Test (dev) Plugin": "PulpBundleNameQuoting_Standalone",
+  "Pulp UI Script Fixture": "PulpUiScriptFixture_Standalone",
   "pulp-cli-run-fixture": "pulp-test-cli-run-fixture",
   "pulp-cpp": "pulp-cli"
  },
  "executables": {
+  "Pulp UI Script Fixture": {
+   "data": "undeclared",
+   "detected_sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ],
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ],
+   "undeclared_sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ]
+  },
   "pulp-control-broker-crash-fixture": {
    "data": "none",
    "inputs": [],
@@ -1741,14 +1756,18 @@
   },
   "pulp-test-group-view-widgets": {
    "data": "declared",
-   "detected_sources": [],
+   "detected_sources": [
+    "test/test_widget_bridge_style_reset.cpp"
+   ],
    "inputs": [
+    "packages/pulp-react/test/fixtures/style-reset-toggle.json",
     "tools/bridge/generated_editor_bridge.ts"
    ],
    "kind": "compiled",
    "runtime_targets": [],
    "sources": [
-    "test/test_editor_bridge.cpp"
+    "test/test_editor_bridge.cpp",
+    "test/test_widget_bridge_style_reset.cpp"
    ],
    "spawning_sources": [
     "test/test_editor_bridge.cpp"
@@ -2342,10 +2361,27 @@
     "test/test_widget_bridge_no_gpu_gates.cpp"
    ],
    "undeclared_sources": []
+  },
+  "pulp-ui-script-editor-probe": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "PulpUiScriptFixture_AU",
+    "PulpUiScriptFixture_CLAP",
+    "PulpUiScriptFixture_VST3"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/fixtures/ui_script_plugin/editor_probe.mm"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
   }
  },
  "executables_scanned": [
   "Pulp Test (dev) Plugin",
+  "Pulp UI Script Fixture",
   "pulp-browser-capture-launcher-fixture",
   "pulp-child-process-input-fixture",
   "pulp-cli-run-fixture",
@@ -2542,6 +2578,7 @@
   "pulp-test-create-template-instrument",
   "pulp-test-cross-platform-audio-golden",
   "pulp-test-crossfade",
+  "pulp-test-css-gradient-dither-gpu",
   "pulp-test-css-gradient-render",
   "pulp-test-css-translator-gaps-1434",
   "pulp-test-data-display-link-floor",
@@ -2554,6 +2591,7 @@
   "pulp-test-design-import-benchmark",
   "pulp-test-design-import-benchmark-contracts",
   "pulp-test-design-import-designmd",
+  "pulp-test-design-import-inert-styles",
   "pulp-test-design-import-jsx-runtime",
   "pulp-test-design-import-native-common",
   "pulp-test-design-import-native-materializer",
@@ -2730,6 +2768,7 @@
   "pulp-test-image-view-fill-gpu",
   "pulp-test-import-design-tool",
   "pulp-test-import-object-coverage",
+  "pulp-test-inline-image-cache-gpu",
   "pulp-test-inspector-audit",
   "pulp-test-inspector-domain-helpers",
   "pulp-test-inspector-session",
@@ -3008,6 +3047,7 @@
   "pulp-test-windowing",
   "pulp-test-xcode-developer-path",
   "pulp-test-yoga-layout-bench",
+  "pulp-ui-script-editor-probe",
   "pulp-unique-temp-dir-fixture",
   "sample-region-allpass-consumer"
  ],
@@ -3444,6 +3484,21 @@
     "core/view",
     "core/view/include/pulp/view/view.hpp",
     "tools/scripts/test_build_time_report.py"
+   ],
+   "kind": "python"
+  },
+  "bump-fastpath-selftest": {
+   "entry": "tools/scripts/test_bump_fastpath.py",
+   "inputs": [
+    ".github/rulesets/main-protection.json",
+    ".github/workflows/build.yml",
+    ".github/workflows/bump-fastpath-weekly.yml",
+    ".github/workflows/control-shipping-native.yml",
+    ".github/workflows/coverage.yml",
+    ".github/workflows/examples-validation.yml",
+    ".github/workflows/intel-portability.yml",
+    "tools/scripts/bump_fastpath_report.py",
+    "tools/scripts/test_bump_fastpath.py"
    ],
    "kind": "python"
   },
@@ -5094,6 +5149,21 @@
    ],
    "kind": "python"
   },
+  "gpu-audio-daw-continuity-receipt-verifier-selftest": {
+   "entry": "tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py",
+   "inputs": [
+    "tools/testing/daw-smoke/reaper_smoke.py",
+    "tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-daw-continuity-v2-receipt-verifier-selftest": {
+   "entry": "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py",
+   "inputs": [
+    "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py"
+   ],
+   "kind": "python"
+  },
   "gpu-audio-p2-campaign-contract-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p2_campaign.py",
    "inputs": [
@@ -5515,6 +5585,38 @@
     "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/testing/daw-smoke/insert_and_float.lua",
     "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-fault-hooks-release-gate": {
+   "entry": "tools/scripts/gpu_fault_hooks_release_gate.py",
+   "inputs": [
+    "tools/scripts/gpu_fault_hooks_release_gate.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-fault-hooks-release-gate-macos-selftest": {
+   "entry": "tools/scripts/test_gpu_fault_hooks_release_gate_macos.py",
+   "inputs": [
+    "tools/scripts/test_gpu_fault_hooks_release_gate.py",
+    "tools/scripts/test_gpu_fault_hooks_release_gate_macos.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-fault-hooks-release-gate-selftest": {
+   "entry": "tools/scripts/test_gpu_fault_hooks_release_gate.py",
+   "inputs": [
+    "tools/scripts/test_gpu_fault_hooks_release_gate.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-fault-real-host-driver-selftest": {
+   "entry": "tools/testing/daw-smoke/test_real_host_smoke.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_host_preflight.py",
+    "tools/testing/daw-smoke/real_host_smoke.py",
+    "tools/testing/daw-smoke/test_real_host_smoke.py",
+    "tools/validation/verify_gpu_audio_daw_continuity_receipt_v2.py"
    ],
    "kind": "python"
   },
@@ -6536,6 +6638,13 @@
    "inputs": [
     "tools/import-validation/test_verify_browser_fidelity_receipt.py",
     "tools/import-validation/verify_browser_fidelity_receipt.py"
+   ],
+   "kind": "python"
+  },
+  "import-validation-chrome-gradient-oracle-selftest": {
+   "entry": "tools/import-validation/test_chrome_gradient_oracle.py",
+   "inputs": [
+    "tools/import-validation/test_chrome_gradient_oracle.py"
    ],
    "kind": "python"
   },

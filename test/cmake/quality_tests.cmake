@@ -71,6 +71,35 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_p5_receipt.py")
 
+    add_test(NAME gpu-audio-daw-continuity-receipt-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py")
+
+    add_test(NAME gpu-audio-daw-continuity-v2-receipt-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py")
+
+    # The GPU fault-injection test hooks never reach a build that did not ask
+    # for them: the self-test plants each way in; the gate scans this tree.
+    add_test(NAME gpu-fault-real-host-driver-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/testing/daw-smoke/test_real_host_smoke.py")
+
+    add_test(NAME gpu-fault-hooks-release-gate-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_fault_hooks_release_gate.py")
+    if(APPLE)
+        add_test(NAME gpu-fault-hooks-release-gate-macos-selftest
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_fault_hooks_release_gate_macos.py")
+    endif()
+    if(NOT PULP_GPU_AUDIO_FAULT_HOOKS)
+        add_test(NAME gpu-fault-hooks-release-gate
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/gpu_fault_hooks_release_gate.py"
+                --build-dir "${CMAKE_BINARY_DIR}")
+    endif()
+
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include
@@ -1566,6 +1595,14 @@ if(Python3_Interpreter_FOUND)
     # otherwise inherit. 3x the worst run observed on 2026-09-13, rounded up.
     set_tests_properties(version-at-land-selftest PROPERTIES
         TIMEOUT 180)
+
+    # The release bot's bump: build.yml's classify step reports whether the
+    # exact-generated-bump fast path was taken (run in Bash with a fake
+    # verifier), bump_fastpath_report.py counts those reports, and the four
+    # advisory workflows skip every job on release/version-bump while every
+    # other pull request still runs them and none of their contexts is required.
+    add_test(NAME bump-fastpath-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_bump_fastpath.py")
 
     # Unreleased migration notes: their validation in the index generator and
     # the fold the version-at-land bump runs to key them to the version it

@@ -283,4 +283,7 @@ YAML, and the required macOS CTest hosts carry no PyYAML.
 The Intel portability workflow is advisory and is scheduled nightly on `main`
 or dispatched by Shipyard at arm time for an approved PR head. It intentionally
 has no `pull_request` trigger, so ordinary PR pushes do not consume the hosted
-Intel capacity.
+Intel capacity. Its job also skips the release bot's `release/version-bump`
+pull request (`github.head_ref != 'release/version-bump' && (...)`): the bump's
+tree is main's plus version files. Keep that guard on any job added here;
+`tools/scripts/test_bump_fastpath.py` checks it.

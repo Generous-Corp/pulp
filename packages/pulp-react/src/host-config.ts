@@ -23,6 +23,7 @@ import { beginBridgeBatch, endBridgeBatch, queueBridgeCall } from './bridge-batc
 import {
     applyAllProps,
     applyChangedProps,
+    applyStyleProps,
     clearMaterializedEventCallbacks,
     isEventHandler,
     normalizeHostProps,
@@ -308,7 +309,28 @@ function applyButtonCaptionLayout(textId: string, hasText: boolean): void {
 /// after createWidget.
 function createHtmlLabel(id: string, text: string, parentId: string): void {
     call('createLabel', id, text, parentId);
-    call('setWhiteSpace', id, 'normal');
+    applyCreationStyle(id, 'label', TEXT_CREATION_STYLE);
+}
+
+/// CSS's default for text, which a native Label does not share.
+const TEXT_CREATION_STYLE: Props = { whiteSpace: 'normal' };
+
+/// SVG primitives have no intrinsic Yoga size; the JSX width/height lives on
+/// the parent <svg>, so they are pinned to the parent bounds so zero-sized
+/// primitives still paint. Presentational SVG children should not intercept
+/// pointer events meant for the parent <svg> handler.
+const SVG_PRIMITIVE_CREATION_STYLE: Props = {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none',
+};
+
+/// Style the host config gives the widget materializeUnder is creating,
+/// collected while createWidget runs and recorded on the instance so a
+/// removed author prop falls back to it rather than to the bare widget.
+let creationStyleSink: Props | undefined;
+
+function applyCreationStyle(id: string, type: string, style: Props): void {
+    applyStyleProps(id, type, style);
+    creationStyleSink = { ...creationStyleSink, ...style };
 }
 
 // ── element-name → bridge createX dispatch ──────────────────────────
@@ -414,8 +436,7 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     // captured/computed display, alignment, and positioning
                     // styles remain free to override it afterwards.
                     call('createRow', id, parentId);
-                    call('setFlex', id, 'align_items', 'center');
-                    call('setFlex', id, 'justify_content', 'center');
+                    applyCreationStyle(id, type, { alignItems: 'center', justifyContent: 'center' });
                     const textId = id + '__text';
                     // Always create the caption—even for nested markup—so a
                     // dynamic nested↔plain-text React update has a stable
@@ -484,14 +505,7 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     // width/height lives on the parent <svg>. Pin children
                     // to the parent bounds so zero-sized primitives still
                     // paint.
-                    call('setPosition', id, 'absolute');
-                    call('setTop', id, 0);
-                    call('setLeft', id, 0);
-                    call('setRight', id, 0);
-                    call('setBottom', id, 0);
-                    // Presentational SVG children should not intercept
-                    // pointer events meant for the parent <svg> handler.
-                    call('setPointerEvents', id, 'none');
+                    applyCreationStyle(id, type, SVG_PRIMITIVE_CREATION_STYLE);
                     return;
                 }
                 case 'circle': {
@@ -523,38 +537,17 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                         }
                     }
                     // Same fill-parent sizing as <path> (see comment above).
-                    call('setPosition', id, 'absolute');
-                    call('setTop', id, 0);
-                    call('setLeft', id, 0);
-                    call('setRight', id, 0);
-                    call('setBottom', id, 0);
-                    // Presentational SVG children should not intercept
-                    // pointer events meant for the parent <svg> handler.
-                    call('setPointerEvents', id, 'none');
+                    applyCreationStyle(id, type, SVG_PRIMITIVE_CREATION_STYLE);
                     return;
                 }
                 case 'rect': {
                     call('createSvgRect', id, parentId);
-                    call('setPosition', id, 'absolute');
-                    call('setTop', id, 0);
-                    call('setLeft', id, 0);
-                    call('setRight', id, 0);
-                    call('setBottom', id, 0);
-                    // Presentational SVG children should not intercept
-                    // pointer events meant for the parent <svg> handler.
-                    call('setPointerEvents', id, 'none');
+                    applyCreationStyle(id, type, SVG_PRIMITIVE_CREATION_STYLE);
                     return;
                 }
                 case 'line': {
                     call('createSvgLine', id, parentId);
-                    call('setPosition', id, 'absolute');
-                    call('setTop', id, 0);
-                    call('setLeft', id, 0);
-                    call('setRight', id, 0);
-                    call('setBottom', id, 0);
-                    // Presentational SVG children should not intercept
-                    // pointer events meant for the parent <svg> handler.
-                    call('setPointerEvents', id, 'none');
+                    applyCreationStyle(id, type, SVG_PRIMITIVE_CREATION_STYLE);
                     return;
                 }
                 case 'g':        call('createCol', id, parentId); return; // <svg><g> group
@@ -657,8 +650,9 @@ function hasFixedTextDimension(value: unknown): boolean {
 /// depends on neither the string nor its glyphs. A unitless value is a
 /// font-size multiplier, which is equally text-independent here because the
 /// gate already requires every non-text prop -- fontSize included -- to be
-/// unchanged. Percentages are rejected: the typography applier parses `'50%'`
-/// as 50px, and a correctness gate must not rest on that coercion.
+/// unchanged. Percentages and font-relative units are rejected: they are
+/// equally text-independent, but this gate admits only the forms it parses
+/// itself rather than restating the typography resolver's unit table.
 function hasFixedLineHeight(value: unknown): boolean {
     if (typeof value === 'number') return Number.isFinite(value) && value > 0;
     if (typeof value !== 'string') return false;
@@ -1448,6 +1442,7 @@ function bindSourceLocation(child: Instance): void {
 
 function materializeUnder(parentId: string, child: Instance, index?: number): void {
     if (child.onBridge) return;
+    creationStyleSink = undefined;
     createWidget(child.type, child.id, parentId, child.props);
     // An older native host has no indexed insert and can only append. Ordering
     // then degrades exactly as it did before this call existed, rather than
@@ -1461,7 +1456,9 @@ function materializeUnder(parentId: string, child: Instance, index?: number): vo
     // so state it explicitly — otherwise every imported paragraph inside a
     // width-constrained box truncates. An element that authored its own
     // `whiteSpace` still wins: applyAllProps runs after this.
-    if (child.anonymousTextTarget) call('setWhiteSpace', child.id, 'normal');  // same CSS default as createHtmlLabel
+    if (child.anonymousTextTarget) applyCreationStyle(child.id, child.type, TEXT_CREATION_STYLE);
+    child.creationStyle = creationStyleSink;
+    creationStyleSink = undefined;
     if (child._dom && typeof child._dom === 'object' && child.textTargetId) {
         (child._dom as Record<string, unknown>).__pulpTextTargetId = child.textTargetId;
     }

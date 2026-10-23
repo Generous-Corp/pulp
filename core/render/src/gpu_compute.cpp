@@ -3855,6 +3855,9 @@ private:
     // Groups at least this large store layer weights output-channel-minor (see
     // the layer shader); smaller plans keep the blob's row order.
     static constexpr uint32_t kWavenetTransposedWeightsMinGroup = 32;
+    // Largest `dilation*(K-1) + B` a WaveNet layer may carry; every history
+    // ring is then at most 2^20 columns (about 22 s at 48 kHz).
+    static constexpr uint64_t kWavenetMaxRingColumns = uint64_t{1} << 20;
     struct WavenetPlan {
         uint32_t B = 0;
         uint32_t count = 1;              // same-shape instances run together
@@ -3948,6 +3951,15 @@ private:
                 return false;
             if (a > 0 && arrays[a - 1].head_size != s.channels)
                 return false; // head chain
+            // Each layer keeps its history in a power-of-two ring of at least
+            // `dilation*(K-1) + B` columns. Bound that before anything is sized,
+            // in 64-bit arithmetic, so an untrusted model cannot wrap the ring
+            // math or request a multi-gigabyte buffer.
+            for (uint32_t l = 0; l < s.num_layers; ++l) {
+                const uint64_t reach = static_cast<uint64_t>(s.dilations[l]) * (s.kernel - 1u);
+                if (s.dilations[l] == 0 || reach + B > kWavenetMaxRingColumns)
+                    return false;
+            }
             const uint64_t Z = s.gated ? 2ull * s.channels : s.channels;
             need += static_cast<uint64_t>(s.channels) * s.input_size; // rechannel
             for (uint32_t l = 0; l < s.num_layers; ++l)
@@ -4011,12 +4023,31 @@ private:
         plan.weight_stride = static_cast<uint32_t>(need);
         // A ring holds `history + B` columns, rounded up to a power of two so the
         // shader can wrap with a mask and the u32 stream position never skews it.
-        auto ring_columns = [B](uint32_t history) {
-            uint32_t r = 1;
+        auto ring_columns = [B](uint64_t history) {
+            uint64_t r = 1;
             while (r < history + B)
                 r <<= 1;
             return r;
         };
+        // Refuse, before allocating any ring, one this device cannot bind as a
+        // single storage buffer.
+        {
+            wgpu::Limits limits{};
+            if (device_.GetLimits(&limits) != wgpu::Status::Success)
+                return false;
+            for (uint32_t a = 0; a < num_arrays; ++a) {
+                const WavenetLayerArraySpec& s = arrays[a];
+                for (uint32_t l = 0; l <= s.num_layers; ++l) {
+                    const uint64_t history =
+                        l < s.num_layers ? static_cast<uint64_t>(s.dilations[l]) * (s.kernel - 1u)
+                                         : 0u;
+                    const uint64_t bytes =
+                        uint64_t{s.channels} * ring_columns(history) * 4u * count;
+                    if (bytes > limits.maxStorageBufferBindingSize || bytes > 0xffffffffull)
+                        return false;
+                }
+            }
+        }
 
         uint64_t woff = 0;
 
@@ -4037,8 +4068,9 @@ private:
             // last activation only feeds the next array's rechannel at the
             // current samples, so it carries no history.
             for (uint32_t l = 0; l <= s.num_layers; ++l) {
-                const uint32_t history = (l < s.num_layers) ? s.dilations[l] * (K - 1u) : 0u;
-                const uint32_t cols = ring_columns(history);
+                const uint64_t history =
+                    (l < s.num_layers) ? static_cast<uint64_t>(s.dilations[l]) * (K - 1u) : 0u;
+                const uint32_t cols = static_cast<uint32_t>(ring_columns(history));
                 const uint64_t bytes64 = static_cast<uint64_t>(C) * cols * 4u * count;
                 if (bytes64 > 0xffffffffull)
                     return false;
