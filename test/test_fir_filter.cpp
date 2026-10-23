@@ -242,6 +242,7 @@ TEST_CASE("FirFilter in-place and separate-output block processing are identical
     separate.set_coefficients(ir);
 
     // Uneven slices that straddle the kBlockCapacity compaction boundary.
+    std::vector<float> stream, from_in_place, from_separate;
     std::size_t phase = 0;
     for (const int n : {7, 300, 511, 512, 513, 1, 900}) {
         std::vector<float> input(static_cast<std::size_t>(n));
@@ -252,6 +253,19 @@ TEST_CASE("FirFilter in-place and separate-output block processing are identical
         in_place.process(data.data(), n);
         separate.process(input.data(), output.data(), n);
         REQUIRE(data == output);
+        stream.insert(stream.end(), input.begin(), input.end());
+        from_in_place.insert(from_in_place.end(), data.begin(), data.end());
+        from_separate.insert(from_separate.end(), output.begin(), output.end());
+    }
+    // Both paths must also be the convolution, not merely agree with each
+    // other: compare against a double-precision direct sum of the stream.
+    for (std::size_t t = 0; t < stream.size(); ++t) {
+        double expected = 0.0;
+        for (std::size_t k = 0; k < ir.size() && k <= t; ++k)
+            expected += static_cast<double>(ir[k]) * stream[t - k];
+        INFO("sample " << t);
+        REQUIRE(std::abs(from_in_place[t] - expected) < 1e-5);
+        REQUIRE(std::abs(from_separate[t] - expected) < 1e-5);
     }
 }
 
