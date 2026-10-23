@@ -13,6 +13,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
 import re
 import stat
@@ -35,6 +36,9 @@ LISTING = (
     "libpulp-view-audio.a[visualizers.cpp.o]: __ZN4pulp4view4weakEv w 0 0\n"
     "libpulp-view-audio.a[visualizers.cpp.o]: __ZN4pulp4view4weakvEv v 0 0\n"
     "libpulp-view-audio.a[waveform.cpp.o]: _ZN4pulp4view12WaveformView5paintEv T 0 0\n"
+    "libpulp-view-audio.a[waveform.cpp.o]: __ZTVN4pulp4view12WaveformViewE W 0 0\n"
+    "libpulp-view-audio.a[waveform.cpp.o]: __ZN4pulp4view6InlineEv V 0 0\n"
+    "libpulp-view-audio.a[waveform.cpp.o]: __ZN4pulp4view6IndirectEv I 0 0\n"
     "libpulp-view-audio.a[waveform.cpp.o]:\n"
 )
 
@@ -45,7 +49,9 @@ def write_exe(path: pathlib.Path, body: str) -> pathlib.Path:
     return path
 
 
-class ManifestTests(unittest.TestCase):
+class ManifestFixture(unittest.TestCase):
+    """A fake nm, demangler and source checkout, plus describe/verify helpers."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name)
@@ -65,6 +71,7 @@ class ManifestTests(unittest.TestCase):
         (self.source / "tools/scripts/view_audio_symbol_floor.py").write_text(
             "import pathlib, sys\n"
             "print('gate argv: ' + ' '.join(a.rsplit('/', 1)[-1] for a in sys.argv[1:]))\n"
+            "print('nm: ' + sys.argv[sys.argv.index('--nm') + 1])\n"
             f"raise SystemExit(int(pathlib.Path({str(self.gate_status)!r}).read_text(encoding='utf-8')))\n",
             encoding="utf-8")
         git = ["git", "-C", str(self.source), "-c", "user.name=t", "-c", "user.email=t@t"]
@@ -98,16 +105,34 @@ class ManifestTests(unittest.TestCase):
             "--configure=-DCMAKE_BUILD_TYPE=Release", *extra])
 
     def verify(self, *extra: str) -> tuple[int, str]:
-        if "--source-sha" not in extra:
-            extra = (*extra, "--source-sha", self.sha)
+        for flag, value in (("--source-sha", self.sha), ("--floor", str(self.floor)),
+                            ("--gate", str(self.gate))):
+            if flag not in extra:
+                extra = (*extra, flag, value)
         return self.call(["verify", "--archive", str(self.archive),
                           "--manifest", str(self.manifest), *extra])
 
-    def test_floor_excludes_undefined_and_weak_references(self):
+    def build_dir(self, name: str) -> pathlib.Path:
+        directory = self.root / name
+        (directory / "core/view").mkdir(parents=True, exist_ok=True)
+        (directory / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=Release\n", encoding="utf-8")
+        return directory
+
+    def rebuild(self, first: str, second: str, data: bytes) -> tuple[int, str]:
+        rebuilt = self.build_dir(second) / "core/view/libpulp-view-audio.a"
+        rebuilt.write_bytes(data)
+        return self.describe("--build-dir", str(self.build_dir(first)),
+                             "--rebuild-dir", str(self.root / second), "--rebuild-archive", str(rebuilt))
+
+
+class ManifestTests(ManifestFixture):
+    def test_floor_keeps_weak_definitions_and_drops_references(self):
         self.assertEqual(tool.defined_symbols(LISTING), [
             "_ZN4pulp4view12WaveformView5paintEv",
             "__ZN4pulp4view5Meter9set_levelEff",
+            "__ZN4pulp4view6InlineEv",
             "__ZTIN4pulp4view5MeterE",
+            "__ZTVN4pulp4view12WaveformViewE",
         ])
 
     def test_describe_records_archive_floor_and_gate(self):
@@ -119,7 +144,7 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(manifest["archive"]["sha256"], tool.sha256_file(self.archive))
         self.assertEqual(manifest["archive"]["size"], self.archive.stat().st_size)
         self.assertEqual(manifest["configure"], ["-DCMAKE_BUILD_TYPE=Release"])
-        self.assertEqual(manifest["symbol_floor"]["symbols"], 3)
+        self.assertEqual(manifest["symbol_floor"]["symbols"], 5)
         self.assertEqual(manifest["symbol_floor"]["sha256"], tool.sha256_file(self.floor))
         self.assertTrue(all(line.startswith("dm:") for line in self.floor.read_text(encoding="utf-8").splitlines()))
         self.assertEqual(manifest["symbol_floor_gate"]["exit_code"], 0)
@@ -156,18 +181,6 @@ class ManifestTests(unittest.TestCase):
         code, err = self.describe()
         self.assertEqual(code, 2)
         self.assertIn("defines no symbol", err)
-
-    def build_dir(self, name: str) -> pathlib.Path:
-        directory = self.root / name
-        (directory / "core/view").mkdir(parents=True, exist_ok=True)
-        (directory / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=Release\n", encoding="utf-8")
-        return directory
-
-    def rebuild(self, first: str, second: str, data: bytes) -> tuple[int, str]:
-        rebuilt = self.build_dir(second) / "core/view/libpulp-view-audio.a"
-        rebuilt.write_bytes(data)
-        return self.describe("--build-dir", str(self.build_dir(first)),
-                             "--rebuild-dir", str(self.root / second), "--rebuild-archive", str(rebuilt))
 
     def test_describe_derives_the_rebuild_kind_from_its_directories(self):
         self.assertEqual(self.rebuild("build", "build-rebuild", self.archive.read_bytes())[0], 0)
@@ -266,12 +279,170 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(self.describe()[0], 0)
         self.assertEqual(self.verify("--gate", str(self.gate), "--require-gate-pass")[0], 0)
 
+    def test_verify_rejects_an_emptied_floor(self):
+        self.assertEqual(self.describe()[0], 0)
+        self.floor.write_text("", encoding="utf-8")
+        code, err = self.verify()
+        self.assertEqual(code, 1)
+        self.assertIn("has 0 symbols", err)
+        # Even with the manifest rewritten to match, an empty floor is refused.
+        manifest = json.loads(self.manifest.read_text(encoding="utf-8"))
+        manifest["symbol_floor"].update(sha256=tool.sha256_file(self.floor), symbols=0)
+        self.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+        code, err = self.verify()
+        self.assertEqual(code, 1)
+        self.assertIn("has 0 symbols", err)
+
+    def test_verify_needs_the_floor_and_the_gate(self):
+        self.assertEqual(self.describe()[0], 0)
+        for missing in ("--floor", "--gate", "--source-sha"):
+            argv = ["verify", "--archive", str(self.archive), "--manifest", str(self.manifest)]
+            for flag, value in (("--floor", str(self.floor)), ("--gate", str(self.gate)),
+                                ("--source-sha", self.sha)):
+                if flag != missing:
+                    argv += [flag, value]
+            with self.subTest(missing=missing), self.assertRaises(SystemExit) as caught, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                tool.main(argv)
+            self.assertEqual(caught.exception.code, 2)
+
+    def test_verify_rejects_a_malformed_recorded_sha(self):
+        self.assertEqual(self.describe()[0], 0)
+        manifest = json.loads(self.manifest.read_text(encoding="utf-8"))
+        manifest["source"]["sha"] = self.sha[:12]
+        self.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+        code, err = self.verify("--source-sha", self.sha[:12])
+        self.assertEqual(code, 1)
+        self.assertIn("is not a full commit", err)
+
+    def test_describe_refuses_a_demangler_that_drops_lines(self):
+        short = write_exe(self.root / "short-cxxfilt", (
+            "import sys\n"
+            "print('dm:only-one')\n"))
+        code, err = self.call([
+            "describe", "--archive", str(self.archive), "--source-sha", self.sha,
+            "--source-root", str(self.source), "--floor-out", str(self.floor),
+            "--gate-out", str(self.gate), "--output", str(self.manifest),
+            "--nm", str(self.nm), "--cxxfilt", str(short),
+            "--check", "view-core=/x/libpulp-view-core.a"])
+        self.assertEqual(code, 2)
+        self.assertIn("one-to-one", err)
+        self.assertFalse(self.manifest.exists())
+
+    def test_the_gate_gets_an_absolute_nm_path(self):
+        # The gate runs from the source checkout, so a relative nm path that
+        # works from the caller's directory must be resolved first.
+        cwd = pathlib.Path.cwd()
+        os.chdir(self.root)
+        try:
+            code, err = self.describe("--nm", "./nm")
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(code, 0, err)
+        gate = self.gate.read_text(encoding="utf-8")
+        self.assertIn(f"nm: {self.nm.resolve()}\n", gate)
+
     def test_verify_rejects_an_unknown_manifest_schema(self):
         self.assertEqual(self.describe()[0], 0)
         manifest = json.loads(self.manifest.read_text(encoding="utf-8"))
         manifest["schema"] = "something-else"
         self.manifest.write_text(json.dumps(manifest), encoding="utf-8")
         self.assertEqual(self.verify()[0], 2)
+
+
+class VerifyReleaseTests(ManifestFixture):
+    """verify-release over a release directory assembled from a real describe."""
+
+    def setUp(self):
+        super().setUp()
+        self.release = self.root / "release"
+        self.release.mkdir()
+        self.gh_log = self.root / "gh.log"
+        self.gh_status = self.root / "gh.status"
+        self.gh_status.write_text("0", encoding="utf-8")
+        self.gh = write_exe(self.root / "gh", (
+            "import os, pathlib, sys\n"
+            f"log = pathlib.Path({str(self.gh_log)!r})\n"
+            "token = 'token' if os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN') else 'no-token'\n"
+            "log.open('a').write(token + ' ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+            f"raise SystemExit(int(pathlib.Path({str(self.gh_status)!r}).read_text()))\n"))
+        self.assertEqual(self.rebuild("build", "build-rebuild", self.archive.read_bytes())[0], 0)
+        names = {self.archive: "libpulp-view-audio.a", self.manifest: "pulp-view-audio-archive.manifest.json",
+                 self.floor: "pulp-view-audio-symbol-floor.txt", self.gate: "pulp-view-audio-symbol-floor-gate.txt"}
+        lines = []
+        for path, name in names.items():
+            (self.release / name).write_bytes(path.read_bytes())
+            lines.append(f"{tool.sha256_file(path)}  {name}")
+        (self.release / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        (self.release / tool.BUNDLE).write_text("{}\n", encoding="utf-8")
+
+    def check(self, sha=None) -> tuple[int, str]:
+        return self.call(["verify-release", "--dir", str(self.release), "--source-sha", sha or self.sha,
+                          "--repository", "Generous-Corp/pulp", "--gh", str(self.gh)])
+
+    def test_a_complete_release_verifies_every_attested_file_without_a_token(self):
+        os.environ["GH_TOKEN"] = "must-not-reach-gh"
+        try:
+            code, err = self.check()
+        finally:
+            del os.environ["GH_TOKEN"]
+        self.assertEqual(code, 0, err)
+        calls = self.gh_log.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(calls), 5)
+        self.assertEqual(sorted(call.split()[3].rsplit("/", 1)[-1] for call in calls), sorted(tool.ATTESTED))
+        for call in calls:
+            self.assertTrue(call.startswith("no-token attestation verify "), call)
+            for flag in ("--bundle", "--source-ref refs/heads/main", f"--source-digest {self.sha}",
+                         "--signer-workflow Generous-Corp/pulp/.github/workflows/view-audio-archive.yml",
+                         "--deny-self-hosted-runners"):
+                self.assertIn(flag, call)
+
+    def test_a_missing_or_extra_asset_is_refused(self):
+        (self.release / "extra.a").write_bytes(b"x")
+        self.assertEqual(self.check()[0], 1)
+        (self.release / "extra.a").unlink()
+        (self.release / tool.BUNDLE).unlink()
+        self.assertEqual(self.check()[0], 1)
+        self.assertFalse(self.gh_log.exists())
+
+    def test_a_checksum_mismatch_is_refused(self):
+        (self.release / "pulp-view-audio-symbol-floor.txt").write_text("dm:other\n", encoding="utf-8")
+        code, err = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("SHA256SUMS does not hold for pulp-view-audio-symbol-floor.txt", err)
+
+    def test_a_rejected_attestation_is_refused(self):
+        self.gh_status.write_text("1", encoding="utf-8")
+        code, err = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("attestation rejected", err)
+
+    def test_another_commit_is_refused(self):
+        code, err = self.check("f" * 40)
+        self.assertEqual(code, 1)
+        self.assertIn("!= expected", err)
+
+
+class NmSymbolsTests(unittest.TestCase):
+    LISTING = (
+        "lib.a[a.o]:\n"
+        "lib.a[a.o]: strong T 0 0\n"
+        "lib.a[a.o]: weak W 0 0\n"
+        "lib.a[a.o]: weakobj V 0 0\n"
+        "lib.a[a.o]: needed U 0 0\n"
+        "lib.a[a.o]: weakref w 0 0\n"
+        "lib.a[a.o]: indirect I 0 0\n"
+        "plain D 0 0\n"
+    )
+
+    def test_weak_definitions_count_only_when_asked_for(self):
+        sys.path.insert(0, str(MODULE_PATH.parent))
+        import nm_symbols
+        self.assertEqual(nm_symbols.defined(self.LISTING, include_weak=False), {"strong", "plain"})
+        self.assertEqual(nm_symbols.defined(self.LISTING, include_weak=True),
+                         {"strong", "plain", "weak", "weakobj"})
+        self.assertEqual(nm_symbols.undefined(self.LISTING), {"needed", "weakref"})
+        self.assertEqual([m for m, _, _ in nm_symbols.entries(self.LISTING)][:2], ["a.o", "a.o"])
 
 
 SOURCE = "a" * 40
@@ -375,7 +546,8 @@ class WorkflowContractTests(unittest.TestCase):
         if self.doc is None:
             self.skipTest("pyyaml not installed")
         triggers = self.doc.get("on", self.doc.get(True))
-        self.assertEqual(triggers, {"push": {"branches": ["main"]}, "workflow_dispatch": {}})
+        # Dispatch only: a push trigger would publish a prerelease per commit.
+        self.assertEqual(triggers, {"workflow_dispatch": {}})
         # No input can name another commit, and no checkout overrides the ref.
         self.assertNotIn("inputs.", self.text)
         self.assertEqual(self.doc["env"]["SOURCE_SHA"], "${{ github.sha }}")
@@ -444,22 +616,36 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertLess(names.index("Re-verify the build's bytes"),
                         names.index("Attest the archive and its manifest"))
         self.assertLess(names.index("Refuse a tag or draft that points elsewhere"),
-                        names.index("Publish the immutable release"))
+                        names.index("Stage the release as a draft"))
 
-    def test_every_published_file_is_attested_and_released_immutably(self):
+    def test_the_draft_is_verified_before_the_one_publishing_step(self):
+        steps = self.jobs()["publish"]["steps"]
+        names = [step.get("name") for step in steps]
+        # Publishing is the last mutation; only a read-back check follows it.
+        self.assertEqual(names[-3:], ["Verify the draft before publishing", "Publish the release",
+                                      "Check the published release"])
+        flips = [step["name"] for step in steps if "--draft=false" in step.get("run", "")]
+        self.assertEqual(flips, ["Publish the release"])
+        self.assertEqual(self.steps(self.jobs()["publish"])["Publish the release"]["run"].count("gh "), 1)
+        verify = self.steps(self.jobs()["publish"])["Verify the draft before publishing"]["run"]
+        for needle in ("git/ref/tags/${TAG}", 'printf \'commit\\t%s\' "${SOURCE_SHA}"',
+                       "check-draft", '"draft=true"', 'gh release download "${TAG}"',
+                       'verify-release \\\n  --dir "${RUNNER_TEMP}/draft-assets" --source-sha "${SOURCE_SHA}"'):
+            self.assertIn(needle, verify)
+
+    def test_every_published_file_is_attested_and_released_as_a_draft_first(self):
         steps = self.steps(self.jobs()["publish"])
         attest = steps["Attest the archive and its manifest"]
         self.assertTrue(attest["uses"].startswith("actions/attest@"))
         subjects = attest["with"]["subject-path"].split()
-        for name in ("libpulp-view-audio.a", "pulp-view-audio-archive.manifest.json",
-                     "pulp-view-audio-symbol-floor.txt", "pulp-view-audio-symbol-floor-gate.txt",
-                     "SHA256SUMS"):
-            self.assertIn(f"out/{name}", subjects)
+        self.assertEqual(sorted(p.split("/", 1)[1] for p in subjects), sorted(tool.ATTESTED))
         self.assertNotIn("TAG", self.jobs()["publish"]["env"])
-        publish = steps["Publish the immutable release"]["run"]
-        self.assertIn("--draft --prerelease --latest=false", publish)
-        self.assertIn("--draft=false --prerelease --latest=false", publish)
-        self.assertLess(publish.index("gh release create"), publish.index("--draft=false"))
+        stage = steps["Stage the release as a draft"]["run"]
+        self.assertIn("--verify-tag --target \"${SOURCE_SHA}\"", stage)
+        self.assertIn("--draft --prerelease --latest=false", stage)
+        self.assertLess(stage.index('-f ref="refs/tags/${TAG}" -f sha="${SOURCE_SHA}"'),
+                        stage.index("gh release create"))
+        self.assertNotIn("--draft=false", stage)
 
     def test_an_existing_tag_or_draft_must_point_at_the_source(self):
         existing = self.steps(self.jobs()["publish"])["Refuse a tag or draft that points elsewhere"]["run"]
@@ -467,24 +653,28 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('"${sha}" != "${SOURCE_SHA}"', existing)
         self.assertIn("view_audio_archive_manifest.py check-draft", existing)
         self.assertNotIn("--clobber", self.text)
-        publish = self.steps(self.jobs()["publish"])["Publish the immutable release"]["run"]
-        draft_path = publish.split('if [ "${DRAFT_EXISTS}" = "true" ]; then', 1)[1].split("else", 1)[0]
-        self.assertNotIn("gh release upload", draft_path)
+        self.assertNotIn("gh release upload", self.text)
+        stage = self.steps(self.jobs()["publish"])["Stage the release as a draft"]["run"]
+        draft_path = stage.split('if [ "${DRAFT_EXISTS}" = "true" ]; then', 1)[1].split("else", 1)[0]
         self.assertIn('--title "${title}" --notes "${notes}"', draft_path)
         checked = self.steps(self.jobs()["publish"])["Check the published release"]["run"]
         self.assertIn("git/ref/tags/${TAG}", checked)
         self.assertIn("view_audio_archive_manifest.py check-release", checked)
 
-    def test_the_documented_check_is_token_free_and_ref_pinned(self):
-        consumer = self.steps(self.jobs()["publish"])["Verify the release the way a consumer does"]["run"]
-        for flag in ("env -u GH_TOKEN -u GITHUB_TOKEN", "--bundle", "--source-ref refs/heads/main",
-                     '--source-digest "${SOURCE_SHA}"',
-                     "--signer-workflow", "--deny-self-hosted-runners"):
-            self.assertIn(flag, consumer)
+    def test_an_existing_published_release_is_verified_not_trusted(self):
+        request = self.steps(self.jobs()["request"])["Check the request"]["run"]
+        published = request.split('[ "${state}" = "false" ]; then', 1)[1].split("else", 1)[0]
+        for needle in ("gh release download", "verify-release", "check-release", "published=true"):
+            self.assertIn(needle, published)
+        self.assertLess(published.index("verify-release"), published.index("published=true"))
+
+    def test_the_documented_check_is_token_free_and_covers_every_attested_file(self):
         header = self.text.split("\non:", 1)[0]
-        for flag in ("--bundle pulp-view-audio-archive.sigstore.json", "--source-ref refs/heads/main",
-                     "--source-sha <expected commit> --require-gate-pass"):
-            self.assertIn(flag, header)
+        for needle in ("verify-release", "--bundle pulp-view-audio-archive.sigstore.json",
+                       "--source-ref refs/heads/main --source-digest <expected commit>",
+                       "--deny-self-hosted-runners", "--floor --gate --source-sha --require-gate-pass",
+                       "--require-identical-rebuild", *tool.ATTESTED):
+            self.assertIn(needle, header)
 
     def test_the_build_job_restores_no_cache(self):
         # The build runs this commit's setup.sh and build with the runner's

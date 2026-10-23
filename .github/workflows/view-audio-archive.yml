@@ -1,36 +1,37 @@
 name: View-audio archive
 
 # Builds the pulp-view-audio static archive at the commit this workflow runs
-# on, which is always a commit of main, on a clean GitHub-hosted runner, and
-# publishes it as assets of an immutable prerelease tagged
-# artifact/pulp-view-audio/<sha>. It runs on every push to main and can be
-# re-dispatched from main; there is no input naming another commit, so the
-# workflow only ever builds code that is already on the protected branch.
+# on, on a clean GitHub-hosted runner, and publishes it as assets of an
+# immutable prerelease tagged artifact/pulp-view-audio/<sha>. It runs only when
+# dispatched, and only on main; there is no input naming another commit, so it
+# only ever builds code that is already on the protected branch, and a
+# consumer pins whichever main commit was dispatched.
 #
 # A downstream package that carries a view unit (Vellum's mirror inertness
-# proof) needs the symbols this archive defines. It downloads the assets
-# anonymously and must check both of these:
+# proof) needs the symbols this archive defines. It downloads the six assets
+# anonymously and runs, without a token:
 #
-#   gh attestation verify libpulp-view-audio.a \
+#   python3 tools/scripts/view_audio_archive_manifest.py verify-release \
+#     --dir <assets> --source-sha <expected commit> --repository Generous-Corp/pulp
+#
+# which requires exactly the six assets and a matching SHA256SUMS, then runs,
+# for each of the five attested files (libpulp-view-audio.a,
+# pulp-view-audio-archive.manifest.json, pulp-view-audio-symbol-floor.txt,
+# pulp-view-audio-symbol-floor-gate.txt, SHA256SUMS):
+#
+#   gh attestation verify <file> \
 #     --bundle pulp-view-audio-archive.sigstore.json \
 #     --repo Generous-Corp/pulp \
 #     --signer-workflow Generous-Corp/pulp/.github/workflows/view-audio-archive.yml \
 #     --source-ref refs/heads/main --source-digest <expected commit> \
 #     --deny-self-hosted-runners
-#   (the same for pulp-view-audio-archive.manifest.json)
 #
-#   python3 tools/scripts/view_audio_archive_manifest.py verify \
-#     --archive libpulp-view-audio.a \
-#     --manifest pulp-view-audio-archive.manifest.json \
-#     --source-sha <expected commit> --require-gate-pass --require-identical-rebuild
-#
-# --bundle makes the attestation check work without a GitHub token, and
-# --source-ref pins the signer to this file as it exists on main: anyone who
-# can push a branch could dispatch a modified copy of this workflow from it,
-# and that copy would carry the same workflow path. Because the workflow
-# builds its own commit, the attestation's source digest is the archive's
-# source commit; the attested manifest records the same commit along with the
-# floor-gate verdict and the rebuild comparison.
+# and finally `verify --floor --gate --source-sha --require-gate-pass
+# --require-identical-rebuild` on the manifest. --bundle makes the attestation
+# check work without a GitHub token, and --source-ref pins the signer to this
+# file as it exists on main: anyone who can push a branch could dispatch a
+# modified copy of this workflow from it, and that copy would carry the same
+# workflow path.
 #
 # The release, not an Actions artifact, is the durable copy: artifacts expire
 # and need a token to download even from a public repository, while a
@@ -38,8 +39,9 @@ name: View-audio archive
 # The tag does not match the protected `v*` release namespace, so no release
 # automation reacts to it, and the release is never marked latest. Because
 # artifact/* tags are not protected, the publish job refuses a tag or draft
-# that does not already point at this commit, and checks the published
-# release afterwards.
+# that does not already point at this commit, creates the tag itself, and
+# runs the consumer check on the staged draft before the one step that
+# publishes it.
 #
 # The build job holds no write token and cannot mint an OIDC token, so nothing
 # the build downloads or runs can sign or publish, and nothing in this
@@ -47,12 +49,10 @@ name: View-audio archive
 # bytes, attests them and releases them.
 #
 # Identity is the manifest plus its attestation. The archive bytes depend on
-# the runner image's Xcode, so a later run for the same commit is refused once
-# a release exists rather than publishing a second, different archive.
+# the runner image's Xcode, so a later run for the same commit checks the
+# existing release instead of publishing a second, different archive.
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch: {}
 
 permissions:
@@ -72,12 +72,18 @@ jobs:
     name: Check the request
     if: github.repository == 'Generous-Corp/pulp'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
     outputs:
       published: ${{ steps.request.outputs.published }}
     steps:
+      - name: Check out the tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: tooling
+          persist-credentials: false
+
       - name: Check the request
         id: request
         shell: bash
@@ -94,7 +100,19 @@ jobs:
           fi
           if state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null) \
               && [ "${state}" = "false" ]; then
-            echo "::notice::${TAG} is already published; its assets are the archive of record."
+            # A published release is never rebuilt, so it must hold up as the
+            # archive of record: the consumer check, the tag and immutability.
+            gh release download "${TAG}" --repo "${REPO}" --dir "${RUNNER_TEMP}/published"
+            python3 tooling/tools/scripts/view_audio_archive_manifest.py verify-release \
+              --dir "${RUNNER_TEMP}/published" --source-sha "${SOURCE_SHA}" --repository "${REPO}"
+            gh api "repos/${REPO}/git/ref/tags/${TAG}" --jq '[.object.type, .object.sha] | @tsv' \
+              >"${RUNNER_TEMP}/tag.tsv"
+            gh api "repos/${REPO}/releases" --paginate \
+              --jq '.[] | select(.tag_name == env.TAG)' | jq -s . >"${RUNNER_TEMP}/release.json"
+            python3 tooling/tools/scripts/view_audio_archive_manifest.py check-release \
+              --releases "${RUNNER_TEMP}/release.json" --tag-ref "${RUNNER_TEMP}/tag.tsv" \
+              --out "${RUNNER_TEMP}/published" --source-sha "${SOURCE_SHA}"
+            echo "::notice::${TAG} is already published and verifies; it is the archive of record."
             echo "published=true" >>"${GITHUB_OUTPUT}"
           else
             echo "published=false" >>"${GITHUB_OUTPUT}"
@@ -300,6 +318,7 @@ jobs:
             --source-sha "${SOURCE_SHA}" >>"${GITHUB_OUTPUT}"
 
       - name: Attest the archive and its manifest
+        if: steps.existing.outputs.draft != 'true'
         id: attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -310,7 +329,7 @@ jobs:
             out/pulp-view-audio-symbol-floor-gate.txt
             out/SHA256SUMS
 
-      - name: Publish the immutable release
+      - name: Stage the release as a draft
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -318,38 +337,69 @@ jobs:
           DRAFT_EXISTS: ${{ steps.existing.outputs.draft }}
         run: |
           set -euo pipefail
-          cp "${BUNDLE}" "${OUT}/pulp-view-audio-archive.sigstore.json"
-          assets=(
-            "${OUT}/libpulp-view-audio.a"
-            "${OUT}/pulp-view-audio-archive.manifest.json"
-            "${OUT}/pulp-view-audio-symbol-floor.txt"
-            "${OUT}/pulp-view-audio-symbol-floor-gate.txt"
-            "${OUT}/SHA256SUMS"
-            "${OUT}/pulp-view-audio-archive.sigstore.json"
-          )
           title="pulp-view-audio archive ${SOURCE_SHA:0:12}"
           notes="pulp-view-audio static archive (darwin-arm64, Release) built from ${SOURCE_SHA} by ${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}.
 
-          Verify both, without a token:
-            gh attestation verify libpulp-view-audio.a --bundle pulp-view-audio-archive.sigstore.json --repo ${REPO} --signer-workflow ${REPO}/.github/workflows/view-audio-archive.yml --source-ref refs/heads/main --source-digest ${SOURCE_SHA} --deny-self-hosted-runners
-            python3 tools/scripts/view_audio_archive_manifest.py verify --archive libpulp-view-audio.a --manifest pulp-view-audio-archive.manifest.json --source-sha ${SOURCE_SHA} --require-gate-pass --require-identical-rebuild
-          The workflow builds its own commit, so the attestation's source digest and the manifest both name ${SOURCE_SHA}."
-          # A published release is immutable, so every asset is attached while
-          # it is still a draft and the publish flip comes last.
+          Verify the downloaded assets, without a token:
+            python3 tools/scripts/view_audio_archive_manifest.py verify-release --dir <assets> --source-sha ${SOURCE_SHA} --repository ${REPO}
+          That runs gh attestation verify on all five attested files with --bundle pulp-view-audio-archive.sigstore.json --repo ${REPO} --signer-workflow ${REPO}/.github/workflows/view-audio-archive.yml --source-ref refs/heads/main --source-digest ${SOURCE_SHA} --deny-self-hosted-runners, checks SHA256SUMS, and runs verify with the floor, the gate output, --require-gate-pass and --require-identical-rebuild."
           if [ "${DRAFT_EXISTS}" = "true" ]; then
-            # The draft already holds exactly these bytes (checked above); only
-            # the notes are regenerated so they name this run. Its bundle is the
-            # earlier attestation of the same digests and is what gets published.
-            gh release download "${TAG}" --repo "${REPO}" \
-              --pattern pulp-view-audio-archive.sigstore.json --dir "${RUNNER_TEMP}/draft-bundle"
-            cp "${RUNNER_TEMP}/draft-bundle/pulp-view-audio-archive.sigstore.json" \
-              "${OUT}/pulp-view-audio-archive.sigstore.json"
+            # The draft already holds exactly these bytes and a bundle (checked
+            # above); nothing is uploaded onto it. The next step verifies its
+            # bundle before anything is published.
             gh release edit "${TAG}" --repo "${REPO}" --title "${title}" --notes "${notes}"
           else
-            gh release create "${TAG}" "${assets[@]}" --repo "${REPO}" \
-              --target "${SOURCE_SHA}" --draft --prerelease --latest=false \
-              --title "${title}" --notes "${notes}"
+            cp "${BUNDLE}" "${OUT}/pulp-view-audio-archive.sigstore.json"
+            # Create the tag first, so it can be checked before the release is
+            # published; --verify-tag then refuses to create it implicitly.
+            if ! gh api "repos/${REPO}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+              gh api --method POST "repos/${REPO}/git/refs" \
+                -f ref="refs/tags/${TAG}" -f sha="${SOURCE_SHA}" >/dev/null
+            fi
+            gh release create "${TAG}" \
+              "${OUT}/libpulp-view-audio.a" \
+              "${OUT}/pulp-view-audio-archive.manifest.json" \
+              "${OUT}/pulp-view-audio-symbol-floor.txt" \
+              "${OUT}/pulp-view-audio-symbol-floor-gate.txt" \
+              "${OUT}/SHA256SUMS" \
+              "${OUT}/pulp-view-audio-archive.sigstore.json" \
+              --repo "${REPO}" --verify-tag --target "${SOURCE_SHA}" \
+              --draft --prerelease --latest=false --title "${title}" --notes "${notes}"
           fi
+
+      - name: Verify the draft before publishing
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag_ref=$(gh api "repos/${REPO}/git/ref/tags/${TAG}" --jq '[.object.type, .object.sha] | @tsv')
+          if [ "${tag_ref}" != "$(printf 'commit\t%s' "${SOURCE_SHA}")" ]; then
+            echo "::error::tag ${TAG} resolves to ${tag_ref}, not commit ${SOURCE_SHA}"
+            exit 1
+          fi
+          gh api "repos/${REPO}/releases" --paginate \
+            --jq '.[] | select(.tag_name == env.TAG)' | jq -s . >"${RUNNER_TEMP}/draft.json"
+          state=$(python3 tooling/tools/scripts/view_audio_archive_manifest.py check-draft \
+            --releases "${RUNNER_TEMP}/draft.json" --out "${OUT}" --source-sha "${SOURCE_SHA}")
+          if [ "${state}" != "draft=true" ]; then
+            echo "::error::the staged draft is not exactly this run's assets (${state})"
+            exit 1
+          fi
+          # Exactly what will be published, downloaded back, including the
+          # bundle a reused draft carries.
+          gh release download "${TAG}" --repo "${REPO}" --dir "${RUNNER_TEMP}/draft-assets"
+          python3 tooling/tools/scripts/view_audio_archive_manifest.py verify-release \
+            --dir "${RUNNER_TEMP}/draft-assets" --source-sha "${SOURCE_SHA}" --repository "${REPO}"
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The only step that changes what consumers can see; everything it
+          # publishes was verified as a draft above.
           gh release edit "${TAG}" --repo "${REPO}" --draft=false --prerelease --latest=false
 
       - name: Check the published release
@@ -358,26 +408,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Immutability is only visible once the release is published.
           gh api "repos/${REPO}/git/ref/tags/${TAG}" --jq '[.object.type, .object.sha] | @tsv' >"${RUNNER_TEMP}/tag.tsv"
           gh api "repos/${REPO}/releases" --paginate \
             --jq '.[] | select(.tag_name == env.TAG)' | jq -s . >"${RUNNER_TEMP}/release.json"
           python3 tooling/tools/scripts/view_audio_archive_manifest.py check-release \
             --releases "${RUNNER_TEMP}/release.json" --tag-ref "${RUNNER_TEMP}/tag.tsv" \
-            --out "${OUT}" --source-sha "${SOURCE_SHA}"
-
-      - name: Verify the release the way a consumer does
-        shell: bash
-        run: |
-          set -euo pipefail
-          # No token and an empty gh config: the documented check must work
-          # anonymously, from the published bundle alone.
-          config="$(mktemp -d)"
-          for subject in libpulp-view-audio.a pulp-view-audio-archive.manifest.json; do
-            env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="${config}" gh attestation verify "${OUT}/${subject}" \
-              --bundle "${OUT}/pulp-view-audio-archive.sigstore.json" \
-              --repo "${REPO}" \
-              --signer-workflow "${REPO}/.github/workflows/view-audio-archive.yml" \
-              --source-ref refs/heads/main \
-              --source-digest "${SOURCE_SHA}" \
-              --deny-self-hosted-runners
-          done
+            --out "${RUNNER_TEMP}/draft-assets" --source-sha "${SOURCE_SHA}"

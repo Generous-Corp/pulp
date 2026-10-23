@@ -2236,8 +2236,9 @@ that lacks `--retry-all-errors`.
 
 ### Per-commit `pulp-view-audio` archives are immutable release assets
 
-`view-audio-archive.yml` runs on every push to `main` (and can be re-dispatched
-on `main`) and builds only the commit it runs on. It publishes
+`view-audio-archive.yml` runs only when dispatched on `main` and builds only
+the commit it runs on, so the commit a consumer re-pins to is whichever `main`
+commit was dispatched. It publishes
 `libpulp-view-audio.a`, its manifest, symbol floor, floor-gate verdict,
 `SHA256SUMS` and the Sigstore bundle as an immutable prerelease tagged
 `artifact/pulp-view-audio/<sha>`. Things that look optional are not:
@@ -2246,28 +2247,33 @@ on `main`) and builds only the commit it runs on. It publishes
   check out made CodeQL's cache-poisoning query fire on the build job (a
   default-branch job running a checked-out tree that an input chose), and
   validating the input in an earlier job did not change that. Building
-  `github.sha` removes the input, so an archive exists only for commits that
-  reached `main` after this workflow did; a consumer pins one of those.
+  `github.sha` removes the input, so an archive exists only for `main` commits
+  someone dispatched it on. It has no push trigger on purpose: a prerelease per
+  `main` push would also crowd SDK versions out of `pulp sdk`'s release list.
 - **The build job must never touch the Actions cache.** It runs this commit's
   `setup.sh` and build in a job whose actions can write the default branch's
   cache scope. A contract test fails on any `actions/cache`, `setup-*` action
   or cache input in that job.
-
 - **`ZERO_AR_DATE=1` is load-bearing.** Apple `ar`/`ranlib` stamp member and
   symbol-table times. The workflow's `rebuild` field records a second clean
   configure and build of the same checkout into a separate build directory on
   the same runner (`kind: separate-build-dir`); without the variable that
   second archive differs. It says nothing about another runner image.
+- **The floor and the dependency gate count weak symbols differently, on
+  purpose.** Both read `nm` through `tools/scripts/nm_symbols.py`. The floor
+  keeps weak definitions (`W`/`V`), because a class's typeinfo or vtable is
+  often weak and is still the archive's; the closure gate drops them, because
+  two archives emitting the same inline function do not depend on each other.
 - **A consumer must check the ref and the manifest, not just the signature.**
-  `gh attestation verify <file> --bundle pulp-view-audio-archive.sigstore.json
-  --repo Generous-Corp/pulp --signer-workflow
-  Generous-Corp/pulp/.github/workflows/view-audio-archive.yml --source-ref
-  refs/heads/main` works without a token only because of `--bundle`, and only
-  `--source-ref` rejects a modified copy of the workflow dispatched from a
-  branch. Add `--source-digest <sha>`, then run `view_audio_archive_manifest.py
-  verify --source-sha <sha> --require-gate-pass --require-identical-rebuild`
-  on the attested manifest, which carries the gate verdict and the rebuild
-  comparison the signature alone does not.
+  `view_audio_archive_manifest.py verify-release --dir <assets> --source-sha
+  <sha> --repository Generous-Corp/pulp` is the whole check in one command, and
+  the publish job runs it on the staged draft before publishing. It runs `gh
+  attestation verify` on all five attested files with `--bundle` (the only
+  reason it works without a token), `--source-ref refs/heads/main` (the only
+  thing that rejects a modified copy of the workflow dispatched from a branch)
+  and `--source-digest <sha>`, then `verify` with the floor, the gate output,
+  `--require-gate-pass` and `--require-identical-rebuild`, which carry what the
+  signature alone does not.
 - **Build and publish are separate jobs.** The build job has `contents: read`
   and no token or OIDC grant, so nothing `setup.sh` fetches can sign; the
   publish job re-verifies the uploaded bytes before attesting them. A failing
@@ -2278,8 +2284,11 @@ on `main`) and builds only the commit it runs on. It publishes
   `sign-and-release.yml`; a tag such as `view-audio-...` would match that glob.
   Because `artifact/*` has no ruleset, the publish job refuses an existing tag
   or draft that does not point at the commit (or a draft with unexpected
-  assets) and afterwards checks the tag, `immutable: true` and every asset
-  digest. Keep the release a prerelease with `--latest=false` so
+  assets), creates the tag itself, verifies the staged draft (tag, exact
+  assets, attestation of what was downloaded back) and only then flips
+  `--draft=false`; `immutable: true` can only be checked after that flip. A
+  run that finds the commit already published verifies that release instead
+  of trusting it. Keep the release a prerelease with `--latest=false` so
   `/releases/latest` and `pulp upgrade` never see it.
 - **Never delete one of these releases.** A published immutable release burns
   its tag name forever; the workflow refuses to rebuild a commit that already

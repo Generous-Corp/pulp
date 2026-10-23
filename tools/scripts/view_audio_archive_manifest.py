@@ -11,13 +11,23 @@ and checks an archive against a manifest:
         --gate-out gate.txt [--check NAME=ARCHIVE ...] --output manifest.json
 
     view_audio_archive_manifest.py verify --archive libpulp-view-audio.a
-        --manifest manifest.json --source-sha <40-hex> [--floor floor.txt]
-        [--gate gate.txt] [--require-gate-pass] [--require-identical-rebuild]
+        --manifest manifest.json --floor floor.txt --gate gate.txt
+        --source-sha <40-hex> [--require-gate-pass] [--require-identical-rebuild]
+
+    view_audio_archive_manifest.py verify-release --dir <downloaded assets>
+        --source-sha <40-hex> --repository Generous-Corp/pulp [--gh gh]
 
     view_audio_archive_manifest.py check-draft --releases releases.json
         --out <asset dir> --source-sha <40-hex>
     view_audio_archive_manifest.py check-release --releases releases.json
         --tag-ref tag.tsv --out <asset dir> --source-sha <40-hex>
+
+verify-release is the consumer check, in one command: the six release assets
+are exactly present, SHA256SUMS holds, `gh attestation verify` accepts all five
+attested files from the bundle alone (no token, the signer workflow on
+refs/heads/main at the source commit, a GitHub-hosted runner), and `verify`
+passes with the floor, the gate output, a passing gate and an identical
+rebuild.
 
 check-draft and check-release read what the GitHub API reports for the
 release tag (every release using it, and the tag ref) and hold it to the
@@ -26,15 +36,16 @@ and holds exactly these bytes plus a Sigstore bundle; a published release must
 be immutable, a prerelease, at a commit tag on the source commit, with exactly
 these assets.
 
-The symbol floor is the demangled list of symbols the archive defines, read
-from `nm -A -P -g` with the same rule view_audio_symbol_floor.py applies: every
-listed type except U, w and v is a definition. The gate output is that script's
-own verdict, run from the source checkout against the named libraries.
+The symbol floor is the demangled list of symbols the archive provides, read
+from `nm -A -P -g` through nm_symbols: strong definitions and weak ones (W/V),
+because a class's typeinfo or vtable is often weak and is still the archive's.
+That is deliberately wider than the dependency gate, which counts only strong
+definitions. The gate output is view_audio_symbol_floor.py's own verdict, run
+from the source checkout against the named libraries.
 
-The manifest is what binds the archive to its source commit: the build
-attestation names the commit that ran the producing workflow, not the one the
-archive was built from. A consumer therefore runs `verify --source-sha` on the
-attested manifest as well as checking the attestation.
+The attestation binds the files to the workflow run; the manifest records the
+source commit, the gate verdict and the rebuild comparison. A consumer checks
+both, which is what verify-release does.
 
 Exit codes: 0 = ok, 1 = verification mismatch, 2 = unusable input.
 """
@@ -50,10 +61,16 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 SCHEMA = "pulp.view-audio-archive.v1"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-LINE_RE = re.compile(r"^(?P<archive>.*?)\[(?P<object>[^\]]+)\]: (?P<symbol>\S+) (?P<type>\S)")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import nm_symbols  # noqa: E402
+
+ATTESTED = ("libpulp-view-audio.a", "pulp-view-audio-archive.manifest.json",
+            "pulp-view-audio-symbol-floor.txt", "pulp-view-audio-symbol-floor-gate.txt", "SHA256SUMS")
+SIGNER_WORKFLOW = ".github/workflows/view-audio-archive.yml"
 
 
 class InputError(RuntimeError):
@@ -74,13 +91,8 @@ def run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 
 def defined_symbols(listing: str) -> list[str]:
-    """Sorted symbols an `nm -A -P -g` listing defines."""
-    defined = set()
-    for line in listing.splitlines():
-        match = LINE_RE.match(line)
-        if match and match["type"] not in ("U", "w", "v"):
-            defined.add(match["symbol"])
-    return sorted(defined)
+    """Sorted symbols an `nm -A -P -g` listing provides, weak definitions included."""
+    return sorted(nm_symbols.defined(listing, include_weak=True))
 
 
 def demangle(symbols: list[str], cxxfilt: str | None) -> list[str]:
@@ -298,7 +310,7 @@ def describe(args: argparse.Namespace) -> int:
         "configure": args.configure,
         "archive": {"name": args.archive.name, "sha256": sha256_file(args.archive),
                     "size": args.archive.stat().st_size},
-        "symbol_floor": {"name": args.floor_out.name, "rule": "nm -A -P -g; types other than U, w, v; demangled",
+        "symbol_floor": {"name": args.floor_out.name, "rule": "nm -A -P -g; strong (TDBRSCG) and weak (WV) definitions; demangled",
                          "sha256": sha256_file(args.floor_out),
                          "symbols": floor_text.count("\n")},
         "symbol_floor_gate": {"name": args.gate_out.name, "script": "tools/scripts/view_audio_symbol_floor.py",
@@ -332,7 +344,7 @@ def verify(args: argparse.Namespace) -> int:
     recorded_sha = manifest.get("source", {}).get("sha")
     if not isinstance(recorded_sha, str) or not SHA_RE.fullmatch(recorded_sha):
         errors.append(f"manifest source sha {recorded_sha!r} is not a full commit")
-    if args.source_sha and recorded_sha != args.source_sha:
+    if recorded_sha != args.source_sha:
         errors.append(f"manifest source sha {recorded_sha} != expected {args.source_sha}")
     archive = manifest.get("archive", {})
     actual = sha256_file(args.archive)
@@ -340,15 +352,20 @@ def verify(args: argparse.Namespace) -> int:
         errors.append(f"archive sha256 {actual} != manifest {archive.get('sha256')}")
     if archive.get("size") != args.archive.stat().st_size:
         errors.append(f"archive size {args.archive.stat().st_size} != manifest {archive.get('size')}")
-    if args.floor:
-        floor_sha = sha256_file(args.floor)
-        if manifest.get("symbol_floor", {}).get("sha256") != floor_sha:
-            errors.append(f"symbol floor sha256 {floor_sha} != manifest")
+    for path in (args.floor, args.gate):
+        if not path.is_file():
+            raise InputError(f"{path} does not exist")
+    floor = manifest.get("symbol_floor", {})
+    floor_sha = sha256_file(args.floor)
+    if floor.get("sha256") != floor_sha:
+        errors.append(f"symbol floor sha256 {floor_sha} != manifest")
+    floor_lines = len(args.floor.read_text(encoding="utf-8").splitlines())
+    if floor_lines == 0 or floor.get("symbols") != floor_lines:
+        errors.append(f"symbol floor has {floor_lines} symbols, manifest records {floor.get('symbols')!r}")
     gate = manifest.get("symbol_floor_gate", {})
-    if args.gate:
-        gate_sha = sha256_file(args.gate)
-        if gate.get("sha256") != gate_sha:
-            errors.append(f"symbol floor gate sha256 {gate_sha} != manifest")
+    gate_sha = sha256_file(args.gate)
+    if gate.get("sha256") != gate_sha:
+        errors.append(f"symbol floor gate sha256 {gate_sha} != manifest")
     if args.require_gate_pass and gate.get("exit_code") != 0:
         errors.append(f"symbol floor gate exit code is {gate.get('exit_code')!r}, not 0")
     if args.require_identical_rebuild:
@@ -361,6 +378,51 @@ def verify(args: argparse.Namespace) -> int:
         print(f"view-audio-archive: {args.archive.name} matches {args.manifest.name} "
               f"for {recorded_sha}")
     return 1 if errors else 0
+
+
+def verify_release(args: argparse.Namespace) -> int:
+    """The consumer check: exact assets, checksums, attestation, manifest."""
+    directory = args.dir.resolve()
+    if not SHA_RE.fullmatch(args.source_sha):
+        raise InputError(f"--source-sha must be a full 40-hex commit, got {args.source_sha!r}")
+    present = {path.name for path in directory.iterdir() if path.is_file()} if directory.is_dir() else set()
+    expected = set(ATTESTED) | {BUNDLE}
+    if present != expected:
+        print(f"view-audio-archive: {directory} holds {sorted(present)}, not {sorted(expected)}",
+              file=sys.stderr)
+        return 1
+    errors = []
+    sums = {}
+    for line in (directory / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
+        digest, _, name = line.partition("  ")
+        sums[name] = digest
+    for name in ATTESTED[:-1]:
+        if sums.get(name) != sha256_file(directory / name):
+            errors.append(f"SHA256SUMS does not hold for {name}")
+    if set(sums) != set(ATTESTED[:-1]):
+        errors.append(f"SHA256SUMS lists {sorted(sums)}")
+    # Token-free on purpose: the bundle alone must be enough for a consumer.
+    env = {key: value for key, value in os.environ.items() if key not in ("GH_TOKEN", "GITHUB_TOKEN")}
+    with tempfile.TemporaryDirectory() as config:
+        env["GH_CONFIG_DIR"] = config
+        for name in ATTESTED:
+            proc = run([args.gh, "attestation", "verify", str(directory / name),
+                        "--bundle", str(directory / BUNDLE),
+                        "--repo", args.repository,
+                        "--signer-workflow", f"{args.repository}/{SIGNER_WORKFLOW}",
+                        "--source-ref", "refs/heads/main",
+                        "--source-digest", args.source_sha,
+                        "--deny-self-hosted-runners"], env=env)
+            if proc.returncode != 0:
+                errors.append(f"attestation rejected {name}: {(proc.stderr or proc.stdout).strip()}")
+    for error in errors:
+        print(f"view-audio-archive: {error}", file=sys.stderr)
+    if errors:
+        return 1
+    return verify(argparse.Namespace(
+        archive=directory / ATTESTED[0], manifest=directory / ATTESTED[1],
+        floor=directory / ATTESTED[2], gate=directory / ATTESTED[3], source_sha=args.source_sha,
+        require_gate_pass=True, require_identical_rebuild=True))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -391,14 +453,21 @@ def main(argv: list[str] | None = None) -> int:
     ver = sub.add_parser("verify", help="check an archive against its manifest")
     ver.add_argument("--archive", type=pathlib.Path, required=True)
     ver.add_argument("--manifest", type=pathlib.Path, required=True)
-    ver.add_argument("--floor", type=pathlib.Path)
+    ver.add_argument("--floor", type=pathlib.Path, required=True)
     ver.add_argument("--source-sha", required=True)
-    ver.add_argument("--gate", type=pathlib.Path, help="the floor gate output to check")
+    ver.add_argument("--gate", type=pathlib.Path, required=True, help="the floor gate output")
     ver.add_argument("--require-gate-pass", action="store_true",
                      help="fail unless the recorded floor gate exited 0")
     ver.add_argument("--require-identical-rebuild", action="store_true",
                      help="fail unless a separate-build-dir rebuild was recorded byte-identical")
     ver.set_defaults(func=verify)
+
+    rel = sub.add_parser("verify-release", help="the consumer check of a downloaded release")
+    rel.add_argument("--dir", type=pathlib.Path, required=True, help="the downloaded release assets")
+    rel.add_argument("--source-sha", required=True)
+    rel.add_argument("--repository", required=True)
+    rel.add_argument("--gh", default=shutil.which("gh") or "gh")
+    rel.set_defaults(func=verify_release)
 
     for name, func, help_text in (("check-draft", check_draft, "refuse a draft that is not exactly ours"),
                                   ("check-release", check_release, "check the published release")):
