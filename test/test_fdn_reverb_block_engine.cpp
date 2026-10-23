@@ -332,3 +332,43 @@ TEST_CASE("fdn reverb block engine reproduces every mode, drive and flutter enve
         CHECK(right < kEnvelopeToleranceDb);
     }
 }
+
+TEST_CASE("FracDelay keeps its ring and mirror exact on rings shorter than a block",
+          "[signal][fdn][block]") {
+    // A ring can be shorter than one block (the minimum is eight samples,
+    // a block is kMaxBlockSamples), and then its mirrored tail spans the
+    // ring more than once. Every slot of ring and mirror must hold the
+    // newest sample written at its ring index, whether the samples arrive
+    // through push_block() or push().
+    using pulp::signal::fdn::FracDelay;
+    for (const int max_delay : {1, 4, 12, 28, 60}) {
+        for (const int n : {1, 7, 8, 9, 31, 32, 33, 70}) {
+            INFO("max_delay " << max_delay << " n " << n);
+            FracDelay block;
+            FracDelay single;
+            block.prepare(max_delay);
+            single.prepare(max_delay);
+            const std::size_t size = block.size();
+            std::vector<float> newest(size, 0.0f);
+            std::size_t written = 0;
+            float next = 1.0f;
+            for (int round = 0; round < 3; ++round) {
+                std::array<float, 70> x{};
+                for (int k = 0; k < n; ++k) {
+                    x[static_cast<std::size_t>(k)] = next++;
+                    newest[written++ % size] = x[static_cast<std::size_t>(k)];
+                }
+                block.push_block(x.data(), n);
+                for (int k = 0; k < n; ++k)
+                    single.push(x[static_cast<std::size_t>(k)]);
+                REQUIRE(block.write_index() == written % size);
+                REQUIRE(single.write_index() == written % size);
+                for (std::size_t i = 0; i < size + FracDelay::mirror_samples(); ++i) {
+                    INFO("slot " << i);
+                    REQUIRE(block.data()[i] == newest[i % size]);
+                    REQUIRE(single.data()[i] == newest[i % size]);
+                }
+            }
+        }
+    }
+}
