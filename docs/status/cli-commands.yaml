@@ -717,7 +717,7 @@ commands:
 
   - name: upgrade
     status: usable
-    summary: Update the Pulp CLI install to the latest or a specific version, including companion artifacts such as `pulp-cpp`. `--check-only` reports the cached latest release without downloading. `--notes` prints embedded migration notes for the upgrade hop.
+    summary: Update the Pulp CLI install to the latest or a specific version, including companion artifacts such as `pulp-cpp`. The archive is verified against the release's SHA256SUMS before extraction (refused on mismatch, or when a release at or above `checksum_manifest_floor` has no manifest). `--check-only` reports the cached latest release without downloading. `--notes` prints embedded migration notes for the upgrade hop.
     args:
       - name: version
         kind: positional
@@ -2126,6 +2126,9 @@ commands:
       - name: --refresh
         kind: flag
         description: Force-refresh the remote registry cache while searching
+      - name: --allow-unsigned-registry
+        kind: flag
+        description: Use a remote registry whose registry.json.sig is missing or does not verify against the pinned signer key (prints a WARNING); with a key pinned the default refuses it, and with no key pinned the registry is used unsigned with a notice
     docs: reference/cli.md#search
 
   - name: update
@@ -2552,7 +2555,7 @@ commands:
     summary: Manage the pinned Pulp SDK installation at ~/.pulp/sdk*/ used by standalone projects.
     subcommands:
       - name: install
-        summary: Download and cache the pinned SDK from GitHub releases; --local builds from the current checkout; --profile forge-dev and --profile trace create immutable development-only arm64 SDKs; --version X.Y.Z pins a version
+        summary: Download and cache the pinned SDK from GitHub releases, verified against the release's SHA256SUMS before extraction; --local builds from the current checkout; --profile forge-dev and --profile trace create immutable development-only arm64 SDKs; --version X.Y.Z pins a version
         args:
           - name: --version
             kind: option

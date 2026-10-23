@@ -3249,6 +3249,10 @@
           {
             "name": "--refresh",
             "kind": "flag"
+          },
+          {
+            "name": "--allow-unsigned-registry",
+            "kind": "flag"
           }
         ],
         "subcommands": []

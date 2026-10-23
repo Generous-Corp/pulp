@@ -1054,6 +1054,7 @@
     "test/test_cli_upgrade_install.cpp"
    ],
    "inputs": [
+    "tools/cli/cli_sdk.cpp",
     "tools/cli/cmd_upgrade.cpp",
     "tools/import-design/browser_capture",
     "tools/import-design/jsx-runtime/materialized_binding_contract.mjs"
@@ -4065,6 +4066,13 @@
     "docs/status/dsp-capabilities.json",
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/test_dsp_capability_registry.py"
+   ],
+   "kind": "python"
+  },
+  "cli-package-registry-signing-helper": {
+   "entry": "tools/scripts/test_sign_package_registry.py",
+   "inputs": [
+    "tools/scripts/test_sign_package_registry.py"
    ],
    "kind": "python"
   },
