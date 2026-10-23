@@ -144,6 +144,24 @@ TEST_CASE("missing manifest is refused at the floor and warned below it",
     fs::remove_all(dir);
 }
 
+TEST_CASE("only a plain M.m.p release version may reach a URL, path, or shell",
+          "[cli][release-checksum][upgrade]") {
+    CHECK(pulp::cli::pulp_release_version_is_well_formed("0.663.1"));
+    CHECK(pulp::cli::pulp_release_version_is_well_formed("1.0.0"));
+    CHECK(pulp::cli::pulp_release_version_is_well_formed("0.1009.0"));
+    CHECK_FALSE(pulp::cli::pulp_release_version_is_well_formed(""));
+    CHECK_FALSE(pulp::cli::pulp_release_version_is_well_formed("0.1"));
+    CHECK_FALSE(pulp::cli::pulp_release_version_is_well_formed("0.1.0.0"));
+    CHECK_FALSE(pulp::cli::pulp_release_version_is_well_formed("v0.1.0"));
+    CHECK_FALSE(pulp::cli::pulp_release_version_is_well_formed("0.1.0-pre"));
+    CHECK_FALSE(pulp::cli::pulp_release_version_is_well_formed("0.1.0 "));
+    CHECK_FALSE(pulp::cli::pulp_release_version_is_well_formed("0..1"));
+    CHECK_FALSE(pulp::cli::pulp_release_version_is_well_formed("0.1.0; rm -rf ~"));
+    CHECK_FALSE(pulp::cli::pulp_release_version_is_well_formed("$(touch pwned)"));
+    CHECK_FALSE(pulp::cli::pulp_release_version_is_well_formed("0.1.0`id`"));
+    CHECK_FALSE(pulp::cli::pulp_release_version_is_well_formed("../0.1.0"));
+}
+
 TEST_CASE("manifest URL sits beside the archive on the same release tag",
           "[cli][release-checksum]") {
     const auto [asset, url] = pulp::cli::pulp_upgrade_url_for("0.700.0", "darwin", "arm64");

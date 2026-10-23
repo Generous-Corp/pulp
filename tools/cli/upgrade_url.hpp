@@ -15,9 +15,31 @@
 
 #pragma once
 
+#include <cctype>
 #include <string>
+#include <string_view>
 
 namespace pulp::cli {
+
+// True when `version` is exactly the `M.m.p` a release tag carries: three
+// dot-separated runs of digits and nothing else. Anything looser (a leading
+// `v`, a pre-release suffix, whitespace, shell metacharacters) is refused
+// before the version reaches a URL, a path, or a shell command.
+inline bool pulp_release_version_is_well_formed(std::string_view version) {
+    int components = 0;
+    std::size_t run = 0;
+    for (unsigned char c : version) {
+        if (std::isdigit(c)) {
+            ++run;
+        } else if (c == '.' && run > 0) {
+            ++components;
+            run = 0;
+        } else {
+            return false;
+        }
+    }
+    return run > 0 && components == 2;
+}
 
 struct UpgradeUrlPair {
     std::string asset;

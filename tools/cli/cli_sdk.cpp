@@ -11,6 +11,7 @@
 #include "fetchcontent_cache.hpp"
 #include "private_temp_dir.hpp"
 #include "release_checksum.hpp"
+#include "upgrade_url.hpp"
 #include "release_floors_gen.h"
 #include "tartci_lease.hpp"
 #include "version_diag.hpp"
@@ -283,6 +284,11 @@ fs::path ensure_sdk(const std::string& version) {
     std::string url = "https://github.com/" + std::string(PULP_GITHUB_REPO)
                     + "/releases/download/v" + version + "/" + tarball;
 
+    if (!pulp::cli::pulp_release_version_is_well_formed(version)) {
+        std::cerr << "Error: '" << version
+                  << "' is not a release version (expected M.m.p, e.g. 0.2.0)\n";
+        return {};
+    }
     std::cout << "Downloading Pulp SDK v" << version << " (" << platform << ")...\n";
 
     // Create cache directory

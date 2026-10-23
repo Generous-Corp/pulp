@@ -294,6 +294,13 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     }
 
     std::string version = target_version.empty() ? latest : target_version;
+    // The version is interpolated into a release URL, a directory name, and
+    // shell commands below; only a plain M.m.p release tag may get that far.
+    if (!pulp::cli::pulp_release_version_is_well_formed(version)) {
+        std::cerr << "Error: '" << version
+                  << "' is not a release version (expected M.m.p, e.g. 0.2.0)\n";
+        return 1;
+    }
     std::cout << "  Target version: " << version << "\n";
 
     std::string platform, arch;
@@ -545,8 +552,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     if (!cli_only) {
         std::cout << "\n  Installing matching SDK v" << version << "...\n";
         // Use shell quoting because self_path might contain spaces.
-        int sdk_rc = run(shell_quote(self_path) + " sdk install --version "
-                         + version);
+        int sdk_rc = run(shell_quote(self_path) + " sdk install --version " + shell_quote(version));
         if (sdk_rc == 0) {
             std::cout << "    \xe2\x9c\x93 SDK v" << version << " installed.\n";
             if (installed != version) {
