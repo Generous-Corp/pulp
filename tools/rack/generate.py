@@ -710,7 +710,8 @@ const char* forge_output_name(int) { return ""; }
         argv, env = gate_launch(exe, tmp)
         try:
             result = subprocess.run(
-                argv, capture_output=True, text=True, timeout=30, env=env)
+                argv, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=30, env=env)
         except subprocess.TimeoutExpired:
             raise BehaviourGateUnavailable(
                 "the behavioural gate preflight hung before generation") from None
@@ -861,6 +862,7 @@ const char* forge_output_name(int i) {{
         # path at run time. gate_launch() supplies it, inside the sandbox.
         argv, env = gate_launch(exe, tmp)
         r = subprocess.run(argv, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace",
                            timeout=120, env=env)
         output = r.stdout + r.stderr
         if r.returncode != 0:
