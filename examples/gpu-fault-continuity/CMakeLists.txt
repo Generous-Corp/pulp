@@ -18,8 +18,9 @@ if(NOT (PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND PULP_GPU_AUDIO_ENABLE_EXPERIMENT
 endif()
 
 pulp_add_plugin(PulpGpuFaultContinuity
-    FORMATS           CLAP VST3
+    FORMATS           CLAP VST3 AU
     SOURCES           gpu_fault_continuity.cpp gpu_fault_interposer.cpp gpu_fault_view.cpp
+                      gpu_fault_rendezvous.cpp
     PLUGIN_NAME       "Pulp GPU Fault Continuity"
     BUNDLE_ID         "com.pulp.gpu-fault-continuity"
     MANUFACTURER      "Pulp"
@@ -51,7 +52,7 @@ endif()
 if(PULP_BUILD_TESTS)
     add_executable(gpu-fault-continuity-test
         test_gpu_fault_continuity.cpp gpu_fault_continuity.cpp gpu_fault_interposer.cpp
-        gpu_fault_view.cpp
+        gpu_fault_view.cpp gpu_fault_rendezvous.cpp test_gpu_fault_rendezvous.cpp
         ${CMAKE_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
     target_link_libraries(gpu-fault-continuity-test PRIVATE
         pulp::format pulp::gpu-audio pulp::render pulp::view pulp::canvas

@@ -9097,6 +9097,62 @@
           "rationale": "Loop transport control is a runtime capability on a live host, not an offline SDK-composition capability a design-time agent manifest declares."
         }
       }
+    },
+    {
+      "id": "react-suspense-host-visibility",
+      "title": "A suspended React Suspense boundary hides its primary widgets and reveals them with the author's own visibility",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "pulp-react-suspense-host-visibility",
+      "owned_paths": [
+        "docs/reference/compat/react.md",
+        "packages/pulp-react/src/prop-applier-visibility.ts",
+        "packages/pulp-react/test/host-config-suspense-visibility.test.ts"
+      ],
+      "evidence": [
+        {
+          "path": "packages/pulp-react/src/prop-applier-visibility.ts",
+          "needles": [
+            "export function writeVisibility(id: string, authored: boolean): void",
+            "export function resumeVisibility(id: string): void"
+          ]
+        },
+        {
+          "path": "packages/pulp-react/src/host-config.ts",
+          "needles": [
+            "hideInstance(instance) {",
+            "unhideTextInstance(textInstance, _text) {"
+          ]
+        },
+        {
+          "path": "packages/pulp-react/test/host-config-suspense-visibility.test.ts",
+          "needles": [
+            "commits a first suspension with the primary hidden beside the fallback"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "A React renderer host-config behaviour; it adds no sequencer or timeline SDK API."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Suspense visibility is not an offline Timeline command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Suspense visibility is not an MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Widget visibility under a Suspense boundary is renderer state, not an independently controllable runtime capability."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This slice describes no installed design-time authoring capability."
+        }
+      }
     }
   ],
   "tombstones": []

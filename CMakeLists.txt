@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.1010.0
+    VERSION 0.1016.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -621,7 +621,12 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --build-dir "${CMAKE_BINARY_DIR}"
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
                 --output "${CMAKE_BINARY_DIR}/vellum-closure.json")
+        # The boundary test writes vellum-closure.json. The gate and the
+        # Pulp-kept check grade that file, so they require it as a fixture:
+        # DEPENDS only orders tests, and a filtered run would grade whatever
+        # manifest an earlier configure left behind.
         set_tests_properties(pulp.vellum-closure-boundary PROPERTIES
+            FIXTURES_SETUP pulp-vellum-closure-manifest
             LABELS "pr")
         add_test(NAME pulp.vellum-closure-gate
             COMMAND "${Python3_EXECUTABLE}"
@@ -634,7 +639,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --build-dir "${CMAKE_BINARY_DIR}"
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json")
         set_tests_properties(pulp.vellum-closure-gate PROPERTIES
-            DEPENDS pulp.vellum-closure-boundary
+            FIXTURES_REQUIRED pulp-vellum-closure-manifest
             LABELS "pr")
         add_test(NAME pulp.vellum-view-core-pulp-kept
             COMMAND "${Python3_EXECUTABLE}"
@@ -643,7 +648,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
                 --unit-manifest "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/vellum_d3_units.json"
                 --source-root "${CMAKE_CURRENT_SOURCE_DIR}")
         set_tests_properties(pulp.vellum-view-core-pulp-kept PROPERTIES
-            DEPENDS pulp.vellum-closure-boundary
+            FIXTURES_REQUIRED pulp-vellum-closure-manifest
             LABELS "pr")
         # The units exported so far, and render, hold no forbidden mirror
         # edge in any file, comments included; export refuses one.

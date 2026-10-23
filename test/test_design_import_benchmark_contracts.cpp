@@ -59,6 +59,35 @@ const IRNode* find_ir_node(const IRNode& node, std::string_view id) {
     return nullptr;
 }
 
+// Allocates a fixed number of heap blocks per interactive step, so a per-frame
+// allocation count can be checked against a known delta.
+class AllocatingFixture final : public BenchmarkFixture {
+  public:
+    explicit AllocatingFixture(int per_step) : per_step_(per_step) {
+        root_.set_id("allocating-root");
+        root_.set_bounds({0, 0, 12, 12});
+    }
+
+    View& root() override {
+        return root_;
+    }
+
+    void step(int frame) override {
+        held_.clear();
+        for (int i = 0; i < per_step_; ++i)
+            held_.push_back(std::make_unique<int>(frame + i));
+    }
+
+    int js_evaluation_count() const override {
+        return 0;
+    }
+
+  private:
+    View root_;
+    int per_step_ = 0;
+    std::vector<std::unique_ptr<int>> held_;
+};
+
 class CountingFixture final : public BenchmarkFixture {
 public:
     CountingFixture() {
@@ -497,6 +526,151 @@ TEST_CASE("design-import benchmark main writes reports and rejects invalid args"
     REQUIRE(run_benchmark_main({"bench", "--lane", "invalid"}) == 2);
 
     std::filesystem::remove(output);
+}
+
+TEST_CASE("design-import benchmark argument parser accepts and clamps warmup frames",
+          "[design-import][benchmark]") {
+    auto equals = parse_args_vec({"bench", "--warmup-frames=12"});
+    REQUIRE(equals.has_value());
+    CHECK(equals->warmup_frames == 12);
+
+    auto split = parse_args_vec({"bench", "--warmup-frames", "7"});
+    REQUIRE(split.has_value());
+    CHECK(split->warmup_frames == 7);
+
+    auto negative = parse_args_vec({"bench", "--warmup-frames=-3"});
+    REQUIRE(negative.has_value());
+    CHECK(negative->warmup_frames == 0);
+
+    CHECK_FALSE(parse_args_vec({"bench", "--warmup-frames=many"}).has_value());
+    CHECK(parse_args_vec({"bench"})->warmup_frames == 0);
+}
+
+TEST_CASE("design-import benchmark JSON report carries tail, allocation, and RSS fields",
+          "[design-import][benchmark]") {
+    Config config;
+    config.lane = "baked-native";
+
+    PhaseMetrics interactive;
+    interactive.warmup_frames = 60;
+    interactive.frame_ms_p95 = 1.25;
+    interactive.update_ms_p95 = 0.5;
+    interactive.allocations_total = 2690;
+    interactive.allocated_bytes_total = 65536;
+    interactive.allocations_per_frame_median = 269.0;
+    interactive.allocations_per_frame_p95 = 271.0;
+
+    const auto json = make_json(config, std::nullopt, StartupMetrics{}, PhaseMetrics{}, interactive,
+                                TeardownMetrics{}, 22511616);
+    CHECK(json.find("\"rss_high_water_bytes\": 22511616") != std::string::npos);
+    CHECK(json.find("\"warmup_frames\": 60") != std::string::npos);
+    CHECK(json.find("\"frame_ms_p95\": 1.2500") != std::string::npos);
+    CHECK(json.find("\"update_ms_p95\": 0.5000") != std::string::npos);
+    CHECK(json.find("\"allocations_total\": 2690") != std::string::npos);
+    CHECK(json.find("\"allocated_bytes_total\": 65536") != std::string::npos);
+    CHECK(json.find("\"allocations_per_frame_median\": 269.0000") != std::string::npos);
+    CHECK(json.find("\"allocations_per_frame_p95\": 271.0000") != std::string::npos);
+}
+
+TEST_CASE("design-import benchmark run_phase excludes warmup frames from samples",
+          "[design-import][benchmark]") {
+    CountingFixture fixture;
+    const auto interactive = run_phase(fixture, 5, std::nullopt, 10000, true, 3);
+    REQUIRE(fixture.steps > 3);
+    CHECK(interactive.warmup_frames == 3);
+    CHECK(interactive.samples == fixture.steps - 3);
+}
+
+TEST_CASE("design-import benchmark run_phase counts per-frame allocations",
+          "[design-import][benchmark]") {
+    AllocatingFixture quiet(0);
+    AllocatingFixture busy(8);
+    const auto quiet_metrics = run_phase(quiet, 5, std::nullopt, 10000, true);
+    const auto busy_metrics = run_phase(busy, 5, std::nullopt, 10000, true);
+    REQUIRE(quiet_metrics.samples > 1);
+    REQUIRE(busy_metrics.samples > 1);
+    // The empty root's render allocates the same amount in both runs, so the
+    // per-frame difference is exactly the fixture's own allocations.
+    CHECK(busy_metrics.allocations_per_frame_median - quiet_metrics.allocations_per_frame_median ==
+          Catch::Approx(8.0));
+    CHECK(busy_metrics.allocations_total >= 8u * static_cast<std::uint64_t>(busy_metrics.samples));
+}
+
+TEST_CASE("design-import benchmark excludes warmup frames from cumulative counters",
+          "[design-import][benchmark]") {
+    auto fixture = make_fixture(lane_config("baked-cpp"));
+    REQUIRE(fixture != nullptr);
+    // Per-frame cost of the idle panel, measured on one frame: its paint
+    // commands and how many layout passes one render asks for.
+    const auto layouts_before = View::layout_pass_count();
+    const auto commands = render_frame(fixture->root());
+    const auto layouts_per_frame = View::layout_pass_count() - layouts_before;
+    REQUIRE(commands > 0);
+    REQUIRE(layouts_per_frame > 0);
+
+    constexpr int kWarmup = 3;
+    const auto idle = run_phase(*fixture, 5, std::nullopt, 10000, false, kWarmup);
+    REQUIRE(idle.samples > 0);
+    const auto sampled = static_cast<std::uint64_t>(idle.samples);
+    // Every frame repeats the same work, so a counter that included the
+    // warmup frames would read kWarmup frames high.
+    CHECK(idle.paint_calls == sampled);
+    CHECK(idle.paint_commands_total == sampled * commands);
+    CHECK(idle.layout_passes == sampled * layouts_per_frame);
+
+    // Control: without warmup every rendered frame is counted.
+    const auto all = run_phase(*fixture, 5, std::nullopt, 10000, false, 0);
+    REQUIRE(all.samples > 0);
+    CHECK(all.paint_calls == static_cast<std::uint64_t>(all.samples));
+    CHECK(all.layout_passes == static_cast<std::uint64_t>(all.samples) * layouts_per_frame);
+
+    // A phase that never leaves warmup counts nothing.
+    const auto warmup_only = run_phase(*fixture, 1, std::nullopt, 10000, false, 1000000);
+    CHECK(warmup_only.samples == 0);
+    CHECK(warmup_only.paint_calls == 0);
+    CHECK(warmup_only.paint_commands_total == 0);
+    CHECK(warmup_only.layout_passes == 0);
+}
+
+TEST_CASE("design-import benchmark reports a nonzero RSS high-water mark",
+          "[design-import][benchmark]") {
+#if defined(__APPLE__) || defined(__linux__)
+    // The high-water mark is a peak, so it can never sit below the resident
+    // set measured before it. A units slip (ru_maxrss is bytes on Apple and
+    // KiB on Linux) reads three orders of magnitude off and fails here.
+    const auto current = current_rss_bytes();
+    REQUIRE(current > 0);
+    CHECK(rss_high_water_bytes() >= current);
+#else
+    SKIP("RSS high-water mark is not implemented on this platform");
+#endif
+}
+
+TEST_CASE("design-import benchmark rebuild lane preserves the meter peak",
+          "[design-import][benchmark]") {
+    constexpr int frame = 30;
+    const float t = static_cast<float>(frame) / 60.0f;
+    const float output = 0.55f + 0.35f * std::sin(t * 1.3f);
+    // The rebuild lane carries the peak as a decimal IR attribute.
+    const float expected_peak =
+        std::strtof(std::to_string(std::max(0.0f, output - 0.18f)).c_str(), nullptr);
+
+    auto rebuild = make_fixture(lane_config("baked-native-rebuild"));
+    REQUIRE(rebuild != nullptr);
+    rebuild->step(frame);
+    auto* meter = dynamic_cast<Meter*>(find_by_id(rebuild->root(), "output"));
+    REQUIRE(meter != nullptr);
+    CHECK(meter->display_rms() == Catch::Approx(output));
+    CHECK(meter->display_peak() == Catch::Approx(expected_peak).margin(1e-6));
+    // Without the peak attribute the materializer falls back to the level.
+    CHECK(meter->display_peak() != Catch::Approx(meter->display_rms()));
+
+    auto baked = make_fixture(lane_config("baked-native"));
+    REQUIRE(baked != nullptr);
+    baked->step(frame);
+    auto* baked_meter = dynamic_cast<Meter*>(find_by_id(baked->root(), "output"));
+    REQUIRE(baked_meter != nullptr);
+    CHECK(baked_meter->display_peak() == Catch::Approx(meter->display_peak()).margin(1e-6));
 }
 
 namespace {

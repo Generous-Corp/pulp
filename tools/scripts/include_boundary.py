@@ -44,6 +44,9 @@ class Boundary:
     allowed_areas: frozenset[str] | None = None
     forbidden_areas: frozenset[str] = frozenset()
     excluded: tuple[str, ...] = ()
+    # Include directories of retained targets whose headers share an allowed
+    # area's prefix (pulp-content installs pulp/state/content_registry.hpp).
+    forbidden_include_dirs: tuple[str, ...] = ()
 
 
 BOUNDARIES: dict[str, Boundary] = {
@@ -57,11 +60,14 @@ BOUNDARIES: dict[str, Boundary] = {
     "view-core": Boundary(
         name="view-core",
         summary=("core/view outside core/view/audio may not include audio, signal, host, "
-                 "midi or format headers, nor the audio widgets' headers"),
+                 "midi, format, timebase, graph, playback, content or sample-bank headers, "
+                 "nor the audio widgets' headers"),
         roots=("core/view",),
         include_dirs=("core/view/include",),
-        forbidden_areas=frozenset({"audio", "signal", "host", "midi", "format"}),
+        forbidden_areas=frozenset({"audio", "signal", "host", "midi", "format", "timebase",
+                                   "graph", "playback", "content", "sample_bank_manifest"}),
         excluded=("core/view/audio",),
+        forbidden_include_dirs=("core/content/include",),
     ),
 }
 
@@ -102,6 +108,7 @@ def crossings(path: pathlib.Path, root: pathlib.Path, b: Boundary) -> list[tuple
     roots = [(root / r).resolve() for r in b.roots]
     excluded = [(root / e).resolve() for e in b.excluded]
     include_dirs = [(root / d).resolve() for d in b.include_dirs]
+    forbidden_dirs = [(root / d).resolve() for d in b.forbidden_include_dirs]
     found: list[tuple[int, str]] = []
     for n, delim, target in include_edges(path):
         parts = target.split("/")
@@ -113,6 +120,9 @@ def crossings(path: pathlib.Path, root: pathlib.Path, b: Boundary) -> list[tuple
                 found.append((n, target))
             elif excluded and not any((d / target).exists() for d in include_dirs) \
                     and any((e / "include" / target).exists() for e in excluded):
+                found.append((n, target))
+            elif forbidden_dirs and not any((d / target).exists() for d in include_dirs) \
+                    and any((d / target).exists() for d in forbidden_dirs):
                 found.append((n, target))
             continue
         if ".." in parts:

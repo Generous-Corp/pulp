@@ -4,6 +4,7 @@
 #include "design_binding_metadata.hpp"
 #include "design_import_document_checks.hpp"
 
+#include <pulp/view/border_style.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/css_gradient.hpp>
@@ -1502,9 +1503,10 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_background_position(*style.background_position);
     if (style.background_size)
         view.set_background_size(*style.background_size);
-    // object-fit is honored by ImageView::paint; on plain Views it sits in the
-    // same style_extras slot the bridge writes, so applying it unconditionally
-    // keeps the native tree in lockstep with the JS lane's setObjectFit.
+    if (style.background_origin)
+        view.set_background_origin(*style.background_origin);
+    // object-fit is honored by ImageView::paint; plain Views keep it in the bridge's
+    // style_extras slot, so the native tree matches the JS lane's setObjectFit.
     if (style.object_fit)
         view.set_object_fit(*style.object_fit);
     if (style.color) {
@@ -1516,12 +1518,10 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.border_radius)
         view.set_border_radius(*style.border_radius);
 
-    // Filters, backdrop filters and blend modes. The JS lane already parses
-    // these — web-compat-style-decl-paint.js pulls the blur radius out and
-    // routes it to setBackdropFilter -> View::set_backdrop_blur — but the
-    // native tree did not, so the same document rendered soft through one lane
-    // and hard-edged through the other. An atmospheric design lives or dies on
-    // this: a 60px bloom with no blur is a solid shape sitting on the panel.
+    // Filters, backdrop filters and blend modes, lowered the way the JS lane does
+    // (web-compat-style-decl-paint.js routes the blur radius to setBackdropFilter ->
+    // View::set_backdrop_blur) so both lanes render the same document equally soft.
+    // An atmospheric design depends on it: a 60px bloom with no blur is a solid shape.
     if (style.filter) {
         if (const auto radius = css_blur_radius(*style.filter))
             view.set_filter_blur(*radius);
@@ -1635,17 +1635,11 @@ void apply_visual_style(View& view, const IRStyle& style,
             if (auto color = parse_any_css_color(*style.border_left_color))
                 view.set_border_left_color(*color);
         }
-        // CSS border-style keyword → View::BorderStyle, same table the bridge's
-        // setBorderStyle uses. A Figma dashPattern lowers to "dashed" at the
-        // producers; without this the native materializer painted it solid
-        // while the JS-bridge lane dashed it. Unknown keywords keep the solid
-        // default (View degrades double/groove/... to solid anyway).
+        // The same keyword table the bridge's setBorderStyle uses; an unknown
+        // keyword keeps the solid default.
         if (style.border_style) {
-            const std::string& bs = *style.border_style;
-            if (bs == "dashed")      view.set_border_style(View::BorderStyle::dashed);
-            else if (bs == "dotted") view.set_border_style(View::BorderStyle::dotted);
-            else if (bs == "none")   view.set_border_style(View::BorderStyle::none);
-            else if (bs == "hidden") view.set_border_style(View::BorderStyle::hidden);
+            if (auto bs = border_style_from_css(*style.border_style))
+                view.set_border_style(*bs);
         }
     }
     if (style.border_top_left_radius) view.set_corner_radius_tl(*style.border_top_left_radius);
@@ -2275,6 +2269,8 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                     std::move(boxes), node.text_layout_basis->width,
                     node.text_layout_basis->resolved_face,
                     wrap_on_cache_miss);
+                if (const auto& m = node.text_layout_basis->line_metrics)
+                    label->set_cached_line_metrics(*m);
                 if (!explicit_nowrap && node.text_line_boxes.size() > 1)
                     label->set_multi_line(true);
             }
@@ -3147,6 +3143,8 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
         // is discovered pass-wide, so setting it on the imported root also
         // covers a host that embeds this tree under its own layout root.
         root->set_subpixel_layout(true);
+        // Captured text snaps its baselines to this frame's grid.
+        root->set_captured_frame_root(true);
         if (options.diagnostics_out != nullptr) {
             options.diagnostics_out->insert(options.diagnostics_out->end(),
                                             materialize_diagnostics.begin(),

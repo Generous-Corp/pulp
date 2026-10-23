@@ -169,6 +169,7 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_options.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_scope.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_resolver.cpp
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/font_tables.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_registry_stubs.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/font_flight_recorder.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/bundled_fonts.cpp
@@ -210,6 +211,8 @@ set(_PULP_WEBUI_VIEW_SOURCES
     # view.cpp does not link without it.
     ${_PULP_WEBUI_ROOT}/core/view/src/view_lifecycle.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/view_paint.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/border_style.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/text_line_metrics.cpp
     # FU-2 partial-repaint damage model — pure, no platform deps. Kept in the
     # web source set so the view lib links identically across native + wasm.
     ${_PULP_WEBUI_ROOT}/core/view/src/repaint_damage.cpp

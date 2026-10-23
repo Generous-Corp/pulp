@@ -624,6 +624,17 @@ exists, open the revert or the one-line fix and jump that. Record the PR, the
 failing test, and how long main was red. Jumping anything else, or switching on
 an automatic jump, is a maintainer decision.
 
+`poisoned` also comes from main's PUSH run: when its Linux leg executed ctest
+on main's tip and failed a test the batch streak shares (proof
+`main-push-linux-failure+batch-streak`). That catches a test that passed when
+its commit landed and fails on main afterwards, which the merge group on the
+tip cannot see; a receipt-reuse green on that merge group used to leave such a
+night `suspected`. `[base_health] auto_jump = "dry-run"` in
+`.shipyard/config.toml` makes `shipyard base-health --act` record "would jump
+PR #n" (host-local `<state>/base-health/jump-decisions.jsonl`) and nothing
+else. Advice needs a decisive `candidate_fix_pr`, so a poisoned base with no
+named fix records nothing; jump by hand as above.
+
 **The pre-approval is narrow.** `GHAPP_ALLOW_QUEUE_REMOVAL=1` is pre-approved
 only to dequeue the fix PR itself so it can be re-enqueued at the front, and only
 while main is red. Every such call carries
@@ -874,10 +885,29 @@ CMake-4-only script fails only there).
 ### A Rust step that fails with "toolchain ... is not installed" is the image, not the PR
 
 The `build.yml` build legs set `RUSTUP_AUTO_INSTALL=0`, so a rustup proxy
-never downloads the toolchain `rust-toolchain.toml` names mid-build. If a cargo
-step fails naming a missing toolchain, the runner image or the resolve step
-lacks it: fix the golden (install the manifest's Rust by name), never by
-re-enabling auto-install in the workflow.
+never downloads the toolchain `rust-toolchain.toml` names mid-build.
+`rust-toolchain.toml` is generated from `tools/toolchain/manifest.toml` and
+names an exact Rust (rustup toolchain `1.97.1`, not `stable`, even when
+`stable` is the same release), so a golden that only has `stable` lacks it. The
+"Provide the pinned Rust toolchain" step (`tools/ci/provide_pinned_rust.sh
+--fallback-to-default`) installs it before configure; a `::warning
+title=toolchain::could not install the pinned Rust` means that download failed
+and the job built with the runner default (`RUSTUP_TOOLCHAIN`). Fix the golden
+(install the manifest's Rust by name, as `tools/ci/mise-golden-layer.sh`
+does), never by re-enabling auto-install in the workflow or deleting the step.
+The step logs `rust: branch=present|stable-alias|install|fallback` and writes
+a JSON receipt plus a step summary line. Gate VMs cannot download Rust at all
+(their egress proxy refuses `static.rust-lang.org`: "tunnel error:
+unsuccessful"), and self-hosted legs never fall back, so a gate VM whose image
+has neither the pin by name nor an identical `stable` FAILS the step: rebake
+the golden, do not add a fallback (contract row 29). Only GitHub-hosted legs
+may fall back, loudly and with an uploaded receipt. `rustup toolchain link` cannot alias an official
+release name, which is why an identical `stable` is selected with
+`RUSTUP_TOOLCHAIN=stable` instead.
+
+`.githooks/post-checkout` trusts a new worktree's own `.mise.toml` (null old
+sha and branch flag 1 only) and never fails the checkout. Do not widen it to a
+parent directory or add `trusted_config_paths` roots (contract row 28).
 
 ## Android minimum-API allocation check
 
@@ -1928,7 +1958,11 @@ turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
 Before regenerating `test/ctest_script_inputs.json` or
 `.shipyard/changed-surface-families.toml`, run that same locked install and
 reconfigure from the gate profile so both materialized-runtime tests remain
-registered.
+registered. `script_test_inputs.py --write` refuses (exit 2, list unchanged)
+when it would delete a checked-in test or executable your configure does not
+produce, such as the generated-name "Pulp UI Script Fixture" executable. Fix
+the configure; pass `--allow-delete` only when the registration really was
+removed.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
@@ -2803,6 +2837,15 @@ partial clone, so a local walk there can miscount. Do not re-pin the GPU
 handoff ledger in the PR; the version bot regenerates it. A missing annotation
 on a job that ran the suite means the measurement broke, not that there is
 room.
+
+The same warning also exists as an issue. Each push to main runs the advisory
+`a2t-headroom-issue` job (`a2t_headroom_annotation.py --reconcile-issue`, fed
+by the Linux leg's `a2t-scope-headroom` artifact). It keeps ONE open issue
+titled `a2t-scope-history-headroom: <count>/<limit> ...` from the 60% mark, and
+closes it on the first push after a re-pin. When that issue is open, the re-pin
+is due: do it then. Do not wait for the guard to go red. The job finds its issue by a
+hidden marker. Closing the issue by hand does nothing useful, because the next
+push reopens it while the count stays high.
 
 ## The flake-exoneration shadow annotation exonerates nothing
 
@@ -5936,9 +5979,12 @@ golden its "Ensure a working Rust toolchain on PATH" step exhausts every probe
 release leg — while the bare-metal studios stay green because they have rustup
 from operator setup. That step now **bootstraps rustup as a last resort**
 (`curl … | sh -s -- -y --profile minimal --default-toolchain stable
---no-modify-path`, then front-loads `rustfmt`+`clippy` per
-`rust-toolchain.toml`), so the lane is self-sufficient on any runner; the pin is
-`stable`, so no reproducibility drift vs the studios. Before flipping
+--no-modify-path`), and the next step, `tools/ci/provide_pinned_rust.sh`,
+installs the exact Rust the generated `rust-toolchain.toml` names with its
+components and the `x86_64-apple-darwin` std, so the lane is self-sufficient on
+any runner and builds with the same compiler as every other lane. Never
+`rustup target add` / `component add` at the repo root: that changes the
+DEFAULT toolchain, not the pinned one cargo uses inside the crate. Before flipping
 `PULP_RELEASE_MACOS_RUNS_ON_JSON` to a VM label, either that fallback must be in
 place **or** the golden must bake rustup — otherwise the darwin publish leg
 fails and the whole release never publishes (the `release` job `needs` the full

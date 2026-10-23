@@ -24,6 +24,7 @@
 // again, so the survivors win exactly as they did before.
 
 import { call } from './prop-applier-internal.js';
+import { writeVisibility } from './prop-applier-visibility.js';
 
 /// Returns false when it decided there was nothing to undo, so the slots it
 /// names are not treated as reset.
@@ -168,7 +169,7 @@ export const STYLE_KEY_RULES: Readonly<Record<string, StyleKeyRule>> = {
         // `none` hid the widget; `flex` turned a column into a row.
         slots: ['visible', 'flex.direction'],
         reset: (id) => {
-            call('setVisible', id, true);
+            writeVisibility(id, true);
             call('resetStyleProperty', id, 'direction');
         },
     },
@@ -306,7 +307,7 @@ export const STYLE_KEY_RULES: Readonly<Record<string, StyleKeyRule>> = {
     outlineStyle: clearOutline,
     outlineWidth: clearOutline,
     opacity: setter(['opacity'], 'setOpacity', 1),
-    visible: setter(['visible'], 'setVisible', true),
+    visible: { slots: ['visible'], reset: (id) => writeVisibility(id, true) },
     boxShadow: clearShadow,
     shadowColor: clearShadow,
     shadowOffset: clearShadow,

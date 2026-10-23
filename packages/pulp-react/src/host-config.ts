@@ -28,6 +28,11 @@ import {
     isEventHandler,
     normalizeHostProps,
 } from './prop-applier.js';
+import {
+    forgetVisibility,
+    resumeVisibility,
+    suspendVisibility,
+} from './prop-applier-visibility.js';
 
 type Type = IntrinsicElementName;
 type Props = Record<string, unknown>;
@@ -918,6 +923,9 @@ export const PulpHostConfig: HostConfig<
         // prop-applier through here.
         const normalizedProps = normalizeHostProps(type, props as Record<string, unknown>);
         const id = (normalizedProps.id as string) ?? autoId(rootContainer);
+        // A new widget starts visible. An authored id can come back after its
+        // previous widget left while a boundary held it hidden.
+        forgetVisibility(id);
         // Public instances expose the web-compat Element shim when it is
         // available. Refs need DOM-shaped methods such as getContext(),
         // getBoundingClientRect(), style setters, and addEventListener().
@@ -1101,6 +1109,27 @@ export const PulpHostConfig: HostConfig<
         markMaterializedTreeDirty();
         // No-op for v0 — React always issues per-child removals.
         // Could be optimized later by tracking a list of root children.
+    },
+
+    // ── Suspense visibility ────────────────────────────────────────
+    // A suspended boundary keeps its primary children mounted and hides the
+    // top-most host widgets under it; resolving reveals them. The reveal
+    // restores the author's own `visible`/`display`, not a blanket true.
+    // Text instances are synthetic Labels, hidden on their own widget id.
+    // The reconciler can hide a widget before an ancestor's placement creates
+    // it; the write is a batched setter, so it reaches the bridge after the
+    // commit's creates.
+    hideInstance(instance) {
+        suspendVisibility(instance.id);
+    },
+    unhideInstance(instance, _props) {
+        resumeVisibility(instance.id);
+    },
+    hideTextInstance(textInstance) {
+        suspendVisibility((textInstance as unknown as Instance).id);
+    },
+    unhideTextInstance(textInstance, _text) {
+        resumeVisibility((textInstance as unknown as Instance).id);
     },
 
     // ── Updates ────────────────────────────────────────────────────
@@ -1521,6 +1550,7 @@ function unregisterDomSubtree(instance: Instance): void {
         if (typeof id === 'string' && id.length > 0) {
             registry.delete(id);
             clearMaterializedEventCallbacks(id);
+            forgetVisibility(id);
         }
         node._parentElement = null;
     };
@@ -1528,6 +1558,7 @@ function unregisterDomSubtree(instance: Instance): void {
     else {
         registry.delete(instance.id);
         clearMaterializedEventCallbacks(instance.id);
+        forgetVisibility(instance.id);
     }
 }
 

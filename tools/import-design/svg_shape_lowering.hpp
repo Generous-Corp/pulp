@@ -49,6 +49,16 @@ enum class SvgRefusal {
     /// because nothing about the design is at fault: the capture predates the
     /// protocol that records SVG paint, and re-capturing fixes it.
     paint_unavailable,
+    /// A shape's own `opacity` below 1 on a shape that both fills and strokes.
+    /// The two paints composite as one layer first, so folding the opacity
+    /// into each colour double-darkens the half of the stroke that overlaps
+    /// the fill.
+    shape_opacity,
+    /// An opacity that has to fold into a colour Chrome serialized as
+    /// something other than `rgb(…)` / `rgba(…)` (`color(…)`, `oklch(…)`).
+    /// Drawing the colour at full alpha would be a brighter icon than the
+    /// author made.
+    paint_alpha,
 };
 
 std::string_view to_string(SvgRefusal refusal);
@@ -69,6 +79,31 @@ struct SvgShape {
     /// In the root's user units, matching `SvgPathWidget::set_stroke_width`.
     double stroke_width = 1.0;
     bool even_odd_fill = false;
+    /// The shape's own `opacity`, already multiplied into `fill` or `stroke`
+    /// alongside `fill-opacity` / `stroke-opacity`. A shape that has both
+    /// paints and an opacity below 1 refuses instead (`shape_opacity`).
+    ///
+    /// The stroke geometry below is resolved the way SVG resolves it: Chrome's
+    /// computed value when the capture collected the property, otherwise the
+    /// nearest inline `style` declaration or presentation attribute on the
+    /// shape or an ancestor (Lucide sets them once on the root `<svg>`), then
+    /// the SVG initial value. An invalid value is skipped, as the browser
+    /// skips it.
+    ///
+    /// `butt`, `round` or `square`.
+    std::string stroke_linecap = "butt";
+    /// `miter`, `round` or `bevel`.
+    std::string stroke_linejoin = "miter";
+    /// SVG's initial value is 4, where a 2D canvas defaults to 10, so a
+    /// consumer must apply this rather than its own default.
+    double stroke_miterlimit = 4.0;
+    /// `stroke-dashoffset` in user units. Only visible under a dash pattern,
+    /// which refuses today (`dashed_stroke`), and carried so the value is not
+    /// lost when dashes are drawn.
+    double stroke_dashoffset = 0.0;
+    /// The author's `pathLength`, the length dash lengths and offsets are
+    /// measured against. Unset when absent or invalid.
+    std::optional<double> path_length;
 };
 
 /// What an `<svg>` subtree lowers to.
