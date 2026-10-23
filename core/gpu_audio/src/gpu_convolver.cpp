@@ -1260,8 +1260,14 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         const auto period = std::chrono::nanoseconds(static_cast<std::uint64_t>(block_) *
                                                      1'000'000'000ull / sample_rate_);
         const auto due_at = due.submitted + period * pipeline;
-        while (!due.done && std::chrono::steady_clock::now() < due_at)
-            (void)gpu_->poll_readbacks();
+        if (std::chrono::steady_clock::now() < due_at) {
+            while (!due.done && std::chrono::steady_clock::now() < due_at)
+                (void)gpu_->poll_readbacks();
+            // One last poll once the due time has passed, so a thread that
+            // was preempted across it still collects a result that landed.
+            if (!due.done)
+                (void)gpu_->poll_readbacks();
+        }
     }
     bool gpu_ok =
         due.attempted && due.done && due.status == render::GpuCompute::ReadbackStatus::Success;
