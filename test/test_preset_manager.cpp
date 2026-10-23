@@ -1697,8 +1697,20 @@ TEST_CASE("runtime content installer refuses an archive above the decompressed-s
     }
 }
 
-TEST_CASE("content install limits count entries",
+TEST_CASE("content install limits clamp to the defaults and count entries",
           "[state][preset][content]") {
+    const ContentInstallLimits defaults;
+
+    // A user-facing byte cap only tightens: a value above a default leaves it.
+    const auto raised = clamp_content_install_bytes(defaults, std::uint64_t{64} << 30);
+    REQUIRE(raised.max_total_bytes == defaults.max_total_bytes);
+    REQUIRE(raised.max_entry_bytes == defaults.max_entry_bytes);
+    REQUIRE(raised.max_entries == defaults.max_entries);
+    const auto lowered = clamp_content_install_bytes(defaults, 65536);
+    REQUIRE(lowered.max_total_bytes == 65536);
+    REQUIRE(lowered.max_entry_bytes == 65536);
+    REQUIRE(lowered.max_entries == defaults.max_entries);
+
     // The budget counts admitted entries and refuses the one past the cap even
     // when it carries no bytes at all.
     ContentInstallLimits limits;

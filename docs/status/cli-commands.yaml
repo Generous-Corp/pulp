@@ -1981,7 +1981,7 @@ commands:
             description: Emit machine-readable validation JSON
           - name: --max-pack-bytes
             kind: option
-            description: Lower the pack cap to this many decompressed bytes (total and per entry)
+            description: Lower the pack byte caps to at most this many decompressed bytes (total and per entry); a value above a default leaves it
       - name: preview
         summary: Preview content-pack compatibility and reload policy against a trusted plugin runtime manifest without installing anything. Archives must include files.sha256.json.
         args:
@@ -2019,7 +2019,7 @@ commands:
             description: Override the user data root for tests or sandboxed installs
           - name: --max-pack-bytes
             kind: option
-            description: Lower the pack cap to this many decompressed bytes (total and per entry)
+            description: Lower the pack byte caps to at most this many decompressed bytes (total and per entry); a value above a default leaves it
       - name: update
         summary: Update a validated local content pack for a plugin with rollback if replacing an installed version fails. Archives must include files.sha256.json and fit the decompressed-size pack cap.
         args:
@@ -2040,7 +2040,7 @@ commands:
             description: Override the user data root for tests or sandboxed installs
           - name: --max-pack-bytes
             kind: option
-            description: Lower the pack cap to this many decompressed bytes (total and per entry)
+            description: Lower the pack byte caps to at most this many decompressed bytes (total and per entry); a value above a default leaves it
       - name: list
         summary: List installed content packs.
         args:

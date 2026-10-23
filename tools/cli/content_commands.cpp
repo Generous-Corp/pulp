@@ -746,11 +746,12 @@ void print_usage() {
                  "rebuilds the metadata index only. They do not execute package code.\n"
               << "An archive is refused before extraction when its declared decompressed size "
                  "exceeds the pack cap (default 4 GiB total, 1 GiB per entry, 65536 entries); "
-                 "--max-pack-bytes lowers both caps to <n>.\n";
+                 "--max-pack-bytes lowers both byte caps to <n> and never raises them.\n";
 }
 
-// Parse a `--max-pack-bytes` value into limits: it caps the pack total and
-// lowers the per-entry cap to match, so one number bounds the whole install.
+// Parse a `--max-pack-bytes` value into limits: it lowers the total and the
+// per-entry cap to at most that number. It can only tighten the defaults, so the
+// documented caps stay the ceiling whatever a user passes.
 bool apply_max_pack_bytes(const std::string& text, pulp::state::ContentInstallLimits& limits) {
     if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos)
         return false;
@@ -762,8 +763,7 @@ bool apply_max_pack_bytes(const std::string& text, pulp::state::ContentInstallLi
     }
     if (value == 0)
         return false;
-    limits.max_total_bytes = value;
-    limits.max_entry_bytes = std::min(limits.max_entry_bytes, value);
+    limits = pulp::state::clamp_content_install_bytes(limits, value);
     return true;
 }
 

@@ -6,6 +6,7 @@
 /// size in its central directory, so the whole pack can be admitted or refused
 /// from metadata alone, before a single byte lands on the heap or on disk.
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -23,6 +24,16 @@ struct ContentInstallLimits {
     /// byte caps bound inflation.
     std::uint64_t max_entries = 65536;
 };
+
+/// Lower both byte caps to at most `max_bytes` (a user-facing `--max-pack-bytes`
+/// value). A value above a default never raises that default: the flag only
+/// tightens. The entry-count cap is untouched.
+inline ContentInstallLimits clamp_content_install_bytes(ContentInstallLimits limits,
+                                                        std::uint64_t max_bytes) {
+    limits.max_total_bytes = std::min(limits.max_total_bytes, max_bytes);
+    limits.max_entry_bytes = std::min(limits.max_entry_bytes, max_bytes);
+    return limits;
+}
 
 /// Running admission of archive entries against a ContentInstallLimits. The
 /// runtime installer and the CLI share it so both refuse the same pack with the

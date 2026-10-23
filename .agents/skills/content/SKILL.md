@@ -112,8 +112,10 @@ separators or colons in file names therefore fails validation everywhere.
 A `.pulpcontent` archive declares each entry's decompressed size, so
 `ContentSizeBudget` (`core/state/include/pulp/state/content_install_limits.hpp`)
 admits the whole pack from metadata before anything is inflated: 4 GiB total,
-1 GiB per entry and 65536 entries by default, `--max-pack-bytes <n>` on
-`validate` / `install` / `update` to lower both byte caps. The entry-count cap is what bounds the hash
+1 GiB per entry and 65536 entries by default. `--max-pack-bytes <n>` on
+`validate` / `install` / `update` lowers both byte caps through
+`clamp_content_install_bytes`; it can never raise a default, which is what lets
+the docs state the caps as ceilings. The entry-count cap is what bounds the hash
 check's cross-reference of archived against declared files, so it is not a
 knob. The runtime installer takes the same `ContentInstallLimits`. The budget runs *before* the `files.sha256.json` hash
 check, because that check inflates every declared file onto the heap. A refusal
