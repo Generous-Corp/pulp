@@ -140,6 +140,21 @@ class GateSandboxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             self.assertNotEqual(self.run_canary(scratch, "net"), 0)
 
+    def test_other_temp_files_are_not_readable(self):
+        # The per-user temp dir and /private/tmp hold other processes'
+        # files; only the gate's own scratch there is readable.
+        for parent in (tempfile.gettempdir(), "/private/tmp"):
+            with self.subTest(parent=parent):
+                other = tempfile.mkdtemp(prefix="pulp-gate-other-", dir=parent)
+                self.addCleanup(shutil.rmtree, other, True)
+                secret = os.path.join(other, "prompt.txt")
+                with open(secret, "w", encoding="utf-8") as f:
+                    f.write("someone else's file")
+                self.assertEqual(self.run_unsandboxed("read", secret), 0)
+                with tempfile.TemporaryDirectory() as scratch:
+                    self.assertNotEqual(
+                        self.run_canary(scratch, "read", secret), 0)
+
     def test_nothing_under_home_is_readable_but_what_the_gate_needs(self):
         # The gate's output feeds the next prompt, so a readable home is a
         # way to print a secret to the model.

@@ -689,6 +689,10 @@ def gate_launch(exe: str, scratch: str):
         # prompt, so a readable ~/.ssh or secrets store would be one print()
         # away from the model. System locations stay readable for dyld.
         f"(deny file-read* (subpath {_sbpl_string(_real_home())}))",
+        # The per-user temp directory and /private/tmp are not under home but
+        # hold other processes' files (Forge's own prompt files among them).
+        # The scratch directory lives there and is allowed back below.
+        f"(deny file-read* (subpath {_sbpl_string(os.path.realpath(tempfile.gettempdir()))}) (subpath \"/private/tmp\"))",
         "(allow file-read* " + " ".join(
             f"(subpath {_sbpl_string(p)})"
             for p in (scratch, os.path.realpath(SDK), os.path.realpath(ROOT))) + ")",
