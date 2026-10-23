@@ -1379,7 +1379,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fixed_ir_convolver.hpp",
-        "fingerprint": "sha256:7e281e2fd29e841f14910708d17b40d77a9f34354adfef46a30e5e9bbbee6544",
+        "fingerprint": "sha256:64382ea1f17038c0f2bcd960eb17a02c8f8cd97ce5680481ef7fe16e0109cb84",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
