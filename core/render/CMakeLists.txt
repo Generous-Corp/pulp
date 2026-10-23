@@ -45,6 +45,18 @@ target_link_libraries(pulp-gpu-device
     PRIVATE pulp::runtime
 )
 
+# Who installs Dawn's process-global proc table. OFF (Pulp's default): Pulp
+# installs Dawn's native procs once, on first use. ON: an embedding host owns
+# the table, Pulp compiles no proc-table setter, and every GpuSurface or
+# GpuCompute creation fails until the host registers an installer with
+# pulp::render::set_dawn_proc_installer(). The source list is the same either
+# way; only this definition differs.
+option(PULP_DAWN_PROCS_HOST_OWNED
+    "An embedding host owns Dawn's proc table; Pulp never installs it" OFF)
+if(PULP_DAWN_PROCS_HOST_OWNED)
+    target_compile_definitions(pulp-gpu-device PRIVATE PULP_DAWN_PROCS_HOST_OWNED=1)
+endif()
+
 # Apple Metal surface helpers for Dawn rendering
 if(PULP_MACOS OR (APPLE AND NOT PULP_IOS))
     target_sources(pulp-gpu-device PRIVATE

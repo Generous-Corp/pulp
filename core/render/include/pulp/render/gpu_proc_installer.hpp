@@ -7,7 +7,8 @@
 // once.
 //
 // By default the installer is Pulp's own: it installs Dawn's native procs once
-// per process. An embedding host that owns the table instead (because it
+// per process. A build configured with PULP_DAWN_PROCS_HOST_OWNED has no
+// default: ensure_dawn_procs() fails until a host registers an installer. An embedding host that owns the table instead (because it
 // authenticates the Dawn build, shares the table with other code, or installs
 // it itself) registers its installer with set_dawn_proc_installer() before any
 // GpuSurface or GpuCompute is created. An installer may install the table, or
