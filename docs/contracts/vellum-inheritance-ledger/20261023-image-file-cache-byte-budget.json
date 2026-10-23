@@ -2,11 +2,12 @@
   "schema": "pulp.vellum-inheritance-entry.v1",
   "event_id": "20261023-image-file-cache-byte-budget",
   "slices": [
-    "canvas-kernel"
+    "canvas-kernel",
+    "render-skia-dawn"
   ],
-  "vellum_obligation": "The file image cache must be bounded by bytes as well as count, keep its newest entry when that entry alone exceeds the budget, and remember a failed build for a bounded interval so a corrupt asset is not decoded on every paint; `clear` and backend invalidation drop the memo.",
+  "vellum_obligation": "The file image cache must be bounded by bytes as well as count, never evict for bytes its newest entry or an entry drawn in the frame being painted (GPU surfaces announce each frame per backend), and remember a failed build for a bounded interval so a corrupt asset is not decoded on every paint, retrying a file as soon as its size or modification time changes; `clear` and backend invalidation drop the memo.",
   "evidence": [
     ".github/vellum-change-events/20261023-image-file-cache-byte-budget.json",
-    "pulp-test-image-file-cache (File pool stays within its byte budget, File pool keeps a lone image larger than its byte budget, A failed build is remembered for the retry window)"
+    "pulp-test-image-file-cache (File pool stays within its byte budget, File images drawn every frame stay cached when a frame exceeds the byte budget, File images not drawn this frame are evicted to the byte budget, A failed build is remembered for the retry window, A failed file build is retried as soon as the file changes)"
   ]
 }

@@ -4,13 +4,17 @@
   "kind": "change",
   "created_at": "2026-10-23T01:43:58Z",
   "slices": [
-    "canvas-kernel"
+    "canvas-kernel",
+    "render-skia-dawn"
   ],
-  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); the ImageFileCache path pool was bounded only by entry count, so its 32 entries could pin over a gigabyte of decoded pixels or textures, and a build that returned null (a missing file, a corrupt data: URI) was retried on every lookup, decoding a broken asset on every paint. The path pool now also has a 64 MiB byte budget with LRU eviction (set_byte_budget, Stats.bytes) and keeps its newest entry even when that one image exceeds the budget, so a large backdrop is decoded once rather than every frame; the inline pool's build-uncached rule is unchanged. Both pools remember a failed build for one second, and clear()/clear_backend() drop those records. Pixel output is unchanged. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); the ImageFileCache path pool was bounded only by entry count, so its 32 entries could pin over a gigabyte of decoded pixels or textures, and a build that returned null (a missing file, a corrupt data: URI) was retried on every lookup, decoding a broken asset on every paint. The path pool now also has a 64 MiB byte budget with LRU eviction (set_byte_budget, Stats.bytes), but never evicts for bytes its newest entry or an entry drawn in the frame being painted: the Graphite and Ganesh SkiaSurface frame starts announce each frame to ImageFileCache::begin_frame() with their backend key, so a frame whose images exceed the budget (an imported panel's full-frame chrome and canvas layers) overshoots it instead of decoding and uploading every layer every frame, and entries only earlier frames drew are trimmed on the next build. The inline pool's build-uncached rule is unchanged. Both pools remember a failed build for one second, a path failure is retried as soon as the file's size or modification time changes, and clear()/clear_backend() drop those records. Pixel output is unchanged. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
   "tests": [
     "Vellum freeze",
     "Vellum trusted freeze",
     "ctest --test-dir build -R 'A failed build is remembered for the retry window'",
+    "ctest --test-dir build -R 'A failed file build is retried as soon as the file changes'",
+    "ctest --test-dir build -R 'File images drawn every frame stay cached'",
+    "ctest --test-dir build -R 'File images not drawn this frame are evicted'",
     "ctest --test-dir build -R 'File pool keeps a lone image larger than its byte budget'",
     "ctest --test-dir build -R 'File pool stays within its byte budget'",
     "ctest --test-dir build -R 'ImageFileCache: null build result is not stored'",
