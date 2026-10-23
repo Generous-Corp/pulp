@@ -52,6 +52,13 @@ Because the automatic Linux selector may use a clean Proxmox VM without a
 system Node installation, `build.yml` first provisions the exact Node
 `22.15.0` toolchain with `actions/setup-node@v7` and a lockfile-keyed npm cache;
 that version supplies the `zstdDecompressSync` API used by the `.fig` lane.
+
+The arm64 macOS legs of `build.yml` (required gate) and `build-macos.yml`
+(retarget) also configure `PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON`: they compile
+the GPU-audio hardware-evidence binaries but never run them, because their tests
+carry the `gpu-proof` label that every gate ctest selection excludes. A guard
+step fails the gate if `pulp-gpu-dawn-wavenet-qualification` is not configured.
+Hardware receipts remain owner-run on a physical GPU.
 Source-only or offline
 configurations without that `node_modules/esbuild` installation still register
 the dependency-free suites, but they do not claim the canonicalization proof.
