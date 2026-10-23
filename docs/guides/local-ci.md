@@ -878,6 +878,14 @@ as the Linux `pulp-trusted-*` and `pulp-pr-safe-*` pools are separated.
 **Operator runbook.** Apply this when the fleet freeze lifts. None of it is
 applied yet, and every step is a host or golden change.
 
+Golden prerequisites, as the x64 golden stands today: it has Windows PowerShell
+5.1 but **no PowerShell 7** (a `shell: pwsh` step fails with `pwsh: command not
+found`), and **no `choco`**. The workflows are written for that:
+`tools/ci/windows_build_env.ps1` runs under `shell: powershell` and needs neither.
+Any new Windows step for these lanes must use `shell: powershell` or `bash`
+unless the golden gains PowerShell 7. Tools the jobs need (ccache below) must be
+baked in, not installed per job.
+
 1. **Bake the Skia/Dawn generation and the source prime into the x64 golden.**
    Follow "Refreshing the golden" above. While the VM is booted from the current
    golden, in the guest as `ci`:
