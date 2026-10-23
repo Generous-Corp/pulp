@@ -624,6 +624,17 @@ exists, open the revert or the one-line fix and jump that. Record the PR, the
 failing test, and how long main was red. Jumping anything else, or switching on
 an automatic jump, is a maintainer decision.
 
+`poisoned` also comes from main's PUSH run: when its Linux leg executed ctest
+on main's tip and failed a test the batch streak shares (proof
+`main-push-linux-failure+batch-streak`). That catches a test that passed when
+its commit landed and fails on main afterwards, which the merge group on the
+tip cannot see; a receipt-reuse green on that merge group used to leave such a
+night `suspected`. `[base_health] auto_jump = "dry-run"` in
+`.shipyard/config.toml` makes `shipyard base-health --act` record "would jump
+PR #n" (host-local `<state>/base-health/jump-decisions.jsonl`) and nothing
+else. Advice needs a decisive `candidate_fix_pr`, so a poisoned base with no
+named fix records nothing; jump by hand as above.
+
 **The pre-approval is narrow.** `GHAPP_ALLOW_QUEUE_REMOVAL=1` is pre-approved
 only to dequeue the fix PR itself so it can be re-enqueued at the front, and only
 while main is red. Every such call carries

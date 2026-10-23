@@ -2787,6 +2787,31 @@ its reason names the tip. The signal says which source it used and carries
 `main_head_sha`. Batches are judged the same way, newest head first, so a batch
 counts toward the streak when any required context failed on it.
 
+**main's push run is evidence too.** A push to main runs the Linux leg of
+`Build and Test` on main's exact commit (no macOS leg, and none of the other
+required contexts). When that leg's test step ran and it failed a test that the
+batch streak also shares, the verdict is `poisoned` with proof
+`main-push-linux-failure+batch-streak`, even when the merge group that landed
+the commit was green. That is the shape of a test that passes when its commit
+lands and fails on main afterwards: on 2026-10-23 main's tip `5489bbad` landed
+through a green merge group, its push run then failed
+`gpu-trace-overhead-acceptance-selftest` on Linux, and eleven consecutive
+batches failed the same test on macOS, while the detector read `healthy`.
+The failing names come from the leg's `ctest-logs-linux` artifact. The streak
+keeps a Linux-only failure out (the batches run macOS, so a test only Linux
+fails is never in their shared set), a leg that ran no test step is not
+evidence, and a green push run is never read as health. The signal carries
+`main_push_run_id`, `main_push_execution` and `main_push_failing_tests`.
+`tools/ci/fixtures/base_poison_2026-10-23.json` replays that night.
+
+**Shipyard reads the signal.** `.shipyard/config.toml` sets
+`[base_health] auto_jump = "dry-run"`: `shipyard base-health --act` records
+"would jump PR #n" once per poisoned episode that names a `candidate_fix_pr`,
+in `<state>/base-health/jump-decisions.jsonl` on the host that runs it, and
+changes nothing. `on` (dequeue the fix and re-enqueue its head with
+`jump: true`) stays off until it checks a trusted approval on the head it
+enqueues and survives a failed re-enqueue.
+
 Failing test names come from wherever the failing context records them: for
 `macos`, the `ctest-logs-macos` **artifact**
 (`Testing/Temporary/LastTestsFailed.log`); for a context that uploads no
@@ -2807,7 +2832,8 @@ and a `base-poison-signal` artifact. Fields: `status`, `proof`,
 `main_failing_contexts`, `main_contexts` (one `{context, state, conclusion,
 source, run_id, tests}` per required context), `batch_streak`,
 `batch_streak_tests`, `batch_streak_contexts`, `batch_streak_heads`,
-`batch_streak_runs`, `candidate_fix_pr`, `likely_culprits`,
+`batch_streak_runs`, `main_push_run_id`, `main_push_execution`,
+`main_push_failing_tests`, `candidate_fix_pr`, `likely_culprits`,
 `required_contexts_source`, `reason`. Fields are only ever added under
 `base-poison-signal/v1`; Shipyard's reader keys on `schema`, `status` and
 `safe_to_pause_queue`.
@@ -2826,7 +2852,7 @@ was judged, and `macos-only-fallback` when branch protection could not be read
 | `healthy` | every required context passed on main's tree and `macos` ran the suite | false |
 | `unproven` | a required context is still running, missing, or `macos` ran nothing — main's health is unmeasured | false |
 | `suspected` | a streak, or a main failure not shared by a streak (or naming no test) | false |
-| `poisoned` | a required context failed a test on main that a streak of consecutive executed batches also failed | **true** |
+| `poisoned` | a required context, or the executed Linux leg of main's push run, failed a test on main that a streak of consecutive executed batches also failed | **true** |
 
 `safe_to_pause_queue` is the only field a consumer should act on. It is true for
 `poisoned` and for nothing else.
