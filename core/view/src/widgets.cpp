@@ -1353,7 +1353,203 @@ void RangeSlider::on_mouse_leave() {
     hover_scale_.animate_to(1.0f, dur, easing::ease_out_quad);
 }
 
+namespace {
+
+// Chromium's cross-platform form-control theme, in CSS px: an 8px track whose
+// ends are pulled in 1px so the thumb can cover them, a 1px border, and a 16px
+// thumb part painted as a circle inset by half a pixel.
+constexpr float kRefreshTrackThickness = 8.0f;
+constexpr float kRefreshThumbPart = 16.0f;
+constexpr float kRefreshBorderWidth = 1.0f;
+// Lightness shift Chromium applies to an author accent for hover / press.
+constexpr float kRefreshAccentLightnessShift = 0.11f;
+
+struct RefreshPalette {
+    canvas::Color fill, value, border;
+};
+
+constexpr canvas::Color argb8(uint32_t argb) {
+    return canvas::Color::rgba8(
+        static_cast<uint8_t>((argb >> 16) & 0xFF), // token-lint:allow -- UA theme palette
+        static_cast<uint8_t>((argb >> 8) & 0xFF), static_cast<uint8_t>(argb & 0xFF),
+        static_cast<uint8_t>((argb >> 24) & 0xFF));
+}
+
+// Chromium's default web-native control colours per state; the slider thumb
+// shares the value-bar colour. These reproduce the browser's UA theme, so they
+// are deliberately not theme tokens.
+RefreshPalette refresh_palette(RangeSlider::ControlState state, bool dark) {
+    using S = RangeSlider::ControlState;
+    if (dark) {
+        switch (state) {
+        case S::disabled:
+            return {argb8(0xFF363636), argb8(0xFF757575), argb8(0xFF626262)};
+        case S::hovered:
+            return {argb8(0xFF3B3B3B), argb8(0xFFD1E6FF), argb8(0xFFACACAC)};
+        case S::pressed:
+            return {argb8(0xFF3B3B3B), argb8(0xFF61A9FF), argb8(0xFF6E6E6E)};
+        case S::normal:
+            break;
+        }
+        return {argb8(0xFF3B3B3B), argb8(0xFF99C8FF), argb8(0xFF858585)};
+    }
+    switch (state) {
+    case S::disabled:
+        return {argb8(0x4DEFEFEF), argb8(0xFFCBCBCB), argb8(0x4D767676)};
+    case S::hovered:
+        return {argb8(0xFFE5E5E5), argb8(0xFF005CC8), argb8(0x804F4F4F)};
+    case S::pressed:
+        return {argb8(0xFFF5F5F5), argb8(0xFF3793FF), argb8(0x808D8D8D)};
+    case S::normal:
+        break;
+    }
+    return {argb8(0xFFEFEFEF), argb8(0xFF0075FF), argb8(0x80767676)};
+}
+
+} // namespace
+
+RangeSlider::ChromiumRefreshParts
+RangeSlider::chromium_refresh_parts(Rect bounds, float position, bool vertical, ControlState state,
+                                    ColorScheme scheme, std::optional<canvas::Color> accent) {
+    ChromiumRefreshParts p;
+    const float t = std::isfinite(position) ? std::clamp(position, 0.0f, 1.0f) : 0.0f;
+    const float half_track = kRefreshTrackThickness * 0.5f;
+    const float cx = bounds.center_x();
+    const float cy = bounds.center_y();
+
+    // Track: the full major axis, centred and clamped on the minor axis.
+    Rect full;
+    if (vertical) {
+        const float l = std::max(bounds.x, cx - half_track);
+        const float r = std::min(bounds.right(), cx + half_track);
+        full = {l, bounds.y, std::max(0.0f, r - l), bounds.height};
+    } else {
+        const float top = std::max(bounds.y, cy - half_track);
+        const float bot = std::min(bounds.bottom(), cy + half_track);
+        full = {bounds.x, top, bounds.width, std::max(0.0f, bot - top)};
+    }
+    // Chromium's radius is "fully rounded" (40px, clamped to the rect).
+    p.track_radius = 0.5f * std::min(full.width, full.height);
+    p.track = full;
+    if (vertical) {
+        p.track.y += 1.0f;
+        p.track.height = std::max(0.0f, p.track.height - 2.0f);
+    } else {
+        p.track.x += 1.0f;
+        p.track.width = std::max(0.0f, p.track.width - 2.0f);
+    }
+    p.track_radius = std::min(p.track_radius, 0.5f * std::min(p.track.width, p.track.height));
+
+    p.border_width = kRefreshBorderWidth;
+    const float inset = p.border_width * 0.5f;
+    p.border = {p.track.x + inset, p.track.y + inset,
+                std::max(0.0f, p.track.width - p.border_width),
+                std::max(0.0f, p.track.height - p.border_width)};
+    p.border_radius = 0.5f * std::min(p.border.width, p.border.height);
+
+    // Thumb part: 16px square travelling the major axis, centred on the minor.
+    if (vertical) {
+        const float travel = std::max(0.0f, bounds.height - kRefreshThumbPart);
+        const float top = bounds.y + (1.0f - t) * travel;
+        p.thumb = {cx - kRefreshThumbPart * 0.5f + 0.5f, top + 0.5f, kRefreshThumbPart - 1.0f,
+                   kRefreshThumbPart - 1.0f};
+        // Minimum at the bottom: the value bar runs from the thumb down.
+        const float thumb_cy = top + kRefreshThumbPart * 0.5f;
+        const float clip_top = thumb_cy - half_track;
+        p.value_clip = {full.x, clip_top, full.width, std::max(0.0f, full.bottom() - clip_top)};
+    } else {
+        const float travel = std::max(0.0f, bounds.width - kRefreshThumbPart);
+        const float left = bounds.x + t * travel;
+        p.thumb = {left + 0.5f, cy - kRefreshThumbPart * 0.5f + 0.5f, kRefreshThumbPart - 1.0f,
+                   kRefreshThumbPart - 1.0f};
+        const float thumb_cx = left + kRefreshThumbPart * 0.5f;
+        p.value_clip = {full.x, full.y, std::max(0.0f, thumb_cx + half_track - full.x),
+                        full.height};
+    }
+
+    const bool dark = scheme == ColorScheme::dark;
+    const auto palette = refresh_palette(state, dark);
+    p.track_fill = palette.fill;
+    p.border_color = palette.border;
+    p.value_fill = palette.value;
+    if (accent && state != ControlState::disabled) {
+        canvas::Color c = *accent;
+        if (state != ControlState::normal) {
+            float shift = state == ControlState::pressed ? kRefreshAccentLightnessShift
+                                                         : -kRefreshAccentLightnessShift;
+            if (dark)
+                shift = -shift;
+            auto hsl = c.to_hsl();
+            hsl.l = std::clamp(hsl.l + shift, 0.0f, 1.0f);
+            c = canvas::Color::from_hsl(hsl, c.a);
+        }
+        p.value_fill = c;
+    }
+    p.thumb_fill = p.value_fill;
+    return p;
+}
+
+RangeSlider::ControlState RangeSlider::control_state() const {
+    if (!enabled())
+        return ControlState::disabled;
+    if (dragging_)
+        return ControlState::pressed;
+    if (is_hovered())
+        return ControlState::hovered;
+    return ControlState::normal;
+}
+
+RangeSlider::ChromiumRefreshParts RangeSlider::chromium_refresh_parts() const {
+    std::optional<canvas::Color> accent;
+    if (has_accent_color_)
+        accent = accent_color_;
+    // A modulator moves the thumb and value bar to the played value, in the
+    // modulation colour, as the platform skin does.
+    const float position = has_modulated_
+                               ? (skew_ == 1.0f ? modulated_ : std::pow(modulated_, skew_))
+                               : value_to_position_();
+    auto parts =
+        chromium_refresh_parts(local_bounds(), position, orientation_ == Orientation::vertical,
+                               control_state(), color_scheme_, accent);
+    if (has_modulated_) {
+        parts.value_fill = resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
+        parts.thumb_fill = parts.value_fill;
+    }
+    return parts;
+}
+
+void RangeSlider::paint_chromium_refresh_(canvas::Canvas& canvas) {
+    const auto p = chromium_refresh_parts();
+
+    canvas.set_fill_color(p.track_fill);
+    canvas.fill_rounded_rect(p.track.x, p.track.y, p.track.width, p.track.height, p.track_radius);
+
+    // The value bar is the same rounded track clipped at the thumb, so its
+    // start keeps the track's rounded end and its open end hides under the thumb.
+    if (p.value_clip.width > 0.0f && p.value_clip.height > 0.0f) {
+        canvas.save();
+        canvas.clip_rect(p.value_clip.x, p.value_clip.y, p.value_clip.width, p.value_clip.height);
+        canvas.set_fill_color(p.value_fill);
+        canvas.fill_rounded_rect(p.track.x, p.track.y, p.track.width, p.track.height,
+                                 p.track_radius);
+        canvas.restore();
+    }
+
+    canvas.set_stroke_color(p.border_color);
+    canvas.set_line_width(p.border_width);
+    canvas.stroke_rounded_rect(p.border.x, p.border.y, p.border.width, p.border.height,
+                               p.border_radius);
+
+    canvas.set_fill_color(p.thumb_fill);
+    canvas.fill_circle(p.thumb.center_x(), p.thumb.center_y(),
+                       0.5f * std::min(p.thumb.width, p.thumb.height));
+}
+
 void RangeSlider::paint(canvas::Canvas& canvas) {
+    if (skin_ == Skin::chromium_refresh) {
+        paint_chromium_refresh_(canvas);
+        return;
+    }
     auto b = local_bounds();
     bool horiz = orientation_ == Orientation::horizontal;
 

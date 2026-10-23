@@ -1941,6 +1941,76 @@ public:
     bool has_accent_color() const { return has_accent_color_; }
     canvas::Color accent_color() const { return accent_color_; }
 
+    /// Which control skin paints the slider.
+    ///  - `platform` (default): Pulp's token-driven track, fill and pill thumb.
+    ///  - `chromium_refresh`: the cross-platform form-control theme Chromium
+    ///    paints for an `appearance: auto` `<input type=range>`, so an imported
+    ///    UA-themed control looks like the browser drew it. Geometry and the
+    ///    per-state light/dark palette come from `chromium_refresh_parts()`;
+    ///    the platform-skin knobs (track thickness, theme tokens, hover growth)
+    ///    do not apply.
+    enum class Skin { platform, chromium_refresh };
+    void set_skin(Skin s) {
+        if (skin_ == s)
+            return;
+        skin_ = s;
+        request_repaint();
+    }
+    Skin skin() const {
+        return skin_;
+    }
+
+    /// The page colour scheme the `chromium_refresh` skin resolves its palette
+    /// from (CSS `color-scheme`). The `platform` skin ignores it.
+    enum class ColorScheme { light, dark };
+    void set_color_scheme(ColorScheme scheme) {
+        if (color_scheme_ == scheme)
+            return;
+        color_scheme_ = scheme;
+        request_repaint();
+    }
+    ColorScheme color_scheme() const {
+        return color_scheme_;
+    }
+
+    /// Interaction state the `chromium_refresh` palette is keyed on.
+    enum class ControlState { normal, hovered, pressed, disabled };
+
+    /// Everything the `chromium_refresh` skin paints, in local coordinates.
+    /// Paint order is track fill, value bar (the track rounded rect clipped to
+    /// `value_clip`), border stroke, thumb.
+    struct ChromiumRefreshParts {
+        Rect track;              ///< rounded track, already shortened 1px per end
+        float track_radius = 0;  ///< corner radius of `track` (half its thickness)
+        Rect value_clip;         ///< clip for the value bar; the thumb covers its open end
+        Rect border;             ///< `track` inset by half the border width
+        float border_radius = 0; ///< corner radius of `border`
+        float border_width = 1.0f;
+        Rect thumb; ///< the circle's bounds (16px part inset by 0.5px)
+        canvas::Color track_fill{};
+        canvas::Color value_fill{};
+        canvas::Color border_color{};
+        canvas::Color thumb_fill{};
+    };
+
+    /// Pure layout + palette of the `chromium_refresh` skin for a box of
+    /// `bounds` (local coordinates) with the thumb at track `position` [0,1].
+    /// `vertical` puts the minimum at the bottom. `accent` replaces the value
+    /// bar and thumb colour in every state but `disabled`; hovered and pressed
+    /// shift its HSL lightness the way Chromium does.
+    static ChromiumRefreshParts
+    chromium_refresh_parts(Rect bounds, float position, bool vertical, ControlState state,
+                           ColorScheme scheme, std::optional<canvas::Color> accent = std::nullopt);
+
+    /// `chromium_refresh_parts()` for this slider's current box, value,
+    /// orientation, state, scheme and accent.
+    ChromiumRefreshParts chromium_refresh_parts() const;
+
+    /// The state the `chromium_refresh` palette resolves for this slider now:
+    /// disabled when not enabled, pressed while dragged, hovered under the
+    /// pointer, otherwise normal.
+    ControlState control_state() const;
+
     /// Track thickness in pixels (default 5). Anything in 4–6 matches
     /// the visual weight of common HTML range styling.
     void set_track_thickness(float t) { track_thickness_ = std::max(1.0f, t); }
@@ -2018,6 +2088,10 @@ private:
     float track_thickness_ = 5.0f;
     canvas::Color accent_color_{};
     bool has_accent_color_ = false;
+    Skin skin_ = Skin::platform;
+    ColorScheme color_scheme_ = ColorScheme::light;
+
+    void paint_chromium_refresh_(canvas::Canvas& canvas);
 };
 
 // ── Toggle ───────────────────────────────────────────────────────────────────

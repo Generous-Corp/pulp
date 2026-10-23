@@ -10,9 +10,13 @@
 #include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/motion_preferences.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -1222,6 +1226,236 @@ TEST_CASE("RangeSlider accent color overrides theme fill",
 
     rs.clear_accent_color();
     REQUIRE_FALSE(rs.has_accent_color());
+}
+
+// ── RangeSlider chromium_refresh skin ────────────────────────────────────────
+
+TEST_CASE("RangeSlider chromium_refresh geometry follows Chromium's form-control theme",
+          "[view][widget][range-skin]") {
+    using RS = RangeSlider;
+    // A 90x16 box: an 8px track, ends pulled in 1px, centred on the minor axis.
+    auto p = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.0f, false, RS::ControlState::normal,
+                                        RS::ColorScheme::light);
+    REQUIRE_THAT(p.track.x, WithinAbs(1.0, 1e-4));
+    REQUIRE_THAT(p.track.y, WithinAbs(4.0, 1e-4));
+    REQUIRE_THAT(p.track.width, WithinAbs(88.0, 1e-4));
+    REQUIRE_THAT(p.track.height, WithinAbs(8.0, 1e-4));
+    REQUIRE_THAT(p.track_radius, WithinAbs(4.0, 1e-4));
+    // The 1px border is stroked on the track inset by half its width.
+    REQUIRE_THAT(p.border.x, WithinAbs(1.5, 1e-4));
+    REQUIRE_THAT(p.border.y, WithinAbs(4.5, 1e-4));
+    REQUIRE_THAT(p.border.width, WithinAbs(87.0, 1e-4));
+    REQUIRE_THAT(p.border.height, WithinAbs(7.0, 1e-4));
+    REQUIRE_THAT(p.border_radius, WithinAbs(3.5, 1e-4));
+    REQUIRE_THAT(p.border_width, WithinAbs(1.0, 1e-4));
+    // At the minimum the 16px thumb part sits flush left; its circle is inset
+    // by half a pixel, so it is 15px across.
+    REQUIRE_THAT(p.thumb.x, WithinAbs(0.5, 1e-4));
+    REQUIRE_THAT(p.thumb.y, WithinAbs(0.5, 1e-4));
+    REQUIRE_THAT(p.thumb.width, WithinAbs(15.0, 1e-4));
+    // The value bar ends half a track past the thumb centre, under the thumb.
+    REQUIRE_THAT(p.value_clip.x, WithinAbs(0.0, 1e-4));
+    REQUIRE_THAT(p.value_clip.width, WithinAbs(12.0, 1e-4));
+
+    // At the maximum the thumb part sits flush right and the value bar runs
+    // past the track end.
+    auto hi = RS::chromium_refresh_parts({0, 0, 90, 16}, 1.0f, false, RS::ControlState::normal,
+                                         RS::ColorScheme::light);
+    REQUIRE_THAT(hi.thumb.x, WithinAbs(74.5, 1e-4));
+    REQUIRE_THAT(hi.value_clip.width, WithinAbs(86.0, 1e-4));
+
+    // A taller box keeps the fixed 8px track and 16px thumb, centred.
+    auto tall = RS::chromium_refresh_parts({10, 20, 90, 30}, 0.5f, false, RS::ControlState::normal,
+                                           RS::ColorScheme::light);
+    REQUIRE_THAT(tall.track.y, WithinAbs(31.0, 1e-4));
+    REQUIRE_THAT(tall.thumb.center_y(), WithinAbs(35.0, 1e-4));
+    REQUIRE_THAT(tall.thumb.center_x(), WithinAbs(10.0 + 8.0 + 0.5 * 74.0, 1e-4));
+
+    // Vertical: minimum at the bottom, value bar from the thumb downward.
+    auto v = RS::chromium_refresh_parts({0, 0, 16, 90}, 0.25f, true, RS::ControlState::normal,
+                                        RS::ColorScheme::light);
+    REQUIRE_THAT(v.track.x, WithinAbs(4.0, 1e-4));
+    REQUIRE_THAT(v.track.y, WithinAbs(1.0, 1e-4));
+    REQUIRE_THAT(v.track.height, WithinAbs(88.0, 1e-4));
+    const float thumb_cy = 0.75f * 74.0f + 8.0f;
+    REQUIRE_THAT(v.thumb.center_y(), WithinAbs(thumb_cy, 1e-4));
+    REQUIRE_THAT(v.value_clip.y, WithinAbs(thumb_cy - 4.0f, 1e-4));
+    REQUIRE_THAT(v.value_clip.bottom(), WithinAbs(90.0, 1e-4));
+}
+
+TEST_CASE("RangeSlider chromium_refresh palette tracks state, scheme and accent",
+          "[view][widget][range-skin]") {
+    using RS = RangeSlider;
+    auto rgba8_of = [](Color c) {
+        auto q = [](float f) { return static_cast<int>(std::lround(f * 255.0f)); };
+        return std::array<int, 4>{q(c.r), q(c.g), q(c.b), q(c.a)};
+    };
+    const auto accent = Color::rgba8(71, 180, 235);
+
+    // Disabled ignores the accent: a translucent track, a translucent border
+    // and an opaque grey value bar and thumb.
+    auto off = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.0f, false, RS::ControlState::disabled,
+                                          RS::ColorScheme::light, accent);
+    REQUIRE(rgba8_of(off.track_fill) == std::array<int, 4>{0xEF, 0xEF, 0xEF, 0x4D});
+    REQUIRE(rgba8_of(off.border_color) == std::array<int, 4>{0x76, 0x76, 0x76, 0x4D});
+    REQUIRE(rgba8_of(off.value_fill) == std::array<int, 4>{0xCB, 0xCB, 0xCB, 0xFF});
+    REQUIRE(rgba8_of(off.thumb_fill) == rgba8_of(off.value_fill));
+
+    // Enabled: the accent paints the value bar and the thumb.
+    auto on = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.5f, false, RS::ControlState::normal,
+                                         RS::ColorScheme::light, accent);
+    REQUIRE(rgba8_of(on.value_fill) == std::array<int, 4>{71, 180, 235, 255});
+    REQUIRE(rgba8_of(on.thumb_fill) == rgba8_of(on.value_fill));
+    REQUIRE(rgba8_of(on.track_fill) == std::array<int, 4>{0xEF, 0xEF, 0xEF, 0xFF});
+    REQUIRE(rgba8_of(on.border_color) == std::array<int, 4>{0x76, 0x76, 0x76, 0x80});
+
+    // Without an accent the default blue applies.
+    auto plain = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.5f, false, RS::ControlState::normal,
+                                            RS::ColorScheme::light);
+    REQUIRE(rgba8_of(plain.value_fill) == std::array<int, 4>{0x00, 0x75, 0xFF, 0xFF});
+
+    // Hover darkens a light-scheme accent by 0.11 HSL lightness; press lightens.
+    const float l = accent.to_hsl().l;
+    auto hov = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.5f, false, RS::ControlState::hovered,
+                                          RS::ColorScheme::light, accent);
+    auto prs = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.5f, false, RS::ControlState::pressed,
+                                          RS::ColorScheme::light, accent);
+    REQUIRE_THAT(hov.value_fill.to_hsl().l, WithinAbs(l - 0.11f, 1e-3));
+    REQUIRE_THAT(prs.value_fill.to_hsl().l, WithinAbs(l + 0.11f, 1e-3));
+
+    // Dark scheme has its own palette and flips the accent shift.
+    auto dark_off = RS::chromium_refresh_parts({0, 0, 90, 16}, 0.0f, false,
+                                               RS::ControlState::disabled, RS::ColorScheme::dark);
+    REQUIRE(rgba8_of(dark_off.value_fill) == std::array<int, 4>{0x75, 0x75, 0x75, 0xFF});
+    REQUIRE(rgba8_of(dark_off.track_fill) == std::array<int, 4>{0x36, 0x36, 0x36, 0xFF});
+    auto dark_hov = RS::chromium_refresh_parts(
+        {0, 0, 90, 16}, 0.5f, false, RS::ControlState::hovered, RS::ColorScheme::dark, accent);
+    REQUIRE_THAT(dark_hov.value_fill.to_hsl().l, WithinAbs(l + 0.11f, 1e-3));
+}
+
+TEST_CASE("RangeSlider chromium_refresh resolves its state from the widget",
+          "[view][widget][range-skin]") {
+    RangeSlider rs;
+    rs.set_bounds({0, 0, 90, 16});
+    rs.set_skin(RangeSlider::Skin::chromium_refresh);
+    REQUIRE(rs.skin() == RangeSlider::Skin::chromium_refresh);
+    REQUIRE(rs.control_state() == RangeSlider::ControlState::normal);
+    rs.set_hovered(true);
+    REQUIRE(rs.control_state() == RangeSlider::ControlState::hovered);
+    rs.set_enabled(false);
+    REQUIRE(rs.control_state() == RangeSlider::ControlState::disabled);
+
+    // The instance overload feeds the value and accent through.
+    rs.set_enabled(true);
+    rs.set_hovered(false);
+    rs.set_value(0.5f);
+    rs.set_accent_color(Color::rgba8(255, 0, 0));
+    auto p = rs.chromium_refresh_parts();
+    REQUIRE_THAT(p.thumb.center_x(), WithinAbs(8.0 + 0.5 * 74.0, 1e-4));
+    REQUIRE_THAT(p.value_fill.r, WithinAbs(1.0, 1e-4));
+}
+
+TEST_CASE("RangeSlider chromium_refresh paints track, value bar, border, round thumb",
+          "[view][widget][range-skin]") {
+    RangeSlider rs;
+    rs.set_bounds({0, 0, 90, 16});
+    rs.set_value(0.5f);
+    rs.set_skin(RangeSlider::Skin::chromium_refresh);
+
+    RecordingCanvas canvas;
+    rs.paint(canvas);
+
+    // Track and value bar are the same rounded rect; the value bar is clipped.
+    auto rects = commands_of(canvas, DrawCommand::Type::fill_rounded_rect);
+    REQUIRE(rects.size() == 2);
+    REQUIRE_THAT(rects[0].f[0], WithinAbs(1.0, 1e-4));
+    REQUIRE_THAT(rects[0].f[1], WithinAbs(4.0, 1e-4));
+    REQUIRE_THAT(rects[0].f[2], WithinAbs(88.0, 1e-4));
+    REQUIRE_THAT(rects[0].f[3], WithinAbs(8.0, 1e-4));
+    REQUIRE(canvas.count(DrawCommand::Type::clip_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_rounded_rect) == 1);
+    // One circular thumb, not the platform skin's pill.
+    auto circles = commands_of(canvas, DrawCommand::Type::fill_circle);
+    REQUIRE(circles.size() == 1);
+    REQUIRE_THAT(circles[0].f[0], WithinAbs(45.0, 1e-4));
+    REQUIRE_THAT(circles[0].f[1], WithinAbs(8.0, 1e-4));
+    REQUIRE_THAT(circles[0].f[2], WithinAbs(7.5, 1e-4));
+}
+
+TEST_CASE("RangeSlider chromium_refresh disabled raster composites like Chromium",
+          "[view][widget][range-skin]") {
+    if (!raw_rgba_render_available()) {
+        SKIP("this build has no raw-RGBA raster backend");
+    }
+    // A disabled slider at its minimum inside a 0.35-opacity group over a dark
+    // panel: the dimmed morph slider of a real imported toolbar. Expected
+    // values are Chromium's palette composited in sRGB: the track is
+    // 0x4DEFEFEF, its border 0x4D767676 over that, the thumb opaque #CBCBCB,
+    // and the group at 35%.
+    View panel;
+    panel.set_bounds({0, 0, 90, 16});
+    panel.set_background_color(Color::rgba8(6, 8, 12));
+    auto group = std::make_unique<View>();
+    group->set_bounds({0, 0, 90, 16});
+    group->set_opacity(0.35f);
+    auto slider = std::make_unique<RangeSlider>();
+    slider->set_bounds({0, 0, 90, 16});
+    slider->set_skin(RangeSlider::Skin::chromium_refresh);
+    slider->set_accent_color(Color::rgba8(71, 180, 235));
+    slider->set_value(0.0f);
+    slider->set_enabled(false);
+    group->add_child(std::move(slider));
+    panel.add_child(std::move(group));
+
+    uint32_t w = 0, h = 0;
+    const auto px = render_to_rgba(panel, 90, 16, 2.0f, &w, &h);
+    REQUIRE(w == 180);
+    REQUIRE(h == 32);
+    auto at = [&](int x, int y) {
+        const size_t i = (static_cast<size_t>(y) * w + static_cast<size_t>(x)) * 4;
+        return std::array<int, 3>{px[i], px[i + 1], px[i + 2]};
+    };
+    auto near = [](std::array<int, 3> got, std::array<int, 3> want) {
+        for (int c = 0; c < 3; ++c)
+            if (std::abs(got[c] - want[c]) > 2)
+                return false;
+        return true;
+    };
+    const float a = 0x4D / 255.0f;
+    auto track = [&](float bg) {
+        return static_cast<int>(std::lround(bg + 0.35f * a * (239.0f - bg)));
+    };
+    auto border = [&](float bg) {
+        const float premul = a * 118.0f + (1.0f - a) * a * 239.0f;
+        const float alpha = a + (1.0f - a) * a;
+        return static_cast<int>(std::lround(0.35f * premul + (1.0f - 0.35f * alpha) * bg));
+    };
+    auto thumb = [](float bg) {
+        return static_cast<int>(std::lround(0.35f * 203.0f + 0.65f * bg));
+    };
+    // Track interior, right of the thumb (device rows 10..21 are interior).
+    CHECK(near(at(120, 16), {track(6), track(8), track(12)}));
+    // Border rows: the top and bottom device rows of the 8px track.
+    CHECK(near(at(120, 8), {border(6), border(8), border(12)}));
+    CHECK(near(at(120, 23), {border(6), border(8), border(12)}));
+    // Thumb centre (CSS 8,8 at 2x).
+    CHECK(near(at(16, 16), {thumb(6), thumb(8), thumb(12)}));
+    // Above the track and right of the thumb only the panel shows.
+    CHECK(near(at(120, 4), {6, 8, 12}));
+    // The track stops 1 CSS px short of the box end: device column 178+ is bare.
+    CHECK(near(at(179, 16), {6, 8, 12}));
+
+    // Opt-in artifact for comparing against a browser capture of the same
+    // control: the 2x RGBA of the slider group alone, without the panel.
+    if (const char* out = std::getenv("PULP_RANGE_SLIDER_SKIN_DUMP")) {
+        panel.set_background_color(Color::rgba8(0, 0, 0, 0));
+        uint32_t dw = 0, dh = 0;
+        const auto group_px = render_to_rgba(panel, 90, 16, 2.0f, &dw, &dh);
+        std::FILE* f = std::fopen(out, "wb");
+        REQUIRE(f != nullptr);
+        std::fwrite(group_px.data(), 1, group_px.size(), f);
+        std::fclose(f);
+    }
 }
 
 TEST_CASE("Toggle state", "[view][widget]") {
