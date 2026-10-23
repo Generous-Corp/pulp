@@ -90,6 +90,8 @@ REPO_PREFIXES = ("tools/", "test/", "hooks/", ".githooks/", ".github/", "docs/",
                  "core/", "examples/", "templates/", "inspect/", "experimental/", "cmake/", "external/")
 LITERAL_RE = re.compile(r"""["'](?P<p>(?:%s)[A-Za-z0-9_./@+-]+)["']""" % "|".join(re.escape(p) for p in REPO_PREFIXES))
 NODE_IMPORT_RE = re.compile(r"""(?:from\s+|import\s*\(?\s*|require\s*\(\s*)["'](?P<s>\.{1,2}/[^"']+)["']""")
+# Node test files `node --test` may list after the first one.
+NODE_SOURCE_SUFFIXES = (".mjs", ".js", ".cjs")
 SHELL_SOURCE_LINE_RE = re.compile(r"""^\s*(?:source|\.)\s+(?P<rest>.+)$""")
 SHELL_TAIL_RE = re.compile(r"""(?P<f>[A-Za-z0-9_./-]+\.(?:sh|bash))["']?\s*$""")
 # A shell script usually names repository files through a directory variable
@@ -649,6 +651,11 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
     for a in args:
         for cand in (Path(a), wd / a):
             if cand.is_absolute() and w._in_repo(cand):
+                # `node --test a.mjs b.mjs ...` runs every listed file, so each
+                # one's imports are inputs, not only the first file's. Walk
+                # before adding: walk_node skips a file already in `seen`.
+                if kind == "node" and cand.suffix in NODE_SOURCE_SUFFIXES and cand.is_file():
+                    w.walk_node(cand, seen)
                 seen.add(cand)
     if tracked is None:
         tracked = tracked_paths(root)

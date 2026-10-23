@@ -322,6 +322,35 @@ class BuildListTests(unittest.TestCase):
         n = self.lst["tests"]["node-run"]
         self.assertEqual(n["inputs"], ["tools/import/config.json", "tools/import/lib/util.mjs", "tools/import/run.mjs"])
 
+    def test_node_test_with_several_files_lists_every_files_imports(self) -> None:
+        # `node --test a.mjs b.mjs` runs both files, so an edit to a module
+        # only the SECOND file imports must still select the test.
+        root = self.repo.root
+        write(root, "tools/import/second.test.mjs", "import { g } from './lib/only_second.mjs';\n")
+        write(root, "tools/import/lib/only_second.mjs", "export const g = 2;\n")
+        write(root, "tools/import/lib/unused.mjs", "export const u = 3;\n")
+        test = {"name": "node-multi", "properties": [],
+                "command": ["/opt/homebrew/bin/node", "--test", f"{root}/tools/import/run.mjs",
+                            f"{root}/tools/import/second.test.mjs"]}
+        rec = sti.inputs_for(test, root)
+        self.assertIn("tools/import/second.test.mjs", rec["inputs"])
+        self.assertIn("tools/import/lib/only_second.mjs", rec["inputs"])
+        self.assertIn("tools/import/lib/util.mjs", rec["inputs"])  # the first file's import
+        # Negative control: a module neither file imports is not an input.
+        self.assertNotIn("tools/import/lib/unused.mjs", rec["inputs"])
+
+    def test_a_non_node_command_does_not_walk_its_arguments_as_modules(self) -> None:
+        # Control for the rule above: only node walks extra file arguments.
+        root = self.repo.root
+        write(root, "tools/import/arg.mjs", "import { z } from './lib/only_arg.mjs';\n")
+        write(root, "tools/import/lib/only_arg.mjs", "export const z = 1;\n")
+        test = {"name": "py-with-mjs-arg", "properties": [],
+                "command": ["/usr/bin/python3", f"{root}/tools/scripts/test_mod.py",
+                            f"{root}/tools/import/arg.mjs"]}
+        rec = sti.inputs_for(test, root)
+        self.assertIn("tools/import/arg.mjs", rec["inputs"])
+        self.assertNotIn("tools/import/lib/only_arg.mjs", rec["inputs"])
+
     def test_a_temp_leak_guarded_command_is_declared_as_what_it_wraps(self) -> None:
         # Classified as the guard, the node test would lose its import walk and
         # a change to its imports would no longer select it.
