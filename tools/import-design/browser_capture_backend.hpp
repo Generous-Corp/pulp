@@ -129,6 +129,10 @@ struct BrowserDiscoveryOptions {
     // The capability probe's deadline. Production callers apply
     // probe_timeout_from_environment() so a slow host can raise it.
     int probe_timeout_ms = 15000;
+    // Where compatible probe answers are remembered (browser_probe_cache.hpp).
+    // nullopt or empty probes every candidate on every discovery, which keeps
+    // tests and hermetic callers independent of earlier runs.
+    std::optional<fs::path> probe_cache_directory;
 };
 
 // PULP_DESIGN_BROWSER_PROBE_TIMEOUT_MS as a positive integer, else
