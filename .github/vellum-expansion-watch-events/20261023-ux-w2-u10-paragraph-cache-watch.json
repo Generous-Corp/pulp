@@ -8,9 +8,10 @@
   "capability_families": [
     "design-output-and-packaging",
     "design-source-ingest",
-    "render-assets-and-backends"
+    "render-assets-and-backends",
+    "visual-proof-harness"
   ],
-  "rationale": "SkiaCanvas keeps laid-out paragraphs in a bounded process-wide cache keyed by every shaping input, and draws them with each call's own paint, so a static label is shaped once instead of on every paint. The design-import benchmark gates paragraph builds in its steady-state gate against the text runs a frame's update wrote, adds --paragraph-cache=off as the uncached path and planted negative, and lets --compare pass arguments to one side. Rendering output is unchanged (cached and uncached frames are byte-identical); no import, Chromium capture, materialization, rendering, packaging or source-authority boundary moves.",
+  "rationale": "SkiaCanvas keeps laid-out paragraphs in a bounded process-wide cache keyed by every shaping input, and draws them with each call's own paint, so a static label is shaped once instead of on every paint. The design-import benchmark gates paragraph builds in its steady-state gate against the text runs a frame's update wrote, adds --paragraph-cache=off as the uncached path and planted negative, and lets --compare pass arguments to one side. setTextRuns keeps the inherited font size and letter spacing for a non-finite value, and a script-driven test paints such runs through the Skia screenshot backend. Rendering output is otherwise unchanged (cached and uncached frames are byte-identical); no import, Chromium capture, materialization, rendering, packaging or source-authority boundary moves.",
   "tests": [
     "ctest --test-dir build -R 'Paragraph cache applies each draw.s own paint'",
     "ctest --test-dir build -R 'Paragraph cache canonicalises non-finite and signed-zero spacing'",
