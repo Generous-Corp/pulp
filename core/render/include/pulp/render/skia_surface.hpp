@@ -2,6 +2,7 @@
 
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/text_raster_policy.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -109,6 +110,10 @@ public:
         uint32_t width = 800;
         uint32_t height = 600;
         float scale_factor = 1.0f;  // HiDPI
+        /// Glyph preblend for every surface this one creates (frame target,
+        /// offscreen, persistent scene, retained layers). See
+        /// `pulp/canvas/text_raster_policy.hpp`.
+        canvas::TextRasterPolicy text_raster_policy = canvas::TextRasterPolicy::legacy;
     };
 
     /// Create a Skia Graphite surface.
@@ -126,6 +131,7 @@ public:
         uint32_t width = 0;
         uint32_t height = 0;
         float scale_factor = 1.0f;  // devicePixelRatio
+        canvas::TextRasterPolicy text_raster_policy = canvas::TextRasterPolicy::legacy;
     };
 
     /// Create a Skia surface backed by Ganesh on a WebGL2 context.
@@ -204,6 +210,21 @@ public:
 
     /// Whether persistent-scene mode is currently active.
     virtual bool persistent_scene() const { return false; }
+
+    /// Change the glyph preblend of every surface this one creates.
+    ///
+    /// An imported panel calls this with `select_text_raster_policy()` over its
+    /// text nodes' captured `-webkit-font-smoothing`. Text already rasterized
+    /// under the old policy is discarded: retained layers are dropped, and the
+    /// offscreen and persistent-scene targets are recreated, so like a resize
+    /// the next frame must be a full repaint. Setting the current policy is a
+    /// no-op that keeps every cache.
+    virtual void set_text_raster_policy(canvas::TextRasterPolicy /*policy*/) {}
+
+    /// The policy surfaces are currently created with.
+    virtual canvas::TextRasterPolicy text_raster_policy() const {
+        return canvas::TextRasterPolicy::legacy;
+    }
 
     /// Read the current rendered frame into an RGBA buffer. If a frame is
     /// currently open, this finalizes and submits pending canvas work before

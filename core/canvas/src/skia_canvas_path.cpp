@@ -23,6 +23,7 @@
 #include "include/core/SkRect.h"
 #include "include/core/SkSamplingOptions.h"
 #include "include/core/SkSurface.h"
+#include "include/core/SkSurfaceProps.h"
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkImageFilters.h"
 #if PULP_CANVAS_GANESH
@@ -434,17 +435,21 @@ Canvas::LayerHandle SkiaCanvas::begin_layer(Rect2D bounds, bool cacheable) {
         SkImageInfo::MakeN32Premul(pw, ph, canvas_->imageInfo().refColorSpace());
 
     // Match the surface to whatever backend owns this canvas, so a GPU layer
-    // stays on the GPU instead of round-tripping through system memory.
+    // stays on the GPU instead of round-tripping through system memory. The
+    // layer carries the target's props: glyph contrast and gamma come from the
+    // surface text is drawn into, so a layer created with defaults would cache
+    // its text at a different weight than the same text drawn directly.
+    const SkSurfaceProps props = canvas_->getBaseProps();
     sk_sp<SkSurface> surface;
     if (recorder_ != nullptr)
-        surface = SkSurfaces::RenderTarget(recorder_, info);
+        surface = SkSurfaces::RenderTarget(recorder_, info, skgpu::Mipmapped::kNo, &props);
 #if PULP_CANVAS_GANESH
     // Only a Ganesh build (the WebGL browser host) sets gr_context_. Compiling
     // this call out elsewhere lets dead-strip drop Skia's Ganesh backend.
     if (recorder_ == nullptr && gr_context_ != nullptr)
-        surface = SkSurfaces::RenderTarget(gr_context_, skgpu::Budgeted::kYes, info);
+        surface = SkSurfaces::RenderTarget(gr_context_, skgpu::Budgeted::kYes, info, 0, &props);
 #endif
-    if (!surface) surface = SkSurfaces::Raster(info);
+    if (!surface) surface = SkSurfaces::Raster(info, &props);
     if (!surface) return LayerHandle{};  // out of memory — caller draws direct
 
     SkCanvas* lc = surface->getCanvas();
