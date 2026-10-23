@@ -218,6 +218,24 @@ GitHub Actions job build `all` and drive `ctest` themselves, so the CLAUDE.md
 anything with tests); a focused green run proves the affected set, not the
 graph. `PULP_BUILD_FOCUS=0` disables focus for scripts that wrap the CLI.
 
+## GPU-audio proof targets are compiled, never run, by the macOS gate
+
+The arm64 macOS legs of `build.yml` and `build-macos.yml` configure
+`PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON`, so the full build compiles and links
+the GPU-audio hardware-evidence binaries against the pinned Dawn. Their ctest
+registrations carry the `gpu-proof` label, which `tools/ci/ctest_gate_args.py`
+excludes on every gate lane (the protected merge receipt's required selection
+carries the same literal; so do `changed_surface_inventory.EXCLUDED_LABEL_REGEX`
+and Shipyard's macOS test stage). A step after configure compares `ctest -N -L
+gpu-proof` with the reviewed allowlist `tools/ci/gpu_proof_tests.txt`, so a
+dropped proof target cannot pass by absence and a new one is a reviewed diff,
+and fails if the gate's own `-LE` selection contains any of them: ctest adds a
+required fixture's setup test even under `-LE`, so no ordinary test may require
+a gpu-proof fixture. With the proof ON the gate selects exactly the tests it
+selects with it OFF. `pulp_gpu_proof_begin()`/`pulp_gpu_proof_end()` bracket
+each proof block, and `end` is a configure error outside the proof option.
+Hardware receipts stay owner-run on m3.
+
 ## A2T structural evidence is produced only by the required macOS PR job
 
 An A2T evidence PR targeting `Generous-Corp/pulp` `main` that adds or modifies the exact tracked

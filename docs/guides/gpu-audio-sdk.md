@@ -235,6 +235,14 @@ Vellum D15 experiment remain outside the official release contract. The legacy
 `release-cli-local.sh` helper does not produce this qualified capability receipt;
 its archive is not a substitute for the official release artifact.
 
+The required arm64 macOS gate also configures `PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON`,
+so CI compiles and links the hardware-evidence binaries (for example
+`pulp-gpu-dawn-wavenet-qualification` and the shared-I/O provider probes)
+against the pinned Dawn on every pull request and merge group. It never runs
+them: their tests carry the `gpu-proof` label, which every CI ctest selection
+excludes. Hardware receipts remain owner-run on a physical GPU (m3), and a
+claim-bearing change still attaches a fresh receipt from that machine.
+
 Earlier experimental builds let `Auto` try shared execution when the convolver
 compile flag was enabled. Experiments relying on that behavior must now request
 `SharedRequired` before preparation. Private diagnostic trial overrides retain

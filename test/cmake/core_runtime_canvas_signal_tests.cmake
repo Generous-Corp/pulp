@@ -3,6 +3,42 @@
 
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake)
 
+# GPU-audio hardware-evidence targets (PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF). The
+# required macOS gate compiles them but never runs them: their tests carry the
+# gpu-proof label, which every CI ctest selection excludes
+# (tools/ci/ctest_gate_args.py), and their executables carry PULP_GPU_PROOF so
+# the script-input inventory does not track them (tools/scripts/script_test_inputs.py).
+# Hardware receipts stay owner-run on a physical GPU. Bracket each proof block
+# with pulp_gpu_proof_begin() and pulp_gpu_proof_end().
+macro(pulp_gpu_proof_begin)
+    get_property(_pulp_gpu_proof_tests_before DIRECTORY PROPERTY TESTS)
+    get_property(_pulp_gpu_proof_targets_before DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+endmacro()
+function(pulp_gpu_proof_end)
+    if(NOT PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+        message(FATAL_ERROR "pulp_gpu_proof_end() outside an exact-provider proof block: "
+                            "only PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF targets are gpu-proof")
+    endif()
+    get_property(_tests DIRECTORY PROPERTY TESTS)
+    foreach(_test IN LISTS _tests)
+        if(_test IN_LIST _pulp_gpu_proof_tests_before)
+            continue()
+        endif()
+        set_property(TEST "${_test}" APPEND PROPERTY LABELS gpu-proof)
+        get_test_property("${_test}" SKIP_RETURN_CODE _skip)
+        get_test_property("${_test}" FIXTURES_SETUP _setup)
+        if(NOT _skip AND NOT _setup)
+            set_tests_properties("${_test}" PROPERTIES SKIP_RETURN_CODE 77)
+        endif()
+    endforeach()
+    get_property(_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_target IN LISTS _targets)
+        if(NOT _target IN_LIST _pulp_gpu_proof_targets_before)
+            set_property(TARGET "${_target}" PROPERTY PULP_GPU_PROOF TRUE)
+        endif()
+    endforeach()
+endfunction()
+
 if(TARGET pulp::inspect-control)
     add_executable(pulp-test-control-shipping-real-component
         control_shipping_real_component_fixture.cpp)
@@ -1119,6 +1155,7 @@ pulp_add_test_suite(pulp-test-search-index GROUP pulp-test-group-core-runtime
 # Explicit physical-provider gate; ordinary VM/GPU-off runs must not claim a
 # skipped hardware run as shared spectral correctness evidence.
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    pulp_gpu_proof_begin()
     add_executable(pulp-gpu-shared-spectral-probe test_gpu_shared_spectral_probe.cpp)
     target_link_libraries(pulp-gpu-shared-spectral-probe PRIVATE pulp::gpu-audio)
     target_compile_definitions(pulp-gpu-shared-spectral-probe PRIVATE
@@ -1128,10 +1165,12 @@ if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
         FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
         RESOURCE_LOCK pulp_gpu
         TIMEOUT 60)
+    pulp_gpu_proof_end()
 endif()
 
 # Opt-in same-device storage experiment. It is never an ordinary GPU-off pass.
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    pulp_gpu_proof_begin()
     add_executable(pulp-gpu-same-device-storage-probe test_gpu_same_device_storage_probe.cpp)
     target_include_directories(pulp-gpu-same-device-storage-probe PRIVATE
         ${PROJECT_SOURCE_DIR}/core/gpu_audio/src)
@@ -1142,9 +1181,11 @@ if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
     add_test(NAME pulp-gpu-same-device-storage-probe COMMAND pulp-gpu-same-device-storage-probe)
     set_tests_properties(pulp-gpu-same-device-storage-probe PROPERTIES
         FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity RESOURCE_LOCK pulp_gpu TIMEOUT 60)
+    pulp_gpu_proof_end()
 endif()
 
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    pulp_gpu_proof_begin()
     # Manual paired campaign: requires a fresh output directory and a reserved GPU.
     add_executable(pulp-gpu-same-device-paired-probe test_gpu_same_device_paired_probe.cpp)
     target_include_directories(pulp-gpu-same-device-paired-probe PRIVATE
@@ -1153,6 +1194,7 @@ if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
     get_target_property(_same_device_revision pulp-gpu-audio PULP_PROVIDER_expected_dawn_sha)
     target_compile_definitions(pulp-gpu-same-device-paired-probe PRIVATE
         PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_same_device_revision}")
+    pulp_gpu_proof_end()
 endif()
 
 if(Python3_Interpreter_FOUND)
