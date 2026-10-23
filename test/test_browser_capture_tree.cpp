@@ -2129,8 +2129,11 @@ TEST_CASE("a duplicated sibling key is reported escaped",
     // The raw key is author text. Reported verbatim, a quote in it would end
     // the quoted value early and the report would name a different key.
     const auto lowered = lower_list("[5,15],[5,15],[5,8]", "escaped-duplicate");
-    CHECK(lowered.counts.duplicate_keys ==
-          std::vector<std::string>{R"(capture:html[0]/body[0]/ol[0] data-pulp-key="t\"o\/ne")"});
+    // Built outside CHECK: MSVC's preprocessor misreads a raw string literal
+    // holding backslashes inside a macro argument (C2017).
+    const std::vector<std::string> expected{
+        R"(capture:html[0]/body[0]/ol[0] data-pulp-key="t\"o\/ne")"};
+    CHECK(lowered.counts.duplicate_keys == expected);
 }
 
 TEST_CASE("hiding a middle sibling misapplies no stored edit",
