@@ -16,7 +16,7 @@
 namespace pulp::render::detail {
 
 class DawnProcInstallerRegistry {
-public:
+  public:
     explicit DawnProcInstallerRegistry(DawnProcInstaller default_installer)
         : default_(default_installer) {}
 
@@ -52,8 +52,12 @@ public:
             return fail(error, "no Dawn proc installer is available");
         std::string reason;
         struct InstallingScope {
-            explicit InstallingScope(const DawnProcInstallerRegistry* self) { installing_ = self; }
-            ~InstallingScope() { installing_ = nullptr; }
+            explicit InstallingScope(const DawnProcInstallerRegistry* self) {
+                installing_ = self;
+            }
+            ~InstallingScope() {
+                installing_ = nullptr;
+            }
         } scope(this);
         ++install_calls_;
         const bool ok = installer.install(installer.context, &reason);
@@ -69,7 +73,7 @@ public:
         return install_calls_;
     }
 
-private:
+  private:
     static bool fail(std::string* error, std::string reason) {
         if (error != nullptr)
             *error = std::move(reason);

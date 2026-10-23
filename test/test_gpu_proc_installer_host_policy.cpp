@@ -42,8 +42,8 @@ TEST_CASE("Dawn proc installer: a verify-only host without a table blocks GPU cr
     using namespace pulp::render;
 
     std::string error;
-    REQUIRE(set_dawn_proc_installer(DawnProcInstaller{&host_reports_missing_table, nullptr},
-                                    &error));
+    REQUIRE(
+        set_dawn_proc_installer(DawnProcInstaller{&host_reports_missing_table, nullptr}, &error));
 
     auto surface = GpuSurface::create_dawn();
     REQUIRE(surface != nullptr);

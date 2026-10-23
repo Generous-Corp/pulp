@@ -38,7 +38,8 @@ DawnProcInstaller installer_for(Counter& counter) {
 
 } // namespace
 
-TEST_CASE("Dawn proc installer: the default runs once across repeated calls", "[render][gpu-procs]") {
+TEST_CASE("Dawn proc installer: the default runs once across repeated calls",
+          "[render][gpu-procs]") {
     Counter fallback;
     DawnProcInstallerRegistry registry(installer_for(fallback));
 
@@ -49,7 +50,8 @@ TEST_CASE("Dawn proc installer: the default runs once across repeated calls", "[
     CHECK(registry.install_calls() == 1);
 }
 
-TEST_CASE("Dawn proc installer: the default runs once when two threads race", "[render][gpu-procs]") {
+TEST_CASE("Dawn proc installer: the default runs once when two threads race",
+          "[render][gpu-procs]") {
     for (int round = 0; round < 64; ++round) {
         Counter fallback;
         DawnProcInstallerRegistry registry(installer_for(fallback));
@@ -72,7 +74,8 @@ TEST_CASE("Dawn proc installer: the default runs once when two threads race", "[
     }
 }
 
-TEST_CASE("Dawn proc installer: a registered installer runs instead of the default", "[render][gpu-procs]") {
+TEST_CASE("Dawn proc installer: a registered installer runs instead of the default",
+          "[render][gpu-procs]") {
     Counter fallback;
     Counter host;
     DawnProcInstallerRegistry registry(installer_for(fallback));
@@ -85,7 +88,8 @@ TEST_CASE("Dawn proc installer: a registered installer runs instead of the defau
     CHECK(fallback.calls == 0);
 }
 
-TEST_CASE("Dawn proc installer: registration after the policy was used is rejected", "[render][gpu-procs]") {
+TEST_CASE("Dawn proc installer: registration after the policy was used is rejected",
+          "[render][gpu-procs]") {
     Counter fallback;
     Counter host;
     DawnProcInstallerRegistry registry(installer_for(fallback));
@@ -113,7 +117,8 @@ TEST_CASE("Dawn proc installer: a failed attempt still seals the policy", "[rend
     CHECK(late.calls == 0);
 }
 
-TEST_CASE("Dawn proc installer: re-registering the same installer is a no-op", "[render][gpu-procs]") {
+TEST_CASE("Dawn proc installer: re-registering the same installer is a no-op",
+          "[render][gpu-procs]") {
     Counter fallback;
     Counter host;
     Counter other;
@@ -132,7 +137,8 @@ TEST_CASE("Dawn proc installer: re-registering the same installer is a no-op", "
     CHECK(other.calls == 0);
 }
 
-TEST_CASE("Dawn proc installer: an installer without a function is rejected", "[render][gpu-procs]") {
+TEST_CASE("Dawn proc installer: an installer without a function is rejected",
+          "[render][gpu-procs]") {
     Counter fallback;
     DawnProcInstallerRegistry registry(installer_for(fallback));
     std::string error;
@@ -142,7 +148,8 @@ TEST_CASE("Dawn proc installer: an installer without a function is rejected", "[
     CHECK(fallback.calls == 1);
 }
 
-TEST_CASE("Dawn proc installer: a verify-only failure is reported and retried", "[render][gpu-procs]") {
+TEST_CASE("Dawn proc installer: a verify-only failure is reported and retried",
+          "[render][gpu-procs]") {
     Counter fallback;
     Counter host;
     host.result = false;
