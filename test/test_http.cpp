@@ -340,8 +340,11 @@ struct SelfSignedCertificate {
     std::string key_pem;
 };
 
-// A P-256 key and a self-signed certificate for CN=localhost, valid now.
-SelfSignedCertificate make_self_signed_certificate() {
+// A P-256 key and a self-signed certificate, valid now. The subject is
+// CN=<host>; an IP-literal host also gets an iPAddress SAN, which is the only
+// name an IP-addressed TLS client matches.
+SelfSignedCertificate make_self_signed_certificate(const std::string& host = "localhost",
+                                                   bool ip_san = false) {
     SelfSignedCertificate out;
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context drbg;
@@ -364,8 +367,18 @@ SelfSignedCertificate make_self_signed_certificate() {
     mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
     mbedtls_x509write_crt_set_subject_key(&crt, &key);
     mbedtls_x509write_crt_set_issuer_key(&crt, &key);
-    REQUIRE(mbedtls_x509write_crt_set_subject_name(&crt, "CN=localhost") == 0);
-    REQUIRE(mbedtls_x509write_crt_set_issuer_name(&crt, "CN=localhost") == 0);
+    const std::string name = "CN=" + host;
+    REQUIRE(mbedtls_x509write_crt_set_subject_name(&crt, name.c_str()) == 0);
+    REQUIRE(mbedtls_x509write_crt_set_issuer_name(&crt, name.c_str()) == 0);
+    unsigned char ip_bytes[4] = {127, 0, 0, 1};
+    mbedtls_x509_san_list san{};
+    if (ip_san) {
+        san.node.type = MBEDTLS_X509_SAN_IP_ADDRESS;
+        san.node.san.unstructured_name.p = ip_bytes;
+        san.node.san.unstructured_name.len = sizeof(ip_bytes);
+        san.next = nullptr;
+        REQUIRE(mbedtls_x509write_crt_set_subject_alternative_name(&crt, &san) == 0);
+    }
     unsigned char serial[] = {0x01};
     REQUIRE(mbedtls_x509write_crt_set_serial_raw(&crt, serial, sizeof(serial)) == 0);
     REQUIRE(mbedtls_x509write_crt_set_validity(&crt, "20240101000000", "20991231235959") == 0);
@@ -388,8 +401,10 @@ SelfSignedCertificate make_self_signed_certificate() {
 
 class TlsLoopbackServer {
   public:
-    explicit TlsLoopbackServer(const SelfSignedCertificate& certificate)
-        : server_(httplib::SSLServer::PemMemory{
+    explicit TlsLoopbackServer(const SelfSignedCertificate& certificate,
+                               std::string host = "localhost")
+        : host_(std::move(host)),
+          server_(httplib::SSLServer::PemMemory{
               certificate.cert_pem.c_str(), certificate.cert_pem.size(),
               certificate.key_pem.c_str(), certificate.key_pem.size(), nullptr, 0, nullptr}) {}
 
@@ -413,28 +428,27 @@ class TlsLoopbackServer {
         return port_;
     }
 
-    // Addressed by name, not by IP literal: the client's TLS backend verifies
-    // the chain for a hostname, whereas an IP-literal host takes a separate
-    // path that this case does not cover.
+    const std::string& host() const {
+        return host_;
+    }
+
     std::string url(std::string_view path) const {
-        return "https://localhost:" + std::to_string(port_) + std::string(path);
+        return "https://" + host_ + ":" + std::to_string(port_) + std::string(path);
     }
 
   private:
+    std::string host_;
     httplib::SSLServer server_;
     int port_ = 0;
     std::thread thread_;
 };
 
-} // namespace
-
-TEST_CASE("HTTPS request to a loopback TLS server with a self-signed certificate fails "
-          "verification",
-          "[runtime][http][tls]") {
-    const auto certificate = make_self_signed_certificate();
-    TlsLoopbackServer loopback(certificate);
-    REQUIRE(loopback.server().is_valid());
-
+// Drives the self-signed listener once: a client trusting exactly that
+// certificate must read the body (the listener speaks TLS and the certificate
+// names `host`), and the Pulp client must refuse from the TLS layer before a
+// request reaches the handler.
+void require_self_signed_refused(TlsLoopbackServer& loopback,
+                                 const SelfSignedCertificate& certificate) {
     std::mutex received_mutex;
     size_t handled_requests = 0;
     loopback.server().Get("/tls", [&](const httplib::Request&, httplib::Response& response) {
@@ -446,11 +460,8 @@ TEST_CASE("HTTPS request to a loopback TLS server with a self-signed certificate
     });
     loopback.start();
 
-    // Control: a client that trusts exactly this certificate completes the
-    // handshake and reads the body, so the listener speaks TLS and the
-    // certificate is valid for localhost. Only the trust decision differs below.
     {
-        httplib::SSLClient trusting("localhost", loopback.port());
+        httplib::SSLClient trusting(loopback.host(), loopback.port());
         trusting.load_ca_cert_store(certificate.cert_pem.c_str(), certificate.cert_pem.size());
         trusting.set_connection_timeout(2);
         trusting.set_read_timeout(2);
@@ -476,4 +487,27 @@ TEST_CASE("HTTPS request to a loopback TLS server with a self-signed certificate
         std::lock_guard lock(received_mutex);
         REQUIRE(handled_requests == 1);
     }
+}
+
+} // namespace
+
+TEST_CASE("HTTPS request to a loopback TLS server with a self-signed certificate fails "
+          "verification",
+          "[runtime][http][tls]") {
+    const auto certificate = make_self_signed_certificate();
+    TlsLoopbackServer loopback(certificate);
+    REQUIRE(loopback.server().is_valid());
+    require_self_signed_refused(loopback, certificate);
+}
+
+TEST_CASE("HTTPS request to an IP-literal host with a self-signed IP-SAN certificate fails "
+          "verification",
+          "[runtime][http][tls]") {
+    // An IP host has no hostname for the TLS backend to pin, and without a
+    // verifier installed the mbedTLS backend skipped the chain check entirely;
+    // a self-signed certificate with the IP in its SAN was then accepted.
+    const auto certificate = make_self_signed_certificate("127.0.0.1", true);
+    TlsLoopbackServer loopback(certificate, "127.0.0.1");
+    REQUIRE(loopback.server().is_valid());
+    require_self_signed_refused(loopback, certificate);
 }
