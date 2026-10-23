@@ -1,6 +1,7 @@
 #include "dawn_shared_io_provider.hpp"
 #include "dawn_shared_io_convolution_session.hpp"
 #include "dawn_shared_io_wavenet_program.hpp"
+#include "wavenet_layer_wgsl.hpp"
 
 #include "dawn_submission_tracker.hpp"
 #include "shared_spectral_kernels.hpp"
@@ -297,44 +298,15 @@ struct P { in_ch:u32, out_ch:u32, B:u32, woff:u32, src_mask:u32, dst_mask:u32, s
  }
 }
 )wgsl";
-// One layer. The gated sigmoid stays a named reciprocal multiplied after tanh;
-// written as a * (1 / x) the shader compiler contracts it differently and gated
-// outputs move by a few ULP. Each 64-lane workgroup covers S = p.S consecutive samples
-// (64 / Z, or 1 when Z > 32) with lane items over (sample, channel), so narrow
-// models fill the lanes; every output keeps its serial reduction order.
-// head_init = 1 (first layer of the first array) assigns the head sum instead
-// of accumulating, so no per-block clear is needed.
-constexpr auto kSharedIoWavenetLayerWgsl = R"wgsl(
-struct P { C:u32, K:u32, B:u32, dil:u32, Z:u32, gated:u32, in_mask:u32, conv_w:u32, conv_b:u32, mix_w:u32, l1_w:u32, l1_b:u32, out_mask:u32, S:u32, head_init:u32, p3:u32 };
-@group(0) @binding(0) var<storage, read> wts:array<f32>;
-@group(0) @binding(1) var<storage, read> ina:array<f32>;
-@group(0) @binding(2) var<storage, read_write> outa:array<f32>;
-@group(0) @binding(3) var<storage, read> cond:array<f32>;
-@group(0) @binding(4) var<storage, read_write> headacc:array<f32>;
-@group(0) @binding(5) var<uniform> p:P;
-@group(0) @binding(6) var<storage, read> pos:array<u32>;
-var<workgroup> zbuf:array<f32,128>; var<workgroup> abuf:array<f32,64>;
-@compute @workgroup_size(64) fn main(@builtin(workgroup_id) wid:vec3u,@builtin(local_invocation_id) lid:vec3u){
- let S=p.S; let t0=wid.x*S; if(t0>=p.B){return;} let lane=lid.x; let C=p.C; let K=p.K; let Z=p.Z;
- for(var i=lane;i<S*Z;i+=64u){let s=i/Z; let oc=i-s*Z; let t=t0+s; if(t<p.B){let n=pos[0]+t;
-  var acc=wts[p.conv_b+oc]; for(var k=0u;k<K;k++){let back=p.dil*(K-1u-k);let base=((n-back)&p.in_mask)*C;let wb=p.conv_w+oc*C*K+k;for(var ic=0u;ic<C;ic++){acc+=wts[wb+ic*K]*ina[base+ic];}}
-  acc+=wts[p.mix_w+oc]*cond[t]; zbuf[i]=acc;}}
- workgroupBarrier();
- for(var i=lane;i<S*C;i+=64u){let s=i/C; let c=i-s*C; if(t0+s<p.B){
-  if(p.gated==0u){abuf[i]=tanh(clamp(zbuf[s*Z+c],-15.0,15.0));}else{let g=1.0/(1.0+exp(-zbuf[s*Z+C+c]));abuf[i]=tanh(clamp(zbuf[s*Z+c],-15.0,15.0))*g;}}}
- workgroupBarrier();
- for(var i=lane;i<S*C;i+=64u){let s=i/C; let oc=i-s*C; let t=t0+s; if(t<p.B){
-  if(p.head_init==1u){headacc[t*C+oc]=abuf[i];}else{headacc[t*C+oc]=headacc[t*C+oc]+abuf[i];}
-  let n=pos[0]+t; var r=wts[p.l1_b+oc]; let rw=p.l1_w+oc*C; let a0=s*C;
-  for(var ic=0u;ic<C;ic++){r+=wts[rw+ic]*abuf[a0+ic];}
-  outa[(n&p.out_mask)*C+oc]=ina[(n&p.in_mask)*C+oc]+r;}}
-}
-)wgsl";
-// Advances the stream position by one block (pos[1] holds B); the last
+// One layer: the WGSL is shared with GpuCompute (wavenet_layer_wgsl.hpp). The
+// program is an instance group of one, so binding 6 is the stream-position
+// buffer below ([0] position, [1] weight count, [2] block size).
+constexpr auto kSharedIoWavenetLayerWgsl = pulp::render::detail::kWavenetLayerWgsl;
+// Advances the stream position by one block (pos[2] holds B); the last
 // dispatch of every WaveNet block.
 constexpr auto kSharedIoWavenetAdvanceWgsl = R"wgsl(
 @group(0) @binding(0) var<storage, read_write> pos:array<u32>;
-@compute @workgroup_size(1) fn main(){ pos[0]=pos[0]+pos[1]; }
+@compute @workgroup_size(1) fn main(){ pos[0]=pos[0]+pos[2]; }
 )wgsl";
 constexpr auto kSharedIoWavenetHeadWgsl = R"wgsl(
 struct P { C:u32,H:u32,B:u32,hr_w:u32,hr_b:u32,bias:u32,p0:u32,p1:u32 };
@@ -485,11 +457,13 @@ struct DawnSharedIoProvider::Impl {
             wgpu::BindGroup scale;
         };
         std::uint32_t block_size = 0;
+        std::uint32_t weight_count = 0; // floats in the weight blob
         wgpu::ComputePipeline rechannel, layer, head, scale, advance;
         wgpu::Buffer weights, scale_u;
-        // Device-resident stream position: [0] = sample index of the next
-        // block, [1] = block size. Advanced on the GPU by the last dispatch of
-        // each executed block.
+        // Device-resident stream state: [0] = sample index of the next block,
+        // [1] = weight count (the shared layer kernel's weight slice), [2] =
+        // block size. [0] is advanced on the GPU by the last dispatch of each
+        // executed block.
         wgpu::Buffer position;
         wgpu::BindGroup advance_group;
         std::vector<Array> arrays;
@@ -1746,6 +1720,7 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
     try {
         auto plan = std::make_unique<Impl::WavenetPlan>();
         plan->block_size = spec.block_size;
+        plan->weight_count = static_cast<std::uint32_t>(spec.weights.size());
         auto make_pipeline = [&](const char* source) {
             wgpu::ShaderSourceWGSL wgsl{};
             wgsl.code = source;
@@ -1804,13 +1779,14 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
         plan->scale = make_pipeline(kSharedIoWavenetScaleWgsl);
         plan->advance = make_pipeline(kSharedIoWavenetAdvanceWgsl);
         plan->weights = make_storage(spec.weights.size() * sizeof(float));
-        plan->position = make_storage(2u * sizeof(std::uint32_t));
+        plan->position = make_storage(4u * sizeof(std::uint32_t));
         if (!plan->rechannel || !plan->layer || !plan->head || !plan->scale || !plan->advance ||
             !plan->weights || !plan->position)
             return false;
         impl_->queue.WriteBuffer(plan->weights, 0, spec.weights.data(),
                                  spec.weights.size() * sizeof(float));
-        const std::uint32_t initial_position[2] = {0u, spec.block_size};
+        const std::uint32_t initial_position[4] = {
+            0u, static_cast<std::uint32_t>(spec.weights.size()), spec.block_size, 0u};
         impl_->queue.WriteBuffer(plan->position, 0, initial_position, sizeof(initial_position));
         // A ring holds at least `pad + B` columns, rounded up to a power of two
         // so the shaders wrap with a mask and the u32 position never skews it.
@@ -2123,6 +2099,66 @@ bool DawnSharedIoProvider::release_wavenet_program() noexcept {
         if (slot->submission.accepted)
             return false;
     impl_->wavenet.reset();
+    return true;
+}
+
+bool DawnSharedIoProvider::reset_wavenet_history(std::uint32_t next_position) noexcept {
+    if (!impl_ || !impl_->accepting || !impl_->wavenet)
+        return false;
+    for (const auto* slot : impl_->slots)
+        if (slot->submission.accepted)
+            return false;
+    auto& plan = *impl_->wavenet;
+    auto encoder = impl_->device.CreateCommandEncoder();
+    if (!encoder)
+        return false;
+    for (const auto& array : plan.arrays)
+        for (const auto& ring : array.rings)
+            encoder.ClearBuffer(ring, 0, ring.GetSize());
+    auto commands = encoder.Finish();
+    if (!commands)
+        return false;
+    const std::uint32_t position[4] = {next_position, plan.weight_count, plan.block_size, 0u};
+    impl_->queue.WriteBuffer(plan.position, 0, position, sizeof(position));
+    impl_->queue.Submit(1, &commands);
+    return true;
+}
+
+bool DawnSharedIoProvider::read_wavenet_stream_position(std::uint32_t& position) noexcept {
+    if (!impl_ || !impl_->wavenet)
+        return false;
+    for (const auto* slot : impl_->slots)
+        if (slot->submission.accepted)
+            return false;
+    wgpu::BufferDescriptor descriptor{};
+    descriptor.size = sizeof(std::uint32_t);
+    descriptor.usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst;
+    auto readback = impl_->device.CreateBuffer(&descriptor);
+    auto encoder = impl_->device.CreateCommandEncoder();
+    if (!readback || !encoder)
+        return false;
+    encoder.CopyBufferToBuffer(impl_->wavenet->position, 0, readback, 0, sizeof(std::uint32_t));
+    auto commands = encoder.Finish();
+    if (!commands)
+        return false;
+    impl_->queue.Submit(1, &commands);
+    auto state = std::make_shared<std::atomic<int>>(0);
+    readback.MapAsync(wgpu::MapMode::Read, 0, sizeof(std::uint32_t), Impl::callback_mode(),
+                      [state](wgpu::MapAsyncStatus status, wgpu::StringView) {
+                          state->store(status == wgpu::MapAsyncStatus::Success ? 1 : 2,
+                                       std::memory_order_release);
+                      });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (state->load(std::memory_order_acquire) == 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+        impl_->instance.ProcessEvents();
+        std::this_thread::yield();
+    }
+    if (state->load(std::memory_order_acquire) != 1)
+        return false;
+    std::memcpy(&position, readback.GetConstMappedRange(0, sizeof(std::uint32_t)),
+                sizeof(std::uint32_t));
+    readback.Unmap();
     return true;
 }
 
