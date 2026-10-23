@@ -832,6 +832,9 @@ if(TARGET pulp-render)
     list(APPEND _pulp_widget_bridge_test_libs pulp::render)
 endif()
 pulp_add_test_suite(pulp-test-widget-bridge GROUP pulp-test-group-view-widgets LIBRARIES ${_pulp_widget_bridge_test_libs})
+# Named chart-shader presets: pure source generation plus raster renders.
+pulp_add_test_suite(pulp-test-chart-shader-presets GROUP pulp-test-group-view-widgets
+    LIBRARIES ${_pulp_widget_bridge_test_libs})
 # The late GPU/lifetime and stderr-diagnostic cases use the same private support
 # but compile as a second translation unit, keeping the original bridge suite
 # behavior and Catch2 names while limiting per-file rebuild cost.

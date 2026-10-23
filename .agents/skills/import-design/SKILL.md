@@ -168,6 +168,18 @@ own work; the registry is the source of truth, and a coverage sweep in
 `tools/scripts/tools_registry_check.py` fails CI if a tool lands here without
 an entry — so nothing can go quiet the way `fidelity_diff.py` did.
 
+**A region score near 1.0 does not mean the region's controls are drawn.**
+`diff_against_reference_regions.py` scored Spectr's bottom toolbar 0.990 with
+its range slider missing, because the bar's background dominates both the
+histogram and the mean-pixel term. Whole-panel ink coverage could not see it
+either (0.978). Read `largest_uncovered_px`: a missing element shows as one
+uncovered patch at its own size (967 px at the default 1320x860 frame, 16 px
+with the slider pasted back, 0 between two Chromium captures). Patch limits
+are `max_uncovered_fraction` of the whole frame, so they hold at any `--size`;
+the JSON also prints the limit in pixels of the current frame. Animated regions, like Spectr's
+spectrum canvas, disagree on patches of thousands of pixels between two
+captures, so gate those on `coverage_floor` only.
+
 **Run `check_contracts.py` on every agent-authored panel before importing
 it — its `realtime` gate is the one check here that sees frame cost.** A React
 state setter inside `onPointerMove` / `onMouseMove` / `onWheel` (either phase),
@@ -270,6 +282,28 @@ advisory drift — a correct import of the reference design tops out at 12px,
 while a dropped auto-layout contract produces ten findings above 16px. The
 `import-layout-parity-gate` ctest runs the whole pipeline on
 `test/fixtures/imports/fig/synthetic.fig` and is strict (exact parity).
+
+**HTML/JSX imports have the same check, with Chromium as the design side.**
+The browser capture already holds Chromium's box for every laid-out node
+(`dom-snapshot.json`, keyed by `backendNodeId`), and the IR stamps that id on
+each node it lowers, so no adapter script is needed:
+
+```bash
+pulp-import-design --file p.html --emit ir-json --output p.pulp.json --native-panel-lowering
+pulp-design-ir-observe --input p.pulp.json --render r.png --layout obs.json --width W --height H
+python3 tools/import-design/layout_parity.py --capture p.pulp-browser-capture --observer-layout obs.json
+```
+
+Three things that are not obvious. Parents come from the DOM, not the IR: a
+native panel is lowered FLAT under `browser:root`, so IR parents would cluster
+the whole page into one finding. The capture must be the IR's OWN capture:
+backend ids are small sequential integers, and a second capture of the same
+page joined all 105 of Spectr's ids cleanly — a wrong pairing looks right — so
+the tool compares the IR's recorded capture-image hashes and exits 2 on a
+mismatch. And a "share offset … alignment/padding dropped" cluster compares
+dx/dy only: on Spectr it named three SVG paths whose real fault was their SIZE
+(primitives boxed at the SVG viewport), so read each child's dw/dh before
+trusting the diagnosis.
 
 **It validates BOXES, not the ink inside them.** A label whose glyphs are shoved
 to one side of a correctly-placed box, an icon drawn at the wrong scale inside

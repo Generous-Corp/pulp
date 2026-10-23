@@ -39,6 +39,7 @@ target_sources(pulp-view-core PRIVATE
     src/press_reach.cpp
     src/caret.cpp
     src/continuous_frames.cpp
+    src/chart_shader_presets.cpp
     src/custom_shader_host.cpp
     src/host_surfaces.cpp
     src/yoga_measurement_internal.cpp

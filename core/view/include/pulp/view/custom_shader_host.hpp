@@ -55,8 +55,18 @@ public:
 
     bool has_custom_shader() const { return !custom_sksl_.empty(); }
     const std::string& custom_shader() const { return custom_sksl_; }
-    void set_chart_shader(std::string sksl) { chart_sksl_ = std::move(sksl); }
+    /// Install a chart shader with the extra reach its own source needs (a
+    /// glow preset's halo). That reach is replaced with the shader, so moving
+    /// from a glow to a preset without one does not keep the wide rect, and it
+    /// pads only the chart draw, never the body shader's.
+    void set_chart_shader(std::string sksl, float reach = 0.0f) {
+        chart_sksl_ = std::move(sksl);
+        chart_reach_ = reach > 0.0f ? reach : 0.0f;
+    }
     const std::string& chart_shader() const { return chart_sksl_; }
+    float chart_reach() const {
+        return chart_reach_;
+    }
 
     void set_shader_uniforms(std::vector<canvas::Canvas::NamedUniform> uniforms) {
         shader_uniforms_ = std::move(uniforms);
@@ -133,6 +143,7 @@ public:
 private:
     std::string custom_sksl_;
     std::string chart_sksl_;
+    float chart_reach_ = 0.0f;
     bool shader_uses_time_ = false;
     bool shader_draw_failure_logged_ = false;
     std::vector<canvas::Canvas::NamedUniform> shader_uniforms_;

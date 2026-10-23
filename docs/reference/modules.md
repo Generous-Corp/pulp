@@ -928,6 +928,32 @@ pass the input through, because a pass-through is audibly indistinguishable from
 a working convolution and would hide the bug. Assert
 `conv.block_size_violations() == 0` in your tests.
 
+When the IR is fixed for a whole preparation, `FixedIrConvolver` runs whichever
+engine is cheaper for that IR length and block size: a vectorized direct FIR or
+the same partitioned FFT. It chooses once in `load_ir()`, never on the audio
+thread, and keeps the same zero latency and fail-closed contract. The FFT
+engine still needs exactly `block_size()` frames per call; the direct engine
+takes any count up to `block_size()`, so a host with a non-power-of-two or
+varying callback works without re-blocking. It has no live IR swap; use `PartitionedConvolver` for that, and
+`ZeroLatencyConvolver` or `NonUniformPartitionedConvolver` for long IRs at small
+callbacks.
+
+```cpp
+#include <pulp/signal/fixed_ir_convolver.hpp>
+
+FixedIrConvolver fixed;
+fixed.load_ir(impulse_response.data(), ir_length, block_size);  // picks the engine
+fixed.process(input, output, fixed.block_size());
+// fixed.backend(): direct_fir, partitioned_fft, or none when no IR is loaded.
+```
+
+The choice comes from `FixedIrConvolver::choose_backend()`, a pure function
+measured in single precision on Apple Silicon Macs with the Accelerate backend;
+other targets, and `FixedIrConvolver64`, keep the FFT engine until they have
+their own measurements. Pass a
+`ConvolutionBackend` as the fourth `load_ir()` argument to pin an engine you
+have measured on your target.
+
 ### Available processors
 
 #### Filters
@@ -957,6 +983,7 @@ a working convolution and would hide the bug. Assert
 | Character Delay | `character_delay.hpp` | Wet-only stereo delay with clean, vintage-digital, tape, BBD, and diffusion feedback-loop characters — see the [dedicated guide](../guides/character-delay.md) |
 | Chorus | `chorus.hpp` | Modulated delay for stereo widening and detuning effects |
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
+| Fixed-IR Convolver | `fixed_ir_convolver.hpp` | Zero-latency fixed-IR convolution that picks direct FIR or partitioned FFT per IR length and block size |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
 | Diffusion Network | `diffusion_network.hpp` | Fixed-capacity wet-only true-stereo Schroeder cascade with transactional configuration, deterministic decorrelation, and an energy-preserving width matrix |
 | [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |

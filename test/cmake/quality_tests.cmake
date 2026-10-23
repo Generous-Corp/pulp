@@ -100,6 +100,10 @@ if(Python3_Interpreter_FOUND)
                 --build-dir "${CMAKE_BINARY_DIR}")
     endif()
 
+    add_test(NAME gpu-audio-provider-conformance-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_provider_conformance.py")
+
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include

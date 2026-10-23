@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-ux-w2-e2-suspense-visibility-watch",
+  "created_at": "2026-10-23T01:54:12Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "@pulp/react implements the Suspense hide/unhide host-config methods and routes every authored visibility write through one gate so a suspended boundary's hide wins and the reveal restores the author's value; the compat doc gains a Suspense entry. Product bridge behaviour only: no design-import, capture, render-backend or proof authority moves.",
+  "tests": [
+    "cd packages/pulp-react && npm run build && npx vitest run",
+    "cd packages/pulp-react && npx vitest run test/host-config-suspense-visibility.test.ts",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
