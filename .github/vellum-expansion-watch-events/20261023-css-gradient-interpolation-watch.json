@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-css-gradient-interpolation-watch",
+  "created_at": "2026-10-23T02:32:45Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record that CSS gradients now honour a `<color-interpolation-method>`: core/view/src/css_gradient.cpp parses `in <space> [<hue> hue]` in every prefix position and defaults to Oklab when a stop is a non-legacy colour, as Chrome does; View::BackgroundGradient carries it; the painter sets it on the canvas around the layer's shader; Skia maps it natively and CoreGraphics resamples. The canvas-kernel half is recorded as the pulp-only change event 20261023-css-gradient-interpolation, which carries the Vellum inheritance obligation; this watch record transfers nothing. chrome_gradient_oracle.py gains a --colors mode (column means, two-backdrop refusal detection) that supplied the expected midpoints. Gradient geometry, dithering, DesignIR, capture semantics, thresholds and packaging are unchanged, and gradients that name no space with legacy stops paint identical pixels. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "A gradient forced to sRGB fails the Oklab midpoint",
+    "CoreGraphics midpoints match Chrome through resampling",
+    "Graphite gradient midpoints match Chrome for each interpolation method",
+    "Interpolation method parses in every prefix position",
+    "Skia raster midpoints match Chrome for every interpolation method",
+    "The reference interpolation matches Chrome's midpoints",
+    "The view hands a layer's interpolation to the canvas around its shader",
+    "import-validation-chrome-gradient-oracle-selftest",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": false
+}
