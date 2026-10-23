@@ -367,13 +367,15 @@ bool NamedPipe::create_server(std::string_view name) {
         return false;
     }
 
-    if (mkfifo(name_.c_str(), 0666) != 0) {
+    // Owner-only FIFOs: the peer is a child of the same user, so no other
+    // account needs to open either end.
+    if (mkfifo(name_.c_str(), 0600) != 0) {
         closing_.store(true);
         is_server_.store(false);
         return false;
     }
     public_fifo_created = true;
-    if (mkfifo(write_name_.c_str(), 0666) != 0) {
+    if (mkfifo(write_name_.c_str(), 0600) != 0) {
         unlink_existing_fifo(name_);
         closing_.store(true);
         is_server_.store(false);

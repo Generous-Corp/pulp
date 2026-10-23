@@ -1,4 +1,5 @@
 #include <pulp/view/app_framework.hpp>
+#include "user_data_paths.hpp"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -182,7 +183,7 @@ void NativeToolbar::add_separator() {
 
 // ── AppSettings ──────────────────────────────────────────────────────────
 
-static std::filesystem::path platform_settings_root() {
+std::filesystem::path detail::platform_settings_root() {
 #ifdef __APPLE__
     const char* home = std::getenv("HOME");
     if (home) return std::filesystem::path(home) / "Library" / "Application Support";
@@ -233,7 +234,7 @@ static bool parse_settings_float(const std::string& text, float& out) {
 }
 
 AppSettings::AppSettings(const std::string& app_name) {
-    auto root = platform_settings_root();
+    auto root = detail::platform_settings_root();
     if (!root.empty()) {
         settings_path_ = root / app_name / "settings.json";
     }

@@ -50,6 +50,24 @@ pulp_add_test_suite(pulp-test-offline-tracing
 pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
+# DecodeLimits contract for the codec-backed readers (FLAC, MP3, OGG Vorbis).
+# A container header is an untrusted size claim: the reader must refuse it
+# before allocating output, and bound an unknown-length stream as it decodes.
+pulp_add_test_suite(pulp-test-format-registry-limits GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
+# Coverage-guided lane over every registered reader. Off by default; the
+# timeline manifest, included earlier, proves the libFuzzer runtime exists
+# before this block is reached.
+if(PULP_ENABLE_FUZZING)
+    add_executable(pulp-fuzz-format-registry
+        fuzz/format_registry_fuzz_target.cpp)
+    target_link_libraries(pulp-fuzz-format-registry PRIVATE pulp::audio)
+    target_compile_options(pulp-fuzz-format-registry PRIVATE
+        -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+    target_link_options(pulp-fuzz-format-registry PRIVATE -fsanitize=fuzzer,address)
+endif()
+
 # Impulse-response loading. The PCM entry point is fed by UNTRUSTED, already-
 # decoded input (a browser hands over an AudioBuffer it just decoded, since a wasm
 # build has no FormatRegistry), so its fail-closed guards — implausible rate,
