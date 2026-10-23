@@ -418,6 +418,77 @@ TEST_CASE("OSC sender/receiver loopback", "[osc][udp]") {
     REQUIRE(rx.local_port() == 0);
 }
 
+namespace {
+
+// Sends `msg` until the receiver reports it or the retry budget runs out;
+// loopback UDP is best-effort, so one send is not a verdict.
+bool deliver_until_received(Sender& tx, const Message& msg,
+                            const std::atomic<bool>& received) {
+    for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+        if (!tx.send(msg)) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return received.load(std::memory_order_acquire);
+}
+
+} // namespace
+
+TEST_CASE("OSC Receiver binds loopback unless told to bind all interfaces",
+          "[osc][udp][bind]") {
+    std::atomic<bool> got_message{false};
+    auto handler = [&](const Message&) {
+        got_message.store(true, std::memory_order_release);
+    };
+
+    SECTION("default bind is loopback and reachable from loopback") {
+        Receiver rx;
+        REQUIRE(rx.listen(0, handler));
+        REQUIRE(rx.local_address() == "127.0.0.1");
+        REQUIRE(rx.local_port() != 0);
+
+        Sender tx;
+        REQUIRE(tx.connect("127.0.0.1", rx.local_port()));
+        REQUIRE(deliver_until_received(tx, Message("/bind/loopback"), got_message));
+
+        rx.stop();
+        REQUIRE(rx.local_address().empty());
+    }
+
+    SECTION("listen_with_options defaults to loopback too") {
+        Receiver rx;
+        ReceiverOptions options;
+        options.on_message = handler;
+        REQUIRE(rx.listen_with_options(0, std::move(options)));
+        REQUIRE(rx.local_address() == std::string(kBindLoopback));
+    }
+
+    SECTION("binding all interfaces is explicit and reported as 0.0.0.0") {
+        Receiver rx;
+        ReceiverOptions options;
+        options.on_message = handler;
+        options.bind_address = std::string(kBindAllInterfaces);
+        REQUIRE(rx.listen_with_options(0, std::move(options)));
+        REQUIRE(rx.local_address() == "0.0.0.0");
+
+        Sender tx;
+        REQUIRE(tx.connect("127.0.0.1", rx.local_port()));
+        REQUIRE(deliver_until_received(tx, Message("/bind/any"), got_message));
+    }
+
+    SECTION("hostnames and empty addresses are refused, never resolved") {
+        for (const char* bad : {"localhost", "", "not an address", "::1"}) {
+            Receiver rx;
+            ReceiverOptions options;
+            options.on_message = handler;
+            options.bind_address = bad;
+            REQUIRE_FALSE(rx.listen_with_options(0, std::move(options)));
+            REQUIRE_FALSE(rx.is_listening());
+            REQUIRE(rx.local_port() == 0);
+            REQUIRE(rx.local_address().empty());
+        }
+    }
+}
+
 TEST_CASE("OSC Sender resolves localhost hostnames", "[osc][udp][sender]") {
     Sender tx;
     REQUIRE(tx.connect("localhost", kOscHostnameTestPort));

@@ -31,6 +31,9 @@ struct OscChannelOptions {
     /// Dispatch executor (same semantics as other channels). When empty,
     /// callbacks run on the Receiver's internal thread.
     pulp::runtime::MessageExecutor executor;
+    /// IPv4 literal the receiving side binds. Loopback by default; set
+    /// kBindAllInterfaces when the remote peer is another machine.
+    std::string bind_address{kBindLoopback};
 };
 
 class OscChannel : public pulp::runtime::MessageChannel {
@@ -55,6 +58,10 @@ public:
 
     /// Convenience — encode and send a structured OSC message.
     bool send(const Message& msg);
+
+    /// Address and port the receiving side is bound to; empty / 0 when closed.
+    std::string local_address() const { return receiver_.local_address(); }
+    std::uint16_t local_port() const { return receiver_.local_port(); }
 
 private:
     OscChannel(OscChannelOptions options);

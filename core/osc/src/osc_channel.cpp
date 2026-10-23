@@ -13,8 +13,12 @@ std::unique_ptr<OscChannel> OscChannel::open(
     if (!chan->sender_.connect(std::string(host), remote_port)) {
         return nullptr;
     }
-    const bool listen_ok = chan->receiver_.listen(local_port,
-        [raw = chan.get()](const Message& m) { raw->dispatch_message(m); });
+    ReceiverOptions receiver_options;
+    receiver_options.bind_address = chan->options_.bind_address;
+    receiver_options.on_message =
+        [raw = chan.get()](const Message& m) { raw->dispatch_message(m); };
+    const bool listen_ok =
+        chan->receiver_.listen_with_options(local_port, std::move(receiver_options));
     if (!listen_ok) {
         chan->sender_.disconnect();
         return nullptr;

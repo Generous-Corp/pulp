@@ -204,6 +204,8 @@ struct Receiver::Impl {
     std::atomic<bool> running{false};
     ReceiverOptions options;
     std::atomic<uint16_t> local_port{0};
+    // Bound IPv4 address in network byte order; read only while listening.
+    std::atomic<uint32_t> local_addr{0};
 
     ~Impl() {
         const auto old_sock = sock.exchange(kInvalidSocket, std::memory_order_acq_rel);
@@ -277,13 +279,20 @@ bool Receiver::listen_with_options(uint16_t port, ReceiverOptions options) {
         stop();
     }
     impl->local_port.store(0, std::memory_order_relaxed);
-    auto sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock == kInvalidSocket) return false;
+    impl->local_addr.store(0, std::memory_order_relaxed);
 
+    // The bind address is a literal only: resolving a hostname here could
+    // silently widen a loopback-only receiver to a LAN interface.
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port);
+    if (options.bind_address.empty()
+        || inet_pton(AF_INET, options.bind_address.c_str(), &addr.sin_addr) != 1) {
+        return false;
+    }
+
+    auto sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock == kInvalidSocket) return false;
 
     // Keep receivers exclusive. Linux permits multiple UDP binds when all
     // participants opt into SO_REUSEADDR, which makes packet delivery
@@ -311,6 +320,7 @@ bool Receiver::listen_with_options(uint16_t port, ReceiverOptions options) {
         return false;
     }
     impl->local_port.store(ntohs(bound_addr.sin_port), std::memory_order_relaxed);
+    impl->local_addr.store(bound_addr.sin_addr.s_addr, std::memory_order_relaxed);
 
     // Set receive timeout so we can check running_ flag
 #if defined(_WIN32)
@@ -319,6 +329,7 @@ bool Receiver::listen_with_options(uint16_t port, ReceiverOptions options) {
                    reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms)) < 0) {
         close_socket(sock);
         impl->local_port.store(0, std::memory_order_relaxed);
+        impl->local_addr.store(0, std::memory_order_relaxed);
         return false;
     }
 #else
@@ -327,6 +338,7 @@ bool Receiver::listen_with_options(uint16_t port, ReceiverOptions options) {
                    reinterpret_cast<const char*>(&tv), sizeof(tv)) < 0) {
         close_socket(sock);
         impl->local_port.store(0, std::memory_order_relaxed);
+        impl->local_addr.store(0, std::memory_order_relaxed);
         return false;
     }
 #endif
@@ -427,6 +439,7 @@ void Receiver::stop_impl(bool destroying) {
     }
     if (called_from_receiver_thread) {
         impl->local_port.store(0, std::memory_order_relaxed);
+        impl->local_addr.store(0, std::memory_order_relaxed);
         if (sock != kInvalidSocket) close_socket(sock);
         if (destroying && impl->thread.joinable()) impl->thread.detach();
         return;
@@ -434,6 +447,7 @@ void Receiver::stop_impl(bool destroying) {
     if (impl->thread.joinable()) impl->thread.join();
     if (sock != kInvalidSocket) close_socket(sock);
     impl->local_port.store(0, std::memory_order_relaxed);
+    impl->local_addr.store(0, std::memory_order_relaxed);
     impl->options = {};
 }
 
@@ -443,6 +457,15 @@ bool Receiver::is_listening() const {
 
 uint16_t Receiver::local_port() const {
     return impl_->local_port.load(std::memory_order_relaxed);
+}
+
+std::string Receiver::local_address() const {
+    if (!is_listening()) return {};
+    in_addr addr{};
+    addr.s_addr = impl_->local_addr.load(std::memory_order_relaxed);
+    char text[INET_ADDRSTRLEN] = {};
+    if (inet_ntop(AF_INET, &addr, text, sizeof(text)) == nullptr) return {};
+    return text;
 }
 
 } // namespace pulp::osc

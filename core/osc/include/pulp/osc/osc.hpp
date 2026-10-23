@@ -112,11 +112,20 @@ struct ReceiverRoute {
     MessageHandler handler;
 };
 
+// Address the receiver binds to. The receiver is IPv4-only, so this is a
+// dotted-quad literal. Loopback is the default: a Receiver is only reachable
+// from the local machine unless the caller binds all interfaces explicitly.
+inline constexpr std::string_view kBindLoopback = "127.0.0.1";
+inline constexpr std::string_view kBindAllInterfaces = "0.0.0.0";
+
 struct ReceiverOptions {
     MessageHandler on_message;
     BundleHandler on_bundle;
     FormatErrorHandler on_error;
     std::vector<ReceiverRoute> routes;
+    // IPv4 literal to bind. Hostnames are not resolved; an unparseable value
+    // makes listen fail. Use kBindAllInterfaces to accept LAN controllers.
+    std::string bind_address{kBindLoopback};
 };
 
 class Receiver {
@@ -129,7 +138,7 @@ public:
     Receiver(Receiver&&) = delete;
     Receiver& operator=(Receiver&&) = delete;
 
-    // Start listening on a port
+    // Start listening on a port, bound to loopback (ReceiverOptions defaults).
     bool listen(uint16_t port, MessageHandler handler);
 
     // Start listening with bundle, error, and address-route callbacks.
@@ -144,6 +153,9 @@ public:
 
     bool is_listening() const;
     uint16_t local_port() const;
+    // Dotted-quad address the socket is bound to ("127.0.0.1", "0.0.0.0", ...);
+    // empty when not listening.
+    std::string local_address() const;
 
 private:
     void stop_impl(bool destroying);
