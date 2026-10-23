@@ -1399,15 +1399,30 @@ class DifferentialLabTests(unittest.TestCase):
 
     def test_work_counters_gate_threshold_eligibility(self) -> None:
         perfect = {"score": 1.0}
+        resources = {"image_decodes": 0, "gpu_uploads": 0, "paragraph_builds": 0,
+                     "scene_records": 0, "scene_replays": 0, "image_cache_builds": 0}
         clean = {"schema": LAB.OBSERVER_COUNTER_SCHEMA, "views_constructed": 9,
                  "views_destroyed": 9, "live_views_after_teardown": 0,
                  "build": {"layout_passes": 0, "damage_requests": 4,
-                           "unmarked_paint_mutations": 83},
+                           "unmarked_paint_mutations": 83, **resources},
                  "first_frame": {"layout_passes": 1, "damage_requests": 0,
-                                 "unmarked_paint_mutations": 7},
+                                 "unmarked_paint_mutations": 7, **resources,
+                                 "image_decodes": 2, "image_cache_builds": 2,
+                                 "paragraph_builds": 11},
                  "readback": {"layout_passes": 0, "damage_requests": 0,
-                              "unmarked_paint_mutations": 0}}
-        self.assertEqual(LAB.work_counter_gate({"counters": clean})["status"], "pass")
+                              "unmarked_paint_mutations": 0, **resources,
+                              "paragraph_builds": 5}}
+        passed = LAB.work_counter_gate({"counters": clean})
+        self.assertEqual(passed["status"], "pass")
+        self.assertEqual(passed["resources"], "gated")
+        # A receipt written before the observer counted resource work is
+        # judged on its v1 fields and says the resource counters were absent.
+        legacy = {**clean, "schema": "pulp-design-ir-observer-counters-v1"}
+        for phase in ("build", "first_frame", "readback"):
+            legacy[phase] = {k: v for k, v in clean[phase].items() if k not in resources}
+        legacy_gate = LAB.work_counter_gate({"counters": legacy})
+        self.assertEqual(legacy_gate["status"], "pass")
+        self.assertEqual(legacy_gate["resources"], "absent")
         planted = {
             "no counters": {},
             "wrong schema": {"counters": {**clean, "schema": "other"}},
@@ -1427,6 +1442,15 @@ class DifferentialLabTests(unittest.TestCase):
             "string count": {"counters": {**clean, "views_constructed": "9"}},
             "missing readback field": {"counters": {**clean, "readback": {
                 "unmarked_paint_mutations": 0}}},
+            # Planted negatives for the v2 resource counters.
+            "read-back decoded an image": {"counters": {**clean, "readback": {
+                **clean["readback"], "image_decodes": 1}}},
+            "read-back uploaded an image": {"counters": {**clean, "readback": {
+                **clean["readback"], "gpu_uploads": 3}}},
+            "read-back rebuilt a cached image": {"counters": {**clean, "readback": {
+                **clean["readback"], "image_cache_builds": 1}}},
+            "v2 without resource counters": {"counters": {**clean, "first_frame": {
+                k: v for k, v in clean["first_frame"].items() if k != "gpu_uploads"}}},
         }
         for name, receipt in planted.items():
             with self.subTest(name):

@@ -759,7 +759,8 @@ knowing before you touch that file:
   `verify_native_authored_frame` read native rects relative to that origin.
 
   **Counter gotcha:** the observer's render receipt carries its own work
-  counters (`pulp-design-ir-observer-counters-v1`), phased as `build`,
+  counters (`pulp-design-ir-observer-counters-v2`; v1 receipts lack the
+  per-phase resource fields and are judged without them), phased as `build`,
   `first_frame` and `readback`, plus views constructed/destroyed and a
   terminal `live_views_after_teardown` read after the tree is destroyed. The
   lab gates eligibility on a zero teardown residue and zero unmarked paint
@@ -767,7 +768,9 @@ knowing before you touch that file:
   paint state on views that have never been drawn (~80 "unmarked" mutations on
   an 8-view card), which stales nothing. Gating those would block every
   fixture for a non-defect; ungating `readback` would let a read-back that
-  mutates the painted tree pass. Raw DOM-snapshot hashes differ per capture
+  mutates the painted tree pass. v2 also gates `readback` on zero
+  `image_decodes`, `gpu_uploads` and `image_cache_builds`, and leaves
+  `paragraph_builds` ungated there because measuring text shapes it. Raw DOM-snapshot hashes differ per capture
   only by the CDP frame ID, so compare `*_snapshot_semantic_sha256` across
   runs, not the raw binding.
 
@@ -2494,6 +2497,32 @@ record the explicit binary-size delta and whether JS evaluation churn is
 actually the dominant bottleneck for the measured fixture. Keep the legacy
 top-level `comparison` entry pointed at `baked-native`, and add per-lane
 results under `comparisons` for both baked lanes.
+
+Benchmark receipt (`pulp-design-import-benchmark-v2`) gotchas:
+
+- **Layout belongs to the frame, not to `step()`.** `run_phase` laps
+  `update`, `layout`, `record` and `submit` on one clock and checks the laps
+  cover the frame (`stages.consistent`). A fixture that calls
+  `layout_children()` inside `step()` bills a layout to `update` and runs two
+  per frame. Before v2 every baked lane and the live script's step did exactly
+  that, so v1 receipts are not comparable per stage or per `layout_passes`.
+- **The default `recording` canvas cannot see decodes, uploads or text
+  shaping** — RecordingCanvas records commands and does none of that work.
+  Resource claims need `--canvas=skia-raster` (or `skia-graphite` where a Dawn
+  adapter exists); `--require-steady-state` exits 4 on a `blind` gate rather
+  than passing it. `paragraph_builds` is reported but never gated: SkiaCanvas
+  shapes every label on every paint until it has a paragraph cache, so a
+  gate on it would fail every text fixture today.
+- **`--lane=live --ir` (optionally `--bundle`) is the production JS path over
+  importer output.** The runtime's `__pulpRuntimeSettle__` called from
+  `engine.evaluate` only records a budget; `WidgetBridge::load_script` drains
+  it. A per-frame step therefore calls `service_frame_callbacks()` itself,
+  the host's frame tick, instead of settling from JavaScript.
+- **Most fleet hosts confound most runs.** A receipt is `confounded` when
+  `getloadavg` exceeds cores/4 or the thermal state is not `nominal`; the gate
+  hosts usually sit above that. `design_import_benchmark.py --compare` then
+  reports `confounded`, never `win` — measure on a quiet host, do not argue
+  the threshold down.
 
 ### Node-type dispatch — exhaustive, never silent (all three producers)
 
