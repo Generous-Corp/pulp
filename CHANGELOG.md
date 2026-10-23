@@ -9,6 +9,17 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v010130"></a>
+## [0.1013.0] - 2026-10-23
+
+- release/version bump ([#10814](https://github.com/Generous-Corp/pulp/pull/10814))
+- fix/biquad history small a2 20261023 ([#10785](https://github.com/Generous-Corp/pulp/pull/10785))
+- plan/importer next 20261021 reconcile ([#10701](https://github.com/Generous-Corp/pulp/pull/10701))
+- asr/importer cdp pipe 20261022 ([#10777](https://github.com/Generous-Corp/pulp/pull/10777))
+- feature/vellum p4 view native carve ([#10788](https://github.com/Generous-Corp/pulp/pull/10788))
+- feature/msvc compile fixes 20261023 ([#10787](https://github.com/Generous-Corp/pulp/pull/10787))
+- asr/rack download consent 20261022 ([#10757](https://github.com/Generous-Corp/pulp/pull/10757))
+
 <a id="v010120"></a>
 ## [0.1012.0] - 2026-10-23
 
@@ -11352,6 +11363,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.1013.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1013.0
 [0.1012.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1012.0
 [0.1011.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1011.0
 [0.1010.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1010.0
