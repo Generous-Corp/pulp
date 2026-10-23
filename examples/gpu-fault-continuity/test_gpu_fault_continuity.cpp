@@ -26,6 +26,7 @@
 #include <vector>
 
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 using pulp::examples::gpu_fault::GpuFaultContinuityProcessor;
@@ -680,4 +681,31 @@ TEST_CASE("a host re-prepare between the fault block and the arm refuses the sta
     CHECK(text.find("\"event\":\"fault_fired\"") == std::string::npos);
     CHECK_FALSE(gf::provider_fault_armed());
     p.set_before_arm_hook_for_test(nullptr);
+}
+
+TEST_CASE("the instance that owns the run names itself in the host log",
+          "[gpu-fault-continuity]") {
+    // AU v2 hosts log no plug-in name of their own, so the verifier's check
+    // that the host's log mentions the plug-in rests on this line.
+    RunDir dir;
+    write_ir(dir.path, make_ir());
+    const auto log_path = dir.path / "stderr.txt";
+    std::fflush(stderr);
+    const int saved = ::dup(STDERR_FILENO);
+    const int file = ::open(log_path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0644);
+    REQUIRE(saved >= 0);
+    REQUIRE(file >= 0);
+    ::dup2(file, STDERR_FILENO);
+    {
+        GpuFaultContinuityProcessor p;
+        p.prepare(prepare_context());
+        std::fflush(stderr);
+    }
+    std::fflush(stderr);
+    ::dup2(saved, STDERR_FILENO);
+    ::close(saved);
+    ::close(file);
+    const auto log = read_text(log_path);
+    INFO(log);
+    CHECK(log.find("'Pulp GPU Fault Continuity' claimed the run directory") != std::string::npos);
 }

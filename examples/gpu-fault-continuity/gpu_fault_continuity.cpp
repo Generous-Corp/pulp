@@ -11,6 +11,7 @@
 
 #include <pulp/gpu_audio/gpu_audio_capability.hpp>
 #include <pulp/gpu_audio/gpu_audio_status.hpp>
+#include <pulp/runtime/log.hpp>
 
 #include <algorithm>
 #include <array>
@@ -334,6 +335,11 @@ void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
     ::close(capture);
     ::close(events);
     harness_ = true;
+    // The host's log names the plug-in only in some formats (CLAP does, AU v2
+    // does not), so the instance that owns the run says so itself; the
+    // verifier looks for the plug-in's name in that log.
+    runtime::log_info("gpu-fault-continuity: '{}' claimed the run directory {}",
+                      descriptor().name, run_dir_.string());
     ring_.reset(kRingBytes);
     RunConfig config;
     config.source = config_source_;
