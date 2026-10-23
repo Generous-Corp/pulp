@@ -141,9 +141,20 @@ class GateSandboxTests(unittest.TestCase):
             self.assertNotEqual(self.run_canary(scratch, "net"), 0)
 
     def test_other_temp_files_are_not_readable(self):
-        # The per-user temp dir and /private/tmp hold other processes'
-        # files; only the gate's own scratch there is readable.
-        for parent in (tempfile.gettempdir(), "/private/tmp"):
+        # The per-user temp and Darwin dirs, /private/tmp and other places on
+        # /Volumes hold other processes' files; only the gate's own scratch
+        # and the toolchain it runs from are readable.
+        parents = [tempfile.gettempdir(), "/private/tmp"]
+        # The per-user Darwin directory (.../0) holds other apps' state.
+        darwin_user = generate._darwin_user_dir()
+        if darwin_user:
+            parents.append(darwin_user)
+        # Another place on an external volume, beside (not inside) this
+        # toolchain, which is allowed back.
+        root = os.path.realpath(generate.ROOT)
+        if root.startswith("/Volumes/"):
+            parents.append(os.path.dirname(root))
+        for parent in parents:
             with self.subTest(parent=parent):
                 other = tempfile.mkdtemp(prefix="pulp-gate-other-", dir=parent)
                 self.addCleanup(shutil.rmtree, other, True)

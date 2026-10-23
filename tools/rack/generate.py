@@ -635,6 +635,17 @@ def _real_home() -> str:
     return os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
 
 
+def _darwin_user_dir() -> str:
+    """The per-user Darwin directory (.../0), or "" where there is none."""
+    try:
+        out = subprocess.run(["/usr/bin/getconf", "DARWIN_USER_DIR"],
+                             capture_output=True, text=True, encoding="utf-8",
+                             timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return os.path.realpath(out) if out else ""
+
+
 def _sbpl_string(path: str) -> str:
     return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -647,7 +658,8 @@ def gate_launch(exe: str, scratch: str):
     runs with a scrubbed environment (HOME is the scratch directory, no keys
     or tokens), and on macOS under sandbox-exec with no network, no process
     spawning, writes confined to the scratch directory, and reads under the
-    home directory allowed only where it must (scratch, the Rack SDK, this
+    home directory, the per-user temp and Darwin directories, /private/tmp
+    and /Volumes allowed only where it must (scratch, the Rack SDK, this
     toolchain), so injected code cannot read the person's files and print
     them into the output that feeds the next prompt.
 
@@ -693,6 +705,14 @@ def gate_launch(exe: str, scratch: str):
         # hold other processes' files (Forge's own prompt files among them).
         # The scratch directory lives there and is allowed back below.
         f"(deny file-read* (subpath {_sbpl_string(os.path.realpath(tempfile.gettempdir()))}) (subpath \"/private/tmp\"))",
+        # The per-user Darwin directory (getconf DARWIN_USER_DIR, .../0) holds
+        # plain user-readable app state, private tokens among it. Its sibling
+        # cache directory (.../C) stays readable for system frameworks.
+        *([f"(deny file-read* (subpath {_sbpl_string(d)}))"]
+          if (d := _darwin_user_dir()) else []),
+        # Other volumes are the person's data too. The toolchain and SDK may
+        # live on one; they are allowed back below.
+        "(deny file-read* (subpath \"/Volumes\"))",
         "(allow file-read* " + " ".join(
             f"(subpath {_sbpl_string(p)})"
             for p in (scratch, os.path.realpath(SDK), os.path.realpath(ROOT))) + ")",
