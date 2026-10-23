@@ -708,6 +708,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     // three different panels, before the size was found missing here.
     emit_str("backgroundSize", s.background_size);
     emit_str("backgroundPosition", s.background_position);
+    emit_str("backgroundOrigin", s.background_origin);
     emit_str("color", s.color);
     emit_float("opacity", s.opacity);
     emit_str("mixBlendMode", s.mix_blend_mode);

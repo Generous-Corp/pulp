@@ -1503,6 +1503,8 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_background_position(*style.background_position);
     if (style.background_size)
         view.set_background_size(*style.background_size);
+    if (style.background_origin)
+        view.set_background_origin(*style.background_origin);
     // object-fit is honored by ImageView::paint; on plain Views it sits in the
     // same style_extras slot the bridge writes, so applying it unconditionally
     // keeps the native tree in lockstep with the JS lane's setObjectFit.

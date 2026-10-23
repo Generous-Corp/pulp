@@ -89,6 +89,11 @@ struct IRStyle {
     // background-image paint honoring is the same deferred slot as
     // background_repeat (View::style_extras).
     std::optional<std::string> background_size;
+    // CSS background-origin ("padding-box", "border-box", "content-box"),
+    // possibly a per-layer list. It decides the box a repeating background
+    // tile is sized and positioned in; absent means the CSS initial value,
+    // padding-box.
+    std::optional<std::string> background_origin;
     // CSS object-fit for image-shaped nodes ("fill", "contain", "cover",
     // "none", "scale-down"). Figma IMAGE fill scale modes lower here when the
     // fill becomes a dedicated image node (FILL → cover, FIT → contain);
