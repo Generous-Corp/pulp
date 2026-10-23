@@ -136,11 +136,17 @@ pub fn manifest_digest_for(manifest: &str, asset: &str) -> Result<String> {
     found.ok_or_else(|| CliError::Other(format!("{MANIFEST_ASSET_NAME} has no entry for {asset}")))
 }
 
-/// True when `version` is at or above `floor`. Unparsable input counts as
-/// at-or-above so a malformed version never unlocks the legacy path.
+/// True when `version` is at or above `floor`. Pre-release and build
+/// suffixes are dropped before comparing, matching the C++ verifier: an exact
+/// floor pre-release sits at the floor, never below it. Unparsable input
+/// counts as at-or-above so a malformed version never unlocks the legacy path.
 #[must_use]
 pub fn version_at_or_above(version: &str, floor: &str) -> bool {
-    let parse = |s: &str| semver::Version::parse(s.trim_start_matches(['v', 'V'])).ok();
+    let parse = |s: &str| {
+        semver::Version::parse(s.trim_start_matches(['v', 'V']))
+            .ok()
+            .map(|v| semver::Version::new(v.major, v.minor, v.patch))
+    };
     match (parse(version), parse(floor)) {
         (Some(v), Some(f)) => v >= f,
         _ => true,

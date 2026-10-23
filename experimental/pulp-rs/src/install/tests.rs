@@ -115,8 +115,12 @@ fn manifest_digest_refuses_duplicate_and_malformed_entries() {
 #[test]
 fn version_floor_comparison_fails_closed() {
     assert!(version_at_or_above("0.663.1", "0.663.1"));
+    assert!(version_at_or_above("0.663.1-pre", "0.663.1"));
+    assert!(version_at_or_above("0.663.1-rc.1+build.7", "0.663.1"));
+    assert!(version_at_or_above("1.0.0-rc1", "0.663.1"));
     assert!(version_at_or_above("v0.700.0", "0.663.1"));
     assert!(!version_at_or_above("0.663.0", "0.663.1"));
+    assert!(!version_at_or_above("0.663.0-pre", "0.663.1"));
     assert!(!version_at_or_above("0.99.9", "0.663.1"));
     assert!(version_at_or_above("garbage", "0.663.1"));
 }
@@ -189,6 +193,20 @@ fn missing_manifest_is_refused_at_the_floor_and_warned_below_it() {
     assert!(
         refused.to_string().contains("could not fetch SHA256SUMS"),
         "{refused}"
+    );
+    // An exact-floor pre-release is at the floor, so its missing manifest is
+    // refused too (the C++ verifier agrees).
+    let prerelease = verify_release_archive(
+        &archive,
+        "pulp-darwin-arm64.tar.gz",
+        "0.663.1-pre",
+        "0.663.1",
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        prerelease.to_string().contains("could not fetch SHA256SUMS"),
+        "{prerelease}"
     );
     let legacy = verify_release_archive(
         &archive,

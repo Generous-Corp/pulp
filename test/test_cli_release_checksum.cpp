@@ -72,7 +72,10 @@ TEST_CASE("version floor comparison fails closed", "[cli][release-checksum]") {
     CHECK(rc::version_at_or_above("0.663.1", "0.663.1"));
     CHECK(rc::version_at_or_above("v0.700.0", "0.663.1"));
     CHECK(rc::version_at_or_above("1.0.0-rc1", "0.663.1"));
+    CHECK(rc::version_at_or_above("0.663.1-pre", "0.663.1"));
+    CHECK(rc::version_at_or_above("0.663.1-rc.1+build.7", "0.663.1"));
     CHECK_FALSE(rc::version_at_or_above("0.663.0", "0.663.1"));
+    CHECK_FALSE(rc::version_at_or_above("0.663.0-pre", "0.663.1"));
     CHECK_FALSE(rc::version_at_or_above("0.99.9", "0.663.1"));
     CHECK(rc::version_at_or_above("garbage", "0.663.1"));
 }
@@ -125,6 +128,13 @@ TEST_CASE("missing manifest is refused at the floor and warned below it",
                                               "0.663.1", std::nullopt);
     CHECK_FALSE(refused.ok());
     CHECK(refused.message.find("could not fetch SHA256SUMS") != std::string::npos);
+
+    // An exact-floor pre-release is at the floor, so its missing manifest is
+    // refused too (the Rust verifier agrees).
+    auto prerelease = rc::verify_release_archive(archive, "pulp-darwin-arm64.tar.gz", "0.663.1-pre",
+                                                 "0.663.1", std::nullopt);
+    CHECK_FALSE(prerelease.ok());
+    CHECK(prerelease.message.find("could not fetch SHA256SUMS") != std::string::npos);
 
     auto legacy = rc::verify_release_archive(archive, "pulp-darwin-arm64.tar.gz", "0.600.0",
                                              "0.663.1", std::nullopt);
