@@ -1,0 +1,17 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-inline-image-any-format",
+  "slices": [
+    "canvas-kernel",
+    "retained-ui-kernel"
+  ],
+  "vellum_obligation": "Vellum's canvas kernel must offer a header-only intrinsic-size read for encoded image bytes (measure_image_from_data) that decodes no pixels, reports the size its draw uses, and in a decoder-less backend reads a PNG IHDR only (IHDR chunk required, each dimension at most 2^31 - 1). Vellum's retained UI kernel must keep an inline data:image source's encoded payload whatever its format and take its intrinsic size from that header read (never a PNG-only parse), drawing it through the content-keyed inline image entry; a payload no decoder accepts must be tried once, reported, and then paint a stable placeholder without further decode attempts. A data URI payload is base64-decoded only when its metadata ends in ;base64 (RFC 2397, case-insensitive), after percent-unescaping, and percent-decoded otherwise, with a malformed escape in a non-base64 payload treated as undecodable. Sprite strips held as encoded bytes must draw through the content-keyed entry under a key computed once at load; once a canvas has successfully measured them, every frame within the declared strip size draws (the draw scales the image to that size), a failed measure must not be recorded on the shared strip, and raw RGBA bytes stay bounded by their byte count.",
+  "evidence": [
+    ".github/vellum-change-events/20261022-inline-image-any-format.json",
+    "pulp-test-asset-manager (AssetManager data URI bytes are returned whatever the image format)",
+    "pulp-test-canvas-cg-image (measure_image_from_data cases)",
+    "pulp-test-group-view-widgets (sprite strip bound cases)",
+    "pulp-test-image-view-cache (ImageView inline-image cases)",
+    "pulp-test-inline-image-cache-gpu"
+  ]
+}

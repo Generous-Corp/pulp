@@ -1,6 +1,7 @@
 // Forge Lo-fi catalog factory implementations.
 
 #include <pulp/host/forge_lofi_catalog.hpp>
+#include <pulp/host/detail/forge_compressor_ballistics.hpp>
 
 namespace pulp::host::forge_lofi {
 
@@ -437,6 +438,8 @@ CustomNodeType make_compressor_node() {
     t.baked_params.push_back({kCompRatio, 1.0f, 20.0f, 4.0f});
     t.baked_params.push_back({kCompAttackMs, 0.1f, 100.0f, 10.0f});
     t.baked_params.push_back({kCompReleaseMs, 10.0f, 1000.0f, 150.0f});
+    // ballistics: 0 branching (default, as before the control existed), 1 decoupled.
+    t.baked_params.push_back({kCompBallistics, 0.0f, 1.0f, 0.0f});
     t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
                                         const audio::BufferView<const float>& in, int n,
                                         const BakedParamView& params) {
@@ -453,6 +456,8 @@ CustomNodeType make_compressor_node() {
         cp.knee_db = 6.0f;   // musical soft knee
         cp.makeup_db = 0.0f; // reduce-only: never restores level
         s->comp.set_params(cp);
+        s->comp.set_ballistics(
+            forge_compressor::ballistics_for(params.value_at(kCompBallistics, 0)));
         // Ballistics are block-rate, so the whole block runs through the
         // compressor's buffer path rather than its per-sample one.
         if (o != i)

@@ -250,6 +250,167 @@ anything — it reported success for any non-empty string, including
 un-compilable SkSL and ids matching no widget. Canvas widgets have no
 shader path, so there was nothing an honest version of it could do.
 
+## Shape shaders: `PulpGeom`, `PulpChart` and presets
+
+A body shader paints a rectangle. A **shape shader** paints one of the SDF
+shapes (`Canvas::SDFShape`) and receives that shape's geometry per fragment,
+so the author writes the look and Pulp supplies the distances. There are two
+contracts, chosen by the signature the source defines.
+
+### `PulpFragment shade(PulpGeom g, float2 p)`: any SDF shape
+
+```sksl
+struct PulpGeom { float sdf; float2 grad; float2 pos; float2 uv; float coverage; };
+struct PulpFragment { half4 color; float strokeWidth; float sigma; };
+```
+
+| Field | Meaning |
+|---|---|
+| `g.sdf` | Signed distance to the shape, negative inside, in local units |
+| `g.grad` | Unit gradient of the distance field (zero where it has none) |
+| `g.pos` | Fragment position relative to the shape's centre |
+| `g.uv` | Fragment position over the draw rect, 0..1 |
+| `g.coverage` | One-unit anti-aliased coverage of the fill |
+
+Return the colour (premultiplied) plus an optional `strokeWidth` (0 fills the
+shape, > 0 strokes its outline at that width). Pulp applies the coverage. From
+JS, install it with `setWidgetShader(id, source, { geometry: { shape: 'stadium',
+strokeWidth: 8, ... } })`; the shape names match `Canvas::SDFShape`. Operator
+trees (`setWidgetShaderGeometry`) feed composed distances into the same `g.sdf`.
+
+### `half4 shade(PulpChart g)`: bands with a centre line
+
+```sksl
+struct PulpChart {
+    float t; float d; float side; float2 tan; float px; float valid;
+    float cross; float halfWidth;
+};
+```
+
+A chart shader sees the shape as a band around a centre line, which is what
+knob arcs, LED rings, fader tracks and bar meters are.
+
+| Field | Meaning |
+|---|---|
+| `g.t` | Position along the centre line, 0 at the start, 1 at the end |
+| `g.cross` | Signed offset from the centre line along the normal `(tan.y, -tan.x)`: outward on arcs and rings, upward on horizontal shapes; `±halfWidth` at the band's edges. Inside a rounded cap it is the distance from the end point, so `cross >= 0` there |
+| `g.halfWidth` | Half the band's width |
+| `g.d` | Signed distance to the band, negative inside, including flat caps |
+| `g.side` | `-1` inside the band, `+1` outside |
+| `g.tan` | Unit tangent of the centre line, the direction `t` grows. Inside a rounded cap it is perpendicular to the radius from the end point, so `(tan.y, -tan.x)` points away from it; below the axis `tan` and `cross` both flip sign at the cap's edge. Their product `cross * (tan.y, -tan.x)` and anything that depends only on `abs(cross)` stay continuous there, but a shader keyed on the sign of `cross` alone, or on `tan` alone, shows a seam |
+| `g.px` | One device pixel in the units of `d`, so `2.0 * g.px` is two pixels at any backing scale |
+| `g.valid` | `0` for degenerate geometry (no sweep, no length, no band width); ignore the other fields then |
+
+The shader runs over the whole draw rect and is responsible for its own
+coverage, for example `clamp(0.5 - g.d / g.px, 0.0, 1.0)`.
+
+| Shape | Centre line | `t` | Notes |
+|---|---|---|---|
+| `flat_arc` | arc of radius `(outer + inner) / 2` from `arc_start`, sweeping `arc_sweep` | 0 at `arc_start` | flat caps |
+| `ring` | full circle starting at `arc_start` | wraps from 1 to 0 at `arc_start` | no caps |
+| `flat_segment` | horizontal line through the centre, `halfSize.x` each side | 0 at the left end | band half width `stroke_width / 2`, flat caps |
+| `rounded_segment` | as `flat_segment` | as `flat_segment` | rounded caps, each a dome about its end point: `cross` is the distance from the end point and `tan` turns so the normal points away from it |
+| `stadium` | horizontal line between the two cap centres | 0 at the left cap | half width is half the height; caps are domes as for `rounded_segment`; a stadium whose width does not exceed its height is a circle and reports `valid = 0` |
+
+Every chart matches the shape `draw_sdf_shape` draws for the same
+`SDFStyle`. The horizontal shapes are horizontal in the canvas's local space;
+draw a vertical track by rotating the canvas. `arc`, `quadratic_bezier` and
+the filled shapes have no chart and are refused by name, at compile time
+(`Canvas::compile_sdf_chart_sksl`) and at draw time. A Bezier's arc length has
+no closed form, so it has no `t`.
+
+From JS, `setWidgetShaderChart(id, source)` installs a chart shader on a knob,
+whose arc is the `flat_arc` from `Knob::start_angle` to `Knob::end_angle`. A
+chart shader paints the knob's material, the same full arc at every value, so
+something else must show the value. With a chart alone the knob draws its
+rotating value pointer over it. With a chart and a body shader, the body shader
+paints over the chart and owns the value display, so no pointer is drawn; give
+it transparent areas where the chart should show through. If the chart draw is
+refused, the body shader paints alone.
+
+### Feather modes and the `reach` rule
+
+A chart draw can be feathered analytically (no blur pass). From JS the
+feather is declared with the shape, `setWidgetShader(id, source, { geometry:
+{ shape: 'flat_arc' }, feather: { sigma: 6, curve: 'gaussian', mode: 'glow' } })`;
+in C++ it is `SDFStyle::feather_sigma`, `feather_curve` (0 Gaussian, 1 linear)
+and `feather_mode`:
+
+| Mode | Coverage |
+|---|---|
+| `uniform` (0) | soft edge on both sides of the outline |
+| `glow` (1) | solid inside, falloff outside |
+| `inner` (2) | falloff inside only |
+| `outer` (3) | outside only, like a drop shadow of the shape |
+| `inset` (4) | inside only, darkest at the outline |
+| `radial` (5) / `sweep` (6) | sigma scaled by the distance across or along the band |
+
+The shader is evaluated over the shape's rect grown by **`reach`** on every
+side, so anything painted outside the shape (a glow, an outer feather, a
+preset's halo) needs reach to land in. A `glow` or `outer` feather whose reach
+is below three sigma is **refused**, not drawn with its falloff cut off at the
+rect edge: `draw_sdf_shape_with_shader` returns false and the widget paints its
+body shader or default body instead, logging why once.
+`Canvas::sdf_feather_min_reach(style)` returns the floor without drawing. From
+JS, `feather.sigma` raises the reach to `ceil(3 * sigma)` automatically, and
+`setWidgetShaderReach(id, px)` sets it explicitly.
+
+### Named presets
+
+Six ready-made chart shaders cover the common hardware looks. Each is plain
+SkSL defining `shade(PulpChart g)` with its options baked in as constants, so
+it works on every charted shape and can be printed, copied and edited.
+
+| Preset | Look | Options it reads |
+|---|---|---|
+| `bevel` | a plate whose edges catch the light; `pressed` sinks it | `color`, `light`, `elevation`, `pressed`, `bevelWidth` |
+| `inset-channel` | a recessed track: walls facing inward, a shadowed floor | `color`, `light`, `elevation`, `bevelWidth` |
+| `tube` | a solid rail with a specular highlight | `color`, `light`, `elevation`, `profile`, `intensity` |
+| `light-pipe` | an emissive LED pipe, brightest where it is thickest, with a glint | `accent`, `light`, `elevation`, `profile`, `intensity` |
+| `centre-highlight` | a bright line along the centre of the band (`center-highlight` also accepted) | `color`, `accent`, `intensity` |
+| `glow` | an opaque core with a Gaussian halo outside the band | `accent`, `intensity`, `sigma` (at most 256) |
+
+`profile` is the cross-section: `round` (a cylinder), `flat` (a flat face with
+narrow rounded rims) or `chamfer` (a flat centre with 45 degree chamfers).
+`light` is the direction the light comes from in degrees counter-clockwise
+from the right (90 is above, 270 below; default 120, upper left) and
+`elevation` its height above the surface (default 45). Colours are CSS colour
+strings.
+
+```js
+// Install on a knob. A glow's extra reach belongs to the chart: it pads only the
+// chart draw and is replaced when another chart or preset is installed.
+setWidgetShaderChartPreset('drive', 'light-pipe', { accent: '#5ab0ff', profile: 'round' });
+
+// Or get the source to inspect or edit.
+const { success, sksl, reach } = getShaderChartPreset('bevel', { light: 90, pressed: true });
+```
+
+```cpp
+#include <pulp/view/chart_shader_presets.hpp>
+
+pulp::view::ChartShaderPresetOptions o;
+o.profile = pulp::view::ChartProfile::chamfer;
+auto preset = pulp::view::make_chart_shader_preset("tube", o);  // .sksl, .reach, .error
+pulp::canvas::Canvas::ShaderDrawOptions draw;
+draw.reach = preset.reach;
+canvas.draw_sdf_shape_with_shader(pulp::canvas::Canvas::SDFShape::rounded_segment,
+                                  x, y, w, h, style, preset.sksl, draw);
+```
+
+The shading model: `u = cross / halfWidth` runs across the band, the profile
+gives a surface height over `u`, and its slope tilts the surface normal along
+the chart normal. A directional light shades it with Lambert diffuse, divided
+by the value for a face toward the viewer so a flat face shows exactly the
+authored colour, plus a Blinn-Phong highlight. All of it happens in linear
+light: colours are decoded from sRGB first and encoded once at the end, since
+lighting sRGB values directly looks plausible and is wrong. The light lives in
+the canvas's local space, so a rotated draw rotates it too.
+
+Options are baked into the source, and each distinct source compiles once and
+is cached; build presets when the look changes, not every frame. The widget
+gallery's "Shader presets" row renders each one.
+
 ## Performance notes
 
 - SkSL is compiled **once per source string per process**, then cached

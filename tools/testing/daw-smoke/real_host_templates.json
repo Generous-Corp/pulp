@@ -1,0 +1,49 @@
+{
+  "schema": "pulp.gpu-fault.real-host-templates.v1",
+  "_comment": "The throwaway projects real_host_smoke.py copies per run (WP-K). Authored once per host with cmux-cua (accessibility actions only), in a temp directory, never under ~/Music; each template is then fingerprinted with `real_host_smoke.py template-manifest` and `stage` refuses a template whose fingerprint changed. Every requirement below is re-checked by accessibility snapshot before each run; a mismatch stops the run before playback.",
+  "common": {
+    "sample_rate": 48000,
+    "tempo_bpm": 120,
+    "tracks": "exactly one stereo audio track",
+    "insert_1": "Pulp GPU Fault Continuity (the run's format); no other plug-in anywhere in the project",
+    "master": "no plug-ins; unity gain; no limiter",
+    "track_region": "playback templates: one region holding the run's stimulus.wav at project sample 0 (the harness replaces the file before each run); live templates: no region"
+  },
+  "kinds": {
+    "playback": {
+      "track_input": "No Input",
+      "input_monitoring": "off",
+      "record_armed": false,
+      "plugin_input": "host (the region feeds the plug-in; captured input must equal stimulus.wav)"
+    },
+    "live": {
+      "track_input": "No Input",
+      "input_monitoring": "off",
+      "record_armed": true,
+      "plugin_input": "internal (the plug-in generates its stimulus; nothing from an input device can reach it)"
+    }
+  },
+  "hosts": {
+    "logic": {
+      "project": "WPK-<kind>.logicx",
+      "settings": {
+        "process_buffer_range": "recorded, not changed (read from Logic's preferences before the run)",
+        "low_latency_mode": "off",
+        "bounce": "File > Bounce > Project or Section: PCM, 32-bit float, 48 kHz, Realtime for the fault pass, Offline for the cross-check; destination typed as the run directory"
+      }
+    },
+    "garageband": {
+      "project": "WPK-<kind>.band",
+      "settings": {
+        "export": "Share > Export Song to Disk (offline only: GarageBand cells are capped at plug-in capture only)"
+      }
+    },
+    "bitwig": {
+      "project": "WPK-<kind>.bwproject",
+      "settings": {
+        "plugin_hosting_mode": "per column: 'Within Bitwig' or 'Individually'; prefs snapshotted and restored by the driver",
+        "export": "File > Export Audio: 32-bit float, 48 kHz, Realtime for the fault pass, Offline for the cross-check"
+      }
+    }
+  }
+}

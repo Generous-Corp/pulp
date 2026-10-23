@@ -1,18 +1,19 @@
 // Content-keyed inline image cache on a live offscreen Dawn + Skia Graphite
 // surface.
 //
-// An inline image (an ImageView with a `data:image/png` source, or a
-// SceneImage holding an encoded blob) keeps its encoded bytes in memory and
-// draws them every paint. On Graphite each uncached draw decodes the PNG and
+// An inline image (an ImageView with a `data:image/*` source in any format
+// Skia decodes, a SceneImage holding an encoded blob, or a Knob/Fader sprite
+// strip loaded from bytes) keeps its encoded bytes in memory and draws them
+// every paint. On Graphite each uncached draw decodes the PNG and
 // uploads a fresh texture. The keyed draw path routes those bytes through
 // ImageFileCache under a SHA-256 content key, so the decode and upload happen
 // once per (content, backend). These cases prove the reuse with the cache's own
 // build/hit counters, prove the counters can see the failure by disabling the
 // cache, and prove the cached frames are pixel-identical to the uncached ones.
 //
-// The timing case is tagged [bench]: it prints CPU wall time per frame for a
-// retina-sized inline PNG with the cache on and off, and asserts only that both
-// modes produced samples. Every case soft-skips without a Dawn adapter.
+// The timing cases are tagged [bench]: they print CPU wall time per frame for
+// a retina-sized inline PNG and for a sprite strip with the cache on and off,
+// and assert only that the cached mode built once. Every case soft-skips without a Dawn adapter.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,9 +21,11 @@
 #include <pulp/canvas/scene/scene_image.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/view/sprite_strip.hpp>
 #include <pulp/view/widgets.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -36,11 +39,14 @@
 #include <pulp/render/skia_surface.hpp>
 
 #include "include/core/SkCanvas.h"
+#include "include/core/SkColor.h"
 #include "include/core/SkData.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPixmap.h"
+#include "include/core/SkStream.h"
 #include "include/core/SkSurface.h"
+#include "include/encode/SkJpegEncoder.h"
 #include "include/encode/SkPngEncoder.h"
 #endif
 
@@ -371,6 +377,403 @@ TEST_CASE("Inline image paint cost per Graphite frame, cached and uncached",
                 "hits %llu\n",
                 kW * 2, kH * 2, png.size(), median(direct), median(uncached), median(cached),
                 static_cast<unsigned long long>(stats.builds),
+                static_cast<unsigned long long>(stats.hits));
+    CHECK(stats.builds == 1);
+}
+
+// ── Inline formats other than PNG ───────────────────────────────────────────
+
+namespace {
+
+// 16x8, left half red, right half blue. Skia in this build decodes WebP and
+// GIF but has no encoder for either, so the bytes are fixed here.
+const std::vector<uint8_t> kSplitWebpLossless = {
+    0x52, 0x49, 0x46, 0x46, 0x26, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x4c,
+    0x19, 0x00, 0x00, 0x00, 0x2f, 0x0f, 0xc0, 0x01, 0x00, 0x0f, 0x10, 0xf3, 0xbf, 0xff, 0xf3, 0x1f,
+    0x0e, 0xc4, 0x82, 0xc9, 0xfc, 0xa5, 0x3b, 0x53, 0x88, 0xe8, 0x7f, 0xe4, 0x00, 0x00};
+const std::vector<uint8_t> kSplitGif = {
+    0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x10, 0x00, 0x08, 0x00, 0x81, 0x00, 0x00, 0xff, 0x00,
+    0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00,
+    0x10, 0x00, 0x08, 0x00, 0x00, 0x08, 0x24, 0x00, 0x01, 0x08, 0x1c, 0x28, 0x30, 0x80, 0xc1,
+    0x83, 0x06, 0x09, 0x12, 0x44, 0x88, 0x50, 0xe1, 0x40, 0x86, 0x07, 0x1d, 0x16, 0x84, 0x18,
+    0x40, 0x22, 0x00, 0x8a, 0x15, 0x25, 0x62, 0xb4, 0xb8, 0x51, 0x23, 0xc5, 0x80, 0x00, 0x3b};
+
+// The same split image as a JPEG at full quality.
+std::vector<uint8_t> make_split_jpeg(int w, int h) {
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(w, h));
+    if (!surface)
+        return {};
+    auto* c = surface->getCanvas();
+    SkPaint p;
+    p.setColor(SK_ColorRED);
+    c->drawRect(SkRect::MakeXYWH(0, 0, w / 2.0f, static_cast<float>(h)), p);
+    p.setColor(SK_ColorBLUE);
+    c->drawRect(SkRect::MakeXYWH(w / 2.0f, 0, w / 2.0f, static_cast<float>(h)), p);
+    SkPixmap pm;
+    if (!surface->peekPixels(&pm))
+        return {};
+    SkJpegEncoder::Options options;
+    options.fQuality = 100;
+    SkDynamicMemoryWStream stream;
+    if (!SkJpegEncoder::Encode(&stream, pm, options))
+        return {};
+    auto data = stream.detachAsData();
+    const auto* bytes = static_cast<const uint8_t*>(data->data());
+    return std::vector<uint8_t>(bytes, bytes + data->size());
+}
+
+std::string data_uri(const char* media_type, const std::vector<uint8_t>& bytes) {
+    return std::string("data:") + media_type + ";base64," +
+           runtime::base64_encode(bytes.data(), bytes.size());
+}
+
+struct Rgba {
+    int r, g, b;
+};
+
+Rgba pixel_at(const std::vector<uint8_t>& px, int width, int x, int y) {
+    const size_t i = (static_cast<size_t>(y) * width + x) * 4;
+    return {px[i], px[i + 1], px[i + 2]};
+}
+
+bool near(Rgba a, Rgba b, int tolerance) {
+    return std::abs(a.r - b.r) <= tolerance && std::abs(a.g - b.g) <= tolerance &&
+           std::abs(a.b - b.b) <= tolerance;
+}
+
+constexpr Rgba kBackground{16, 18, 26};
+
+} // namespace
+
+TEST_CASE("ImageView JPEG, WebP and GIF data URIs draw at their decoded size and hit the cache",
+          "[gpu][skia][image-cache][inline-image][image-view]") {
+    CacheEnabledRestore restore_cache;
+    constexpr int kSize = 200;
+    auto f = make_fixture(kSize, kSize);
+    if (!usable(f))
+        SKIP("Dawn/Graphite unavailable on this host.");
+
+    struct Format {
+        const char* media_type;
+        std::vector<uint8_t> bytes;
+        int tolerance; // JPEG is lossy; the lossless formats are exact
+    };
+    const std::vector<Format> formats = {
+        {"image/jpeg", make_split_jpeg(64, 32), 24},
+        {"image/webp", kSplitWebpLossless, 0},
+        {"image/gif", kSplitGif, 0},
+    };
+    for (const auto& format : formats) {
+        INFO(format.media_type);
+        REQUIRE_FALSE(format.bytes.empty());
+        view::ImageView image;
+        image.set_bounds({0, 0, kSize, kSize});
+        // contain places a 2:1 image in the middle half of the square box, so the
+        // bands above and below stay background only if the decoded size is used.
+        image.set_object_fit("contain");
+        image.set_image_source(data_uri(format.media_type, format.bytes));
+
+        reset_cache(false);
+        std::vector<uint8_t> reference;
+        if (!paint_frame(f, [&](canvas::Canvas& c) { image.paint(c); }, &reference))
+            SKIP("GPU readback failed (no adapter).");
+        if (near(pixel_at(reference, kSize, 50, 100), kBackground, 4))
+            SKIP("Offscreen GPU composited nothing (no real adapter).");
+        CHECK(near(pixel_at(reference, kSize, 50, 100), {255, 0, 0}, format.tolerance));
+        CHECK(near(pixel_at(reference, kSize, 150, 100), {0, 0, 255}, format.tolerance));
+        CHECK(near(pixel_at(reference, kSize, 100, 20), kBackground, 0));
+        CHECK(near(pixel_at(reference, kSize, 100, 180), kBackground, 0));
+
+        reset_cache(true);
+        std::vector<uint8_t> cached;
+        for (int frame = 0; frame < kFrames; ++frame) {
+            REQUIRE(paint_frame(f, [&](canvas::Canvas& c) { image.paint(c); }, &cached));
+            CHECK(max_channel_delta(reference, cached) == 0);
+        }
+        const auto stats = canvas::ImageFileCache::instance().inline_stats();
+        CHECK(stats.builds == 1);
+        CHECK(stats.hits == kFrames - 1);
+    }
+}
+
+TEST_CASE("ImageView percent-encoded PNG data URI draws and hits the cache",
+          "[gpu][skia][image-cache][inline-image][image-view]") {
+    CacheEnabledRestore restore_cache;
+    // RFC 2397: a payload without ;base64 is percent-encoded octets.
+    constexpr int kSize = 128;
+    auto f = make_fixture(kSize, kSize);
+    if (!usable(f))
+        SKIP("Dawn/Graphite unavailable on this host.");
+    const auto png = make_png(64, 64, SK_ColorYELLOW);
+    REQUIRE_FALSE(png.empty());
+    std::string uri = "data:image/png,";
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    for (uint8_t byte : png) {
+        if (std::isalnum(byte) || byte == '-' || byte == '.' || byte == '_' || byte == '~') {
+            uri.push_back(static_cast<char>(byte));
+        } else {
+            uri.push_back('%');
+            uri.push_back(kHex[byte >> 4]);
+            uri.push_back(kHex[byte & 0x0f]);
+        }
+    }
+    view::ImageView image;
+    image.set_bounds({0, 0, kSize, kSize});
+    image.set_image_source(uri);
+    view::ImageView base64_image;
+    base64_image.set_bounds({0, 0, kSize, kSize});
+    base64_image.set_image_source(data_uri(png));
+
+    reset_cache(false);
+    std::vector<uint8_t> reference;
+    if (!paint_frame(f, [&](canvas::Canvas& c) { base64_image.paint(c); }, &reference))
+        SKIP("GPU readback failed (no adapter).");
+    if (red_pixels(reference) == 0)
+        SKIP("Offscreen GPU composited nothing (no real adapter).");
+
+    reset_cache(true);
+    std::vector<uint8_t> cached;
+    for (int frame = 0; frame < kFrames; ++frame) {
+        REQUIRE(paint_frame(f, [&](canvas::Canvas& c) { image.paint(c); }, &cached));
+        CHECK(max_channel_delta(reference, cached) == 0);
+    }
+    const auto stats = canvas::ImageFileCache::instance().inline_stats();
+    CHECK(stats.builds == 1);
+    CHECK(stats.hits == kFrames - 1);
+}
+
+TEST_CASE("ImageView with an undecodable inline payload attempts one decode and paints a "
+          "stable placeholder",
+          "[gpu][skia][image-cache][inline-image][image-view]") {
+    CacheEnabledRestore restore_cache;
+    // Planted negative for the formats case: bytes no decoder accepts must not
+    // draw image content, must not be retried every paint, and must not be
+    // cached.
+    constexpr int kSize = 128;
+    auto f = make_fixture(kSize, kSize);
+    if (!usable(f))
+        SKIP("Dawn/Graphite unavailable on this host.");
+    const std::vector<uint8_t> junk = {'n', 'o', 't', ' ', 'a', 'n', ' ', 'i', 'm', 'a',
+                                       'g', 'e', ',', ' ', 'j', 'u', 's', 't', ' ', 't',
+                                       'e', 'x', 't', ' ', 'b', 'y', 't', 'e', 's', '.'};
+    view::ImageView image;
+    image.set_bounds({0, 0, kSize, kSize});
+    image.set_image_source(data_uri("image/jpeg", junk));
+
+    reset_cache(true);
+    std::vector<uint8_t> first;
+    if (!paint_frame(f, [&](canvas::Canvas& c) { image.paint(c); }, &first))
+        SKIP("GPU readback failed (no adapter).");
+    CHECK(red_pixels(first) == 0);
+    std::vector<uint8_t> later;
+    for (int frame = 1; frame < kFrames; ++frame) {
+        REQUIRE(paint_frame(f, [&](canvas::Canvas& c) { image.paint(c); }, &later));
+        CHECK(max_channel_delta(first, later) == 0);
+    }
+    const auto stats = canvas::ImageFileCache::instance().inline_stats();
+    CHECK(stats.builds == 1);
+    CHECK(stats.hits == 0);
+    CHECK(stats.size == 0);
+}
+
+// ── Sprite strips holding encoded bytes ─────────────────────────────────────
+
+namespace {
+
+// Solid colour of frame @p i in the strips below.
+SkColor strip_frame_color(int i) {
+    static constexpr SkColor kColors[] = {SK_ColorRED, SK_ColorGREEN, SK_ColorBLUE, SK_ColorYELLOW};
+    return kColors[i % 4];
+}
+
+// A vertical strip of @p frames solid-colour frames encoded as PNG. Flat
+// colour compresses to a few hundred bytes, far less than one frame's RGBA
+// size, so every frame after the first lies past the encoded byte length.
+std::vector<uint8_t> make_strip_png(int fw, int fh, int frames) {
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32(fw, fh * frames, kOpaque_SkAlphaType));
+    if (!surface)
+        return {};
+    auto* c = surface->getCanvas();
+    SkPaint p;
+    for (int i = 0; i < frames; ++i) {
+        p.setColor(strip_frame_color(i));
+        c->drawRect(SkRect::MakeXYWH(0, static_cast<float>(fh * i), static_cast<float>(fw),
+                                     static_cast<float>(fh)),
+                    p);
+    }
+    auto data =
+        SkPngEncoder::Encode(nullptr, surface->makeImageSnapshot().get(), SkPngEncoder::Options{});
+    if (!data)
+        return {};
+    const auto* bytes = static_cast<const uint8_t*>(data->data());
+    return std::vector<uint8_t>(bytes, bytes + data->size());
+}
+
+std::shared_ptr<view::SpriteStrip> make_encoded_strip(int fw, int fh, int frames) {
+    const auto png = make_strip_png(fw, fh, frames);
+    if (png.empty())
+        return nullptr;
+    auto strip = std::make_shared<view::SpriteStrip>();
+    strip->load(png.data(), png.size(), fw, fh * frames, frames);
+    return strip;
+}
+
+size_t non_background_pixels(const std::vector<uint8_t>& px) {
+    size_t n = 0;
+    for (size_t i = 0; i + 3 < px.size(); i += 4)
+        if (!near({px[i], px[i + 1], px[i + 2]}, kBackground, 2))
+            ++n;
+    return n;
+}
+
+} // namespace
+
+TEST_CASE("Knob and Fader sprite strips decode their encoded bytes once across Graphite paints",
+          "[gpu][skia][image-cache][inline-image][sprite]") {
+    CacheEnabledRestore restore_cache;
+    constexpr int kSize = 96;
+    auto f = make_fixture(kSize, kSize);
+    if (!usable(f))
+        SKIP("Dawn/Graphite unavailable on this host.");
+    auto strip = make_encoded_strip(48, 48, 4);
+    REQUIRE(strip);
+    REQUIRE(strip->data_key() == runtime::sha256_hex(strip->data(), strip->data_size()));
+
+    view::Knob knob;
+    knob.set_bounds({0, 0, kSize, kSize});
+    knob.set_value(0.0f);
+    knob.set_sprite_strip(strip);
+    view::Fader fader;
+    fader.set_bounds({0, 0, kSize, kSize});
+    fader.set_value(0.0f);
+    fader.set_sprite_strip(strip);
+
+    for (view::View* widget : {static_cast<view::View*>(&knob), static_cast<view::View*>(&fader)}) {
+        INFO((widget == &knob ? "Knob" : "Fader"));
+        reset_cache(false);
+        std::vector<uint8_t> reference;
+        if (!paint_frame(f, [&](canvas::Canvas& c) { widget->paint(c); }, &reference))
+            SKIP("GPU readback failed (no adapter).");
+        if (non_background_pixels(reference) < static_cast<size_t>(kSize * kSize / 2))
+            SKIP("Offscreen GPU composited nothing (no real adapter).");
+
+        reset_cache(true);
+        std::vector<uint8_t> cached;
+        for (int frame = 0; frame < kFrames; ++frame) {
+            REQUIRE(paint_frame(f, [&](canvas::Canvas& c) { widget->paint(c); }, &cached));
+            CHECK(max_channel_delta(reference, cached) == 0);
+        }
+        const auto stats = canvas::ImageFileCache::instance().inline_stats();
+        CHECK(stats.builds == 1);
+        CHECK(stats.hits == kFrames - 1);
+    }
+}
+
+TEST_CASE("Knob and Fader draw the last frame of a compressed sprite strip",
+          "[gpu][skia][inline-image][sprite]") {
+    // The last frame starts far past the encoded byte length. Bounding frames
+    // by the byte count, as for raw RGBA pixels, skips it and draws nothing.
+    constexpr int kSize = 96;
+    constexpr int kFrameSize = 48;
+    constexpr int kFrameCount = 4;
+    auto f = make_fixture(kSize, kSize);
+    if (!usable(f))
+        SKIP("Dawn/Graphite unavailable on this host.");
+    auto strip = make_encoded_strip(kFrameSize, kFrameSize, kFrameCount);
+    REQUIRE(strip);
+    const size_t last_frame_offset =
+        static_cast<size_t>(kFrameSize) * kFrameSize * 4u * (kFrameCount - 1);
+    REQUIRE(strip->data_size() < last_frame_offset);
+
+    view::Knob knob;
+    knob.set_bounds({0, 0, kSize, kSize});
+    knob.set_value(1.0f);
+    knob.set_sprite_strip(strip);
+    view::Fader fader;
+    fader.set_bounds({0, 0, kSize, kSize});
+    fader.set_value(1.0f);
+    fader.set_sprite_strip(strip);
+    REQUIRE(strip->frame_for_value(1.0f) == kFrameCount - 1);
+
+    const SkColor last = strip_frame_color(kFrameCount - 1);
+    const Rgba expected{static_cast<int>(SkColorGetR(last)), static_cast<int>(SkColorGetG(last)),
+                        static_cast<int>(SkColorGetB(last))};
+    for (view::View* widget : {static_cast<view::View*>(&knob), static_cast<view::View*>(&fader)}) {
+        INFO((widget == &knob ? "Knob" : "Fader"));
+        std::vector<uint8_t> px;
+        if (!paint_frame(f, [&](canvas::Canvas& c) { widget->paint(c); }, &px))
+            SKIP("GPU readback failed (no adapter).");
+        CHECK(near(pixel_at(px, kSize, kSize / 2, kSize / 2), expected, 0));
+    }
+}
+
+TEST_CASE("Disabling the image cache decodes a sprite strip on every Graphite paint",
+          "[gpu][skia][image-cache][inline-image][sprite]") {
+    CacheEnabledRestore restore_cache;
+    // Planted negative for the sprite counters above.
+    constexpr int kSize = 96;
+    auto f = make_fixture(kSize, kSize);
+    if (!usable(f))
+        SKIP("Dawn/Graphite unavailable on this host.");
+    auto strip = make_encoded_strip(48, 48, 4);
+    REQUIRE(strip);
+    view::Knob knob;
+    knob.set_bounds({0, 0, kSize, kSize});
+    knob.set_value(0.0f);
+    knob.set_sprite_strip(strip);
+    reset_cache(false);
+    for (int frame = 0; frame < kFrames; ++frame) {
+        if (!paint_frame(f, [&](canvas::Canvas& c) { knob.paint(c); }))
+            SKIP("GPU frame failed (no adapter).");
+    }
+    const auto stats = canvas::ImageFileCache::instance().inline_stats();
+    CHECK(stats.builds == kFrames);
+    CHECK(stats.hits == 0);
+}
+
+TEST_CASE("Sprite strip paint cost per Graphite frame, cached and uncached",
+          "[gpu][skia][image-cache][inline-image][sprite][bench]") {
+    CacheEnabledRestore restore_cache;
+    // A 128 px knob filmstrip of 32 frames held as encoded PNG bytes.
+    // Uncached, every paint decodes and uploads the whole strip to show one
+    // frame.
+    constexpr int kSize = 128;
+    auto f = make_fixture(kSize, kSize);
+    if (!usable(f))
+        SKIP("Dawn/Graphite unavailable on this host.");
+    auto strip = make_encoded_strip(kSize, kSize, 32);
+    REQUIRE(strip);
+    view::Knob knob;
+    knob.set_bounds({0, 0, kSize, kSize});
+    knob.set_value(0.0f);
+    knob.set_sprite_strip(strip);
+    std::vector<uint8_t> px;
+    auto run = [&](bool cached) {
+        reset_cache(cached);
+        std::vector<double> ms;
+        for (int i = 0; i < 25; ++i) {
+            const auto t0 = std::chrono::steady_clock::now();
+            if (!paint_frame(f, [&](canvas::Canvas& c) { knob.paint(c); }, &px))
+                return ms;
+            const auto t1 = std::chrono::steady_clock::now();
+            if (i >= 5)
+                ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+        }
+        return ms;
+    };
+    auto median = [](std::vector<double> v) {
+        std::sort(v.begin(), v.end());
+        return v.empty() ? 0.0 : v[v.size() / 2];
+    };
+    const auto uncached = run(false);
+    const auto cached = run(true);
+    const auto stats = canvas::ImageFileCache::instance().inline_stats();
+    if (uncached.empty() || cached.empty())
+        SKIP("GPU frame failed (no adapter).");
+    std::printf("sprite strip %dx%d (%zu encoded bytes): cache disabled %.3f ms/frame, cached "
+                "%.3f ms/frame, cached builds %llu hits %llu\n",
+                strip->total_width(), strip->total_height(), strip->data_size(), median(uncached),
+                median(cached), static_cast<unsigned long long>(stats.builds),
                 static_cast<unsigned long long>(stats.hits));
     CHECK(stats.builds == 1);
 }

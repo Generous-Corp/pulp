@@ -1,4 +1,5 @@
 {
+  "schema": "pulp.vellum.closure.v1",
   "source_root": ".",
   "missing_targets": [],
   "targets": [],

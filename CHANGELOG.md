@@ -9,6 +9,74 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v010160"></a>
+## [0.1016.0] - 2026-10-23
+
+- release/version bump ([#10843](https://github.com/Generous-Corp/pulp/pull/10843))
+- fix/android midi jni exports ([#10783](https://github.com/Generous-Corp/pulp/pull/10783))
+- feature/ux w1 i chart shapes 20261022 ([#10778](https://github.com/Generous-Corp/pulp/pull/10778))
+
+<a id="v010150"></a>
+## [0.1015.0] - 2026-10-23
+
+- release/version bump ([#10841](https://github.com/Generous-Corp/pulp/pull/10841))
+
+<a id="v010140"></a>
+## [0.1014.0] - 2026-10-23
+
+- release/version bump ([#10816](https://github.com/Generous-Corp/pulp/pull/10816))
+- perf/adaptive convolver 20261021 ([#10624](https://github.com/Generous-Corp/pulp/pull/10624))
+- feature/import layout parity capture ([#10805](https://github.com/Generous-Corp/pulp/pull/10805))
+- fix/g6 boundary guards 20261023 ([#10812](https://github.com/Generous-Corp/pulp/pull/10812))
+- ci/base health main push ([#10811](https://github.com/Generous-Corp/pulp/pull/10811))
+- feature/ux w2 e1 dispatch batch 20261023 ([#10807](https://github.com/Generous-Corp/pulp/pull/10807))
+- feature/ux w2 e2 suspense visibility 20261023 ([#10806](https://github.com/Generous-Corp/pulp/pull/10806))
+- feature/gpu audio wp p provider conformance 20261022 ([#10668](https://github.com/Generous-Corp/pulp/pull/10668))
+- feature/toolchain host sync ([#10789](https://github.com/Generous-Corp/pulp/pull/10789))
+- feature/importer region coverage 20261023 ([#10794](https://github.com/Generous-Corp/pulp/pull/10794))
+- codex/signalgraph executor followup 20261023 ([#10810](https://github.com/Generous-Corp/pulp/pull/10810))
+
+<a id="v010130"></a>
+## [0.1013.0] - 2026-10-23
+
+- release/version bump ([#10814](https://github.com/Generous-Corp/pulp/pull/10814))
+- fix/biquad history small a2 20261023 ([#10785](https://github.com/Generous-Corp/pulp/pull/10785))
+- plan/importer next 20261021 reconcile ([#10701](https://github.com/Generous-Corp/pulp/pull/10701))
+- asr/importer cdp pipe 20261022 ([#10777](https://github.com/Generous-Corp/pulp/pull/10777))
+- feature/vellum p4 view native carve ([#10788](https://github.com/Generous-Corp/pulp/pull/10788))
+- feature/msvc compile fixes 20261023 ([#10787](https://github.com/Generous-Corp/pulp/pull/10787))
+- asr/rack download consent 20261022 ([#10757](https://github.com/Generous-Corp/pulp/pull/10757))
+
+<a id="v010120"></a>
+## [0.1012.0] - 2026-10-23
+
+- release/version bump ([#10804](https://github.com/Generous-Corp/pulp/pull/10804))
+- ci/a2t headroom tracking issue ([#10786](https://github.com/Generous-Corp/pulp/pull/10786))
+- codex/signalgraph live swap 20261022 ([#10774](https://github.com/Generous-Corp/pulp/pull/10774))
+- feature/gpu audio wp k real hosts 20261022 ([#10745](https://github.com/Generous-Corp/pulp/pull/10745))
+
+<a id="v010110"></a>
+## [0.1011.0] - 2026-10-23
+
+- release/version bump ([#10796](https://github.com/Generous-Corp/pulp/pull/10796))
+- fix/gpu wavenet history bound 20261022 ([#10784](https://github.com/Generous-Corp/pulp/pull/10784))
+- feature/ux w1 g asimage 20261022 ([#10780](https://github.com/Generous-Corp/pulp/pull/10780))
+- feature/ux w1 h style reset 20261022 ([#10775](https://github.com/Generous-Corp/pulp/pull/10775))
+- perf/ui perf 20261021 ([#10692](https://github.com/Generous-Corp/pulp/pull/10692))
+- feature/ux w0 d image cache 20261022 ([#10660](https://github.com/Generous-Corp/pulp/pull/10660))
+- fix/a2t scope history repin 20261022 ([#10772](https://github.com/Generous-Corp/pulp/pull/10772))
+- feature/attack surface phase0 20261022 ([#10744](https://github.com/Generous-Corp/pulp/pull/10744))
+
+<a id="v010100"></a>
+## [0.1010.0] - 2026-10-23
+
+- release/version bump ([#10769](https://github.com/Generous-Corp/pulp/pull/10769))
+- fix/host ccache config isolation ([#10760](https://github.com/Generous-Corp/pulp/pull/10760))
+- feature/ux w0 f inert attrib 20261022 ([#10662](https://github.com/Generous-Corp/pulp/pull/10662))
+- asr/consumers 20261022 ([#10749](https://github.com/Generous-Corp/pulp/pull/10749))
+- fix/gpu audio msvc incomplete session 20261022 ([#10752](https://github.com/Generous-Corp/pulp/pull/10752))
+- ci/selector path refs ([#10750](https://github.com/Generous-Corp/pulp/pull/10750))
+
 <a id="v010090"></a>
 ## [0.1009.0] - 2026-10-22
 
@@ -11322,6 +11390,13 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.1016.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1016.0
+[0.1015.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1015.0
+[0.1014.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1014.0
+[0.1013.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1013.0
+[0.1012.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1012.0
+[0.1011.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1011.0
+[0.1010.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1010.0
 [0.1009.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1009.0
 [0.1008.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1008.0
 [0.1007.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1007.0

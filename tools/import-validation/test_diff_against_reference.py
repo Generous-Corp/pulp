@@ -34,8 +34,9 @@ from importer_differential.core import (  # noqa: E402
     NativeNode,
     authenticated_authored_origin,
     document_canvas_background,
-    geometry_metrics,
+    geometry_metrics_with_registration,
     promotion_recommendation,
+    register_browser_nodes_to_native_frame,
 )
 
 
@@ -106,6 +107,21 @@ class HelperScoringTests(unittest.TestCase):
     def _capture(x: float, y: float) -> dict[str, object]:
         return {"reference": {"authored_frame": {"x": x, "y": y}}}
 
+    def test_authenticated_frame_registers_page_bounds_to_panel_origin(self) -> None:
+        node = BrowserNode(1, "main", -1, "", {}, (45.0, 81.0, 320.0, 18.0), {})
+        registered, metadata = register_browser_nodes_to_native_frame(
+            [node], self._capture(24.0, 24.0), self._capture(24.0, 24.0))
+        self.assertEqual(registered[0].bounds, (21.0, 57.0, 320.0, 18.0))
+        self.assertEqual(metadata["x"], -24.0)
+        self.assertEqual(metadata["y"], -24.0)
+
+    def test_zero_frame_is_identity(self) -> None:
+        nodes = [BrowserNode(1, "main", -1, "", {}, (0.0, 0.0, 320.0, 18.0), {})]
+        registered, metadata = register_browser_nodes_to_native_frame(
+            nodes, self._capture(0.0, 0.0), self._capture(0.0, 0.0))
+        self.assertIs(registered, nodes)
+        self.assertEqual(metadata["x"], 0.0)
+
     def test_authenticated_origin_is_the_signed_authored_frame(self) -> None:
         self.assertEqual(
             authenticated_authored_origin(self._capture(24.0, 18.5), self._capture(24.0, 18.5)),
@@ -130,7 +146,13 @@ class HelperScoringTests(unittest.TestCase):
         native = NativeNode(
             "browser:main", "element", "main", "", None, {},
             (0.0, 0.0, 320.0, 18.0))
-        geometry = geometry_metrics([(browser, native, 1.0)])
+        raw_match = [(browser, native, 1.0)]
+        registered_browser = BrowserNode(
+            1, "main", -1, "", {}, (0.0, 0.0, 320.0, 18.0), {})
+        registered = [(registered_browser, native, 1.0)]
+        geometry = geometry_metrics_with_registration(
+            raw_match, registered, {"x": -24.0, "y": -24.0},
+            reference_nodes=[registered_browser])
         self.assertLess(geometry["score"], 1.0)
         recommendation = promotion_recommendation(
             [],
@@ -142,6 +164,13 @@ class HelperScoringTests(unittest.TestCase):
         )
         self.assertFalse(recommendation["threshold_eligible"])
         self.assertFalse(recommendation["production_promotion_enabled"])
+        # Page-space geometry gates beside the registered checks: the unplaced
+        # panel fails it, and the missing frame placement proof fails too.
+        self.assertEqual(geometry["role"], "page-space-gated")
+        self.assertEqual(geometry["gate"]["failed"], ["page_space_mean", "frame_placement"])
+        self.assertIn("geometry score below 0.980", recommendation["reasons"])
+        self.assertIn("geometry gate failed: page_space_mean, frame_placement",
+                      recommendation["reasons"])
 
     @staticmethod
     def _canvas_snapshot(html: dict[str, str], body: dict[str, str]) -> dict[str, object]:
@@ -190,11 +219,43 @@ class HelperScoringTests(unittest.TestCase):
         self.assertEqual(result["color"], "rgb(16, 21, 34)")
 
     def test_transparent_root_and_body_stay_unresolved(self) -> None:
-        # The UA canvas colour follows the page's own color-scheme, which the
-        # capture does not record; the emulated preference is not enough.
+        # The UA canvas colour follows the page's own color-scheme; without
+        # the colour Chromium reported for it, the emulated preference is not
+        # enough.
         for scheme in ("light", "dark"):
             with self.subTest(scheme=scheme):
                 result = self._canvas({}, {}, scheme=scheme)
+                self.assertEqual(result["status"], "unresolved")
+                self.assertIsNone(result["color"])
+
+    def _canvas_with_report(self, html: dict[str, str], body: dict[str, str],
+                            report: object) -> dict[str, object]:
+        snapshot = self._canvas_snapshot(html, body)
+        snapshot["documentCanvas"] = report
+        return document_canvas_background(snapshot, {"provenance": {"color_scheme": "light"}})
+
+    def test_transparent_root_and_body_take_the_recorded_ua_canvas(self) -> None:
+        report = {"schema": "pulp-document-canvas-v1", "root_color_scheme": "dark",
+                  "canvas_color": "rgb(18, 18, 18)"}
+        self.assertEqual(self._canvas_with_report({}, {}, report), {
+            "status": "resolved", "source": "ua-canvas", "color": "rgb(18, 18, 18)",
+            "root_color_scheme": "dark"})
+        # An opaque root or body still paints the canvas itself.
+        result = self._canvas_with_report({}, {"background-color": "rgb(16, 21, 34)"}, report)
+        self.assertEqual(result["source"], "body-background")
+
+    def test_a_malformed_ua_canvas_report_stays_unresolved(self) -> None:
+        for report in (
+            None,
+            "rgb(18, 18, 18)",
+            {"schema": "pulp-document-canvas-v0", "canvas_color": "rgb(18, 18, 18)"},
+            {"schema": "pulp-document-canvas-v1", "canvas_color": None},
+            {"schema": "pulp-document-canvas-v1", "canvas_color": "rgba(18, 18, 18, 0.5)"},
+            {"schema": "pulp-document-canvas-v1", "canvas_color": "rgb(256, 0, 0)"},
+            {"schema": "pulp-document-canvas-v1", "canvas_color": "Canvas"},
+        ):
+            with self.subTest(report=report):
+                result = self._canvas_with_report({}, {}, report)
                 self.assertEqual(result["status"], "unresolved")
                 self.assertIsNone(result["color"])
 

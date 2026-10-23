@@ -121,6 +121,7 @@ void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
     // missing platform face or malformed capture must reject the boxes, but a
     // caller that observed wrappable browser text still needs normal reflow.
     captured_wrap_fallback_ = wrap_on_cache_miss;
+    cached_line_metrics_.reset();
     if (boxes.empty() || boxes.size() > 4096 ||
         !std::isfinite(basis_width) || basis_width <= 0.0f ||
         basis_face.empty())
@@ -149,6 +150,12 @@ void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
     cached_line_basis_font_style_ = resolved.font_slant;
     cached_line_basis_letter_spacing_ = resolved.letter_spacing;
     shaped_cache_valid_ = false;
+}
+
+void Label::set_cached_line_metrics(LineMetrics metrics) {
+    if (cached_line_boxes_.empty() || !metrics.valid())
+        return;
+    cached_line_metrics_ = metrics;
 }
 
 /// Slice a UTF-8 string by a UTF-16 offset and length.
@@ -1555,6 +1562,24 @@ void Label::paint_selection_line_(canvas::Canvas& canvas, const std::string& lin
     selection_layout_pending_.lines.push_back(std::move(rec));
 }
 
+namespace {
+
+// `view`'s y offset from the captured frame it was imported into: the nearest
+// ancestor marked as a captured frame root. Ancestors above that frame (a
+// host's embed offset, scroll or transform) do not count. Without such an
+// ancestor, the offset from the top.
+float captured_frame_y(const View& view) {
+    float y = 0.0f;
+    for (const View* v = &view; v != nullptr; v = v->parent()) {
+        if (v->captured_frame_root())
+            break;
+        y += v->bounds().y;
+    }
+    return y;
+}
+
+} // namespace
+
 void Label::paint(canvas::Canvas& canvas) {
     // A Label that also has element children draws its own text inside the
     // anonymous inline box the layout pass reserved for it on the flex line.
@@ -1947,6 +1972,10 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             ? 0.0f
             : (first_line_box_h - single_line_ink_height) * 0.5f;
     float baseline_y;
+    // Captured lines are placed and snapped by captured_baseline(); these
+    // carry its inputs from the first line to the rest.
+    float captured_root_y = 0.0f;
+    float captured_offset = 0.0f;
     // Where a selection band sits relative to the baseline. A captured line
     // overrides both with the run rect Chromium reported, so the band covers
     // the box the text was laid out in rather than the worst-case glyph extent.
@@ -1988,17 +2017,29 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         // Without real face metrics, fall back to centring the ink in the box
         // (unclamped: negative leading lets glyphs overflow evenly).
         const auto& first_line = shaped_layout->lines.front();
-        const auto fm = has_attributed_ ? FaceMetrics{}
-                                        : face_metrics(family, effective_font_size,
-                                                       effective_font_weight(), font_style_);
-        if (fm.real) {
-            baseline_y = first_line.y + first_line.height - std::round(fm.typographic_descent);
-            selection_ascent = baseline_y - first_line.y;
-            selection_height = first_line.height;
+        // A descent the capture measured outranks the face's own: it already
+        // carries Chromium's rounding and any per-face adjustment.
+        std::optional<float> css_descent;
+        if (has_attributed_) {
+            if (attributed_prepare_cache_.typographic_descent() > 0.0f)
+                css_descent = attributed_prepare_cache_.typographic_descent();
         } else {
-            const float half_leading = (first_line.height - single_line_text_height) * 0.5f;
-            baseline_y = first_line.y + half_leading + first_line_ascent;
+            const auto fm =
+                face_metrics(family, effective_font_size, effective_font_weight(), font_style_);
+            if (fm.real)
+                css_descent = fm.typographic_descent;
         }
+        if (cached_line_metrics_ || css_descent) {
+            captured_offset = captured_baseline_offset(
+                first_line.height, css_descent.value_or(0.0f), cached_line_metrics_);
+        } else {
+            captured_offset =
+                (first_line.height - single_line_text_height) * 0.5f + first_line_ascent;
+        }
+        captured_root_y = captured_frame_y(*this) + (has_own_text_box() ? own_text_box().y : 0.0f);
+        baseline_y = captured_baseline(first_line.y, captured_offset, captured_root_y);
+        selection_ascent = baseline_y - first_line.y;
+        selection_height = first_line.height;
     }
 
     // text-align cascade with `auto` + `match-parent` fully resolved. Shared
@@ -2115,9 +2156,6 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             // of `\n`-splitting. Line-clamp + ellipsis logic is identical,
             // driven by source_lines (= shaped_layout.line_count) and
             // visible_lines.
-            const float captured_first_top = captured_cache_usable &&
-                    !shaped_layout->lines.empty()
-                ? shaped_layout->lines.front().y : 0.0f;
             std::size_t source_cursor = 0;
             for (const auto& shaped_line : shaped_layout->lines) {
                 if (emitted >= visible_lines) break;
@@ -2125,9 +2163,10 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                 if (need_ellipsis && (emitted + 1 == visible_lines)) {
                     line.append("\xe2\x80\xa6");
                 }
-                const float line_baseline = captured_cache_usable
-                    ? baseline_y + shaped_line.y - captured_first_top
-                    : y;
+                const float line_baseline =
+                    captured_cache_usable
+                        ? captured_baseline(shaped_line.y, captured_offset, captured_root_y)
+                        : y;
                 // Map the shaped line back to its origin in `display_text`.
                 // The shaper drops the whitespace it broke at, so byte spans
                 // are not contiguous and cannot be accumulated from line

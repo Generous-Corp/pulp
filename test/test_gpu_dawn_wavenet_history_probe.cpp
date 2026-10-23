@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <vector>
 #include <chrono>
 #include <cstdint>
@@ -117,6 +118,8 @@ int main() {
     auto program = DawnSharedIoWavenetProgram::create(provider, fixture.spec());
     if (!program)
         return fail("program_create");
+    // The plan owns the program; keep a handle for the history-reset checks.
+    auto* const wavenet = program.get();
 
     SharedIoComputePlan plan;
     if (!plan.prepare(provider,
@@ -129,13 +132,13 @@ int main() {
 
     // Preparation zeroes one ring per activation, sized from that layer's own
     // causal pad. Each target-size bucket is fully accounted for:
-    //   8 bytes:  final activation ring + device stream position
-    //   16 bytes: dilation-1 ring + scale uniform
+    //   8 bytes:  final activation ring
+    //   16 bytes: dilation-1 ring + scale uniform + device stream state
     //   32 bytes: dilation-4 ring + rechannel uniform + head uniform
     //   64 bytes: the two layer uniforms
     const auto prepared = transfer_counter.snapshot();
-    const bool exact_allocations = prepared.queue_write_buffer_target_size_histogram[8] == 2 &&
-                                   prepared.queue_write_buffer_target_size_histogram[16] == 2 &&
+    const bool exact_allocations = prepared.queue_write_buffer_target_size_histogram[8] == 1 &&
+                                   prepared.queue_write_buffer_target_size_histogram[16] == 3 &&
                                    prepared.queue_write_buffer_target_size_histogram[32] == 3 &&
                                    prepared.queue_write_buffer_target_size_histogram[64] == 2 &&
                                    prepared.queue_write_buffer_target_size_histogram[4] == 0 &&
@@ -159,27 +162,33 @@ int main() {
     std::vector<float> stream(blocks * 2u), streamed(blocks * 2u, -9.0f);
     for (std::size_t i = 0; i < stream.size(); ++i)
         stream[i] = 0.7f * std::sin(0.9f * static_cast<float>(i)) - 0.1f;
-    for (std::uint64_t sequence = 1; sequence <= blocks; ++sequence) {
-        auto write = plan.acquire_input(sequence, 0);
-        if (!write || write->bytes.size() != 2u * sizeof(float))
-            return fail("input_lease");
-        auto* input = reinterpret_cast<float*>(write->bytes.data());
-        input[0] = stream[(sequence - 1u) * 2u];
-        input[1] = stream[(sequence - 1u) * 2u + 1u];
-        if (!plan.submit({write->token, 0}))
-            return fail("submit");
-        std::optional<SharedIoComputePlan::Completion> completion;
-        if (!wait_for_completion(plan, completion))
-            return fail("completion");
-        auto output = plan.acquire_output(*completion);
-        if (!output || output->bytes.size() != 2u * sizeof(float))
-            return fail("output");
-        const auto* result = reinterpret_cast<const float*>(output->bytes.data());
-        streamed[(sequence - 1u) * 2u] = result[0];
-        streamed[(sequence - 1u) * 2u + 1u] = result[1];
-        if (!plan.release_output({output->token}))
-            return fail("output_release");
-    }
+    std::uint64_t sequence = 1;
+    const auto run_stream = [&](std::vector<float>& out) -> const char* {
+        for (std::uint64_t block = 0; block < blocks; ++block, ++sequence) {
+            auto write = plan.acquire_input(sequence, 0);
+            if (!write || write->bytes.size() != 2u * sizeof(float))
+                return "input_lease";
+            auto* input = reinterpret_cast<float*>(write->bytes.data());
+            input[0] = stream[block * 2u];
+            input[1] = stream[block * 2u + 1u];
+            if (!plan.submit({write->token, 0}))
+                return "submit";
+            std::optional<SharedIoComputePlan::Completion> completion;
+            if (!wait_for_completion(plan, completion))
+                return "completion";
+            auto output = plan.acquire_output(*completion);
+            if (!output || output->bytes.size() != 2u * sizeof(float))
+                return "output";
+            const auto* result = reinterpret_cast<const float*>(output->bytes.data());
+            out[block * 2u] = result[0];
+            out[block * 2u + 1u] = result[1];
+            if (!plan.release_output({output->token}))
+                return "output_release";
+        }
+        return nullptr;
+    };
+    if (const char* stage = run_stream(streamed))
+        return fail(stage);
     const auto expected = reference(fixture, stream);
     double worst = 0.0;
     for (std::size_t i = 0; i < stream.size(); ++i)
@@ -196,18 +205,53 @@ int main() {
     const bool zero_transfers = submitted.copy_buffer_to_buffer_calls == 0 &&
                                 submitted.copy_buffer_to_buffer_bytes == 0 &&
                                 submitted.queue_write_buffer_calls == 0;
-    const bool released = plan.release() && provider.drain();
-    if (!zero_transfers || !released) {
+    if (!zero_transfers) {
         std::cerr << "mixed_dilation_history_proof status=failed stage=transfers"
                   << " copies=" << submitted.copy_buffer_to_buffer_calls
                   << " copy_bytes=" << submitted.copy_buffer_to_buffer_bytes
-                  << " writes=" << submitted.queue_write_buffer_calls << " released=" << released
-                  << '\n';
+                  << " writes=" << submitted.queue_write_buffer_calls << '\n';
         return 1;
     }
 
+    // The device position advanced by one block per executed block.
+    std::uint32_t position = 0;
+    if (!wavenet->read_stream_position(position) || position != blocks * 2u)
+        return fail("position_after_stream");
+
+    // A history reset (host reset or transport jump) zeroes every ring, so the
+    // same input streamed again must reproduce the first run bit for bit.
+    std::vector<float> after_reset(stream.size(), -9.0f);
+    if (!wavenet->reset_history(0))
+        return fail("reset_history");
+    if (const char* stage = run_stream(after_reset))
+        return fail(stage);
+    // Seeding the position three blocks short of the u32 wrap makes the stream
+    // position wrap mid-stream; power-of-two rings keep every column index
+    // exact across the wrap, so the output is again bit-identical.
+    std::vector<float> across_wrap(stream.size(), -9.0f);
+    constexpr std::uint32_t near_wrap = std::numeric_limits<std::uint32_t>::max() - 3u * 2u + 1u;
+    if (!wavenet->reset_history(near_wrap))
+        return fail("reset_history_near_wrap");
+    // The seed must actually reach the device, or the wrap below is never
+    // exercised; afterwards the position must have wrapped past 2^32.
+    if (!wavenet->read_stream_position(position) || position != near_wrap)
+        return fail("position_seed");
+    if (const char* stage = run_stream(across_wrap))
+        return fail(stage);
+    if (!wavenet->read_stream_position(position) ||
+        position != static_cast<std::uint32_t>(near_wrap + blocks * 2u))
+        return fail("position_wrap");
+    if (std::memcmp(after_reset.data(), streamed.data(), streamed.size() * sizeof(float)) != 0)
+        return fail("reset_mismatch");
+    if (std::memcmp(across_wrap.data(), streamed.data(), streamed.size() * sizeof(float)) != 0)
+        return fail("position_wrap_mismatch");
+
+    if (!plan.release() || !provider.drain())
+        return fail("release");
+
     std::cout << "mixed_dilation_history_proof"
               << " ring_bytes=[16,32,8]"
-              << " copies=0 blocks=" << blocks << " worst=" << worst << " status=passed\n";
+              << " copies=0 blocks=" << blocks << " worst=" << worst
+              << " reset=bit_exact position_wrap=bit_exact status=passed\n";
     return 0;
 }

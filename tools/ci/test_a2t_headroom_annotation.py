@@ -74,6 +74,114 @@ class CliTests(unittest.TestCase):
                                   proc.stdout)
 
 
+class FakeGitHub:
+    """Records gh api calls and serves issues from an in-memory list."""
+
+    def __init__(self, issues: list[dict] | None = None) -> None:
+        self.issues = issues or []
+        self.calls: list[tuple[list[str], str | None]] = []
+
+    def __call__(self, args: list[str], stdin: str | None = None) -> object:
+        self.calls.append((args, stdin))
+        if "/search/issues" in args:
+            return {"items": [dict(i) for i in self.issues]}
+        if args[:2] == ["-X", "POST"] and args[2].endswith("/issues"):
+            fields = json.loads(stdin or "{}")
+            self.issues.append({"number": 900 + len(self.issues), "state": "open", **fields})
+            return {}
+        if args[:2] == ["-X", "PATCH"]:
+            number = int(args[2].rsplit("/", 1)[1])
+            issue = next(i for i in self.issues if i["number"] == number)
+            if stdin:
+                issue.update(json.loads(stdin))
+            if "state=closed" in args:
+                issue["state"] = "closed"
+            return {}
+        return {}
+
+    def mutations(self) -> list[list[str]]:
+        return [a for a, _ in self.calls if "/search/issues" not in a]
+
+
+def measurement_at_share_of_budget(share: float) -> dict:
+    count = int(BUDGET * share)
+    return {"count": count, "limit": LIMIT, "headroom": LIMIT - count, "budget": BUDGET}
+
+
+class TrackingIssueTests(unittest.TestCase):
+    """The issue fires when headroom drops below 20% of the guard's budget."""
+
+    def test_the_issue_threshold_is_headroom_below_a_fifth_of_the_budget(self) -> None:
+        self.assertAlmostEqual(ann.EARLY_WARNING_RATIO * LIMIT, 0.80 * BUDGET, places=6)
+
+    def test_at_79_percent_of_the_budget_no_issue_is_opened(self) -> None:
+        gh = FakeGitHub()
+        action = ann.reconcile_issue(measurement_at_share_of_budget(0.79), "o/r", gh)
+        self.assertEqual(action, "none")
+        self.assertEqual(gh.mutations(), [])
+
+    def test_at_81_percent_one_issue_opens_then_updates_in_place(self) -> None:
+        gh = FakeGitHub()
+        first = ann.reconcile_issue(measurement_at_share_of_budget(0.81), "o/r", gh)
+        self.assertEqual(first, "opened")
+        self.assertEqual(len(gh.issues), 1)
+        issue = gh.issues[0]
+        count = int(BUDGET * 0.81)
+        self.assertEqual(issue["title"], f"{ann.TITLE}: {count}/{LIMIT} scope-touching revisions; "
+                                         "re-pin A2T_SCOPE_HISTORY_BASE")
+        self.assertIn("A2T_SCOPE_HISTORY_BASE", issue["body"])
+        self.assertIn("never raise A2T_SCOPE_HISTORY_LIMIT", issue["body"])
+        self.assertIn(ann.ISSUE_MARKER, issue["body"])
+        # A later push at a higher count updates the same issue, never a second one.
+        second = ann.reconcile_issue(measurement_at_share_of_budget(0.9), "o/r", gh)
+        self.assertEqual(second, f"updated #{issue['number']}")
+        self.assertEqual(len(gh.issues), 1)
+        self.assertIn(f"{int(BUDGET * 0.9)}/{LIMIT}", gh.issues[0]["title"])
+
+    def test_after_a_repin_the_open_issue_closes(self) -> None:
+        gh = FakeGitHub()
+        ann.reconcile_issue(measurement_at_share_of_budget(0.81), "o/r", gh)
+        repinned = {"count": 128, "limit": LIMIT, "headroom": LIMIT - 128, "budget": BUDGET}
+        action = ann.reconcile_issue(repinned, "o/r", gh)
+        self.assertEqual(action, f"closed #{gh.issues[0]['number']}")
+        self.assertEqual(gh.issues[0]["state"], "closed")
+        # And stays closed: a healthy push does nothing further.
+        before = len(gh.mutations())
+        self.assertEqual(ann.reconcile_issue(repinned, "o/r", gh), "none")
+        self.assertEqual(len(gh.mutations()), before)
+
+    def test_open_duplicates_carrying_the_marker_are_closed(self) -> None:
+        def tracked(number: int, state: str = "open") -> dict:
+            return {"number": number, "state": state, "title": f"{ann.TITLE}: old",
+                    "body": f"old\n{ann.ISSUE_MARKER}\n"}
+        gh = FakeGitHub([tracked(10), tracked(12), tracked(11, "closed")])
+        action = ann.reconcile_issue(measurement_at_share_of_budget(0.81), "o/r", gh)
+        # The newest open one is kept and updated; the other open one is closed.
+        self.assertEqual(action, "updated #12")
+        states = {i["number"]: i["state"] for i in gh.issues}
+        self.assertEqual(states, {10: "closed", 12: "open", 11: "closed"})
+        closing = [a for a in gh.mutations() if "state=closed" in a]
+        self.assertEqual([a[2] for a in closing], ["/repos/o/r/issues/10"])
+        # After a re-pin the survivor closes too, leaving none open.
+        repinned = {"count": 128, "limit": LIMIT, "headroom": LIMIT - 128, "budget": BUDGET}
+        self.assertEqual(ann.reconcile_issue(repinned, "o/r", gh), "closed #12")
+        self.assertTrue(all(i["state"] == "closed" for i in gh.issues))
+
+    def test_an_issue_without_the_marker_is_never_touched(self) -> None:
+        stranger = {"number": 5, "state": "open", "title": f"{ann.TITLE} discussion", "body": "hand-written"}
+        gh = FakeGitHub([stranger])
+        repinned = {"count": 128, "limit": LIMIT, "headroom": LIMIT - 128, "budget": BUDGET}
+        self.assertEqual(ann.reconcile_issue(repinned, "o/r", gh), "none")
+        self.assertEqual(gh.mutations(), [])
+
+    def test_an_unreadable_measurement_never_opens_or_closes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run("--reconcile-issue", "--repo", "o/r", str(Path(tmp, "absent.json")))
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("was not measured", proc.stdout)
+            self.assertNotIn("tracking issue:", proc.stdout)
+
+
 class WiringTests(unittest.TestCase):
     def test_the_gate_measures_and_announces(self) -> None:
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
@@ -83,6 +191,23 @@ class WiringTests(unittest.TestCase):
         self.assertIn("steps.ctest.outcome != 'skipped'", step)
         self.assertIn("continue-on-error: true", step)
         self.assertIn('python3 tools/ci/a2t_headroom_annotation.py "$RUNNER_TEMP/a2t-scope-headroom.json"', step)
+
+    def test_a_push_to_main_keeps_the_tracking_issue(self) -> None:
+        workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        upload = workflow.split("      - name: Upload A2T scope-history headroom\n", 1)[1]
+        upload = upload.split("\n      - name:", 1)[0]
+        self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", upload)
+        self.assertIn("runner.os == 'Linux'", upload)
+        self.assertIn("name: a2t-scope-headroom", upload)
+        job = workflow.split("\n  a2t-headroom-issue:\n", 1)[1].split("\n  # ", 1)[0]
+        self.assertIn("needs: [build]", job)
+        self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", job)
+        # A fork's own main push must not open issues from its copy of the job.
+        self.assertIn("github.repository == vars.PULP_PRIMARY_REPO", job)
+        self.assertIn("issues: write", job)
+        self.assertIn("continue-on-error: true", job)
+        self.assertIn("--reconcile-issue", job)
+        self.assertIn('--repo "$GITHUB_REPOSITORY"', job)
 
     def test_the_guard_test_writes_its_measurement(self) -> None:
         source = (ROOT / "tools/scripts/test_gpu_trace_overhead_acceptance.py").read_text(encoding="utf-8")

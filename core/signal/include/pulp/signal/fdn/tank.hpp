@@ -14,6 +14,15 @@
 // the listener hears is the tail the decay law describes; what is fed back is
 // the tail plus everything that must be energy-accounted for.
 //
+// BLOCK PROCESSING. Every stage between one line read and the matching write
+// is either per line (read, diffusion) or per sample across lines (damping,
+// flux, the matrix). The shortest loop is far longer than a control period, so
+// the tank runs a whole period at a time: each line reads and diffuses its span
+// along time, the cross-line stages then run one sample at a time over all
+// sixteen lines as one vector, and the writes are committed last. Every sample
+// is computed by the same expression it would be one at a time, so the block
+// partition is unobservable — process() is simply a block of one.
+//
 // RT contract: prepare() allocates; configure/update/process/reset allocate
 // nothing, so a live tank-rate change never touches the allocator.
 
@@ -21,6 +30,7 @@
 #include <pulp/signal/fdn/config.hpp>
 #include <pulp/signal/fdn/diffusion.hpp>
 #include <pulp/signal/fdn/frac_delay.hpp>
+#include <pulp/signal/detail/simd_lanes.hpp>
 #include <pulp/signal/fdn/loop_eq.hpp>
 #include <pulp/signal/fdn/modulation.hpp>
 #include <pulp/signal/fdn/shimmer.hpp>
@@ -29,8 +39,13 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
+#include <limits>
+#include <type_traits>
 
 namespace pulp::signal::fdn {
+
+namespace lanes = signal::detail::lanes;
 
 // Everything the tank re-derives at the control rate. The engine owns the
 // smoothing; the tank owns what the smoothed values mean.
@@ -102,16 +117,24 @@ inline double damping_state_step(double input, double coefficient,
 
 template <typename SampleType = float>
 class FdnTank {
-public:
+    static_assert(std::is_same_v<SampleType, float>,
+                  "the tank's block kernels are single precision");
+
+  public:
     // Sizes every allocation for the worst case: the longest line at the
     // highest tank rate. configure() only re-derives lengths and coefficients.
     void prepare(double max_tank_rate) {
         const int max_line = static_cast<int>(kDelayMaxSeconds * kSizeScaleMax *
                                               max_tank_rate) +
                              kHermiteGuard;
-        for (auto& line : lines_) line.prepare(max_line);
-        for (auto& cascade : loop_diffusion_)
-            cascade.prepare(kLoopDiffusionBaseMs, max_tank_rate, kLoopDiffusionStages);
+        // The sixteen lines, and the sixteen cascades' stages, advance in
+        // lockstep: stagger every ring so none shares low address bits with
+        // another (FracDelayT::prepare).
+        for (std::size_t i = 0; i < lines_.size(); ++i)
+            lines_[i].prepare(max_line, i * kRingStaggerSamples);
+        for (std::size_t i = 0; i < loop_diffusion_.size(); ++i)
+            loop_diffusion_[i].prepare(kLoopDiffusionBaseMs, max_tank_rate, kLoopDiffusionStages,
+                                       i * kLoopDiffusionStages * kRingStaggerSamples);
         shimmer_.prepare(max_tank_rate);
         for (int i = 0; i < kNumChannels; ++i) {
             flutter_lfo_[i].reset(static_cast<double>(i) /
@@ -158,8 +181,8 @@ public:
         flux_.reset();
         shimmer_.reset();
         for (int i = 0; i < kNumChannels; ++i) {
-            lp_state_[i] = 0.0;
-            hp_state_[i] = 0.0;
+            lp_state_[i] = 0.0f;
+            hp_state_[i] = 0.0f;
             current_delay_[i] = target_delay_[i];
             flutter_lfo_[i].reset(static_cast<double>(i) /
                                   static_cast<double>(kNumChannels));
@@ -169,6 +192,7 @@ public:
         // paired with stale decay or damping state.
         recompute_derived_state(controls_, true);
         cached_ = controls_;
+        heal_phase_ = 0;
     }
 
     void set_active_channels(int n) {
@@ -179,6 +203,11 @@ public:
             1.0 / std::sqrt(static_cast<double>(active_n_)));
         in_gain_ = static_cast<SampleType>(
             1.0 / std::sqrt(static_cast<double>(active_n_) * 0.5));
+        for (int j = 0; j < kNumChannels / 4; ++j)
+            active_[j] = lanes::make(
+                4 * j < active_n_ ? 1.0f : 0.0f, 4 * j + 1 < active_n_ ? 1.0f : 0.0f,
+                4 * j + 2 < active_n_ ? 1.0f : 0.0f, 4 * j + 3 < active_n_ ? 1.0f : 0.0f);
+        derive_safe_block();
     }
     int active_channels() const { return active_n_; }
 
@@ -228,75 +257,403 @@ public:
     // One tank sample. `in_l` / `in_r` are already pre-diffused and ducked;
     // `out_l` / `out_r` are the wet taps, before width and the output stage.
     void process(SampleType in_l, SampleType in_r, SampleType& out_l, SampleType& out_r) {
-        std::array<SampleType, kNumChannels> v{};
-        SampleType tap_l = 0;
-        SampleType tap_r = 0;
+        process_block(&in_l, &in_r, &out_l, &out_r, 1);
+    }
 
-        for (int i = 0; i < active_n_; ++i) {
-            const auto ui = static_cast<std::size_t>(i);
-            // Modulated read.
-            const double d = current_delay_[ui] * (1.0 + mod_depth_ * modulation_.tick(i));
-            SampleType s = lines_[ui].read(d);
+    // A block of tank samples with the controls held, as between two
+    // update_controls() calls. Any length; it is split internally so no read
+    // ever reaches a sample written inside the same piece.
+    void process_block(const SampleType* in_l, const SampleType* in_r, SampleType* out_l,
+                       SampleType* out_r, int n) {
+        int offset = 0;
+        while (offset < n) {
+            const int chunk =
+                std::min({n - offset, safe_block_, kHealIntervalSamples - heal_phase_});
+            process_chunk(in_l + offset, in_r + offset, out_l + offset, out_r + offset, chunk);
+            offset += chunk;
+            heal_phase_ += chunk;
+            if (heal_phase_ == kHealIntervalSamples) {
+                heal();
+                heal_phase_ = 0;
+            }
+        }
+    }
 
-            // In-loop diffusion — a lower coefficient than the input cascade,
-            // because this one is re-applied on every pass. Its sign alternates
-            // by channel parity so neighbouring lines never diffuse alike.
-            const SampleType g = (i & 1) ? -loop_g_ : loop_g_;
-            s = controls_.flutter
-                    ? loop_diffusion_[ui].process_fluttered(s, g, flutter_lfo_[ui].tick(),
-                                                            kFlutterDepth)
-                    : loop_diffusion_[ui].process(s, g);
+  private:
+    using Lane = std::array<SampleType, kNumChannels>;
 
-            // Damping: one-pole LP then one-pole HP, both scaled per line so
-            // the frequency-dependent decay is consistent across lengths.
-            double x = static_cast<double>(s);
-            if (lp_a_[ui] > 0.0)
-                x = damping_state_step(x, lp_a_[ui], lp_state_[ui]);
-            if (hp_a_[ui] > 0.0)
-                x -= damping_state_step(x, hp_a_[ui], hp_state_[ui]);
-            s = static_cast<SampleType>(x);
+    // One piece of at most safe_block_ samples. See the file note.
+    void process_chunk(const SampleType* in_l, const SampleType* in_r, SampleType* out_l,
+                       SampleType* out_r, int n) {
+        // Sample-major work area: x[k] holds every line's value at sample k.
+        alignas(64) std::array<Lane, kMaxBlockSamples> x;
+        // Line-major spans: span[i] is line i's read, then its diffusion.
+        alignas(64) SampleType span[kNumChannels][kMaxBlockSamples];
+        read_lines(span, n);
 
-            s = eq_.process(i, s);
-            s = flux_.process(i, s);
+        // In-loop diffusion per line, along time. Its sign alternates by
+        // channel parity so neighbouring lines never diffuse alike.
+        diffuse_lines(span, n);
+        // Back to sample-major, four samples of four lines per transpose
+        // while every line is active; the tail and reduced line counts go
+        // value by value.
+        int k0 = 0;
+        if (active_n_ == kNumChannels) {
+            for (; k0 + 4 <= n; k0 += 4) {
+                for (int j = 0; j < kNumChannels / 4; ++j) {
+                    lanes::F4 a = lanes::load(&span[4 * j][k0]);
+                    lanes::F4 b = lanes::load(&span[4 * j + 1][k0]);
+                    lanes::F4 c = lanes::load(&span[4 * j + 2][k0]);
+                    lanes::F4 d = lanes::load(&span[4 * j + 3][k0]);
+                    lanes::transpose(a, b, c, d);
+                    const auto col = 4 * static_cast<std::size_t>(j);
+                    lanes::store(&x[static_cast<std::size_t>(k0)][col], a);
+                    lanes::store(&x[static_cast<std::size_t>(k0) + 1][col], b);
+                    lanes::store(&x[static_cast<std::size_t>(k0) + 2][col], c);
+                    lanes::store(&x[static_cast<std::size_t>(k0) + 3][col], d);
+                }
+            }
+        }
+        for (int k = k0; k < n; ++k) {
+            for (int i = 0; i < active_n_; ++i)
+                x[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] = span[i][k];
+            for (int i = active_n_; i < kNumChannels; ++i)
+                x[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] = SampleType{0};
+        }
+
+        // Across lines, one sample at a time, as four 4-lane vectors.
+        using lanes::F4;
+        constexpr int kVectors = kNumChannels / 4;
+        F4 lp_state[kVectors];
+        F4 hp_state[kVectors];
+        for (int j = 0; j < kVectors; ++j) {
+            lp_state[j] = lanes::load(&lp_state_[4 * static_cast<std::size_t>(j)]);
+            hp_state[j] = lanes::load(&hp_state_[4 * static_cast<std::size_t>(j)]);
+        }
+        const F4 ceiling = lanes::splat(static_cast<float>(kSanityCeil));
+        const F4 floor = lanes::splat(-static_cast<float>(kSanityCeil));
+        const bool shimmer = shimmer_weight_ > 0.0;
+        const bool eq = eq_.active_bands() > 0;
+        typename FluxBank<SampleType>::Lanes flux;
+        flux_.load_lanes(flux);
+        // Each line's input lands straight in its ring: the sixteen rings
+        // share one write position, and the mirror past each ring's end takes
+        // a span that runs over it (FracDelayT::advance).
+        const std::size_t write = lines_[0].write_index();
+        SampleType* ring[kNumChannels];
+        for (std::size_t i = 0; i < static_cast<std::size_t>(kNumChannels); ++i)
+            ring[i] = lines_[i].data() + write;
+        for (int k = 0; k < n; ++k) {
+            float* row = x[static_cast<std::size_t>(k)].data();
+            F4 v[kVectors];
+            for (int j = 0; j < kVectors; ++j) {
+                // Damping: one-pole LP then one-pole HP, both scaled per line
+                // so the frequency-dependent decay is consistent across
+                // lengths. The input is clamped to the tank's sanity ceiling,
+                // and each one-pole is a convex mix of its input and its own
+                // previous state, so both states stay inside that ceiling with
+                // no clamp on the recursion; heal() snaps and sanitizes them
+                // once per chunk.
+                const F4 in = lanes::clamp(lanes::load(row + 4 * j), floor, ceiling);
+                const F4 lp = in + (lp_state[j] - in) * lp_coeff_[j];
+                lp_state[j] = lp;
+                const F4 y = lanes::select(lp_on_[j], lp, in);
+                const F4 hp = y + (hp_state[j] - y) * hp_coeff_[j];
+                hp_state[j] = hp;
+                v[j] = lanes::select(hp_on_[j], y - hp, y);
+            }
+            if (eq) {
+                for (int j = 0; j < kVectors; ++j)
+                    lanes::store(row + 4 * j, v[j]);
+                for (int i = 0; i < active_n_; ++i)
+                    row[i] = eq_.process(i, row[i]);
+                for (int j = 0; j < kVectors; ++j)
+                    v[j] = lanes::load(row + 4 * j);
+            }
+            FluxBank<SampleType>::process_lanes(flux, v);
+            for (int j = 0; j < kVectors; ++j)
+                v[j] *= active_[j];
 
             // Output tap: even channels feed left, odd feed right.
-            if (i & 1)
-                tap_r += s;
-            else
-                tap_l += s;
+            const F4 taps = (v[0] + v[1]) + (v[2] + v[3]);
+            out_l[k] = (lanes::lane(taps, 0) + lanes::lane(taps, 2)) * tap_scale_;
+            out_r[k] = (lanes::lane(taps, 1) + lanes::lane(taps, 3)) * tap_scale_;
 
             // Shimmer injects into the FEEDBACK, which is what makes it bloom.
-            if (shimmer_weight_ > 0.0)
-                s += static_cast<SampleType>(shimmer_weight_ *
-                                             static_cast<double>(shimmer_.process(i, s)));
+            if (shimmer) {
+                for (int j = 0; j < kVectors; ++j)
+                    lanes::store(row + 4 * j, v[j]);
+                for (int i = 0; i < active_n_; ++i)
+                    row[i] += static_cast<SampleType>(
+                        shimmer_weight_ * static_cast<double>(shimmer_.process(i, row[i])));
+                for (int j = 0; j < kVectors; ++j)
+                    v[j] = lanes::load(row + 4 * j);
+            }
 
             // 1-Lipschitz crossfade: both terms have slope <= 1 everywhere, so
             // the saturator can never raise the loop gain at any drive.
             if (drive_ > 0.0) {
-                const double xs = static_cast<double>(s);
-                s = static_cast<SampleType>(xs + drive_ * (lipschitz_tanh(xs) - xs));
+                const F4 drive = lanes::splat(static_cast<float>(drive_));
+                for (int j = 0; j < kVectors; ++j)
+                    v[j] += drive * (lipschitz_tanh_lanes(v[j]) - v[j]);
             }
 
-            v[ui] = static_cast<SampleType>(static_cast<double>(s) * gain_[ui]);
+            // Per-line decay gain (with the matrix's 1/4 normalization folded
+            // in), then the 16-point Hadamard: two butterfly stages across the
+            // vectors, two inside each.
+            for (int j = 0; j < kVectors; ++j)
+                v[j] *= matrix_gain_[j];
+            const F4 a0 = v[0] + v[1];
+            const F4 a1 = v[0] - v[1];
+            const F4 a2 = v[2] + v[3];
+            const F4 a3 = v[2] - v[3];
+            v[0] = lanes::hadamard4(a0 + a2);
+            v[1] = lanes::hadamard4(a1 + a3);
+            v[2] = lanes::hadamard4(a0 - a2);
+            v[3] = lanes::hadamard4(a1 - a3);
+
+            // Input fan-out: left feeds the even lines, right the odd, so
+            // stereo separation is built into the topology rather than bolted
+            // on after. The matrix output is clamped to its narrower ceiling
+            // before the fan-out, and the line input is fully sanitized after
+            // it (non-finite to zero, clamped, snapped).
+            const F4 feed = lanes::make(in_gain_ * in_l[k], in_gain_ * in_r[k], in_gain_ * in_l[k],
+                                        in_gain_ * in_r[k]);
+            const F4 matrix_ceiling = lanes::splat(static_cast<float>(kPostHadamardCeil));
+            for (int j = 0; j < kVectors; ++j) {
+                const F4 w =
+                    clean(lanes::clamp(v[j], -matrix_ceiling, matrix_ceiling) + feed, kSanityCeil);
+                for (int lane = 0; lane < 4; ++lane)
+                    ring[4 * j + lane][k] = lanes::lane(w, lane);
+            }
         }
-        for (int i = active_n_; i < kNumChannels; ++i) v[static_cast<std::size_t>(i)] = 0;
+        flux_.store_lanes(flux);
+        for (int j = 0; j < kVectors; ++j) {
+            lanes::store(&lp_state_[4 * static_cast<std::size_t>(j)], lp_state[j]);
+            lanes::store(&hp_state_[4 * static_cast<std::size_t>(j)], hp_state[j]);
+        }
 
-        hadamard16(v);
-        for (auto& sample : v) sample = post_hadamard_guard(sample);
+        // Every ring advances, inactive lines included, so all sixteen stay
+        // in lockstep for read_lines(); an inactive line's contents are
+        // zeroed by the active mask before they can reach the matrix.
+        for (auto& line : lines_)
+            line.advance(n);
+    }
 
-        out_l = tap_l * tap_scale_;
-        out_r = tap_r * tap_scale_;
+    // Modulated reads for every line, one sample at a time across lines. All
+    // sixteen rings share one size and advance in lockstep, so one write index
+    // and mask serve them all; each read's four taps are one 16-byte load
+    // (FracDelayT::taps_at), and the interpolation runs four lines per vector.
+    // Same delays, taps, fractions, and curve as FracDelayT::read_hermite_at.
+    void read_lines(SampleType (&span)[kNumChannels][kMaxBlockSamples], int n) {
+        using lanes::D2;
+        using lanes::F4;
+        using lanes::I2;
+        constexpr int kPairs = kNumChannels / 2;
+        const std::size_t write = lines_[0].write_index();
+        const SampleType* ring[kNumChannels];
+        for (std::size_t i = 0; i < static_cast<std::size_t>(kNumChannels); ++i)
+            ring[i] = lines_[i].taps_at(0);
+        D2 length[kPairs];
+        for (int p = 0; p < kPairs; ++p)
+            length[p] = lanes::load(&current_delay_[2 * static_cast<std::size_t>(p)]);
+        const D2 depth = lanes::splat(mod_depth_);
+        // Each line's delay as integer part and fraction, exactly as
+        // FracDelayT::read_hermite_at derives them.
+        const D2 one = lanes::splat(1.0);
+        const D2 lowest = lanes::splat(2.0);
+        const D2 highest = lanes::splat(static_cast<double>(lines_[0].max_delay()));
+        const I2 mask = lanes::splat_i(static_cast<std::int64_t>(lines_[0].mask()));
+        const F4 half = lanes::splat(0.5f);
+        const F4 two_and_half = lanes::splat(2.5f);
+        const F4 two = lanes::splat(2.0f);
+        const F4 one_and_half = lanes::splat(1.5f);
+        const F4 onef = lanes::splat(1.0f);
+        // out[j] is lines 4j..4j+3 at one sample. Four consecutive samples'
+        // results are transposed so each vector holds one line across those
+        // samples and lands in the line-major span as one store; a tail of
+        // fewer than four samples is stored lane by lane.
+        F4 pending[4][kNumChannels / 4];
+        int held = 0;
+        const auto flush = [&](int last) {
+            if (held == 4) {
+                for (int j = 0; j < kNumChannels / 4; ++j) {
+                    F4 a = pending[0][j], b = pending[1][j], c = pending[2][j], d = pending[3][j];
+                    lanes::transpose(a, b, c, d);
+                    const int first = last - 3;
+                    lanes::store(&span[4 * j][first], a);
+                    lanes::store(&span[4 * j + 1][first], b);
+                    lanes::store(&span[4 * j + 2][first], c);
+                    lanes::store(&span[4 * j + 3][first], d);
+                }
+            } else {
+                for (int h = 0; h < held; ++h)
+                    for (int j = 0; j < kNumChannels / 4; ++j)
+                        for (int lane = 0; lane < 4; ++lane)
+                            span[4 * j + lane][last - held + 1 + h] =
+                                lanes::lane(pending[h][j], lane);
+            }
+            held = 0;
+        };
+        for (int k = 0; k < n; ++k) {
+            alignas(16) double m[kNumChannels];
+            modulation_.tick(m);
+            const I2 origin =
+                lanes::splat_i(static_cast<std::int64_t>(write + static_cast<std::size_t>(k)) - 2);
+            alignas(16) std::int64_t start[kNumChannels];
+            F4 frac[kNumChannels / 4];
+            for (int j = 0; j < kNumChannels / 4; ++j) {
+                D2 f[2];
+                for (int h = 0; h < 2; ++h) {
+                    const int p = 2 * j + h;
+                    const D2 d = lanes::clamp(length[p] * (one + depth * lanes::load(m + 2 * p)),
+                                              lowest, highest);
+                    const I2 whole = lanes::to_int(d);
+                    f[h] = d - lanes::to_double(whole);
+                    const I2 at = (origin - whole) & mask;
+                    start[2 * p] = lanes::lane(at, 0);
+                    start[2 * p + 1] = lanes::lane(at, 1);
+                }
+                frac[j] = lanes::narrow(f[0], f[1]);
+            }
+            for (int j = 0; j < kNumChannels / 4; ++j) {
+                F4 ym1 = lanes::load(ring[4 * j] + start[4 * j]);
+                F4 y0 = lanes::load(ring[4 * j + 1] + start[4 * j + 1]);
+                F4 y1 = lanes::load(ring[4 * j + 2] + start[4 * j + 2]);
+                F4 y2 = lanes::load(ring[4 * j + 3] + start[4 * j + 3]);
+                lanes::transpose(ym1, y0, y1, y2);
+                const F4 t = onef - frac[j];
+                const F4 c1 = half * (y1 - ym1);
+                const F4 c2 = ym1 - two_and_half * y0 + two * y1 - half * y2;
+                const F4 c3 = half * (y2 - ym1) + one_and_half * (y0 - y1);
+                pending[held][j] = ((c3 * t + c2) * t + c1) * t + y0;
+            }
+            if (++held == 4)
+                flush(k);
+        }
+        flush(n - 1);
+    }
 
-        // Input fan-out: left feeds the even lines, right the odd, so stereo
-        // separation is built into the topology rather than bolted on after.
+    // The in-loop cascades, each through AllpassCascade::run_spans4 with no
+    // setup beyond its eight span pointers.
+    void diffuse_lines(SampleType (&span)[kNumChannels][kMaxBlockSamples], int n) {
+        if (controls_.flutter) {
+            alignas(64) double lfo[kMaxBlockSamples];
+            for (int i = 0; i < active_n_; ++i) {
+                const auto ui = static_cast<std::size_t>(i);
+                for (int k = 0; k < n; ++k)
+                    lfo[k] = flutter_lfo_[ui].tick();
+                const SampleType g = (i & 1) ? -loop_g_ : loop_g_;
+                loop_diffusion_[ui].process_block_fluttered(span[i], n, g, lfo, kFlutterDepth);
+            }
+            advance_inactive_cascades(n);
+            return;
+        }
+        // Every line's stage s ring has one size and advances in lockstep
+        // with the others, so the write position, mask, and the decision
+        // whether mirror upkeep is due are shared per stage; only each ring's
+        // base and its stage delay differ.
+        constexpr int kStages = kLoopDiffusionStages;
+        static_assert(kStages == 4, "run_spans4 is the four-stage kernel");
+        if (n > loop_diffusion_[0].min_delay()) {
+            for (int i = 0; i < active_n_; ++i)
+                loop_diffusion_[static_cast<std::size_t>(i)].process_block(
+                    span[i], n, (i & 1) ? -loop_g_ : loop_g_);
+            advance_inactive_cascades(n);
+            return;
+        }
+        std::size_t write[kStages];
+        std::size_t mask[kStages];
+        bool upkeep[kStages];
+        for (int s = 0; s < kStages; ++s) {
+            auto& line = loop_diffusion_[0].stage(s).line();
+            write[s] = line.write_index();
+            mask[s] = line.mask();
+            upkeep[s] = write[s] < line.mirror_samples() ||
+                        write[s] + static_cast<std::size_t>(n) > line.size();
+        }
         for (int i = 0; i < active_n_; ++i) {
-            const auto ui = static_cast<std::size_t>(i);
-            const SampleType w = v[ui] + in_gain_ * ((i & 1) ? in_r : in_l);
-            lines_[ui].push(sanitize(w));
+            auto& cascade = loop_diffusion_[static_cast<std::size_t>(i)];
+            SampleType* delayed[kStages];
+            SampleType* stored[kStages];
+            for (int s = 0; s < kStages; ++s) {
+                auto& stage = cascade.stage(s);
+                SampleType* base = stage.line().data();
+                delayed[s] =
+                    base + ((write[s] - static_cast<std::size_t>(stage.delay())) & mask[s]);
+                stored[s] = base + write[s];
+            }
+            AllpassCascade<SampleType>::run_spans4(span[i], n, (i & 1) ? -loop_g_ : loop_g_,
+                                                   delayed, stored);
+        }
+        // Inactive lines' rings advance too, so all sixteen stay in lockstep.
+        for (int s = 0; s < kStages; ++s) {
+            for (int i = 0; i < kNumChannels; ++i) {
+                auto& line = loop_diffusion_[static_cast<std::size_t>(i)].stage(s).line();
+                if (upkeep[s])
+                    line.advance(n);
+                else
+                    line.skip(n);
+            }
         }
     }
 
-private:
+    // Inactive lines' cascades advance with the active ones so every stage
+    // ring stays in lockstep (diffuse_lines() shares write positions).
+    void advance_inactive_cascades(int n) {
+        for (int i = active_n_; i < kNumChannels; ++i)
+            for (int s = 0; s < loop_diffusion_[static_cast<std::size_t>(i)].num_stages(); ++s)
+                loop_diffusion_[static_cast<std::size_t>(i)].stage(s).line().advance(n);
+    }
+
+    // Every kHealIntervalSamples: snap decayed recursive state to zero (the
+    // interval is far too short for a state at the snap threshold to reach the
+    // denormal range), and zero any state that went non-finite, so one corrupt
+    // value can never persist in a recursion.
+    void heal() {
+        for (std::size_t i = 0; i < static_cast<std::size_t>(kNumChannels); ++i) {
+            lp_state_[i] = std::isfinite(lp_state_[i]) ? snap_to_zero(lp_state_[i]) : 0.0f;
+            hp_state_[i] = std::isfinite(hp_state_[i]) ? snap_to_zero(hp_state_[i]) : 0.0f;
+        }
+        flux_.heal();
+    }
+
+    // post_hadamard_guard / sanitize on four lanes: non-finite to zero, finite
+    // values clamped to +/-ceiling and snapped.
+    static lanes::F4 clean(lanes::F4 x, double ceiling) {
+        const auto c = lanes::splat(static_cast<float>(ceiling));
+        const lanes::F4 bounded = lanes::clamp(x, -c, c);
+        const lanes::F4 magnitude = lanes::abs(x);
+        const lanes::M4 keep = lanes::both(
+            lanes::less_equal(magnitude, lanes::splat(std::numeric_limits<float>::max())),
+            lanes::less_equal(lanes::splat(snap_threshold<float>()), magnitude));
+        return lanes::select(keep, bounded, lanes::splat(0.0f));
+    }
+
+    static lanes::F4 lipschitz_tanh_lanes(lanes::F4 v) {
+        const lanes::F4 x = lanes::clamp(v, lanes::splat(-3.0f), lanes::splat(3.0f));
+        const lanes::F4 x2 = x * x;
+        return x * (lanes::splat(27.0f) + x2) / (lanes::splat(27.0f) + lanes::splat(9.0f) * x2);
+    }
+
+    // The longest piece process_chunk() may take: every line read and every
+    // diffusion stage must reach only samples written before the piece began.
+    void derive_safe_block() {
+        int bound = kMaxBlockSamples;
+        for (int i = 0; i < active_n_; ++i) {
+            const auto ui = static_cast<std::size_t>(i);
+            // |modulation| <= 1, and the read is clamped at a delay of 2. The
+            // Hermite window's newest tap is one sample newer than the floor.
+            const double shortest = std::max(2.0, current_delay_[ui] * (1.0 - mod_depth_));
+            bound = std::min(bound, static_cast<int>(shortest) - 1);
+            int stage = loop_diffusion_[ui].min_delay();
+            if (controls_.flutter)
+                stage = static_cast<int>(static_cast<double>(stage) * (1.0 - kFlutterDepth)) - 1;
+            bound = std::min(bound, stage);
+        }
+        safe_block_ = std::max(bound, 1);
+    }
+
     void recompute_derived_state(const TankControls& c, bool force_damping) {
         for (int i = 0; i < kNumChannels; ++i) {
             loop_delay_[i] =
@@ -313,6 +670,15 @@ private:
         const double ceiling = kGainCeil / worst_case_boost_;
         const double authority = c.bloom * bloom_authority(c.decay);
         const double t60 = std::max(c.decay, 0.01);
+        // Once the controls and the size glide settle, every input below is
+        // unchanged from tick to tick; the per-line pow() is then skipped.
+        if (!force_damping && ceiling == gain_key_.ceiling && authority == gain_key_.authority &&
+            t60 == gain_key_.t60 && tank_rate_ == gain_key_.tank_rate &&
+            loop_delay_ == gain_key_.loop_delay) {
+            finish_derived_state(c, force_damping);
+            return;
+        }
+        gain_key_ = {ceiling, authority, t60, tank_rate_, loop_delay_};
         for (int i = 0; i < kNumChannels; ++i) {
             // Jot's absorptive law: every line reaches -60 dB at the same time
             // regardless of its length. The length that matters is the whole
@@ -326,7 +692,18 @@ private:
             g += (ceiling - g) * authority;
             gain_[i] = g;
         }
+        for (int j = 0; j < kNumChannels / 4; ++j) {
+            const auto u = static_cast<std::size_t>(4 * j);
+            // The matrix's 1/sqrt(16) normalization rides on the decay gain.
+            matrix_gain_[j] = lanes::make(
+                static_cast<float>(gain_[u] * 0.25), static_cast<float>(gain_[u + 1] * 0.25),
+                static_cast<float>(gain_[u + 2] * 0.25), static_cast<float>(gain_[u + 3] * 0.25));
+        }
 
+        finish_derived_state(c, force_damping);
+    }
+
+    void finish_derived_state(const TankControls& c, bool force_damping) {
         if (force_damping || c.damp_hi != cached_.damp_hi ||
             c.damp_lo != cached_.damp_lo || c.size != cached_.size)
             derive_damping(c.damp_hi, c.damp_lo);
@@ -334,6 +711,7 @@ private:
         mod_depth_ = c.mod * kModMaxFraction * mod_depth_shrink(c.decay);
         loop_g_ = static_cast<SampleType>(c.diffusion * kLoopDiffusionG);
         drive_ = c.drive;
+        derive_safe_block();
     }
 
     // Defense in depth. One guard at the output is not enough in a 16-line
@@ -403,6 +781,19 @@ private:
                 std::exp(-6.283185307179586 * hp_hz / tank_rate_),
                 std::exp(-6.283185307179586 * hp_hz_i / tank_rate_));
         }
+        for (int j = 0; j < kNumChannels / 4; ++j) {
+            const auto u = static_cast<std::size_t>(4 * j);
+            lp_coeff_[j] =
+                lanes::make(static_cast<float>(lp_a_[u]), static_cast<float>(lp_a_[u + 1]),
+                            static_cast<float>(lp_a_[u + 2]), static_cast<float>(lp_a_[u + 3]));
+            hp_coeff_[j] =
+                lanes::make(static_cast<float>(hp_a_[u]), static_cast<float>(hp_a_[u + 1]),
+                            static_cast<float>(hp_a_[u + 2]), static_cast<float>(hp_a_[u + 3]));
+            lp_on_[j] = lanes::mask_of(lp_a_[u] > 0.0, lp_a_[u + 1] > 0.0, lp_a_[u + 2] > 0.0,
+                                       lp_a_[u + 3] > 0.0);
+            hp_on_[j] = lanes::mask_of(hp_a_[u] > 0.0, hp_a_[u + 1] > 0.0, hp_a_[u + 2] > 0.0,
+                                       hp_a_[u + 3] > 0.0);
+        }
     }
 
     // Blend the uniform coefficient against the length-proportional one.
@@ -426,8 +817,16 @@ private:
     std::array<double, kNumChannels> gain_{};
     std::array<double, kNumChannels> lp_a_{};
     std::array<double, kNumChannels> hp_a_{};
-    std::array<double, kNumChannels> lp_state_{};
-    std::array<double, kNumChannels> hp_state_{};
+    std::array<float, kNumChannels> lp_state_{};
+    std::array<float, kNumChannels> hp_state_{};
+    // The cross-line stage's per-line constants, as four 4-lane vectors.
+    lanes::F4 matrix_gain_[kNumChannels / 4] = {};
+    lanes::F4 lp_coeff_[kNumChannels / 4] = {};
+    lanes::F4 hp_coeff_[kNumChannels / 4] = {};
+    lanes::M4 lp_on_[kNumChannels / 4] = {};
+    lanes::M4 hp_on_[kNumChannels / 4] = {};
+    lanes::F4 active_[kNumChannels / 4] = {lanes::splat(1.0f), lanes::splat(1.0f),
+                                           lanes::splat(1.0f), lanes::splat(1.0f)};
 
     TankControls controls_{};
     TankControls cached_{};
@@ -443,6 +842,17 @@ private:
     SampleType tap_scale_ = static_cast<SampleType>(0.25);
     SampleType in_gain_ = static_cast<SampleType>(0.35355339059327373);
     int active_n_ = kNumChannels;
+    int safe_block_ = 1;
+    int heal_phase_ = 0;
+
+    // The inputs the per-line decay gains were last derived from.
+    struct GainKey {
+        double ceiling = -1.0;
+        double authority = -1.0;
+        double t60 = -1.0;
+        double tank_rate = -1.0;
+        std::array<double, kNumChannels> loop_delay{};
+    } gain_key_{};
 };
 
 }  // namespace pulp::signal::fdn
