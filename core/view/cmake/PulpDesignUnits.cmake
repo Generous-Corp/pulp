@@ -137,6 +137,7 @@ target_link_libraries(pulp-design-import-audio-pack PUBLIC pulp::design-import)
 # (importer plus the built-in recognition pack), as they did when the importer
 # lived inside view-core.
 target_link_libraries(pulp-view-script PUBLIC pulp::design-import)
+target_link_libraries(pulp-view-platform PUBLIC pulp::design-import)
 foreach(_pulp_view_target pulp-view pulp-view-native)
     target_link_libraries(${_pulp_view_target} PUBLIC pulp::design-import-audio-pack)
 endforeach()

@@ -123,6 +123,7 @@
     "pulp-view-core",
     "pulp-view-tooling",
     "pulp-view-native",
+    "pulp-view-platform",
     "pulp-view-webview",
     "pulp-view-script"
   ],

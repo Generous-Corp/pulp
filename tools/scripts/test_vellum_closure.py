@@ -868,7 +868,7 @@ class MirroredLinkTests(unittest.TestCase):
                           "pulp-gpu-device", "?pulp-skia-chromium-raw-ptr-compat",
                           "pulp-canvas", "pulp-bundled-fonts", "?pulp-bundled-noto-color-emoji", "pulp-render",
                           "pulp-state", "pulp-view-core", "pulp-design-import",
-                          "pulp-view-script", "pulp-view-native", "pulp-jsx-runtime-materialized-contract",
+                          "pulp-view-script", "pulp-view-platform", "pulp-jsx-runtime-materialized-contract",
                           "pulp-jsx-runtime-materialized-emitter"])
 
     def test_duplicate_target_requires_an_explicit_alias(self):
@@ -962,12 +962,26 @@ class MirroredLinkTests(unittest.TestCase):
         planted = {"targets": [{"name": "pulp-canvas", "link_targets": ["pulp-timebase"]}]}
         self.assertEqual(unmirrored_link_violations(planted, mirrored, edges, set()), ["unmirrored Pulp target pulp-canvas -> pulp-timebase"])
 
-    def test_approved_view_audio_edges_are_exact_and_scoped(self):
-        entries = {e["id"]: e for e in load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")}
-        for name in ("pulp-timebase", "pulp-sample-bank-manifest"):
-            entry = next(e for e in entries.values() if e["match"] == f"pulp-view-native->{name}")
-            self.assertEqual((entry["kind"], entry["owner"], entry["approver"]), ("edge", "carve-p4", "team-lead 2026-10-13"))
-            self.assertTrue(entry["platforms"])
+    def test_view_platform_is_carried_by_the_audio_free_target(self):
+        # pulp-view-native is the Pulp-kept umbrella that adds the audio widgets;
+        # the view-platform unit carries pulp-view-platform, and no allowlist
+        # entry admits an audio edge from either.
+        from vellum_closure import unit_manifest_targets
+        self.assertEqual(unit_manifest_targets(self.UNITS, "view-platform"), ["pulp-view-platform"])
+        entries = load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")
+        self.assertEqual([e["id"] for e in entries if e["debt_id"] == "P4-view-audio"], [])
+        self.assertEqual([e["id"] for e in entries if e.get("match", "").startswith(("pulp-view-native->", "pulp-view-platform->"))], [])
+
+    def test_empty_allowlist_loads_and_malformed_entries_fail(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "a.json"
+            path.write_text(json.dumps({"schema": "pulp.vellum.closure.allowlist.v1", "entries": []}), encoding="utf-8")
+            self.assertEqual(load_allowlist(path), [])
+            for payload in ({"schema": "pulp.vellum.closure.allowlist.v1"},
+                            {"schema": "pulp.vellum.closure.allowlist.v1", "entries": {}}):
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, "entries must be a list"):
+                    load_allowlist(path)
 
     def test_raw_ptr_compat_is_a_linux_and_windows_target_below_every_skia_consumer(self):
         from vellum_closure import unit_layer_violations, unit_manifest_layout, unmirrored_link_violations

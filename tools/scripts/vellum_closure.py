@@ -1984,9 +1984,11 @@ def load_allowlist(path: Path) -> list[dict]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema") != "pulp.vellum.closure.allowlist.v1":
         raise SystemExit(f"invalid closure allowlist schema: {path}")
+    # An empty list is the debt-free state; a missing or non-list field is a
+    # malformed file, not an empty allowlist.
     entries = payload.get("entries")
-    if not isinstance(entries, list) or not entries:
-        raise SystemExit("closure allowlist must contain entries")
+    if not isinstance(entries, list):
+        raise SystemExit("closure allowlist entries must be a list")
     seen: set[str] = set()
     for entry in entries:
         if not isinstance(entry, dict) or not {"id", "owner", "debt_id", "kind", "match"} <= set(entry):
