@@ -2180,19 +2180,30 @@ jobs:
           fi
         shell: bash
 
-      - name: Verify GPU-audio proof targets are configured
-        # A cmake change that silently dropped the proof targets would otherwise
-        # pass by absence: nothing runs them here, so nothing would notice.
+      - name: Verify GPU-audio proof targets are configured and never run
+        # The configure registers exactly the reviewed gpu-proof set
+        # (tools/ci/gpu_proof_tests.txt): a dropped proof target cannot pass by
+        # absence, and a new one is a reviewed allowlist diff. ctest adds a
+        # required fixture's setup even under -LE, so the selection this gate
+        # runs is checked too: it must contain no gpu-proof test.
         if: runner.os == 'macOS' && runner.arch == 'ARM64'
         shell: bash
         run: |
           set -euo pipefail
-          # -FA keeps ctest from adding the identity fixtures it requires.
-          listing="$(ctest --test-dir "$PULP_BUILD_DIR" -N -FA '.*' \
-            -R '^pulp-gpu-dawn-wavenet-qualification$')"
-          if ! grep -qx 'Total Tests: 1' <<<"$listing"; then
-            printf '%s\n' "$listing"
-            echo "::error title=gpu-audio-proof::pulp-gpu-dawn-wavenet-qualification is not configured; the gate no longer compiles the GPU-audio proof targets"
+          names() { sed -n 's/^ *Test *#[0-9]*: //p' | LC_ALL=C sort; }
+          labelled="$(ctest --test-dir "$PULP_BUILD_DIR" -N -L '^gpu-proof$' | names)"
+          if ! diff -u tools/ci/gpu_proof_tests.txt <(printf '%s\n' "$labelled"); then
+            echo "::error title=gpu-audio-proof::the configured gpu-proof tests differ from tools/ci/gpu_proof_tests.txt"
+            exit 1
+          fi
+          eval "$(python3 tools/ci/ctest_gate_args.py \
+            --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
+          : "${label_exclude:?ctest gate arguments did not resolve}"
+          leaked="$(LC_ALL=C comm -12 tools/ci/gpu_proof_tests.txt \
+            <(ctest --test-dir "$PULP_BUILD_DIR" -N -LE "$label_exclude" | names))"
+          if [ -n "$leaked" ]; then
+            printf '%s\n' "$leaked"
+            echo "::error title=gpu-audio-proof::the gate's ctest selection would run gpu-proof tests"
             exit 1
           fi
 

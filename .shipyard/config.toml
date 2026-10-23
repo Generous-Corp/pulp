@@ -205,7 +205,7 @@ configure = "tools/ci/require_build_generator.sh build Ninja && tools/ci/build-d
 # here and run_changed_surface_tests.py writes it for a bounded plan. A failed
 # recording only warns: the run's verdict is ctest's.
 reuse_record = true
-test      = "PULP_BUILD_CLASS=background python3 tools/ci/build_dir_lock.py --build-dir build -- python3 tools/ci/lane_reuse_record.py test --build-dir build -- tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab\""
+test      = "PULP_BUILD_CLASS=background python3 tools/ci/build_dir_lock.py --build-dir build -- python3 tools/ci/lane_reuse_record.py test --build-dir build -- tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab|gpu-proof\""
 
 [validation.gates]
 # Layer-3 authoritative gates — same scripts CI runs via

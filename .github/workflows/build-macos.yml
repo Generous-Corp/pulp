@@ -679,16 +679,27 @@ jobs:
             -DPULP_LOTTIE=ON -DPULP_USE_CCACHE=OFF \
             ${proof_args[@]+"${proof_args[@]}"}
 
-      - name: Verify GPU-audio proof targets are configured
+      - name: Verify GPU-audio proof targets are configured and never run
+        # Mirrors build.yml: the reviewed gpu-proof set, and none of it in the
+        # Test step's selection below.
         if: runner.arch == 'ARM64'
         shell: bash
         run: |
           set -euo pipefail
-          listing="$("$PULP_UNTRUSTED_RUNNER" ctest --test-dir "$PULP_BUILD_DIR" \
-            -N -FA '.*' -R '^pulp-gpu-dawn-wavenet-qualification$')"
-          if ! grep -qx 'Total Tests: 1' <<<"$listing"; then
-            printf '%s\n' "$listing"
-            echo "::error title=gpu-audio-proof::pulp-gpu-dawn-wavenet-qualification is not configured; the gate no longer compiles the GPU-audio proof targets"
+          allowlist="$PULP_UNTRUSTED_SOURCE/tools/ci/gpu_proof_tests.txt"
+          names() { sed -n 's/^ *Test *#[0-9]*: //p' | LC_ALL=C sort; }
+          labelled="$("$PULP_UNTRUSTED_RUNNER" ctest --test-dir "$PULP_BUILD_DIR" \
+            -N -L '^gpu-proof$' | names)"
+          if ! diff -u "$allowlist" <(printf '%s\n' "$labelled"); then
+            echo "::error title=gpu-audio-proof::the configured gpu-proof tests differ from tools/ci/gpu_proof_tests.txt"
+            exit 1
+          fi
+          leaked="$(LC_ALL=C comm -12 "$allowlist" <("$PULP_UNTRUSTED_RUNNER" ctest \
+            --test-dir "$PULP_BUILD_DIR" -N \
+            -LE "validation|slow|performance|bench|quality-lab|gpu-proof" | names))"
+          if [ -n "$leaked" ]; then
+            printf '%s\n' "$leaked"
+            echo "::error title=gpu-audio-proof::the Test step's selection would run gpu-proof tests"
             exit 1
           fi
 

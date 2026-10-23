@@ -225,12 +225,16 @@ The arm64 macOS legs of `build.yml` and `build-macos.yml` configure
 the GPU-audio hardware-evidence binaries against the pinned Dawn. Their ctest
 registrations carry the `gpu-proof` label, which `tools/ci/ctest_gate_args.py`
 excludes on every gate lane (the protected merge receipt's required selection
-carries the same literal). A step after configure fails the gate unless exactly
-one `pulp-gpu-dawn-wavenet-qualification` test is configured, so a cmake change
-that drops the proof targets cannot pass by absence. ctest still adds a required
-fixture's setup test, so the hash-only `pulp-gpu-audio-provider-identity` runs
-as the setup the existing host-mapped pointer probes require; no GPU evidence
-runs in CI. Hardware receipts stay owner-run on m3.
+carries the same literal; so do `changed_surface_inventory.EXCLUDED_LABEL_REGEX`
+and Shipyard's macOS test stage). A step after configure compares `ctest -N -L
+gpu-proof` with the reviewed allowlist `tools/ci/gpu_proof_tests.txt`, so a
+dropped proof target cannot pass by absence and a new one is a reviewed diff,
+and fails if the gate's own `-LE` selection contains any of them: ctest adds a
+required fixture's setup test even under `-LE`, so no ordinary test may require
+a gpu-proof fixture. With the proof ON the gate selects exactly the tests it
+selects with it OFF. `pulp_gpu_proof_begin()`/`pulp_gpu_proof_end()` bracket
+each proof block, and `end` is a configure error outside the proof option.
+Hardware receipts stay owner-run on m3.
 
 ## A2T structural evidence is produced only by the required macOS PR job
 
