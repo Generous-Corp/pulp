@@ -1573,7 +1573,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/audio/restored_path.hpp",
-        "fingerprint": "sha256:11e3b82c52e43deb3ef2093b786b59f443c3e6568f1267f1812ca1bdf0509a01",
+        "fingerprint": "sha256:5070b5aa15535869b72106ae976074d4e35b1dda6a8df9d303acfaabf4b9a7ec",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
