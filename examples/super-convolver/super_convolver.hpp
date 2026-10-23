@@ -99,6 +99,10 @@
 #include <pulp/platform/file_dialog.hpp>
 #include <cstdlib>
 #include <filesystem>
+#if !defined(_WIN32)
+#include <pwd.h>
+#include <unistd.h>
+#endif
 #include "source_display.hpp"
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
@@ -1123,7 +1127,10 @@ public:
     /// authored by whoever saved it, so the path it carries is untrusted input:
     /// deserialize_plugin_state() resolves it (symlinks followed) and drops it,
     /// logging why, unless it sits under this root. The user's own picks through
-    /// load_ir_path() are not confined. Defaults to the user's home directory.
+    /// load_ir_path() are not confined. Defaults to the user's home directory,
+    /// which keeps a hostile session off system files and other users' files;
+    /// it does not keep it off the user's own. A sandboxed host whose HOME is
+    /// the app container should set the directory it can actually read from.
     /// UI/main thread only (takes a mutex).
     void set_ir_restore_root(std::filesystem::path root) {
         std::lock_guard<std::mutex> lock(ir_path_mutex_);
@@ -2388,12 +2395,19 @@ private:
     }
 
 #if !defined(PULP_WASM)
+    /// The user's home directory. A host may scrub HOME from a plugin's
+    /// environment (an out-of-process AU hosting service does), and an empty
+    /// root would refuse every restored IR, so the account database is asked
+    /// when the variable is missing.
     static std::filesystem::path default_ir_restore_root() {
         if (const char* home = std::getenv("HOME"); home && *home)
             return home;
 #if defined(_WIN32)
         if (const char* profile = std::getenv("USERPROFILE"); profile && *profile)
             return profile;
+#else
+        if (const passwd* pw = getpwuid(getuid()); pw && pw->pw_dir && *pw->pw_dir)
+            return pw->pw_dir;
 #endif
         return {};
     }

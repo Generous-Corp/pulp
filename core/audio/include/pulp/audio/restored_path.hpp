@@ -7,6 +7,15 @@
 /// the author named. State blobs should carry content or root-relative
 /// references, never absolute paths; this helper is the gate for the legacy
 /// blobs that still do.
+///
+/// What the root buys is bounded: with the user's home directory as the root
+/// (the usual default) a hostile blob is kept off system files and other
+/// users' files, but not off the user's own documents, keys, or caches, which
+/// the decoder can still be pointed at. A tighter root (a presets or IR
+/// folder) narrows that; the root itself must come from the plugin or host,
+/// never from the blob being restored. Callers adopt the returned canonical
+/// path and open that, not the blob's spelling, or a relative spelling is
+/// checked against the root but opened against the process working directory.
 
 #include <pulp/runtime/safe_relative_path.hpp>
 
