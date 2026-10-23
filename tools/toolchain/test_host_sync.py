@@ -31,6 +31,10 @@ FAKE_MISE = r"""#!/bin/sh
 echo "$*" >> "$HOME/mise.log"
 case "$1" in
   --version) echo "2026.10.17 macos-arm64 (2026-10-17)" ;;
+  trust)
+    # Only ever one named file, never a directory.
+    [ "$2" = --quiet ] && [ -f "$3" ] && [ "$(basename "$3")" = .mise.toml ] || { echo "fake mise: bad trust $*" >&2; exit 3; }
+    ;;
   install)
     if [ -n "$FAKE_MISE_FAIL" ]; then
       echo "mise ERROR failed to download https://github.com/Kitware/CMake/releases/download/v4.3.3/cmake.tar.gz: Could not resolve host: github.com" >&2
@@ -59,7 +63,7 @@ S="$HOME/rustup-state"
 mkdir -p "$S"
 case "$1 $2" in
   "toolchain list")
-    echo "stable-aarch64-apple-darwin (default)"
+    # A toolchain is a directory under $S; `stable` holds a `version` file.
     for t in "$S"/*; do [ -d "$t" ] && echo "$(basename "$t")-aarch64-apple-darwin"; done
     exit 0 ;;
   "toolchain install")
@@ -92,6 +96,12 @@ case "$1 $2" in
     cat "$S/$5/targets" 2>/dev/null
     exit 0 ;;
 esac
+if [ "$1" = run ] && [ "$3 $4" = "rustc --version" ]; then
+  [ -d "$S/$2" ] || { echo "error: toolchain '$2' is not installed" >&2; exit 1; }
+  if [ -f "$S/$2/version" ]; then v=$(cat "$S/$2/version"); else v="$2"; fi
+  echo "rustc $v (fake 2026-06-12)"
+  exit 0
+fi
 if [ "$1" = default ] && [ $# -eq 1 ]; then echo "stable-aarch64-apple-darwin (default)"; exit 0; fi
 echo "fake rustup: unexpected $*" >&2
 exit 2
@@ -255,6 +265,7 @@ class HostSyncTests(unittest.TestCase):
         self.assertEqual(self.git("-C", str(self.checkout), "rev-parse", "origin/main"), receipt["ref_sha"])
         self.assertEqual("a" * 64, receipt["manifest_sha256"])
         self.assertIn("install --locked", self.log("mise"))
+        self.assertIn(f"trust --quiet {self.checkout}/.mise.toml", self.log("mise"))
         self.assertEqual(
             [f"toolchain install {PIN} --profile minimal --no-self-update --component rustfmt,clippy "
              "--target x86_64-apple-darwin"],
@@ -334,7 +345,7 @@ class HostSyncTests(unittest.TestCase):
     def test_only_additive_commands_are_run(self) -> None:
         self.assertEqual(0, self.sync().returncode)
         mise = {line.split()[0] for line in self.log("mise")}
-        self.assertLessEqual(mise, {"install", "exec", "--version"}, self.log("mise"))
+        self.assertLessEqual(mise, {"trust", "install", "exec", "--version"}, self.log("mise"))
         rustup = {" ".join(line.split()[:2]) for line in self.log("rustup")}
         allowed = {"toolchain list", "toolchain install", "component list", "target list", "default"}
         self.assertLessEqual(rustup, allowed, self.log("rustup"))
@@ -353,6 +364,19 @@ class HostSyncTests(unittest.TestCase):
             self.assertTrue(any(n.startswith("Xcode: Xcode 26.5") for n in notes), notes)
         self.assertTrue(host_sync.is_homebrew("/opt/homebrew/bin/cmake"))
         self.assertFalse(host_sync.is_homebrew(str(self.base_bin / "rustc")))
+
+    def test_a_cache_placed_outside_the_volume_caches_root_fails_the_sync(self) -> None:
+        target = self.root / "tmp/mise-data"  # a temporary directory, like the dangling Aug-29 link
+        target.mkdir()
+        link = self.home / ".local/share/mise"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(target)
+        out = self.sync()
+        self.assertEqual(1, out.returncode, out.stdout + out.stderr)
+        found = [f for f in self.receipt()["findings"] if f["tool"] == "cache mise data"]
+        self.assertEqual(1, len(found), self.receipt()["findings"])
+        self.assertIn("temporary directory", found[0]["note"])
+        self.assertTrue(target.is_dir(), "a finding is reported, never moved or deleted")
 
     def test_a_platform_without_rust_skips_rustup(self) -> None:
         pins = self.pins()
@@ -425,20 +449,55 @@ class ProvidePinnedRustTests(unittest.TestCase):
         lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
         return [line for line in lines if line.startswith("toolchain install")]
 
-    def test_the_pin_comes_from_the_generated_file_and_is_installed_once(self) -> None:
+    def stable(self, version: str, components=None, targets=None) -> None:
+        """Give the image a `stable` toolchain at `version` with these parts
+        (default: every pinned part)."""
+        root = self.home / "rustup-state/stable"
+        root.mkdir(parents=True)
+        (root / "version").write_text(version, encoding="utf-8")
+        comps = self.expected["rust_components"] if components is None else components
+        targs = self.expected["rust_targets"] if targets is None else targets
+        (root / "components").write_text("".join(f"{c}\n" for c in comps), encoding="utf-8")
+        (root / "targets").write_text("".join(f"{t}\n" for t in targs), encoding="utf-8")
+
+    def branch(self, out: subprocess.CompletedProcess) -> str:
+        lines = [l for l in out.stdout.splitlines() if l.startswith("rust: branch=")]
+        self.assertEqual(1, len(lines), out.stdout + out.stderr)
+        return lines[0].split("=", 1)[1].split(":", 1)[0]
+
+    def test_pin_present_by_name_is_a_no_op(self) -> None:
+        self.assertEqual("install", self.branch(self.provide("--fallback-to-default")))
         out = self.provide("--fallback-to-default")
         self.assertEqual(0, out.returncode, out.stdout + out.stderr)
-        self.assertEqual(
-            [f"toolchain install {self.pin} --profile minimal --no-self-update "
-             f"--component {','.join(self.expected['rust_components'])} "
-             f"--target {','.join(self.expected['rust_targets'])}"],
-            self.installs(),
-        )
-        again = self.provide("--fallback-to-default")
-        self.assertEqual(0, again.returncode, again.stdout + again.stderr)
-        self.assertEqual(1, len(self.installs()), again.stdout)
-        self.assertIn(f"rust: {self.pin} is installed", again.stdout)
+        self.assertEqual("present", self.branch(out))
+        self.assertEqual(1, len(self.installs()), out.stdout)
         self.assertEqual("", self.github_env.read_text(encoding="utf-8"))
+
+    def test_an_image_stable_that_is_the_pin_is_selected_offline(self) -> None:
+        self.stable(self.pin)
+        out = self.provide("--fallback-to-default", FAKE_RUSTUP_FAIL="1")  # any download would fail
+        self.assertEqual(0, out.returncode, out.stdout + out.stderr)
+        self.assertEqual("stable-alias", self.branch(out))
+        self.assertEqual([], self.installs())
+        self.assertEqual("RUSTUP_TOOLCHAIN=stable\n", self.github_env.read_text(encoding="utf-8"))
+
+    def test_a_stable_of_another_release_or_missing_a_target_installs_the_pin(self) -> None:
+        for name, version, targets in (("other release", "1.99.0", None), ("no cross std", self.pin, [])):
+            with self.subTest(case=name):
+                shutil.rmtree(self.home / "rustup-state", ignore_errors=True)
+                (self.home / "rustup.log").unlink(missing_ok=True)
+                self.github_env.write_text("", encoding="utf-8")
+                self.stable(version, targets=targets)
+                out = self.provide("--fallback-to-default")
+                self.assertEqual(0, out.returncode, out.stdout + out.stderr)
+                self.assertEqual("install", self.branch(out))
+                self.assertEqual(
+                    [f"toolchain install {self.pin} --profile minimal --no-self-update "
+                     f"--component {','.join(self.expected['rust_components'])} "
+                     f"--target {','.join(self.expected['rust_targets'])}"],
+                    self.installs(),
+                )
+                self.assertEqual("", self.github_env.read_text(encoding="utf-8"))
 
     def test_a_missing_component_is_installed_into_the_existing_toolchain(self) -> None:
         self.assertEqual(0, self.provide(FAKE_RUSTUP_DROP="clippy").returncode)
@@ -447,12 +506,15 @@ class ProvidePinnedRustTests(unittest.TestCase):
         self.assertEqual(2, len(self.installs()))
         self.assertIn("was missing: clippy", out.stdout)
 
-    def test_a_download_failure_falls_back_to_the_default_only_when_asked(self) -> None:
+    def test_a_failed_install_falls_back_to_stable_naming_both_versions_only_when_asked(self) -> None:
+        self.stable("1.99.0")
         out = self.provide("--fallback-to-default", FAKE_RUSTUP_FAIL="1")
         self.assertEqual(0, out.returncode, out.stdout + out.stderr)
+        self.assertEqual("fallback", self.branch(out))
         self.assertEqual(3, len(self.installs()), "three spaced attempts")
-        self.assertIn(f"::warning title=toolchain::could not install the pinned Rust {self.pin}", out.stdout)
-        self.assertEqual("RUSTUP_TOOLCHAIN=stable-aarch64-apple-darwin\n", self.github_env.read_text(encoding="utf-8"))
+        self.assertIn(f"::warning title=toolchain::could not install the pinned Rust {self.pin}; "
+                      f"this run builds pulp-rs with stable (rustc 1.99.0), not {self.pin}", out.stdout)
+        self.assertEqual("RUSTUP_TOOLCHAIN=stable\n", self.github_env.read_text(encoding="utf-8"))
         strict = self.provide(FAKE_RUSTUP_FAIL="1")
         self.assertEqual(1, strict.returncode, strict.stdout + strict.stderr)
         self.assertIn("::error::could not install the pinned Rust", strict.stderr)
@@ -478,12 +540,99 @@ class ProvidePinnedRustTests(unittest.TestCase):
                 self.assertNotIn("rustup component add", text)
 
 
+@unittest.skipIf(os.name == "nt", "the fake tools are shell scripts")
+class PostCheckoutTrustHookTests(unittest.TestCase):
+    """.githooks/post-checkout trusts a new worktree's own .mise.toml."""
+
+    NULL = "0" * 40
+
+    def setUp(self) -> None:
+        self.td = tempfile.TemporaryDirectory()
+        self.root = Path(self.td.name).resolve()
+        self.home = self.root / "home"
+        self.bin = self.root / "bin"
+        script(self.bin / "mise", '#!/bin/sh\necho "$(pwd -P)|$*" >> "$HOME/mise.log"\n'
+                                  '[ -z "$FAKE_MISE_TRUST_FAIL" ] || exit 1\n')
+        self.home.mkdir()
+        git = shutil.which("git")
+        assert git
+        (self.bin / "git").symlink_to(git)
+        self.env = {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.home), "GIT_CONFIG_NOSYSTEM": "1"}
+        self.repo = self.root / "repo"
+        self.git("init", "--quiet", "-b", "main", str(self.repo))
+        hooks = self.repo / ".githooks"
+        hooks.mkdir()
+        shutil.copy(REPO / ".githooks/post-checkout", hooks / "post-checkout")
+        (hooks / "post-checkout").chmod(0o755)
+        (self.repo / ".mise.toml").write_text("[settings]\nlocked = true\n", encoding="utf-8")
+        self.git("-C", str(self.repo), "add", ".githooks", ".mise.toml")
+        self.git("-C", str(self.repo), "commit", "--quiet", "-m", "init")
+        self.git("-C", str(self.repo), "config", "core.hooksPath", ".githooks")
+
+    def tearDown(self) -> None:
+        self.td.cleanup()
+
+    def git(self, *args: str, **env: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+                              env=dict(self.env, **env), capture_output=True, text=True, check=True)
+
+    def log(self) -> List[str]:
+        path = self.home / "mise.log"
+        return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+    def hook(self, cwd: Path, *args: str, path: str = "", **env: str) -> subprocess.CompletedProcess:
+        run_env = dict(self.env, **env)
+        if path:
+            run_env["PATH"] = path
+        return subprocess.run(["/bin/sh", str(REPO / ".githooks/post-checkout"), *args], cwd=cwd, env=run_env,
+                              capture_output=True, text=True, check=False)
+
+    def test_a_new_worktree_trusts_exactly_its_own_config(self) -> None:
+        worktree = self.root / "wt"
+        self.git("-C", str(self.repo), "worktree", "add", "--quiet", "-b", "topic", str(worktree))
+        self.assertEqual([f"{worktree}|trust --quiet {worktree}/.mise.toml"], self.log())
+
+    def test_a_branch_switch_trusts_nothing(self) -> None:
+        out = self.hook(self.repo, "1" * 40, "2" * 40, "1")
+        self.assertEqual(0, out.returncode)
+        self.assertEqual([], self.log())
+        out = self.hook(self.repo, self.NULL, "2" * 40, "0")  # a file checkout, not a branch
+        self.assertEqual([], self.log())
+        self.hook(self.repo, self.NULL, "2" * 40, "1")  # control: the creation case does trust
+        self.assertEqual(1, len(self.log()))
+
+    def test_no_mise_or_no_config_is_a_quiet_success(self) -> None:
+        out = self.hook(self.repo, self.NULL, "2" * 40, "1", path="/usr/bin:/bin")
+        self.assertEqual((0, ""), (out.returncode, out.stderr))
+        bare = self.root / "no-config"
+        bare.mkdir()
+        out = self.hook(bare, self.NULL, "2" * 40, "1")
+        self.assertEqual((0, ""), (out.returncode, out.stderr))
+        self.assertEqual([], self.log())
+
+    def test_a_failed_trust_never_fails_the_checkout(self) -> None:
+        out = self.hook(self.repo, self.NULL, "2" * 40, "1", FAKE_MISE_TRUST_FAIL="1")
+        self.assertEqual(0, out.returncode)
+        self.assertIn(f"run: mise trust {self.repo}/.mise.toml", out.stderr)
+
+
 class SourceTests(unittest.TestCase):
     def test_source_parses_as_python_39(self) -> None:
         # It runs on a stock Mac's /usr/bin/python3 (3.9) before mise exists.
         source = (HERE / "host_sync.py").read_text(encoding="utf-8")
         ast.parse(source, feature_version=(3, 9))
         self.assertNotIn("tomllib", source)
+
+    @unittest.skipIf(os.name == "nt", "POSIX signals")
+    def test_a_hung_command_is_abandoned_within_its_bound(self) -> None:
+        import time
+
+        start = time.monotonic()
+        code, _, err = host_sync.run_cmd([sys.executable, "-c", "import time; time.sleep(60)"], None,
+                                         dict(os.environ), 0.5)
+        self.assertEqual(124, code)
+        self.assertIn("timed out", err)
+        self.assertLess(time.monotonic() - start, 10)
 
     def test_network_errors_are_recognised(self) -> None:
         for text in ("Could not resolve host: github.com", "error: could not download file", "HTTP status 503",

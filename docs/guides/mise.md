@@ -174,11 +174,11 @@ rather than resolving a new download. Pulp's `.mise.toml` also sets
 behind your back. mise applies a project's `[settings]` only after you trust
 the checkout, so run `mise trust` first; until then those two settings, and
 `disable_update_warning`, are ignored, and mise falls back to its defaults
-(`locked = false`, `auto_install = true`). On a machine with many worktrees,
-trust their common parent once instead of each checkout, for example by
-exporting `MISE_TRUSTED_CONFIG_PATHS="$HOME/Code"` in your shell profile (the
-fleet hosts use their checkout roots: `/Volumes/Workshop/Code` on m3, `~/Code`
-on m1, m5 and m5s). Confirm it from inside a checkout:
+(`locked = false`, `auto_install = true`). Trust each checkout's own file,
+never a common parent: a worktree created with the repository's hooks
+installed is trusted by `.githooks/post-checkout` (see
+[Fresh worktrees and mise trust](#fresh-worktrees-and-mise-trust)). Confirm it
+from inside a checkout:
 
 ```bash
 mise settings get locked   # must print true
@@ -349,22 +349,26 @@ difference stops the configure and `setup.sh` with the same lines.
 
 ## Keeping hosts current
 
-`tools/toolchain/host_sync.py` makes a host match the pins: it runs the fixes
+`tools/toolchain/manifest.toml` is the one authority for host tools.
+`tools/toolchain/host_sync.py` makes a host match it: it runs the fixes
 `check_env.py` names.
 
 ```bash
 python3 tools/toolchain/host_sync.py                    # this checkout
 python3 tools/toolchain/host_sync.py --repo ~/Code/pulp # another one
+cat ~/.config/pulp/toolchain-sync.json                  # what it did and what remains
 ```
 
 It fetches `origin/main` and reads the pins from there, never from the working
 tree, so a host converges on what landed whatever branch its checkout has out.
-It then runs the pinned mise's `mise install --locked` against a copy of those
-pins, installs the manifest's Rust by name with `rustup toolchain install`
-(with the pinned components and targets) when anything is missing, and finally
-runs `check_env.py --fleet-path` inside the pinned environment. The outcome of
-every step is written to `~/.config/pulp/toolchain-sync.json`. It holds a lock,
-so two runs never overlap.
+It trusts the checkout's own `.mise.toml`, runs the pinned mise's
+`mise install --locked` against a copy of the pins, installs the manifest's
+Rust by name with `rustup toolchain install` (with the pinned components and
+targets) when anything is missing, and finally runs `check_env.py --fleet-path`
+inside the pinned environment. The receipt at
+`~/.config/pulp/toolchain-sync.json` records every step (with
+`network_failure` on the ones a download broke), the remaining `findings`, and
+`report_only` notes. It holds a lock, so two runs never overlap.
 
 It only adds. It never uninstalls a tool, runs `mise use`, edits a shell
 profile, or changes the default rustup toolchain. A few things it reports but
@@ -375,9 +379,58 @@ anything Homebrew owns, and Xcode.
 Exit status: `0` when the host matches, `1` when a difference remains that it
 does not fix, `2` when a download or the fetch failed (the receipt names the
 step; the next run tries again, and nothing is counted as fixed), `3` when the
-pins could not be read, `4` when another run holds the lock. Run it by hand
-after a pin bump lands; tartci schedules it on fleet hosts.
-`tools/toolchain/fleet_report.py` stays the read-only view across every host.
+pins could not be read, `4` when another run holds the lock.
+
+**When to run it.** Run it by hand, or from an interactive or agent session,
+after a pin bump lands; those sessions already have access to the data
+volumes. Do not install it as a plain LaunchAgent: a launchd job that opens a
+`/Volumes` path without the tartci launcher's Removable Volumes grant hangs
+on that open (one orphan hung for two hours). tartci will schedule it under
+its consented launcher identity. Until then the hourly
+`tools/toolchain/fleet_report.py` run is the drift alarm. Every child
+`host_sync.py` and `check_env.py` start is bounded and abandoned if it does
+not answer, so a lost grant shows up as a named finding, not a hang.
+
+## Cache placement on volume hosts
+
+On a host whose builds live on a data volume (m3 `/Volumes/Workshop`, m5s
+`/Volumes/Atelier`), the agent-only caches (mise data, rustup, cargo, the Skia
+keyed cache) live under `/Volumes/<vol>/caches/<name>`, with a symlink at
+their default path (`~/.local/share/mise`, `~/.rustup`, `~/.cargo`,
+`~/.cache/pulp/skia`). Moving one:
+
+1. **Copy** the default directory to `/Volumes/<vol>/caches/<name>` (`ditto`
+   or `rsync -a`), with nothing using it.
+2. **Verify** the copy: same file count and size, and a spot check of a few
+   files by digest.
+3. **Symlink**: move the default directory aside, then `ln -s
+   /Volumes/<vol>/caches/<name> <default path>`.
+4. **Prove** the tool reads it: `check_env.py --fleet-path` and
+   `host_sync.py` report no `cache` finding, and the tool still runs (for
+   example `rustup toolchain list`, `MISE_ENV=toolchain mise ls`).
+5. **Delete** the old copy only after that proof.
+
+Never point a cache at a temporary or `mktemp` directory, under
+`/Volumes/<vol>/VMs`, or inside any reclaim root: an Aug-29 mise symlink into a
+`mktemp` directory under the volume's VM cache tree dangled once that was
+cleared. `check_env.py` reports a cache symlink that dangles, points into a
+temporary directory, or leaves `/Volumes/<vol>/caches`, so `host_sync.py`
+fails on it. Caches a VM mounts (the ccache `cache_root`, `fetchcontent-src`)
+and `TARTCI_HOME`/logs move only through tartci's profile placement, never a
+symlink: a dangling `--dir` mount takes a lane down.
+
+## Fresh worktrees and mise trust
+
+mise refuses a config it does not trust, so in a fresh worktree any command
+that reaches `python3` through the mise shim (`gates.sh`, the pre-push hook)
+fails. `.githooks/post-checkout` trusts the new worktree's own `.mise.toml`
+when git creates it, and `host_sync.py` trusts the checkout it runs in.
+
+- Check: `mise settings get locked` inside the worktree prints `true`.
+- Repair one worktree: `mise trust <worktree>/.mise.toml`.
+- Never trust a parent directory, `$HOME` or `/`, and never add
+  `trusted_config_paths` roots: trust paths are prefixes, so a root trusts
+  every repository cloned under it, and a `.mise.toml` can run code.
 
 ## Building plugins with the Pulp SDK
 

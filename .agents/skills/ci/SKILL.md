@@ -884,6 +884,15 @@ title=toolchain::could not install the pinned Rust` means that download failed
 and the job built with the runner default (`RUSTUP_TOOLCHAIN`). Fix the golden
 (install the manifest's Rust by name, as `tools/ci/mise-golden-layer.sh`
 does), never by re-enabling auto-install in the workflow or deleting the step.
+The step logs `rust: branch=present|stable-alias|install|fallback`; on a gate
+VM anything but `present` or `stable-alias` means the golden drifted from the
+pin and pays a download. `rustup toolchain link` cannot alias an official
+release name, which is why an identical `stable` is selected with
+`RUSTUP_TOOLCHAIN=stable` instead.
+
+`.githooks/post-checkout` trusts a new worktree's own `.mise.toml` (null old
+sha and branch flag 1 only) and never fails the checkout. Do not widen it to a
+parent directory or add `trusted_config_paths` roots (contract row 28).
 
 ## Android minimum-API allocation check
 

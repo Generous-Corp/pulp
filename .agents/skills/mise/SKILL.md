@@ -68,15 +68,27 @@ configured before opting in keeps its cached interpreter: configure a fresh one.
 
 ## Bringing a host up to the pins
 
-`python3 tools/toolchain/host_sync.py [--repo <checkout>]` is check_env's fix
-commands executed: fetch, read the pins from `origin/main` (never the working
-tree), `mise install --locked` with the pinned mise, `rustup toolchain install`
-of the manifest Rust with its components and targets, then
-`check_env.py --fleet-path` inside the pinned environment, with a receipt at
-`~/.config/pulp/toolchain-sync.json`. Exit 0 match, 1 a difference it does not
-fix, 2 network (retry; never counted as fixed), 3 pins unreadable, 4 another run
-holds the lock.
+Decisions contract rows 24-28 (`.agents/contract.toml`) are the settled rules
+below; read them before changing any of it.
 
+**Procedure.** Run `python3 tools/toolchain/host_sync.py [--repo <checkout>]`
+by hand or from an interactive or agent session, then read
+`~/.config/pulp/toolchain-sync.json`: `exit`, `findings` (what is still
+different and its fix), `network_failures` (steps a download broke: just run
+it again later) and `report_only` (things it must not change). It is
+check_env's fix commands executed: fetch, read the pins from `origin/main`
+(never the working tree), `mise trust` of the checkout's own `.mise.toml`,
+`mise install --locked` with the pinned mise, `rustup toolchain install` of the
+manifest Rust with its components and targets, then `check_env.py --fleet-path`
+inside the pinned environment. Exit 0 match, 1 a difference it does not fix,
+2 network (retry; never counted as fixed), 3 pins unreadable, 4 another run
+holds the lock. `fleet_report.py` (hourly) is the read-only drift alarm.
+
+- Never schedule it as a plain LaunchAgent. A launchd job that opens a
+  `/Volumes` path without the tartci launcher's Removable Volumes grant hangs
+  there (an m5s orphan hung two hours); tartci will schedule it under its
+  consented launcher. Every child it and check_env start is bounded and
+  abandoned on timeout; keep it that way (no unbounded `wait`).
 - It is additive only. Do not teach it to uninstall, `mise use`, set the rustup
   default, touch shell profiles, Homebrew or Xcode: those are report-only lines
   in the receipt for a human or tartci to act on.
@@ -88,12 +100,47 @@ holds the lock.
   toolchain and a host with the pin installed beside a newer `stable` reads as
   drift forever.
 - `rustc --version` cannot see a missing clippy or cross std. check_env asks
-  `rustup component list` / `target list --toolchain <pin>`, and that is the
-  finding that keeps a half-installed toolchain from exiting 0.
+  `rustup component list` / `target list --toolchain <pin>` (or the toolchain a
+  job selected with `RUSTUP_TOOLCHAIN`), and that is the finding that keeps a
+  half-installed toolchain from exiting 0.
+- `rustup toolchain link 1.97.1 <sysroot>` is refused ("invalid custom
+  toolchain name"): an official release name cannot be aliased. CI selects an
+  identical `stable` by name instead (`tools/ci/provide_pinned_rust.sh`,
+  branch `stable-alias`).
 - Tests run it as a subprocess against a real local git origin and shell fakes
   for mise/rustup/rustc with HOME in the fixture
   (`tools/toolchain/test_host_sync.py`); never let a test reach the real
   `~/.config/pulp`.
+
+## Cache placement on volume hosts
+
+Agent-only caches (mise data, rustup, cargo, the Skia keyed cache) on m3
+(`/Volumes/Workshop`) and m5s (`/Volumes/Atelier`) live under
+`/Volumes/<vol>/caches/<name>`, symlinked from the default path. To move one:
+copy it there with nothing using it, verify (file count, size, a few digests),
+move the default aside and symlink it, prove the tool reads it (`check_env.py
+--fleet-path` and `host_sync.py` show no `cache` finding; the tool runs), and
+only then delete the old copy.
+
+Do NOT: link a cache into a tmp or `mktemp` directory, under
+`/Volumes/<vol>/VMs`, or inside any reclaim root (the Aug-29 mise link into a
+`mktemp` dir under the VM cache tree dangled); move a VM-mounted cache (ccache
+`cache_root`, `fetchcontent-src`) or `TARTCI_HOME`/logs with a symlink, which
+only tartci's profile placement may move (a dangling `--dir` mount takes a lane
+down); delete the old copy before the proof. `check_env.py` reports a cache
+symlink that dangles, points into a temporary directory, leaves
+`/Volumes/<vol>/caches`, or does not answer (a lost volume grant).
+
+## Fresh worktrees and mise trust
+
+mise refuses an untrusted `.mise.toml`, so the mise `python3` shim fails in a
+fresh worktree. `.githooks/post-checkout` trusts exactly the new worktree's
+own `.mise.toml` when git creates it; `host_sync.py` trusts the checkout it
+runs in. Check with `mise settings get locked` (must print `true` inside the
+worktree); repair with `mise trust <worktree>/.mise.toml`. Never trust a
+parent directory, `$HOME` or `/`, and never add `trusted_config_paths` roots:
+they are prefixes, so a root trusts every repository under it, and a
+`.mise.toml` can run code.
 
 ## The pinned-toolchain golden (CI images)
 
@@ -201,10 +248,10 @@ trusted. In an untrusted checkout `locked`, `auto_install` and
 `MISE_TRUSTED_CONFIG_PATHS` (as `generate.py --lock`, the golden layer and the
 candidate CI lane do) or pass the setting as an environment variable. Lanes
 also export `MISE_LOCKED=1` and `MISE_AUTO_INSTALL=0`, which hold whatever
-mise's trust rules do; keep them when adding a lane that runs mise. Each fleet
-host trusts its checkout roots (`MISE_TRUSTED_CONFIG_PATHS` set to
-`/Volumes/Workshop/Code` on m3, `~/Code` on m1, m5 and m5s, or `mise trust`
-there), and a rollout step checks that `mise settings get locked` prints `true`
+mise's trust rules do; keep them when adding a lane that runs mise. A fleet
+checkout is trusted one file at a time (the post-checkout hook, host_sync, or
+`mise trust <checkout>/.mise.toml`), never through `trusted_config_paths`
+roots, and a rollout step checks that `mise settings get locked` prints `true`
 inside a checkout. Since
 2026.10.14 a global `~/.config/mise/config.override.toml` (or
 `config.toolchain.override.toml`) outranks the project's tools and is exempt

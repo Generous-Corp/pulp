@@ -56,6 +56,12 @@ config_paths = [
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/gpu_trace_overhead_scope.json",
     ".agents/contract.toml",
+    "tools/toolchain/**",
+    "experimental/pulp-rs/rust-toolchain.toml",
+    ".mise.toml",
+    ".mise.toolchain.toml",
+    "mise.toolchain.lock",
+    ".githooks/**",
 ]
 
 [meta]
@@ -297,3 +303,48 @@ title = "The iOS compile gate is skipped only on a trusted PASS receipt for its 
 why = "The gate costs 6-13 min per macos job. Over its shadow window (2026-09-27..29: 242 gate jobs, 60 would_skip verdicts across merge_group and pull_request) no would_skip was followed by a failing real run; the one digest that failed and later passed failed on an npm registry DNS error, not an input. A code audit then found inputs the digest missed (the Three.js bundler and its npm lockfile, the build wrapper, directories the root CMakeLists adds on iOS), which were added before enforcement."
 do_not = "Trusting a receipt from outside this repository's build.yml merge_group or same-repository pull_request runs; narrowing ios_gate_digest.py's input set without a shadow window; removing the control cadence. A control_run or would_skip followed by ran_failed means an input is missing: set PULP_IOS_GATE_DIGEST_MODE=shadow and widen the set before re-enabling."
 guards = [".github/workflows/build.yml", "tools/ci/ios_gate_digest.py"]
+
+[[decision]]
+id = 24
+layer = "pulp"
+tags = ["toolchain", "host-freshness", "mise", "rustup", "host-sync", "drift"]
+title = "tools/toolchain/manifest.toml is the single toolchain authority; hosts converge with the additive, idempotent tools/toolchain/host_sync.py, and drift is detected by check_env.py and fleet_report.py."
+why = "2026-10-22: m3 and m5s had never installed the pinned mise toolchain, and three hosts ran three different rustc versions (1.96.0, 1.98.1, 1.99.1) against a 1.97.1 pin, because nothing applied the pins and every host updated on its own schedule."
+do_not = "Letting host_sync uninstall a tool, run `mise use`, change the rustup default, edit shell profiles, touch Homebrew or Xcode, or run a mise binary whose digest is not the pin; reading pins from a working tree instead of the fetched origin/main; counting a network failure as fixed; hand-installing per host instead of fixing the manifest."
+guards = ["tools/toolchain/**", ".mise.toml", ".mise.toolchain.toml", "mise.toolchain.lock"]
+
+[[decision]]
+id = 25
+layer = "pulp"
+tags = ["rust", "rust-toolchain", "stable", "pin", "rustup", "toolchain"]
+title = "Rust is pinned by experimental/pulp-rs/rust-toolchain.toml, generated from the manifest with the exact release, components and targets; never `channel = \"stable\"`. CI provides the pin before the build (offline when the image has it or its stable is the same release), never by re-enabling RUSTUP_AUTO_INSTALL."
+why = "The file said `channel = \"stable\"` while the manifest pinned 1.97.1, so the pin was unenforceable: each host built pulp-rs with its own stable. Pinning it alone would have broken the required gate, whose golden had only `stable` and whose build legs set RUSTUP_AUTO_INSTALL=0, so tools/ci/provide_pinned_rust.sh runs first."
+do_not = "Hand-editing rust-toolchain.toml or setting it to a channel; `rustup target add` / `component add` at the repo root (that changes the default toolchain, not the pinned one); `rustup toolchain link` of an official release name (rustup refuses it); deleting the provide step or turning auto-install back on to green a job."
+guards = ["experimental/pulp-rs/rust-toolchain.toml", "tools/toolchain/**", "tools/ci/**", ".github/workflows/**"]
+
+[[decision]]
+id = 26
+layer = "pulp"
+tags = ["cache", "volume", "symlink", "mise", "rustup", "cargo", "skia", "ccache", "placement"]
+title = "On volume hosts, agent-only caches (mise data, rustup, cargo, the Skia keyed cache) live under /Volumes/<vol>/caches/<name>, symlinked from their default path; VM-mounted caches (ccache cache_root, fetchcontent-src) and TARTCI_HOME/logs move only through tartci profile placement, never a symlink."
+why = "An Aug-29 mise data symlink pointed into a mktemp directory under the volume's VMs/cache tree and dangled once that was cleared; a dangling --dir mount behind a VM-mounted cache would take a lane down. check_env.py reports a cache symlink that dangles, points into a temporary directory, or leaves /Volumes/<vol>/caches."
+do_not = "Symlinking a cache into a tmp or mktemp directory, under /Volumes/<vol>/VMs, or inside any reclaim root; moving a VM-mounted cache with a symlink; deleting the old copy before the new one is verified and proven in use."
+guards = ["tools/toolchain/**"]
+
+[[decision]]
+id = 27
+layer = "pulp"
+tags = ["launchd", "removable-volumes", "tcc", "consent", "launcher", "host-sync"]
+title = "A launchd job that opens /Volumes paths on a volume host runs under the tartci launcher's consented identity; a plain LaunchAgent is forbidden. Until tartci schedules host_sync, it runs by hand or from an interactive or agent session, and the hourly fleet_report is the drift alarm."
+why = "A launchd job without the launcher's Removable Volumes grant hangs on its first /Volumes open: an orphan on m5s hung on the data volume for two hours. host_sync and check_env bound every child they start and abandon one that does not answer, so a lost grant fails fast with a named finding."
+do_not = "Installing host_sync (or any cache-touching job) as a plain LaunchAgent; an unbounded wait on a child that may touch /Volumes."
+guards = ["tools/toolchain/**", "tools/ci/**"]
+
+[[decision]]
+id = 28
+layer = "pulp"
+tags = ["mise", "trust", "worktree", "post-checkout", "trusted_config_paths", "security"]
+title = "mise trust is per checkout: .githooks/post-checkout trusts a new worktree's own .mise.toml, and host_sync trusts the checkout it runs in. No trusted_config_paths roots."
+why = "mise 2026.10.13+ refuses an untrusted config, so python3 through the mise shim failed in every fresh worktree (gates.sh, pre-push). A root in trusted_config_paths is a prefix match that would trust every repository cloned under it, and a .mise.toml can run code."
+do_not = "Adding trusted_config_paths roots, trusting a parent directory, $HOME or /, or running `mise trust` on an arbitrary path; repair one worktree with `mise trust <worktree>/.mise.toml`."
+guards = [".githooks/**", ".mise.toml", "tools/toolchain/**"]

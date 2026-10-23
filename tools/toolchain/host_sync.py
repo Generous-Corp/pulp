@@ -9,7 +9,8 @@ those commands. It reads the pins from origin/main after a fetch, never from
 the working tree, so a host stays on what landed whatever branch its checkout
 has out. Then:
 
-  1. `MISE_ENV=toolchain <pinned mise> install --locked` in a copy of the
+  1. `mise trust` of this checkout's own .mise.toml, then
+     `MISE_ENV=toolchain <pinned mise> install --locked` in a copy of the
      pinned mise config: it installs only what is missing.
   2. `rustup toolchain install <rust pin>` with the components and targets
      rust-toolchain.toml names, when any of them is missing.
@@ -88,17 +89,30 @@ Runner = Callable[[List[str], Optional[Path], Dict[str, str], float], Result]
 def run_cmd(argv: List[str], cwd: Optional[Path], env: Dict[str, str], timeout: float) -> Result:
     """(exit, stdout, stderr). A command that cannot start is 127; one that
     outlives its bound is 124 with "timed out" in stderr, which is a network
-    failure for a download step."""
+    failure for a download step.
+
+    A timed-out child is killed and then given a few seconds, never waited on
+    without a bound: a process that opened a /Volumes path without the
+    Removable Volumes grant sits in the kernel where no signal reaches it, and
+    an unbounded wait would hang this run with it.
+    """
     try:
-        out = subprocess.run(
-            argv, cwd=str(cwd) if cwd else None, env=env, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout, check=False,
+        proc = subprocess.Popen(
+            argv, cwd=str(cwd) if cwd else None, env=env, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
         )
-    except subprocess.TimeoutExpired:
-        return 124, "", f"{argv[0]} timed out after {timeout:.0f}s"
     except OSError as exc:
         return 127, "", f"cannot run {argv[0]}: {exc}"
-    return out.returncode, out.stdout or "", out.stderr or ""
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass  # abandoned: it cannot be reaped, and this run must not hang on it
+        return 124, "", f"{argv[0]} timed out after {timeout:.0f}s"
+    return proc.returncode, out or "", err or ""
 
 
 def host_platform() -> str:
@@ -224,6 +238,19 @@ def pinned_mise(expected: dict, home: Path, plat: str) -> Tuple[Optional[Path], 
         return None, (f"{path} has sha256 {have}, the pin is {digest}; never run, never replaced here "
                       "(tartci's host installer owns the binary)")
     return path, ""
+
+
+def trust_checkout(mise: Path, repo: Path, env: Dict[str, str], run: Runner) -> Step:
+    """Trust exactly this checkout's .mise.toml, as .githooks/post-checkout
+    does for a new worktree. Never a parent directory: mise's trust paths are
+    prefixes, and a .mise.toml can run code."""
+    config = repo / ".mise.toml"
+    if not config.is_file():
+        return Step("trust", "skipped", f"{config} does not exist")
+    argv = [str(mise), "trust", "--quiet", str(config)]
+    step = ran("trust", argv, run(argv, repo, dict(env, MISE_DISABLE_UPDATE_WARNING="1"), TIMEOUT["probe"]))
+    step.network = False  # trusting a file is local; a failure is a finding, not a retry
+    return step
 
 
 def mise_env(env: Dict[str, str], pins: Path) -> Dict[str, str]:
@@ -389,6 +416,7 @@ def sync(
             if mise is None:
                 steps.append(Step("mise", "skipped", why))
             else:
+                steps.append(trust_checkout(mise, repo, env, run))
                 argv = [str(mise), "install", "--locked"]
                 steps.append(ran("mise", argv, run(argv, pins, mise_env(env, pins), TIMEOUT["mise"])))
             steps.append(sync_rust(expected, plat, env, home, pins, run))

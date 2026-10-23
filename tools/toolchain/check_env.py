@@ -43,6 +43,24 @@ PROBE_TIMEOUT_S = 5
 ACTIVATE_FIX = 'MISE_ENV=toolchain mise install --locked && eval "$(MISE_ENV=toolchain mise activate bash)"'
 NPM_FIX = "MISE_ENV=toolchain mise run npm-deps"
 MISE_FIX = "install the pinned mise by digest (tartci host installer); never brew or mise self-update"
+CACHE_FIX = (
+    "move it as the mise skill says: copy to /Volumes/<vol>/caches/<name>, verify, re-point the "
+    "symlink, prove the tool reads it, then delete the old copy; VM-mounted caches move only through tartci"
+)
+
+# Agent-only caches a volume host may keep on a data volume behind a symlink at
+# the default path: (path under HOME, name). Only a symlink is judged.
+CACHE_LINKS: Tuple[Tuple[str, str], ...] = (
+    (".local/share/mise", "mise data"),
+    (".rustup", "rustup"),
+    (".cargo", "cargo"),
+    (".cache/pulp/skia", "Skia keyed cache"),
+)
+# A cache symlinked into a temporary directory dangles once the OS or a reclaim
+# pass clears it; one under a volume's VMs/ tree or another reclaim root is
+# deleted with it. /Volumes/<vol>/caches/<name> is the one place for them.
+TEMP_PREFIXES = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
+VOLUME_CACHE = re.compile(r"^/Volumes/[^/]+/caches/[^/]+(/|$)")
 
 # (manifest key, display name, executables to try in order, version pattern)
 TOOLS: Tuple[Tuple[str, str, Tuple[str, ...], str], ...] = (
@@ -159,9 +177,13 @@ def check_rust_parts(
     rustup = which("rustup")
     if rustup is None or not (components or targets):
         return []
+    # A job that selected a verified-identical toolchain by name (CI's
+    # RUSTUP_TOOLCHAIN=stable when the image's stable is the pin) builds with
+    # that one, so its parts are the ones that count.
+    toolchain = os.environ.get("RUSTUP_TOOLCHAIN") or want
     installed: List[str] = []
     for kind in ("component", "target"):
-        text = run([rustup, kind, "list", "--installed", "--toolchain", want], None)
+        text = run([rustup, kind, "list", "--installed", "--toolchain", toolchain], None)
         if text is None:
             return [Finding("rust components", want, "unknown (rustup did not answer)", rustup, rust_fix(expected))]
         installed += [line.strip() for line in text.splitlines() if line.strip()]
@@ -236,6 +258,62 @@ def check_mise(
     return []
 
 
+def cache_placement_problem(target: str) -> Optional[str]:
+    """Why a cache symlink's target is in the wrong place, or None."""
+    if target.startswith(TEMP_PREFIXES) or target in ("/tmp", "/private/tmp"):
+        return "a temporary directory, which the OS or a reclaim pass clears"
+    if target.startswith("/Volumes/") and not VOLUME_CACHE.match(target):
+        return "on a volume but outside /Volumes/<vol>/caches/<name>, where a VMs/ or reclaim sweep deletes it"
+    return None
+
+
+def path_exists_bounded(path: str, timeout: float = PROBE_TIMEOUT_S,
+                        probe: Tuple[str, ...] = ("/bin/test", "-e")) -> Optional[bool]:
+    """Whether `path` exists, or None when the answer did not come in time.
+
+    A launchd job without the Removable Volumes grant hangs on its first open
+    of a /Volumes path, so the existence check runs in a child that is killed
+    and abandoned (never waited on again: a process stuck in the kernel cannot
+    be reaped) instead of blocking this check.
+    """
+    try:
+        proc = subprocess.Popen(list(probe) + [path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return os.path.exists(path)  # no /bin/test (Windows): nothing here is on a removable volume
+    try:
+        return proc.wait(timeout=timeout) == 0
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return None
+
+
+def check_caches(home: Path, exists: Callable[[str], Optional[bool]] = path_exists_bounded) -> List[Finding]:
+    """Each cache moved off its default path must point at an existing
+    /Volumes/<vol>/caches/<name> (or an internal-disk) directory."""
+    findings: List[Finding] = []
+    for rel, name in CACHE_LINKS:
+        link = home / rel
+        if not link.is_symlink():
+            continue
+        raw = os.readlink(str(link))
+        target = raw if os.path.isabs(raw) else os.path.normpath(os.path.join(str(link.parent), raw))
+        want = f"/Volumes/<vol>/caches/{Path(rel).name.lstrip('.')} or the default path"
+        problem = cache_placement_problem(target)
+        if problem:
+            findings.append(Finding(f"cache {name}", want, target, str(link), CACHE_FIX, problem))
+            continue
+        state = exists(target)
+        if state is None:
+            findings.append(Finding(
+                f"cache {name}", want, f"{target}, which did not answer within {PROBE_TIMEOUT_S}s", str(link),
+                "run from a session with access to the volume (a launchd job needs the tartci launcher's "
+                "Removable Volumes grant)", "volume unresponsive",
+            ))
+        elif not state:
+            findings.append(Finding(f"cache {name}", want, f"a dangling symlink to {target}", str(link), CACHE_FIX, "dangling"))
+    return findings
+
+
 def check_npm(expected: dict, root: Path) -> List[Finding]:
     """Each lockfile directory's node_modules must be exactly its package-lock.json.
 
@@ -282,6 +360,7 @@ def check_npm(expected: dict, root: Path) -> List[Finding]:
 def collect(
     expected: dict, root: Path, home: Path, plat: str,
     which: Callable[[str], Optional[str]] = shutil.which, run: Runner = run_version,
+    exists: Callable[[str], Optional[bool]] = path_exists_bounded,
 ) -> List[Finding]:
     tools = check_tools(expected, plat, which, run, root)
     # A wrong or missing rustc is already a finding; its parts are only worth
@@ -291,6 +370,7 @@ def collect(
         tools
         + parts
         + check_mise(expected, plat, which, run, home)
+        + check_caches(home, exists)
         + check_npm(expected, root)
     )
 
