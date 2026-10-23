@@ -685,10 +685,12 @@ Release blockers for any claim of native import correctness: form-control
 chrome (08, 18); the IPC socket timeout tests, which are timing-sensitive under
 load and fail on `main` independently of this work; and the masked-field secret
 fix, whose own tests fail without it (24 pass, 2 fail when the masking is
-neutered). Deferred items: the RTL caret in `text_x_for_byte`, paragraph-path
-lookup of the system UI font by its private name, non-rendered text outside
-form controls keeping its value in the snapshot, and the native-DPR text-layout
-deviation of up to one device pixel per line.
+neutered). Deferred items: the RTL caret in `text_x_for_byte`, non-rendered text
+outside form controls keeping its value in the snapshot, and the native-DPR
+text-layout deviation of up to one device pixel per line. The paragraph path
+now finds the system UI font through a manager that serves it at the exact
+requested weight (see the `text-metrics` skill), and a transparent html/body
+resolves its page background from the UA canvas colour the capture records.
 
 **Parallel `main` record (2026-10-21 to 2026-10-22).** `main` landed an
 independent version of this work in PR 10640 (merge `e6da6d9816`) and its
