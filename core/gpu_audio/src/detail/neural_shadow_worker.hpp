@@ -141,8 +141,8 @@ class NeuralShadowWorker {
     // echoes into `parked_` once it has stopped stepping.
     std::atomic<std::uint64_t> paused_{0}, parked_{0};
     std::uint64_t pause_generation_ = 0; // host side
-    std::uint64_t next_expected_ = 0; // shadow side
-    bool has_expected_ = false;       // shadow side
+    std::uint64_t next_expected_ = 0;    // shadow side
+    bool has_expected_ = false;          // shadow side
     std::atomic<std::uint64_t> processed_{0}, input_dropped_{0}, output_dropped_{0}, resyncs_{0},
         late_{0};
     std::atomic<bool> workgroup_joined_{false};
