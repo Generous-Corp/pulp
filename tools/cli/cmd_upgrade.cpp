@@ -9,7 +9,9 @@
 // "`pulp upgrade`" section and test_cli_upgrade_url.cpp.
 
 #include "cli_common.hpp"
+#include "cli_sdk.hpp"
 #include "migration_index.hpp"
+#include "private_temp_dir.hpp"
 #include "release_checksum.hpp"
 #include "release_floors_gen.h"
 #include "update_check.hpp"
@@ -324,11 +326,25 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     auto [tarball, url] = pulp::cli::pulp_upgrade_url_for(version, platform, arch);
     std::cout << "  Downloading " << tarball << "...\n";
 
-    std::string tmp_dir = "/tmp/pulp-upgrade-" + version;
-    int rc = run("mkdir -p " + tmp_dir + " && curl -fSL -o " + tmp_dir + "/" + tarball + " " + url);
+    // Verify-then-extract runs in a directory this process created exclusively
+    // under the user's own Pulp home, never a predictable name in the shared
+    // system temp dir.
+    const fs::path tmp_root = pulp_home() / "tmp";
+    const auto private_dir = pulp::cli::make_private_temp_dir(tmp_root, "pulp-upgrade-" + version);
+    if (!private_dir) {
+        std::cerr << "Error: could not create a private download directory under " << tmp_root
+                  << "\n";
+        return 1;
+    }
+    const std::string tmp_dir = private_dir->string();
+    const auto discard_tmp = [&] {
+        std::error_code ec;
+        fs::remove_all(*private_dir, ec);
+    };
+    int rc = run("curl -fSL -o " + shell_quote(fs::path(tmp_dir) / tarball) + " " + shell_quote(url));
     if (rc != 0) {
         std::cerr << "Download failed. Check: https://github.com/Generous-Corp/pulp/releases/tag/v" << version << "\n";
-        run("rm -rf " + tmp_dir);
+        discard_tmp();
         return 1;
     }
 
@@ -348,7 +364,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
             std::cerr
                 << "  Verify by hand from: https://github.com/Generous-Corp/pulp/releases/tag/v"
                 << version << "\n";
-            run("rm -rf " + tmp_dir);
+            discard_tmp();
             return 1;
         }
         if (verdict.status == relcheck::Status::unverified_legacy)
@@ -357,10 +373,10 @@ int cmd_upgrade(const std::vector<std::string>& args) {
             std::cout << "  " << verdict.message << "\n";
     }
 
-    rc = run("tar -xzf " + tmp_dir + "/" + tarball + " -C " + tmp_dir);
+    rc = run("tar -xzf " + shell_quote(fs::path(tmp_dir) / tarball) + " -C " + shell_quote(tmp_dir));
     if (rc != 0) {
         std::cerr << "Extraction failed.\n";
-        run("rm -rf " + tmp_dir);
+        discard_tmp();
         return 1;
     }
 
@@ -371,7 +387,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         std::cerr << "Error: extracted archive does not contain '"
                   << pulp::cli::upgrade_install::primary_binary_name()
                   << "' binary.\n";
-        run("rm -rf " + tmp_dir);
+        discard_tmp();
         return 1;
     }
 
@@ -399,11 +415,11 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         if (fs::exists(backup) && !fs::exists(self)) {
             fs::rename(backup, self);
         }
-        run("rm -rf " + tmp_dir);
+        discard_tmp();
         return 1;
     }
 
-    run("rm -rf " + tmp_dir);
+    discard_tmp();
 
     std::cout << "\n  \xe2\x9c\x93 Pulp CLI upgraded to v" << version << "\n";
     if (pulp::cli::upgrade_install::installed_cpp_delegate(installed_payloads)) {

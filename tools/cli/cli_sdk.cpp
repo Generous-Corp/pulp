@@ -9,6 +9,7 @@
 
 #include "cli_common.hpp"
 #include "fetchcontent_cache.hpp"
+#include "private_temp_dir.hpp"
 #include "release_checksum.hpp"
 #include "release_floors_gen.h"
 #include "tartci_lease.hpp"
@@ -287,11 +288,19 @@ fs::path ensure_sdk(const std::string& version) {
     // Create cache directory
     fs::create_directories(sdk_dir);
 
-    std::string tmp_dir = "/tmp/pulp-sdk-download-" + version;
-#ifdef _WIN32
-    tmp_dir = pulp::runtime::get_env("TEMP").value_or(".") + "\\pulp-sdk-download-" + version;
-#endif
-    fs::create_directories(tmp_dir);
+    // Verify-then-extract runs in a directory this process created exclusively
+    // under the user's own Pulp home, never a predictable name in the shared
+    // system temp dir.
+    const fs::path tmp_root = pulp_home() / "tmp";
+    const auto private_dir =
+        pulp::cli::make_private_temp_dir(tmp_root, "pulp-sdk-download-" + version);
+    if (!private_dir) {
+        std::cerr << "Error: could not create a private download directory under " << tmp_root
+                  << "\n";
+        fs::remove_all(sdk_dir);
+        return {};
+    }
+    const std::string tmp_dir = private_dir->string();
 
     // Download
     const fs::path archive_path = fs::path(tmp_dir) / tarball;

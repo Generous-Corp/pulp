@@ -205,7 +205,9 @@ fn missing_manifest_is_refused_at_the_floor_and_warned_below_it() {
     )
     .unwrap_err();
     assert!(
-        prerelease.to_string().contains("could not fetch SHA256SUMS"),
+        prerelease
+            .to_string()
+            .contains("could not fetch SHA256SUMS"),
         "{prerelease}"
     );
     let legacy = verify_release_archive(

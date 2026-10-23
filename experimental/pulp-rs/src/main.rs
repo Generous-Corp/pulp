@@ -524,11 +524,10 @@ fn maybe_reconcile_control_broker_on_startup() -> Result<(), CliError> {
     }
 
     let home = config.home.clone();
-    let temporary = std::env::temp_dir().join(format!(
+    let temporary = pulp_rs::install::private_temp_dir(&format!(
         "pulp-control-broker-transition-{}",
         std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&temporary);
+    ))?;
     let recovery = pulp_rs::install::recover_legacy_control_broker_once_with(
         &plan,
         &home,
