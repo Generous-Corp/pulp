@@ -657,8 +657,9 @@ function hasFixedTextDimension(value: unknown): boolean {
 /// depends on neither the string nor its glyphs. A unitless value is a
 /// font-size multiplier, which is equally text-independent here because the
 /// gate already requires every non-text prop -- fontSize included -- to be
-/// unchanged. Percentages are rejected: the typography applier parses `'50%'`
-/// as 50px, and a correctness gate must not rest on that coercion.
+/// unchanged. Percentages and font-relative units are rejected: they are
+/// equally text-independent, but this gate admits only the forms it parses
+/// itself rather than restating the typography resolver's unit table.
 function hasFixedLineHeight(value: unknown): boolean {
     if (typeof value === 'number') return Number.isFinite(value) && value > 0;
     if (typeof value !== 'string') return false;

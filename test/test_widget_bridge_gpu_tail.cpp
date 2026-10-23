@@ -1090,6 +1090,94 @@ TEST_CASE("repeated geometry reads with no mutation cost one layout pass",
     CHECK(passes <= 1);
 }
 
+// The typography setters take CSS pixels as numbers. A CSS length string is
+// read as its leading number with the unit dropped, so '0.08em' becomes
+// 0.08 px rather than 0.08 of the font size. @pulp/react resolves units
+// before it calls these setters; this pins why it has to.
+TEST_CASE("letter spacing given an em string is read as bare pixels", "[view][bridge][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('caption', 'Caption', '');
+        setFontSize('caption', 20);
+        setLetterSpacing('caption', 1.5);
+    )");
+    auto* caption = dynamic_cast<Label*>(bridge.widget("caption"));
+    REQUIRE(caption != nullptr);
+    // CONTROL: a numeric pixel value lands.
+    REQUIRE(caption->letter_spacing() == Catch::Approx(1.5f));
+
+    // 0.08em at 20 px is 1.6 px in CSS; the bridge stores 0.08.
+    engine.evaluate("setLetterSpacing('caption', '0.08em')");
+    CHECK(caption->letter_spacing() == Catch::Approx(0.08f));
+    CHECK(caption->letter_spacing() != Catch::Approx(1.6f));
+}
+
+// The materialized metadata applier reads each binding's parent and own box
+// metrics and then writes captured geometry. Each read that follows a write
+// lays out the whole root, so the order of reads and writes, not their number,
+// decides how many passes one application costs.
+TEST_CASE("geometry reads batched ahead of writes cost one layout pass",
+          "[view][bridge][layout][perf]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 800, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('parent', '');
+        setFlex('parent', 'width', 780);
+        setFlex('parent', 'height', 200);
+        for (let i = 0; i < 24; ++i) createCol('c' + i, 'parent');
+        layout();
+    )");
+
+    // Interleaved: read, write, read, write ... as a per-binding loop does.
+    auto before = View::layout_pass_count();
+    engine.evaluate(R"(
+        for (let i = 0; i < 24; ++i) {
+            getLayoutBoxMetrics('parent');
+            getLayoutBoxMetrics('c' + i);
+            setPosition('c' + i, 'absolute');
+            setLeft('c' + i, i * 30);
+            setFlex('c' + i, 'width', 20);
+        }
+        getLayoutBoxMetrics('c0');
+    )");
+    const auto interleaved = View::layout_pass_count() - before;
+
+    // Phased: every read, then every write, then one read. New left values so
+    // each write is a real geometry change, as in the interleaved run.
+    before = View::layout_pass_count();
+    engine.evaluate(R"(
+        for (let i = 0; i < 24; ++i) {
+            getLayoutBoxMetrics('parent');
+            getLayoutBoxMetrics('c' + i);
+        }
+        for (let i = 0; i < 24; ++i) {
+            setPosition('c' + i, 'absolute');
+            setLeft('c' + i, i * 31);
+            setFlex('c' + i, 'width', 21);
+        }
+        getLayoutBoxMetrics('c0');
+    )");
+    const auto phased = View::layout_pass_count() - before;
+
+    INFO("interleaved " << interleaved << " passes, phased " << phased);
+    // CONTROL: the interleaved order pays a pass per binding, so the counter
+    // sees every read that follows a write.
+    CHECK(interleaved >= 24);
+    CHECK(phased <= 1);
+    // The phased writes landed.
+    CHECK(engine.evaluate("getLayoutBoxMetrics('c23').localX").getWithDefault<double>(-1.0) ==
+          Catch::Approx(23 * 31));
+}
+
 TEST_CASE("host paint reuses a layout completed by the bridge",
           "[view][bridge][layout][perf]") {
     ScriptEngine engine;

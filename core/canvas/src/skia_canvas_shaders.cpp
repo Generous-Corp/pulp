@@ -590,6 +590,8 @@ bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
         (author_sksl.find("PulpChart") != std::string::npos ||
          author_sksl.find("pulp_chart") != std::string::npos))
         return false;
+    if (options.reach < sdf_feather_min_reach(style))
+        return false;
     // Keep the chart prelude deliberately small and explicit. It is emitted
     // before the author function so the same source can be compiled at draw
     // time and by the bridge's normal SkSL compiler.
@@ -644,8 +646,13 @@ bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
     auto shader = builder.makeShader();
     if (!shader) return false;
     SkPaint paint; paint.setShader(std::move(shader));
+    // `coord` is in the translated space, so growing the rect by reach adds
+    // room for the feather without moving the geometry.
     canvas_->save(); canvas_->translate(x, y);
-    canvas_->drawRect(SkRect::MakeXYWH(0, 0, w, h), paint); canvas_->restore();
+    canvas_->drawRect(SkRect::MakeXYWH(-options.reach, -options.reach, w + 2.0f * options.reach,
+                                       h + 2.0f * options.reach),
+                      paint);
+    canvas_->restore();
     return true;
 }
 

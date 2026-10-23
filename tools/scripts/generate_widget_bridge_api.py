@@ -648,6 +648,20 @@ def emit_interface(name: str, rows: list[ManifestRow]) -> list[str]:
     return lines
 
 
+# Globals the standard DOM library (lib.dom.d.ts) already declares. A bridge
+# function with one of these names stays on its PulpBridge*Globals interface
+# but gets no `declare global` var: redeclaring it is a duplicate-identifier
+# error in every consumer compiled with the DOM lib and library checking on.
+DOM_LIB_GLOBALS = frozenset({
+    "alert", "atob", "blur", "btoa", "cancelAnimationFrame", "clearInterval",
+    "clearTimeout", "close", "confirm", "fetch", "focus", "getComputedStyle",
+    "getSelection", "matchMedia", "moveBy", "moveTo", "open", "postMessage",
+    "print", "prompt", "queueMicrotask", "reportError", "requestAnimationFrame",
+    "resizeBy", "resizeTo", "scroll", "scrollBy", "scrollTo", "setInterval",
+    "setTimeout", "stop", "structuredClone",
+})
+
+
 def emit_types(rows: list[ManifestRow], autocaps: dict[str, str], fingerprint: str) -> str:
     manifest_names = {row.name for row in rows}
     extra_autocaps = sorted(set(autocaps) - manifest_names)
@@ -682,6 +696,8 @@ def emit_types(rows: list[ManifestRow], autocaps: dict[str, str], fingerprint: s
     lines.append("")
     lines.append("declare global {")
     for row in rows:
+        if row.name in DOM_LIB_GLOBALS:
+            continue
         cap = autocaps.get(row.name)
         iface = interface_name_for_capability(cap)
         type_expr = f"{iface}['{row.name}']"

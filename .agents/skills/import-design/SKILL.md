@@ -4103,6 +4103,27 @@ re-tokenizing the raw string. **Gotcha:** the bridge takes one drop shadow, so
 multi-layer stacks render only their first layer natively even though the IR now
 preserves them all.
 
+### An initial-value style must install nothing natively
+
+`IRStyle` keeps string properties as authored, so `clip-path: none`,
+`filter: none` and friends arrive at `apply_visual_style` as non-empty
+optionals. A property whose handler passes "anything unparsed" straight
+through is the trap: the native materializer stored `clip-path: none` as SVG
+path data, and every paint recorded `clip_path_svg "none"`. Skia's path parser
+rejects it, so the raster was unchanged and no pixel scorer saw it; a backend
+that treats an unparseable path as an empty clip would erase the node. The JS
+lane had always cleared on `none`, so the lanes disagreed silently.
+
+`test/test_design_import_inert_styles.cpp` builds one scene through the IR JSON
+reader with and without each inert declaration and requires an identical
+drawlist, an identical drawlist from the next sibling on (headed by its open
+save depth, so a leaked save is named as a leak) and an identical Skia raster.
+When you add a style property to the materializer, add its inert value AND a
+live value to that table: the live value is what proves the property reaches
+the paint path at all, since a dropped property passes the inert check.
+`background-image` has no live value there because the native materializer
+does not paint it.
+
 ### Figma effects: blurs lower for real; new families are diagnosed
 
 All three Figma producers lower the **ordered effect stack**, honoring
@@ -7798,6 +7819,21 @@ metadata. What Pulp now does by default, and what the document must not undo:
   reconciler is created.
 - **Identical font bytes register once** — several `@font-face` weight rules
   of one variable font no longer decode and append the same face per binding.
+- **The metadata pass reads before it writes** (runtime revision 4). Any
+  `getLayoutBoxMetrics` that follows a geometry or typography write lays out
+  the whole root, so a per-binding read-then-write loop costs one Yoga pass
+  per binding: 78 passes for Spectr's first apply, 2 phased. Keep new reads in
+  the applier inside the read phases; `materialized_runtime_commit_cost.test.mjs`
+  counts flushes with a trace model and fails when a read lands after a write.
+  To measure the native count, wrap `applyMaterializedImportMetadata` in a
+  copy of the emitted bundle and read `View::layout_pass_count()` through a
+  scratch bridge function; pulp-screenshot has no built-in counter.
+  The Spectr panel is a blind instrument for the text-target half of that pass:
+  forcing `materializedTextTargetGeometry` to null changes 0 pixels there (the
+  layout-inset half changes ~24k), so text-target translation is proved by the
+  unit test, not by a Spectr render. Older Spectr captures also fail today's
+  text-binding validation (a box running past the text's end) and need their
+  boxes trimmed before the transform accepts them.
 
 What the document's own code must do (this is the app's cost, not Pulp's):
 

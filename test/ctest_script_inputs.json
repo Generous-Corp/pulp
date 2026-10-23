@@ -2556,6 +2556,7 @@
   "pulp-test-design-import-benchmark",
   "pulp-test-design-import-benchmark-contracts",
   "pulp-test-design-import-designmd",
+  "pulp-test-design-import-inert-styles",
   "pulp-test-design-import-jsx-runtime",
   "pulp-test-design-import-native-common",
   "pulp-test-design-import-native-materializer",
@@ -3445,6 +3446,21 @@
     "core/view",
     "core/view/include/pulp/view/view.hpp",
     "tools/scripts/test_build_time_report.py"
+   ],
+   "kind": "python"
+  },
+  "bump-fastpath-selftest": {
+   "entry": "tools/scripts/test_bump_fastpath.py",
+   "inputs": [
+    ".github/rulesets/main-protection.json",
+    ".github/workflows/build.yml",
+    ".github/workflows/bump-fastpath-weekly.yml",
+    ".github/workflows/control-shipping-native.yml",
+    ".github/workflows/coverage.yml",
+    ".github/workflows/examples-validation.yml",
+    ".github/workflows/intel-portability.yml",
+    "tools/scripts/bump_fastpath_report.py",
+    "tools/scripts/test_bump_fastpath.py"
    ],
    "kind": "python"
   },
@@ -5092,6 +5108,14 @@
     "tools/scripts/gpu_audio_comparator_v2.py",
     "tools/scripts/gpu_audio_p2_host_preflight.py",
     "tools/scripts/test_gpu_audio_comparator_v2.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-daw-continuity-receipt-verifier-selftest": {
+   "entry": "tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py",
+   "inputs": [
+    "tools/testing/daw-smoke/reaper_smoke.py",
+    "tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py"
    ],
    "kind": "python"
   },

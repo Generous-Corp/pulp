@@ -54,6 +54,35 @@ export function clearMaterializedEventCallbacks(id: string): void {
     for (const key of registry.keys()) {
         if (key.startsWith(prefix)) registry.delete(key);
     }
+    forgetNativeListeners(id);
+}
+
+/// Native listeners this module has armed and installed, per widget id, by
+/// the event name the bridge dispatches. A listener installed here is a
+/// trampoline that reads the registry at dispatch time, so while it stays
+/// installed a handler whose identity changes (every inline arrow function,
+/// every render) needs a registry write and no bridge call. The record
+/// belongs to one native widget and one installed bridge: a widget created
+/// again under the same id (applyAllProps), a detached subtree
+/// (clearMaterializedEventCallbacks) or a replaced bridge starts it over.
+const nativeListeners = new Map<string, Set<string>>();
+let nativeListenersBridge: unknown = null;
+
+function nativeListenerSet(id: string): Set<string> {
+    if (g.on !== nativeListenersBridge) {
+        nativeListeners.clear();
+        nativeListenersBridge = g.on;
+    }
+    let set = nativeListeners.get(id);
+    if (!set) {
+        set = new Set<string>();
+        nativeListeners.set(id, set);
+    }
+    return set;
+}
+
+function forgetNativeListeners(id: string): void {
+    nativeListeners.delete(id);
 }
 
 let _aap_count = 0;
@@ -303,26 +332,12 @@ function gestureRegistrarFor(eventName: string): string | null {
     }
 }
 
-function applyEventHandler(id: string, key: string, value: unknown): void {
-    const eventName = eventNameFor(key);
-    if (typeof value !== 'function') {
-        eventCallbackRegistry().delete(`${id}:${eventName}`);
-        // WidgetBridge's listener table is replace-only. Install an inert
-        // callback so a conditional React handler cannot remain live after
-        // its prop disappears. This is intentionally different from leaving
-        // the old closure registered: dynamic imported controls frequently
-        // change ownership while a menu/modal mounts or unmounts.
-        if (isHoverEvent(eventName)) {
-            // Re-arm the fan-out so the sibling spelling, if any, survives.
-            installHoverFanout(id, nativeHoverNameFor(eventName));
-            return;
-        }
-        call('on', id, eventName, () => ({ __pulpEventPropagation: 0 }));
-        return;
-    }
+/// Arm the native dispatch path an event needs. Each registrar is idempotent
+/// on the bridge; it runs once when the listener is first installed.
+function armNativeEvent(id: string, eventName: string): void {
     if (isHoverEvent(eventName)) {
-        // Arm the native hover dispatchers exactly once (idempotent on
-        // the bridge — re-registers replace the lambdas, same shape).
+        // Arm the native hover dispatchers (re-registers replace the
+        // lambdas, same shape).
         call('registerHover', id);
     }
     if (eventName === 'click') {
@@ -359,17 +374,20 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
     if (gestureRegistrar) {
         call(gestureRegistrar, id);
     }
-    // Wrap the React handler in a synthetic-event factory so JSX
-    // consumers receive a React-DOM-shaped event object (with
-    // `currentTarget`, `target`, `preventDefault`, `nativeEvent.rawArgs`,
-    // and event-type-specific fields) instead of the bridge's raw
-    // positional args. Without this, idiomatic handlers like
-    //   onMouseEnter={e => e.currentTarget.style.background = 'rgba(...)'}
-    // crash with `Cannot read property 'style' of undefined`. See the
-    // synthetic-event module header for the full surface and the
-    // event-type → field-extraction routing.
-    const handler = value as (e: unknown) => void;
-    const callback = (...rawArgs: unknown[]) => {
+}
+
+/// Wrap the React handler in a synthetic-event factory so JSX
+/// consumers receive a React-DOM-shaped event object (with
+/// `currentTarget`, `target`, `preventDefault`, `nativeEvent.rawArgs`,
+/// and event-type-specific fields) instead of the bridge's raw
+/// positional args. Without this, idiomatic handlers like
+///   onMouseEnter={e => e.currentTarget.style.background = 'rgba(...)'}
+/// crash with `Cannot read property 'style' of undefined`. See the
+/// synthetic-event module header for the full surface and the
+/// event-type → field-extraction routing.
+function syntheticEventCallback(id: string, eventName: string,
+                                handler: (e: unknown) => void): (...rawArgs: unknown[]) => unknown {
+    return (...rawArgs: unknown[]) => {
         const evt = makeSyntheticEvent(id, eventName, rawArgs);
         handler(evt);
         // The native pointer router walks registered View ancestors after the
@@ -382,13 +400,49 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
                 : 0,
         };
     };
-    eventCallbackRegistry().set(`${id}:${eventName}`, callback);
-    if (isHoverEvent(eventName)) {
-        // Both hover spellings route through one native dispatch name.
-        installHoverFanout(id, nativeHoverNameFor(eventName));
+}
+
+const INERT_EVENT_RESULT = () => ({ __pulpEventPropagation: 0 });
+
+function applyEventHandler(id: string, key: string, value: unknown): void {
+    const eventName = eventNameFor(key);
+    const registryKey = `${id}:${eventName}`;
+    const hover = isHoverEvent(eventName);
+    const nativeName = hover ? nativeHoverNameFor(eventName) : eventName;
+    const installed = nativeListenerSet(id);
+    if (typeof value !== 'function') {
+        const registry = eventCallbackRegistry();
+        registry.delete(registryKey);
+        // Nothing was installed for this event, so nothing can stay live.
+        if (!installed.has(nativeName)) return;
+        // The other hover spelling still owns the shared native listener,
+        // which reads the registry at dispatch and now skips this one.
+        if (hover && hoverAliasesFor(nativeName).some(
+            (alias) => registry.has(`${id}:${alias}`))) return;
+        // WidgetBridge's listener table is replace-only. Install an inert
+        // callback so a conditional React handler cannot remain live after
+        // its prop disappears. This is intentionally different from leaving
+        // the old closure registered: dynamic imported controls frequently
+        // change ownership while a menu/modal mounts or unmounts.
+        call('on', id, nativeName, INERT_EVENT_RESULT);
+        installed.delete(nativeName);
         return;
     }
-    call('on', id, eventName, callback);
+    eventCallbackRegistry().set(registryKey,
+        syntheticEventCallback(id, eventName, value as (e: unknown) => void));
+    // A new closure for an installed listener is a registry write only.
+    if (installed.has(nativeName)) return;
+    armNativeEvent(id, eventName);
+    installed.add(nativeName);
+    if (hover) {
+        // Both hover spellings route through one native dispatch name.
+        installHoverFanout(id, nativeName);
+        return;
+    }
+    call('on', id, nativeName, (...rawArgs: unknown[]) => {
+        const callback = eventCallbackRegistry().get(registryKey);
+        return callback ? callback(...rawArgs) : INERT_EVENT_RESULT();
+    });
 }
 
 /// Emit one setSvgRect call carrying the full geometry (x, y, width,
@@ -739,6 +793,9 @@ export function normalizeHostProps(
 export function applyAllProps(instance: PulpInstance): void {
     const { id, type, props } = instance;
     logApply('applyAll', id, type, Object.keys(props).length);
+    // A first attach is a new native widget: nothing is installed on it yet,
+    // whatever an earlier widget under this id had.
+    forgetNativeListeners(id);
     // For SvgRect / SvgLine, emit the geometry call once up-front from
     // the full props snapshot, then skip the per-prop dispatch for the
     // four geometry keys. Otherwise we'd issue four identical

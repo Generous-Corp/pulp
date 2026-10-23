@@ -1588,7 +1588,7 @@ void apply_visual_style(View& view, const IRStyle& style,
         if (const auto degrees = css_transform_rotation(*style.transform))
             view.set_rotation(*degrees);
     }
-    if (style.clip_path) {
+    if (style.clip_path && !css_keyword_is_none(*style.clip_path)) {
         // `set_clip_path` takes SVG path data, but CSS gives a shape function.
         // Handing `polygon(4% 87%, …)` straight through produced a string the
         // path parser could not read, so the clip silently did nothing and the

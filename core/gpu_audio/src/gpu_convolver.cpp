@@ -811,7 +811,7 @@ void detail::GpuConvolverTestAccess::install_staged_compute(
 }
 
 bool detail::GpuConvolverTestAccess::install_shared_io_session(
-    GpuConvolver& convolver, std::unique_ptr<SharedIoConvolutionSession> session) noexcept {
+    GpuConvolver& convolver, std::unique_ptr<SharedIoConvolutionSession>&& session) noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (!convolver.prepared_ || !session || !session->prepared())
         return false;

@@ -200,11 +200,24 @@ public:
     /// Block until the GPU has finished the work this surface submitted. A
     /// host that must hand the compositor a finished drawable (a first frame
     /// presented with its Core Animation transaction) calls it between
-    /// `end_frame()` and the present. Returns false when the surface cannot
-    /// wait (no GPU context); never call it per frame.
+    /// `end_frame()` and the present. Returns the synchronizing submit's
+    /// result: false when the surface has no GPU context or the backend could
+    /// not submit and wait. Never call it per frame.
     virtual bool wait_for_submitted_work() {
         return false;
     }
+
+#if !defined(__EMSCRIPTEN__)
+    /// Test seam for Graphite recording inserts. When installed, every
+    /// SkiaSurface passes whether Graphite accepted each recording it inserts
+    /// (`end_frame()`'s and `read_current_rgba()`'s mid-frame flush) through
+    /// `hook`, and acts on the returned value instead. A healthy device does
+    /// not reject recordings, so this is how a test reaches the rejection
+    /// path. Process-wide and not synchronized: install before rendering,
+    /// pass nullptr to remove.
+    using InsertOutcomeHook = bool (*)(bool accepted);
+    static void set_insert_outcome_hook_for_testing(InsertOutcomeHook hook);
+#endif
 };
 
 } // namespace pulp::render

@@ -71,6 +71,10 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_p5_receipt.py")
 
+    add_test(NAME gpu-audio-daw-continuity-receipt-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py")
+
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include
@@ -1566,6 +1570,14 @@ if(Python3_Interpreter_FOUND)
     # otherwise inherit. 3x the worst run observed on 2026-09-13, rounded up.
     set_tests_properties(version-at-land-selftest PROPERTIES
         TIMEOUT 180)
+
+    # The release bot's bump: build.yml's classify step reports whether the
+    # exact-generated-bump fast path was taken (run in Bash with a fake
+    # verifier), bump_fastpath_report.py counts those reports, and the four
+    # advisory workflows skip every job on release/version-bump while every
+    # other pull request still runs them and none of their contexts is required.
+    add_test(NAME bump-fastpath-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_bump_fastpath.py")
 
     # Unreleased migration notes: their validation in the index generator and
     # the fold the version-at-land bump runs to key them to the version it
