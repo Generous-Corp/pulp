@@ -15,6 +15,14 @@ audio continuity require a product scenario and remain `NOT_EVALUATED` here.
   -ParamIndex 0 -AutomationSec 8 -TimeoutSec 60
 ```
 
+`EvidenceDir` must be writable by the account that launches REAPER. A service
+or SSH launch as `ci` must use a `ci`-owned path (for example
+`$env:TEMP\pulp-reaper-evidence`); it must not write under another desktop
+account such as `C:\Users\pulp-rdp\Desktop`. A GUI capture launched from the
+interactive `pulp-rdp` session has the opposite requirement. This account
+boundary is checked before the host starts so an ACL failure cannot be
+misreported as a plugin or status-publication failure.
+
 Use an initialized, registered profile whose first-run dialogs have already
 been dismissed. The harness copies only `reaper.ini` and an existing license
 file into a private temporary profile outside the evidence directory. Cleanup
