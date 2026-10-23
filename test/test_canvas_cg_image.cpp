@@ -217,4 +217,69 @@ TEST_CASE("CoreGraphicsCanvas image verbs fail gracefully on bad input",
     CGContextRelease(ctx);
 }
 
+TEST_CASE("CoreGraphicsCanvas measures encoded bytes of any ImageIO format",
+          "[canvas][cg][image][inline-image]") {
+    // A 16x8 GIF: left half red, right half blue.
+    static const uint8_t gif[] = {
+        0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x10, 0x00, 0x08, 0x00, 0x81, 0x00, 0x00, 0xff, 0x00,
+        0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00,
+        0x10, 0x00, 0x08, 0x00, 0x00, 0x08, 0x24, 0x00, 0x01, 0x08, 0x1c, 0x28, 0x30, 0x80, 0xc1,
+        0x83, 0x06, 0x09, 0x12, 0x44, 0x88, 0x50, 0xe1, 0x40, 0x86, 0x07, 0x1d, 0x16, 0x84, 0x18,
+        0x40, 0x22, 0x00, 0x8a, 0x15, 0x25, 0x62, 0xb4, 0xb8, 0x51, 0x23, 0xc5, 0x80, 0x00, 0x3b};
+    std::vector<uint8_t> px;
+    CGContextRef ctx = cg_make_bitmap(8, 8, px);
+    REQUIRE(ctx != nullptr);
+    {
+        CoreGraphicsCanvas canvas(ctx, 8, 8);
+        float w = 0, h = 0;
+        REQUIRE(canvas.measure_image_from_data(gif, sizeof(gif), w, h));
+        CHECK(w == 16.0f);
+        CHECK(h == 8.0f);
+
+        const std::string src = write_source_png();
+        REQUIRE_FALSE(src.empty());
+        const std::vector<uint8_t> png = read_file_bytes(src);
+        unlink(src.c_str());
+        REQUIRE(canvas.measure_image_from_data(png.data(), png.size(), w, h));
+        CHECK(w == 32.0f);
+        CHECK(h == 32.0f);
+
+        const uint8_t junk[] = {1, 2, 3, 4, 5, 6, 7, 8};
+        w = h = 1.0f;
+        REQUIRE_FALSE(canvas.measure_image_from_data(junk, sizeof(junk), w, h));
+        CHECK(w == 0.0f);
+        CHECK(h == 0.0f);
+    }
+    CGContextRelease(ctx);
+}
+
+TEST_CASE("Canvas default measure_image_from_data reads a PNG header only",
+          "[canvas][image][inline-image]") {
+    // The base implementation serves backends without a decoder: it sizes a
+    // PNG from IHDR and declines every other format.
+    RecordingCanvas canvas;
+    const std::string src = write_source_png();
+    REQUIRE_FALSE(src.empty());
+    const std::vector<uint8_t> png = read_file_bytes(src);
+    unlink(src.c_str());
+    float w = 0, h = 0;
+    REQUIRE(canvas.measure_image_from_data(png.data(), png.size(), w, h));
+    CHECK(w == 32.0f);
+    CHECK(h == 32.0f);
+    const uint8_t gif_header[] = {'G', 'I', 'F', '8', '7', 'a', 0x10, 0x00, 0x08, 0x00, 0, 0,
+                                  0,   0,   0,   0,   0,   0,   0,    0,    0,    0,    0, 0};
+    REQUIRE_FALSE(canvas.measure_image_from_data(gif_header, sizeof(gif_header), w, h));
+    CHECK(w == 0.0f);
+
+    // A first chunk other than IHDR, or a dimension past PNG's 2^31 - 1 cap,
+    // is not a size.
+    std::vector<uint8_t> bad = png;
+    bad[12] = 'X';
+    REQUIRE_FALSE(canvas.measure_image_from_data(bad.data(), bad.size(), w, h));
+    bad = png;
+    bad[16] = 0xff;
+    REQUIRE_FALSE(canvas.measure_image_from_data(bad.data(), bad.size(), w, h));
+    CHECK(w == 0.0f);
+}
+
 #endif // __APPLE__

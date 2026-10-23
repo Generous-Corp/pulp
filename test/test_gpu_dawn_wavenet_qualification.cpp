@@ -476,14 +476,13 @@ Result run() {
     // the pad plus one block: the layer-input ring is 4 columns (16 bytes) and
     // the final activation ring, which carries no history, 2 columns (8 bytes).
     // Preparation zeroes each ring once. In the target-size histogram the 16-byte
-    // bucket also holds the scale uniform, and the 8-byte bucket the two-word
-    // device stream position.
+    // bucket also holds the scale uniform and the four-word device stream state.
     const auto prepared_transfer = transfer_counter.snapshot();
     constexpr std::size_t expected_history_bytes = sizeof(float);
     result.history_transfer_contract =
         resident_history_bytes == expected_history_bytes &&
-        prepared_transfer.queue_write_buffer_target_size_histogram[16] == 2 &&
-        prepared_transfer.queue_write_buffer_target_size_histogram[8] == 2 &&
+        prepared_transfer.queue_write_buffer_target_size_histogram[16] == 3 &&
+        prepared_transfer.queue_write_buffer_target_size_histogram[8] == 1 &&
         prepared_transfer.queue_write_buffer_target_size_histogram[expected_history_bytes] == 0;
 
     transfer_counter.reset();

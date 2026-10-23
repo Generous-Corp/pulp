@@ -2955,8 +2955,12 @@ arrives AFTER the first render -- a mount effect that requests state, a
 passive effect that hands that hydrate on, a native `load_script` that flips a
 flag -- is another commit, and in a materialized import each one re-applies
 the captured document. Host-callback batching (`__pulpBatchUpdates__` around
-rAF/timer callbacks and one native message's listeners) merges updates inside
-ONE callback; it cannot merge a promise job with a later frame or a passive
+rAF/timer callbacks, one native message's listeners, and every handler one
+native widget event reaches through `__dispatch__`, nested dispatches
+included; a handler that reads the native tree right after a `setState` sees
+the previous commit until the dispatch returns, so it calls `flushSync`, as in
+a browser) merges updates inside ONE callback; it cannot merge a promise job
+with a later frame or a passive
 effect, and Pulp deliberately does not batch the microtask queue: @pulp/react
 renders a LegacyRoot, code may read the tree right after a `setState` in a
 `.then`, and wrapping the engine's job drain would re-enter it from script.

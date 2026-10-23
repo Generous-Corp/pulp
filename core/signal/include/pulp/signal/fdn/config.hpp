@@ -185,6 +185,28 @@ inline constexpr double kSanityCeil = 10.0;
 // Parameter smoothing and control-rate cadence.
 inline constexpr double kSmoothingMs = 5.0;
 inline constexpr int kControlRateSamples = 32;
+// The block kernels never take more than one control period at a time:
+// controls are constant inside a period, so a period is the natural unit.
+inline constexpr int kMaxBlockSamples = kControlRateSamples;
+// Block kernels run their recursions bare and snap / sanitize the state once
+// every this many samples instead of at every multiply-add. The interval is
+// counted in each stage's own samples from its last reset, never in caller
+// blocks, so the cleanup lands on the same samples however a render is split.
+inline constexpr int kHealIntervalSamples = 32;
+// Offset step between rings that advance in lockstep (see FracDelayT::prepare):
+// an odd number of 64-byte lines, so no two rings share a cache set or low
+// address bits at their write positions.
+inline constexpr std::size_t kRingStaggerSamples = 37 * 16;
+// Quadrature oscillators re-derive their phase exactly after this many
+// rotation steps, bounding accumulated rounding far below anything audible.
+inline constexpr int kOscReanchorSamples = 4096;
+
+// ── Engine tiers ─────────────────────────────────────────────────────────
+// Which engine an FdnReverbT runs. `network` is the multirate sixteen-line
+// FDN this file describes. `classic` is ClassicReverbT: parallel combs into
+// series allpasses at the host rate, driven by the same parameters, for when a
+// conventional reverb at a fraction of the cost is the right trade.
+enum class Tier { network = 0, classic };
 
 // ── Parameters ───────────────────────────────────────────────────────────
 // Index into the engine's parameter array. The catalog node maps its baked

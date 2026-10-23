@@ -285,6 +285,9 @@ public:
                                     float dx, float dy, float dw, float dh) override;
     bool measure_image_from_file(const std::string& path,
                                   float& out_width, float& out_height) override;
+    // Reads the header through SkCodec; no pixels are decoded.
+    bool measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                 float& out_height) override;
 
     // Skia-specific: draw an already-constructed SkImage (e.g. a GPU
     // surface snapshot or atlas texture) into the active rect. The

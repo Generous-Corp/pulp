@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -87,6 +88,13 @@ public:
 
     /// Load image from data: URI (base64-encoded PNG/JPEG).
     ImageData load_image_from_data_uri(const std::string& uri);
+
+    /// The payload of a data: URI as encoded bytes, whatever their format;
+    /// dimensions are left to a decoder. Per RFC 2397 a payload marked
+    /// `;base64` is base64-decoded (leniently) and any other payload is
+    /// percent-decoded. Empty when the URI has no comma, no payload, or a
+    /// malformed percent escape.
+    static std::vector<uint8_t> decode_data_uri_bytes(std::string_view uri);
 
     // ── Font Loading ────────────────────────────────────────────────────────
 

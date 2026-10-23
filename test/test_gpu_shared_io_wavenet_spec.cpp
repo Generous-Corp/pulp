@@ -283,6 +283,22 @@ TEST_CASE("WaveNet shared spec bounds each layer's causal reach before allocatio
     CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
 }
 
+TEST_CASE("WaveNet shared spec rejects an array without layers",
+          "[gpu_audio][shared_io][wavenet]") {
+    // The first layer of array 0 starts each block's head sum on the GPU, so a
+    // spec whose array has no layers must never reach a provider.
+    Fixture fixture;
+    fixture.layer.dilations = {};
+    const WavenetProgramSpec spec{
+        .block_size = 32,
+        .head_scale = 1.0f,
+        .stream_instances = 1,
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
+        .weights = fixture.weights,
+    };
+    CHECK(validate_wavenet_spec(spec).error == WavenetSpecError::InvalidLayer);
+}
+
 TEST_CASE("WaveNet shared spec rejects invalid flags and non-mono final heads",
           "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;

@@ -46,6 +46,16 @@
 #include <thread>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 using pulp::render::GpuCompute;
 using Clock = std::chrono::steady_clock;
 
@@ -293,10 +303,23 @@ bool all_finite(const std::vector<float>& v) {
     return true;
 }
 
+/// CPU time the calling thread has consumed, in microseconds.
 double thread_cpu_us() {
+#if defined(_WIN32)
+    // Kernel plus user time in 100 ns units. Windows charges it at scheduler
+    // tick granularity, so short periods read coarser than on POSIX.
+    FILETIME creation{}, exit_time{}, kernel{}, user{};
+    if (!GetThreadTimes(GetCurrentThread(), &creation, &exit_time, &kernel, &user))
+        return 0.0;
+    const auto ticks = [](const FILETIME& t) {
+        return (static_cast<std::uint64_t>(t.dwHighDateTime) << 32) | t.dwLowDateTime;
+    };
+    return static_cast<double>(ticks(kernel) + ticks(user)) / 10.0;
+#else
     timespec ts{};
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
     return static_cast<double>(ts.tv_sec) * 1e6 + static_cast<double>(ts.tv_nsec) / 1e3;
+#endif
 }
 
 double pct(std::vector<double> v, double p) {

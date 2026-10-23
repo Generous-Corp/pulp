@@ -1,0 +1,18 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-canvas-chart-shapes-watch",
+  "slices": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "vellum_obligation": "Carry the chart derivation for ring, flat and rounded segments and stadium (t, cross, halfWidth; flat caps cut d; quadratic_bezier refused) and the premultiplied chart feather into Vellum's canvas backend when the corresponding Pulp targets adopt Vellum. The named presets and gallery row are Pulp-owned view code and are not owed.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261022-canvas-chart-shapes-watch.json",
+    "ctest --test-dir build -R 'SDF chart feather keeps the colour premultiplied'",
+    "ctest --test-dir build -R 'SDF chart: ring and flat arc chart t around and cross radially'",
+    "ctest --test-dir build -R 'SDF chart: segments and stadium chart t along and cross across'",
+    "ctest --test-dir build -R 'WidgetBridge installs named chart shader presets on a knob'",
+    "ctest --test-dir build -R 'lit chart presets follow the light direction'",
+    "ctest --test-dir build -R 'widget gallery shows every chart shader preset on a knob'"
+  ]
+}

@@ -78,6 +78,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-audio-daw-continuity-v2-receipt-verifier-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py")
+    # 53 cases: about 45 s on an M1 and 86 s to past 120 s on a GitHub-hosted
+    # Linux runner, so it needs more than ctest's default 120 s.
+    set_tests_properties(gpu-audio-daw-continuity-v2-receipt-verifier-selftest PROPERTIES
+        TIMEOUT 300)
 
     # The GPU fault-injection test hooks never reach a build that did not ask
     # for them: the self-test plants each way in; the gate scans this tree.
@@ -99,6 +103,10 @@ if(Python3_Interpreter_FOUND)
                 "${CMAKE_SOURCE_DIR}/tools/scripts/gpu_fault_hooks_release_gate.py"
                 --build-dir "${CMAKE_BINARY_DIR}")
     endif()
+
+    add_test(NAME gpu-audio-provider-conformance-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_provider_conformance.py")
 
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees

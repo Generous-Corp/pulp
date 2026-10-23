@@ -1988,6 +1988,39 @@ TEST_CASE("baked native materializer preserves per-layer background position",
     CHECK(root->background_position() == "0 0, 2px 2px");
 }
 
+TEST_CASE("background-origin reaches the View and every emitted form of the IR",
+          "[view][import][native-materializer][gradient][background-origin]") {
+    // The origin decides the box a tile is sized and positioned in, so a lane
+    // that drops it paints a border-box tile as padding-box, or the reverse.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "bar";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 45.0f;
+    ir.root.style.background_gradient =
+        "linear-gradient(rgba(10, 14, 20, 0.8), rgba(10, 14, 20, 0))";
+    ir.root.style.background_origin = "border-box";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    CHECK(root->background_origin() == "border-box");
+
+    const auto parsed = parse_design_ir_json(serialize_design_ir(ir));
+    REQUIRE(parsed.root.style.background_origin);
+    CHECK(*parsed.root.style.background_origin == "border-box");
+
+    CodeGenOptions web;
+    web.mode = CodeGenMode::web_compat;
+    CHECK(generate_pulp_js(ir, web).find("backgroundOrigin") != std::string::npos);
+    CHECK(generate_pulp_cpp(ir, ir.asset_manifest, {})
+              .source.find("set_background_origin(\"border-box\")") != std::string::npos);
+
+    // Control: absent stays absent, the initial padding-box.
+    ir.root.style.background_origin.reset();
+    CHECK_FALSE(parse_design_ir_json(serialize_design_ir(ir)).root.style.background_origin);
+    CHECK(generate_pulp_js(ir, web).find("backgroundOrigin") == std::string::npos);
+}
+
 TEST_CASE("baked native materializer maps a Dropdown frame to an interactive ComboBox",
           "[view][import][native-materializer][combo-box]") {
     // ELYSIUM's FX RACK ships explicit "Dropdown" frames (a selected-value text

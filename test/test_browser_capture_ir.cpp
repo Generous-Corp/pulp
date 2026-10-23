@@ -611,9 +611,52 @@ TEST_CASE("producer-bound native document canvas changes only root background",
         "paint_bounds":{"left":10,"top":10,"width":64,"height":64},
         "data_pulp":{"param":"gain"}}]})");
     auto snapshot = root_canvas_snapshot();
+    std::string expected_background = "rgb(16, 21, 34)";
     SECTION("opaque matching body") {}
     SECTION("transparent body") {
         change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+    }
+    SECTION("transparent document canvas defaults to Chromium white") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        expected_background = "rgb(255, 255, 255)";
+    }
+    // The UA canvas follows the root's used color-scheme; the capture records
+    // the colour Chromium resolved for it.
+    const auto with_canvas_report = [&](std::string_view report) {
+        REQUIRE(snapshot.front() == '{');
+        snapshot.insert(1, "\"documentCanvas\":" + std::string(report) + ",");
+    };
+    constexpr std::string_view dark_report =
+        R"j({"schema":"pulp-document-canvas-v1","root_color_scheme":"dark",)j"
+        R"j("canvas_color":"rgb(18, 18, 18)"})j";
+    SECTION("transparent document canvas takes the recorded UA canvas colour") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        with_canvas_report(dark_report);
+        expected_background = "rgb(18, 18, 18)";
+    }
+    SECTION("a canvas report that is not an opaque colour keeps Chromium white") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        with_canvas_report(R"j({"schema":"pulp-document-canvas-v1",)j"
+                           R"j("canvas_color":"rgba(18, 18, 18, 0.5)"})j");
+        expected_background = "rgb(255, 255, 255)";
+    }
+    SECTION("a canvas report from another schema keeps Chromium white") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgba(0, 0, 0, 0)");
+        with_canvas_report(R"j({"schema":"pulp-document-canvas-v0",)j"
+                           R"j("canvas_color":"rgb(18, 18, 18)"})j");
+        expected_background = "rgb(255, 255, 255)";
+    }
+    SECTION("an opaque root background outranks the UA canvas report") {
+        with_canvas_report(dark_report);
+    }
+    SECTION("opaque body paints a transparent HTML canvas") {
+        change_canvas_style(snapshot, 1, "background-color", "rgba(0, 0, 0, 0)");
+        change_canvas_style(snapshot, 2, "background-color", "rgb(1, 2, 3)");
+        expected_background = "rgb(1, 2, 3)";
     }
     SECTION("omitted optional sparse metadata means no entries") {
         snapshot = choc::json::toString(choc::json::parse(snapshot), false);
@@ -621,6 +664,7 @@ TEST_CASE("producer-bound native document canvas changes only root background",
     }
     SECTION("renderer clear color remains a computed color") {
         replace_canvas_fact(snapshot, "rgb(16, 21, 34)", "rgb(30, 30, 46)");
+        expected_background = "rgb(30, 30, 46)";
     }
     const auto capture = root_canvas_envelope(pulp::runtime::sha256_hex(png));
     auto baseline = lower_root_canvas(temp, snapshot, capture, false);
@@ -630,15 +674,242 @@ TEST_CASE("producer-bound native document canvas changes only root background",
     REQUIRE(result);
     REQUIRE_FALSE(baseline.design_ir->root.style.background_color);
     REQUIRE(result.design_ir->root.style.background_color);
-    CHECK(*result.design_ir->root.style.background_color ==
-          (snapshot.find("rgb(30, 30, 46)") != std::string::npos ? "rgb(30, 30, 46)"
-                                                                 : "rgb(16, 21, 34)"));
+    CHECK(*result.design_ir->root.style.background_color == expected_background);
     CHECK(result.design_ir->root.children.size() > 1);
     CHECK(result.design_ir->root.style.width == 1280);
     CHECK(result.design_ir->root.style.height == 200);
     result.design_ir->root.style.background_color.reset();
     CHECK(pulp::view::serialize_design_ir(*result.design_ir) ==
           pulp::view::serialize_design_ir(*baseline.design_ir));
+}
+
+namespace {
+
+// Append `extra` to the array value of the first `"key"` at or after `from`
+// in serialized JSON.
+void append_to_array(std::string& json, std::string_view key, std::string_view extra,
+                     std::string_view from = {}) {
+    const auto start = from.empty() ? 0 : json.find(from);
+    REQUIRE(start != std::string::npos);
+    INFO(key);
+    const auto at = json.find("\"" + std::string(key) + "\":", start);
+    REQUIRE(at != std::string::npos);
+    auto cursor = json.find_first_not_of(' ', at + key.size() + 3);
+    REQUIRE(cursor != std::string::npos);
+    REQUIRE(json[cursor] == '[');
+    int depth = 0;
+    for (; cursor < json.size(); ++cursor) {
+        if (json[cursor] == '[')
+            ++depth;
+        if (json[cursor] == ']' && --depth == 0)
+            break;
+    }
+    REQUIRE(cursor < json.size());
+    const bool empty = json[cursor - 1] == '[';
+    json.insert(cursor, (empty ? "" : ",") + std::string(extra));
+}
+
+// The frozen root-canvas capture plus one `::before` on its innermost DIV,
+// laid out as Chromium lays out an absolutely positioned pseudo with empty
+// `content`: its own box, then `generated` (the generated-content row).
+std::string root_canvas_with_pseudo(const std::vector<std::string>& generated) {
+    const auto parsed = choc::json::parse(root_canvas_snapshot());
+    const auto strings = parsed["strings"];
+    const auto div_style =
+        choc::json::toString(parsed["documents"][0]["layout"]["styles"][5], false);
+    const auto pseudo_name = std::to_string(strings.size());
+    // One row per layout entry: the pseudo's own box, then each generated row.
+    const auto rows = [&](const std::string& value) {
+        std::string joined = value;
+        for (size_t i = 0; i < generated.size(); ++i)
+            joined += "," + value;
+        return joined;
+    };
+    std::string bounds = "[42,44,10,10]";
+    for (const auto& box : generated)
+        bounds += "," + box;
+    auto json = choc::json::toString(parsed, false);
+    append_to_array(json, "strings", "\"::before\",\"before\"");
+    append_to_array(json, "parentIndex", "11");
+    append_to_array(json, "nodeType", "1");
+    append_to_array(json, "nodeName", pseudo_name);
+    append_to_array(json, "nodeValue", "-1");
+    append_to_array(json, "backendNodeId", "9001");
+    append_to_array(json, "attributes", "[]");
+    append_to_array(json, "index", "13", "\"pseudoType\"");
+    append_to_array(json, "value", std::to_string(strings.size() + 1), "\"pseudoType\"");
+    append_to_array(json, "nodeIndex", rows("13"));
+    append_to_array(json, "styles", rows(div_style));
+    append_to_array(json, "bounds", bounds);
+    append_to_array(json, "text", rows("-1"));
+    append_to_array(json, "paintOrders", rows("3"));
+    for (const auto* key : {"offsetRects", "scrollRects", "clientRects"})
+        append_to_array(json, key, rows("[]"));
+    append_to_array(json, "blendedBackgroundColors", rows("-1"));
+    append_to_array(json, "textColorOpacities", rows("1"));
+    return json;
+}
+
+std::optional<pulp::import_design::detail::DocumentCanvasPaint>
+canvas_paint_of(const std::string& snapshot, const std::string& name) {
+    const auto path = fs::temp_directory_path() / (name + ".json");
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << snapshot;
+    }
+    const auto index = pulp::import_design::CapturedStyleIndex::load(path);
+    fs::remove(path);
+    REQUIRE(index);
+    return index->document_canvas_paint();
+}
+
+} // namespace
+
+TEST_CASE("an empty pseudo-element's generated row keeps the document canvas",
+          "[import-design][browser-capture][ir][root-canvas]") {
+    // Control: the frozen capture proves its canvas paint on its own.
+    REQUIRE(canvas_paint_of(root_canvas_snapshot(), "root-canvas-plain"));
+
+    // A `::before` with `content: ""` adds a zero-size row for its generated
+    // content beside its own box. That row paints nothing, so the document
+    // canvas proof must survive it.
+    const auto empty =
+        canvas_paint_of(root_canvas_with_pseudo({"[0,0,0,0]"}), "root-canvas-empty-pseudo");
+    REQUIRE(empty);
+    CHECK(empty->color == canvas_paint_of(root_canvas_snapshot(), "root-canvas-again")->color);
+
+    // Negative control: a repeated row WITH area is a conflicting layout fact
+    // for one node and still withholds the proof.
+    CHECK_FALSE(canvas_paint_of(root_canvas_with_pseudo({"[42,44,10,10]"}),
+                                "root-canvas-conflicting-pseudo"));
+    // And a pseudo gets one generated row, not an unbounded run of them.
+    CHECK_FALSE(canvas_paint_of(root_canvas_with_pseudo({"[0,0,0,0]", "[0,0,0,0]"}),
+                                "root-canvas-repeated-pseudo"));
+}
+
+TEST_CASE("a node's own layout row is its first row with area",
+          "[import-design][browser-capture][ir][layout-rows]") {
+    // The same snapshot and expected rows pin the differential lab's Python
+    // reader (test/test_importer_differential_lab.py), so the two languages
+    // cannot drift onto different rules.
+    const fs::path root =
+        fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) / "browser-capture-layout-rows";
+    const auto index = pulp::import_design::CapturedStyleIndex::load(root / "dom-snapshot.json");
+    REQUIRE(index);
+    std::ifstream input(root / "expected-own-rows.json", std::ios::binary);
+    const std::string text{std::istreambuf_iterator<char>(input), {}};
+    const auto parsed = choc::json::parse(text);
+    const auto expected = parsed["own_rows"];
+    REQUIRE(expected.size() == 6);
+    for (int node = 0; node < index->node_count(); ++node) {
+        INFO("node " << node);
+        const auto key = std::to_string(node);
+        if (expected.hasObjectMember(key)) {
+            REQUIRE(index->own_layout_row(node));
+            CHECK(*index->own_layout_row(node) == expected[key].getWithDefault<int>(-1));
+        } else {
+            CHECK_FALSE(index->own_layout_row(node));
+        }
+    }
+    // The split inline's lookups read its own fragment, not a continuation.
+    const auto span = index->bounds_for(6);
+    REQUIRE(span);
+    CHECK(span->left == 20.0);
+    CHECK(span->top == 58.0);
+}
+
+namespace {
+
+// The frozen root-canvas capture plus one `<canvas>` (backend 9002) inside its
+// MAIN, laid out at 300,40 100x50 CSS px with no border or padding.
+std::string root_canvas_with_canvas() {
+    const auto parsed = choc::json::parse(root_canvas_snapshot());
+    const auto strings = parsed["strings"];
+    const auto section_style =
+        choc::json::toString(parsed["documents"][0]["layout"]["styles"][4], false);
+    auto json = choc::json::toString(parsed, false);
+    append_to_array(json, "strings", "\"CANVAS\"");
+    append_to_array(json, "parentIndex", "9");
+    append_to_array(json, "nodeType", "1");
+    append_to_array(json, "nodeName", std::to_string(strings.size()));
+    append_to_array(json, "nodeValue", "-1");
+    append_to_array(json, "backendNodeId", "9002");
+    append_to_array(json, "attributes", "[]");
+    append_to_array(json, "nodeIndex", "13");
+    append_to_array(json, "styles", section_style);
+    append_to_array(json, "bounds", "[300,40,100,50]");
+    append_to_array(json, "text", "-1");
+    append_to_array(json, "paintOrders", "4");
+    for (const auto* key : {"offsetRects", "scrollRects", "clientRects"})
+        append_to_array(json, key, "[]");
+    append_to_array(json, "blendedBackgroundColors", "-1");
+    append_to_array(json, "textColorOpacities", "1");
+    return json;
+}
+
+const pulp::view::IRNode* find_captured_canvas(const pulp::view::IRNode& node) {
+    if (node.attributes.count("captured_element"))
+        return &node;
+    for (const auto& child : node.children)
+        if (const auto* found = find_captured_canvas(child))
+            return found;
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("a capture-sized canvas asset lowers as a viewport plane",
+          "[import-design][browser-capture][ir][canvas]") {
+    // Capture: 1280x800 CSS px at DPR 2, so a viewport plane is 2560x1600 px.
+    TempCapture temp;
+    const auto reference = png_header(2560, 1600);
+    temp.write("browser.png", reference);
+    write_valid_reports(temp);
+    const auto lower_with_asset = [&](int width, int height) {
+        const auto asset = png_header(width, height);
+        temp.write("canvas-9002.png", asset);
+        const auto capture =
+            with_canvas_asset(root_canvas_envelope(pulp::runtime::sha256_hex(reference)),
+                              pulp::runtime::sha256_hex(asset), 9002, "canvas:9002",
+                              "canvas-9002.png", width, height);
+        return lower_root_canvas(temp, root_canvas_with_canvas(), capture, false);
+    };
+
+    SECTION("an asset the capture's size is a plane placed inside the canvas") {
+        const auto result = lower_with_asset(2560, 1600);
+        INFO(result.error);
+        REQUIRE(result);
+        const auto* canvas = find_captured_canvas(result.design_ir->root);
+        REQUIRE(canvas != nullptr);
+        CHECK(canvas->type == "frame");
+        REQUIRE(canvas->children.size() == 1);
+        const auto& plane = canvas->children[0];
+        CHECK(plane.type == "image");
+        CHECK(plane.attributes.at("asset_ref") == "canvas:9002");
+        CHECK(plane.attributes.at("captured_layer") == "viewport");
+        // The plane is the capture's CSS extent, not the canvas box.
+        CHECK(*plane.style.width == Catch::Approx(1280.0));
+        CHECK(*plane.style.height == Catch::Approx(800.0));
+    }
+    SECTION("an element-sized asset is the canvas picture itself") {
+        const auto result = lower_with_asset(200, 100);
+        INFO(result.error);
+        REQUIRE(result);
+        const auto* canvas = find_captured_canvas(result.design_ir->root);
+        REQUIRE(canvas != nullptr);
+        CHECK(canvas->type == "image");
+        CHECK(canvas->attributes.at("asset_ref") == "canvas:9002");
+        CHECK(canvas->style.object_fit.value_or("") == "fill");
+        CHECK(canvas->children.empty());
+    }
+    SECTION("one pixel off the capture size is not a plane") {
+        const auto result = lower_with_asset(2559, 1600);
+        INFO(result.error);
+        REQUIRE(result);
+        const auto* canvas = find_captured_canvas(result.design_ir->root);
+        REQUIRE(canvas != nullptr);
+        CHECK(canvas->type == "image");
+    }
 }
 
 TEST_CASE("unsupported document canvas facts preserve complete legacy lowering",
