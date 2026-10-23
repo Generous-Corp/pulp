@@ -201,11 +201,19 @@ if(PULP_HAS_SKIA)
         # arbitrary shader source from generated UIs.
         src/named_shader_effects.cpp
         src/bundled_fonts.cpp
+        src/font_tables.cpp
         # TextFontContext glues emoji_segmenter into the SkShaper +
         # SkParagraph paths and owns the per-context FontCollection used
         # for Label/measurement.
         src/text_font_context.cpp
     )
+    if(APPLE)
+        target_sources(pulp-canvas PRIVATE src/system_ui_font_manager.cpp)
+        # It subclasses SkFontMgr, whose type info the prebuilt Skia does not
+        # export.
+        set_source_files_properties(src/system_ui_font_manager.cpp PROPERTIES
+            COMPILE_OPTIONS "-fno-rtti")
+    endif()
 
 
     # Optional bundled Noto Color Emoji typeface — gated by the

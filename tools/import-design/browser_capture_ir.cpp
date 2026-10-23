@@ -98,13 +98,21 @@ bool document_canvas_registration(const detail::DocumentCanvasPaint& paint,
     if (!std::isfinite(dpr) || dpr <= 0 || n(viewport, "device_scale_factor") != dpr ||
         n(reference, "logical_width") != width || n(reference, "logical_height") != height ||
         n(resolved, "width") != width || n(resolved, "height") != height ||
-        n(extent, "width") != width || n(extent, "height") != height || n(surface, "left") != 0 ||
-        n(surface, "top") != 0 || n(authored, "x") != 0 || n(authored, "y") != 0)
+        n(extent, "width") != width || n(extent, "height") != height)
         return false;
+    const double surface_left = n(surface, "left"), surface_top = n(surface, "top");
     const double panel_width = n(surface, "width"), panel_height = n(surface, "height");
-    return std::isfinite(panel_width) && std::isfinite(panel_height) && panel_width > 0 &&
-           panel_height > 0 && panel_width <= width && panel_height <= height &&
-           n(authored, "width") == panel_width && n(authored, "height") == panel_height;
+    const double authored_x = n(authored, "x"), authored_y = n(authored, "y");
+    const double authored_width = n(authored, "width"), authored_height = n(authored, "height");
+    return std::isfinite(surface_left) && std::isfinite(surface_top) &&
+           std::isfinite(panel_width) && std::isfinite(panel_height) && std::isfinite(authored_x) &&
+           std::isfinite(authored_y) && std::isfinite(authored_width) &&
+           std::isfinite(authored_height) && panel_width > 0 && panel_height > 0 &&
+           panel_width <= width && panel_height <= height && surface_left >= 0 &&
+           surface_top >= 0 && surface_left + panel_width <= width &&
+           surface_top + panel_height <= height && authored_x == surface_left &&
+           authored_y == surface_top && authored_width == panel_width &&
+           authored_height == panel_height;
 }
 
 bool bool_member(const choc::value::ValueView& object,
@@ -1467,6 +1475,10 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     std::optional<std::string> chrome_asset_id;
     std::optional<std::string> canvas_composite_asset_id;
     std::unordered_map<int, std::string> captured_element_assets;
+    // Canvas snapshots are viewport planes at the capture DPR (the canvas
+    // composited at its final page geometry), so their CSS extent is the
+    // capture's logical size, not the element's box.
+    std::unordered_map<std::string, CapturedLayerExtent> captured_layers;
     std::unordered_set<std::string> captured_asset_ids{
         "reference:browser"};
     constexpr std::uint64_t kMaximumCapturedCanvasPixels =
@@ -1627,6 +1639,11 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
                                      static_cast<int>(height), result.error))
                 return result;
             const int backend_id = static_cast<int>(backend);
+            // A plane is exactly the reference screenshot's size; anything
+            // else is an element-sized raster and is drawn into the box.
+            if (dpr > 0.0 && std::isfinite(dpr) && std::abs(width - logical_width * dpr) < 0.5 &&
+                std::abs(height - logical_height * dpr) < 0.5)
+                captured_layers[id] = {logical_width, logical_height};
             if (!captured_element_assets.emplace(backend_id, id).second) {
                 result.error = "browser capture has duplicate canvas backend node assets";
                 return result;
@@ -1905,14 +1922,17 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // controls after the tree is what keeps a value ring above the knob face it
     // belongs to rather than under it.
     if (native_lowering) {
-        const auto tree = lower_painted_tree(
-            *captured_styles, control_dx, control_dy, dpr, ir.root,
-            captured_element_assets,
-            // A captured canvas can interleave with pseudo-elements and DOM
-            // ancestors in Chromium's paint list. Preserve hierarchy for
-            // ordinary native panels; switch to the exact flat compositor only
-            // when executable canvas paint was captured as an image layer.
-            /*flatten_to_paint_order=*/!captured_element_assets.empty());
+        // A captured canvas can interleave with pseudo-elements and DOM
+        // ancestors in Chromium's paint list. Ordinary native panels keep
+        // their hierarchy; a panel with a captured canvas layer keeps it too
+        // unless the nested tree would visibly reorder overlapping paint, and
+        // only then switches to the exact flat compositor.
+        const auto tree =
+            captured_element_assets.empty()
+                ? lower_painted_tree(*captured_styles, control_dx, control_dy, dpr, ir.root)
+                : lower_painted_tree_preferring_hierarchy(*captured_styles, control_dx, control_dy,
+                                                          dpr, ir.root, captured_element_assets,
+                                                          captured_layers);
         ir.root.attributes["native_painted_nodes"] =
             std::to_string(tree.painted);
         ir.root.attributes["native_nodes_lowered"] =
@@ -1963,6 +1983,8 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         const auto record_if = [&ir](const char* key, int value) {
             if (value > 0) ir.root.attributes[key] = std::to_string(value);
         };
+        record_if("native_tree_flattened_overlapping_reorders",
+                  tree.flattened_overlapping_reorders);
         record_if("native_nodes_skipped_empty_box", tree.skipped_empty_box);
         record_if("native_nodes_skipped_blank_text", tree.skipped_blank_text);
         record_if("native_nodes_skipped_non_visual", tree.skipped_non_visual);
@@ -2001,6 +2023,10 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         record_if("native_svg_lowered", tree.svg_lowered);
         record_if("native_svg_refused", tree.svg_refused);
         record_if("native_svg_shapes", tree.svg_shapes);
+        // Form controls: strings drawn from control state, and controls the
+        // native theme paints, whose boxes here are approximations.
+        record_if("native_control_value_text", tree.control_value_text);
+        record_if("native_appearance_controls", tree.native_appearance_controls);
         // A snapshot taken before the capture collected SVG paint holds the
         // geometry and no colour for it, so every icon in the design falls
         // back — and a reader sees a panel with no icons and no error, which

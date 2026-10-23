@@ -13,6 +13,16 @@ Regions are defined as percent-of-window rects, so they scale across
 different output sizes (the reference may be 2640x1620, the native render
 1213x812 — the same region maps proportionally to each).
 
+Histogram and mean-pixel scores are dominated by a region's background, so a
+missing element that is small next to its region scores as a match. Each
+region therefore also reports reference-ink coverage: how much of the
+reference's ink (pixels that stand out from the region's modal colour) the
+candidate also inks, and the largest connected patch of reference ink the
+candidate left empty. A region gates on them only when it declares
+`coverage_floor` (minimum covered fraction) or `max_uncovered_fraction`
+(largest allowed empty patch, as a fraction of the whole --size frame, so the
+limit means the same element size at any --size, capture size or DPR).
+
 Default regions are Spectr's editor.html shape. Override with
 `--regions <path-to-json>` for other fixtures.
 
@@ -33,6 +43,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 import warnings
@@ -44,35 +55,47 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # are per-region similarity scores below which the region is judged
 # broken. Canvas regions tolerate more variance because Skia raster + AA
 # vary; chrome regions are tighter because text + button layout should
-# match deterministically.
+# match deterministically. The patch limit, 0.000056 of the frame, is 64 px
+# at the default 1320x860: two Chromium captures of the static chrome leave
+# no uncovered ink, real imports leave patches of at most 0.000023 (text
+# antialiasing), and a missing 90x16 control leaves about 0.00085.
 SPECTR_REGIONS = {
     "title_chrome": {
         "x": 0.00, "y": 0.00, "w": 0.30, "h": 0.05,
         "threshold": 0.80,
         "edge_threshold": 0.42,
+        "max_uncovered_fraction": 0.000056,
         "notes": "SPECTR title + ZOOMABLE FILTER BANK",
     },
     "mode_toggles": {
         "x": 0.30, "y": 0.00, "w": 0.40, "h": 0.05,
         "threshold": 0.75,
         "edge_threshold": 0.42,
+        "max_uncovered_fraction": 0.000056,
         "notes": "LIVE / PRECISION / IIR / FFT / HYBRID buttons",
     },
     "band_dropdown": {
         "x": 0.70, "y": 0.00, "w": 0.30, "h": 0.05,
         "threshold": 0.75,
         "edge_threshold": 0.42,
+        "max_uncovered_fraction": 0.000056,
         "notes": "64 bands dropdown + zoom indicator",
     },
     "central_canvas": {
         "x": 0.00, "y": 0.05, "w": 1.00, "h": 0.85,
         "threshold": 0.55,
+        # The spectrum animates, so two captures of it disagree on 5-11% of
+        # its ink and on patches of thousands of pixels. Only gross absence
+        # is gated here.
+        "coverage_floor": 0.50,
         "notes": "Spectrum gradient + band columns + ruler — canvas paint, looser threshold for raster variance",
     },
     "bottom_toolbar": {
         "x": 0.00, "y": 0.90, "w": 1.00, "h": 0.10,
         "threshold": 0.75,
         "edge_threshold": 0.42,
+        "coverage_floor": 0.98,
+        "max_uncovered_fraction": 0.000056,
         "notes": "CLEAR/SCULPT/PEAK/PRESETS/SNAPSHOT/A/B + morph slider",
     },
 }
@@ -167,6 +190,90 @@ def is_blank(img: Image.Image, dark_threshold: int = 30) -> bool:
     return near_black / len(pixels) > 0.95
 
 
+def ink_coverage(ref: Image.Image, cand: Image.Image, ink_threshold: int = 8) -> dict:
+    """Did the candidate put ink where the reference has ink?
+
+    Ink is a pixel whose largest channel difference from the reference
+    region's modal colour exceeds `ink_threshold`; both images are measured
+    against that same modal colour. A reference ink pixel is covered when the
+    candidate pixel carries at least half of its contrast. The half keeps a
+    dithered gradient that sits one level either side of the threshold, and
+    lighter or heavier antialiasing, from counting as missing, while an
+    element the candidate never drew leaves background and stays uncovered.
+    Coverage is presence only: a pixel drawn in the wrong colour still counts.
+
+    `covered` is a fraction of the reference's ink, so a missing element that
+    is small next to a heavily inked region barely moves it.
+    `largest_uncovered_px` is the area of the largest 8-connected patch of
+    uncovered reference ink, which a missing element shows at its own size
+    however much ink surrounds it.
+    """
+    if cand.size != ref.size:
+        Image = _image_module()
+        cand = cand.resize(ref.size, Image.Resampling.LANCZOS)
+    pr = list(ref.getdata())
+    pc = list(cand.getdata())
+    if not pr or len(pr) != len(pc):
+        return {
+            "reference_ink_px": 0,
+            "candidate_ink_px": 0,
+            "covered": 1.0,
+            "ink_ratio": 1.0,
+            "largest_uncovered_px": 0,
+            "reference_modal_rgb": [0, 0, 0],
+        }
+
+    bins = Counter((r >> 3, g >> 3, b >> 3) for r, g, b in pr)
+    modal_bin = bins.most_common(1)[0][0]
+    members = [p for p in pr if (p[0] >> 3, p[1] >> 3, p[2] >> 3) == modal_bin]
+    modal = tuple(sum(p[c] for p in members) / len(members) for c in range(3))
+
+    def contrast(p: tuple[int, int, int]) -> float:
+        return max(abs(p[0] - modal[0]), abs(p[1] - modal[1]), abs(p[2] - modal[2]))
+
+    reference_ink = 0
+    candidate_ink = 0
+    uncovered: set[int] = set()
+    for i, (a, b) in enumerate(zip(pr, pc)):
+        da = contrast(a)
+        db = contrast(b)
+        if db > ink_threshold:
+            candidate_ink += 1
+        if da > ink_threshold:
+            reference_ink += 1
+            if db < 0.5 * da:
+                uncovered.add(i)
+
+    width = ref.size[0]
+    largest = 0
+    pending = set(uncovered)
+    while pending:
+        stack = [pending.pop()]
+        area = 0
+        while stack:
+            i = stack.pop()
+            area += 1
+            y, x = divmod(i, width)
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    nx = x + dx
+                    if (dx or dy) and 0 <= nx < width:
+                        j = (y + dy) * width + nx
+                        if j in pending:
+                            pending.remove(j)
+                            stack.append(j)
+        largest = max(largest, area)
+
+    return {
+        "reference_ink_px": reference_ink,
+        "candidate_ink_px": candidate_ink,
+        "covered": 1.0 if reference_ink == 0 else (reference_ink - len(uncovered)) / reference_ink,
+        "ink_ratio": candidate_ink / max(reference_ink, 1),
+        "largest_uncovered_px": largest,
+        "reference_modal_rgb": [int(round(v)) for v in modal],
+    }
+
+
 def region_score(ref_full: Image.Image, cand_full: Image.Image, region: dict) -> dict:
     ref_crop = crop_region(ref_full, region)
     cand_crop = crop_region(cand_full, region)
@@ -183,7 +290,23 @@ def region_score(ref_full: Image.Image, cand_full: Image.Image, region: dict) ->
     # reject matching negative space around a faithfully imported panel.
     blank_mismatch = blank_cand and not blank_ref
     edge_passed = edge_threshold is None or edges >= edge_threshold
-    passed = score >= threshold and edge_passed and not blank_mismatch
+    coverage = ink_coverage(ref_crop, cand_crop)
+    coverage_floor = region.get("coverage_floor")
+    frame_px = ref_full.size[0] * ref_full.size[1]
+    largest_fraction = coverage["largest_uncovered_px"] / max(frame_px, 1)
+    max_uncovered = region.get("max_uncovered_fraction")
+    coverage_passed = coverage_floor is None or coverage["covered"] >= coverage_floor
+    uncovered_passed = max_uncovered is None or largest_fraction <= max_uncovered
+    failed_checks = [
+        name for name, ok in (
+            ("score", score >= threshold),
+            ("edges", edge_passed),
+            ("blank", not blank_mismatch),
+            ("coverage", coverage_passed),
+            ("uncovered_patch", uncovered_passed),
+        ) if not ok
+    ]
+    passed = not failed_checks
     return {
         "score": round(score, 4),
         "histogram_similarity": round(hist, 4),
@@ -196,6 +319,18 @@ def region_score(ref_full: Image.Image, cand_full: Image.Image, region: dict) ->
         "blank_candidate": blank_cand,
         "blank_reference": blank_ref,
         "blank_mismatch": blank_mismatch,
+        "ink_coverage": round(coverage["covered"], 4),
+        "coverage_floor": coverage_floor,
+        "coverage_passed": coverage_passed,
+        "largest_uncovered_px": coverage["largest_uncovered_px"],
+        "largest_uncovered_fraction": round(largest_fraction, 7),
+        "max_uncovered_fraction": max_uncovered,
+        "max_uncovered_px": None if max_uncovered is None else int(max_uncovered * frame_px),
+        "uncovered_passed": uncovered_passed,
+        "reference_ink_px": coverage["reference_ink_px"],
+        "candidate_ink_px": coverage["candidate_ink_px"],
+        "ink_ratio": round(coverage["ink_ratio"], 4),
+        "failed_checks": failed_checks,
         "rect_pct": {k: region[k] for k in ("x", "y", "w", "h")},
         "notes": region.get("notes", ""),
     }
@@ -237,7 +372,7 @@ def load_regions(path: Path | None) -> dict:
                     file=sys.stderr,
                 )
                 sys.exit(2)
-        for threshold_name in ("threshold", "edge_threshold"):
+        for threshold_name in ("threshold", "edge_threshold", "coverage_floor", "max_uncovered_fraction"):
             if threshold_name not in region:
                 continue
             thr = region[threshold_name]
@@ -318,6 +453,10 @@ def main() -> int:
             mark = "✓" if r["passed"] else "✗"
             blank = " (BLANK)" if r["blank_candidate"] else ""
             print(f"  {mark} {name:18s} score={r['score']:.3f} threshold={r['threshold']:.3f}{blank}")
+            limit = "" if r["max_uncovered_px"] is None else f" (limit {r['max_uncovered_px']}px)"
+            print(f"    ink coverage={r['ink_coverage']:.3f} largest uncovered patch={r['largest_uncovered_px']}px{limit}")
+            if r["failed_checks"]:
+                print(f"    failed: {', '.join(r['failed_checks'])}")
             print(f"    rect: x={r['rect_pct']['x']:.2f} y={r['rect_pct']['y']:.2f} w={r['rect_pct']['w']:.2f} h={r['rect_pct']['h']:.2f}")
             if r["notes"]:
                 print(f"    {r['notes']}")
