@@ -700,12 +700,10 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     // AFTER the shorthand, never before: `background` resets `background-size`,
     // so emitting the size first silently throws it away.
     //
-    // Without this a tiled background collapses to one stretched copy of its
-    // gradient. That is not a texture nicety — a design-system grid or scanline
-    // IS a gradient plus a size, so losing the size loses the element. A
-    // spectrum display whose only content was `.grid-x` / `.grid-y` rendered as
-    // an empty panel and was reported as a layout bug three separate times, on
-    // three different panels, before the size was found missing here.
+    // Without this a tiled background collapses to one stretched copy of its gradient.
+    // A design-system grid or scanline IS a gradient plus a size, so losing the size
+    // loses the element: a spectrum display built only from `.grid-x` / `.grid-y`
+    // rendered as an empty panel, misreported as a layout bug on three panels.
     emit_str("backgroundSize", s.background_size);
     emit_str("backgroundPosition", s.background_position);
     emit_str("backgroundOrigin", s.background_origin);

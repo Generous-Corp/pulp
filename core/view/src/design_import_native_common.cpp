@@ -1505,9 +1505,8 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_background_size(*style.background_size);
     if (style.background_origin)
         view.set_background_origin(*style.background_origin);
-    // object-fit is honored by ImageView::paint; on plain Views it sits in the
-    // same style_extras slot the bridge writes, so applying it unconditionally
-    // keeps the native tree in lockstep with the JS lane's setObjectFit.
+    // object-fit is honored by ImageView::paint; plain Views keep it in the bridge's
+    // style_extras slot, so the native tree matches the JS lane's setObjectFit.
     if (style.object_fit)
         view.set_object_fit(*style.object_fit);
     if (style.color) {
@@ -1519,12 +1518,10 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.border_radius)
         view.set_border_radius(*style.border_radius);
 
-    // Filters, backdrop filters and blend modes. The JS lane already parses
-    // these — web-compat-style-decl-paint.js pulls the blur radius out and
-    // routes it to setBackdropFilter -> View::set_backdrop_blur — but the
-    // native tree did not, so the same document rendered soft through one lane
-    // and hard-edged through the other. An atmospheric design lives or dies on
-    // this: a 60px bloom with no blur is a solid shape sitting on the panel.
+    // Filters, backdrop filters and blend modes, lowered the way the JS lane does
+    // (web-compat-style-decl-paint.js routes the blur radius to setBackdropFilter ->
+    // View::set_backdrop_blur) so both lanes render the same document equally soft.
+    // An atmospheric design depends on it: a 60px bloom with no blur is a solid shape.
     if (style.filter) {
         if (const auto radius = css_blur_radius(*style.filter))
             view.set_filter_blur(*radius);

@@ -307,12 +307,10 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
         auto k = resolve_key(key);
         if (!k) return;
         const auto& v = obj[k->c_str()];
-        // v0 / Stitch / Pencil emit CSS string dimensions ("100px", "12") where
-        // the figma-plugin lane emits a bare number. getWithDefault<double> on a
-        // string returns 0, which silently degenerates the dimension (a "1px"
-        // border or width collapses to 0). Coerce a px-suffixed / numeric string
-        // through the shared length parser; a non-length string (e.g. "auto",
-        // "50%") leaves the field unset for the sizing-mode path to handle.
+        // v0 / Stitch / Pencil emit CSS string dimensions ("100px", "12") where the
+        // figma-plugin lane emits a number; getWithDefault<double> on a string returns 0
+        // and collapses a "1px" border to 0. Coerce lengths through the shared parser; a
+        // non-length ("auto", "50%") stays unset for the sizing-mode path to handle.
         if (v.isString()) {
             float parsed = 0.0f;
             if (bxsh_parse_length(std::string(v.toString()), parsed)) field = parsed;
