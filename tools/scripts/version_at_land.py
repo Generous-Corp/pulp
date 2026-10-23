@@ -509,6 +509,11 @@ CAPABILITY_ASSIGNED_PATHS = (
 )
 
 
+# --assign-pending regenerates the manifest, surface ledger and history, which
+# takes seconds; a hung run must not hold the bump that releases everything else.
+CAPABILITY_ASSIGN_TIMEOUT_SECS = 300
+
+
 def _assign_capability_counters(repo: Path, plan: list[Assignment]) -> list[str]:
     """Assign the agent-capability counters a pending tree carries.
 
@@ -525,8 +530,9 @@ def _assign_capability_counters(repo: Path, plan: list[Assignment]) -> list[str]
         return []
     try:
         subprocess.run([sys.executable, CAPABILITY_SCRIPT, "--assign-pending"],
-                       cwd=repo, check=True, capture_output=True)
-    except (subprocess.CalledProcessError, OSError) as error:
+                       cwd=repo, check=True, capture_output=True,
+                       timeout=CAPABILITY_ASSIGN_TIMEOUT_SECS)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
         print(f"version-at-land: could not assign pending capability counters; "
               f"they stay pending{_failure_tail(error)}", file=sys.stderr)
         # One path at a time: a pathspec the tree does not track would make a
@@ -535,7 +541,7 @@ def _assign_capability_counters(repo: Path, plan: list[Assignment]) -> list[str]
             subprocess.run(["git", "checkout", "--", path], cwd=repo, capture_output=True)
         return []
     moved = subprocess.run(["git", "status", "--porcelain", "--", *CAPABILITY_ASSIGNED_PATHS],
-                           cwd=repo, capture_output=True, text=True).stdout
+                           cwd=repo, capture_output=True, text=True, encoding="utf-8").stdout
     return [line[3:] for line in moved.splitlines() if line.strip()]
 
 

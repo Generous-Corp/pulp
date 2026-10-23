@@ -1504,7 +1504,7 @@ def exercise_counters_assigned_at_land(canonical: dict) -> int:
     # The release guard and the status report read the same rule.
     with tempfile.TemporaryDirectory(prefix="pulp-agent-counters-") as temp:
         path = pathlib.Path(temp) / "history.json"
-        path.write_text(json.dumps(history))
+        path.write_text(json.dumps(history), encoding="utf-8")
         flags = argparse.Namespace(status=False, require_assigned=True, assign_pending=False)
         assert manifest.counter_status(ROOT, changed, surface_doc, path, flags) == 1
         assert manifest.counter_status(ROOT, assigned, surface_doc, path, flags) == 0
@@ -1516,6 +1516,63 @@ def exercise_counters_assigned_at_land(canonical: dict) -> int:
     assert all(item["state"] in {"assigned", "pending"} for item in status.values())
     checks += 1
     return checks
+
+
+def exercise_release_guard_wiring() -> int:
+    """auto-release.yml withholds the SDK tag while a counter is pending.
+
+    Runs the workflow step's own script against a stub manifest tool for both
+    outcomes, then evaluates the tag step's SDK_SHOULD_TAG expression with the
+    step's output, so a rewired condition fails here rather than tagging a
+    pending revision."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/auto-release.yml").read_text(encoding="utf-8"))
+    steps = next(iter(workflow["jobs"].values()))["steps"]
+    by_id = {step.get("id"): step for step in steps if step.get("id")}
+    guard = by_id["capability_precheck"]
+    tag = next(step for step in steps if step.get("name") == "Create tags for moved surfaces")
+    assert "steps.versions.outputs.sdk_should_tag == '1'" in guard["if"]
+    assert "--require-assigned" in guard["run"]
+    assert steps.index(guard) < steps.index(tag), "the guard must run before tagging"
+    checks = 1
+
+    expression = tag["env"]["SDK_SHOULD_TAG"].strip()
+    assert expression.startswith("${{") and expression.endswith("}}")
+    body = expression[3:-2]
+
+    def should_tag(windows: str, capability: str, decided: str) -> str:
+        python = (body.replace("steps.windows_precheck.outputs.block", repr(windows))
+                  .replace("steps.capability_precheck.outputs.block", repr(capability))
+                  .replace("steps.versions.outputs.sdk_should_tag", repr(decided))
+                  .replace("||", " or ").replace("&&", " and "))
+        return eval(python, {"__builtins__": {}}, {})  # noqa: S307 - literals only
+
+    with tempfile.TemporaryDirectory(prefix="pulp-release-guard-") as temp:
+        root = pathlib.Path(temp)
+        tool = root / "tools/scripts/agent_capability_manifest.py"
+        tool.parent.mkdir(parents=True)
+        for exit_code, expected_block in ((1, "1"), (0, "0")):
+            tool.write_text(f"import sys\nsys.exit({exit_code})\n", encoding="utf-8")
+            output = root / "github_output"
+            summary = root / "step_summary"
+            output.write_text("", encoding="utf-8")
+            result = subprocess.run(
+                ["bash", "-c", guard["run"]], cwd=root, text=True, encoding="utf-8",
+                capture_output=True,
+                env={**os.environ, "GITHUB_OUTPUT": str(output),
+                     "GITHUB_STEP_SUMMARY": str(summary), "SDK_AFTER": "9.9.9"})
+            assert result.returncode == 0, result.stderr
+            block = output.read_text(encoding="utf-8").strip().split("=")[-1]
+            assert block == expected_block, (exit_code, block)
+            assert should_tag("", block, "1") == ("0" if block == "1" else "1")
+            checks += 1
+    # The Windows guard still withholds on its own, and a "no tag" decision is
+    # never turned into a tag.
+    assert should_tag("1", "0", "1") == "0"
+    assert should_tag("0", "0", "0") == "0"
+    return checks + 1
 
 
 def main() -> int:
@@ -1536,6 +1593,7 @@ def main() -> int:
     checks += exercise_compatibility(canonical)
     checks += exercise_base_drift()
     checks += exercise_counters_assigned_at_land(canonical)
+    checks += exercise_release_guard_wiring()
     checks += exercise_authority_navigation()
     print(f"agent-capabilities: {checks} negative/evolution/surface/compatibility checks passed")
     return 0

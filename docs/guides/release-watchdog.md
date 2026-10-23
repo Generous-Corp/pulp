@@ -519,9 +519,24 @@ base value and the version-at-land bump assigns them
 commit). If that assignment failed, `main` still carries a pending counter: a
 revision number that names no published contract. `auto-release.yml` runs
 `--require-assigned` before tagging the SDK and withholds the tag when anything
-is pending, with an `SDK tag withheld` annotation and summary. The next SDK
-bump that assigns the counters tags the then-current version. The plugin tag
+is pending, with an `SDK tag withheld` annotation and summary. The plugin tag
 is never held.
+
+**Recovery when the assignment keeps failing.** The bump run's log names the
+failure (`could not assign pending capability counters`, with the tool's last
+lines, or `timed out` after 300 s). Fix the cause, then assign by hand: on a
+branch from `main`, run `python3 tools/scripts/agent_capability_manifest.py
+--assign-pending` and land the result as an ordinary PR. Its one-step advance
+over the pending base is exactly what the check accepts, and `--status` on the
+branch must report every counter `assigned`.
+
+**What happens to the withheld version.** The tag decision tags HEAD whenever
+its version is newer than the latest tag (`auto_release_decision.py`). So the
+withheld `vN` is tagged by the first push to `main` after the counters are
+assigned, if `main` is still at `vN` at that point, on that commit rather than
+on the bump commit. If another SDK bump lands first, `main` moves to `vN+1`,
+that bump assigns the counters and is tagged, and `vN` is skipped for good:
+nothing tags an older version later.
 
 ## fix/feat-needs-bump (PR-time prevention, issue #1009)
 

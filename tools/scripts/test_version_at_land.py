@@ -1832,7 +1832,7 @@ class CapabilityCounterAssignTest(unittest.TestCase):
         self._stub(0)
         edited = val._write_plan(self.repo, CONFIG, self._sdk())
         self.assertIn(self.SNAPSHOT, edited)
-        self.assertIn('"manifest_revision": 2', (self.repo / self.SNAPSHOT).read_text())
+        self.assertIn('"manifest_revision": 2', (self.repo / self.SNAPSHOT).read_text(encoding="utf-8"))
         message = val._bump_message(self._sdk(), "a" * 40, "b" * 40, edited)
         self.assertIn("Skill-Update: skip skill=agent-capabilities", message)
         self.assertIn(f"{val.APPLIED_MARKER}: {'b' * 40}", message)
@@ -1842,7 +1842,7 @@ class CapabilityCounterAssignTest(unittest.TestCase):
         plan = [val.Assignment(surface="plugin", level="patch", current="0.5.0", assigned="0.5.1")]
         edited = val._write_plan(self.repo, CONFIG, plan)
         self.assertNotIn(self.SNAPSHOT, edited)
-        self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text())
+        self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text(encoding="utf-8"))
 
     def test_a_failed_assignment_is_reverted_and_does_not_stop_the_bump(self):
         self._stub(1)
@@ -1851,8 +1851,27 @@ class CapabilityCounterAssignTest(unittest.TestCase):
             edited = val._write_plan(self.repo, CONFIG, self._sdk())
         self.assertIn("CMakeLists.txt", edited)
         self.assertNotIn(self.SNAPSHOT, edited)
-        self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text())
+        self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text(encoding="utf-8"))
         self.assertIn("could not assign pending capability counters", err.getvalue())
+
+    def test_a_hung_assignment_times_out_and_does_not_hold_the_bump(self):
+        self.r.write(val.CAPABILITY_SCRIPT,
+                     "import pathlib, time\n"
+                     f"pathlib.Path({self.SNAPSHOT!r}).write_text('partial\\n')\n"
+                     "time.sleep(30)\n")
+        self.r.commit("install hanging stub")
+        err = io.StringIO()
+        original = val.CAPABILITY_ASSIGN_TIMEOUT_SECS
+        val.CAPABILITY_ASSIGN_TIMEOUT_SECS = 1
+        try:
+            with contextlib.redirect_stderr(err):
+                edited = val._write_plan(self.repo, CONFIG, self._sdk())
+        finally:
+            val.CAPABILITY_ASSIGN_TIMEOUT_SECS = original
+        self.assertIn("CMakeLists.txt", edited)
+        self.assertNotIn(self.SNAPSHOT, edited)
+        self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text(encoding="utf-8"))
+        self.assertIn("timed out", err.getvalue())
 
     def test_control_a_bump_without_capability_edits_carries_no_skill_trailer(self):
         message = val._bump_message(self._sdk(), "a" * 40, "b" * 40, ["CMakeLists.txt"])

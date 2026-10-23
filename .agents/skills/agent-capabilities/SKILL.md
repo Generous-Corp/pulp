@@ -25,6 +25,12 @@ was a single integer every open branch raced for; one merge staled the rest.
   rule only stopped requiring it.
 - A pending state is never appended to the history, so two materials never
   share a counter there.
+- If the bump's assignment keeps failing (its log says `could not assign
+  pending capability counters` or `timed out`), fix the cause and land
+  `--assign-pending` by hand as an ordinary PR from `main`. The withheld SDK
+  version is tagged by the next push only if `main` is still at it; once a
+  later bump moves the version, it is skipped. See
+  `docs/guides/release-watchdog.md`.
 
 The sections below that say "increase the counter" describe the hand-bump
 flow that branches no longer need; leave the constants alone instead.
