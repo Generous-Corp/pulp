@@ -27,6 +27,7 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/theme_presets.hpp>
 #include <pulp/view/widget_gallery.hpp>
+#include <pulp/view/widgets.hpp>
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColorSpace.h"
@@ -38,6 +39,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -274,6 +276,50 @@ TEST_CASE("the widget gallery renders unchanged under the default policy",
 #if defined(__APPLE__)
     CHECK(chromium != shipped);
 #endif
+}
+
+TEST_CASE("shared-surface smoke: imported text and a native knob on one surface",
+          "[.][canvas][text-raster][smoke]") {
+    // Screenshots only, never a gate: the before/after an editor shows when
+    // an imported panel and a native widget share one chromium surface. Set
+    // PULP_TEXT_RASTER_SMOKE_DIR to a directory to write the pair.
+    const char* out_dir = std::getenv("PULP_TEXT_RASTER_SMOKE_DIR");
+    if (out_dir == nullptr || *out_dir == '\0')
+        SKIP("PULP_TEXT_RASTER_SMOKE_DIR is not set");
+    register_fixture_font();
+
+    // Absolute boxes, so the layout pass keeps each widget where it is put.
+    auto place = [](view::View& v, float x, float y, float w, float h) {
+        v.set_position(view::View::Position::absolute);
+        v.set_left(x);
+        v.set_top(y);
+        v.flex().preferred_width = w;
+        v.flex().preferred_height = h;
+    };
+    view::View root;
+    auto label = std::make_unique<view::Label>();
+    label->set_text("SCULPT  PEAK  PRESETS");
+    label->set_font_family(kFamily);
+    label->set_font_size(10.0f);
+    label->set_letter_spacing(1.0f);
+    label->set_text_color(canvas::Color::rgba8(255, 255, 255, 217));
+    place(*label, 12, 12, 216, 20);
+    root.add_child(std::move(label));
+    auto knob = std::make_unique<view::Knob>();
+    place(*knob, 12, 36, 48, 48);
+    root.add_child(std::move(knob));
+
+    for (const TextRasterPolicy policy : {TextRasterPolicy::legacy, TextRasterPolicy::chromium}) {
+        const auto png =
+            view::render_to_png(root, 240, 96, kScale, view::ScreenshotBackend::skia, policy);
+        REQUIRE_FALSE(png.empty());
+        const std::string path = std::string(out_dir) + "/shared-surface-" +
+                                 (policy == TextRasterPolicy::chromium ? "chromium" : "legacy") +
+                                 ".png";
+        std::ofstream(path, std::ios::binary)
+            .write(reinterpret_cast<const char*>(png.data()),
+                   static_cast<std::streamsize>(png.size()));
+    }
 }
 
 TEST_CASE("a GPU surface carries its text raster policy into retained layers",
