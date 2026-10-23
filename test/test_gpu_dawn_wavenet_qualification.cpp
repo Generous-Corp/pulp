@@ -2,6 +2,7 @@
 #include "detail/dawn_shared_io_wavenet_program.hpp"
 #include "detail/gpu_convolver_trial_config.hpp"
 #include "detail/gpu_neural_model.hpp"
+#include "detail/gpu_neural_realtime_test_access.hpp"
 #include "detail/nam_tcn_artifact.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/shared_io_compute_plan.hpp"
@@ -255,6 +256,8 @@ struct Result {
     AdmissionRun admission_reject;
     AdmissionRun admission_skip_control;
     AdmissionRun admission_reject_midstream;
+    AdmissionRun neural_default_depth;
+    bool neural_default_depth_receipt = false;
     bool admission_healthy_receipt = false;
     bool admission_loss_receipt = false;
     bool admission_reject_receipt = false;
@@ -341,6 +344,8 @@ void emit(const Result& result, std::string_view status) {
                    result.admission_skip_control_receipt);
     emit_admission(std::cout, "admission_reject_midstream", result.admission_reject_midstream,
                    result.admission_reject_midstream_receipt);
+    emit_admission(std::cout, "neural_default_depth", result.neural_default_depth,
+                   result.neural_default_depth_receipt);
     std::cout << R"(,"refusal_retry":{"receipt":)"
               << (result.refusal_retry_receipt ? "true" : "false") << R"(,"refused_on_slot1":)"
               << (result.refusal_retry.refused ? "true" : "false") << R"(,"retried_on_slot0":)"
@@ -676,26 +681,28 @@ struct FaultedSession {
     }
 };
 
-// The same physical faults behind the generic neural node: its WaveNet
-// backend creates its one session through FaultedSession, and its CPU model
-// is a silent stand-in, since only the latched recovery is under test.
-NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_table,
-                                   DawnSharedIoProvider::Fault fault) {
+// The generic neural node's WaveNet model over a physical provider with
+// `fault`: its backend creates its one session through FaultedSession at the
+// backend's default depth, and its CPU model is a silent stand-in, since the
+// GPU path is what is under test. Null, with `error` set, when unavailable.
+pulp::gpu_audio::GpuNeuralModelHandle neural_model_over(const Fixture& fixture,
+                                                        const void* proc_table,
+                                                        DawnSharedIoProvider::Fault fault,
+                                                        std::string& error) {
     namespace ga = pulp::gpu_audio;
-    NodeFaultRun run;
     auto created = DawnSharedIoProvider::create(
         {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
          .proc_table_override_for_testing = proc_table,
          .fault = fault,
          .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer});
     if (!created.provider) {
-        run.reason_text = "provider_unavailable";
-        return run;
+        error = "provider_unavailable";
+        return {};
     }
     auto program = DawnSharedIoWavenetProgram::create(*created.provider, fixture.spec());
     if (!program) {
-        run.reason_text = "program_unavailable";
-        return run;
+        error = "program_unavailable";
+        return {};
     }
     const auto block = fixture.spec().block_size;
     const auto bytes = block * sizeof(float);
@@ -706,17 +713,18 @@ NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_tabl
              .input_bytes_per_slot = bytes,
              .output_bytes_per_slot = bytes,
              .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer})) {
-        run.reason_text = "session_prepare_failed";
-        return run;
+        error = "session_prepare_failed";
+        return {};
     }
-    const std::array<std::uint32_t, 1> dilations{1};
-    const ga::GpuWaveNetLayerDescriptor layer{.input_size = 1,
-                                              .condition_size = 1,
-                                              .channels = 1,
-                                              .kernel = 2,
-                                              .head_size = 1,
-                                              .tanh_activation = true,
-                                              .dilations = dilations};
+    static const std::array<std::uint32_t, 1> dilations{1};
+    static const ga::GpuWaveNetLayerDescriptor layer{.input_size = 1,
+                                                     .condition_size = 1,
+                                                     .channels = 1,
+                                                     .kernel = 2,
+                                                     .head_size = 1,
+                                                     .tanh_activation = true,
+                                                     .dilations = dilations};
+    // max_inflight is left at the backend's default: two for two slots.
     auto backend = std::make_unique<WaveNetStreamingBackend>(
         WaveNetStreamingBackend::Config{
             .session = {.descriptor = {.block_size = block,
@@ -726,11 +734,10 @@ NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_tabl
                                        .weight_count = fixture.weights.size()},
                         .weights = fixture.weights,
                         .slots = 2},
-            .channels = 1,
-            .max_inflight = 1},
+            .channels = 1},
         WaveNetStreamingBackend::ChannelFactory{}, &create_session_channel<FaultedSession>);
     FaultedSession::next = std::move(session);
-    int silent_state = 0;
+    static int silent_state = 0;
     const NeuralCpuKernel silent{
         .state = &silent_state,
         .prepare = [](void*, const StreamingPrepareContext&) noexcept { return true; },
@@ -757,12 +764,24 @@ NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_tabl
     request.backend = std::move(backend);
     auto build = make_neural_model(std::move(request));
     if (!build) {
-        run.reason_text = "model_rejected";
-        return run;
+        error = "model_rejected";
+        return {};
     }
+    return build.model;
+}
+
+// The same physical faults behind the generic neural node, at its default
+// depth (two in flight for this ring and backend).
+NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_table,
+                                   DawnSharedIoProvider::Fault fault) {
+    namespace ga = pulp::gpu_audio;
+    NodeFaultRun run;
+    const auto model = neural_model_over(fixture, proc_table, fault, run.reason_text);
+    if (!model)
+        return run;
     ga::GpuNeuralRealtimeNode node(
         {.family = ga::NeuralFamily::WaveNet,
-         .model = build.model,
+         .model = model,
          .channels = 1,
          .lead_blocks = 1,
          .capacity = 4,
@@ -926,6 +945,80 @@ AdmissionRun run_admission(const Fixture& fixture, const void* proc_table,
     run.statuses_valid = run.statuses_valid && ga::validate_gpu_audio_status(status).accepted();
     run.next_sequence = path.next_sequence(path.context);
     run.in_flight_high_water = WaveNetRealtimeTestAccess::telemetry(node).in_flight_high_water;
+    run.released = node.release();
+    return run;
+}
+
+// The generic neural node at its default depth over a healthy physical
+// provider, on the admission schedule: withholding the pumps after callback
+// `skip_pump_at` leaves that block in flight when the next is admitted, so the
+// node must hold two blocks at once on Dawn, and every block the GPU delivered
+// must match the CPU reference in order.
+AdmissionRun run_neural_default_depth(const Fixture& fixture, const void* proc_table,
+                                      std::uint32_t lead, std::uint64_t skip_pump_at) {
+    namespace ga = pulp::gpu_audio;
+    AdmissionRun run;
+    const auto model =
+        neural_model_over(fixture, proc_table, DawnSharedIoProvider::Fault::None, run.error);
+    if (!model)
+        return run;
+    ga::GpuNeuralRealtimeNode node(
+        {.family = ga::NeuralFamily::WaveNet,
+         .model = model,
+         .channels = 1,
+         .lead_blocks = lead,
+         .capacity = kAdmissionCapacity,
+         .shadow_policy = ga::GpuNeuralRealtimeNode::ShadowPolicy::Inline,
+         .watchdog_blocks = kAdmissionWatchdogBlocks});
+    if (!node.prepare() || !node.gpu_kernel_available()) {
+        run.error = "node_not_on_gpu";
+        return run;
+    }
+    auto path = realtime_gpu_node_path(&node);
+    std::array<float, 2> input{}, output{};
+    const float* in_ptr = input.data();
+    float* out_ptr = output.data();
+    pulp::audio::BufferView<const float> in(&in_ptr, 1, 2);
+    pulp::audio::BufferView<float> out(&out_ptr, 1, 2);
+    run.ran = true;
+    for (std::uint64_t sequence = 0; sequence < kAdmissionCallbacks; ++sequence) {
+        input = {static_cast<float>(sequence), static_cast<float>(sequence) + 0.25f};
+        const auto status = path.process(path.context, in, out, 2, sequence, true, now_ns());
+        const auto disposition =
+            status == kRealtimeGpuReady     ? SharedIoDeliveryDisposition::GpuDelivered
+            : status == kRealtimeGpuPriming ? SharedIoDeliveryDisposition::Priming
+                                            : SharedIoDeliveryDisposition::CpuFallbackDelivered;
+        path.delivered(path.context, sequence, static_cast<std::uint8_t>(disposition), 0, 0);
+        ++run.callbacks;
+        if (path.next_sequence(path.context) != sequence + 1)
+            ++run.sequence_drift;
+        run.trace += status == kRealtimeGpuReady ? 'G' : status == kRealtimeGpuPriming ? 'P' : 'S';
+        if (status == kRealtimeGpuReady) {
+            ++run.gpu_blocks;
+            const auto due = sequence - lead;
+            const float previous = due == 0 ? 0.0f : static_cast<float>(due - 1) + 0.25f;
+            const std::array<float, 2> expected{std::tanh(0.5f * previous),
+                                                std::tanh(0.5f * static_cast<float>(due))};
+            if (!compare_block(output, expected))
+                ++run.mismatches;
+        }
+        for (int pump = 0; sequence != skip_pump_at && pump < 4; ++pump) {
+            (void)path.service(path.context, 0);
+            std::this_thread::sleep_for(std::chrono::microseconds(250));
+        }
+        run.statuses_valid =
+            run.statuses_valid && ga::validate_gpu_audio_status(node.status_snapshot()).accepted();
+        if (run.latched_after == UINT64_MAX &&
+            node.recovery_reason() != ga::GpuAudioRecoveryReason::None)
+            run.latched_after = sequence;
+    }
+    const auto status = node.status_snapshot();
+    run.reason = status.recovery_reason;
+    run.sequence = status.recovery_sequence;
+    run.state = status.provider_state;
+    run.statuses_valid = run.statuses_valid && ga::validate_gpu_audio_status(status).accepted();
+    run.next_sequence = path.next_sequence(path.context);
+    run.in_flight_high_water = NeuralRealtimeTestAccess::in_flight_high_water(node);
     run.released = node.release();
     return run;
 }
@@ -1168,6 +1261,15 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
     auto control_scenario = midstream;
     control_scenario.fault = Fault::None;
     control_scenario.inflight = 0;
+    // The generic neural node at its default depth: the same schedule must put
+    // two of its blocks in flight on Dawn, matching the CPU reference in order.
+    auto& neural_depth = result.neural_default_depth;
+    neural_depth =
+        run_neural_default_depth(fixture, proc_table, midstream.lead, midstream.skip_pump_at);
+    result.neural_default_depth_receipt =
+        clean(neural_depth) && neural_depth.reason == ga_reason::None &&
+        neural_depth.gpu_blocks + kLateAllowance >= kCallbacks - 2 &&
+        neural_depth.mismatches == 0 && neural_depth.in_flight_high_water == 2;
     auto& control = result.admission_skip_control;
     control = run_admission(fixture, proc_table, control_scenario);
     result.admission_skip_control_receipt = clean(control) && control.reason == ga_reason::None &&
@@ -1462,7 +1564,8 @@ int main(int argc, char** argv) {
         result.admission_reject_unreachable_slot_receipt && result.admission_skip_control_receipt &&
         result.admission_reject_midstream_receipt && result.refusal_retry_receipt &&
         result.node_loss_default_depth_receipt && result.node_hang_default_depth_receipt &&
-        result.reacquire_loss_receipt && result.reacquire_hang_receipt;
+        result.reacquire_loss_receipt && result.reacquire_hang_receipt &&
+        result.neural_default_depth_receipt;
     emit(result, passed ? "passed" : "failed");
     return passed ? 0 : 1;
 }
