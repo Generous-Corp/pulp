@@ -13,9 +13,7 @@ session rather than UTM's emulated framebuffer:
 
 ```sh
 cd /path/to/pulp
-export SPECTR_WINDOWS_UTM_UUID='<verified-uuid>'
-export SPECTR_WINDOWS_SSH_PORT='<verified-local-ssh-port>'
-export SPECTR_WINDOWS_RDP_PORT='<verified-local-rdp-port>'
+# Prefer the verified machine-local config; see tools/windows/README.md.
 ./tools/windows/open-utm-rdp.sh
 ```
 
