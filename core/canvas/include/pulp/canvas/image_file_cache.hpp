@@ -15,16 +15,24 @@
 /// an image larger than the whole budget is built and drawn uncached.
 ///
 /// The path pool is bounded by entry count and by bytes (decoded or uploaded
-/// pixels). Its rule for an image larger than the whole budget differs from
-/// the inline pool's: the newest entry is always kept, alone, so a large
-/// backdrop drawn every frame is decoded and uploaded once rather than every
-/// frame.
+/// pixels), but it never evicts for bytes an entry drawn in the frame being
+/// painted, nor its most recent entry. A frame whose file images exceed the
+/// budget (an imported panel drawn as several full-frame layers, one
+/// backdrop larger than the whole budget) overshoots the budget instead of
+/// evicting each layer just before it is drawn again, which would decode and
+/// upload every layer on every frame. Entries left over from earlier frames
+/// are evicted down to the budget on the next build. Frames are announced per
+/// backend with `begin_frame()`; a backend that never announces one is evicted
+/// strictly by recency, keeping only its newest entry. The inline pool keeps
+/// its own rule: an image larger than its budget is built and drawn uncached.
 ///
 /// Both pools remember a build that returned null for `kFailureRetryDelay`:
 /// lookups of that key inside the window return null without building, so a
-/// missing or corrupt asset is not read and decoded on every paint. After the
-/// window the next lookup builds again. `clear()` and `clear_backend()` drop
-/// the remembered failures with the entries.
+/// missing or corrupt asset is not read and decoded on every paint. A path key
+/// also records the file's size and modification time, and is retried as soon
+/// as either changes, so a file written or fixed inside the window shows on
+/// the next repaint. `clear()` and `clear_backend()` drop the remembered
+/// failures with the entries.
 ///
 /// `SkiaCanvas::draw_image_from_file` used to re-read the PNG/JPEG bytes off
 /// disk (`SkData::MakeFromFileName`), re-decode them
@@ -85,7 +93,8 @@ public:
     /// other and from the CPU raster image, so the same path drawn through two
     /// contexts caches two entries. A null build result is returned but not
     /// stored; lookups of that key return null without building until
-    /// `kFailureRetryDelay` has passed, then the next one builds again.
+    /// `kFailureRetryDelay` has passed or the file changes, then the next one
+    /// builds again.
     /// When disabled, always rebuilds and stores nothing.
     sk_sp<SkImage> get_or_build(
         const std::string& path,
@@ -118,7 +127,8 @@ public:
         std::uint64_t hits = 0;    ///< Cache hits (decode + upload skipped).
         std::uint64_t builds = 0;  ///< Cache misses (image rebuilt).
         std::size_t size = 0;      ///< Live entries.
-        std::size_t bytes = 0;     ///< Pixel bytes of live entries.
+        std::size_t bytes = 0;     ///< Pixel bytes of live entries; above the
+                                   ///< budget only while one frame's images exceed it.
     };
     /// Counters for the path pool.
     Stats stats() const;
@@ -135,7 +145,7 @@ public:
     /// Reset the counters of both pools.
     void reset_stats();
 
-    /// Drop all cached images from both pools. The invalidation hook for on-disk file mutation
+    /// Drop all cached images from both pools, and forget announced frames. The invalidation hook for on-disk file mutation
     /// (see the semantic-change note above) and for GPU-context teardown.
     /// Stop painting before calling this; it waits for every in-flight build.
     void clear();
@@ -145,6 +155,12 @@ public:
     /// this method waits for already-started builds, then removes their entries.
     /// A null backend key is ignored because it denotes the shared CPU-raster entry.
     void clear_backend(const void* backend_key);
+
+    /// Announce that a new frame starts drawing through @p backend_key (the
+    /// Graphite recorder or Ganesh context, or null for CPU raster). Entries
+    /// that backend draws until its next frame are not evicted for bytes.
+    /// GPU surfaces call this from their frame start.
+    void begin_frame(const void* backend_key);
 
     /// Toggle caching globally. When false, get_or_build still works but always
     /// rebuilds and stores nothing (used to A/B against the uncached path and to
@@ -156,7 +172,7 @@ public:
     void set_capacity(std::size_t capacity);
 
     /// Byte budget of the path pool; evicts down to it immediately, keeping
-    /// the most recently used entry even when it alone exceeds the budget.
+    /// the most recently used entry and the entries drawn this frame.
     void set_byte_budget(std::size_t bytes);
     std::size_t byte_budget() const;
 
