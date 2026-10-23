@@ -2823,6 +2823,15 @@ handoff ledger in the PR; the version bot regenerates it. A missing annotation
 on a job that ran the suite means the measurement broke, not that there is
 room.
 
+The same warning also exists as an issue. Each push to main runs the advisory
+`a2t-headroom-issue` job (`a2t_headroom_annotation.py --reconcile-issue`, fed
+by the Linux leg's `a2t-scope-headroom` artifact). It keeps ONE open issue
+titled `a2t-scope-history-headroom: <count>/<limit> ...` from the 60% mark, and
+closes it on the first push after a re-pin. When that issue is open, the re-pin
+is due: do it then. Do not wait for the guard to go red. The job finds its issue by a
+hidden marker. Closing the issue by hand does nothing useful, because the next
+push reopens it while the count stays high.
+
 ## The flake-exoneration shadow annotation exonerates nothing
 
 A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`

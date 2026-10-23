@@ -2703,8 +2703,10 @@ last 60 push runs were cancelled with zero jobs started, and the Linux/Windows
 cache-save steps ran at most once per stuck window. With the leg omitted, a push
 run finishes on hosted runners and the caches publish on every merge.
 
-`a2t-protected-event`, the one other push-only job, runs on GitHub-hosted
-`macos-15` for the same reason: its verifier needs only macOS, git and python3.
+`a2t-protected-event`, a push-only job, runs on GitHub-hosted `macos-15` for the
+same reason: its verifier needs only macOS, git and python3. `a2t-headroom-issue`,
+the other push-only job, runs on `ubuntu-latest`; it only reads an artifact and
+calls the GitHub API.
 `tools/scripts/test_fork_pr_runner_routing.py` (run by `workflow-lint.yml`,
 which installs PyYAML) walks every `build.yml` job reachable on push and fails
 if any routes to a runner that is not a GitHub-hosted label or a hosted lane
@@ -3519,6 +3521,18 @@ re-pin, a `::notice` with the numbers below that, and a warning when the
 measurement is missing after the suite ran. The fix is always the re-pin in
 decisions contract row 22: move only `A2T_SCOPE_HISTORY_BASE` on protected
 main, never the limit.
+
+An annotation is easy to miss, and main once reached the 75% failure with the
+warning printed and unread. So every push to main also keeps one tracking
+issue. The Linux leg uploads the measurement as the `a2t-scope-headroom`
+artifact, and the advisory `a2t-headroom-issue` job runs
+`tools/ci/a2t_headroom_annotation.py --reconcile-issue`. From the same 60% mark
+(headroom below 20% of the guard's budget), it opens the issue, or updates it in
+place. The title carries the check name, the count and limit, and the re-pin,
+and the body the full instruction. The job closes the issue on the first push
+after a re-pin brings the count back under. The issue is found by a hidden
+marker, so a hand-written issue with the same title is never touched, and a
+missing measurement never opens or closes it.
 
 ## A2T evidence receipts get a nonterminal required-job attestation
 

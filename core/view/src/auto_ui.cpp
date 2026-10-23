@@ -328,6 +328,12 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
             value->set_id(value_label_id(param.id));
             value->set_font_size(10.0f);
             value->flex().preferred_height = 13.0f;
+            // A fixed, centered box: the readout changes on every automation
+            // step and drag sample, and a fixed single-line Label repaints only
+            // its own box. Sized to its content it re-ran layout and repainted
+            // the whole editor per value change.
+            value->flex().preferred_width = kTileWidth;
+            value->set_text_align(LabelAlign::center);
             tile->add_child(std::move(value));
         }
 

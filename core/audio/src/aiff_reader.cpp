@@ -4,6 +4,7 @@
 
 #include <pulp/audio/format_registry.hpp>
 #include "aiff_parser.hpp"
+#include "decode_limits_detail.hpp"
 #include <fstream>
 #include <filesystem>
 #include <cstring>
@@ -248,6 +249,11 @@ public:
     }
 
     std::optional<AudioFileData> read(const std::string& path) override {
+        return read(path, DecodeLimits{});
+    }
+
+    std::optional<AudioFileData> read(const std::string& path,
+                                      const DecodeLimits& limits) override {
         std::ifstream file(path, std::ios::binary);
         if (!file) return std::nullopt;
 
@@ -256,6 +262,11 @@ public:
         if (error) return std::nullopt;
         auto layout = detail::parse_aiff_layout(file, file_size, true);
         if (!layout) return std::nullopt;
+        // The layout bounds the COMM frame count by the SSND payload; the
+        // caller's ceilings bound it again before output is allocated.
+        if (!detail::within_decode_limits("AIFF", layout->info.num_frames,
+                                          layout->info.num_channels, limits))
+            return std::nullopt;
 
         AudioFileData data;
         data.sample_rate = layout->info.sample_rate;

@@ -296,8 +296,8 @@ public:
     const std::shared_ptr<std::atomic<bool>>& alive_token() const { return alive_; }
 
     /// Access the scripted UI session, if the primary view was built from
-    /// a JS script. This includes the framework-owned `PULP_UI_SCRIPT_PATH`
-    /// path and custom processors that expose a session through
+    /// a JS script. This includes the framework-owned script the plug-in declares
+    /// (`UI_SCRIPT`, see editor_assets.hpp) and custom processors that expose a session through
     /// `Processor::active_scripted_ui()`.
     view::ScriptedUiSession* scripted_ui();
     const view::ScriptedUiSession* scripted_ui() const;

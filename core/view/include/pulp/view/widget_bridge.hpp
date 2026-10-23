@@ -24,6 +24,7 @@ namespace pulp::view { struct ClaudeBundle; }
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <functional>
 #include <limits>
 #include <string>
@@ -456,6 +457,17 @@ private:
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;
     std::filesystem::path script_base_dir_;
+
+    /// Per-bridge persisted-store directories (widget storage, style presets),
+    /// resolved once per script base dir by the storage registrars so a UI
+    /// that mirrors every control change into storage never re-walks the
+    /// directory tree. Reset whenever the base dir it was resolved for moves.
+    struct PrivateStoreDirs {
+        std::filesystem::path base_dir;
+        std::optional<std::filesystem::path> widget_storage;
+        std::optional<std::filesystem::path> style_presets;
+    };
+    PrivateStoreDirs private_store_dirs_;
 
     // Per-id cache entry: the resolved View plus the tree structure generation
     // at which that View was last CONFIRMED to live under `root_`. A fresh entry
