@@ -25,7 +25,6 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-cli",
     "pulp-control-trusted-host-e2e-fixture",
     "pulp-mcp"
    ],
@@ -33,8 +32,11 @@
    "spawning_sources": [
     "inspect/src/control_broker_daemon.cpp"
    ],
-   "spawns": "declared",
-   "undeclared_sources": []
+   "spawns": "undeclared",
+   "undeclared_sources": [],
+   "unmatched_programs": [
+    "pulp-cli"
+   ]
   },
   "pulp-cpp": {
    "data": "whole_checkout",
@@ -300,44 +302,38 @@
     "tools/packages/tool-registry.json"
    ],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_audio_compare.cpp"
    ],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-audio-latency": {
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-audio-validate": {
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-bake": {
@@ -365,14 +361,12 @@
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
     "test/test_cli_configure_defaults.cpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-content-commands": {
@@ -416,30 +410,26 @@
     "tools/templates/standalone"
    ],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_create_shellout.cpp"
    ],
    "spawning_sources": [
     "test/test_cli_create_shellout.cpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-designmd-subcommands": {
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-docs-command": {
@@ -483,9 +473,7 @@
     "tools/packages/tool-registry.json"
    ],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_import.cpp",
     "tools/cli/import_detect.cpp",
@@ -494,7 +482,7 @@
    "spawning_sources": [
     "tools/cli/import_spi.cpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-import-design": {
@@ -509,7 +497,6 @@
    ],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-cli",
     "pulp-import-design"
    ],
    "sources": [
@@ -518,8 +505,11 @@
    "spawning_sources": [
     "test/test_cli_import_design.cpp"
    ],
-   "spawns": "declared",
-   "undeclared_sources": []
+   "spawns": "undeclared",
+   "undeclared_sources": [],
+   "unmatched_programs": [
+    "pulp-cli"
+   ]
   },
   "pulp-test-cli-import-detect": {
    "data": "declared",
@@ -543,9 +533,7 @@
     "tools/packages/tool-registry.json"
    ],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_import_emit.cpp",
     "tools/cli/import_detect.cpp",
@@ -555,7 +543,7 @@
    "spawning_sources": [
     "test/test_cli_import_emit.cpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-import-figma-url": {
@@ -563,15 +551,17 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-cli",
     "pulp-import-design"
    ],
    "sources": [],
    "spawning_sources": [
     "test/test_cli_import_figma_url.cpp"
    ],
-   "spawns": "declared",
-   "undeclared_sources": []
+   "spawns": "undeclared",
+   "undeclared_sources": [],
+   "unmatched_programs": [
+    "pulp-cli"
+   ]
   },
   "pulp-test-cli-import-install": {
    "data": "none",
@@ -599,9 +589,7 @@
     "tools/scripts/check_import_provenance.py"
    ],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_import_terms.cpp",
     "tools/cli/import_terms.cpp"
@@ -609,7 +597,7 @@
    "spawning_sources": [
     "test/test_cli_import_terms.cpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-importer-install": {
@@ -631,14 +619,12 @@
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-kit-commands": {
@@ -707,14 +693,12 @@
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-package-analyzer-descriptors": {
@@ -834,7 +818,6 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-cli",
     "pulp-import-design",
     "pulp-sampler-cli-sidecar-probe",
     "pulp-test-cli-run-fixture"
@@ -859,9 +842,7 @@
     ".claude-plugin/plugin.json"
    ],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_shellout_lifecycle.cpp"
    ],
@@ -869,21 +850,19 @@
     "test/test_cli_shellout_helpers.hpp",
     "test/test_cli_shellout_lifecycle.cpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-shellout-loop": {
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-shellout-pr": {
@@ -891,9 +870,7 @@
    "detected_sources": [],
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [
     "test/test_cli_shellout_pr.cpp"
    ],
@@ -901,35 +878,31 @@
     "test/test_cli_shellout_helpers.hpp",
     "test/test_cli_shellout_pr.cpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-shellout-scan-projects": {
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-ship-shellout": {
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
     "test/test_cli_ship_shellout.cpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-skew-banner": {
@@ -1029,14 +1002,12 @@
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli"
-   ],
+   "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
-   "spawns": "declared",
+   "spawns": "undeclared",
    "undeclared_sources": []
   },
   "pulp-test-cli-update-check": {
@@ -1096,10 +1067,8 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-cli",
     "pulp-control-broker",
     "pulp-control-broker-crash-fixture",
-    "pulp-control-installed-host-e2e-fixture",
     "pulp-control-trusted-host-e2e-fixture",
     "pulp-control-trusted-host-fixture",
     "pulp-mcp"
@@ -1109,27 +1078,11 @@
     "inspect/src/control_broker_daemon.cpp",
     "test/test_control_broker_daemon.cpp"
    ],
-   "spawns": "declared",
-   "undeclared_sources": []
-  },
-  "pulp-test-control-dspx04-graph-product-e2e": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "runtime_targets": [
-    "pulp-cli",
-    "pulp-control-dspx04-graph-product-fixture",
-    "pulp-mcp"
-   ],
-   "sources": [],
-   "spawning_sources": [
-    "inspect/src/control_broker_daemon.cpp",
-    "test/support/control_sample_region_e2e.hpp"
-   ],
    "spawns": "undeclared",
    "undeclared_sources": [],
    "unmatched_programs": [
-    "pulp-control-broker"
+    "pulp-cli",
+    "pulp-control-installed-host-e2e-fixture"
    ]
   },
   "pulp-test-control-endpoint-enrollment": {
@@ -1138,7 +1091,6 @@
    "kind": "compiled",
    "runtime_targets": [
     "pulp-control-enrollment-host-fixture",
-    "pulp-control-installed-host-e2e-fixture",
     "pulp-control-trusted-host-e2e-fixture",
     "pulp-control-trusted-host-fixture"
    ],
@@ -1146,8 +1098,11 @@
    "spawning_sources": [
     "test/test_control_endpoint_enrollment.cpp"
    ],
-   "spawns": "declared",
-   "undeclared_sources": []
+   "spawns": "undeclared",
+   "undeclared_sources": [],
+   "unmatched_programs": [
+    "pulp-control-installed-host-e2e-fixture"
+   ]
   },
   "pulp-test-control-gpu-health-standalone-product": {
    "data": "none",
@@ -1939,7 +1894,6 @@
    ],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-cli",
     "pulp-test-mcp-gpu-probe-fake-cli"
    ],
    "sources": [
@@ -2399,6 +2353,7 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
+  "pulp-generate-plugin-state-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
   "pulp-gpu-wavenet-scaling-bench",
@@ -7846,35 +7801,6 @@
    ],
    "kind": "python"
   },
-  "pulp.vellum-closure-boundary": {
-   "entry": "tools/scripts/vellum_closure.py",
-   "inputs": [
-    "core/canvas",
-    "core/canvas/CMakeLists.txt",
-    "core/platform",
-    "core/platform/include",
-    "core/runtime",
-    "core/runtime/CMakeLists.txt",
-    "core/runtime/include",
-    "core/runtime/include/pulp/runtime/build_info.hpp.in",
-    "core/simd",
-    "core/simd/include",
-    "core/view",
-    "core/view/audio",
-    "core/view/cmake/PulpViewJsPreludes.cmake",
-    "core/view/include",
-    "core/view/include/pulp/view/widgets.hpp",
-    "core/view/js/embed_js.py",
-    "core/view/src/reload_exports.cpp",
-    "tools/cmake",
-    "tools/cmake/PulpEmbedData.cmake",
-    "tools/cmake/scripts/encode_binary_data.py",
-    "tools/scripts/include_boundary.py",
-    "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
-   ],
-   "kind": "python"
-  },
   "pulp.vellum-closure-edge-negative": {
    "entry": "tools/scripts/confirm_failure.sh",
    "inputs": [
@@ -7884,64 +7810,6 @@
    ],
    "kind": "shell"
   },
-  "pulp.vellum-closure-export-mentions": {
-   "entry": "tools/scripts/vellum_closure.py",
-   "inputs": [
-    "core/canvas",
-    "core/canvas/CMakeLists.txt",
-    "core/platform",
-    "core/platform/include",
-    "core/runtime",
-    "core/runtime/CMakeLists.txt",
-    "core/runtime/include",
-    "core/runtime/include/pulp/runtime/build_info.hpp.in",
-    "core/simd",
-    "core/simd/include",
-    "core/view",
-    "core/view/audio",
-    "core/view/cmake/PulpViewJsPreludes.cmake",
-    "core/view/include",
-    "core/view/include/pulp/view/widgets.hpp",
-    "core/view/js/embed_js.py",
-    "core/view/src/reload_exports.cpp",
-    "tools/cmake",
-    "tools/cmake/PulpEmbedData.cmake",
-    "tools/cmake/scripts/encode_binary_data.py",
-    "tools/scripts/include_boundary.py",
-    "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
-   ],
-   "kind": "python"
-  },
-  "pulp.vellum-closure-export-units": {
-   "entry": "tools/scripts/vellum_closure.py",
-   "inputs": [
-    "core/canvas",
-    "core/canvas/CMakeLists.txt",
-    "core/platform",
-    "core/platform/include",
-    "core/runtime",
-    "core/runtime/CMakeLists.txt",
-    "core/runtime/include",
-    "core/runtime/include/pulp/runtime/build_info.hpp.in",
-    "core/simd",
-    "core/simd/include",
-    "core/view",
-    "core/view/audio",
-    "core/view/cmake/PulpViewJsPreludes.cmake",
-    "core/view/include",
-    "core/view/include/pulp/view/widgets.hpp",
-    "core/view/js/embed_js.py",
-    "core/view/src/reload_exports.cpp",
-    "tools/cmake",
-    "tools/cmake/PulpEmbedData.cmake",
-    "tools/cmake/scripts/encode_binary_data.py",
-    "tools/scripts/include_boundary.py",
-    "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
-   ],
-   "kind": "python"
-  },
   "pulp.vellum-closure-external-input-negative": {
    "entry": "tools/scripts/confirm_failure.sh",
    "inputs": [
@@ -7950,36 +7818,6 @@
     "tools/scripts/vellum_closure_external_input_fixture.json"
    ],
    "kind": "shell"
-  },
-  "pulp.vellum-closure-gate": {
-   "entry": "tools/scripts/vellum_closure.py",
-   "inputs": [
-    "core/canvas",
-    "core/canvas/CMakeLists.txt",
-    "core/platform",
-    "core/platform/include",
-    "core/runtime",
-    "core/runtime/CMakeLists.txt",
-    "core/runtime/include",
-    "core/runtime/include/pulp/runtime/build_info.hpp.in",
-    "core/simd",
-    "core/simd/include",
-    "core/view",
-    "core/view/audio",
-    "core/view/cmake/PulpViewJsPreludes.cmake",
-    "core/view/include",
-    "core/view/include/pulp/view/widgets.hpp",
-    "core/view/js/embed_js.py",
-    "core/view/src/reload_exports.cpp",
-    "tools/cmake",
-    "tools/cmake/PulpEmbedData.cmake",
-    "tools/cmake/scripts/encode_binary_data.py",
-    "tools/scripts/include_boundary.py",
-    "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_closure_allowlist.json",
-    "tools/scripts/vellum_d3_units.json"
-   ],
-   "kind": "python"
   },
   "pulp.vellum-closure-gate-negative": {
    "entry": "tools/scripts/confirm_failure.sh",
@@ -8038,14 +7876,6 @@
     "tools/scripts/vellum_d3_units.json",
     "tools/scripts/vellum_mirror_edge_patterns.json",
     "tools/scripts/vellum_mirror_edge_table.py"
-   ],
-   "kind": "python"
-  },
-  "pulp.vellum-view-core-pulp-kept": {
-   "entry": "tools/scripts/vellum_view_core_pulp_kept_check.py",
-   "inputs": [
-    "tools/scripts/vellum_d3_units.json",
-    "tools/scripts/vellum_view_core_pulp_kept_check.py"
    ],
    "kind": "python"
   },
