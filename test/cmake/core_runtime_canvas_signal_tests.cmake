@@ -3,6 +3,26 @@
 
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake)
 
+# GPU-audio hardware-evidence tests (PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF). The
+# required macOS gate compiles them but never runs them: the gpu-proof label is
+# excluded from every CI ctest selection (tools/ci/ctest_gate_args.py), and the
+# hardware receipts stay owner-run on a physical GPU. Call at the end of a proof
+# block with the directory's TESTS captured at its start.
+function(pulp_mark_gpu_proof_tests_since before_tests)
+    get_property(_pulp_gpu_proof_tests_after DIRECTORY PROPERTY TESTS)
+    foreach(_pulp_gpu_proof_test IN LISTS _pulp_gpu_proof_tests_after)
+        if(_pulp_gpu_proof_test IN_LIST before_tests)
+            continue()
+        endif()
+        set_property(TEST "${_pulp_gpu_proof_test}" APPEND PROPERTY LABELS gpu-proof)
+        get_test_property("${_pulp_gpu_proof_test}" SKIP_RETURN_CODE _pulp_gpu_proof_skip)
+        get_test_property("${_pulp_gpu_proof_test}" FIXTURES_SETUP _pulp_gpu_proof_setup)
+        if(NOT _pulp_gpu_proof_skip AND NOT _pulp_gpu_proof_setup)
+            set_tests_properties("${_pulp_gpu_proof_test}" PROPERTIES SKIP_RETURN_CODE 77)
+        endif()
+    endforeach()
+endfunction()
+
 if(TARGET pulp::inspect-control)
     add_executable(pulp-test-control-shipping-real-component
         control_shipping_real_component_fixture.cpp)
@@ -1119,6 +1139,7 @@ pulp_add_test_suite(pulp-test-search-index GROUP pulp-test-group-core-runtime
 # Explicit physical-provider gate; ordinary VM/GPU-off runs must not claim a
 # skipped hardware run as shared spectral correctness evidence.
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    get_property(_pulp_gpu_proof_tests_before DIRECTORY PROPERTY TESTS)
     add_executable(pulp-gpu-shared-spectral-probe test_gpu_shared_spectral_probe.cpp)
     target_link_libraries(pulp-gpu-shared-spectral-probe PRIVATE pulp::gpu-audio)
     target_compile_definitions(pulp-gpu-shared-spectral-probe PRIVATE
@@ -1128,10 +1149,12 @@ if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
         FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
         RESOURCE_LOCK pulp_gpu
         TIMEOUT 60)
+    pulp_mark_gpu_proof_tests_since("${_pulp_gpu_proof_tests_before}")
 endif()
 
 # Opt-in same-device storage experiment. It is never an ordinary GPU-off pass.
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    get_property(_pulp_gpu_proof_tests_before DIRECTORY PROPERTY TESTS)
     add_executable(pulp-gpu-same-device-storage-probe test_gpu_same_device_storage_probe.cpp)
     target_include_directories(pulp-gpu-same-device-storage-probe PRIVATE
         ${PROJECT_SOURCE_DIR}/core/gpu_audio/src)
@@ -1142,6 +1165,7 @@ if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
     add_test(NAME pulp-gpu-same-device-storage-probe COMMAND pulp-gpu-same-device-storage-probe)
     set_tests_properties(pulp-gpu-same-device-storage-probe PROPERTIES
         FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity RESOURCE_LOCK pulp_gpu TIMEOUT 60)
+    pulp_mark_gpu_proof_tests_since("${_pulp_gpu_proof_tests_before}")
 endif()
 
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
