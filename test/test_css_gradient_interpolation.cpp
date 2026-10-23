@@ -2,11 +2,12 @@
 //
 // The expected colours are Chrome's, read by
 // tools/import-validation/chrome_gradient_oracle.py --colors: each case paints
-// #ff0000 -> #0000ff left to right across a 101x16 box, and the number is the
-// mean of column 50 (t = 0.5 exactly), which also cancels Chrome's dither. Pulp
-// paints the same CSS in the same box and is read the same way. A gradient
-// that silently fell back to sRGB reads (127.5, 0, 127.5) in every case, which
-// is what the planted negative below pins.
+// its two stops (red to blue unless the table says otherwise) left to right
+// across a 101x16 box, and the number is the mean of column 50 (t = 0.5
+// exactly), which also cancels Chrome's dither. Pulp paints the same CSS in the
+// same box and is read the same way. A red-to-blue gradient that silently fell
+// back to sRGB reads (127.5, 0, 127.5), which is what the planted negative
+// below pins.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -46,6 +47,7 @@ struct ChromeMidpoint {
     const char* css;
     GradientInterpolation method;
     std::array<double, 3> rgb;
+    Color end = Color::rgba(0.0f, 0.0f, 1.0f, 1.0f); ///< the stop the ramp ends on
 };
 
 // chrome_gradient_oracle.py --colors, Chrome 156, column 50.
@@ -81,6 +83,16 @@ const ChromeMidpoint kChromeMidpoints[] = {
     {"linear-gradient(to right in display-p3, #ff0000, #0000ff)",
      {GradientColorSpace::display_p3},
      {127.88, 9.75, 145.0}},
+    // Red to yellow is a short arc, so `longer` must turn the long way round
+    // through blue; red to blue above is already the long way for `longer`.
+    {"linear-gradient(to right in oklch longer hue, #ff0000, #ffff00)",
+     {GradientColorSpace::oklch, GradientHueMethod::longer},
+     {0.0, 192.75, 255.0},
+     Color::rgba(1.0f, 1.0f, 0.0f, 1.0f)},
+    {"linear-gradient(to right in hsl longer hue, #ff0000, #ffff00)",
+     {GradientColorSpace::hsl, GradientHueMethod::longer},
+     {0.0, 127.5, 255.0},
+     Color::rgba(1.0f, 1.0f, 0.0f, 1.0f)},
 };
 
 const ChromeMidpoint& chrome_oklab() {
@@ -242,9 +254,8 @@ TEST_CASE("A gradient that names no space defaults by its stops",
 TEST_CASE("The reference interpolation matches Chrome's midpoints",
           "[canvas][gradient][interpolation]") {
     const Color red = Color::rgba(1.0f, 0.0f, 0.0f, 1.0f);
-    const Color blue = Color::rgba(0.0f, 0.0f, 1.0f, 1.0f);
     for (const auto& c : kChromeMidpoints) {
-        const Color m = pulp::canvas::interpolate_gradient_color(red, blue, 0.5f, c.method);
+        const Color m = pulp::canvas::interpolate_gradient_color(red, c.end, 0.5f, c.method);
         const std::array<double, 3> got{m.r * 255.0, m.g * 255.0, m.b * 255.0};
         INFO(c.css << "\n  reference " << rgb_text(got) << " Chrome " << rgb_text(c.rgb));
         CHECK(max_channel_error(got, c.rgb) <= kChromeTolerance);
