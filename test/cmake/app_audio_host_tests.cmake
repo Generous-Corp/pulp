@@ -789,6 +789,9 @@ add_library(pulp-test-host-signal-graph-headers OBJECT
     header_compile/host_signal_graph_execution_status.cpp
     header_compile/host_signal_graph_executor_contract.cpp
     header_compile/host_signal_graph_executor_routing.cpp
+    header_compile/host_signal_graph_prepared_topology_edit.cpp
+    header_compile/host_signal_graph_control.cpp
+    header_compile/host_processor_signal_graph_binding.cpp
     header_compile/host_signal_graph_umbrella.cpp)
 target_link_libraries(pulp-test-host-signal-graph-headers PRIVATE pulp::host)
 
