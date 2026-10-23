@@ -2418,6 +2418,7 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
+  "pulp-generate-plugin-state-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
   "pulp-gpu-wavenet-scaling-bench",
