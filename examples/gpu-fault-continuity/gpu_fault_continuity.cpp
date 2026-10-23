@@ -338,8 +338,8 @@ void GpuFaultContinuityProcessor::claim_run_dir(std::uint32_t sample_rate) {
     // The host's log names the plug-in only in some formats (CLAP does, AU v2
     // does not), so the instance that owns the run says so itself; the
     // verifier looks for the plug-in's name in that log.
-    runtime::log_info("gpu-fault-continuity: '{}' claimed the run directory {}",
-                      descriptor().name, run_dir_.string());
+    runtime::log_info("gpu-fault-continuity: '{}' claimed the run directory {}", descriptor().name,
+                      run_dir_.string());
     ring_.reset(kRingBytes);
     RunConfig config;
     config.source = config_source_;
@@ -731,8 +731,9 @@ void GpuFaultContinuityProcessor::poll_request() {
     after_at_.store(after, std::memory_order_relaxed);
     // A delayed completion stalls the worker for longer than the lead; a worker
     // stall for seconds. Either way the callback must not notice.
-    delay_ms_ = delay > 0 ? static_cast<std::uint32_t>(std::min<std::int64_t>(delay, kMaxProviderStallMs))
-                          : (kind == FaultKind::WorkerStall ? 3000u : 100u);
+    delay_ms_ = delay > 0
+                    ? static_cast<std::uint32_t>(std::min<std::int64_t>(delay, kMaxProviderStallMs))
+                    : (kind == FaultKind::WorkerStall ? 3000u : 100u);
     const bool internal = internal_stimulus_.load(std::memory_order_relaxed);
     planted_.store(static_cast<std::uint8_t>(planted), std::memory_order_relaxed);
     fault_at_.store(at, std::memory_order_release);

@@ -603,8 +603,7 @@ TEST_CASE("an unreadable run directory does not stop the service thread",
     CHECK(wait_for(events, "\"event\":\"fault_armed\""));
 }
 
-TEST_CASE("a worker stall is bounded and releasing the engine ends it",
-          "[gpu-fault-continuity]") {
+TEST_CASE("a worker stall is bounded and releasing the engine ends it", "[gpu-fault-continuity]") {
     RunDir dir;
     write_ir(dir.path, make_ir());
     const auto events = dir.path / "events.jsonl";
@@ -683,8 +682,7 @@ TEST_CASE("a host re-prepare between the fault block and the arm refuses the sta
     p.set_before_arm_hook_for_test(nullptr);
 }
 
-TEST_CASE("the instance that owns the run names itself in the host log",
-          "[gpu-fault-continuity]") {
+TEST_CASE("the instance that owns the run names itself in the host log", "[gpu-fault-continuity]") {
     // AU v2 hosts log no plug-in name of their own, so the verifier's check
     // that the host's log mentions the plug-in rests on this line.
     RunDir dir;

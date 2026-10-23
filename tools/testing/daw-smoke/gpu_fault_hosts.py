@@ -111,7 +111,7 @@ KNOWN_DEFECTS = (
     {"id": "#10736",
      "what": "provider WaveNet with staged storage and timestamps hangs after the first block",
      "match": {"node": "wavenet", "storage": "staged", "timestamps": True},
-     # Merge commit of #10736 on main (tracked as #10740).
+     # The merge commit that carries the fix on main.
      "fixed_by": "590bee7a5232a07484c170a9a0690208ec241c1b"},
 )
 # A realtime render cannot finish faster than the audio it renders; allow a
