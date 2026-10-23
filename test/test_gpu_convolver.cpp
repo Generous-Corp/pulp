@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <pulp/gpu_audio/detail/gpu_ola.hpp>
 #include <pulp/gpu_audio/gpu_audio_program.hpp>
@@ -1282,11 +1283,31 @@ class InjectableConvolver : public GpuConvolver {
     }
 };
 
-std::vector<float> staged_test_ir() {
-    std::vector<float> ir(150);
+std::vector<float> staged_test_ir(std::size_t taps = 150) {
+    std::vector<float> ir(taps);
     for (std::size_t i = 0; i < ir.size(); ++i)
         ir[i] = static_cast<float>(std::cos(0.07 * i) * std::exp(-0.015 * i));
     return ir;
+}
+
+// IR lengths for the staged routing tests: 150 taps selects the FFT engine of
+// the worker's CPU convolution at 64 frames; the direct-engine limit (128 taps
+// on Apple Silicon with Accelerate) selects the direct engine where the policy
+// has one.
+std::size_t staged_engine_ir_taps(bool direct) {
+    constexpr std::size_t kLimit = pulp::signal::FixedIrConvolver::direct_fir_limit(64);
+    return direct && kLimit > 0 ? kLimit : 150;
+}
+
+void require_staged_engine(std::size_t taps, bool direct) {
+#if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
+    REQUIRE(pulp::signal::FixedIrConvolver::choose_backend(taps, 64) ==
+            (direct ? pulp::signal::ConvolutionBackend::direct_fir
+                    : pulp::signal::ConvolutionBackend::partitioned_fft));
+#else
+    (void)taps;
+    (void)direct;
+#endif
 }
 
 std::vector<float> staged_test_input(std::size_t size) {
@@ -1457,13 +1478,20 @@ TEST_CASE("Staged GpuConvolver routes missed blocks, and only those, to the CPU"
           "[gpu_audio][convolver][staged]") {
     constexpr std::uint32_t BS = 64;
     constexpr std::size_t NBLK = 32;
-    const auto ir = staged_test_ir();
+    const bool direct = GENERATE(false, true);
+    const auto taps = staged_engine_ir_taps(direct);
+    INFO("IR taps " << taps << (direct ? " (direct engine)" : " (FFT engine)"));
+    require_staged_engine(taps, direct);
+    const auto ir = staged_test_ir(taps);
     InjectableConvolver node(1, BS, 48000, ir);
     REQUIRE(node.prepare());
     auto* fake = node.adopt_fake(ir);
 
     const auto input = staged_test_input(BS * NBLK);
     const auto is_miss = [](std::size_t b) { return b == 6 || b == 12 || b == 13; };
+    // The CPU runs for each miss plus the IR's tail, ceil((taps - 1) / BS)
+    // blocks: 3 for 150 taps, 2 for 128.
+    const std::size_t tail = (taps - 1 + BS - 1) / BS;
     const auto expected = routed_reference(input, ir, BS, blocks_where(NBLK, is_miss), 1);
 
     SECTION("expired results are served misses, not a recovery cause") {
@@ -1474,9 +1502,9 @@ TEST_CASE("Staged GpuConvolver routes missed blocks, and only those, to the CPU"
         CHECK(first_mismatch(out, expected) == out.size());
         CHECK(node.staged_latched_reason() == GpuAudioRecoveryReason::None);
         CHECK(validate_gpu_audio_status(node.status_snapshot()).accepted());
-        // The 150-tap IR's tail spans 3 more 64-sample blocks, so the CPU runs
-        // for 6..9 and 12..16 and nowhere else.
-        CHECK(node.staged_cpu_blocks() == 9u);
+        // The CPU runs for 6..6+tail and 12..13+tail and nowhere else (9 blocks
+        // for 150 taps).
+        CHECK(node.staged_cpu_blocks() == (tail + 1) + (tail + 2));
     }
     SECTION("a failed map latches ProviderFailure") {
         const auto out = run_staged_stream(node, input, BS, [&](std::size_t b) {
@@ -1642,7 +1670,11 @@ TEST_CASE("Staged GpuConvolver continues on the CPU after device loss",
           "[gpu_audio][convolver][staged]") {
     constexpr std::uint32_t BS = 64;
     constexpr std::size_t NBLK = 24, kLossBlock = 9;
-    const auto ir = staged_test_ir();
+    const bool direct = GENERATE(false, true);
+    const auto taps = staged_engine_ir_taps(direct);
+    INFO("IR taps " << taps << (direct ? " (direct engine)" : " (FFT engine)"));
+    require_staged_engine(taps, direct);
+    const auto ir = staged_test_ir(taps);
     InjectableConvolver node(1, BS, 48000, ir);
     REQUIRE(node.prepare());
     auto* fake = node.adopt_fake(ir);
