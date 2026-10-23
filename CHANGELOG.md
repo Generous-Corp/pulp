@@ -9,6 +9,13 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v010160"></a>
+## [0.1016.0] - 2026-10-23
+
+- release/version bump ([#10843](https://github.com/Generous-Corp/pulp/pull/10843))
+- fix/android midi jni exports ([#10783](https://github.com/Generous-Corp/pulp/pull/10783))
+- feature/ux w1 i chart shapes 20261022 ([#10778](https://github.com/Generous-Corp/pulp/pull/10778))
+
 <a id="v010150"></a>
 ## [0.1015.0] - 2026-10-23
 
@@ -11383,6 +11390,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.1016.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1016.0
 [0.1015.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1015.0
 [0.1014.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1014.0
 [0.1013.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1013.0
