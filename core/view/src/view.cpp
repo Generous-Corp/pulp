@@ -853,6 +853,11 @@ void View::add_child(std::unique_ptr<View> child) {
 
 void View::add_child_transactional(std::unique_ptr<View>& child) {
     if (!child) return;
+    // A view cannot become its own ancestor: linking one turns every walk to
+    // the root into an endless loop. The child stays with the caller.
+    for (const View* ancestor = this; ancestor; ancestor = ancestor->parent_)
+        if (ancestor == child.get())
+            return;
     auto* inserted = child.get();
     // Address alone cannot identify the child across a callback: a hook may
     // destroy it and the allocator may hand the same address to a replacement

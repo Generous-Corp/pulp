@@ -60,7 +60,8 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
         c->set_native_gpu_texture_provider([&self, id]() {
             return self.describe_native_canvas_frame(id);
         });
-        self.widgets_[id] = c.get(); self.resolve_parent(pid)->add_child(std::move(c));
+        self.widgets_[id] = c.get();
+        self.resolve_parent(pid, c.get())->add_child(std::move(c));
         return choc::value::createString(id);
     });
 

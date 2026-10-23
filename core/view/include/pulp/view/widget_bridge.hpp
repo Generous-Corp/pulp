@@ -859,7 +859,11 @@ private:
 #endif
 
     // Resolve parent: returns view for parentId, or &root_ if empty
-    View* resolve_parent(const std::string& parent_id);
+    // The view a script named as a parent, or the root for an unknown id. With
+    // `child`, a parent that is the child itself or one of its descendants also
+    // resolves to the root: a script registers a widget under its id before
+    // attaching it, so naming that id as the parent must not build a cycle.
+    View* resolve_parent(const std::string& parent_id, const View* child = nullptr);
 
     // Install on_change/on_toggle callbacks that dispatch to JS
     void wire_callbacks(const std::string& id, View* w);

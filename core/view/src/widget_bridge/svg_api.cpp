@@ -28,7 +28,7 @@ void BridgeRegistrars::register_svg_api(WidgetBridge& self) {
         auto w = std::make_unique<SvgPathWidget>();
         w->set_id(id);
         self.widgets_[id] = w.get();
-        self.resolve_parent(pid)->add_child(std::move(w));
+        self.resolve_parent(pid, w.get())->add_child(std::move(w));
         return choc::value::createString(id);
     });
 
@@ -182,7 +182,7 @@ void BridgeRegistrars::register_svg_api(WidgetBridge& self) {
         auto w = std::make_unique<SvgRectWidget>();
         w->set_id(id);
         self.widgets_[id] = w.get();
-        self.resolve_parent(pid)->add_child(std::move(w));
+        self.resolve_parent(pid, w.get())->add_child(std::move(w));
         return choc::value::createString(id);
     });
 
@@ -207,7 +207,7 @@ void BridgeRegistrars::register_svg_api(WidgetBridge& self) {
         auto w = std::make_unique<SvgLineWidget>();
         w->set_id(id);
         self.widgets_[id] = w.get();
-        self.resolve_parent(pid)->add_child(std::move(w));
+        self.resolve_parent(pid, w.get())->add_child(std::move(w));
         return choc::value::createString(id);
     });
 

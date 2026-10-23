@@ -93,7 +93,7 @@ void BridgeRegistrars::register_layout_grid_api(WidgetBridge& self) {
         v->set_id(id);
         v->set_layout_mode(LayoutMode::grid);
         self.widgets_[id] = v.get();
-        self.resolve_parent(pid)->add_child(std::move(v));
+        self.resolve_parent(pid, v.get())->add_child(std::move(v));
         return choc::value::createString(id);
     });
 

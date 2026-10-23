@@ -123,6 +123,31 @@ TEST_CASE("View child management", "[view]") {
     REQUIRE(removed->parent() == nullptr);
 }
 
+TEST_CASE("View refuses a child that is itself or one of its ancestors", "[view]") {
+    auto outer = std::make_unique<View>();
+    auto* outer_ptr = outer.get();
+    auto inner = std::make_unique<View>();
+    auto* inner_ptr = inner.get();
+    outer_ptr->add_child(std::move(inner));
+    REQUIRE(inner_ptr->parent() == outer_ptr);
+
+    // Attaching the outer view under its own descendant would make it its
+    // own ancestor; the caller keeps ownership and the tree is unchanged.
+    inner_ptr->add_child_transactional(outer);
+    REQUIRE(outer != nullptr);
+    REQUIRE(outer_ptr->parent() == nullptr);
+    REQUIRE(inner_ptr->child_count() == 0);
+    REQUIRE(outer_ptr->child_count() == 1);
+
+    // The same refusal for a view named as its own parent.
+    std::unique_ptr<View> self_owner(outer.release());
+    auto* self_ptr = self_owner.get();
+    self_ptr->add_child_transactional(self_owner);
+    REQUIRE(self_owner != nullptr);
+    REQUIRE(self_ptr->parent() == nullptr);
+    REQUIRE(self_ptr->child_count() == 1);
+}
+
 TEST_CASE("View child removal ignores unknown children", "[view]") {
     View root;
     auto child = std::make_unique<View>();
