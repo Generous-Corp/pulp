@@ -127,6 +127,7 @@ BrowserHtmlImportResult import_browser_html(
     discovery.explicit_path = request.browser_executable;
     discovery.probe_timeout_ms =
         browser_capture::probe_timeout_from_environment(discovery.probe_timeout_ms);
+    discovery.probe_cache_directory = request.browser_probe_cache_directory;
 
     browser_capture::CaptureRequest capture;
     capture.input_file = staged.entry;

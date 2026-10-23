@@ -53,6 +53,11 @@ struct BrowserImportCliRequest {
     bool validate = false;
     /// `--emit materialized-runtime`, whose input is the executable document.
     bool materialized_runtime_emit = false;
+    /// Where browser discovery remembers compatible probe answers
+    /// (browser_probe_cache.hpp). Empty probes every time; the CLI passes
+    /// default_browser_probe_cache_directory(), library callers and tests do
+    /// not, so a test never writes into the user's Pulp home.
+    std::filesystem::path browser_probe_cache_directory;
 };
 
 /// Reject browser-specific CLI options before a non-browser command path can

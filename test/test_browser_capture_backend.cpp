@@ -749,6 +749,101 @@ TEST_CASE("redaction keeps a leading-slash token that is not a path",
 #endif
 
 #ifndef _WIN32
+TEST_CASE("a remembered browser probe is reused until the browser changes",
+          "[import-design][browser-capture][probe-cache]") {
+    TempTree tree("probe-cache");
+    // Every --version read leaves a mark, so the test counts real launches.
+    const auto wrapper = [&](std::string_view version, std::string_view extra) {
+        const auto path = tree.write(
+            "browser-wrapper",
+            std::string("#!/bin/sh\n") + "echo launched >> \"$(dirname \"$0\")/launches\"\n" +
+                "echo 'Google Chrome " + std::string(version) + "'\n" + std::string(extra));
+        fs::permissions(path,
+                        fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+        return path;
+    };
+    const auto launches = [&] {
+        std::ifstream input(tree.root() / "launches");
+        int count = 0;
+        for (std::string line; std::getline(input, line);)
+            ++count;
+        return count;
+    };
+    const auto browser = wrapper("123.0.0.0", "");
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    options.probe_cache_directory = tree.root() / "cache";
+    const capture::BrowserCandidate candidate{browser, capture::BrowserOrigin::explicit_override};
+
+    const auto fresh = capture::probe_browser(candidate, options);
+    INFO(fresh.failure);
+    REQUIRE(fresh.compatible);
+    CHECK(launches() == 1);
+
+    // The second discovery answers from the cache, field for field.
+    const auto remembered = capture::probe_browser(candidate, options);
+    REQUIRE(remembered.compatible);
+    CHECK(launches() == 1);
+    CHECK(remembered.product == fresh.product);
+    CHECK(remembered.version == fresh.version);
+    CHECK(remembered.major_version == fresh.major_version);
+    CHECK(remembered.protocol_version == fresh.protocol_version);
+    CHECK(remembered.build_hash == fresh.build_hash);
+    REQUIRE(remembered.node.ok());
+
+    // A replaced browser is a different key and is probed again.
+    wrapper("999.0.0.0", "# updated\n");
+    const auto updated = capture::probe_browser(candidate, options);
+    REQUIRE(updated.compatible);
+    CHECK(launches() == 2);
+    CHECK(updated.major_version == 999);
+
+    // Same bytes, new modification time: still a different browser.
+    fs::last_write_time(browser, fs::last_write_time(browser) + std::chrono::seconds(10));
+    REQUIRE(capture::probe_browser(candidate, options).compatible);
+    CHECK(launches() == 3);
+    REQUIRE(capture::probe_browser(candidate, options).compatible);
+    CHECK(launches() == 3);
+
+    // A changed capture script is part of the key too.
+    tree.write("capture.mjs", "// fixture, revised");
+    REQUIRE(capture::probe_browser(candidate, options).compatible);
+    CHECK(launches() == 4);
+
+    // Without a cache directory every discovery probes.
+    auto uncached = options;
+    uncached.probe_cache_directory.reset();
+    REQUIRE(capture::probe_browser(candidate, uncached).compatible);
+    CHECK(launches() == 5);
+}
+
+TEST_CASE("a failed browser probe is never remembered",
+          "[import-design][browser-capture][probe-cache]") {
+    TempTree tree("probe-cache-failure");
+    const auto browser =
+        tree.write("browser-wrapper", "#!/bin/sh\necho launched >> \"$(dirname \"$0\")/launches\"\n"
+                                      "echo 'Google Chrome 123.0.0.0'\n");
+    fs::permissions(browser,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+    const auto script = tree.write("probe-refuses.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    options.probe_cache_directory = tree.root() / "cache";
+    const capture::BrowserCandidate candidate{browser, capture::BrowserOrigin::explicit_override};
+    CHECK_FALSE(capture::probe_browser(candidate, options).compatible);
+    CHECK_FALSE(capture::probe_browser(candidate, options).compatible);
+    std::ifstream input(tree.root() / "launches");
+    int count = 0;
+    for (std::string line; std::getline(input, line);)
+        ++count;
+    CHECK(count == 2);
+}
+
 TEST_CASE("a transient version read is retried instead of rejecting a browser",
           "[import-design][browser-capture]") {
     TempTree tree("version-retry");

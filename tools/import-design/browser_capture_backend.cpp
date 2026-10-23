@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "browser_capture_backend.hpp"
 #include "browser_capture_diagnostics.hpp"
+#include "browser_probe_cache.hpp"
 #include "node_runtime.hpp"
 
 #include <choc/text/choc_JSON.h>
@@ -606,6 +607,43 @@ BrowserProbeResult probe_browser(
         return result;
     }
 
+    // A remembered answer replaces only the two browser launches. Node and the
+    // capture script are still resolved here, because the capture itself needs
+    // them, and their identities are part of the key.
+    const fs::path cache_directory = options.probe_cache_directory.value_or(fs::path{});
+    std::optional<std::string> cache_key;
+    const auto keyed_inputs = [&]() -> std::optional<std::string> {
+        if (cache_directory.empty() || !result.node.ok())
+            return std::nullopt;
+        const auto script = resolve_capture_script(options.capture_script);
+        if (!script)
+            return std::nullopt;
+        return browser_probe_cache_key(candidate.executable, *script, *result.node.executable);
+    };
+    if (!cache_directory.empty()) {
+        result.node = resolve_node_runtime(options.node_executable);
+        cache_key = keyed_inputs();
+        if (cache_key) {
+            if (const auto cached = load_cached_browser_identity(cache_directory, *cache_key)) {
+                result.product = cached->product;
+                result.version = cached->version;
+                result.major_version = cached->major_version;
+                result.protocol_version = cached->protocol_version;
+                result.build_hash = cached->build_hash;
+                if (result.major_version < options.minimum_major) {
+                    result.failure_kind = BrowserProbeFailure::browser_incompatible;
+                    result.failure = "browser is too old (found " +
+                                     std::to_string(result.major_version) + ", need " +
+                                     std::to_string(options.minimum_major) + " or newer)";
+                    return result;
+                }
+                result.compatible = true;
+                result.failure_kind = BrowserProbeFailure::none;
+                return result;
+            }
+        }
+    }
+
     platform::ProcessOptions version_options;
     // Honour the caller's probe budget. A shorter private cap here only turns a
     // slow-but-healthy browser into a rejection the caller never asked for.
@@ -769,6 +807,13 @@ BrowserProbeResult probe_browser(
 
     result.compatible = true;
     result.failure_kind = BrowserProbeFailure::none;
+    if (!cache_key)
+        cache_key = keyed_inputs();
+    if (cache_key) {
+        store_cached_browser_identity(cache_directory, *cache_key,
+                                      {result.product, result.version, result.major_version,
+                                       result.protocol_version, result.build_hash});
+    }
     return result;
 }
 
