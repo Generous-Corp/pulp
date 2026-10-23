@@ -120,7 +120,7 @@ class SyntheticMechanisms(unittest.TestCase):
 class CommandLine(unittest.TestCase):
     def run_cli(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, str(SCRIPT), *args],
-                              capture_output=True, text=True, check=False)
+                              capture_output=True, text=True, encoding="utf-8", check=False)
 
     def test_html_carries_smoothing_and_every_label(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -128,8 +128,8 @@ class CommandLine(unittest.TestCase):
             proc = self.run_cli("html", str(FIXTURE / "labels.json"), "--font-url", "face.ttf",
                                 "--smoothing", "antialiased", "--out", str(out))
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            page = out.read_text()
-            labels = json.loads((FIXTURE / "labels.json").read_text())["labels"]
+            page = out.read_text(encoding="utf-8")
+            labels = json.loads((FIXTURE / "labels.json").read_text(encoding="utf-8"))["labels"]
             self.assertIn("-webkit-font-smoothing:antialiased", page)
             for lab in labels:
                 self.assertIn(f'id="{lab["id"]}"', page)
@@ -137,7 +137,7 @@ class CommandLine(unittest.TestCase):
     def test_spec_refuses_a_missing_baseline(self):
         with tempfile.TemporaryDirectory() as tmp:
             dump = Path(tmp) / "b.json"
-            dump.write_text(json.dumps({"live": {"x": 12, "baseline": 30}}))
+            dump.write_text(json.dumps({"live": {"x": 12, "baseline": 30}}), encoding="utf-8")
             proc = self.run_cli("spec", str(FIXTURE / "labels.json"), str(dump),
                                 "--out", str(Path(tmp) / "spec.tsv"))
             self.assertEqual(proc.returncode, trd.EX_INPUT)
@@ -149,7 +149,7 @@ class CommandLine(unittest.TestCase):
             proc = self.run_cli("spec", str(FIXTURE / "labels.json"),
                                 str(FIXTURE / "chromium-antialiased.baselines.json"), "--out", str(out))
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            first = out.read_text().splitlines()[0].split("\t")
+            first = out.read_text(encoding="utf-8").splitlines()[0].split("\t")
             self.assertEqual(first[6], "SPECTR")
             self.assertEqual(first[5], "ffffffff")
 
@@ -164,9 +164,9 @@ class RecordedMatrix(unittest.TestCase):
                 [sys.executable, str(SCRIPT), "analyze", "--labels", str(FIXTURE / "labels.json"),
                  "--baselines", str(FIXTURE / "chromium-antialiased.baselines.json"),
                  "--ref", str(FIXTURE / ref), "--cand", str(FIXTURE / cand), "--json", str(out)],
-                capture_output=True, text=True, check=False)
+                capture_output=True, text=True, encoding="utf-8", check=False)
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-            return json.loads(out.read_text())
+            return json.loads(out.read_text(encoding="utf-8"))
 
     def test_default_pulp_raster_is_heavier_than_antialiased_chromium(self):
         summary = self.analyze("chromium-antialiased.png", "pulp-default.png")["summary"]
@@ -183,7 +183,7 @@ class RecordedMatrix(unittest.TestCase):
             self.assertLess(abs(row["dy"]), 0.25, msg=row["id"])
 
     def test_ltr_runs_land_on_chromium_and_rtl_runs_keep_half_the_spacing(self):
-        labels = {lab["id"]: lab for lab in json.loads((FIXTURE / "labels.json").read_text())["labels"]}
+        labels = {lab["id"]: lab for lab in json.loads((FIXTURE / "labels.json").read_text(encoding="utf-8"))["labels"]}
         report = self.analyze("chromium-antialiased.png", "pulp-hinting-none-gamma-1.png")
         for row in report["labels"]:
             lab = labels[row["id"]]

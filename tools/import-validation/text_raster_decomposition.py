@@ -186,7 +186,7 @@ def print_table(rows: list[dict], out=sys.stdout) -> None:
 
 def load_json(path: str):
     try:
-        return json.loads(Path(path).read_text())
+        return json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         sys.stderr.write(f"text_raster_decomposition: cannot read {path}: {exc}\n")
         sys.exit(EX_INPUT)
@@ -226,7 +226,7 @@ document.fonts.ready.then(() => {{
 </script>
 </body></html>
 """
-    Path(args.out).write_text(page)
+    Path(args.out).write_text(page, encoding="utf-8")
     return 0
 
 
@@ -240,7 +240,7 @@ def parse_rgba(text: str) -> str:
 
 def cmd_spec(args) -> int:
     spec = load_json(args.labels)
-    raw = Path(args.baselines).read_text()
+    raw = Path(args.baselines).read_text(encoding="utf-8")
     start, end = raw.find("{"), raw.rfind("}")
     if start < 0:
         sys.stderr.write("text_raster_decomposition: no baselines JSON in the dump\n")
@@ -256,7 +256,7 @@ def cmd_spec(args) -> int:
             f"{m['x']:.4f}", f"{m['baseline']:.4f}", str(lab["size"]), str(lab.get("weight", 400)),
             str(lab.get("letter_spacing", 0)), parse_rgba(lab["color"]), lab["text"],
             lab.get("direction", "ltr")]))
-    Path(args.out).write_text("\n".join(lines) + "\n")
+    Path(args.out).write_text("\n".join(lines) + "\n", encoding="utf-8")
     return 0
 
 
@@ -288,7 +288,7 @@ def run_boxes(ref_path: str, cand_path: str, boxes) -> list[dict]:
 def emit(rows: list[dict], args) -> int:
     report = {"schema": "pulp-text-raster-decomposition-v1", "summary": summarize(rows), "labels": rows}
     if args.json:
-        Path(args.json).write_text(json.dumps(report, indent=1))
+        Path(args.json).write_text(json.dumps(report, indent=1), encoding="utf-8")
     print_table(rows)
     s = report["summary"]
     print(f"summary: {json.dumps(s)}")
@@ -297,7 +297,7 @@ def emit(rows: list[dict], args) -> int:
 
 def cmd_analyze(args) -> int:
     spec = load_json(args.labels)
-    raw = Path(args.baselines).read_text()
+    raw = Path(args.baselines).read_text(encoding="utf-8")
     measured = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
     return emit(run_boxes(args.ref, args.cand, label_boxes(spec, measured, args.scale)), args)
 
