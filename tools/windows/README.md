@@ -58,7 +58,14 @@ space with:
 ```
 
 The helper refuses if a QEMU command line still references the overlay. After
-the guest boots, extend the Windows C: volume with DiskPart (`select volume C`
-then `extend`) and verify the free space before starting the bounded build.
+the guest boots, copy and run the checked-in guest-side helper from an
+authenticated PowerShell session:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\tmp\extend-c-volume.ps1
+```
+
+It grows C: only to the supported maximum and emits JSON with the resulting
+size/free-space values. Verify that receipt before starting the bounded build.
 Retain the backup and exact `qemu-img info` output with the run receipt; delete
 only the named backup and overlay when the disposable run is retired.
