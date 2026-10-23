@@ -318,6 +318,10 @@ void emit_visual_style(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_size(" + cpp_string_literal(*style.background_size) + ");");
     if (style.background_position)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_position(" + cpp_string_literal(*style.background_position) + ");");
+    if (style.background_origin)
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_background_origin(" +
+                      cpp_string_literal(*style.background_origin) + ");");
     const auto box_paint_dpr = attr_float(node, "browser_box_paint_dpr");
     const auto box_paint_left = attr_float(node, "browser_box_paint_left_px");
     const auto box_paint_top = attr_float(node, "browser_box_paint_top_px");

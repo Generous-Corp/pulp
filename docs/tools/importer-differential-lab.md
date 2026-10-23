@@ -85,8 +85,13 @@ frame: geometry by subtracting that origin from Chromium's boxes and from the
 native layout, the authored-frame visual by cropping the frame from both PNGs
 at the same page rect. For a panel with page around it, that node
 carries the canvas colour Chromium paints, resolved from the verified DOM
-snapshot by CSS background propagation (`comparison.page_background`); a
-colour the rule cannot resolve is left unpainted and reported `unresolved`. A
+snapshot by CSS background propagation (`comparison.page_background`). When
+html and body are both transparent the canvas is the user agent's, and it
+resolves (`source: ua-canvas`) to the colour the capture recorded for it: a
+probe given the root's computed color-scheme and a `Canvas` background reads
+back what Chromium resolves, after every frame is captured
+(`documentCanvas` in the DOM snapshot). A colour the rule cannot resolve is
+left unpainted and reported `unresolved`. A
 panel that covers the whole page owns its canvas (`importer-owned`), so a
 dropped document colour shows up as a residual instead of being supplied.
 The render receipt records the placement it applied, and the lab rejects a
@@ -680,10 +685,14 @@ Release blockers for any claim of native import correctness: form-control
 chrome (08, 18); the IPC socket timeout tests, which are timing-sensitive under
 load and fail on `main` independently of this work; and the masked-field secret
 fix, whose own tests fail without it (24 pass, 2 fail when the masking is
-neutered). Deferred items: the RTL caret in `text_x_for_byte`, paragraph-path
-lookup of the system UI font by its private name, non-rendered text outside
-form controls keeping its value in the snapshot, and the native-DPR text-layout
-deviation of up to one device pixel per line.
+neutered). Deferred items: the RTL caret in `text_x_for_byte`, non-rendered text
+outside form controls keeping its value in the snapshot, and the native-DPR
+text-layout deviation of up to one device pixel per line. Imported
+right-to-left text never reaches the RTL letter-spacing branch, because
+DesignIR carries no text direction. The paragraph path
+now finds the system UI font through a manager that serves it at the exact
+requested weight (see the `text-metrics` skill), and a transparent html/body
+resolves its page background from the UA canvas colour the capture records.
 
 **Parallel `main` record (2026-10-21 to 2026-10-22).** `main` landed an
 independent version of this work in PR 10640 (merge `e6da6d9816`) and its

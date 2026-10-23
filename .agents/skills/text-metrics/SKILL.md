@@ -140,6 +140,20 @@ inherited face, so a wider painted face simply overflows and clips. It clips
 Fix shape: one `effective_font_family()` helper, used by paint and every metric,
 so the walk cannot drift again.
 
+The same rule holds one level down, for the FACE a family resolves to. The
+resolver reaches `system-ui` through CoreText's UI-font API at the exact
+weight, but SkParagraph finds families by name, so the paragraph path sees the
+private `.AppleSystemUIFont`. The CoreText manager's style set for that name
+holds only the named instances, so a weight between them (250) shaped in the
+nearest one (200) while the resolver measured an interpolated 250, which is
+what Chrome draws; and `matchFamilyStyle` by that name returns null for the
+rest of the process once such a weight has been asked for. The font collection
+now consults `make_system_ui_font_manager` (`core/canvas/src/system_ui_typeface.hpp`)
+first. Compare a family's paragraph face with its resolver face per weight,
+names and advances, before trusting either. A subclass of `SkFontMgr` (or of
+SkParagraph's `TypefaceFontProvider`) must live in a TU built with `-fno-rtti`:
+the prebuilt Skia exports no type info for them and the link fails.
+
 ## A Label with element children does not paint at its own origin
 
 A `Label` that carries both text and element children is a flex container whose

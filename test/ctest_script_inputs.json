@@ -260,6 +260,7 @@
    "data": "declared",
    "detected_sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_ir.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
@@ -272,6 +273,7 @@
    "kind": "compiled",
    "sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_ir.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
@@ -7572,9 +7574,10 @@
    "kind": "node"
   },
   "pulp-browser-capture-node-unit": {
-   "entry": "tools/import-design/browser_capture/form_control_theme.test.mjs",
+   "entry": "tools/import-design/browser_capture/document_canvas.test.mjs",
    "inputs": [
-    "tools/import-design/browser_capture/form_control_theme.mjs",
+    "tools/import-design/browser_capture/document_canvas.mjs",
+    "tools/import-design/browser_capture/document_canvas.test.mjs",
     "tools/import-design/browser_capture/form_control_theme.test.mjs",
     "tools/import-design/browser_capture/health.mjs",
     "tools/import-design/browser_capture/health.test.mjs",

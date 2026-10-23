@@ -11,6 +11,7 @@
 #include "pulp/canvas/font_scope.hpp"
 #include "pulp/canvas/bundled_fonts.hpp"
 #include "pulp/canvas/font_flight_recorder.hpp"
+#include "system_ui_typeface.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -286,12 +287,12 @@ CGFloat ct_weight_for_css_weight(int css_weight) {
     return kAtHundreds[lo] + (kAtHundreds[lo + 1] - kAtHundreds[lo]) * t;
 }
 
-// The system UI font at `style`. Its family name (".AppleSystemUIFont") is
-// private, and CoreText does not reliably honour a lookup by it: after a
-// request at a weight between its named instances, later lookups by the name
-// in the same process return nothing. CTFontCreateUIFontForLanguage is the
-// supported way in, and its faces report the same `.SFNS-*` names the
-// browser does.
+} // namespace
+
+namespace detail {
+
+// CTFontCreateUIFontForLanguage is the supported way in to the system UI font,
+// and its faces report the same `.SFNS-*` names the browser does.
 sk_sp<SkTypeface> system_ui_typeface(SkFontStyle style) {
     CTFontRef base = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, 0.0, nullptr);
     if (!base)
@@ -334,6 +335,10 @@ sk_sp<SkTypeface> system_ui_typeface(SkFontStyle style) {
     CFRelease(font);
     return typeface;
 }
+
+} // namespace detail
+
+namespace {
 #endif
 
 // Keep this TU self-contained by using the public registered-font,
@@ -402,7 +407,7 @@ ResolvedFont resolve_one_family(const std::string& entry, const FontOptions& opt
         // Widths other than normal keep the name lookup, which maps them.
         if (!css.quoted && names_system_ui_font(family) &&
             sk_style.width() == SkFontStyle::kNormal_Width) {
-            tf = system_ui_typeface(sk_style);
+            tf = detail::system_ui_typeface(sk_style);
             system_ui = tf != nullptr;
         }
 #endif

@@ -179,6 +179,10 @@ class DomSnapshot:
         """The capture's per-control theme verdicts, or None when absent."""
         return self.raw.get("formControlTheme")
 
+    def document_canvas(self) -> Any:
+        """The capture's UA canvas report, or None when absent."""
+        return self.raw.get("documentCanvas")
+
 
 def browser_nodes(snapshot: DomSnapshot | dict[str, Any]) -> list[BrowserNode]:
     snap = DomSnapshot.coerce(snapshot)
@@ -280,10 +284,12 @@ def document_canvas_background(
 
     CSS propagates the root element's background to the canvas, and the
     body's when the root's is transparent. Only a flat, fully opaque colour on
-    a box Chromium composites as a plain fill is resolved. Anything else --
-    translucency, an image, a filter or blend, or two transparent boxes
-    (whose UA canvas colour depends on the page's own color-scheme, which the
-    capture does not record) -- is reported unresolved rather than
+    a box Chromium composites as a plain fill is resolved. When both boxes are
+    transparent the canvas is the user agent's, whose colour follows the
+    root's used color-scheme; it resolves only from the colour Chromium itself
+    reported for it at capture time (`documentCanvas`, document_canvas.mjs).
+    Anything else -- translucency, an image, a filter or blend, or a missing
+    or malformed canvas report -- is reported unresolved rather than
     approximated, so the observer leaves the page uncovered and the residual
     stays visible.
     """
@@ -337,5 +343,12 @@ def document_canvas_background(
                     "color": color}
         if alpha != 0.0:
             return unresolved(f"{label} background is translucent")
-    return unresolved("html and body are transparent; the UA canvas colour "
-                      "depends on a color-scheme the capture does not record")
+    report = snap.document_canvas()
+    color = report.get("canvas_color") if isinstance(report, dict) else None
+    match = re.fullmatch(r"rgb\((\d{1,3}), (\d{1,3}), (\d{1,3})\)", color or "")
+    if (not isinstance(report, dict) or report.get("schema") != "pulp-document-canvas-v1"
+            or not match or any(int(channel) > 255 for channel in match.groups())):
+        return unresolved("html and body are transparent and the capture "
+                          "recorded no UA canvas colour")
+    return {"status": "resolved", "source": "ua-canvas", "color": color,
+            "root_color_scheme": report.get("root_color_scheme")}

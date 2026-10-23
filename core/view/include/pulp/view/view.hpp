@@ -2279,8 +2279,8 @@ public:
     ///   • background-clip: `text` would clip the bg paint to text glyphs
     ///     via SkBlendMode::kSrcIn. Other values are no-ops on solid bg.
     ///     Catalog: partial.
-    ///   • background-origin: relevant only for repeating gradients (which
-    ///     we don't paint per-tile). Catalog: noop.
+    ///   • background-origin: the box a background gradient tile is sized
+    ///     and positioned in (`content-box` uses the padding box). Partial.
     void set_background_attachment(std::string kw) { style_extras().background_attachment = std::move(kw); }
     const std::string& background_attachment() const {
         static const std::string kEmpty;
@@ -3177,7 +3177,7 @@ private:
         std::string object_position; // CSS object-position paired with object-fit
         std::string background_attachment;  // noop today
         std::string background_clip;        // partial (text deferred)
-        std::string background_origin;      // noop today
+        std::string background_origin;      // gradient tile box; content-box partial
         std::string background_position;    // repeating gradient tile phase; raster bg deferred
         std::string background_size;        // storage-only (raster bg deferred)
     };

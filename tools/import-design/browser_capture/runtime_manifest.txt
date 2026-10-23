@@ -1,5 +1,6 @@
 browser_process.mjs
 capture.mjs
+document_canvas.mjs
 form_control_theme.mjs
 health.mjs
 interaction_executor.mjs

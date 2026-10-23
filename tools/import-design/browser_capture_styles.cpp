@@ -1047,6 +1047,10 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
         set_string("background-size", style.background_size);
         set_string("background-position", style.background_position);
         set_string("background-repeat", style.background_repeat);
+        // Absent is the initial padding-box, so only another origin is kept.
+        if (const auto origin = lookup("background-origin");
+            !is_absent(origin) && origin != "padding-box")
+            style.background_origin = origin;
     }
 
     const auto opacity = lookup("opacity");

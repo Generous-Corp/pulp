@@ -15,7 +15,7 @@ import statistics
 from dataclasses import replace
 from typing import Any
 
-from .model import PROMOTION_THRESHOLDS, BrowserNode, LabError, NativeNode
+from .model import PROMOTION_THRESHOLDS, BrowserNode, LabError, NativeNode, has_reference_box
 from .snapshot import DomSnapshot
 
 
@@ -372,7 +372,7 @@ def geometry_metrics_with_registration(
     frame_placement: dict[str, Any] | None = None,
     max_abs_delta: float = GEOMETRY_MAX_ABS_DELTA_PX,
     *,
-    reference_node_count: int,
+    reference_nodes: list[BrowserNode],
     placement: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return raw page-space geometry and the registered geometry gate.
@@ -393,8 +393,10 @@ def geometry_metrics_with_registration(
       on x, y, width, and height, with at least one matched box. A delta that
       is not a finite number is a violation, never a pass;
     - coverage: the measured boxes are at least the structural threshold's
-      share of ``reference_node_count``, the browser nodes the structural lens
-      scores against.
+      share of ``reference_nodes`` that have a box to measure
+      (``has_reference_box``). The others, a `<title>` or any element with no
+      layout object, can never be matched by position, so counting them would
+      fail a fully matched page.
 
     The coverage floor exists because the delta bound is a claim about every
     box it measured and nothing else: one well-placed box among many
@@ -419,7 +421,12 @@ def geometry_metrics_with_registration(
         or row["max_abs_delta"] > max_abs_delta
     ]
     coverage_floor = PROMOTION_THRESHOLDS["structural"]
-    coverage = (registered["matched_bounds"] / reference_node_count
+    measurable = {node.index for node in reference_nodes if has_reference_box(node)}
+    reference_node_count = len(measurable)
+    # Numerator and denominator count the same population: a matched row whose
+    # reference has no measurable box would otherwise lift coverage past 1.
+    matched_measurable = len({row["browser_node"] for row in registered["rows"]} & measurable)
+    coverage = (matched_measurable / reference_node_count
                 if reference_node_count > 0 else 0.0)
     if frame_placement is None:
         frame_placement = {"ok": False, "reason": "not evaluated"}
@@ -450,7 +457,9 @@ def geometry_metrics_with_registration(
             "coverage": round(coverage, 6),
             "floor": coverage_floor,
             "matched_bounds": registered["matched_bounds"],
+            "matched_measurable": matched_measurable,
             "reference_node_count": reference_node_count,
+            "unmeasurable_reference_count": len(reference_nodes) - reference_node_count,
         },
     }
     geometry["gate"] = {
