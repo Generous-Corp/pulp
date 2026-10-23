@@ -983,4 +983,29 @@ TEST_CASE("A failed file build is retried as soon as the file changes",
     std::filesystem::remove(path);
 }
 
+TEST_CASE("CPU raster frames are independent of GPU backend frames",
+          "[canvas][image-cache][byte-budget]") {
+    CacheDefaults restore;
+    auto& cache = ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    cache.set_byte_budget(20 * kMiB);
+    const void* gpu = reinterpret_cast<const void*>(0xF8A40);
+    auto build = [] { return make_image(1024, 1536); }; // 6 MiB
+
+    // A GPU window starting its frames between the raster frame's draws does
+    // not end the raster frame: the null key has its own generation.
+    for (int frame = 0; frame < 10; ++frame) {
+        cache.begin_frame(nullptr);
+        for (int layer = 0; layer < 4; ++layer) {
+            cache.begin_frame(gpu);
+            cache.get_or_build("/tmp/raster-layer-" + std::to_string(layer) + ".png", nullptr,
+                               build);
+        }
+    }
+    CHECK(cache.stats().builds == 4);
+    CHECK(cache.stats().hits == 36);
+}
+
 #endif // PULP_HAS_SKIA
