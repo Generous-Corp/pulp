@@ -37,6 +37,7 @@ firehose.
 |---|---|---|---|
 | 0. release-path PR gate | PR touching release-path files | prebuilt-Skia / link-order / CMake breakage at PR time (#1962) | 5-15 min (pre-merge) |
 | 0. Windows CLI compile + pre-tag check | PR or main push that can reach the MSVC CLI build | an MSVC-only error under `#ifdef _WIN32` that every Clang/GCC gate accepts | pre-merge (advisory); pre-tag (blocking) |
+| 0. Agent-capability pre-tag check | SDK tag about to be cut | a release whose agent-capability counter is still pending (`agent_capability_manifest.py --require-assigned`) | pre-tag (blocking) |
 | 1. Workflow lint | PR review | bad YAML / bad `uses:` / bad shell | seconds (pre-merge) |
 | 2. Auto-release watchdog | `workflow_run` completion | auto-release.yml runtime failure (any cause) | 1-2 minutes |
 | 3. Cadence check | `schedule` every 30 min | version bumped on main but no tag created | ≤45 min |
@@ -509,6 +510,18 @@ repository variable `PULP_RELEASE_WINDOWS_PRECHECK=off` to disable the check.
 The pre-tag check cannot stop the first tag after a bad merge if that tag is cut
 before the merge's compile finishes; Layer 4 then reports that tag as soon as its
 Windows legs fail.
+
+## Agent-capability pre-tag check
+
+Branches leave `MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION` at their
+base value and the version-at-land bump assigns them
+(`agent_capability_manifest.py --assign-pending`, best-effort inside the bump
+commit). If that assignment failed, `main` still carries a pending counter: a
+revision number that names no published contract. `auto-release.yml` runs
+`--require-assigned` before tagging the SDK and withholds the tag when anything
+is pending, with an `SDK tag withheld` annotation and summary. The next SDK
+bump that assigns the counters tags the then-current version. The plugin tag
+is never held.
 
 ## fix/feat-needs-bump (PR-time prevention, issue #1009)
 

@@ -1427,6 +1427,97 @@ def exercise_base_drift() -> int:
     return checks
 
 
+def exercise_counters_assigned_at_land(canonical: dict) -> int:
+    """Branches leave the counters at the base; the version-at-land bump assigns.
+
+    Each rule is paired with the strict behaviour it relaxes, so a check that
+    stopped discriminating fails here."""
+    import argparse
+
+    checks = 0
+    surface_doc = manifest.build_surface(ROOT)[0]
+    published = copy.deepcopy(canonical)
+    history = capability_history.history_document(
+        [capability_history.history_entry(published, surface_doc)])
+
+    changed = copy.deepcopy(published)
+    changed["capabilities"][0]["summary"] += " (edited)"
+    assigned = copy.deepcopy(changed)
+    assigned["manifest_revision"] += 1
+
+    # Pending: changed material under the counter the history last recorded.
+    assert capability_history.pending_counters(history, changed, surface_doc) == (True, False)
+    assert capability_history.pending_counters(history, published, surface_doc) == (False, False)
+    assert capability_history.pending_counters(history, assigned, surface_doc) == (False, False)
+    checks += 1
+
+    strict = manifest.evolution_problems(published, changed, allow_unpublished_migration=False)
+    expect_problem(strict, "manifest changed without a manifest_revision increase")
+    assert "manifest changed without a manifest_revision increase" not in "\n".join(
+        manifest.evolution_problems(published, changed, allow_unpublished_migration=False,
+                                    unassigned=True))
+    checks += 1
+
+    # Assigning: the counter advances by exactly one over unchanged material.
+    expect_problem(manifest.evolution_problems(changed, assigned, allow_unpublished_migration=False),
+                   "manifest_revision changed without a manifest change")
+    assert not manifest.evolution_problems(changed, assigned, allow_unpublished_migration=False,
+                                           assigning=True)
+    skipped = copy.deepcopy(assigned)
+    skipped["manifest_revision"] += 1
+    expect_problem(manifest.evolution_problems(changed, skipped, allow_unpublished_migration=False,
+                                               assigning=True),
+                   "manifest_revision changed without a manifest change")
+    checks += 1
+
+    surface_changed = copy.deepcopy(surface_doc)
+    surface_changed["headers"][0]["fingerprint"] = "sha256:" + "b" * 64
+    expect_problem(manifest.surface_evolution_problems(surface_doc, surface_changed,
+                                                       surface.SURFACE_SCHEMA),
+                   "public surface changed without an inventory_version increase")
+    assert not manifest.surface_evolution_problems(surface_doc, surface_changed,
+                                                   surface.SURFACE_SCHEMA, unassigned=True)
+    assert capability_history.pending_counters(history, published, surface_changed) == (False, True)
+    checks += 1
+
+    # A pending state is never recorded: it names no contract identity.
+    entries = capability_history.updated_history_entries(
+        history, changed, surface_doc, assigned, surface_doc,
+        initial_bootstrap=False, migrate_unpublished=False)
+    assert entries == history["entries"], "a pending previous state was appended"
+    entries = capability_history.updated_history_entries(
+        capability_history.history_document([]), published, surface_doc, changed, surface_doc,
+        initial_bootstrap=False, migrate_unpublished=False)
+    assert entries == [capability_history.history_entry(published, surface_doc)]
+    checks += 1
+
+    # The history check accepts a pending current snapshot, and still refuses a
+    # changed snapshot whose counter went backwards.
+    assert not [problem for problem in capability_history.history_problems(
+        history, changed, surface_doc) if "without a manifest_revision increase" in problem]
+    regressed = copy.deepcopy(changed)
+    regressed["manifest_revision"] -= 1
+    expect_problem(capability_history.history_problems(history, regressed, surface_doc),
+                   "manifest changed without a manifest_revision increase")
+    checks += 1
+
+    # The release guard and the status report read the same rule.
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-counters-") as temp:
+        path = pathlib.Path(temp) / "history.json"
+        path.write_text(json.dumps(history))
+        flags = argparse.Namespace(status=False, require_assigned=True, assign_pending=False)
+        assert manifest.counter_status(ROOT, changed, surface_doc, path, flags) == 1
+        assert manifest.counter_status(ROOT, assigned, surface_doc, path, flags) == 0
+        assert manifest.counter_status(ROOT, published, surface_doc, path, flags) == 0
+    result = run("--status")
+    assert result.returncode == 0, result.stderr
+    status = json.loads(result.stdout)
+    assert set(status) == {"manifest_revision", "inventory_version"}
+    assert all(item["state"] in {"assigned", "pending"} for item in status.values())
+    checks += 1
+    return checks
+
+
 def main() -> int:
     result = run("--json")
     assert result.returncode == 0, result.stderr
@@ -1444,6 +1535,7 @@ def main() -> int:
 
     checks += exercise_compatibility(canonical)
     checks += exercise_base_drift()
+    checks += exercise_counters_assigned_at_land(canonical)
     checks += exercise_authority_navigation()
     print(f"agent-capabilities: {checks} negative/evolution/surface/compatibility checks passed")
     return 0

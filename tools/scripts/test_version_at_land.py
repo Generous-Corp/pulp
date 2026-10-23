@@ -1795,5 +1795,69 @@ class MigrationNoteFoldTest(unittest.TestCase):
         self.assertIn("could not fold", err.getvalue())
 
 
+class CapabilityCounterAssignTest(unittest.TestCase):
+    """The SDK bump assigns pending agent-capability counters.
+
+    The repo's own `agent_capability_manifest.py --assign-pending` does the
+    assignment; a stub stands in for it so this pins the bot's contract (run it
+    on an SDK bump, carry what it changed, survive its failure)."""
+
+    SNAPSHOT = "docs/status/agent-capabilities.json"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name).resolve()
+        self._cwd = os.getcwd()
+        self.r = RangeRepo(self.repo)
+        os.chdir(self.repo)
+        self.r.write(self.SNAPSHOT, '{"manifest_revision": 1}\n')
+        self.r.commit("seed capability snapshot")
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        self._tmp.cleanup()
+
+    def _stub(self, exit_code: int) -> None:
+        self.r.write(val.CAPABILITY_SCRIPT,
+                     "import pathlib, sys\n"
+                     "assert sys.argv[1:] == ['--assign-pending']\n"
+                     f"pathlib.Path({self.SNAPSHOT!r}).write_text('{{\"manifest_revision\": 2}}\\n')\n"
+                     f"sys.exit({exit_code})\n")
+        self.r.commit("install stub capability script")
+
+    def _sdk(self):
+        return [val.Assignment(surface="sdk", level="minor", current="1.2.3", assigned="1.3.0")]
+
+    def test_an_sdk_bump_carries_the_assigned_counters(self):
+        self._stub(0)
+        edited = val._write_plan(self.repo, CONFIG, self._sdk())
+        self.assertIn(self.SNAPSHOT, edited)
+        self.assertIn('"manifest_revision": 2', (self.repo / self.SNAPSHOT).read_text())
+        message = val._bump_message(self._sdk(), "a" * 40, "b" * 40, edited)
+        self.assertIn("Skill-Update: skip skill=agent-capabilities", message)
+        self.assertIn(f"{val.APPLIED_MARKER}: {'b' * 40}", message)
+
+    def test_a_plugin_only_bump_leaves_the_counters_pending(self):
+        self._stub(0)
+        plan = [val.Assignment(surface="plugin", level="patch", current="0.5.0", assigned="0.5.1")]
+        edited = val._write_plan(self.repo, CONFIG, plan)
+        self.assertNotIn(self.SNAPSHOT, edited)
+        self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text())
+
+    def test_a_failed_assignment_is_reverted_and_does_not_stop_the_bump(self):
+        self._stub(1)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            edited = val._write_plan(self.repo, CONFIG, self._sdk())
+        self.assertIn("CMakeLists.txt", edited)
+        self.assertNotIn(self.SNAPSHOT, edited)
+        self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text())
+        self.assertIn("could not assign pending capability counters", err.getvalue())
+
+    def test_control_a_bump_without_capability_edits_carries_no_skill_trailer(self):
+        message = val._bump_message(self._sdk(), "a" * 40, "b" * 40, ["CMakeLists.txt"])
+        self.assertNotIn("Skill-Update", message)
+
+
 if __name__ == "__main__":
     unittest.main()
