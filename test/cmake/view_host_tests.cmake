@@ -663,8 +663,9 @@ if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio)
 endif()
 
 # The include half of the same boundary: no core/view source outside
-# core/view/audio may reach an audio, signal, host, midi or format header, or an
-# audio widget's header, in any spelling (angle, quoted, #import, relative).
+# core/view/audio may reach an audio, signal, host, midi, format, timebase,
+# graph, playback, content or sample-bank header, or an audio widget's header,
+# in any spelling (angle, quoted, #import, relative).
 # The self-test plants each spelling and must turn red.
 add_test(NAME pulp-view-core-include-boundary
     COMMAND ${Python3_EXECUTABLE}

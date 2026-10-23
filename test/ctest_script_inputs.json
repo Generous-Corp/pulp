@@ -4959,6 +4959,7 @@
   "foundation-include-lint": {
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7843,6 +7844,7 @@
   "pulp-view-core-include-boundary": {
    "entry": "tools/scripts/include_boundary.py",
    "inputs": [
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7862,6 +7864,8 @@
    "entry": "tools/scripts/test_include_boundary.py",
    "inputs": [
     "core/audio/include/pulp/audio/buffer.hpp",
+    "core/content/include/pulp/state/content_registry.hpp",
+    "core/state/include/pulp/state/store.hpp",
     "core/view/include/pulp/view/view.hpp",
     "core/view/src/view.cpp",
     "tools/scripts/test_include_boundary.py"
@@ -7890,6 +7894,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7928,6 +7933,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7957,6 +7963,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7995,6 +8002,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8037,6 +8045,7 @@
     "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
     "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/render/include/pulp/render/gpu_compute.hpp",
@@ -12345,6 +12354,8 @@
    "entry": "tools/scripts/vellum_boundary_lint.py",
    "inputs": [
     "core/view",
+    "core/view/audio/src",
+    "core/view/platform",
     "core/view/src",
     "tools/import-design/pulp-package.json",
     "tools/scripts/vellum_boundary_lint.py",
@@ -12355,6 +12366,8 @@
   "vellum-boundary-lint-negative-contract": {
    "entry": "tools/scripts/test_vellum_boundary_lint.py",
    "inputs": [
+    "core/view/audio/include",
+    "core/view/platform/mac/window_host_mac_internal.hpp",
     "tools/import-design",
     "tools/import-design/pulp-package.json",
     "tools/scripts/test_vellum_boundary_lint.py",
