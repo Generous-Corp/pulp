@@ -2,14 +2,15 @@
 set -euo pipefail
 
 # Expand one disposable qcow2 overlay while it is offline. The Windows C:
-# partition still needs to be extended inside the guest after the next boot.
+# partition still needs to be extended with the checked-in PowerShell helper
+# inside the guest after the next boot.
 
 usage() {
   cat >&2 <<'EOF'
 usage: expand-qemu-overlay.sh --overlay PATH --backup PATH --disposable-root PATH [--extra-gib N]
 
 Creates a verified qcow2 backup, expands the named disposable overlay, and
-prints the guest-side DiskPart command. The guest must be shut down first.
+prints the guest-side PowerShell follow-up. The guest must be shut down first.
 EOF
   exit 2
 }
