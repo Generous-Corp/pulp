@@ -950,6 +950,7 @@
       "pulp/signal/finite_stretch_builder.hpp",
       "pulp/signal/fir_design.hpp",
       "pulp/signal/fir_filter.hpp",
+      "pulp/signal/fixed_ir_convolver.hpp",
       "pulp/signal/flanger.hpp",
       "pulp/signal/fm_operator_engine.hpp",
       "pulp/signal/formant_filter_bank.hpp",

@@ -881,7 +881,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:605bf3df3ea2937f290f83e8430baf9ef7f3c605faf08cfdbb5b7db206cea736",
+        "fingerprint": "sha256:6d6c680ae9ce6f82cc796d8fcaab3d61d25f9c9eaea26318e698c0b85df0440d",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1367,7 +1367,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fir_filter.hpp",
-        "fingerprint": "sha256:1f3e4bda478177961e284380af65de670de421902e114be6ef55820dead438b7",
+        "fingerprint": "sha256:6f7610684f4b26bb9cd9cf258ec7131f6ecd9bf69fce36e4fa43caf22a1876df",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1375,6 +1375,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "dot and correlate calls. A bounded DSP primitive a processor drives from its "
             "own process(); its coefficient generators and taps are documented in the "
             "signal guide, and it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fixed_ir_convolver.hpp",
+        "fingerprint": "sha256:64382ea1f17038c0f2bcd960eb17a02c8f8cd97ce5680481ef7fe16e0109cb84",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Fixed-IR convolution that runs FirFilterT or PartitionedConvolverT, chosen "
+            "once at prepare time by a pure policy. A bounded DSP primitive a processor "
+            "drives from its own process() at a fixed block size, documented beside the "
+            "partitioned convolver in the signal guide; it makes no installed agent "
+            "capability claim of its own."
         ),
     },
     {
@@ -1428,7 +1441,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver_messages.hpp",
-        "fingerprint": "sha256:f12dc10a6090a81966552ece2a5ebf26b7370cd59d3a310b66e84d2616b36c2f",
+        "fingerprint": "sha256:13c0cdc65296220448802702ad25141e704d9d0c9d780f6575e222e1e6fa78ce",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

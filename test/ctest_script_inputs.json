@@ -4418,6 +4418,14 @@
    ],
    "kind": "python"
   },
+  "convolver-crossover-table": {
+   "entry": "tools/scripts/convolver_crossover_check.py",
+   "inputs": [
+    "core/signal/include/pulp/signal/fixed_ir_convolver.hpp",
+    "tools/scripts/convolver_crossover_check.py"
+   ],
+   "kind": "python"
+  },
   "create-templates-verify": {
    "entry": "tools/scripts/test_verify_create_templates.py",
    "inputs": [
