@@ -26,10 +26,15 @@ public:
             had_old_ = true;
             old_value_ = old;
         }
+        // A null value removes the variable for the scope.
 #if defined(_WIN32)
-        _putenv_s(name_.c_str(), value);
+        _putenv_s(name_.c_str(), value ? value : "");
 #else
-        setenv(name_.c_str(), value, 1);
+        if (value) {
+            setenv(name_.c_str(), value, 1);
+        } else {
+            unsetenv(name_.c_str());
+        }
 #endif
     }
 
@@ -663,19 +668,22 @@ TEST_CASE("pulp create rejects non-template kits passed as template paths",
     REQUIRE(r.stderr_output.find("does not declare kind `template`") != std::string::npos);
 }
 
-#if defined(PULP_CMAKE_COMMAND) && defined(PULP_CATCH2_SOURCE_DIR) && defined(PULP_RUST_CLI_BINARY)
 namespace {
 
 // The Rust front end (`<build>/pulp`) owns the native --ci scaffold; the C++
 // delegate the other cases launch has its own create path.
-pulp::platform::ProcessResult run_rust_cli(const std::vector<std::string>& args,
-                                           const fs::path& working_dir) {
+// `version_override` sets PULP_RS_CLI_VERSION for the run (null clears it).
+[[maybe_unused]] pulp::platform::ProcessResult run_rust_cli(const std::string& binary,
+                                                            const std::vector<std::string>& args,
+                                                            const fs::path& working_dir,
+                                                            const char* version_override) {
     pulp::platform::ProcessOptions options;
     options.working_directory = native_path_string(working_dir);
     options.timeout_ms = pulp_test_cli::shellout_timeout_ms();
     ScopedEnvVar disable_update("PULP_UPDATE_CHECK_DISABLED", "1");
     ScopedEnvVar no_bootstrap("PULP_SKIP_DEPENDENCY_BOOTSTRAP", "1");
-    return pulp::platform::ChildProcess::run(PULP_RUST_CLI_BINARY, args, options);
+    ScopedEnvVar override_version("PULP_RS_CLI_VERSION", version_override);
+    return pulp::platform::ChildProcess::run(binary, args, options);
 }
 
 } // namespace
@@ -683,28 +691,36 @@ pulp::platform::ProcessResult run_rust_cli(const std::vector<std::string>& args,
 TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configures",
           "[cli][create][shellout][configure]") {
     // The generated `find_package(Pulp <version> REQUIRED)` must carry the SDK
-    // version the CLI was built from: CMake rejects a non-numeric version as an
-    // invalid argument, so a placeholder leaves the project unable to configure.
-    // Configure the generated project for real (cmake, no build) against a stub
-    // SDK whose version file accepts exactly the version the CLI reports, so a
-    // placeholder, a malformed version or a drifted one all fail here.
+    // version this build is (the root project VERSION, passed in from CMake,
+    // not read back from the CLI under test). CMake rejects a non-numeric
+    // version, so a placeholder leaves the project unable to configure, and the
+    // stub SDK below accepts only the exact build version, so a crate-only or
+    // overridden version fails too. `pulp version` runs with PULP_RS_CLI_VERSION
+    // cleared and must report the build version; `create` runs with it set to a
+    // bogus value, which the scaffold must ignore.
+#if !defined(PULP_RUST_CLI_BINARY)
+    SKIP("Rust pulp front end is not part of this configure (PULP_RUST_CLI_BINARY unset)");
+#elif !defined(PULP_CATCH2_SOURCE_DIR)
+    SKIP("no Catch2 source copy in this build to serve the generated project offline");
+#else
+    const std::string expected = PULP_EXPECTED_SDK_VERSION;
     std::error_code exists_ec;
     if (!fs::is_regular_file(PULP_RUST_CLI_BINARY, exists_ec)) {
-        SKIP("Rust pulp front end not built");
+        SKIP("Rust pulp front end not built at " PULP_RUST_CLI_BINARY);
     }
     TempDir tmp("pulp-create-ci-configure");
 
-    auto version = run_rust_cli({"version"}, tmp.path);
+    auto version = run_rust_cli(PULP_RUST_CLI_BINARY, {"version"}, tmp.path, nullptr);
     const std::string version_text = version.stdout_output + version.stderr_output;
     INFO(version_text);
     std::smatch m;
-    REQUIRE(std::regex_search(version_text, m, std::regex(R"(pulp v(\d+\.\d+\.\d+))")));
-    const std::string sdk_version = m[1].str();
+    REQUIRE(std::regex_search(version_text, m, std::regex(R"(pulp v(\S+))")));
+    CHECK(m[1].str() == expected);
 
     const auto sdk = tmp.path / "stub-sdk";
     const auto cfg = sdk / "lib" / "cmake" / "Pulp";
     write_file(cfg / "PulpConfigVersion.cmake",
-               "set(PACKAGE_VERSION \"" + sdk_version +
+               "set(PACKAGE_VERSION \"" + expected +
                    "\")\n"
                    "if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)\n"
                    "  set(PACKAGE_VERSION_COMPATIBLE TRUE)\n"
@@ -721,16 +737,18 @@ TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configure
                "endfunction()\n");
 
     const auto out_dir = tmp.path / "CiGain";
-    auto r = run_rust_cli({"create", "CiGain", "--type", "effect", "--output",
+    auto r = run_rust_cli(PULP_RUST_CLI_BINARY,
+                          {"create", "CiGain", "--type", "effect", "--output",
                            native_path_string(out_dir), "--no-build", "--ci"},
-                          source_root());
+                          source_root(), "9.9.9");
     INFO(r.stdout_output);
     INFO(r.stderr_output);
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
+    CHECK(r.stderr_output.find("built by cargo alone") == std::string::npos);
     const auto cmake_lists = read_file(out_dir / "CMakeLists.txt");
-    CHECK(cmake_lists.find("find_package(Pulp " + sdk_version + " REQUIRED)") != std::string::npos);
-    CHECK(read_file(out_dir / "pulp.toml").find("sdk_version = \"" + sdk_version + "\"") !=
+    CHECK(cmake_lists.find("find_package(Pulp " + expected + " REQUIRED)") != std::string::npos);
+    CHECK(read_file(out_dir / "pulp.toml").find("sdk_version = \"" + expected + "\"") !=
           std::string::npos);
 
     pulp::platform::ProcessOptions options;
@@ -750,5 +768,5 @@ TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configure
     REQUIRE(configure.exit_code == 0);
     CHECK(read_file(out_dir / "build" / "CMakeCache.txt")
               .find("Pulp_DIR:PATH=" + native_path_string(cfg)) != std::string::npos);
-}
 #endif
+}

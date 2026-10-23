@@ -74,7 +74,8 @@ target_link_libraries(pulp-test-cli-create-shellout PRIVATE
 target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-    PULP_CMAKE_COMMAND="${CMAKE_COMMAND}")
+    PULP_CMAKE_COMMAND="${CMAKE_COMMAND}"
+    PULP_EXPECTED_SDK_VERSION="${PROJECT_VERSION}")
 if(catch2_SOURCE_DIR)
     target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
         PULP_CATCH2_SOURCE_DIR="${catch2_SOURCE_DIR}")
