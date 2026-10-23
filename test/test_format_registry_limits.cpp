@@ -357,6 +357,66 @@ TEST_CASE("FormatRegistry reads a small WAV and refuses one beyond custom ceilin
     REQUIRE_FALSE(registry.read(path, byte_ceiling).has_value());
 }
 
+// A 16-bit stereo PCM WAV of `frames` frames with a constant sample value.
+std::vector<uint8_t> build_wav_frames(uint32_t frames, int16_t value) {
+    auto out = build_wav_header_only(2u, frames * 2u * 2u);
+    for (uint32_t i = 0; i < frames * 2u; ++i)
+        push_le16(out, static_cast<uint16_t>(value));
+    return out;
+}
+
+TEST_CASE("read_audio_file decodes the header it admitted rather than one a later open would see",
+          "[audio][wav][decode-limits]") {
+    using pulp::audio::AudioFileInfo;
+    TempDir temp;
+    const auto path = temp.path / "swapped.wav";
+    const auto bigger = temp.path / "bigger.wav";
+    write_bytes(path, build_wav_frames(64u, 4096));
+    write_bytes(bigger, build_wav_frames(4096u, -4096));
+
+    // Control: the admission sees the small header, and refusing it refuses
+    // the file.
+    size_t admitted_calls = 0;
+    auto refused = pulp::audio::read_audio_file(path.string(), [&](const AudioFileInfo& info) {
+        ++admitted_calls;
+        REQUIRE(info.num_frames == 64u);
+        REQUIRE(info.num_channels == 2u);
+        return false;
+    });
+    REQUIRE(admitted_calls == 1u);
+    REQUIRE_FALSE(refused.has_value());
+
+    // While the small header is being admitted, the path is replaced by a file
+    // whose header claims sixty-four times as many frames. The decode must
+    // come from the open that was admitted: 64 frames of the original value.
+    // (Replacing a file that is open fails on Windows; the admitted decode
+    // then trivially matches, and the ancestor-check still proves the seam.)
+    bool replaced = false;
+    auto decoded = pulp::audio::read_audio_file(path.string(), [&](const AudioFileInfo& info) {
+        REQUIRE(info.num_frames == 64u);
+        std::error_code ec;
+        fs::rename(bigger, path, ec);
+        replaced = !ec;
+        return true;
+    });
+#ifndef _WIN32
+    REQUIRE(replaced);
+#endif
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->channels.size() == 2u);
+    REQUIRE(decoded->num_frames() == 64u);
+    // Int16 decode scales by 1/32767 or 1/32768 depending on the reader.
+    REQUIRE_THAT(decoded->channels[0].front(), WithinAbs(0.125, 1e-4));
+    REQUIRE_THAT(decoded->channels[1].back(), WithinAbs(0.125, 1e-4));
+
+    // The replaced path now carries the bigger file, so a fresh open sees it.
+    if (replaced) {
+        auto info = pulp::audio::read_audio_file_info(path.string());
+        REQUIRE(info.has_value());
+        REQUIRE(info->num_frames == 4096u);
+    }
+}
+
 TEST_CASE(
     "FormatRegistry refuses a WAV header that claims more frames than the decode limits allow",
     "[audio][wav][decode-limits]") {
