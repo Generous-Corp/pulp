@@ -174,7 +174,8 @@ PreparedParagraph build_paragraph(const ParagraphKey& key, const std::string& fa
     // Diagnostic contract for imported typography. A non-empty value filters
     // by text content ("*" traces every run) and reports the typeface that
     // SkParagraph actually shaped with, rather than the requested CSS family
-    // or the separate Canvas2D resolver result.
+    // or the separate Canvas2D resolver result. It prints when the paragraph
+    // is built, so a run served from the paragraph cache traces once.
     if (const char* trace = std::getenv("PULP_PARAGRAPH_FONT_TRACE")) {
         const std::string_view filter(trace);
         if (filter == "*" || text.find(filter) != std::string::npos) {
