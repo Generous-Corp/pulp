@@ -7,7 +7,7 @@ and the real-input transforms in `<pulp/signal/fft.hpp>`.
 
 | Kind | Default | Rejection | Passband | Latency |
 |---|---|---|---|---|
-| `polyphase_iir` | yes | `standard`: 113.3 dB from 0.56 Fs. `pristine`: 146.3 dB from 0.55 Fs | flat (< 1e-8 dB) to 0.44 Fs / 0.45 Fs | minimum phase, frequency dependent |
+| `polyphase_iir` | yes | `standard`: 114.6 dB from 0.515 Fs. `pristine`: 153.2 dB from 0.515 Fs | flat (< 1e-8 dB) to 0.485 Fs | minimum phase, frequency dependent |
 | `fir_biquad` | no | about 7 dB just above base Nyquist, ~9 dB at 0.55 Fs | -1.9 dB at 0.3 Fs | minimum phase, frequency dependent |
 | `linear_phase_fir` | no | `standard`: 96 dB, `pristine`: 140 dB | flat to 0.40 Fs / 0.45 Fs | constant, reported by `latency()` |
 
@@ -20,15 +20,18 @@ stage design's equiripple level. Stage 0 sets the base-band edge; each higher st
 same absolute band clean at twice the rate, so it uses a much shorter design.
 
 A half-band's transition is symmetric about base Nyquist, so content the
-callback creates in (0.5, 0.56) Fs (standard) folds onto (0.44, 0.5) Fs with
-only partial rejection. That lands above the advertised passband; if it
-matters, `linear_phase_fir` ends its transition at Nyquist instead.
+callback creates in (0.5, 0.515) Fs folds onto (0.485, 0.5) Fs with only
+partial rejection. That lands above the advertised passband, and above 21 kHz
+at a 44.1 kHz base rate; if it matters, `linear_phase_fir` ends its transition
+at Nyquist instead. Everything the callback creates from 0.515 Fs up meets the
+full stopband: a tanh driven at 5 kHz, whose fifth harmonic falls at 0.521 Fs
+of a 48 kHz base, aliases at -91 dBc at x2 and -147 dBc at x4 (standard).
 
 ### Additional methods
 
 | Method | Description |
 |---|---|
-| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB, flat to 0.40 Fs) or `pristine` (140 dB, flat to 0.45 Fs). Polyphase lane: `standard` (113.3 dB from 0.56 Fs, flat to 0.44 Fs) or `pristine` (146.3 dB from 0.55 Fs, flat to 0.45 Fs). |
+| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB, flat to 0.40 Fs) or `pristine` (140 dB, flat to 0.45 Fs). Polyphase lane: `standard` (114.6 dB) or `pristine` (153.2 dB), both from 0.515 Fs and flat to 0.485 Fs. |
 | `group_delay_samples(double f)` | Round-trip group delay in base samples at `f` cycles per base sample; constant for the linear-phase lane. |
 | `polyphase_stage_design(Quality, int stage)` | The `HalfBandIirDesign` a polyphase stage uses; evaluate it with `halfband_iir_response()`, `halfband_iir_magnitude_db()`, `halfband_iir_group_delay()` or `halfband_iir_stopband_db()`. |
 
@@ -47,8 +50,10 @@ Both minimum-phase lanes report `latency().constant == false` and
 
 | Round trip | Near DC | At 0.4 Fs |
 |---|---|---|
-| `polyphase_iir` standard, x2 | 3.39 base samples | 9.9 |
-| `polyphase_iir` standard, x4 | 4.51 | 11.2 |
+| `polyphase_iir` standard, x2 | 3.79 base samples | 12.6 |
+| `polyphase_iir` standard, x4 | 4.90 | 13.9 |
+| `polyphase_iir` pristine, x2 | 5.16 | 16.7 |
+| `polyphase_iir` pristine, x4 | 6.87 | 18.8 |
 | `fir_biquad`, x2 | 0.97 | 1.5 |
 | `fir_biquad`, x4 | 1.46 | 2.1 |
 
@@ -59,17 +64,17 @@ A caller blending the oversampled path with a dry path can align the dry path
 with `group_delay_samples()`, or select `linear_phase_fir` for a constant,
 reportable latency.
 
-`polyphase_iir` became the default in v0.997.2 (see that
-[migration note](../migrations/v0.997.2.md)), and its standard design
-deepened in v0.1003.0 ([migration note](../migrations/v0.1003.0.md)); they
-cover the consequences and how to
-keep `fir_biquad`.
+`polyphase_iir` became the default in v0.997.2; that
+[migration note](../migrations/v0.997.2.md) covers the consequences and how
+to keep `fir_biquad`. Both designs later narrowed their transition to
+0.485-0.515 Fs; `pulp upgrade --notes` lists that change and its delay cost
+for the release that carries it.
 
 ### Silence
 
 The polyphase stages zero any state below about 1e-30 (float) at the end of
-each processed block, so silence decays to exact zero (within 1152 samples at
-standard quality, 1664 at pristine, in float) rather than a subnormal limit
+each processed block, so silence decays to exact zero (within about 4200
+samples at standard quality, 5600 at pristine, in float) rather than a subnormal limit
 cycle. Per-sample `process()` flushes every sample, so block and per-sample
 output can differ by less than that threshold while a signal dies away.
 

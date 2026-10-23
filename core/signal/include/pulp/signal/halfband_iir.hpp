@@ -42,6 +42,7 @@
 ///     passband edge 0.21 (of the 2x rate):  N=5 -79.3 dB, N=6 -94.8 dB,
 ///                                           N=8 -125.9 dB
 ///     passband edge 0.225:                  N=6 -80.1 dB, N=11 -146.3 dB
+///     passband edge 0.2425:                 N=12 -114.6 dB, N=16 -153.2 dB
 ///
 /// `halfband_iir_response()`, `halfband_iir_group_delay()`, and
 /// `halfband_iir_stopband_db()` evaluate a design without running audio
