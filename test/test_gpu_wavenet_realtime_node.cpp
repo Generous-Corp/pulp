@@ -310,6 +310,8 @@ struct Tweak {
     bool trace = false;
     // Leave watchdog_blocks at zero: the node's time-based default.
     bool default_watchdog = false;
+    // Zero selects the node's default depth.
+    std::uint32_t max_inflight = 1;
 };
 struct Harness {
     Shape shape;
@@ -330,7 +332,7 @@ struct Harness {
         start(tweak.trace);
     }
     static GpuWaveNetRealtimeNode::Config tweaked(Shape& shape, const Tweak& tweak) {
-        auto config = shape.config(tweak.lead, tweak.channels);
+        auto config = shape.config(tweak.lead, tweak.channels, 0, tweak.max_inflight);
         if (tweak.capacity != 0)
             config.capacity = tweak.capacity;
         config.watchdog_blocks = tweak.default_watchdog       ? 0
@@ -487,6 +489,31 @@ TEST_CASE("WaveNet bounded multi-flight retires contiguous results in order",
     CHECK(h.outa[0] == 2);
     REQUIRE(h.callback(6) == detail::kRealtimeGpuReady);
     CHECK(h.outa[0] == 3);
+}
+
+TEST_CASE("WaveNet default depth is two in flight when the slots and ring allow it",
+          "[gpu_audio][wavenet][realtime][depth]") {
+    // max_inflight = 0 resolves to two with the session's two slots and a ring
+    // that holds two blocks past the lead, else one; an explicit value is
+    // kept. The lead, and so the reported latency, does not change.
+    struct Case {
+        std::uint32_t max_inflight, capacity;
+        int expected_depth;
+    };
+    for (const auto c : {Case{0, 4, 2}, Case{0, 2, 1}, Case{1, 4, 1}}) {
+        CAPTURE(c.max_inflight, c.capacity);
+        Harness h(Tweak{.lead = 1, .capacity = c.capacity, .max_inflight = c.max_inflight});
+        // Nothing completes, so the worker admits up to its depth and stops.
+        h.controls[0].hang = true;
+        for (std::uint32_t block = 0; block + 1 < c.capacity; ++block)
+            h.callback(float(block));
+        h.service();
+        h.service();
+        CHECK(h.controls[0].submits == c.expected_depth);
+        const auto status = checked_status(h.node);
+        CHECK(status.prepared_lead_blocks == 1);
+        CHECK(status.latency_samples == 2);
+    }
 }
 
 TEST_CASE("WaveNet depth telemetry reports bounded multi-flight",

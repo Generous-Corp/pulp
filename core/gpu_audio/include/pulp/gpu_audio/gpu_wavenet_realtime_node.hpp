@@ -33,10 +33,13 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
         std::uint32_t lead_blocks = 2;
         std::uint32_t capacity = 8;
         /// Maximum number of submitted blocks retained by the serialized
-        /// worker before it waits for retirement. One preserves the original
-        /// single-flight behavior; larger values require matching provider
-        /// slots and a fixed preallocated pending ring.
-        std::uint32_t max_inflight = 1;
+        /// worker before it waits for retirement. Zero selects two when the
+        /// session has at least two slots and the ring holds two blocks past
+        /// the lead, else one: one block in flight cannot keep up when a
+        /// block's round trip exceeds its period (64 frames on an M1 Max). The
+        /// lead, and so the latency, is unchanged. Larger values require
+        /// matching provider slots and a fixed preallocated pending ring.
+        std::uint32_t max_inflight = 0;
         std::uint32_t prewarm_blocks = 0;
         /// Optional bounded completion-service budget for each non-RT worker
         /// pump. Zero preserves nonblocking service. This is not an audio

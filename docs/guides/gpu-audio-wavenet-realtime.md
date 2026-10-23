@@ -43,7 +43,9 @@ the full CPU shadow and does not establish CPU-offload savings.
    same pump. There are at most two service passes per channel, sharing the
    original unchanged deadline; the second pass adds no wait budget and admits
    no further work. The default zero budget retains one service pass per pump.
-   The worker does not busy-wait and permits one all-channel block in flight;
+   The worker does not busy-wait and keeps at most `max_inflight` all-channel
+   blocks in flight (by default two when the session has two slots and the ring
+   holds two blocks past the lead, else one); completions retire in order, and
    only successful output from every channel publishes the original stamp.
    This is a bounded correctness architecture, not a throughput claim.
 5. Stop and join both callers before `release()` or reprepare. A failed physical
@@ -200,6 +202,29 @@ reliability. An authenticated installed SDK build, actual GPU delivery controls,
 matched DSP output, CPU cost and graphics/load contention remain separate gates.
 The worker scheduling/completion policy still affects latency. There is no
 hard-realtime GPU scheduling guarantee and no NAM speedup claim.
+
+### Measured throughput (not a guarantee)
+
+One block in flight keeps up only while a block's round trip (GPU work plus
+host submission, polling and completion wake) fits in its period. The share of
+callback blocks the GPU delivered, measured with
+`pulp-gpu-dawn-wavenet-watchdog-campaign` on Dawn `ada567700e13`, a NAM
+"standard"-sized WaveNet (two arrays of ten dilated layers, 16 and 8 channels),
+48 kHz, lead 2, 120 s per cell at each host's ambient load, before and after
+the event-driven transport wake:
+
+| Host | Block | 1 in flight | 2 in flight |
+|---|---|---|---|
+| M1 Max | 64 frames | 0.00 / 0.00 | 0.87 / 0.98 |
+| M1 Max | 128 frames | 0.62 / 1.00 | 0.93 / 1.00 |
+| M3 Ultra | 64 frames | 0.99 / 1.00 | 0.99 / 1.00 |
+| M3 Ultra | 128 frames | 0.92 / 1.00 | 1.00 / 1.00 |
+
+GPU work per block was 0.79 ms on the M1 Max and 0.43 ms on the M3 Ultra
+(staged timestamps); at 64 frames (1.33 ms) the M1 Max round trip exceeds the
+period with one block in flight, so the stream falls behind until the ring
+saturates. That is why the default is two in flight. Other hosts, models, block
+sizes and loads will differ; measure on the target.
 
 ### Optional bounded completion servicing
 

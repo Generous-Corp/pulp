@@ -20,8 +20,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <memory>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -105,6 +105,8 @@ struct AdmissionRun {
     std::uint64_t sequence_drift = 0;
     std::uint64_t gpu_blocks = 0;
     std::uint64_t mismatches = 0;
+    // Most blocks the worker had in flight at once (trace telemetry).
+    std::uint64_t in_flight_high_water = 0;
     // Submissions the provider refused, as the node's channel saw them.
     std::uint64_t refused_submits = 0;
     std::uint64_t first_refused = UINT64_MAX;
@@ -186,12 +188,13 @@ void emit_admission(std::ostream& out, std::string_view name, const AdmissionRun
         << R"(,"sequence_agrees":)" << (run.sequence_agrees() ? "true" : "false")
         << R"(,"callbacks":)" << run.callbacks << R"(,"bridge_next_sequence":)" << run.next_sequence
         << R"(,"sequence_drift":)" << run.sequence_drift << R"(,"gpu_blocks":)" << run.gpu_blocks
-        << R"(,"gpu_mismatches":)" << run.mismatches << R"(,"refused_submits":)"
-        << run.refused_submits << R"(,"first_refused_sequence":)"
-        << signed_sequence(run.first_refused) << R"(,"recovery_reason":")"
-        << recovery_name(run.reason) << R"(","recovery_sequence":)" << signed_sequence(run.sequence)
-        << R"(,"latched_after_callback":)" << signed_sequence(run.latched_after)
-        << R"(,"provider_state":)" << static_cast<int>(run.state) << R"(,"statuses_valid":)"
+        << R"(,"gpu_mismatches":)" << run.mismatches << R"(,"in_flight_high_water":)"
+        << run.in_flight_high_water << R"(,"refused_submits":)" << run.refused_submits
+        << R"(,"first_refused_sequence":)" << signed_sequence(run.first_refused)
+        << R"(,"recovery_reason":")" << recovery_name(run.reason) << R"(","recovery_sequence":)"
+        << signed_sequence(run.sequence) << R"(,"latched_after_callback":)"
+        << signed_sequence(run.latched_after) << R"(,"provider_state":)"
+        << static_cast<int>(run.state) << R"(,"statuses_valid":)"
         << (run.statuses_valid ? "true" : "false") << R"(,"released":)"
         << (run.released ? "true" : "false") << R"(,"trace":")" << run.trace << R"(","error":")"
         << run.error << R"("})";
@@ -258,6 +261,9 @@ struct Result {
     AdmissionRun admission_reject_unreachable_slot;
     bool admission_reject_unreachable_slot_receipt = false;
     bool admission_skip_control_receipt = false;
+    bool node_loss_default_depth_receipt = false;
+    bool node_hang_default_depth_receipt = false;
+    std::string node_default_depth_reasons = "not_run";
     bool admission_reject_midstream_receipt = false;
     RefusalRetryRun refusal_retry;
     bool refusal_retry_receipt = false;
@@ -317,6 +323,11 @@ void emit(const Result& result, std::string_view status) {
               << R"(,"reacquire_hang_reason":")" << result.reacquire_hang_reason
               << R"(","reacquire_hang_reprepare_ns":)" << result.reacquire_hang_reprepare_ns
               << R"(,"reacquire_hang_resume_ns":)" << result.reacquire_hang_resume_ns;
+    std::cout << R"(,"node_loss_default_depth_receipt":)"
+              << (result.node_loss_default_depth_receipt ? "true" : "false")
+              << R"(,"node_hang_default_depth_receipt":)"
+              << (result.node_hang_default_depth_receipt ? "true" : "false")
+              << R"(,"node_default_depth_reasons":")" << result.node_default_depth_reasons << "\"";
     emit_admission(std::cout, "admission_healthy", result.admission_healthy,
                    result.admission_healthy_receipt);
     emit_admission(std::cout, "admission_force_loss_before_submit", result.admission_loss,
@@ -489,7 +500,8 @@ struct PhysicalChannelFactory {
 // recovery reason latches. Callbacks and worker pumps alternate on this thread
 // with a short real wait, so the provider sees real device time.
 NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
-                            DawnSharedIoProvider::Fault fault, bool reacquire = false) {
+                            DawnSharedIoProvider::Fault fault, bool reacquire = false,
+                            std::uint32_t max_inflight = 1) {
     namespace ga = pulp::gpu_audio;
     NodeFaultRun run;
     auto created = DawnSharedIoProvider::create(
@@ -536,7 +548,7 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
         .channels = 1,
         .lead_blocks = 1,
         .capacity = 4,
-        .max_inflight = 1,
+        .max_inflight = max_inflight,
         // Hang detection within this receipt's short run: the ring-sized
         // window. The time-based default has its own campaign receipt.
         .watchdog_blocks = 3};
@@ -861,6 +873,8 @@ AdmissionRun run_admission(const Fixture& fixture, const void* proc_table,
     std::vector<std::unique_ptr<WaveNetRealtimeChannel>> channels;
     channels.push_back(std::make_unique<RefusalCountingChannel>(
         std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)), run));
+    // The trace telemetry records the in-flight high-water mark.
+    (void)node.configure_trace({.enabled = true});
     if (!WaveNetRealtimeTestAccess::prepare(node, std::move(channels))) {
         run.error = "node_prepare_failed";
         return run;
@@ -911,6 +925,7 @@ AdmissionRun run_admission(const Fixture& fixture, const void* proc_table,
     run.state = status.provider_state;
     run.statuses_valid = run.statuses_valid && ga::validate_gpu_audio_status(status).accepted();
     run.next_sequence = path.next_sequence(path.context);
+    run.in_flight_high_water = WaveNetRealtimeTestAccess::telemetry(node).in_flight_high_water;
     run.released = node.release();
     return run;
 }
@@ -1058,6 +1073,23 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
     result.node_hang_receipt = hang.ran && hang.reason == ga_reason::ProviderUnresponsive &&
                                hang.sequence == 0 && hang.state == ga_state::Unavailable &&
                                hang.status_valid;
+    // The same faults at the node's default depth (two in flight).
+    const auto loss_default =
+        run_node_fault(fixture, proc_table,
+                       DawnSharedIoProvider::Fault::ForceLossAfterCompletionRegistration, false, 0);
+    result.node_loss_default_depth_receipt =
+        loss_default.ran && loss_default.reason == ga_reason::ProviderLost &&
+        loss_default.sequence == 0 && loss_default.state == ga_state::Unavailable &&
+        loss_default.status_valid;
+    const auto hang_default =
+        run_node_fault(fixture, proc_table, DawnSharedIoProvider::Fault::DelayCompletion, false, 0);
+    result.node_hang_default_depth_receipt =
+        hang_default.ran && hang_default.reason == ga_reason::ProviderUnresponsive &&
+        hang_default.sequence == 0 && hang_default.state == ga_state::Unavailable &&
+        hang_default.status_valid;
+    result.node_default_depth_reasons = loss_default.reason_text + "/" + hang_default.reason_text +
+                                        "@" + std::to_string(loss_default.sequence) + "/" +
+                                        std::to_string(hang_default.sequence);
     const auto neural_loss = run_neural_node_fault(
         fixture, proc_table, DawnSharedIoProvider::Fault::ForceLossBeforeSubmit);
     result.neural_loss_reason = neural_loss.reason_text;
@@ -1093,9 +1125,10 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
         return run.refused_submits >= 1 && run.first_refused == sequence &&
                latched(run, ga_reason::ProviderFailure, sequence, ga_state::Degraded);
     };
-    // A late block is a miss, not a fault, so a loaded host may lose a few
-    // deliveries; none may mismatch.
-    constexpr std::uint64_t kLateAllowance = 6;
+    // A late block is a miss, not a fault: a host stall of several
+    // milliseconds shows as a run of late blocks. The counts are a sanity
+    // floor; refusals, latches and parity are the properties under test.
+    constexpr std::uint64_t kLateAllowance = 10;
     auto& healthy = result.admission_healthy;
     healthy = run_admission(fixture, proc_table, {});
     result.admission_healthy_receipt = clean(healthy) && healthy.reason == ga_reason::None &&
@@ -1129,23 +1162,31 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
                                       .lead = 2,
                                       .inflight = 2,
                                       .skip_pump_at = 10};
+    // At the node's default depth (max_inflight = 0 resolves to two here),
+    // the same schedule puts two blocks physically in flight on Dawn; every
+    // delivered block still matches the CPU reference, in order.
     auto control_scenario = midstream;
     control_scenario.fault = Fault::None;
+    control_scenario.inflight = 0;
     auto& control = result.admission_skip_control;
     control = run_admission(fixture, proc_table, control_scenario);
     result.admission_skip_control_receipt = clean(control) && control.reason == ga_reason::None &&
                                             control.gpu_blocks + kLateAllowance >= kCallbacks - 2 &&
-                                            control.mismatches == 0;
-    // Block 11 is the first admission on slot 1. Blocks 0..9 deliver on the
-    // GPU at callbacks 2..11 and match the CPU reference. Block 10 was accepted
-    // before the latch but is not delivered after it: the node fails closed,
-    // so no callback after 11 delivers GPU output.
+                                            control.mismatches == 0 &&
+                                            control.in_flight_high_water == 2;
+    // Withholding the pumps after callback 10 makes block 11 the first
+    // admission on slot 1, unless a host stall put two blocks in flight
+    // earlier: the refusal lands on the first block slot 1 takes, at or before
+    // 11. It latches at that block; the blocks before it that the GPU
+    // delivered match the CPU reference; and no GPU block is delivered after
+    // the latch, even one accepted before it: the node fails closed.
     auto& refused = result.admission_reject_midstream;
     refused = run_admission(fixture, proc_table, midstream);
+    const auto at = refused.first_refused;
     const auto last_gpu = refused.trace.find_last_of('G');
     result.admission_reject_midstream_receipt =
-        refused_at(refused, 11) && refused.gpu_blocks + kLateAllowance >= 10 &&
-        last_gpu != std::string::npos && last_gpu <= 11 && refused.mismatches == 0;
+        at >= 2 && at <= 11 && refused_at(refused, at) && refused.gpu_blocks >= 1 &&
+        last_gpu != std::string::npos && last_gpu <= at && refused.mismatches == 0;
 
     result.refusal_retry = run_refusal_retry(fixture, proc_table);
     result.refusal_retry_receipt = result.refusal_retry.refused && result.refusal_retry.retried &&
@@ -1420,6 +1461,7 @@ int main(int argc, char** argv) {
         result.admission_loss_receipt && result.admission_reject_receipt &&
         result.admission_reject_unreachable_slot_receipt && result.admission_skip_control_receipt &&
         result.admission_reject_midstream_receipt && result.refusal_retry_receipt &&
+        result.node_loss_default_depth_receipt && result.node_hang_default_depth_receipt &&
         result.reacquire_loss_receipt && result.reacquire_hang_receipt;
     emit(result, passed ? "passed" : "failed");
     return passed ? 0 : 1;

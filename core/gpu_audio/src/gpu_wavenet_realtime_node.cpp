@@ -347,6 +347,9 @@ struct GpuWaveNetRealtimeNode::Impl {
         }
         config.session.descriptor.layers = layers;
         config.session.weights = weights;
+        if (config.max_inflight == 0)
+            config.max_inflight =
+                config.session.slots >= 2 && config.capacity >= config.lead_blocks + 2 ? 2 : 1;
     }
     bool valid_config(bool include_prewarm = true) const noexcept {
         const auto& c = config;
