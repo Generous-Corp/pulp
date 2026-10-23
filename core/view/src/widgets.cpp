@@ -575,25 +575,19 @@ void Knob::paint(canvas::Canvas& canvas) {
                 });
             }
         } else {
-            // Legacy raw-RGBA path. NOTE: SkiaCanvas::draw_image_from_data
-            // expects ENCODED bytes (PNG/JPEG), so callers that fed decoded
-            // pixels here will draw nothing. Kept for backward compatibility
-            // and any future raw-pixmap canvas API.
-            size_t frame_bytes = static_cast<size_t>(fw * fh * 4);
-            size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 +
-                                                 fx * 4);
-            if (offset + frame_bytes <= sprite_strip_->data_size()) {
+            // Byte-backed strip. The draw decodes ENCODED bytes (PNG/JPEG);
+            // raw RGBA pixels pass the bounds check but draw nothing on Skia.
+            if (byte_strip_frame_in_bounds(canvas, *sprite_strip_, fx, fy)) {
                 canvas.save();
                 canvas.clip_rect(0, 0, b.width, b.height);
                 float sx = b.width / fw;
                 float sy = b.height / fh;
                 canvas.scale(sx, sy);
                 canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
-                canvas.draw_image_from_data(sprite_strip_->data(),
-                                             sprite_strip_->data_size(),
-                                             0, 0,
-                                             static_cast<float>(sprite_strip_->total_width()),
-                                             static_cast<float>(sprite_strip_->total_height()));
+                canvas.draw_image_from_keyed_data(
+                    sprite_strip_->data_key(), sprite_strip_->data(), sprite_strip_->data_size(), 0,
+                    0, static_cast<float>(sprite_strip_->total_width()),
+                    static_cast<float>(sprite_strip_->total_height()));
                 canvas.restore();
             }
         }
@@ -1022,20 +1016,17 @@ void Fader::paint(canvas::Canvas& canvas) {
         int frame = sprite_strip_->frame_for_value(shown);
         int fx, fy;
         sprite_strip_->frame_offset(frame, fx, fy);
-        size_t frame_bytes = static_cast<size_t>(sprite_strip_->frame_width() *
-                                                  sprite_strip_->frame_height() * 4);
-        size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 + fx * 4);
-        if (offset + frame_bytes <= sprite_strip_->data_size()) {
+        if (byte_strip_frame_in_bounds(canvas, *sprite_strip_, fx, fy)) {
             canvas.save();
             canvas.clip_rect(0, 0, b.width, b.height);
             float sx = b.width / static_cast<float>(sprite_strip_->frame_width());
             float sy = b.height / static_cast<float>(sprite_strip_->frame_height());
             canvas.scale(sx, sy);
             canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
-            canvas.draw_image_from_data(sprite_strip_->data(), sprite_strip_->data_size(),
-                                         0, 0,
-                                         static_cast<float>(sprite_strip_->total_width()),
-                                         static_cast<float>(sprite_strip_->total_height()));
+            canvas.draw_image_from_keyed_data(sprite_strip_->data_key(), sprite_strip_->data(),
+                                              sprite_strip_->data_size(), 0, 0,
+                                              static_cast<float>(sprite_strip_->total_width()),
+                                              static_cast<float>(sprite_strip_->total_height()));
             canvas.restore();
         }
     } else if (!widget_schema_.empty()) {
