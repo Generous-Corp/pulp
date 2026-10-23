@@ -12,15 +12,31 @@
 // reads as the page. Only the two device rows of the border show it, which is
 // why a whole-panel score never sees it.
 //
-// The fixture stacks three otherwise identical bars on a flat grey page:
+// The fixture has two parts. Three bars on a flat grey page separate the
+// shapes cleanly:
 //
 //   #padding   initial values: the tile repeats into the border strip.
 //   #border    `background-origin: border-box`: the tile IS the border box.
 //   #norepeat  padding-box tile, `no-repeat`: nothing under the border.
 //
+// Then the two bars a dark plugin panel authors, border-box sized, each next
+// to an otherwise identical `background-origin: border-box` probe:
+//
+//   #header    `to bottom` gradient, bottom border, on a near-black page.
+//   #toolbar   `to top` gradient, top border, on a lighter canvas colour.
+//
+// Both wrap the gradient's 0.8 stop under their border. On the near-black page
+// that stop is LIGHTER than the transparent end, on the canvas it is DARKER,
+// so a renderer that sizes the gradient to the border box draws the header's
+// hairline too dark and the toolbar's too light: one cause, opposite signs.
+//
+// The border-box probes are the diagnosis check. They differ from the default
+// bars only in `background-origin`, so if they did not already match Chrome
+// the cause would lie elsewhere and no paint change should be built on it.
+//
 // Every expectation is read off `browser.png`. The first case pins what Chrome
 // painted to the CSS arithmetic, so the fixture itself is shown to separate the
-// three shapes before any render is judged against it.
+// shapes before any render is judged against it.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -47,14 +63,22 @@ namespace fs = std::filesystem;
 
 constexpr const char* kFixture = "browser-capture-gradient-border";
 constexpr int kPanelWidth = 400;
-constexpr int kPanelHeight = 180;
+constexpr int kPanelHeight = 460;
 constexpr int kScale = 2;
-constexpr int kBarHeight = 44;  // padding box; the border box is 45
 
-// Top edge of each bar in CSS pixels, as authored in `b.html`.
-constexpr int kPaddingBarTop = 0;
-constexpr int kBorderBoxBarTop = 60;
-constexpr int kNoRepeatBarTop = 120;
+// CSS row of each bar's 1px border, as authored in `b.html`.
+constexpr int kPaddingBorder = 44;      // #padding, content-box 44px tall
+constexpr int kBorderBoxBorder = 104;   // #border
+constexpr int kNoRepeatBorder = 164;    // #norepeat
+constexpr int kHeaderBorder = 180 + 43;           // #header, border-box 44px
+constexpr int kHeaderProbeBorder = 180 + 60 + 43;  // #header-border-box
+constexpr int kToolbarBorder = 300 + 10;          // #toolbar, top border
+constexpr int kToolbarProbeBorder = 300 + 90;     // #toolbar-border-box
+
+// CSS rows of flat backdrop with no bar over them.
+constexpr int kGreyPageRow = 52;
+constexpr int kDarkPageRow = 180 + 50;
+constexpr int kCanvasRow = 300 + 80;
 
 // Chrome rows within this many levels of the CSS arithmetic, and a render
 // within this many levels of Chrome, per channel. Chrome's two border rows
@@ -97,9 +121,9 @@ Rgb row_mean(const ImportPngImage& image, int device_row) {
     return {sum[0] / n, sum[1] / n, sum[2] / n};
 }
 
-/// The two device rows of a bar's 1px bottom border.
-std::array<int, 2> border_rows(int bar_top) {
-    const int first = (bar_top + kBarHeight) * kScale;
+/// The two device rows of a 1px border at CSS row `border_row`.
+std::array<int, 2> border_rows(int border_row) {
+    const int first = border_row * kScale;
     return {first, first + 1};
 }
 
@@ -125,9 +149,8 @@ Rgb first_stop_over(const Rgb& page) {
             20.0f * kAlpha + page[2] * (1.0f - kAlpha)};
 }
 
-/// A page row in the gap between the first two bars.
-Rgb page_colour(const ImportPngImage& image) {
-    return row_mean(image, 52 * kScale);
+Rgb backdrop(const ImportPngImage& image, int css_row) {
+    return row_mean(image, css_row * kScale);
 }
 
 bool any_capture_node(const pulp::view::IRNode& node) {
@@ -167,8 +190,8 @@ std::vector<uint8_t> render_panel() {
 
 void require_border_rows_match_chrome(const ImportPngImage& reference,
                                       const ImportPngImage& render,
-                                      int bar_top, const char* what) {
-    for (const int row : border_rows(bar_top)) {
+                                      int border_row, const char* what) {
+    for (const int row : border_rows(border_row)) {
         const Rgb expected = row_mean(reference, row);
         const Rgb got = row_mean(render, row);
         INFO(what << " border row " << row << ": chrome (" << expected[0]
@@ -178,63 +201,115 @@ void require_border_rows_match_chrome(const ImportPngImage& reference,
     }
 }
 
+/// Chrome's two border rows match `expected` within the tolerance.
+void require_chrome_rows(const ImportPngImage& reference, int border_row,
+                         const Rgb& expected, const char* what) {
+    for (const int row : border_rows(border_row)) {
+        const Rgb got = row_mean(reference, row);
+        INFO(what << " border row " << row << ": (" << got[0] << ", " << got[1]
+                  << ", " << got[2] << ") expected (" << expected[0] << ", "
+                  << expected[1] << ", " << expected[2] << ")");
+        CHECK(max_channel_delta(got, expected) <= kTolerance);
+    }
+}
+
+/// Mean over the three channels of `a - b`: positive when `a` is lighter.
+float mean_signed_delta(const Rgb& a, const Rgb& b) {
+    return ((a[0] - b[0]) + (a[1] - b[1]) + (a[2] - b[2])) / 3.0f;
+}
+
 }  // namespace
 
 TEST_CASE("Chrome repeats a padding-box gradient tile into its border strip",
           "[browser-capture][native-lowering][background-origin]") {
     const auto reference = decode(read_bytes(fixture_dir() / "browser.png"));
-    const Rgb page = page_colour(reference);
-    INFO("page (" << page[0] << ", " << page[1] << ", " << page[2] << ")");
+    const Rgb grey = backdrop(reference, kGreyPageRow);
+    const Rgb dark = backdrop(reference, kDarkPageRow);
+    const Rgb canvas = backdrop(reference, kCanvasRow);
 
-    // #padding: the hairline sits over the tile's wrapped first stop.
-    const Rgb padding_expected = hairline_over(first_stop_over(page));
-    for (const int row : border_rows(kPaddingBarTop)) {
-        const Rgb got = row_mean(reference, row);
-        INFO("padding-box border row " << row << ": (" << got[0] << ", "
-                                       << got[1] << ", " << got[2] << ")");
-        CHECK(max_channel_delta(got, padding_expected) <= kTolerance);
-    }
+    // Default origin: the hairline sits over the tile's wrapped first stop,
+    // whichever side the border is on and whichever way the gradient runs.
+    require_chrome_rows(reference, kPaddingBorder,
+                        hairline_over(first_stop_over(grey)), "#padding");
+    require_chrome_rows(reference, kHeaderBorder,
+                        hairline_over(first_stop_over(dark)), "#header");
+    require_chrome_rows(reference, kToolbarBorder,
+                        hairline_over(first_stop_over(canvas)), "#toolbar");
 
-    // #norepeat: nothing under the hairline but the page.
-    const Rgb bare_expected = hairline_over(page);
-    for (const int row : border_rows(kNoRepeatBarTop)) {
-        const Rgb got = row_mean(reference, row);
-        INFO("no-repeat border row " << row << ": (" << got[0] << ", "
-                                     << got[1] << ", " << got[2] << ")");
-        CHECK(max_channel_delta(got, bare_expected) <= kTolerance);
-    }
+    // No repeat: nothing under the hairline but the page.
+    require_chrome_rows(reference, kNoRepeatBorder, hairline_over(grey),
+                        "#norepeat");
 
     // Negative control on Chrome's own output: the origin decides the border
     // row's colour by far more than any tolerance used here, so a render that
-    // ignores `background-origin` cannot match both bars.
+    // ignores `background-origin` cannot match both bars of a pair.
     for (std::size_t i = 0; i < 2; ++i) {
-        const Rgb padding = row_mean(reference, border_rows(kPaddingBarTop)[i]);
+        const Rgb padding = row_mean(reference, border_rows(kPaddingBorder)[i]);
         const Rgb border_box =
-            row_mean(reference, border_rows(kBorderBoxBarTop)[i]);
+            row_mean(reference, border_rows(kBorderBoxBorder)[i]);
         CHECK(max_channel_delta(padding, border_box) >= 10.0f);
+    }
+
+    // The Spectr-shaped pair: the header's wrapped stop is lighter than its
+    // probe's transparent end, the toolbar's darker. One cause, opposite
+    // signs, so a fix that only brightens or only darkens fails one of them.
+    for (std::size_t i = 0; i < 2; ++i) {
+        const Rgb header = row_mean(reference, border_rows(kHeaderBorder)[i]);
+        const Rgb header_probe =
+            row_mean(reference, border_rows(kHeaderProbeBorder)[i]);
+        const Rgb toolbar = row_mean(reference, border_rows(kToolbarBorder)[i]);
+        const Rgb toolbar_probe =
+            row_mean(reference, border_rows(kToolbarProbeBorder)[i]);
+        INFO("header - probe " << mean_signed_delta(header, header_probe)
+             << ", toolbar - probe " << mean_signed_delta(toolbar, toolbar_probe));
+        CHECK(mean_signed_delta(header, header_probe) >= 3.0f);
+        CHECK(mean_signed_delta(toolbar, toolbar_probe) <= -10.0f);
     }
 }
 
 TEST_CASE("a border-box gradient origin and an unrepeated tile paint what "
           "Chrome painted under the border",
           "[browser-capture][native-lowering][background-origin]") {
+    // These bars differ from the failing ones only in `background-origin` or
+    // `background-repeat`. They must match Chrome as paint stands today: if a
+    // probe did not, the border-row error would have another cause.
     const auto reference = decode(read_bytes(fixture_dir() / "browser.png"));
     const auto render = decode(render_panel());
-    require_border_rows_match_chrome(reference, render, kBorderBoxBarTop,
-                                     "background-origin: border-box");
-    require_border_rows_match_chrome(reference, render, kNoRepeatBarTop,
-                                     "background-repeat: no-repeat");
+    require_border_rows_match_chrome(reference, render, kBorderBoxBorder,
+                                     "#border: background-origin: border-box");
+    require_border_rows_match_chrome(reference, render, kNoRepeatBorder,
+                                     "#norepeat: background-repeat: no-repeat");
+    require_border_rows_match_chrome(reference, render, kHeaderProbeBorder,
+                                     "#header-border-box");
+    require_border_rows_match_chrome(reference, render, kToolbarProbeBorder,
+                                     "#toolbar-border-box");
 }
 
 // Pulp sizes a background gradient to the border box regardless of
-// `background-origin`, so the hairline over #padding shows the gradient's
-// transparent end. Marked `!shouldfail` so the gap is executed rather than
-// skipped: the case turns red the moment paint honours the padding-box origin,
-// and the tag comes off with that change.
+// `background-origin`, so each default-origin hairline shows the gradient's
+// transparent end. Each bar is its own `!shouldfail` case so the gap is
+// executed rather than skipped, and each turns red on its own the moment paint
+// honours the padding-box origin for it; the tag comes off with that change.
 TEST_CASE("a padding-box gradient tile repeats under a translucent border",
           "[browser-capture][native-lowering][background-origin][!shouldfail]") {
     const auto reference = decode(read_bytes(fixture_dir() / "browser.png"));
     const auto render = decode(render_panel());
-    require_border_rows_match_chrome(reference, render, kPaddingBarTop,
-                                     "background-origin: padding-box");
+    require_border_rows_match_chrome(reference, render, kPaddingBorder,
+                                     "#padding");
+}
+
+TEST_CASE("a header gradient wraps its first stop under its bottom border",
+          "[browser-capture][native-lowering][background-origin][!shouldfail]") {
+    const auto reference = decode(read_bytes(fixture_dir() / "browser.png"));
+    const auto render = decode(render_panel());
+    require_border_rows_match_chrome(reference, render, kHeaderBorder,
+                                     "#header");
+}
+
+TEST_CASE("a toolbar gradient wraps its first stop under its top border",
+          "[browser-capture][native-lowering][background-origin][!shouldfail]") {
+    const auto reference = decode(read_bytes(fixture_dir() / "browser.png"));
+    const auto render = decode(render_panel());
+    require_border_rows_match_chrome(reference, render, kToolbarBorder,
+                                     "#toolbar");
 }

@@ -12,21 +12,21 @@
     },
     "source": {
       "entry": "b.html",
-      "sha256": "abb5a1a96949ece4582b1efa67b2376886fa2618250e72e54a8b520adabaf201"
+      "sha256": "08b59726bd61922c7efa0071804de4b2d80b4ea47f4ffd21b3650c23712d15bc"
     },
     "viewport": {
       "initial": {
         "width": 400,
-        "height": 180
+        "height": 460
       },
       "width_pinned": false,
       "resolved": {
         "width": 400,
-        "height": 180
+        "height": 460
       },
       "document": {
         "width": 400,
-        "height": 180,
+        "height": 460,
         "primary_surface": {
           "left": 0,
           "top": 0,
@@ -43,7 +43,7 @@
     "settle": {
       "rounds": 15,
       "stable_rounds": 13,
-      "elapsed_ms": 1371
+      "elapsed_ms": 1396
     },
     "network": {
       "external_allowed": false,
@@ -53,10 +53,10 @@
     },
     "health": {
       "status": "healthy",
-      "layout_count": 7,
-      "visible_elements": 4,
+      "layout_count": 13,
+      "visible_elements": 10,
       "visible_text_characters": 0,
-      "painted_surfaces": 3,
+      "painted_surfaces": 9,
       "failed_fonts": [],
       "runtime_exceptions": [],
       "log_errors": [],
@@ -72,11 +72,11 @@
     {
       "id": "document:0",
       "url": "pulp-capture:///b.html",
-      "node_count": 19,
-      "layout_count": 7,
+      "node_count": 33,
+      "layout_count": 13,
       "paint_order": true,
       "snapshot_asset": "dom-snapshot.json",
-      "snapshot_sha256": "8f84745f446ed1f1898f0985249559a52b8b6206f60b150a6f01fd1250585e4f"
+      "snapshot_sha256": "aaf91cd3dba8578d7e39c8439c74fe184251b465989cafdb6ae6182ab6beb5e8"
     }
   ],
   "assets": [
@@ -85,36 +85,36 @@
       "kind": "screenshot",
       "mime_type": "image/png",
       "path": "browser.png",
-      "sha256": "7b7f055727024a01e426fef7890ddc41a9206156aa1cf889e4113aefb9c6a84e",
+      "sha256": "22f0304c40cf5a61abca99222b6ba5a93e72ef5ee85d75e08e0819489bd9f874",
       "width_px": 800,
-      "height_px": 360
+      "height_px": 920
     },
     {
       "id": "reference:browser-static",
       "kind": "screenshot",
       "mime_type": "image/png",
       "path": "browser-static.png",
-      "sha256": "7b7f055727024a01e426fef7890ddc41a9206156aa1cf889e4113aefb9c6a84e",
+      "sha256": "22f0304c40cf5a61abca99222b6ba5a93e72ef5ee85d75e08e0819489bd9f874",
       "width_px": 800,
-      "height_px": 360
+      "height_px": 920
     },
     {
       "id": "reference:browser-chrome",
       "kind": "chrome-screenshot",
       "mime_type": "image/png",
       "path": "browser-chrome.png",
-      "sha256": "7b7f055727024a01e426fef7890ddc41a9206156aa1cf889e4113aefb9c6a84e",
+      "sha256": "22f0304c40cf5a61abca99222b6ba5a93e72ef5ee85d75e08e0819489bd9f874",
       "width_px": 800,
-      "height_px": 360
+      "height_px": 920
     },
     {
       "id": "evidence:browser-canvas-composite",
       "kind": "canvas-composite-evidence",
       "mime_type": "image/png",
       "path": "browser-canvas-composite.png",
-      "sha256": "e4891055c944694172e6ad2019a80476ea2b45709a6aaa637e89737979b9f5a3",
+      "sha256": "2736a273b03e063aadc19143a24b9f6a2deb7978b495d08d7ff49786a519503b",
       "width_px": 800,
-      "height_px": 360,
+      "height_px": 920,
       "changed_pixels": 0
     }
   ],
@@ -149,7 +149,7 @@
     "asset_id": "reference:browser",
     "path": "browser.png",
     "logical_width": 400,
-    "logical_height": 180,
+    "logical_height": 460,
     "device_scale_factor": 2,
     "authored_frame": {
       "x": 0,

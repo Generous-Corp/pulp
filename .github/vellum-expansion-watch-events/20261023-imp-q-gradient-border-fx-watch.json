@@ -13,7 +13,9 @@
   "tests": [
     "ctest --test-dir build -R 'Chrome repeats a padding-box gradient tile into its border strip'",
     "ctest --test-dir build -R 'a border-box gradient origin and an unrepeated tile paint what Chrome painted under the border'",
+    "ctest --test-dir build -R 'a header gradient wraps its first stop under its bottom border'",
     "ctest --test-dir build -R 'a padding-box gradient tile repeats under a translucent border'",
+    "ctest --test-dir build -R 'a toolbar gradient wraps its first stop under its top border'",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
   ],

@@ -21,9 +21,41 @@
   /* The tile is the padding box and does not repeat, so the border strip
      carries no gradient at all: only the page under the white hairline. */
   #norepeat { top: 120px; background-repeat: no-repeat; }
+
+  /* The two bars as a dark plugin panel authors them: border-box sizing, a
+     header whose gradient runs away from its bottom border, and a toolbar
+     whose gradient runs away from its top border. Both wrap the gradient's
+     0.8 stop under the border; whether that reads lighter or darker than the
+     transparent end depends on the backdrop, so each sits on its own. */
+  .panel { position: relative; width: 400px; box-sizing: border-box; }
+  .panel div { box-sizing: border-box; position: absolute; left: 0; width: 400px; }
+  #page { height: 120px; background: #05070a; }
+  .header {
+    height: 44px;
+    border-bottom: 1px solid rgba(255, 255, 255, .06);
+    background: linear-gradient(to bottom, rgba(10, 14, 20, .8), rgba(10, 14, 20, 0));
+  }
+  #header { top: 0; }
+  #header-border-box { top: 60px; background-origin: border-box; }
+  #canvas { height: 160px; background: #1b232c; }
+  .toolbar {
+    height: 56px;
+    border-top: 1px solid rgba(255, 255, 255, .06);
+    background: linear-gradient(to top, rgba(10, 14, 20, .8), rgba(10, 14, 20, 0));
+  }
+  #toolbar { top: 10px; }
+  #toolbar-border-box { top: 90px; background-origin: border-box; }
 </style>
 <div id="panel">
   <div class="bar" id="padding"></div>
   <div class="bar" id="border"></div>
   <div class="bar" id="norepeat"></div>
+</div>
+<div class="panel" id="page">
+  <div class="header" id="header"></div>
+  <div class="header" id="header-border-box"></div>
+</div>
+<div class="panel" id="canvas">
+  <div class="toolbar" id="toolbar"></div>
+  <div class="toolbar" id="toolbar-border-box"></div>
 </div>
