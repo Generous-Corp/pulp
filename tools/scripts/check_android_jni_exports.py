@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that the native libraries export every JNI method the Android app declares.
 
-    check_android_jni_exports.py --sources android/app/src/main --apk app-debug.apk
+    check_android_jni_exports.py --sources android/app/src/main --apk app-debug.apk [--require-abi arm64-v8a ...]
     check_android_jni_exports.py --sources android/app/src/main --lib libpulp.so [--lib ...]
 
 Every Kotlin `external fun` and Java `native` method under --sources binds by
@@ -12,7 +12,9 @@ in the .so calls is dropped, the build stays green, and Java's first call
 throws UnsatisfiedLinkError. This check reads each library's ELF dynamic
 symbol table directly (no NDK tools) and fails on any declared native that no
 library exports. With --apk, every `lib/<abi>/libpulp.so` in the APK is
-checked on its own: each ABI must carry the full set.
+checked on its own: each ABI must carry the full set, and each --require-abi
+must be present (an APK that silently lost an ABI would otherwise check fewer
+libraries and still pass).
 
 Exit status: 0 when every native is exported, 1 when one is missing, 2 on a
 usage or input error (no natives found, no library, unreadable ELF).
@@ -104,9 +106,13 @@ def main() -> int:
     parser.add_argument("--sources", type=Path, required=True, help="the app's src/main directory")
     parser.add_argument("--apk", type=Path, help="check every lib/<abi>/libpulp.so in this APK")
     parser.add_argument("--lib", type=Path, action="append", default=[], help="a native library (repeatable)")
+    parser.add_argument("--require-abi", action="append", default=[],
+                        help="with --apk: an ABI whose lib/<abi>/libpulp.so must be present (repeatable)")
     args = parser.parse_args()
     if not args.apk and not args.lib:
         parser.error("give --apk or at least one --lib")
+    if args.require_abi and not args.apk:
+        parser.error("--require-abi applies to --apk")
     files = sorted(p for p in args.sources.rglob("*") if p.suffix in (".kt", ".java"))
     natives = sorted({n for f in files for n in declared_natives(f)})
     if not natives:
@@ -122,6 +128,10 @@ def main() -> int:
             if not entries:
                 print(f"error: {args.apk} carries no lib/<abi>/libpulp.so", file=sys.stderr)
                 return 2
+            missing_abis = [abi for abi in args.require_abi if f"lib/{abi}/libpulp.so" not in entries]
+            if missing_abis:
+                print(f"FAIL {args.apk}: no libpulp.so for required ABI(s) {', '.join(missing_abis)}")
+                return 1
         if args.lib:
             groups[" + ".join(str(p) for p in args.lib)] = set().union(*(elf_exports(p.read_bytes())
                                                                        for p in args.lib))

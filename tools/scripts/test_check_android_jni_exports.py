@@ -59,8 +59,8 @@ EXPECTED = [
 ]
 
 
-def elf_so(exports: list[str], hidden: list[str] = ()) -> bytes:
-    names = [*exports, *hidden]
+def elf_so(exports: list[str], hidden: list[str] = (), undefined: list[str] = ()) -> bytes:
+    names = [*exports, *hidden, *undefined]
     dynstr, offsets = b"\0", {}
     for n in names:
         offsets[n] = len(dynstr)
@@ -68,6 +68,8 @@ def elf_so(exports: list[str], hidden: list[str] = ()) -> bytes:
     syms = struct.pack("<IBBHQQ", 0, 0, 0, 0, 0, 0)
     syms += b"".join(struct.pack("<IBBHQQ", offsets[n], 0x12, 0, 1, 0x1000, 4) for n in exports)
     syms += b"".join(struct.pack("<IBBHQQ", offsets[n], 0x12, 2, 1, 0x1000, 4) for n in hidden)
+    # An undefined reference: GLOBAL, default visibility, section index 0.
+    syms += b"".join(struct.pack("<IBBHQQ", offsets[n], 0x12, 0, 0, 0, 0) for n in undefined)
     shstr = b"\0.dynstr\0.dynsym\0.shstrtab\0"
     body = dynstr + b"\0" * (-len(dynstr) % 8)
     sym_at = 64 + len(body)
@@ -102,9 +104,9 @@ class CheckAndroidJniExportsTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(SCRIPT), "--sources", str(self.sources), *args],
                               capture_output=True, text=True, encoding="utf-8")
 
-    def lib(self, name: str, exports: list[str], hidden: list[str] = ()) -> Path:
+    def lib(self, name: str, exports: list[str], hidden: list[str] = (), undefined: list[str] = ()) -> Path:
         path = self.root / name
-        path.write_bytes(elf_so(exports, hidden))
+        path.write_bytes(elf_so(exports, hidden, undefined))
         return path
 
     def test_declarations_bind_to_the_jni_names_the_vm_looks_up(self):
@@ -127,6 +129,23 @@ class CheckAndroidJniExportsTest(unittest.TestCase):
         res = self.run_checker("--lib", str(lib))
         self.assertEqual(res.returncode, 1)
         self.assertIn(EXPECTED[0], res.stdout)
+
+    def test_an_undefined_reference_is_not_an_export(self):
+        # A library that only references a JNI name (another library defines
+        # it) lists it in .dynsym with section index 0; that is not an export.
+        lib = self.lib("libpulp.so", EXPECTED[1:], undefined=EXPECTED[:1])
+        res = self.run_checker("--lib", str(lib))
+        self.assertEqual(res.returncode, 1)
+        self.assertIn(EXPECTED[0], res.stdout)
+
+    def test_a_required_abi_missing_from_the_apk_fails(self):
+        apk = self.root / "app.apk"
+        with zipfile.ZipFile(apk, "w") as z:
+            z.writestr("lib/arm64-v8a/libpulp.so", elf_so(EXPECTED))
+        res = self.run_checker("--apk", str(apk), "--require-abi", "arm64-v8a", "--require-abi", "x86_64")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("required ABI(s) x86_64", res.stdout)
+        self.assertEqual(self.run_checker("--apk", str(apk), "--require-abi", "arm64-v8a").returncode, 0)
 
     def test_natives_may_be_split_across_libraries(self):
         res = self.run_checker("--lib", str(self.lib("a.so", EXPECTED[:2])),

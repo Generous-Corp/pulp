@@ -168,7 +168,8 @@ jobs:
         run: |
           python3 tools/scripts/check_android_jni_exports.py \
             --sources android/app/src/main \
-            --apk android/app/build/outputs/apk/debug/app-debug.apk
+            --apk android/app/build/outputs/apk/debug/app-debug.apk \
+            --require-abi arm64-v8a
 
       # Always upload APK + Gradle/NDK logs so a failed "Verify APK"
       # step (historically flaky on windows-latest — #403, #418) can
@@ -279,7 +280,7 @@ jobs:
         run: ./gradlew --no-daemon --max-workers=2 :app:connectedBleMidiValidationAndroidTest
 
       - name: Verify the APK exports every declared JNI native
-        run: python3 tools/scripts/check_android_jni_exports.py --sources android/app/src/main --apk app-debug.apk
+        run: python3 tools/scripts/check_android_jni_exports.py --sources android/app/src/main --apk app-debug.apk --require-abi arm64-v8a
 
       # On a freshly booted emulator the app receives a MIDI device-removed
       # callback within its first second, which calls the MIDI natives; an
