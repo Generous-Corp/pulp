@@ -64,7 +64,7 @@ on:
       libfuzzer_seconds:
         description: 'libFuzzer wall-clock budget per target, in seconds'
         required: false
-        default: '900'
+        default: '600'
 
 concurrency:
   group: timeline-fuzz-${{ github.ref }}
@@ -129,9 +129,10 @@ jobs:
       (github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp')
       && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    # Eight targets at the default 900 s budget each is two hours of fuzzing
-    # on top of the build; the ceiling leaves room for the build and the
-    # smoke without masking a wedged target.
+    # Eight targets at the default 600 s budget each is eighty minutes of
+    # fuzzing; the rest of the ceiling covers the ASan build and the smoke on
+    # a four-core hosted runner, so a wedged target still fails with its
+    # reproducer uploaded rather than at the job timeout.
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
@@ -201,21 +202,21 @@ jobs:
         run: |
           ./build-libfuzzer/test/pulp-fuzz-timeline-document \
             fuzz-corpus/timeline \
-            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 600 }} \
             -max_len=1048576 \
             -rss_limit_mb=2048 \
             -timeout=25 \
             -print_final_stats=1
           ./build-libfuzzer/test/pulp-fuzz-control-protocol \
             fuzz-corpus/control-protocol \
-            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 600 }} \
             -max_len=1048576 \
             -rss_limit_mb=2048 \
             -timeout=25 \
             -print_final_stats=1
           ./build-libfuzzer/test/pulp-fuzz-plugin-state \
             fuzz-corpus/plugin-state \
-            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 600 }} \
             -max_len=1048576 \
             -rss_limit_mb=2048 \
             -timeout=25 \
@@ -225,35 +226,35 @@ jobs:
           # libFuzzer timeout.
           ./build-libfuzzer/test/pulp-fuzz-ui-script \
             fuzz-corpus/ui-script test/fixtures/fuzz/ui-script \
-            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 600 }} \
             -max_len=16384 \
             -rss_limit_mb=2048 \
             -timeout=25 \
             -print_final_stats=1
           ./build-libfuzzer/test/pulp-fuzz-svg \
             fuzz-corpus/svg test/fixtures/fuzz/svg \
-            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 600 }} \
             -max_len=262144 \
             -rss_limit_mb=2048 \
             -timeout=25 \
             -print_final_stats=1
           ./build-libfuzzer/test/pulp-fuzz-smf \
             fuzz-corpus/smf test/fixtures/fuzz/smf \
-            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 600 }} \
             -max_len=1048576 \
             -rss_limit_mb=2048 \
             -timeout=25 \
             -print_final_stats=1
           ./build-libfuzzer/test/pulp-fuzz-content-manifest \
             fuzz-corpus/content-manifest test/fixtures/fuzz/content-manifest \
-            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 600 }} \
             -max_len=262144 \
             -rss_limit_mb=2048 \
             -timeout=25 \
             -print_final_stats=1
           ./build-libfuzzer/test/pulp-fuzz-format-registry \
             fuzz-corpus/format-registry \
-            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 600 }} \
             -max_len=1048576 \
             -rss_limit_mb=2048 \
             -timeout=25 \
