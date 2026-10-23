@@ -2676,6 +2676,9 @@ commands:
       - name: --no-load
         kind: flag
         description: Compatibility no-op on the Rust front end because it is already filesystem-only; on pulp-cpp, skip dlopen and use filename-derived enumeration when rich scanning crashes while loading malformed plug-ins.
+      - name: --in-process
+        kind: flag
+        description: "pulp-cpp only: run each CLAP bundle's entry point in the scanning process instead of a disposable pulp-scan-worker child. By default a crashing or hanging bundle is skipped and recorded in the scan blacklist; when no worker is found (beside the executable or via PULP_SCAN_WORKER) CLAP bundles are not enumerated and the command says so, since only this flag may run their code in-process."
     docs: reference/cli.md#scan
 
   - name: host

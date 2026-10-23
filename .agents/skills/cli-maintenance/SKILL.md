@@ -606,6 +606,30 @@ performs signature/trust and bounded-parse checks only; it never executes Custom
 code or restores state. `--no-mint` is the non-interactive guard that refuses an
 absent signing key instead of silently creating a new identity.
 
+`pulp bake` never loads a plugin: `cmd_bake.cpp` passes
+`GraphLoadOptions::load_plugins = false`, because the lowerability check
+refuses hosted Plugin nodes anyway and loading one first would run whatever
+library the graph file names, for nothing. There is deliberately no
+`--allow-path` flag on bake (it could never produce a successful bake), and
+`pulp host <path>` needs none either, since its positional path *is* the
+operator's explicit choice. `pulp scan --in-process` is the only way CLAP
+entry points run in the scanning process: by default `PluginScanner::scan`
+runs each `.clap` in a `pulp-scan-worker` child, found beside the executable
+(an installed SDK's `bin/`, or `tools/scan-worker/` in a build tree) or via
+`PULP_SCAN_WORKER`, and when no worker exists CLAP is **skipped**, not scanned
+in-process; `cmd_scan` reads `scan_report()` and prints the "pass
+`--in-process`" guidance to stderr. Both behaviours are `pulp-cpp`-side; the
+Rust front end forwards `bake` arguments untouched, while its own `scan` is
+filesystem-only and never reaches the worker.
+
+`tools/cli` is configured only when `PULP_ENABLE_GPU` is ON (root
+`CMakeLists.txt`), so a GPU-off worktree has no `pulp-cli` target at all and
+`cmake --build build --target pulp-cli` fails with "unknown target". To
+compile-check a CLI edit there, run the compiler with `-fsyntax-only` using
+the `FLAGS`/`DEFINES`/`INCLUDES` of a sibling target that links `pulp::host`
+(for example `pulp-scan-worker`'s rule in `build/build.ninja`) plus
+`-Itools/cli`; the real link still happens on the GPU-enabled `macos` gate.
+
 Stateful Custom records persist the graph's authored/staged
 `custom_state_blob`, not a live instance's `save_state()` result. This is a
 load-bearing realtime boundary: bake may run while the graph processes, and the

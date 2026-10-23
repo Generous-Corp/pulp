@@ -3181,6 +3181,10 @@
           {
             "name": "--no-load",
             "kind": "flag"
+          },
+          {
+            "name": "--in-process",
+            "kind": "flag"
           }
         ],
         "subcommands": []
