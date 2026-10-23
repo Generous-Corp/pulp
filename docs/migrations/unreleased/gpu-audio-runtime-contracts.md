@@ -140,12 +140,13 @@ reports its default until the node in question supplies it.
   counts an invalid or out-of-sequence callback in
   `callback_contract_violations()` instead of latching a recovery reason, so it
   stays `Ready`.
-- **The WaveNet GPU path now actually prepares.** Before this batch, a
-  WaveNet node built with a GPU session always fell back to its CPU model and
-  reported `Degraded` with `ProviderFailure`, even where the session could be
-  created. This batch is the first in which the neural node's GPU path runs
-  on hardware. Expect `Ready` on the GPU engine where Dawn is available, and
-  re-check any measurements or expectations taken against the CPU fallback.
+- **The WaveNet GPU path is reachable, and prepares, for the first time.**
+  Before this release the neural node's WaveNet GPU path could not be reached
+  through the public API: `GpuNeuralModel` was only forward-declared, and its
+  internal builder had a prepare bug that would have left the node on its CPU
+  model. This release adds the public `make_gpu_neural_model()` factory with
+  the fix, plus hardware evidence. Where Dawn is available, a WaveNet node
+  built with a GPU session reports `Ready` on the GPU engine.
 
 ### Neural shadow placement
 
