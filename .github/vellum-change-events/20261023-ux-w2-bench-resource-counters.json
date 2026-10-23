@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "event_id": "20261023-ux-w2-bench-resource-counters",
+  "kind": "change",
+  "created_at": "2026-10-23T02:37:33Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); the Skia canvas counts the resource work it does beneath the Canvas API in process-wide relaxed atomics declared in pulp/canvas/resource_counters.hpp: every encoded-image decode site (inline bytes, cached files, static data, pattern fills, mask images) and both GPU upload paths route through skia_resource_counting.hpp, and make_paragraph counts each SkParagraph build. Counting adds one relaxed increment per decode, upload or build and changes no drawing, caching or upload behaviour; no public API is removed and no design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'design-import benchmark Graphite lane counts GPU uploads'",
+    "ctest --test-dir build -R 'design-import benchmark Skia lane counts per-frame resource work'",
+    "ctest --test-dir build -R 'design-import benchmark Skia lane counts scene-cache records and replays'",
+    "ctest --test-dir build -R 'design-import benchmark steady-state gate fails a planted per-frame decode'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

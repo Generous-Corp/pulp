@@ -182,8 +182,14 @@ def _is_inert(path: str) -> bool:
 def _prefetch(ctx: _Context, stems: set[str]) -> bool:
     """Fill the referrer cache for ``stems`` with ONE git grep; False on error.
 
-    ``git grep -l -w -F -f`` finds every tracked file naming any of the stems
-    in a single pass; the per-stem attribution then reads only those files.
+    ``git grep -l -F -f`` finds every tracked file containing any of the stems
+    in a single pass; the per-stem attribution then reads only those files and
+    applies the word boundary itself. The boundary is deliberately NOT asked of
+    git: ``-w`` with many fixed strings retries every partial match at every
+    position, and a set holding short common stems (``core``, ``gates``)
+    against a tree with long lines of them ran for minutes, where the
+    unbounded search takes seconds and returns a superset the boundary below
+    narrows to the same answer.
     """
     pending = sorted(s for s in stems if s not in ctx.referrer_cache)
     if not pending:
@@ -192,7 +198,7 @@ def _prefetch(ctx: _Context, stems: set[str]) -> bool:
         return False
     ctx.grep_calls += 1
     proc = subprocess.run(
-        ["git", "grep", "-l", "-w", "-F", "-f", "-"],
+        ["git", "grep", "-l", "-F", "-f", "-"],
         cwd=ctx.repo,
         input="\n".join(pending) + "\n",
         capture_output=True,
@@ -202,19 +208,23 @@ def _prefetch(ctx: _Context, stems: set[str]) -> bool:
     # git grep exits 1 when nothing matches; anything else is an error.
     if proc.returncode not in (0, 1):
         return False
-    word = re.compile(
-        rb"(?<![A-Za-z0-9_])("
-        + b"|".join(re.escape(s.encode()) for s in pending)
-        + rb")(?![A-Za-z0-9_])"
-    )
+    # One bounded pattern per stem, tried only on files that contain the stem
+    # at all: a substring test is a fast scan, while a single alternation of
+    # every stem with look-arounds re-tests each stem at every position.
+    bounded = {
+        s: re.compile(rb"(?<![A-Za-z0-9_])" + re.escape(s.encode())
+                      + rb"(?![A-Za-z0-9_])")
+        for s in pending
+    }
     found: dict[str, list[str]] = {s: [] for s in pending}
     for rel in proc.stdout.splitlines():
         try:
             data = (ctx.repo / rel).read_bytes()
         except OSError:
             return False
-        for stem in {m.decode() for m in word.findall(data)}:
-            found[stem].append(rel)
+        for stem, pattern in bounded.items():
+            if stem.encode() in data and pattern.search(data):
+                found[stem].append(rel)
     ctx.referrer_cache.update(found)
     return True
 

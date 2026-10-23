@@ -31,5 +31,12 @@
   "npm_prefixes": [
     "tools/import-design/jsx-runtime",
     "tools/scripts"
+  ],
+  "rust_components": [
+    "rustfmt",
+    "clippy"
+  ],
+  "rust_targets": [
+    "x86_64-apple-darwin"
   ]
 }

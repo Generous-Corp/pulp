@@ -560,6 +560,27 @@ TEST_CASE("default layout keeps Yoga's whole-pixel grid rounding",
     REQUIRE(b.height == std::round(b.height));
 }
 
+TEST_CASE("setCapturedFrameRoot marks the captured frame and nothing else",
+          "[view][bridge][layout][typography]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 100, 100});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        setSubpixelLayout('', true);
+        createPanel('card', '');
+        setCapturedFrameRoot('card', true);
+    )");
+    // Sub-pixel layout alone does not make a captured frame.
+    CHECK(root.subpixel_layout());
+    CHECK_FALSE(root.captured_frame_root());
+    CHECK(bridge.widget("card")->captured_frame_root());
+    bridge.load_script("setCapturedFrameRoot('', true); setCapturedFrameRoot('card', false);");
+    CHECK(root.captured_frame_root());
+    CHECK_FALSE(bridge.widget("card")->captured_frame_root());
+}
+
 TEST_CASE("setSubpixelLayout preserves fractional solved geometry pass-wide",
           "[view][bridge][layout][subpixel]") {
     ScriptEngine engine;

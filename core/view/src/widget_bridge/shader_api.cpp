@@ -1,6 +1,8 @@
 // widget_bridge/shader_api.cpp - shader registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/chart_shader_presets.hpp>
+#include <pulp/view/css_gradient.hpp>
 #include <pulp/view/custom_shader_host.hpp>
 #include "api_registry.hpp"
 
@@ -271,6 +273,63 @@ std::string emit_geometry_expression(
         return "pulp_smooth_subtract(" + left + "," + right + "," + k + ")";
     error = "Unknown shader geometry operator '" + op + "'";
     return {};
+}
+
+// Reads a chart preset's options object. Every key is optional; a key that is
+// present but unreadable is an error rather than a silent default, so a typo'd
+// colour does not quietly paint the preset's default grey.
+std::string parse_chart_preset_options(const choc::value::ValueView& value,
+                                       ChartShaderPresetOptions& out) {
+    if (value.isVoid())
+        return {};
+    if (!value.isObject())
+        return "Chart preset options must be an object";
+    std::string error;
+    value.visitObjectMembers([&](std::string_view key, const choc::value::ValueView& v) {
+        if (!error.empty())
+            return;
+        const std::string name(key);
+        auto number = [&](float& slot) {
+            if (!v.isInt() && !v.isFloat())
+                error = "Chart preset option '" + name + "' must be a number";
+            else
+                slot = static_cast<float>(v.getWithDefault<double>(0.0));
+        };
+        auto color = [&](canvas::Color& slot) {
+            const auto text = v.isString() ? v.getWithDefault<std::string>("") : std::string();
+            if (!css_color_syntax_supported(text))
+                error = "Chart preset option '" + name + "' must be a CSS colour string";
+            else
+                slot = parse_css_color(text);
+        };
+        if (name == "color")
+            color(out.color);
+        else if (name == "accent")
+            color(out.accent);
+        else if (name == "light")
+            number(out.light_angle_deg);
+        else if (name == "elevation")
+            number(out.light_elevation_deg);
+        else if (name == "bevelWidth")
+            number(out.bevel_width);
+        else if (name == "intensity")
+            number(out.intensity);
+        else if (name == "sigma")
+            number(out.glow_sigma);
+        else if (name == "pressed") {
+            if (!v.isBool())
+                error = "Chart preset option 'pressed' must be a boolean";
+            else
+                out.pressed = v.getWithDefault<bool>(false);
+        } else if (name == "profile") {
+            if (!v.isString() ||
+                !parse_chart_profile(v.getWithDefault<std::string>(""), out.profile))
+                error = "Chart preset option 'profile' must be 'round', 'flat' or 'chamfer'";
+        } else {
+            error = "Unknown chart preset option '" + name + "'";
+        }
+    });
+    return error;
 }
 
 } // namespace
@@ -648,6 +707,54 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         self.request_repaint();
         return shader_result(true, "");
     });
+
+    // getShaderChartPreset(name, options?) -> {success, error, sksl, reach}
+    // Returns a named preset's chart shader source with its options baked in,
+    // for inspection, editing, or a later setWidgetShaderChart.
+    register_bridge_function(api, "getShaderChartPreset", [](choc::javascript::ArgumentList args) {
+        ChartShaderPresetOptions options;
+        auto error = args.numArgs > 1 && args[1] != nullptr
+                         ? parse_chart_preset_options(*args[1], options)
+                         : std::string();
+        const auto preset = error.empty()
+                                ? make_chart_shader_preset(args.get<std::string>(0, ""), options)
+                                : ChartShaderPreset{};
+        if (error.empty())
+            error = preset.error;
+        auto result = shader_result(error.empty(), error);
+        result.addMember("sksl", choc::value::createString(preset.sksl));
+        result.addMember("reach", choc::value::createFloat64(preset.reach));
+        return result;
+    });
+
+    // setWidgetShaderChartPreset(id, name, options?) -> {success, error}
+    // Installs a named preset as the widget's chart shader, exactly as
+    // setWidgetShaderChart would install its source, together with the reach
+    // the preset needs (a glow's halo), which pads only the chart draw.
+    register_bridge_function(
+        api, "setWidgetShaderChartPreset", [&self](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto* v = self.widget(id);
+            auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
+            if (!host)
+                return shader_result(false, v ? "Widget does not support custom shaders"
+                                              : "No widget with id '" + id + "'");
+            ChartShaderPresetOptions options;
+            if (args.numArgs > 2 && args[2] != nullptr) {
+                if (auto error = parse_chart_preset_options(*args[2], options); !error.empty())
+                    return shader_result(false, error);
+            }
+            auto preset = make_chart_shader_preset(args.get<std::string>(1, ""), options);
+            if (!preset.error.empty())
+                return shader_result(false, preset.error);
+            auto error = canvas::Canvas::compile_sdf_chart_sksl(canvas::Canvas::SDFShape::flat_arc,
+                                                                preset.sksl);
+            if (!error.empty())
+                return shader_result(false, error);
+            host->set_chart_shader(std::move(preset.sksl), preset.reach);
+            self.request_repaint();
+            return shader_result(true, "");
+        });
 
     // clearWidgetShader(id) -> {success: bool, error: string}
     // Removes the custom shader and restores the default C++ paint path.
