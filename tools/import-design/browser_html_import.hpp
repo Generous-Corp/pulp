@@ -40,6 +40,10 @@ struct BrowserHtmlImportRequest {
     /// Fail validation when materialized canvas evidence is completely
     /// transparent. Only meaningful with materialized canvas composition.
     bool require_canvas_ink = false;
+    /// The executable document is the input of `--emit materialized-runtime`
+    /// and nothing else; every other emit leaves it uncaptured rather than
+    /// serializing, hashing and publishing megabytes nobody reads.
+    bool capture_materialized_document = true;
 };
 
 struct BrowserHtmlNotApplicable {};

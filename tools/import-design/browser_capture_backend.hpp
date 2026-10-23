@@ -203,6 +203,8 @@ struct CaptureRequest {
     // Derive one viewport from the authored root, reload the same target once,
     // and require the root to be a contained fixed point at that viewport.
     bool fit_authored_frame = false;
+    // Read the page's executable materialized document into the capture.
+    bool capture_materialized_document = true;
 };
 
 struct CaptureArtifacts {

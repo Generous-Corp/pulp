@@ -138,6 +138,7 @@ BrowserHtmlImportResult import_browser_html(
     capture.interaction_plan = request.browser_interactions;
     capture.fit_authored_frame = request.fit_authored_frame;
     capture.allow_network = request.allow_browser_network;
+    capture.capture_materialized_document = request.capture_materialized_document;
 
     std::error_code ec;
     const auto executable =

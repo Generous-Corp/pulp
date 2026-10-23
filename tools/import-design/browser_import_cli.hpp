@@ -51,6 +51,10 @@ struct BrowserImportCliRequest {
     /// explicit --validate request to additionally publish convenience render
     /// and diff files beside the primary output.
     bool validate = false;
+    /// The executable document is the input of `--emit materialized-runtime`
+    /// and nothing else; every other emit leaves it uncaptured rather than
+    /// serializing, hashing and publishing megabytes nobody reads.
+    bool capture_materialized_document = true;
 };
 
 /// Reject browser-specific CLI options before a non-browser command path can
