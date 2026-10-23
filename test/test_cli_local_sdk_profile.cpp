@@ -293,8 +293,9 @@ TEST_CASE("forge development SDK validation rejects a shell exec bridge in the a
     };
 
     // Control: the planted cache says OFF, so nothing below fails for another reason.
-    REQUIRE(local_sdk::validate_staged_install(prefix, build, expected,
-                                               "/source/external/skia-build").ok);
+    REQUIRE(
+        local_sdk::validate_staged_install(prefix, build, expected, "/source/external/skia-build")
+            .ok);
 
     auto cache = read_file(build / "CMakeCache.txt");
     const auto off = cache.find("PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n");
@@ -348,22 +349,21 @@ local_sdk::Identity trace_identity() {
 // the runtime archive carries the retained ship sentinel that
 // `core/runtime/src/trace.cpp` emits only under PULP_TRACING.
 void plant_tracing_evidence(const fs::path& prefix, const fs::path& build) {
-    auto cache = std::string(
-        "CMAKE_BUILD_TYPE:STRING=Release\n"
-        "CMAKE_OSX_ARCHITECTURES:STRING=arm64\n"
-        "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n"
-        "SKIA_DIR:PATH=/source/external/skia-build\n"
-        "PULP_ENABLE_GPU:BOOL=ON\n"
-        "PULP_HAS_SKIA:INTERNAL=TRUE\n"
-        "PULP_ENABLE_DESIGN_IMPORT:BOOL=ON\n"
-        "PULP_BUILD_WEBVIEW:BOOL=ON\n"
-        "PULP_HAS_VST3:INTERNAL=TRUE\n"
-        "PULP_HAS_AUSDK:INTERNAL=TRUE\n"
-        "PULP_HAS_CLAP:INTERNAL=TRUE\n"
-        "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
-        "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
-        "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"
-        "PULP_TRACING:BOOL=ON\n");
+    auto cache = std::string("CMAKE_BUILD_TYPE:STRING=Release\n"
+                             "CMAKE_OSX_ARCHITECTURES:STRING=arm64\n"
+                             "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n"
+                             "SKIA_DIR:PATH=/source/external/skia-build\n"
+                             "PULP_ENABLE_GPU:BOOL=ON\n"
+                             "PULP_HAS_SKIA:INTERNAL=TRUE\n"
+                             "PULP_ENABLE_DESIGN_IMPORT:BOOL=ON\n"
+                             "PULP_BUILD_WEBVIEW:BOOL=ON\n"
+                             "PULP_HAS_VST3:INTERNAL=TRUE\n"
+                             "PULP_HAS_AUSDK:INTERNAL=TRUE\n"
+                             "PULP_HAS_CLAP:INTERNAL=TRUE\n"
+                             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
+                             "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
+                             "PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n"
+                             "PULP_TRACING:BOOL=ON\n");
     write_file(build / "CMakeCache.txt", cache);
     write_file(prefix / "lib/cmake/Pulp/PulpTargets.cmake",
                "Pulp::format Pulp::standalone Pulp::render Pulp::clap Pulp::vst3-sdk "

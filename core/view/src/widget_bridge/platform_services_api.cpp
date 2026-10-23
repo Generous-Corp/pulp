@@ -19,7 +19,8 @@
 // this translation unit also carries the always-present AI, dialog and clipboard
 // registrars, so a static-archive link would pull the shell body in with them.
 #ifndef PULP_BRIDGE_EXEC_ENABLED
-#error "PULP_BRIDGE_EXEC_ENABLED is not defined; core/view/cmake/PulpViewJsEngines.cmake sets it from PULP_DEV_BRIDGE_EXEC"
+#error                                                                                             \
+    "PULP_BRIDGE_EXEC_ENABLED is not defined; core/view/cmake/PulpViewJsEngines.cmake sets it from PULP_DEV_BRIDGE_EXEC"
 #endif
 
 namespace pulp::view {

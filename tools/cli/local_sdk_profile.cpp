@@ -227,30 +227,19 @@ std::vector<std::string> configure_arguments(const fs::path& source, const fs::p
                                              const fs::path& install_prefix,
                                              const Identity& identity,
                                              const std::optional<fs::path>& node_runtime) {
-    std::vector<std::string> args{"cmake",
-            "-S",
-            source.string(),
-            "-B",
-            build.string(),
-            "-DCMAKE_BUILD_TYPE=Release",
-            "-DCMAKE_C_COMPILER=/usr/bin/clang",
-            "-DCMAKE_CXX_COMPILER=/usr/bin/clang++",
-            "-DCMAKE_INSTALL_PREFIX=" + install_prefix.string(),
-            "-DCMAKE_OSX_DEPLOYMENT_TARGET=" + identity.deployment_target,
-            "-DSKIA_DIR=" + (source / "external" / "skia-build").string(),
-            "-DPULP_MACOS_ARCH=arm64",
-            "-DPULP_ENABLE_GPU=ON",
-            "-DPULP_REQUIRE_GPU_FOR_SDK=ON",
-            "-DPULP_ENABLE_DESIGN_IMPORT=ON",
-            "-DPULP_BUILD_WEBVIEW=ON",
-            "-DPULP_ENABLE_AUDIO_PROBES=OFF",
-            "-DPULP_ENABLE_INSPECTOR=OFF",
-            "-DPULP_BUILD_TESTS=OFF",
-            "-DPULP_BUILD_EXAMPLES=OFF",
-            // Tests OFF already implies this; it is passed explicitly because the
-            // staged-install validator asserts the cache value, and a consumer
-            // reads the matching `bridge_exec` provenance key.
-            "-DPULP_DEV_BRIDGE_EXEC=OFF"};
+    std::vector<std::string> args{
+        "cmake", "-S", source.string(), "-B", build.string(), "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_C_COMPILER=/usr/bin/clang", "-DCMAKE_CXX_COMPILER=/usr/bin/clang++",
+        "-DCMAKE_INSTALL_PREFIX=" + install_prefix.string(),
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=" + identity.deployment_target,
+        "-DSKIA_DIR=" + (source / "external" / "skia-build").string(), "-DPULP_MACOS_ARCH=arm64",
+        "-DPULP_ENABLE_GPU=ON", "-DPULP_REQUIRE_GPU_FOR_SDK=ON", "-DPULP_ENABLE_DESIGN_IMPORT=ON",
+        "-DPULP_BUILD_WEBVIEW=ON", "-DPULP_ENABLE_AUDIO_PROBES=OFF", "-DPULP_ENABLE_INSPECTOR=OFF",
+        "-DPULP_BUILD_TESTS=OFF", "-DPULP_BUILD_EXAMPLES=OFF",
+        // Tests OFF already implies this; it is passed explicitly because the
+        // staged-install validator asserts the cache value, and a consumer
+        // reads the matching `bridge_exec` provenance key.
+        "-DPULP_DEV_BRIDGE_EXEC=OFF"};
     if (identity.tracing) {
         // Deliberately the SAME feature set as forge-dev, plus Perfetto. A
         // traced SDK built with GPU or design-import off would produce traces
@@ -313,7 +302,8 @@ Validation validate_staged_install(const fs::path& prefix, const fs::path& build
     require(cache.find("PULP_DEV_BRIDGE_EXEC") != cache.end() &&
                 !cache_true(cache, "PULP_DEV_BRIDGE_EXEC"),
             "the shell exec/execAsync JS bridge must be compiled out of the SDK "
-            "(PULP_DEV_BRIDGE_EXEC missing or ON)", out);
+            "(PULP_DEV_BRIDGE_EXEC missing or ON)",
+            out);
 
     // Tracing is checked in BOTH directions, and that symmetry is the point.
     //
@@ -365,7 +355,8 @@ std::string serialize_provenance(const Identity& i, const std::string& fingerpri
         << "  \"schema\": " << json_string(kProvenanceSchema) << ",\n"
         << "  \"kind\": \"development\",\n"
         << "  \"profile\": " << json_string(profile_name_for(i)) << ",\n"
-        << "  \"profile_revision\": " << profile_revision_for(i) << ",\n"
+        << "  \"profile_revision\": " << profile_revision_for(i)
+        << ",\n"
         // Always false, for both profiles. PulpSdkProvenance.cmake fails closed
         // on a development SDK that claims eligibility, and a traced SDK must
         // never be distributable under any circumstances.
@@ -380,20 +371,20 @@ std::string serialize_provenance(const Identity& i, const std::string& fingerpri
         << "  \"generator\": " << json_string(i.generator) << ",\n"
         << "  \"compiler\": " << json_string(i.compiler) << ",\n"
         << "  \"macos_sdk\": " << json_string(i.macos_sdk) << ",\n"
-        << "  \"deployment_target\": " << json_string(i.deployment_target) << ",\n"
+        << "  \"deployment_target\": " << json_string(i.deployment_target)
+        << ",\n"
         // `bridge_exec` is always false: both profiles configure with
         // PULP_DEV_BRIDGE_EXEC=OFF and the staged-install validator proves it,
         // so a downstream consumer can assert the shell bridge is absent from
         // the archive without opening it. The traced variant adds the one key
         // that distinguishes it. Adding a feature key changes this exact text,
         // which is why each profile revision moved when it arrived.
-        << (i.tracing
-                ? "  \"features\": {\"gpu\": true, \"design_import\": true, "
-                  "\"webview\": true, \"audio_probes\": false, \"inspector\": false, "
-                  "\"bridge_exec\": false, \"tracing\": true},\n"
-                : "  \"features\": {\"gpu\": true, \"design_import\": true, "
-                  "\"webview\": true, \"audio_probes\": false, \"inspector\": false, "
-                  "\"bridge_exec\": false},\n")
+        << (i.tracing ? "  \"features\": {\"gpu\": true, \"design_import\": true, "
+                        "\"webview\": true, \"audio_probes\": false, \"inspector\": false, "
+                        "\"bridge_exec\": false, \"tracing\": true},\n"
+                      : "  \"features\": {\"gpu\": true, \"design_import\": true, "
+                        "\"webview\": true, \"audio_probes\": false, \"inspector\": false, "
+                        "\"bridge_exec\": false},\n")
         << "  \"formats\": {\"AU\": true, \"VST3\": true, \"CLAP\": true, "
            "\"Standalone\": true},\n"
         << "  \"dependencies\": {\"skia\": " << json_string(i.skia_identity)

@@ -17,7 +17,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #ifndef PULP_BRIDGE_EXEC_ENABLED
-#error "PULP_BRIDGE_EXEC_ENABLED must mirror PULP_DEV_BRIDGE_EXEC; see test/cmake/view_widget_bridge_tests.cmake"
+#error                                                                                             \
+    "PULP_BRIDGE_EXEC_ENABLED must mirror PULP_DEV_BRIDGE_EXEC; see test/cmake/view_widget_bridge_tests.cmake"
 #endif
 
 #include <pulp/view/reload_capabilities.hpp>
@@ -82,7 +83,7 @@ TEST_CASE("capability gates are independent — Filesystem does not grant Exec",
 #if PULP_BRIDGE_EXEC_ENABLED
     REQUIRE(typeof_global(ex, "exec") == "function");            // granted
 #else
-    REQUIRE(typeof_global(ex, "exec") == "undefined");           // granted, but not compiled in
+    REQUIRE(typeof_global(ex, "exec") == "undefined"); // granted, but not compiled in
 #endif
     REQUIRE(typeof_global(ex, "setImageSource") == "undefined"); // NOT granted
 }
@@ -136,12 +137,12 @@ TEST_CASE("every gated API group is absent without its capability and present wi
         {ReloadCapability::Filesystem, "showOpenDialog"},
         {ReloadCapability::Filesystem, "__loadAssetSync__"},
         {ReloadCapability::Filesystem, "loadFont"},
-        {ReloadCapability::Storage,    "setWidgetSchema"},
-        {ReloadCapability::Storage,    "storageGetItem"},
-        {ReloadCapability::Ai,         "setAICli"},
-        {ReloadCapability::Clipboard,  "readClipboard"},
+        {ReloadCapability::Storage, "setWidgetSchema"},
+        {ReloadCapability::Storage, "storageGetItem"},
+        {ReloadCapability::Ai, "setAICli"},
+        {ReloadCapability::Clipboard, "readClipboard"},
 #if PULP_BRIDGE_EXEC_ENABLED
-        {ReloadCapability::Exec,       "exec"},
+        {ReloadCapability::Exec, "exec"},
 #endif
     };
 
