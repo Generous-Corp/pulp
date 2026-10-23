@@ -1023,6 +1023,7 @@ DiscoverAndCaptureResult discover_and_capture(
     BrowserProbeFunction probe) {
     DiscoverAndCaptureResult result;
     result.discovery = discover_browser(discovery_options, std::move(probe));
+    result.discovered_at = std::chrono::steady_clock::now();
     if (!result.discovery.selected) {
         result.capture.diagnostic = result.discovery.diagnostic;
         return result;

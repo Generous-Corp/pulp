@@ -4,6 +4,7 @@
 #include "browser_capture_limits.hpp"
 #include "node_runtime.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -229,6 +230,9 @@ CaptureResult capture_document(
 struct DiscoverAndCaptureResult {
     BrowserDiscoveryResult discovery;
     CaptureResult capture;
+    /// When discovery finished and the capture subprocess began, so a caller
+    /// timing the pair can attribute each side separately.
+    std::chrono::steady_clock::time_point discovered_at{};
 
     [[nodiscard]] bool ok() const noexcept {
         return discovery.ok() && capture.ok();

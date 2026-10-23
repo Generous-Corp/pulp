@@ -55,6 +55,7 @@ BrowserHtmlImportResult import_browser_html(
         return BrowserHtmlFailure{
             2, "--require-canvas-ink cannot be combined with --offline", "", {}};
     }
+    BrowserLaneClock clock;
     const auto intake = classify_html_intake(request.input_file, content);
     const auto shape = html_export_shape_name(intake.shape);
     if (!intake.use_browser) return BrowserHtmlNotApplicable{};
@@ -115,6 +116,7 @@ BrowserHtmlImportResult import_browser_html(
             std::move(workspaces)};
     }
     workspaces.push_back(staged.workspace);
+    clock.lap("html-staging");
 
     browser_capture::BrowserDiscoveryOptions discovery;
     discovery.explicit_path = request.browser_executable;
@@ -164,6 +166,8 @@ BrowserHtmlImportResult import_browser_html(
 
     auto captured =
         browser_capture::discover_and_capture(discovery, capture);
+    clock.lap("browser-discovery", captured.discovered_at);
+    clock.lap("browser-capture");
     if (!captured.discovery.ok()) {
         return BrowserHtmlFailure{
             2,
@@ -200,6 +204,7 @@ BrowserHtmlImportResult import_browser_html(
                                       provenance.code + "]: " + provenance.message,
                                   shape, std::move(workspaces)};
     }
+    clock.lap("capture-provenance");
 
     auto lowered = lower_browser_capture_to_ir(
         captured.capture.artifacts->envelope,
@@ -220,6 +225,7 @@ BrowserHtmlImportResult import_browser_html(
             shape,
             std::move(workspaces)};
     }
+    clock.lap("capture-lowering");
     // Give each knob/fader whose author declared an indicator the capture
     // slices needed to clean the frozen instance and move the authored art with
     // the parameter. Fails the
@@ -238,6 +244,7 @@ BrowserHtmlImportResult import_browser_html(
         return BrowserHtmlFailure{
             3, std::move(sprite_error), shape, std::move(workspaces)};
     }
+    clock.lap("control-sprites");
     return BrowserHtmlCaptured{shape,
                                std::move(*lowered.design_ir),
                                capture_directory,
@@ -246,7 +253,8 @@ BrowserHtmlImportResult import_browser_html(
                                lowered.semantic_report,
                                captured.capture.artifacts->materialized_document,
                                std::move(workspaces),
-                               std::move(lowered.warnings)};
+                               std::move(lowered.warnings),
+                               clock.take_stages()};
 }
 
 }  // namespace pulp::import_design
