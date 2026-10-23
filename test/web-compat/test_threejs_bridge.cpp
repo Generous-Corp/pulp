@@ -1316,7 +1316,10 @@ TEST_CASE("Three.js native smoke initializes and renders through the Dawn-backed
                                 globalThis.__phase13BundleStages.push(JSON.stringify({
                                     stage: 'createRenderBundleEncoder',
                                     label: bundleDescriptor && bundleDescriptor.label ? bundleDescriptor.label : ''
-                                }));
+                                }));)JS"
+    // MSVC rejects a single string literal over 16 KB (C2026); adjacent
+    // literals concatenate, so the module is split into two pieces.
+    R"JS(
                             } catch (_) {}
                             const bundleEncoder = originalCreateRenderBundleEncoder(bundleDescriptor);
                             if (!bundleEncoder) {
