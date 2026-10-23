@@ -100,9 +100,12 @@ struct GpuAudioCapabilityValidation {
 /// Known gaps, deliberately not checked because a shipped producer emits the
 /// state today:
 /// - A staged or shared-memory path with `gpu_kernel_available == false`.
-///   `GpuAudioTransport::capability_report()` never sets the field (only its
-///   status carries it), and `GpuNeuralRealtimeNode::capability_report()`
-///   clears it while a backend is quiesced.
+///   A transport reports the kernel only from a node's health sample, so a
+///   staged node with no health hook never reports one. A shared-memory path
+///   also keeps its path after its kernel is gone: GpuConvolver hosted after
+///   a device loss, offline fence or refused block, and
+///   `GpuNeuralRealtimeNode::capability_report()` while its backend is
+///   quiesced.
 /// - A shared-memory path with provider Unknown.
 ///   `GpuNeuralRealtimeNode::capability_report()` reports this while its
 ///   backend runs without an authenticated provider.
