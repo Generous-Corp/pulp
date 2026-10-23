@@ -7402,6 +7402,7 @@
   "pulp-browser-capture-node-integration": {
    "entry": "tools/import-design/browser_capture/run_integration.mjs",
    "inputs": [
+    "tools/import-design/browser_capture/browser_pipe.integration.test.mjs",
     "tools/import-design/browser_capture/capture.integration.test.mjs",
     "tools/import-design/browser_capture/capture_frame_fitting.integration.test.mjs",
     "tools/import-design/browser_capture/capture_geometry.integration.test.mjs",
