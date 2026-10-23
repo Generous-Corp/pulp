@@ -267,11 +267,18 @@ public:
     // two recursions in the lanes of one vector so a stereo pair costs about
     // as much as one channel. Each channel's output is bit-identical to
     // calling that filter's block process(); the filters may have different
-    // coefficients. Both buffers must hold num_samples samples.
+    // coefficients. Both buffers must hold num_samples samples. Passing one
+    // filter as both channels runs the left buffer and then the right through
+    // it, as two block process() calls would.
     static void process_stereo(BiquadT& left, BiquadT& right, SampleType* left_buffer,
                                SampleType* right_buffer, std::size_t num_samples) {
         if (num_samples == 0)
             return;
+        if (&left == &right) {
+            dispatch_fixed<1>(&left, nullptr, left_buffer, nullptr, num_samples);
+            dispatch_fixed<1>(&left, nullptr, right_buffer, nullptr, num_samples);
+            return;
+        }
         // Below about 64 samples two separate calls already overlap in the
         // out-of-order window and the lane path measured no faster. Filters
         // whose passes take different forms cannot share lanes.
@@ -319,10 +326,16 @@ public:
     /// of `count` sections, with the channels in the lanes of one vector.
     /// Each channel's output is bit-identical to process_chain() on it alone.
     /// Compilers without vector lanes (simd::kHasVectorLanes) run the two
-    /// chains in turn.
+    /// chains in turn. Passing one chain as both channels runs the left
+    /// buffer and then the right through it, as two process_chain() calls.
     static void process_chain_stereo(BiquadT* left, BiquadT* right, std::size_t count,
                                      SampleType* left_buffer, SampleType* right_buffer,
                                      std::size_t num_samples) noexcept {
+        if (left == right) {
+            process_chain(left, count, left_buffer, num_samples);
+            process_chain(left, count, right_buffer, num_samples);
+            return;
+        }
         for (std::size_t first = 0; first < count; first += kChainSectionsPerPass) {
             const std::size_t n = std::min(count - first, kChainSectionsPerPass);
             // The two channels' passes must take the same form to share
