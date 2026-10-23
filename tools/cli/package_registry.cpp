@@ -630,21 +630,21 @@ static bool write_bytes(const fs::path& path, const std::string& bytes) {
     return out.good();
 }
 
-// The verified marker records the SHA-256 of the cached registry bytes whose
-// signature verified at fetch time; the cache is trusted only while its bytes
-// still hash to that value.
-static fs::path verified_marker_path(const fs::path& cache_file) {
-    return cache_file.string() + ".verified";
+// The registry's signature is cached beside its bytes and re-verified with
+// the pinned key on every load, so nothing writable in the cache directory
+// can mark unsigned bytes as trusted: only a signature the owner's key
+// produced over exactly these bytes does.
+static fs::path cached_signature_path(const fs::path& cache_file) {
+    return cache_file.string() + ".sig";
 }
 
-static bool cache_is_verified(const fs::path& cache_file) {
-    const auto marker = verified_marker_path(cache_file);
-    if (!fs::exists(cache_file) || !fs::exists(marker))
+static bool cache_is_verified(const fs::path& cache_file, const RegistryTrustPolicy& policy) {
+    const auto sig = cached_signature_path(cache_file);
+    if (!fs::exists(cache_file) || !fs::exists(sig))
         return false;
-    std::string recorded = read_bytes(marker);
-    while (!recorded.empty() && std::isspace(static_cast<unsigned char>(recorded.back())))
-        recorded.pop_back();
-    return !recorded.empty() && recorded == pulp::runtime::sha256_hex(read_bytes(cache_file));
+    return verify_registry_signature(read_bytes(cache_file), read_bytes(sig),
+                                     policy.pinned_public_key_hex)
+        .ok;
 }
 
 static const char* unsigned_hint =
@@ -673,7 +673,7 @@ static RemoteRegistryLoadResult remote_failure(std::string error) {
 // unless unsigned registries are allowed, in which case say so.
 static RemoteRegistryLoadResult load_cached_registry(const fs::path& cache_file,
                                                      const RegistryTrustPolicy& policy) {
-    const bool verified = cache_is_verified(cache_file);
+    const bool verified = cache_is_verified(cache_file, policy);
     const bool enforced = enforces_signatures(policy);
     if (!verified && enforced && !policy.allow_unsigned)
         return remote_failure("cached remote registry " + cache_file.string() +
@@ -693,7 +693,8 @@ struct RemoteFetch {
 };
 
 // Download registry.json and registry.json.sig, verify, and only then replace
-// the cache. A refused registry never touches the cache.
+// the cache (bytes plus the signature that verified them). A refused
+// registry never touches the cache.
 static RemoteFetch fetch_remote_registry(const std::string& url, const fs::path& cache_file,
                                          const RegistryTrustPolicy& policy,
                                          const RegistryDownloader& downloader) {
@@ -724,13 +725,12 @@ static RemoteFetch fetch_remote_registry(const std::string& url, const fs::path&
         fs::remove(part, ec);
         return {remote_failure("could not write registry cache " + cache_file.string()), false};
     }
-    const auto marker = verified_marker_path(cache_file);
+    const auto cached_sig = cached_signature_path(cache_file);
     if (check.ok) {
-        if (!write_bytes(marker, pulp::runtime::sha256_hex(bytes) + "\n")) {
-            fs::remove(marker, ec);
-        }
+        if (!write_bytes(cached_sig, signature))
+            fs::remove(cached_sig, ec);
     } else {
-        fs::remove(marker, ec);
+        fs::remove(cached_sig, ec);
     }
 
     RemoteRegistryLoadResult result;

@@ -851,7 +851,7 @@ TEST_CASE("remote registry enforcement follows whether a signer key is pinned",
         REQUIRE(loaded.warning.find("pins no registry signer key") != std::string::npos);
         REQUIRE(loaded.warning.find("--allow-unsigned-registry") == std::string::npos);
         REQUIRE(fs::exists(cache.path / "registry-cache.json"));
-        REQUIRE_FALSE(fs::exists(cache.path / "registry-cache.json.verified"));
+        REQUIRE_FALSE(fs::exists(cache.path / "registry-cache.json.sig"));
 
         // The unverified cache stays usable under the same unpinned policy.
         auto cached = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
@@ -882,7 +882,53 @@ TEST_CASE("remote registry enforcement follows whether a signer key is pinned",
         REQUIRE(ok.verified);
         REQUIRE(ok.warning.empty());
         REQUIRE(ok.registry.packages.size() == 2);
-        REQUIRE(fs::exists(cache.path / "registry-cache.json.verified"));
+        REQUIRE(fs::exists(cache.path / "registry-cache.json.sig"));
+    }
+}
+
+TEST_CASE("remote registry cache cannot be forged by writing the cache directory",
+          "[cli][package-registry][remote][trust][cache]") {
+    // Anything that can write the cache directory can plant registry bytes;
+    // only a signature the pinned key verifies over those bytes makes them
+    // servable under a strict policy.
+    TempDir tmp;
+    const std::string registry = slurp(write_registry_fixture(tmp.path, "served.json"));
+    const auto keypair = test_registry_keypair();
+    RegistryTrustPolicy strict;
+    strict.pinned_public_key_hex = hex_encode(keypair.public_key);
+    const auto offline = fake_downloader(registry, "", false);
+
+    SECTION("planted bytes with no cached signature") {
+        TempDir cache;
+        write_file(cache.path / "registry-cache.json", registry);
+        auto fresh = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
+                                          strict, offline);
+        REQUIRE(fresh.registry.packages.empty());
+        REQUIRE(fresh.error.find("not signature-verified") != std::string::npos);
+    }
+
+    SECTION("planted bytes with a signature by another key") {
+        TempDir cache;
+        auto other = pulp::runtime::ed25519_keypair_from_seed(
+            std::vector<std::uint8_t>(32, 0x42).data(), 32);
+        REQUIRE(other.has_value());
+        write_file(cache.path / "registry-cache.json", registry);
+        write_file(cache.path / "registry-cache.json.sig", sign_registry_text(*other, registry));
+        auto fresh = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
+                                          strict, offline);
+        REQUIRE(fresh.registry.packages.empty());
+        REQUIRE(fresh.error.find("not signature-verified") != std::string::npos);
+    }
+
+    SECTION("planted bytes with the owner's signature are served") {
+        TempDir cache;
+        write_file(cache.path / "registry-cache.json", registry);
+        write_file(cache.path / "registry-cache.json.sig", sign_registry_text(keypair, registry));
+        auto fresh = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
+                                          strict, offline);
+        REQUIRE(fresh.error.empty());
+        REQUIRE(fresh.verified);
+        REQUIRE(fresh.registry.packages.size() == 2);
     }
 }
 
@@ -897,7 +943,7 @@ TEST_CASE("remote registry caches a verified registry and falls back only to a v
 
     TempDir cache;
     const auto cache_file = cache.path / "registry-cache.json";
-    const auto marker = cache.path / "registry-cache.json.verified";
+    const auto cached_sig = cache.path / "registry-cache.json.sig";
 
     auto verified = refresh_remote_registry("https://registry.test/registry.json", cache.path,
                                             strict, fake_downloader(registry, signature));
@@ -905,7 +951,8 @@ TEST_CASE("remote registry caches a verified registry and falls back only to a v
     REQUIRE(verified.verified);
     REQUIRE(verified.warning.empty());
     REQUIRE(verified.registry.packages.size() == 2);
-    REQUIRE(fs::exists(marker));
+    REQUIRE(fs::exists(cached_sig));
+    REQUIRE(slurp(cached_sig) == signature);
     REQUIRE(slurp(cache_file) == registry);
 
     // Fresh verified cache: served without a fetch.
@@ -929,9 +976,10 @@ TEST_CASE("remote registry caches a verified registry and falls back only to a v
     REQUIRE(refused.registry.packages.empty());
     REQUIRE(refused.error.find("refused") != std::string::npos);
     REQUIRE(slurp(cache_file) == registry);
-    REQUIRE(fs::exists(marker));
+    REQUIRE(slurp(cached_sig) == signature);
 
-    // Tampered cache bytes no longer match the marker: no stale fallback.
+    // Tampered cache bytes no longer verify against the cached signature: no
+    // stale fallback.
     write_file(cache_file, registry + "\n");
     auto tampered = load_remote_registry("https://registry.test/registry.json", cache.path, 0,
                                          strict, fake_downloader(registry, signature, false));

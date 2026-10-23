@@ -52,8 +52,10 @@ Ed25519 signature over `"pulp-package-registry-sig-v1\n" + sha256_hex(bytes)
 while it is empty (no key pinned yet) the registry is used unsigned and
 `pulp search` prints a one-line notice; once a key is pinned, unsigned or
 mismatching registries are refused (`--allow-unsigned-registry` overrides for
-one run, loudly), and a cached copy is reused only if it verified when fetched
-(`registry-cache.json.verified` records the hash of the trusted bytes).
+one run, loudly), and a cached copy is reused only while the
+`registry-cache.json.sig` cached beside it still verifies against the pinned
+key (re-checked on every load, so writing the cache directory cannot forge
+trust).
 Pinning the key is therefore the switch that turns verification on; ship it
 only after `registry.json.sig` is published.
 

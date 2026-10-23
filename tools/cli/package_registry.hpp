@@ -157,9 +157,10 @@ using RegistryDownloader = std::function<bool(const std::string& url, const fs::
 RegistryDownloader default_registry_downloader();
 
 // Fetch registry from remote URL and cache it locally with a TTL. A cached
-// copy is reused only while it is fresh and was verified when fetched (or the
-// policy allows unsigned registries). When the download fails, a stale cache
-// is used under the same rule.
+// copy is reused only while it is fresh and its cached registry.json.sig
+// still verifies against the pinned key (or the policy allows unsigned
+// registries). When the download fails, a stale cache is used under the same
+// rule.
 RemoteRegistryLoadResult load_remote_registry(const std::string& url, const fs::path& cache_dir,
                                               int ttl_hours = 24,
                                               const RegistryTrustPolicy& policy = {},
