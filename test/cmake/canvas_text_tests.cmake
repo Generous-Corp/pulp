@@ -302,6 +302,13 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         LIBRARIES pulp::view pulp::canvas pulp::render
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 
+    # CSS gradient interpolation methods on an offscreen Dawn/Graphite surface,
+    # midpoints held to Chrome's as pulp-test-css-gradient-interpolation holds
+    # the raster ones. Soft-skips without an adapter.
+    pulp_add_test_suite(pulp-test-css-gradient-interpolation-gpu
+        LIBRARIES pulp::view pulp::canvas pulp::render
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
+
     # Persistent-scene mode — live-GPU cross-frame retention proof (FU-2).
     # Drives an offscreen Dawn+Skia surface with set_persistent_scene(true) for
     # a full frame then a clipped frame, and asserts the untouched content

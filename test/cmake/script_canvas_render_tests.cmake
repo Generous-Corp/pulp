@@ -292,6 +292,15 @@ if(PULP_HAS_SKIA)
         LIBRARIES pulp::view pulp::canvas)
 endif()
 
+# CSS `<color-interpolation-method>` (`in oklab`, hue methods): parsing, the
+# view-to-canvas handoff, and Skia raster / CoreGraphics midpoints held to
+# Chrome's, read by chrome_gradient_oracle.py --colors. The Graphite
+# counterpart is pulp-test-css-gradient-interpolation-gpu.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-css-gradient-interpolation GROUP pulp-test-group-script-view
+        LIBRARIES pulp::view pulp::canvas)
+endif()
+
 # CG-degraded gradient + pattern cluster. Apple-only TU, registered only on
 # Apple: a grouped member whose file compiles to no test cases fails discovery. every
 # TEST_CASE drives CoreGraphics directly to prove the CoreGraphicsCanvas
