@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <utility>
 #include <vector>
 
 using namespace pulp::signal;
@@ -889,6 +890,72 @@ TEST_CASE("Biquad block path continues the sample path when a2 is tiny but nonze
                 worst = std::max(worst, std::abs(static_cast<double>(block[i]) - expected[i]));
             CHECK(worst < 1.0e-5);
         }
+    }
+}
+
+TEST_CASE("Biquad retune to b2 = 0 with a tiny a2 keeps the block output exact",
+          "[signal][biquad][determinism]") {
+    // Retuning to b2 = 0 with a tiny nonzero a2 leaves the old state's s2,
+    // and every history that reproduces it has |y1| = |s2| / |a2|. No
+    // history is small, so the block path must hand over to the sample
+    // order rather than cancel huge terms.
+    const BiquadCoefficients before{0.2f, 0.4f, 0.2f, -0.6f, 0.25f};
+    for (double a2 = 1.0e-6; a2 >= 1.0e-30; a2 *= 1.0e-2) {
+        INFO("a2 " << a2);
+        const BiquadCoefficients tiny{0.5f, 0.3f, 0.0f, -0.5f, static_cast<float>(a2)};
+        Biquad filter;
+        ReferenceDf2t reference;
+        filter.set_coefficients(before);
+        reference.set(before);
+        for (int i = 0; i < 8; ++i) {
+            const float x = (i % 2 == 0) ? 1.0f : -1.0f;
+            (void)filter.process(x);
+            (void)reference.process(x);
+        }
+        filter.set_coefficients(tiny);
+        reference.set(tiny);
+        std::array<float, 64> block{};
+        for (std::size_t i = 0; i < block.size(); ++i)
+            block[i] = 0.5f * std::sin(0.3f * static_cast<float>(i));
+        std::array<double, 64> expected{};
+        for (std::size_t i = 0; i < block.size(); ++i)
+            expected[i] = reference.process(block[i]);
+        filter.process(block.data(), static_cast<int>(block.size()));
+        double worst = 0.0;
+        for (std::size_t i = 0; i < block.size(); ++i)
+            worst = std::max(worst, std::abs(static_cast<double>(block[i]) - expected[i]));
+        CHECK(worst < 1.0e-5);
+    }
+}
+
+TEST_CASE("Biquad well-conditioned retunes still take the block path",
+          "[signal][biquad][determinism]") {
+    // The history guard only refuses histories far above the state. An
+    // ordinary retune with live state keeps the DF1 block form, whose
+    // rounding differs from the per-sample order: the two outputs are close
+    // but not bit-identical. Bit identity here would mean the guard sent an
+    // ordinary filter down the sample order.
+    for (const auto& [from, to] : {std::pair{BiquadCoefficients{0.2f, 0.4f, 0.2f, -0.6f, 0.25f},
+                                             BiquadCoefficients{0.3f, -0.2f, 0.4f, -0.9f, 0.4f}},
+                                   std::pair{BiquadCoefficients{0.1f, 0.2f, 0.1f, -1.2f, 0.5f},
+                                             BiquadCoefficients{0.5f, 0.3f, 0.5f, -0.5f, 0.1f}}}) {
+        Biquad block_filter;
+        block_filter.set_coefficients(from);
+        for (int i = 0; i < 16; ++i)
+            (void)block_filter.process(0.7f * std::sin(0.21f * static_cast<float>(i)));
+        block_filter.set_coefficients(to);
+        Biquad sample_filter = block_filter;
+        std::vector<float> block(512), sample(512);
+        for (std::size_t i = 0; i < block.size(); ++i)
+            block[i] = sample[i] = 0.5f * std::sin(0.037f * static_cast<float>(i));
+        block_filter.process(block.data(), static_cast<int>(block.size()));
+        for (auto& v : sample)
+            v = sample_filter.process(v);
+        float worst = 0.0f;
+        for (std::size_t i = 0; i < block.size(); ++i)
+            worst = std::max(worst, std::abs(block[i] - sample[i]));
+        CHECK(worst < 1.0e-5f);
+        CHECK(std::memcmp(block.data(), sample.data(), block.size() * sizeof(float)) != 0);
     }
 }
 

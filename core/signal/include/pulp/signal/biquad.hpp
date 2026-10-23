@@ -597,6 +597,10 @@ public:
         }
     }
 
+    // Largest ratio of a derived DF1 history to the DF2T state it reproduces
+    // that the block path accepts.
+    static constexpr double kMaxHistoryGain = 1.0e4;
+
     // Make the DF1 history describe the current DF2T state: if the last
     // writer was the sample path or a coefficient change, derive an
     // equivalent history that produces the same future output in exact
@@ -647,13 +651,20 @@ public:
             for (std::size_t i = 0; i < 4; ++i)
                 v[i] = p[i] * w1 + q[i] * w2;
         }
+        // Even the minimum-norm history can be forced large: retuning to
+        // b2 = 0 with a tiny a2 leaves s2 = -a2 y1, so |y1| = |s2| / |a2| for
+        // every solution. A history far above the state it reproduces would
+        // lose the block output to cancellation, so that case runs the
+        // sample order too.
+        const double state = std::max(std::abs(s1), std::abs(s2));
+        const double largest =
+            std::max({std::abs(v[0]), std::abs(v[1]), std::abs(v[2]), std::abs(v[3])});
+        if (!std::isfinite(largest) || largest > kMaxHistoryGain * state)
+            return false;
         hx1_ = v[0];
         hx2_ = v[1];
         hy1_ = v[2];
         hy2_ = v[3];
-        if (!(std::isfinite(hy1_) && std::isfinite(hy2_) && std::isfinite(hx1_) &&
-              std::isfinite(hx2_)))
-            return false;
         history_valid_ = true;
         return true;
     }
