@@ -3321,6 +3321,14 @@
    ],
    "kind": "python"
   },
+  "android-jni-exports-selftest": {
+   "entry": "tools/scripts/test_check_android_jni_exports.py",
+   "inputs": [
+    "tools/scripts/check_android_jni_exports.py",
+    "tools/scripts/test_check_android_jni_exports.py"
+   ],
+   "kind": "python"
+  },
   "android-smoke": {
    "entry": "tools/scripts/android_smoke.sh",
    "inputs": [
@@ -3340,6 +3348,7 @@
    "entry": "tools/scripts/test_archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py",
     "tools/scripts/test_archive_symbol_closure_check.py"
    ],
    "kind": "python"
@@ -4418,6 +4427,14 @@
    ],
    "kind": "python"
   },
+  "convolver-crossover-table": {
+   "entry": "tools/scripts/convolver_crossover_check.py",
+   "inputs": [
+    "core/signal/include/pulp/signal/fixed_ir_convolver.hpp",
+    "tools/scripts/convolver_crossover_check.py"
+   ],
+   "kind": "python"
+  },
   "create-templates-verify": {
    "entry": "tools/scripts/test_verify_create_templates.py",
    "inputs": [
@@ -4979,6 +4996,7 @@
   "foundation-include-lint": {
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7677,21 +7695,24 @@
   "pulp-format-clap-core-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
   "pulp-format-core-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
   "pulp-format-view-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
@@ -7808,7 +7829,8 @@
   "pulp-state-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
@@ -7893,13 +7915,16 @@
   "pulp-view-audio-symbol-floor": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
   "pulp-view-audio-symbol-floor-negative-contract": {
    "entry": "tools/scripts/test_view_audio_symbol_floor.py",
    "inputs": [
+    "test/cmake/view_host_tests.cmake",
+    "tools/scripts/nm_symbols.py",
     "tools/scripts/test_view_audio_symbol_floor.py"
    ],
    "kind": "python"
@@ -7907,6 +7932,7 @@
   "pulp-view-core-include-boundary": {
    "entry": "tools/scripts/include_boundary.py",
    "inputs": [
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7926,6 +7952,8 @@
    "entry": "tools/scripts/test_include_boundary.py",
    "inputs": [
     "core/audio/include/pulp/audio/buffer.hpp",
+    "core/content/include/pulp/state/content_registry.hpp",
+    "core/state/include/pulp/state/store.hpp",
     "core/view/include/pulp/view/view.hpp",
     "core/view/src/view.cpp",
     "tools/scripts/test_include_boundary.py"
@@ -7935,7 +7963,8 @@
   "pulp-view-tooling-symbol-floor": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
@@ -7954,6 +7983,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -7992,6 +8022,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8021,6 +8052,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8059,6 +8091,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8101,6 +8134,7 @@
     "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
     "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
+    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/render/include/pulp/render/gpu_compute.hpp",
@@ -12466,6 +12500,8 @@
    "entry": "tools/scripts/vellum_boundary_lint.py",
    "inputs": [
     "core/view",
+    "core/view/audio/src",
+    "core/view/platform",
     "core/view/src",
     "tools/import-design/pulp-package.json",
     "tools/scripts/vellum_boundary_lint.py",
@@ -12476,6 +12512,8 @@
   "vellum-boundary-lint-negative-contract": {
    "entry": "tools/scripts/test_vellum_boundary_lint.py",
    "inputs": [
+    "core/view/audio/include",
+    "core/view/platform/mac/window_host_mac_internal.hpp",
     "tools/import-design",
     "tools/import-design/pulp-package.json",
     "tools/scripts/test_vellum_boundary_lint.py",

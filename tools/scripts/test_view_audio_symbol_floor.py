@@ -20,6 +20,8 @@ SPEC = importlib.util.spec_from_file_location("view_audio_symbol_floor", MODULE_
 floor = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = floor
 SPEC.loader.exec_module(floor)
+sys.path.insert(0, str(MODULE_PATH.parent))
+import nm_symbols  # noqa: E402
 
 AUDIO = (
     "libpulp-view-audio.a[visualizers.cpp.o]: __ZTIN4pulp4view5MeterE S 10 0\n"
@@ -100,6 +102,38 @@ class SymbolFloorTests(unittest.TestCase):
         core = self._archive("core.a", CORE_DIRTY)
         rc, _ = self._run("--check", f"view-core={core}")
         self.assertEqual(rc, 2)
+
+    def test_weak_definitions_count_toward_the_floor(self):
+        # One strong and two weak definitions: the floor is all three.
+        listing = (
+            "libpulp-view-audio.a[meter.cpp.o]: __ZN4pulp4view5Meter9set_levelEff T 20 0\n"
+            "libpulp-view-audio.a[meter.cpp.o]: __ZTIN4pulp4view5MeterE W 0 0\n"
+            "libpulp-view-audio.a[meter.cpp.o]: __ZTVN4pulp4view5MeterE W 0 0\n"
+            "libpulp-view-audio.a[meter.cpp.o]: __ZN4pulp4view4View5paintEv U 0 0\n"
+        )
+        self.assertEqual(len(nm_symbols.defined_any(listing)), 3)
+        self.assertEqual(len(nm_symbols.defined_strong(listing)), 1)
+        self._archive("audio.a", listing)
+        for symbol in ("__ZTIN4pulp4view5MeterE", "__ZTVN4pulp4view5MeterE"):
+            core = self._archive("core.a", f"libpulp-view-core.a[x.o]: {symbol} U 0 0\n")
+            rc, out = self._run("--check", f"view-core={core}")
+            self.assertEqual(rc, 1, out)
+            self.assertIn(symbol, out)
+
+    def test_the_floor_is_built_from_weak_definitions_alone(self):
+        # An archive whose only definitions are weak is not "defines nothing".
+        self._archive("audio.a", "libpulp-view-audio.a[m.o]: __ZTIN4pulp4view5MeterE W 0 0\n")
+        core = self._archive("core.a", CORE_DIRTY)
+        rc, out = self._run("--check", f"view-core={core}")
+        self.assertEqual(rc, 1, out)
+
+    def test_the_registered_gate_counts_weak_definitions(self):
+        # The ctest calls archive_symbol_closure_check.py directly, so it must
+        # ask for the same rule this wrapper uses.
+        manifest = MODULE_PATH.parents[2] / "test/cmake/view_host_tests.cmake"
+        text = manifest.read_text(encoding="utf-8")
+        block = text.split("add_test(NAME pulp-view-audio-symbol-floor\n", 1)[1].split(")\n", 1)[0]
+        self.assertIn('--forbidden "$<TARGET_FILE:pulp-view-audio>" --forbidden-defines any', block)
 
     def test_a_missing_archive_is_a_scan_error(self):
         rc, _ = self._run("--check", f"view-core={self.dir / 'missing.a'}")
