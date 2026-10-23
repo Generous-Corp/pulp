@@ -247,7 +247,11 @@ PluginInfo PluginScanner::scan_lv2_bundle(const std::string& path) {
 
 std::vector<PluginInfo> PluginScanner::scan_bundle(const std::string& path, PluginFormat format) {
     std::vector<PluginInfo> results;
-    if (!is_plugin_bundle(path, format))
+    // is_plugin_bundle judges the name alone; a path that is not on disk has
+    // no descriptors, and the VST3/LV2 metadata scanners would otherwise
+    // invent one from the file name.
+    std::error_code ec;
+    if (!is_plugin_bundle(path, format) || !fs::exists(path, ec))
         return results;
     PluginScanner scanner;
     switch (format) {

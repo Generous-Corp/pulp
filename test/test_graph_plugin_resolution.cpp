@@ -460,7 +460,11 @@ TEST_CASE("a stale last_path is re-resolved by (format, unique_id) in the regist
     }
     ScopedEnv worker("PULP_SCAN_WORKER");
     worker.set(PULP_SCAN_WORKER_PATH);
-    const fs::path bundle = PULP_TEST_NO_EDITOR_CLAP;
+    // The build's CLAP directory holds a sibling bundle with a related id, and
+    // directory order differs by filesystem, so the root is a scratch copy
+    // that holds exactly this bundle.
+    ScratchDir scratch("stale-path");
+    const auto bundle = copy_bundle(PULP_TEST_NO_EDITOR_CLAP, scratch.path / "root");
     auto options = hermetic_options();
     options.plugin_roots.push_back(bundle.parent_path().string());
     options.scan_mode = GraphPluginScanMode::isolated_only;

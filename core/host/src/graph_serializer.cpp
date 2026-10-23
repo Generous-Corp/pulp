@@ -3,7 +3,15 @@
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/runtime/log.hpp>
-#if !defined(__EMSCRIPTEN__)
+
+// The web DSP builds (Emscripten for WAM, plain clang targeting wasm32 for
+// WebCLAP) compile this serializer without the plugin scanner and have no
+// plugin bundles to load; the resolver below has a stub for them.
+#if defined(__EMSCRIPTEN__) || defined(__wasm__) || defined(__wasm32__)
+#define PULP_GRAPH_SERIALIZER_WITHOUT_PLUGIN_SCANNER 1
+#endif
+
+#if !defined(PULP_GRAPH_SERIALIZER_WITHOUT_PLUGIN_SCANNER)
 #include <pulp/host/scan_blacklist.hpp>
 #include <pulp/host/scan_cache.hpp>
 #include <pulp/host/scanner.hpp>
@@ -1099,7 +1107,7 @@ std::string GraphSerializer::to_json(
 
 namespace {
 
-#if defined(__EMSCRIPTEN__)
+#if defined(PULP_GRAPH_SERIALIZER_WITHOUT_PLUGIN_SCANNER)
 // The web build compiles this serializer without the plugin scanner and has
 // no plugin bundles to load, so every plugin node stays an unresolved
 // placeholder: nothing is opened and no scanner symbol is referenced.
@@ -1226,7 +1234,7 @@ class PluginNodeResolver {
     const GraphLoadOptions& options_;
     std::unordered_map<PluginFormat, ScanReport> scans_;
 };
-#endif // __EMSCRIPTEN__
+#endif // PULP_GRAPH_SERIALIZER_WITHOUT_PLUGIN_SCANNER
 
 } // namespace
 
