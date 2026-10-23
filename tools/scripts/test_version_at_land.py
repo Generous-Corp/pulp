@@ -1841,7 +1841,7 @@ class MigrationFoldRouteTest(unittest.TestCase):
 
     def _show(self, ref: str, path: str) -> str | None:
         out = subprocess.run(["git", "-C", str(self.origin), "show", f"{ref}:{path}"],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, encoding="utf-8")
         return out.stdout if out.returncode == 0 else None
 
     def _cfg(self, repo: Path):

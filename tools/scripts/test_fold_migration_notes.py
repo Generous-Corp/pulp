@@ -175,7 +175,7 @@ class ShippedReleaseTests(_RepoCase):
     def git(self, *args: str) -> str:
         import subprocess
         return subprocess.run(["git", "-C", str(self.repo), *args], capture_output=True,
-                              text=True, check=True).stdout.strip()
+                              text=True, encoding="utf-8", check=True).stdout.strip()
 
     def init_git(self) -> None:
         self.git("init", "-q", "-b", "main")
@@ -215,6 +215,22 @@ class ShippedReleaseTests(_RepoCase):
         self.git("tag", "v0.10.0")
         self.git("tag", "v0.9.0")
         self.assertEqual(fmn.shipped_version(self.repo, rel), "0.9.0")
+
+    def test_a_shallow_clone_falls_back_to_the_bump_version(self) -> None:
+        import subprocess
+        self.init_git()
+        note = self.note("a.md", 'summary = "s"')
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "add note")
+        self.git("tag", "v0.9.0")
+        rel = note.relative_to(self.repo).as_posix()
+        self.assertEqual(fmn.shipped_version(self.repo, rel), "0.9.0")
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        shallow = pathlib.Path(scratch.name) / "shallow"
+        subprocess.run(["git", "clone", "-q", "--depth", "1", f"file://{self.repo}", str(shallow)],
+                       check=True, capture_output=True)
+        self.assertIsNone(fmn.shipped_version(shallow, rel))
 
 
 if __name__ == "__main__":

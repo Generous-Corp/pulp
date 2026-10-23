@@ -77,8 +77,13 @@ def shipped_version(repo: pathlib.Path, rel: str) -> str | None:
 
     def git(*args: str) -> str:
         return subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
-                              text=True, check=True).stdout
+                              text=True, encoding="utf-8", check=True).stdout
 
+    # A shallow clone can miss the commit that added the note or the tags that
+    # contain it, and would then key a shipped note to the wrong release. Fall
+    # back to the bump's own version, the behaviour before tags were consulted.
+    if git("rev-parse", "--is-shallow-repository").strip() == "true":
+        return None
     added = git("log", "--diff-filter=A", "--format=%H", "-1", "--", rel).strip()
     if not added:
         return None
