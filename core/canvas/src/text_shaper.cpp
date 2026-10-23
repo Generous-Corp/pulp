@@ -813,34 +813,16 @@ struct TextShaper::Impl {
         paragraph->layout(SK_ScalarInfinity);
         std::vector<skia::textlayout::LineMetrics> lines;
         paragraph->getLineMetrics(lines);
-        float previous_cumulative_height = 0.0f;
+        std::vector<ParagraphLineExtent> extents;
+        extents.reserve(lines.size());
         for (const auto& line : lines) {
-            const float ascent = static_cast<float>(line.fAscent);
-            const float descent = static_cast<float>(line.fDescent);
-            // This SkParagraph API reports fHeight cumulatively through the
-            // current line. Convert it to this line's height before deriving
-            // leading, or each hard-newline line would include all preceding
-            // line heights and multiline labels would grow quadratically.
-            const float cumulative_height = static_cast<float>(line.fHeight);
-            const float line_height = cumulative_height - previous_cumulative_height;
-            if (std::isfinite(cumulative_height) &&
-                cumulative_height >= previous_cumulative_height) {
-                previous_cumulative_height = cumulative_height;
-            }
-            const float metric_limit = std::max(1.0f, font_size) * 10.0f;
-            if (!std::isfinite(ascent) || !std::isfinite(descent) ||
-                !std::isfinite(line_height) || ascent < 0.0f ||
-                descent < 0.0f || ascent > metric_limit ||
-                descent > metric_limit || line_height <= 0.0f ||
-                line_height > metric_limit) {
-                continue;
-            }
-            box.ascent = std::max(box.ascent, ascent);
-            box.descent = std::max(box.descent, descent);
-            box.leading = std::max(
-                box.leading,
-                std::max(0.0f, line_height - ascent - descent));
+            extents.push_back({static_cast<float>(line.fAscent), static_cast<float>(line.fDescent),
+                               static_cast<float>(line.fHeight)});
         }
+        const auto measured = paragraph_text_extents(extents, font_size);
+        box.ascent = measured.ascent;
+        box.descent = measured.descent;
+        box.leading = measured.leading;
         box.line_height = box.ascent + box.descent + box.leading;
         box.real = box.line_height > 0.0f;
 #else
@@ -1269,6 +1251,28 @@ void TextShaper::clear_cache() {
 
 bool TextShaper::uses_real_shaping() const {
     return impl_->has_real_shaping;
+}
+
+ParagraphTextExtents paragraph_text_extents(const std::vector<ParagraphLineExtent>& lines,
+                                            float font_size) {
+    ParagraphTextExtents extents;
+    const float metric_limit = std::max(1.0f, font_size) * 10.0f;
+    for (const auto& line : lines) {
+        if (!std::isfinite(line.ascent) || !std::isfinite(line.descent) ||
+            !std::isfinite(line.height) || line.ascent < 0.0f || line.descent < 0.0f ||
+            line.ascent > metric_limit || line.descent > metric_limit || line.height <= 0.0f ||
+            line.height > metric_limit) {
+            continue;
+        }
+        extents.ascent = std::max(extents.ascent, line.ascent);
+        extents.descent = std::max(extents.descent, line.descent);
+        extents.leading =
+            std::max(extents.leading, std::max(0.0f, line.height - line.ascent - line.descent));
+        extents.real = true;
+    }
+    if (extents.line_height() <= 0.0f)
+        extents.real = false;
+    return extents;
 }
 
 TextShaper& global_text_shaper() {
