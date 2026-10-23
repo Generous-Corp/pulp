@@ -78,10 +78,8 @@ class NotarizationHeartbeatTest(unittest.TestCase):
         tool("pkgutil", '[[ "${1:-}" == "--expand-full" ]] || exit 2\n'
              'expanded="$3"; [[ ! -e "$expanded" ]] || { echo "destination already exists" >&2; exit 1; }; mkdir -p "$expanded"\n'
              'root="${PAYLOAD_BUNDLE_ROOTS}"; bundle="$(basename "$root")"\n'
-             "exec_name=\"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \"$root/Contents/Info.plist\")\"\n"
-             'dest="$expanded/Payload/$bundle/Contents/MacOS/$exec_name"\n'
-             'mkdir -p "$(dirname "$dest")"\n'
-             'cp "$root/Contents/MacOS/$exec_name" "$dest"\n')
+             'mkdir -p "$expanded/Payload"\n'
+             'cp -R "$root" "$expanded/Payload/"\n')
         # The stand-in for Apple. `submit --wait` sleeps (standing in for the
         # dark poll phase), prints what notarytool prints, and exits with the
         # status under test. `staple` records that it ran at all — that record
@@ -408,13 +406,14 @@ class CombinedInstallerTest(unittest.TestCase):
                 '  [[ -n "$root" ]] || continue\n'
                 '  bundle="$(basename "$root")"\n'
                 "  exec_name=\"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \"$root/Contents/Info.plist\")\"\n"
-                '  dest="$expanded/Payload/$bundle/Contents/MacOS/$exec_name"\n'
-                '  mkdir -p "$(dirname "$dest")"\n'
+                '  mkdir -p "$expanded/Payload"\n'
                 '  if [[ "${PAYLOAD_MODE:-match}" != "missing" || "$idx" != 0 ]]; then\n'
+                '    cp -R "$root" "$expanded/Payload/"\n'
+                '    dest="$expanded/Payload/$bundle/Contents/MacOS/$exec_name"\n'
                 '    if [[ "${PAYLOAD_MODE:-match}" == "stale" && "$idx" == 0 ]]; then\n'
                 '      printf "stale payload\\n" > "$dest"\n'
-                '    else\n'
-                '      cp "$root/Contents/MacOS/$exec_name" "$dest"\n'
+                '    elif [[ "${PAYLOAD_MODE:-match}" == "stale_asset" && "$idx" == 0 ]]; then\n'
+                '      printf "<svg data-fixture=\\"stale\\"/>\\n" > "$expanded/Payload/$bundle/Contents/Resources/faceplate.svg"\n'
                 '    fi\n'
                 '  fi\n'
                 '  idx=$((idx+1))\n'
@@ -456,6 +455,11 @@ class CombinedInstallerTest(unittest.TestCase):
                 executable = macos / plugin_name
                 executable.write_text("fixture executable\n")
                 executable.chmod(0o755)
+                resources = bundle / "Contents" / "Resources"
+                resources.mkdir(parents=True)
+                (resources / "faceplate.svg").write_text(
+                    "<svg data-fixture=\"fresh\"/>\n", encoding="utf-8"
+                )
                 if d15_fixture and not plugin_bundles:
                     if d15_fixture == "file":
                         (macos / "libvellum-gpu.dylib").write_bytes(
@@ -704,6 +708,17 @@ class CombinedInstallerTest(unittest.TestCase):
             payload_gate_failure=True,
         )
         self.assertIn("packaged payload hash mismatch", output)
+
+    def test_stale_sidecar_asset_is_rejected_before_productsign(self) -> None:
+        """A stale faceplate/resource cannot hide behind a fresh executable."""
+        output, _ = self._run_installer(
+            [("Kick", "clap")],
+            payload_mode="stale_asset",
+            expect_success=False,
+            refused_after_verification=True,
+            payload_gate_failure=True,
+        )
+        self.assertIn("packaged bundle digest mismatch", output)
 
     def test_missing_product_payload_is_rejected_before_productsign(self) -> None:
         output, _ = self._run_installer(

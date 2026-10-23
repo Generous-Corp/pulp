@@ -409,7 +409,24 @@ PLUGIN_ENTRIES=""    # one "pluginIndex<TAB>pluginName<TAB>choiceId" line per fo
 # Release provenance captured after the source bundle has been signed.  These
 # hashes are the guard against the failure mode where pkgbuild/productbuild
 # silently packages a different bundle than the signed source bundle.
-declare -a P_PAYLOAD_BUNDLE=() P_PAYLOAD_EXECUTABLE=() P_PAYLOAD_SHA256=()
+declare -a P_PAYLOAD_BUNDLE=() P_PAYLOAD_EXECUTABLE=() P_PAYLOAD_SHA256=() P_PAYLOAD_DIGEST=()
+
+# Produce a stable digest for every regular file in a bundle.  The executable
+# hash catches stale embedded UI, but a plugin can also carry sidecar artwork,
+# presets, or other resources.  Those bytes are part of the shipped payload and
+# must be bound to the exact signed source bundle as well.
+bundle_payload_digest() {  # $1=bundle
+  local bundle="$1" file rel
+  (
+    cd "$bundle" || exit 1
+    find . -type f -print | LC_ALL=C sort | while IFS= read -r file; do
+      rel="${file#./}"
+      printf '%s\0' "$rel"
+      shasum -a 256 "$file" | awk '{print $1}'
+      printf '\n'
+    done
+  ) | shasum -a 256 | awk '{print $1}'
+}
 
 bundle_executable_path() {  # $1=bundle; prints the exact signed executable
   local bundle="$1" name
@@ -427,17 +444,23 @@ bundle_executable_path() {  # $1=bundle; prints the exact signed executable
 }
 
 record_plugin_payload_identity() {  # $1=bundle
-  local bundle="$1" executable sha
+  local bundle="$1" executable sha digest
   executable="$(bundle_executable_path "$bundle")" || exit 2
   sha="$(shasum -a 256 "$executable" | awk '{print $1}')" || exit 2
   [[ "$sha" =~ ^[0-9a-fA-F]{64}$ ]] || {
     echo "error: unable to hash signed plugin executable: $executable" >&2
     exit 2
   }
+  digest="$(bundle_payload_digest "$bundle")" || exit 2
+  [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || {
+    echo "error: unable to digest signed plugin bundle: $bundle" >&2
+    exit 2
+  }
   P_PAYLOAD_BUNDLE+=("$(basename "$bundle")")
   P_PAYLOAD_EXECUTABLE+=("$(basename "$executable")")
   P_PAYLOAD_SHA256+=("$sha")
-  echo "  source payload identity: $(basename "$bundle")/$(basename "$executable") sha256=$sha"
+  P_PAYLOAD_DIGEST+=("$digest")
+  echo "  source payload identity: $(basename "$bundle")/$(basename "$executable") sha256=$sha bundle-digest=$digest"
 }
 
 verify_product_payload_identities() {
@@ -445,8 +468,8 @@ verify_product_payload_identities() {
   # archive is intentional: productsign only wraps the archive and cannot fix
   # a stale component payload.  Match by bundle leaf + CFBundleExecutable so
   # two formats of one product do not get confused with one another.
-  local archive="$1" expanded="$STAGE/expanded-product" i bundle executable expected
-  local matches_file match count got
+  local archive="$1" expanded="$STAGE/expanded-product" i bundle executable expected digest
+  local matches_file match count got packaged_digest
   [[ "${#P_PAYLOAD_BUNDLE[@]}" -gt 0 ]] || return 0
   # pkgutil --expand-full requires a destination that does not already exist.
   # Do not pre-create it: the real macOS tool rejects an existing directory,
@@ -458,6 +481,7 @@ verify_product_payload_identities() {
   for ((i=0; i<${#P_PAYLOAD_BUNDLE[@]}; i++)); do
     bundle="${P_PAYLOAD_BUNDLE[$i]}"; executable="${P_PAYLOAD_EXECUTABLE[$i]}"
     expected="${P_PAYLOAD_SHA256[$i]}"
+    digest="${P_PAYLOAD_DIGEST[$i]}"
     matches_file="$STAGE/payload-matches-$i"
     # pkgbuild --component places the bundle directly at the payload root
     # (Payload/$bundle).  The product archive may put that component beneath
@@ -481,7 +505,14 @@ verify_product_payload_identities() {
       echo "  archive: $got ($match)" >&2
       exit 2
     }
-    echo "  verified packaged payload: $bundle/$executable sha256=$got"
+    packaged_digest="$(bundle_payload_digest "${match%/Contents/MacOS/$executable}")"
+    [[ "$packaged_digest" == "$digest" ]] || {
+      echo "error: packaged bundle digest mismatch for $bundle" >&2
+      echo "  source:  $digest" >&2
+      echo "  archive: $packaged_digest ($match)" >&2
+      exit 2
+    }
+    echo "  verified packaged payload: $bundle/$executable sha256=$got bundle-digest=$packaged_digest"
   done
 }
 # ── Installer panes ─────────────────────────────────────────────────────────
