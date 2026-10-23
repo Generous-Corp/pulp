@@ -162,10 +162,10 @@ jobs:
           probe --enable-unsafe-swiftshader
           probe --enable-unsafe-swiftshader --use-angle=swiftshader
 
-      # choc at an exact commit (the pulp-webview-dnd-poc1 tag), cloned fresh.
+      # choc at an exact commit (the pulp-webview-dnd-poc2 tag), cloned fresh.
       - name: Vendor choc for the WAM build
         env:
-          CHOC_COMMIT: df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60
+          CHOC_COMMIT: b586f33d1c9e8bee98c2b420a5b20bf525c3c7be
         run: |
           set -euo pipefail
           dest="${RUNNER_TEMP:?}/choc-src"
@@ -641,10 +641,10 @@ jobs:
       # long before it could prove anything about the GPU.
       # Self-hosted runners keep $HOME between jobs, and PR jobs run there too, so a
       # copy left in $HOME is not trusted: choc is fetched at an exact commit (the
-      # pulp-webview-dnd-poc1 tag) into this job's own temp dir.
+      # pulp-webview-dnd-poc2 tag) into this job's own temp dir.
       - name: Vendor choc for the UI build
         env:
-          CHOC_COMMIT: df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60
+          CHOC_COMMIT: b586f33d1c9e8bee98c2b420a5b20bf525c3c7be
         run: |
           set -euo pipefail
           dest="${RUNNER_TEMP:?}/choc-src"

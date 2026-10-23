@@ -19,7 +19,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | Babel parser | 7.29.7 | MIT | JSX/TSX source-contract extraction for `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`; npm-installed for import tooling, not bundled into the C++ runtime | import tooling | 2026-05-27 |
 | Babel standalone (holdout fixture) | 7.29.0 | MIT | Unmodified `@babel/standalone` build embedded in the Claude standalone bundle frozen as the importer differential lab holdout `test/fixtures/import-differential/holdout/spectr-standalone.html`; evaluated only by Chromium inside the lab capture, never built, linked, or shipped. MIT text in `test/fixtures/import-differential/holdout/LICENSE-Babel.txt` | test fixture | 2026-10-23 |
 | Catch2 | 3.7.1 | BSL-1.0 | Unit testing framework | test | 2026-03-24 |
-| CHOC | pulp-webview-dnd-poc1 (fork of f0f5cdf5a938) | ISC | JS engine abstraction, MIDI utilities, audio helpers, WebView drag-and-drop | multiple | 2026-03-24 |
+| CHOC | pulp-webview-dnd-poc2 (fork of f0f5cdf5a938 + upstream JSON EOF fix 9181665) | ISC | JS engine abstraction, MIDI utilities, audio helpers, WebView drag-and-drop | multiple | 2026-03-24 |
 | CLAP | 1.2.10 | MIT | CLAP plugin format headers | pulp-format | 2026-03-24 |
 | command-group | 5.0.1 | Apache-2.0 | Cross-platform process-tree containment and termination for bounded Rust CLI trace analysis (Unix process groups; Windows Job Objects) | pulp-rs | 2026-08-30 |
 | cpp-httplib | vendored-snapshot | MIT | HTTP client (GET/POST/download) | pulp-runtime | 2026-04-07 |
