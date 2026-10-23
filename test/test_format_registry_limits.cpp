@@ -390,7 +390,8 @@ TEST_CASE("read_audio_file decodes the header it admitted rather than one a late
     // whose header claims sixty-four times as many frames. The decode must
     // come from the open that was admitted: 64 frames of the original value.
     // (Replacing a file that is open fails on Windows; the admitted decode
-    // then trivially matches, and the ancestor-check still proves the seam.)
+    // then trivially matches, and the refused-admission check above still
+    // proves the seam.)
     bool replaced = false;
     auto decoded = pulp::audio::read_audio_file(path.string(), [&](const AudioFileInfo& info) {
         REQUIRE(info.num_frames == 64u);

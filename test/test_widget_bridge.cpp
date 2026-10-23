@@ -39,7 +39,7 @@ TEST_CASE("WidgetBridge attaches a widget named as its own parent under the root
     REQUIRE(root.child_at(0)->child_count() == 0);
 
     // A parent that is a descendant of the new widget cannot exist at create
-    // time, but one that is the widget itself through the DOM path can.
+    // time, but one that is the widget itself can on every factory path.
     bridge.load_script("createRow('row', 'row');");
     REQUIRE(root.child_count() == 2);
     REQUIRE(root.child_at(1)->parent() == &root);
