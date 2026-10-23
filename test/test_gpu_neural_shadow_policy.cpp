@@ -18,6 +18,7 @@
 #include <pulp/gpu_audio/gpu_neural_realtime_node.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <limits>
@@ -40,17 +41,18 @@ constexpr std::uint32_t kLead = 2;
 // Set while the test thread is inside the audio callback.
 thread_local bool t_in_callback = false;
 
-/// FirKernel that counts how often the model ran inside the callback.
+/// FirKernel that counts how often the model ran inside the callback. The
+/// shadow thread counts while the test reads, so the counters are atomic.
 struct CountingFir {
     FirKernel fir;
-    std::uint64_t calls = 0, calls_in_callback = 0;
+    std::atomic<std::uint64_t> calls{0}, calls_in_callback{0};
     void reset() noexcept {
         fir.reset();
     }
     void process(const float* in, float* out, std::uint32_t n) noexcept {
-        ++calls;
+        calls.fetch_add(1, std::memory_order_relaxed);
         if (t_in_callback)
-            ++calls_in_callback;
+            calls_in_callback.fetch_add(1, std::memory_order_relaxed);
         fir.process(in, out, n);
     }
 };
@@ -146,7 +148,7 @@ struct Rig {
     std::uint64_t calls_in_callback() const {
         std::uint64_t total = 0;
         for (const auto& kernel : kernels)
-            total += kernel.calls_in_callback;
+            total += kernel.calls_in_callback.load(std::memory_order_relaxed);
         return total;
     }
 
