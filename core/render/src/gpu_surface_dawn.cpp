@@ -125,7 +125,7 @@ public:
         // native default unless a host registered its own) owns it.
         std::string proc_error;
         if (!ensure_dawn_procs(&proc_error)) {
-            runtime::log_error("GpuSurface: Dawn proc table unavailable: " + proc_error);
+            runtime::log_error("GpuSurface: Dawn proc table unavailable: {}", proc_error);
             return false;
         }
 

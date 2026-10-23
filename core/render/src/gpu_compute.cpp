@@ -4809,7 +4809,7 @@ private:
     bool create_instance() {
         std::string proc_error;
         if (!ensure_dawn_procs(&proc_error)) {
-            runtime::log_error("GpuCompute: Dawn proc table unavailable: " + proc_error);
+            runtime::log_error("GpuCompute: Dawn proc table unavailable: {}", proc_error);
             return false;
         }
 

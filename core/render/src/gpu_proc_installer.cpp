@@ -26,7 +26,7 @@ bool set_dawn_proc_installer(const DawnProcInstaller& installer, std::string* er
     std::string reason;
     if (registry().set(installer, &reason))
         return true;
-    runtime::log_error("set_dawn_proc_installer: " + reason);
+    runtime::log_error("set_dawn_proc_installer: {}", reason);
     if (error != nullptr)
         *error = std::move(reason);
     return false;
