@@ -328,6 +328,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "setFaderTrackBorder": "(id: string, color: string) => void",
     "setFaderTrackWidth": "(id: string, width: number) => void",
     "setFlex": "(id: string, key: string, value: number | string) => void",
+    "resetStyleProperty": "(id: string, slot: string) => boolean",
     "setGrid": "(id: string, key: string, value: number | string) => void",
     "setImageSource": "(id: string, path: string) => void",
     "setItems": "(id: string, items: string[] | string) => void",

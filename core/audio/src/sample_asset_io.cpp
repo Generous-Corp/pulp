@@ -191,7 +191,9 @@ SampleAssetImportResult SampleAssetImporter::import_audio_file(
         return result;
     }
 
-    auto audio = FormatRegistry::instance().read(path);
+    // The path was chosen by the user or host and describe_audio_file applied
+    // the caller's policy above; that preflight owns the bound.
+    auto audio = FormatRegistry::instance().read(path, DecodeLimits::unbounded());
     if (!audio) {
         result.descriptor.status = SampleAssetStatus::read_failed;
         return result;

@@ -590,6 +590,11 @@ public:
         (void)frame;
         (void)dt;
     }
+    /// `meter_frame()` changed: repaint this view (a live binding alone does not
+    /// composite). Meter owns its invalidation in `on_meter_frame` and overrides it.
+    virtual void on_meter_snapshot_changed() {
+        request_repaint();
+    }
 
     // ── Transient-animation glue ─────────────────────────────────────────────
     // Tween/easing already exist; what a faithful port re-rolls every time is

@@ -1809,12 +1809,36 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
         impl_->queue.WriteBuffer(plan->position, 0, initial_position, sizeof(initial_position));
         // A ring holds at least `pad + B` columns, rounded up to a power of two
         // so the shaders wrap with a mask and the u32 position never skews it.
+        // The validator caps pad + B at kWavenetMaxRingColumns; the arithmetic
+        // is 64-bit so a larger value can never wrap the doubling loop.
         const auto ring_columns = [&](std::uint32_t pad) {
-            std::uint32_t columns = 1;
-            while (columns < pad + spec.block_size)
+            const std::uint64_t needed = std::uint64_t{pad} + spec.block_size;
+            std::uint64_t columns = 1;
+            while (columns < needed && columns <= kWavenetMaxRingColumns)
                 columns <<= 1;
             return columns;
         };
+        // Refuse, before allocating anything, a ring the validator's cap allows
+        // but this device cannot bind as one storage buffer.
+        {
+            wgpu::Limits limits{};
+            if (impl_->device.GetLimits(&limits) != wgpu::Status::Success)
+                return false;
+            for (const auto& layer : spec.arrays) {
+                for (std::size_t activation = 0; activation <= layer.dilations.size();
+                     ++activation) {
+                    const auto pad =
+                        activation < layer.dilations.size()
+                            ? wavenet_causal_pad(layer.kernel, layer.dilations[activation])
+                            : 0u;
+                    const auto columns = ring_columns(pad);
+                    if (columns > kWavenetMaxRingColumns ||
+                        std::uint64_t{layer.channels} * columns * sizeof(float) >
+                            limits.maxStorageBufferBindingSize)
+                        return false;
+                }
+            }
+        }
 
         struct RcU {
             std::uint32_t in_ch, out_ch, B, woff, src_mask, dst_mask, src_ring, p1;
@@ -1852,7 +1876,8 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             array.rings.reserve(layer.dilations.size() + 1u);
             array.ring_masks.reserve(layer.dilations.size() + 1u);
             for (std::size_t activation = 0; activation <= layer.dilations.size(); ++activation) {
-                const auto columns = ring_columns(array.pads[activation]);
+                const auto columns =
+                    static_cast<std::uint32_t>(ring_columns(array.pads[activation]));
                 const auto ring_floats = static_cast<std::size_t>(C) * columns;
                 auto ring = make_storage(ring_floats * sizeof(float));
                 if (!ring)

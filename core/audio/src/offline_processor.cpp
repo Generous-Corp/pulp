@@ -518,7 +518,8 @@ bool offline_process_file(
 {
     auto& registry = FormatRegistry::instance();
 
-    auto input = registry.read(input_path);
+    // The input path was chosen by the user or host; the caller owns the bound.
+    auto input = registry.read(input_path, DecodeLimits::unbounded());
     if (!input) return false;
 
     auto output = offline_process(*input, process_fn, block_size);

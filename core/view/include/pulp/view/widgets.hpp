@@ -2303,6 +2303,7 @@ public:
             path_ = uri;
             loaded_ = false;
             cached_data_.clear();
+            cached_data_key_.clear();
         }
     }
     const std::string& image_source() const { return path_; }
@@ -2356,6 +2357,7 @@ private:
     std::string path_;
     bool loaded_ = false;
     std::vector<uint8_t> cached_data_;  // File bytes cached after first successful load
+    std::string cached_data_key_;       // SHA-256 hex of cached_data_; empty when unset
     ImageCache* cache_ = nullptr;       // optional; owned externally
     float fill_value_ = -1.0f;          // <0 disables the silhouette fill overlay
     canvas::Color fill_color_ = canvas::Color::rgba(0.49f, 0.42f, 1.0f, 0.55f);

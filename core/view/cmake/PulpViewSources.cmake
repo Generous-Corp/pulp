@@ -212,6 +212,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/style_cursor_api.cpp
     src/widget_bridge/style_effects_api.cpp
     src/widget_bridge/style_rn_compat_api.cpp
+    src/widget_bridge/style_reset_api.cpp
     src/widget_bridge/style_state_api.cpp
     src/widget_bridge/style_storage_api.cpp
     src/widget_bridge/style_visual_api.cpp
