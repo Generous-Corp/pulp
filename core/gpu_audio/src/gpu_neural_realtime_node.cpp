@@ -30,27 +30,6 @@ std::uint64_t now_ns() noexcept {
                                           .count());
 }
 
-GpuAudioRecoveryReason public_reason(detail::SharedIoRecoveryReason reason) noexcept {
-    switch (reason) {
-    case detail::SharedIoRecoveryReason::None:
-        return GpuAudioRecoveryReason::None;
-    case detail::SharedIoRecoveryReason::SequenceGap:
-        return GpuAudioRecoveryReason::SequenceGap;
-    case detail::SharedIoRecoveryReason::InputSaturated:
-        return GpuAudioRecoveryReason::InputSaturated;
-    case detail::SharedIoRecoveryReason::ProviderFailure:
-        return GpuAudioRecoveryReason::ProviderFailure;
-    case detail::SharedIoRecoveryReason::ProviderLost:
-        return GpuAudioRecoveryReason::ProviderLost;
-    case detail::SharedIoRecoveryReason::OfflineFence:
-        return GpuAudioRecoveryReason::OfflineFence;
-    case detail::SharedIoRecoveryReason::InvalidCallback:
-        return GpuAudioRecoveryReason::InvalidCallback;
-    case detail::SharedIoRecoveryReason::ProviderUnresponsive:
-        return GpuAudioRecoveryReason::ProviderUnresponsive;
-    }
-    return GpuAudioRecoveryReason::None;
-}
 } // namespace
 
 struct GpuNeuralRealtimeNode::Impl {
@@ -896,7 +875,7 @@ bool GpuNeuralRealtimeNode::bind_realtime_path(detail::RealtimeGpuNodeBinding& b
 }
 
 GpuAudioRecoveryReason GpuNeuralRealtimeNode::recovery_reason() const noexcept {
-    return public_reason(impl_->recovery());
+    return detail::public_recovery_reason(impl_->recovery());
 }
 
 std::uint64_t GpuNeuralRealtimeNode::recovery_sequence() const noexcept {
@@ -1182,8 +1161,16 @@ bool GpuNeuralRealtimeNode::health(const void* self, detail::RealtimeGpuHealth& 
     out.delivery_epoch_active = out.epoch != 0;
     out.device_lost = node.impl_->device_lost.load(std::memory_order_acquire);
     out.gpu_kernel_available = node.gpu_kernel_available();
-    if (node.impl_->prepared)
+    if (node.impl_->prepared) {
         node.impl_->fill_shadow(out);
+        // Under ShadowPolicy::None a realtime miss is silent although the
+        // descriptor declares CpuFallback; report what is in effect.
+        const bool silent_miss =
+            node.impl_->shadow_mode.load(std::memory_order_relaxed) == ShadowPolicy::None;
+        out.reports_fallback = true;
+        out.fallback_policy = silent_miss ? MissPolicy::Silence : MissPolicy::CpuFallback;
+        out.fallback_available = !silent_miss && node.cpu_fallback_prepared();
+    }
     return true;
 }
 

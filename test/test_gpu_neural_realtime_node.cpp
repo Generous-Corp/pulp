@@ -947,6 +947,31 @@ TEST_CASE("the node's status projection keeps sustained deadline misses Degraded
     CHECK(detail::provider_state_for_health(health) == GpuAudioProviderState::Ready);
 }
 
+TEST_CASE("a degraded node delivers CPU only from a prepared fallback",
+          "[gpu_audio][neural][status]") {
+    using detail::project_node_state;
+    const auto none = GpuAudioRecoveryReason::None;
+    // Positive control: a Ready provider delivers GPU whatever the fallback.
+    auto ready = project_node_state(false, none, true, MissPolicy::CpuFallback, false);
+    CHECK(ready.provider_state == GpuAudioProviderState::Ready);
+    CHECK(ready.selected_engine == GpuAudioEngine::Gpu);
+    // Degraded with a prepared CPU fallback: the callback runs it.
+    auto prepared = project_node_state(false, none, false, MissPolicy::CpuFallback, true);
+    CHECK(prepared.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(prepared.selected_engine == GpuAudioEngine::Cpu);
+    // Declared but not prepared, or a silent policy: no engine delivers.
+    CHECK(project_node_state(false, none, false, MissPolicy::CpuFallback, false).selected_engine ==
+          GpuAudioEngine::Unknown);
+    CHECK(project_node_state(false, none, false, MissPolicy::Silence, true).selected_engine ==
+          GpuAudioEngine::Unknown);
+    // Loss outranks authentication.
+    auto lost = project_node_state(true, none, true, MissPolicy::CpuFallback, true);
+    CHECK(lost.provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(lost.selected_engine == GpuAudioEngine::Cpu);
+    CHECK(detail::public_recovery_reason(detail::SharedIoRecoveryReason::ProviderLost) ==
+          GpuAudioRecoveryReason::ProviderLost);
+}
+
 TEST_CASE("non-finite input reaches neither the GPU nor the shadow",
           "[gpu_audio][neural][realtime]") {
     const auto c = GENERATE(kWaveNetGpu, kLstm);

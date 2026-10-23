@@ -848,25 +848,7 @@ bool GpuWaveNetRealtimeNode::fenced() const noexcept {
 GpuAudioRecoveryReason GpuWaveNetRealtimeNode::recovery_reason() const noexcept {
     if (!impl_->bridge)
         return GpuAudioRecoveryReason::None;
-    switch (impl_->recovery()) {
-    case detail::SharedIoRecoveryReason::None:
-        return GpuAudioRecoveryReason::None;
-    case detail::SharedIoRecoveryReason::SequenceGap:
-        return GpuAudioRecoveryReason::SequenceGap;
-    case detail::SharedIoRecoveryReason::InputSaturated:
-        return GpuAudioRecoveryReason::InputSaturated;
-    case detail::SharedIoRecoveryReason::ProviderFailure:
-        return GpuAudioRecoveryReason::ProviderFailure;
-    case detail::SharedIoRecoveryReason::ProviderLost:
-        return GpuAudioRecoveryReason::ProviderLost;
-    case detail::SharedIoRecoveryReason::OfflineFence:
-        return GpuAudioRecoveryReason::OfflineFence;
-    case detail::SharedIoRecoveryReason::InvalidCallback:
-        return GpuAudioRecoveryReason::InvalidCallback;
-    case detail::SharedIoRecoveryReason::ProviderUnresponsive:
-        return GpuAudioRecoveryReason::ProviderUnresponsive;
-    }
-    return GpuAudioRecoveryReason::None;
+    return detail::public_recovery_reason(impl_->recovery());
 }
 std::uint64_t GpuWaveNetRealtimeNode::recovery_sequence() const noexcept {
     return impl_->bridge ? impl_->bridge->recovery_sequence()
@@ -930,23 +912,13 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     status.gpu_kernel_available = true;
     // A lost device or an unresponsive provider needs a new provider before
     // the GPU can deliver again, whatever cause latched first; every other
-    // recovery reason leaves it recoverable.
-    if (impl_->device_lost.load(std::memory_order_acquire) ||
-        status.recovery_reason == GpuAudioRecoveryReason::ProviderLost ||
-        status.recovery_reason == GpuAudioRecoveryReason::ProviderUnresponsive)
-        status.provider_state = GpuAudioProviderState::Unavailable;
-    else
-        status.provider_state = authenticated_provider() && !fenced()
-                                    ? GpuAudioProviderState::Ready
-                                    : GpuAudioProviderState::Degraded;
-    // The engine actually producing audio: the GPU only while it delivers;
-    // otherwise the prepared CPU shadow, or none when misses are silent.
-    if (status.provider_state == GpuAudioProviderState::Ready)
-        status.selected_engine = GpuAudioEngine::Gpu;
-    else if (status.fallback_policy == MissPolicy::CpuFallback && status.fallback_available)
-        status.selected_engine = GpuAudioEngine::Cpu;
-    else
-        status.selected_engine = GpuAudioEngine::Unknown;
+    // recovery reason leaves it recoverable. The engine is the GPU only while
+    // it delivers; otherwise the prepared CPU shadow, or none when silent.
+    const auto projection = detail::project_node_state(
+        impl_->device_lost.load(std::memory_order_acquire), status.recovery_reason,
+        authenticated_provider() && !fenced(), status.fallback_policy, status.fallback_available);
+    status.provider_state = projection.provider_state;
+    status.selected_engine = projection.selected_engine;
     return status;
 }
 bool GpuWaveNetRealtimeNode::ready() const noexcept {

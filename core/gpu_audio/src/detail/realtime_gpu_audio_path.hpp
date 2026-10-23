@@ -61,6 +61,13 @@ struct RealtimeGpuHealth {
     GpuAudioCompletionMode completion_mode = GpuAudioCompletionMode::Unknown;
     bool timestamps_available = false;
     std::uint64_t last_delivery_ns = 0;
+    // The miss substitute in effect now, when it differs from what the
+    // descriptor declared (a neural node under ShadowPolicy::None declares
+    // CpuFallback so the transport keeps calling it, but a miss is silent).
+    // Without `reports_fallback` the transport keeps the declared policy.
+    bool reports_fallback = false;
+    MissPolicy fallback_policy = MissPolicy::Silence;
+    bool fallback_available = false;
 };
 // Returns false when no coherent read could be taken.
 using RealtimeGpuHealthFn = bool (*)(const void*, RealtimeGpuHealth&) noexcept;

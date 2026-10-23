@@ -1029,6 +1029,10 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
         status.completion_mode = health.completion_mode;
         status.timestamps_available = health.timestamps_available;
         status.last_delivery_ns = health.last_delivery_ns;
+        if (health.reports_fallback) {
+            status.fallback_policy = health.fallback_policy;
+            status.fallback_available = health.fallback_available;
+        }
     } else if (configuration.realtime_health) {
         // No coherent health copy: never report an unverified provider as
         // Ready, and claim no recovery cause that was not observed. A staged
@@ -1036,7 +1040,8 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
         lower_to(GpuAudioProviderState::Degraded);
     }
     status.selected_engine = detail::delivering_engine(
-        status.provider_state, status.selected_engine, status.fallback_policy);
+        status.provider_state, status.selected_engine, status.fallback_policy,
+        status.fallback_available);
     status.reacquire_attempts = reacquire_attempts_.load(std::memory_order_relaxed);
     status.reacquire_successes = reacquire_successes_.load(std::memory_order_relaxed);
     status.last_reacquire_to_gpu_ns = last_reacquire_to_gpu_ns_.load(std::memory_order_relaxed);

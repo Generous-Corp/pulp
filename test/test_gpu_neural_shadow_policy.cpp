@@ -139,6 +139,10 @@ struct Rig {
         CHECK(hosted.shadow_late_blocks == own.shadow_late_blocks);
         CHECK(hosted.shadow_double_miss_blocks == own.shadow_double_miss_blocks);
         CHECK(hosted.shadow_model_differs == own.shadow_model_differs);
+        // The transport reports the miss substitute in effect, not only the
+        // one the descriptor declared.
+        CHECK(hosted.fallback_policy == own.fallback_policy);
+        CHECK(hosted.fallback_available == own.fallback_available);
         return own;
     }
     Mode mode() const {

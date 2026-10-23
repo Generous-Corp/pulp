@@ -1,6 +1,7 @@
 #pragma once
 
 #include "realtime_gpu_audio_path.hpp"
+#include "shared_io_stamped_bridge.hpp"
 
 #include <array>
 #include <atomic>
@@ -138,11 +139,60 @@ inline GpuAudioRecoveryReason reported_recovery_reason(const RealtimeGpuHealth& 
 // deliver GPU blocks: the callback runs the prepared CPU fallback, or emits
 // silence or dry input, which no engine produces.
 inline GpuAudioEngine delivering_engine(GpuAudioProviderState state, GpuAudioEngine selected,
-                                        MissPolicy fallback_policy) noexcept {
+                                        MissPolicy fallback_policy,
+                                        bool fallback_available = true) noexcept {
     if (state == GpuAudioProviderState::Ready || selected != GpuAudioEngine::Gpu)
         return selected;
-    return fallback_policy == MissPolicy::CpuFallback ? GpuAudioEngine::Cpu
-                                                      : GpuAudioEngine::Unknown;
+    return fallback_policy == MissPolicy::CpuFallback && fallback_available
+               ? GpuAudioEngine::Cpu
+               : GpuAudioEngine::Unknown;
+}
+
+// The one private-to-public recovery-reason mapping, shared by every node
+// that reads a stamped bridge.
+inline GpuAudioRecoveryReason public_recovery_reason(SharedIoRecoveryReason reason) noexcept {
+    switch (reason) {
+    case SharedIoRecoveryReason::None:
+        return GpuAudioRecoveryReason::None;
+    case SharedIoRecoveryReason::SequenceGap:
+        return GpuAudioRecoveryReason::SequenceGap;
+    case SharedIoRecoveryReason::InputSaturated:
+        return GpuAudioRecoveryReason::InputSaturated;
+    case SharedIoRecoveryReason::ProviderFailure:
+        return GpuAudioRecoveryReason::ProviderFailure;
+    case SharedIoRecoveryReason::ProviderLost:
+        return GpuAudioRecoveryReason::ProviderLost;
+    case SharedIoRecoveryReason::OfflineFence:
+        return GpuAudioRecoveryReason::OfflineFence;
+    case SharedIoRecoveryReason::InvalidCallback:
+        return GpuAudioRecoveryReason::InvalidCallback;
+    case SharedIoRecoveryReason::ProviderUnresponsive:
+        return GpuAudioRecoveryReason::ProviderUnresponsive;
+    }
+    return GpuAudioRecoveryReason::None;
+}
+
+// A node's provider state and delivering engine from its own facts, the same
+// projection the transport applies to a health sample: Unavailable when the
+// provider is lost or stalled, Ready only for an authenticated, unfenced
+// provider, Degraded otherwise.
+struct NodeStateProjection {
+    GpuAudioProviderState provider_state = GpuAudioProviderState::Degraded;
+    GpuAudioEngine selected_engine = GpuAudioEngine::Unknown;
+};
+inline NodeStateProjection project_node_state(bool device_lost, GpuAudioRecoveryReason reason,
+                                              bool authenticated_unfenced,
+                                              MissPolicy fallback_policy,
+                                              bool fallback_available) noexcept {
+    RealtimeGpuHealth health;
+    health.device_lost = device_lost;
+    health.recovery_reason = reason;
+    health.fenced = !authenticated_unfenced;
+    NodeStateProjection projection;
+    projection.provider_state = provider_state_for_health(health);
+    projection.selected_engine = delivering_engine(projection.provider_state, GpuAudioEngine::Gpu,
+                                                   fallback_policy, fallback_available);
+    return projection;
 }
 
 // Health carried by a node's own status projection. Loss is the latched

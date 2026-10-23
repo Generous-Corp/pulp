@@ -831,31 +831,6 @@ bool GpuConvolver::bind_realtime_path(detail::RealtimeGpuNodeBinding& binding) n
     return true;
 }
 
-#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-namespace {
-GpuAudioRecoveryReason public_recovery_reason(detail::SharedIoRecoveryReason reason) noexcept {
-    switch (reason) {
-    case detail::SharedIoRecoveryReason::None:
-        return GpuAudioRecoveryReason::None;
-    case detail::SharedIoRecoveryReason::SequenceGap:
-        return GpuAudioRecoveryReason::SequenceGap;
-    case detail::SharedIoRecoveryReason::InputSaturated:
-        return GpuAudioRecoveryReason::InputSaturated;
-    case detail::SharedIoRecoveryReason::ProviderFailure:
-        return GpuAudioRecoveryReason::ProviderFailure;
-    case detail::SharedIoRecoveryReason::ProviderLost:
-        return GpuAudioRecoveryReason::ProviderLost;
-    case detail::SharedIoRecoveryReason::OfflineFence:
-        return GpuAudioRecoveryReason::OfflineFence;
-    case detail::SharedIoRecoveryReason::InvalidCallback:
-        return GpuAudioRecoveryReason::InvalidCallback;
-    case detail::SharedIoRecoveryReason::ProviderUnresponsive:
-        return GpuAudioRecoveryReason::ProviderUnresponsive;
-    }
-    return GpuAudioRecoveryReason::None;
-}
-} // namespace
-#endif
 
 bool GpuConvolver::set_realtime_shared_io_notifier(
     void* self, detail::SharedIoCompletionNotifier notifier) noexcept {
@@ -878,7 +853,7 @@ bool GpuConvolver::realtime_shared_io_health(const void* self,
         return false;
     const auto& session = *convolver->shared_io_->session;
     detail::RealtimeGpuHealth health;
-    health.recovery_reason = public_recovery_reason(session.recovery_reason());
+    health.recovery_reason = detail::public_recovery_reason(session.recovery_reason());
     health.recovery_sequence = session.recovery_sequence();
     // A cause the worker latched without a stream position (provider loss,
     // failure or an offline fence) is attributed to the first sequence of the
