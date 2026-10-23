@@ -1453,6 +1453,32 @@ def mirror_edge_table(path: Path = MIRROR_EDGE_TABLE) -> dict:
     }
 
 
+CLOSURE_SCHEMA = "pulp.vellum.closure.v1"
+
+
+def closure_source_root(data: dict) -> Path | None:
+    """The checkout a closure's ``files`` are relative to, or None.
+
+    ``"."`` names this checkout. Anything else must be an existing directory;
+    a scan rooted at a missing one would read nothing and pass.
+    """
+    source = data.get("source_root")
+    if source == ".":
+        return Path(__file__).resolve().parents[2]
+    if not isinstance(source, str) or not source or not Path(source).is_dir():
+        return None
+    return Path(source)
+
+
+def closure_shape_violations(data: dict) -> list[str]:
+    violations: list[str] = []
+    if data.get("schema") != CLOSURE_SCHEMA:
+        violations.append(f"closure schema must be {CLOSURE_SCHEMA}, not {data.get('schema')!r}")
+    if closure_source_root(data) is None:
+        violations.append(f"closure source_root is not an existing directory: {data.get('source_root')!r}")
+    return violations
+
+
 def closure_mention_violations(data: dict, table: dict | None = None) -> list[str]:
     """Every file a closure carries is free of forbidden mirror edges.
 
@@ -1462,11 +1488,10 @@ def closure_mention_violations(data: dict, table: dict | None = None) -> list[st
     ride along unchecked. The patterns are the ones Vellum's extraction scan
     applies to the mirror.
     """
-    source = data.get("source_root")
-    if not source:
-        return []
+    root = closure_source_root(data)
+    if root is None:
+        return [f"closure source_root is not an existing directory: {data.get('source_root')!r}"]
     table = table or mirror_edge_table()
-    root = Path(__file__).resolve().parents[2] if source == "." else Path(source)
     violations: list[str] = []
     for rel in data.get("files", []):
         for name, pattern in table["path"].items():
@@ -1496,18 +1521,19 @@ def closure_mention_violations(data: dict, table: dict | None = None) -> list[st
 
 def cmake_reference_violations(data: dict, allowlist: list[dict] | None, used: set[str]) -> list[str]:
     """No CMake file in a closure may reference a forbidden Pulp target."""
-    source = data.get("source_root")
-    if not source:
+    root = closure_source_root(data)
+    if root is None:
         return []
-    root = Path(__file__).resolve().parents[2] if source == "." else Path(source)
     violations: list[str] = []
     for path in data.get("files", []):
-        if not (path.endswith(".cmake") or Path(path).name == "CMakeLists.txt"):
+        if path.startswith("@build/") or not (path.endswith(".cmake") or Path(path).name == "CMakeLists.txt"):
             continue
-        full = root / path
-        if not full.is_file():
+        try:
+            text = (root / path).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            violations.append(f"unreadable closure file {path}: {exc}")
             continue
-        for line_no, line in enumerate(full.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        for line_no, line in enumerate(text.splitlines(), 1):
             code = line.split("#", 1)[0]
             for match in FORBIDDEN_CMAKE_TARGET.finditer(code):
                 key = f"{path}:{match.group(0)}"
@@ -1975,18 +2001,15 @@ def policy_include_forbidden(name: str) -> bool:
     return bool(FORBIDDEN_INCLUDE.match(name))
 
 
-def symbol_closure(undefined: Iterable[str], allowed: Iterable[str] = ()) -> list[str]:
-    allowed_set = set(allowed)
-    return sorted(symbol for symbol in undefined if symbol not in allowed_set and re.search(r"(?:audio|signal|host|midi|music|format|content|ContentRegistry)", symbol, re.I))
-
-
 def load_allowlist(path: Path) -> list[dict]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema") != "pulp.vellum.closure.allowlist.v1":
         raise SystemExit(f"invalid closure allowlist schema: {path}")
+    # An empty list is the debt-free state; a missing or non-list field is a
+    # malformed file, not an empty allowlist.
     entries = payload.get("entries")
-    if not isinstance(entries, list) or not entries:
-        raise SystemExit("closure allowlist must contain entries")
+    if not isinstance(entries, list):
+        raise SystemExit("closure allowlist entries must be a list")
     seen: set[str] = set()
     for entry in entries:
         if not isinstance(entry, dict) or not {"id", "owner", "debt_id", "kind", "match"} <= set(entry):
@@ -2077,8 +2100,10 @@ def cmd_gate(args: argparse.Namespace) -> int:
         # An entry scoped to platforms matches only a manifest from one of them.
         allowlist = None if full_allowlist is None else [
             entry for entry in full_allowlist if entry.get("platforms") is None or (system and system in entry["platforms"])]
-        violations: list[str] = []
-        if data.get("schema") == "pulp.vellum.closure.v1" and data.get("targets") and not args.unit_manifest:
+        violations: list[str] = closure_shape_violations(data)
+        root = closure_source_root(data)
+        # A closure that names its build tree came from a CMake configure.
+        if data.get("targets") and data.get("build_dir") and not args.unit_manifest:
             violations.append("a CMake closure is gated against the D3 units: pass --unit-manifest")
         violations.extend(external_input_violations(data))
         violations.extend(receipt_path_violations(data))
@@ -2102,9 +2127,10 @@ def cmd_gate(args: argparse.Namespace) -> int:
                     allowed = allowed or allowlist_match(allowlist, "target", link, used_allowlist)
                 if policy_target_forbidden(link) and not allowed:
                     violations.append(f"forbidden link {target['name']} -> {link}")
-        for symbol in data.get("undefined_symbols", []):
-            if symbol_closure([symbol]):
-                violations.append(f"forbidden undefined symbol {symbol}")
+        if "undefined_symbols" in data:
+            # This gate reads CMake edges and source text, never object files;
+            # symbol closure is archive_symbol_closure_check.py's job.
+            violations.append("undefined_symbols is not graded by the closure gate; check archives with archive_symbol_closure_check.py")
         for path in data.get("files", []):
             if path.startswith("@build/"):
                 continue
@@ -2115,21 +2141,27 @@ def cmd_gate(args: argparse.Namespace) -> int:
                 if not allowed_root:
                     violations.append(f"forbidden closure root {path}")
                 continue
-            full = Path(data["source_root"]) / path
-            if full.suffix.lower() in TEXT_EXTS and full.is_file():
-                for line_no, _delimiter, include_name in include_edges(full):
-                    if policy_include_forbidden(include_name):
-                        # A path exemption is only valid for the explicitly named edge. Never let
-                        # one legacy file exemption accept every forbidden include in that file.
-                        allowed = any(
-                            path == allowed_path and include_name == allowed_include
-                            for allowed_path, allowed_include in getattr(args, "allow_include_edge", [])
-                        )
-                        allowed = allowed or any(path.startswith(prefix) for prefix in args.allow_include_prefix)
-                        if allowlist:
-                            allowed = allowed or allowlist_match(allowlist, "include", f"{path}:{include_name}", used_allowlist)
-                        if not allowed:
-                            violations.append(f"forbidden include {path}:{line_no}: {include_name}")
+            if root is None or Path(path).suffix.lower() not in TEXT_EXTS:
+                continue
+            try:
+                edges = include_edges(root / path)
+            except OSError as exc:
+                violations.append(f"unreadable closure file {path}: {exc}")
+                continue
+            for line_no, _delimiter, include_name in edges:
+                if policy_include_forbidden(include_name):
+                    # A path exemption is only valid for the explicitly named edge. Never let
+                    # one legacy file exemption accept every forbidden include in that file.
+                    allowed = any(
+                        path == allowed_path and include_name == allowed_include
+                        for allowed_path, allowed_include in getattr(args, "allow_include_edge", [])
+                    )
+                    allowed = allowed or any(path.startswith(prefix) for prefix in args.allow_include_prefix)
+                    if allowlist:
+                        allowed = allowed or allowlist_match(allowlist, "include", f"{path}:{include_name}", used_allowlist)
+                    if not allowed:
+                        violations.append(f"forbidden include {path}:{line_no}: {include_name}")
+        violations = list(dict.fromkeys(violations))
         status = "PASS" if not violations else ("REPORT-ONLY" if args.report_only else "FAIL")
         print(f"{name}: {status}")
         for violation in violations:
@@ -2147,7 +2179,13 @@ def cmd_gate(args: argparse.Namespace) -> int:
     return 1 if failed and not args.report_only else 0
 
 
-def git_blob_rows(repo: Path, commit: str, paths: Iterable[str]) -> list[dict]:
+def git_blob_rows(repo: Path, commit: str, paths: Iterable[str], strict: bool = True) -> list[dict]:
+    """(path, mode, blob) for each path tracked as a file at ``commit``.
+
+    With ``strict`` a path that is not a tracked file there is an error: an
+    export that silently dropped it would ship a receipt missing a file its
+    closure lists. ``strict=False`` leaves the absence for the caller to report.
+    """
     rows: list[dict] = []
     for path in paths:
         if path.startswith("@build/"):
@@ -2155,12 +2193,40 @@ def git_blob_rows(repo: Path, commit: str, paths: Iterable[str]) -> list[dict]:
         try:
             row = run("git", "-C", str(repo), "ls-tree", commit, "--", path)
         except subprocess.CalledProcessError:
-            continue
+            row = ""
+        kind = ""
         if row:
             mode, kind, blob, name = row.split("\t", 1)[0].split(" ") + [row.split("\t", 1)[1]]
             if kind == "blob":
                 rows.append({"path": name, "mode": mode, "blob": blob})
+        if strict and kind != "blob":
+            raise SystemExit(f"closure file is not a tracked file at {commit}: {path}")
     return rows
+
+
+def export_commit_map(commit_map_src: Path, pulp_sha: str, mirror_sha: str) -> bytes:
+    """The commit map git-filter-repo wrote, which must map the exported commit.
+
+    The row is evidence from the rewrite itself; a map without it cannot be
+    repaired by writing the row in, because nothing would then attest it.
+    """
+    if not commit_map_src.is_file():
+        raise SystemExit(f"git-filter-repo wrote no commit map: {commit_map_src}")
+    data = commit_map_src.read_bytes()
+    if f"{pulp_sha} {mirror_sha}".encode() not in data.splitlines():
+        raise SystemExit(f"git-filter-repo commit map does not map {pulp_sha} to {mirror_sha}")
+    return data
+
+
+def claim_export_paths(paths: Iterable[Path]) -> None:
+    """Refuse to overwrite an earlier export that shares this export id.
+
+    The id is the day plus the Pulp SHA, a form Vellum's verifier requires, so
+    a second export of one SHA on one day would replace the first's receipt.
+    """
+    existing = [str(path) for path in paths if path.exists()]
+    if existing:
+        raise SystemExit("an export with this id already exists; use another --landing: " + ", ".join(existing))
 
 
 def export_owned_file_violations(manifests: list[dict], unit_names: list[str], units: Path | None = None) -> list[str]:
@@ -2284,6 +2350,8 @@ def cmd_export(args: argparse.Namespace) -> int:
     if not filter_repo:
         raise SystemExit("git-filter-repo is required for export; refusing fallback projection")
     paths = sorted({p for manifest in manifests for p in manifest["files"] if not p.startswith("@build/")})
+    rows = git_blob_rows(repo, args.pulp_sha, paths)
+    by_path = {row["path"]: row["blob"] for row in rows}
     subprocess.run(["git", "clone", "--no-local", str(repo), str(out)], check=True, stdout=subprocess.DEVNULL)
     mirror_root = args.mirror_root.strip("/")
     if not mirror_root or mirror_root.startswith("@"):
@@ -2302,12 +2370,14 @@ def cmd_export(args: argparse.Namespace) -> int:
     run("git", "-C", str(out), "checkout", "--detach", "export-source")
     mirror_sha = run("git", "-C", str(out), "rev-parse", "refs/heads/export-source")
     mirror_tree = run("git", "-C", str(out), "rev-parse", f"{mirror_sha}:mirror")
-    rows = git_blob_rows(repo, args.pulp_sha, paths)
-    by_path = {row["path"]: row["blob"] for row in rows}
     export_id = f"{datetime.now(timezone.utc):%Y%m%d}-{args.pulp_sha[:12]}"
     landing = Path(args.landing).resolve() if args.landing else out.parent / f"vellum-export-{export_id}"
     closure_dir = landing / "provenance" / "mirror" / "closures" / export_id
-    closure_dir.mkdir(parents=True, exist_ok=True)
+    commit_map_path = landing / "provenance" / "mirror" / "commit-maps" / f"{export_id}.txt"
+    receipt_path = landing / "provenance" / "mirror" / "receipts" / f"{export_id}.json"
+    claim_export_paths([closure_dir, commit_map_path, receipt_path])
+    commit_map_bytes = export_commit_map(out / ".git" / "filter-repo" / "commit-map", args.pulp_sha, mirror_sha)
+    closure_dir.mkdir(parents=True)
     units = []
     for index, manifest in enumerate(manifests):
         unit_name = args.unit_name[index] if index < len(args.unit_name) else Path(args.manifest[index]).stem
@@ -2318,13 +2388,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         units.append({"name": unit_name, "closure_manifest": f"provenance/mirror/closures/{export_id}/{unit_name}.json", "closure_sha256": sha256(closure_path), "oracle_class": "identity",
                       "configure": {"identity": configure.get("identity"), "options_sha256": configure.get("options_sha256"), "label": configure.get("label", "")}})
     files = sorted(({"mirror_path": f"{mirror_root}/{rename_map.get(path, path)}", "pulp_path": path, "mode": next(row["mode"] for row in rows if row["path"] == path), "blob": by_path[path]} for path in paths if path in by_path), key=lambda row: row["mirror_path"])
-    commit_map_src = out / ".git" / "filter-repo" / "commit-map"
-    commit_map_path = landing / "provenance" / "mirror" / "commit-maps" / f"{export_id}.txt"
     commit_map_path.parent.mkdir(parents=True, exist_ok=True)
-    commit_map_bytes = commit_map_src.read_bytes() if commit_map_src.is_file() else b""
-    required_map_row = f"{args.pulp_sha} {mirror_sha}\n".encode()
-    if required_map_row not in commit_map_bytes:
-        commit_map_bytes += required_map_row
     commit_map_path.write_bytes(commit_map_bytes)
     tool_rows = git_blob_rows(repo, args.pulp_sha, ["tools/scripts/vellum_closure.py"])
     receipt_rel = f"provenance/mirror/receipts/{export_id}.json"
@@ -2371,7 +2435,6 @@ def cmd_export(args: argparse.Namespace) -> int:
         raise SystemExit("receipt contains host paths: " + "; ".join(path_violations))
     if args.dry_run:
         receipt["dry_run"] = True
-    receipt_path = landing / "provenance" / "mirror" / "receipts" / f"{export_id}.json"
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
     receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"export_receipt={receipt_path} mirror_sha={mirror_sha} blobs={len(files)}")
@@ -2422,7 +2485,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         print(f"identity=FAIL\n  mirror HEAD {head} != receipt mirror commit {recorded_head}")
         return 1
     expected = {row["mirror_path"]: row["blob"] for row in receipt["files"]}
-    actual = {row["path"]: row["blob"] for row in git_blob_rows(repo, head, expected)}
+    actual = {row["path"]: row["blob"] for row in git_blob_rows(repo, head, expected, strict=False)}
     bad = [path for path, blob in expected.items() if actual.get(path) != blob]
     if bad:
         print("identity=FAIL")
@@ -2444,8 +2507,8 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.add_argument("--unit"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
     p = sub.add_parser("js-manifest"); p.add_argument("--source-root", required=True); p.add_argument("--unit", default="design-import"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_js_manifest)
-    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=False)
-    p = sub.add_parser("report"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=True)
+    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=False)
+    p = sub.add_parser("report"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=True)
     p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.add_argument("--cpu-only-unit", action="append", default=[]); p.set_defaults(func=cmd_export)
     p = sub.add_parser("mentions"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--unit-manifest", required=True); p.add_argument("--unit", action="append", required=True); p.set_defaults(func=cmd_mentions)
     p = sub.add_parser("export-check"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--unit-manifest", required=True); p.add_argument("--unit", action="append", required=True); p.set_defaults(func=cmd_export_check)

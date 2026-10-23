@@ -435,7 +435,10 @@ void SkiaCanvas::draw_sdf_shape(SDFShape shape, float x, float y, float w, float
 
 static std::string compose_sdf_chart_shader(const std::string& author_sksl) {
     return R"(
-struct PulpChart { float t; float d; float side; float2 tan; float px; float valid; };
+struct PulpChart {
+    float t; float d; float side; float2 tan; float px; float valid;
+    float cross; float halfWidth;
+};
 struct PulpSdf { float d; float id; };
 uniform float2 resolution;
 uniform float shapeType;
@@ -497,33 +500,112 @@ PulpSdf pulpSmoothUnion(PulpSdf a, PulpSdf b, float k) {
     float h = clamp(0.5 + 0.5 * (b.d - a.d) / max(abs(k), 0.0001), 0.0, 1.0);
     return PulpSdf(mix(b.d, a.d, h) - abs(k) * h * (1.0 - h), h < 0.5 ? b.id : a.id);
 }
-)" + author_sksl + R"(
+)" + author_sksl +
+           R"(
+// The chart of the shape draw_sdf_shape draws for the same uniforms. Every
+// shape is a band around a centre line: an arc or circle of radius
+// (outer + inner) / 2 for flat_arc and ring, a horizontal segment through the
+// centre for the segments and the stadium. t runs along that line, cross is
+// the signed offset from it along the normal (tan.y, -tan.x) — outward for the
+// arcs, upward for the horizontal shapes — and d is the band's signed
+// distance, negative inside. Past an end t holds its end value; a flat cap
+// cuts d square there, and a rounded cap is a dome about the end point: cross
+// is the (non-negative) distance from it and tan turns so the normal points
+// away from it, which keeps d = |cross| - halfWidth.
+PulpChart pulpChartAt(float2 p, float px) {
+    float2 halfSize = resolution * 0.5 - float2(2.0);
+    float radius = min(halfSize.x, halfSize.y);
+    if ((shapeType > 11.5 && shapeType < 12.5) || (shapeType > 6.5 && shapeType < 7.5)) {
+        bool fullRing = shapeType < 7.5;
+        float angle = atan(p.y, p.x);
+        float outer = radius;
+        float inner = radius * innerRadius;
+        float halfWidth = (outer - inner) * 0.5;
+        float cross = length(p) - (outer + inner) * 0.5;
+        float d = abs(cross) - halfWidth;
+        float t;
+        if (fullRing) {
+            // A ring is a flat arc with a full sweep from arcStart; t wraps
+            // from 1 back to 0 at arcStart.
+            float turns = (angle - arcStart) / 6.2831853;
+            t = turns - floor(turns);
+        } else {
+            float halfSweep = arcSweep * 0.5;
+            float diff = angle - (arcStart + halfSweep);
+            diff = diff - 6.2831853 * floor((diff + 3.1415926) / 6.2831853);
+            t = clamp((diff + halfSweep) / max(2.0 * halfSweep, 0.0001), 0.0, 1.0);
+            if (halfSweep < 3.1415926) {
+                // Flat caps: the signed distance to the nearer end's radial
+                // line, intersected with the band like a box.
+                float over = abs(diff) - halfSweep;
+                float cap = length(p) * sin(clamp(over, -1.5707963, 1.5707963));
+                d = length(max(float2(d, cap), float2(0.0))) + min(max(d, cap), 0.0);
+            }
+        }
+        bool ok = outer > inner && (fullRing || arcSweep > 0.0);
+        return PulpChart(t, d, d < 0.0 ? -1.0 : 1.0, float2(-sin(angle), cos(angle)), px,
+                         ok ? 1.0 : 0.0, cross, halfWidth);
+    }
+    // Stadium (8), flat segment (10) and rounded segment (11). The cross
+    // (9) has no centre line and falls through to the invalid chart.
+    if ((shapeType > 7.5 && shapeType < 8.5) || (shapeType > 9.5 && shapeType < 11.5)) {
+        float halfLen;
+        float halfWidth;
+        bool flatCaps = shapeType > 9.5 && shapeType < 10.5;
+        if (shapeType < 8.5) {
+            // Stadium: the pill's radius is its half height, and its centre
+            // line is what remains of the width once both caps are taken off.
+            halfWidth = min(halfSize.x, halfSize.y);
+            halfLen = halfSize.x - halfWidth;
+        } else if (flatCaps) {
+            halfWidth = strokeWidth * 0.5;
+            halfLen = halfSize.x;
+        } else {
+            halfWidth = max(strokeWidth, 2.0) * 0.5;
+            halfLen = halfSize.x;
+        }
+        float along = clamp(p.x, -halfLen, halfLen);
+        float t = clamp((along + halfLen) / max(2.0 * halfLen, 0.0001), 0.0, 1.0);
+        float cross = -p.y;
+        float2 tan = float2(1.0, 0.0);
+        float d;
+        if (flatCaps) {
+            float2 q = abs(p) - float2(halfLen, halfWidth);
+            d = length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0);
+        } else {
+            d = abs(cross) - halfWidth;
+            float2 off = p - float2(along, 0.0);
+            float r = length(off);
+            if (p.x != along && r > 0.0) {
+                // A rounded cap is a dome about the end point: cross is the
+                // distance from it and the normal (tan.y, -tan.x) points
+                // straight away from it, so shading turns smoothly over the
+                // cap instead of flipping sign along the axis.
+                float2 n = off / r;
+                cross = r;
+                tan = float2(-n.y, n.x);
+                d = r - halfWidth;
+            }
+        }
+        bool ok = halfLen > 0.0 && halfWidth > 0.0;
+        return PulpChart(t, d, d < 0.0 ? -1.0 : 1.0, tan, px, ok ? 1.0 : 0.0, cross, halfWidth);
+    }
+    return PulpChart(0.0, 1.0, 1.0, float2(1.0, 0.0), px, 0.0, 0.0, 0.0);
+}
+
 half4 main(float2 coord) {
-    float2 center = resolution * 0.5;
-    float2 p = coord - center;
-    float radius = min(center.x, center.y) - 2.0;
-    float angle = atan(p.y, p.x);
-    float halfSweep = arcSweep * 0.5;
-    float mid = arcStart + halfSweep;
-    float diff = angle - mid;
-    diff = diff - 6.2831853 * floor((diff + 3.1415926) / 6.2831853);
-    float outer = radius;
-    float inner = radius * innerRadius;
-    float d = abs(length(p) - (outer + inner) * 0.5) - (outer - inner) * 0.5;
-    float t = clamp((diff + halfSweep) / max(2.0 * halfSweep, 0.0001), 0.0, 1.0);
-    float2 tan = float2(-sin(angle), cos(angle));
+    float2 p = coord - resolution * 0.5;
     // px is one device pixel measured in the same units as d, so an author
     // writing `2.0 * g.px` gets two device pixels at any backing scale.
-    float px = 1.0 / max(pixelScale, 0.0001);
-    PulpChart g = PulpChart(t, d, d < 0.0 ? -1.0 : 1.0, tan, px,
-                            (shapeType > 11.5 && shapeType < 12.5 &&
-                             arcSweep > 0.0 && outer > inner) ? 1.0 : 0.0);
+    PulpChart g = pulpChartAt(p, 1.0 / max(pixelScale, 0.0001));
     half4 shaded = shade(g);
     if (featherSigma > 0.0) {
         float feather = pulpFeather(g, featherSigma,
                                     int(featherCurve + 0.5),
                                     int(featherMode + 0.5));
-        shaded.a *= half(feather);
+        // shade() returns premultiplied colour, so coverage scales all four
+        // channels; scaling alpha alone leaves colour brighter than its alpha.
+        shaded *= half(feather);
     }
     return shaded;
 }

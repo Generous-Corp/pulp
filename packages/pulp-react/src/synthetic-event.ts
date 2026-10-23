@@ -24,6 +24,8 @@
 // JSX-direct handlers bypass that pipeline entirely; this module is the
 // matching synthesis for the prop-applier `on()` lane.
 
+import { writeVisibility } from './prop-applier-visibility.js';
+
 type AnyFn = (...args: unknown[]) => unknown;
 
 const g = (): Record<string, AnyFn | undefined> =>
@@ -45,7 +47,8 @@ function makeStyleProxy(id: string): Record<string, unknown> {
         backgroundGradient: (v) => callBridge('setBackgroundGradient', id, String(v)),
         opacity: (v) => callBridge('setOpacity', id, Number(v)),
         // visibility: 'hidden' | 'visible' — matches CSS, not the inverse `hidden`.
-        visibility: (v) => callBridge('setVisible', id, String(v) !== 'hidden'),
+        // It is an authored write, so a suspended boundary still wins.
+        visibility: (v) => writeVisibility(id, String(v) !== 'hidden'),
         // Border shorthands route to the per-attribute bridge setters
         // that preserve unset siblings.
         borderColor: (v) => callBridge('setBorderColor', id, String(v)),

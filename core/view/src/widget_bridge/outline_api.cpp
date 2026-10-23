@@ -1,5 +1,6 @@
 // widget_bridge/outline_api.cpp - outline style registrations for WidgetBridge.
 
+#include <pulp/view/border_style.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include "api_registry.hpp"
@@ -76,16 +77,7 @@ void BridgeRegistrars::register_widget_outline_api(WidgetBridge& self) {
         auto s = args.get<std::string>(1, "solid");
         auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
-        if (s == "dashed")        v->set_outline_style(View::BorderStyle::dashed);
-        else if (s == "dotted")   v->set_outline_style(View::BorderStyle::dotted);
-        else if (s == "double")   v->set_outline_style(View::BorderStyle::double_);
-        else if (s == "groove")   v->set_outline_style(View::BorderStyle::groove);
-        else if (s == "ridge")    v->set_outline_style(View::BorderStyle::ridge);
-        else if (s == "inset")    v->set_outline_style(View::BorderStyle::inset);
-        else if (s == "outset")   v->set_outline_style(View::BorderStyle::outset);
-        else if (s == "none")     v->set_outline_style(View::BorderStyle::none);
-        else if (s == "hidden")   v->set_outline_style(View::BorderStyle::hidden);
-        else                      v->set_outline_style(View::BorderStyle::solid);
+        v->set_outline_style(border_style_from_css(s).value_or(View::BorderStyle::solid));
         return choc::value::Value();
     });
 

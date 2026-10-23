@@ -502,6 +502,177 @@ export function sanitizeSnapshot(value, privatePrefix) {
   return value;
 }
 
+// The glyph Chromium paints for each character of a masked run, by
+// `-webkit-text-security` keyword. A password field's UA style is `disc`.
+const MASK_GLYPHS = new Map([
+  ["disc", "•"],
+  ["circle", "◦"],
+  ["square", "■"],
+]);
+const DEFAULT_MASK_GLYPH = "•";
+
+// Columns of a DOMSnapshot whose entries are string-table indices.
+const DOCUMENT_STRING_FIELDS = [
+  "documentURL", "title", "baseURL", "contentLanguage", "encodingName",
+  "publicId", "systemId", "frameId"];
+const NODE_STRING_COLUMNS = ["nodeName", "nodeValue"];
+const NODE_RARE_STRING_COLUMNS = [
+  "shadowRootType", "textValue", "inputValue", "pseudoIdentifier",
+  "currentSourceURL", "originURL"];
+const LAYOUT_STRING_COLUMNS = ["text", "blendedBackgroundColors"];
+
+/// Every string-table reference in a snapshot, as `[holder, key]` pairs whose
+/// `holder[key]` is the index.
+function stringReferences(snapshot) {
+  const refs = [];
+  const column = (array) => {
+    if (!Array.isArray(array)) return;
+    for (let i = 0; i < array.length; i += 1) {
+      if (Number.isInteger(array[i])) refs.push([array, i]);
+    }
+  };
+  for (const document of snapshot.documents ?? []) {
+    for (const field of DOCUMENT_STRING_FIELDS) {
+      if (Number.isInteger(document[field])) refs.push([document, field]);
+    }
+    const nodes = document.nodes ?? {};
+    for (const name of NODE_STRING_COLUMNS) column(nodes[name]);
+    for (const pairs of nodes.attributes ?? []) column(pairs);
+    for (const name of NODE_RARE_STRING_COLUMNS) column(nodes[name]?.value);
+    const layout = document.layout ?? {};
+    for (const name of LAYOUT_STRING_COLUMNS) column(layout[name]);
+    for (const row of layout.styles ?? []) column(row);
+  }
+  return refs;
+}
+
+/// ASCII-lowercase an attribute value, as HTML matches enumerated attributes.
+function asciiLower(value) {
+  return String(value ?? "").replace(/[A-Z]/gu, (c) => c.toLowerCase());
+}
+
+/// Replace, in place, every string a masked control or masked text run holds
+/// with the mask glyphs Chromium paints for it, so the persisted snapshot and
+/// every sidecar derived from it carry no secret.
+///
+/// Masked means: an `<input type=password>` (matched as HTML matches the
+/// attribute: ASCII case-insensitively, untrimmed); any laid-out node whose
+/// computed `-webkit-text-security` is not `none`; and any `<input>` or
+/// `<textarea>` Chromium did not lay out, whose computed style the snapshot
+/// does not carry and whose value is never painted, so it is masked rather
+/// than guessed. The slots masked are a masked control's `inputValue`,
+/// `textValue` and `value` attribute, the `nodeValue` of a masked element's
+/// text children, and a masked text run's `nodeValue` and layout text.
+///
+/// Each character becomes one glyph per UTF-16 code unit, so a text box's
+/// start and length still index the masked string. The secret's own
+/// string-table entry is overwritten, not orphaned; a reference outside the
+/// masked slots that shared it (the same string painted in clear elsewhere)
+/// is repointed to an appended copy. The result is a pure function of the
+/// snapshot. Non-rendered text outside a form control keeps its captured
+/// value: Chromium paints none of it and no computed style says it is masked.
+export function maskSecretText(snapshot, styleNames) {
+  const strings = snapshot?.strings;
+  if (!Array.isArray(strings)) return { masked_slots: 0 };
+  const securityAt = (styleNames ?? []).indexOf("-webkit-text-security");
+  const maskedSlots = [];
+  for (const document of snapshot.documents ?? []) {
+    const nodes = document.nodes ?? {};
+    const layout = document.layout ?? {};
+    const names = nodes.nodeName ?? [];
+    const parents = nodes.parentIndex ?? [];
+    const rowsOf = new Map();
+    (layout.nodeIndex ?? []).forEach((node, row) => {
+      if (!rowsOf.has(node)) rowsOf.set(node, []);
+      rowsOf.get(node).push(row);
+    });
+    const styleGlyph = (node) => {
+      if (securityAt < 0) return null;
+      for (const row of rowsOf.get(node) ?? []) {
+        const value = strings[layout.styles?.[row]?.[securityAt]];
+        if (typeof value === "string" && value !== "" && value !== "none")
+          return MASK_GLYPHS.get(value) ?? DEFAULT_MASK_GLYPH;
+      }
+      return null;
+    };
+    const tagOf = (node) => asciiLower(strings[names[node]]);
+    const attributeSlot = (node, wanted) => {
+      const pairs = nodes.attributes?.[node] ?? [];
+      for (let i = 0; i + 1 < pairs.length; i += 2) {
+        if (asciiLower(strings[pairs[i]]) === wanted) return [pairs, i + 1];
+      }
+      return null;
+    };
+    const rareSlot = (name, node) => {
+      const rare = nodes[name];
+      const at = rare?.index?.indexOf(node) ?? -1;
+      return at >= 0 && Array.isArray(rare.value) ? [rare.value, at] : null;
+    };
+    const elementGlyph = new Map();
+    for (let node = 0; node < names.length; node += 1) {
+      const tag = tagOf(node);
+      let glyph = styleGlyph(node);
+      if (tag === "input" || tag === "textarea") {
+        const typeSlot = tag === "input" ? attributeSlot(node, "type") : null;
+        const type = typeSlot ? asciiLower(strings[typeSlot[0][typeSlot[1]]]) : "";
+        if (!glyph && (type === "password" || !rowsOf.has(node)))
+          glyph = DEFAULT_MASK_GLYPH;
+        if (!glyph) continue;
+        elementGlyph.set(node, glyph);
+        for (const slot of [
+          rareSlot("inputValue", node), rareSlot("textValue", node),
+          tag === "input" ? attributeSlot(node, "value") : null]) {
+          if (slot) maskedSlots.push([...slot, glyph]);
+        }
+        continue;
+      }
+      if (glyph && nodes.nodeType?.[node] === 1) elementGlyph.set(node, glyph);
+    }
+    for (let node = 0; node < names.length; node += 1) {
+      if (nodes.nodeType?.[node] !== 3) continue;
+      const glyph = styleGlyph(node) ?? elementGlyph.get(parents[node]);
+      if (!glyph) continue;
+      if (Array.isArray(nodes.nodeValue))
+        maskedSlots.push([nodes.nodeValue, node, glyph]);
+      for (const row of rowsOf.get(node) ?? []) {
+        if (Array.isArray(layout.text))
+          maskedSlots.push([layout.text, row, glyph]);
+      }
+    }
+  }
+  const secrets = new Map();
+  const appended = new Map();
+  const intern = (value) => {
+    if (!appended.has(value)) {
+      appended.set(value, strings.length);
+      strings.push(value);
+    }
+    return appended.get(value);
+  };
+  let count = 0;
+  for (const [holder, key, glyph] of maskedSlots) {
+    const index = holder[key];
+    const value = strings[index];
+    if (!Number.isInteger(index) || typeof value !== "string" || value === "")
+      continue;
+    const mask = glyph.repeat(value.length);
+    if (mask === value) continue;
+    secrets.set(index, mask);
+    holder[key] = intern(mask);
+    count += 1;
+  }
+  if (secrets.size > 0) {
+    const originals = new Map(
+      [...secrets.keys()].map((index) => [index, strings[index]]));
+    for (const [holder, key] of stringReferences(snapshot)) {
+      if (originals.has(holder[key]))
+        holder[key] = intern(originals.get(holder[key]));
+    }
+    for (const [index, mask] of secrets) strings[index] = mask;
+  }
+  return { masked_slots: count };
+}
+
 export function sanitizeCaptureError(error, privatePrefix) {
   const sanitized = {
     message: sanitizeSnapshot(

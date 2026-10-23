@@ -36,6 +36,29 @@ and records thousands of unmarked mutations. If the control ever reports zero
 identity changes, the counter is blind, not the plan retained. `--plant-leak`
 holds one subtree past the fixture's destruction to prove the readback fails.
 
+`--warmup-frames` excludes warmup frames from every statistic, the cumulative
+counters (`paint_calls`, `paint_commands_total`, `layout_passes`, bridge and
+invalidation counts) included: they start at the first sampled frame.
+
+### A DOM node's own layout row: one rule per language
+
+Chromium's DOMSnapshot emits several layout rows for one DOM node: a
+`::before`/`::after` box is followed by a zero-size generated-content row, a
+list marker by its paint record, and a split inline by one row per line box.
+The node's own box is the first row with positive area (a node whose rows are
+all empty keeps its first). In C++ that rule is
+`CapturedStyleIndex::own_layout_row`, which every per-node lookup and the
+document-canvas proof read; in the differential lab it is
+`principal_layout_rows`, read through `snapshot.DomSnapshot`. Never build a
+`{node: row}` map from `layout.nodeIndex` directly: the last row wins and a
+split inline's continuation or a pseudo's empty row silently stands in for
+the node. `test/fixtures/browser-capture-layout-rows` pins both readers to the
+same rows.
+
+The lab's `rescore` subcommand replays a finished corpus's stored artifacts
+through `compare_one` with no browser or importer build. Compare two
+`rescore.json` files with `cmp` to prove a scoring refactor changed nothing.
+
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
 ### Preconverted vector artwork is validation-only
@@ -84,6 +107,42 @@ records three agreeing source, importer, observer, font, capture, PNG, layout,
 and native render receipt digests. Short campaigns remain unverified, and the
 raw visual threshold is not relaxed by calibration or renderer disagreement.
 
+### Captured line metrics travel as one `LineMetrics`
+
+The capture's measured ascent/descent ride the line-box basis as
+`std::optional<LineMetrics>` (`pulp/view/text_line_metrics.hpp`), and every
+producer and consumer gates on `LineMetrics::valid()`: the sidecar parse, the
+IR JSON parse, `Label::set_cached_line_metrics` and the bridge. The basis's
+JSON (`lineBoxes` / `lineBoxBasis`) is read and written in
+`design_ir_json_text.cpp`, with the shared field readers and member writers in
+`design_ir_json_primitives.hpp`; add a basis field there, not in
+`design_ir_json.cpp`, which is a frozen hotspot.
+
+### Imported text looks heavier than Chromium: check font smoothing first
+
+Pulp's default glyph raster on macOS is Chromium's `-webkit-font-smoothing:
+auto` pixel for pixel. `kSlight` hinting turns CoreText smoothing on, and the
+default `SkSurfaceProps` preblend applies. A design that sets `antialiased`,
+which Tailwind's `antialiased` class and most design systems put on
+`html, body`, therefore paints about 1.3x the glyph ink of its Chromium
+capture. That looks like a rasterizer difference, but it is not one.
+
+The two smoothing modes need different surface props:
+- `antialiased` is reproduced exactly by hinting `kNone` plus
+  `SkSurfaceProps(0, kUnknown_SkPixelGeometry, 0, 1)`.
+- `auto` needs today's defaults.
+
+`SkFont` edging does not change the ink on a raster surface whose pixel
+geometry is unknown.
+
+Separate weight from placement with
+`tools/import-validation/text_raster_decomposition.py crops` (ink ratio,
+centroid, integer shift, transfer curve per text node) before you touch
+baselines. On macOS the skia screenshot backend lives in
+`core/view/platform/mac/screenshot_mac.mm`. `core/view/src/screenshot_skia.cpp`
+is the non-Apple path, so a surface change made only there never reaches a
+macOS render.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
@@ -93,6 +152,15 @@ manifest plus the materialized JSX siblings
 the release provenance handoff hashes the complete tree and rejects a missing
 sibling or an undeclared extra. Validate the archive with
 `python3 tools/scripts/test_release_artifact_contents.py` before publishing.
+
+A new module `capture.mjs` imports must be named in FOUR lists, not one:
+`browser_capture/runtime_manifest.txt` (the source of truth CMake installs
+from), `tools/cli/upgrade_install.hpp` (`browser_capture_runtime_files`),
+`experimental/pulp-rs/src/install_import_design.rs`
+(`BROWSER_CAPTURE_RUNTIME_FILES`), and `tools/scripts/release_product_matrix.json`
+(`common_cli_members`). A source build passes with only the first; the miss
+surfaces as the upgrade-manifest tests (C++ and Rust) or, worse, as an
+upgraded SDK whose capture cannot resolve its own module graph.
 
 ## TOOLS THIS SKILL ALREADY SHIPS — reach for these before hand-rolling (read this first)
 
@@ -124,6 +192,18 @@ so it is always in context. The table above is the fast path for this skill's
 own work; the registry is the source of truth, and a coverage sweep in
 `tools/scripts/tools_registry_check.py` fails CI if a tool lands here without
 an entry — so nothing can go quiet the way `fidelity_diff.py` did.
+
+**A region score near 1.0 does not mean the region's controls are drawn.**
+`diff_against_reference_regions.py` scored Spectr's bottom toolbar 0.990 with
+its range slider missing, because the bar's background dominates both the
+histogram and the mean-pixel term. Whole-panel ink coverage could not see it
+either (0.978). Read `largest_uncovered_px`: a missing element shows as one
+uncovered patch at its own size (967 px at the default 1320x860 frame, 16 px
+with the slider pasted back, 0 between two Chromium captures). Patch limits
+are `max_uncovered_fraction` of the whole frame, so they hold at any `--size`;
+the JSON also prints the limit in pixels of the current frame. Animated regions, like Spectr's
+spectrum canvas, disagree on patches of thousands of pixels between two
+captures, so gate those on `coverage_floor` only.
 
 **Run `check_contracts.py` on every agent-authored panel before importing
 it — its `realtime` gate is the one check here that sees frame cost.** A React
@@ -227,6 +307,28 @@ advisory drift — a correct import of the reference design tops out at 12px,
 while a dropped auto-layout contract produces ten findings above 16px. The
 `import-layout-parity-gate` ctest runs the whole pipeline on
 `test/fixtures/imports/fig/synthetic.fig` and is strict (exact parity).
+
+**HTML/JSX imports have the same check, with Chromium as the design side.**
+The browser capture already holds Chromium's box for every laid-out node
+(`dom-snapshot.json`, keyed by `backendNodeId`), and the IR stamps that id on
+each node it lowers, so no adapter script is needed:
+
+```bash
+pulp-import-design --file p.html --emit ir-json --output p.pulp.json --native-panel-lowering
+pulp-design-ir-observe --input p.pulp.json --render r.png --layout obs.json --width W --height H
+python3 tools/import-design/layout_parity.py --capture p.pulp-browser-capture --observer-layout obs.json
+```
+
+Three things that are not obvious. Parents come from the DOM, not the IR: a
+native panel is lowered FLAT under `browser:root`, so IR parents would cluster
+the whole page into one finding. The capture must be the IR's OWN capture:
+backend ids are small sequential integers, and a second capture of the same
+page joined all 105 of Spectr's ids cleanly — a wrong pairing looks right — so
+the tool compares the IR's recorded capture-image hashes and exits 2 on a
+mismatch. And a "share offset … alignment/padding dropped" cluster compares
+dx/dy only: on Spectr it named three SVG paths whose real fault was their SIZE
+(primitives boxed at the SVG viewport), so read each child's dw/dh before
+trusting the diagnosis.
 
 **It validates BOXES, not the ink inside them.** A label whose glyphs are shoved
 to one side of a correctly-placed box, an icon drawn at the wrong scale inside
@@ -508,6 +610,33 @@ knowing before you touch that file:
 - **`native_tree_root_children` / `native_tree_depth` are the shape.** A depth
   of 1 means the lowering reflattened and every per-node count still looks
   right, so check the shape, not only the census.
+- **A captured `<canvas>` does NOT by itself flatten the panel.** Canvas panels
+  lower hierarchically first (hoisting already covers a canvas that paints
+  before its parent) and switch to the flat paint-order list only when that
+  hierarchy reports `overlapping_reorders > 0`; the count that forced it is
+  recorded as `native_tree_flattened_overlapping_reorders`. Always flattening
+  on a canvas cost static canvas panels their sections for no fidelity gain.
+- **A canvas snapshot is a VIEWPORT PLANE, not an element raster.** Capture
+  composites the canvas bitmap into its content box on a transparent,
+  capture-sized PNG. Native lowering keeps the canvas as a box (its border and
+  background paint normally) holding the plane as an `image` child at the page
+  origin, clipped to the content box and anchored `<canvas anchor>/layer[0]`.
+  Drawing the plane into the canvas box with `fill` shrinks the whole page
+  into the canvas. Only an asset whose pixel size matches the capture is
+  treated as a plane.
+- **Every lowered node, SVG shapes included, carries `backend_node_id`.** A
+  vector node's box is its root `<svg>`'s box (the viewBox frame), never the
+  shape's ink box, so anything comparing geometry by identity must compare a
+  shape against Chromium's `<svg>` box (the differential lab labels these rows
+  `reference_frame: svg-viewport`).
+- **A node can own several DOMSnapshot layout rows.** A pseudo-element's own
+  box is followed by a zero-size row for its generated content at the page
+  origin; a reader that keeps the last row per node sees every `::before` as
+  empty. Use the first positive-area row.
+- **Clips snap with the box paint.** A clipper's box paints on
+  `floor(edge + 0.5)` CSS edges, and so does Chromium's overflow clip; lowering
+  snaps the stored clip the same way (only when a device scale is known), or a
+  rounded track's clipped fill lands one device row off at half-pixel offsets.
 - **Clipping travels with the node, NOT with its place in the tree — never put
   `overflow` back on a lowered node.** A tree that carries `overflow` clips by
   DOM parentage, because a renderer applies it to whatever the node's children
@@ -614,11 +743,20 @@ knowing before you touch that file:
   it from the full-page screenshot, so it is page-space already. The page node,
   never the panel root, carries `--page-background`, which the lab resolves
   from the verified DOM snapshot by CSS canvas propagation (html, else body;
-  both transparent is `unresolved`, since the UA colour follows a
-  color-scheme the capture does not record) and supplies only for a panel with
-  page around it. A whole-page panel owns its canvas: the importer stamps it on
-  the root, and filling underneath would hide a dropped stamp. Never translate
-  the browser nodes as well; that registers the panel twice.
+  both transparent takes the UA canvas colour the capture recorded as
+  `documentCanvas`, and is `unresolved` without that report) and supplies only
+  for a panel with page around it. The UA canvas is the `Canvas` system colour
+  of the ROOT's used color-scheme (`rgb(18, 18, 18)` dark in Chrome 151), set
+  by root CSS or a color-scheme meta tag; a body's color-scheme never reaches
+  it, and the root's computed `color-scheme` reads `normal` under a dark meta,
+  so the capture asks Chromium with a probe rather than mapping the property. A whole-page panel owns its canvas: the importer stamps it on
+  the root, and filling underneath would hide a dropped stamp. Page-space
+  comparisons must not translate the browser nodes as well; that registers the
+  panel twice. The registered geometry gate instead moves BOTH sides back into
+  the panel frame (Chromium's boxes by `register_browser_nodes_to_native_frame`,
+  the native layout by `native_nodes_in_panel_space` with the receipt's
+  placement origin), and `frame_placement_check` and
+  `verify_native_authored_frame` read native rects relative to that origin.
 
   **Counter gotcha:** the observer's render receipt carries its own work
   counters (`pulp-design-ir-observer-counters-v1`), phased as `build`,
@@ -3804,6 +3942,25 @@ their siblings). Two traps:
   (hoist promote + demote + indicator-geometry capture + materializer forwarding,
   pure, no I/O) + the GPU harness (end-to-end skin + interactivity).
 
+### Shaded and double CSS borders, and themed form controls
+
+- `border-style: outset | inset | groove | ridge | double` are painted by View
+  in per-side bands (`border_shades` / `border_bands` / `border_band_color` in
+  `pulp/view/border_style.hpp`, pure and public). Every lowering parses the
+  keyword through the one `border_style_from_css()` table there; dropping a
+  keyword paints a flat solid frame. The shading rule was fitted
+  to Chrome 151 renders and checked on 189 colours — re-measure with a probe
+  page before changing it, never from a fixture. Pure black is not special in
+  the code: any colour no brighter than rgb(32,32,32) by relative luminance is
+  lightened once before shading, which is why black shades to 168/84.
+- A user-agent `<button>` computes `2px outset rgb(0, 0, 0)`. Chromium paints
+  that border with CSS only when the author styled the box (background, border,
+  or radius); otherwise its native theme paints the control and the computed
+  border is not what is drawn. Whether the theme painted is recorded per control
+  in the DOM snapshot's `formControlTheme` (from matched-rule origins) — read it
+  instead of re-deriving it from computed `appearance`, which stays `auto` in
+  both cases.
+
 ### Rasterized-vector image: suppress its baked stroke as a CSS border
 
 A Figma vector exported as a PNG (the FILTER & EQ curve `Vector 3`, every grid
@@ -5653,7 +5810,9 @@ capture envelope, not signing, independent authentication, background-compositin
 correctness, or Chromium/Skia pixel parity.
 
 Native browser lowering can add the computed opaque HTML canvas colour to the
-existing synthetic root, including a panel-sized root. This requires a declared
+existing synthetic root, including a panel-sized root. With html and body both
+transparent it takes the snapshot's `documentCanvas.canvas_color`, and opaque
+white for a capture without that report. This requires a declared
 verified snapshot hash, unique HTML/body identity, complete supported paint
 facts, and consistent origin-aligned viewport/document/authored geometry. Body
 must be transparent or the same opaque colour; effects, root/body pseudos,
@@ -6314,7 +6473,11 @@ correctness bug before it was made explicit; treat them as invariants.
   laid-out boxes — imported roots opt out via
   `View::set_subpixel_layout(true)` (set by `build_native_view_tree` and
   by the emitted `setSubpixelLayout('', true)` bridge call in generated
-  JS; discovered pass-wide in yoga_layout.cpp). When diagnosing a
+  JS; discovered pass-wide in yoga_layout.cpp). The same roots are also
+  marked `set_captured_frame_root(true)` / `setCapturedFrameRoot('', true)`,
+  a separate flag Label snaps captured baselines to; a new import lane must
+  set both, since sub-pixel layout no longer implies a captured frame
+  (see the `text-metrics` skill). When diagnosing a
   "shape misregistered by <1px" report, check BOTH layers before touching
   paint code — `--dump-layout` shows the post-Yoga truth, and integer-only
   x/y/width/height there means the opt-out is not reaching the pass.
@@ -6793,6 +6956,23 @@ stroke IS there. Both consumers already understand the literal string `none`
 clear), so emit it. Found by looking at the render; no IR-level assertion could
 have caught it.
 
+**Stroke style reaches the IR from AUTHORED declarations, so a stylesheet-set
+cap is still invisible.** `stroke-linecap`, `stroke-linejoin`,
+`stroke-miterlimit` and `stroke-dashoffset` are not in the captured property
+list, so `svg_shape_lowering.cpp` resolves them from inline `style` and
+presentation attributes up the ancestor chain (Lucide declares them once on the
+root `<svg>`, so reading only the shape gets every Lucide icon wrong). That
+covers the attribute idiom icon sets use; a `.icon path { stroke-linecap:
+round }` rule stays butt until the property is collected, after which the
+computed value wins automatically (`has_property`). Two traps when consuming
+the attributes: the canvas miter limit defaults to 10 where SVG's is 4, which
+is why `svg_stroke_miterlimit` is always written under a miter join; and a
+shape's own `opacity` is already folded into `svg_fill`/`svg_stroke` alpha
+(multiplied into an `rgba()` alpha, never replacing it), so applying it again
+in paint double-dims the icon. A shape with BOTH paints and an opacity refuses
+as `svg-shape-opacity`, because one layer composite is not two per-paint
+alphas where the stroke overlaps the fill.
+
 **Shapes share ONE box, and it is the `<svg>`'s.** The shapes of one icon share
 one user-coordinate space (the root `viewBox`), so every vector node is placed
 at the `<svg>` element's own box and carries the same viewBox. Giving each
@@ -7100,11 +7280,20 @@ browser you launched yourself:
 import { createEmptyProfile, launchBrowser, pageTarget, terminateBrowser }
   from "./browser_capture/browser_process.mjs";
 import { semanticExpression } from "./browser_capture/semantics.mjs";
-// launch -> Page.navigate to a fixture -> Runtime.evaluate(semanticExpression([]))
+// launch -> pageTarget(call) -> Target.attachToTarget {flatten: true}
+//   -> Page.navigate to a fixture -> Runtime.evaluate(semanticExpression([]))
 ```
 
-Node 22 ships a built-in `WebSocket`, so the CDP client is a few dozen lines and
-needs no dependency. Importing the merged copy alongside the patched one and
+The browser is driven over `--remote-debugging-pipe`, never a debugging port: a
+port is an unauthenticated endpoint any local process could attach to while a
+capture runs. `launchBrowser` returns `{ child, pipe }`; `pipe` is a `CdpPipe`
+(NUL-terminated JSON on the browser's fds 3 and 4, carried through the POSIX
+anchor) that is the BROWSER session, so there is no `/json/list` and no
+`webSocketDebuggerUrl`. Find the page with `pageTarget(call, timeoutMs)` and
+attach with `Target.attachToTarget {flatten: true}`; page commands then carry
+the returned `sessionId`. `browser_pipe.integration.test.mjs` holds the minimal
+client and fails if the launched process group listens on TCP or writes
+`DevToolsActivePort`. Importing the merged copy alongside the patched one and
 evaluating BOTH against the same loaded page yields a before/after table that
 re-running one build can never fake — and it is what tells you the two
 already-working controls did not move.

@@ -75,13 +75,10 @@ bool GpuConvolver::prepare() {
         latency_blocks_ > kMaxLatencyBlocks)
         return false;
 
-    // The fallback is a signal::PartitionedConvolver loaded at `block_`, and
-    // load_ir() rounds a non-power-of-two block UP to the next power of two for
-    // its radix-2 FFT. It would then be partitioned for a block size the
-    // transport never delivers, so every block would be a block-size violation.
-    // Here that is fatal rather than degrading: with no render backend the
-    // fallback is the ONLY audio path, so the node would emit nothing but
-    // silence. Refuse to prepare instead.
+    // The GPU transport and its prepared CPU fallback both require the exact
+    // host block size. Keep rejecting non-power-of-two blocks: the no-render
+    // path is the only audio path, so silently normalizing a callback size
+    // would turn every block into a fail-closed violation.
     if ((block_ & (block_ - 1u)) != 0u)
         return false;
 
