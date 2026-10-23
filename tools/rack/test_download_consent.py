@@ -83,6 +83,56 @@ class DownloadConsentTests(unittest.TestCase):
                 self.assertEqual(installs, [])
                 self.assertEqual(len(consent), 1)
 
+    def run_gap_fill(self, st, env):
+        installs = []
+
+        def fake_install(plugin, version, premium, owned):
+            installs.append(plugin)
+            return True, f"installed {plugin}"
+
+        missing = {"Filter": [{"plugin": "Valley", "module": "Feline",
+                               "premium": False}]}
+        cat = {"Valley": {"version": "2.4.5"}}
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(patch, "entitlements_cached", return_value=set()), \
+                mock.patch.object(patch, "install_module", side_effect=fake_install), \
+                contextlib.redirect_stdout(out):
+            fetched = patch.fill_capability_gaps(missing, cat, st)
+        held = [line for line in out.getvalue().splitlines()
+                if line.startswith(patch.DOWNLOAD_CONSENT_PREFIX)]
+        return installs, fetched, held
+
+    def test_the_gap_fill_holds_like_named_modules(self):
+        # The preflight gap-fill is the second automatic download path.
+        installs, fetched, held = self.run_gap_fill(
+            self.settings_with(), {"FORGE_INTERACTIVE_DOWNLOADS": "1"})
+        self.assertEqual(installs, [])
+        self.assertEqual(fetched, [])
+        self.assertEqual(len(held), 1)
+        self.assertIn('"plugin": "Valley"', held[0])
+        installs, fetched, held = self.run_gap_fill(self.settings_with(), {})
+        self.assertEqual(installs, ["Valley"])
+        self.assertEqual(held, [])
+
+    def library_brief_under(self, st, env):
+        cat = {"Valley": {"brand": "Valley", "name": "Valley", "premium": False}}
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(patch, "settings", return_value=st), \
+                mock.patch.object(patch, "catalog", return_value=cat), \
+                mock.patch.object(patch, "entitlements_cached", return_value=set()), \
+                mock.patch.object(patch, "installable_here", return_value=True), \
+                mock.patch.object(patch, "rack_library_token", return_value="tok"):
+            return patch.library_brief("use valley", {})
+
+    def test_the_model_is_not_promised_a_held_download(self):
+        held = self.library_brief_under(self.settings_with(),
+                                        {"FORGE_INTERACTIVE_DOWNLOADS": "1"})
+        self.assertIn("waiting for the user's OK", held)
+        self.assertNotIn("fetched automatically", held)
+        free = self.library_brief_under(self.settings_with(), {})
+        self.assertIn("fetched automatically", free)
+
     def test_the_new_values_are_writable(self):
         with tempfile.TemporaryDirectory() as home:
             path = os.path.join(home, "settings.json")

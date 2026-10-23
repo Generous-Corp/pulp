@@ -6439,6 +6439,47 @@ def hold_download(plugin: str, version: str, modules, why: str) -> None:
          "why": why}, sort_keys=True), flush=True)
 
 
+def fill_capability_gaps(missing: dict, cat: dict, st: dict) -> list:
+    """Fetch the best free or owned module for each capability gap.
+
+    Returns the plugin slugs installed. Only the best-ranked option per gap,
+    only when the settings allow it, and a held download (downloads_held) is
+    reported for consent instead of fetched.
+    """
+    fetched = []
+    if st["auto_download"] == "none" or not st["auto_download_free"]:
+        return fetched
+    owned = entitlements_cached()
+    for tag, opts in list(missing.items()):
+        # opts is already ordered by what it would COST to get
+        # this, and anything unbuyable has been dropped, so the
+        # first entry is the right one. Skipping every premium
+        # option here -- as this did -- threw away the modules the
+        # user had already paid for in favour of a free
+        # second-best.
+        best = opts[0] if opts else None
+        if not best:
+            continue
+        version = (cat.get(best["plugin"], {}) or {}).get("version")
+        if not version:
+            continue
+        if downloads_held(st):
+            hold_download(best["plugin"], version, None,
+                          f"a {tag.lower()} module")
+            continue
+        print(f"  no {tag.lower()} module installed — fetching "
+              f"{best['plugin']}/{best['module']}…", flush=True)
+        ok_dl, msg = install_module(best["plugin"], version,
+                                    best["premium"],
+                                    best["plugin"] in owned)
+        print(f"    {msg}")
+        if ok_dl:
+            fetched.append(best["plugin"])
+        elif "not signed in" in msg:
+            break            # saying it once is enough
+    return fetched
+
+
 def ensure_named_installed(prompt: str, inv: dict, cat: dict, midx: dict,
                            mentions: dict,
                            maker_resolution: maker_intent.Resolution | None = None
@@ -6570,7 +6611,11 @@ def library_brief(prompt: str, inv: dict, limit: int = 70,
     # the download path that answered 403 for a year: the model plans around a
     # module that then never arrives, and the user is the one who finds out.
     signed_in = bool(rack_library_token())
-    may_fetch = settings().get("auto_download", "entitled") != "none"
+    st = settings()
+    may_fetch = st.get("auto_download", "entitled") != "none"
+    # A held download is not a download: the plugin arrives only after the
+    # person agrees, and this patch is built without it either way.
+    held = may_fetch and downloads_held(st)
     if not signed_in:
         free_title = "Free, but NOT signed in to the VCV library"
         free_note = ("These cannot be fetched until the user signs in via "
@@ -6580,6 +6625,11 @@ def library_brief(prompt: str, inv: dict, limit: int = 70,
         free_title = "Free, but automatic downloading is switched off"
         free_note = ("The user has asked to install things themselves. Prefer "
                      "installed modules and name any of these you need.")
+    elif held:
+        free_title = "Free, but downloads are waiting for the user's OK"
+        free_note = ("Naming one of these asks the user to download it; this "
+                     "patch is built without it. Prefer installed modules and "
+                     "name any of these you genuinely need.")
     else:
         free_title = "Free, fetched automatically if you name them"
         free_note = "Naming one of these installs it. Treat it as available."
@@ -8568,36 +8618,7 @@ def main(argv):
             # modules, only the best-ranked one per gap, and only when the
             # setting allows it.
             st = settings()
-            fetched = []
-            if st["auto_download"] != "none" and st["auto_download_free"]:
-                owned = entitlements_cached()
-                for tag, opts in list(pf["missing"].items()):
-                    # opts is already ordered by what it would COST to get
-                    # this, and anything unbuyable has been dropped, so the
-                    # first entry is the right one. Skipping every premium
-                    # option here -- as this did -- threw away the modules the
-                    # user had already paid for in favour of a free
-                    # second-best.
-                    best = opts[0] if opts else None
-                    if not best:
-                        continue
-                    version = (cat.get(best["plugin"], {}) or {}).get("version")
-                    if not version:
-                        continue
-                    if downloads_held(st):
-                        hold_download(best["plugin"], version, None,
-                                      f"a {tag.lower()} module")
-                        continue
-                    print(f"  no {tag.lower()} module installed — fetching "
-                          f"{best['plugin']}/{best['module']}…", flush=True)
-                    ok_dl, msg = install_module(best["plugin"], version,
-                                                best["premium"],
-                                                best["plugin"] in owned)
-                    print(f"    {msg}")
-                    if ok_dl:
-                        fetched.append(best["plugin"])
-                    elif "not signed in" in msg:
-                        break            # saying it once is enough
+            fetched = fill_capability_gaps(pf["missing"], cat, st)
             if fetched:
                 # The inventory was read before the download; re-read it, or
                 # the very module just installed is still missing to the
