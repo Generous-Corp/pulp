@@ -2783,8 +2783,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/web-plugins/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "418f7398e4d8cb40c26fed4c12597aa5c34bf222",
-          "object_id": "e2d46e18877a8f19d1ec460c0f78858b0e0cb753",
+          "revision": "e71e9315e1269b464ce362961b50d5dfe41a1572",
+          "object_id": "7c7839f2ff85c25c00fa8ed9ff6f1cf3de321a0a",
           "object_type": "blob"
         },
         {
@@ -3058,8 +3058,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_product_matrix.json",
           "state": "pulp-owned-retained",
-          "revision": "1208b80bc9ce1688174023430ac4fa1bfa639261",
-          "object_id": "cd20c87273562f32d50517fbac5a61d12c4d0c7a",
+          "revision": "f3119b3de37a518e186cf1203a6461ab8ba470e2",
+          "object_id": "ec5dd2ff65172c5e675eadf8c2ba2850b7d0de68",
           "object_type": "blob"
         },
         {
