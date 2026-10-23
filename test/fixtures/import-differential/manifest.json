@@ -151,6 +151,7 @@
       "expected_gaps": [
         {
           "id": "fractional-frame-height-refused",
+          "issue": "https://github.com/Generous-Corp/pulp/issues/10833",
           "lab_signal": "lab error: native authored panel bounds differ from authenticated frame (1006.703125 vs 1006.7)",
           "effect": "the lab refuses the fixture before scoring; the native panel height is rounded to 0.1 CSS px"
         }

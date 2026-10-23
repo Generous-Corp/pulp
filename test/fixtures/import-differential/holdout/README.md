@@ -91,6 +91,10 @@ native render digests change on every run inside its `volatile_regions`, so
 its determinism verdict is `fail` while its DOM snapshot and native layout
 digests hold. The lab refuses lattice before scoring because the native panel
 height is rounded to 0.1 CSS px (1006.7 against Chromium's 1006.703125).
-Both are recorded as expected gaps in the manifest. `benchmark` takes no viewport, so it can only be run on Spectr,
-whose viewport is the 1280x800 default. Three `analyze-corpus` runs give the
+Both are recorded as expected gaps in the manifest. The lattice fix is
+tracked in https://github.com/Generous-Corp/pulp/issues/10833; remove that
+expected gap once lattice scores in three consecutive runs.
+
+`benchmark` takes no viewport, so it can only be run on Spectr, whose
+viewport is the 1280x800 default. Three `analyze-corpus` runs give the
 same three-run comparison for the other two.
