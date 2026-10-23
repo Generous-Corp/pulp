@@ -2323,6 +2323,37 @@ TEST_CASE("WaveNet re-acquire that delivers again clears the stuck-late state",
     CHECK(status.selected_engine == GpuAudioEngine::Gpu);
 }
 
+TEST_CASE("WaveNet re-acquire routes completion events to the replacement provider",
+          "[gpu_audio][wavenet][realtime][reacquire]") {
+    Harness h;
+    h.controls[0].notifier_supported = true;
+    h.controls[1].notifier_supported = true;
+    ChannelFactory factory{.control = &h.controls[1]};
+    factory.install(h.node);
+    int wakes = 0;
+    const detail::SharedIoCompletionNotifier notifier{
+        [](void* context) noexcept { ++*static_cast<int*>(context); }, &wakes};
+    REQUIRE(h.path.set_completion_notifier(h.path.context, notifier));
+    CHECK(h.controls[0].notifier_installs == 1);
+    for (int block = 0; block < 3; ++block) {
+        h.callback(float(h.sequence + 1));
+        h.service();
+    }
+    h.controls[0].lost = true;
+    h.service();
+    REQUIRE(h.path.reprepare(h.path.context, 1'000'000'000));
+    // The replaced provider can no longer wake the transport; the new one can.
+    CHECK(h.controls[0].notifier_clears == 1);
+    CHECK(h.controls[0].notifier.notify == nullptr);
+    CHECK(h.controls[1].notifier_installs == 1);
+    REQUIRE(h.controls[1].notifier.notify != nullptr);
+    h.controls[1].notifier.notify(h.controls[1].notifier.context);
+    CHECK(wakes == 1);
+    // Positive control for the clear: the transport's release clears it too.
+    REQUIRE(h.path.set_completion_notifier(h.path.context, {}));
+    CHECK(h.controls[1].notifier.notify == nullptr);
+}
+
 TEST_CASE("WaveNet re-acquire quarantines a provider that cannot drain",
           "[gpu_audio][wavenet][realtime][reacquire]") {
     Harness h;

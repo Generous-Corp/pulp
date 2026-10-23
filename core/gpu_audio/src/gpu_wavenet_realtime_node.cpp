@@ -302,6 +302,10 @@ struct GpuWaveNetRealtimeNode::Impl {
     std::atomic<std::uint64_t> reacquire_attempts{0}, reacquire_successes{0};
     // Callback-written per delivered block, read by status_snapshot().
     detail::RecentGpuDelivery recent;
+    // The transport's completion notifier, host or worker only. Every channel
+    // in `channels` routes to it; a channel leaving them is cleared first, so a
+    // parked or quarantined provider never wakes a transport it outlives.
+    detail::SharedIoCompletionNotifier notifier{};
     bool prepared = false, production_provider = false;
     // Reported by the prepared provider itself; empty for injected channels.
     detail::SharedIoProviderIdentity provider_identity;
@@ -575,8 +579,10 @@ struct GpuWaveNetRealtimeNode::Impl {
     // recycle drain (zero: the provider's default).
     bool park(std::unique_ptr<detail::WaveNetRealtimeChannel>& channel,
               std::uint64_t budget_ns) noexcept {
-        if (config.provider_pool == nullptr || !channel || channel->lost() ||
-            !channel->recycle(budget_ns))
+        if (config.provider_pool == nullptr || !channel || channel->lost())
+            return false;
+        (void)channel->set_completion_notifier({});
+        if (!channel->recycle(budget_ns))
             return false;
         try {
             return config.provider_pool->give(config.session, channel->provider_key(), channel);
@@ -631,9 +637,11 @@ struct GpuWaveNetRealtimeNode::Impl {
             const auto now = now_ns();
             return now >= deadline ? std::uint64_t{1} : deadline - now;
         };
-        for (auto& channel : channels)
+        for (auto& channel : channels) {
+            (void)channel->set_completion_notifier({});
             if (!channel->release_bounded(remaining()))
                 quarantine.push_back(std::move(channel));
+        }
         channels.clear();
         for (std::uint32_t ch = 0; ch < config.channels; ++ch) {
             auto channel = make_channel(remaining());
@@ -646,6 +654,11 @@ struct GpuWaveNetRealtimeNode::Impl {
             fresh.push_back(std::move(channel));
         }
         channels = std::move(fresh);
+        // The replacement routes its completions where the old provider did. A
+        // replacement without an event source leaves the transport on its
+        // one-block fallback poll.
+        if (notifier.notify != nullptr && !install_notifier(notifier))
+            notifier = {};
         // An input stall leaves the ring full of old-epoch records that
         // nothing else retires; the new epoch's first block needs the room.
         while (const auto stale = bridge->acquire_input())
@@ -674,6 +687,18 @@ struct GpuWaveNetRealtimeNode::Impl {
     void fail(detail::SharedIoRecoveryReason reason,
               std::uint64_t sequence = std::numeric_limits<std::uint64_t>::max()) noexcept {
         bridge->request_recovery(reason, sequence);
+    }
+    // All or nothing: one channel without an event source would otherwise
+    // lose its completions to the transport's longer event-driven fallback.
+    bool install_notifier(detail::SharedIoCompletionNotifier installed) noexcept {
+        for (std::size_t i = 0; i < channels.size(); ++i) {
+            if (!channels[i]->set_completion_notifier(installed)) {
+                for (std::size_t j = 0; j < i; ++j)
+                    (void)channels[j]->set_completion_notifier({});
+                return false;
+            }
+        }
+        return !channels.empty();
     }
 };
 
@@ -971,18 +996,13 @@ bool GpuWaveNetRealtimeNode::set_notifier(void* self,
     if (notifier.notify == nullptr) {
         for (auto& channel : s.channels)
             (void)channel->set_completion_notifier({});
+        s.notifier = {};
         return true;
     }
-    // All or nothing: one channel without an event source would otherwise
-    // lose its completions to the transport's longer event-driven fallback.
-    for (std::size_t i = 0; i < s.channels.size(); ++i) {
-        if (!s.channels[i]->set_completion_notifier(notifier)) {
-            for (std::size_t j = 0; j < i; ++j)
-                (void)s.channels[j]->set_completion_notifier({});
-            return false;
-        }
-    }
-    return !s.channels.empty();
+    if (!s.install_notifier(notifier))
+        return false;
+    s.notifier = notifier;
+    return true;
 }
 std::uint64_t GpuWaveNetRealtimeNode::next_sequence(void* self) noexcept {
     return static_cast<GpuWaveNetRealtimeNode*>(self)->impl_->bridge->next_sequence();
