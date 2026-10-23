@@ -204,7 +204,8 @@ std::size_t NeuralShadowWorker::pump(std::size_t max_blocks) noexcept {
         input_.pop();
         has_expected_ = true;
         next_expected_ = stamp.sequence + 1;
-        processed_.fetch_add(1, std::memory_order_relaxed);
+        // Release: a reader that sees the count also sees the step's effects.
+        processed_.fetch_add(1, std::memory_order_release);
         ++done;
     }
     return done;
@@ -238,7 +239,7 @@ void NeuralShadowWorker::loop() noexcept {
 }
 
 NeuralShadowWorker::Counters NeuralShadowWorker::counters() const noexcept {
-    return {.processed = processed_.load(std::memory_order_relaxed),
+    return {.processed = processed_.load(std::memory_order_acquire),
             .input_dropped = input_dropped_.load(std::memory_order_relaxed),
             .output_dropped = output_dropped_.load(std::memory_order_relaxed),
             .resyncs = resyncs_.load(std::memory_order_relaxed),

@@ -216,7 +216,8 @@ struct Rig {
         }
     }
     // Real-thread Worker: wait (bounded) until the shadow caught up, so slot
-    // timing matches the explicit-pump tests.
+    // timing matches the explicit-pump tests. The processed count is
+    // published with release, so the model calls it covers are final here.
     void wait_for_shadow() {
         const auto mode = node->status_snapshot().shadow_mode;
         if (mode != Mode::Worker && mode != Mode::None)
