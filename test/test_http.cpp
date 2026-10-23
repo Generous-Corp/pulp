@@ -4,7 +4,15 @@
 
 #include <httplib.h>
 
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/ecp.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/pk.h>
+#include <mbedtls/x509_crt.h>
+
+#include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -314,5 +322,158 @@ TEST_CASE("HTTP POST content type handling remains compatible and case insensiti
         REQUIRE(custom_type == "application/x-custom");
         REQUIRE(empty_legacy_type_count == 1);
         REQUIRE(empty_legacy_type == "text/plain");
+    }
+}
+
+// ── TLS verification against a real TLS listener ─────────────────────────────
+//
+// Refusing a peer that speaks no TLS is a property a build with TLS compiled
+// out also "passes", by rejecting the scheme. This fixture is a listener that
+// really speaks TLS, presenting a certificate generated at test time (never
+// checked in, never written to disk), so the assertion is about certificate
+// verification rather than about the scheme.
+
+namespace {
+
+struct SelfSignedCertificate {
+    std::string cert_pem;
+    std::string key_pem;
+};
+
+// A P-256 key and a self-signed certificate for CN=localhost, valid now.
+SelfSignedCertificate make_self_signed_certificate() {
+    SelfSignedCertificate out;
+    mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context drbg;
+    mbedtls_pk_context key;
+    mbedtls_x509write_cert crt;
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&drbg);
+    mbedtls_pk_init(&key);
+    mbedtls_x509write_crt_init(&crt);
+
+    const char* personalization = "pulp-test-http-tls";
+    REQUIRE(mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy,
+                                  reinterpret_cast<const unsigned char*>(personalization),
+                                  std::strlen(personalization)) == 0);
+    REQUIRE(mbedtls_pk_setup(&key, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY)) == 0);
+    REQUIRE(mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1, mbedtls_pk_ec(key),
+                                mbedtls_ctr_drbg_random, &drbg) == 0);
+
+    mbedtls_x509write_crt_set_version(&crt, MBEDTLS_X509_CRT_VERSION_3);
+    mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
+    mbedtls_x509write_crt_set_subject_key(&crt, &key);
+    mbedtls_x509write_crt_set_issuer_key(&crt, &key);
+    REQUIRE(mbedtls_x509write_crt_set_subject_name(&crt, "CN=localhost") == 0);
+    REQUIRE(mbedtls_x509write_crt_set_issuer_name(&crt, "CN=localhost") == 0);
+    unsigned char serial[] = {0x01};
+    REQUIRE(mbedtls_x509write_crt_set_serial_raw(&crt, serial, sizeof(serial)) == 0);
+    REQUIRE(mbedtls_x509write_crt_set_validity(&crt, "20240101000000", "20991231235959") == 0);
+    REQUIRE(mbedtls_x509write_crt_set_basic_constraints(&crt, 0, -1) == 0);
+
+    std::vector<unsigned char> buffer(8192, 0);
+    REQUIRE(mbedtls_x509write_crt_pem(&crt, buffer.data(), buffer.size(), mbedtls_ctr_drbg_random,
+                                      &drbg) == 0);
+    out.cert_pem = reinterpret_cast<const char*>(buffer.data());
+    std::fill(buffer.begin(), buffer.end(), 0);
+    REQUIRE(mbedtls_pk_write_key_pem(&key, buffer.data(), buffer.size()) == 0);
+    out.key_pem = reinterpret_cast<const char*>(buffer.data());
+
+    mbedtls_x509write_crt_free(&crt);
+    mbedtls_pk_free(&key);
+    mbedtls_ctr_drbg_free(&drbg);
+    mbedtls_entropy_free(&entropy);
+    return out;
+}
+
+class TlsLoopbackServer {
+  public:
+    explicit TlsLoopbackServer(const SelfSignedCertificate& certificate)
+        : server_(httplib::SSLServer::PemMemory{
+              certificate.cert_pem.c_str(), certificate.cert_pem.size(),
+              certificate.key_pem.c_str(), certificate.key_pem.size(), nullptr, 0, nullptr}) {}
+
+    httplib::SSLServer& server() {
+        return server_;
+    }
+
+    void start() {
+        port_ = server_.bind_to_any_port("127.0.0.1");
+        thread_ = std::thread([this] { server_.listen_after_bind(); });
+        server_.wait_until_ready();
+    }
+
+    ~TlsLoopbackServer() {
+        server_.stop();
+        if (thread_.joinable())
+            thread_.join();
+    }
+
+    int port() const {
+        return port_;
+    }
+
+    // Addressed by name, not by IP literal: the client's TLS backend verifies
+    // the chain for a hostname, whereas an IP-literal host takes a separate
+    // path that this case does not cover.
+    std::string url(std::string_view path) const {
+        return "https://localhost:" + std::to_string(port_) + std::string(path);
+    }
+
+  private:
+    httplib::SSLServer server_;
+    int port_ = 0;
+    std::thread thread_;
+};
+
+} // namespace
+
+TEST_CASE("HTTPS request to a loopback TLS server with a self-signed certificate fails "
+          "verification",
+          "[runtime][http][tls]") {
+    const auto certificate = make_self_signed_certificate();
+    TlsLoopbackServer loopback(certificate);
+    REQUIRE(loopback.server().is_valid());
+
+    std::mutex received_mutex;
+    size_t handled_requests = 0;
+    loopback.server().Get("/tls", [&](const httplib::Request&, httplib::Response& response) {
+        {
+            std::lock_guard lock(received_mutex);
+            ++handled_requests;
+        }
+        response.set_content("secret", "text/plain");
+    });
+    loopback.start();
+
+    // Control: a client that trusts exactly this certificate completes the
+    // handshake and reads the body, so the listener speaks TLS and the
+    // certificate is valid for localhost. Only the trust decision differs below.
+    {
+        httplib::SSLClient trusting("localhost", loopback.port());
+        trusting.load_ca_cert_store(certificate.cert_pem.c_str(), certificate.cert_pem.size());
+        trusting.set_connection_timeout(2);
+        trusting.set_read_timeout(2);
+        auto result = trusting.Get("/tls");
+        REQUIRE(result);
+        REQUIRE(result->status == 200);
+        REQUIRE(result->body == "secret");
+    }
+
+    HttpResponse response;
+    REQUIRE_NOTHROW(response = http_get(loopback.url("/tls"), 2));
+    CAPTURE(response.status_code, response.error, response.body);
+
+    // The refusal comes from the TLS layer ("SSL server verification failed"
+    // with a system trust store, "SSL connection failed" on a host without
+    // one), never from the scheme or the socket, and the handshake aborts
+    // before a request reaches the handler.
+    REQUIRE_FALSE(response.ok());
+    REQUIRE(response.status_code == 0);
+    REQUIRE(response.body.empty());
+    REQUIRE(response.error.find("SSL") != std::string::npos);
+    {
+        std::lock_guard lock(received_mutex);
+        REQUIRE(handled_requests == 1);
     }
 }
