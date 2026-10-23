@@ -6,6 +6,7 @@ import subprocess
 import unittest
 import unittest.mock
 import json
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -58,6 +59,47 @@ class ClosurePolicyTests(unittest.TestCase):
             "generated_inputs": [{"path": "@build/core/runtime/generated/build_info.hpp", "producer_paths": ["core/runtime/CMakeLists.txt"]}],
         }), [])
         self.assertTrue(receipt_path_violations({"files": [{"pulp_path": "/Users/agent/build/rogue.hpp"}]}))
+
+    def test_every_forbidden_form_derives_from_the_shared_policy(self):
+        import vellum_closure
+        import vellum_policy
+        names = vellum_policy.names()
+        self.assertTrue({"gpu_audio", "music"} <= set(names))
+        self.assertEqual(vellum_closure.FORBIDDEN_ROOTS, vellum_policy.roots())
+        for name in names:
+            stem = name.replace("_", "-")
+            with self.subTest(name=name):
+                self.assertTrue(vellum_closure.policy_target_forbidden(f"pulp-{stem}"))
+                self.assertTrue(vellum_closure.policy_target_forbidden(f"pulp::{stem}"))
+                self.assertTrue(vellum_closure.policy_include_forbidden(f"pulp/{name}/x.hpp"))
+                self.assertTrue(vellum_closure.FORBIDDEN_CMAKE_TARGET.search(f"target_link_libraries(x PUBLIC pulp::{stem})"))
+        for allowed in ("pulp-canvas", "pulp::view-core", "pulp-state", "SkiaLib", "absl_graphcycles_internal"):
+            self.assertFalse(vellum_closure.policy_target_forbidden(allowed), allowed)
+        self.assertFalse(vellum_closure.policy_include_forbidden("pulp/canvas/canvas.hpp"))
+        table = json.loads((REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8"))
+        product_include = re.compile(table["content_patterns"]["mirror-product-include"])
+        product_symbol = re.compile(table["content_patterns"]["mirror-product-symbol"])
+        for name in names:
+            with self.subTest(mirror=name):
+                self.assertTrue(product_include.search(f"#include <pulp/{name}/x.hpp>"))
+                self.assertTrue(product_symbol.search(f"pulp::{name}::thing"))
+                self.assertTrue(product_symbol.search(f"pulp-{name.replace('_', '-')}"))
+
+    def test_policy_loader_rejects_malformed_tables(self):
+        import vellum_policy
+        cases = [
+            ({"schema": "other", "forbidden_subsystems": [{"name": "audio"}]}, "schema"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": []}, "non-empty"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "audio"}, {"name": "audio"}]}, "duplicate"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "Gpu-Audio"}]}, "invalid"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "content", "include_dirs": "x"}]}, "include_dirs"),
+        ]
+        for payload, message in cases:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "policy.json"
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, message):
+                    vellum_policy.load(path)
 
     def test_edge_allowlist_keeps_audio_targets_distinct(self):
         self.assertEqual(edge_key("pulp-design-import", "pulp-audio"), "pulp-design-import->pulp-audio")
