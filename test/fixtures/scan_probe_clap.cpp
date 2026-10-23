@@ -82,7 +82,22 @@ const void* entry_get_factory(const char* factory_id) {
 
 } // namespace
 
-extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry = {
+// Every CLAP exports a global named clap_entry, and the resolution tests load
+// this fixture from several scratch copies inside one process (macOS never
+// unmaps an image that carries C++ statics). AddressSanitizer would report
+// that as an ODR violation between two instrumented globals of the same name,
+// so the entry is left out of ASan's global registry; the host never reads it
+// through the sanitizer anyway.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define PULP_SCAN_FIXTURE_NO_ASAN __attribute__((no_sanitize("address")))
+#endif
+#endif
+#ifndef PULP_SCAN_FIXTURE_NO_ASAN
+#define PULP_SCAN_FIXTURE_NO_ASAN
+#endif
+
+extern "C" CLAP_EXPORT PULP_SCAN_FIXTURE_NO_ASAN const clap_plugin_entry_t clap_entry = {
     CLAP_VERSION_INIT,
     entry_init,
     entry_deinit,
