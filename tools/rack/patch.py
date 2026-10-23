@@ -5158,6 +5158,34 @@ def _externalize_codex_inventory(prompt: str) -> tuple[str, str | None]:
             prompt[end + len(INVENTORY_END):], inventory_path)
 
 
+# Every built-in tool a generation pass could reach, denied by name. With
+# `--tools ""` this is belt and braces; without it, it is the fence.
+CLAUDE_DENIED_TOOLS = ("Write", "Edit", "NotebookEdit", "Bash", "WebFetch",
+                       "WebSearch", "Read", "Glob", "Grep", "Task", "Skill",
+                       "ToolSearch")
+_TOOLS_FLAG_SUPPORT: dict = {}
+
+
+def claude_disables_all_tools(claude: str) -> bool:
+    """Whether this Claude CLI accepts `--tools ""` (turn every tool off).
+
+    Read from its --help once per executable. A CLI that predates the flag
+    would reject the whole argv as an unknown option, so it is only passed
+    where the help names it.
+    """
+    if claude not in _TOOLS_FLAG_SUPPORT:
+        import subprocess
+        try:
+            out = subprocess.run([claude, "--help"], capture_output=True,
+                                 text=True, encoding="utf-8",
+                                 errors="replace", timeout=30)
+            _TOOLS_FLAG_SUPPORT[claude] = re.search(
+                r"^\s*--tools\b", out.stdout or "", re.M) is not None
+        except (OSError, subprocess.SubprocessError):
+            _TOOLS_FLAG_SUPPORT[claude] = False
+    return _TOOLS_FLAG_SUPPORT[claude]
+
+
 def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
     """Run the selected model CLI, externalizing only a marked Codex inventory."""
     import toolpaths
@@ -5246,15 +5274,18 @@ def _ask_model(claude: str, prompt: str, seconds: float, tick: float,
         claude_model = exact_model("FORGE_CLAUDE_MODEL", "Claude")
         claude_effort = exact_reasoning_effort(
             "FORGE_CLAUDE_REASONING_EFFORT")
-        # The answer is the JSON on stdout, so the pass needs no tools. A
+        # The answer is the JSON on stdout, so the pass needs NO tools. A
         # prompt carries library-index text, module names and a base patch,
-        # so a tool left available is something an injection could use to
-        # write files, run commands or reach the network.
+        # so any tool left available is something an injection could use:
+        # Read alone puts ~/.ssh or a secrets file into the model's context.
+        # `--tools ""` turns every tool off, including ones a later CLI adds;
+        # a CLI too old to know the flag gets the widest denylist instead.
         command = [claude, "-p", "--strict-mcp-config", "--verbose",
                    "--output-format=stream-json",
-                   "--include-partial-messages",
-                   "--disallowedTools", "Write", "Edit", "NotebookEdit",
-                   "Bash", "WebFetch", "WebSearch"]
+                   "--include-partial-messages"]
+        if claude_disables_all_tools(claude):
+            command.extend(["--tools", ""])
+        command.extend(["--disallowedTools", *CLAUDE_DENIED_TOOLS])
         if claude_model is not None:
             command.extend(["--model", claude_model])
         if claude_effort is not None:
