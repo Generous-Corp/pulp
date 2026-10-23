@@ -257,7 +257,7 @@ def _load_snapshot(capture_dir: pathlib.Path) -> dict:
     envelope_path = capture_dir / "capture.json"
     if not envelope_path.is_file():
         raise CaptureInputError(f"not a browser capture (no capture.json): {capture_dir}")
-    envelope = json.loads(envelope_path.read_text())
+    envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
     if envelope.get("schema") != CAPTURE_SCHEMA:
         raise CaptureInputError(
             f"unsupported capture schema {envelope.get('schema')!r} (expected {CAPTURE_SCHEMA})")
@@ -285,7 +285,7 @@ def load_capture_geometry(
     ``source`` summary: how many IR nodes joined, which are import scaffolding
     (no backend id), and which carry a backend id Chromium laid out no box for.
     """
-    ir = json.loads(ir_path.read_text())
+    ir = json.loads(ir_path.read_text(encoding="utf-8"))
     root = ir.get("root")
     if not isinstance(root, dict):
         raise CaptureInputError(f"not a DesignIR document (no root): {ir_path}")
@@ -358,7 +358,7 @@ def load_capture_geometry(
 def load_observer_layout(path: pathlib.Path) -> dict[str, Rect]:
     """A ``visual-layout-snapshot-v1`` (``pulp-design-ir-observe --layout``),
     keyed by view id, which the observer sets to the node's anchor id."""
-    doc = json.loads(path.read_text())
+    doc = json.loads(path.read_text(encoding="utf-8"))
     if "nodes" not in doc:
         raise CaptureInputError(
             f"not an observer layout (expected a visual-layout-snapshot 'nodes' list): {path}")

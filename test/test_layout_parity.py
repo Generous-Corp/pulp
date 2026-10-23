@@ -429,7 +429,7 @@ class CaptureFixture:
             "schema": "pulp-browser-capture-v1",
             "documents": [{"snapshot_asset": "dom-snapshot.json",
                            "snapshot_sha256": hashlib.sha256(snapshot).hexdigest()}],
-        }))
+        }), encoding="utf-8")
         children = []
         for anchor, backend in lowered:
             attrs = {} if backend is None else {"backend_node_id": str(backend)}
@@ -443,11 +443,11 @@ class CaptureFixture:
             "assetManifest": {"assets": [{
                 "original_uri": "pulp-capture:///browser-static.png",
                 "content_hash": hashlib.sha256(ir_png).hexdigest()}]},
-        }))
+        }), encoding="utf-8")
         self.layout.write_text(json.dumps({
             "schema_version": "visual-layout-snapshot-v1",
             "nodes": [{"id": i, "rect": {"x": x, "y": y, "w": w, "h": h}}
-                      for i, x, y, w, h in views]}))
+                      for i, x, y, w, h in views]}), encoding="utf-8")
 
     def compare(self) -> dict:
         return layout_parity.compare_capture(self.capture, self.ir, self.layout)
@@ -537,7 +537,7 @@ class TestCaptureJoin(CaptureTestCase):
 class TestCaptureCli(CaptureTestCase):
     def run_tool(self, *args) -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, str(TOOL), *map(str, args)],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8")
 
     def test_exit_codes_and_the_default_ir_sibling(self):
         good = self.fixture()
