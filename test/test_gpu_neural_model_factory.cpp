@@ -220,6 +220,11 @@ TEST_CASE("a WaveNet model with a GPU session reports its real path",
     INFO("descriptor error " << static_cast<int>(
              validate_gpu_wavenet_descriptor(session.descriptor).error));
     REQUIRE(validate_gpu_wavenet_descriptor(session.descriptor).accepted());
+    // The descriptor check counts weights but does not read them, and a
+    // build without a provider refuses create() before it would; so check
+    // the blob's trailing head scale here, on every host.
+    REQUIRE(session.weights.size() == session.descriptor.weight_count);
+    REQUIRE(session.weights.back() == session.descriptor.head_scale);
     auto request = request_for(NeuralFamily::WaveNet, kernels);
     request.wavenet_gpu = &session;
     auto result = make_gpu_neural_model(request);
