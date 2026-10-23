@@ -1582,7 +1582,7 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 83,
+        "installed_target_count": 84,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -1605,6 +1605,10 @@
             "closure_node_count": 92
           },
           {
+            "exported_as": "Pulp::standalone-native",
+            "closure_node_count": 91
+          },
+          {
             "exported_as": "Pulp::inspect",
             "closure_node_count": 90
           },
@@ -1614,10 +1618,6 @@
           },
           {
             "exported_as": "Pulp::standalone",
-            "closure_node_count": 90
-          },
-          {
-            "exported_as": "Pulp::standalone-native",
             "closure_node_count": 90
           },
           {
@@ -1642,11 +1642,15 @@
           },
           {
             "exported_as": "Pulp::view-native",
-            "closure_node_count": 79
+            "closure_node_count": 80
           },
           {
             "exported_as": "Pulp::view-audio",
             "closure_node_count": 76
+          },
+          {
+            "exported_as": "Pulp::view-platform",
+            "closure_node_count": 69
           },
           {
             "exported_as": "Pulp::view-tooling",
@@ -6966,7 +6970,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 90,
+            "node_count": 91,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -6996,6 +7000,7 @@
               "pulp-view-audio",
               "pulp-view-core",
               "pulp-view-native",
+              "pulp-view-platform",
               "pulp-view-script",
               "pulp-view-tooling"
             ],
@@ -7962,7 +7967,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 79,
+            "node_count": 80,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7987,6 +7992,7 @@
               "pulp-view-audio",
               "pulp-view-core",
               "pulp-view-native",
+              "pulp-view-platform",
               "pulp-view-script"
             ],
             "third_party_targets": [
@@ -8083,6 +8089,124 @@
           "direct_dependencies": [
             "pulp-design-import-audio-pack",
             "pulp-view-audio",
+            "pulp-view-platform"
+          ]
+        },
+        "view-platform": {
+          "target": "pulp-view-platform",
+          "exported_as": "Pulp::view-platform",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "core/view",
+          "closure": {
+            "node_count": 69,
+            "pulp_targets": [
+              "pulp-bundled-fonts",
+              "pulp-canvas",
+              "pulp-design-import",
+              "pulp-design-ir",
+              "pulp-events",
+              "pulp-foundation",
+              "pulp-gpu-device",
+              "pulp-gpu-device-api",
+              "pulp-platform",
+              "pulp-render",
+              "pulp-runtime",
+              "pulp-simd",
+              "pulp-state",
+              "pulp-view-core",
+              "pulp-view-platform",
+              "pulp-view-script"
+            ],
+            "third_party_targets": [
+              "SDL3-static",
+              "SDL3_Headers",
+              "SheenBidi",
+              "everest",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing",
+              "skia::skia",
+              "yaml-cpp",
+              "yogacore"
+            ]
+          },
+          "external_dependencies": {
+            "count": 53,
+            "third_party_targets": [
+              "SDL3-static",
+              "SDL3_Headers",
+              "SheenBidi",
+              "everest",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing",
+              "skia::skia",
+              "yaml-cpp",
+              "yogacore"
+            ],
+            "prebuilt_archives": [
+              "libdawn_combined.a",
+              "libjsonreader.a",
+              "libskia.a",
+              "libskottie.a",
+              "libskparagraph.a",
+              "libskresources.a",
+              "libsksg.a",
+              "libskshaper.a",
+              "libskunicode_core.a",
+              "libskunicode_icu.a",
+              "libsvg.a"
+            ],
+            "imported_targets": [],
+            "frameworks": [
+              "AVFoundation",
+              "Accelerate",
+              "AudioToolbox",
+              "Carbon",
+              "Cocoa",
+              "CoreAudio",
+              "CoreFoundation",
+              "CoreGraphics",
+              "CoreHaptics",
+              "CoreMedia",
+              "CoreServices",
+              "CoreText",
+              "CoreVideo",
+              "ForceFeedback",
+              "Foundation",
+              "GameController",
+              "IOKit",
+              "IOSurface",
+              "ImageIO",
+              "Metal",
+              "MetalKit",
+              "QuartzCore",
+              "Security",
+              "UniformTypeIdentifiers",
+              "UserNotifications"
+            ],
+            "system_libraries": [
+              "bsm",
+              "m",
+              "objc"
+            ]
+          },
+          "public_headers": {
+            "roots": [
+              "core/view/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "pulp-design-import",
             "pulp-view-script"
           ]
         },
