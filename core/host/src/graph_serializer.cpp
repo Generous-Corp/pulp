@@ -2,13 +2,17 @@
 
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
+#include <pulp/host/scan_blacklist.hpp>
+#include <pulp/host/scanner.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/safe_relative_path.hpp>
 
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -1090,9 +1094,135 @@ std::string GraphSerializer::to_json(
     return choc::json::toString(root, true);
 }
 
+namespace {
+
+// Resolves plugin nodes for one from_json call. The scan of the known roots
+// is run at most once per format, and only when a node's path hint does not
+// already lie inside a root.
+class PluginNodeResolver {
+  public:
+    explicit PluginNodeResolver(const GraphLoadOptions& options) : options_(options) {}
+
+    // Returns the path to load, or nullopt with `reason` set.
+    std::optional<std::string> resolve(const PluginInfo& info, std::string& reason) {
+        // Audio Units are found through the component registry by identity;
+        // the stored path is never opened.
+        if (info.format == PluginFormat::AudioUnit || info.format == PluginFormat::AudioUnitV3 ||
+            info.format == PluginFormat::BuiltIn) {
+            return info.path;
+        }
+        if (!options_.load_plugins) {
+            reason = "plugin loading is disabled for this load";
+            return std::nullopt;
+        }
+        if (!info.path.empty() && path_within_known_root(info.path, info.format)) {
+            if (options_.blacklist && options_.blacklist->is_blacklisted(info.path)) {
+                reason = "last_path is blacklisted from a previous scan crash";
+                return std::nullopt;
+            }
+            return info.path;
+        }
+        if (options_.scan_mode != GraphPluginScanMode::none && !info.unique_id.empty()) {
+            const auto& scan = scanned(info.format);
+            for (const auto& installed : scan.plugins) {
+                if (installed.unique_id == info.unique_id && !installed.path.empty()) {
+                    return installed.path;
+                }
+            }
+            if (scan.clap_skipped_no_worker) {
+                reason = "no scan worker found for isolated plugin resolution; " + scan.error;
+                return std::nullopt;
+            }
+        }
+        if (options_.allow_unrooted_plugin_paths && !info.path.empty()) {
+            runtime::log_warn("GraphSerializer: loading '{}' from outside the known plugin roots "
+                              "because unrooted paths were allowed",
+                              info.path);
+            return info.path;
+        }
+        if (options_.scan_mode == GraphPluginScanMode::none) {
+            reason = info.path.empty()
+                         ? "no last_path and scanning the plugin roots is disabled"
+                         : "last_path is outside the known plugin roots and scanning them "
+                           "for this identity is disabled";
+            return std::nullopt;
+        }
+        reason =
+            info.path.empty()
+                ? "no installed plugin with this identity in the known plugin roots"
+                : "last_path is outside the known plugin roots and no installed plugin matches "
+                  "this identity";
+        return std::nullopt;
+    }
+
+  private:
+    std::vector<std::string> roots_for(PluginFormat format) const {
+        std::vector<std::string> roots;
+        if (options_.include_default_plugin_roots)
+            roots = PluginScanner::default_paths(format);
+        roots.insert(roots.end(), options_.plugin_roots.begin(), options_.plugin_roots.end());
+        return roots;
+    }
+
+    bool path_within_known_root(const std::string& path, PluginFormat format) const {
+        std::error_code ec;
+        const auto real = std::filesystem::canonical(path, ec);
+        if (ec)
+            return false;
+        for (const auto& root : roots_for(format)) {
+            const auto real_root = std::filesystem::canonical(root, ec);
+            if (ec || real_root.empty())
+                continue;
+            if (runtime::is_within_directory(real_root, real))
+                return true;
+        }
+        return false;
+    }
+
+    const ScanReport& scanned(PluginFormat format) {
+        auto it = scans_.find(format);
+        if (it != scans_.end())
+            return it->second;
+        ScanOptions scan;
+        scan.scan_vst3 = format == PluginFormat::VST3;
+        scan.scan_clap = format == PluginFormat::CLAP;
+        scan.scan_lv2 = format == PluginFormat::LV2;
+        scan.scan_au = false;
+        scan.extra_paths = options_.plugin_roots;
+        scan.only_extra_paths = !options_.include_default_plugin_roots;
+        scan.scan_worker_path = options_.scan_worker_path;
+        // The scan records any bundle that crashes its worker; that goes
+        // into a copy so the caller's blacklist stays theirs to persist.
+        ScanBlacklist blacklist;
+        if (options_.blacklist)
+            blacklist = *options_.blacklist;
+        scan.blacklist = &blacklist;
+        auto report = PluginScanner{}.scan_report(scan);
+        if (report.clap_skipped_no_worker &&
+            options_.scan_mode == GraphPluginScanMode::allow_in_process) {
+            // The caller accepts entry points running here when no worker
+            // exists; isolated_only callers get the skipped report instead.
+            scan.in_process_clap = true;
+            report = PluginScanner{}.scan_report(scan);
+        }
+        return scans_.emplace(format, std::move(report)).first->second;
+    }
+
+    const GraphLoadOptions& options_;
+    std::unordered_map<PluginFormat, ScanReport> scans_;
+};
+
+} // namespace
+
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json) {
+    return from_json(graph, json, GraphLoadOptions{});
+}
+
+GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json,
+                                                       const GraphLoadOptions& options) {
     LoadResult result;
     graph.clear();
+    PluginNodeResolver plugin_resolver(options);
 
     std::string readable_json = json;
     if (!migrate_graph_json(readable_json, result.error)) {
@@ -1472,10 +1602,31 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     info.format       = parse_format(pv["format"].getString());
                     info.num_inputs   = in_ch;
                     info.num_outputs  = out_ch;
-                    auto slot = PluginSlot::load(info);
+                    std::string unresolved_reason;
+                    std::unique_ptr<PluginSlot> slot;
+                    if (const auto load_path = plugin_resolver.resolve(info, unresolved_reason)) {
+                        PluginInfo load_info = info;
+                        load_info.path = *load_path;
+                        slot = PluginSlot::load(load_info);
+                        if (!slot) {
+                            unresolved_reason = "the plugin failed to load";
+                        } else if (!info.unique_id.empty() && !slot->info().unique_id.empty() &&
+                                   slot->info().unique_id != info.unique_id) {
+                            // The bundle at that path holds some other plugin
+                            // (replaced in place, or a stale path reused by a
+                            // different install); it is not this node.
+                            unresolved_reason = "the bundle at last_path holds plugin '" +
+                                                slot->info().unique_id + "', not '" +
+                                                info.unique_id + "'";
+                            runtime::log_warn("GraphSerializer: refusing '{}' for node '{}': {}",
+                                              *load_path, name, unresolved_reason);
+                            slot.reset();
+                        }
+                    }
                     if (!slot) {
-                        result.missing_plugins.push_back(
-                            std::string(format_str(info.format)) + ":" + info.unique_id);
+                        result.missing_plugins.push_back(std::string(format_str(info.format)) +
+                                                         ":" + info.unique_id + " (" +
+                                                         unresolved_reason + ")");
                         // Still create a placeholder Plugin node with no slot so
                         // connection IDs remain stable.
                         new_id = graph.add_unresolved_plugin_node(info, in_ch, out_ch, name);
