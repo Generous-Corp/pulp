@@ -3480,6 +3480,10 @@
                 "required": false
               },
               {
+                "name": "--allow-dev-build",
+                "required": false
+              },
+              {
                 "name": "--path",
                 "required": false
               },
@@ -3561,6 +3565,10 @@
             "arguments": [
               {
                 "name": "--version",
+                "required": false
+              },
+              {
+                "name": "--allow-dev-build",
                 "required": false
               },
               {
