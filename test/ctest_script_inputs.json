@@ -6,6 +6,20 @@
   "pulp-cpp": "pulp-cli"
  },
  "executables": {
+  "Pulp UI Script Fixture": {
+   "data": "undeclared",
+   "detected_sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ],
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ],
+   "undeclared_sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ]
+  },
   "pulp-control-broker-crash-fixture": {
    "data": "none",
    "inputs": [],

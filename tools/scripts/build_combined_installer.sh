@@ -408,7 +408,7 @@ PLUGIN_NAMES=()
 PLUGIN_ENTRIES=""    # one "pluginIndex<TAB>pluginName<TAB>choiceId" line per format
 # Release provenance captured after the source bundle has been signed.  These
 # hashes are the guard against the failure mode where pkgbuild/productbuild
-# silently packages a stale or metadata-only build-tree bundle.
+# silently packages a different bundle than the signed source bundle.
 declare -a P_PAYLOAD_BUNDLE=() P_PAYLOAD_EXECUTABLE=() P_PAYLOAD_SHA256=()
 
 bundle_executable_path() {  # $1=bundle; prints the exact signed executable
@@ -448,7 +448,9 @@ verify_product_payload_identities() {
   local archive="$1" expanded="$STAGE/expanded-product" i bundle executable expected
   local matches_file match count got
   [[ "${#P_PAYLOAD_BUNDLE[@]}" -gt 0 ]] || return 0
-  mkdir -p "$expanded"
+  # pkgutil --expand-full requires a destination that does not already exist.
+  # Do not pre-create it: the real macOS tool rejects an existing directory,
+  # while a permissive test double would otherwise hide that release failure.
   pkgutil --expand-full "$archive" "$expanded" >/dev/null || {
     echo "error: pkgutil could not expand product archive for payload verification" >&2
     exit 2
@@ -458,13 +460,13 @@ verify_product_payload_identities() {
     expected="${P_PAYLOAD_SHA256[$i]}"
     matches_file="$STAGE/payload-matches-$i"
     # pkgbuild --component places the bundle directly at the payload root
-    # (Payload/$bundle).  Keep the nested form as well for products assembled
-    # by a distribution that deliberately preserves an install-prefix tree.
-    # Matching both layouts is required: --install-location is metadata and
-    # does not add Library/Audio/... directories inside Payload.
+    # (Payload/$bundle).  The product archive may put that component beneath
+    # its component package directory, so match exactly one component payload
+    # and never a similarly named bundle nested inside another component.
+    # --install-location is metadata and does not add Library/Audio/... inside
+    # Payload.
     find "$expanded" -type f \
-      \( -path "*/Payload/$bundle/Contents/MacOS/$executable" \
-         -o -path "*/Payload/*/$bundle/Contents/MacOS/$executable" \) \
+      -path "*/Payload/$bundle/Contents/MacOS/$executable" \
       -print > "$matches_file"
     count="$(wc -l < "$matches_file" | tr -d ' ')"
     [[ "$count" == 1 ]] || {

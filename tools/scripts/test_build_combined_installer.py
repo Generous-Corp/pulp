@@ -76,10 +76,10 @@ class NotarizationHeartbeatTest(unittest.TestCase):
         tool("productsign", 'last=""\nfor a in "$@"; do last="$a"; done\n'
                             'mkdir -p "$(dirname "$last")"\n: > "$last"\n')
         tool("pkgutil", '[[ "${1:-}" == "--expand-full" ]] || exit 2\n'
-             'expanded="$3"; mkdir -p "$expanded"\n'
+             'expanded="$3"; [[ ! -e "$expanded" ]] || { echo "destination already exists" >&2; exit 1; }; mkdir -p "$expanded"\n'
              'root="${PAYLOAD_BUNDLE_ROOTS}"; bundle="$(basename "$root")"\n'
              "exec_name=\"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \"$root/Contents/Info.plist\")\"\n"
-             'dest="$expanded/component-0/Payload/Library/Audio/$bundle/Contents/MacOS/$exec_name"\n'
+             'dest="$expanded/Payload/$bundle/Contents/MacOS/$exec_name"\n'
              'mkdir -p "$(dirname "$dest")"\n'
              'cp "$root/Contents/MacOS/$exec_name" "$dest"\n')
         # The stand-in for Apple. `submit --wait` sleeps (standing in for the
@@ -401,14 +401,14 @@ class CombinedInstallerTest(unittest.TestCase):
                 fake_bin,
                 "pkgutil",
                 '[[ "${1:-}" == "--expand-full" ]] || exit 2\n'
-                'archive="$2"; expanded="$3"; mkdir -p "$expanded"\n'
+                'archive="$2"; expanded="$3"; [[ ! -e "$expanded" ]] || { echo "destination already exists" >&2; exit 1; }; mkdir -p "$expanded"\n'
                 'idx=0\n'
                 'IFS=: read -r -a roots <<< "${PAYLOAD_BUNDLE_ROOTS:-}"\n'
                 'for root in "${roots[@]}"; do\n'
                 '  [[ -n "$root" ]] || continue\n'
                 '  bundle="$(basename "$root")"\n'
                 "  exec_name=\"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \"$root/Contents/Info.plist\")\"\n"
-                '  dest="$expanded/component-$idx/Payload/$bundle/Contents/MacOS/$exec_name"\n'
+                '  dest="$expanded/Payload/$bundle/Contents/MacOS/$exec_name"\n'
                 '  mkdir -p "$(dirname "$dest")"\n'
                 '  if [[ "${PAYLOAD_MODE:-match}" != "missing" || "$idx" != 0 ]]; then\n'
                 '    if [[ "${PAYLOAD_MODE:-match}" == "stale" && "$idx" == 0 ]]; then\n'
@@ -575,6 +575,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 check=False,
             )
             self._last_returncode = completed.returncode
+            self._last_installer_output = completed.stdout + completed.stderr
             self._last_wraptool_argv = (
                 wraptool_argv_capture.read_text(encoding="utf-8")
                 if wraptool_argv_capture.is_file()
@@ -689,6 +690,10 @@ class CombinedInstallerTest(unittest.TestCase):
     def test_product_payload_hash_matches_the_signed_source_bundle(self) -> None:
         """The happy path proves the package contains the exact build output."""
         self._run_installer([("Kick", "clap")])
+        self.assertIn(
+            "verified packaged payload: Kick.clap/Kick sha256=",
+            self._last_installer_output,
+        )
 
     def test_stale_product_payload_is_rejected_before_productsign(self) -> None:
         output, _ = self._run_installer(
