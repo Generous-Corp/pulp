@@ -19,8 +19,9 @@ region therefore also reports reference-ink coverage: how much of the
 reference's ink (pixels that stand out from the region's modal colour) the
 candidate also inks, and the largest connected patch of reference ink the
 candidate left empty. A region gates on them only when it declares
-`coverage_floor` (minimum covered fraction) or `max_uncovered_px` (largest
-allowed empty patch, in pixels of the --size frame).
+`coverage_floor` (minimum covered fraction) or `max_uncovered_fraction`
+(largest allowed empty patch, as a fraction of the whole --size frame, so the
+limit means the same element size at any --size, capture size or DPR).
 
 Default regions are Spectr's editor.html shape. Override with
 `--regions <path-to-json>` for other fixtures.
@@ -54,30 +55,30 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # are per-region similarity scores below which the region is judged
 # broken. Canvas regions tolerate more variance because Skia raster + AA
 # vary; chrome regions are tighter because text + button layout should
-# match deterministically. The coverage gates are tuned at the default
-# 1320x860 frame: two Chromium captures of the static chrome leave no
-# uncovered ink, real imports leave patches of at most a few dozen pixels of
-# text antialiasing, and a missing 90x16 control leaves roughly 950.
+# match deterministically. The patch limit, 0.000056 of the frame, is 64 px
+# at the default 1320x860: two Chromium captures of the static chrome leave
+# no uncovered ink, real imports leave patches of at most 0.000023 (text
+# antialiasing), and a missing 90x16 control leaves about 0.00085.
 SPECTR_REGIONS = {
     "title_chrome": {
         "x": 0.00, "y": 0.00, "w": 0.30, "h": 0.05,
         "threshold": 0.80,
         "edge_threshold": 0.42,
-        "max_uncovered_px": 64,
+        "max_uncovered_fraction": 0.000056,
         "notes": "SPECTR title + ZOOMABLE FILTER BANK",
     },
     "mode_toggles": {
         "x": 0.30, "y": 0.00, "w": 0.40, "h": 0.05,
         "threshold": 0.75,
         "edge_threshold": 0.42,
-        "max_uncovered_px": 64,
+        "max_uncovered_fraction": 0.000056,
         "notes": "LIVE / PRECISION / IIR / FFT / HYBRID buttons",
     },
     "band_dropdown": {
         "x": 0.70, "y": 0.00, "w": 0.30, "h": 0.05,
         "threshold": 0.75,
         "edge_threshold": 0.42,
-        "max_uncovered_px": 64,
+        "max_uncovered_fraction": 0.000056,
         "notes": "64 bands dropdown + zoom indicator",
     },
     "central_canvas": {
@@ -94,7 +95,7 @@ SPECTR_REGIONS = {
         "threshold": 0.75,
         "edge_threshold": 0.42,
         "coverage_floor": 0.98,
-        "max_uncovered_px": 64,
+        "max_uncovered_fraction": 0.000056,
         "notes": "CLEAR/SCULPT/PEAK/PRESETS/SNAPSHOT/A/B + morph slider",
     },
 }
@@ -291,9 +292,11 @@ def region_score(ref_full: Image.Image, cand_full: Image.Image, region: dict) ->
     edge_passed = edge_threshold is None or edges >= edge_threshold
     coverage = ink_coverage(ref_crop, cand_crop)
     coverage_floor = region.get("coverage_floor")
-    max_uncovered = region.get("max_uncovered_px")
+    frame_px = ref_full.size[0] * ref_full.size[1]
+    largest_fraction = coverage["largest_uncovered_px"] / max(frame_px, 1)
+    max_uncovered = region.get("max_uncovered_fraction")
     coverage_passed = coverage_floor is None or coverage["covered"] >= coverage_floor
-    uncovered_passed = max_uncovered is None or coverage["largest_uncovered_px"] <= max_uncovered
+    uncovered_passed = max_uncovered is None or largest_fraction <= max_uncovered
     failed_checks = [
         name for name, ok in (
             ("score", score >= threshold),
@@ -320,7 +323,9 @@ def region_score(ref_full: Image.Image, cand_full: Image.Image, region: dict) ->
         "coverage_floor": coverage_floor,
         "coverage_passed": coverage_passed,
         "largest_uncovered_px": coverage["largest_uncovered_px"],
-        "max_uncovered_px": max_uncovered,
+        "largest_uncovered_fraction": round(largest_fraction, 7),
+        "max_uncovered_fraction": max_uncovered,
+        "max_uncovered_px": None if max_uncovered is None else int(max_uncovered * frame_px),
         "uncovered_passed": uncovered_passed,
         "reference_ink_px": coverage["reference_ink_px"],
         "candidate_ink_px": coverage["candidate_ink_px"],
@@ -367,21 +372,13 @@ def load_regions(path: Path | None) -> dict:
                     file=sys.stderr,
                 )
                 sys.exit(2)
-        for threshold_name in ("threshold", "edge_threshold", "coverage_floor"):
+        for threshold_name in ("threshold", "edge_threshold", "coverage_floor", "max_uncovered_fraction"):
             if threshold_name not in region:
                 continue
             thr = region[threshold_name]
             if isinstance(thr, bool) or not isinstance(thr, (int, float)) or not (0.0 <= float(thr) <= 1.0):
                 print(
                     f"error: region '{name}' has invalid {threshold_name}={thr!r} (expected number in 0..1)",
-                    file=sys.stderr,
-                )
-                sys.exit(2)
-        if "max_uncovered_px" in region:
-            limit = region["max_uncovered_px"]
-            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
-                print(
-                    f"error: region '{name}' has invalid max_uncovered_px={limit!r} (expected a non-negative integer)",
                     file=sys.stderr,
                 )
                 sys.exit(2)
@@ -456,7 +453,8 @@ def main() -> int:
             mark = "✓" if r["passed"] else "✗"
             blank = " (BLANK)" if r["blank_candidate"] else ""
             print(f"  {mark} {name:18s} score={r['score']:.3f} threshold={r['threshold']:.3f}{blank}")
-            print(f"    ink coverage={r['ink_coverage']:.3f} largest uncovered patch={r['largest_uncovered_px']}px")
+            limit = "" if r["max_uncovered_px"] is None else f" (limit {r['max_uncovered_px']}px)"
+            print(f"    ink coverage={r['ink_coverage']:.3f} largest uncovered patch={r['largest_uncovered_px']}px{limit}")
             if r["failed_checks"]:
                 print(f"    failed: {', '.join(r['failed_checks'])}")
             print(f"    rect: x={r['rect_pct']['x']:.2f} y={r['rect_pct']['y']:.2f} w={r['rect_pct']['w']:.2f} h={r['rect_pct']['h']:.2f}")

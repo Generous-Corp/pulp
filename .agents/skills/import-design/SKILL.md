@@ -130,8 +130,10 @@ an entry — so nothing can go quiet the way `fidelity_diff.py` did.
 its range slider missing, because the bar's background dominates both the
 histogram and the mean-pixel term. Whole-panel ink coverage could not see it
 either (0.978). Read `largest_uncovered_px`: a missing element shows as one
-uncovered patch at its own size (967 px there, 16 px with the slider pasted
-back, 0 between two Chromium captures). Animated regions, like Spectr's
+uncovered patch at its own size (967 px at the default 1320x860 frame, 16 px
+with the slider pasted back, 0 between two Chromium captures). Patch limits
+are `max_uncovered_fraction` of the whole frame, so they hold at any `--size`;
+the JSON also prints the limit in pixels of the current frame. Animated regions, like Spectr's
 spectrum canvas, disagree on patches of thousands of pixels between two
 captures, so gate those on `coverage_floor` only.
 
