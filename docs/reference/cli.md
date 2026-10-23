@@ -1144,8 +1144,8 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 |------------|-------------|
 | `sign`     | Code-sign all built plugin bundles (VST3, CLAP, AU), or one `--path` artifact |
 | `notarize` | Submit packaged artifacts to Apple notarytool (macOS); prefer `release` or `--path` with `.pkg`, `.dmg`, or `.zip` |
-| `package`  | Create macOS `.pkg`/`.dmg`, Windows NSIS, Linux `.deb`/`.tar.gz`, or Android APK/AAB packages in `artifacts/`. On macOS each AU/VST3/CLAP bundle ships as a copy with local symbols stripped (`strip -x`) and re-signed (`--identity`, or ad hoc for an unsigned build); a dSYM of the unstripped executable is written first to `artifacts/symbols/<FORMAT>/<bundle>.dSYM` for crash symbolication, and the build output keeps its symbols. `--keep-symbols` opts out |
-| `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
+| `package`  | Create macOS `.pkg`/`.dmg`, Windows NSIS, Linux `.deb`/`.tar.gz`, or Android APK/AAB packages in `artifacts/`. On macOS each AU/VST3/CLAP bundle ships as a copy with local symbols stripped (`strip -x`) and re-signed (`--identity`, or ad hoc for an unsigned build); a dSYM of the unstripped executable is written first to `artifacts/symbols/<FORMAT>/<bundle>.dSYM` for crash symbolication, and the build output keeps its symbols. The stripped copy is re-signed with the original's entitlements unless `--entitlements` names a file. `--keep-symbols` opts out |
+| `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple. `--entitlements <plist>` is passed to both the sign and package stages |
 | `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
 | `appcast`  | Generate a Sparkle-compatible appcast feed from a package URL or local artifact |
 | `auv3-xcodeproj` | Generate an Xcode project for an AUv3 target (macOS) |

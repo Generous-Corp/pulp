@@ -117,6 +117,7 @@ static int print_ship_help() {
     std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
     std::cout << "             --target macos --identity \"...\" --apple-id ... --team-id ...\n";
     std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (.pkg signing)\n";
+    std::cout << "             [--entitlements <plist>]  (sign and re-sign plug-ins with these)\n";
     std::cout << "             --pkg | --dmg   (notarizes the signed .pkg/.dmg it builds) (item 7.5)\n";
     std::cout << "             --ship-inspector [--ship-inspector-runtime-eval]  (package acknowledgements)\n";
     std::cout << "             --skip-sign | --skip-package | --skip-notarize      (CI flags)\n";
@@ -1519,7 +1520,7 @@ static int ship_release(const std::vector<std::string>& args,
     const std::string sub = "release";
         std::string target = "macos";
         std::string identity, apple_id, team_id, password, version;
-        std::string api_key, api_key_id, api_issuer, installer_identity;
+        std::string api_key, api_key_id, api_issuer, installer_identity, entitlements;
         bool want_pkg = false, want_dmg = false;
         bool skip_sign = false, skip_package = false, skip_notarize = false;
         bool ship_inspector = false, ship_inspector_runtime_eval = false;
@@ -1531,6 +1532,9 @@ static int ship_release(const std::vector<std::string>& args,
                 if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
             } else if (args[i] == "--installer-identity") {
                 if (!take_ship_value(args, i, sub, args[i], installer_identity)) return 2;
+            } else if (args[i] == "--entitlements") {
+                if (!take_ship_value(args, i, sub, args[i], entitlements))
+                    return 2;
             } else if (args[i] == "--apple-id") {
                 if (!take_ship_value(args, i, sub, args[i], apple_id)) return 2;
             } else if (args[i] == "--team-id") {
@@ -1586,6 +1590,10 @@ static int ship_release(const std::vector<std::string>& args,
             if (!identity.empty()) {
                 sign_args.push_back("--identity");
                 sign_args.push_back(identity);
+            }
+            if (!entitlements.empty()) {
+                sign_args.push_back("--entitlements");
+                sign_args.push_back(entitlements);
             }
             int sign_rc = cmd_ship(sign_args);
             if (sign_rc != 0) {
@@ -1652,6 +1660,10 @@ static int ship_release(const std::vector<std::string>& args,
             if (!identity.empty()) {
                 pkg_args.push_back("--identity");
                 pkg_args.push_back(identity);
+            }
+            if (!entitlements.empty()) {
+                pkg_args.push_back("--entitlements");
+                pkg_args.push_back(entitlements);
             }
             int pkg_rc = cmd_ship(pkg_args);
             if (pkg_rc != 0) {

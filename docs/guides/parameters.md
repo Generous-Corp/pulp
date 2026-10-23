@@ -217,6 +217,13 @@ processor and the override to remove. The warning is logged at deactivation or
 teardown, off the audio thread: VST3 `setActive(false)` and `terminate()`,
 CLAP `deactivate` and `destroy`, AU v2 `Cleanup()`.
 
+The record is a fixed table of 256 slots per plug-in module, found by
+hashing the queue's address and probing at most 8 slots, so the audio thread
+never allocates or locks for it. With very many opted-out instances of one
+plug-in alive at once (hundreds), a new instance may find no free slot and
+its misuse goes unreported; the warning is a development aid, not a
+guarantee.
+
 ```cpp
 void process(audio::BufferView<float>& output,
              const audio::BufferView<const float>& input,

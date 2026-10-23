@@ -547,16 +547,17 @@ void StateStore::set_values_rt(std::span<const ParamWrite> writes) {
     if (writes.empty())
         return;
     const auto older_writers = active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
-    const auto generation = advance_state_generation();
     const auto apply = [&](auto&& notify) {
         for (const auto& write : writes) {
             const std::size_t index = index_of(write.id);
             if (index == kNoIndex)
                 continue;
             const float clamped = constrain_stored_value(params_[index], write.value);
-            // One generation for the whole batch: a second write to the same
-            // parameter cannot claim it again, so the first value stands.
-            if (values_[index].set_packed_revisioned(clamped, generation, older_writers + 1))
+            // Each write takes its own generation, in batch order, so a later
+            // write to the same parameter wins, and so does a host write that
+            // follows one an Audio listener made earlier in the batch.
+            if (values_[index].set_packed_revisioned(clamped, advance_state_generation(),
+                                                     older_writers + 1))
                 notify(write.id, clamped);
         }
     };

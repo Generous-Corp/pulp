@@ -232,13 +232,15 @@ class StateStore {
         float value = 0.0f;
     };
 
-    /// @c set_value_rt() for several distinct parameters as one store write:
-    /// one writer claim and one state generation for the batch, and one
-    /// listener-snapshot lease for its notifications. Every applied write
-    /// still notifies its parameter's listeners once, in batch order, and
-    /// Audio listeners run inside the batch. A repeated ID keeps its first
-    /// value. Real-time safe; format adapters use it to write a block's
-    /// automation, one value per parameter.
+    /// @c set_value_rt() for several parameters as one store write: one
+    /// writer claim for the batch and one listener-snapshot lease for its
+    /// notifications. Writes apply in batch order, each with its own state
+    /// generation, exactly as consecutive @c set_value_rt() calls would: a
+    /// repeated ID ends at its last value, and a write an Audio listener
+    /// makes during the batch is overwritten by a later batch write to the
+    /// same parameter. Every applied write notifies its parameter's listeners
+    /// once, and Audio listeners run inside the batch. Real-time safe; format
+    /// adapters use it to write a block's automation.
     void set_values_rt(std::span<const ParamWrite> writes);
 
     /// Real-time-safe normalized-value write. Denormalizes through the

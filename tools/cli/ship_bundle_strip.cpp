@@ -106,16 +106,30 @@ std::optional<fs::path> stage_stripped_bundle(const fs::path& bundle, const fs::
         std::cerr << "  FAILED to strip local symbols from " << bundle.filename().string() << "\n";
         return std::nullopt;
     }
+    // Re-signing replaces the signature, entitlements included, so carry the
+    // original's entitlements over unless the caller named a file.
+    std::string entitlements = options.entitlements;
+    if (entitlements.empty()) {
+        const auto extracted =
+            staged.parent_path() / (bundle.filename().string() + ".entitlements");
+        fs::remove(extracted, ec);
+        if (run("/usr/bin/codesign -d --entitlements " + shell_quote(extracted) + " --xml " +
+                shell_quote(bundle) + " >/dev/null 2>&1") == 0 &&
+            fs::is_regular_file(extracted, ec) && fs::file_size(extracted, ec) > 0)
+            entitlements = extracted.string();
+    }
     if (developer_signed) {
         if (options.signing_preflight && !options.signing_preflight())
             return std::nullopt;
-        if (!pulp::ship::codesign(staged.string(), options.identity, options.entitlements)) {
+        if (!pulp::ship::codesign(staged.string(), options.identity, entitlements)) {
             std::cerr << "  FAILED to re-sign the stripped copy of " << bundle.filename().string()
                       << "\n";
             return std::nullopt;
         }
-    } else if (run("/usr/bin/codesign --force --sign - " + shell_quote(staged) +
-                   " >/dev/null 2>&1") != 0) {
+    } else if (run("/usr/bin/codesign --force --sign - " +
+                   (entitlements.empty() ? std::string()
+                                         : "--entitlements " + shell_quote(entitlements) + " ") +
+                   shell_quote(staged) + " >/dev/null 2>&1") != 0) {
         std::cerr << "  FAILED to ad hoc sign the stripped copy of " << bundle.filename().string()
                   << "\n";
         return std::nullopt;

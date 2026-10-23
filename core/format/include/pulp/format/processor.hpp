@@ -128,6 +128,41 @@ enum class EditorHostKind : std::uint8_t { plugin, standalone };
 /// - prepare() and release() are called on the **host thread** with the
 ///   audio thread stopped.
 /// - define_parameters() is called once during construction on the host thread.
+namespace detail {
+/// The parameter-event queues adapters hand to opted-out processors, keyed by
+/// address, with a flag param_events() sets when one of them is read. Static
+/// storage and atomics only: param_events() runs on the audio thread, so the
+/// lookup must not allocate, lock, or touch thread-local storage (a module's
+/// thread-local block is allocated on a thread's first access).
+struct ParamEventsOptOutSlot {
+    std::atomic<const void*> queue{nullptr};
+    std::atomic<bool> read{false};
+};
+inline constexpr std::size_t kParamEventsOptOutSlots = 256;
+inline constexpr std::size_t kParamEventsOptOutProbe = 8;
+inline ParamEventsOptOutSlot param_events_opt_out_slots[kParamEventsOptOutSlots];
+inline std::atomic<std::size_t> param_events_opt_out_count{0};
+
+inline std::size_t param_events_opt_out_home(const void* queue) noexcept {
+    auto v = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(queue));
+    v ^= v >> 33;
+    v *= 0xff51afd7ed558ccdULL;
+    v ^= v >> 33;
+    return static_cast<std::size_t>(v) & (kParamEventsOptOutSlots - 1);
+}
+
+/// The slot registered for `queue`, or null.
+inline ParamEventsOptOutSlot* param_events_opt_out_find(const void* queue) noexcept {
+    const auto home = param_events_opt_out_home(queue);
+    for (std::size_t i = 0; i < kParamEventsOptOutProbe; ++i) {
+        auto& slot = param_events_opt_out_slots[(home + i) & (kParamEventsOptOutSlots - 1)];
+        if (slot.queue.load(std::memory_order_acquire) == queue)
+            return &slot;
+    }
+    return nullptr;
+}
+} // namespace detail
+
 class Processor {
 public:
     Processor() {
@@ -926,19 +961,15 @@ public:
     /// wants_sample_accurate_parameters() returns false. A read in that state
     /// is a mistake (the processor opted out of the points it is looking
     /// for), so it is recorded (one relaxed store, safe on the audio thread)
-    /// and the adapter logs it once, off the audio thread, naming the
-    /// override.
+    /// in the adapter's ParamEventsOptOutMonitor, which logs it once, off the
+    /// audio thread, naming the override.
     const state::ParameterEventQueue* param_events() const {
-        if (param_events_block_rate_)
-            param_events_read_while_block_rate_.store(true, std::memory_order_relaxed);
+        if (param_events_ != nullptr &&
+            detail::param_events_opt_out_count.load(std::memory_order_relaxed) != 0) {
+            if (auto* slot = detail::param_events_opt_out_find(param_events_))
+                slot->read.store(true, std::memory_order_relaxed);
+        }
         return param_events_;
-    }
-
-    /// True once this processor read param_events() in an adapter that
-    /// delivers it block-rate values only, because its
-    /// wants_sample_accurate_parameters() returns false.
-    bool read_param_events_while_opted_out() const {
-        return param_events_read_while_block_rate_.load(std::memory_order_relaxed);
     }
 
     /// Timestamped host modulation events for the current block. CLAP
@@ -986,16 +1017,6 @@ public:
     void set_ump_input(const midi::UmpBuffer* ump) { ump_input_ = ump; }
     /// @internal Called by format adapters before process().
     void set_param_events(const state::ParameterEventQueue* events) { param_events_ = events; }
-    /// @internal Called by the VST3, AU v2 and CLAP adapters, which leave the
-    /// queue empty for a processor that opted out of sample-accurate
-    /// parameters, so a read of it can be reported.
-    void set_param_events_block_rate(bool block_rate) {
-        param_events_block_rate_ = block_rate;
-    }
-    /// @internal Logs, once per processor, that it read param_events() while
-    /// opted out. Main thread only (adapters call it on deactivation and
-    /// teardown). Returns true when it logged.
-    bool report_param_events_while_opted_out();
     /// @internal Called by format adapters before process().
     void set_modulation_events(const state::ModulationEventQueue* events) {
         modulation_events_ = events;
@@ -1237,12 +1258,74 @@ private:
     std::atomic<bool> tail_changed_{false};
     std::atomic<bool> note_names_changed_{false};
     std::atomic<bool> state_dirty_{false};
-    // Appended after every existing member, so no earlier member moves and the
-    // three bytes fit in the tail padding after the flags above: sizeof stays
-    // the same for binaries built against an earlier header.
-    bool param_events_block_rate_ = false;
-    mutable std::atomic<bool> param_events_read_while_block_rate_{false};
-    bool param_events_misuse_reported_ = false;
+};
+
+/// Records, for one adapter, whether an opted-out processor read
+/// param_events(), and logs it once. The state lives outside Processor so its
+/// layout stays fixed: a plug-in built against an earlier header may have
+/// placed its own first members in Processor's tail padding, so Processor
+/// gains no data members.
+///
+/// The adapter arms it once, on the main thread, with the queue it hands the
+/// processor; that registers the queue's address. param_events() looks the
+/// address up and marks it, with atomics on static storage only. report() runs
+/// off the audio thread when the host deactivates or releases the processor.
+/// When every slot near the queue's home is taken, the read is not recorded.
+///
+/// The queue and its monitor are members of the same adapter object, so the
+/// queue's storage is released only after the monitor's destructor has
+/// cleared the slot: no other queue can take that address while the slot
+/// still names it. A caller that owns the two separately must keep the queue
+/// alive until the monitor is destroyed or re-armed.
+class ParamEventsOptOutMonitor {
+  public:
+    ParamEventsOptOutMonitor() = default;
+    ParamEventsOptOutMonitor(const ParamEventsOptOutMonitor&) = delete;
+    ParamEventsOptOutMonitor& operator=(const ParamEventsOptOutMonitor&) = delete;
+    ~ParamEventsOptOutMonitor() {
+        disarm();
+    }
+
+    /// Registers `queue` when the processor opted out; does nothing otherwise.
+    void arm(bool opted_out, const state::ParameterEventQueue* queue) noexcept {
+        disarm();
+        if (!opted_out || queue == nullptr)
+            return;
+        const auto home = detail::param_events_opt_out_home(queue);
+        for (std::size_t i = 0; i < detail::kParamEventsOptOutProbe; ++i) {
+            auto& slot = detail::param_events_opt_out_slots[(home + i) &
+                                                            (detail::kParamEventsOptOutSlots - 1)];
+            const void* expected = nullptr;
+            slot.read.store(false, std::memory_order_relaxed);
+            if (slot.queue.compare_exchange_strong(expected, queue, std::memory_order_acq_rel)) {
+                slot_ = &slot;
+                detail::param_events_opt_out_count.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+        }
+    }
+
+    /// True once the processor read param_events() while opted out.
+    bool read_while_opted_out() const noexcept {
+        return slot_ != nullptr && slot_->read.load(std::memory_order_relaxed);
+    }
+
+    /// Logs, once, that `processor` read param_events() while opted out.
+    /// Main thread only. Returns true when it logged.
+    bool report(const Processor& processor);
+
+  private:
+    void disarm() noexcept {
+        if (slot_ == nullptr)
+            return;
+        slot_->queue.store(nullptr, std::memory_order_release);
+        slot_->read.store(false, std::memory_order_relaxed);
+        detail::param_events_opt_out_count.fetch_sub(1, std::memory_order_relaxed);
+        slot_ = nullptr;
+    }
+
+    detail::ParamEventsOptOutSlot* slot_ = nullptr;
+    bool reported_ = false;
 };
 
 /// Factory function type — plugins provide this to create processor instances.

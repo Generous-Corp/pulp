@@ -6,15 +6,15 @@
 
 namespace pulp::format {
 
-bool Processor::report_param_events_while_opted_out() {
-    if (param_events_misuse_reported_ || !read_param_events_while_opted_out())
+bool ParamEventsOptOutMonitor::report(const Processor& processor) {
+    if (reported_ || !read_while_opted_out())
         return false;
-    param_events_misuse_reported_ = true;
+    reported_ = true;
     runtime::log_warn(
         "'{}' read param_events() but its wants_sample_accurate_parameters() returns false; "
         "VST3, AU v2 and CLAP give it an empty queue and block-rate values. Remove that "
         "override (the default is true) to receive every automation point.",
-        descriptor().name);
+        processor.descriptor().name);
     return true;
 }
 

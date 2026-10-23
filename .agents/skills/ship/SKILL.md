@@ -568,6 +568,12 @@ Watch out for:
   Developer ID signature, ad hoc otherwise. `pulp ship release` passes its
   identity through. If a bundle is Developer-ID-signed and no identity
   resolves, it ships unstripped with a warning rather than with a broken seal.
+- **Re-signing keeps the entitlements.** A new signature replaces the old one,
+  entitlements included, so `stage_stripped_bundle()` extracts the original's
+  entitlements (`codesign -d --entitlements <file> --xml`) and signs the copy
+  with them, for Developer ID and ad hoc alike, unless `--entitlements` names a
+  file. `pulp ship release --entitlements` passes the file to both its sign and
+  package stages.
 - **A dSYM is written before every strip.** `dsymutil` runs on the UNSTRIPPED
   build-output executable, writing `artifacts/symbols/<FORMAT>/<bundle>.dSYM`
   (`pulp ship package`) or `<out>/symbols/<kind>/<bundle>.dSYM` (the installer

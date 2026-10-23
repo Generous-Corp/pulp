@@ -43,7 +43,7 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
         processor_ = factory();
         if (processor_) {
             sample_accurate_params_ = processor_->wants_sample_accurate_parameters();
-            processor_->set_param_events_block_rate(!sample_accurate_params_);
+            param_events_monitor_.arm(!sample_accurate_params_, &param_events_);
             slice_scheduled_params_ =
                 sample_accurate_params_ && processor_->wants_au_scheduled_parameter_slices();
             processor_->set_state_store(&store_);
@@ -223,9 +223,12 @@ void PulpAUEffect::queue_scheduled_events(const ParameterEventList& events,
         if (store_.info(param_id) == nullptr)
             continue;
         if (event.eventType == kParameterEvent_Immediate) {
-            const auto offset = std::clamp(
-                static_cast<SInt32>(event.eventValues.immediate.bufferOffset), 0, last_frame);
-            param_events_.push({param_id, offset, event.eventValues.immediate.value, 0});
+            // A point at or past the buffer's end is not in this buffer.
+            const auto offset = static_cast<SInt64>(event.eventValues.immediate.bufferOffset);
+            if (offset > last_frame)
+                continue;
+            param_events_.push(
+                {param_id, static_cast<int32_t>(offset), event.eventValues.immediate.value, 0});
         } else if (event.eventType == kParameterEvent_Ramped) {
             const auto& ramp = event.eventValues.ramp;
             const SInt64 start = std::max<SInt64>(0, ramp.startBufferOffset);
@@ -262,6 +265,10 @@ void PulpAUEffect::write_scheduled_end_values(ParameterEventList& events,
             continue;
         if (event.eventType != kParameterEvent_Immediate &&
             event.eventType != kParameterEvent_Ramped)
+            continue;
+        // An event that starts past the buffer's end is not in this buffer;
+        // one exactly at its end still sets the value the buffer ends on.
+        if (scheduled_start_offset(event) > static_cast<SInt32>(frames_to_process))
             continue;
         const auto* info = store_.info(static_cast<state::ParamID>(event.parameter));
         if (info == nullptr) {
@@ -431,6 +438,15 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
         return event.scope == kAudioUnitScope_Global && event.element == 0;
     };
     const auto ramp_value_at = scheduled_ramp_value_at;
+    // An immediate overrides a ramp on the same parameter that precedes it in
+    // the sorted list: one that starts earlier, or at the same offset earlier
+    // in host order. A ramp after it at the same offset still wins.
+    const auto supersede_earlier_ramps = [this](std::size_t event_index,
+                                                AudioUnitParameterID parameter) {
+        for (auto& ramp : scheduled_ramps_)
+            if (ramp.index < event_index && (*scheduled_events_)[ramp.index].parameter == parameter)
+                ramp.superseded = true;
+    };
 
     // Immediates up to this slice's start take effect once, in time order (a
     // later one wins), and supersede an earlier ramp on the same parameter.
@@ -438,7 +454,8 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
     while (scheduled_cursor_ < events->size() &&
            scheduled_start_offset((*events)[scheduled_cursor_]) <=
                static_cast<SInt32>(start_frame_in_buffer)) {
-        const auto& event = (*events)[scheduled_cursor_++];
+        const auto event_index = scheduled_cursor_++;
+        const auto& event = (*events)[event_index];
         if (event.eventType != kParameterEvent_Immediate || !is_global(event))
             continue;
         const auto param_id = static_cast<state::ParamID>(event.parameter);
@@ -451,13 +468,7 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
         apply_value(param_id, event.eventValues.immediate.value);
         if (event.eventValues.immediate.bufferOffset == start_frame_in_buffer)
             param_events_.push({param_id, 0, event.eventValues.immediate.value, 0});
-        for (auto& ramp : scheduled_ramps_) {
-            const auto& ramp_event = (*events)[ramp.index];
-            if (ramp_event.parameter == event.parameter &&
-                ramp_event.eventValues.ramp.startBufferOffset <=
-                    static_cast<SInt32>(event.eventValues.immediate.bufferOffset))
-                ramp.superseded = true;
-        }
+        supersede_earlier_ramps(event_index, event.parameter);
     }
 
     // Ramps under way at this slice's start: the store takes their value here
@@ -481,9 +492,19 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
         }
     };
     if (scheduled_ramps_overflowed_) {
-        for (std::size_t i = 0; i < scheduled_cursor_; ++i)
-            if ((*events)[i].eventType == kParameterEvent_Ramped)
-                apply_ramp((*events)[i], false);
+        // Past the ramp capacity there is no per-ramp record, so replay every
+        // event that has started, in host order: the last one for a
+        // parameter sets its value, as when each event is applied in turn.
+        for (std::size_t i = 0; i < scheduled_cursor_; ++i) {
+            const auto& event = (*events)[i];
+            if (event.eventType == kParameterEvent_Ramped) {
+                apply_ramp(event, false);
+            } else if (event.eventType == kParameterEvent_Immediate && is_global(event) &&
+                       store_.info(static_cast<state::ParamID>(event.parameter)) != nullptr) {
+                apply_value(static_cast<state::ParamID>(event.parameter),
+                            event.eventValues.immediate.value);
+            }
+        }
     } else {
         for (const auto& ramp : scheduled_ramps_)
             apply_ramp((*events)[ramp.index], ramp.superseded);
@@ -506,13 +527,14 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
         host_write.emplace();
         for (std::size_t i = scheduled_cursor_; i < events->size(); ++i) {
             const auto& event = (*events)[i];
+            if (scheduled_start_offset(event) > static_cast<SInt32>(slice_end))
+                break;
             if (event.eventType != kParameterEvent_Immediate || !is_global(event))
                 continue;
-            if (event.eventValues.immediate.bufferOffset > slice_end)
-                break;
             const auto param_id = static_cast<state::ParamID>(event.parameter);
             if (store_.info(param_id) != nullptr)
                 apply_value(param_id, event.eventValues.immediate.value);
+            supersede_earlier_ramps(i, event.parameter);
         }
         const auto settle_ramp = [&](const AudioUnitParameterEvent& event, bool superseded) {
             if (superseded || !is_global(event))
@@ -526,9 +548,18 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
             apply_value(param_id, ramp_value_at(event, slice_end));
         };
         if (scheduled_ramps_overflowed_) {
-            for (const auto& event : *events)
-                if (event.eventType == kParameterEvent_Ramped)
+            // Replay in host order, as at a slice start.
+            for (const auto& event : *events) {
+                if (scheduled_start_offset(event) > static_cast<SInt32>(slice_end))
+                    break;
+                if (event.eventType == kParameterEvent_Ramped) {
                     settle_ramp(event, false);
+                } else if (event.eventType == kParameterEvent_Immediate && is_global(event) &&
+                           store_.info(static_cast<state::ParamID>(event.parameter)) != nullptr) {
+                    apply_value(static_cast<state::ParamID>(event.parameter),
+                                event.eventValues.immediate.value);
+                }
+            }
         } else {
             for (const auto& ramp : scheduled_ramps_)
                 settle_ramp((*events)[ramp.index], ramp.superseded);
@@ -860,7 +891,7 @@ void PulpAUEffect::warm_render_path() {
 void PulpAUEffect::Cleanup()
 {
     if (processor_) {
-        processor_->report_param_events_while_opted_out();
+        param_events_monitor_.report(*processor_);
         processor_->release();
     }
     AUEffectBase::Cleanup();

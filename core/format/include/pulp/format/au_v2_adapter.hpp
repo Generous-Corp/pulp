@@ -326,6 +326,11 @@ public:
     Float64 GetTailTime() override;
     Float64 GetLatency() override;
 
+    /// The opted-out-reader record for this unit's processor.
+    ParamEventsOptOutMonitor& param_events_monitor() {
+        return param_events_monitor_;
+    }
+
   protected:
     void queue_scheduled_events(const ParameterEventList& events, UInt32 frames_to_process);
     void write_scheduled_end_values(ParameterEventList& events, UInt32 frames_to_process);
@@ -417,6 +422,8 @@ private:
     // Processor::wants_sample_accurate_parameters(), asked at construction.
     // False: scheduled automation renders the buffer in one call.
     bool sample_accurate_params_ = false;
+    // Records an opted-out processor reading param_events(); see processor.hpp.
+    ParamEventsOptOutMonitor param_events_monitor_;
     // Processor::wants_au_scheduled_parameter_slices(): render one call per
     // scheduled slice instead of one call per buffer.
     bool slice_scheduled_params_ = false;

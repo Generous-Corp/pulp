@@ -1234,6 +1234,37 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     const auto build_binary = bundle / "Contents" / "MacOS" / "StripMe";
     // Control: the fixture really carries the local symbol the case looks for.
     REQUIRE(has_local_fixture_symbol(build_binary));
+    // codesign embeds entitlements only in an executable's signature, not in a
+    // loadable module's, so a second bundle carries a copy of an executable
+    // to tell whether re-signing the stripped copy keeps them.
+    auto entitled = make_module_bundle(root, "CLAP", "EntMe", ".clap");
+    const auto entitled_binary = entitled / "Contents" / "MacOS" / "EntMe";
+    fs::copy_file("/usr/bin/true", entitled_binary, fs::copy_options::overwrite_existing);
+    // Sign it with an entitlement, as `pulp ship sign` would.
+    const auto entitlements_plist = root / "fixture.entitlements";
+    {
+        std::ofstream ent(entitlements_plist);
+        ent << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+               "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+            << "<plist version=\"1.0\"><dict>"
+            << "<key>com.apple.security.cs.disable-library-validation</key><true/>"
+            << "</dict></plist>\n";
+    }
+    REQUIRE(ChildProcess::run("/usr/bin/codesign",
+                              {"--force", "--sign", "-", "--entitlements",
+                               entitlements_plist.string(), entitled.string()},
+                              ProcessOptions{})
+                .exit_code == 0);
+    auto entitlements_of = [](const fs::path& signed_bundle) {
+        auto e = ChildProcess::run("/usr/bin/codesign",
+                                   {"-d", "--entitlements", "-", "--xml", signed_bundle.string()},
+                                   ProcessOptions{});
+        REQUIRE(e.exit_code == 0);
+        return e.stdout_output;
+    };
+    const auto original_entitlements = entitlements_of(entitled);
+    REQUIRE(contains(original_entitlements, "disable-library-validation"));
 
     auto r = run_pulp_in(root, {"ship", "package", "--version", "1.0.0", "--separate"});
     INFO(r.stdout_output << r.stderr_output);
@@ -1263,6 +1294,12 @@ TEST_CASE_METHOD(ShipShelloutFixture,
         return u.stdout_output.substr(at + 6, 36);
     };
     CHECK(uuid_of(dsym_binary) == uuid_of(shipped));
+    // Re-signing the stripped copy keeps the original's entitlements.
+    REQUIRE(contains(r.stdout_output, "stripped local symbols from EntMe.clap"));
+    const auto shipped_entitled =
+        packaged_binary(root / "artifacts" / "EntMe-CLAP-1.0.0.pkg", root / "expanded-ent", "EntMe");
+    CHECK(entitlements_of(shipped_entitled.parent_path().parent_path().parent_path()) ==
+          original_entitlements);
     // The stripped copy carries a valid (ad hoc) signature, so it still loads.
     auto verify = ChildProcess::run(
         "/usr/bin/codesign",

@@ -258,6 +258,10 @@ public:
         return param_events_;
     }
 
+    ParamEventsOptOutMonitor& param_events_monitor() {
+        return param_events_monitor_;
+    }
+
     /// Returns the StateStore ParamID the adapter routes VST3's
     /// `kIsBypass` parameter to. `process()` short-circuits to
     /// pass-through when this parameter's value is >= 0.5. Returns 0
@@ -367,6 +371,8 @@ private:
     state::ParameterEventQueue param_events_;
     // Processor::wants_sample_accurate_parameters(), asked in initialize().
     bool sample_accurate_params_ = false;
+    // Records an opted-out processor reading param_events(); see processor.hpp.
+    ParamEventsOptOutMonitor param_events_monitor_;
     // A block's automated values, written to the store in one batch after the
     // input queues are read; one slot per parameter, reserved in
     // setupProcessing().

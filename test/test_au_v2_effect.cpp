@@ -1407,9 +1407,113 @@ TEST_CASE("AU v2 effect renders scheduled automation in one call for a block-rat
     REQUIRE(value == Catch::Approx(0.5f)); // 48 of the ramp's 96 frames
     // Its ParamCursor read the queue while opted out: recorded, and
     // reported once when the host cleans the unit up.
-    REQUIRE(DenseAutomationProcessor::last->read_param_events_while_opted_out());
+    REQUIRE(effect.param_events_monitor().read_while_opted_out());
     effect.DoCleanup();
-    REQUIRE_FALSE(DenseAutomationProcessor::last->report_param_events_while_opted_out());
+    REQUIRE_FALSE(effect.param_events_monitor().report(*DenseAutomationProcessor::last));
+}
+
+namespace {
+
+AudioUnitParameterEvent ramp_event(AudioUnitParameterID id, SInt32 start, UInt32 frames, float from,
+                                   float to) {
+    AudioUnitParameterEvent event{};
+    event.eventType = kParameterEvent_Ramped;
+    event.parameter = id;
+    event.scope = kAudioUnitScope_Global;
+    event.eventValues.ramp.startBufferOffset = start;
+    event.eventValues.ramp.durationInFrames = frames;
+    event.eventValues.ramp.startValue = from;
+    event.eventValues.ramp.endValue = to;
+    return event;
+}
+
+// Renders one buffer of `frames` with `events` scheduled through
+// DenseAutomationProcessor in the given mode, and returns parameter 1's
+// store value afterwards.
+float render_scheduled_and_read_p1(UInt32 frames, std::vector<AudioUnitParameterEvent> events,
+                                   bool sample_accurate, bool slices) {
+    DenseAutomationProcessor::sample_accurate = sample_accurate;
+    DenseAutomationProcessor::slices = slices;
+    TestScheduledEffect effect;
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    UInt32 max_frames = frames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+    REQUIRE(effect.SetParameter(1, kAudioUnitScope_Global, 0, 0.5f, 0) == noErr);
+    REQUIRE(effect.ScheduleParameter(events.data(), static_cast<UInt32>(events.size())) == noErr);
+    std::vector<float> input_samples(frames, 0.0f);
+    std::vector<float> output_samples(frames, 0.0f);
+    AudioBufferList input{};
+    input.mNumberBuffers = 1;
+    input.mBuffers[0] = {1, frames * static_cast<UInt32>(sizeof(float)), input_samples.data()};
+    AudioBufferList output{};
+    output.mNumberBuffers = 1;
+    output.mBuffers[0] = {1, frames * static_cast<UInt32>(sizeof(float)), output_samples.data()};
+    AudioUnitRenderActionFlags flags = 0;
+    REQUIRE(effect.process_scheduled(flags, input, output, frames) == noErr);
+    effect.clear_scheduled();
+    Float32 value = 0.0f;
+    REQUIRE(effect.GetParameter(1, kAudioUnitScope_Global, 0, value) == noErr);
+    effect.DoCleanup();
+    return value;
+}
+
+struct DenseModeRestore {
+    pulp::format::ProcessorFactory previous = pulp::format::registered_factory();
+    DenseModeRestore() {
+        pulp::format::register_plugin(create_dense_automation_effect);
+    }
+    ~DenseModeRestore() {
+        pulp::format::register_plugin(previous);
+        DenseAutomationProcessor::sample_accurate = true;
+        DenseAutomationProcessor::slices = true;
+    }
+};
+
+} // namespace
+
+TEST_CASE("AU v2 ignores scheduled events past the buffer's end in every render mode",
+          "[au][au-v2][automation]") {
+    DenseModeRestore restore;
+    // Per slice, one call per buffer with every point, and block-rate: an
+    // immediate at frame 100 of a 64-frame buffer is not in this buffer.
+    for (const auto [sample_accurate, slices] :
+         {std::pair{true, true}, std::pair{true, false}, std::pair{false, true}}) {
+        INFO("sample_accurate=" << sample_accurate << " slices=" << slices);
+        CHECK(render_scheduled_and_read_p1(64, {immediate_event(1, 100, 0.9f)}, sample_accurate,
+                                           slices) == Catch::Approx(0.5f));
+        // Control: the same event inside the buffer does land.
+        CHECK(render_scheduled_and_read_p1(64, {immediate_event(1, 10, 0.9f)}, sample_accurate,
+                                           slices) == Catch::Approx(0.9f));
+    }
+}
+
+TEST_CASE("AU v2 lets a later immediate override a ramp in host order, past the ramp capacity",
+          "[au][au-v2][automation]") {
+    DenseModeRestore restore;
+    // More ramps than the per-render ramp record holds, then a ramp on
+    // parameter 1 over the whole buffer and an immediate on it at 200: the
+    // immediate comes later, so it sets the value the buffer ends on.
+    std::vector<AudioUnitParameterEvent> events;
+    for (int i = 0; i < 300; ++i)
+        events.push_back(ramp_event(2, 0, 512, 0.0f, 1.0f));
+    events.push_back(ramp_event(1, 0, 512, 0.0f, 1.0f));
+    events.push_back(immediate_event(1, 200, 0.25f));
+    CHECK(render_scheduled_and_read_p1(512, events, true, true) == Catch::Approx(0.25f));
+
+    // Within the ramp capacity, an equal offset is decided by host order: an
+    // immediate then a ramp at 32 leaves the ramp in charge, and the reverse
+    // leaves the immediate.
+    CHECK(render_scheduled_and_read_p1(
+              64, {immediate_event(1, 32, 0.25f), ramp_event(1, 32, 32, 0.0f, 1.0f)}, true, true) ==
+          Catch::Approx(1.0f));
+    CHECK(render_scheduled_and_read_p1(
+              64, {ramp_event(1, 32, 32, 0.0f, 1.0f), immediate_event(1, 32, 0.25f)}, true, true) ==
+          Catch::Approx(0.25f));
 }
 
 TEST_CASE("AU v2 PulpGain at 0 dB is bit-transparent, including after a round trip",

@@ -1410,11 +1410,11 @@ TEST_CASE("VST3 gives a block-rate processor each parameter's last value and no 
     REQUIRE(writes.load() == 2);
     // It read the (empty) queue while opted out: recorded, then reported
     // once when the host deactivates it.
-    REQUIRE(test_processor->read_param_events_while_opted_out());
+    REQUIRE(processor.param_events_monitor().read_while_opted_out());
 
     listener.reset();
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
-    REQUIRE_FALSE(test_processor->report_param_events_while_opted_out());
+    REQUIRE_FALSE(processor.param_events_monitor().report(*test_processor));
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 

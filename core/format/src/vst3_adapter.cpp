@@ -686,7 +686,7 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     processor_ = factory_();
     if (!processor_) return kInternalError;
     sample_accurate_params_ = processor_->wants_sample_accurate_parameters();
-    processor_->set_param_events_block_rate(!sample_accurate_params_);
+    param_events_monitor_.arm(!sample_accurate_params_, &param_events_);
 
     // Resolve host accommodations once. Cross-host defenses such as
     // clamp_latency_to_nonneg apply regardless of the detected DAW;
@@ -969,7 +969,7 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
 
 tresult PLUGIN_API PulpVst3Processor::terminate() {
     if (processor_)
-        processor_->report_param_events_while_opted_out();
+        param_events_monitor_.report(*processor_);
     // Invalidate the liveness token FIRST so any main-thread lambda still
     // queued on the host run loop (a one-shot drain or a paced poll tick)
     // becomes a no-op and cannot dereference this instance after it is freed.
@@ -1513,7 +1513,7 @@ void PulpVst3Processor::schedule_restart_poll_tick() {
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
     PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_set_active");
     if (!state && processor_)
-        processor_->report_param_events_while_opted_out();
+        param_events_monitor_.report(*processor_);
     if (state)
         refresh_bus_channel_cache();
     if (state && processor_ && has_prepared_context_) {
