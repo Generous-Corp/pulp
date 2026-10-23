@@ -348,6 +348,25 @@ TEST_CASE("validate_gpu_audio_status rejects each planted v3 violation", "[gpu_a
     status.reacquire_attempts = 1;
     status.last_reacquire_to_gpu_ns = 10;
     CHECK(status_error(status) == Error::ReacquireTimingWithoutSuccess);
+
+    // The GPU engine needs a prepared kernel; the same status on the CPU
+    // engine, with the kernel gone, is fine.
+    status = ready_gpu_status();
+    status.gpu_kernel_available = false;
+    CHECK(status_error(status) == Error::GpuEngineWithoutKernel);
+    status.selected_engine = GpuAudioEngine::Cpu;
+    status.terminal_counts[1] = 0;
+    CHECK(status_error(status) == Error::None);
+
+    // Precedence: a status breaking a re-acquire rule and the kernel rule
+    // reports the re-acquire error; the kernel rule is checked last.
+    status = ready_gpu_status();
+    status.gpu_kernel_available = false;
+    status.reacquire_attempts = 1;
+    status.reacquire_successes = 2;
+    CHECK(status_error(status) == Error::ReacquireSuccessesExceedAttempts);
+    status.reacquire_successes = 1;
+    CHECK(status_error(status) == Error::GpuEngineWithoutKernel);
 }
 
 TEST_CASE("GPU audio contract enums append without renumbering", "[gpu_audio][status]") {
@@ -1814,6 +1833,9 @@ struct HealthHarness {
         : node(1, 32, MissPolicy::CpuFallback), input(1, 32), output(1, 32) {
         node.claims_provider = claims_provider;
         node.expose_health = expose_health;
+        // A hook standing in for an authenticated provider also stands in
+        // for its prepared kernel, as every shipped GPU path reports one.
+        node.health.gpu_kernel_available = claims_provider && expose_health;
         REQUIRE(node.prepare());
         REQUIRE(transport.prepare(&node, {8}));
         input.fill(0.25f);
@@ -1936,11 +1958,13 @@ TEST_CASE("GpuAudioTransport status without a node health hook cannot see a fenc
           "[gpu_audio][transport][status][health]") {
     // Planted negative: the same fenced node, hosted without its health hook,
     // is indistinguishable from a healthy one. The health read is what makes
-    // the status truthful.
+    // the status truthful. With no hook there is no kernel witness either, so
+    // the GPU claim it projects fails validation rather than passing as Ready.
     HealthHarness h(true, false);
     h.node.inject_recovery(GpuAudioRecoveryReason::ProviderLost, 3);
     h.transport.pump();
-    const auto status = validated(h.transport.status_snapshot());
+    const auto status = h.transport.status_snapshot();
+    CHECK(validate_gpu_audio_status(status).error == GpuAudioStatusError::GpuEngineWithoutKernel);
     CHECK(status.provider_state == GpuAudioProviderState::Ready);
     CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
     CHECK(h.node.health_calls == 0);
@@ -2309,6 +2333,7 @@ TEST_CASE("GpuAudioTransport status names the engine that delivers after a fence
         RealtimeHookNode node(1, 32, policy);
         node.claims_provider = true;
         node.expose_health = true;
+        node.health.gpu_kernel_available = true;
         REQUIRE(node.prepare());
         GpuAudioTransport t;
         REQUIRE(t.prepare(&node, {8}));
@@ -2328,8 +2353,9 @@ TEST_CASE("GpuAudioTransport status names the engine that delivers after a fence
 
 TEST_CASE("GpuAudioTransport status carries the node's provider facts",
           "[gpu_audio][transport][status][health]") {
-    // Realtime node: the facts arrive through the health hook.
-    HealthHarness h;
+    // Realtime node: the facts arrive through the health hook. The node does
+    // not claim a provider, so a kernel bit left unset is still a valid status.
+    HealthHarness h(false);
     // Positive control: a node that reports nothing leaves the defaults.
     auto status = validated(h.transport.status_snapshot());
     CHECK_FALSE(status.gpu_kernel_available);

@@ -195,6 +195,10 @@ enum class GpuAudioStatusError : std::uint8_t {
     ReacquiredWithoutSuccess = 17,
     ReacquiredNotDelivering = 18,
     ReacquireTimingWithoutSuccess = 19,
+    // Appended: a status naming the GPU engine must also report a prepared
+    // GPU kernel. Checked after every other rule, the re-acquire rules
+    // included, so a status breaking both reports the other error.
+    GpuEngineWithoutKernel = 20,
 };
 
 struct GpuAudioStatusValidation {
@@ -309,6 +313,11 @@ validate_gpu_audio_status(const GpuAudioStatus& status) noexcept {
         if (status.provider_state == State::Unavailable)
             return {Error::ReacquiredNotDelivering};
     }
+    // The GPU engine delivers only through a prepared kernel; every producer
+    // that selects it reads the kernel from the same health sample. Checked
+    // last, so every earlier error, the re-acquire rules included, wins.
+    if (status.selected_engine == GpuAudioEngine::Gpu && !status.gpu_kernel_available)
+        return {Error::GpuEngineWithoutKernel};
     return {};
 }
 
