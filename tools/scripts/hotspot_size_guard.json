@@ -11,6 +11,11 @@
   },
   "hotspots": [
     {
+      "path": "core/signal/include/pulp/signal/multi_channel_meter.hpp",
+      "max_loc": 1086,
+      "note": "Meter feature sets and their block kernels; new feature kernels belong in focused detail headers rather than growing this one"
+    },
+    {
       "path": "core/host/include/pulp/host/signal_graph.hpp",
       "max_loc": 9,
       "note": "Compatibility umbrella for independently compilable custom-node, node, connection, and runtime contracts; declarations belong in the focused headers"
