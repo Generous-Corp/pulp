@@ -65,6 +65,95 @@ struct Fixture {
     }
 };
 
+std::string_view recovery_name(pulp::gpu_audio::GpuAudioRecoveryReason reason) {
+    using R = pulp::gpu_audio::GpuAudioRecoveryReason;
+    switch (reason) {
+    case R::None:
+        return "none";
+    case R::SequenceGap:
+        return "sequence_gap";
+    case R::InputSaturated:
+        return "input_saturated";
+    case R::ProviderFailure:
+        return "provider_failure";
+    case R::ProviderLost:
+        return "provider_lost";
+    case R::OfflineFence:
+        return "offline_fence";
+    case R::InvalidCallback:
+        return "invalid_callback";
+    case R::ProviderUnresponsive:
+        return "provider_unresponsive";
+    case R::ProviderReacquired:
+        return "provider_reacquired";
+    case R::SustainedDeadlineMisses:
+        return "sustained_deadline_misses";
+    }
+    return "unknown";
+}
+
+// One admission-time scenario: the stamped WaveNet node over a physical
+// provider for a fixed number of callbacks. `skip_pump_at` withholds the worker
+// pumps after one callback, so the block it admitted is still in flight when
+// the next admission needs a slot and must take slot 1.
+struct AdmissionRun {
+    bool ran = false;
+    std::uint64_t callbacks = 0;
+    std::uint64_t next_sequence = 0;
+    // Callbacks after which the bridge's next sequence was not one past the
+    // callback's own.
+    std::uint64_t sequence_drift = 0;
+    std::uint64_t gpu_blocks = 0;
+    std::uint64_t mismatches = 0;
+    pulp::gpu_audio::GpuAudioRecoveryReason reason = pulp::gpu_audio::GpuAudioRecoveryReason::None;
+    std::uint64_t sequence = UINT64_MAX;
+    std::uint64_t latched_after = UINT64_MAX;
+    pulp::gpu_audio::GpuAudioProviderState state =
+        pulp::gpu_audio::GpuAudioProviderState::Uninitialized;
+    bool statuses_valid = true;
+    bool released = false;
+    std::string trace;
+    std::string error;
+
+    bool sequence_agrees() const noexcept {
+        return ran && sequence_drift == 0 && next_sequence == callbacks;
+    }
+};
+
+struct AdmissionScenario {
+    DawnSharedIoProvider::Fault fault = DawnSharedIoProvider::Fault::None;
+    std::uint32_t fault_slot = 0;
+    std::uint32_t lead = 1;
+    std::uint32_t inflight = 1;
+    std::uint64_t skip_pump_at = UINT64_MAX;
+};
+
+struct RefusalRetryRun {
+    bool refused = false;
+    bool retried = false;
+    std::uint64_t delivered = 0;
+    std::uint64_t mismatches = 0;
+    std::string error;
+};
+
+void emit_admission(std::ostream& out, std::string_view name, const AdmissionRun& run,
+                    bool receipt) {
+    const auto signed_sequence = [](std::uint64_t value) {
+        return value == UINT64_MAX ? -1LL : static_cast<long long>(value);
+    };
+    out << R"(,")" << name << R"(":{"receipt":)" << (receipt ? "true" : "false")
+        << R"(,"sequence_agrees":)" << (run.sequence_agrees() ? "true" : "false")
+        << R"(,"callbacks":)" << run.callbacks << R"(,"bridge_next_sequence":)" << run.next_sequence
+        << R"(,"sequence_drift":)" << run.sequence_drift << R"(,"gpu_blocks":)" << run.gpu_blocks
+        << R"(,"gpu_mismatches":)" << run.mismatches << R"(,"recovery_reason":")"
+        << recovery_name(run.reason) << R"(","recovery_sequence":)" << signed_sequence(run.sequence)
+        << R"(,"latched_after_callback":)" << signed_sequence(run.latched_after)
+        << R"(,"provider_state":)" << static_cast<int>(run.state) << R"(,"statuses_valid":)"
+        << (run.statuses_valid ? "true" : "false") << R"(,"released":)"
+        << (run.released ? "true" : "false") << R"(,"trace":")" << run.trace << R"(","error":")"
+        << run.error << R"("})";
+}
+
 struct Result {
     bool unavailable = false;
     bool identity = false;
@@ -113,6 +202,20 @@ struct Result {
     std::uint64_t reacquire_hang_reprepare_ns = 0;
     std::string reacquire_loss_reason = "not_run";
     std::string reacquire_hang_reason = "not_run";
+    // Admission-time faults on the stamped WaveNet node over a physical
+    // provider, each with the bridge's sequence checked against the callbacks.
+    AdmissionRun admission_healthy;
+    AdmissionRun admission_loss;
+    AdmissionRun admission_reject;
+    AdmissionRun admission_skip_control;
+    AdmissionRun admission_reject_midstream;
+    bool admission_healthy_receipt = false;
+    bool admission_loss_receipt = false;
+    bool admission_reject_receipt = false;
+    bool admission_skip_control_receipt = false;
+    bool admission_reject_midstream_receipt = false;
+    RefusalRetryRun refusal_retry;
+    bool refusal_retry_receipt = false;
     std::uint64_t submissions = 0;
     std::uint64_t gpu_delivered = 0;
     std::uint64_t cpu_fallback = 0;
@@ -168,8 +271,24 @@ void emit(const Result& result, std::string_view status) {
               << (result.reacquire_hang_receipt ? "true" : "false")
               << R"(,"reacquire_hang_reason":")" << result.reacquire_hang_reason
               << R"(","reacquire_hang_reprepare_ns":)" << result.reacquire_hang_reprepare_ns
-              << R"(,"reacquire_hang_resume_ns":)" << result.reacquire_hang_resume_ns
-              << R"(,"submissions":)" << result.submissions << R"(,"gpu_delivered":)"
+              << R"(,"reacquire_hang_resume_ns":)" << result.reacquire_hang_resume_ns;
+    emit_admission(std::cout, "admission_healthy", result.admission_healthy,
+                   result.admission_healthy_receipt);
+    emit_admission(std::cout, "admission_force_loss_before_submit", result.admission_loss,
+                   result.admission_loss_receipt);
+    emit_admission(std::cout, "admission_reject_before_submit", result.admission_reject,
+                   result.admission_reject_receipt);
+    emit_admission(std::cout, "admission_skip_pump_control", result.admission_skip_control,
+                   result.admission_skip_control_receipt);
+    emit_admission(std::cout, "admission_reject_midstream", result.admission_reject_midstream,
+                   result.admission_reject_midstream_receipt);
+    std::cout << R"(,"refusal_retry":{"receipt":)"
+              << (result.refusal_retry_receipt ? "true" : "false") << R"(,"refused_on_slot1":)"
+              << (result.refusal_retry.refused ? "true" : "false") << R"(,"retried_on_slot0":)"
+              << (result.refusal_retry.retried ? "true" : "false") << R"(,"delivered":)"
+              << result.refusal_retry.delivered << R"(,"gpu_mismatches":)"
+              << result.refusal_retry.mismatches << R"(,"error":")" << result.refusal_retry.error
+              << R"("})" << R"(,"submissions":)" << result.submissions << R"(,"gpu_delivered":)"
               << result.gpu_delivered << R"(,"cpu_fallback_blocks":)" << result.cpu_fallback
               << R"(,"late_blocks":)" << result.late << R"(,"resident_state_copies":)"
               << result.resident_state_copies << R"(,"generation":)" << result.generation
@@ -269,33 +388,6 @@ void run_device_loss_negative(Result& result, const Fixture& fixture, const void
                         std::to_string(drained) + std::to_string(provider.device_lost()) +
                         std::to_string(can_resume) + std::to_string(reprime) +
                         std::to_string(receipts.size()) + std::to_string(released);
-}
-
-std::string_view recovery_name(pulp::gpu_audio::GpuAudioRecoveryReason reason) {
-    using R = pulp::gpu_audio::GpuAudioRecoveryReason;
-    switch (reason) {
-    case R::None:
-        return "none";
-    case R::SequenceGap:
-        return "sequence_gap";
-    case R::InputSaturated:
-        return "input_saturated";
-    case R::ProviderFailure:
-        return "provider_failure";
-    case R::ProviderLost:
-        return "provider_lost";
-    case R::OfflineFence:
-        return "offline_fence";
-    case R::InvalidCallback:
-        return "invalid_callback";
-    case R::ProviderUnresponsive:
-        return "provider_unresponsive";
-    case R::ProviderReacquired:
-        return "provider_reacquired";
-    case R::SustainedDeadlineMisses:
-        return "sustained_deadline_misses";
-    }
-    return "unknown";
 }
 
 struct NodeFaultRun {
@@ -653,6 +745,219 @@ NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_tabl
     return run;
 }
 
+constexpr std::uint64_t kAdmissionCallbacks = 24;
+
+AdmissionRun run_admission(const Fixture& fixture, const void* proc_table,
+                           const AdmissionScenario& scenario) {
+    namespace ga = pulp::gpu_audio;
+    AdmissionRun run;
+    auto created = DawnSharedIoProvider::create(
+        {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+         .proc_table_override_for_testing = proc_table,
+         .fault = scenario.fault,
+         .fault_slot = scenario.fault_slot,
+         .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer});
+    if (!created.provider) {
+        run.error = "provider_unavailable";
+        return run;
+    }
+    auto program = DawnSharedIoWavenetProgram::create(*created.provider, fixture.spec());
+    const auto bytes = fixture.spec().block_size * sizeof(float);
+    auto session = std::make_unique<SharedIoProgramSession>();
+    if (!program ||
+        !session->prepare(
+            {std::move(created.provider), std::move(program)},
+            {.slots = 2,
+             .input_bytes_per_slot = bytes,
+             .output_bytes_per_slot = bytes,
+             .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer})) {
+        run.error = "session_prepare_failed";
+        return run;
+    }
+    const std::array<std::uint32_t, 1> dilations{1};
+    const ga::GpuWaveNetLayerDescriptor layer{.input_size = 1,
+                                              .condition_size = 1,
+                                              .channels = 1,
+                                              .kernel = 2,
+                                              .head_size = 1,
+                                              .tanh_activation = true,
+                                              .dilations = dilations};
+    ga::GpuWaveNetRealtimeNode::Config config{
+        .session = {.descriptor = {.block_size = fixture.spec().block_size,
+                                   .sample_rate = 48000,
+                                   .stream_instances = 1,
+                                   .layers = {&layer, 1},
+                                   .weight_count = fixture.weights.size()},
+                    .weights = fixture.weights,
+                    .slots = 2},
+        .channels = 1,
+        .lead_blocks = scenario.lead,
+        .capacity = 4,
+        .max_inflight = scenario.inflight};
+    ga::GpuWaveNetRealtimeNode node(config);
+    std::vector<std::unique_ptr<WaveNetRealtimeChannel>> channels;
+    channels.push_back(std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)));
+    if (!WaveNetRealtimeTestAccess::prepare(node, std::move(channels))) {
+        run.error = "node_prepare_failed";
+        return run;
+    }
+    auto path = realtime_gpu_node_path(&node);
+    std::array<float, 2> input{}, output{};
+    const float* in_ptr = input.data();
+    float* out_ptr = output.data();
+    pulp::audio::BufferView<const float> in(&in_ptr, 1, 2);
+    pulp::audio::BufferView<float> out(&out_ptr, 1, 2);
+    run.ran = true;
+    for (std::uint64_t sequence = 0; sequence < kAdmissionCallbacks; ++sequence) {
+        input = {static_cast<float>(sequence), static_cast<float>(sequence) + 0.25f};
+        const auto status = path.process(path.context, in, out, 2, sequence, true, now_ns());
+        const auto disposition =
+            status == kRealtimeGpuReady     ? SharedIoDeliveryDisposition::GpuDelivered
+            : status == kRealtimeGpuPriming ? SharedIoDeliveryDisposition::Priming
+                                            : SharedIoDeliveryDisposition::SilenceDelivered;
+        path.delivered(path.context, sequence, static_cast<std::uint8_t>(disposition), 0, 0);
+        ++run.callbacks;
+        if (path.next_sequence(path.context) != sequence + 1)
+            ++run.sequence_drift;
+        run.trace += status == kRealtimeGpuReady ? 'G' : status == kRealtimeGpuPriming ? 'P' : 'S';
+        if (status == kRealtimeGpuReady) {
+            // y[n] = tanh(0.5 x[n-1]) over the whole stream, so every GPU
+            // block also checks the history carried in from the block before.
+            ++run.gpu_blocks;
+            const auto due = sequence - scenario.lead;
+            const float previous = due == 0 ? 0.0f : static_cast<float>(due - 1) + 0.25f;
+            const std::array<float, 2> expected{std::tanh(0.5f * previous),
+                                                std::tanh(0.5f * static_cast<float>(due))};
+            if (!compare_block(output, expected))
+                ++run.mismatches;
+        }
+        for (int pump = 0; sequence != scenario.skip_pump_at && pump < 4; ++pump) {
+            (void)path.service(path.context, 0);
+            std::this_thread::sleep_for(std::chrono::microseconds(250));
+        }
+        run.statuses_valid =
+            run.statuses_valid && ga::validate_gpu_audio_status(node.status_snapshot()).accepted();
+        if (run.latched_after == UINT64_MAX &&
+            node.recovery_reason() != ga::GpuAudioRecoveryReason::None)
+            run.latched_after = sequence;
+    }
+    const auto status = node.status_snapshot();
+    run.reason = status.recovery_reason;
+    run.sequence = status.recovery_sequence;
+    run.state = status.provider_state;
+    run.statuses_valid = run.statuses_valid && ga::validate_gpu_audio_status(status).accepted();
+    run.next_sequence = path.next_sequence(path.context);
+    run.released = node.release();
+    return run;
+}
+
+// A refused submission must not move the device-resident stream position.
+// Blocks 0..9 run one at a time on slot 0; block 10 is left in flight so block
+// 11 lands on the refusing slot 1; block 11 is then retried on slot 0 and the
+// stream continues. Every delivered block must match the whole-stream CPU
+// reference, so a position that advanced on the refusal shows as a one-block
+// history skew from block 11 on.
+RefusalRetryRun run_refusal_retry(const Fixture& fixture, const void* proc_table) {
+    RefusalRetryRun run;
+    auto created = DawnSharedIoProvider::create(
+        {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+         .proc_table_override_for_testing = proc_table,
+         .fault = DawnSharedIoProvider::Fault::RejectBeforeSubmit,
+         .fault_slot = 1,
+         .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer});
+    if (!created.provider) {
+        run.error = "provider_unavailable";
+        return run;
+    }
+    auto& provider = *created.provider;
+    auto program = DawnSharedIoWavenetProgram::create(provider, fixture.spec());
+    SharedIoComputePlan plan;
+    const auto bytes = fixture.spec().block_size * sizeof(float);
+    if (!program ||
+        !plan.prepare(provider,
+                      {.slots = 2,
+                       .input_bytes_per_slot = bytes,
+                       .output_bytes_per_slot = bytes,
+                       .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer},
+                      std::move(program))) {
+        run.error = "plan_prepare_failed";
+        return run;
+    }
+    // Returns the slot the block was leased on, and whether the provider took it.
+    struct Admitted {
+        bool leased = false;
+        bool accepted = false;
+        std::uint32_t slot = 0;
+    };
+    const auto submit = [&](std::uint64_t block) {
+        Admitted admitted;
+        auto write = plan.acquire_input(block, 0);
+        if (!write || write->bytes.size() != bytes)
+            return admitted;
+        admitted.leased = true;
+        admitted.slot = write->token.slot;
+        const std::array<float, 2> input{static_cast<float>(block),
+                                         static_cast<float>(block) + 0.25f};
+        std::copy(input.begin(), input.end(), reinterpret_cast<float*>(write->bytes.data()));
+        const SharedIoComputePlan::SubmitToken token{write->token, 0};
+        admitted.accepted = plan.submit(token);
+        if (!admitted.accepted)
+            (void)plan.cancel(token);
+        return admitted;
+    };
+    const auto collect = [&](std::uint64_t block) {
+        std::optional<SharedIoComputePlan::Completion> completion;
+        const auto deadline = Clock::now() + std::chrono::seconds(5);
+        while (!completion && Clock::now() < deadline) {
+            plan.drain(now_ns());
+            completion = plan.pop_completion();
+            if (!completion)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (!completion || completion->token.slot.stream_sequence != block)
+            return false;
+        auto output = plan.acquire_output(*completion);
+        if (!output || output->bytes.size() != bytes)
+            return false;
+        const float previous = block == 0 ? 0.0f : static_cast<float>(block - 1) + 0.25f;
+        const std::array<float, 2> expected{std::tanh(0.5f * previous),
+                                            std::tanh(0.5f * static_cast<float>(block))};
+        if (!compare_block({reinterpret_cast<const float*>(output->bytes.data()), 2}, expected))
+            ++run.mismatches;
+        ++run.delivered;
+        return plan.release_output({output->token});
+    };
+    constexpr std::uint64_t kRefusedBlock = 11;
+    for (std::uint64_t block = 0; block < 16; ++block) {
+        const auto admitted = submit(block);
+        if (block == kRefusedBlock) {
+            run.refused = admitted.leased && !admitted.accepted && admitted.slot == 1;
+            if (!collect(block - 1)) {
+                run.error = "collect_failed_at_" + std::to_string(block - 1);
+                break;
+            }
+            const auto retry = submit(block);
+            run.retried = retry.accepted && retry.slot == 0;
+            if (!run.retried) {
+                run.error = "retry_failed";
+                break;
+            }
+        } else if (!admitted.accepted) {
+            run.error = "submit_failed_at_" + std::to_string(block);
+            break;
+        }
+        if (block == kRefusedBlock - 1)
+            continue; // left in flight on slot 0
+        if (!collect(block)) {
+            run.error = "collect_failed_at_" + std::to_string(block);
+            break;
+        }
+    }
+    if (!plan.release() && run.error.empty())
+        run.error = "release_failed";
+    return run;
+}
+
 void run_node_faults(Result& result, const Fixture& fixture, const void* proc_table) {
     using ga_reason = pulp::gpu_audio::GpuAudioRecoveryReason;
     using ga_state = pulp::gpu_audio::GpuAudioProviderState;
@@ -707,6 +1012,68 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
         neural_hang.ran && neural_hang.reason == ga_reason::ProviderUnresponsive &&
         neural_hang.sequence == 0 && neural_hang.state == ga_state::Unavailable &&
         neural_hang.status_valid;
+
+    using Fault = DawnSharedIoProvider::Fault;
+    constexpr auto kCallbacks = kAdmissionCallbacks;
+    const auto clean = [](const AdmissionRun& run) {
+        return run.sequence_agrees() && run.statuses_valid && run.released && run.error.empty();
+    };
+    const auto latched = [&](const AdmissionRun& run, ga_reason reason, std::uint64_t sequence,
+                             ga_state state) {
+        return clean(run) && run.reason == reason && run.sequence == sequence &&
+               run.latched_after == sequence && run.state == state;
+    };
+    // A late block is a miss, not a fault, so a loaded host may lose a couple
+    // of deliveries; none may mismatch.
+    constexpr std::uint64_t kLateAllowance = 2;
+    auto& healthy = result.admission_healthy;
+    healthy = run_admission(fixture, proc_table, {});
+    result.admission_healthy_receipt = clean(healthy) && healthy.reason == ga_reason::None &&
+                                       healthy.gpu_blocks + kLateAllowance >= kCallbacks - 1 &&
+                                       healthy.mismatches == 0;
+    // Loss is forced on the first submission, so it latches at 0 with no GPU
+    // block before it.
+    auto& lost = result.admission_loss;
+    lost = run_admission(fixture, proc_table, {.fault = Fault::ForceLossBeforeSubmit});
+    result.admission_loss_receipt =
+        latched(lost, ga_reason::ProviderLost, 0, ga_state::Unavailable) && lost.gpu_blocks == 0;
+    // A refusal is a provider failure, not a loss.
+    auto& reject = result.admission_reject;
+    reject = run_admission(fixture, proc_table, {.fault = Fault::RejectBeforeSubmit});
+    result.admission_reject_receipt =
+        latched(reject, ga_reason::ProviderFailure, 0, ga_state::Degraded) &&
+        reject.gpu_blocks == 0;
+    // Withholding the pumps after callback 10 alone latches nothing, so the
+    // mid-stream run's latch belongs to the refusal.
+    const AdmissionScenario midstream{.fault = Fault::RejectBeforeSubmit,
+                                      .fault_slot = 1,
+                                      .lead = 2,
+                                      .inflight = 2,
+                                      .skip_pump_at = 10};
+    auto control_scenario = midstream;
+    control_scenario.fault = Fault::None;
+    auto& control = result.admission_skip_control;
+    control = run_admission(fixture, proc_table, control_scenario);
+    result.admission_skip_control_receipt = clean(control) && control.reason == ga_reason::None &&
+                                            control.gpu_blocks + kLateAllowance >= kCallbacks - 2 &&
+                                            control.mismatches == 0;
+    // Block 11 is the first admission on slot 1. Blocks 0..9 deliver on the
+    // GPU at callbacks 2..11 and match the CPU reference. Block 10 was accepted
+    // before the latch but is not delivered after it: the node fails closed,
+    // so no callback after 11 delivers GPU output.
+    auto& refused = result.admission_reject_midstream;
+    refused = run_admission(fixture, proc_table, midstream);
+    const auto last_gpu = refused.trace.find_last_of('G');
+    result.admission_reject_midstream_receipt =
+        latched(refused, ga_reason::ProviderFailure, 11, ga_state::Degraded) &&
+        refused.gpu_blocks + kLateAllowance >= 10 && last_gpu != std::string::npos &&
+        last_gpu <= 11 && refused.mismatches == 0;
+
+    result.refusal_retry = run_refusal_retry(fixture, proc_table);
+    result.refusal_retry_receipt = result.refusal_retry.refused && result.refusal_retry.retried &&
+                                   result.refusal_retry.delivered == 16 &&
+                                   result.refusal_retry.mismatches == 0 &&
+                                   result.refusal_retry.error.empty();
 }
 
 Result run() {
@@ -971,7 +1338,10 @@ int main(int argc, char** argv) {
         result.late_result_rejected && result.retired && result.reprimed &&
         result.immutable_provenance && result.device_loss_negative && result.device_loss_receipt &&
         result.node_loss_receipt && result.node_hang_receipt && result.neural_loss_receipt &&
-        result.neural_hang_receipt && result.reacquire_loss_receipt &&
+        result.neural_hang_receipt && result.admission_healthy_receipt &&
+        result.admission_loss_receipt && result.admission_reject_receipt &&
+        result.admission_skip_control_receipt && result.admission_reject_midstream_receipt &&
+        result.refusal_retry_receipt && result.reacquire_loss_receipt &&
         result.reacquire_hang_receipt;
     emit(result, passed ? "passed" : "failed");
     return passed ? 0 : 1;

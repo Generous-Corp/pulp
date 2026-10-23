@@ -724,8 +724,8 @@
             # Bounded private one-stream WaveNet qualification. This probe is
             # admitted only after exact provider identity and exercises the
             # resident causal plan, imported audio-slot accounting, CPU oracle,
-            # late-result rejection, explicit reprime, and immutable receipt
-            # digest. It has no installed/public provider or generic runtime
+            # late-result rejection, explicit reprime, immutable receipt
+            # digest, and admission-time loss and refusal on the stamped node. It has no installed/public provider or generic runtime
             # surface; unavailable physical Dawn remains a typed skip (77).
             add_executable(pulp-gpu-dawn-wavenet-qualification
                 test_gpu_dawn_wavenet_qualification.cpp)

@@ -772,6 +772,17 @@ supplies them. The shared `GpuConvolver` path supplies the epoch and counts one
 terminal disposition per admitted GPU block. A refused or failed block is counted
 as `CpuFallback`, because that is what the callback delivers for it.
 
+For `GpuWaveNetRealtimeNode` the fence fails closed. Blocks admitted before the
+latch are not delivered after it, even when their GPU results complete
+cleanly: from the first callback after the latch, every block takes the CPU
+fallback, or silence for a node without one, until a new preparation or an
+`AutoReacquire` re-acquire resumes GPU delivery in a new epoch. The cost is bounded by the blocks
+in flight, and a provider that has just failed never adds late GPU blocks to a
+stream that has already moved to its fallback. `recovery_sequence` is the block
+at which the cause latched, which can be later than the last block delivered on
+the GPU. See [the WaveNet node guide](gpu-audio-wavenet-realtime.md) for the
+physical evidence.
+
 The read is allocation-free and safe from a UI thread. `status_snapshot()` and
 `capability_report()` read only the transport's own copies: the configuration
 captured at `prepare()`, and the last health sample. They never touch the node,

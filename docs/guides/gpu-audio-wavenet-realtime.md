@@ -130,11 +130,28 @@ and a provider failure under the declared miss policy, `CpuFallback` only after
 its consumer delivered the fallback. A quiescent snapshot therefore passes
 `validate_gpu_audio_status()`.
 
+A latch fences GPU delivery at once, and the fence fails closed: a block the
+provider accepted before the latch is not delivered after it, even when its
+result completes cleanly. From the first callback after the latch the node
+delivers its miss policy for every block until a new preparation, or an
+`AutoReacquire` re-acquire, resumes GPU delivery in a new epoch. For example, with a lead of two
+blocks, a refusal on block 11 ends GPU delivery with block 9 while block 10 is
+still in flight, and block 10 is never delivered. The cost is bounded by the
+blocks in flight (`max_inflight`), and a provider that has just failed never
+contributes a few last GPU blocks to a stream that has already moved to its
+fallback. A refused submission does not move the provider's device-resident
+stream position, and the node's sequence keeps advancing one block per callback
+through the fault. The physical Dawn qualification
+(`pulp-gpu-dawn-wavenet-qualification --strict`) checks loss and refusal at the
+first submission, a refusal mid-stream with the GPU blocks before it matched
+against the CPU reference, and a refused block retried on the same stream.
+
 Completions collected in either completion pass count as provider progress,
 and completions are collected before the watchdog is evaluated, so a starved
 worker whose provider keeps completing is not reported as unresponsive.
 
-Recovery is manual: nothing re-acquires a lost or unresponsive provider. See
+Under the default `GpuAudioRecoveryPolicy::Manual`, nothing re-acquires a lost
+or unresponsive provider; `AutoReacquire` (above) does it on the live stream. See
 [GPU audio reliability on macOS](gpu-audio-macos-reliability.md) for how this
 node's health compares with the other GPU-audio nodes.
 
