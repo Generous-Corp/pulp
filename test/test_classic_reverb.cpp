@@ -464,3 +464,29 @@ TEST_CASE("classic reverb comb bank decays to exact silence without flush-to-zer
         CHECK(reverb.combs_silent());
     }
 }
+
+TEST_CASE("classic reverb follows automated size without a snap", "[reverb][classic][automation]") {
+    // A host automates size by moving the target block by block; nothing
+    // snaps the parameters. The comb lengths must follow the smoothed
+    // control to the lengths a snap at the new size gives.
+    ClassicReverb reverb;
+    configure(reverb, 1.5, 0.3);
+    reverb.set_parameter(Param::size, 0.2);
+    reverb.snap_parameters();
+    const int before = reverb.comb_length(0);
+
+    std::vector<float> in(static_cast<std::size_t>(kHostRate * 0.5), 0.0f);
+    in[0] = 1.0f;
+    reverb.set_parameter(Param::size, 0.8);
+    (void)render_classic(reverb, in);
+
+    ClassicReverb snapped;
+    configure(snapped, 1.5, 0.3);
+    snapped.set_parameter(Param::size, 0.8);
+    snapped.snap_parameters();
+    INFO("before " << before << ", after " << reverb.comb_length(0) << ", snapped "
+                   << snapped.comb_length(0));
+    CHECK(reverb.comb_length(0) != before);
+    for (int c = 0; c < pulp::signal::classic_reverb::kCombs; ++c)
+        CHECK(reverb.comb_length(c) == snapped.comb_length(c));
+}
