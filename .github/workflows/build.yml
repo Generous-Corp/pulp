@@ -1892,7 +1892,7 @@ jobs:
       - name: Provide the pinned Rust toolchain
         timeout-minutes: 10
         shell: bash
-        run: tools/ci/provide_pinned_rust.sh --fallback-to-default
+        run: bash tools/ci/provide_pinned_rust.sh --fallback-to-default
 
       - name: Fetch pulp-rs crates
         shell: bash

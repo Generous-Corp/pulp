@@ -853,7 +853,7 @@ jobs:
       - name: Provide the pinned Rust toolchain
         if: runner.os != 'Windows'
         timeout-minutes: 10
-        run: tools/ci/provide_pinned_rust.sh
+        run: bash tools/ci/provide_pinned_rust.sh
         shell: bash
 
       - name: Prepare pinned Node runtime for design import
