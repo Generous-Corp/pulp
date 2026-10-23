@@ -2336,6 +2336,7 @@ private:
     // an off-main reader can never observe a torn value.
     std::atomic<bool> last_submission_observed_{false};
     std::atomic<bool> continuous_frames_{false};
+    std::atomic<bool> animating_frames_{false}; // HostFrameTick::animating
     std::atomic<bool> render_dispatch_queued_{false};
     std::shared_ptr<std::atomic<bool>> render_dispatch_alive_ =
         std::make_shared<std::atomic<bool>>(true);
@@ -2817,14 +2818,12 @@ private:
         // than one frame later. Reusing `tick.continuous` would cost a spurious
         // frame per animation instead of a walk.
         //
-        // The O(1) question first. `needs_continuous_frames` walks the
-        // whole view tree; `has_active_subscribers` is a count. Asking the
-        // expensive one first meant the walk ran on every frame of every
-        // animation, when the answer was already yes.
-        continuous_frames_.store(
-            frame_clock_.has_active_subscribers() ||
-                pulp::view::needs_continuous_frames(&root_),
-            std::memory_order_relaxed);
+        // The gate stays open for clock subscribers; only a tree that paints
+        // on its own re-arms the dirty flag (HostFrameTick::animating).
+        const bool animating = pulp::view::needs_continuous_frames(&root_);
+        animating_frames_.store(animating, std::memory_order_relaxed);
+        continuous_frames_.store(animating || frame_clock_.has_active_subscribers(),
+                                 std::memory_order_relaxed);
 
         // No host-level span around either end_frame() below: the surfaces emit
         // `gpu_submit` / `gpu_present` themselves, and they emit them on EVERY
@@ -2847,7 +2846,7 @@ private:
             runtime::log_info("{}", render::format_gpu_startup_line(startup_report_));
         }
 
-        needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
+        needs_repaint_.store(animating_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
         // Retire damage only for a frame that REACHED the drawable (see render::FrameOutcome).
         const bool reached_output = pulp::render::frame_reached_output(outcome);
@@ -2981,16 +2980,19 @@ private:
                     // Content may have moved under a stationary pointer; AppKit
                     // will not re-ask on its own.
                     [self->metal_view_ refreshHoverCursor];
-                    if (tick.continuous) {
+                    if (tick.animating) {
                         self->needs_repaint_.store(true, std::memory_order_relaxed);
-                        // Note: animation pump: animation /
-                        // frame-clock pumps mutate view state without
-                        // going through request_repaint(), so for the
-                        // tracker they count as a full-surface dirty
-                        // until animating widget paths are audited and
-                        // converted to per-rect repaints.
+                        // Widget/CSS animations change paint state without
+                        // request_repaint(): a full-surface dirty for the tracker.
                         self->tracker_.invalidate_all();
                         ++self->pump_dirty_frames_;
+                    }
+                    if (!pulp::view::host_frame_composites( // subscriber-only, undirtied
+                            tick, self->needs_repaint_.load(std::memory_order_relaxed))) {
+                        self->continuous_frames_.store(tick.continuous, std::memory_order_relaxed);
+                        self->render_dispatch_queued_.store(false, std::memory_order_release);
+                        self->frame_times_.record(pulp::view::host_elapsed_ms(frame_start));
+                        return;
                     }
                     self->frame_vsync_target_s_ = frame_time;
                     self->refresh_period_s_ = refresh_period;

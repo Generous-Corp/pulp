@@ -1,10 +1,25 @@
 {
  "executable_targets": {
   "Pulp Test (dev) Plugin": "PulpBundleNameQuoting_Standalone",
+  "Pulp UI Script Fixture": "PulpUiScriptFixture_Standalone",
   "pulp-cli-run-fixture": "pulp-test-cli-run-fixture",
   "pulp-cpp": "pulp-cli"
  },
  "executables": {
+  "Pulp UI Script Fixture": {
+   "data": "undeclared",
+   "detected_sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ],
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ],
+   "undeclared_sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ]
+  },
   "pulp-control-broker-crash-fixture": {
    "data": "none",
    "inputs": [],
@@ -2342,10 +2357,27 @@
     "test/test_widget_bridge_no_gpu_gates.cpp"
    ],
    "undeclared_sources": []
+  },
+  "pulp-ui-script-editor-probe": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "PulpUiScriptFixture_AU",
+    "PulpUiScriptFixture_CLAP",
+    "PulpUiScriptFixture_VST3"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/fixtures/ui_script_plugin/editor_probe.mm"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
   }
  },
  "executables_scanned": [
   "Pulp Test (dev) Plugin",
+  "Pulp UI Script Fixture",
   "pulp-browser-capture-launcher-fixture",
   "pulp-child-process-input-fixture",
   "pulp-cli-run-fixture",
@@ -3010,6 +3042,7 @@
   "pulp-test-windowing",
   "pulp-test-xcode-developer-path",
   "pulp-test-yoga-layout-bench",
+  "pulp-ui-script-editor-probe",
   "pulp-unique-temp-dir-fixture",
   "sample-region-allpass-consumer"
  ],

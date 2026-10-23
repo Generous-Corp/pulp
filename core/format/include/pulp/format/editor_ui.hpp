@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/format/editor_assets.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/alive_token.hpp>
 #include <pulp/runtime/exceptions.hpp>
@@ -42,26 +43,26 @@ struct EditorUiInstance {
     bool uses_script_ui = false;
 };
 
-inline std::optional<std::filesystem::path> configured_ui_script_path() {
-#ifdef PULP_UI_SCRIPT_PATH
-    return std::filesystem::path{PULP_UI_SCRIPT_PATH};
-#else
-    return std::nullopt;
-#endif
+/// The scripted-UI entry file `assets` declares, if any.
+inline std::optional<std::filesystem::path> configured_ui_script_path(const EditorAssets& assets) {
+    if (assets.script_path == nullptr || assets.script_path[0] == '\0')
+        return std::nullopt;
+    return std::filesystem::path{assets.script_path};
 }
 
-inline std::optional<std::filesystem::path> configured_ui_theme_path() {
-#ifdef PULP_UI_THEME_PATH
-    return std::filesystem::path{PULP_UI_THEME_PATH};
-#else
-    return std::nullopt;
-#endif
+/// The theme / design-token file `assets` declares, if any.
+inline std::optional<std::filesystem::path> configured_ui_theme_path(const EditorAssets& assets) {
+    if (assets.theme_path == nullptr || assets.theme_path[0] == '\0')
+        return std::nullopt;
+    return std::filesystem::path{assets.theme_path};
 }
 
-inline std::vector<std::filesystem::path> configured_ui_asset_roots() {
+/// The asset directories `assets` declares, split on '|'.
+inline std::vector<std::filesystem::path> configured_ui_asset_roots(const EditorAssets& assets) {
     std::vector<std::filesystem::path> roots;
-#ifdef PULP_UI_ASSET_ROOTS
-    std::string_view raw{PULP_UI_ASSET_ROOTS};
+    if (assets.asset_roots == nullptr)
+        return roots;
+    std::string_view raw{assets.asset_roots};
     while (!raw.empty()) {
         const auto split = raw.find('|');
         const auto item = raw.substr(0, split);
@@ -69,16 +70,33 @@ inline std::vector<std::filesystem::path> configured_ui_asset_roots() {
         if (split == std::string_view::npos) break;
         raw.remove_prefix(split + 1);
     }
-#endif
     return roots;
 }
 
-/// `value_channel_access` leases the hosting processor's current named value
-/// channels while scripted UI code resolves and snapshots them.
-inline EditorUiInstance build_editor_ui_with_value_channel_access(
-    state::StateStore& store, bool enable_hot_reload, std::string* error,
-    view::ValueChannelAccess value_channel_access) {
-    if (auto script_path = configured_ui_script_path()) {
+/// This binary's scripted-UI entry file (see register_editor_assets()).
+inline std::optional<std::filesystem::path> configured_ui_script_path() {
+    return configured_ui_script_path(registered_editor_assets());
+}
+
+/// This binary's theme / design-token file.
+inline std::optional<std::filesystem::path> configured_ui_theme_path() {
+    return configured_ui_theme_path(registered_editor_assets());
+}
+
+/// This binary's asset directories.
+inline std::vector<std::filesystem::path> configured_ui_asset_roots() {
+    return configured_ui_asset_roots(registered_editor_assets());
+}
+
+/// Build the editor `assets` declares: a scripted UI when it names a script,
+/// AutoUi otherwise (or when the script fails to load). `value_channel_access`
+/// leases the hosting processor's current named value channels while scripted
+/// UI code resolves and snapshots them.
+inline EditorUiInstance build_editor_ui_for_assets(const EditorAssets& assets,
+                                                   state::StateStore& store, bool enable_hot_reload,
+                                                   std::string* error,
+                                                   view::ValueChannelAccess value_channel_access) {
+    if (auto script_path = configured_ui_script_path(assets)) {
         auto root = std::make_unique<view::View>();
         root->set_theme(view::Theme::dark());
         root->flex().direction = view::FlexDirection::column;
@@ -90,11 +108,12 @@ inline EditorUiInstance build_editor_ui_with_value_channel_access(
 
         view::ScriptedUiOptions options;
         options.script_path = *script_path;
-        const bool has_configured_theme = configured_ui_theme_path().has_value();
-        if (auto theme_path = configured_ui_theme_path()) {
+        const auto theme_path = configured_ui_theme_path(assets);
+        const bool has_configured_theme = theme_path.has_value();
+        if (theme_path) {
             options.theme_path = *theme_path;
         }
-        options.asset_roots = configured_ui_asset_roots();
+        options.asset_roots = configured_ui_asset_roots(assets);
         options.enable_hot_reload = enable_hot_reload;
         options.enable_theme_reload = enable_hot_reload || has_configured_theme;
         options.value_channel_access = std::move(value_channel_access);
@@ -132,6 +151,15 @@ inline EditorUiInstance build_editor_ui_with_value_channel_access(
         *error = "AutoUi::build() returned nullptr";
     }
     return {std::move(root), nullptr, false};
+}
+
+/// The editor this binary declares (see register_editor_assets()).
+inline EditorUiInstance
+build_editor_ui_with_value_channel_access(state::StateStore& store, bool enable_hot_reload,
+                                          std::string* error,
+                                          view::ValueChannelAccess value_channel_access) {
+    return build_editor_ui_for_assets(registered_editor_assets(), store, enable_hot_reload, error,
+                                      std::move(value_channel_access));
 }
 
 /// Compatibility entry point for stable processors and callers without a
