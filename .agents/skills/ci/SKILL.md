@@ -4506,6 +4506,11 @@ auto-release deliberately does not hold. Read it as:
   runs no tests. A failure in `Build CLI targets (MSVC)` is a real MSVC error; a
   failure in an earlier step (bootstrap, toolchain) is runner trouble: the verdict
   job is skipped, so the pre-tag check ignores it too.
+- A second blocking pre-tag check withholds the SDK tag while an
+  agent-capability counter is pending
+  (`agent_capability_manifest.py --require-assigned`). The version-at-land bump
+  assigns pending counters; a withheld tag here means that assignment failed,
+  and its run log names why. See `docs/guides/release-watchdog.md`.
 - The MSVC build step invokes `bash tools/ci/governed-build.sh cmake --build
   build-win-cli --target pulp-cli pulp-mcp -- -k 0`. Keep the wrapper even though
   the hosted Windows runner is single-tenant: it supplies the same bounded
