@@ -95,6 +95,12 @@ function(pulp_reload_host target)
         target_link_options(${target} PRIVATE -Wl,-export_dynamic)
     else()  # Linux / other ELF
         target_link_options(${target} PRIVATE -rdynamic)
+        # A Linux plug-in's version script exports only its entry points
+        # (_pulp_apply_elf_exports); republish the pulp:: surface for the logic.
+        # This brings back cross-plug-in symbol sharing in the reload host, which
+        # is a development build.
+        set_property(TARGET ${target} APPEND PROPERTY PULP_ELF_EXTRA_EXPORTS
+            "_ZN4pulp*" "_ZNK4pulp*" "_ZTVN4pulp*" "_ZTIN4pulp*" "_ZTSN4pulp*")
     endif()
 endfunction()
 
