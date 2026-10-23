@@ -1174,9 +1174,9 @@ TEST_CASE("design-import benchmark Skia lane counts per-frame resource work",
     // after it. Switching the cache off (which also empties it) restores a
     // shape per run per paint, and the steady-state gate then fails on text.
     auto bench = make_fixture(lane_config("baked-cpp"));
-    REQUIRE(set_paragraph_cache_enabled(false));
+    set_paragraph_cache_enabled(false);
     const auto uncached = run_phase(*bench, 0, 3, 60, false, 0, options);
-    REQUIRE(set_paragraph_cache_enabled(true));
+    set_paragraph_cache_enabled(true);
     const auto text = run_phase(*bench, 0, 3, 60, false, 0, options);
     CHECK(text.resources.paragraph_builds.per_frame_max > 0);
     CHECK(text.resources.paragraph_builds.frames_after_first_with_work == 0);
@@ -1184,11 +1184,11 @@ TEST_CASE("design-import benchmark Skia lane counts per-frame resource work",
     CHECK(steady_state_gate(text, text, true).status == "pass");
     CHECK(uncached.resources.paragraph_builds.per_frame_max ==
           text.resources.paragraph_builds.per_frame_max);
-    CHECK(uncached.resources.paragraph_builds.frames_after_first_over_budget == 2);
+    CHECK(uncached.resources.paragraph_builds_unwritten.frames_after_first_with_work == 2);
     CHECK(steady_state_gate(uncached, uncached, true).status == "fail");
 }
 
-TEST_CASE("design-import benchmark text budget allows only the runs a step wrote",
+TEST_CASE("design-import benchmark text gate allows only the text a step wrote",
           "[design-import][benchmark]") {
     std::string error;
     auto target = make_frame_target("skia-raster", 200, 80, error);
@@ -1196,25 +1196,45 @@ TEST_CASE("design-import benchmark text budget allows only the runs a step wrote
         SKIP("skia-raster target unavailable: " + error);
     PhaseOptions options;
     options.target = target.get();
-    const auto path = write_slot_ir("pulp-bench-text-budget.ir.json");
+    const auto path = write_slot_ir("pulp-bench-text-gate.ir.json");
     Config config = lane_config("baked-native");
     config.ir_path = path;
     auto fixture = make_fixture(config);
     REQUIRE(fixture != nullptr);
-    REQUIRE(fixture->text_runs_written_per_step() == 2);
+    REQUIRE(fixture->text_written_by_step(3) ==
+            std::vector<std::string>{"slot 0 frame 3", "slot 1 frame 3"});
 
-    // Each step writes both slots, so each frame shapes exactly those two.
+    // Each step writes both slots, so each frame shapes exactly those two,
+    // and none of it is text the step did not write.
     const auto phase = run_phase(*fixture, 0, 4, 60, true, 0, options);
-    const auto& builds = phase.resources.paragraph_builds;
-    CHECK(builds.per_frame_budget == 2);
-    CHECK(builds.frames_after_first_with_work == 3);
-    CHECK(builds.frames_after_first_over_budget == 0);
+    CHECK(phase.resources.paragraph_builds.frames_after_first_with_work == 3);
+    CHECK(phase.resources.paragraph_builds_unwritten.total == 0);
     CHECK(steady_state_gate(phase, phase, true).status == "pass");
 
-    // Idle frames write nothing, so their budget is zero.
+    // A static label beside a slot the frame never paints: the step still
+    // writes two runs but only one is shaped, so with the cache off the
+    // static label's re-shape fits inside the written count. Counting builds
+    // by text still catches it.
+    auto caption = std::make_unique<Label>("Static caption");
+    caption->set_bounds({0, 50, 200, 20});
+    fixture->root().add_child(std::move(caption));
+    std::vector<View*> slots;
+    for (std::size_t i = 0; i < fixture->root().child_count(); ++i)
+        if (auto* label = dynamic_cast<Label*>(fixture->root().child_at(i));
+            label && label->text() != "Static caption")
+            slots.push_back(label);
+    REQUIRE(slots.size() == 2);
+    slots[1]->set_visible(false);
+    set_paragraph_cache_enabled(false);
+    const auto culled = run_phase(*fixture, 0, 4, 60, true, 0, options);
+    set_paragraph_cache_enabled(true);
+    CHECK(culled.resources.paragraph_builds.per_frame_max == 2);
+    CHECK(culled.resources.paragraph_builds_unwritten.frames_after_first_with_work == 3);
+    CHECK(steady_state_gate(culled, culled, true).status == "fail");
+
+    // Idle frames write nothing, so any build after the first is unwritten.
     const auto idle = run_phase(*fixture, 0, 4, 60, false, 0, options);
-    CHECK(idle.resources.paragraph_builds.per_frame_budget == 0);
-    CHECK(idle.resources.paragraph_builds.frames_after_first_over_budget == 0);
+    CHECK(idle.resources.paragraph_builds_unwritten.frames_after_first_with_work == 0);
     std::filesystem::remove(path);
 }
 

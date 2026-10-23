@@ -2558,11 +2558,14 @@ Benchmark receipt (`pulp-design-import-benchmark-v2`) gotchas:
   shaping** — RecordingCanvas records commands and does none of that work.
   Resource claims need `--canvas=skia-raster` (or `skia-graphite` where a Dawn
   adapter exists); `--require-steady-state` exits 4 on a `blind` gate rather
-  than passing it. `paragraph_builds` is gated against a per-frame budget,
-  not zero: a step that writes N text slots legitimately shapes N new runs
-  (the IR fixtures write fresh `slot i frame N` strings every frame), so the
-  budget is the fixture's `text_runs_written_per_step()` and idle frames get
-  0. A new fixture that writes text must declare it, or the gate fails it.
+  than passing it. Paragraph builds are gated by TEXT, not by count: a step
+  legitimately shapes the runs it wrote (the IR fixtures write fresh
+  `slot i frame N` strings every frame), so the gate reads
+  `paragraph_builds.unwritten`, the builds of any text the fixture's
+  `text_written_by_step(frame)` did not list. A count budget ("at most N
+  builds") is blind to a culled slot: the slot shapes nothing, and a static
+  label re-shaping every frame fits inside N. A new fixture that writes text
+  must list it, or the gate fails it.
   `--paragraph-cache=off` is the uncached text path and the gate's planted
   negative; compare cached vs uncached with `--baseline-arg` /
   `--candidate-arg` on the same lane.

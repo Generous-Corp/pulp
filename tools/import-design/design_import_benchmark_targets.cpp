@@ -144,12 +144,19 @@ std::unique_ptr<FrameTarget> make_frame_target(std::string_view name, std::uint3
     return nullptr;
 }
 
-bool set_paragraph_cache_enabled(bool enabled) {
+void set_paragraph_cache_enabled(bool enabled) {
 #if defined(PULP_HAS_SKIA)
     canvas::ParagraphCache::instance().set_enabled(enabled);
-    return true;
 #else
-    return !enabled;
+    (void)enabled;
+#endif
+}
+
+void set_paragraph_build_observer(std::function<void(std::string_view)> observer) {
+#if defined(PULP_HAS_SKIA)
+    canvas::ParagraphCache::instance().set_build_observer(std::move(observer));
+#else
+    (void)observer;
 #endif
 }
 

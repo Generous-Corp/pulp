@@ -25,6 +25,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -114,18 +115,12 @@ struct ResourceSeries {
     std::uint64_t total = 0;
     std::uint64_t per_frame_max = 0;
     std::uint64_t frames_after_first_with_work = 0;
-    // Work a frame may legitimately do, and the frames after the first that
-    // did more. Only paragraph builds carry a budget: the text a step wrote.
-    std::uint64_t per_frame_budget = 0;
-    std::uint64_t frames_after_first_over_budget = 0;
 
     void add(std::uint64_t delta, bool first) {
         total += delta;
         per_frame_max = std::max(per_frame_max, delta);
         if (!first && delta != 0)
             ++frames_after_first_with_work;
-        if (!first && delta > per_frame_budget)
-            ++frames_after_first_over_budget;
     }
 };
 
@@ -133,6 +128,9 @@ struct PhaseResources {
     ResourceSeries image_decodes;
     ResourceSeries gpu_uploads;
     ResourceSeries paragraph_builds;
+    // Paragraph builds of text the frame's update did not write: re-shaping
+    // that a cache should have served.
+    ResourceSeries paragraph_builds_unwritten;
     ResourceSeries scene_records;
     ResourceSeries scene_replays;
     ResourceSeries image_cache_hits;
@@ -943,6 +941,20 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
     std::vector<double> record_ms;
     std::vector<double> submit_ms;
     std::vector<double> frame_allocations;
+    // The text this frame's update wrote, and the builds of any other text.
+    // Ordered with a transparent comparator so the observer looks text up
+    // without allocating inside the measured frame.
+    std::set<std::string, std::less<>> written;
+    std::uint64_t unwritten_builds = 0;
+    set_paragraph_build_observer([&](std::string_view text) {
+        if (written.find(text) == written.end())
+            ++unwritten_builds;
+    });
+    struct ObserverReset {
+        ~ObserverReset() {
+            set_paragraph_build_observer({});
+        }
+    } observer_reset;
     MemorySeries rss;
     MemorySeries footprint;
 
@@ -960,6 +972,11 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
         std::size_t allocations = 0;
         std::size_t allocated_bytes = 0;
         Clock::time_point laps[4];
+        written.clear();
+        if (interactive)
+            for (auto& text : fixture.text_written_by_step(frame))
+                written.insert(std::move(text));
+        const auto unwritten_before = unwritten_builds;
         const auto resources_before = sample_resources();
         const auto frame_start = Clock::now();
         const auto frame_cpu_start = std::clock();
@@ -999,9 +1016,8 @@ PhaseMetrics run_phase(BenchmarkFixture& fixture, int duration_ms, std::optional
             const auto& b = resources_before;
             r.image_decodes.add(a.image_decodes - b.image_decodes, first);
             r.gpu_uploads.add(a.gpu_uploads - b.gpu_uploads, first);
-            r.paragraph_builds.per_frame_budget =
-                interactive ? fixture.text_runs_written_per_step() : 0;
             r.paragraph_builds.add(a.paragraph_builds - b.paragraph_builds, first);
+            r.paragraph_builds_unwritten.add(unwritten_builds - unwritten_before, first);
             r.scene_records.add(a.scene_records - b.scene_records, first);
             r.scene_replays.add(a.scene_replays - b.scene_replays, first);
             r.image_cache_hits.add(a.image_cache_hits - b.image_cache_hits, first);
@@ -1231,12 +1247,8 @@ SteadyStateGate steady_state_gate(const PhaseMetrics& idle, const PhaseMetrics& 
         check("image decodes", phase->resources.image_decodes);
         check("GPU uploads", phase->resources.gpu_uploads);
         check("image-cache builds", phase->resources.image_cache_builds);
-        const auto& builds = phase->resources.paragraph_builds;
-        if (builds.frames_after_first_over_budget != 0)
-            gate.failures.push_back(
-                std::string(name) + ": " + std::to_string(builds.frames_after_first_over_budget) +
-                " frames after the first shaped more than the " +
-                std::to_string(builds.per_frame_budget) + " text runs their update wrote");
+        check("paragraph builds of text the update did not write",
+              phase->resources.paragraph_builds_unwritten);
     }
     gate.status = gate.failures.empty() ? "pass" : "fail";
     return gate;
@@ -1249,13 +1261,12 @@ std::string resource_json(const ResourceSeries& series) {
            std::to_string(series.frames_after_first_with_work) + "}";
 }
 
-// Paragraph builds also carry the per-frame budget the gate judges them by.
-std::string paragraph_builds_json(const ResourceSeries& series) {
-    auto json = resource_json(series);
+// Paragraph builds also carry the subset the gate judges: builds of text the
+// frame's update did not write.
+std::string paragraph_builds_json(const PhaseResources& r) {
+    auto json = resource_json(r.paragraph_builds);
     json.pop_back();
-    return json + ", \"per_frame_budget\": " + std::to_string(series.per_frame_budget) +
-           ", \"frames_after_first_over_budget\": " +
-           std::to_string(series.frames_after_first_over_budget) + "}";
+    return json + ", \"unwritten\": " + resource_json(r.paragraph_builds_unwritten) + "}";
 }
 
 void append_phase_json(std::ostringstream& out,
@@ -1315,7 +1326,7 @@ void append_phase_json(std::ostringstream& out,
     out << "      \"resources\": {\n";
     out << "        \"image_decodes\": " << resource_json(r.image_decodes) << ",\n";
     out << "        \"gpu_uploads\": " << resource_json(r.gpu_uploads) << ",\n";
-    out << "        \"paragraph_builds\": " << paragraph_builds_json(r.paragraph_builds) << ",\n";
+    out << "        \"paragraph_builds\": " << paragraph_builds_json(r) << ",\n";
     out << "        \"scene_cache\": {\"records\": " << resource_json(r.scene_records)
         << ", \"replays\": " << resource_json(r.scene_replays) << "},\n";
     out << "        \"image_cache\": {\"hits\": " << resource_json(r.image_cache_hits)
@@ -1649,10 +1660,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    if (!set_paragraph_cache_enabled(config->paragraph_cache)) {
-        std::cerr << "--paragraph-cache=on needs a build with a paragraph cache\n";
-        return 2;
-    }
+    set_paragraph_cache_enabled(config->paragraph_cache);
     const auto views_constructed_start = View::constructed_count();
     const auto views_destroyed_start = View::destroyed_count();
     const auto build_start = Clock::now();

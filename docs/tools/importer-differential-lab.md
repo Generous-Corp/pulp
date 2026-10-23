@@ -640,9 +640,9 @@ What changed, and what each field can and cannot show:
   `image_cache.{hits,builds}` per phase as total, per-frame maximum, and
   frames after the first that did any. `steady_state_gate` fails when any
   frame after a phase's first decodes, uploads or rebuilds an image, or
-  shapes more text runs than its update wrote (`paragraph_builds` carries
-  that `per_frame_budget`: 0 when idle, the fixture's written text slots
-  when interactive); the recording canvas reports `blind`.
+  shapes text its update did not write (`paragraph_builds.unwritten`, from a
+  build observer matched against the text the fixture's step wrote); the
+  recording canvas reports `blind`.
   `--require-steady-state` exits 4 unless the gate passes, and
   `--plant-frame-decode` and `--paragraph-cache=off` must each make it fail.
   SkiaCanvas keeps laid-out paragraphs in a process-wide cache
