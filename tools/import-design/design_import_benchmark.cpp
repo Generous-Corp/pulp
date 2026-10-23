@@ -1,5 +1,4 @@
 #include <pulp/canvas/canvas.hpp>
-#include <pulp/runtime/crypto.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir_io.hpp>
@@ -9,6 +8,7 @@
 #include <pulp/view/widgets.hpp>
 
 #include "test/harness/rt_allocation_probe.hpp"
+#include "tools/import-design/design_import_benchmark_fixture.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -42,11 +42,10 @@
 #endif
 
 using namespace pulp::view;
+using namespace pulp::design_import_bench;
 
 namespace {
 
-constexpr int kFixtureWidth = 760;
-constexpr int kFixtureHeight = 420;
 constexpr const char* kFixtureName = "phase5-imported-plugin-panel";
 
 using Clock = std::chrono::steady_clock;
@@ -227,30 +226,6 @@ std::string platform_name() {
     return "unknown";
 #endif
 }
-
-class BenchmarkFixture {
-public:
-    virtual ~BenchmarkFixture() = default;
-    virtual View& root() = 0;
-    virtual void step(int frame) = 0;
-    virtual int js_evaluation_count() const = 0;
-    virtual std::uint64_t bridge_call_count() const {
-        return 0;
-    }
-    // Anchor-keyed text slots whose View changed identity across an update,
-    // and slots whose text did not read back as written. Only fixtures that
-    // drive keyed slots report non-zero.
-    virtual std::uint64_t slot_identity_change_count() const {
-        return 0;
-    }
-    virtual std::uint64_t slot_text_mismatch_count() const {
-        return 0;
-    }
-    // Untimed check that the update `step(frame)` made is what the tree now
-    // holds. run_phase calls it outside every clock, so verification cost
-    // never lands in update or frame time.
-    virtual void verify(int /*frame*/) {}
-};
 
 void place_absolute(IRNode& node, float left, float top, float width, float height) {
     node.style.position = "absolute";
@@ -826,204 +801,6 @@ layout();
     std::unique_ptr<pulp::state::StateStore> store_;
     std::unique_ptr<WidgetBridge> bridge_;
     int js_evaluations_ = 0;
-};
-
-// Materializes a DesignIR and fails closed on any import error, so a
-// benchmark never measures a tree the importer reported as wrong. Warnings
-// (a design that states no widget palette, say) do not change the tree's
-// structure; their codes are returned so the receipt shows every one.
-std::unique_ptr<View> materialize_checked(const DesignIR& ir, float width, float height,
-                                          std::string_view lane,
-                                          std::vector<std::string>* warning_codes) {
-    NativeMaterializeOptions options;
-    std::vector<ImportDiagnostic> diagnostics;
-    options.diagnostics_out = &diagnostics;
-    auto root = build_native_view_tree(ir, ir.asset_manifest, options);
-    for (const auto& diagnostic : diagnostics) {
-        if (diagnostic.severity == ImportDiagnosticSeverity::error) {
-            std::ostringstream msg;
-            msg << lane << " materialization reported an error";
-            if (!diagnostic.code.empty())
-                msg << "; code=" << diagnostic.code;
-            if (!diagnostic.message.empty())
-                msg << ": " << diagnostic.message;
-            throw std::runtime_error(msg.str());
-        }
-        if (warning_codes && std::find(warning_codes->begin(), warning_codes->end(),
-                                       diagnostic.code) == warning_codes->end())
-            warning_codes->push_back(diagnostic.code);
-    }
-    if (!root)
-        throw std::runtime_error(std::string(lane) + " materialization returned null root");
-    root->set_bounds({0, 0, width, height});
-    root->layout_children();
-    return root;
-}
-
-// An importer-produced DesignIR, with the provenance that binds a receipt to
-// the exact bytes measured.
-struct LoadedIr {
-    DesignIR ir;
-    std::string sha256;
-    std::string file_name;
-    float width = static_cast<float>(kFixtureWidth);
-    float height = static_cast<float>(kFixtureHeight);
-    std::vector<std::string> slot_anchors;
-};
-
-LoadedIr load_ir(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in)
-        throw std::runtime_error("cannot read DesignIR " + path.string());
-    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-    LoadedIr loaded;
-    loaded.ir = parse_design_ir_json(text);
-    loaded.sha256 = pulp::runtime::sha256_hex(text);
-    loaded.file_name = path.filename().string();
-    if (loaded.ir.root.style.width && *loaded.ir.root.style.width > 0.0f)
-        loaded.width = *loaded.ir.root.style.width;
-    if (loaded.ir.root.style.height && *loaded.ir.root.style.height > 0.0f)
-        loaded.height = *loaded.ir.root.style.height;
-    const auto collect = [&](auto& self, const IRNode& node) -> void {
-        if (node.type == "text" && !node.text_content.empty() && node.stable_anchor_id &&
-            !node.stable_anchor_id->empty())
-            loaded.slot_anchors.push_back(*node.stable_anchor_id);
-        for (const auto& child : node.children)
-            self(self, child);
-    };
-    collect(collect, loaded.ir.root);
-    auto sorted = loaded.slot_anchors;
-    std::sort(sorted.begin(), sorted.end());
-    if (auto dup = std::adjacent_find(sorted.begin(), sorted.end()); dup != sorted.end())
-        throw std::runtime_error("DesignIR " + loaded.file_name + " repeats text slot anchor " +
-                                 *dup + "; a keyed slot needs a unique anchor");
-    if (loaded.slot_anchors.empty())
-        throw std::runtime_error("DesignIR " + loaded.file_name + " has no anchored text slots");
-    return loaded;
-}
-
-std::string slot_text(std::size_t slot, int frame) {
-    return "slot " + std::to_string(slot) + " frame " + std::to_string(frame);
-}
-
-// The retained-plan experiment over real importer output. Each anchored text
-// node is a typed slot. The retained lane resolves every slot to its Label
-// once and writes through it; the rebuild lane is the control, writing the
-// same text into a copy of the IR and rematerializing the whole tree. Both
-// read every slot back by anchor after the update, so a slot that rebound to
-// a different View, or kept stale text, is counted rather than assumed away.
-class IrBoundFixture final : public BenchmarkFixture {
-  public:
-    IrBoundFixture(const std::filesystem::path& path, bool rebuild_each_step)
-        : loaded_(load_ir(path)), rebuild_each_step_(rebuild_each_step) {
-        materialize(loaded_.ir);
-        for (std::size_t i = 0; i < loaded_.slot_anchors.size(); ++i) {
-            auto* label = resolved_[i];
-            if (!label)
-                throw std::runtime_error("text slot " + loaded_.slot_anchors[i] +
-                                         " did not materialize as a Label");
-            slots_.push_back({label->import_binding_instance_id()});
-        }
-    }
-
-    View& root() override {
-        return *root_;
-    }
-    int js_evaluation_count() const override {
-        return 0;
-    }
-    std::uint64_t slot_identity_change_count() const override {
-        return identity_changes_;
-    }
-    std::uint64_t slot_text_mismatch_count() const override {
-        return text_mismatches_;
-    }
-    View& tree() {
-        return *root_;
-    }
-    const LoadedIr& loaded() const {
-        return loaded_;
-    }
-    const std::vector<std::string>& warning_codes() const {
-        return warning_codes_;
-    }
-
-    void step(int frame) override {
-        if (rebuild_each_step_) {
-            auto ir = loaded_.ir;
-            std::size_t slot = 0;
-            const auto write = [&](auto& self, IRNode& node) -> void {
-                if (node.type == "text" && node.stable_anchor_id &&
-                    slot < loaded_.slot_anchors.size() &&
-                    *node.stable_anchor_id == loaded_.slot_anchors[slot])
-                    node.text_content = slot_text(slot++, frame);
-                for (auto& child : node.children)
-                    self(self, child);
-            };
-            write(write, ir.root);
-            materialize(ir);
-        } else {
-            for (std::size_t i = 0; i < slots_.size(); ++i)
-                retained_[i]->set_text(slot_text(i, frame));
-            root_->layout_children();
-        }
-    }
-
-    // Reads every slot back through the anchors of the CURRENT tree, so a
-    // slot that rebound to another View, or kept stale text, is counted.
-    void verify(int frame) override {
-        resolve_slots();
-        for (std::size_t i = 0; i < slots_.size(); ++i) {
-            auto* label = resolved_[i];
-            if (!label || label->import_binding_instance_id() != slots_[i].instance_id) {
-                ++identity_changes_;
-                if (label)
-                    slots_[i].instance_id = label->import_binding_instance_id();
-            }
-            if (!label || label->text() != slot_text(i, frame))
-                ++text_mismatches_;
-        }
-    }
-
-  private:
-    struct Slot {
-        std::uint64_t instance_id = 0;
-    };
-
-    // Builds the tree and resolves every slot anchor in one walk. The
-    // retained lane keeps writing through the Labels resolved at
-    // construction; `resolved_` always describes the current tree.
-    void materialize(const DesignIR& ir) {
-        root_ = materialize_checked(ir, loaded_.width, loaded_.height, "IR-bound", &warning_codes_);
-        resolve_slots();
-        // Only the retained lane writes through the Labels of its first tree;
-        // the rebuild lane replaces that tree, so it keeps no such pointers.
-        if (!rebuild_each_step_ && retained_.empty())
-            retained_ = resolved_;
-    }
-
-    // Resolves every slot anchor against the CURRENT tree.
-    void resolve_slots() {
-        resolved_.assign(loaded_.slot_anchors.size(), nullptr);
-        const auto visit = [&](auto& self, View& view) -> void {
-            for (std::size_t i = 0; i < loaded_.slot_anchors.size(); ++i)
-                if (view.anchor_id() == loaded_.slot_anchors[i])
-                    resolved_[i] = dynamic_cast<Label*>(&view);
-            for (std::size_t c = 0; c < view.child_count(); ++c)
-                self(self, *view.child_at(c));
-        };
-        visit(visit, *root_);
-    }
-
-    LoadedIr loaded_;
-    bool rebuild_each_step_ = false;
-    std::unique_ptr<View> root_;
-    std::vector<Slot> slots_;
-    std::vector<Label*> resolved_;
-    std::vector<Label*> retained_;
-    std::vector<std::string> warning_codes_;
-    std::uint64_t identity_changes_ = 0;
-    std::uint64_t text_mismatches_ = 0;
 };
 
 std::unique_ptr<BenchmarkFixture> make_fixture(const Config& config) {
