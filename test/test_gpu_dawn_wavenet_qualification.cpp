@@ -382,9 +382,53 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
     return run;
 }
 
+// A GpuWaveNetSession stand-in whose create() hands out a program session
+// prepared over a faulted physical provider, so the backend reaches it through
+// the same create path as the public session.
+struct FaultedSession {
+    struct CreateResult {
+        std::unique_ptr<FaultedSession> session;
+        pulp::gpu_audio::GpuWaveNetSessionError error =
+            pulp::gpu_audio::GpuWaveNetSessionError::ProviderUnavailable;
+        explicit operator bool() const noexcept {
+            return session != nullptr && error == pulp::gpu_audio::GpuWaveNetSessionError::None;
+        }
+    };
+    static inline std::unique_ptr<SharedIoProgramSession> next;
+    static CreateResult create(const pulp::gpu_audio::GpuWaveNetSession::Config&) {
+        if (!next)
+            return {};
+        auto session = std::make_unique<FaultedSession>();
+        session->channel = std::make_unique<pulp::test::ProgramSessionChannel>(std::move(next));
+        return {std::move(session), pulp::gpu_audio::GpuWaveNetSessionError::None};
+    }
+    std::unique_ptr<pulp::test::ProgramSessionChannel> channel;
+    bool submit_block(std::span<const float> input, std::uint64_t sequence) noexcept {
+        return channel->submit(input, sequence);
+    }
+    std::size_t service(std::uint64_t now) noexcept {
+        channel->service(now);
+        return 0;
+    }
+    std::size_t service_until(std::uint64_t deadline) noexcept {
+        channel->service_until(now_ns(), deadline);
+        return 0;
+    }
+    std::optional<pulp::gpu_audio::GpuWaveNetBlockResult>
+    receive(std::span<float> output) noexcept {
+        return channel->receive(output);
+    }
+    bool release() noexcept {
+        return channel->release();
+    }
+    bool device_lost() const noexcept {
+        return channel->lost();
+    }
+};
+
 // The same physical faults behind the generic neural node: its WaveNet
-// backend owns one channel over the faulted provider, and its CPU model is a
-// silent stand-in, since only the latched recovery is under test.
+// backend creates its one session through FaultedSession, and its CPU model
+// is a silent stand-in, since only the latched recovery is under test.
 NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_table,
                                    DawnSharedIoProvider::Fault fault) {
     namespace ga = pulp::gpu_audio;
@@ -405,9 +449,8 @@ NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_tabl
     }
     const auto block = fixture.spec().block_size;
     const auto bytes = block * sizeof(float);
-    auto session = std::make_shared<std::unique_ptr<SharedIoProgramSession>>(
-        std::make_unique<SharedIoProgramSession>());
-    if (!(*session)->prepare(
+    auto session = std::make_unique<SharedIoProgramSession>();
+    if (!session->prepare(
             {std::move(created.provider), std::move(program)},
             {.slots = 2,
              .input_bytes_per_slot = bytes,
@@ -435,11 +478,8 @@ NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_tabl
                         .slots = 2},
             .channels = 1,
             .max_inflight = 1},
-        [session](std::uint32_t) -> std::unique_ptr<WaveNetRealtimeChannel> {
-            if (!*session)
-                return nullptr;
-            return std::make_unique<pulp::test::ProgramSessionChannel>(std::move(*session));
-        });
+        WaveNetStreamingBackend::ChannelFactory{}, &create_session_channel<FaultedSession>);
+    FaultedSession::next = std::move(session);
     int silent_state = 0;
     const NeuralCpuKernel silent{
         .state = &silent_state,
@@ -477,8 +517,12 @@ NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_tabl
          .lead_blocks = 1,
          .capacity = 4,
          .shadow_policy = ga::GpuNeuralRealtimeNode::ShadowPolicy::Inline});
-    if (!node.prepare() || !node.gpu_kernel_available()) {
-        run.reason_text = "node_prepare_failed";
+    // The fault must hit a node that is on the GPU, not one that fell back to
+    // its CPU model. (The injected provider is not the authenticated one, so
+    // the status says Degraded; the strict Ready receipt is the public one.)
+    if (!node.prepare() || !node.gpu_kernel_available() || node.epoch() == 0 ||
+        node.recovery_reason() != ga::GpuAudioRecoveryReason::None) {
+        run.reason_text = "node_not_on_gpu";
         return run;
     }
     auto path = realtime_gpu_node_path(&node);
@@ -536,7 +580,7 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
                                hang.sequence == 0 && hang.state == ga_state::Unavailable &&
                                hang.status_valid;
     const auto neural_loss = run_neural_node_fault(
-        fixture, proc_table, DawnSharedIoProvider::Fault::ForceLossAfterCompletionRegistration);
+        fixture, proc_table, DawnSharedIoProvider::Fault::ForceLossBeforeSubmit);
     result.neural_loss_reason = neural_loss.reason_text;
     result.neural_loss_sequence = neural_loss.sequence;
     result.neural_loss_blocks = neural_loss.blocks;

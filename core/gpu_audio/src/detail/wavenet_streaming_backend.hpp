@@ -111,6 +111,10 @@ class WaveNetStreamingBackend final : public StreamingBackend {
     bool prepared() const noexcept {
         return prepared_;
     }
+    /// Provider channels currently held, prepared or retained for a drain.
+    std::size_t channel_count() const noexcept {
+        return channels_.size();
+    }
     std::uint32_t max_inflight() const noexcept {
         return config_.max_inflight;
     }

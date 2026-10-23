@@ -557,14 +557,16 @@ TEST_CASE("a public WaveNet node runs its GPU path when the provider is availabl
                                 .capacity = kLead + 4,
                                 .shadow_policy = GpuNeuralRealtimeNode::ShadowPolicy::Inline});
     REQUIRE(node.prepare());
-    // The session was created here, so the node must be on the GPU.
+    // The session was created here, so the node must be on the GPU: a
+    // Degraded CPU-only node fails this test rather than passing a branch.
     REQUIRE(node.gpu_kernel_available());
     auto status = node.status_snapshot();
-    CHECK(validate_gpu_audio_status(status).accepted());
-    CHECK(status.provider == GpuAudioProvider::Dawn);
-    CHECK(status.selected_engine == GpuAudioEngine::Gpu);
-    CHECK(status.provider_state == GpuAudioProviderState::Ready);
-    CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+    REQUIRE(validate_gpu_audio_status(status).accepted());
+    REQUIRE(status.provider == GpuAudioProvider::Dawn);
+    REQUIRE(status.selected_engine == GpuAudioEngine::Gpu);
+    REQUIRE(status.provider_state == GpuAudioProviderState::Ready);
+    REQUIRE(status.recovery_reason == GpuAudioRecoveryReason::None);
+    REQUIRE(node.epoch() > 0);
 
     GpuAudioTransport transport;
     REQUIRE(transport.prepare(&node, {.ring_blocks = kLead + 2}));
@@ -593,8 +595,12 @@ TEST_CASE("a public WaveNet node runs its GPU path when the provider is availabl
                 static_cast<unsigned long long>(delivery.gpu_blocks),
                 static_cast<unsigned long long>(status.fallback_blocks),
                 static_cast<unsigned long long>(status.missed_blocks));
+    REQUIRE(delivery.gpu_blocks > 0);
     CHECK(delivery.gpu_blocks >= kBlocks / 2);
-    CHECK(status.provider_state == GpuAudioProviderState::Ready);
+    REQUIRE(node.gpu_kernel_available());
+    REQUIRE(node.epoch() > 0);
+    REQUIRE(status.selected_engine == GpuAudioEngine::Gpu);
+    REQUIRE(status.provider_state == GpuAudioProviderState::Ready);
     // Every emitted block, GPU or shadow, nulls against the model delayed by
     // the lead.
     const std::size_t delay = std::size_t{kLead} * kBlock;

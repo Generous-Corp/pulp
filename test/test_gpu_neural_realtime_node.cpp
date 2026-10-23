@@ -1226,6 +1226,82 @@ template <class Session> std::unique_ptr<detail::WaveNetStreamingBackend> sessio
 }
 } // namespace
 
+/// The backend's own prepare context, as the node builds it.
+struct BackendContext {
+    detail::StreamingModelSpec spec{.model_id = "pulp.test.wavenet",
+                                    .architecture = "wavenet",
+                                    .model_version = "1",
+                                    .weights_hash = kSha,
+                                    .runtime_hash = "pulp.neural.test.v1",
+                                    .input_channels = kChannels,
+                                    .output_channels = kChannels,
+                                    .sample_rate = 48000,
+                                    .block_size = kBlock,
+                                    .feature_rate = 48000};
+    detail::StreamingPrepareContext context() const {
+        return {.spec = &spec,
+                .artifact_id = "pulp.test.wavenet.weights",
+                .artifact_hash = kSha,
+                .fallback = detail::StreamingFallbackStrategy::ContinuouslyPrimedCpuShadow,
+                .max_frames = kBlock,
+                .lead_blocks = kLead,
+                .worker_backend_requested = true};
+    }
+};
+
+TEST_CASE("the WaveNet backend prepares on the session path only when create succeeds",
+          "[gpu_audio][neural][wavenet-session]") {
+    const BackendContext ctx;
+    REQUIRE(detail::valid_streaming_prepare_context(ctx.context()));
+    SECTION("a created session: one session channel per audio channel") {
+        CreatedSession::created = CreatedSession::released = 0;
+        auto backend = session_backend<CreatedSession>();
+        REQUIRE(backend->prepare(ctx.context()));
+        CHECK(backend->prepared());
+        CHECK(backend->channel_count() == kChannels);
+        CHECK(CreatedSession::created == static_cast<int>(kChannels));
+        CHECK_FALSE(backend->production_provider());
+        REQUIRE(backend->release());
+        CHECK(CreatedSession::released == static_cast<int>(kChannels));
+    }
+    SECTION("a session created with an error: refused, released, nothing retained") {
+        PartialSession::created = PartialSession::released = 0;
+        auto backend = session_backend<PartialSession>();
+        CHECK_FALSE(backend->prepare(ctx.context()));
+        CHECK_FALSE(backend->prepared());
+        CHECK(PartialSession::created == 1);
+        CHECK(PartialSession::released == 1);
+        CHECK(backend->channel_count() == 0);
+    }
+    SECTION("no session: refused, nothing retained") {
+        MissingSession::created = 0;
+        auto backend = session_backend<MissingSession>();
+        CHECK_FALSE(backend->prepare(ctx.context()));
+        CHECK(MissingSession::created == 1);
+        CHECK(backend->channel_count() == 0);
+    }
+    SECTION("the production creator agrees with GpuWaveNetSession::create on this host") {
+        // No factory and no creator: the authenticated session path. Without
+        // a provider (GPU-less CI) both refuse; with one both succeed.
+        static const WaveNetShape shape;
+        const auto config = shape.session(kBlock, 48000);
+        bool available = false;
+        {
+            auto probe = GpuWaveNetSession::create(config);
+            available = static_cast<bool>(probe);
+            if (probe.session)
+                REQUIRE(probe.session->release());
+        }
+        detail::WaveNetStreamingBackend backend({.session = config, .channels = kChannels});
+        CAPTURE(available);
+        CHECK(backend.prepare(ctx.context()) == available);
+        CHECK(backend.production_provider() == available);
+        CHECK(backend.channel_count() == (available ? kChannels : 0u));
+        REQUIRE(backend.release());
+        CHECK(backend.channel_count() == 0);
+    }
+}
+
 /// A WaveNet node over a substituted session creator, prepared.
 template <class Session> struct SessionNode {
     FamilyFixture fixture{NeuralFamily::WaveNet, kChannels, kBlock};
