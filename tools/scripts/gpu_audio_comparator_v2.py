@@ -48,6 +48,7 @@ SAMPLE_FIELDS = (
 PARITY_TOLERANCE = 1e-4
 # Allowance for the Metal GPU-clock to host-clock conversion.
 CLOCK_MARGIN_NS = 50_000
+WAKE_GPU_END_UNORDERED = "metal_shared_event_gpu_end_not_ordered_before_visible"
 GATING_ROBUSTNESS = "tint_equivalent"
 ROBUSTNESS_PROBE_ROLE = "robustness_cost_probe"
 ROBUSTNESS_PROBE_LANE = "metal_shared_event_unguarded_robustness_probe"
@@ -120,6 +121,7 @@ def cell_metrics(cell: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]
     period = cell["frames"] * 1e9 / config["sample_rate"]
     lead = config["lead_blocks"] * period
     n = cell["blocks"]
+    timed_wake = gpu_end_precedes_visible(cell)
     s2v, busy, wake, cb_to_worker, wake_bound, lag = [], [], [], [], [], []
     misses = 0
     for i in range(n):
@@ -136,7 +138,7 @@ def cell_metrics(cell: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]
                 # Submit-to-visible minus GPU busy: an upper bound on wake
                 # latency where no host-domain completion time exists.
                 wake_bound.append(visible - submit - s["gpu_busy_ns"][i])
-        if ok and s["gpu_end_ns"][i] >= 0:
+        if ok and timed_wake and s["gpu_end_ns"][i] >= 0:
             wake.append(visible - s["gpu_end_ns"][i])
         if ok and s["callback_ns"][i] >= 0:
             cb_to_worker.append(visible - s["callback_ns"][i])
@@ -176,10 +178,22 @@ def cell_metrics(cell: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def gpu_end_precedes_visible(cell: dict[str, Any]) -> bool:
+    """Whether the cell's completion signal causally follows GPUEndTime.
+
+    A completed handler runs after the command buffer completes, so its GPU
+    end precedes visibility. A shared-event listener can fire before the
+    command buffer records GPUEndTime (paravirtual GPUs show this), so for
+    those cells GPU end bounds nothing about wake or latency.
+    """
+    return cell.get("wake_domain") != WAKE_GPU_END_UNORDERED
+
+
 def _check_samples(cell: dict[str, Any], refusals: list[str]) -> None:
     """Refuse a cell whose timeline is impossible."""
     s = cell["samples"]
     tag = f"{cell['lane']}:{cell['frames']}:{cell['load']}"
+    ordered = gpu_end_precedes_visible(cell)
     for i in range(cell["blocks"]):
         release, submit = s["release_ns"][i], s["submit_ns"][i]
         submit_end, visible = s["submit_end_ns"][i], s["visible_ns"][i]
@@ -190,12 +204,14 @@ def _check_samples(cell: dict[str, Any], refusals: list[str]) -> None:
             refusals.append(f"sample_order:{tag}")
             return
         gpu_end = s["gpu_end_ns"][i]
-        if gpu_end >= 0 and visible >= 0 and not (
-                submit - CLOCK_MARGIN_NS <= gpu_end <= visible + CLOCK_MARGIN_NS):
+        if gpu_end >= 0 and visible >= 0 and (
+                gpu_end < submit - CLOCK_MARGIN_NS or
+                (ordered and gpu_end > visible + CLOCK_MARGIN_NS)):
             refusals.append(f"sample_gpu_end_order:{tag}")
             return
         busy = s["gpu_busy_ns"][i]
-        if busy >= 0 and visible >= 0 and busy > visible - submit + CLOCK_MARGIN_NS:
+        if (ordered and busy >= 0 and visible >= 0 and
+                busy > visible - submit + CLOCK_MARGIN_NS):
             refusals.append(f"sample_gpu_busy_exceeds_latency:{tag}")
             return
 

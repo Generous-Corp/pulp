@@ -328,6 +328,10 @@ struct KernelIdentity {
 constexpr const char* kRobustnessTint = "tint_equivalent";
 constexpr const char* kRobustnessNone = "none";
 
+constexpr const char* kWakeFromGpuEnd = "metal_gpu_end_to_worker_observed";
+constexpr const char* kWakeGpuEndUnordered =
+    "metal_shared_event_gpu_end_not_ordered_before_visible";
+
 // Canonical form matches json.dumps(sort_keys=True, separators=(",", ":")), so
 // the verifier recomputes the digest instead of trusting it. `port_sha` names
 // the MSL port: the compiled source on Metal, and the port pinned to this WGSL
@@ -1788,7 +1792,12 @@ int main(int argc, char** argv) {
                                                convolution_passes(w));
                 cell.gpu_timestamps = true;
                 cell.gpu_busy_domain = "metal_command_buffer_gpu_start_to_end";
-                cell.wake_domain = "metal_gpu_end_to_worker_observed";
+                // A shared event can be observed before its command buffer
+                // records GPUEndTime (seen on paravirtual GPUs), so only the
+                // completed-handler lane can time wake latency from GPU end.
+                cell.wake_domain = spec.metal_completion == MetalCompletion::CompletedHandler
+                                       ? kWakeFromGpuEnd
+                                       : kWakeGpuEndUnordered;
             } else {
                 cell.kernel = make_kernel_identity(
                     kProgramId, wgsl.ok ? wgsl.fft_sha256 : "unavailable",

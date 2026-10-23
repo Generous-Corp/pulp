@@ -127,9 +127,14 @@ it lands.
 
 The comparator records raw per-block samples. The verifier computes every
 statistic from them, and refuses a cell whose timeline is impossible. A valid
-timeline satisfies `release ≤ submit ≤ submit_end ≤ visible`, has the GPU end
-between submit and visible (within a 50 µs clock-conversion margin), and has
-GPU busy time no longer than the latency.
+timeline satisfies `release ≤ submit ≤ submit_end ≤ visible` and has the GPU
+end no earlier than submit (within a 50 µs clock-conversion margin). In
+completed-handler cells, the GPU end must also precede visibility, and GPU busy
+time can be no longer than the latency.
+
+Shared-event cells are exempt from those last two checks. Their listener can
+fire before the command buffer records `GPUEndTime`, so the GPU end may trail
+visibility. Paravirtual CI GPUs show this.
 
 - **Submit→visible**: p50, p99, p99.9 and max, on the host clock.
 - **GPU busy time**: Metal measures command-buffer start to end; Dawn measures
@@ -144,8 +149,9 @@ GPU busy time no longer than the latency.
     never decides the gate.
   - In render cells, Dawn/Metal driver threads serving the UI device also land
     in process CPU. That noise affects both sides alike.
-- **Wake latency**: measured on Metal only, from GPU end to the moment the
-  worker observes it.
+- **Wake latency**: measured only on the Metal completed-handler lane, from GPU
+  end to the moment the worker observes it. In the shared-event lanes, GPU end
+  is not ordered before the event, so those lanes report no wake latency.
 - **Misses**: a block misses when it is not visible within a two-block lead
   of its release, or when it fails the oracle.
 
