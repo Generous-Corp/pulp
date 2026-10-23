@@ -400,7 +400,8 @@ TEST_CASE("CoreGraphics midpoints match Chrome through resampling",
           "[css][gradient][interpolation][cg]") {
     const Color blue = Color::rgba(0.0f, 0.0f, 1.0f, 1.0f);
     for (const auto& c : kChromeMidpoints) {
-        if (c.end != blue) continue;
+        if (c.end != blue)
+            continue;
         const auto got = cg_midpoint(c.css);
         INFO(c.css << "\n  CoreGraphics " << rgb_text(got) << " Chrome " << rgb_text(c.rgb));
         CHECK(max_channel_error(got, c.rgb) <= kChromeTolerance);

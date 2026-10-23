@@ -14,6 +14,8 @@ namespace pulp::canvas {
 // Does not actually render anything
 
 struct DrawCommand {
+    // A hand-aligned table: clang-format would re-flow every row of it.
+    // clang-format off
     enum class Type {
         save, restore,
         translate, scale, rotate, clip_rect,
@@ -172,6 +174,7 @@ struct DrawCommand {
         draw_sksl,            ///< rect x/y/w/h in f[0..3]; value f[4]; time f[5]; SkSL source in `text`
         set_gradient_interpolation  ///< GradientColorSpace in f[0], GradientHueMethod in f[1]
     };
+    // clang-format on
 
     Type type;
     // Generic storage for command parameters
