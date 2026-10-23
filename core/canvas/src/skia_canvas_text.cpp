@@ -125,6 +125,8 @@ PreparedParagraph build_paragraph(const ParagraphKey& key, const std::string& fa
     // its default, `start`, an RTL line is aligned to the right edge, which is
     // at infinity, and nothing it paints lands on the canvas.
     pstyle.setTextAlign(skia::textlayout::TextAlign::kLeft);
+    if (!key.hinting)
+        pstyle.turnHintingOff();
     skia::textlayout::TextStyle tstyle;
     std::vector<SkString> families;
     for (const auto& entry : key.families)
@@ -221,6 +223,20 @@ ParagraphUse make_paragraph(const std::string& text, const std::string& family, 
                             const std::vector<Canvas::FontFeature>& features = {}) {
     if (text.empty())
         return {};
+    // Read before any face resolves, so the typeface and the generation in the
+    // key are one snapshot.
+    const std::uint64_t generation = font_registration_generation();
+    // A non-finite size falls back the way the build does, a non-finite
+    // spacing draws unspaced, and -0 folds to +0: the key compares floats by
+    // value and hashes them by bits, so a NaN key would never find itself.
+    if (!std::isfinite(size))
+        size = 0.0f;
+    if (!std::isfinite(letter_spacing))
+        letter_spacing = 0.0f;
+    if (size == 0.0f)
+        size = 0.0f;
+    if (letter_spacing == 0.0f)
+        letter_spacing = 0.0f;
     ParagraphKey key;
     key.text = text;
     // `family` can be a comma-separated CSS fallback list ("Inter,
@@ -238,7 +254,7 @@ ParagraphUse make_paragraph(const std::string& text, const std::string& family, 
     key.letter_spacing = letter_spacing;
     key.ltr = ltr;
     key.features = features;
-    key.font_generation = font_registration_generation();
+    key.font_generation = generation;
     return find_or_build_paragraph(std::move(key), [&family, &primary](const ParagraphKey& k) {
         return build_paragraph(k, family, primary);
     });

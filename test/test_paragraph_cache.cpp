@@ -24,10 +24,13 @@
 #include <malloc/malloc.h>
 #endif
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace pulp::canvas;
@@ -181,6 +184,17 @@ TEST_CASE("Paragraph cache keys every shaping input", "[canvas][paragraph-cache]
         expect_second_matches_uncached(base(),
                                        text_with("Inter", 16.0f, 400, 0, 2.5f, "Hello 1001"));
     }
+    SECTION("direction") {
+        const auto with_direction = [](Canvas::TextDirection direction) {
+            return [direction](SkiaCanvas& c) {
+                c.set_font_full("Inter", 16.0f, 400, 0, 0.0f);
+                c.set_direction(direction);
+                c.fill_text("Hello 1001!", 8.0f, kBaseline);
+            };
+        };
+        expect_second_matches_uncached(with_direction(Canvas::TextDirection::ltr),
+                                       with_direction(Canvas::TextDirection::rtl));
+    }
     SECTION("OpenType features") {
         const Canvas::FontFeature zero{Canvas::make_font_feature_tag("zero"), 1};
         expect_second_matches_uncached(text_with("Inter", 16.0f, 400, 0, 0.0f, "1001", {}),
@@ -309,8 +323,8 @@ TEST_CASE("Paragraph cache stays within its entry and byte bounds", "[canvas][pa
     CHECK(cache.stats().entries == 2);
     CHECK(cache.stats().bytes <= two);
 
-    // The least recently used entry goes first: re-touching "Preset 4" keeps
-    // it when "Preset 6" arrives.
+    // An entry looked up again is protected and probation is evicted first:
+    // re-touching "Preset 4" keeps it when "Preset 6" arrives.
     render(text_with("Inter", 14.0f, 400, 0, 0.0f, "Preset 4"));
     const auto hits = cache.stats().hits;
     render(text_with("Inter", 14.0f, 400, 0, 0.0f, "Preset 6"));
@@ -322,46 +336,197 @@ TEST_CASE("Paragraph cache stays within its entry and byte bounds", "[canvas][pa
     CHECK(cache.stats().entries == 1);
 }
 
-#if defined(__APPLE__)
-TEST_CASE("Paragraph cache byte estimate bounds what an entry holds",
-          "[canvas][paragraph-cache][memory]") {
+TEST_CASE("Paragraph cache canonicalises non-finite and signed-zero spacing",
+          "[canvas][paragraph-cache]") {
     CacheScope scope;
     auto& cache = ParagraphCache::instance();
-    constexpr int kCount = 96;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+
+    // NaN and infinite spacing draw unspaced, cached or not, and a repaint
+    // finds the entry rather than adding one per paint.
+    const Draw spaced_nan = text_with("Inter", 16.0f, 400, 0, nan, "Gain -3 dB");
+    const Draw sized_nan = text_with("Inter", nan, 400, 0, 0.0f, "Gain -3 dB");
+    const Pixels want = render_uncached(text_with("Inter", 16.0f, 400, 0, 0.0f, "Gain -3 dB"));
+    const Pixels want_sized = render_uncached(sized_nan);
+    CHECK(render_uncached(spaced_nan) == want);
+    cache.clear();
+    const auto before = paragraph_builds();
+    for (int frame = 0; frame < 4; ++frame)
+        CHECK(render(spaced_nan) == want);
+    CHECK(render(text_with("Inter", 16.0f, 400, 0, inf, "Gain -3 dB")) == want);
+    CHECK(render(sized_nan) == want_sized);
+    CHECK(render(sized_nan) == want_sized);
+    CHECK(paragraph_builds() - before == 2); // the NaN-size run is its own key
+
+    // -0 and +0 are one key.
+    cache.clear();
+    const auto zeros = paragraph_builds();
+    render(text_with("Inter", 16.0f, 400, 0, -0.0f, "Mix"));
+    render(text_with("Inter", 16.0f, 400, 0, 0.0f, "Mix"));
+    CHECK(paragraph_builds() - zeros == 1);
+    CHECK(cache.stats().entries == 1);
+
+    // A NaN run reaching the eviction end of the cache does not crash it.
+    cache.clear();
+    cache.set_limits(1, ParagraphCache::kDefaultMaxBytes);
+    render(spaced_nan);
+    for (int i = 0; i < 3; ++i)
+        render(text_with("Inter", 16.0f, 400, 0, nan, "Run " + std::to_string(i)));
+    CHECK(cache.stats().entries == 1);
+}
+
+TEST_CASE("Paragraph cache keeps a static label through text that changes every frame",
+          "[canvas][paragraph-cache]") {
+    CacheScope scope;
+    auto& cache = ParagraphCache::instance();
+    cache.set_limits(64, ParagraphCache::kDefaultMaxBytes);
+    const Draw label = text_with("Inter", 14.0f, 400, 0, 0.0f, "Output");
+    const Pixels want = render_uncached(label);
+    render(label);
+    render(label); // looked up again: protected
+
+    // 1000 frames of a meter readout, each a string never seen before, while
+    // the label is not repainted.
+    for (int frame = 0; frame < 1000; ++frame)
+        render(text_with("Inter", 14.0f, 400, 0, 0.0f,
+                         std::to_string(-60 + frame % 61) + "." + std::to_string(frame) + " dB"));
+    CHECK(cache.stats().entries <= 64);
+
+    const auto before = paragraph_builds();
+    CHECK(render(label) == want);
+    CHECK(paragraph_builds() - before == 0);
+}
+
+TEST_CASE("Paragraph cache stays correct and bounded under concurrent painting",
+          "[canvas][paragraph-cache][threading]") {
+    CacheScope scope;
+    auto& cache = ParagraphCache::instance();
+    constexpr int kThreads = 4;
+    constexpr int kFrames = 60;
     std::vector<std::string> texts;
-    std::size_t text_bytes = 0;
-    for (int i = 0; i < kCount; ++i) {
-        texts.push_back("Band " + std::to_string(i) + " gain -" + std::to_string(i % 24) + " dB");
-        text_bytes += texts.back().size();
+    for (int i = 0; i < 12; ++i)
+        texts.push_back("Shared " + std::to_string(i));
+    for (int t = 0; t < kThreads; ++t)
+        for (int i = 0; i < 6; ++i)
+            texts.push_back("Thread " + std::to_string(t) + " run " + std::to_string(i));
+    std::vector<Pixels> want;
+    for (const auto& text : texts)
+        want.push_back(render_uncached(text_with("Inter", 15.0f, 400, 0, 0.5f, text)));
+
+    const std::size_t small = 8 * ParagraphCache::estimated_entry_bytes(16);
+    std::atomic<bool> painting{true};
+    std::atomic<int> mismatches{0};
+    std::vector<std::thread> painters;
+    for (int t = 0; t < kThreads; ++t) {
+        painters.emplace_back([&, t] {
+            for (int frame = 0; frame < kFrames; ++frame) {
+                const std::size_t shared = static_cast<std::size_t>((frame + t) % 12);
+                const std::size_t own = 12 + static_cast<std::size_t>(t * 6 + frame % 6);
+                for (const std::size_t i : {shared, own})
+                    if (!(render(text_with("Inter", 15.0f, 400, 0, 0.5f, texts[i])) == want[i]))
+                        ++mismatches;
+            }
+        });
     }
+    // Meanwhile font registrations invalidate everything and the bounds move.
+    std::thread churn([&] {
+        int round = 0;
+        while (painting.load()) {
+            bump_font_registration_generation();
+            cache.set_limits(round % 2 ? 4 : 64,
+                             round % 2 ? small : ParagraphCache::kDefaultMaxBytes);
+            ++round;
+            std::this_thread::yield();
+        }
+    });
+    for (auto& p : painters)
+        p.join();
+    painting = false;
+    churn.join();
+
+    CHECK(mismatches.load() == 0);
+    const auto stats = cache.stats();
+    CHECK(stats.entries <= stats.max_entries);
+    CHECK(stats.bytes <= stats.max_bytes);
+    // Byte accounting did not drift: every live entry holds 8 to 17 text bytes.
+    CHECK(stats.bytes >= stats.entries * ParagraphCache::estimated_entry_bytes(8));
+    CHECK(stats.bytes <= stats.entries * ParagraphCache::estimated_entry_bytes(17));
+}
+
+#if defined(__APPLE__)
+namespace {
+
+// Heap growth from caching @p texts, after an uncached pass has warmed Skia's
+// glyph and shaping caches so the growth is what the entries themselves hold.
+std::size_t held_by_entries(const std::vector<std::string>& texts, float spacing) {
+    auto& cache = ParagraphCache::instance();
     const auto draw_all = [&] {
         for (const auto& t : texts)
-            render(text_with("Inter", 13.0f, 400, 0, 0.0f, t));
+            render(text_with("Inter", 13.0f, 400, 0, spacing, t));
     };
-    // Warm Skia's glyph and shaping caches with nothing retained, so the
-    // measured growth is what the entries themselves hold.
     cache.set_enabled(false);
     draw_all();
     cache.set_enabled(true);
     cache.clear();
-
     malloc_statistics_t before{};
     malloc_zone_statistics(nullptr, &before);
     draw_all();
     malloc_statistics_t after{};
     malloc_zone_statistics(nullptr, &after);
+    REQUIRE(cache.stats().entries == texts.size());
+    return after.size_in_use > before.size_in_use ? after.size_in_use - before.size_in_use : 0;
+}
 
-    REQUIRE(cache.stats().entries == kCount);
-    const std::size_t held =
-        after.size_in_use > before.size_in_use ? after.size_in_use - before.size_in_use : 0;
-    std::size_t estimate = 0;
-    for (const auto& t : texts)
-        estimate += ParagraphCache::estimated_entry_bytes(t.size());
-    INFO("held " << held << " bytes for " << kCount << " entries (" << text_bytes
-                 << " text bytes); estimate " << estimate);
-    CHECK(held > 0);
-    CHECK(held <= estimate);
-    CHECK(cache.stats().bytes == estimate);
+std::vector<std::string> numbered(const std::string& stem, int count) {
+    std::vector<std::string> texts;
+    for (int i = 0; i < count; ++i)
+        texts.push_back(stem + " " + std::to_string(i));
+    return texts;
+}
+
+} // namespace
+
+TEST_CASE("Paragraph cache byte estimate tracks what an entry holds",
+          "[canvas][paragraph-cache][memory]") {
+    CacheScope scope;
+    // Text the primary face cannot cover takes the per-run fallback shaper
+    // unless it is spaced, so the CJK group is spaced to reach SkParagraph.
+    struct Group {
+        const char* name;
+        std::vector<std::string> texts;
+        float spacing = 0.0f;
+    };
+    const std::vector<Group> groups = {
+        {"short latin", numbered("Band gain -12 dB", 96)},
+        {"long latin",
+         numbered("The quick brown fox jumps over the lazy dog while the low shelf rises "
+                  "and the high cut falls; attack, release, ratio, knee and makeup gain "
+                  "all sit on one line here",
+                  48)},
+        {"cjk",
+         numbered("\xE9\x9F\xB3\xE9\x87\x8F\xE8\xB0\x83\xE6\x95\xB4"
+                  "\xE9\xA2\x91\xE7\x8E\x87\xE5\x93\x8D\xE5\xBA\x94",
+                  64),
+         0.5f},
+        {"emoji", numbered("Mix \xF0\x9F\x8E\x9B\xEF\xB8\x8F level \xF0\x9F\x94\x8A", 64)},
+    };
+    for (const auto& group : groups) {
+        const std::size_t held = held_by_entries(group.texts, group.spacing);
+        std::size_t estimate = 0;
+        std::size_t text_bytes = 0;
+        for (const auto& t : group.texts) {
+            estimate += ParagraphCache::estimated_entry_bytes(t.size());
+            text_bytes += t.size();
+        }
+        INFO(group.name << ": held " << held << " bytes for " << group.texts.size() << " entries ("
+                        << text_bytes << " text bytes); estimate " << estimate);
+        CHECK(ParagraphCache::instance().stats().bytes == estimate);
+        // An upper bound with headroom, not a multiple of the real footprint:
+        // a far-off estimate would make the byte bound meaningless.
+        CHECK(held <= estimate);
+        CHECK(held * 3 >= estimate);
+    }
 }
 #endif
 

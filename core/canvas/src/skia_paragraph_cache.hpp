@@ -40,6 +40,8 @@ struct PreparedParagraph {
 // generic keywords resolve to platform families, so a change to that mapping
 // is a different key; `primary_typeface` is the resolved primary face, whose
 // optical size and AAT tracking the build applies.
+// Float fields must be canonical (finite, and +0 rather than -0): equality
+// and hashing compare them by value and by bits respectively.
 struct ParagraphKey {
     std::string text;
     std::vector<std::string> families;
@@ -49,6 +51,9 @@ struct ParagraphKey {
     int slant = 0;
     float letter_spacing = 0;
     bool ltr = true;
+    // SkParagraph rounds the first baseline only with hinting on, so hinting
+    // moves glyphs. SkiaCanvas never turns it off today.
+    bool hinting = true;
     std::vector<Canvas::FontFeature> features;
     std::uint64_t font_generation = 0;
 
@@ -64,7 +69,8 @@ struct CachedParagraph {
 };
 
 // A locked use of one paragraph. Holds the entry alive and its mutex for the
-// handle's lifetime; empty when the build failed.
+// handle's lifetime; empty when the build failed. Never hold two at once: a
+// second use of the same key on the same thread would wait on itself.
 class ParagraphUse {
   public:
     ParagraphUse() = default;

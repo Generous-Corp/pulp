@@ -515,7 +515,18 @@ new `SkiaCanvas` every frame, so a per-canvas cache never hits.
   cache builds paragraphs with no foreground paint and draws them through a
   `ParagraphPainter` that applies the caller's paint to each glyph run.
 - **Every use holds the entry's mutex** (`ParagraphUse`): SkParagraph mutates
-  itself on first paint and in queries such as `getRectsForRange`.
+  itself on first paint and in queries such as `getRectsForRange`. Never hold
+  two uses at once; the same key twice on one thread waits on itself.
+- **Key floats must be canonical.** The key compares floats by value and
+  hashes them by bits, so a NaN letter spacing (script can send one through
+  `setTextRuns`) never found its own entry, piled one in per paint, and then
+  crashed eviction; `-0` and `+0` hashed apart. `make_paragraph` replaces
+  non-finite size and spacing and folds `-0` to `+0` before building the key.
+- **Eviction is a segmented LRU on purpose.** A meter readout is a new string
+  every frame; with plain LRU it flushes every label that is not repainted
+  each frame. New entries start on probation and are protected on a second
+  lookup. Admitting only on a second miss instead would shape every stable
+  label twice and fail the benchmark's zero-build steady-state frame.
 - **Unspaced text the primary face cannot cover never reaches SkParagraph.**
   `fill_text` sends it to the per-run SkShaper fallback, so a cache test that
   draws a missing glyph must add letter spacing (or a feature) to exercise the
