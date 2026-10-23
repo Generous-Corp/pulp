@@ -944,6 +944,24 @@ endif()
 pulp_add_test_suite(pulp-test-graph-serializer GROUP pulp-test-group-app-host
     LIBRARIES pulp::host)
 
+# GraphSerializer plugin-node resolution against the known plugin roots. Its
+# own process: the fixture paths are baked in with $<TARGET_FILE:...>, it
+# loads a real CLAP, and it runs the scan worker, none of which the grouped
+# serializer suite declares it does. The editor-less link-floor CLAP is the
+# loadable plugin; it is not built on Windows, where those cases skip.
+if(PULP_HAS_CLAP AND NOT IOS AND NOT ANDROID)
+    pulp_add_test_suite(pulp-test-graph-plugin-resolution
+        LIBRARIES pulp::host
+        COMPILE_DEFINITIONS
+            PULP_SCAN_FIXTURE_PROBE_CLAP="$<TARGET_FILE:pulp-test-fixture-clap-probe>"
+            PULP_SCAN_WORKER_PATH="$<TARGET_FILE:pulp-scan-worker>"
+            PULP_TEST_NO_EDITOR_CLAP="${CMAKE_BINARY_DIR}/CLAP/Pulp No Editor Link Floor.clap")
+    pulp_test_spawns(pulp-test-graph-plugin-resolution
+        pulp-test-fixture-clap-probe
+        pulp-scan-worker
+        PulpNoEditorLinkFloor_CLAP)
+endif()
+
 # NetworkServiceDiscovery backend-dispatch tests
 pulp_add_test_suite(pulp-test-network-service-discovery LIBRARIES pulp::events)
 

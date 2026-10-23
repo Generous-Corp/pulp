@@ -89,9 +89,40 @@ struct ScanOptions {
     // Optional blacklist of bundle paths the scanner should skip, usually
     // populated from a prior out-of-process scanner crash. When non-null,
     // scan() short-circuits any path reported by ScanBlacklist::is_blacklisted
-    // and pushes nothing into the result for it. Caller-owned; must outlive
-    // scan().
+    // and pushes nothing into the result for it, and an isolated CLAP scan
+    // records every bundle whose worker crashed or hung into it. Caller-owned;
+    // must outlive scan().
     class ScanBlacklist* blacklist = nullptr;
+
+    // CLAP enumeration runs the bundle's `clap_entry` (dlopen + init +
+    // factory walk). Each bundle runs in a disposable `pulp-scan-worker`
+    // child process, so a bundle that crashes or hangs is reported into
+    // `blacklist` instead of taking the scanning process down. Entry points
+    // run in this process only when this is true; the worker itself scans
+    // this way, and `pulp scan --in-process` exposes it. When it is false and
+    // no worker can be found, CLAP enumeration is skipped and ScanReport says
+    // so: a host process never runs plugin code it did not ask to run.
+    bool in_process_clap = false;
+
+    // Worker binary for isolated CLAP scanning. Empty resolves the
+    // PULP_SCAN_WORKER environment variable, then `pulp-scan-worker` beside
+    // the running executable or in a `bin/` or `tools/scan-worker/` directory
+    // above it (see find_scan_worker).
+    std::string scan_worker_path;
+
+    // Per-bundle budget for the isolated worker; a bundle that exceeds it is
+    // recorded as a timeout in `blacklist`.
+    int scan_worker_timeout_ms = 5000;
+};
+
+// What a scan found, and what it refused to do.
+struct ScanReport {
+    std::vector<PluginInfo> plugins;
+    // CLAP enumeration was skipped because no `pulp-scan-worker` was found
+    // and ScanOptions::in_process_clap was false. `error` says where the
+    // scanner looked and how to opt into in-process enumeration.
+    bool clap_skipped_no_worker = false;
+    std::string error;
 };
 
 // ── Plugin Scanner ──────────────────────────────────────────────────────
@@ -101,8 +132,10 @@ public:
     PluginScanner() = default;
 
     // Scan all standard plugin directories and return found plugins.
-    // This performs I/O and may take seconds on large collections.
+    // This performs I/O and may take seconds on large collections. Anything
+    // the scan refused to do is logged; scan_report() returns it as data.
     std::vector<PluginInfo> scan(const ScanOptions& options = {});
+    ScanReport scan_report(const ScanOptions& options = {});
 
     // Get default scan paths for a specific format on the current platform
     static std::vector<std::string> default_paths(PluginFormat format);
@@ -110,10 +143,17 @@ public:
     // Quick check if a specific path looks like a valid plugin bundle
     static bool is_plugin_bundle(const std::string& path, PluginFormat format);
 
-private:
-    std::vector<PluginInfo> scan_directory(const std::string& dir, PluginFormat format);
+    // Enumerate exactly one bundle in this process, with no blacklist and no
+    // worker: the in-process half of scanning that `pulp-scan-worker` runs on
+    // the parent's behalf. A CLAP bundle runs its entry point here. Returns
+    // nothing for an Audio Unit (component discovery has no bundle path) or
+    // a path that is not a bundle of `format`.
+    static std::vector<PluginInfo> scan_bundle(const std::string& path, PluginFormat format);
+
+  private:
     std::vector<PluginInfo> scan_directory(const std::string& dir, PluginFormat format,
-                                           const class ScanBlacklist* blacklist);
+                                           const ScanOptions& options,
+                                           const class IsolatedPluginScanner* isolated);
     PluginInfo scan_vst3_bundle(const std::string& path);
     PluginInfo scan_clap_bundle(const std::string& path);
     PluginInfo scan_lv2_bundle(const std::string& path);

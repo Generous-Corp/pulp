@@ -55,6 +55,26 @@ TEST_CASE("rebuilt plugin is not blacklisted", "[host][blacklist]") {
     REQUIRE_FALSE(bl.is_blacklisted(f.path.string()));
 }
 
+TEST_CASE("a bundle directory entry expires when the binary inside it changes",
+          "[host][blacklist]") {
+    // A macOS-style bundle is a directory; its own mtime and size do not
+    // move when the executable inside is rebuilt, so the entry is stamped
+    // through that executable.
+    TempFile bundle;
+    const auto binary = bundle.path / "Contents" / "MacOS" / "Plugin";
+    fs::create_directories(binary.parent_path());
+    std::ofstream(binary, std::ios::binary) << "original";
+    std::ofstream(bundle.path / "Contents" / "Info.plist", std::ios::binary) << "<plist/>";
+
+    ScanBlacklist bl;
+    bl.blacklist(bundle.path.string(), "crash");
+    REQUIRE(bl.is_blacklisted(bundle.path.string()));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    std::ofstream(binary, std::ios::binary) << "rebuilt with very different content";
+    REQUIRE_FALSE(bl.is_blacklisted(bundle.path.string()));
+}
+
 TEST_CASE("deleted plugin entry remains blacklisted", "[host][blacklist]") {
     TempFile f;
     f.write("original");

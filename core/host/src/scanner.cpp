@@ -3,6 +3,7 @@
 // Each format has platform-specific default paths.
 
 #include <pulp/host/scanner.hpp>
+#include <pulp/host/isolated_scanner.hpp>
 #include <pulp/host/scan_blacklist.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <optional>
 #include <regex>
 #include <string>
 
@@ -242,16 +244,44 @@ PluginInfo PluginScanner::scan_lv2_bundle(const std::string& path) {
     return info;
 }
 
-std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir, PluginFormat format) {
-    return scan_directory(dir, format, nullptr);
+std::vector<PluginInfo> PluginScanner::scan_bundle(const std::string& path, PluginFormat format) {
+    std::vector<PluginInfo> results;
+    if (!is_plugin_bundle(path, format))
+        return results;
+    PluginScanner scanner;
+    switch (format) {
+    case PluginFormat::VST3:
+        results.push_back(scanner.scan_vst3_bundle(path));
+        break;
+    case PluginFormat::CLAP: {
+#if PULP_HOST_HAS_CLAP
+        results = scan_clap_bundle_descriptors(path);
+#else
+        results.push_back(scanner.scan_clap_bundle(path));
+#endif
+        break;
+    }
+    case PluginFormat::LV2:
+        results.push_back(scanner.scan_lv2_bundle(path));
+        break;
+    case PluginFormat::AudioUnit:
+    case PluginFormat::AudioUnitV3:
+    case PluginFormat::BuiltIn:
+        break;
+    }
+    return results;
 }
 
-std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir,
-                                                     PluginFormat format,
-                                                     const ScanBlacklist* blacklist) {
+std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir, PluginFormat format,
+                                                      const ScanOptions& options,
+                                                      const IsolatedPluginScanner* isolated) {
     std::vector<PluginInfo> results;
 
     if (format == PluginFormat::BuiltIn) return results;
+    // Without a worker, a CLAP entry point runs here; only a caller who asked
+    // for that gets it.
+    if (format == PluginFormat::CLAP && !isolated && !options.in_process_clap)
+        return results;
 
     std::error_code ec;
     if (!fs::exists(dir, ec) || !fs::is_directory(dir, ec)) return results;
@@ -262,28 +292,42 @@ std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir,
 
         // Consult the blacklist before opening the bundle so an entry that
         // crashed a previous scan is never dlopen'd again.
-        if (blacklist && blacklist->is_blacklisted(path)) continue;
+        if (options.blacklist && options.blacklist->is_blacklisted(path))
+            continue;
 
-        switch (format) {
-            case PluginFormat::VST3:
-                results.push_back(scan_vst3_bundle(path));
+        if (format == PluginFormat::CLAP && isolated) {
+            // The bundle's entry point runs in the worker; this process only
+            // reads the descriptors it printed. A crash or hang is the
+            // bundle's verdict, recorded so the next scan never opens it.
+            auto outcome = isolated->scan(path, options.scan_worker_timeout_ms);
+            switch (outcome.status) {
+            case ScanStatus::Ok:
+                results.insert(results.end(), outcome.descriptors.begin(),
+                               outcome.descriptors.end());
                 break;
-            case PluginFormat::CLAP: {
-#if PULP_HOST_HAS_CLAP
-                auto descs = scan_clap_bundle_descriptors(path);
-                results.insert(results.end(), descs.begin(), descs.end());
-#else
-                results.push_back(scan_clap_bundle(path));
-#endif
+            case ScanStatus::Crash:
+            case ScanStatus::Timeout:
+                runtime::log_warn("CLAP scan: '{}' crashed its scan worker: {}", path,
+                                  outcome.error_message);
+                if (options.blacklist)
+                    options.blacklist->blacklist(path, outcome.error_message);
+                break;
+            case ScanStatus::NotPlugin:
+                break;
+            case ScanStatus::FormatError:
+            case ScanStatus::WorkerMissing:
+            case ScanStatus::ProtocolError:
+                // The worker, not the bundle, failed: no verdict, no
+                // blacklist entry.
+                runtime::log_warn("CLAP scan: worker could not scan '{}': {}", path,
+                                  outcome.error_message);
                 break;
             }
-            case PluginFormat::LV2:
-                results.push_back(scan_lv2_bundle(path));
-                break;
-            case PluginFormat::BuiltIn:
-                break;
-            default: break;
+            continue;
         }
+
+        auto found = scan_bundle(path, format);
+        results.insert(results.end(), found.begin(), found.end());
     }
 
     return results;
@@ -300,9 +344,40 @@ std::vector<PluginInfo> PluginScanner::scan_audio_units() {
 #endif
 
 std::vector<PluginInfo> PluginScanner::scan(const ScanOptions& options) {
-    std::vector<PluginInfo> all;
+    return scan_report(options).plugins;
+}
+
+ScanReport PluginScanner::scan_report(const ScanOptions& options) {
+    ScanReport report;
+    auto& all = report.plugins;
     int total_dirs = 0;
     int scanned = 0;
+
+    // CLAP enumeration executes each bundle, so it runs in a disposable
+    // worker unless the caller asked for this process. Resolve the worker
+    // once per scan. Without one, and without that explicit ask, CLAP is
+    // skipped: enumerating anyway would run every installed bundle's entry
+    // point inside whatever process this is, which may be a DAW.
+    std::optional<IsolatedPluginScanner> isolated;
+    bool scan_clap = options.scan_clap;
+    if (options.scan_clap && !options.in_process_clap) {
+        const auto worker = find_scan_worker(options.scan_worker_path);
+        if (!worker.empty()) {
+            isolated.emplace(worker);
+        } else {
+            scan_clap = false;
+            report.clap_skipped_no_worker = true;
+            report.error =
+                "no scan worker found" +
+                (options.scan_worker_path.empty()
+                     ? std::string(" (PULP_SCAN_WORKER unset; no pulp-scan-worker beside the "
+                                   "executable)")
+                     : " at '" + options.scan_worker_path + "'") +
+                "; CLAP bundles were not enumerated. Set ScanOptions::in_process_clap "
+                "(pulp scan --in-process) to run their entry points in this process.";
+            runtime::log_error("PluginScanner: {}", report.error);
+        }
+    }
 
     auto scan_format = [&](PluginFormat fmt) {
         // Hermetic lanes can supply explicit scan roots without also walking
@@ -319,13 +394,14 @@ std::vector<PluginInfo> PluginScanner::scan(const ScanOptions& options) {
             }
             // Keep blacklist filtering inside scan_directory so skipped
             // bundles are rejected before any format scanner can open them.
-            auto found = scan_directory(dir, fmt, options.blacklist);
+            auto found = scan_directory(dir, fmt, options, isolated ? &*isolated : nullptr);
             all.insert(all.end(), found.begin(), found.end());
         }
     };
 
     if (options.scan_vst3)  scan_format(PluginFormat::VST3);
-    if (options.scan_clap)  scan_format(PluginFormat::CLAP);
+    if (scan_clap)
+        scan_format(PluginFormat::CLAP);
     if (options.scan_lv2)   scan_format(PluginFormat::LV2);
 
 #ifdef __APPLE__
@@ -344,7 +420,7 @@ std::vector<PluginInfo> PluginScanner::scan(const ScanOptions& options) {
         [](const PluginInfo& a, const PluginInfo& b) { return a.name < b.name; });
 
     runtime::log_info("PluginScanner: found {} plugins", all.size());
-    return all;
+    return report;
 }
 
 bool plugin_info_from_au_identity(std::string_view identity, PluginInfo& info) {
