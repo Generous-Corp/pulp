@@ -61,9 +61,9 @@ class Host:
         # `rustup <kind> list --installed --toolchain <pin>` output; rustup is
         # only on the fake PATH when a test adds it.
         self.rustup = {
-            "component": "cargo-aarch64-apple-darwin\nclippy-aarch64-apple-darwin\n"
-                         "rust-std-aarch64-apple-darwin\nrustc-aarch64-apple-darwin\nrustfmt-aarch64-apple-darwin\n",
-            "target": "aarch64-apple-darwin\nx86_64-apple-darwin\n",
+            "component": "cargo-aarch64-unknown-linux-gnu\nclippy-aarch64-unknown-linux-gnu\n"
+                         "rust-std-aarch64-unknown-linux-gnu\nrustc-aarch64-unknown-linux-gnu\nrustfmt-aarch64-unknown-linux-gnu\n",
+            "target": "aarch64-unknown-linux-gnu\nwasm32-unknown-unknown\n",
         }
 
     @property
@@ -200,20 +200,20 @@ class CheckEnvTests(unittest.TestCase):
         self.host.present.add("rustup")
         doc = self.matching()
         doc["rust_components"] = ["rustfmt", "clippy"]
-        doc["rust_targets"] = ["x86_64-apple-darwin"]
+        doc["rust_targets"] = ["wasm32-unknown-unknown"]
         return doc
 
     def test_a_pinned_toolchain_missing_a_component_or_target_is_reported(self) -> None:
         doc = self.with_rust_parts()
         self.assertEqual([], self.collect(doc))  # control: everything listed is installed
-        self.host.rustup["component"] = self.host.rustup["component"].replace("clippy-aarch64-apple-darwin\n", "")
+        self.host.rustup["component"] = self.host.rustup["component"].replace("clippy-aarch64-unknown-linux-gnu\n", "")
         findings = self.collect(doc)
         self.assertEqual(["rust components"], [f.tool for f in findings])
         self.assertIn("missing clippy", findings[0].line())
         self.assertIn("rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy "
-                      "--target x86_64-apple-darwin", findings[0].fix)
-        self.host.rustup["target"] = "aarch64-apple-darwin\n"
-        self.assertIn("missing clippy, x86_64-apple-darwin", self.collect(doc)[0].line())
+                      "--target wasm32-unknown-unknown", findings[0].fix)
+        self.host.rustup["target"] = "aarch64-unknown-linux-gnu\n"
+        self.assertIn("missing clippy, wasm32-unknown-unknown", self.collect(doc)[0].line())
 
     def test_rust_parts_are_asked_of_the_pinned_toolchain_by_name(self) -> None:
         doc = self.with_rust_parts()

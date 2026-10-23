@@ -1885,14 +1885,26 @@ jobs:
 
       # experimental/pulp-rs/rust-toolchain.toml (generated from
       # tools/toolchain/manifest.toml) names an exact Rust, and RUSTUP_AUTO_INSTALL=0
-      # keeps cargo from fetching it mid-build. Install it here, before the build,
-      # when the image lacks it; a golden baked with the pin by name makes this a
-      # no-op. If rustup cannot download it, the build falls back to the runner's
-      # default toolchain with a warning rather than failing on the network.
+      # keeps cargo from fetching it mid-build. This provides it before the build:
+      # offline when the image has it by name or its stable is the same release,
+      # otherwise a download. Self-hosted legs (the required gate) fail closed;
+      # only GitHub-hosted legs may fall back, with a warning, a step summary line
+      # and the receipt uploaded below. Once tartci bakes the pin by name into the
+      # live golden, --fallback-to-default goes too (decisions contract row 29).
       - name: Provide the pinned Rust toolchain
+        id: pinned-rust
         timeout-minutes: 10
         shell: bash
         run: bash tools/ci/provide_pinned_rust.sh --fallback-to-default
+
+      - name: Upload the Rust fallback receipt
+        if: steps.pinned-rust.outputs.branch == 'fallback'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-toolchain-fallback-${{ matrix.key || runner.os }}
+          path: ${{ steps.pinned-rust.outputs.receipt }}
+          retention-days: 30
 
       - name: Fetch pulp-rs crates
         shell: bash

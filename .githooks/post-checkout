@@ -7,11 +7,18 @@
 # $3 when it checks a branch out for the first time. Exactly one file is
 # trusted: mise's trusted_config_paths are prefixes, so trusting a parent
 # directory would trust every repository under it, and a .mise.toml can run
-# code. Never fails the checkout.
+# code. The path is the physical one (a worktree reached through a symlink is
+# trusted at its real location), and a .mise.toml that is itself a symlink is
+# never trusted, since its target could be anywhere. Never fails the checkout.
 null_sha=0000000000000000000000000000000000000000
 [ "${1:-}" = "$null_sha" ] && [ "${3:-}" = 1 ] || exit 0
-config="$PWD/.mise.toml"
+dir="$(pwd -P)" || exit 0
+config="$dir/.mise.toml"
 [ -f "$config" ] || exit 0
+if [ -L "$config" ]; then
+  echo "post-checkout: $config is a symlink; not trusting it" >&2
+  exit 0
+fi
 command -v mise >/dev/null 2>&1 || exit 0
 mise trust --quiet "$config" >/dev/null 2>&1 \
   || echo "post-checkout: could not trust $config; run: mise trust $config" >&2

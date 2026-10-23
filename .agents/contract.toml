@@ -348,3 +348,12 @@ title = "mise trust is per checkout: .githooks/post-checkout trusts a new worktr
 why = "mise 2026.10.13+ refuses an untrusted config, so python3 through the mise shim failed in every fresh worktree (gates.sh, pre-push). A root in trusted_config_paths is a prefix match that would trust every repository cloned under it, and a .mise.toml can run code."
 do_not = "Adding trusted_config_paths roots, trusting a parent directory, $HOME or /, or running `mise trust` on an arbitrary path; repair one worktree with `mise trust <worktree>/.mise.toml`."
 guards = [".githooks/**", ".mise.toml", "tools/toolchain/**"]
+
+[[decision]]
+id = 29
+layer = "pulp"
+tags = ["rust", "fallback", "fail-closed", "gate", "receipt", "rustup"]
+title = "A build that cannot get the pinned Rust fails closed on self-hosted legs and on pull requests that change experimental/pulp-rs; only GitHub-hosted legs may fall back, and only loudly (::warning naming both versions, a step summary line, a JSON receipt uploaded as an artifact). When tartci bakes the pin by name into the live golden, --fallback-to-default is removed from build.yml and every leg fails closed."
+why = "A silent fallback leaves the required gate green on an unpinned compiler, so code that needs a newer stable passes review. The gate VMs reach the network through a proxy that refuses static.rust-lang.org ('tunnel error: unsuccessful' on all three attempts, PR 10789's first macos run), so their pin must come from the image: by name, or as a stable that is the same release with every pinned part."
+do_not = "Letting a self-hosted leg fall back; dropping the warning, summary line or receipt; keeping --fallback-to-default after the golden carries the pin by name; fixing a gate that cannot download Rust by re-enabling auto-install."
+guards = ["tools/ci/**", ".github/workflows/**", "experimental/pulp-rs/rust-toolchain.toml"]

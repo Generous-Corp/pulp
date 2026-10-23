@@ -106,7 +106,9 @@ holds the lock. `fleet_report.py` (hourly) is the read-only drift alarm.
 - `rustup toolchain link 1.97.1 <sysroot>` is refused ("invalid custom
   toolchain name"): an official release name cannot be aliased. CI selects an
   identical `stable` by name instead (`tools/ci/provide_pinned_rust.sh`,
-  branch `stable-alias`).
+  branch `stable-alias`). That script fails closed on self-hosted legs and on
+  pull requests that change `experimental/pulp-rs`; only hosted legs may fall
+  back, with a warning, a summary line and a receipt (contract row 29).
 - Tests run it as a subprocess against a real local git origin and shell fakes
   for mise/rustup/rustc with HOME in the fixture
   (`tools/toolchain/test_host_sync.py`); never let a test reach the real

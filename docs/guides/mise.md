@@ -424,7 +424,10 @@ symlink: a dangling `--dir` mount takes a lane down.
 mise refuses a config it does not trust, so in a fresh worktree any command
 that reaches `python3` through the mise shim (`gates.sh`, the pre-push hook)
 fails. `.githooks/post-checkout` trusts the new worktree's own `.mise.toml`
-when git creates it, and `host_sync.py` trusts the checkout it runs in.
+when git creates it, and `host_sync.py` trusts the checkout it runs in. Both
+trust the file at the checkout's physical path (a worktree reached through a
+symlink is trusted where it really is), and neither trusts a `.mise.toml` that
+is itself a symlink.
 
 - Check: `mise settings get locked` inside the worktree prints `true`.
 - Repair one worktree: `mise trust <worktree>/.mise.toml`.

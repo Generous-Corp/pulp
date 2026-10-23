@@ -64,7 +64,7 @@ mkdir -p "$S"
 case "$1 $2" in
   "toolchain list")
     # A toolchain is a directory under $S; `stable` holds a `version` file.
-    for t in "$S"/*; do [ -d "$t" ] && echo "$(basename "$t")-aarch64-apple-darwin"; done
+    for t in "$S"/*; do [ -d "$t" ] && echo "$(basename "$t")-aarch64-unknown-linux-gnu"; done
     exit 0 ;;
   "toolchain install")
     if [ -n "$FAKE_RUSTUP_FAIL" ]; then
@@ -86,13 +86,13 @@ case "$1 $2" in
     fi
     exit 0 ;;
   "component list")
-    [ -d "$S/$5" ] || { echo "error: toolchain '$5-aarch64-apple-darwin' is not installed" >&2; exit 1; }
-    echo "rustc-aarch64-apple-darwin"
-    sed 's/$/-aarch64-apple-darwin/' "$S/$5/components" 2>/dev/null
+    [ -d "$S/$5" ] || { echo "error: toolchain '$5-aarch64-unknown-linux-gnu' is not installed" >&2; exit 1; }
+    echo "rustc-aarch64-unknown-linux-gnu"
+    sed 's/$/-aarch64-unknown-linux-gnu/' "$S/$5/components" 2>/dev/null
     exit 0 ;;
   "target list")
-    [ -d "$S/$5" ] || { echo "error: toolchain '$5-aarch64-apple-darwin' is not installed" >&2; exit 1; }
-    echo "aarch64-apple-darwin"
+    [ -d "$S/$5" ] || { echo "error: toolchain '$5-aarch64-unknown-linux-gnu' is not installed" >&2; exit 1; }
+    echo "aarch64-unknown-linux-gnu"
     cat "$S/$5/targets" 2>/dev/null
     exit 0 ;;
 esac
@@ -102,7 +102,7 @@ if [ "$1" = run ] && [ "$3 $4" = "rustc --version" ]; then
   echo "rustc $v (fake 2026-06-12)"
   exit 0
 fi
-if [ "$1" = default ] && [ $# -eq 1 ]; then echo "stable-aarch64-apple-darwin (default)"; exit 0; fi
+if [ "$1" = default ] && [ $# -eq 1 ]; then echo "stable-aarch64-unknown-linux-gnu (default)"; exit 0; fi
 echo "fake rustup: unexpected $*" >&2
 exit 2
 """
@@ -112,7 +112,7 @@ FAKE_RUSTC = r"""#!/bin/sh
 pin=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml 2>/dev/null)
 [ -n "$pin" ] || pin=stable
 if [ -d "$HOME/rustup-state/$pin" ]; then echo "rustc $pin (fake 2026-06-12)"; exit 0; fi
-echo "error: toolchain '$pin-aarch64-apple-darwin' is not installed" >&2
+echo "error: toolchain '$pin-aarch64-unknown-linux-gnu' is not installed" >&2
 exit 1
 """
 
@@ -199,7 +199,7 @@ class HostSyncTests(unittest.TestCase):
             # A per-checkout tree the pins copy never has: reported, never counted.
             "npm_prefixes": ["web"],
             "rust_components": ["rustfmt", "clippy"],
-            "rust_targets": ["x86_64-apple-darwin"],
+            "rust_targets": ["wasm32-unknown-unknown"],
         }
 
     def pins(self, rust: str = PIN, **kw: str) -> Dict[str, str]:
@@ -268,7 +268,7 @@ class HostSyncTests(unittest.TestCase):
         self.assertIn(f"trust --quiet {self.checkout}/.mise.toml", self.log("mise"))
         self.assertEqual(
             [f"toolchain install {PIN} --profile minimal --no-self-update --component rustfmt,clippy "
-             "--target x86_64-apple-darwin"],
+             "--target wasm32-unknown-unknown"],
             self.installs(),
         )
         # The per-checkout npm tree is reported, never counted against the host.
@@ -360,7 +360,7 @@ class HostSyncTests(unittest.TestCase):
         notes = self.receipt()["report_only"]
         self.assertTrue(any("not rustup's proxy" in n for n in notes), notes)
         self.assertTrue(any("default rustup toolchain is stable" in n for n in notes), notes)
-        if sys.platform == "darwin":
+        if host_sync.host_platform().startswith("macos"):
             self.assertTrue(any(n.startswith("Xcode: Xcode 26.5") for n in notes), notes)
         self.assertTrue(host_sync.is_homebrew("/opt/homebrew/bin/cmake"))
         self.assertFalse(host_sync.is_homebrew(str(self.base_bin / "rustc")))
@@ -430,6 +430,10 @@ class ProvidePinnedRustTests(unittest.TestCase):
         shutil.copy(REPO / "experimental/pulp-rs/rust-toolchain.toml", crate / "rust-toolchain.toml")
         self.github_env = self.root / "github_env"
         self.github_env.write_text("", encoding="utf-8")
+        self.summary = self.root / "step_summary"
+        self.outputs = self.root / "step_outputs"
+        self.runner_temp = self.root / "runner_temp"
+        self.runner_temp.mkdir()
         self.expected = json.loads((HERE / "expected.json").read_text(encoding="utf-8"))
         self.pin = self.expected["tools"]["rust"]
 
@@ -439,10 +443,15 @@ class ProvidePinnedRustTests(unittest.TestCase):
     def provide(self, *args: str, **env: str) -> subprocess.CompletedProcess:
         # /bin/bash: macOS runners run 3.2.
         base = {"PATH": "/usr/bin:/bin", "HOME": str(self.home), "GITHUB_ENV": str(self.github_env),
+                "GITHUB_STEP_SUMMARY": str(self.summary), "GITHUB_OUTPUT": str(self.outputs),
+                "RUNNER_TEMP": str(self.runner_temp), "RUNNER_ENVIRONMENT": "self-hosted",
                 "PULP_RUST_INSTALL_RETRY_DELAY_SECS": "0", "RUSTUP_AUTO_INSTALL": "0"}
         return subprocess.run(["/bin/bash", str(self.work / "tools/ci/provide_pinned_rust.sh"), *args],
                               cwd=self.root, env=dict(base, **env), capture_output=True, text=True,
                               encoding="utf-8", check=False)
+
+    def receipt(self) -> dict:
+        return json.loads((self.runner_temp / "pulp-rust-toolchain.json").read_text(encoding="utf-8"))
 
     def installs(self) -> List[str]:
         log = self.home / "rustup.log"
@@ -506,24 +515,70 @@ class ProvidePinnedRustTests(unittest.TestCase):
         self.assertEqual(2, len(self.installs()))
         self.assertIn("was missing: clippy", out.stdout)
 
-    def test_a_failed_install_falls_back_to_stable_naming_both_versions_only_when_asked(self) -> None:
+    def test_a_hosted_fallback_is_loud_and_receipted(self) -> None:
         self.stable("1.99.0")
-        out = self.provide("--fallback-to-default", FAKE_RUSTUP_FAIL="1")
+        out = self.provide("--fallback-to-default", FAKE_RUSTUP_FAIL="1", RUNNER_ENVIRONMENT="github-hosted")
         self.assertEqual(0, out.returncode, out.stdout + out.stderr)
         self.assertEqual("fallback", self.branch(out))
         self.assertEqual(3, len(self.installs()), "three spaced attempts")
         self.assertIn(f"::warning title=toolchain::could not install the pinned Rust {self.pin}; "
                       f"this run builds pulp-rs with stable (rustc 1.99.0), not {self.pin}", out.stdout)
         self.assertEqual("RUSTUP_TOOLCHAIN=stable\n", self.github_env.read_text(encoding="utf-8"))
-        strict = self.provide(FAKE_RUSTUP_FAIL="1")
+        receipt = self.receipt()
+        self.assertEqual(
+            {"pinned": self.pin, "branch": "fallback", "toolchain": "stable", "rustc": "1.99.0", "attempts": 3,
+             "runner_environment": "github-hosted"},
+            {k: receipt[k] for k in ("pinned", "branch", "toolchain", "rustc", "attempts", "runner_environment")},
+        )
+        self.assertIn("download failed", receipt["reason"])
+        summary = self.summary.read_text(encoding="utf-8")
+        self.assertIn(f"branch `fallback`, pinned `{self.pin}`, built with `stable` (`1.99.0`)", summary)
+        self.assertIn("branch=fallback", self.outputs.read_text(encoding="utf-8").splitlines())
+
+    def test_a_self_hosted_runner_never_falls_back(self) -> None:
+        self.stable("1.99.0")
+        out = self.provide("--fallback-to-default", FAKE_RUSTUP_FAIL="1")
+        self.assertEqual(1, out.returncode, out.stdout + out.stderr)
+        self.assertIn("a self-hosted runner (self-hosted) must carry the pin", out.stderr)
+        self.assertEqual("", self.github_env.read_text(encoding="utf-8"))
+        self.assertEqual("failed", self.receipt()["branch"])
+        strict = self.provide(FAKE_RUSTUP_FAIL="1", RUNNER_ENVIRONMENT="github-hosted")
         self.assertEqual(1, strict.returncode, strict.stdout + strict.stderr)
-        self.assertIn("::error::could not install the pinned Rust", strict.stderr)
+        self.assertIn("::error title=toolchain::could not install the pinned Rust", strict.stderr)
+
+    def test_a_pull_request_changing_pulp_rs_never_falls_back(self) -> None:
+        self.stable("1.99.0")
+        env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", HOME=str(self.home))
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-C", str(self.work)]
+        subprocess.run(git[:5] + ["init", "--quiet", "-b", "main", str(self.work)], env=env, check=True)
+        subprocess.run(git + ["add", "."], env=env, check=True)
+        subprocess.run(git + ["commit", "--quiet", "-m", "base"], env=env, check=True)
+        subprocess.run(git + ["update-ref", "refs/remotes/origin/main", "HEAD"], env=env, check=True)
+        hosted = {"FAKE_RUSTUP_FAIL": "1", "RUNNER_ENVIRONMENT": "github-hosted", "GITHUB_BASE_REF": "main"}
+        self.assertEqual(0, self.provide("--fallback-to-default", **hosted).returncode)  # control: untouched
+        (self.work / "experimental/pulp-rs/src.rs").write_text("fn main() {}\n", encoding="utf-8")
+        subprocess.run(git + ["add", "."], env=env, check=True)
+        subprocess.run(git + ["commit", "--quiet", "-m", "change pulp-rs"], env=env, check=True)
+        out = self.provide("--fallback-to-default", **hosted)
+        self.assertEqual(1, out.returncode, out.stdout + out.stderr)
+        self.assertIn("this pull request changes experimental/pulp-rs", out.stderr)
+
+    def test_cargo_without_rustup_is_a_warning_with_a_receipt(self) -> None:
+        (self.home / ".cargo/bin/rustup").unlink()
+        tools = self.root / "brew/bin"
+        script(tools / "cargo", "#!/bin/sh\necho 'cargo 1.99.0'\n")
+        script(tools / "rustc", "#!/bin/sh\necho 'rustc 1.99.0 (homebrew)'\n")
+        out = self.provide(PATH=f"{tools}:/usr/bin:/bin")
+        self.assertEqual(0, out.returncode, out.stdout + out.stderr)
+        self.assertIn(f"::warning title=toolchain::cargo at {tools}/cargo is not rustup's", out.stdout)
+        self.assertIn(f"rustc 1.99.0 (homebrew), not the pinned {self.pin}", out.stdout)
+        self.assertEqual("no-rustup", self.receipt()["branch"])
 
     def test_a_runner_without_rustup_is_left_alone(self) -> None:
         (self.home / ".cargo/bin/rustup").unlink()
         out = self.provide()
         self.assertEqual(0, out.returncode, out.stdout + out.stderr)
-        self.assertIn("no rustup on this runner", out.stdout)
+        self.assertIn("no rustup and no cargo on this runner", out.stdout)
 
     def test_every_lane_that_builds_pulp_rs_provides_the_pin_first(self) -> None:
         build = (REPO / ".github/workflows/build.yml").read_text(encoding="utf-8")
@@ -608,6 +663,23 @@ class PostCheckoutTrustHookTests(unittest.TestCase):
         bare.mkdir()
         out = self.hook(bare, self.NULL, "2" * 40, "1")
         self.assertEqual((0, ""), (out.returncode, out.stderr))
+        self.assertEqual([], self.log())
+
+    def test_a_worktree_reached_through_a_symlink_is_trusted_at_its_real_path(self) -> None:
+        link = self.root / "via-link"
+        link.symlink_to(self.repo)
+        out = self.hook(link, self.NULL, "2" * 40, "1", PWD=str(link))
+        self.assertEqual(0, out.returncode, out.stderr)
+        self.assertEqual([f"{self.repo}|trust --quiet {self.repo}/.mise.toml"], self.log())
+
+    def test_a_symlinked_config_is_never_trusted(self) -> None:
+        elsewhere = self.root / "elsewhere.toml"
+        elsewhere.write_text("[settings]\n", encoding="utf-8")
+        (self.repo / ".mise.toml").unlink()
+        (self.repo / ".mise.toml").symlink_to(elsewhere)
+        out = self.hook(self.repo, self.NULL, "2" * 40, "1")
+        self.assertEqual(0, out.returncode)
+        self.assertIn("is a symlink; not trusting it", out.stderr)
         self.assertEqual([], self.log())
 
     def test_a_failed_trust_never_fails_the_checkout(self) -> None:

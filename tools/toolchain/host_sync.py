@@ -244,7 +244,9 @@ def trust_checkout(mise: Path, repo: Path, env: Dict[str, str], run: Runner) -> 
     """Trust exactly this checkout's .mise.toml, as .githooks/post-checkout
     does for a new worktree. Never a parent directory: mise's trust paths are
     prefixes, and a .mise.toml can run code."""
-    config = repo / ".mise.toml"
+    config = Path(os.path.realpath(str(repo))) / ".mise.toml"
+    if config.is_symlink():
+        return Step("trust", "skipped", f"{config} is a symlink, whose target could be anywhere; not trusted")
     if not config.is_file():
         return Step("trust", "skipped", f"{config} does not exist")
     argv = [str(mise), "trust", "--quiet", str(config)]

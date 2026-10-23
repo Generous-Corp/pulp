@@ -884,9 +884,13 @@ title=toolchain::could not install the pinned Rust` means that download failed
 and the job built with the runner default (`RUSTUP_TOOLCHAIN`). Fix the golden
 (install the manifest's Rust by name, as `tools/ci/mise-golden-layer.sh`
 does), never by re-enabling auto-install in the workflow or deleting the step.
-The step logs `rust: branch=present|stable-alias|install|fallback`; on a gate
-VM anything but `present` or `stable-alias` means the golden drifted from the
-pin and pays a download. `rustup toolchain link` cannot alias an official
+The step logs `rust: branch=present|stable-alias|install|fallback` and writes
+a JSON receipt plus a step summary line. Gate VMs cannot download Rust at all
+(their egress proxy refuses `static.rust-lang.org`: "tunnel error:
+unsuccessful"), and self-hosted legs never fall back, so a gate VM whose image
+has neither the pin by name nor an identical `stable` FAILS the step: rebake
+the golden, do not add a fallback (contract row 29). Only GitHub-hosted legs
+may fall back, loudly and with an uploaded receipt. `rustup toolchain link` cannot alias an official
 release name, which is why an identical `stable` is selected with
 `RUSTUP_TOOLCHAIN=stable` instead.
 
