@@ -9,6 +9,32 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v101"></a>
+## [1.0.1] - 2026-10-23
+
+- release/version bump ([#10860](https://github.com/Generous-Corp/pulp/pull/10860))
+- codex/windows m157 build 20261022 ([#10755](https://github.com/Generous-Corp/pulp/pull/10755))
+
+<a id="v100"></a>
+## [1.0.0] - 2026-10-23
+
+- release/version bump ([#10858](https://github.com/Generous-Corp/pulp/pull/10858))
+- codex/signalgraph header probes 20261023 ([#10850](https://github.com/Generous-Corp/pulp/pull/10850))
+- asr/rack gate sandbox 20261022 ([#10756](https://github.com/Generous-Corp/pulp/pull/10756))
+- fix/view audio floor weak defs 20261023 ([#10845](https://github.com/Generous-Corp/pulp/pull/10845))
+- release/version bump ([#10846](https://github.com/Generous-Corp/pulp/pull/10846))
+- perf/signal family 20261022 ([#10705](https://github.com/Generous-Corp/pulp/pull/10705))
+- feature/ux w2 bench 20261023 ([#10820](https://github.com/Generous-Corp/pulp/pull/10820))
+- feature/ux w1 k inline formats 20261022 ([#10819](https://github.com/Generous-Corp/pulp/pull/10819))
+- fix/linux plugin core pic and test timeouts ([#10825](https://github.com/Generous-Corp/pulp/pull/10825))
+- feature/text raster decomposition ([#10823](https://github.com/Generous-Corp/pulp/pull/10823))
+- fix/vellum closure gate hardening ([#10832](https://github.com/Generous-Corp/pulp/pull/10832))
+- feature/imp q svg lowering ([#10822](https://github.com/Generous-Corp/pulp/pull/10822))
+- test/gpu wavenet staged timestamps 20261022 ([#10817](https://github.com/Generous-Corp/pulp/pull/10817))
+- plan/importer followups 20261023 ([#10830](https://github.com/Generous-Corp/pulp/pull/10830))
+- fix/script test inputs node multi file ([#10836](https://github.com/Generous-Corp/pulp/pull/10836))
+- release/version bump ([#10844](https://github.com/Generous-Corp/pulp/pull/10844))
+
 <a id="v010160"></a>
 ## [0.1016.0] - 2026-10-23
 
@@ -11390,6 +11416,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.0.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.0.1
+[1.0.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.0.0
 [0.1016.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1016.0
 [0.1015.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1015.0
 [0.1014.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1014.0
