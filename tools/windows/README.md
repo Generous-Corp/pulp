@@ -54,6 +54,7 @@ space with:
 ./tools/windows/expand-qemu-overlay.sh \
   --overlay /Volumes/Atelier/VMs/bench/<owned-run>/overlay.qcow2 \
   --backup /Volumes/Atelier/VMs/bench/<owned-run>/overlay-before-resize.qcow2 \
+  --disposable-root /Volumes/Atelier/VMs/bench \
   --extra-gib 30
 ```
 

@@ -8,6 +8,44 @@ ssh_helper="$repo_root/tools/windows/ssh-qemu.sh"
 for helper in "$open_helper" "$ssh_helper" "$repo_root/tools/windows/ensure-rdp-over-ssh.sh"; do
   bash -n "$helper"
 done
+bash -n "$repo_root/tools/windows/expand-qemu-overlay.sh"
+
+# The resize helper must reject both a persistent/non-overlay image and an
+# overlay outside the explicitly declared disposable root.  These are safety
+# controls, not product fixtures: no resize is allowed in either case.
+resize_tmp="$(mktemp -d "${TMPDIR:-/tmp}/pulp-windows-resize.XXXXXX")"
+trap 'rm -f "$resize_tmp"/*.qcow2 "$resize_tmp"/*.img; rmdir "$resize_tmp" 2>/dev/null || true' EXIT
+qemu-img create -q -f qcow2 "$resize_tmp/base.qcow2" 16M
+non_overlay_output="$({ "$repo_root/tools/windows/expand-qemu-overlay.sh" \
+  --overlay "$resize_tmp/base.qcow2" \
+  --backup "$resize_tmp/base-backup.qcow2" \
+  --disposable-root "$resize_tmp"; } 2>&1 || true)"
+[[ "$non_overlay_output" == *"non-overlay image"* ]] || {
+  echo "expand-qemu-overlay.sh accepted a non-overlay image" >&2
+  exit 1
+}
+outside="$resize_tmp-outside.qcow2"
+qemu-img create -q -f qcow2 "$outside" 16M
+outside_output="$({ "$repo_root/tools/windows/expand-qemu-overlay.sh" \
+  --overlay "$outside" \
+  --backup "$resize_tmp/outside-backup.qcow2" \
+  --disposable-root "$resize_tmp"; } 2>&1 || true)"
+[[ "$outside_output" == *"outside disposable root"* ]] || {
+  echo "expand-qemu-overlay.sh accepted an out-of-root image" >&2
+  exit 1
+}
+rm -f "$outside"
+qemu-img create -q -f raw "$resize_tmp/backing.img" 16M
+qemu-img create -q -f qcow2 -F raw -b "$resize_tmp/backing.img" "$resize_tmp/overlay.qcow2"
+qemu-img create -q -f qcow2 -F qcow2 -b "$resize_tmp/overlay.qcow2" "$resize_tmp/child.qcow2"
+dependent_output="$({ "$repo_root/tools/windows/expand-qemu-overlay.sh" \
+  --overlay "$resize_tmp/overlay.qcow2" \
+  --backup "$resize_tmp/overlay-backup.qcow2" \
+  --disposable-root "$resize_tmp"; } 2>&1 || true)"
+[[ "$dependent_output" == *"used as backing image"* ]] || {
+  echo "expand-qemu-overlay.sh accepted an overlay used by another image" >&2
+  exit 1
+}
 
 missing_config_output="$({ env -u SPECTR_WINDOWS_UTM_UUID -u SPECTR_WINDOWS_SSH_PORT \
   -u SPECTR_WINDOWS_RDP_PORT \
