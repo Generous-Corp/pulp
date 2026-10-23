@@ -209,6 +209,62 @@ same reason: smaller quanta run back to back inside one callback.
 negatives the plug-in plants, which must come back FAIL and INCONCLUSIVE
 respectively.
 
+A REAPER run can be read in v2 terms (the same receipt as the other hosts, so
+a planted negative reads `negative_proved`) without running anything again:
+
+```bash
+python3 tools/testing/daw-smoke/real_host_smoke.py wrap-reaper \
+  --reaper-run /tmp/gpu-fault-run --out /tmp/gpu-fault-run-v2 --code-commit <sha>
+```
+
+It refuses a run the v1 verifier does not accept live. REAPER's harness does
+not record its launch time, so the v2 host block bounds it below by the
+preflight's `host_vitals` sample, which is taken before REAPER starts.
+
+Where both the plug-in capture and the host's realtime render deviate, the v2
+verifier requires the render to sit exactly the PDC the plug-in declared in its
+`prepared` event earlier, at both ends of the deviation. On the shared-I/O
+convolver that is `(lead_blocks + 1) * quantum` (1536 at a 512 quantum); the
+`latency_samples` in the health status (1024) is the GPU lead alone, not the
+PDC the host compensates. Any other offset makes the row INCONCLUSIVE.
+
+### Real hosts: Logic, GarageBand, Bitwig (WP-K)
+
+`real_host_smoke.py` drives these one step at a time; the UI steps are done
+through cmux-cua by accessibility element, with the host launched by
+`open -g -n`. Allow about 15 minutes per host.
+
+1. `preflight --host H --run DIR` refuses a running DAW, a locked console, an
+   active rendezvous or an unreverted run.
+2. For an AU host, `install-au`; for Bitwig, `snapshot-prefs`. Logic and
+   GarageBand preferences are not snapshotted by the driver yet: before the
+   launch, `defaults export com.apple.logic10 DIR/logic10.before.plist`; after
+   the quit, `defaults import com.apple.logic10 DIR/logic10.before.plist` and
+   `defaults delete` each key the export did not have (`import` merges, so an
+   added key such as `NewTrackSettingsV1` survives it). Compare a fresh export
+   with the backup before calling it restored.
+3. Templates (`real_host_templates.json`) are authored once per host into the
+   temp directory and fingerprinted with `template-manifest`. No kind is
+   record-armed: Logic refuses to arm a No Input track ("No input source
+   selected!"). A `live` template is an unarmed no-input track with no audio
+   region, on which the plug-in renders its internal stimulus; the M6 input
+   check proves no host input reached it. Save with the plan from
+   `save-as-plan --host H --target /tmp/.../WPK-live.logicx`: Cmd-Shift-S and
+   Cmd-Shift-G with only the host's own window briefly in front, because
+   pressing File > Save As by accessibility did not open Logic's save sheet.
+4. `stage`, `launch`, `await-claim`, then the realtime render between
+   `realtime-begin` and `realtime-end`, and the offline bounce.
+5. `collect --host-evidence AX.json`: the AX snapshot must carry `plugins` and a
+   `track` object (`input`, `record_armed`, `input_monitoring`). `collect` and
+   the v2 verifier refuse an armed track, monitoring on, or an input other than
+   the host's no-input label (`No Input`, `none` for a GarageBand instrument
+   track, `No input` in Bitwig).
+6. Quit without saving, then `revert` (it refuses while the host is alive).
+
+Expected side effects a revert does not undo: Logic's launch rewrites its
+library databases under `~/Music/Audio Music Apps/Databases`, and the AU
+component cache learns the test plug-in. Neither touches a user project.
+
 ## Scan-path note (2026-10-22)
 
 The pre-warm launch now waits for a scanned plug-in entry in REAPER's cache, not

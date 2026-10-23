@@ -52,6 +52,12 @@ HOST_FORMATS = {"reaper": ("clap", "vst3", "au"), "logic": ("au",), "garageband"
 REALTIME_RENDER_HOSTS = ("reaper", "logic", "bitwig")
 HOSTING_MODES = ("in_process", "auhostingservice", "auhostingservice_arrow",
                  "bitwig_plugin_host")
+# Hosts driven from an authored template, whose AX snapshot must record the
+# track's input, arm and monitoring state; and the label each host shows for a
+# track no input device reaches ("none" for a GarageBand instrument track).
+TEMPLATE_HOSTS = ("logic", "garageband", "bitwig")
+NO_INPUT_LABELS = {"reaper": ("none",), "logic": ("No Input",),
+                   "garageband": ("No Input", "none"), "bitwig": ("No input",)}
 CONTROL_KINDS = ("fault", "positive_control", "planted_negative", "offline_fault")
 POSITIVE_CONTROL = "positive_control"
 # Planted negatives and what each must verify as. The first three corrupt the
@@ -270,6 +276,23 @@ def loss_status_problem(snapshots: dict[str, dict]) -> str:
             f"recovery_reason={reason!r} (Batch A requires 'unavailable' and 'provider-lost')")
 
 
+def track_state_problem(track: Any, host_id: str) -> str:
+    """Why the track the plug-in sat on could have let host input in, or ""
+    when it could not: not record-armed, input monitoring off, and its input
+    the host's own no-input label. Logic refuses to arm a No Input track, so a
+    live row plays an unarmed track and relies on the internal stimulus (M6)."""
+    if not isinstance(track, dict):
+        return "no track state was recorded from the host's AX snapshot"
+    if track.get("record_armed") is not False:
+        return f"the track was record-armed (record_armed={track.get('record_armed')!r})"
+    if track.get("input_monitoring") is not False:
+        return f"input monitoring was on (input_monitoring={track.get('input_monitoring')!r})"
+    if track.get("input") not in NO_INPUT_LABELS[host_id]:
+        return (f"the track input was {track.get('input')!r}, not one of "
+                f"{', '.join(NO_INPUT_LABELS[host_id])}")
+    return ""
+
+
 def _usable(run_dir: Path, name: str, listed: Sequence[str] | None) -> bool:
     return (run_dir / name).is_file() and (listed is None or name in listed)
 
@@ -320,6 +343,22 @@ def _took_effect(base: dict, fault: str, applied: dict | None) -> bool:
         bool((base["fault"].get("render_loss") or {}).get("performed"))
         if fault in gfc.RENDER_FAULTS else
         True if fault in gfc.CONTROL_FAULTS else applied is not None)
+
+
+def host_offset(nulls: dict, pdc: Any) -> dict[str, Any]:
+    """How far the host's realtime render sits from the plug-in's capture.
+    The capture is the plug-in's output, delayed by the PDC it declared; the
+    host compensates that PDC, so a deviation shows up exactly `pdc` samples
+    earlier in its render. Measured at both ends of the deviating span, so a
+    render that drifted between them does not match."""
+    plugin, realtime = nulls.get("plugin") or {}, nulls.get("host_realtime") or {}
+    ends = [(plugin.get(k), realtime.get(k))
+            for k in ("first_deviating_sample", "last_deviating_sample")]
+    if not isinstance(pdc, int) or pdc < 0 or any(p is None or r is None for p, r in ends):
+        return {"status": "unmeasurable", "observed": None, "declared": pdc}
+    observed = sorted({p - r for p, r in ends})
+    return {"status": "matched" if observed == [pdc] else "mismatch",
+            "observed": observed[0] if len(observed) == 1 else observed, "declared": pdc}
 
 
 def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: int,
@@ -431,6 +470,11 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
             preconditions.append("provider_fault_applied has no host_time_ns that maps to a "
                                  "capture record (G3)")
 
+    offset = host_offset(base["nulls"], base["pdc_samples"])
+    if offset["status"] == "mismatch":
+        preconditions.append(f"the host render is offset {offset['observed']} samples from the "
+                             f"plug-in capture, not the declared PDC {offset['declared']}")
+
     # The stricter of WP-h1's verdict and this one.
     base_verdict, base_reasons = base["verdict"], list(base["verdict_reasons"])
     capture_only = (host.get("id") not in REALTIME_RENDER_HOSTS and
@@ -500,6 +544,7 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         "offline_path": {k: base.get(k) for k in ("offline_records_in_bounce",
                                                   "offline_path_checked")},
         "nulls": base["nulls"],
+        "host_offset": offset,
         "health": base["health"],
         "host_alive": host_alive,
         "verdict": verdict,

@@ -25,6 +25,7 @@ gfc, hosts = rhs.gfc, rhs.hosts
 LOGIC = rhs.HOSTS["logic"]["executable"]
 FAULT, POST, FRAMES = 3000, 48000, 9600
 QUIET = {"status": "ok", "quiet_host": True, "reasons": []}
+UNARMED = {"input": "No Input", "record_armed": False, "input_monitoring": False}
 
 
 class Env(unittest.TestCase):
@@ -196,6 +197,102 @@ class Stage(Env):
         with self.assertRaises(SystemExit):
             rhs.await_claim(self.run, timeout=0.05, poll=0.01)
         self.assertFalse((self.root / "active.json").exists())
+
+
+class Templates(unittest.TestCase):
+    def setUp(self):
+        self.spec = json.loads(rhs.TEMPLATES.read_text(encoding="utf-8"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="wpk-save-as-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_no_template_kind_arms_the_track(self):
+        # Logic refuses to arm a No Input track, and a live row does not need
+        # a recording: every kind plays an unarmed track with monitoring off.
+        for kind, spec in self.spec["kinds"].items():
+            with self.subTest(kind):
+                self.assertIs(spec["record_armed"], False)
+                self.assertIs(spec["input_monitoring"], False)
+        self.assertTrue(self.spec["kinds"]["live"]["plugin_input"].startswith("internal"))
+
+    def test_each_host_template_uses_a_label_the_verifier_accepts(self):
+        self.assertEqual(set(self.spec["hosts"]), set(hosts.TEMPLATE_HOSTS))
+        for host_id, spec in self.spec["hosts"].items():
+            with self.subTest(host_id):
+                track = dict(UNARMED, input=spec["no_input_label"])
+                self.assertEqual(hosts.track_state_problem(track, host_id), "")
+
+    def test_the_save_as_plan_fronts_only_for_the_key_commands(self):
+        plan = rhs.save_as_plan("logic", self.tmp / "WPK-live.logicx")
+        actions = [s["action"] for s in plan["steps"]]
+        self.assertEqual(actions, ["hotkey", "await_window", "hotkey", "type_text", "press_key",
+                                   "type_text", "press_key", "verify_exists"])
+        self.assertEqual(plan["steps"][0]["keys"], ["cmd", "shift", "s"])
+        self.assertEqual(plan["steps"][2]["keys"], ["cmd", "shift", "g"])
+        self.assertEqual([s.get("delivery_mode") for s in plan["steps"]],
+                         ["foreground", None, "foreground", None, None, None, None, None])
+        self.assertEqual(plan["steps"][3]["text"], os.path.realpath(self.tmp))
+        self.assertEqual(plan["steps"][5]["text"], "WPK-live")
+
+    def test_the_save_as_plan_refuses_unsafe_targets(self):
+        existing = self.tmp / "WPK-playback.logicx"
+        existing.mkdir()
+        for target, needle in (
+                (Path.home() / "Music" / "Logic" / "WPK-live.logicx", "temp directory"),
+                (self.tmp / "WPK-live.band", "ends in .logicx"),
+                (existing, "never overwritten"),
+                (self.tmp / "missing" / "WPK-live.logicx", "does not exist")):
+            with self.subTest(needle):
+                with self.assertRaisesRegex(SystemExit, needle):
+                    rhs.save_as_plan("logic", target)
+
+    def test_the_save_as_cli_prints_the_plan_or_refuses(self):
+        self.assertEqual(rhs.main(["save-as-plan", "--host", "bitwig", "--target",
+                                   str(self.tmp / "WPK-live.bwproject")]), rhs.EXIT_OK)
+        self.assertEqual(rhs.main(["save-as-plan", "--host", "bitwig", "--target",
+                                   str(Path.home() / "WPK-live.bwproject")]), rhs.EXIT_USAGE)
+
+
+class WrapReaper(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="wpk-wrap-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_the_launch_bound_is_the_preflight_sample(self):
+        doc = {"observations": [
+            {"argv": ["/bin/ps"], "stdout": "1 0.0 launchd"},
+            {"argv": ["/repo/tools/scripts/host_vitals.sh", "--json"],
+             "stdout": json.dumps({"level": "green", "sampled_at": 1792769309})}]}
+        self.assertEqual(rhs._preflight_sampled_us(doc), 1792769309 * 1_000_000)
+        for broken in ({}, {"observations": [{"argv": ["/x/host_vitals.sh"], "stdout": "{"}]},
+                       {"observations": [{"argv": ["/x/host_vitals.sh"], "stdout": "{}"}]}):
+            with self.subTest(broken=broken):
+                self.assertIsNone(rhs._preflight_sampled_us(broken))
+
+    def test_the_control_kind_comes_from_what_the_plugin_armed(self):
+        none = {"planted_negative": None, "gpu_off": False}
+        self.assertEqual(rhs.reaper_control_kind(dict(none, planted_negative="no_fallback"),
+                                                 "force_loss_after"), "planted_negative")
+        self.assertEqual(rhs.reaper_control_kind(dict(none, gpu_off=True), "positive_control"),
+                         "planted_negative")
+        self.assertEqual(rhs.reaper_control_kind(none, "positive_control"), "positive_control")
+        self.assertEqual(rhs.reaper_control_kind(none, "worker_stall"), "fault")
+
+    def test_only_a_run_v1_verifies_live_is_wrapped(self):
+        # A dry run verifies as v1 only with --allow-dry-run; it is not DAW
+        # evidence, so it never becomes a v2 receipt.
+        run = self.tmp / "dry"
+        proc = rhs.subprocess.run(
+            [sys.executable, str(HERE / "reaper_smoke.py"), "--mode", "gpu-fault",
+             "--gpu-fault", "force_loss_after", "--dry-run", "--format", "clap",
+             "--plugin-name", "x", "--plugin-path", "/nonexistent", "--out-dir", str(run)],
+            capture_output=True, text=True, check=False)
+        self.assertTrue((run / "receipt.json").is_file(), proc.stdout[-2000:])
+        with self.assertRaisesRegex(rhs.V2.ReceiptError, "not DAW evidence"):
+            rhs.wrap_reaper(run, self.tmp / "out", code_commit="c" * 40)
+        self.assertFalse((self.tmp / "out").exists())
+        self.assertEqual(rhs.main(["wrap-reaper", "--reaper-run", str(run), "--out",
+                                   str(self.tmp / "out"), "--code-commit", "c" * 40]),
+                         rhs.EXIT_USAGE)
 
 
 class Revert(Env):
@@ -371,10 +468,20 @@ class EndToEnd(Env):
             realtime.stat().st_mtime * 1e6) - 2_000_000)
         rhs.realtime_end(self.run, realtime, settle_s=0.05, poll=0.01)
         evidence = self.run / "ax.json"
-        evidence.write_text(json.dumps({"plugins": [rhs.PLUGIN_NAME],
-                                        "insert_slot": 1}), encoding="utf-8")
         executable = self.run / "plugin-binary"
         executable.write_bytes(b"binary")
+        # A snapshot showing the track armed on a real input is refused before
+        # any receipt is written.
+        evidence.write_text(json.dumps({"plugins": [rhs.PLUGIN_NAME], "insert_slot": 1,
+                                        "track": dict(UNARMED, record_armed=True,
+                                                      input="Input 1")}), encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "record-armed"):
+            rhs.collect(self.run, bounce=self.run / "host-bounce.wav", host_evidence=evidence,
+                        hosting_mode="in_process", host_alive=True, host_version="12.4",
+                        code_commit="c" * 40, plugin_executable=executable, window_pre=1000)
+        self.assertFalse((self.run / "artifacts").exists())
+        evidence.write_text(json.dumps({"plugins": [rhs.PLUGIN_NAME], "insert_slot": 1,
+                                        "track": UNARMED}), encoding="utf-8")
         receipt, verdict, outcome = rhs.collect(
             self.run, bounce=self.run / "host-bounce.wav", host_evidence=evidence,
             hosting_mode="in_process", host_alive=True, host_version="12.4",

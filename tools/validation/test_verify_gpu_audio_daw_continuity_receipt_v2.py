@@ -133,12 +133,16 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
 GARAGEBAND = "/Applications/GarageBand.app/Contents/MacOS/GarageBand"
 
 
+UNARMED = {"input": "No Input", "record_armed": False, "input_monitoring": False}
+
+
 def write_host_evidence(run: Path, host_id: str = "logic", plugin: str = NAME,
-                        pid: int = HOST_PID) -> None:
-    (run / "host_evidence.json").write_text(json.dumps(
-        {"plugins": [plugin], "host_pid": pid,
-         "host_executable": GARAGEBAND if host_id == "garageband" else LOGIC}) + "\n",
-        encoding="utf-8")
+                        pid: int = HOST_PID, track: dict | None = UNARMED) -> None:
+    doc = {"plugins": [plugin], "host_pid": pid,
+           "host_executable": GARAGEBAND if host_id == "garageband" else LOGIC}
+    if track is not None:
+        doc["track"] = track
+    (run / "host_evidence.json").write_text(json.dumps(doc) + "\n", encoding="utf-8")
 
 
 def write_realtime_from(source: Path, target: Path) -> None:
@@ -559,6 +563,56 @@ class V2Receipt(unittest.TestCase):
         self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], FAULT)
         self.assertEqual(self.main(run), V2.EXIT_OK)
 
+    def test_the_host_render_sits_exactly_the_declared_pdc_from_the_capture(self):
+        run = self.run_dir("offset")
+        receipt = make_run(run, kind="planted_negative", break_fallback=True)
+        self.assertEqual(receipt["host_offset"], {"status": "matched",
+                                                  "observed": receipt["pdc_samples"],
+                                                  "declared": receipt["pdc_samples"]})
+
+    def test_a_host_render_offset_from_the_declared_pdc_is_not_proved(self):
+        # One quantum late in the host's render: the host compensated a
+        # latency other than the one the plug-in declared, so its render is
+        # not the timeline the plug-in capture is compared on.
+        run = self.run_dir("offset-late")
+        make_run(run, kind="planted_negative", break_fallback=True)
+        _, channels = gfc.read_wav(run / "realtime.wav")
+        gfc.write_wav_f32(run / "realtime.wav", [[0.0] * 512 + list(ch[:-512])
+                                                 for ch in channels])
+        receipt = receipt_for(run, kind="planted_negative", fault="force_loss_before",
+                              mode="auhostingservice_arrow")
+        self.assertEqual(receipt["host_offset"]["status"], "mismatch")
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+        self.assertTrue(any("not the declared PDC" in r for r in receipt["verdict_reasons"]))
+
+    def test_a_host_render_whose_deviation_ends_elsewhere_is_not_proved(self):
+        # Right offset where the corruption starts, a quantum more where it
+        # ends: the host's timeline slipped during the run.
+        run = self.run_dir("offset-drift")
+        receipt = make_run(run, kind="planted_negative", break_fallback=True)
+        last = receipt["nulls"]["host_realtime"]["last_deviating_sample"]
+        _, channels = gfc.read_wav(run / "realtime.wav")
+        channels = [list(ch) for ch in channels]
+        channels[0][last + 512] += 0.5
+        gfc.write_wav_f32(run / "realtime.wav", channels)
+        receipt = receipt_for(run, kind="planted_negative", fault="force_loss_before",
+                              mode="auhostingservice_arrow")
+        self.assertEqual(receipt["host_offset"]["status"], "mismatch")
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
+    def test_a_row_without_two_deviations_has_no_measurable_offset(self):
+        run = self.run_dir("offset-none")
+        receipt = make_run(run)
+        self.assertEqual(receipt["host_offset"]["status"], "unmeasurable")
+        self.assertEqual(self.verify(receipt, run), ("pass", "pass"))
+
+    def test_the_offset_is_recomputed_not_read(self):
+        run = self.run_dir("offset-forged")
+        receipt = make_run(run, kind="planted_negative", break_fallback=True)
+        receipt["host_offset"] = dict(receipt["host_offset"], observed=0)
+        with self.assertRaisesRegex(V2.ReceiptError, "host_offset does not re-derive"):
+            V2.verify(resign(receipt), run)
+
     def test_every_audio_planted_negative_is_proved(self):
         # Dropout, one-quantum misalignment and a stale fallback: continuous
         # but wrong audio must FAIL from the fault sample on.
@@ -581,7 +635,10 @@ class V2Receipt(unittest.TestCase):
         receipt = receipt_for(run, kind="planted_negative", fault="force_loss_before",
                               mode="auhostingservice_arrow")
         self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], FAULT - 500)
-        self.assertEqual(len(receipt["verdict_reasons"]), 1)
+        # The plug-in null alone, plus the host render now disagreeing with the
+        # capture by more than the PDC: nothing else stands between it and proof.
+        self.assertEqual(len(receipt["verdict_reasons"]), 2)
+        self.assertIn("not the declared PDC", receipt["verdict_reasons"][1])
         self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
 
     def test_a_planted_negative_one_sample_early_is_not_proved(self):
@@ -806,6 +863,37 @@ class V2Receipt(unittest.TestCase):
                     run / "host_evidence.json")
                 with self.assertRaisesRegex(V2.ReceiptError, needle):
                     V2.verify(resign(copy.deepcopy(receipt)), run)
+
+    def test_a_template_host_track_must_be_unreachable_by_input(self):
+        # Logic will not arm a No Input track, so a live row plays an unarmed
+        # one; an armed track, monitoring on or a real input is refused, as is
+        # a snapshot that recorded no track at all.
+        run = self.run_dir("track")
+        receipt = make_run(run)
+        for track, needle in (
+                (dict(UNARMED, record_armed=True, input="Input 1"), "record-armed"),
+                (dict(UNARMED, record_armed=True), "record-armed"),
+                (dict(UNARMED, input_monitoring=True), "input monitoring was on"),
+                (dict(UNARMED, input="Input 1"), "track input was 'Input 1'"),
+                (dict(UNARMED, input="No input"), "track input was 'No input'"),
+                (None, "no track state")):
+            with self.subTest(needle=needle, track=track):
+                write_host_evidence(run, track=track)
+                receipt["artifacts"]["host_evidence.json"] = gfc.sha256_file(
+                    run / "host_evidence.json")
+                with self.assertRaisesRegex(V2.ReceiptError, needle):
+                    V2.verify(resign(copy.deepcopy(receipt)), run)
+        write_host_evidence(run)
+        receipt["artifacts"]["host_evidence.json"] = gfc.sha256_file(run / "host_evidence.json")
+        self.assertEqual(V2.verify(resign(receipt), run), ("pass", "pass"))
+
+    def test_each_host_names_no_input_its_own_way(self):
+        for host_id, label in (("logic", "No Input"), ("bitwig", "No input"),
+                               ("garageband", "none"), ("reaper", "none")):
+            with self.subTest(host_id):
+                self.assertEqual(hosts.track_state_problem(dict(UNARMED, input=label), host_id),
+                                 "")
+        self.assertIn("not one of", hosts.track_state_problem(UNARMED, "bitwig"))
 
     def test_a_live_receipt_needs_the_live_window_floor(self):
         run = self.run_dir("floor")
