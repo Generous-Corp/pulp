@@ -5,10 +5,11 @@
 // in `shasum -a 256` format, covering every archive on that release. The
 // CLI download paths (`pulp upgrade`, `pulp sdk install`) fetch that
 // manifest next to the archive and refuse to extract an archive whose
-// digest differs from its manifest entry. Releases older than the floor in
-// tools/scripts/release_product_matrix.json predate the manifest gate and
-// may install with a loud warning when no manifest exists; at or above the
-// floor a missing manifest is refused.
+// digest differs from its manifest entry. The manifest is verified whenever
+// it is present; the floor in tools/scripts/release_product_matrix.json
+// governs only absence. It names the first release whose publish step
+// guaranteed the manifest, so at or above it a missing manifest is refused,
+// while an older manifest-less release installs with a loud warning.
 //
 // Header-only so tests can drive the verifier without the CLI's link deps;
 // the only dependency is pulp::runtime's streaming SHA-256.

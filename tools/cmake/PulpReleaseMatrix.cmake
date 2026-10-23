@@ -1,7 +1,10 @@
 # Read release floors from tools/scripts/release_product_matrix.json so the
 # CLI and its tests compile against the same values the release workflow
 # publishes with. The matrix is the only place a floor is written down;
-# consumers receive it as a compile definition.
+# consumers receive it as a compile definition. `checksum_manifest_floor` is
+# the first release whose publish step guaranteed SHA256SUMS; the manifest is
+# verified whenever present, and the floor decides only what a missing one
+# means (refusal at or above it, a warning below).
 
 function(pulp_release_matrix_floor out_var key)
     set(_matrix "${PROJECT_SOURCE_DIR}/tools/scripts/release_product_matrix.json")

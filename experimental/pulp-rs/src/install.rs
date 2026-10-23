@@ -67,15 +67,70 @@ pub fn upgrade_url_for(version: &str, platform: &str, arch: &str) -> (String, St
 /// Checksum manifest the release workflow publishes beside every archive.
 pub const MANIFEST_ASSET_NAME: &str = "SHA256SUMS";
 
+/// A fresh directory only this user can enter, created exclusively under
+/// `<pulp home>/tmp`. The checksum check and the extraction that follows it
+/// must share a directory nobody else could have pre-created: a fixed name in
+/// the shared system temp dir lets another local user swap the archive between
+/// the two steps. The caller owns cleanup.
+///
+/// # Errors
+///
+/// [`CliError::Other`] when no private directory could be created.
+pub fn private_temp_dir(prefix: &str) -> Result<PathBuf> {
+    use std::collections::hash_map::RandomState;
+    use std::hash::BuildHasher;
+
+    let root = crate::config::pulp_home().map_or_else(std::env::temp_dir, |home| home.join("tmp"));
+    let mut root_builder = fs::DirBuilder::new();
+    root_builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        root_builder.mode(0o700);
+    }
+    root_builder.create(&root).map_err(|e| {
+        CliError::Other(format!(
+            "could not create private temp root {}: {e}",
+            root.display()
+        ))
+    })?;
+    let nonce_source = RandomState::new();
+    for attempt in 0u32..32 {
+        let nonce = nonce_source.hash_one((std::process::id(), attempt, SystemTime::now()));
+        let candidate = root.join(format!("{prefix}-{nonce:016x}"));
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        match builder.create(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => {
+                return Err(CliError::Other(format!(
+                    "could not create private temp dir {}: {e}",
+                    candidate.display()
+                )))
+            }
+        }
+    }
+    Err(CliError::Other(format!(
+        "could not create a private temp dir under {}",
+        root.display()
+    )))
+}
+
 /// The release product matrix, embedded so the floor the CLI enforces is the
 /// one the release workflow publishes with. The matrix is the only place a
 /// floor is written down.
 const RELEASE_PRODUCT_MATRIX_JSON: &str =
     include_str!("../../../tools/scripts/release_product_matrix.json");
 
-/// First release version whose `SHA256SUMS` is a publish gate. Releases at
-/// or above it must carry a manifest; older ones may install unverified
-/// with a loud warning.
+/// First release version whose publish step guaranteed `SHA256SUMS`. The
+/// manifest is verified whenever it is present; this floor decides only what
+/// a missing one means: releases at or above it are refused, older ones may
+/// install unverified with a loud warning.
 ///
 /// # Errors
 ///
