@@ -4590,12 +4590,21 @@ TEST_CASE("a translucent group that cannot be nested exactly stays flat and says
                                "[10,10,100,60]", "[20,20,40,20]", "[30,30,40,40]", "[0,1,1,2,4,3]"),
                     "group-opacity-interleaved") == "interleaved-paint-order");
     }
-    SECTION("a transformed group") {
-        // A nested child would be drawn through the group's transform, while
-        // its box is already the transformed page box.
-        CHECK(refused(group_spec("[-1,0,1,2,3,2]", kTransformedGroupRow, kFilledRow, kFilledRow,
-                                 "[10,10,100,60]", "[20,20,40,20]", "[150,10,40,40]",
-                                 "[0,1,1,2,3,4]"),
-                      "group-opacity-transformed") == "transform");
-    }
+}
+
+TEST_CASE("a scaled translucent group still nests, at its scaled page box",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    // An axis-preserving transform reaches the IR only through the boxes,
+    // which are already Chrome's post-transform page boxes, so nesting adds no
+    // second transform and the group stays exact.
+    const auto lowered = lower_snapshot(
+        group_spec("[-1,0,1,2,3,2]", kTransformedGroupRow, kFilledRow, kFilledRow, "[10,10,100,60]",
+                   "[20,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+        "group-opacity-scaled", {}, /*flatten_to_paint_order=*/true);
+    CHECK(lowered.counts.isolating_groups_nested == 1);
+    const auto* group = translucent_node(lowered.root);
+    REQUIRE(group != nullptr);
+    CHECK_FALSE(group->style.transform.has_value());
+    REQUIRE(group->children.size() == 1);
+    CHECK(*group->children[0].style.left == Catch::Approx(10.0f));
 }
