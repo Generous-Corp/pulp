@@ -12,7 +12,8 @@
 // causal state across calls. bind_neural_cpu_kernel() fills any of the
 // adapters' six-function kernel structs.
 //
-// Construction fails closed: if the shape or a weight span is inconsistent,
+// Construction fails closed: if the shape is invalid or any weight span is
+// not exactly the size the shape implies,
 // the kernel keeps no weights, valid() is false, prepare() returns false (so
 // the owning adapter refuses to prepare), and process() writes silence.
 // Inputs are finite by contract (see neural_simd.hpp).
@@ -224,8 +225,10 @@ template <class Isa = neural_simd::DefaultIsa> class NamTcnSimdKernel {
             if (d == 0 || d > 65536)
                 return false;
         const std::size_t c = w.channels, k = w.kernel, l = w.dilations.size();
-        return w.in_w.size() >= c && w.conv_w.size() >= l * c * c * k && w.conv_b.size() >= l * c &&
-               w.mix_w.size() >= l * c * c && w.head_w.size() >= c;
+        // Exact sizes: a longer span is a shape mismatch, not spare data, and
+        // the packing copies below are sized from the shape.
+        return w.in_w.size() == c && w.conv_w.size() == l * c * c * k && w.conv_b.size() == l * c &&
+               w.mix_w.size() == l * c * c && w.head_w.size() == c;
     }
 
     explicit NamTcnSimdKernel(const Weights& w) {
@@ -396,8 +399,9 @@ template <class Isa = neural_simd::DefaultIsa> class RecurrentSimdKernel {
           gates_(static_cast<std::uint32_t>(recurrent_gate_count(shape.family))),
           rows_(gates_ * hpad_), head_bias_(w.head_bias) {
         const std::size_t g = gates_, h = hidden_;
-        if (!valid_recurrent_cpu_shape(shape) || w.w_ih.size() < g * h ||
-            w.w_hh.size() < g * h * h || w.bias.size() < g * h || w.head.size() < h) {
+        // Exact sizes, as for NamTcnSimdKernel.
+        if (!valid_recurrent_cpu_shape(shape) || w.w_ih.size() != g * h ||
+            w.w_hh.size() != g * h * h || w.bias.size() != g * h || w.head.size() != h) {
             hidden_ = hpad_ = rows_ = 0;
             return;
         }

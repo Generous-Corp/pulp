@@ -10,6 +10,7 @@
 #include "harness/scoped_rt_process_probe.hpp"
 
 #include <pulp/gpu_audio/gpu_wavenet.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <algorithm>
 #include <array>
@@ -21,6 +22,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -39,6 +41,25 @@ namespace {
 // reference comparison uses the GPU WaveNet session's CPU-parity margin.
 constexpr double kSimdNull = 1.0e-6;
 constexpr double kReferenceParity = 2.0e-5;
+
+// Sanitizer builds run the same nulls on a shorter stimulus: the scalar
+// references are ~20x slower under ASan and would otherwise exceed the
+// hosted per-test timeout. Every topology, block pattern and impulse still
+// runs; only the noise length and impulse count shrink.
+#if defined(__SANITIZE_ADDRESS__)
+#define PULP_NEURAL_SIMD_SANITIZED 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define PULP_NEURAL_SIMD_SANITIZED 1
+#endif
+#endif
+#if defined(PULP_NEURAL_SIMD_SANITIZED)
+constexpr std::size_t kNullNoise = 6000;
+constexpr int kNullImpulses = 3;
+#else
+constexpr std::size_t kNullNoise = 48000;
+constexpr int kNullImpulses = 8;
+#endif
 
 class Rng {
   public:
@@ -78,10 +99,10 @@ double max_abs_diff(const std::vector<float>& a, const std::vector<float>& b) {
 std::vector<float> stimulus(std::size_t noise, std::uint32_t seed, std::uint32_t spacing) {
     Rng rng(seed);
     std::vector<float> x;
-    x.reserve(noise + 8 * spacing + noise / 4);
+    x.reserve(noise + kNullImpulses * spacing + noise / 4);
     for (std::size_t i = 0; i < noise; ++i)
         x.push_back(rng.uniform(1.0f));
-    for (int k = 0; k < 8; ++k) {
+    for (int k = 0; k < kNullImpulses; ++k) {
         x.push_back(k % 2 ? -1.0f : 1.0f);
         x.insert(x.end(), spacing - 1, 0.0f);
     }
@@ -243,7 +264,7 @@ NamNull nam_null(const std::string& path, std::uint32_t seed) {
     REQUIRE(reference->cpu_kernel() == NamCpuKernel::Reference);
     REQUIRE(scalar->cpu_kernel() == NamCpuKernel::BlockScalar);
     REQUIRE(simd->cpu_kernel() == NamCpuKernel::BlockSimd);
-    const auto x = stimulus(48000, seed, std::max(2048u, reference->receptive_field() + 64));
+    const auto x = stimulus(kNullNoise, seed, std::max(2048u, reference->receptive_field() + 64));
     const auto call = [](NamTcnArtifact& a) {
         return [&a](const float* i, float* o, std::uint32_t n) { a.process(i, o, n); };
     };
@@ -654,7 +675,7 @@ struct FamilyNull {
 
 template <class Ref, class Scalar, class Simd>
 FamilyNull family_null(const char* name, Ref& ref, Scalar& scalar, Simd& simd, std::uint32_t seed) {
-    const auto x = stimulus(48000, seed, 4200);
+    const auto x = stimulus(kNullNoise, seed, 4200);
     const auto bind = [](auto& k) {
         return [&k](const float* i, float* o, std::uint32_t n) { k.process(i, o, n); };
     };
@@ -932,6 +953,85 @@ TEST_CASE("SIMD family kernels fail closed on inconsistent construction",
                                      .artifact_hash = kSha,
                                      .max_frames = 256}));
     }
+    SECTION("NAM-TCN: every weight span must be exactly the shape's size") {
+        NamTcnRef ref(4, 3, {1, 2}, 3);
+        const auto w = ref.weights();
+        // Backing storage longer than any span, so a too-long span is a valid
+        // view and only the kernel's own copies could run past its buffers.
+        std::vector<float> spare(4096, 0.25f);
+        const auto longer = [&](std::span<const float> exact, std::size_t extra) {
+            std::copy(exact.begin(), exact.end(), spare.begin());
+            return std::span<const float>(spare.data(), exact.size() + extra);
+        };
+        const auto shorter = [](std::span<const float> exact) {
+            return exact.first(exact.size() - 1);
+        };
+        using Field = std::span<const float> NamTcnSimdKernel<>::Weights::*;
+        for (const Field field :
+             {&NamTcnSimdKernel<>::Weights::in_w, &NamTcnSimdKernel<>::Weights::conv_w,
+              &NamTcnSimdKernel<>::Weights::conv_b, &NamTcnSimdKernel<>::Weights::mix_w,
+              &NamTcnSimdKernel<>::Weights::head_w}) {
+            // 64 extra floats exceed every padded buffer the kernel packs
+            // into, so a size check that tolerated a long span would overflow.
+            auto too_long = w;
+            too_long.*field = longer(w.*field, 64);
+            auto too_short = w;
+            too_short.*field = shorter(w.*field);
+            for (const auto& bad_weights : {too_long, too_short}) {
+                NamTcnSimdKernel<> bad(bad_weights);
+                CHECK_FALSE(bad.valid());
+                CHECK_FALSE(bad.prepare(unused));
+                CHECK(silent(bad));
+            }
+        }
+        NamTcnSimdKernel<> exact(w);
+        CHECK(exact.valid());
+        CHECK_FALSE(silent(exact));
+    }
+    SECTION("recurrent: every weight span must be exactly the shape's size") {
+        for (const auto family : {RecurrentFamily::Lstm, RecurrentFamily::Gru}) {
+            const RecurrentCpuShape shape{.family = family,
+                                          .input_size = 1,
+                                          .hidden_size = 8,
+                                          .layers = 1,
+                                          .directions = 1,
+                                          .output_size = 1};
+            RecurrentRef ref(family, 8, 3);
+            const auto w = ref.weights();
+            std::vector<float> spare(8192, 0.25f);
+            using Field = std::span<const float> RecurrentSimdKernel<>::Weights::*;
+            for (const Field field :
+                 {&RecurrentSimdKernel<>::Weights::w_ih, &RecurrentSimdKernel<>::Weights::w_hh,
+                  &RecurrentSimdKernel<>::Weights::bias, &RecurrentSimdKernel<>::Weights::head}) {
+                const auto exact = w.*field;
+                std::copy(exact.begin(), exact.end(), spare.begin());
+                auto too_long = w;
+                too_long.*field = std::span<const float>(spare.data(), exact.size() + 64);
+                auto too_short = w;
+                too_short.*field = exact.first(exact.size() - 1);
+                for (const auto& bad_weights : {too_long, too_short}) {
+                    RecurrentSimdKernel<> bad(shape, bad_weights);
+                    CHECK_FALSE(bad.valid());
+                    CHECK_FALSE(bad.prepare(unused));
+                    CHECK(silent(bad));
+                }
+            }
+            RecurrentSimdKernel<> exact(shape, w);
+            CHECK(exact.valid());
+            CHECK_FALSE(silent(exact));
+        }
+    }
+    SECTION("TCN and SSM: a too-long span is refused too") {
+        const TcnCpuShape shape{.channels = 1, .kernel_size = 4, .dilation = 2, .layers = 1};
+        const std::vector<float> taps(4 + 64, 0.1f);
+        TcnSimdKernel<> tcn(shape, taps, 0.0f);
+        CHECK_FALSE(tcn.valid());
+        SsmRef ref(16, 3);
+        std::vector<float> long_b(ref.b);
+        long_b.resize(16 + 64, 0.1f);
+        SsmSimdKernel<> ssm(ref.a, long_b, ref.c, ref.d);
+        CHECK_FALSE(ssm.valid());
+    }
     SECTION("SSM: matching non-empty spans") {
         SsmRef ref(16, 3);
         SsmSimdKernel<> good(ref.a, ref.b, ref.c, ref.d);
@@ -943,6 +1043,78 @@ TEST_CASE("SIMD family kernels fail closed on inconsistent construction",
         SsmSimdKernel<> empty({}, {}, {}, 0.0f);
         CHECK_FALSE(empty.valid());
     }
+}
+
+namespace {
+
+/// A decaying diagonal SSM: an impulse then silence halves the state each
+/// sample, so it passes through the subnormal range after ~126 samples.
+std::size_t subnormal_outputs(bool flush) {
+    constexpr std::uint32_t states = 16, frames = 1024;
+    const std::vector<float> a(states, 0.5f), b(states, 1.0f), c(states, 1.0f / states);
+    SsmSimdKernel<> ssm(a, b, c, 0.0f);
+    REQUIRE(ssm.valid());
+    std::vector<float> x(frames, 0.0f), y(frames, 0.0f);
+    x[0] = 1.0f;
+    {
+        std::optional<pulp::signal::ScopedFlushDenormals> scope;
+        if (flush)
+            scope.emplace();
+        ssm.process(x.data(), y.data(), frames);
+    }
+    return static_cast<std::size_t>(std::count_if(
+        y.begin(), y.end(), [](float v) { return std::fpclassify(v) == FP_SUBNORMAL; }));
+}
+
+} // namespace
+
+TEST_CASE("SIMD kernels produce no subnormals under the realtime flush scope",
+          "[gpu_audio][neural][simd][denormal]") {
+    // Positive control: without flush-to-zero the decay really is subnormal,
+    // so the check below can see a missing scope.
+    const auto unflushed = subnormal_outputs(false);
+    CHECK(unflushed > 0);
+    CHECK(subnormal_outputs(true) == 0);
+    std::printf("[denormal] subnormal outputs: unflushed=%zu flushed=0\n", unflushed);
+}
+
+TEST_CASE("neural SIMD denormal-tail cost", "[.][neural-simd-denormal]") {
+    // Receipt, not a gate: per-block cost on a subnormal decay tail compared
+    // with ordinary input, with and without the flush scope.
+    constexpr std::uint32_t states = 256, block = 64;
+    const std::vector<float> a(states, 0.5f), b(states, 1.0f), c(states, 1.0f / states);
+    const auto run = [&](bool denormal_tail, bool flush) {
+        SsmSimdKernel<> ssm(a, b, c, 0.0f);
+        std::optional<pulp::signal::ScopedFlushDenormals> scope;
+        if (flush)
+            scope.emplace();
+        std::vector<float> x(block), y(block);
+        Rng rng(3);
+        std::vector<double> samples;
+        for (int i = 0; i < 3300; ++i) {
+            // Keep the state in the subnormal range: re-seed with a tiny
+            // impulse each block and let it decay.
+            for (auto& v : x)
+                v = denormal_tail ? 0.0f : rng.uniform(1.0f);
+            if (denormal_tail)
+                x[0] = 1.0e-36f;
+            const auto t0 = std::chrono::steady_clock::now();
+            ssm.process(x.data(), y.data(), block);
+            const auto t1 = std::chrono::steady_clock::now();
+            if (i >= 300)
+                samples.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+        }
+        std::sort(samples.begin(), samples.end());
+        return std::pair{samples[samples.size() / 2], samples[samples.size() * 99 / 100]};
+    };
+    for (const bool flush : {false, true})
+        for (const bool tail : {false, true}) {
+            const auto [p50, p99] = run(tail, flush);
+            std::printf("{\"kernel\":\"ssm.diagonal(256)\",\"input\":\"%s\",\"flush\":%s,"
+                        "\"p50_us\":%.2f,\"p99_us\":%.2f}\n",
+                        tail ? "denormal-tail" : "noise", flush ? "true" : "false", p50, p99);
+        }
+    SUCCEED();
 }
 
 // ---------------------------------------------------------------------------
