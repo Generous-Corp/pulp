@@ -367,6 +367,15 @@ plugin-owned payloads are restored.
 that contains only `StateStore` data. Override implementations should treat
 empty input as "reset persisted plugin-owned state to defaults".
 
+State blobs carry content or root-relative references, never absolute paths. A
+session or preset is authored by whoever saved it, so a path inside it is
+untrusted input: a plugin that restored it verbatim would open any file the
+author named. A plugin that still has to read a path from an older blob should
+pass it through `pulp::audio::confine_restored_path(path, root)`
+(`core/audio/include/pulp/audio/restored_path.hpp`), which follows symlinks and
+returns the path only when it resolves inside the directory the plugin is
+allowed to read from, and skip the file (with a log line) otherwise.
+
 ## Thread Model
 
 | Thread | Can Read | Can Write | Mechanism |
