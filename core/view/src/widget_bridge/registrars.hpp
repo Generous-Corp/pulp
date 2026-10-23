@@ -53,6 +53,7 @@ struct BridgeRegistrars {
     static void register_layout_query_api(WidgetBridge& self);
     static void register_layout_box_model_api(WidgetBridge& self);
     static void register_layout_position_api(WidgetBridge& self);
+    static void register_style_reset_api(WidgetBridge& self);
     static void register_list_style_api(WidgetBridge& self);
     static void register_metadata_removal_api(WidgetBridge& self);
     static void register_metadata_source_api(WidgetBridge& self);
