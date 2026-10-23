@@ -105,6 +105,9 @@ struct AdmissionRun {
     std::uint64_t sequence_drift = 0;
     std::uint64_t gpu_blocks = 0;
     std::uint64_t mismatches = 0;
+    // Submissions the provider refused, as the node's channel saw them.
+    std::uint64_t refused_submits = 0;
+    std::uint64_t first_refused = UINT64_MAX;
     pulp::gpu_audio::GpuAudioRecoveryReason reason = pulp::gpu_audio::GpuAudioRecoveryReason::None;
     std::uint64_t sequence = UINT64_MAX;
     std::uint64_t latched_after = UINT64_MAX;
@@ -128,6 +131,44 @@ struct AdmissionScenario {
     std::uint64_t skip_pump_at = UINT64_MAX;
 };
 
+// Records the submissions the provider refused on their way from the node to
+// the physical channel, so a receipt can tie a latch to the refused block.
+class RefusalCountingChannel final : public WaveNetRealtimeChannel {
+  public:
+    RefusalCountingChannel(std::unique_ptr<WaveNetRealtimeChannel> inner, AdmissionRun& run)
+        : inner_(std::move(inner)), run_(run) {}
+    bool submit(std::span<const float> input,
+                const SharedIoSubmissionTicket& ticket) noexcept override {
+        if (inner_->submit(input, ticket))
+            return true;
+        if (run_.refused_submits++ == 0)
+            run_.first_refused = ticket.sequence;
+        return false;
+    }
+    void service(std::uint64_t now) noexcept override {
+        inner_->service(now);
+    }
+    void service_until(std::uint64_t now, std::uint64_t deadline) noexcept override {
+        inner_->service_until(now, deadline);
+    }
+    std::optional<WaveNetChannelCompletion> receive(std::span<float> output) noexcept override {
+        return inner_->receive(output);
+    }
+    bool release() noexcept override {
+        return inner_->release();
+    }
+    bool release_bounded(std::uint64_t budget_ns) noexcept override {
+        return inner_->release_bounded(budget_ns);
+    }
+    bool lost() const noexcept override {
+        return inner_->lost();
+    }
+
+  private:
+    std::unique_ptr<WaveNetRealtimeChannel> inner_;
+    AdmissionRun& run_;
+};
+
 struct RefusalRetryRun {
     bool refused = false;
     bool retried = false;
@@ -145,7 +186,9 @@ void emit_admission(std::ostream& out, std::string_view name, const AdmissionRun
         << R"(,"sequence_agrees":)" << (run.sequence_agrees() ? "true" : "false")
         << R"(,"callbacks":)" << run.callbacks << R"(,"bridge_next_sequence":)" << run.next_sequence
         << R"(,"sequence_drift":)" << run.sequence_drift << R"(,"gpu_blocks":)" << run.gpu_blocks
-        << R"(,"gpu_mismatches":)" << run.mismatches << R"(,"recovery_reason":")"
+        << R"(,"gpu_mismatches":)" << run.mismatches << R"(,"refused_submits":)"
+        << run.refused_submits << R"(,"first_refused_sequence":)"
+        << signed_sequence(run.first_refused) << R"(,"recovery_reason":")"
         << recovery_name(run.reason) << R"(","recovery_sequence":)" << signed_sequence(run.sequence)
         << R"(,"latched_after_callback":)" << signed_sequence(run.latched_after)
         << R"(,"provider_state":)" << static_cast<int>(run.state) << R"(,"statuses_valid":)"
@@ -212,6 +255,8 @@ struct Result {
     bool admission_healthy_receipt = false;
     bool admission_loss_receipt = false;
     bool admission_reject_receipt = false;
+    AdmissionRun admission_reject_unreachable_slot;
+    bool admission_reject_unreachable_slot_receipt = false;
     bool admission_skip_control_receipt = false;
     bool admission_reject_midstream_receipt = false;
     RefusalRetryRun refusal_retry;
@@ -278,6 +323,9 @@ void emit(const Result& result, std::string_view status) {
                    result.admission_loss_receipt);
     emit_admission(std::cout, "admission_reject_before_submit", result.admission_reject,
                    result.admission_reject_receipt);
+    emit_admission(std::cout, "admission_reject_unreachable_slot",
+                   result.admission_reject_unreachable_slot,
+                   result.admission_reject_unreachable_slot_receipt);
     emit_admission(std::cout, "admission_skip_pump_control", result.admission_skip_control,
                    result.admission_skip_control_receipt);
     emit_admission(std::cout, "admission_reject_midstream", result.admission_reject_midstream,
@@ -748,6 +796,13 @@ NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_tabl
 }
 
 constexpr std::uint64_t kAdmissionCallbacks = 24;
+// Each harness callback block takes about a millisecond (four pumps with a
+// 250 us wait), far longer than the fixture's two-sample period, so the default
+// watchdog of capacity - 1 blocks would call a few milliseconds of host
+// scheduling delay an unresponsive provider. These runs test admission faults,
+// so the window and the ring are wide enough that only a real stall latches.
+constexpr std::uint32_t kAdmissionCapacity = 16;
+constexpr std::uint32_t kAdmissionWatchdogBlocks = 12;
 
 AdmissionRun run_admission(const Fixture& fixture, const void* proc_table,
                            const AdmissionScenario& scenario) {
@@ -794,11 +849,13 @@ AdmissionRun run_admission(const Fixture& fixture, const void* proc_table,
                     .slots = 2},
         .channels = 1,
         .lead_blocks = scenario.lead,
-        .capacity = 4,
-        .max_inflight = scenario.inflight};
+        .capacity = kAdmissionCapacity,
+        .max_inflight = scenario.inflight,
+        .watchdog_blocks = kAdmissionWatchdogBlocks};
     ga::GpuWaveNetRealtimeNode node(config);
     std::vector<std::unique_ptr<WaveNetRealtimeChannel>> channels;
-    channels.push_back(std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)));
+    channels.push_back(std::make_unique<RefusalCountingChannel>(
+        std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)), run));
     if (!WaveNetRealtimeTestAccess::prepare(node, std::move(channels))) {
         run.error = "node_prepare_failed";
         return run;
@@ -1025,9 +1082,15 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
         return clean(run) && run.reason == reason && run.sequence == sequence &&
                run.latched_after == sequence && run.state == state;
     };
-    // A late block is a miss, not a fault, so a loaded host may lose a couple
-    // of deliveries; none may mismatch.
-    constexpr std::uint64_t kLateAllowance = 2;
+    // A refusal latches ProviderFailure at the refused block in the pump that
+    // saw it, so the latch names the first refused sequence.
+    const auto refused_at = [&](const AdmissionRun& run, std::uint64_t sequence) {
+        return run.refused_submits >= 1 && run.first_refused == sequence &&
+               latched(run, ga_reason::ProviderFailure, sequence, ga_state::Degraded);
+    };
+    // A late block is a miss, not a fault, so a loaded host may lose a few
+    // deliveries; none may mismatch.
+    constexpr std::uint64_t kLateAllowance = 6;
     auto& healthy = result.admission_healthy;
     healthy = run_admission(fixture, proc_table, {});
     result.admission_healthy_receipt = clean(healthy) && healthy.reason == ga_reason::None &&
@@ -1042,9 +1105,18 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
     // A refusal is a provider failure, not a loss.
     auto& reject = result.admission_reject;
     reject = run_admission(fixture, proc_table, {.fault = Fault::RejectBeforeSubmit});
-    result.admission_reject_receipt =
-        latched(reject, ga_reason::ProviderFailure, 0, ga_state::Degraded) &&
-        reject.gpu_blocks == 0;
+    result.admission_reject_receipt = refused_at(reject, 0) && reject.gpu_blocks == 0;
+    // With one block in flight the node takes its next block only after the
+    // last one's slot is released, so a refusing slot 1 is never reached: the
+    // run must refuse nothing and latch nothing. A stall seen in this
+    // configuration is therefore never a refusal.
+    auto& unreachable = result.admission_reject_unreachable_slot;
+    unreachable =
+        run_admission(fixture, proc_table, {.fault = Fault::RejectBeforeSubmit, .fault_slot = 1});
+    result.admission_reject_unreachable_slot_receipt =
+        clean(unreachable) && unreachable.refused_submits == 0 &&
+        unreachable.reason == ga_reason::None &&
+        unreachable.gpu_blocks + kLateAllowance >= kCallbacks - 1 && unreachable.mismatches == 0;
     // Withholding the pumps after callback 10 alone latches nothing, so the
     // mid-stream run's latch belongs to the refusal.
     const AdmissionScenario midstream{.fault = Fault::RejectBeforeSubmit,
@@ -1067,9 +1139,8 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
     refused = run_admission(fixture, proc_table, midstream);
     const auto last_gpu = refused.trace.find_last_of('G');
     result.admission_reject_midstream_receipt =
-        latched(refused, ga_reason::ProviderFailure, 11, ga_state::Degraded) &&
-        refused.gpu_blocks + kLateAllowance >= 10 && last_gpu != std::string::npos &&
-        last_gpu <= 11 && refused.mismatches == 0;
+        refused_at(refused, 11) && refused.gpu_blocks + kLateAllowance >= 10 &&
+        last_gpu != std::string::npos && last_gpu <= 11 && refused.mismatches == 0;
 
     result.refusal_retry = run_refusal_retry(fixture, proc_table);
     result.refusal_retry_receipt = result.refusal_retry.refused && result.refusal_retry.retried &&
@@ -1342,9 +1413,9 @@ int main(int argc, char** argv) {
         result.node_loss_receipt && result.node_hang_receipt && result.neural_loss_receipt &&
         result.neural_hang_receipt && result.admission_healthy_receipt &&
         result.admission_loss_receipt && result.admission_reject_receipt &&
-        result.admission_skip_control_receipt && result.admission_reject_midstream_receipt &&
-        result.refusal_retry_receipt && result.reacquire_loss_receipt &&
-        result.reacquire_hang_receipt;
+        result.admission_reject_unreachable_slot_receipt && result.admission_skip_control_receipt &&
+        result.admission_reject_midstream_receipt && result.refusal_retry_receipt &&
+        result.reacquire_loss_receipt && result.reacquire_hang_receipt;
     emit(result, passed ? "passed" : "failed");
     return passed ? 0 : 1;
 }

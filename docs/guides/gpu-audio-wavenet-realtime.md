@@ -114,6 +114,12 @@ slow, not unresponsive: its results retire as late, and if it falls behind for
 good the input ring saturates. If the worker itself stops, the callback latches
 `InputSaturated` when the ring fills.
 
+A refused submission latches `ProviderFailure` at the refused block in the
+worker pump that sees it, or `ProviderLost` if the device is gone. A refused
+block never goes in flight, so the watchdog cannot time it.
+`ProviderUnresponsive` therefore always means a block was accepted and nothing
+completed within the window; it never stands for a refusal.
+
 `status_snapshot()` reports `provider_state = Unavailable` after an observed
 device loss, whatever cause latched first, and for `ProviderUnresponsive`:
 delivery cannot resume until the node is released and prepared with a new
@@ -144,7 +150,8 @@ stream position, and the node's sequence keeps advancing one block per callback
 through the fault. The physical Dawn qualification
 (`pulp-gpu-dawn-wavenet-qualification --strict`) checks loss and refusal at the
 first submission, a refusal mid-stream with the GPU blocks before it matched
-against the CPU reference, and a refused block retried on the same stream.
+against the CPU reference, a refused block retried on the same stream, and that
+each refusal latches at the block the provider refused.
 
 Completions collected in either completion pass count as provider progress,
 and completions are collected before the watchdog is evaluated, so a starved
