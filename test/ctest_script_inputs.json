@@ -8097,6 +8097,7 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
+    "core/canvas/include/pulp/canvas/affine_transform.hpp",
     "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
     "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
