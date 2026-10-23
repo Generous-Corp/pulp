@@ -5156,6 +5156,13 @@
    ],
    "kind": "python"
   },
+  "gpu-audio-daw-continuity-v2-receipt-verifier-selftest": {
+   "entry": "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py",
+   "inputs": [
+    "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py"
+   ],
+   "kind": "python"
+  },
   "gpu-audio-p2-campaign-contract-selftest": {
    "entry": "tools/scripts/test_gpu_audio_p2_campaign.py",
    "inputs": [
@@ -5577,6 +5584,38 @@
     "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/testing/daw-smoke/insert_and_float.lua",
     "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-fault-hooks-release-gate": {
+   "entry": "tools/scripts/gpu_fault_hooks_release_gate.py",
+   "inputs": [
+    "tools/scripts/gpu_fault_hooks_release_gate.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-fault-hooks-release-gate-macos-selftest": {
+   "entry": "tools/scripts/test_gpu_fault_hooks_release_gate_macos.py",
+   "inputs": [
+    "tools/scripts/test_gpu_fault_hooks_release_gate.py",
+    "tools/scripts/test_gpu_fault_hooks_release_gate_macos.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-fault-hooks-release-gate-selftest": {
+   "entry": "tools/scripts/test_gpu_fault_hooks_release_gate.py",
+   "inputs": [
+    "tools/scripts/test_gpu_fault_hooks_release_gate.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-fault-real-host-driver-selftest": {
+   "entry": "tools/testing/daw-smoke/test_real_host_smoke.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_p2_host_preflight.py",
+    "tools/testing/daw-smoke/real_host_smoke.py",
+    "tools/testing/daw-smoke/test_real_host_smoke.py",
+    "tools/validation/verify_gpu_audio_daw_continuity_receipt_v2.py"
    ],
    "kind": "python"
   },
