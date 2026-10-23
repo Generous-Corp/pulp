@@ -75,7 +75,7 @@ class RegistrySignatureTests(unittest.TestCase):
             self.assertEqual(spr.main(["sign", "--key", str(seed), str(registry)]), 0)
             sig = root / "registry.json.sig"
             self.assertTrue(sig.is_file())
-            public = spr.public_key(bytes.fromhex(seed.read_text().strip())).hex()
+            public = spr.public_key(bytes.fromhex(seed.read_text(encoding="ascii").strip())).hex()
             self.assertEqual(spr.main(["verify", "--public-key", public, str(registry), str(sig)]), 0)
             registry.write_bytes(REGISTRY + b" ")
             self.assertEqual(spr.main(["verify", "--public-key", public, str(registry), str(sig)]), 1)
