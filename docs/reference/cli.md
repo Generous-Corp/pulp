@@ -235,6 +235,14 @@ become reachable in time is a warning in both: the CLI is already installed.
 On macOS and Windows it also reports whether an optional AAX SDK is detected. On
 Linux and Ubuntu it reports AAX as unsupported.
 
+In a source checkout `pulp status` also prints an `Agent capabilities:` line
+from `tools/scripts/agent_capability_manifest.py --status`. A counter shows as
+`(pending: not a published revision; the next SDK release assigns N)` when the
+checkout's capability material changed after it was last assigned, which is
+normal on `main` until the version-at-land bump releases the change. `pulp
+doctor` reports the same line as the `Agent-capability counters` check, and the
+MCP `pulp_status` tool includes it.
+
 ### validate
 
 **Status**: usable

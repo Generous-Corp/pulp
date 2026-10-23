@@ -8,6 +8,8 @@
 #include "cli_common.hpp"
 
 #include <pulp/platform/child_process.hpp>
+#include "agent_capability_status.hpp"
+#include "shell_redirect.hpp"
 #include "git_lock_health.hpp"
 #include "package_registry.hpp"
 
@@ -162,6 +164,17 @@ static bool sdk_config_ready(const fs::path& sdk_dir) {
     return fs::exists(sdk_dir / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake");
 }
 
+std::string agent_capability_status_for(const fs::path& root, bool* pending) {
+    if (root.empty()) return {};
+    const auto tool = root / "tools" / "scripts" / "agent_capability_manifest.py";
+    if (!fs::exists(tool)) return {};
+    const auto counters = pulp::cli::parse_agent_capability_status(
+        exec_output("python3 " + shell_quote(tool.string()) + " --status" + stderr_to_null()));
+    if (!counters) return {};
+    if (pending) *pending = pulp::cli::any_agent_capability_counter_pending(*counters);
+    return pulp::cli::agent_capability_status_line(*counters);
+}
+
 std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool standalone_mode,
                                            const std::string& only_filter) {
     std::vector<DoctorCheck> checks;
@@ -169,6 +182,24 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
 
     if (doctor_check_matches_only_filter(only_filter, "Control broker")) {
         checks.push_back(control_broker_check());
+    }
+
+    // A pending counter is normal on main between a capability change landing
+    // and the bump that releases it, so this reports rather than fails; what it
+    // prevents is an agent reading the bare integer as a published revision.
+    if (!repo_root.empty() &&
+        fs::exists(repo_root / "tools" / "scripts" / "agent_capability_manifest.py") &&
+        doctor_check_matches_only_filter(only_filter, "Agent-capability counters")) {
+        DoctorCheck c{"Agent-capability counters", true, {}, {}};
+        c.checkout_health = true;
+        c.detail = agent_capability_status_for(repo_root);
+        if (c.detail.empty()) {
+            c.passed = false;
+            c.optional = true;
+            c.detail = "could not run tools/scripts/agent_capability_manifest.py --status";
+            c.fix = "python3 tools/scripts/agent_capability_manifest.py --status";
+        }
+        checks.push_back(c);
     }
 
     // 1. C++20 compiler

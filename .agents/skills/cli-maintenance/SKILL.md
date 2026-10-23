@@ -3969,3 +3969,13 @@ after a successful delegated Shipyard arm/ship path, and deliberately skips
 `--no-arm`. Keep this hook after arming so advisory workflow dispatches bind to
 the approved head; direct `shipyard pr` remains an interim gap until Shipyard
 provides a native arm hook.
+
+## Agent-capability counters in `status`, `doctor` and MCP
+
+`tools/cli/agent_capability_status.hpp` (header-only, shared with
+`tools/mcp/mcp_tools.cpp`) parses `agent_capability_manifest.py --status` and
+formats the counters, naming a pending one as such. `pulp status`, the
+`Agent-capability counters` doctor check and MCP `pulp_status` print it only in
+a source checkout; a missing or failing tool omits the line rather than
+printing a guess. The doctor check never fails on pending: pending is the
+normal state of `main` between a capability change landing and its release.

@@ -4,6 +4,7 @@
 #include "mcp_json.hpp"
 #include "mcp_shell.hpp"
 #include "mcp_tools_internal.hpp"
+#include "../cli/agent_capability_status.hpp"
 
 #include <filesystem>
 #include <sstream>
@@ -84,6 +85,15 @@ std::string handle_status(const std::string& /*params_json*/) {
     out << "Build: " << (fs::exists(build_dir / "CMakeCache.txt") ? "configured" : "not configured")
         << "\n";
     out << import_design_defaults_line();
+    // The capability counters, with pending ones named as such: an agent on a
+    // source checkout must not read an unassigned integer as a released revision.
+    const auto capability_tool = root / "tools" / "scripts" / "agent_capability_manifest.py";
+    if (fs::exists(capability_tool)) {
+        if (const auto counters = pulp::cli::parse_agent_capability_status(
+                exec("python3 " + shell_quote(capability_tool.string()) + " --status 2>/dev/null"))) {
+            out << "Agent capabilities: " << pulp::cli::agent_capability_status_line(*counters) << "\n";
+        }
+    }
 
     int src = 0, hdr = 0, tests = 0;
     for (auto& e : fs::recursive_directory_iterator(root / "core")) {

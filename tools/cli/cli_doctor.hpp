@@ -52,6 +52,11 @@ inline bool doctor_check_gates_project_creation(const DoctorCheck& check) {
     return !check.optional && !check.release_only && !check.checkout_health;
 }
 
+// The agent-capability counters of a source checkout as one status line, or
+// empty when `root` is not a source tree or the manifest tool cannot run.
+// Shared by `pulp status` and the "Agent-capability counters" doctor check.
+std::string agent_capability_status_for(const fs::path& root, bool* pending = nullptr);
+
 // `only_filter`: case-insensitive substring. When non-empty,
 // individual probes whose name doesn't match are SKIPPED — no process
 // spawn, no file IO — so `pulp doctor --only git` runs only git probes

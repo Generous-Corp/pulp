@@ -315,6 +315,12 @@ int cmd_status(const std::vector<std::string>& args) {
     std::cout << "Build governance: Tier " << governance.tier
               << " (" << governance.detail << ")\n";
 
+    if (!standalone_mode) {
+        if (const auto counters = agent_capability_status_for(root); !counters.empty()) {
+            std::cout << "Agent capabilities: " << counters << "\n";
+        }
+    }
+
     print_pr_workflow_status(root, !standalone_mode);
     print_import_design_default_status();
 

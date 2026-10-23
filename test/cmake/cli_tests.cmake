@@ -63,6 +63,13 @@ target_compile_definitions(pulp-test-cli-configure-defaults PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}")
 catch_discover_tests(pulp-test-cli-configure-defaults)
 
+# The agent-capability counter line shared by `pulp status`, `pulp doctor` and
+# the MCP status tool: parsing `agent_capability_manifest.py --status` and
+# naming a pending counter rather than printing a bare revision.
+add_executable(pulp-test-cli-agent-capability-status test_cli_agent_capability_status.cpp)
+target_link_libraries(pulp-test-cli-agent-capability-status PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-agent-capability-status)
+
 # CLI create shell-out edge tests. These launch the built CLI but stay on
 # fail-fast paths that do not run doctor, configure, build, or network setup.
 add_executable(pulp-test-cli-create-shellout test_cli_create_shellout.cpp)
