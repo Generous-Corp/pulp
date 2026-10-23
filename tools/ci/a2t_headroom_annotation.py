@@ -110,9 +110,17 @@ def reconcile_issue(measurement: dict, repo: str, api: GhApi = gh_api) -> str:
                  f'q=repo:{repo} is:issue in:title "{TITLE}"'], None) or {}
     mine = [i for i in (found.get("items") or [])
             if ISSUE_MARKER in (i.get("body") or "")]
-    # One issue: an open one wins over closed duplicates, then the newest.
+    # One issue: an open one wins over closed duplicates, then the newest. Any
+    # OTHER open issue carrying the marker is a duplicate, closed in favour of it.
     mine.sort(key=lambda i: (i.get("state") == "open", i.get("number", 0)), reverse=True)
     issue = mine[0] if mine else None
+    for duplicate in mine[1:]:
+        if duplicate.get("state") != "open":
+            continue
+        api(["-X", "POST", f"/repos/{repo}/issues/{duplicate['number']}/comments", "-f",
+             f"body=Duplicate of #{issue['number']}, which tracks A2T headroom. Closing."], None)
+        api(["-X", "PATCH", f"/repos/{repo}/issues/{duplicate['number']}",
+             "-f", "state=closed", "-f", "state_reason=not_planned"], None)
     if firing:
         fields = {"title": issue_title(count, limit), "body": issue_body(measurement)}
         if issue is None:

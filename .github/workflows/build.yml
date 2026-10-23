@@ -3771,13 +3771,6 @@ jobs:
           echo "Windows leg ${conclusion:-not found} or MSVC=$msvc_ok — failing windows alias (advisory only; not required)"
           exit 1
 
-  # Names the cause of each failed job in this run as a `ci.cause/v1` record,
-  # printed as a `::notice title=ci-cause::` annotation. A job's own log can be
-  # downloaded only once it has finished, so this job reads the failed jobs'
-  # finished logs and runs `shipyard cause extract` over each
-  # (tools/ci/ci_cause_notices.sh), on the release tools/shipyard.toml pins,
-  # verified against tools/toolchain/shipyard.sha256. It is advisory: it never
-  # gates the run, and none of its failures fail it.
   # The A2T early warning as an issue, not only an annotation: on each push to
   # main, open or update ONE tracking issue while the scope-history window is at
   # or past the early-warning share, and close it once a re-pin brings it back
@@ -3788,6 +3781,7 @@ jobs:
     needs: [build]
     if: >-
       always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 5
@@ -3814,6 +3808,13 @@ jobs:
           python3 tools/ci/a2t_headroom_annotation.py --reconcile-issue
           --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/a2t/a2t-scope-headroom.json"
 
+  # Names the cause of each failed job in this run as a `ci.cause/v1` record,
+  # printed as a `::notice title=ci-cause::` annotation. A job's own log can be
+  # downloaded only once it has finished, so this job reads the failed jobs'
+  # finished logs and runs `shipyard cause extract` over each
+  # (tools/ci/ci_cause_notices.sh), on the release tools/shipyard.toml pins,
+  # verified against tools/toolchain/shipyard.sha256. It is advisory: it never
+  # gates the run, and none of its failures fail it.
   ci-cause:
     name: ci-cause (advisory)
     needs: [build, macos, macos-merge-group, linux, windows]

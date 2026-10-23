@@ -150,6 +150,23 @@ class TrackingIssueTests(unittest.TestCase):
         self.assertEqual(ann.reconcile_issue(repinned, "o/r", gh), "none")
         self.assertEqual(len(gh.mutations()), before)
 
+    def test_open_duplicates_carrying_the_marker_are_closed(self) -> None:
+        def tracked(number: int, state: str = "open") -> dict:
+            return {"number": number, "state": state, "title": f"{ann.TITLE}: old",
+                    "body": f"old\n{ann.ISSUE_MARKER}\n"}
+        gh = FakeGitHub([tracked(10), tracked(12), tracked(11, "closed")])
+        action = ann.reconcile_issue(measurement_at_share_of_budget(0.81), "o/r", gh)
+        # The newest open one is kept and updated; the other open one is closed.
+        self.assertEqual(action, "updated #12")
+        states = {i["number"]: i["state"] for i in gh.issues}
+        self.assertEqual(states, {10: "closed", 12: "open", 11: "closed"})
+        closing = [a for a in gh.mutations() if "state=closed" in a]
+        self.assertEqual([a[2] for a in closing], ["/repos/o/r/issues/10"])
+        # After a re-pin the survivor closes too, leaving none open.
+        repinned = {"count": 128, "limit": LIMIT, "headroom": LIMIT - 128, "budget": BUDGET}
+        self.assertEqual(ann.reconcile_issue(repinned, "o/r", gh), "closed #12")
+        self.assertTrue(all(i["state"] == "closed" for i in gh.issues))
+
     def test_an_issue_without_the_marker_is_never_touched(self) -> None:
         stranger = {"number": 5, "state": "open", "title": f"{ann.TITLE} discussion", "body": "hand-written"}
         gh = FakeGitHub([stranger])
@@ -182,9 +199,11 @@ class WiringTests(unittest.TestCase):
         self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", upload)
         self.assertIn("runner.os == 'Linux'", upload)
         self.assertIn("name: a2t-scope-headroom", upload)
-        job = workflow.split("\n  a2t-headroom-issue:\n", 1)[1].split("\n  ci-cause:\n", 1)[0]
+        job = workflow.split("\n  a2t-headroom-issue:\n", 1)[1].split("\n  # ", 1)[0]
         self.assertIn("needs: [build]", job)
         self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", job)
+        # A fork's own main push must not open issues from its copy of the job.
+        self.assertIn("github.repository == vars.PULP_PRIMARY_REPO", job)
         self.assertIn("issues: write", job)
         self.assertIn("continue-on-error: true", job)
         self.assertIn("--reconcile-issue", job)
