@@ -407,4 +407,33 @@ TEST_CASE("CoreGraphics midpoints match Chrome through resampling",
         CHECK(max_channel_error(got, c.rgb) <= kChromeTolerance);
     }
 }
+
+// Planted negative for the resampling: the same Oklab CSS with its layer forced
+// back to sRGB is what CoreGraphics would paint if it resampled in sRGB (or not
+// at all), and it must miss Chrome's Oklab midpoint by far more than the
+// tolerance the honoured render meets.
+TEST_CASE("CoreGraphics resampled in sRGB fails the Oklab midpoint",
+          "[css][gradient][interpolation][cg]") {
+    View v;
+    v.set_bounds({0.0f, 0.0f, static_cast<float>(kW), static_cast<float>(kH)});
+    REQUIRE(apply_css_background_gradient(v, chrome_oklab().css));
+    const auto render = [&] {
+        const auto png = render_to_png(v, kW, kH, 1.0f, ScreenshotBackend::coregraphics);
+        REQUIRE_FALSE(png.empty());
+        size_t pw = 0, ph = 0;
+        const auto px = decode_png_rgba(png, pw, ph);
+        REQUIRE(pw == static_cast<size_t>(kW));
+        REQUIRE(ph == static_cast<size_t>(kH));
+        return column_mean(px, kW, kH, kW / 2);
+    };
+    const auto honoured = render();
+    auto layers = v.background_gradient_layers();
+    layers.front().interpolation = {};
+    v.set_background_gradient_layers(std::move(layers));
+    const auto forced = render();
+    INFO("Oklab " << rgb_text(honoured) << ", sRGB " << rgb_text(forced) << ", Chrome "
+                  << rgb_text(chrome_oklab().rgb));
+    CHECK(max_channel_error(honoured, chrome_oklab().rgb) <= kChromeTolerance);
+    CHECK(max_channel_error(forced, chrome_oklab().rgb) > 10.0 * kChromeTolerance);
+}
 #endif
