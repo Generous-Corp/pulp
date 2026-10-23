@@ -219,6 +219,14 @@ TEST_CASE("shared IO telemetry validates quiescent admission and delivery bounds
     legacy.admitted_blocks = 0;
     CHECK(validate_shared_io_telemetry(legacy).accepted());
 
+    // A legacy receipt has no separate admission counter, so all terminal
+    // outcomes still must be bounded by the provider submissions it reports.
+    legacy = {};
+    legacy.submitted_blocks = 0;
+    legacy.retired_failure = 1;
+    CHECK(validate_shared_io_telemetry(legacy).error ==
+          SharedIoTelemetryError::RetirementsExceedSubmissions);
+
     constexpr SharedIoTelemetrySnapshot unconfigured{};
     STATIC_REQUIRE(validate_shared_io_telemetry(unconfigured).accepted());
 }
