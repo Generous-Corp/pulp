@@ -1,7 +1,11 @@
 name: Timeline and control protocol fuzzing
 
-# Fuzzing over the untrusted Timeline document parsers and the bounded local
-# capability-control protocol decoder.
+# Fuzzing over the untrusted Timeline document parsers, the bounded local
+# capability-control protocol decoder, and the other parsers that read bytes a
+# host, a downloaded pack or a dropped file hands the SDK: the host-facing
+# plugin state blob, a scripted UI document (ui.js) in a QuickJS realm, SVG
+# ingest, Standard MIDI File import, audio container headers, and the
+# content-pack, sample-bank and plugin capability manifests.
 #
 # Two lanes share each parser's oracle implementation
 # (`timeline_document_oracle.*` and `control_protocol_fuzz_oracle.hpp`), because
@@ -14,7 +18,12 @@ name: Timeline and control protocol fuzzing
 #                  on-demand only, and Linux-only: `-fsanitize=fuzzer` needs a
 #                  compiler runtime Apple's clang does not ship, so a macOS leg
 #                  would need a Homebrew LLVM and would buy nothing the
-#                  deterministic lane does not already cover.
+#                  deterministic lane does not already cover. The parser
+#                  targets that have no deterministic twin live only here, so
+#                  this job is their one lane: each also carries a bounded
+#                  ctest smoke (`-L libfuzzer`) that proves the binary links,
+#                  loads its seeds and survives a short mutation pass before
+#                  the long budget starts.
 #
 # Runner routing: GitHub-hosted throughout. Per the repository's runner-priority
 # contract the self-hosted Macs carry the required `macos` gate, and a
@@ -37,6 +46,7 @@ on:
       - 'inspect/src/control_protocol*.cpp'
       - 'inspect/src/control_json_*.cpp'
       - 'test/fuzz/**'
+      - 'test/fixtures/fuzz/**'
       - 'test/test_control_protocol_fuzz.cpp'
       - 'test/test_timeline_document_fuzz.cpp'
       - 'test/fixtures/timeline/**'
@@ -119,7 +129,10 @@ jobs:
       (github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp')
       && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # Eight targets at the default 900 s budget each is two hours of fuzzing
+    # on top of the build; the ceiling leaves room for the build and the
+    # smoke without masking a wedged target.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
         with:
@@ -147,7 +160,17 @@ jobs:
         run: |
           tools/ci/governed-build.sh cmake --build build-libfuzzer \
             --target pulp-fuzz-timeline-document pulp-fuzz-control-protocol \
-              pulp-generate-control-protocol-fuzz-corpus
+              pulp-generate-control-protocol-fuzz-corpus \
+              pulp-fuzz-plugin-state pulp-generate-plugin-state-fuzz-corpus \
+              pulp-fuzz-ui-script pulp-fuzz-svg pulp-fuzz-smf \
+              pulp-fuzz-content-manifest pulp-fuzz-format-registry
+
+      # Bounded pass over every registered target and its seed corpus. A
+      # target that fails to load its seeds or crashes within a few thousand
+      # iterations fails here, named, instead of inside a fifteen-minute run.
+      - name: Smoke every libFuzzer target
+        run: |
+          ctest --test-dir build-libfuzzer --output-on-failure -L libfuzzer
 
       - name: Seed the corpus
         run: |
@@ -163,6 +186,13 @@ jobs:
               done
           ./build-libfuzzer/test/pulp-generate-control-protocol-fuzz-corpus \
             fuzz-corpus/control-protocol
+          ./build-libfuzzer/test/pulp-generate-plugin-state-fuzz-corpus \
+            fuzz-corpus/plugin-state
+          # The checked-in seeds are read in place; libFuzzer writes every new
+          # input into the first directory it is given, so each target gets a
+          # scratch directory first and never grows the fixture tree.
+          mkdir -p fuzz-corpus/ui-script fuzz-corpus/svg fuzz-corpus/smf \
+            fuzz-corpus/content-manifest fuzz-corpus/format-registry
           find fuzz-corpus -type f -print | sort
 
       - name: Fuzz
@@ -178,6 +208,51 @@ jobs:
             -print_final_stats=1
           ./build-libfuzzer/test/pulp-fuzz-control-protocol \
             fuzz-corpus/control-protocol \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_len=1048576 \
+            -rss_limit_mb=2048 \
+            -timeout=25 \
+            -print_final_stats=1
+          ./build-libfuzzer/test/pulp-fuzz-plugin-state \
+            fuzz-corpus/plugin-state \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_len=1048576 \
+            -rss_limit_mb=2048 \
+            -timeout=25 \
+            -print_final_stats=1
+          # Each ui.js input builds a fresh realm, so the input ceiling is
+          # small and the per-input watchdog (500 ms) sits well under the
+          # libFuzzer timeout.
+          ./build-libfuzzer/test/pulp-fuzz-ui-script \
+            fuzz-corpus/ui-script test/fixtures/fuzz/ui-script \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_len=16384 \
+            -rss_limit_mb=2048 \
+            -timeout=25 \
+            -print_final_stats=1
+          ./build-libfuzzer/test/pulp-fuzz-svg \
+            fuzz-corpus/svg test/fixtures/fuzz/svg \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_len=262144 \
+            -rss_limit_mb=2048 \
+            -timeout=25 \
+            -print_final_stats=1
+          ./build-libfuzzer/test/pulp-fuzz-smf \
+            fuzz-corpus/smf test/fixtures/fuzz/smf \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_len=1048576 \
+            -rss_limit_mb=2048 \
+            -timeout=25 \
+            -print_final_stats=1
+          ./build-libfuzzer/test/pulp-fuzz-content-manifest \
+            fuzz-corpus/content-manifest test/fixtures/fuzz/content-manifest \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_len=262144 \
+            -rss_limit_mb=2048 \
+            -timeout=25 \
+            -print_final_stats=1
+          ./build-libfuzzer/test/pulp-fuzz-format-registry \
+            fuzz-corpus/format-registry \
             -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
             -max_len=1048576 \
             -rss_limit_mb=2048 \

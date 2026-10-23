@@ -59,3 +59,14 @@ pulp_test_spawns(pulp-test-cli-kit-commands NOT_RUN pulp-screenshot)
 # reaches, and the package registry's curl/powershell download.
 pulp_test_spawns(pulp-test-cli-content-commands NONE REASON "links the kit runner, whose screenshot path it never reaches, and the registry's curl/powershell download, it runs nothing the tree builds")
 pulp_test_spawns(pulp-test-cli-content-commands NOT_RUN pulp-screenshot)
+
+# Coverage-guided lane over the manifests a content pack carries: the pack
+# manifest through the install preview, the sample-bank manifest, and the
+# plugin-side capability manifest. Off by default; the libFuzzer runtime probe
+# lives in timeline_tests.cmake.
+if(PULP_ENABLE_FUZZING)
+    pulp_add_libfuzzer_target(pulp-fuzz-content-manifest
+        SOURCES fuzz/content_manifest_fuzz_target.cpp
+        LIBRARIES pulp::content pulp::audio
+        CORPUS "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fuzz/content-manifest")
+endif()

@@ -64,8 +64,8 @@ if(PULP_ENABLE_FUZZING)
         fuzz/format_registry_fuzz_target.cpp)
     target_link_libraries(pulp-fuzz-format-registry PRIVATE pulp::audio)
     target_compile_options(pulp-fuzz-format-registry PRIVATE
-        -fsanitize=fuzzer,address -fno-omit-frame-pointer)
-    target_link_options(pulp-fuzz-format-registry PRIVATE -fsanitize=fuzzer,address)
+        -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
+    target_link_options(pulp-fuzz-format-registry PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS})
 endif()
 
 # Impulse-response loading. The PCM entry point is fed by UNTRUSTED, already-
