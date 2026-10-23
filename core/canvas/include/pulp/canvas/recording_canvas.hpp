@@ -169,7 +169,8 @@ struct DrawCommand {
         // instead captures the shader source + rect and returns false
         // (a recorder cannot compile/execute SkSL). Callers that test the
         // base CPU fallback must invoke `rc.Canvas::draw_with_sksl(...)`.
-        draw_sksl             ///< rect x/y/w/h in f[0..3]; value f[4]; time f[5]; SkSL source in `text`
+        draw_sksl,            ///< rect x/y/w/h in f[0..3]; value f[4]; time f[5]; SkSL source in `text`
+        set_gradient_interpolation  ///< GradientColorSpace in f[0], GradientHueMethod in f[1]
     };
 
     Type type;
@@ -332,6 +333,7 @@ public:
                                  const Color* colors, const float* positions,
                                  int count) override;
     void clear_fill_gradient() override;
+    void set_gradient_interpolation(GradientInterpolation method) override;
 
     // ── Retained paths ───────────────────────────────────────────────────
     // `using` re-exposes the base-class polygon overloads: declaring
