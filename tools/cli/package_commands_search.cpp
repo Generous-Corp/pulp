@@ -226,8 +226,10 @@ int cmd_search(const std::vector<std::string>& args) {
         std::cout << "Usage: pulp search <query> [options]\n\n"
                   << "Search the package registry by name, description, tags, or category.\n\n"
                   << "Options:\n"
-                  << "  --refresh      Force refresh the remote registry cache\n"
-                  << "  --format json  Output as JSON\n";
+                  << "  --refresh                  Force refresh the remote registry cache\n"
+                  << "  --allow-unsigned-registry  Use a remote registry whose signature is "
+                     "missing or invalid (prints a WARNING)\n"
+                  << "  --format json              Output as JSON\n";
         return 0;
     }
 
