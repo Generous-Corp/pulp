@@ -112,6 +112,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME import-validation-score-native-panel-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_score_native_panel.py")
     set_tests_properties(import-validation-score-native-panel-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME import-validation-text-raster-decomposition-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_text_raster_decomposition.py")
+    set_tests_properties(import-validation-text-raster-decomposition-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120 SKIP_RETURN_CODE 77)
     add_test(NAME import-validation-source-contract-schema-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/import-validation/test_source_contract_schema.py")
     set_tests_properties(import-validation-source-contract-schema-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
