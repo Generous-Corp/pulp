@@ -1,10 +1,10 @@
 #pragma once
 
 // Shared surface of the design-import benchmark: the fixture interface every
-// lane implements, and the fixture built from an importer-produced DesignIR.
-// The IR-bound fixture lives in its own translation unit so the benchmark's
+// lane implements, and the fixtures built from an importer-produced DesignIR.
+// The IR-bound fixtures live in their own translation unit so the benchmark's
 // driver, receipt and synthetic lanes do not share a file with the retained
-// slot experiment.
+// and live slot experiments.
 
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/view.hpp>
@@ -19,7 +19,13 @@
 
 namespace pulp::view {
 class Label;
+class ScriptEngine;
+class WidgetBridge;
 } // namespace pulp::view
+
+namespace pulp::state {
+class StateStore;
+}
 
 namespace pulp::design_import_bench {
 
@@ -54,9 +60,17 @@ class BenchmarkFixture {
 // benchmark never measures a tree the importer reported as wrong. Warnings
 // (a design that states no widget palette, say) do not change the tree's
 // structure; their codes are returned so the receipt shows every one.
-std::unique_ptr<view::View> materialize_checked(const view::DesignIR& ir, float width,
-                                                float height, std::string_view lane,
+std::unique_ptr<view::View> materialize_checked(const view::DesignIR& ir, float width, float height,
+                                                std::string_view lane,
                                                 std::vector<std::string>* warning_codes);
+
+// A file read whole, with the digest that binds a receipt to its bytes.
+struct HashedFile {
+    std::string text;
+    std::string sha256;
+    std::string file_name;
+};
+HashedFile read_hashed_file(const std::filesystem::path& path, std::string_view what);
 
 // An importer-produced DesignIR, with the provenance that binds a receipt to
 // the exact bytes measured.
@@ -64,6 +78,7 @@ struct LoadedIr {
     view::DesignIR ir;
     std::string sha256;
     std::string file_name;
+    std::filesystem::path base_dir;
     float width = static_cast<float>(kFixtureWidth);
     float height = static_cast<float>(kFixtureHeight);
     std::vector<std::string> slot_anchors;
@@ -123,6 +138,62 @@ class IrBoundFixture final : public BenchmarkFixture {
     std::vector<view::Label*> resolved_;
     std::vector<view::Label*> retained_;
     std::vector<std::string> warning_codes_;
+    std::uint64_t identity_changes_ = 0;
+    std::uint64_t text_mismatches_ = 0;
+};
+
+// The production JavaScript path over the same importer output. The DesignIR
+// is mounted the way a live import mounts it: an optional materialized runtime
+// bundle (the captured application's behavior realm) loads first, then the
+// DesignIR as generated bridge JavaScript, then the runtime settles. Each step
+// writes every anchored text slot through the bridge's `setText` in one script
+// evaluation and then services one host frame tick, so the update cost
+// includes the script engine, the bridge and the runtime's own frame work.
+class IrLiveFixture final : public BenchmarkFixture {
+  public:
+    IrLiveFixture(const std::filesystem::path& ir_path, const std::filesystem::path& bundle_path);
+    ~IrLiveFixture() override;
+
+    view::View& root() override {
+        return *root_;
+    }
+    void step(int frame) override;
+    void verify(int frame) override;
+    int js_evaluation_count() const override {
+        return js_evaluations_;
+    }
+    std::uint64_t bridge_call_count() const override;
+    std::uint64_t slot_identity_change_count() const override {
+        return identity_changes_;
+    }
+    std::uint64_t slot_text_mismatch_count() const override {
+        return text_mismatches_;
+    }
+    const LoadedIr& loaded() const {
+        return loaded_;
+    }
+    // Digest of the materialized bundle measured, empty for a bridge-JS-only
+    // mount.
+    const std::string& bundle_sha256() const {
+        return bundle_sha256_;
+    }
+    const std::string& bundle_file_name() const {
+        return bundle_file_name_;
+    }
+
+  private:
+    std::vector<std::vector<view::Label*>> find_slot_labels() const;
+    std::vector<view::Label*> resolve_slots() const;
+
+    LoadedIr loaded_;
+    std::string bundle_sha256_;
+    std::string bundle_file_name_;
+    std::unique_ptr<view::View> root_;
+    std::unique_ptr<view::ScriptEngine> engine_;
+    std::unique_ptr<state::StateStore> store_;
+    std::unique_ptr<view::WidgetBridge> bridge_;
+    std::vector<std::uint64_t> slot_instance_ids_;
+    int js_evaluations_ = 0;
     std::uint64_t identity_changes_ = 0;
     std::uint64_t text_mismatches_ = 0;
 };
