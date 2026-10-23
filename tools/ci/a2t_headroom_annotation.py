@@ -76,7 +76,7 @@ GhApi = Callable[[list[str], "str | None"], object]
 
 def gh_api(args: list[str], stdin: str | None = None) -> object:
     proc = subprocess.run(["gh", "api", *args], input=stdin, capture_output=True,
-                          text=True, timeout=60, env=os.environ.copy())
+                          text=True, encoding="utf-8", timeout=60, env=os.environ.copy())
     if proc.returncode != 0:
         raise RuntimeError(f"gh api {' '.join(args[:3])} failed: {proc.stderr.strip()[:300]}")
     return json.loads(proc.stdout) if proc.stdout.strip() else None

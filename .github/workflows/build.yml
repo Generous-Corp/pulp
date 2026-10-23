@@ -3780,7 +3780,9 @@ jobs:
     name: a2t-headroom-issue (advisory)
     needs: [build]
     if: >-
-      always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
+      && !cancelled()
+      && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     continue-on-error: true
