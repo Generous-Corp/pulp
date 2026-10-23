@@ -167,6 +167,7 @@
       "pulp/canvas/image_probe.hpp",
       "pulp/canvas/lottie_animation.hpp",
       "pulp/canvas/msdf_atlas.hpp",
+      "pulp/canvas/paragraph_cache.hpp",
       "pulp/canvas/path.hpp",
       "pulp/canvas/path_measure.hpp",
       "pulp/canvas/path_to_sdf.hpp",
