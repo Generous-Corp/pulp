@@ -90,6 +90,8 @@ COLOR_CASES = [
     "linear-gradient(to right in display-p3, #ff0000, #0000ff)",
     "linear-gradient(to right in oklch longer hue, #ff0000, #ffff00)",
     "linear-gradient(to right in hsl longer hue, #ff0000, #ffff00)",
+    "linear-gradient(to right in hsl, #ffffff, #0000ff)",
+    "linear-gradient(to right in oklch, #ffffff, #0000ff)",
 ]
 
 

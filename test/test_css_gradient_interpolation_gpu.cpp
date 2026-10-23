@@ -45,6 +45,7 @@ const ChromeMidpoint kCases[] = {
     {"linear-gradient(to right in oklch longer hue, #ff0000, #0000ff)", {0.0, 146.75, 0.0}},
     {"linear-gradient(to right in oklch increasing hue, #ff0000, #0000ff)", {0.0, 146.75, 0.0}},
     {"linear-gradient(to right in oklch decreasing hue, #ff0000, #0000ff)", {186.0, 0.0, 193.75}},
+    {"linear-gradient(to right in hsl, #ffffff, #0000ff)", {159.25, 159.25, 223.0}},
 };
 
 } // namespace
@@ -68,6 +69,7 @@ TEST_CASE("Graphite gradient midpoints match Chrome for each interpolation metho
     if (!skia || !skia->is_available())
         SKIP("Graphite surface unavailable.");
 
+    bool bgra = false;
     for (const auto& c : kCases) {
         view::View v;
         v.set_bounds({0.0f, 0.0f, static_cast<float>(kW), static_cast<float>(kH)});
@@ -89,9 +91,10 @@ TEST_CASE("Graphite gradient midpoints match Chrome for each interpolation metho
         REQUIRE(ph == kH);
         REQUIRE(px.size() == static_cast<size_t>(kW) * kH * 4);
 
-        // The left edge is the red stop, which fixes the channel order
-        // whatever the surface's format.
-        const bool bgra = px[2] > px[0];
+        // The first case's left edge is its red stop, which fixes the channel
+        // order whatever the surface's format; later cases may start on white.
+        if (&c == &kCases[0])
+            bgra = px[2] > px[0];
         std::array<double, 3> got{};
         for (uint32_t y = 0; y < kH; ++y) {
             const uint8_t* p = &px[(static_cast<size_t>(y) * kW + kW / 2) * 4];

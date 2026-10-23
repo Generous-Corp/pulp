@@ -47,7 +47,8 @@ struct ChromeMidpoint {
     const char* css;
     GradientInterpolation method;
     std::array<double, 3> rgb;
-    Color end = Color::rgba(0.0f, 0.0f, 1.0f, 1.0f); ///< the stop the ramp ends on
+    Color end = Color::rgba(0.0f, 0.0f, 1.0f, 1.0f);   ///< the stop the ramp ends on
+    Color start = Color::rgba(1.0f, 0.0f, 0.0f, 1.0f); ///< the stop the ramp starts on
 };
 
 // chrome_gradient_oracle.py --colors, Chrome 156, column 50.
@@ -93,6 +94,13 @@ const ChromeMidpoint kChromeMidpoints[] = {
      {GradientColorSpace::hsl, GradientHueMethod::longer},
      {0.0, 127.5, 255.0},
      Color::rgba(1.0f, 1.0f, 0.0f, 1.0f)},
+    // An achromatic stop: white has no hue of its own, and in HSL Chrome lets
+    // it take blue's, as CSS says. The OKLCH counterpart is below the table.
+    {"linear-gradient(to right in hsl, #ffffff, #0000ff)",
+     {GradientColorSpace::hsl},
+     {159.25, 159.25, 223.0},
+     Color::rgba(0.0f, 0.0f, 1.0f, 1.0f),
+     Color::rgba(1.0f, 1.0f, 1.0f, 1.0f)},
 };
 
 const ChromeMidpoint& chrome_oklab() {
@@ -253,9 +261,8 @@ TEST_CASE("A gradient that names no space defaults by its stops",
 
 TEST_CASE("The reference interpolation matches Chrome's midpoints",
           "[canvas][gradient][interpolation]") {
-    const Color red = Color::rgba(1.0f, 0.0f, 0.0f, 1.0f);
     for (const auto& c : kChromeMidpoints) {
-        const Color m = pulp::canvas::interpolate_gradient_color(red, c.end, 0.5f, c.method);
+        const Color m = pulp::canvas::interpolate_gradient_color(c.start, c.end, 0.5f, c.method);
         const std::array<double, 3> got{m.r * 255.0, m.g * 255.0, m.b * 255.0};
         INFO(c.css << "\n  reference " << rgb_text(got) << " Chrome " << rgb_text(c.rgb));
         CHECK(max_channel_error(got, c.rgb) <= kChromeTolerance);
@@ -339,6 +346,35 @@ TEST_CASE("Skia raster midpoints match Chrome for every interpolation method",
     }
 }
 
+// White to blue in OKLCH is where Chrome and Skia part company, so it is pinned
+// to Skia rather than to Chrome. Skia (and so Pulp, on raster and Graphite)
+// gives white's powerless hue the other stop's, as CSS Color 4 says, and reads
+// (115.5, 162.5, 255) at the midpoint. Chrome 156 reads (75.5, 171.75, 255), an
+// OKLCH hue near 248 rather than blue's 264, and the same (0, 180.75, 248)
+// whether white is written `oklch(1 0 none)`, `oklch(1 0 0)` or
+// `oklch(1 0 232)`, so it is not white's own hue leaking through either. That
+// is Blink's handling of the stop before Skia sees it, which a canvas that
+// paints through Skia directly does not reproduce. HSL white to blue, which
+// both agree on, is in the Chrome table above.
+TEST_CASE("An achromatic OKLCH stop takes the other stop's hue as Skia does",
+          "[css][gradient][interpolation][skia]") {
+    if (!raw_rgba_render_available())
+        SKIP("No raster backend in this build.");
+    const char* css = "linear-gradient(to right in oklch, #ffffff, #0000ff)";
+    View v;
+    v.set_bounds({0.0f, 0.0f, static_cast<float>(kW), static_cast<float>(kH)});
+    REQUIRE(apply_css_background_gradient(v, css));
+    const auto got = raster_midpoint(v);
+    const Color m = pulp::canvas::interpolate_gradient_color(Color::rgba(1.0f, 1.0f, 1.0f, 1.0f),
+                                                             Color::rgba(0.0f, 0.0f, 1.0f, 1.0f),
+                                                             0.5f, {GradientColorSpace::oklch});
+    const std::array<double, 3> reference{m.r * 255.0, m.g * 255.0, m.b * 255.0};
+    INFO("Pulp " << rgb_text(got) << ", reference " << rgb_text(reference)
+                 << ", Chrome (75.5, 171.75, 255)");
+    CHECK(max_channel_error(got, reference) <= kChromeTolerance);
+    CHECK(max_channel_error(got, {115.5, 162.5, 255.0}) <= kChromeTolerance);
+}
+
 // Planted negative: the same Oklab CSS with its layer forced back to sRGB must
 // MISS Chrome's Oklab midpoint. Without this, a Skia mapping that ignored the
 // space entirely would be indistinguishable from one that honoured it on a
@@ -398,9 +434,10 @@ std::array<double, 3> cg_midpoint(const std::string& css) {
 // red). That is CoreGraphics' sampling, not the resampled curve.
 TEST_CASE("CoreGraphics midpoints match Chrome through resampling",
           "[css][gradient][interpolation][cg]") {
+    const Color red = Color::rgba(1.0f, 0.0f, 0.0f, 1.0f);
     const Color blue = Color::rgba(0.0f, 0.0f, 1.0f, 1.0f);
     for (const auto& c : kChromeMidpoints) {
-        if (c.end != blue)
+        if (c.start != red || c.end != blue)
             continue;
         const auto got = cg_midpoint(c.css);
         INFO(c.css << "\n  CoreGraphics " << rgb_text(got) << " Chrome " << rgb_text(c.rgb));
