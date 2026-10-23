@@ -9,6 +9,7 @@
 // as text_editor_paint.cpp. All definitions are View:: members declared in
 // view.hpp, so the move needs no friend decls or header churn.
 
+#include <pulp/canvas/resource_counters.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/border_style.hpp>
 #include <pulp/view/tracing_badge.hpp>
@@ -2115,14 +2116,18 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
                 paint_content(rec, layers, children_ns);
             });
         scene_cache_valid_ = (scene_cache_ != nullptr);
+        if (scene_cache_valid_)
+            canvas::note_scene_record();
     }
 
     // Replay the recording. On a cache HIT children are NOT re-walked, so
     // children_ns stays 0 and the whole replay is attributed as self-time
     // (which it is — one drawPicture). If replay is refused (foreign recording,
     // defensive), fall back to a direct paint so the frame is never blank.
-    if (scene_cache_valid_ && scene_cache_ && canvas.draw_scene(*scene_cache_))
+    if (scene_cache_valid_ && scene_cache_ && canvas.draw_scene(*scene_cache_)) {
+        canvas::note_scene_replay();
         return;
+    }
     paint_content(canvas, layers, children_ns);
 }
 

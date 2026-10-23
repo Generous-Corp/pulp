@@ -759,7 +759,7 @@ if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET p
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/archive_symbol_closure_check.py"
             --nm "${CMAKE_NM}"
-            --forbidden "$<TARGET_FILE:pulp-view-audio>" --no-control
+            --forbidden "$<TARGET_FILE:pulp-view-audio>" --forbidden-defines any --no-control
             --check "view-core=$<TARGET_FILE:pulp-view-core>"
             --check "view-script=$<TARGET_FILE:pulp-view-script>"
             --check "design-import=$<TARGET_FILE:pulp-design-import>"

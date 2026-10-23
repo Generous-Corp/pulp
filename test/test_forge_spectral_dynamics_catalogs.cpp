@@ -386,3 +386,133 @@ TEST_CASE("Forge compressor nodes render what their compressor renders, at any b
         require_matches(run_callback(type, params, {program}, 0), expected);
     }
 }
+
+TEST_CASE("Forge compressor nodes default to branching and select decoupled ballistics",
+          "[host][forge][catalog][dynamics]") {
+    // The ballistics control defaults to branching, so a patch saved before
+    // the control existed renders exactly as before; 1 selects the decoupled
+    // form, which must equal the compressor run with set_ballistics(decoupled)
+    // and must audibly differ from the default on this program.
+    using Ballistics = pulp::signal::CompressorBallistics;
+    constexpr std::size_t kSamples = 9000;
+    const auto program = burst_signal(kSamples);
+    auto differs = [](const std::vector<float>& a, const std::vector<float>& b) {
+        std::size_t count = 0;
+        for (std::size_t i = 0; i < a.size(); ++i)
+            count += a[i] != b[i];
+        return count;
+    };
+
+    SECTION("lo-fi compressor") {
+        namespace lofi = pulp::host::forge_lofi;
+        const auto type = lofi::make_compressor_node();
+        auto render = [&](float value, Ballistics expected_form) {
+            FixedParamView params(type);
+            params.set(lofi::kCompThresholdDb, -30.0f);
+            params.set(lofi::kCompRatio, 8.0f);
+            params.set(lofi::kCompAttackMs, 1.0f);
+            params.set(lofi::kCompReleaseMs, 40.0f);
+            if (value >= 0.0f)
+                params.set(lofi::kCompBallistics, value);
+            pulp::signal::Compressor reference;
+            reference.set_sample_rate(static_cast<float>(kSampleRate));
+            pulp::signal::Compressor::Params cp;
+            cp.threshold_db = -30.0f;
+            cp.ratio = 8.0f;
+            cp.attack_ms = 1.0f;
+            cp.release_ms = 40.0f;
+            cp.knee_db = 6.0f;
+            cp.makeup_db = 0.0f;
+            reference.set_params(cp);
+            reference.set_ballistics(expected_form);
+            std::vector<float> expected(kSamples);
+            for (std::size_t i = 0; i < kSamples; ++i)
+                expected[i] = reference.process(program[i]);
+            const auto actual = run_callback(type, params, {program});
+            require_matches(actual, expected);
+            return actual;
+        };
+        const auto by_default = render(-1.0f, Ballistics::branching);
+        const auto branching = render(0.0f, Ballistics::branching);
+        const auto decoupled = render(1.0f, Ballistics::decoupled);
+        CHECK(differs(by_default, branching) == 0);
+        CHECK(differs(branching, decoupled) > 0);
+    }
+
+    SECTION("sidechain compressor") {
+        namespace sc = pulp::host::sidechain;
+        const auto type = sc::make_sidechain_compressor_node();
+        std::vector<float> main_signal(kSamples);
+        for (std::size_t i = 0; i < kSamples; ++i)
+            main_signal[i] =
+                0.5f * std::sin(static_cast<float>(2.0 * std::numbers::pi * 440.0 *
+                                                   static_cast<double>(i) / kSampleRate));
+        auto render = [&](float value, Ballistics expected_form) {
+            FixedParamView params(type);
+            params.set(sc::kThresholdDb, -30.0f);
+            params.set(sc::kRatio, 8.0f);
+            params.set(sc::kAttackMs, 1.0f);
+            params.set(sc::kReleaseMs, 40.0f);
+            if (value >= 0.0f)
+                params.set(sc::kBallistics, value);
+            pulp::signal::Compressor reference;
+            reference.set_sample_rate(static_cast<float>(kSampleRate));
+            pulp::signal::Compressor::Params cp;
+            cp.threshold_db = -30.0f;
+            cp.ratio = 8.0f;
+            cp.attack_ms = 1.0f;
+            cp.release_ms = 40.0f;
+            cp.knee_db = 6.0f;
+            cp.makeup_db = 0.0f;
+            reference.set_params(cp);
+            reference.set_ballistics(expected_form);
+            std::vector<float> expected(kSamples);
+            for (std::size_t i = 0; i < kSamples; ++i)
+                expected[i] = reference.process_with_sidechain(main_signal[i], program[i]);
+            const auto actual = run_callback(type, params, {main_signal, program});
+            require_matches(actual, expected);
+            return actual;
+        };
+        const auto by_default = render(-1.0f, Ballistics::branching);
+        const auto decoupled = render(1.0f, Ballistics::decoupled);
+        CHECK(differs(by_default, decoupled) > 0);
+    }
+
+    SECTION("multiband compressor") {
+        namespace mb = pulp::host::multiband;
+        const auto type = mb::make_multiband_compressor_node();
+        auto render = [&](float value, Ballistics expected_form) {
+            FixedParamView params(type);
+            params.set(mb::kCrossoverHz, 1000.0f);
+            params.set(mb::kLowThresholdDb, -30.0f);
+            params.set(mb::kLowRatio, 6.0f);
+            params.set(mb::kHighThresholdDb, -24.0f);
+            params.set(mb::kHighRatio, 3.0f);
+            params.set(mb::kAttackMs, 2.0f);
+            params.set(mb::kReleaseMs, 60.0f);
+            if (value >= 0.0f)
+                params.set(mb::kBallistics, value);
+            pulp::signal::LinkwitzRiley crossover;
+            crossover.set_frequency(1000.0f, static_cast<float>(kSampleRate));
+            pulp::signal::Compressor low;
+            pulp::signal::Compressor high;
+            low.set_sample_rate(static_cast<float>(kSampleRate));
+            high.set_sample_rate(static_cast<float>(kSampleRate));
+            low.set_params(mb::detail::compressor_params(-30.0f, 6.0f, 2.0f, 60.0f, 0.0f));
+            high.set_params(mb::detail::compressor_params(-24.0f, 3.0f, 2.0f, 60.0f, 0.0f));
+            low.set_ballistics(expected_form);
+            high.set_ballistics(expected_form);
+            std::vector<float> expected(kSamples);
+            for (std::size_t i = 0; i < kSamples; ++i) {
+                const auto split = crossover.process(program[i]);
+                expected[i] = low.process(split.low) + high.process(split.high);
+            }
+            const auto actual = run_callback(type, params, {program});
+            require_matches(actual, expected);
+            return actual;
+        };
+        const auto by_default = render(-1.0f, Ballistics::branching);
+        const auto decoupled = render(1.0f, Ballistics::decoupled);
+        CHECK(differs(by_default, decoupled) > 0);
+    }
+}

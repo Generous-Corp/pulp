@@ -10,6 +10,8 @@
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 using namespace pulp::view;
 
@@ -335,4 +337,189 @@ TEST_CASE("object-fit graceful fallback when measure_image_from_file fails",
     REQUIRE(cv.draws[0].has_src == false);
     REQUIRE_THAT(cv.draws[0].dw, WithinAbs(200.0f, 0.001f));
     REQUIRE_THAT(cv.draws[0].dh, WithinAbs(100.0f, 0.001f));
+}
+
+// Inline `data:image/*` sources keep their encoded bytes whatever the format,
+// read the intrinsic size from the backend's decoder once per source, and draw
+// through the content-keyed entry.
+
+namespace {
+
+// A 16x8 GIF: left half red, right half blue.
+constexpr uint8_t kSplitGif[] = {
+    0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x10, 0x00, 0x08, 0x00, 0x81, 0x00, 0x00, 0xff, 0x00,
+    0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00,
+    0x10, 0x00, 0x08, 0x00, 0x00, 0x08, 0x24, 0x00, 0x01, 0x08, 0x1c, 0x28, 0x30, 0x80, 0xc1,
+    0x83, 0x06, 0x09, 0x12, 0x44, 0x88, 0x50, 0xe1, 0x40, 0x86, 0x07, 0x1d, 0x16, 0x84, 0x18,
+    0x40, 0x22, 0x00, 0x8a, 0x15, 0x25, 0x62, 0xb4, 0xb8, 0x51, 0x23, 0xc5, 0x80, 0x00, 0x3b};
+
+std::string inline_uri(const char* media_type, const uint8_t* bytes, size_t size) {
+    return std::string("data:") + media_type + ";base64," +
+           pulp::runtime::base64_encode(bytes, size);
+}
+
+// Stands in for a decoding backend: measures and draws whatever bytes it was
+// told it can decode, and records every keyed draw.
+struct InlineStubCanvas : pulp::canvas::RecordingCanvas {
+    float img_w = 0.0f, img_h = 0.0f;
+    bool decodes = true;
+    int measures = 0;
+    struct KeyedDraw {
+        std::string key;
+        size_t size = 0;
+        float dx = 0, dy = 0, dw = 0, dh = 0;
+    };
+    std::vector<KeyedDraw> keyed;
+    int file_draws = 0;
+
+    bool supports(pulp::canvas::CanvasCapability cap) const override {
+        return cap == pulp::canvas::CanvasCapability::images;
+    }
+    bool measure_image_from_data(const uint8_t*, size_t, float& w, float& h) override {
+        ++measures;
+        w = decodes ? img_w : 0.0f;
+        h = decodes ? img_h : 0.0f;
+        return decodes;
+    }
+    bool draw_image_from_keyed_data(const std::string& key, const uint8_t*, size_t size, float x,
+                                    float y, float w, float h) override {
+        keyed.push_back({key, size, x, y, w, h});
+        return decodes;
+    }
+    bool draw_image_from_file(const std::string&, float, float, float, float) override {
+        ++file_draws;
+        return false;
+    }
+};
+
+} // namespace
+
+TEST_CASE("ImageView sizes a non-PNG data URI from the decoder and draws it keyed",
+          "[widgets][image][inline-image]") {
+    using Catch::Matchers::WithinAbs;
+    ImageView v;
+    v.set_image_source(inline_uri("image/gif", kSplitGif, sizeof(kSplitGif)));
+    v.set_bounds({0, 0, 200, 200});
+    v.set_object_fit("contain");
+    InlineStubCanvas cv;
+    cv.img_w = 16.0f;
+    cv.img_h = 8.0f;
+
+    for (int i = 0; i < 3; ++i)
+        v.paint(cv);
+
+    // The header is read once per source, not once per paint.
+    CHECK(cv.measures == 1);
+    CHECK(cv.file_draws == 0);
+    REQUIRE(cv.keyed.size() == 3);
+    const auto expected_key = pulp::runtime::sha256_hex(kSplitGif, sizeof(kSplitGif));
+    for (const auto& d : cv.keyed) {
+        CHECK(d.key == expected_key);
+        CHECK(d.size == sizeof(kSplitGif));
+        // contain: 16x8 into 200x200 letterboxes to 200x100, centred.
+        CHECK_THAT(d.dw, WithinAbs(200.0f, 0.001f));
+        CHECK_THAT(d.dh, WithinAbs(100.0f, 0.001f));
+        CHECK_THAT(d.dy, WithinAbs(50.0f, 0.001f));
+    }
+}
+
+TEST_CASE("ImageView stretches an inline image the backend cannot measure",
+          "[widgets][image][inline-image]") {
+    using Catch::Matchers::WithinAbs;
+    ImageView v;
+    v.set_image_source(inline_uri("image/gif", kSplitGif, sizeof(kSplitGif)));
+    v.set_bounds({0, 0, 120, 60});
+    v.set_object_fit("contain");
+    // A backend that draws but cannot read the size: object-fit falls back to fill.
+    struct NoMeasure : InlineStubCanvas {
+        bool measure_image_from_data(const uint8_t*, size_t, float& w, float& h) override {
+            ++measures;
+            w = h = 0.0f;
+            return false;
+        }
+    } cv;
+    v.paint(cv);
+    REQUIRE(cv.keyed.size() == 1);
+    CHECK(cv.file_draws == 0);
+    CHECK_THAT(cv.keyed[0].dw, WithinAbs(120.0f, 0.001f));
+    CHECK_THAT(cv.keyed[0].dh, WithinAbs(60.0f, 0.001f));
+}
+
+TEST_CASE("ImageView fails an undecodable inline payload once and then paints the placeholder",
+          "[widgets][image][inline-image]") {
+    const uint8_t junk[] = {'n', 'o', 't', ' ', 'a', 'n', ' ', 'i', 'm', 'a', 'g', 'e'};
+    ImageView v;
+    v.set_image_source(inline_uri("image/jpeg", junk, sizeof(junk)));
+    v.set_bounds({0, 0, 64, 64});
+    InlineStubCanvas cv;
+    cv.decodes = false;
+
+    for (int i = 0; i < 4; ++i)
+        v.paint(cv);
+
+    // One decode attempt, never a retry and never a filesystem lookup of the URI.
+    CHECK(cv.measures == 1);
+    CHECK(cv.keyed.size() == 1);
+    CHECK(cv.file_draws == 0);
+    // Every paint lands on the placeholder, labelled with the media type
+    // rather than a fragment of the base64 payload.
+    int labels = 0;
+    for (const auto& cmd : cv.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_text) {
+            CHECK(cmd.text == "image/jpeg");
+            ++labels;
+        }
+    }
+    CHECK(labels == 4);
+
+    // A new source is a fresh attempt.
+    v.set_image_source(inline_uri("image/gif", kSplitGif, sizeof(kSplitGif)));
+    cv.decodes = true;
+    cv.img_w = 16.0f;
+    cv.img_h = 8.0f;
+    v.paint(cv);
+    CHECK(cv.keyed.size() == 2);
+}
+
+TEST_CASE("ImageView fails a malformed percent-encoded data URI once into the placeholder",
+          "[widgets][image][inline-image]") {
+    ImageView v;
+    v.set_image_source("data:image/png,%89PNG%0D%0A%1A%0A%zz");
+    v.set_bounds({0, 0, 64, 64});
+    InlineStubCanvas cv;
+    for (int i = 0; i < 3; ++i)
+        v.paint(cv);
+    // No bytes came out of the payload, so nothing is measured or drawn.
+    CHECK(cv.measures == 0);
+    CHECK(cv.keyed.empty());
+    CHECK(cv.file_draws == 0);
+    int labels = 0;
+    for (const auto& cmd : cv.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_text) {
+            CHECK(cmd.text == "image/png");
+            ++labels;
+        }
+    }
+    CHECK(labels == 3);
+}
+
+TEST_CASE("ImageView draws a percent-encoded data URI through the keyed entry",
+          "[widgets][image][inline-image]") {
+    std::string uri = "data:image/gif,";
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    for (uint8_t byte : kSplitGif) {
+        uri.push_back('%');
+        uri.push_back(kHex[byte >> 4]);
+        uri.push_back(kHex[byte & 0x0f]);
+    }
+    ImageView v;
+    v.set_image_source(uri);
+    v.set_bounds({0, 0, 32, 16});
+    InlineStubCanvas cv;
+    cv.img_w = 16.0f;
+    cv.img_h = 8.0f;
+    v.paint(cv);
+    REQUIRE(cv.keyed.size() == 1);
+    CHECK(cv.keyed[0].key == pulp::runtime::sha256_hex(kSplitGif, sizeof(kSplitGif)));
+    CHECK(cv.keyed[0].size == sizeof(kSplitGif));
 }
