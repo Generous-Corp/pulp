@@ -89,7 +89,7 @@ class DownloadConsentTests(unittest.TestCase):
             with mock.patch.object(patch, "SETTINGS_PATH", path):
                 patch.write_setting("auto_download", "ask")
                 patch.write_setting("auto_download_acknowledged", True)
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     written = json.load(f)
                 self.assertEqual(written["auto_download"], "ask")
                 self.assertIs(written["auto_download_acknowledged"], True)
