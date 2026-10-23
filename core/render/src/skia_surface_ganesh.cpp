@@ -35,6 +35,7 @@
 #if defined(__EMSCRIPTEN__) && defined(PULP_HAS_SKIA)
 
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/canvas/skia_text_raster_policy.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
 
@@ -48,6 +49,7 @@
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
+#include "include/core/SkSurfaceProps.h"
 #include "include/gpu/GpuTypes.h"
 #include "include/gpu/ganesh/GrBackendSurface.h"
 #include "include/gpu/ganesh/GrDirectContext.h"
@@ -76,8 +78,10 @@ constexpr int kStencilBits = 8;
 
 class SkiaSurfaceGanesh : public SkiaSurface {
 public:
-    SkiaSurfaceGanesh(std::string selector, uint32_t width, uint32_t height, float scale)
-        : selector_(std::move(selector)), width_(width), height_(height), scale_(scale) {}
+    SkiaSurfaceGanesh(std::string selector, uint32_t width, uint32_t height, float scale,
+                      canvas::TextRasterPolicy text_raster_policy)
+        : selector_(std::move(selector)), width_(width), height_(height), scale_(scale),
+          text_raster_policy_(text_raster_policy) {}
 
     ~SkiaSurfaceGanesh() override {
         // Unregister FIRST: a lost/restored event delivered after this object is
@@ -225,13 +229,14 @@ public:
             kStencilBits,
             fb_info);
 
+        const SkSurfaceProps props = canvas::surface_props_for(text_raster_policy_);
         frame_surface_ = SkSurfaces::WrapBackendRenderTarget(
             context_.get(),
             target,
             kBottomLeft_GrSurfaceOrigin,  // GL's origin for the default framebuffer
             kRGBA_8888_SkColorType,
             SkColorSpace::MakeSRGB(),
-            nullptr);
+            &props);
 
         SkCanvas* sk_canvas = nullptr;
         if (frame_surface_) {
@@ -290,6 +295,21 @@ public:
         if (lost_) return;       // the canvas is resized again on restore
         apply_canvas_size();
         create_offscreen_target();
+    }
+
+    void set_text_raster_policy(canvas::TextRasterPolicy policy) override {
+        if (policy == text_raster_policy_) return;
+        text_raster_policy_ = policy;
+        // Retained layers hold text rasterized under the old preblend.
+        canvas_.reset();
+        retained_layers_ = canvas::SkiaCanvas::create_retained_layer_store();
+        frame_surface_.reset();  // rewrapped with the new props on the next begin_frame()
+        if (lost_) return;
+        create_offscreen_target();
+    }
+
+    canvas::TextRasterPolicy text_raster_policy() const override {
+        return text_raster_policy_;
     }
 
     bool read_current_rgba(std::vector<uint8_t>& pixels,
@@ -394,7 +414,9 @@ private:
 
         SkImageInfo info = SkImageInfo::MakeN32Premul(static_cast<int>(pixel_width()),
                                                       static_cast<int>(pixel_height()));
-        offscreen_surface_ = SkSurfaces::RenderTarget(context_.get(), skgpu::Budgeted::kYes, info);
+        const SkSurfaceProps props = canvas::surface_props_for(text_raster_policy_);
+        offscreen_surface_ =
+            SkSurfaces::RenderTarget(context_.get(), skgpu::Budgeted::kYes, info, 0, &props);
 
         if (offscreen_surface_ && scale_ != 1.0f) {
             offscreen_surface_->getCanvas()->scale(scale_, scale_);
@@ -404,6 +426,7 @@ private:
     std::string selector_;
     uint32_t width_ = 0, height_ = 0;
     float scale_ = 1.0f;
+    canvas::TextRasterPolicy text_raster_policy_ = canvas::TextRasterPolicy::legacy;
 
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE gl_context_ = 0;
     sk_sp<GrDirectContext> context_;
@@ -424,7 +447,8 @@ std::unique_ptr<SkiaSurface> SkiaSurface::create_webgl(const WebGlConfig& config
         config.canvas_selector ? config.canvas_selector : "#pulp",
         config.width,
         config.height,
-        config.scale_factor);
+        config.scale_factor,
+        config.text_raster_policy);
     if (!surface->init()) return nullptr;
     return surface;
 }

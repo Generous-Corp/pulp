@@ -88,7 +88,7 @@ std::vector<uint8_t> invoke_screenshot_provider(View& root, uint32_t width,
 
 std::vector<uint8_t> render_to_png(
     View& root, uint32_t width, uint32_t height, float scale,
-    ScreenshotBackend backend)
+    ScreenshotBackend backend, canvas::TextRasterPolicy /*text_raster*/)
 {
     bool had = false;
     return invoke_screenshot_provider(root, width, height, scale, backend, &had);
@@ -97,7 +97,7 @@ std::vector<uint8_t> render_to_png(
 bool render_to_file(
     View& root, uint32_t width, uint32_t height,
     const std::string& output_path, float scale,
-    ScreenshotBackend backend)
+    ScreenshotBackend backend, canvas::TextRasterPolicy /*text_raster*/)
 {
     auto bytes = render_to_png(root, width, height, scale, backend);
     if (bytes.empty()) return false;
@@ -113,7 +113,7 @@ bool render_to_file(
 // there is no portable producer here yet — return empty explicitly.
 std::vector<uint8_t> render_to_rgba(
     View& /*root*/, uint32_t /*width*/, uint32_t /*height*/, float /*scale*/,
-    uint32_t* out_width, uint32_t* out_height)
+    uint32_t* out_width, uint32_t* out_height, canvas::TextRasterPolicy /*text_raster*/)
 {
     if (out_width) *out_width = 0;
     if (out_height) *out_height = 0;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/canvas/text_raster_policy.hpp>
 #include <pulp/view/view.hpp>
 #include <string>
 #include <vector>
@@ -30,12 +31,19 @@ enum class ScreenshotBackend {
 //
 // Callers can probe has_screenshot_provider() to distinguish
 // "no backend installed" from "render failed".
+//
+// `text_raster` is the glyph preblend of the Skia surfaces the render creates
+// (skia and gpu backends; see pulp/canvas/text_raster_policy.hpp). An imported
+// panel passes select_text_raster_policy() over its captured text so the
+// capture renders the way its live surface does. The CoreGraphics backend and
+// a host-registered provider ignore it.
 std::vector<uint8_t> render_to_png(
     View& root,
     uint32_t width,
     uint32_t height,
     float scale = 2.0f,  // Retina scale factor
-    ScreenshotBackend backend = ScreenshotBackend::default_backend
+    ScreenshotBackend backend = ScreenshotBackend::default_backend,
+    canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy
 );
 
 // Render a view tree to a PNG file
@@ -45,7 +53,8 @@ bool render_to_file(
     uint32_t height,
     const std::string& output_path,
     float scale = 2.0f,
-    ScreenshotBackend backend = ScreenshotBackend::default_backend
+    ScreenshotBackend backend = ScreenshotBackend::default_backend,
+    canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy
 );
 
 // ── Smart, always-honest capture (the "always-capturable" must-have) ─────
@@ -96,7 +105,8 @@ std::vector<uint8_t> render_to_png_gpu(
     View& root,
     uint32_t width,
     uint32_t height,
-    float scale = 2.0f
+    float scale = 2.0f,
+    canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy
 );
 
 // True when render_to_png_gpu can produce frames in this build (GPU backend
@@ -142,7 +152,8 @@ std::vector<uint8_t> render_to_rgba(
     uint32_t height,
     float scale,
     uint32_t* out_width,
-    uint32_t* out_height
+    uint32_t* out_height,
+    canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy
 );
 
 // Whether this BUILD has a raw-RGBA producer at all — a property of which

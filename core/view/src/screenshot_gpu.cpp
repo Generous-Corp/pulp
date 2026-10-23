@@ -135,12 +135,13 @@ bool passes_capture_content_floor(const std::vector<uint8_t>& png) {
 }
 
 std::vector<uint8_t> render_to_png_gpu(View& root, uint32_t width, uint32_t height,
-                                       float scale) {
+                                       float scale, canvas::TextRasterPolicy text_raster) {
 #ifdef PULP_VIEW_HAS_GPU_CAPTURE
     pulp::render::HeadlessSurface::Config cfg;
     cfg.width = width;
     cfg.height = height;
     cfg.scale_factor = scale;
+    cfg.text_raster_policy = text_raster;
     std::string err;
     auto surface = pulp::render::HeadlessSurface::create(cfg, &err);
     if (!surface) {
@@ -151,7 +152,7 @@ std::vector<uint8_t> render_to_png_gpu(View& root, uint32_t width, uint32_t heig
     return surface->render_png(
         [&](canvas::Canvas& c) { paint_root(c, root, width, height); });
 #else
-    (void)root; (void)width; (void)height; (void)scale;
+    (void)root; (void)width; (void)height; (void)scale; (void)text_raster;
     return {};
 #endif
 }
