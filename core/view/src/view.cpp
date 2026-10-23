@@ -847,17 +847,20 @@ void View::publish_structure_change() noexcept {
     invalidate_subtree_caches_up();
 }
 
-void View::add_child(std::unique_ptr<View> child) {
-    add_child_transactional(child);
+std::unique_ptr<View> View::add_child(std::unique_ptr<View> child) {
+    if (add_child_transactional(child))
+        return nullptr;
+    return child;
 }
 
-void View::add_child_transactional(std::unique_ptr<View>& child) {
-    if (!child) return;
+bool View::add_child_transactional(std::unique_ptr<View>& child) {
+    if (!child) return false;
     // A view cannot become its own ancestor: linking one turns every walk to
-    // the root into an endless loop. The child stays with the caller.
+    // the root into an endless loop. The caller keeps the child and learns
+    // of the refusal from the result.
     for (const View* ancestor = this; ancestor; ancestor = ancestor->parent_)
         if (ancestor == child.get())
-            return;
+            return false;
     auto* inserted = child.get();
     // Address alone cannot identify the child across a callback: a hook may
     // destroy it and the allocator may hand the same address to a replacement
@@ -905,7 +908,7 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
         inserted->set_host_actions(host_actions_);
         auto attached_it = std::find_if(children_.begin(), children_.end(), is_inserted);
         if (attached_it == children_.end())
-            return;
+            return true;
         {
             // on_attached() may remove and try to destroy the very child it is
             // running on. The lease keeps its storage alive until this scope
@@ -965,6 +968,7 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
     // paints at whatever rect it arrived with — the default zero rect for a
     // fresh view, its previous parent's slot when it is being reparented.
     note_layout_mutation();
+    return true;
 }
 
 bool View::move_child_to_index(View* child, size_t index) {

@@ -61,7 +61,7 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
             return self.describe_native_canvas_frame(id);
         });
         self.widgets_[id] = c.get();
-        self.resolve_parent(pid, c.get())->add_child(std::move(c));
+        self.attach_created(id, pid, std::move(c));
         return choc::value::createString(id);
     });
 

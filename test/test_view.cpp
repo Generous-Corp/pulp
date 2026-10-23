@@ -139,13 +139,23 @@ TEST_CASE("View refuses a child that is itself or one of its ancestors", "[view]
     REQUIRE(inner_ptr->child_count() == 0);
     REQUIRE(outer_ptr->child_count() == 1);
 
-    // The same refusal for a view named as its own parent.
+    // The same refusal for a view named as its own parent, reported as false.
     std::unique_ptr<View> self_owner(outer.release());
     auto* self_ptr = self_owner.get();
-    self_ptr->add_child_transactional(self_owner);
+    REQUIRE_FALSE(self_ptr->add_child_transactional(self_owner));
     REQUIRE(self_owner != nullptr);
     REQUIRE(self_ptr->parent() == nullptr);
     REQUIRE(self_ptr->child_count() == 1);
+
+    // The by-value overload hands a refused child back instead of destroying
+    // it, so a caller holding the raw pointer still owns live memory.
+    auto handed_back = inner_ptr->add_child(std::move(self_owner));
+    REQUIRE(handed_back.get() == self_ptr);
+    REQUIRE(self_ptr->parent() == nullptr);
+    REQUIRE(inner_ptr->child_count() == 0);
+    auto fresh = std::make_unique<View>();
+    REQUIRE(inner_ptr->add_child(std::move(fresh)) == nullptr);
+    REQUIRE(inner_ptr->child_count() == 1);
 }
 
 TEST_CASE("View child removal ignores unknown children", "[view]") {

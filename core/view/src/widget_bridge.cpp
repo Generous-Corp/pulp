@@ -1192,6 +1192,16 @@ View* WidgetBridge::resolve_parent(const std::string& parent_id, const View* chi
     return parent;
 }
 
+bool WidgetBridge::attach_created(const std::string& id, const std::string& parent_id,
+                                  std::unique_ptr<View> view) {
+    auto* child = view.get();
+    auto refused = resolve_parent(parent_id, child)->add_child(std::move(view));
+    if (!refused)
+        return true;
+    widgets_.erase(id);
+    return false;
+}
+
 ScrollView* WidgetBridge::scroll_wrapper(const std::string& id) const noexcept {
     auto it = scroll_wrappers_.find(id);
     if (it == scroll_wrappers_.end() || !it->second) return nullptr;
