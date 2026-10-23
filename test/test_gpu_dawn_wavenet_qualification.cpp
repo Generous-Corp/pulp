@@ -1,11 +1,13 @@
 #include "detail/dawn_shared_io_provider.hpp"
 #include "detail/dawn_shared_io_wavenet_program.hpp"
 #include "detail/gpu_convolver_trial_config.hpp"
+#include "detail/gpu_neural_model.hpp"
 #include "detail/nam_tcn_artifact.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/shared_io_compute_plan.hpp"
 #include "detail/shared_io_wavenet_spec.hpp"
 #include "detail/wavenet_realtime_channel.hpp"
+#include "detail/wavenet_streaming_backend.hpp"
 #include "support/dawn_transfer_call_counter.hpp"
 #include "support/physical_qualification_outcome.hpp"
 #include "support/wavenet_program_session_channel.hpp"
@@ -27,6 +29,7 @@
 #include <thread>
 #include <vector>
 
+#include <pulp/gpu_audio/gpu_neural_realtime_node.hpp>
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 
 #ifndef PULP_GPU_AUDIO_EXPECTED_DAWN_SHA
@@ -92,6 +95,14 @@ struct Result {
     std::uint64_t node_hang_sequence = 0;
     std::uint64_t node_loss_blocks = 0;
     std::uint64_t node_hang_blocks = 0;
+    bool neural_loss_receipt = false;
+    bool neural_hang_receipt = false;
+    std::string neural_loss_reason = "not_run";
+    std::string neural_hang_reason = "not_run";
+    std::uint64_t neural_loss_sequence = 0;
+    std::uint64_t neural_hang_sequence = 0;
+    std::uint64_t neural_loss_blocks = 0;
+    std::uint64_t neural_hang_blocks = 0;
     std::uint64_t submissions = 0;
     std::uint64_t gpu_delivered = 0;
     std::uint64_t cpu_fallback = 0;
@@ -129,7 +140,15 @@ void emit(const Result& result, std::string_view status) {
               << R"(,"node_hang_receipt":)" << (result.node_hang_receipt ? "true" : "false")
               << R"(,"node_hang_reason":")" << result.node_hang_reason
               << R"(","node_hang_sequence":)" << result.node_hang_sequence
-              << R"(,"node_hang_blocks":)" << result.node_hang_blocks << R"(,"submissions":)"
+              << R"(,"node_hang_blocks":)" << result.node_hang_blocks
+              << R"(,"neural_loss_receipt":)" << (result.neural_loss_receipt ? "true" : "false")
+              << R"(,"neural_loss_reason":")" << result.neural_loss_reason
+              << R"(","neural_loss_sequence":)" << result.neural_loss_sequence
+              << R"(,"neural_loss_blocks":)" << result.neural_loss_blocks
+              << R"(,"neural_hang_receipt":)" << (result.neural_hang_receipt ? "true" : "false")
+              << R"(,"neural_hang_reason":")" << result.neural_hang_reason
+              << R"(","neural_hang_sequence":)" << result.neural_hang_sequence
+              << R"(,"neural_hang_blocks":)" << result.neural_hang_blocks << R"(,"submissions":)"
               << result.submissions << R"(,"gpu_delivered":)" << result.gpu_delivered
               << R"(,"cpu_fallback_blocks":)" << result.cpu_fallback << R"(,"late_blocks":)"
               << result.late << R"(,"resident_state_copies":)" << result.resident_state_copies
@@ -363,6 +382,140 @@ NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
     return run;
 }
 
+// The same physical faults behind the generic neural node: its WaveNet
+// backend owns one channel over the faulted provider, and its CPU model is a
+// silent stand-in, since only the latched recovery is under test.
+NodeFaultRun run_neural_node_fault(const Fixture& fixture, const void* proc_table,
+                                   DawnSharedIoProvider::Fault fault) {
+    namespace ga = pulp::gpu_audio;
+    NodeFaultRun run;
+    auto created = DawnSharedIoProvider::create(
+        {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+         .proc_table_override_for_testing = proc_table,
+         .fault = fault,
+         .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer});
+    if (!created.provider) {
+        run.reason_text = "provider_unavailable";
+        return run;
+    }
+    auto program = DawnSharedIoWavenetProgram::create(*created.provider, fixture.spec());
+    if (!program) {
+        run.reason_text = "program_unavailable";
+        return run;
+    }
+    const auto block = fixture.spec().block_size;
+    const auto bytes = block * sizeof(float);
+    auto session = std::make_shared<std::unique_ptr<SharedIoProgramSession>>(
+        std::make_unique<SharedIoProgramSession>());
+    if (!(*session)->prepare(
+            {std::move(created.provider), std::move(program)},
+            {.slots = 2,
+             .input_bytes_per_slot = bytes,
+             .output_bytes_per_slot = bytes,
+             .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer})) {
+        run.reason_text = "session_prepare_failed";
+        return run;
+    }
+    const std::array<std::uint32_t, 1> dilations{1};
+    const ga::GpuWaveNetLayerDescriptor layer{.input_size = 1,
+                                              .condition_size = 1,
+                                              .channels = 1,
+                                              .kernel = 2,
+                                              .head_size = 1,
+                                              .tanh_activation = true,
+                                              .dilations = dilations};
+    auto backend = std::make_unique<WaveNetStreamingBackend>(
+        WaveNetStreamingBackend::Config{
+            .session = {.descriptor = {.block_size = block,
+                                       .sample_rate = 48000,
+                                       .stream_instances = 1,
+                                       .layers = {&layer, 1},
+                                       .weight_count = fixture.weights.size()},
+                        .weights = fixture.weights,
+                        .slots = 2},
+            .channels = 1,
+            .max_inflight = 1},
+        [session](std::uint32_t) -> std::unique_ptr<WaveNetRealtimeChannel> {
+            if (!*session)
+                return nullptr;
+            return std::make_unique<pulp::test::ProgramSessionChannel>(std::move(*session));
+        });
+    int silent_state = 0;
+    const NeuralCpuKernel silent{
+        .state = &silent_state,
+        .prepare = [](void*, const StreamingPrepareContext&) noexcept { return true; },
+        .process = [](void*, const float*, float* out,
+                      std::uint32_t n) noexcept { std::fill_n(out, n, 0.0f); },
+        .reset = [](void*) noexcept {},
+        .quiesce = [](void*) noexcept { return true; },
+        .release = [](void*) noexcept { return true; }};
+    NeuralModelRequest request;
+    request.family = ga::NeuralFamily::WaveNet;
+    request.manifest = {.model_id = "pulp.qualification.wavenet",
+                        .architecture = "wavenet",
+                        .model_version = "1",
+                        .artifact_id = "pulp.qualification.wavenet.weights",
+                        .artifact_sha256 =
+                            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                        .license = "MIT",
+                        .runtime = "pulp.qualification.v1",
+                        .artifact_size_bytes = 64,
+                        .sample_rate_hz = 48000,
+                        .redistributable = true};
+    request.block_size = block;
+    request.channel_kernels = {&silent, 1};
+    request.backend = std::move(backend);
+    auto build = make_neural_model(std::move(request));
+    if (!build) {
+        run.reason_text = "model_rejected";
+        return run;
+    }
+    ga::GpuNeuralRealtimeNode node(
+        {.family = ga::NeuralFamily::WaveNet,
+         .model = build.model,
+         .channels = 1,
+         .lead_blocks = 1,
+         .capacity = 4,
+         .shadow_policy = ga::GpuNeuralRealtimeNode::ShadowPolicy::Inline});
+    if (!node.prepare() || !node.gpu_kernel_available()) {
+        run.reason_text = "node_prepare_failed";
+        return run;
+    }
+    auto path = realtime_gpu_node_path(&node);
+    std::array<float, 2> input{}, output{};
+    const float* in_ptr = input.data();
+    float* out_ptr = output.data();
+    pulp::audio::BufferView<const float> in(&in_ptr, 1, 2);
+    pulp::audio::BufferView<float> out(&out_ptr, 1, 2);
+    run.ran = true;
+    for (std::uint64_t sequence = 0; sequence < 64; ++sequence) {
+        input = {static_cast<float>(sequence), static_cast<float>(sequence) + 0.25f};
+        const auto status = path.process(path.context, in, out, 2, sequence, true, now_ns());
+        const auto disposition =
+            status == kRealtimeGpuReady     ? SharedIoDeliveryDisposition::GpuDelivered
+            : status == kRealtimeGpuPriming ? SharedIoDeliveryDisposition::Priming
+                                            : SharedIoDeliveryDisposition::CpuFallbackDelivered;
+        path.delivered(path.context, sequence, static_cast<std::uint8_t>(disposition), 0, 0);
+        ++run.blocks;
+        for (int pump = 0; pump < 4; ++pump) {
+            (void)path.service(path.context, 0);
+            std::this_thread::sleep_for(std::chrono::microseconds(250));
+        }
+        if (node.recovery_reason() != ga::GpuAudioRecoveryReason::None)
+            break;
+    }
+    run.reason = node.recovery_reason();
+    run.sequence = node.recovery_sequence();
+    const auto status = node.status_snapshot();
+    run.state = status.provider_state;
+    run.status_valid = ga::validate_gpu_audio_status(status).accepted() &&
+                       status.selected_engine != ga::GpuAudioEngine::Gpu;
+    run.reason_text = std::string(recovery_name(run.reason));
+    if (!node.release())
+        run.reason_text += ":release_retained";
+    return run;
+}
+
 void run_node_faults(Result& result, const Fixture& fixture, const void* proc_table) {
     using ga_reason = pulp::gpu_audio::GpuAudioRecoveryReason;
     using ga_state = pulp::gpu_audio::GpuAudioProviderState;
@@ -382,6 +535,24 @@ void run_node_faults(Result& result, const Fixture& fixture, const void* proc_ta
     result.node_hang_receipt = hang.ran && hang.reason == ga_reason::ProviderUnresponsive &&
                                hang.sequence == 0 && hang.state == ga_state::Unavailable &&
                                hang.status_valid;
+    const auto neural_loss = run_neural_node_fault(
+        fixture, proc_table, DawnSharedIoProvider::Fault::ForceLossAfterCompletionRegistration);
+    result.neural_loss_reason = neural_loss.reason_text;
+    result.neural_loss_sequence = neural_loss.sequence;
+    result.neural_loss_blocks = neural_loss.blocks;
+    result.neural_loss_receipt = neural_loss.ran && neural_loss.reason == ga_reason::ProviderLost &&
+                                 neural_loss.sequence == 0 &&
+                                 neural_loss.state == ga_state::Unavailable &&
+                                 neural_loss.status_valid;
+    const auto neural_hang =
+        run_neural_node_fault(fixture, proc_table, DawnSharedIoProvider::Fault::DelayCompletion);
+    result.neural_hang_reason = neural_hang.reason_text;
+    result.neural_hang_sequence = neural_hang.sequence;
+    result.neural_hang_blocks = neural_hang.blocks;
+    result.neural_hang_receipt =
+        neural_hang.ran && neural_hang.reason == ga_reason::ProviderUnresponsive &&
+        neural_hang.sequence == 0 && neural_hang.state == ga_state::Unavailable &&
+        neural_hang.status_valid;
 }
 
 Result run() {
@@ -645,7 +816,8 @@ int main(int argc, char** argv) {
         result.cpu_parity && result.cpu_fallback_parity && result.cpu_fallback_delivered &&
         result.late_result_rejected && result.retired && result.reprimed &&
         result.immutable_provenance && result.device_loss_negative && result.device_loss_receipt &&
-        result.node_loss_receipt && result.node_hang_receipt;
+        result.node_loss_receipt && result.node_hang_receipt && result.neural_loss_receipt &&
+        result.neural_hang_receipt;
     emit(result, passed ? "passed" : "failed");
     return passed ? 0 : 1;
 }
