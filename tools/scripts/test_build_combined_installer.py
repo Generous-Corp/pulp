@@ -75,6 +75,13 @@ class NotarizationHeartbeatTest(unittest.TestCase):
                              'mkdir -p "$(dirname "$last")"\n: > "$last"\n')
         tool("productsign", 'last=""\nfor a in "$@"; do last="$a"; done\n'
                             'mkdir -p "$(dirname "$last")"\n: > "$last"\n')
+        tool("pkgutil", '[[ "${1:-}" == "--expand-full" ]] || exit 2\n'
+             'expanded="$3"; mkdir -p "$expanded"\n'
+             'root="${PAYLOAD_BUNDLE_ROOTS}"; bundle="$(basename "$root")"\n'
+             "exec_name=\"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \"$root/Contents/Info.plist\")\"\n"
+             'dest="$expanded/component-0/Payload/Library/Audio/$bundle/Contents/MacOS/$exec_name"\n'
+             'mkdir -p "$(dirname "$dest")"\n'
+             'cp "$root/Contents/MacOS/$exec_name" "$dest"\n')
         # The stand-in for Apple. `submit --wait` sleeps (standing in for the
         # dark poll phase), prints what notarytool prints, and exits with the
         # status under test. `staple` records that it ran at all — that record
@@ -134,6 +141,7 @@ class NotarizationHeartbeatTest(unittest.TestCase):
             "PULP_SIGN_P12_PW": "test-p12-password",
             "PULP_SIGN_IDENTITY_HASH": "ABC",
             "PULP_NOTARIZE_HEARTBEAT_SECS": "1",
+            "PAYLOAD_BUNDLE_ROOTS": str(bundle),
         }
         Path(env["PULP_NOTARY_KEY_PATH"]).touch()
         Path(env["PULP_SIGN_KEYCHAIN"]).touch()
@@ -257,6 +265,8 @@ class CombinedInstallerTest(unittest.TestCase):
         legacy_evidence: bool = False,
         unsigned_bundles: set[str] | None = None,
         refused_after_verification: bool = False,
+        payload_gate_failure: bool = False,
+        payload_mode: str = "match",
         wraptool: str = "pass",
         allow_unverified_aax_wrap: bool = False,
     ) -> tuple[str, str]:
@@ -382,6 +392,33 @@ class CombinedInstallerTest(unittest.TestCase):
                 'printf "%s\\n" "$*" >> "$CAPTURE_PRODUCTSIGN_ARGV"\n'
                 'last=""\nfor arg in "$@"; do last="$arg"; done\n'
                 'mkdir -p "$(dirname "$last")"\n: > "$last"\n',
+            )
+            # A small pkgutil stand-in that materializes the component payload
+            # the productbuild fixture would have produced.  Keeping this in
+            # the contract test makes the anti-stale gate testable on every
+            # host while still exercising the real package-verifier logic.
+            self._write_tool(
+                fake_bin,
+                "pkgutil",
+                '[[ "${1:-}" == "--expand-full" ]] || exit 2\n'
+                'archive="$2"; expanded="$3"; mkdir -p "$expanded"\n'
+                'idx=0\n'
+                'IFS=: read -r -a roots <<< "${PAYLOAD_BUNDLE_ROOTS:-}"\n'
+                'for root in "${roots[@]}"; do\n'
+                '  [[ -n "$root" ]] || continue\n'
+                '  bundle="$(basename "$root")"\n'
+                "  exec_name=\"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \"$root/Contents/Info.plist\")\"\n"
+                '  dest="$expanded/component-$idx/Payload/Library/Audio/$bundle/Contents/MacOS/$exec_name"\n'
+                '  mkdir -p "$(dirname "$dest")"\n'
+                '  if [[ "${PAYLOAD_MODE:-match}" != "missing" || "$idx" != 0 ]]; then\n'
+                '    if [[ "${PAYLOAD_MODE:-match}" == "stale" && "$idx" == 0 ]]; then\n'
+                '      printf "stale payload\\n" > "$dest"\n'
+                '    else\n'
+                '      cp "$root/Contents/MacOS/$exec_name" "$dest"\n'
+                '    fi\n'
+                '  fi\n'
+                '  idx=$((idx+1))\n'
+                'done\n',
             )
 
             args = [
@@ -518,6 +555,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 "PULP_SIGN_IDENTITY_HASH": "ABC",
                 "ANALYZE_OMITS_RELOCATABLE": "1" if analyze_omits_relocatable else "0",
                 "UNSIGNED_BUNDLES": " ".join(sorted(unsigned_bundles or set())),
+                "PAYLOAD_MODE": payload_mode,
                 # A fake PACE wraptool, so no test depends on PACE's tooling:
                 # "pass" verifies every bundle, "fail" rejects every bundle,
                 # and "absent" names a path that does not exist.
@@ -526,6 +564,7 @@ class CombinedInstallerTest(unittest.TestCase):
             }
             Path(env["PULP_SIGN_KEYCHAIN"]).touch()
             Path(env["PULP_SIGN_P12"]).touch()
+            env["PAYLOAD_BUNDLE_ROOTS"] = ":".join(str(p) for p in plugin_bundles)
             completed = subprocess.run(
                 args,
                 cwd=ROOT,
@@ -547,7 +586,10 @@ class CombinedInstallerTest(unittest.TestCase):
                 # already run `codesign --verify`; only a pre-signing refusal
                 # (D15, legacy evidence) must leave every release tool unrun.
                 if refused_after_verification:
-                    self.assertFalse(productbuild_argv_capture.exists())
+                    if payload_gate_failure:
+                        self.assertTrue(productbuild_argv_capture.exists())
+                    else:
+                        self.assertFalse(productbuild_argv_capture.exists())
                     self.assertFalse(productsign_argv_capture.exists())
                     return completed.stdout + completed.stderr, ""
                 for forbidden_capture in (
@@ -643,6 +685,30 @@ class CombinedInstallerTest(unittest.TestCase):
             self._last_productsign_argv,
             msg="productsign must use the exact unattended signing keychain",
         )
+
+    def test_product_payload_hash_matches_the_signed_source_bundle(self) -> None:
+        """The happy path proves the package contains the exact build output."""
+        self._run_installer([("Kick", "clap")])
+
+    def test_stale_product_payload_is_rejected_before_productsign(self) -> None:
+        output, _ = self._run_installer(
+            [("Kick", "clap")],
+            payload_mode="stale",
+            expect_success=False,
+            refused_after_verification=True,
+            payload_gate_failure=True,
+        )
+        self.assertIn("packaged payload hash mismatch", output)
+
+    def test_missing_product_payload_is_rejected_before_productsign(self) -> None:
+        output, _ = self._run_installer(
+            [("Kick", "clap")],
+            payload_mode="missing",
+            expect_success=False,
+            refused_after_verification=True,
+            payload_gate_failure=True,
+        )
+        self.assertIn("expected exactly one packaged payload executable", output)
 
     def test_multi_plugin_packages_are_unique_and_grouped_by_plugin(self) -> None:
         xml, _ = self._run_installer(
