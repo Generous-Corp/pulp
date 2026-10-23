@@ -6,6 +6,7 @@
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <algorithm>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::gpu_audio::detail {
@@ -86,8 +87,12 @@ class GpuWaveNetSessionChannel final : public WaveNetRealtimeChannel {
     bool lost() const noexcept override {
         return session_->device_lost();
     }
+    // A scripted session is not an authenticated provider.
     SharedIoProviderIdentity provider_identity() const noexcept override {
-        return GpuWaveNetSessionAccess::provider_identity(*session_);
+        if constexpr (std::is_same_v<Session, GpuWaveNetSession>)
+            return GpuWaveNetSessionAccess::provider_identity(*session_);
+        else
+            return {};
     }
 
   private:
