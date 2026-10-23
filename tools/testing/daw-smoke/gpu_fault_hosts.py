@@ -67,6 +67,7 @@ POSITIVE_CONTROL = "positive_control"
 PLANTED_NEGATIVES = {**{name: "fail" for name in gfc.PLANTED},
                      **{name: "inconclusive" for name in gfc.PATH_NEGATIVES}}
 NOT_SHARED_PATH = "not on the shared-I/O GPU path"
+HOST_NOT_QUIET = "host_not_quiet:"
 # M2: the GPU must have carried the stream just before the fault.
 GPU_SHARE_PASS = 0.9
 # A positive control must show the GPU path carried the stream, or every fault
@@ -345,6 +346,70 @@ def _took_effect(base: dict, fault: str, applied: dict | None) -> bool:
         True if fault in gfc.CONTROL_FAULTS else applied is not None)
 
 
+def exemption_problem(run_dir: Path, planted: str, base: dict, events: Sequence[dict],
+                      offset: dict, proving_reason: str, *, render_frames: int,
+                      capture: Any, listed: Sequence[str] | None) -> str:
+    """Why a planted FAIL negative on a busy host does not carry the defect's
+    own signature, or "" when it does (Fable, Q1). Load can add a late
+    transient after the fault; it cannot place a deviation exactly where the
+    plug-in's planted construction starts it, for exactly as long as that
+    construction lasts.
+
+    The plug-in arms the defect for the callback after the fault block (the
+    fault's `issued` sample). Its output leaves the staging quantum one
+    quantum later, so a dropout or a one-quantum misalignment starts at
+    issued + quantum and lasts to the end of the reference signal; a
+    withheld quantum of input reaches the output after the PDC, at
+    issued + PDC, and lasts one quantum plus the impulse response."""
+    if not proving_reason.startswith("plugin null failed"):
+        return "the proving reason is not the plug-in null"
+    if offset.get("status") != "matched":
+        return f"the host render offset is {offset.get('status')}, not matched at both ends"
+    issued = base["fault"].get("issued_project_sample")
+    prepared = next((e for e in events if e.get("event") == "prepared"), {})
+    quantum, pdc, taps = prepared.get("quantum"), base.get("pdc_samples"), prepared.get("ir_taps")
+    if not all(isinstance(v, int) and v > 0 for v in (issued, quantum, pdc, taps)):
+        return "issued sample, quantum, PDC or IR length unknown"
+    # The fallback takes over where the provider fault was applied, on the
+    # capture's clock (G3). The interposer arms at the provider's next
+    # matching call, so that is the issued block or the quantum after it
+    # (live stale run: issued 96256, applied 96768).
+    delivery = base.get("delivery") or {}
+    applied_ns = (base["fault"].get("provider_fault_applied") or {}).get("host_time_ns")
+    applied = (gfc.applied_project_sample(capture, {"host_time_ns": applied_ns})
+               if capture is not None and isinstance(applied_ns, int) else None)
+    if applied is None or not issued <= applied <= issued + quantum:
+        return f"the fault was applied at {applied}, not the issued block {issued} or the next"
+    if not delivery.get("met") or delivery.get("first_fallback_project_sample") != applied:
+        return f"the fallback did not take over where the fault was applied ({applied})"
+    plugin = base["nulls"]["plugin"]
+    first, last = plugin["first_deviating_sample"], plugin["last_deviating_sample"]
+    onset = issued + (pdc if planted == "fallback_stale" else quantum)
+    if abs(first - onset) >= quantum:
+        return f"the deviation starts at {first}, not the defect's onset {onset}"
+    if planted == "fallback_stale":
+        if not quantum <= last - first <= 2 * quantum + taps:
+            return (f"the deviation lasts {last - first} samples, not one quantum plus the "
+                    f"impulse response ({quantum}..{2 * quantum + taps})")
+        return ""
+    # A dropout or misalignment lasts as long as the reference has signal:
+    # the played stimulus (or the internal one over the render), through the
+    # PDC and the impulse response, cut at the end of the capture.
+    armed = next((e for e in events if e.get("event") == "fault_armed"), {})
+    if armed.get("input") == "internal":
+        stimulus_frames = render_frames
+    elif _usable(run_dir, "stimulus.wav", listed):
+        stimulus_frames = len(gfc.read_wav(run_dir / "stimulus.wav")[1][0])
+    else:
+        return "stimulus.wav unavailable"
+    played = [r["position"] + r["frames"] for r in (capture.records if capture else [])
+              if r["position"] >= 0]
+    end = min(stimulus_frames + pdc + taps, max(played, default=0))
+    if last < end - quantum:
+        return f"the deviation ends at {last}, before the signal ends at {end}"
+    return ""
+
+
 def host_offset(nulls: dict, pdc: Any) -> dict[str, Any]:
     """How far the host's realtime render sits from the plug-in's capture.
     The capture is the plug-in's output, delayed by the PDC it declared; the
@@ -508,8 +573,18 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
 
     took_effect = _took_effect(base, fault, applied)
     negative_proved = None
+    quiet_host_exempt = False
     if control_kind == "planted_negative":
         bound = binding["outcome"] == "bound" and not mismatches and not preconditions
+        # Fable's Q1 ruling: a busy host does not void a planted negative, but
+        # only where load cannot have produced the evidence. host_not_quiet is
+        # set aside for the proof (it stays in verdict_reasons); a FAIL shape
+        # must then also show the defect's own onset and span, the host render
+        # at the declared PDC at both ends, and the fallback taking over at the
+        # issued block. --require-quiet-host still refuses such a receipt.
+        exempting = host_quiet is False
+        proof_reasons = [r for r in base_reasons
+                         if not (exempting and r.startswith(HOST_NOT_QUIET))]
         if PLANTED_NEGATIVES.get(planted) == "fail":
             # Fired and applied, bound, and the FAIL is the corrupted audio
             # alone: a null failing from the fault sample on, nothing else.
@@ -517,19 +592,24 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
             # holding the fault sample (WP-h1, G1), so it cannot begin earlier.
             plugin = base["nulls"]["plugin"]
             negative_proved = bool(
-                bound and took_effect and verdict == "fail" and len(base_reasons) == 1 and
-                base_reasons[0].startswith(("plugin null failed",
-                                            "host realtime render null failed")) and
+                bound and took_effect and verdict == "fail" and len(proof_reasons) == 1 and
+                proof_reasons[0].startswith(("plugin null failed",
+                                             "host realtime render null failed")) and
                 plugin is not None and not plugin["passed"] and
                 plugin["first_deviating_sample"] is not None and
                 plugin["first_deviating_sample"] >= fault_sample)
+            if negative_proved and exempting:
+                negative_proved = not exemption_problem(
+                    run_dir, planted, base, events, offset, proof_reasons[0],
+                    render_frames=render_frames, capture=capture, listed=listed)
         else:
             # gpu_off: fired, bound, and only the GPU-off consequences kept the
             # run from passing.
             negative_proved = bool(
                 bound and base["fault"]["fired"] and verdict == "inconclusive" and
-                any(NOT_SHARED_PATH in r for r in base_reasons) and
-                all(any(k in r for k in _PATH_NEGATIVE_REASONS) for r in base_reasons))
+                any(NOT_SHARED_PATH in r for r in proof_reasons) and
+                all(any(k in r for k in _PATH_NEGATIVE_REASONS) for r in proof_reasons))
+        quiet_host_exempt = bool(negative_proved and exempting)
     return {
         "fault": base["fault"],
         "pdc_samples": base["pdc_samples"],
@@ -551,6 +631,7 @@ def evaluate_v2(run_dir: Path, *, control_kind: str, fault: str, fault_sample: i
         "verdict_reasons": reasons,
         "planted_negative": planted,
         "negative_proved": negative_proved,
+        "quiet_host_exempt": quiet_host_exempt,
     }
 
 

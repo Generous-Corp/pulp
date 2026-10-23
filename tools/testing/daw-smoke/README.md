@@ -228,6 +228,18 @@ convolver that is `(lead_blocks + 1) * quantum` (1536 at a 512 quantum); the
 `latency_samples` in the health status (1024) is the GPU lead alone, not the
 PDC the host compensates. Any other offset makes the row INCONCLUSIVE.
 
+A host that was not quiet makes a row INCONCLUSIVE, except a planted negative
+whose evidence load cannot produce (Fable's Q1 ruling). The deviation must
+start at the planted defect's own onset, within one quantum: the issued
+sample plus one quantum for `no_fallback` and `fallback_misaligned`, plus the
+PDC for `fallback_stale`. It must last as long as the defect does: to the end
+of the reference signal, or one quantum plus the impulse response for a
+withheld quantum. The host render must match at both ends, and the fallback
+must take over where the fault was applied, on the issued block or the next.
+Such a receipt records `quiet_host_exempt: true`, which the verifier
+re-derives; `--require-quiet-host` still refuses it. `gpu_off` on
+`positive_control` is exempt the same way.
+
 ### Real hosts: Logic, GarageBand, Bitwig (WP-K)
 
 `real_host_smoke.py` drives these one step at a time; the UI steps are done

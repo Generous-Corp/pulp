@@ -28,6 +28,10 @@ stimulus and impulse response, never read from the receipt. On top of v1:
 * where both the plug-in capture and the host's realtime render deviate, the
   host render must sit exactly the plug-in's declared PDC earlier at both ends
   of the deviation, or the row is INCONCLUSIVE;
+* a planted negative on a host that was not quiet is still proved
+  (`quiet_host_exempt`, re-derived here) when the deviation has the planted
+  defect's own onset and span, the host render matches at both ends and the
+  fallback took over at the issued block; `--require-quiet-host` refuses it;
 * the code under test is named by commit.
 
 `receipt_sha256` is an unkeyed digest of the receipt body: it detects
@@ -90,7 +94,8 @@ LIVE_ARTIFACTS = ("host_evidence.json",)
 RECOMPUTED = ("fault", "pdc_samples", "plugin_identity", "binding", "plugin_process", "capture",
               "calling_pattern", "delivery", "controls", "offline_path", "nulls", "host_offset",
               "health",
-              "host_alive", "verdict", "verdict_reasons", "planted_negative", "negative_proved")
+              "host_alive", "verdict", "verdict_reasons", "planted_negative", "negative_proved",
+              "quiet_host_exempt")
 FULL_OUTCOMES = ("pass", "control_passed", "negative_proved")
 
 ReceiptError = v1.ReceiptError

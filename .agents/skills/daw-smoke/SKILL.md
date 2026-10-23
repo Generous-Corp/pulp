@@ -171,6 +171,9 @@ REAPER session untouched.
     earlier than the plug-in capture, not the status `latency_samples` (1024,
     the GPU lead alone). The v2 verifier requires that offset at both ends of
     the deviation. `wrap-reaper` re-reads a v1 REAPER run as a v2 receipt.
+  - A busy host voids a planted negative only when the deviation lacks the
+    defect's own onset and span (`quiet_host_exempt`). Rerun `gpu_off` on
+    `--gpu-fault positive_control`; on a fault row the pairing is a mismatch.
   - Only `tools/validation/verify_gpu_audio_daw_continuity_receipt_v2.py`
     accepts a real-host receipt (built by `gpu_fault_hosts.py`). It needs all
     six binding conjuncts: an unbound run is INCONCLUSIVE and a wrong DAW is
