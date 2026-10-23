@@ -26,8 +26,8 @@ namespace pulp::cli {
 // rather than reusing a directory that already exists. `root` is created
 // owner-only when missing. Returns nullopt when no directory could be made;
 // the caller owns cleanup of the returned path.
-inline std::optional<std::filesystem::path> make_private_temp_dir(
-    const std::filesystem::path& root, const std::string& prefix) {
+inline std::optional<std::filesystem::path> make_private_temp_dir(const std::filesystem::path& root,
+                                                                  const std::string& prefix) {
     namespace fs = std::filesystem;
     std::error_code ec;
     if (!fs::exists(root, ec)) {
@@ -58,4 +58,4 @@ inline std::optional<std::filesystem::path> make_private_temp_dir(
 #endif
 }
 
-}  // namespace pulp::cli
+} // namespace pulp::cli

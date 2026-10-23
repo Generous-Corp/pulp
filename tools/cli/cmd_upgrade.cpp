@@ -341,7 +341,8 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         std::error_code ec;
         fs::remove_all(*private_dir, ec);
     };
-    int rc = run("curl -fSL -o " + shell_quote(fs::path(tmp_dir) / tarball) + " " + shell_quote(url));
+    int rc =
+        run("curl -fSL -o " + shell_quote(fs::path(tmp_dir) / tarball) + " " + shell_quote(url));
     if (rc != 0) {
         std::cerr << "Download failed. Check: https://github.com/Generous-Corp/pulp/releases/tag/v" << version << "\n";
         discard_tmp();
@@ -373,7 +374,8 @@ int cmd_upgrade(const std::vector<std::string>& args) {
             std::cout << "  " << verdict.message << "\n";
     }
 
-    rc = run("tar -xzf " + shell_quote(fs::path(tmp_dir) / tarball) + " -C " + shell_quote(tmp_dir));
+    rc =
+        run("tar -xzf " + shell_quote(fs::path(tmp_dir) / tarball) + " -C " + shell_quote(tmp_dir));
     if (rc != 0) {
         std::cerr << "Extraction failed.\n";
         discard_tmp();
