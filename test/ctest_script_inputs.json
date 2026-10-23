@@ -3351,6 +3351,7 @@
    "entry": "tools/scripts/test_archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py",
     "tools/scripts/test_archive_symbol_closure_check.py"
    ],
    "kind": "python"
@@ -7745,21 +7746,24 @@
   "pulp-format-clap-core-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
   "pulp-format-core-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
   "pulp-format-view-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
@@ -7877,7 +7881,8 @@
   "pulp-state-symbol-closure": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
@@ -7962,13 +7967,16 @@
   "pulp-view-audio-symbol-floor": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
   "pulp-view-audio-symbol-floor-negative-contract": {
    "entry": "tools/scripts/test_view_audio_symbol_floor.py",
    "inputs": [
+    "test/cmake/view_host_tests.cmake",
+    "tools/scripts/nm_symbols.py",
     "tools/scripts/test_view_audio_symbol_floor.py"
    ],
    "kind": "python"
@@ -8007,7 +8015,8 @@
   "pulp-view-tooling-symbol-floor": {
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
-    "tools/scripts/archive_symbol_closure_check.py"
+    "tools/scripts/archive_symbol_closure_check.py",
+    "tools/scripts/nm_symbols.py"
    ],
    "kind": "python"
   },
