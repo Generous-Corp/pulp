@@ -77,13 +77,16 @@ pinned, checksummed fetch path in `tools/deps/manifest.json`.
 
 Two tools are pinned in the manifest but are **not** installed by mise:
 
-- **Rust** (`rust = "1.97.1"` in the manifest, with `rustfmt` and `clippy`).
-  rustup installs Rust and cargo reads `rust-toolchain.toml`. mise could only
-  record a version string for Rust, not a checksum, so Rust is deliberately
-  left out of the lock. Note that `experimental/pulp-rs/rust-toolchain.toml`
-  still selects `channel = "stable"`; the manifest's 1.97.1 records what the CI
-  gate image actually runs, and generating `rust-toolchain.toml` from the
-  manifest is planned (see below).
+- **Rust** (`rust = "1.97.1"` in the manifest, with `rustfmt`, `clippy` and
+  the `x86_64-apple-darwin` std). rustup installs Rust, and cargo reads
+  `experimental/pulp-rs/rust-toolchain.toml`, which `generate.py` writes from
+  the manifest with that exact version, its components and its targets, so
+  every host builds pulp-rs with the same compiler whatever its default
+  toolchain is. mise could only record a version string for Rust, not a
+  checksum, so Rust is deliberately left out of the lock. CI build legs never
+  let cargo fetch a toolchain mid-build (`RUSTUP_AUTO_INSTALL=0`); they run
+  `tools/ci/provide_pinned_rust.sh` before configuring, which installs the pin
+  when the image lacks it.
 - **Xcode** (`xcode = "26.5"`, build `17F42`). Xcode is installed into the
   macOS CI image by the image provisioning scripts, not by mise.
 
@@ -278,7 +281,9 @@ toolchain-check: 1 difference(s) from the manifest; continuing (warn mode)
 ```
 
 It checks `python3`, `cmake`, `ninja`, `node`, `rustc` (asked from
-`experimental/pulp-rs`, where cargo builds), `clang-format`, the `mise` binary
+`experimental/pulp-rs`, where cargo builds, and, when rustup is present, that
+the pinned toolchain has every component and target `rust-toolchain.toml`
+names), `clang-format`, the `mise` binary
 (version, and its sha256 against `[mise.binary]` in the manifest), and that each
 npm lockfile directory's `node_modules` is exactly its `package-lock.json`. It
 only reads; it never installs anything.
@@ -342,6 +347,38 @@ It also runs on its own, once, before a build:
 In warn mode none of these fails. Once the manifest is in enforce mode a
 difference stops the configure and `setup.sh` with the same lines.
 
+## Keeping hosts current
+
+`tools/toolchain/host_sync.py` makes a host match the pins: it runs the fixes
+`check_env.py` names.
+
+```bash
+python3 tools/toolchain/host_sync.py                    # this checkout
+python3 tools/toolchain/host_sync.py --repo ~/Code/pulp # another one
+```
+
+It fetches `origin/main` and reads the pins from there, never from the working
+tree, so a host converges on what landed whatever branch its checkout has out.
+It then runs the pinned mise's `mise install --locked` against a copy of those
+pins, installs the manifest's Rust by name with `rustup toolchain install`
+(with the pinned components and targets) when anything is missing, and finally
+runs `check_env.py --fleet-path` inside the pinned environment. The outcome of
+every step is written to `~/.config/pulp/toolchain-sync.json`. It holds a lock,
+so two runs never overlap.
+
+It only adds. It never uninstalls a tool, runs `mise use`, edits a shell
+profile, or changes the default rustup toolchain. A few things it reports but
+never changes: a mise binary whose digest is not the pin (it is not even run;
+tartci installs the binary), a `rustc` on PATH that is not rustup's proxy,
+anything Homebrew owns, and Xcode.
+
+Exit status: `0` when the host matches, `1` when a difference remains that it
+does not fix, `2` when a download or the fetch failed (the receipt names the
+step; the next run tries again, and nothing is counted as fixed), `3` when the
+pins could not be read, `4` when another run holds the lock. Run it by hand
+after a pin bump lands; tartci schedules it on fleet hosts.
+`tools/toolchain/fleet_report.py` stays the read-only view across every host.
+
 ## Building plugins with the Pulp SDK
 
 If you build plugins with the installed SDK (`pulp create`, `pulp build` in a
@@ -374,8 +411,6 @@ section is here so the direction is visible, not as instructions.
 - **The check before generators of committed files.** The generators that
   write committed files run the environment check first, and refuse outside the
   pinned environment.
-- **Rust from the manifest.** Generate `rust-toolchain.toml` from the manifest
-  so cargo uses the pinned Rust instead of the current `stable`.
 - **CI images built from the lock.** `.shipyard/vm-image.mise.toml` and
   `tools/ci/mise-golden-layer.sh` bake a candidate golden with the pinned
   toolchain installed (`mise install --locked`, Rust by name) and a receipt of

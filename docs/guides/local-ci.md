@@ -2206,7 +2206,17 @@ expected versions (exit 3), becomes a warning annotation, never a failed step.
 The build legs also set `RUSTUP_AUTO_INSTALL=0`: a rustup proxy would
 otherwise download, mid-build, whatever toolchain `rust-toolchain.toml` names
 when the runner lacks it. With it off, a missing toolchain fails the cargo step
-by name, and the image or the resolve step has to provide it.
+by name, and the image or the resolve step has to provide it. The
+"Provide the pinned Rust toolchain" step is that resolve step: before
+configuring, `tools/ci/provide_pinned_rust.sh --fallback-to-default` installs
+the exact Rust the generated `experimental/pulp-rs/rust-toolchain.toml` names,
+with its components and targets, when the image lacks any of them, and does
+nothing when it has them. An image baked with the pin by name never downloads
+here. If rustup cannot download it after three spaced attempts, the step warns
+and sets `RUSTUP_TOOLCHAIN` to the runner's default toolchain for the rest of
+the job, so a network failure costs the pin for one run, not the job. The
+release lanes (`release-cli.yml`, `release-path-pr-gate.yml`) run the same
+script without the fallback.
 
 ## Build-time Node dependencies are installed before the build, never inside it
 

@@ -66,6 +66,35 @@ configure of a Pulp checkout sets `Python3_FIND_FRAMEWORK=LAST` when
 `MISE_ENV=toolchain` is set so the pinned interpreter wins. A build directory
 configured before opting in keeps its cached interpreter: configure a fresh one.
 
+## Bringing a host up to the pins
+
+`python3 tools/toolchain/host_sync.py [--repo <checkout>]` is check_env's fix
+commands executed: fetch, read the pins from `origin/main` (never the working
+tree), `mise install --locked` with the pinned mise, `rustup toolchain install`
+of the manifest Rust with its components and targets, then
+`check_env.py --fleet-path` inside the pinned environment, with a receipt at
+`~/.config/pulp/toolchain-sync.json`. Exit 0 match, 1 a difference it does not
+fix, 2 network (retry; never counted as fixed), 3 pins unreadable, 4 another run
+holds the lock.
+
+- It is additive only. Do not teach it to uninstall, `mise use`, set the rustup
+  default, touch shell profiles, Homebrew or Xcode: those are report-only lines
+  in the receipt for a human or tartci to act on.
+- A mise binary whose sha256 is not the pin is never executed, not even for
+  `install`; the binary is tartci's to install. Do not "fix" that by running
+  whatever `mise` is on PATH.
+- Its verify step needs the ref's `experimental/pulp-rs/rust-toolchain.toml` in
+  the copied pins: without it `rustc --version` answers for the default
+  toolchain and a host with the pin installed beside a newer `stable` reads as
+  drift forever.
+- `rustc --version` cannot see a missing clippy or cross std. check_env asks
+  `rustup component list` / `target list --toolchain <pin>`, and that is the
+  finding that keeps a half-installed toolchain from exiting 0.
+- Tests run it as a subprocess against a real local git origin and shell fakes
+  for mise/rustup/rustc with HOME in the fixture
+  (`tools/toolchain/test_host_sync.py`); never let a test reach the real
+  `~/.config/pulp`.
+
 ## The pinned-toolchain golden (CI images)
 
 `.shipyard/vm-image.mise.toml` bakes a candidate image,

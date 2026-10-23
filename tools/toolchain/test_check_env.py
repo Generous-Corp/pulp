@@ -58,6 +58,13 @@ class Host:
         self.mise_path = root / "bin/mise"
         self.mise_path.parent.mkdir(parents=True, exist_ok=True)
         self.mise_path.write_bytes(self.mise_bytes)
+        # `rustup <kind> list --installed --toolchain <pin>` output; rustup is
+        # only on the fake PATH when a test adds it.
+        self.rustup = {
+            "component": "cargo-aarch64-apple-darwin\nclippy-aarch64-apple-darwin\n"
+                         "rust-std-aarch64-apple-darwin\nrustc-aarch64-apple-darwin\nrustfmt-aarch64-apple-darwin\n",
+            "target": "aarch64-apple-darwin\nx86_64-apple-darwin\n",
+        }
 
     @property
     def mise_sha(self) -> str:
@@ -70,6 +77,8 @@ class Host:
 
     def run(self, argv, cwd):
         name = Path(argv[0]).name
+        if name == "rustup":
+            return self.rustup.get(argv[1])
         return self.text.get(name)
 
 
@@ -186,6 +195,46 @@ class CheckEnvTests(unittest.TestCase):
         cmake = [f for f in findings if f.tool == "cmake"]
         self.assertEqual(1, len(cmake))
         self.assertIn("declared exception: platform.linux cmake = system", cmake[0].line())
+
+    def with_rust_parts(self) -> dict:
+        self.host.present.add("rustup")
+        doc = self.matching()
+        doc["rust_components"] = ["rustfmt", "clippy"]
+        doc["rust_targets"] = ["x86_64-apple-darwin"]
+        return doc
+
+    def test_a_pinned_toolchain_missing_a_component_or_target_is_reported(self) -> None:
+        doc = self.with_rust_parts()
+        self.assertEqual([], self.collect(doc))  # control: everything listed is installed
+        self.host.rustup["component"] = self.host.rustup["component"].replace("clippy-aarch64-apple-darwin\n", "")
+        findings = self.collect(doc)
+        self.assertEqual(["rust components"], [f.tool for f in findings])
+        self.assertIn("missing clippy", findings[0].line())
+        self.assertIn("rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy "
+                      "--target x86_64-apple-darwin", findings[0].fix)
+        self.host.rustup["target"] = "aarch64-apple-darwin\n"
+        self.assertIn("missing clippy, x86_64-apple-darwin", self.collect(doc)[0].line())
+
+    def test_rust_parts_are_asked_of_the_pinned_toolchain_by_name(self) -> None:
+        doc = self.with_rust_parts()
+        seen = []
+
+        def run(argv, cwd):
+            seen.append(list(argv[1:]))
+            return self.host.run(argv, cwd)
+
+        check_env.collect(doc, self.tmp, self.home, PLAT, self.host.which, run)
+        self.assertIn(["component", "list", "--installed", "--toolchain", "1.97.1"], seen)
+        self.assertIn(["target", "list", "--installed", "--toolchain", "1.97.1"], seen)
+
+    def test_rust_parts_are_not_asked_when_rustc_is_already_wrong_or_absent(self) -> None:
+        doc = self.with_rust_parts()
+        self.host.rustup["component"] = ""
+        self.assertEqual(["rust components"], [f.tool for f in self.collect(doc)])  # control
+        self.host.text["rustc"] = "rustc 1.99.0 (abc 2026-09-01)"
+        self.assertEqual(["rustc"], [f.tool for f in self.collect(doc)])
+        self.host.present.discard("rustc")
+        self.assertEqual([], [f.tool for f in self.collect(doc, plat="linux-x64") if f.tool.startswith("rust")])
 
     def test_mise_version_mismatch(self) -> None:
         self.host.text["mise"] = "2026.5.16 macos-arm64 (2026-05-16)"

@@ -42,7 +42,6 @@ PROBE_TIMEOUT_S = 5
 
 ACTIVATE_FIX = 'MISE_ENV=toolchain mise install --locked && eval "$(MISE_ENV=toolchain mise activate bash)"'
 NPM_FIX = "MISE_ENV=toolchain mise run npm-deps"
-RUST_FIX = f"rustup toolchain install <version> (cargo reads {RUST_DIR}/rust-toolchain.toml)"
 MISE_FIX = "install the pinned mise by digest (tartci host installer); never brew or mise self-update"
 
 # (manifest key, display name, executables to try in order, version pattern)
@@ -134,6 +133,48 @@ def load_expected(path: Path) -> dict:
     return data
 
 
+def rust_fix(expected: dict) -> str:
+    """The rustup command that installs the pinned Rust with every component
+    and target rust-toolchain.toml names, without touching the default."""
+    words = ["rustup toolchain install", expected["tools"]["rust"], "--profile minimal"]
+    words += [f"--component {c}" for c in expected.get("rust_components", [])]
+    words += [f"--target {t}" for t in expected.get("rust_targets", [])]
+    return " ".join(words) + f" (cargo reads {RUST_DIR}/rust-toolchain.toml)"
+
+
+def check_rust_parts(
+    expected: dict, plat: str, which: Callable[[str], Optional[str]], run: Runner,
+) -> List[Finding]:
+    """The pinned toolchain must carry the components and targets the
+    generated rust-toolchain.toml names. `rustc --version` cannot see a
+    missing clippy or cross std, and with RUSTUP_AUTO_INSTALL=0 cargo then
+    fails on it mid-build. Asked of rustup only: a rustc without rustup has no
+    component list to read, and its version is checked above."""
+    want = expected["tools"]["rust"]
+    components = list(expected.get("rust_components", []))
+    targets = list(expected.get("rust_targets", []))
+    os_name = plat.split("-", 1)[0]
+    if expected.get("platform_overrides", {}).get(os_name, {}).get("rust") == "absent":
+        return []
+    rustup = which("rustup")
+    if rustup is None or not (components or targets):
+        return []
+    installed: List[str] = []
+    for kind in ("component", "target"):
+        text = run([rustup, kind, "list", "--installed", "--toolchain", want], None)
+        if text is None:
+            return [Finding("rust components", want, "unknown (rustup did not answer)", rustup, rust_fix(expected))]
+        installed += [line.strip() for line in text.splitlines() if line.strip()]
+    missing = [c for c in components if not any(line == c or line.startswith(c + "-") for line in installed)]
+    missing += [t for t in targets if t not in installed]
+    if not missing:
+        return []
+    return [Finding(
+        "rust components", f"{want} with " + ", ".join(components + targets),
+        "missing " + ", ".join(missing), rustup, rust_fix(expected),
+    )]
+
+
 def check_tools(
     expected: dict, plat: str, which: Callable[[str], Optional[str]], run: Runner, root: Path,
 ) -> List[Finding]:
@@ -143,7 +184,7 @@ def check_tools(
     for key, display, exes, pattern in TOOLS:
         want = expected["tools"][key]
         override = overrides.get(key)
-        fix = RUST_FIX.replace("<version>", want) if key == "rust" else ACTIVATE_FIX
+        fix = rust_fix(expected) if key == "rust" else ACTIVATE_FIX
         path = next((p for p in (which(e) for e in exes) if p), None)
         if path is None:
             if override == "absent":
@@ -242,8 +283,13 @@ def collect(
     expected: dict, root: Path, home: Path, plat: str,
     which: Callable[[str], Optional[str]] = shutil.which, run: Runner = run_version,
 ) -> List[Finding]:
+    tools = check_tools(expected, plat, which, run, root)
+    # A wrong or missing rustc is already a finding; its parts are only worth
+    # asking about once the pinned toolchain itself is there.
+    parts = [] if any(f.tool == "rustc" for f in tools) else check_rust_parts(expected, plat, which, run)
     return (
-        check_tools(expected, plat, which, run, root)
+        tools
+        + parts
         + check_mise(expected, plat, which, run, home)
         + check_npm(expected, root)
     )

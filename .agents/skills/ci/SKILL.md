@@ -874,10 +874,16 @@ CMake-4-only script fails only there).
 ### A Rust step that fails with "toolchain ... is not installed" is the image, not the PR
 
 The `build.yml` build legs set `RUSTUP_AUTO_INSTALL=0`, so a rustup proxy
-never downloads the toolchain `rust-toolchain.toml` names mid-build. If a cargo
-step fails naming a missing toolchain, the runner image or the resolve step
-lacks it: fix the golden (install the manifest's Rust by name), never by
-re-enabling auto-install in the workflow.
+never downloads the toolchain `rust-toolchain.toml` names mid-build.
+`rust-toolchain.toml` is generated from `tools/toolchain/manifest.toml` and
+names an exact Rust (rustup toolchain `1.97.1`, not `stable`, even when
+`stable` is the same release), so a golden that only has `stable` lacks it. The
+"Provide the pinned Rust toolchain" step (`tools/ci/provide_pinned_rust.sh
+--fallback-to-default`) installs it before configure; a `::warning
+title=toolchain::could not install the pinned Rust` means that download failed
+and the job built with the runner default (`RUSTUP_TOOLCHAIN`). Fix the golden
+(install the manifest's Rust by name, as `tools/ci/mise-golden-layer.sh`
+does), never by re-enabling auto-install in the workflow or deleting the step.
 
 ## Android minimum-API allocation check
 
@@ -5936,9 +5942,12 @@ golden its "Ensure a working Rust toolchain on PATH" step exhausts every probe
 release leg — while the bare-metal studios stay green because they have rustup
 from operator setup. That step now **bootstraps rustup as a last resort**
 (`curl … | sh -s -- -y --profile minimal --default-toolchain stable
---no-modify-path`, then front-loads `rustfmt`+`clippy` per
-`rust-toolchain.toml`), so the lane is self-sufficient on any runner; the pin is
-`stable`, so no reproducibility drift vs the studios. Before flipping
+--no-modify-path`), and the next step, `tools/ci/provide_pinned_rust.sh`,
+installs the exact Rust the generated `rust-toolchain.toml` names with its
+components and the `x86_64-apple-darwin` std, so the lane is self-sufficient on
+any runner and builds with the same compiler as every other lane. Never
+`rustup target add` / `component add` at the repo root: that changes the
+DEFAULT toolchain, not the pinned one cargo uses inside the crate. Before flipping
 `PULP_RELEASE_MACOS_RUNS_ON_JSON` to a VM label, either that fallback must be in
 place **or** the golden must bake rustup — otherwise the darwin publish leg
 fails and the whole release never publishes (the `release` job `needs` the full

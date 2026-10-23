@@ -1883,6 +1883,17 @@ jobs:
           [ -x "$chrome" ] || { echo "Chrome executable missing after verified extraction" >&2; exit 1; }
           echo "PULP_DESIGN_BROWSER=$chrome" >> "$GITHUB_ENV"
 
+      # experimental/pulp-rs/rust-toolchain.toml (generated from
+      # tools/toolchain/manifest.toml) names an exact Rust, and RUSTUP_AUTO_INSTALL=0
+      # keeps cargo from fetching it mid-build. Install it here, before the build,
+      # when the image lacks it; a golden baked with the pin by name makes this a
+      # no-op. If rustup cannot download it, the build falls back to the runner's
+      # default toolchain with a warning rather than failing on the network.
+      - name: Provide the pinned Rust toolchain
+        timeout-minutes: 10
+        shell: bash
+        run: tools/ci/provide_pinned_rust.sh --fallback-to-default
+
       - name: Fetch pulp-rs crates
         shell: bash
         env:
