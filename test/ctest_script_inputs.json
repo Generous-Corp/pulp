@@ -1632,6 +1632,20 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-group-dsp-rt-format": {
+   "data": "undeclared",
+   "detected_sources": [
+    "test/test_processor_defaults.cpp"
+   ],
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [
+    "test/test_processor_defaults.cpp"
+   ],
+   "undeclared_sources": [
+    "test/test_processor_defaults.cpp"
+   ]
+  },
   "pulp-test-group-fmt-ship": {
    "data": "none",
    "inputs": [],
@@ -7593,6 +7607,7 @@
    "inputs": [
     "tools/import-design/browser_capture/document_canvas.mjs",
     "tools/import-design/browser_capture/document_canvas.test.mjs",
+    "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture/form_control_theme.test.mjs",
     "tools/import-design/browser_capture/health.mjs",
     "tools/import-design/browser_capture/health.test.mjs",
