@@ -41,6 +41,7 @@ NAMES = {
     "cmake-ios-auv3-control-shipping": set(),
     "pulp-test-cli-migration-index": set(),
     "pulp-rust-cli-cargo-tests": set(), "pulp-rust-cli-doc-tests": set(),
+    "pulp-rust-gpu-trace-analysis-unit": set(), "pulp-rust-stale-cli-guard": set(),
     "TripleBuffer hammer: writer + reader for 500ms": set(),
     "SeqLock hammer: 1 writer + 2 readers for 500ms": set(),
     "SpscQueue hammer: producer + consumer for 500ms": set(),
@@ -142,7 +143,8 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(plan["merge_only"], [])
         self.assertEqual(plan["tests"], ["unit-a"])
 
-    PULP_RS_TESTS = ["pulp-rust-cli-cargo-tests", "pulp-rust-cli-doc-tests"]
+    PULP_RS_TESTS = ["pulp-rust-cli-cargo-tests", "pulp-rust-cli-doc-tests",
+                     "pulp-rust-gpu-trace-analysis-unit", "pulp-rust-stale-cli-guard"]
 
     def test_a_pulp_rs_edit_runs_the_cargo_tests_first(self) -> None:
         # The crate owns no CMake sources, so the projection selects nothing.
@@ -154,17 +156,26 @@ class SelectionTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = self.plan([path], selection("focused", ["unit-a"]))
                 self.assertEqual(sorted(plan["merge_only"]), self.PULP_RS_TESTS)
-                self.assertEqual(sorted(plan["tests"][:2]), self.PULP_RS_TESTS)
+                count = len(self.PULP_RS_TESTS)
+                self.assertEqual(sorted(plan["tests"][:count]), self.PULP_RS_TESTS)
                 # A diff of skills or Markdown alone is never projected.
                 projected = [] if step.is_non_test_path(path) else ["unit-a"]
-                self.assertEqual(plan["tests"][2:], projected)
+                self.assertEqual(plan["tests"][count:], projected)
 
     def test_the_pulp_rs_family_names_the_tests_the_crate_registers(self) -> None:
-        # A rename of either ctest would leave the family selecting less.
-        registered = re.findall(r"add_test\(NAME\s+(\S+)",
-                                (REPO / "experimental/pulp-rs/CMakeLists.txt").read_text(encoding="utf-8"))
+        # Every ctest that runs cargo or a crate test script must match, so a
+        # new or renamed one cannot drop out silently. The crate's
+        # Python-driven checks of tools/scripts reach a PR head through their
+        # declared script inputs instead.
+        text = (REPO / "experimental/pulp-rs/CMakeLists.txt").read_text(encoding="utf-8")
+        blocks = [b.split(None, 1) for b in text.split("add_test(NAME")[1:]]
+        crate = [name for name, body in blocks
+                 if "CARGO_EXECUTABLE" in body.split("set_tests_properties")[0]
+                 or "CMAKE_CURRENT_SOURCE_DIR}/tests/" in body.split("set_tests_properties")[0]]
         test_re = next(t for f, _, t in step.PATH_FAMILIES if f == "pulp-rs-cargo")
-        self.assertEqual(sorted(n for n in registered if test_re.search(n)), self.PULP_RS_TESTS)
+        self.assertGreaterEqual(len(crate), 6)
+        self.assertEqual([n for n in crate if not test_re.search(n)], [])
+        self.assertTrue(set(self.PULP_RS_TESTS) <= set(crate))
 
     def test_control_non_pulp_rs_paths_do_not_run_the_cargo_tests(self) -> None:
         for path in ("tools/cli/src/main.cpp", "experimental/other/src/main.rs",
@@ -449,11 +460,11 @@ class RequiredFamilyTests(unittest.TestCase):
         for primitive in ("TripleBuffer", "SeqLock", "SpscQueue"):
             self.assertTrue(any(h.startswith(primitive) for h in hammers), (primitive, hammers))
         self.assertGreaterEqual(len(resolved["audio-buffer-ops"]), 1)
-        self.assertEqual(sorted(resolved["pulp-rs-cargo"]),
-                         ["pulp-rust-cli-cargo-tests", "pulp-rust-cli-doc-tests"])
+        self.assertTrue({"pulp-rust-cli-cargo-tests", "pulp-rust-gpu-trace-analysis-unit",
+                         "pulp-rust-stale-cli-guard"} <= set(resolved["pulp-rs-cargo"]))
 
     def test_planted_rename_of_the_pulp_rs_tests_is_detected(self) -> None:
-        resolved = self.resolve(self.real_case_names(rename=("pulp-rust-cli-", "pulp-rs-cli-")))
+        resolved = self.resolve(self.real_case_names(rename=("pulp-rust-", "pulp-rs-")))
         self.assertEqual(step.empty_required_families(resolved), ["pulp-rs-cargo"])
 
     def test_planted_rename_of_the_hammers_is_detected(self) -> None:

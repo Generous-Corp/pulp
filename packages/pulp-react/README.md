@@ -87,6 +87,16 @@ Visual: `background`, `backgroundGradient`, `border={{ color, width, radius }}`,
 
 Text (Label/Button/TextEditor): `text`, `textColor`, `textAlign`.
 
+Typography lengths (`fontSize`, `letterSpacing`, `lineHeight`) accept numbers
+and `px`, `em`, `rem` and `%` strings, plus `normal` where CSS allows it, and
+reach the native setters as pixels. `em` and `%` resolve against the element's
+own `fontSize` (Pulp's default Label size, 14, when it has none; `fontSize`
+itself resolves against that default), and `rem` against 16. A bare
+`lineHeight` number follows `setLengthDialect`: `'dom'` reads it as a
+font-size multiplier, `'native'` as pixels, and the default `'auto'` reads
+values up to 8 as multipliers and larger ones as pixels. A value it cannot
+resolve, such as `calc()`, leaves the native value unchanged.
+
 ## Architecture
 
 - Mutation mode (Ink/R3F pattern), `isPrimaryRenderer: true`

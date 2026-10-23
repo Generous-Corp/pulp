@@ -9,6 +9,23 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v010070"></a>
+## [0.1007.0] - 2026-10-22
+
+- release/version bump ([#10729](https://github.com/Generous-Corp/pulp/pull/10729))
+- ci/migration notes unreleased ([#10728](https://github.com/Generous-Corp/pulp/pull/10728))
+- perf/icu data subset 20261022 ([#10688](https://github.com/Generous-Corp/pulp/pull/10688))
+- feature/gpu audio wp0 header prep 20261022 ([#10670](https://github.com/Generous-Corp/pulp/pull/10670))
+- ci/pulp rs cargo test family ([#10725](https://github.com/Generous-Corp/pulp/pull/10725))
+- fix/gpu audio seqlock coherence test flake 20261022 ([#10727](https://github.com/Generous-Corp/pulp/pull/10727))
+- fix/prepared edit concurrent read overlap ([#10721](https://github.com/Generous-Corp/pulp/pull/10721))
+- fix/realtime worker pool contention ([#10719](https://github.com/Generous-Corp/pulp/pull/10719))
+- codex/roadmap pointer 20261022 ([#10716](https://github.com/Generous-Corp/pulp/pull/10716))
+- feature/ux w1 j followups 20261022 ([#10720](https://github.com/Generous-Corp/pulp/pull/10720))
+- release/version bump ([#10726](https://github.com/Generous-Corp/pulp/pull/10726))
+- fix/cli consumer build ship 20261022 ([#10669](https://github.com/Generous-Corp/pulp/pull/10669))
+- feature/ux w1 l gpu hygiene 20261022 ([#10722](https://github.com/Generous-Corp/pulp/pull/10722))
+
 <a id="v010060"></a>
 ## [0.1006.0] - 2026-10-22
 
@@ -11281,6 +11298,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.1007.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1007.0
 [0.1006.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1006.0
 [0.1005.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1005.0
 [0.1004.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.1004.0
