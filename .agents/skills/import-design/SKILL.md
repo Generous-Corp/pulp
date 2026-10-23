@@ -3277,6 +3277,25 @@ they share no code unless you make them.
   (so the codegen path is covered even when the planning-gated cpp-codegen target
   is skipped), plus the gated `pulp-test-design-import-cpp-codegen`.
 
+### Gradient colour-interpolation (`in oklab`) and the default Chrome hides
+
+`css_gradient.cpp` honours `in <space> [<hue> hue]` anywhere in a gradient's
+prefix (Chrome's computed style writes `to right in oklab`, `circle in hsl` and
+`from 90deg in oklch`). Two things are easy to get wrong:
+
+- **The clause is not always there to read.** CSS Color 4 makes Oklab the
+  default as soon as one stop is a non-legacy colour, and Chrome's computed style
+  DROPS `in oklab` from such a gradient because it is the default. Captured
+  designs are full of `oklab(...)` stops (Chrome serializes every modern colour
+  and every `color-mix()` that way), so a parser that only reads the clause
+  paints them in sRGB with nothing in the CSS to say why. `default_interpolation`
+  keys on the stop text for this reason.
+- **The oracle's green backdrop cannot see a refusal on its own.** `in oklch
+  longer hue` from red to blue is green at its midpoint, which the geometry
+  scan's `unpainted()` reads as backdrop. `chrome_gradient_oracle.py --colors`
+  paints each case over two backdrops and reports a refusal only when the
+  renders differ; reuse that trick for any colour oracle.
+
 ### Per-range text styles → nested `<span>`s
 
 A text node used to take the FIRST-CHAR dominant style only (one run); mixed
