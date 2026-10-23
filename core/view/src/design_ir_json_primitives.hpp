@@ -8,6 +8,7 @@
 
 #include <choc/containers/choc_Value.h>
 
+#include <charconv>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -63,9 +64,13 @@ inline void write_string_member(std::ostringstream& out, bool& first, const char
         write_string_member(out, first, key, *value);
 }
 
+// Shortest text that reads back as the same float. A stream's default six
+// significant digits would cut Chromium's 1/64 px layout to 0.1 px from 1000 px up.
 inline void write_float_member(std::ostringstream& out, bool& first, const char* key, float value) {
     write_key(out, first, key);
-    out << value;
+    char buffer[32];
+    const auto written = std::to_chars(buffer, buffer + sizeof buffer, value);
+    out.write(buffer, written.ptr - buffer);
 }
 
 inline void write_float_member(std::ostringstream& out, bool& first, const char* key,
