@@ -1347,6 +1347,171 @@ TEST_CASE("each refusal names the construct that caused it",
     CHECK(attribute(*vector_shapes.front(), "source_tag") == "rect");
 }
 
+// ── SVG stroke style and shape opacity ──────────────────────────────────────
+// test/fixtures/browser-capture-svg-stroke-style is a real Chromium capture of
+// the stroke constructs icon sets actually use. The first three icons are
+// Spectr's PEAK, SCULPT and PRESETS glyphs verbatim; the fourth is the Lucide
+// convention of declaring the stroke style once on the root `<svg>`.
+
+TEST_CASE("an svg stroke's cap, join and miter limit reach the IR",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // PEAK: ten 1.3-unit ticks. Butt caps cut every tick short by the
+    // half-disc a round cap adds at each end, which reads as a lighter icon.
+    const auto* peak =
+        vector_from(root, "M 3 20 L 3 14 M 7 20 L 7 10 M 11 20 L 11 6 M 15 20 L 15 12 "
+                          "M 19 20 L 19 8 M 1 14 L 5 14 M 5 10 L 9 10 M 9 6 L 13 6 "
+                          "M 13 12 L 17 12 M 17 8 L 21 8");
+    REQUIRE(peak != nullptr);
+    CHECK(attribute(*peak, "svg_stroke_linecap") == "round");
+    CHECK(attribute(*peak, "svg_stroke_linejoin") == "round");
+    // The limit only means something under a miter join.
+    CHECK(attribute(*peak, "svg_stroke_miterlimit").empty());
+
+    // SCULPT: one curve, round at both ends.
+    const auto* sculpt = vector_from(root, "M 2 14 Q 5 4 9 10 T 16 8 T 22 6");
+    REQUIRE(sculpt != nullptr);
+    CHECK(attribute(*sculpt, "svg_stroke_linecap") == "round");
+    CHECK(attribute(*sculpt, "svg_stroke_linejoin") == "round");
+
+    // Lucide: neither shape declares a cap or join; both inherit the root's.
+    for (const char* data :
+         {"M2 12 A10 10 0 0 1 22 12 A10 10 0 0 1 2 12 Z", "M12 6 L12 12 L16 14"}) {
+        const auto* shape = vector_from(root, data);
+        REQUIRE(shape != nullptr);
+        CHECK(attribute(*shape, "svg_stroke_linecap") == "round");
+        CHECK(attribute(*shape, "svg_stroke_linejoin") == "round");
+        CHECK(attribute(*shape, "svg_stroke_width") == "2");
+    }
+
+    // A miter join carries its limit, authored or not: SVG's initial value is
+    // 4 and a 2D canvas's is 10, so leaving it out changes which corners
+    // collapse to a bevel.
+    const auto* mitred = vector_from(root, "M2 20 L8 4 L14 20");
+    REQUIRE(mitred != nullptr);
+    CHECK(attribute(*mitred, "svg_stroke_linecap") == "butt");
+    CHECK(attribute(*mitred, "svg_stroke_linejoin") == "miter");
+    CHECK(attribute(*mitred, "svg_stroke_miterlimit") == "2");
+    // An inline `style` declaration is as authored as an attribute.
+    const auto* bevelled = vector_from(root, "M18 20 L24 4 L30 20");
+    REQUIRE(bevelled != nullptr);
+    CHECK(attribute(*bevelled, "svg_stroke_linejoin") == "bevel");
+    // A group's inline style is inherited like its attributes are.
+    const auto* squared = vector_from(root, "M4 12 L20 12");
+    REQUIRE(squared != nullptr);
+    CHECK(attribute(*squared, "svg_stroke_linecap") == "square");
+    CHECK(attribute(*squared, "svg_stroke_miterlimit") == "4");
+
+    // `pathLength` and `stroke-dashoffset` change nothing on a solid stroke,
+    // and are carried so a dash pattern drawn later measures against them.
+    const auto* measured = vector_from(root, "M 4 12 H 20");
+    REQUIRE(measured != nullptr);
+    CHECK(attribute(*measured, "svg_path_length") == "100");
+    CHECK(attribute(*measured, "svg_stroke_dashoffset") == "3");
+}
+
+TEST_CASE("an svg shape's own opacity folds into its one paint",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // PRESETS: three waves at 0.45, 0.7 and 1, stroked in an inherited
+    // `rgba(255, 255, 255, 0.85)`. The shape's opacity multiplies the alpha
+    // the colour already has rather than replacing it.
+    const std::pair<const char*, const char*> waves[] = {
+        {"M 2 13 Q 7 13 10 9 Q 13 5 17 5 Q 20 5 22 7", "rgba(255, 255, 255, 0.3825)"},
+        {"M 2 11 Q 6 11 9 7 Q 13 3 17 7 Q 20 10 22 10", "rgba(255, 255, 255, 0.595)"},
+        {"M 2 9 Q 5 4 9 10 Q 13 15 17 9 Q 20 5 22 6", "rgba(255, 255, 255, 0.85)"},
+    };
+    for (const auto& [data, stroke] : waves) {
+        const auto* wave = vector_from(root, data);
+        REQUIRE(wave != nullptr);
+        CHECK(attribute(*wave, "svg_stroke") == stroke);
+        CHECK(attribute(*wave, "svg_fill") == "none");
+        CHECK(attribute(*wave, "svg_stroke_linecap") == "round");
+    }
+
+    const auto* faded = vector_from(root, "M2 2 H11 V22 H2 Z");
+    REQUIRE(faded != nullptr);
+    CHECK(attribute(*faded, "svg_fill") == "rgba(143, 214, 148, 0.5)");
+    // `fill-opacity` over a colour that already has an alpha multiplies it.
+    const auto* translucent = vector_from(root, "M13 2 H22 V22 H13 Z");
+    REQUIRE(translucent != nullptr);
+    CHECK(attribute(*translucent, "svg_fill") == "rgba(240, 160, 75, 0.4)");
+}
+
+TEST_CASE("svg stroke constructs the lowering cannot draw refuse by name",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    CHECK(attribute(root, "native_svg_lowered") == "8");
+    CHECK(attribute(root, "native_svg_refused") == "2");
+
+    std::map<std::string, std::string> refusals; // reason → detail
+    const std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (attribute(child, "capture_fallback_element") == "svg") {
+                refusals[attribute(child, "capture_fallback_reason")] =
+                    attribute(child, "capture_fallback_detail");
+            }
+            walk(child);
+        }
+    };
+    walk(root);
+    // A fill and a stroke under one opacity composite as a layer; per-paint
+    // alpha would double-darken where the stroke overlaps the fill.
+    CHECK(refusals["svg-shape-opacity"] == "circle");
+    // A marker is a `<defs>` reference like a clip or a mask: the line drawn
+    // without it loses its arrowhead.
+    CHECK(refusals["svg-paint-reference"] == "line");
+    CHECK(refusals.size() == 2);
+}
+
+TEST_CASE("a captured stroke property outranks the authored attribute",
+          "[browser-capture][native-lowering][svg]") {
+    // A stylesheet rule can override `stroke-linecap="round"`, and only the
+    // browser has seen the stylesheet. When the capture collected the
+    // property, Chrome's value wins; when it did not, the attribute is the
+    // best evidence there is.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 svg, 4 path
+    // strings: 0 #document 1 HTML 2 BODY 3 svg 4 path 5 none
+    //   6 rgb(1, 2, 3) 7 butt 8 d 9 "M0 0 L10 10" 10 stroke-linecap 11 round
+    //   12 viewBox 13 "0 0 10 10"
+    SnapshotSpec spec{
+        .node_names = "[0,1,2,3,4]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,3]",
+        .attributes = "[[],[],[],[12,13],[8,9,10,11]]",
+        .layout_nodes = "[0,1,2,3,4]",
+        .styles = "[[5,5,7],[5,5,7],[5,5,7],[5,5,7],[5,6,7]]",
+        .bounds = "[[0,0,100,100],[0,0,100,100],[0,0,100,100],"
+                  "[10,10,20,20],[10,10,20,20]]",
+        .paint_orders = "[0,1,1,2,3]",
+        .computed_names = R"(["fill","stroke","stroke-linecap"])",
+        .strings = R"J("#document","HTML","BODY","svg","path","none",)J"
+                   R"J("rgb(1, 2, 3)","butt","d","M0 0 L10 10",)J"
+                   R"J("stroke-linecap","round","viewBox","0 0 10 10")J",
+    };
+    const auto captured = lower_snapshot(spec, "svg");
+    const auto captured_shapes = vector_nodes(captured.root);
+    REQUIRE(captured_shapes.size() == 1);
+    CHECK(attribute(*captured_shapes.front(), "svg_stroke") == "rgb(1, 2, 3)");
+    CHECK(attribute(*captured_shapes.front(), "svg_stroke_linecap") == "butt");
+
+    spec.computed_names = R"(["fill","stroke","cursor"])";
+    const auto authored = lower_snapshot(spec, "svg");
+    const auto authored_shapes = vector_nodes(authored.root);
+    REQUIRE(authored_shapes.size() == 1);
+    CHECK(attribute(*authored_shapes.front(), "svg_stroke_linecap") == "round");
+}
+
 TEST_CASE("a capture with no SVG paint says so out loud",
           "[browser-capture][native-lowering][svg]") {
     // The same six icons, byte-identical, with ONLY the seven SVG paint

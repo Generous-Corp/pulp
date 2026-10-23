@@ -1720,6 +1720,22 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
             if (shape.stroke) {
                 vector_node.attributes["svg_stroke_width"] =
                     format_number(shape.stroke_width);
+                // Cap and join are stated even at their SVG initial values,
+                // for the same reason as the paints: the renderer's defaults
+                // are a 2D canvas's, and its miter limit (10) is not SVG's (4).
+                vector_node.attributes["svg_stroke_linecap"] = shape.stroke_linecap;
+                vector_node.attributes["svg_stroke_linejoin"] = shape.stroke_linejoin;
+                if (shape.stroke_linejoin == "miter") {
+                    vector_node.attributes["svg_stroke_miterlimit"] =
+                        format_number(shape.stroke_miterlimit);
+                }
+                if (shape.stroke_dashoffset != 0.0) {
+                    vector_node.attributes["svg_stroke_dashoffset"] =
+                        format_number(shape.stroke_dashoffset);
+                }
+            }
+            if (shape.path_length) {
+                vector_node.attributes["svg_path_length"] = format_number(*shape.path_length);
             }
             vector_node.style.position = "absolute";
             vector_node.attributes["paint_class"] =
