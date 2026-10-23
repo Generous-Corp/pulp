@@ -374,6 +374,29 @@ if(NOT IOS AND NOT ANDROID)
     add_dependencies(pulp-test-isolated-scanner
         pulp-scan-worker
         pulp-isolated-scanner-crash-helper)
+    if(PULP_HAS_CLAP)
+        # Two bundles from one source (fixtures/scan_probe_clap.cpp): the
+        # probe marks the file PULP_TEST_DLOPEN_MARKER names when it is
+        # loaded and lists one descriptor; the other aborts in
+        # clap_entry.init. Flat `.clap` files, so every platform's scanner
+        # and loader open them the same way.
+        add_library(pulp-test-fixture-clap-probe MODULE fixtures/scan_probe_clap.cpp)
+        target_link_libraries(pulp-test-fixture-clap-probe PRIVATE clap)
+        set_target_properties(pulp-test-fixture-clap-probe PROPERTIES
+            OUTPUT_NAME "PulpScanProbe" PREFIX "" SUFFIX ".clap")
+        add_library(pulp-test-fixture-clap-abort MODULE fixtures/scan_probe_clap.cpp)
+        target_link_libraries(pulp-test-fixture-clap-abort PRIVATE clap)
+        target_compile_definitions(pulp-test-fixture-clap-abort PRIVATE
+            PULP_SCAN_FIXTURE_ABORT_ON_INIT=1)
+        set_target_properties(pulp-test-fixture-clap-abort PROPERTIES
+            OUTPUT_NAME "PulpScanAbort" PREFIX "" SUFFIX ".clap")
+        target_compile_definitions(pulp-test-isolated-scanner PRIVATE
+            PULP_SCAN_FIXTURE_PROBE_CLAP="$<TARGET_FILE:pulp-test-fixture-clap-probe>"
+            PULP_SCAN_FIXTURE_ABORT_CLAP="$<TARGET_FILE:pulp-test-fixture-clap-abort>")
+        add_dependencies(pulp-test-isolated-scanner
+            pulp-test-fixture-clap-probe
+            pulp-test-fixture-clap-abort)
+    endif()
     catch_discover_tests(pulp-test-isolated-scanner)
 endif()
 # Hosted editor API

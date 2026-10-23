@@ -1496,6 +1496,23 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-graph-plugin-resolution": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "PulpNoEditorLinkFloor_CLAP",
+    "pulp-scan-worker",
+    "pulp-test-fixture-clap-abort",
+    "pulp-test-fixture-clap-probe"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_graph_plugin_resolution.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-group-app-host": {
    "data": "declared",
    "detected_sources": [
@@ -1890,7 +1907,9 @@
    "kind": "compiled",
    "runtime_targets": [
     "pulp-isolated-scanner-crash-helper",
-    "pulp-scan-worker"
+    "pulp-scan-worker",
+    "pulp-test-fixture-clap-abort",
+    "pulp-test-fixture-clap-probe"
    ],
    "sources": [],
    "spawning_sources": [
@@ -2694,6 +2713,7 @@
   "pulp-test-gpu-wavenet-realtime-node",
   "pulp-test-gpu-wavenet-session",
   "pulp-test-graph-executor-routing",
+  "pulp-test-graph-plugin-resolution",
   "pulp-test-graph-runtime-worker-pool",
   "pulp-test-graphic-eq",
   "pulp-test-group-app-audio",

@@ -1113,6 +1113,10 @@ runs the bounded parse against a `--trust` key set — it never executes the pla
 or loads custom state. Key handling reuses the reload-trust key file, the same
 path `ship swap-pack` uses.
 
+Baking refuses hosted Plugin nodes, so `pulp bake` never loads a plugin: each
+plugin node in the input stays an unresolved placeholder (no library the file
+names is opened) and the lowerability check reports it.
+
 ### ship
 
 **Status**: experimental
@@ -2394,6 +2398,7 @@ pulp scan --format auv3             # Only AUv3
 pulp scan --format lv2              # Only LV2
 pulp scan -f clap                   # Short alias for --format
 pulp scan --no-load                 # Compatibility no-op on Rust; filesystem-only mode for pulp-cpp
+pulp scan --in-process              # pulp-cpp: run CLAP entry points in this process, not a worker
 pulp scan --help                    # Print usage; never opens any plug-in
 ```
 
@@ -2402,6 +2407,8 @@ Output is one line per plug-in: `[<format>]` header per section, then `<name>  <
 On the Rust front end, `--no-load` is accepted for compatibility and is effectively the default behavior. On `pulp-cpp scan`, `--no-load` skips the dlopen step entirely and uses the same filename-derived inventory mode; use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
 
 `pulp scan --help` is handled by the Rust CLI help path and does not enumerate or load plug-ins. `pulp-cpp scan --help` has the same pre-scan help behavior, so help remains safe while diagnosing a malformed plug-in that crashes the rich metadata path.
+
+On `pulp-cpp scan`, each CLAP bundle's entry point runs in a disposable `pulp-scan-worker` child process, so a bundle that crashes or hangs is skipped (and recorded in the caller's scan blacklist) instead of ending the scan. The worker is found beside the executable (an installed SDK's `bin/`, or `tools/scan-worker/` in a build tree) or through `PULP_SCAN_WORKER`; a group- or world-writable worker is refused. When no worker can be found, CLAP bundles are not enumerated at all and the command prints why; `--in-process` is the explicit opt-in that runs their entry points in the scanning process instead.
 
 ### host
 
