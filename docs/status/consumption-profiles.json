@@ -1287,6 +1287,7 @@
       "pulp/view/capability_fallback.hpp",
       "pulp/view/caret.hpp",
       "pulp/view/channel_strip_view.hpp",
+      "pulp/view/chart_shader_presets.hpp",
       "pulp/view/code_editor.hpp",
       "pulp/view/code_editor_tokenizer.hpp",
       "pulp/view/color_picker.hpp",
