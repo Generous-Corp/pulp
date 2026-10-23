@@ -8,7 +8,7 @@
   "capability_families": [
     "design-output-and-packaging"
   ],
-  "rationale": "Content-pack installs now admit declared decompressed sizes before extraction and model downloads refuse https-to-http redirects and digest-less entries; packaging and download surfaces change behaviour, so Vellum inherits the new refusals and the --max-pack-bytes flag.",
+  "rationale": "Content-pack installs now admit declared decompressed sizes before extraction, and model downloads refuse https-to-http redirects and digest-less entries. These are refusals on existing packaging and download surfaces plus a --max-pack-bytes flag; no authority or design-output contract changes.",
   "tests": [
     "ctest --test-dir build -R pulp-test-audio",
     "ctest --test-dir build -R pulp-test-cli-content-commands",
@@ -18,5 +18,6 @@
     "vellum-expansion-watch"
   ],
   "disposition": "watch-only-no-authority",
-  "authority_effect": "none"
+  "authority_effect": "none",
+  "vellum_inherits": false
 }
