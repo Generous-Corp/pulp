@@ -42,23 +42,30 @@ namespace {
 constexpr double kSimdNull = 1.0e-6;
 constexpr double kReferenceParity = 2.0e-5;
 
-// Sanitizer builds run the same nulls on a shorter stimulus: the scalar
-// references are ~20x slower under ASan and would otherwise exceed the
-// hosted per-test timeout. Every topology, block pattern and impulse still
-// runs; only the noise length and impulse count shrink.
-#if defined(__SANITIZE_ADDRESS__)
+// Sanitizer builds (ASan, TSan) run the same nulls at reduced size: the
+// scalar references are ~20x slower there and must fit the hosted 120 s
+// per-test timeout without a `slow` label, which the sanitizer lane
+// excludes. Every family, every channel width (so every SIMD tile width),
+// random 1..512 block tails and the impulses still run. Only the noise
+// length, impulse count, the dilation depth of the 2x10 WaveNets (2x6) and
+// the largest recurrent hidden size (64) shrink.
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
 #define PULP_NEURAL_SIMD_SANITIZED 1
 #elif defined(__has_feature)
-#if __has_feature(address_sanitizer)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
 #define PULP_NEURAL_SIMD_SANITIZED 1
 #endif
 #endif
 #if defined(PULP_NEURAL_SIMD_SANITIZED)
-constexpr std::size_t kNullNoise = 6000;
-constexpr int kNullImpulses = 3;
+constexpr std::size_t kNullNoise = 4000;
+constexpr int kNullImpulses = 2;
+constexpr int kWaveNetDepth = 6;
+constexpr std::array<std::uint32_t, 3> kRecurrentHidden{24, 13, 3};
 #else
 constexpr std::size_t kNullNoise = 48000;
 constexpr int kNullImpulses = 8;
+constexpr int kWaveNetDepth = 10;
+constexpr std::array<std::uint32_t, 4> kRecurrentHidden{24, 64, 13, 3};
 #endif
 
 class Rng {
@@ -155,16 +162,16 @@ std::vector<int> pow2_dilations(int count) {
 }
 
 std::vector<NamArraySpec> nam_standard() {
-    return {{1, 16, 8, 3, pow2_dilations(10)},
-            {16, 8, 1, 3, pow2_dilations(10), "Tanh", false, true}};
+    return {{1, 16, 8, 3, pow2_dilations(kWaveNetDepth)},
+            {16, 8, 1, 3, pow2_dilations(kWaveNetDepth), "Tanh", false, true}};
 }
 std::vector<NamArraySpec> nam_lite() {
-    return {{1, 12, 6, 3, pow2_dilations(10)},
-            {12, 6, 1, 3, pow2_dilations(10), "Tanh", false, true}};
+    return {{1, 12, 6, 3, pow2_dilations(kWaveNetDepth)},
+            {12, 6, 1, 3, pow2_dilations(kWaveNetDepth), "Tanh", false, true}};
 }
 std::vector<NamArraySpec> nam_nano() {
-    return {{1, 4, 2, 3, pow2_dilations(10)},
-            {4, 2, 1, 3, pow2_dilations(10), "Tanh", false, true}};
+    return {{1, 4, 2, 3, pow2_dilations(kWaveNetDepth)},
+            {4, 2, 1, 3, pow2_dilations(kWaveNetDepth), "Tanh", false, true}};
 }
 
 /// Writes a NAM file with weights in the serialized order NamTcnArtifact reads.
@@ -737,7 +744,7 @@ TEST_CASE("NAM-TCN SIMD kernel nulls scalar against SIMD and the reference",
 TEST_CASE("LSTM and GRU SIMD kernels null scalar against SIMD and the reference",
           "[gpu_audio][neural][simd][recurrent]") {
     for (const auto family : {RecurrentFamily::Lstm, RecurrentFamily::Gru})
-        for (const std::uint32_t hidden : {24u, 64u, 13u}) {
+        for (const std::uint32_t hidden : kRecurrentHidden) {
             const RecurrentCpuShape shape{.family = family,
                                           .input_size = 1,
                                           .hidden_size = hidden,
