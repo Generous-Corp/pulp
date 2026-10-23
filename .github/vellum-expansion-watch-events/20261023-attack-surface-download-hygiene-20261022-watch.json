@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-attack-surface-download-hygiene-20261022-watch",
+  "created_at": "2026-10-23T06:09:53Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Content-pack installs now admit declared decompressed sizes before extraction and model downloads refuse https-to-http redirects and digest-less entries; packaging and download surfaces change behaviour, so Vellum inherits the new refusals and the --max-pack-bytes flag.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-audio",
+    "ctest --test-dir build -R pulp-test-cli-content-commands",
+    "ctest --test-dir build -R pulp-test-model-download",
+    "ctest --test-dir build -R pulp-test-preset-manager",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
