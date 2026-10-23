@@ -43,15 +43,85 @@ case "$overlay_abs" in
   *) echo "refusing overlay outside disposable root: $overlay_abs" >&2; exit 1 ;;
 esac
 backup_dir=$(dirname "$backup")
-mkdir -p "$backup_dir"
-backup_abs=$(cd "$backup_dir" && printf '%s/%s' "$PWD" "$(basename "$backup")")
-
-# A running QEMU may hold the overlay open even when the guest looks idle.
-# Match the complete command line and fail closed; never resize a live disk.
-if ps axww -o command= | grep -E 'qemu-system|qemu-kvm' | grep -F -e "$overlay_abs" -e "$overlay_input_abs" >/dev/null; then
-  echo "refusing live overlay resize; QEMU references: $overlay_abs" >&2
+[[ -d "$backup_dir" ]] || { echo "refusing backup outside an existing disposable run: $backup_dir" >&2; exit 1; }
+backup_dir_abs=$(realpath "$backup_dir")
+case "$backup_dir_abs" in
+  "$disposable_root_abs"|"$disposable_root_abs"/*) ;;
+  *) echo "refusing backup outside disposable root: $backup_dir_abs" >&2; exit 1 ;;
+esac
+backup_abs="$backup_dir_abs/$(basename "$backup")"
+if [[ -L "$backup_abs" ]]; then
+  echo "refusing dangling backup symlink: $backup_abs" >&2
+  exit 1
+elif [[ -e "$backup_abs" ]]; then
+  echo "refusing existing backup (must be a new file): $backup_abs" >&2
   exit 1
 fi
+
+# A running QEMU may hold the overlay open even when the guest looks idle.
+# Match both the spelling in its command line and the resolved path. The latter
+# matters when QEMU was started through a symlink or with a relative `file=`
+# argument. The helper is deliberately fail-closed when process inspection is
+# unavailable: resizing a live disk is never an acceptable fallback.
+python3 - "$overlay_abs" "$overlay_input_abs" <<'PY'
+import pathlib, shlex, subprocess, sys
+
+overlay = pathlib.Path(sys.argv[1]).resolve()
+input_path = pathlib.Path(sys.argv[2])
+
+def process_cwd(pid):
+    try:
+        raw = subprocess.check_output(
+            ["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"],
+            text=True, stderr=subprocess.DEVNULL)
+        for line in raw.splitlines():
+            if line.startswith("n"):
+                return pathlib.Path(line[1:])
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+try:
+    listing = subprocess.check_output(
+        ["ps", "-axo", "pid=,command="], text=True,
+        stderr=subprocess.STDOUT)
+except (OSError, subprocess.CalledProcessError) as exc:
+    print(f"refusing to inspect live QEMU processes: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+for line in listing.splitlines():
+    parts = line.strip().split(None, 1)
+    if len(parts) != 2 or not ("qemu-system" in parts[1] or "qemu-kvm" in parts[1]):
+        continue
+    pid, command = parts
+    if str(overlay) in command or str(input_path) in command:
+        print(f"refusing live overlay resize; QEMU pid {pid} references {overlay}", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    cwd = process_cwd(pid)
+    for token in tokens:
+        candidates = []
+        for field in ("file=", "filename="):
+            if field in token:
+                candidates.append(token.split(field, 1)[1].split(",", 1)[0])
+        for candidate in candidates:
+            if not candidate.lower().endswith((".qcow2", ".qcow", ".img")):
+                continue
+            path = pathlib.Path(candidate)
+            if not path.is_absolute():
+                if cwd is None:
+                    print(f"refusing unresolved relative QEMU disk path for pid {pid}: {candidate}", file=sys.stderr)
+                    raise SystemExit(1)
+                path = cwd / path
+            try:
+                if path.resolve() == overlay:
+                    print(f"refusing live overlay resize; QEMU pid {pid} resolves {path} to {overlay}", file=sys.stderr)
+                    raise SystemExit(1)
+            except OSError:
+                continue
+PY
 
 # Require a real differencing image and refuse an image used by another disk.
 python3 - "$overlay_abs" "$disposable_root_abs" <<'PY'

@@ -23,6 +23,11 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windows_editor_common.ps1')
 $token = [Guid]::NewGuid().ToString('N')
 New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
+$resolvedEvidenceDir = (Resolve-Path -LiteralPath $EvidenceDir).Path
+$run = Join-Path $resolvedEvidenceDir ('run-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + $token.Substring(0,8))
+New-Item -ItemType Directory -Path $run | Out-Null
+$receipt = [ordered]@{schema=2;token=$token;verdict='INCONCLUSIVE';scope='host insertion/editor/optional host parameter readback';started_utc=[DateTime]::UtcNow.ToString('o');error=$null;cleanup_errors=@()}
+if($Headless){$receipt.scope='host insertion/optional host parameter readback (headless)'}
 # Fail before launching REAPER when the selected evidence root belongs to a
 # different Windows account. Without this probe, the Lua status handshake can
 # be mistaken for a plugin failure after an ACL-denied write.
@@ -31,12 +36,12 @@ try {
   [IO.File]::WriteAllText($writeProbe, 'probe', [Text.UTF8Encoding]::new($false))
   Remove-Item -LiteralPath $writeProbe -Force
 } catch {
-  throw "EvidenceDir is not writable by $env:USERNAME: $EvidenceDir ($($_.Exception.Message))"
+  $receipt.error = "EvidenceDir is not writable by $env:USERNAME: $EvidenceDir ($($_.Exception.Message))"
+  $receipt.finished_utc=[DateTime]::UtcNow.ToString('o')
+  $receipt | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $run 'receipt.json') -Encoding utf8
+  Write-Warning $receipt.error
+  exit 3
 }
-$run = Join-Path (Resolve-Path -LiteralPath $EvidenceDir).Path ('run-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + $token.Substring(0,8))
-New-Item -ItemType Directory -Path $run | Out-Null
-$receipt = [ordered]@{schema=2;token=$token;verdict='INCONCLUSIVE';scope='host insertion/editor/optional host parameter readback';started_utc=[DateTime]::UtcNow.ToString('o');error=$null;cleanup_errors=@()}
-if($Headless){$receipt.scope='host insertion/optional host parameter readback (headless)'}
 $owned = New-Object 'System.Collections.Generic.List[object]'
 $priorEnv = @{}
 $envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION') | ForEach-Object {'PULP_DAW_SMOKE_'+$_}

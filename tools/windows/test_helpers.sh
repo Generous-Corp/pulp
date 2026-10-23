@@ -34,6 +34,33 @@ outside_output="$({ "$repo_root/tools/windows/expand-qemu-overlay.sh" \
   echo "expand-qemu-overlay.sh accepted an out-of-root image" >&2
   exit 1
 }
+outside_backup="$resize_tmp-outside-backup.qcow2"
+outside_backup_output="$({ "$repo_root/tools/windows/expand-qemu-overlay.sh" \
+  --overlay "$resize_tmp/base.qcow2" \
+  --backup "$outside_backup" \
+  --disposable-root "$resize_tmp"; } 2>&1 || true)"
+[[ "$outside_backup_output" == *"backup outside disposable root"* ]] || {
+  echo "expand-qemu-overlay.sh accepted an out-of-root backup" >&2
+  exit 1
+}
+ln -s "$resize_tmp-outside-dangling-target.qcow2" "$resize_tmp/dangling-backup.qcow2"
+dangling_output="$({ "$repo_root/tools/windows/expand-qemu-overlay.sh" \
+  --overlay "$resize_tmp/base.qcow2" \
+  --backup "$resize_tmp/dangling-backup.qcow2" \
+  --disposable-root "$resize_tmp"; } 2>&1 || true)"
+[[ "$dangling_output" == *"dangling backup symlink"* ]] || {
+  echo "expand-qemu-overlay.sh accepted a dangling backup symlink" >&2
+  exit 1
+}
+printf 'existing\n' > "$resize_tmp/existing-backup.qcow2"
+existing_output="$({ "$repo_root/tools/windows/expand-qemu-overlay.sh" \
+  --overlay "$resize_tmp/base.qcow2" \
+  --backup "$resize_tmp/existing-backup.qcow2" \
+  --disposable-root "$resize_tmp"; } 2>&1 || true)"
+[[ "$existing_output" == *"existing backup"* ]] || {
+  echo "expand-qemu-overlay.sh overwrote an existing backup" >&2
+  exit 1
+}
 rm -f "$outside"
 qemu-img create -q -f raw "$resize_tmp/backing.img" 16M
 qemu-img create -q -f qcow2 -F raw -b "$resize_tmp/backing.img" "$resize_tmp/overlay.qcow2"
@@ -44,6 +71,59 @@ dependent_output="$({ "$repo_root/tools/windows/expand-qemu-overlay.sh" \
   --disposable-root "$resize_tmp"; } 2>&1 || true)"
 [[ "$dependent_output" == *"used as backing image"* ]] || {
   echo "expand-qemu-overlay.sh accepted an overlay used by another image" >&2
+  exit 1
+}
+
+# The live-process guard must resolve a symlinked QEMU `file=` argument, not
+# only compare the spelling printed by ps.  Inject a tiny ps/lsof fixture so no
+# real VM is touched while this negative control exercises the realpath branch.
+live_link="$resize_tmp/live-link.qcow2"
+ln -s "$resize_tmp/overlay.qcow2" "$live_link"
+fakebin="$resize_tmp/fakebin"
+mkdir -p "$fakebin"
+cat >"$fakebin/ps" <<EOF
+#!/bin/sh
+echo "4242 qemu-system-x86_64 -drive file=$live_link,if=none"
+EOF
+cat >"$fakebin/lsof" <<'EOF'
+#!/bin/sh
+echo 'ncwd'
+EOF
+chmod +x "$fakebin/ps" "$fakebin/lsof"
+live_output="$({ PATH="$fakebin:$PATH" "$repo_root/tools/windows/expand-qemu-overlay.sh" \
+  --overlay "$resize_tmp/overlay.qcow2" \
+  --backup "$resize_tmp/live-backup.qcow2" \
+  --disposable-root "$resize_tmp"; } 2>&1 || true)"
+[[ "$live_output" == *"live overlay resize"* ]] || {
+  echo "expand-qemu-overlay.sh accepted a symlinked live QEMU image" >&2
+  exit 1
+}
+cat >"$fakebin/ps" <<'EOF'
+#!/bin/sh
+echo '4243 qemu-system-x86_64 -drive file=overlay.qcow2,if=none'
+EOF
+cat >"$fakebin/lsof" <<EOF
+#!/bin/sh
+echo 'n$resize_tmp'
+EOF
+relative_output="$({ PATH="$fakebin:$PATH" "$repo_root/tools/windows/expand-qemu-overlay.sh" \
+  --overlay "$resize_tmp/overlay.qcow2" \
+  --backup "$resize_tmp/relative-backup.qcow2" \
+  --disposable-root "$resize_tmp"; } 2>&1 || true)"
+[[ "$relative_output" == *"live overlay resize"* ]] || {
+  echo "expand-qemu-overlay.sh accepted a relative live QEMU image" >&2
+  exit 1
+}
+cat >"$fakebin/ps" <<EOF
+#!/bin/sh
+echo "4244 qemu-system-aarch64 -blockdev driver=file,filename=$live_link,locking=off"
+EOF
+blockdev_output="$({ PATH="$fakebin:$PATH" "$repo_root/tools/windows/expand-qemu-overlay.sh" \
+  --overlay "$resize_tmp/overlay.qcow2" \
+  --backup "$resize_tmp/blockdev-backup.qcow2" \
+  --disposable-root "$resize_tmp"; } 2>&1 || true)"
+[[ "$blockdev_output" == *"live overlay resize"* ]] || {
+  echo "expand-qemu-overlay.sh accepted a -blockdev filename live image" >&2
   exit 1
 }
 
