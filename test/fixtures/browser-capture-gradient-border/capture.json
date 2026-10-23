@@ -1,0 +1,161 @@
+{
+  "schema": "pulp-browser-capture-v1",
+  "version": 1,
+  "provenance": {
+    "capture_method": "chromium-cdp",
+    "browser": {
+      "product": "Chrome",
+      "version": "156.0.8078.48",
+      "protocol_version": "1.3",
+      "build_hash": "@d0c02bfad08ec92a6ffcf989e53cd995e6381a4c",
+      "origin": "system"
+    },
+    "source": {
+      "entry": "b.html",
+      "sha256": "abb5a1a96949ece4582b1efa67b2376886fa2618250e72e54a8b520adabaf201"
+    },
+    "viewport": {
+      "initial": {
+        "width": 400,
+        "height": 180
+      },
+      "width_pinned": false,
+      "resolved": {
+        "width": 400,
+        "height": 180
+      },
+      "document": {
+        "width": 400,
+        "height": 180,
+        "primary_surface": {
+          "left": 0,
+          "top": 0,
+          "width": 400,
+          "height": 180
+        }
+      },
+      "device_scale_factor": 2
+    },
+    "locale": "en-US",
+    "timezone": "UTC",
+    "color_scheme": "light",
+    "reduced_motion": false,
+    "settle": {
+      "rounds": 15,
+      "stable_rounds": 13,
+      "elapsed_ms": 1371
+    },
+    "network": {
+      "external_allowed": false,
+      "allowed_origins": [],
+      "external_resources": [],
+      "blocked_requests": []
+    },
+    "health": {
+      "status": "healthy",
+      "layout_count": 7,
+      "visible_elements": 4,
+      "visible_text_characters": 0,
+      "painted_surfaces": 3,
+      "failed_fonts": [],
+      "runtime_exceptions": [],
+      "log_errors": [],
+      "failed_responses": []
+    },
+    "readiness": {
+      "contract": "",
+      "awaited": false
+    },
+    "renderer_hooks": []
+  },
+  "documents": [
+    {
+      "id": "document:0",
+      "url": "pulp-capture:///b.html",
+      "node_count": 19,
+      "layout_count": 7,
+      "paint_order": true,
+      "snapshot_asset": "dom-snapshot.json",
+      "snapshot_sha256": "8f84745f446ed1f1898f0985249559a52b8b6206f60b150a6f01fd1250585e4f"
+    }
+  ],
+  "assets": [
+    {
+      "id": "reference:browser",
+      "kind": "screenshot",
+      "mime_type": "image/png",
+      "path": "browser.png",
+      "sha256": "7b7f055727024a01e426fef7890ddc41a9206156aa1cf889e4113aefb9c6a84e",
+      "width_px": 800,
+      "height_px": 360
+    },
+    {
+      "id": "reference:browser-static",
+      "kind": "screenshot",
+      "mime_type": "image/png",
+      "path": "browser-static.png",
+      "sha256": "7b7f055727024a01e426fef7890ddc41a9206156aa1cf889e4113aefb9c6a84e",
+      "width_px": 800,
+      "height_px": 360
+    },
+    {
+      "id": "reference:browser-chrome",
+      "kind": "chrome-screenshot",
+      "mime_type": "image/png",
+      "path": "browser-chrome.png",
+      "sha256": "7b7f055727024a01e426fef7890ddc41a9206156aa1cf889e4113aefb9c6a84e",
+      "width_px": 800,
+      "height_px": 360
+    },
+    {
+      "id": "evidence:browser-canvas-composite",
+      "kind": "canvas-composite-evidence",
+      "mime_type": "image/png",
+      "path": "browser-canvas-composite.png",
+      "sha256": "e4891055c944694172e6ad2019a80476ea2b45709a6aaa637e89737979b9f5a3",
+      "width_px": 800,
+      "height_px": 360,
+      "changed_pixels": 0
+    }
+  ],
+  "semantics": {
+    "schema": "pulp-browser-semantics-v1",
+    "report": "semantic-report.json",
+    "candidate_count": 0,
+    "resolved_count": 0,
+    "unresolved_count": 0
+  },
+  "tokens": {
+    "schema": "pulp-browser-tokens-v1",
+    "report": "tokens.json",
+    "color_count": 0,
+    "dimension_count": 0,
+    "string_count": 0
+  },
+  "platform_fonts": {
+    "schema": "pulp-browser-platform-fonts-v1",
+    "report": "platform-fonts.json",
+    "text_run_count": 0,
+    "resolved_run_count": 0,
+    "face_count": 0
+  },
+  "states": [
+    {
+      "name": "default",
+      "reference_asset_id": "reference:browser"
+    }
+  ],
+  "reference": {
+    "asset_id": "reference:browser",
+    "path": "browser.png",
+    "logical_width": 400,
+    "logical_height": 180,
+    "device_scale_factor": 2,
+    "authored_frame": {
+      "x": 0,
+      "y": 0,
+      "width": 400,
+      "height": 180
+    }
+  }
+}
