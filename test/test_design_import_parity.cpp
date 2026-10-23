@@ -97,6 +97,10 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
           "View::style_extras deferred slot"}},
         {"background_repeat",
          {{"swift"}, "js+cpp+native lower it; SwiftUI tiling deferred"}},
+        {"background_origin",
+         {{"swift"},
+          "js+cpp+native lower it; SwiftUI fills the frame with one gradient, so "
+          "the origin box a CSS tile is sized in has no equivalent there"}},
         {"object_fit",
          {{"swift"}, "js+cpp+native lower it; SwiftUI content-mode mapping deferred"}},
         {"mix_blend_mode",
