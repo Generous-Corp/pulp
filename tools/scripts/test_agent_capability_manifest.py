@@ -1518,6 +1518,47 @@ def exercise_counters_assigned_at_land(canonical: dict) -> int:
     return checks
 
 
+def _workflow_steps(text: str) -> list[dict[str, str]]:
+    """The steps of a single-job workflow as {"name", "id", "if", "run", <env>}.
+
+    Read as text: the gate Python has no PyYAML. Only the shapes auto-release.yml
+    uses are understood: `- name:` starts a step, `key: value` and folded
+    `key: >-` / literal `key: |` blocks at step level, and one `env:` map."""
+    steps: list[dict[str, str]] = []
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.lstrip().startswith("- name:") and line.startswith("      - "):
+            steps.append({"name": line.split(":", 1)[1].strip()})
+            index += 1
+            continue
+        if steps and line.startswith("        ") and not line.startswith("         "):
+            key, _, value = line.strip().partition(":")
+            value = value.strip()
+            if value in ("|", ">-", ">"):
+                block = []
+                index += 1
+                while index < len(lines) and (lines[index].startswith("          ")
+                                              or not lines[index].strip()):
+                    block.append(lines[index][10:])
+                    index += 1
+                joiner = "\n" if value == "|" else " "
+                steps[-1][key] = joiner.join(block).strip() + ("\n" if value == "|" else "")
+                continue
+            if key == "env":
+                index += 1
+                while index < len(lines) and lines[index].startswith("          "):
+                    env_key, _, env_value = lines[index].strip().partition(":")
+                    if not env_key.startswith("#"):
+                        steps[-1][env_key] = env_value.strip()
+                    index += 1
+                continue
+            steps[-1][key] = value
+        index += 1
+    return steps
+
+
 def exercise_release_guard_wiring() -> int:
     """auto-release.yml withholds the SDK tag while a counter is pending.
 
@@ -1525,20 +1566,17 @@ def exercise_release_guard_wiring() -> int:
     outcomes, then evaluates the tag step's SDK_SHOULD_TAG expression with the
     step's output, so a rewired condition fails here rather than tagging a
     pending revision."""
-    import yaml
-
-    workflow = yaml.safe_load(
+    steps = _workflow_steps(
         (ROOT / ".github/workflows/auto-release.yml").read_text(encoding="utf-8"))
-    steps = next(iter(workflow["jobs"].values()))["steps"]
-    by_id = {step.get("id"): step for step in steps if step.get("id")}
+    by_id = {step["id"]: step for step in steps if "id" in step}
     guard = by_id["capability_precheck"]
-    tag = next(step for step in steps if step.get("name") == "Create tags for moved surfaces")
+    tag = next(step for step in steps if step["name"] == "Create tags for moved surfaces")
     assert "steps.versions.outputs.sdk_should_tag == '1'" in guard["if"]
     assert "--require-assigned" in guard["run"]
     assert steps.index(guard) < steps.index(tag), "the guard must run before tagging"
     checks = 1
 
-    expression = tag["env"]["SDK_SHOULD_TAG"].strip()
+    expression = tag["SDK_SHOULD_TAG"].strip()
     assert expression.startswith("${{") and expression.endswith("}}")
     body = expression[3:-2]
 
