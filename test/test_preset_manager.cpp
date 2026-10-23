@@ -106,9 +106,12 @@ static fs::path write_source_content_pack(const fs::path& root,
     return root;
 }
 
-static fs::path write_content_pack_archive(const fs::path& archive,
-                                           const fs::path& source_root,
-                                           bool add_unlisted_payload = false) {
+// `extra_files` are (archive path, body) pairs added and hashed like the
+// source tree's own files, so a test can shape an entry the directory fixture
+// never writes (for instance a large, highly compressible payload).
+static fs::path write_content_pack_archive(
+    const fs::path& archive, const fs::path& source_root, bool add_unlisted_payload = false,
+    const std::vector<std::pair<std::string, std::string>>& extra_files = {}) {
     mz_zip_archive zip{};
     REQUIRE(mz_zip_writer_init_file(&zip, archive.string().c_str(), 0));
     std::error_code ec;
@@ -118,6 +121,11 @@ static fs::path write_content_pack_archive(const fs::path& archive,
         const auto rel = fs::relative(it->path(), source_root, ec).generic_string();
         std::ifstream file(it->path(), std::ios::binary);
         std::string body((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        REQUIRE(mz_zip_writer_add_mem(&zip, rel.c_str(), body.data(), body.size(),
+                                      MZ_DEFAULT_COMPRESSION));
+        hashes.push_back({rel, "sha256-" + pulp::runtime::sha256_hex(body)});
+    }
+    for (const auto& [rel, body] : extra_files) {
         REQUIRE(mz_zip_writer_add_mem(&zip, rel.c_str(), body.data(), body.size(),
                                       MZ_DEFAULT_COMPRESSION));
         hashes.push_back({rel, "sha256-" + pulp::runtime::sha256_hex(body)});
@@ -1565,6 +1573,66 @@ TEST_CASE("runtime content installer accepts packed pulpcontent archives",
     REQUIRE(fs::exists(data_root / "Content" / "dev.pulp.test.plugin" /
                        "dev.pulp.test.archive-expansion" / "0.1.0" /
                        "presets" / "DropInit.json"));
+}
+
+TEST_CASE("runtime content installer refuses an archive above the decompressed-size caps before "
+          "extracting",
+          "[state][preset][content]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-archive-size");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = write_source_content_pack(sandbox.root / "incoming",
+                                                  "dev.pulp.test.archive-padded", "0.1.0");
+    // A whitespace-padded theme: 1 MiB declared, a few hundred bytes stored.
+    const std::string padded =
+        std::string(std::size_t{1} << 20, ' ') + R"json({"name":"Padded"})json";
+    const auto archive = write_content_pack_archive(sandbox.root / "padded.pulpcontent", source,
+                                                    false, {{"themes/Padded.json", padded}});
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1", "content.themes.v1"};
+    manifest.content_kinds = {"presets", "themes"};
+
+    const auto issue_naming = [](const std::vector<std::string>& issues, std::string_view entry) {
+        return std::any_of(issues.begin(), issues.end(), [&](const std::string& issue) {
+            return issue.rfind("archive-size:", 0) == 0 && issue.find(entry) != std::string::npos;
+        });
+    };
+
+    SECTION("per-entry cap") {
+        ContentInstallLimits limits;
+        limits.max_entry_bytes = std::uint64_t{64} << 10;
+        auto preview = preview_content_pack_install(archive, manifest, data_root, limits);
+        REQUIRE_FALSE(preview.ok);
+        REQUIRE(issue_naming(preview.issues, "themes/Padded.json"));
+
+        auto installed = install_content_pack(archive, manifest, data_root, true, limits);
+        REQUIRE_FALSE(installed.ok);
+        REQUIRE(issue_naming(installed.issues, "themes/Padded.json"));
+        REQUIRE_FALSE(fs::exists(data_root / "Content"));
+    }
+
+    SECTION("total cap across entries that each fit") {
+        ContentInstallLimits limits;
+        limits.max_total_bytes = std::uint64_t{1} << 20; // the padded theme alone nearly fills it
+        auto preview = preview_content_pack_install(archive, manifest, data_root, limits);
+        REQUIRE_FALSE(preview.ok);
+        REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& i) {
+            return i.rfind("archive-size:", 0) == 0 && i.find("total cap") != std::string::npos;
+        }));
+        REQUIRE_FALSE(fs::exists(data_root / "Content"));
+    }
+
+    SECTION("positive control: the default caps admit the same pack") {
+        auto preview = preview_content_pack_install(archive, manifest, data_root);
+        REQUIRE(preview.ok);
+        auto installed = install_content_pack(archive, manifest, data_root, true);
+        REQUIRE(installed.ok);
+        const auto extracted = data_root / "Content" / "dev.pulp.test.plugin" /
+                               "dev.pulp.test.archive-padded" / "0.1.0" / "themes" / "Padded.json";
+        REQUIRE(fs::exists(extracted));
+        REQUIRE(fs::file_size(extracted) == padded.size());
+    }
 }
 
 TEST_CASE("runtime content installer rejects pulpcontent archives without hash manifests",

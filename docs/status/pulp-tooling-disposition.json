@@ -950,6 +950,10 @@
               {
                 "name": "--json",
                 "kind": "flag"
+              },
+              {
+                "name": "--max-pack-bytes",
+                "kind": "option"
               }
             ],
             "subcommands": []
@@ -999,6 +1003,10 @@
               {
                 "name": "--root",
                 "kind": "option"
+              },
+              {
+                "name": "--max-pack-bytes",
+                "kind": "option"
               }
             ],
             "subcommands": []
@@ -1023,6 +1031,10 @@
               },
               {
                 "name": "--root",
+                "kind": "option"
+              },
+              {
+                "name": "--max-pack-bytes",
                 "kind": "option"
               }
             ],

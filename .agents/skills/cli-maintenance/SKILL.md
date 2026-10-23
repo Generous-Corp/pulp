@@ -892,6 +892,16 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
 
+### `pulp content` archives are size-budgeted before extraction
+
+`validate` / `install` / `update` admit a `.pulpcontent` archive from its central
+directory before inflating anything: 4 GiB total and 1 GiB per entry by default,
+`--max-pack-bytes <n>` to lower both. The budget (`pulp::state::ContentSizeBudget`
+in `core/state/include/pulp/state/content_install_limits.hpp`) is shared with
+the runtime installer, so a cap change belongs in that header, not in
+`content_commands.cpp`. The CLI parses options per subcommand, so a new content
+flag is added to each parser (and to `print_usage`), not in one place.
+
 ### `pulp build --seed-build` is best-effort by contract
 
 `--seed-build[=<donor>]` (and `PULP_SEED_BUILD`) hands a fresh source
