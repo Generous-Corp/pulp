@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 // TptFilter (sample and block paths) and the lockstep voice banks

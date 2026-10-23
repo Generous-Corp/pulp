@@ -201,6 +201,7 @@ if(PULP_HAS_SKIA)
         # arbitrary shader source from generated UIs.
         src/named_shader_effects.cpp
         src/bundled_fonts.cpp
+        src/font_tables.cpp
         # TextFontContext glues emoji_segmenter into the SkShaper +
         # SkParagraph paths and owns the per-context FontCollection used
         # for Label/measurement.

@@ -174,6 +174,7 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_ir.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_knob_sprites.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_styles.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_controls.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_tree.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_validation.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/svg_shape_lowering.cpp

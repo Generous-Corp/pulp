@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import hashlib
 import json
 import math
@@ -11,44 +10,72 @@ import os
 import re
 import shutil
 import stat
-import statistics
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+# The lens modules' public names are re-exported here: callers and tests
+# address the whole lab as `importer_differential.core`.
+from .form_controls import attribute_residual, form_controls, support_boundaries
+from .geometry_gate import (
+    FRAME_PLACEMENT_TOLERANCE_PX,
+    GEOMETRY_MAX_ABS_DELTA_PX,
+    NATIVE_HTML_ANCHOR,
+    authenticated_authored_origin,
+    dom_authored_surface,
+    frame_placement_check,
+    geometry_gate_failures,
+    geometry_gate_ok,
+    geometry_metrics,
+    geometry_metrics_with_registration,
+    native_nodes_in_panel_space,
+    register_browser_nodes_to_native_frame,
+    relative_error,
+    verify_native_authored_frame,
+)
+from .aggregate import CORPUS_SCHEMA, aggregate_reports, percentile
+from .model import (
+    PROMOTION_THRESHOLDS,
+    SCHEMA_VERSION,
+    BrowserNode,
+    LabError,
+    NativeNode,
+)
 from .recognition import source_recognition, unsupported_features
 from .reports import format_summary
+from .snapshot import (
+    CANVAS_NEUTRAL_STYLES,
+    LEGACY_COMPUTED_STYLES,
+    DomSnapshot,
+    browser_nodes,
+    decode_string,
+    document_canvas_background,
+    principal_layout_rows,
+)
+from .verdicts import (
+    OBSERVER_COUNTER_SCHEMA,
+    ROOT_CAUSE_ORDER,
+    classify_gaps,
+    promotion_recommendation,
+    work_counter_gate,
+)
+from .visual import (
+    classify_full_frame,
+    full_frame_ok,
+    outside_frame_ink,
+    score_images,
+    visual_metrics,
+)
 
-SCHEMA_VERSION = 1
 REPORT_SCHEMA = "pulp-importer-differential-report-v1"
-CORPUS_SCHEMA = "pulp-importer-differential-corpus-v1"
 OBSERVABILITY_SCHEMA = "pulp-importer-observability-v1"
 MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
 TIMING_BUDGET_KEYS = (
     "browser_import_ms", "native_import_ms", "native_render_ms", "native_total_ms",
 )
 
-# `layout.styles` rows are positional, so a row is unreadable without the
-# request order that produced it. The capture writes that order into the
-# snapshot as `computedStyleNames`; this list is only the shape of a snapshot
-# predating that field. Keying off the snapshot is what stops a property added
-# to the capture from shifting every later value here by one and mapping, say,
-# a background into a border with no error anywhere.
-LEGACY_COMPUTED_STYLES = [
-    "display", "visibility", "opacity", "position", "z-index",
-    "background-color", "background-image", "background-blend-mode",
-    "border-top-color", "border-right-color", "border-bottom-color",
-    "border-left-color", "border-top-width", "border-right-width",
-    "border-bottom-width", "border-left-width", "border-top-style",
-    "border-radius", "box-shadow", "text-shadow", "filter", "backdrop-filter",
-    "transform", "transform-origin", "overflow", "clip-path", "mask-image",
-    "mix-blend-mode", "isolation", "color", "font-family", "font-size",
-    "font-weight", "font-style", "font-variation-settings", "text-align",
-    "letter-spacing", "line-height", "text-transform",
-    "text-decoration-line", "white-space", "cursor", "pointer-events",
-]
 
 TYPOGRAPHY_MAP = {
     "font-family": "fontFamily",
@@ -80,26 +107,6 @@ CSS_INITIAL_EQUIVALENTS = {
     "white-space": {"normal"},
 }
 
-PROMOTION_THRESHOLDS = {
-    "structural": 0.99,
-    "geometry": 0.98,
-    "typography": 0.98,
-    "visual": 0.995,
-}
-
-ROOT_CAUSE_ORDER = [
-    "javascript-evaluation", "conditional-rendering", "async-initialization",
-    "canvas", "webgl", "pseudo-element", "css-variable", "responsive-style",
-    "flex-layout", "grid-layout", "intrinsic-sizing", "absolute-positioning",
-    "font-resolution", "font-metrics", "text-wrapping", "svg",
-    "image-loading", "transform", "animation", "portal",
-    "unsupported-browser-api", "source-recognition", "unknown",
-]
-
-
-class LabError(RuntimeError):
-    pass
-
 
 def timing_budget_result(
     timings: dict[str, Any], budgets_ms: dict[str, int] | None,
@@ -126,12 +133,6 @@ def timing_budget_result(
     }
 
 
-def percentile(values: list[int], fraction: float) -> int:
-    ordered = sorted(values)
-    return ordered[max(0, min(len(ordered) - 1,
-                               math.ceil(len(ordered) * fraction) - 1))]
-
-
 @dataclass
 class CommandResult:
     argv: list[str]
@@ -139,30 +140,6 @@ class CommandResult:
     returncode: int
     stdout: str
     stderr: str
-
-
-@dataclass
-class BrowserNode:
-    index: int
-    tag: str
-    parent: int
-    text: str
-    attributes: dict[str, str]
-    bounds: tuple[float, float, float, float] | None
-    styles: dict[str, str]
-    backend_node_id: int | None = None
-
-
-@dataclass
-class NativeNode:
-    anchor: str
-    node_type: str
-    name: str
-    text: str
-    parent_anchor: str | None
-    style: dict[str, Any]
-    bounds: tuple[float, float, float, float] | None
-    backend_node_id: int | None = None
 
 
 def sha256_file(path: Path) -> str:
@@ -215,6 +192,10 @@ def interaction_plan_sha256(path: Path) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+# Settle-loop polling counts in a capture envelope's `provenance.settle`.
+SETTLE_COUNTER_KEYS = frozenset({"rounds", "stable_rounds"})
+
+
 def canonical_json_sha256(source: Path | bytes) -> str:
     """Hash JSON evidence after removing documented per-run envelope fields.
 
@@ -222,7 +203,13 @@ def canonical_json_sha256(source: Path | bytes) -> str:
     Those fields must not make an otherwise identical campaign appear
     nondeterministic. Browser-capture envelopes also omit their exact snapshot
     binding here: CDP frame IDs vary per capture. Each raw binding is verified
-    separately; this digest does not establish semantic DOM determinism.
+    separately; `snapshot_semantic_sha256` covers the snapshot's content.
+    They also omit the settle loop's iteration counters
+    (`provenance.settle.rounds` and `stable_rounds`, and an IR's top-level
+    `settle_rounds`): how many polls the page took to go quiet depends on host
+    load, not on what was captured. Only those counters are scrubbed (the
+    settle record's only in capture envelopes); every other settle field and
+    every content field still enters the digest.
     """
     volatile_keys = {"elapsed_ms", "imported_at"}
     document = json.loads(source if isinstance(source, bytes) else source.read_bytes())
@@ -235,16 +222,13 @@ def canonical_json_sha256(source: Path | bytes) -> str:
             # equivalence. Retain and verify raw snapshot bindings separately.
             document_entry = (capture_envelope and len(path) == 2
                               and path[0] == "documents" and isinstance(path[1], int))
-            # The settle loop polls until the DOM stops changing; how many
-            # polls that took depends on host load, like elapsed_ms, while
-            # the settled DOM itself is covered by the snapshot digests.
-            settle_entry = path == ("provenance", "settle")
+            settle_record = capture_envelope and path == ("provenance", "settle")
             return {
                 key: scrub(item, (*path, key))
                 for key, item in value.items()
                 if key not in volatile_keys
                 and not (document_entry and key == "snapshot_sha256")
-                and not (settle_entry and key in {"rounds", "stable_rounds"})
+                and not (settle_record and key in SETTLE_COUNTER_KEYS)
                 and not (path == () and key == "settle_rounds")
             }
         if isinstance(value, list):
@@ -260,21 +244,41 @@ def canonical_json_sha256(source: Path | bytes) -> str:
 
 
 def snapshot_semantic_sha256(snapshot_bytes: bytes) -> str:
-    """Hash a DOM snapshot with only its capture-local CDP frame IDs removed.
+    """Hash a DOM snapshot with only its capture-local CDP identifiers fixed.
 
-    Every other byte of the snapshot -- nodes, layout, styles, text -- is
-    covered, so three captures of one source agreeing here is evidence of a
-    deterministic DOM, which the raw binding (frame IDs differ per capture)
-    cannot show.
+    `canonical_json_sha256` drops a capture envelope's snapshot binding because
+    the raw snapshot carries a CDP frame ID minted per browser session, so a
+    DOM change, a different form-control theme verdict, or any other content
+    inside the snapshot moved no determinism digest. This one covers the whole
+    snapshot. Each document's `frameId` string is replaced by its document
+    position, and any `loaderId` value by a constant; both are opaque per-run
+    tokens that name no content. Everything else, including the string table
+    and the capture's `formControlTheme` report, enters the digest unchanged.
     """
-    snapshot = json.loads(snapshot_bytes)
-    strings = list(snapshot.get("strings", []))
-    for document in snapshot.get("documents", []):
-        index = document.get("frameId")
-        if isinstance(index, int) and 0 <= index < len(strings):
-            strings[index] = "<capture-local-frame-id>"
-    snapshot["strings"] = strings
-    canonical = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    document = json.loads(snapshot_bytes)
+    if not isinstance(document, dict):
+        raise LabError("DOM snapshot is not a JSON object")
+    strings = list(document.get("strings") or [])
+    documents = document.get("documents") or []
+    for position, entry in enumerate(documents):
+        if not isinstance(entry, dict):
+            continue
+        frame = entry.get("frameId")
+        if isinstance(frame, int) and 0 <= frame < len(strings):
+            strings[frame] = f"<frame:{position}>"
+
+    def scrub(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: ("<loader>" if key == "loaderId" else scrub(item))
+                    for key, item in value.items()}
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        return value
+
+    canonical = json.dumps(
+        scrub({**document, "strings": strings}),
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
 
 
@@ -305,109 +309,25 @@ def run_command(argv: list[str], timeout_seconds: int) -> CommandResult:
 
 
 def command_record(result: CommandResult) -> dict[str, Any]:
+    def public_arg(value: str) -> str:
+        # Keep command provenance useful without leaking machine-local paths.
+        # Flags remain exact; path-like values are reduced to their basename.
+        return Path(value).name if "/" in value else value
+
+    timing_line = next(
+        (line.strip() for line in result.stdout.splitlines()
+         if line.strip().startswith("✓ imported ")),
+        None,
+    )
     return {
         "elapsed_ms": result.elapsed_ms,
         "exit_code": result.returncode,
         "executable": Path(result.argv[0]).name if result.argv else "",
+        "argv": [public_arg(value) for value in result.argv],
+        "stdout_sha256": hashlib.sha256(result.stdout.encode()).hexdigest(),
+        "stderr_sha256": hashlib.sha256(result.stderr.encode()).hexdigest(),
+        "import_timing_line": timing_line,
     }
-
-
-def decode_string(strings: list[str], index: Any) -> str:
-    if isinstance(index, int) and 0 <= index < len(strings):
-        return strings[index]
-    return ""
-
-
-def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
-    strings = snapshot.get("strings", [])
-    documents = snapshot.get("documents", [])
-    if not documents:
-        return []
-    document = documents[0]
-    raw_nodes = document.get("nodes", {})
-    layout = document.get("layout", {})
-    style_names = snapshot.get("computedStyleNames") or LEGACY_COMPUTED_STYLES
-    layout_by_node = {
-        node_index: layout_index
-        for layout_index, node_index in enumerate(layout.get("nodeIndex", []))
-    }
-    parents = raw_nodes.get("parentIndex", [])
-    types = raw_nodes.get("nodeType", [])
-    names = raw_nodes.get("nodeName", [])
-    values = raw_nodes.get("nodeValue", [])
-    backend_node_ids = raw_nodes.get("backendNodeId", [])
-    raw_attributes = raw_nodes.get("attributes", [])
-    children: dict[int, list[int]] = {}
-    for index, parent in enumerate(parents):
-        children.setdefault(parent, []).append(index)
-
-    def descendant_text(index: int) -> str:
-        parts: list[str] = []
-        stack = list(children.get(index, []))
-        while stack:
-            child = stack.pop()
-            if child < len(types) and types[child] == 3:
-                value = decode_string(strings, values[child])
-                if value.strip():
-                    parts.append(value.strip())
-            stack.extend(children.get(child, []))
-        return " ".join(reversed(parts)).strip()
-
-    result: list[BrowserNode] = []
-    for index, node_type in enumerate(types):
-        if node_type != 1:
-            continue
-        tag = decode_string(strings, names[index]).lower()
-        if tag in {"html", "head", "body", "script", "style", "link", "meta"}:
-            continue
-        attrs: dict[str, str] = {}
-        pairs = raw_attributes[index] if index < len(raw_attributes) else []
-        for offset in range(0, len(pairs) - 1, 2):
-            attrs[decode_string(strings, pairs[offset])] = decode_string(
-                strings, pairs[offset + 1])
-        layout_index = layout_by_node.get(index)
-        bounds = None
-        styles: dict[str, str] = {}
-        if layout_index is not None:
-            raw_bounds = layout.get("bounds", [])
-            if layout_index < len(raw_bounds) and len(raw_bounds[layout_index]) == 4:
-                bounds = tuple(float(v) for v in raw_bounds[layout_index])
-            raw_styles = layout.get("styles", [])
-            if layout_index < len(raw_styles):
-                values_for_style = raw_styles[layout_index]
-                # zip() truncates in silence, which is precisely how a stale
-                # property list turns into shifted-by-one values that read as
-                # real style data. A row that does not match the declared
-                # request order is a decoding failure, not a short row.
-                if len(values_for_style) != len(style_names):
-                    raise LabError(
-                        f"snapshot style row has {len(values_for_style)} "
-                        f"values but declares {len(style_names)} property "
-                        "names; the capture and this reader have drifted")
-                styles = {
-                    name: decode_string(strings, value)
-                    for name, value in zip(style_names, values_for_style)
-                }
-        if bounds and (bounds[2] <= 0 or bounds[3] <= 0):
-            continue
-        if styles.get("display") == "none" or styles.get("visibility") == "hidden":
-            continue
-        result.append(BrowserNode(
-            index=index,
-            tag=tag,
-            parent=parents[index] if index < len(parents) else -1,
-            text=descendant_text(index),
-            attributes=attrs,
-            bounds=bounds,
-            styles=styles,
-            backend_node_id=(
-                int(backend_node_ids[index])
-                if index < len(backend_node_ids)
-                and isinstance(backend_node_ids[index], int)
-                and backend_node_ids[index] > 0
-                else None),
-        ))
-    return result
 
 
 def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]:
@@ -433,8 +353,11 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
             continue
     result: list[NativeNode] = []
 
-    def visit(node: dict[str, Any], parent: str | None) -> None:
+    def visit(node: dict[str, Any], parent: str | None,
+              parent_captured: bool = False) -> None:
         anchor = str(node.get("stable_anchor_id") or "")
+        attributes = node.get("attributes") if isinstance(
+            node.get("attributes"), dict) else {}
         node_type = str(node.get("type") or "unknown")
         text = str(node.get("content") or node.get("text") or "").strip()
         result.append(NativeNode(
@@ -450,10 +373,13 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
                 if isinstance(node.get("attributes"), dict)
                 and str(node.get("attributes", {}).get("backend_node_id", "")).isdigit()
                 else None),
+            captured_layer_of=(
+                parent if parent_captured and "captured_layer" in attributes
+                else None),
         ))
         for child in node.get("children", []):
             if isinstance(child, dict):
-                visit(child, anchor or parent)
+                visit(child, anchor or parent, "captured_element" in attributes)
 
     root = ir.get("root")
     if isinstance(root, dict):
@@ -534,18 +460,25 @@ def comparable_native_nodes(native: list[NativeNode]) -> tuple[list[NativeNode],
 
     Chromium's DOM snapshot reader intentionally exposes element nodes only;
     native DesignIR also contains synthetic frame roots, html/body capture
-    wrappers, and explicit text children. Counting those implementation nodes
-    as unmatched browser elements makes an exact element join look like a
-    structural failure. Keep them in the report as ignored representation
-    nodes, but exclude them from precision/recall.
+    wrappers, explicit text children, and the raster plane inside a captured
+    canvas. Counting those implementation nodes as unmatched browser elements
+    makes an exact element join look like a structural failure. Keep them in
+    the report as ignored representation nodes, but exclude them from
+    precision/recall.
     """
     ignored_names = {"html", "body"}
     comparable: list[NativeNode] = []
     ignored: list[NativeNode] = []
     for node in native:
+        # A captured element's raster plane is that element's paint, the way
+        # a text run is its element's text. `captured_layer_of` is set only
+        # for a plane hanging directly inside its captured element, so a plane
+        # whose element was dropped still counts.
+        layer_of_present_element = node.captured_layer_of is not None
         if (node.node_type.lower() == "text"
                 or node.anchor == "browser:root"
-                or node.name.lower() in ignored_names):
+                or node.name.lower() in ignored_names
+                or layer_of_present_element):
             ignored.append(node)
         else:
             comparable.append(node)
@@ -589,226 +522,6 @@ def structural_comparison(
         "structurally_valid_matches": structurally_valid_matches,
         "precision": precision, "recall": recall, "score": score,
     }
-
-
-def relative_error(reference: float, candidate: float) -> float:
-    return abs(reference - candidate) / max(1.0, abs(reference))
-
-
-def geometry_metrics(
-    matches: list[tuple[BrowserNode, NativeNode, float]]
-) -> dict[str, Any]:
-    rows: list[dict[str, Any]] = []
-    errors: list[float] = []
-    browser_by_index = {browser.index: browser for browser, _native, _score in matches}
-
-    def depth(index: int) -> int:
-        seen: set[int] = set()
-        value = 0
-        while index >= 0 and index not in seen:
-            seen.add(index)
-            parent = browser_by_index.get(index)
-            if parent is None or parent.parent < 0:
-                break
-            value += 1
-            index = parent.parent
-        return value
-
-    for browser, native, _ in matches:
-        if not browser.bounds or not native.bounds:
-            continue
-        labels = ("x", "y", "width", "height")
-        signed_delta = [candidate - reference
-                        for reference, candidate in zip(browser.bounds, native.bounds)]
-        component_errors = [
-            relative_error(reference, candidate)
-            for reference, candidate in zip(browser.bounds, native.bounds)
-        ]
-        mean_error = statistics.fmean(component_errors)
-        errors.append(mean_error)
-        rows.append({
-            "browser_node": browser.index,
-            "native_anchor": native.anchor,
-            "browser": dict(zip(labels, browser.bounds)),
-            "candidate": dict(zip(labels, native.bounds)),
-            # Keep the direction visible. An absolute score can hide a
-            # systematic offset by collapsing +N and -N into the same value.
-            "signed_delta": dict(zip(labels, [round(v, 6) for v in signed_delta])),
-            "max_abs_delta": round(max(abs(v) for v in signed_delta), 6),
-            "depth": depth(browser.index),
-            "mean_relative_error": round(mean_error, 6),
-        })
-    mean_error = statistics.fmean(errors) if errors else 1.0
-    signed_columns = {
-        label: [row["signed_delta"][label] for row in rows]
-        for label in ("x", "y", "width", "height")
-    }
-    signed_summary = {
-        label: {
-            "mean": round(statistics.fmean(values), 6) if values else None,
-            "median": round(statistics.median(values), 6) if values else None,
-            "p95_abs": round(sorted(abs(value) for value in values)[
-                min(len(values) - 1, max(0, math.ceil(len(values) * 0.95) - 1))], 6)
-            if values else None,
-            "min": min(values) if values else None,
-            "max": max(values) if values else None,
-        }
-        for label, values in signed_columns.items()
-    }
-    root_indices = {browser.index for browser, _native, _score in matches
-                    if browser.parent < 0}
-    root_rows = [row for row in rows if row["browser_node"] in root_indices]
-    result = {
-        "score": round(max(0.0, 1.0 - mean_error), 6),
-        "matched_bounds": len(rows),
-        "mean_relative_error": round(mean_error, 6),
-        "signed_delta_summary": signed_summary,
-        "root_count": len(root_rows),
-        "root_residual": root_rows[0] if len(root_rows) == 1 else None,
-        "root_residuals": root_rows,
-        "rows": rows,
-    }
-    return result
-
-
-def panel_covers_page(capture: dict[str, Any]) -> bool:
-    """Whether the authored frame is the whole captured page."""
-    width, height = capture_logical_size(capture)
-    try:
-        frame = capture["reference"]["authored_frame"]
-        x, y = float(frame["x"]), float(frame["y"])
-        w, h = float(frame["width"]), float(frame["height"])
-    except (KeyError, TypeError, ValueError):
-        return False
-    return x <= 0 and y <= 0 and x + w >= width and y + h >= height
-
-
-def authenticated_authored_origin(
-    capture: dict[str, Any], native_capture: dict[str, Any],
-) -> tuple[float, float]:
-    """Return the page-space origin of the authored panel both captures sign.
-
-    Browser-backed native imports emit a panel-local root when the authored
-    surface is smaller than the viewport, while Chromium's screenshot and DOM
-    snapshot are page-space. The observer places the native panel at this
-    origin so both sides are compared in page space. Only the authored-frame
-    metadata carried by both captures is used, never a shift inferred from
-    pixels or from an observed residual, and the two must agree.
-    """
-    try:
-        authored = capture["reference"]["authored_frame"]
-        native_authored = native_capture["reference"]["authored_frame"]
-        frame_x = float(authored["x"])
-        frame_y = float(authored["y"])
-        native_frame_x = float(native_authored["x"])
-        native_frame_y = float(native_authored["y"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise LabError("capture is missing authenticated authored-frame metadata") from exc
-    if not all(math.isfinite(value) for value in
-               (frame_x, frame_y, native_frame_x, native_frame_y)):
-        raise LabError("authored-frame metadata is non-finite")
-    if abs(frame_x - native_frame_x) > 1e-6 or abs(frame_y - native_frame_y) > 1e-6:
-        raise LabError("browser/native authored-frame metadata disagrees")
-    return frame_x, frame_y
-
-
-# Styles under which Chromium composites the root or body differently from a
-# flat fill of its background colour. The importer's own canvas rule refuses
-# the same set (browser_capture_canvas_impl.hpp).
-CANVAS_NEUTRAL_STYLES = {
-    "opacity": "1",
-    "filter": "none",
-    "backdrop-filter": "none",
-    "transform": "none",
-    "clip-path": "none",
-    "mask-image": "none",
-    "mix-blend-mode": "normal",
-    "background-image": "none",
-}
-
-
-def document_canvas_background(
-    snapshot: dict[str, Any], capture: dict[str, Any],
-) -> dict[str, Any]:
-    """Resolve the colour Chromium paints across the page canvas.
-
-    CSS propagates the root element's background to the canvas, and the
-    body's when the root's is transparent. Only a flat, fully opaque colour on
-    a box Chromium composites as a plain fill is resolved. Anything else --
-    translucency, an image, a filter or blend, or two transparent boxes
-    (whose UA canvas colour depends on the page's own color-scheme, which the
-    capture does not record) -- is reported unresolved rather than
-    approximated, so the observer leaves the page uncovered and the residual
-    stays visible.
-    """
-    def unresolved(reason: str) -> dict[str, Any]:
-        return {"status": "unresolved", "reason": reason, "color": None}
-
-    strings = snapshot.get("strings", [])
-    documents = snapshot.get("documents", [])
-    style_names = snapshot.get("computedStyleNames") or LEGACY_COMPUTED_STYLES
-    if not documents:
-        return unresolved("snapshot has no document")
-    document = documents[0]
-    nodes = document.get("nodes", {})
-    layout = document.get("layout", {})
-    names = nodes.get("nodeName", [])
-    types = nodes.get("nodeType", [])
-    parents = nodes.get("parentIndex", [])
-    layout_by_node = {
-        node: index for index, node in enumerate(layout.get("nodeIndex", []))}
-    raw_styles = layout.get("styles", [])
-
-    def element(tag: str, parent: int | None) -> dict[str, str] | None:
-        for index, name in enumerate(names):
-            # Element nodes only: the doctype is also named "html".
-            if index >= len(types) or types[index] != 1:
-                continue
-            if decode_string(strings, name).lower() != tag:
-                continue
-            if parent is not None and (index >= len(parents) or parents[index] != parent):
-                continue
-            layout_index = layout_by_node.get(index)
-            if layout_index is None or layout_index >= len(raw_styles):
-                return None
-            row = raw_styles[layout_index]
-            if len(row) != len(style_names):
-                raise LabError("snapshot style row does not match its property names")
-            styles = {name: decode_string(strings, value)
-                      for name, value in zip(style_names, row)}
-            styles["__index"] = str(index)
-            return styles
-        return None
-
-    html = element("html", None)
-    body = element("body", int(html["__index"])) if html else None
-    if html is None or body is None:
-        return unresolved("snapshot lacks a laid-out html/body pair")
-
-    def flat_color(styles: dict[str, str]) -> tuple[str, float] | None:
-        if any(styles.get(name, neutral) != neutral
-               for name, neutral in CANVAS_NEUTRAL_STYLES.items()):
-            return None
-        match = re.fullmatch(
-            r"rgba?\((\d+), (\d+), (\d+)(?:, ([0-9.]+))?\)",
-            styles.get("background-color", ""))
-        if not match:
-            return None
-        alpha = float(match.group(4)) if match.group(4) is not None else 1.0
-        return f"rgb({match.group(1)}, {match.group(2)}, {match.group(3)})", alpha
-
-    for label, styles in (("html", html), ("body", body)):
-        resolved = flat_color(styles)
-        if resolved is None:
-            return unresolved(f"{label} is not a plain flat-colour fill")
-        color, alpha = resolved
-        if alpha == 1.0:
-            return {"status": "resolved", "source": f"{label}-background",
-                    "color": color}
-        if alpha != 0.0:
-            return unresolved(f"{label} background is translucent")
-    return unresolved("html and body are transparent; the UA canvas colour "
-                      "depends on a color-scheme the capture does not record")
 
 
 def viewport_dpr_audit(
@@ -920,275 +633,45 @@ def typography_metrics(
     }
 
 
-def visual_metrics(
+def form_control_residual(
+    browser_flat_raw: list[BrowserNode],
     reference_path: Path,
     candidate_path: Path,
-    artifacts_dir: Path,
-    expected_size: tuple[int, int] | None = None,
+    visual: dict[str, Any],
+    snapshot: DomSnapshot | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Form controls, their support status, and their share of the residual.
+
+    Attributed on the image pair the visual gate scored: the registered
+    authored-frame crops when registration ran, the full frames otherwise.
+    """
+    controls = form_controls(browser_flat_raw, snapshot)
+    if not controls:
+        return {"controls": [], "support_boundaries": [],
+                "foreground_error_total": 0.0,
+                "boundary_foreground_error_share": 0.0,
+                "scored_surface": None}
     try:
-        from PIL import Image, ImageChops
+        from PIL import Image
     except ImportError as exc:
-        raise LabError("Pillow is required for visual comparison") from exc
+        raise LabError("Pillow is required for form-control attribution") from exc
     reference = Image.open(reference_path).convert("RGBA")
     candidate = Image.open(candidate_path).convert("RGBA")
-    if expected_size and reference.size != expected_size:
-        raise LabError(
-            "browser screenshot dimensions do not match the captured DPR: "
-            f"expected {expected_size}, got {reference.size}")
-    if expected_size and candidate.size != expected_size:
-        raise LabError(
-            "candidate render dimensions do not match the captured DPR: "
-            f"expected {expected_size}, got {candidate.size}")
-    if reference.size != candidate.size:
-        raise LabError(
-            "browser and candidate render dimensions differ: "
-            f"{reference.size} vs {candidate.size}")
-    logical_size = candidate.size
-    ref_pixels = list(reference.get_flattened_data())
-    candidate_pixels = list(candidate.get_flattened_data())
-    total_distance = 0.0
-    alpha_distance = 0.0
-    foreground_distance = 0.0
-    foreground_samples = 0
-    differing = 0
-    threshold = 2
-    reference_background = Counter(ref_pixels).most_common(1)[0][0]
-    candidate_background = Counter(candidate_pixels).most_common(1)[0][0]
-    for ref_pixel, candidate_pixel in zip(ref_pixels, candidate_pixels):
-        delta = sum(abs(a - b) for a, b in zip(ref_pixel[:3], candidate_pixel[:3]))
-        alpha_delta = abs(ref_pixel[3] - candidate_pixel[3])
-        alpha_distance += alpha_delta
-        total_distance += delta
-        if delta > threshold or alpha_delta > threshold:
-            differing += 1
-        ref_foreground = sum(
-            abs(a - b) for a, b in zip(ref_pixel[:3], reference_background[:3])) > 18
-        candidate_foreground = sum(
-            abs(a - b) for a, b in zip(
-                candidate_pixel[:3], candidate_background[:3])) > 18
-        if ref_foreground or candidate_foreground:
-            foreground_distance += delta
-            foreground_samples += 1
-    samples = max(1, len(ref_pixels))
-    mean_channel_error = total_distance / (samples * 3.0)
-    mean_alpha_error = alpha_distance / samples
-    combined_mean_error = (total_distance + alpha_distance) / (samples * 4.0)
-    global_similarity = max(0.0, 1.0 - combined_mean_error / 255.0)
-    foreground_mean_error = (
-        foreground_distance / (foreground_samples * 3.0)
-        if foreground_samples else mean_channel_error)
-    foreground_similarity = max(0.0, 1.0 - foreground_mean_error / 255.0)
-    similarity = min(global_similarity, foreground_similarity)
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-    side_by_side = Image.new(
-        "RGBA", (logical_size[0] * 2, logical_size[1]))
-    side_by_side.paste(reference, (0, 0))
-    side_by_side.paste(candidate, (logical_size[0], 0))
-    side_path = artifacts_dir / "side-by-side.png"
-    side_by_side.save(side_path)
-    diff = ImageChops.difference(reference, candidate).convert("RGB")
-    heatmap = diff.point(lambda value: min(255, value * 4))
-    heatmap_path = artifacts_dir / "visual-diff.png"
-    heatmap.save(heatmap_path)
-    overlay = Image.blend(reference, candidate, 0.5)
-    overlay_path = artifacts_dir / "overlay.png"
-    overlay.save(overlay_path)
-    return {
-        "score": round(similarity, 6),
-        "global_score": round(global_similarity, 6),
-        "foreground_score": round(foreground_similarity, 6),
-        "mean_channel_error": round(mean_channel_error, 6),
-        "mean_alpha_error": round(mean_alpha_error, 6),
-        "combined_mean_channel_error": round(combined_mean_error, 6),
-        "foreground_mean_channel_error": round(foreground_mean_error, 6),
-        "foreground_pixel_count": foreground_samples,
-        "differing_pixel_count": differing,
-        "differing_pixel_fraction": round(differing / samples, 6),
-        "width": logical_size[0],
-        "height": logical_size[1],
-        "artifacts": {
-            "side_by_side": "overlays/side-by-side.png",
-            "heatmap": "overlays/visual-diff.png",
-            "overlay": "overlays/overlay.png",
-        },
-    }
-
-
-def classify_gaps(
-    recognition: dict[str, Any],
-    structural: dict[str, Any],
-    geometry: dict[str, Any],
-    typography: dict[str, Any],
-    visual: dict[str, Any],
-) -> list[dict[str, Any]]:
-    features = recognition["features"]
-    facts: dict[str, tuple[str, float, str]] = {}
-    mappings = {
-        "canvas": ("canvas", 1.0),
-        "webgl": ("webgl", 1.0),
-        "pseudo_elements": ("pseudo-element", 0.95),
-        "css_variables": ("css-variable", 0.9),
-        "media_queries": ("responsive-style", 0.9),
-        "flex_layout": ("flex-layout", 0.85),
-        "grid_layout": ("grid-layout", 0.85),
-        "absolute_positioning": ("absolute-positioning", 0.85),
-        "custom_fonts": ("font-resolution", 0.8),
-        "svg": ("svg", 0.8),
-        "images": ("image-loading", 0.8),
-        "animation": ("animation", 0.95),
-        "portals": ("portal", 0.95),
-        "async_initialization": ("async-initialization", 0.95),
-        "conditional_rendering": ("conditional-rendering", 0.9),
-    }
-    for feature, (cause, confidence) in mappings.items():
-        if features.get(feature):
-            facts[cause] = (
-                f"source recognition observed {feature.replace('_', ' ')}",
-                confidence,
-                "source-recognition",
-            )
-    if recognition["framework"] in {"react", "vue", "svelte"}:
-        facts["javascript-evaluation"] = (
-            f"{recognition['framework']} source requires evaluated component state",
-            0.98,
-            "runtime-importer",
-        )
-    if structural["score"] < PROMOTION_THRESHOLDS["structural"]:
-        facts.setdefault("source-recognition", (
-            f"{structural['missing_count']} browser nodes were not matched",
-            0.75,
-            "parser",
-        ))
-    if geometry["score"] < PROMOTION_THRESHOLDS["geometry"]:
-        likely = "flex-layout" if features.get("flex_layout") else (
-            "grid-layout" if features.get("grid_layout") else "intrinsic-sizing")
-        facts.setdefault(likely, (
-            f"geometry score was {geometry['score']:.3f}",
-            0.65,
-            "layout",
-        ))
-    if typography["score"] < PROMOTION_THRESHOLDS["typography"]:
-        facts.setdefault("font-metrics", (
-            f"typography score was {typography['score']:.3f}",
-            0.6,
-            "text",
-        ))
-    if visual["score"] < PROMOTION_THRESHOLDS["visual"] and not facts:
-        facts["unknown"] = (
-            f"visual score was {visual['score']:.3f}",
-            0.3,
-            "unknown",
-        )
-    result = []
-    for cause in ROOT_CAUSE_ORDER:
-        if cause not in facts:
-            continue
-        evidence, confidence, subsystem = facts[cause]
-        result.append({
-            "cause": cause,
-            "status": "hypothesis",
-            "confidence": confidence,
-            "supporting_evidence": evidence,
-            "suggested_subsystem": subsystem,
-        })
-    return result
-
-
-OBSERVER_COUNTER_SCHEMA = "pulp-design-ir-observer-counters-v1"
-
-
-def work_counter_gate(render_receipt: dict[str, Any]) -> dict[str, Any]:
-    """Judge the observer's own work counters for this render.
-
-    The counters come from the digest-bound render receipt, so they describe
-    the exact native render that was scored. A receipt without them, a tree
-    that outlived its teardown, or a read-back of the painted tree that staled
-    a cache without requesting a repaint each blocks threshold eligibility.
-    Build and first-frame mutations are reported but not gated: until a frame
-    has been painted there is no painted state to stale. The observer paints
-    one frame, so this gate proves complete teardown and a side-effect-free
-    read-back only; steady-state update behaviour is measured by the
-    benchmark's interactive phase, not here.
-    """
-    counters = render_receipt.get("counters")
-    if not isinstance(counters, dict) or counters.get("schema") != OBSERVER_COUNTER_SCHEMA:
-        return {"status": "absent", "counters": None,
-                "failures": ["observer receipt carries no work counters"]}
-    failures: list[str] = []
-
-    def count(value: Any) -> int:
-        # Counts are non-negative JSON integers; bool, float and string are
-        # malformed, not coercible.
-        if type(value) is not int or value < 0:
-            raise ValueError(value)
-        return value
-
-    try:
-        constructed = count(counters["views_constructed"])
-        destroyed = count(counters["views_destroyed"])
-        live = count(counters["live_views_after_teardown"])
-        for phase in ("build", "first_frame", "readback"):
-            for name in ("layout_passes", "damage_requests", "unmarked_paint_mutations"):
-                count(counters[phase][name])
-        unmarked = counters["readback"]["unmarked_paint_mutations"]
-    except (KeyError, TypeError, ValueError):
-        return {"status": "absent", "counters": counters,
-                "failures": ["observer work counters are malformed"]}
-    if constructed <= 0:
-        failures.append("observer built no views")
-    if live != 0 or destroyed != constructed:
-        failures.append(
-            f"{constructed - destroyed} of {constructed} views outlived teardown")
-    if unmarked != 0:
-        failures.append(f"{unmarked} unmarked paint mutations after the first frame")
-    return {"status": "fail" if failures else "pass", "counters": counters,
-            "failures": failures}
-
-
-def promotion_recommendation(
-    unsupported: list[str],
-    structural: dict[str, Any],
-    geometry: dict[str, Any],
-    typography: dict[str, Any],
-    visual: dict[str, Any],
-    work_counters: dict[str, Any],
-) -> dict[str, Any]:
-    scores = {
-        "structural": structural["score"],
-        "geometry": geometry["score"],
-        "typography": typography["score"],
-        "visual": visual["score"],
-    }
-    # `not (score >= threshold)` so a NaN score fails rather than passing a
-    # `<` comparison that is false for NaN.
-    failed = [
-        name for name, threshold in PROMOTION_THRESHOLDS.items()
-        if not (math.isfinite(scores[name]) and scores[name] >= threshold)
-    ]
-    counter_failures = (
-        [] if work_counters.get("status") == "pass"
-        else list(work_counters.get("failures") or ["work counters not evaluated"]))
-    threshold_eligible = not unsupported and not failed and not counter_failures
-    if unsupported:
-        classification = "browser-required"
-        reasons = [f"unsupported dynamic features: {', '.join(unsupported)}"]
-    else:
-        classification = "native-with-browser-validation"
-        reasons = (
-            [f"{name} score below {PROMOTION_THRESHOLDS[name]:.3f}"
-             for name in failed] + counter_failures
-            if failed or counter_failures else
-            ["threshold-eligible, but production promotion is disabled until "
-             "a candidate-only classifier passes a frozen holdout corpus"])
-    return {
-        "classification": classification,
-        "advisory_only": True,
-        "production_promotion_enabled": False,
-        "threshold_eligible": threshold_eligible,
-        "thresholds": PROMOTION_THRESHOLDS,
-        "reasons": reasons,
-    }
+    registered = visual.get("registered_visual")
+    scale = float(visual["registration"].get("device_scale_factor", 1.0))
+    origin = (0.0, 0.0)
+    surface = "full-frame"
+    if registered:
+        registration = registered["registration"]
+        reference = reference.crop(tuple(registration["browser_crop_px"]))
+        candidate = candidate.crop(tuple(registration["native_crop_px"]))
+        frame = registration["logical_frame"]
+        origin = (float(frame["x"]), float(frame["y"]))
+        surface = "registered-authored-frame"
+    attribution = attribute_residual(controls, reference, candidate, origin, scale)
+    attribution["support_boundaries"] = support_boundaries(attribution)
+    attribution["scored_surface"] = surface
+    return attribution
 
 
 def find_browser_evidence(browser_ir: Path) -> Path:
@@ -1208,6 +691,18 @@ def capture_logical_size(capture: dict[str, Any]) -> tuple[int, int]:
     if width <= 0 or height <= 0:
         raise LabError("browser capture has no valid logical extent")
     return width, height
+
+
+def panel_covers_page(capture: dict[str, Any]) -> bool:
+    """Whether the authored frame is the whole captured page."""
+    width, height = capture_logical_size(capture)
+    try:
+        frame = capture["reference"]["authored_frame"]
+        x, y = float(frame["x"]), float(frame["y"])
+        w, h = float(frame["width"]), float(frame["height"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return x <= 0 and y <= 0 and x + w >= width and y + h >= height
 
 
 def import_lane_args(
@@ -1393,23 +888,73 @@ def verify_capture_snapshot_binding(
     return {"status": "producer-bound", "sha256": actual}, snapshot_bytes
 
 
-def compare_one(
-    importer: Path,
-    observer: Path,
-    source: Path,
-    output: Path,
-    timeout_seconds: int,
-    from_source: str,
-    browser_path: Path | None,
-    fixture_metadata: dict[str, Any] | None = None,
-    cache_state: str = "unknown",
-    timing_budgets_ms: dict[str, int] | None = None,
-) -> dict[str, Any]:
-    output.mkdir(parents=True, exist_ok=True)
-    source_copy_dir = output / "source"
-    source_copy_dir.mkdir(exist_ok=True)
-    source_copy = source_copy_dir / source.name
-    shutil.copy2(source, source_copy)
+@dataclass
+class LaneOutputs:
+    """Both importer lanes and the native render, run and verified.
+
+    Every field here has passed its binding check: the captures are bound to
+    the authored source, viewport, browser, and interaction plan; the PNG and
+    snapshot bytes are bound to their envelopes; the render receipt proves a
+    Skia render; and the viewport/DPR audit passed.
+    """
+    browser_dir: Path
+    native_dir: Path
+    comparison_dir: Path
+    browser_ir: Path
+    native_ir: Path
+    native_render: Path
+    native_layout: Path
+    native_receipt: Path
+    browser_run: CommandResult
+    native_run: CommandResult
+    render_run: CommandResult
+    browser_command: dict[str, Any]
+    native_command: dict[str, Any]
+    render_command: dict[str, Any]
+    browser_doc: dict[str, Any]
+    native_doc: dict[str, Any]
+    evidence: Path
+    native_evidence: Path
+    capture: dict[str, Any]
+    native_capture: dict[str, Any]
+    capture_bytes: bytes
+    native_capture_bytes: bytes
+    browser_snapshot_binding: dict[str, Any]
+    native_snapshot_binding: dict[str, Any]
+    browser_snapshot_bytes: bytes
+    native_snapshot_bytes: bytes
+    render_receipt: dict[str, Any]
+    source_sha256: str
+    capture_size: tuple[int, int]
+    viewport_dpr: dict[str, Any]
+    # Where the observer placed the panel-local native import (the signed
+    # authored origin, which its receipt records) and the page colour it
+    # painted around it.
+    placement_origin: tuple[float, float]
+    page_background: dict[str, Any]
+
+
+@dataclass
+class Scores:
+    """Every lens's result for one fixture, plus the verdicts drawn from them."""
+    recognition: dict[str, Any]
+    blockers: list[str]
+    structural: dict[str, Any]
+    geometry: dict[str, Any]
+    typography: dict[str, Any]
+    visual: dict[str, Any]
+    form_controls: dict[str, Any]
+    classifications: list[dict[str, Any]]
+    promotion: dict[str, Any]
+    work_counters: dict[str, Any]
+
+
+def run_lanes(
+    importer: Path, observer: Path, source: Path, output: Path,
+    timeout_seconds: int, from_source: str, browser_path: Path | None,
+    fixture_metadata: dict[str, Any] | None,
+) -> LaneOutputs:
+    """Import the source through both lanes, render the native IR, verify all of it."""
     browser_dir = output / "browser"
     native_dir = output / "candidate"
     comparison_dir = output / "comparison"
@@ -1446,8 +991,10 @@ def compare_one(
         native=True)
     browser_run = run_command(browser_args, timeout_seconds)
     native_run = run_command(native_args, timeout_seconds)
-    write_json(browser_dir / "command.json", command_record(browser_run))
-    write_json(native_dir / "import-command.json", command_record(native_run))
+    browser_command = command_record(browser_run)
+    native_command = command_record(native_run)
+    write_json(browser_dir / "command.json", browser_command)
+    write_json(native_dir / "import-command.json", native_command)
     if browser_run.returncode != 0:
         raise LabError(
             f"browser import failed ({browser_run.returncode}): {browser_run.stderr}")
@@ -1481,7 +1028,6 @@ def compare_one(
     verify_capture_image_binding(native_capture, native_evidence / "browser.png")
     browser_snapshot_binding, browser_snapshot_bytes = verify_capture_snapshot_binding(capture, evidence)
     native_snapshot_binding, native_snapshot_bytes = verify_capture_snapshot_binding(native_capture, native_evidence)
-    viewport = capture["provenance"]["viewport"]["resolved"]
     capture_width, capture_height = capture_logical_size(capture)
     authored_x, authored_y = authenticated_authored_origin(capture, native_capture)
     page_background = document_canvas_background(
@@ -1530,6 +1076,7 @@ def compare_one(
                                 abs_tol=1e-4)
             or placement.get("page_background") != expected_background):
         raise LabError("native render receipt does not record the requested placement")
+    render_command = command_record(render_run)
 
     try:
         from PIL import Image
@@ -1541,56 +1088,104 @@ def compare_one(
         capture, native_capture, (viewport_width, viewport_height), actual_render_size)
     if not viewport_dpr["ok"]:
         raise LabError("viewport/DPR audit failed: " + json.dumps(viewport_dpr["checks"], sort_keys=True))
+    return LaneOutputs(
+        browser_dir=browser_dir, native_dir=native_dir, comparison_dir=comparison_dir,
+        browser_ir=browser_ir, native_ir=native_ir, native_render=native_render,
+        native_layout=native_layout, native_receipt=native_receipt,
+        browser_run=browser_run, native_run=native_run, render_run=render_run,
+        browser_command=browser_command, native_command=native_command,
+        render_command=render_command,
+        browser_doc=browser_doc, native_doc=native_doc,
+        evidence=evidence, native_evidence=native_evidence,
+        capture=capture, native_capture=native_capture,
+        capture_bytes=capture_bytes, native_capture_bytes=native_capture_bytes,
+        browser_snapshot_binding=browser_snapshot_binding,
+        native_snapshot_binding=native_snapshot_binding,
+        browser_snapshot_bytes=browser_snapshot_bytes,
+        native_snapshot_bytes=native_snapshot_bytes,
+        render_receipt=render_receipt, source_sha256=source_sha256,
+        capture_size=(capture_width, capture_height), viewport_dpr=viewport_dpr,
+        placement_origin=(authored_x, authored_y), page_background=page_background,
+    )
 
+
+def retain_evidence(lanes: LaneOutputs) -> None:
+    """Copy the verified capture evidence beside each lane's outputs."""
     for name in (
         ".pulp-browser-capture-v1", "browser.png",
         "semantic-report.json", "tokens.json",
         "interaction-report.json", "platform-fonts.json",
     ):
-        source_evidence = evidence / name
+        source_evidence = lanes.evidence / name
         if source_evidence.exists():
-            shutil.copy2(source_evidence, browser_dir / name)
+            shutil.copy2(source_evidence, lanes.browser_dir / name)
     # Parse and retain the exact buffer verified above, without reopening a
     # sidecar that could have changed after verification.
-    (browser_dir / "dom-snapshot.json").write_bytes(browser_snapshot_bytes)
-    (browser_dir / "capture.json").write_bytes(capture_bytes)
-    (native_dir / "dom-snapshot.json").write_bytes(native_snapshot_bytes)
-    (native_dir / "capture.json").write_bytes(native_capture_bytes)
-    recognition = source_recognition(source.read_text(encoding="utf-8", errors="replace"))
-    browser_snapshot = json.loads(browser_snapshot_bytes)
-    native_layout_doc = json.loads(native_layout.read_text(encoding="utf-8"))
-    browser_flat = browser_nodes(browser_snapshot)
-    # The observer already placed the native render and its layout receipt at
-    # the authenticated origin, so both sides are page-space. Translating the
-    # browser nodes as well would register the panel twice.
-    native_flat = native_nodes(native_doc, native_layout_doc)
-    geometry_registration = {
-        "x": round(authored_x, 6), "y": round(authored_y, 6),
-        "source": "authenticated-authored-frame",
-        "applied_to": "native-render-and-layout",
-        # Capture snaps box paint edges in panel-local CSS px. Moved by a
-        # fractional origin they no longer equal Chromium's page-space snap,
-        # so edge residuals on such a panel are partly registration.
-        "integral_origin": float(authored_x).is_integer() and float(authored_y).is_integer(),
+    (lanes.browser_dir / "dom-snapshot.json").write_bytes(lanes.browser_snapshot_bytes)
+    (lanes.browser_dir / "capture.json").write_bytes(lanes.capture_bytes)
+    (lanes.native_dir / "dom-snapshot.json").write_bytes(lanes.native_snapshot_bytes)
+    (lanes.native_dir / "capture.json").write_bytes(lanes.native_capture_bytes)
+
+
+def stage_provenance(lanes: LaneOutputs) -> dict[str, Any]:
+    """Keep the design-time browser assist apart from the browser-free runtime.
+
+    The native comparison lane is browser-assisted during design-time import:
+    Chromium evaluates the authored HTML and the native lowering consumes that
+    capture. The runtime claim is narrower and testable: the observer receives
+    DesignIR and renders it through Skia without a browser argument or browser
+    capture process. Keeping the two claims separate means the native import
+    timing is never misreported as browser-free runtime startup.
+    """
+    render_argv_lower = [str(value).lower() for value in lanes.render_command["argv"]]
+    browser_runtime_tokens = ("chrome", "chromium", "webkit", "browser")
+    browser_runtime_token_hits = [
+        token for token in render_argv_lower
+        if any(marker in token for marker in browser_runtime_tokens)
+    ]
+    native_provenance = lanes.native_capture.get("provenance", {})
+    return {
+        "schema": "pulp-importer-differential-stage-provenance-v1",
+        "design_time": {
+            "native_lane_browser_assisted": (
+                native_provenance.get("capture_method") == "chromium-cdp"),
+            "capture_method": native_provenance.get("capture_method"),
+            "browser_build_hash": native_provenance.get("browser", {}).get("build_hash"),
+            "scope": "authored-source evaluation and DesignIR lowering",
+        },
+        "native_runtime": {
+            "browser_required": bool(browser_runtime_token_hits),
+            "browser_argument_tokens": browser_runtime_token_hits,
+            "renderer_executable": lanes.render_command["executable"],
+            "backend_requested": lanes.render_receipt.get("backend_requested"),
+            "backend_used": lanes.render_receipt.get("backend_used"),
+            "skia_receipt_ok": lanes.render_receipt.get("ok") is True,
+            "scope": "DesignIR observation and native readback render",
+            "evidence": [
+                "candidate/render-command.json",
+                "candidate/render-receipt.json",
+            ],
+        },
     }
-    comparison = structural_comparison(browser_flat, native_flat)
+
+
+def structural_report(
+    comparison: dict[str, Any], browser_flat: list[BrowserNode],
+    native_flat: list[NativeNode],
+) -> dict[str, Any]:
     matches = comparison["matches"]
-    missing = comparison["missing"]
-    extra = comparison["extra"]
     ignored_native = comparison["ignored_native"]
     parentage_errors = comparison["parentage_errors"]
-    structurally_valid_matches = comparison["structurally_valid_matches"]
-    structural_score = comparison["score"]
-    structural = {
-        "score": round(structural_score, 6),
+    return {
+        "score": round(comparison["score"], 6),
         "browser_node_count": len(browser_flat),
         "candidate_node_count": len(native_flat),
         "matched_count": len(matches),
-        "structurally_valid_match_count": structurally_valid_matches,
+        "structurally_valid_match_count": comparison["structurally_valid_matches"],
         "incorrect_parentage_count": len(parentage_errors),
         "incorrect_parentage": parentage_errors,
-        "missing_count": len(missing),
-        "extra_count": len(extra),
+        "missing_count": len(comparison["missing"]),
+        "extra_count": len(comparison["extra"]),
         "ignored_representation_node_count": len(ignored_native),
         "ignored_representation_nodes": [
             {"anchor": node.anchor, "type": node.node_type, "name": node.name,
@@ -1599,12 +1194,12 @@ def compare_one(
         ],
         "missing": [
             {"index": node.index, "tag": node.tag, "text": node.text}
-            for node in missing
+            for node in comparison["missing"]
         ],
         "extra": [
             {"anchor": node.anchor, "type": node.node_type, "name": node.name,
              "text": node.text}
-            for node in extra
+            for node in comparison["extra"]
         ],
         "matches": [
             {
@@ -1617,59 +1212,136 @@ def compare_one(
             for browser, native, score in matches
         ],
     }
-    geometry = geometry_metrics(matches)
-    geometry["registration"] = geometry_registration
-    typography = typography_metrics(matches)
-    visual = visual_metrics(
-        browser_dir / "browser.png",
-        native_render,
-        comparison_dir / "overlays",
-        (
-            round(capture_width * capture["reference"]["device_scale_factor"]),
-            round(capture_height * capture["reference"]["device_scale_factor"]),
-        ),
-    )
-    blockers = unsupported_features(recognition)
-    classifications = classify_gaps(
-        recognition, structural, geometry, typography, visual)
-    work_counters = work_counter_gate(render_receipt)
-    recommendation = promotion_recommendation(
-        blockers, structural, geometry, typography, visual, work_counters)
-    timings = {
-        "browser_import_ms": browser_run.elapsed_ms,
-        "native_import_ms": native_run.elapsed_ms,
-        "native_render_ms": render_run.elapsed_ms,
-        "native_total_ms": native_run.elapsed_ms + render_run.elapsed_ms,
-        "browser_to_native_import_speedup": round(
-            browser_run.elapsed_ms / max(1, native_run.elapsed_ms), 3),
+
+
+def score_lanes(lanes: LaneOutputs, source: Path) -> Scores:
+    """Run every lens over verified lane outputs and draw the verdicts."""
+    capture = lanes.capture
+    native_capture = lanes.native_capture
+    recognition = source_recognition(source.read_text(encoding="utf-8", errors="replace"))
+    browser_snapshot = DomSnapshot(json.loads(lanes.browser_snapshot_bytes))
+    native_layout_doc = json.loads(lanes.native_layout.read_text(encoding="utf-8"))
+    browser_flat_raw = browser_nodes(browser_snapshot)
+    # The observer laid the panel out at the placement origin, so its layout
+    # is page-space like Chromium's. The registered comparison moves both
+    # sides back into the panel's own frame; page-space stays a diagnostic.
+    native_flat_page = native_nodes(lanes.native_doc, native_layout_doc)
+    native_flat = native_nodes_in_panel_space(native_flat_page, lanes.placement_origin)
+    browser_flat, geometry_registration = register_browser_nodes_to_native_frame(
+        browser_flat_raw, capture, native_capture)
+    comparison = structural_comparison(browser_flat, native_flat)
+    matches = comparison["matches"]
+    structural = structural_report(comparison, browser_flat, native_flat)
+    # Registered panel geometry is gated together with a frame placement
+    # proof, so registration cannot hide a misplaced panel. Page-space
+    # geometry stays reported as an ungated diagnostic.
+    raw_comparison = structural_comparison(browser_flat_raw, native_flat_page)
+    frame_placement = frame_placement_check(
+        browser_snapshot, lanes.native_doc, native_layout_doc, matches, capture)
+    placed_x, placed_y = lanes.placement_origin
+    placement = {
+        "x": round(placed_x, 6), "y": round(placed_y, 6),
+        "source": "authenticated-authored-frame",
+        "applied_to": "native-render-and-layout",
+        # Capture snaps box paint edges in panel-local CSS px. Moved by a
+        # fractional origin they no longer equal Chromium's page-space snap,
+        # so edge residuals on such a panel are partly registration.
+        "integral_origin": float(placed_x).is_integer() and float(placed_y).is_integer(),
     }
-    timing_budget = timing_budget_result(timings, timing_budgets_ms)
-    integrity = {
+    geometry = geometry_metrics_with_registration(
+        raw_comparison["matches"], matches, geometry_registration, frame_placement,
+        reference_node_count=len(browser_flat), placement=placement)
+    typography = typography_metrics(matches)
+    authored_frame = capture.get("reference", {}).get("authored_frame")
+    native_authored_frame = native_capture.get("reference", {}).get("authored_frame")
+    if authored_frame != native_authored_frame:
+        raise LabError("browser/native authored-frame metadata disagrees for visual comparison")
+    native_frame_registration = verify_native_authored_frame(
+        lanes.native_doc, native_layout_doc, authored_frame,
+        placement_origin=lanes.placement_origin)
+    scale = capture["reference"]["device_scale_factor"]
+    capture_width, capture_height = lanes.capture_size
+    visual = visual_metrics(
+        lanes.browser_dir / "browser.png",
+        lanes.native_render,
+        lanes.comparison_dir / "overlays",
+        (round(capture_width * scale), round(capture_height * scale)),
+        authored_frame,
+        scale,
+        lanes.placement_origin,
+        lanes.page_background.get("status"),
+    )
+    visual["registration"]["native_layout"] = native_frame_registration
+    if visual.get("registered_visual"):
+        visual["registered_visual"]["registration"]["native_layout"] = native_frame_registration
+    blockers = unsupported_features(recognition)
+    form_control_report = form_control_residual(
+        browser_flat_raw, lanes.browser_dir / "browser.png", lanes.native_render, visual,
+        browser_snapshot)
+    classifications = classify_gaps(
+        recognition, structural, geometry, typography, visual,
+        form_control_report)
+    work_counters = work_counter_gate(lanes.render_receipt)
+    recommendation = promotion_recommendation(
+        blockers, structural, geometry, typography, visual, work_counters,
+        support_boundaries=form_control_report["support_boundaries"])
+    return Scores(
+        recognition=recognition, blockers=blockers, structural=structural,
+        geometry=geometry, typography=typography, visual=visual,
+        form_controls=form_control_report, classifications=classifications,
+        promotion=recommendation, work_counters=work_counters)
+
+
+def timings_record(lanes: LaneOutputs) -> dict[str, Any]:
+    browser_ms = lanes.browser_run.elapsed_ms
+    native_ms = lanes.native_run.elapsed_ms
+    render_ms = lanes.render_run.elapsed_ms
+    return {
+        "browser_import_ms": browser_ms,
+        "native_import_ms": native_ms,
+        "native_render_ms": render_ms,
+        "native_total_ms": native_ms + render_ms,
+        "browser_import_timing_line": lanes.browser_command["import_timing_line"],
+        "native_import_timing_line": lanes.native_command["import_timing_line"],
+        "browser_to_native_import_speedup": round(browser_ms / max(1, native_ms), 3),
+    }
+
+
+def integrity_record(
+    lanes: LaneOutputs, importer: Path, observer: Path,
+) -> dict[str, Any]:
+    capture = lanes.capture
+    return {
         "schema": "pulp-importer-differential-integrity-v1",
-        "source_sha256": source_sha256,
+        "source_sha256": lanes.source_sha256,
         "importer_sha256": sha256_file(importer) if importer.is_file() else None,
         "observer_sha256": sha256_file(observer) if observer.is_file() else None,
-        "browser_ir_sha256": sha256_file(browser_ir),
-        "native_ir_sha256": sha256_file(native_ir),
+        "browser_ir_sha256": sha256_file(lanes.browser_ir),
+        "native_ir_sha256": sha256_file(lanes.native_ir),
         # Raw hashes preserve chain of custody. Canonical hashes scrub capture
         # clocks so repeated equivalent runs can actually reach determinism.
-        "browser_capture_sha256": hashlib.sha256(capture_bytes).hexdigest(),
-        "native_capture_sha256": hashlib.sha256(native_capture_bytes).hexdigest(),
-        "browser_snapshot_binding": browser_snapshot_binding,
-        "native_snapshot_binding": native_snapshot_binding,
-        "browser_snapshot_semantic_sha256": snapshot_semantic_sha256(browser_snapshot_bytes),
-        "native_snapshot_semantic_sha256": snapshot_semantic_sha256(native_snapshot_bytes),
-        "browser_ir_canonical_sha256": canonical_json_sha256(browser_ir),
-        "native_ir_canonical_sha256": canonical_json_sha256(native_ir),
-        "browser_capture_canonical_sha256": canonical_json_sha256(capture_bytes),
-        "native_capture_canonical_sha256": canonical_json_sha256(native_capture_bytes),
-        "browser_screenshot_sha256": sha256_file(browser_dir / "browser.png"),
-        "native_render_sha256": sha256_file(native_render),
-        "native_layout_sha256": sha256_file(native_layout),
-        "native_render_receipt_sha256": sha256_file(native_receipt),
+        "browser_capture_sha256": hashlib.sha256(lanes.capture_bytes).hexdigest(),
+        "native_capture_sha256": hashlib.sha256(lanes.native_capture_bytes).hexdigest(),
+        "browser_snapshot_binding": lanes.browser_snapshot_binding,
+        "native_snapshot_binding": lanes.native_snapshot_binding,
+        "browser_ir_canonical_sha256": canonical_json_sha256(lanes.browser_ir),
+        "native_ir_canonical_sha256": canonical_json_sha256(lanes.native_ir),
+        "browser_capture_canonical_sha256": canonical_json_sha256(lanes.capture_bytes),
+        "native_capture_canonical_sha256": canonical_json_sha256(lanes.native_capture_bytes),
+        # The snapshot's own content, which the canonical capture digests
+        # cannot see: only per-session CDP identifiers are normalised.
+        "browser_snapshot_semantic_sha256": snapshot_semantic_sha256(
+            lanes.browser_snapshot_bytes),
+        "native_snapshot_semantic_sha256": snapshot_semantic_sha256(
+            lanes.native_snapshot_bytes),
+        "browser_screenshot_sha256": sha256_file(lanes.browser_dir / "browser.png"),
+        "native_render_sha256": sha256_file(lanes.native_render),
+        "native_layout_sha256": sha256_file(lanes.native_layout),
+        "native_render_receipt_sha256": sha256_file(lanes.native_receipt),
+        "stage_provenance": stage_provenance(lanes),
         "platform_fonts_sha256": (
-            sha256_file(evidence / "platform-fonts.json")
-            if (evidence / "platform-fonts.json").is_file() else None),
+            sha256_file(lanes.evidence / "platform-fonts.json")
+            if (lanes.evidence / "platform-fonts.json").is_file() else None),
         "interaction_plan_sha256": (
             capture.get("provenance", {}).get("interactions", {}).get("plan_sha256")
             or "none"),
@@ -1679,14 +1351,20 @@ def compare_one(
         "source_bound": True,
         "viewport_bound": True,
         "browser_bound": True,
-        "backend_bound": render_receipt.get("backend_used") == "skia",
+        "backend_bound": lanes.render_receipt.get("backend_used") == "skia",
         "offline_parser": False,
         "eligibility": "diagnostic-only-until-three-run-digests-and-counters-agree",
     }
-    # These timings deliberately keep presentation claims fail-closed. The
-    # importer and observer run headlessly and the observer emits a readback;
-    # neither is proof of a real GPU present or native interaction event.
-    observability = {
+
+
+def observability_record(native_import_ms: int, cache_state: str) -> dict[str, Any]:
+    """Presentation timings, kept fail-closed.
+
+    The importer and observer run headlessly and the observer emits a
+    readback; neither is proof of a real GPU present or native interaction
+    event.
+    """
+    return {
         "schema": OBSERVABILITY_SCHEMA,
         "ttfp": {
             "value_ms": None,
@@ -1701,7 +1379,7 @@ def compare_one(
             "evidence": "no interaction-ready event is emitted by this lab",
         },
         "ttni_proxy": {
-            "value_ms": native_run.elapsed_ms,
+            "value_ms": native_import_ms,
             "status": "measured",
             "definition": "time to native import process completion",
             "evidence": "import process completion is a proxy, not interaction readiness",
@@ -1729,6 +1407,31 @@ def compare_one(
             },
         },
     }
+
+
+def compare_one(
+    importer: Path,
+    observer: Path,
+    source: Path,
+    output: Path,
+    timeout_seconds: int,
+    from_source: str,
+    browser_path: Path | None,
+    fixture_metadata: dict[str, Any] | None = None,
+    cache_state: str = "unknown",
+    timing_budgets_ms: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    output.mkdir(parents=True, exist_ok=True)
+    source_copy_dir = output / "source"
+    source_copy_dir.mkdir(exist_ok=True)
+    shutil.copy2(source, source_copy_dir / source.name)
+    lanes = run_lanes(importer, observer, source, output, timeout_seconds,
+                      from_source, browser_path, fixture_metadata)
+    retain_evidence(lanes)
+    scores = score_lanes(lanes, source)
+    timings = timings_record(lanes)
+    capture = lanes.capture
+    native_capture = lanes.native_capture
     report = {
         "schema": REPORT_SCHEMA,
         "version": SCHEMA_VERSION,
@@ -1739,29 +1442,29 @@ def compare_one(
         },
         "oracle": {
             "authority": "chromium",
-            "capture_method": browser_doc.get("capture_method"),
+            "capture_method": lanes.browser_doc.get("capture_method"),
             "browser": capture["provenance"]["browser"],
             "viewport": capture["provenance"]["viewport"],
         },
         "candidate": {
             "authority": "advisory",
-            "capture_method": native_doc.get("capture_method"),
-            "source_adapter": native_doc.get("source_adapter"),
+            "capture_method": lanes.native_doc.get("capture_method"),
+            "source_adapter": lanes.native_doc.get("source_adapter"),
             "comparison_lane": "browser-native-panel-lowering",
             "offline_parser": False,
             "provenance": {
-                "source_sha256": source_sha256,
+                "source_sha256": lanes.source_sha256,
                 "browser": native_capture["provenance"]["browser"],
                 "viewport": native_capture["provenance"]["viewport"],
-                "capture_sha256": sha256_file(native_evidence / "capture.json"),
+                "capture_sha256": sha256_file(lanes.native_evidence / "capture.json"),
             },
         },
-        "source_recognition": recognition,
-        "unsupported_dynamic_features": blockers,
+        "source_recognition": scores.recognition,
+        "unsupported_dynamic_features": scores.blockers,
         "timings": timings,
-        "timing_budget": timing_budget,
-        "integrity": integrity,
-        "observability": observability,
+        "timing_budget": timing_budget_result(timings, timing_budgets_ms),
+        "integrity": integrity_record(lanes, importer, observer),
+        "observability": observability_record(lanes.native_run.elapsed_ms, cache_state),
         "receipt_paths": {
             "fixture_report": "comparison/report.json",
             "browser_capture": "browser/capture.json",
@@ -1769,21 +1472,23 @@ def compare_one(
             "native_render_receipt": "candidate/render-receipt.json",
         },
         "comparison": {
-            "structural": structural,
-            "geometry": geometry,
-            "typography": typography,
-            "visual": visual,
-            "viewport_dpr_audit": viewport_dpr,
-            "page_background": page_background,
-            "work_counters": work_counters,
+            "structural": scores.structural,
+            "geometry": scores.geometry,
+            "typography": scores.typography,
+            "visual": scores.visual,
+            "viewport_dpr_audit": lanes.viewport_dpr,
+            "form_controls": scores.form_controls,
+            "page_background": lanes.page_background,
+            "work_counters": scores.work_counters,
         },
-        "classifications": classifications,
-        "promotion": recommendation,
+        "classifications": scores.classifications,
+        "promotion": scores.promotion,
         "canonical_output_modified": False,
     }
+    comparison_dir = lanes.comparison_dir
     write_json(comparison_dir / "report.json", report)
-    write_json(comparison_dir / "structural-diff.json", structural)
-    write_json(comparison_dir / "classifications.json", classifications)
+    write_json(comparison_dir / "structural-diff.json", scores.structural)
+    write_json(comparison_dir / "classifications.json", scores.classifications)
     (comparison_dir / "summary.md").write_text(format_summary(report), encoding="utf-8")
     return report
 
@@ -1795,124 +1500,3 @@ def source_files(root: Path) -> list[Path]:
     return sorted(
         path for path in root.rglob("*")
         if path.is_file() and path.suffix.lower() in suffixes)
-
-
-def aggregate_reports(
-    reports: list[dict[str, Any]], failure_count: int = 0
-) -> dict[str, Any]:
-    classifications = {
-        "native-authoritative": 0,
-        "native-with-browser-validation": 0,
-        "browser-required": 0,
-        "unsupported": 0,
-    }
-    gap_counts: dict[str, dict[str, Any]] = {}
-    for report in reports:
-        classifications[report["promotion"]["classification"]] += 1
-        impact = 1.0 - report["comparison"]["visual"]["score"]
-        for finding in report["classifications"]:
-            bucket = gap_counts.setdefault(finding["cause"], {
-                "cause": finding["cause"],
-                "affected": 0,
-                "visual_impact_sum": 0.0,
-                "confidence_sum": 0.0,
-                "suggested_subsystem": finding["suggested_subsystem"],
-            })
-            bucket["affected"] += 1
-            bucket["visual_impact_sum"] += impact
-            bucket["confidence_sum"] += finding["confidence"]
-    ranked = []
-    for bucket in gap_counts.values():
-        affected = bucket["affected"]
-        ranked.append({
-            "cause": bucket["cause"],
-            "affected": affected,
-            "affected_fraction": round(affected / max(1, len(reports)), 6),
-            "mean_visual_impact": round(
-                bucket["visual_impact_sum"] / affected, 6),
-            "mean_confidence": round(bucket["confidence_sum"] / affected, 6),
-            "suggested_subsystem": bucket["suggested_subsystem"],
-            "priority_score": round(
-                affected * (bucket["visual_impact_sum"] / affected)
-                * (bucket["confidence_sum"] / affected), 6),
-        })
-    ranked.sort(key=lambda row: (-row["priority_score"], row["cause"]))
-
-    def mean(path: tuple[str, ...]) -> float:
-        values = []
-        for report in reports:
-            value: Any = report
-            for key in path:
-                value = value[key]
-            values.append(float(value))
-        return round(statistics.fmean(values), 6) if values else 0.0
-
-    total = len(reports) + failure_count
-    classifications["unsupported"] = failure_count
-    false_promotions = sum(
-        1 for report in reports
-        if report["promotion"]["classification"] == "native-authoritative"
-        and not report["promotion"]["threshold_eligible"])
-    budget_reports = [report.get("timing_budget", {}) for report in reports]
-    budget_requested = any(
-        report.get("status") in ("pass", "fail") for report in budget_reports)
-    budget_failed = any(report.get("status") == "fail" for report in budget_reports)
-    return {
-        "schema": CORPUS_SCHEMA,
-        "version": SCHEMA_VERSION,
-        "fixture_count": total,
-        "completed_fixture_count": len(reports),
-        "failed_fixture_count": failure_count,
-        "classifications": classifications,
-        "shares": {
-            key: round(value / max(1, total), 6)
-            for key, value in classifications.items()
-        },
-        "mean_scores": {
-            name: mean(("comparison", name, "score"))
-            for name in ("structural", "geometry", "typography", "visual")
-        },
-        "mean_timings_ms": {
-            "browser_import": mean(("timings", "browser_import_ms")),
-            "native_import": mean(("timings", "native_import_ms")),
-            "native_render": mean(("timings", "native_render_ms")),
-            "native_total": mean(("timings", "native_total_ms")),
-        },
-        "mean_import_only_speedup": mean(
-            ("timings", "browser_to_native_import_speedup")),
-        "false_promotions": false_promotions,
-        "false_promotion_status": (
-            "not-evaluable-production-promotion-disabled"
-            if not any(
-                report["promotion"].get("production_promotion_enabled", False)
-                for report in reports)
-            else "evaluated"),
-        "timing_budget": {
-            "status": "fail" if budget_failed else
-                ("pass" if budget_requested else "not-requested"),
-            "budgets_ms": next((report.get("budgets_ms", {}) for report in budget_reports
-                                if report.get("budgets_ms")), {}),
-            "failed_fixture_count": sum(
-                report.get("status") == "fail" for report in budget_reports),
-        },
-        "observability": {
-            "ttfp": {"value_ms": None, "status": "unverified"},
-            "ttni": {"p50_ms": None, "p95_ms": None, "status": "unverified"},
-            "ttni_proxy": {
-                "p50_ms": round(statistics.median([
-                    report.get("observability", {}).get("ttni_proxy", {}).get(
-                        "value_ms", report["timings"]["native_import_ms"])
-                    for report in reports]), 1) if reports else None,
-                "p95_ms": percentile([
-                    report.get("observability", {}).get("ttni_proxy", {}).get(
-                        "value_ms", report["timings"]["native_import_ms"])
-                    for report in reports], 0.95) if reports else None,
-                "status": "measured" if reports else "unverified",
-            },
-            "ifnf": {"value_ms": None, "status": "readback-only"},
-            "cache_states": sorted({
-                report.get("observability", {}).get("cache_state", {}).get(
-                    "identity", "unknown") for report in reports}),
-        },
-        "ranked_gaps": ranked,
-    }
