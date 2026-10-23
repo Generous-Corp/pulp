@@ -87,6 +87,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     (void)pulp::audio::parse_sample_bank_json(text);
     (void)pulp::state::parse_content_capability_manifest(text);
 
+    // preview_content_pack_install reads the manifest from a pack directory
+    // and has no from-bytes entry point, so each iteration writes the input
+    // to the scratch pack. libFuzzer leaves on _exit after a crash, so the
+    // scratch directory (one small file) outlives that run.
     const auto manifest_path = scratch().pack / "pulp.package.json";
     if (write_manifest(manifest_path, text))
         (void)pulp::state::preview_content_pack_install(scratch().pack, trusted_plugin(),
