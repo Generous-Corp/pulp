@@ -31,6 +31,11 @@ class DawnSharedIoWavenetProgram final : public SharedIoPreparedProgram {
     bool submit(SharedIoArenaProvider& provider, const SlotResources& resources, SlotToken token,
                 std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept override;
     bool release() noexcept override;
+    // Zeroes this program's causal history on the provider and sets the next
+    // block's stream position; see DawnSharedIoProvider::reset_wavenet_history.
+    bool reset_history(std::uint32_t next_position = 0) noexcept;
+    // Diagnostic: reads the device stream position back (blocking, host only).
+    bool read_stream_position(std::uint32_t& position) noexcept;
 
     bool prepared() const noexcept {
         return prepared_;

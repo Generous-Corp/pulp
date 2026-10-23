@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-gpu-wavenet-reset-shared-layer-20261022-watch",
+  "created_at": "2026-10-23T07:43:13Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "GPU audio compute only: the GpuCompute and shared-I/O provider WaveNet passes now compile one shared layer WGSL source with a storage-buffer stream state, the provider gains a WaveNet history reset and a diagnostic position readback, and a Dawn probe pins staged-storage-plus-timestamps completion. Output is unchanged bit for bit. No design-import, Chromium, rendering, or packaging authority moves; no UI paint path changes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-gpu-dawn-wavenet-history-probe",
+    "ctest --test-dir build -R pulp-test-gpu-dawn-wavenet-qualification",
+    "ctest --test-dir build -R pulp-test-gpu-dawn-wavenet-staged-timestamps-probe",
+    "ctest --test-dir build -R pulp-test-gpu-shared-io-wavenet-spec",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
