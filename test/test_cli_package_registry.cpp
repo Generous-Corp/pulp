@@ -9,6 +9,8 @@
 
 #include "../tools/cli/package_registry.hpp"
 
+#include <pulp/runtime/crypto.hpp>
+
 #include <atomic>
 #include <cstdlib>
 #include <cstdint>
@@ -287,18 +289,15 @@ TEST_CASE("remote registry helpers use environment cache paths and fresh cache h
     auto cache_file = write_registry_fixture(tmp.path, "registry-cache.json");
     REQUIRE(fs::exists(cache_file));
 
-    auto loaded = load_remote_registry(
-        "https://127.0.0.1:9/pulp-registry-should-not-be-fetched.json",
-        tmp.path,
-        24);
+    auto loaded =
+        load_remote_registry("https://127.0.0.1:9/pulp-registry-should-not-be-fetched.json",
+                             tmp.path, 24, RegistryTrustPolicy{true});
     REQUIRE(loaded.error.empty());
     REQUIRE(loaded.registry.packages.size() == 2);
     REQUIRE(loaded.registry.packages.at("synth-core").name == "Core Synth");
 
-    auto stale = load_remote_registry(
-        "https://127.0.0.1:9/pulp-registry-stale-cache-fallback.json",
-        tmp.path,
-        0);
+    auto stale = load_remote_registry("https://127.0.0.1:9/pulp-registry-stale-cache-fallback.json",
+                                      tmp.path, 0, RegistryTrustPolicy{true});
     REQUIRE(stale.error.empty());
     REQUIRE(stale.registry.packages.size() == 2);
 
@@ -673,18 +672,269 @@ TEST_CASE("remote registry retries corrupt fresh cache before stale fallback",
     TempDir tmp;
     write_file(tmp.path / "registry-cache.json", "[]");
 
-    auto corrupt = load_remote_registry(
-        "https://127.0.0.1:9/pulp-registry-corrupt-cache.json",
-        tmp.path,
-        24);
+    auto corrupt = load_remote_registry("https://127.0.0.1:9/pulp-registry-corrupt-cache.json",
+                                        tmp.path, 24, RegistryTrustPolicy{true});
     REQUIRE(corrupt.registry.packages.empty());
     REQUIRE(corrupt.error == "Registry file is not a valid JSON object");
 
     write_registry_fixture(tmp.path, "registry-cache.json");
-    auto stale = load_remote_registry(
-        "https://127.0.0.1:9/pulp-registry-stale-after-failure.json",
-        tmp.path,
-        0);
+    auto stale = load_remote_registry("https://127.0.0.1:9/pulp-registry-stale-after-failure.json",
+                                      tmp.path, 0, RegistryTrustPolicy{true});
     REQUIRE(stale.error.empty());
     REQUIRE(stale.registry.packages.size() == 2);
+}
+
+namespace {
+
+std::string slurp(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+std::string hex_encode(const std::vector<std::uint8_t>& bytes) {
+    static const char* digits = "0123456789abcdef";
+    std::string out;
+    for (auto b : bytes) {
+        out += digits[b >> 4];
+        out += digits[b & 0xF];
+    }
+    return out;
+}
+
+// Seed bytes 1..32: the keypair tools/scripts/test_sign_package_registry.py
+// signs its shared vector with.
+pulp::runtime::Ed25519KeyPair test_registry_keypair() {
+    std::vector<std::uint8_t> seed(32);
+    for (std::size_t i = 0; i < seed.size(); ++i)
+        seed[i] = static_cast<std::uint8_t>(i + 1);
+    auto keypair = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
+    REQUIRE(keypair.has_value());
+    return *keypair;
+}
+
+std::string sign_registry_text(const pulp::runtime::Ed25519KeyPair& keypair,
+                               const std::string& registry_bytes) {
+    const auto message = registry_signed_message(registry_bytes);
+    auto signature = pulp::runtime::ed25519_sign(
+        keypair.private_key.data(), keypair.private_key.size(),
+        reinterpret_cast<const std::uint8_t*>(message.data()), message.size());
+    REQUIRE(signature.has_value());
+    return std::string(kRegistrySignatureSchema) + "\n" + hex_encode(*signature) + "\n";
+}
+
+// A downloader that serves `registry` at the registry URL and `signature`
+// (when non-empty) at `<url>.sig`; `reachable == false` fails every fetch.
+RegistryDownloader fake_downloader(const std::string& registry, const std::string& signature,
+                                   bool reachable = true) {
+    return [=](const std::string& url, const fs::path& dest) {
+        if (!reachable)
+            return false;
+        const bool wants_signature = url.size() >= 4 && url.compare(url.size() - 4, 4, ".sig") == 0;
+        if (wants_signature && signature.empty())
+            return false;
+        write_file(dest, wants_signature ? signature : registry);
+        return true;
+    };
+}
+
+} // namespace
+
+TEST_CASE("registry signature verifies with the pinned key and refuses tampering",
+          "[cli][package-registry][remote][trust]") {
+    const auto keypair = test_registry_keypair();
+    const std::string pinned = hex_encode(keypair.public_key);
+    const std::string registry = "{\"registry_version\": 2, \"packages\": {}}\n";
+    const std::string signature = sign_registry_text(keypair, registry);
+
+    auto ok = verify_registry_signature(registry, signature, pinned);
+    REQUIRE(ok.ok);
+    REQUIRE(ok.code == "verified");
+
+    std::string tampered = registry;
+    tampered[tampered.find('2')] = '3';
+    auto mismatch = verify_registry_signature(tampered, signature, pinned);
+    REQUIRE_FALSE(mismatch.ok);
+    REQUIRE(mismatch.code == "signature-mismatch");
+
+    auto missing = verify_registry_signature(registry, "", pinned);
+    REQUIRE_FALSE(missing.ok);
+    REQUIRE(missing.code == "missing-signature");
+
+    auto malformed = verify_registry_signature(registry, "not-a-signature\n", pinned);
+    REQUIRE_FALSE(malformed.ok);
+    REQUIRE(malformed.code == "malformed-signature");
+
+    auto short_sig = verify_registry_signature(
+        registry, std::string(kRegistrySignatureSchema) + "\nabcd\n", pinned);
+    REQUIRE_FALSE(short_sig.ok);
+    REQUIRE(short_sig.code == "malformed-signature");
+
+    std::string other_key = pinned;
+    other_key[0] = other_key[0] == '0' ? '1' : '0';
+    auto wrong_key = verify_registry_signature(registry, signature, other_key);
+    REQUIRE_FALSE(wrong_key.ok);
+    REQUIRE(wrong_key.code == "signature-mismatch");
+
+    auto no_root = verify_registry_signature(registry, signature, "");
+    REQUIRE_FALSE(no_root.ok);
+    REQUIRE(no_root.code == "no-trust-root");
+}
+
+TEST_CASE("registry signature from the owner's signing helper verifies in the CLI",
+          "[cli][package-registry][remote][trust]") {
+    // Produced by tools/scripts/sign_package_registry.py for seed bytes 1..32
+    // over these exact registry bytes; proves the two implementations agree.
+    const std::string registry = "{\"registry_version\": 2, \"packages\": {}}\n";
+    const std::string pinned = "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664";
+    const std::string signature =
+        std::string(kRegistrySignatureSchema) +
+        "\n"
+        "3dac8cb5d27b4733df4d90edda22db2fe6ddc3a63d9e70c45b391dd1b98de0f7"
+        "6c8ac486c0e15282e475917b99dce05fb8ba1bb5623985de6b74f6b4b4910109\n";
+    REQUIRE(hex_encode(test_registry_keypair().public_key) == pinned);
+    REQUIRE(verify_registry_signature(registry, signature, pinned).ok);
+    REQUIRE_FALSE(verify_registry_signature(registry + " ", signature, pinned).ok);
+}
+
+TEST_CASE("remote registry fetch refuses an unsigned registry unless allowed",
+          "[cli][package-registry][remote][trust]") {
+    TempDir tmp;
+    const std::string registry = slurp(write_registry_fixture(tmp.path, "served.json"));
+    const auto keypair = test_registry_keypair();
+    RegistryTrustPolicy strict;
+    strict.pinned_public_key_hex = hex_encode(keypair.public_key);
+
+    TempDir cache;
+    auto refused = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
+                                        strict, fake_downloader(registry, ""));
+    REQUIRE(refused.registry.packages.empty());
+    REQUIRE(refused.error.find("missing-signature") == std::string::npos);
+    REQUIRE(refused.error.find("no registry.json.sig") != std::string::npos);
+    REQUIRE(refused.error.find("--allow-unsigned-registry") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(cache.path / "registry-cache.json"));
+
+    RegistryTrustPolicy lenient = strict;
+    lenient.allow_unsigned = true;
+    auto allowed = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
+                                        lenient, fake_downloader(registry, ""));
+    REQUIRE(allowed.error.empty());
+    REQUIRE(allowed.registry.packages.size() == 2);
+    REQUIRE_FALSE(allowed.verified);
+    REQUIRE(allowed.warning.find("unverified") != std::string::npos);
+    REQUIRE(fs::exists(cache.path / "registry-cache.json"));
+    REQUIRE_FALSE(fs::exists(cache.path / "registry-cache.json.verified"));
+
+    // The lenient fetch left an unverified cache behind; a strict load
+    // neither trusts it fresh nor falls back to it when the fetch fails.
+    auto strict_again = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
+                                             strict, fake_downloader(registry, "", false));
+    REQUIRE(strict_again.registry.packages.empty());
+    REQUIRE(strict_again.error.find("not signature-verified") != std::string::npos);
+}
+
+TEST_CASE("remote registry enforcement follows whether a signer key is pinned",
+          "[cli][package-registry][remote][trust]") {
+    TempDir tmp;
+    const std::string registry = slurp(write_registry_fixture(tmp.path, "served.json"));
+    const auto keypair = test_registry_keypair();
+    const std::string signature = sign_registry_text(keypair, registry);
+
+    SECTION("no pinned key: an unsigned registry is used, with a notice") {
+        TempDir cache;
+        RegistryTrustPolicy unpinned;
+        unpinned.pinned_public_key_hex.clear();
+        auto loaded = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
+                                           unpinned, fake_downloader(registry, ""));
+        REQUIRE(loaded.error.empty());
+        REQUIRE(loaded.registry.packages.size() == 2);
+        REQUIRE_FALSE(loaded.verified);
+        REQUIRE(loaded.warning.find("pins no registry signer key") != std::string::npos);
+        REQUIRE(loaded.warning.find("--allow-unsigned-registry") == std::string::npos);
+        REQUIRE(fs::exists(cache.path / "registry-cache.json"));
+        REQUIRE_FALSE(fs::exists(cache.path / "registry-cache.json.verified"));
+
+        // The unverified cache stays usable under the same unpinned policy.
+        auto cached = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
+                                           unpinned, fake_downloader(registry, "", false));
+        REQUIRE(cached.error.empty());
+        REQUIRE(cached.registry.packages.size() == 2);
+        REQUIRE(cached.warning.find("pins no registry signer key") != std::string::npos);
+    }
+
+    SECTION("pinned key: an unsigned registry is refused") {
+        TempDir cache;
+        RegistryTrustPolicy pinned;
+        pinned.pinned_public_key_hex = hex_encode(keypair.public_key);
+        auto refused = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
+                                            pinned, fake_downloader(registry, ""));
+        REQUIRE(refused.registry.packages.empty());
+        REQUIRE(refused.error.find("refused") != std::string::npos);
+        REQUIRE_FALSE(fs::exists(cache.path / "registry-cache.json"));
+    }
+
+    SECTION("pinned key: a validly signed registry is used and marked verified") {
+        TempDir cache;
+        RegistryTrustPolicy pinned;
+        pinned.pinned_public_key_hex = hex_encode(keypair.public_key);
+        auto ok = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
+                                       pinned, fake_downloader(registry, signature));
+        REQUIRE(ok.error.empty());
+        REQUIRE(ok.verified);
+        REQUIRE(ok.warning.empty());
+        REQUIRE(ok.registry.packages.size() == 2);
+        REQUIRE(fs::exists(cache.path / "registry-cache.json.verified"));
+    }
+}
+
+TEST_CASE("remote registry caches a verified registry and falls back only to a verified cache",
+          "[cli][package-registry][remote][trust][cache]") {
+    TempDir tmp;
+    const std::string registry = slurp(write_registry_fixture(tmp.path, "served.json"));
+    const auto keypair = test_registry_keypair();
+    const std::string signature = sign_registry_text(keypair, registry);
+    RegistryTrustPolicy strict;
+    strict.pinned_public_key_hex = hex_encode(keypair.public_key);
+
+    TempDir cache;
+    const auto cache_file = cache.path / "registry-cache.json";
+    const auto marker = cache.path / "registry-cache.json.verified";
+
+    auto verified = refresh_remote_registry("https://registry.test/registry.json", cache.path,
+                                            strict, fake_downloader(registry, signature));
+    REQUIRE(verified.error.empty());
+    REQUIRE(verified.verified);
+    REQUIRE(verified.warning.empty());
+    REQUIRE(verified.registry.packages.size() == 2);
+    REQUIRE(fs::exists(marker));
+    REQUIRE(slurp(cache_file) == registry);
+
+    // Fresh verified cache: served without a fetch.
+    auto cached = load_remote_registry("https://registry.test/registry.json", cache.path, 24,
+                                       strict, fake_downloader(registry, signature, false));
+    REQUIRE(cached.error.empty());
+    REQUIRE(cached.verified);
+
+    // Stale verified cache survives a failed download.
+    auto stale = load_remote_registry("https://registry.test/registry.json", cache.path, 0, strict,
+                                      fake_downloader(registry, signature, false));
+    REQUIRE(stale.error.empty());
+    REQUIRE(stale.verified);
+    REQUIRE(stale.registry.packages.size() == 2);
+
+    // A refused refresh (bad signature) leaves the verified cache untouched.
+    std::string wrong = signature;
+    wrong[wrong.size() - 2] = wrong[wrong.size() - 2] == '0' ? '1' : '0';
+    auto refused = refresh_remote_registry("https://registry.test/registry.json", cache.path,
+                                           strict, fake_downloader(registry, wrong));
+    REQUIRE(refused.registry.packages.empty());
+    REQUIRE(refused.error.find("refused") != std::string::npos);
+    REQUIRE(slurp(cache_file) == registry);
+    REQUIRE(fs::exists(marker));
+
+    // Tampered cache bytes no longer match the marker: no stale fallback.
+    write_file(cache_file, registry + "\n");
+    auto tampered = load_remote_registry("https://registry.test/registry.json", cache.path, 0,
+                                         strict, fake_downloader(registry, signature, false));
+    REQUIRE(tampered.registry.packages.empty());
+    REQUIRE(tampered.error.find("not signature-verified") != std::string::npos);
 }

@@ -2,10 +2,13 @@
 #include "package_registry.hpp"
 #include "json_writer.hpp"
 #include <pulp/platform/child_process.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <regex>
 #include <sstream>
@@ -600,6 +603,10 @@ static bool download_file(const std::string& url, const fs::path& dest) {
     return r.exit_code == 0;
 }
 
+RegistryDownloader default_registry_downloader() {
+    return download_file;
+}
+
 static bool is_cache_fresh(const fs::path& cache_file, int ttl_hours) {
     if (!fs::exists(cache_file)) return false;
     auto mod_time = fs::last_write_time(cache_file);
@@ -608,36 +615,164 @@ static bool is_cache_fresh(const fs::path& cache_file, int ttl_hours) {
     return age.count() < ttl_hours;
 }
 
-RegistryLoadResult load_remote_registry(const std::string& url,
-                                         const fs::path& cache_dir,
-                                         int ttl_hours) {
-    auto cache_file = cache_dir / "registry-cache.json";
-
-    if (is_cache_fresh(cache_file, ttl_hours)) {
-        auto result = load_registry(cache_file);
-        if (!result.error.empty() || result.registry.packages.empty()) {
-            // Cache is corrupt — try re-downloading
-        } else {
-            return result;
-        }
-    }
-
-    if (download_file(url, cache_file))
-        return load_registry(cache_file);
-
-    // Fall back to stale cache if download fails
-    if (fs::exists(cache_file))
-        return load_registry(cache_file);
-
-    return {{}, "Failed to fetch remote registry from " + url};
+static std::string read_bytes(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        return {};
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-RegistryLoadResult refresh_remote_registry(const std::string& url,
-                                            const fs::path& cache_dir) {
+static bool write_bytes(const fs::path& path, const std::string& bytes) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out)
+        return false;
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return out.good();
+}
+
+// The verified marker records the SHA-256 of the cached registry bytes whose
+// signature verified at fetch time; the cache is trusted only while its bytes
+// still hash to that value.
+static fs::path verified_marker_path(const fs::path& cache_file) {
+    return cache_file.string() + ".verified";
+}
+
+static bool cache_is_verified(const fs::path& cache_file) {
+    const auto marker = verified_marker_path(cache_file);
+    if (!fs::exists(cache_file) || !fs::exists(marker))
+        return false;
+    std::string recorded = read_bytes(marker);
+    while (!recorded.empty() && std::isspace(static_cast<unsigned char>(recorded.back())))
+        recorded.pop_back();
+    return !recorded.empty() && recorded == pulp::runtime::sha256_hex(read_bytes(cache_file));
+}
+
+static const char* unsigned_hint =
+    "; pass --allow-unsigned-registry to use it without verification";
+
+// A build with no pinned signer key cannot verify anything, so it keeps using
+// the registry unsigned and says so; enforcement begins once a key is pinned.
+static bool enforces_signatures(const RegistryTrustPolicy& policy) {
+    for (unsigned char c : policy.pinned_public_key_hex)
+        if (!std::isspace(c))
+            return true;
+    return false;
+}
+
+static const char* no_pin_notice =
+    " (this build pins no registry signer key; signature verification is enforced once one is "
+    "pinned)";
+
+static RemoteRegistryLoadResult remote_failure(std::string error) {
+    RemoteRegistryLoadResult out;
+    out.error = std::move(error);
+    return out;
+}
+
+// Load the cached copy under `policy`: refuse a cache that was never verified
+// unless unsigned registries are allowed, in which case say so.
+static RemoteRegistryLoadResult load_cached_registry(const fs::path& cache_file,
+                                                     const RegistryTrustPolicy& policy) {
+    const bool verified = cache_is_verified(cache_file);
+    const bool enforced = enforces_signatures(policy);
+    if (!verified && enforced && !policy.allow_unsigned)
+        return remote_failure("cached remote registry " + cache_file.string() +
+                              " is not signature-verified" + unsigned_hint);
+    RemoteRegistryLoadResult result;
+    static_cast<RegistryLoadResult&>(result) = load_registry(cache_file);
+    result.verified = verified;
+    if (!verified && result.error.empty())
+        result.warning = "remote registry cache " + cache_file.string() + " is unverified" +
+                         (enforced ? " (--allow-unsigned-registry)" : no_pin_notice);
+    return result;
+}
+
+struct RemoteFetch {
+    RemoteRegistryLoadResult result;
+    bool download_failed = false; // transport failure, as opposed to a refused registry
+};
+
+// Download registry.json and registry.json.sig, verify, and only then replace
+// the cache. A refused registry never touches the cache.
+static RemoteFetch fetch_remote_registry(const std::string& url, const fs::path& cache_file,
+                                         const RegistryTrustPolicy& policy,
+                                         const RegistryDownloader& downloader) {
+    const fs::path part = cache_file.string() + ".part";
+    const fs::path sig_part = cache_file.string() + ".sig.part";
+    std::error_code ec;
+    if (!downloader(url, part)) {
+        fs::remove(part, ec);
+        return {remote_failure("Failed to fetch remote registry from " + url), true};
+    }
+    const std::string bytes = read_bytes(part);
+    std::string signature;
+    if (downloader(url + ".sig", sig_part))
+        signature = read_bytes(sig_part);
+    fs::remove(sig_part, ec);
+
+    const auto check = verify_registry_signature(bytes, signature, policy.pinned_public_key_hex);
+    const bool enforced = enforces_signatures(policy);
+    if (!check.ok && enforced && !policy.allow_unsigned) {
+        fs::remove(part, ec);
+        return {
+            remote_failure("remote registry " + url + " refused: " + check.error + unsigned_hint),
+            false};
+    }
+
+    fs::rename(part, cache_file, ec);
+    if (ec) {
+        fs::remove(part, ec);
+        return {remote_failure("could not write registry cache " + cache_file.string()), false};
+    }
+    const auto marker = verified_marker_path(cache_file);
+    if (check.ok) {
+        if (!write_bytes(marker, pulp::runtime::sha256_hex(bytes) + "\n")) {
+            fs::remove(marker, ec);
+        }
+    } else {
+        fs::remove(marker, ec);
+    }
+
+    RemoteRegistryLoadResult result;
+    static_cast<RegistryLoadResult&>(result) = load_registry(cache_file);
+    result.verified = check.ok;
+    if (!check.ok && result.error.empty())
+        result.warning = enforced ? "remote registry " + url + " is unverified (" + check.error +
+                                        "); continuing because --allow-unsigned-registry was passed"
+                                  : "remote registry " + url + " is unsigned" + no_pin_notice;
+    return {result, false};
+}
+
+RemoteRegistryLoadResult load_remote_registry(const std::string& url, const fs::path& cache_dir,
+                                              int ttl_hours, const RegistryTrustPolicy& policy,
+                                              const RegistryDownloader& downloader) {
     auto cache_file = cache_dir / "registry-cache.json";
-    if (download_file(url, cache_file))
-        return load_registry(cache_file);
-    return {{}, "Failed to fetch remote registry from " + url};
+    const RegistryDownloader fetch = downloader ? downloader : default_registry_downloader();
+
+    if (is_cache_fresh(cache_file, ttl_hours)) {
+        auto result = load_cached_registry(cache_file, policy);
+        if (result.error.empty() && !result.registry.packages.empty())
+            return result;
+        // Corrupt, empty, or unverified cache: fetch again.
+    }
+
+    auto fetched = fetch_remote_registry(url, cache_file, policy, fetch);
+    if (fetched.result.error.empty() || !fetched.download_failed)
+        return fetched.result;
+
+    // The download failed: fall back to a stale cache only when that cache
+    // is trusted under the same policy.
+    if (fs::exists(cache_file))
+        return load_cached_registry(cache_file, policy);
+    return fetched.result;
+}
+
+RemoteRegistryLoadResult refresh_remote_registry(const std::string& url, const fs::path& cache_dir,
+                                                 const RegistryTrustPolicy& policy,
+                                                 const RegistryDownloader& downloader) {
+    auto cache_file = cache_dir / "registry-cache.json";
+    const RegistryDownloader fetch = downloader ? downloader : default_registry_downloader();
+    return fetch_remote_registry(url, cache_file, policy, fetch).result;
 }
 
 // ── Semver ──

@@ -232,11 +232,14 @@ int cmd_search(const std::vector<std::string>& args) {
     }
 
     bool refresh = false;
+    RegistryTrustPolicy trust;
     std::string query;
     bool json_output = false;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--refresh") {
             refresh = true;
+        } else if (args[i] == "--allow-unsigned-registry") {
+            trust.allow_unsigned = true;
         } else if (args[i] == "--format") {
             if (missing_option_value(args, i)) {
                 print_fail("--format requires a value");
@@ -267,6 +270,7 @@ int cmd_search(const std::vector<std::string>& args) {
     auto reg_path = root.empty() ? fs::path{} : find_registry_path(root);
 
     RegistryLoadResult result;
+    std::string remote_warning;
     if (!reg_path.empty()) {
         result = load_registry(reg_path);
     }
@@ -274,17 +278,19 @@ int cmd_search(const std::vector<std::string>& args) {
     // If local failed or empty, try remote
     if (result.registry.packages.empty()) {
         auto cache_dir = default_cache_dir();
-        if (refresh) {
-            result = refresh_remote_registry(default_remote_registry_url(), cache_dir);
-        } else {
-            result = load_remote_registry(default_remote_registry_url(), cache_dir);
-        }
+        auto remote =
+            refresh ? refresh_remote_registry(default_remote_registry_url(), cache_dir, trust)
+                    : load_remote_registry(default_remote_registry_url(), cache_dir, 24, trust);
+        remote_warning = remote.warning;
+        result = remote;
     }
 
     if (!result.error.empty() && result.registry.packages.empty()) {
         print_fail(result.error);
         return 1;
     }
+    if (!remote_warning.empty())
+        std::cerr << "WARNING: " << remote_warning << "\n";
 
     auto& reg = result.registry;
 
