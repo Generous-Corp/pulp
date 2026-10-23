@@ -149,25 +149,53 @@ std::optional<std::string> migrate_v1_to_v2(
     const uint8_t* v2_secret_32,
     size_t v2_secret_size);
 
+/// Transport policy for OnlineActivation.
+struct OnlineActivationOptions {
+    /// Permit a plain `http://` server_url. Off by default: every exchange
+    /// carries the serial or license key plus the machine id, and the status
+    /// verdict is acted on, so only a loopback test server should be reached
+    /// without TLS.
+    bool allow_insecure_http = false;
+    int timeout_seconds = 30;
+};
+
 /// Online license activation flow.
-/// POST to a license server, receive and store a license key.
+/// Every exchange is a JSON POST to an https license server; the serial,
+/// license key and machine id travel in the request body, never in the URL.
 struct OnlineActivation {
     /// Activate online with a serial number.
     /// Returns the license key on success.
     static std::optional<std::string> activate(
         std::string_view server_url,
         std::string_view serial_number,
-        std::string_view product_id);
+        std::string_view product_id,
+        const OnlineActivationOptions& options = {});
 
     /// Deactivate a license (free up a machine slot).
     static bool deactivate(
         std::string_view server_url,
-        std::string_view license_key);
+        std::string_view license_key,
+        const OnlineActivationOptions& options = {});
 
-    /// Check license status with the server.
+    /// Check license status with the server. Returns NotFound when the server
+    /// is refused or unreachable, and InvalidSignature when it answered but did
+    /// not vouch for the key (see parse_status_response).
     static LicenseStatus check_status(
         std::string_view server_url,
-        std::string_view license_key);
+        std::string_view license_key,
+        const OnlineActivationOptions& options = {});
+
+    /// True when `server_url` is an `https://` origin, or `http://` and the
+    /// options allow it. Nothing is sent to a URL this rejects.
+    static bool server_url_allowed(std::string_view server_url,
+                                   const OnlineActivationOptions& options = {});
+
+    /// Exact parse of a `/status` response body: a JSON object whose `status`
+    /// member is the string "valid" or "expired" maps to Valid / Expired;
+    /// anything else (other values, other fields, non-objects, malformed JSON)
+    /// is InvalidSignature. The word "valid" appearing elsewhere in the body
+    /// is not a verdict.
+    static LicenseStatus parse_status_response(std::string_view body);
 };
 
 }  // namespace pulp::runtime

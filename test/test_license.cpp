@@ -2,9 +2,13 @@
 #include <pulp/runtime/license.hpp>
 #include <pulp/runtime/big_integer.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/socket.hpp>
 #include <pulp/runtime/temporary_file.hpp>
 #include "../external/cpp-httplib/httplib.h"
+
+#include <choc/containers/choc_Value.h>
+#include <choc/text/choc_JSON.h>
 
 #include <array>
 #include <chrono>
@@ -883,6 +887,26 @@ TEST_CASE("LicenseValidator validate_file accepts signed keys with trailing CRLF
     REQUIRE(validator.validate_file(tmp.path_string()) == LicenseStatus::Valid);
 }
 
+namespace {
+
+// Loopback test servers speak plain http; production refuses it by default.
+OnlineActivationOptions loopback_http_options() {
+    OnlineActivationOptions options;
+    options.allow_insecure_http = true;
+    return options;
+}
+
+std::string request_body(const std::string& request) {
+    const auto header_end = request.find("\r\n\r\n");
+    return header_end == std::string::npos ? std::string{} : request.substr(header_end + 4);
+}
+
+std::string request_line(const std::string& request) {
+    return request.substr(0, request.find("\r\n"));
+}
+
+}  // namespace
+
 TEST_CASE("OnlineActivation treats empty server URL as failed request",
           "[crypto][license]") {
     REQUIRE_FALSE(OnlineActivation::activate("", "serial", "product"));
@@ -894,7 +918,8 @@ TEST_CASE("OnlineActivation activate returns loopback license response",
           "[crypto][license]") {
     auto exchange = serve_loopback_http_response("license-key");
 
-    auto license = OnlineActivation::activate(exchange.base_url, "serial-123", "PulpSynth");
+    auto license = OnlineActivation::activate(exchange.base_url, "serial-123", "PulpSynth",
+                                              loopback_http_options());
     exchange.worker.join();
 
     REQUIRE(license.has_value());
@@ -908,7 +933,8 @@ TEST_CASE("OnlineActivation deactivate accepts successful loopback response",
           "[crypto][license]") {
     auto exchange = serve_loopback_http_response(R"({"ok":true})");
 
-    REQUIRE(OnlineActivation::deactivate(exchange.base_url, "license-key"));
+    REQUIRE(OnlineActivation::deactivate(exchange.base_url, "license-key",
+                                         loopback_http_options()));
     exchange.worker.join();
 
     REQUIRE(exchange.request->find("POST /deactivate HTTP/1.1") != std::string::npos);
@@ -919,24 +945,27 @@ TEST_CASE("OnlineActivation check_status maps loopback response bodies",
           "[crypto][license]") {
     {
         auto exchange = serve_loopback_http_response(R"({"status":"valid"})");
-        REQUIRE(OnlineActivation::check_status(exchange.base_url, "valid-key") == LicenseStatus::Valid);
+        REQUIRE(OnlineActivation::check_status(exchange.base_url, "valid-key",
+                                               loopback_http_options()) == LicenseStatus::Valid);
         exchange.worker.join();
-        REQUIRE(exchange.request->find("GET /status?key=valid-key&machine=") != std::string::npos);
+        REQUIRE(exchange.request->find("POST /status HTTP/1.1") != std::string::npos);
     }
 
     {
         auto exchange = serve_loopback_http_response(R"({"status":"expired"})");
-        REQUIRE(OnlineActivation::check_status(exchange.base_url, "expired-key") == LicenseStatus::Expired);
+        REQUIRE(OnlineActivation::check_status(exchange.base_url, "expired-key",
+                                               loopback_http_options()) == LicenseStatus::Expired);
         exchange.worker.join();
-        REQUIRE(exchange.request->find("GET /status?key=expired-key&machine=") != std::string::npos);
+        REQUIRE(exchange.request->find("POST /status HTTP/1.1") != std::string::npos);
     }
 
     {
         auto exchange = serve_loopback_http_response(R"({"status":"rejected"})");
-        REQUIRE(OnlineActivation::check_status(exchange.base_url, "rejected-key") ==
+        REQUIRE(OnlineActivation::check_status(exchange.base_url, "rejected-key",
+                                               loopback_http_options()) ==
                 LicenseStatus::InvalidSignature);
         exchange.worker.join();
-        REQUIRE(exchange.request->find("GET /status?key=rejected-key&machine=") != std::string::npos);
+        REQUIRE(exchange.request->find("POST /status HTTP/1.1") != std::string::npos);
     }
 }
 
@@ -944,24 +973,127 @@ TEST_CASE("OnlineActivation treats non-2xx loopback responses as activation fail
           "[crypto][license]") {
     {
         auto exchange = serve_loopback_http_status(403, R"({"error":"denied"})");
-        REQUIRE_FALSE(OnlineActivation::activate(exchange.base_url, "serial", "product"));
+        REQUIRE_FALSE(OnlineActivation::activate(exchange.base_url, "serial", "product",
+                                                 loopback_http_options()));
         exchange.worker.join();
         REQUIRE(exchange.request->find("POST /activate HTTP/1.1") != std::string::npos);
     }
 
     {
         auto exchange = serve_loopback_http_status(500, R"({"error":"server"})");
-        REQUIRE_FALSE(OnlineActivation::deactivate(exchange.base_url, "license"));
+        REQUIRE_FALSE(OnlineActivation::deactivate(exchange.base_url, "license",
+                                                   loopback_http_options()));
         exchange.worker.join();
         REQUIRE(exchange.request->find("POST /deactivate HTTP/1.1") != std::string::npos);
     }
 
     {
         auto exchange = serve_loopback_http_status(404, R"({"status":"valid"})");
-        REQUIRE(OnlineActivation::check_status(exchange.base_url, "license") == LicenseStatus::NotFound);
+        REQUIRE(OnlineActivation::check_status(exchange.base_url, "license",
+                                               loopback_http_options()) == LicenseStatus::NotFound);
         exchange.worker.join();
-        REQUIRE(exchange.request->find("GET /status?key=license&machine=") != std::string::npos);
+        REQUIRE(exchange.request->find("POST /status HTTP/1.1") != std::string::npos);
     }
+}
+
+TEST_CASE("OnlineActivation refuses plain http unless the caller allows it",
+          "[crypto][license][transport]") {
+    SECTION("URL policy is a pure check") {
+        REQUIRE(OnlineActivation::server_url_allowed("https://license.example.com"));
+        REQUIRE(OnlineActivation::server_url_allowed("HTTPS://license.example.com"));
+        REQUIRE_FALSE(OnlineActivation::server_url_allowed("http://license.example.com"));
+        REQUIRE_FALSE(OnlineActivation::server_url_allowed("http://127.0.0.1:8080"));
+        REQUIRE_FALSE(OnlineActivation::server_url_allowed("ftp://license.example.com"));
+        REQUIRE_FALSE(OnlineActivation::server_url_allowed("https://"));
+        REQUIRE_FALSE(OnlineActivation::server_url_allowed(""));
+        REQUIRE(OnlineActivation::server_url_allowed("http://127.0.0.1:8080",
+                                                     loopback_http_options()));
+        REQUIRE_FALSE(OnlineActivation::server_url_allowed("ftp://x", loopback_http_options()));
+    }
+
+    SECTION("a refused URL is never contacted") {
+        auto exchange = serve_loopback_http_response(R"({"status":"valid"})");
+
+        REQUIRE_FALSE(OnlineActivation::activate(exchange.base_url, "serial", "product"));
+        REQUIRE_FALSE(OnlineActivation::deactivate(exchange.base_url, "license-key"));
+        REQUIRE(OnlineActivation::check_status(exchange.base_url, "license-key") ==
+                LicenseStatus::NotFound);
+
+        // Control: the listener is live, and the first connection it sees is
+        // this probe, so the three refusals above opened none.
+        const auto port = static_cast<uint16_t>(
+            std::stoul(exchange.base_url.substr(exchange.base_url.rfind(':') + 1)));
+        Socket probe;
+        REQUIRE(probe.create(SocketType::TCP));
+        REQUIRE(probe.connect("127.0.0.1", port, std::chrono::seconds(5)));
+        REQUIRE(probe.send("PROBE / HTTP/1.1\r\nHost: loopback\r\n\r\n") > 0);
+        exchange.worker.join();
+        REQUIRE(exchange.request->rfind("PROBE / HTTP/1.1", 0) == 0);
+    }
+}
+
+TEST_CASE("OnlineActivation sends the key and machine id in the body, not the URL",
+          "[crypto][license][transport]") {
+    auto exchange = serve_loopback_http_response(R"({"status":"valid"})");
+    REQUIRE(OnlineActivation::check_status(exchange.base_url, "secret-key-42",
+                                           loopback_http_options()) == LicenseStatus::Valid);
+    exchange.worker.join();
+
+    const auto line = request_line(*exchange.request);
+    REQUIRE(line == "POST /status HTTP/1.1");
+    REQUIRE(line.find('?') == std::string::npos);
+    REQUIRE(line.find("secret-key-42") == std::string::npos);
+    REQUIRE(line.find(machine_id()) == std::string::npos);
+
+    const auto body = choc::json::parse(request_body(*exchange.request));
+    REQUIRE(body.isObject());
+    REQUIRE(body["key"].getString() == "secret-key-42");
+    REQUIRE(body["machine"].getString() == machine_id());
+}
+
+TEST_CASE("OnlineActivation JSON-escapes user-typed fields",
+          "[crypto][license][transport]") {
+    const std::string serial = R"(SER-"quoted"-back\slash-,"admin":true)";
+    const std::string product = "Pulp\nSynth\t\"β\"";
+    auto exchange = serve_loopback_http_response("license-key");
+    REQUIRE(OnlineActivation::activate(exchange.base_url, serial, product,
+                                       loopback_http_options()));
+    exchange.worker.join();
+
+    const auto body = choc::json::parse(request_body(*exchange.request));
+    REQUIRE(body.isObject());
+    REQUIRE(body.size() == 3);  // serial, product, machine — the injected "admin" is text
+    REQUIRE(body["serial"].getString() == serial);
+    REQUIRE(body["product"].getString() == product);
+    REQUIRE_FALSE(body.hasObjectMember("admin"));
+}
+
+TEST_CASE("OnlineActivation status parse is exact rather than a substring match",
+          "[crypto][license][transport]") {
+    using OA = OnlineActivation;
+    // Controls: the two accepted shapes.
+    REQUIRE(OA::parse_status_response(R"({"status":"valid"})") == LicenseStatus::Valid);
+    REQUIRE(OA::parse_status_response(R"({"status":"expired","note":"renew"})") ==
+            LicenseStatus::Expired);
+
+    // The success word somewhere other than the status field is not a verdict.
+    REQUIRE(OA::parse_status_response(R"({"status":"rejected","note":"valid"})") ==
+            LicenseStatus::InvalidSignature);
+    REQUIRE(OA::parse_status_response(R"({"message":"\"valid\" is required"})") ==
+            LicenseStatus::InvalidSignature);
+    REQUIRE(OA::parse_status_response(R"({"valid":true})") == LicenseStatus::InvalidSignature);
+    REQUIRE(OA::parse_status_response(R"(["valid"])") == LicenseStatus::InvalidSignature);
+    REQUIRE(OA::parse_status_response(R"("valid")") == LicenseStatus::InvalidSignature);
+    REQUIRE(OA::parse_status_response(R"({"status":"Valid"})") == LicenseStatus::InvalidSignature);
+    REQUIRE(OA::parse_status_response(R"({"status":true})") == LicenseStatus::InvalidSignature);
+    REQUIRE(OA::parse_status_response(R"(not json "valid")") == LicenseStatus::InvalidSignature);
+    REQUIRE(OA::parse_status_response("") == LicenseStatus::InvalidSignature);
+
+    // End to end: the server answers with the word in the wrong field.
+    auto exchange = serve_loopback_http_response(R"({"status":"revoked","reason":"\"valid\" until 2025"})");
+    REQUIRE(OA::check_status(exchange.base_url, "key", loopback_http_options()) ==
+            LicenseStatus::InvalidSignature);
+    exchange.worker.join();
 }
 
 TEST_CASE("LicenseGenerator requires a usable private key", "[crypto][license]") {
@@ -978,9 +1110,11 @@ TEST_CASE("LicenseGenerator requires a usable private key", "[crypto][license]")
 }
 
 TEST_CASE("OnlineActivation rejects malformed server URLs without network", "[crypto][license][issue-656]") {
-    REQUIRE_FALSE(OnlineActivation::activate("not-a-url", "serial", "product").has_value());
-    REQUIRE_FALSE(OnlineActivation::deactivate("not-a-url", "license"));
-    REQUIRE(OnlineActivation::check_status("not-a-url", "license") == LicenseStatus::NotFound);
+    for (const char* url : {"not-a-url", "https://", "http://127.0.0.1:1"}) {
+        REQUIRE_FALSE(OnlineActivation::activate(url, "serial", "product").has_value());
+        REQUIRE_FALSE(OnlineActivation::deactivate(url, "license"));
+        REQUIRE(OnlineActivation::check_status(url, "license") == LicenseStatus::NotFound);
+    }
 }
 
 TEST_CASE("OnlineActivation handles successful loopback activation flows",
@@ -992,12 +1126,17 @@ TEST_CASE("OnlineActivation handles successful loopback activation flows",
     server.Post("/deactivate", [](const httplib::Request&, httplib::Response& response) {
         response.status = 204;
     });
-    server.Get("/status", [](const httplib::Request& request, httplib::Response& response) {
-        const auto key = request.has_param("key") ? request.get_param_value("key") : "";
+    server.Post("/status", [](const httplib::Request& request, httplib::Response& response) {
+        std::string key;
+        try {
+            const auto body = choc::json::parse(request.body);
+            if (body.isObject() && body["key"].isString()) key = body["key"].getString();
+        } catch (...) {
+        }
         if (key == "license-key") {
-            response.set_content(R"({"valid":true})", "application/json");
+            response.set_content(R"({"status":"valid"})", "application/json");
         } else if (key == "expired-key") {
-            response.set_content(R"({"expired":true})", "application/json");
+            response.set_content(R"({"status":"expired"})", "application/json");
         } else {
             response.set_content(R"({"status":"denied"})", "application/json");
         }
@@ -1008,14 +1147,16 @@ TEST_CASE("OnlineActivation handles successful loopback activation flows",
     LicenseHttpServerRunner runner(server);
     REQUIRE(runner.wait_until_running());
 
+    const auto options = loopback_http_options();
     const std::string base_url = "http://127.0.0.1:" + std::to_string(port);
-    auto license = OnlineActivation::activate(base_url, "serial-1", "PulpSynth");
+    auto license = OnlineActivation::activate(base_url, "serial-1", "PulpSynth", options);
     REQUIRE(license.has_value());
     REQUIRE(*license == "license-key");
 
-    REQUIRE(OnlineActivation::deactivate(base_url, *license));
-    REQUIRE(OnlineActivation::check_status(base_url, *license) == LicenseStatus::Valid);
-    REQUIRE(OnlineActivation::check_status(base_url, "expired-key") == LicenseStatus::Expired);
-    REQUIRE(OnlineActivation::check_status(base_url, "unknown-key") ==
+    REQUIRE(OnlineActivation::deactivate(base_url, *license, options));
+    REQUIRE(OnlineActivation::check_status(base_url, *license, options) == LicenseStatus::Valid);
+    REQUIRE(OnlineActivation::check_status(base_url, "expired-key", options) ==
+            LicenseStatus::Expired);
+    REQUIRE(OnlineActivation::check_status(base_url, "unknown-key", options) ==
             LicenseStatus::InvalidSignature);
 }
