@@ -539,7 +539,9 @@ void Checkbox::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color(fill);
         canvas.fill_rounded_rect(cx - r, cy - r, r * 2, r * 2, corner);
         // Check glyph (simple checkmark using lines)
-        canvas.set_stroke_color(resolve_color("control.check", canvas::Color::rgba8(30, 30, 40)));
+        // clang-format off
+        canvas.set_stroke_color(canvas::Color::rgba8(30, 30, 40)); // token-lint:allow -- check-glyph ink on the control.fill face; no theme token carries it
+        // clang-format on
         canvas.set_line_width(2.0f);
         canvas.stroke_line(cx - r * 0.35f, cy, cx - r * 0.05f, cy + r * 0.3f);
         canvas.stroke_line(cx - r * 0.05f, cy + r * 0.3f, cx + r * 0.4f, cy - r * 0.3f);
