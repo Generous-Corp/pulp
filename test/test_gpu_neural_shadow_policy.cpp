@@ -8,6 +8,7 @@
 #include "gpu_neural_test_kernels.hpp"
 
 #include "detail/gpu_neural_realtime_test_access.hpp"
+#include "detail/neural_shadow_worker.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -19,6 +20,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -81,6 +83,7 @@ struct Rig {
     std::unique_ptr<GpuNeuralRealtimeNode> node;
     GpuAudioTransport transport;
     std::uint64_t frame = 0;
+    std::uint64_t shadow_pushed = 0; // realtime blocks handed to the Worker
     std::array<std::vector<float>, kChannels> output;
     std::size_t callback_allocations = 0;
 
@@ -174,6 +177,8 @@ struct Rig {
         for (std::uint32_t ch = 0; ch < kChannels; ++ch)
             output[ch].insert(output[ch].end(), out[ch].begin(), out[ch].end());
         frame += kBlock;
+        if (const auto now = mode(); now == Mode::Worker || now == Mode::None)
+            ++shadow_pushed;
         if (pump_gpu)
             for (int i = 0; i < 2; ++i)
                 transport.pump();
@@ -186,6 +191,28 @@ struct Rig {
         for (std::uint32_t b = 0; b < blocks; ++b)
             block(pump_gpu, pump_shadow);
     }
+    /// Offline blocks through the transport, on the same stream.
+    void bounce(std::uint32_t blocks) {
+        std::array<std::vector<float>, kChannels> in, out;
+        std::array<const float*, kChannels> in_ptrs{};
+        std::array<float*, kChannels> out_ptrs{};
+        for (std::uint32_t b = 0; b < blocks; ++b) {
+            for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
+                in[ch].resize(kBlock);
+                out[ch].assign(kBlock, 0.0f);
+                for (std::uint32_t i = 0; i < kBlock; ++i)
+                    in[ch][i] = stimulus(ch, frame + i);
+                in_ptrs[ch] = in[ch].data();
+                out_ptrs[ch] = out[ch].data();
+            }
+            audio::BufferView<const float> input(in_ptrs.data(), kChannels, kBlock);
+            audio::BufferView<float> result(out_ptrs.data(), kChannels, kBlock);
+            transport.process_offline(input, result, kBlock);
+            for (std::uint32_t ch = 0; ch < kChannels; ++ch)
+                output[ch].insert(output[ch].end(), out[ch].begin(), out[ch].end());
+            frame += kBlock;
+        }
+    }
     // Real-thread Worker: wait (bounded) until the shadow caught up, so slot
     // timing matches the explicit-pump tests.
     void wait_for_shadow() {
@@ -193,7 +220,7 @@ struct Rig {
         if (mode != Mode::Worker && mode != Mode::None)
             return;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        while (detail::NeuralRealtimeTestAccess::shadow_processed(*node) < frame / kBlock &&
+        while (detail::NeuralRealtimeTestAccess::shadow_processed(*node) < shadow_pushed &&
                std::chrono::steady_clock::now() < deadline)
             std::this_thread::yield();
     }
@@ -429,6 +456,62 @@ TEST_CASE("an offline render moves a Worker shadow inline on the same timeline",
     rig.offline_status();
 }
 
+TEST_CASE("realtime after an offline bounce runs the shadow where it was prepared",
+          "[gpu_audio][neural][shadow-policy]") {
+    const auto manual = GENERATE(true, false);
+    const auto policy = GENERATE(Policy::Worker, Policy::None);
+    CAPTURE(manual, policy);
+    const auto placed = policy == Policy::Worker ? Mode::Worker : Mode::None;
+    Rig rig({.policy = policy, .manual = manual, .gpu_gain = 2.0f});
+    REQUIRE(rig.prepare());
+    rig.render(4);
+    REQUIRE(rig.mode() == placed);
+    REQUIRE(rig.calls_in_callback() == 0);
+    // Two bounces, each followed by realtime: every switch both ways.
+    for (int bounce = 0; bounce < 2; ++bounce) {
+        rig.bounce(6);
+        CHECK(rig.mode() == Mode::Inline);
+        rig.offline_status();
+        const auto processed = detail::NeuralRealtimeTestAccess::shadow_processed(*rig.node);
+        rig.render(8);
+        // The model ran on the shadow side for every realtime block, never
+        // inside the callback, and the switch back allocated nothing.
+        CHECK(rig.mode() == placed);
+        CHECK(rig.calls_in_callback() == 0);
+        CHECK(detail::NeuralRealtimeTestAccess::shadow_processed(*rig.node) == processed + 8);
+        CHECK(rig.callback_allocations == 0);
+        const auto status = rig.status();
+        CHECK(status.fallback_policy ==
+              (policy == Policy::None ? MissPolicy::Silence : MissPolicy::CpuFallback));
+    }
+    const auto ref = reference(NeuralFamily::WaveNet, 32ull * kBlock);
+    CHECK(block_error(rig, ref, kLead, 4, 2.0f) == 0.0f); // realtime: the GPU, marked
+    CHECK(block_error(rig, ref, 4, 10, 1.0f) == 0.0f);    // first bounce: inline
+    CHECK(block_error(rig, ref, 18, 24, 1.0f) == 0.0f);   // second bounce: inline
+    if (policy == Policy::Worker) {
+        // The GPU stays fenced after offline, so the Worker covers every
+        // realtime slot, the first `lead` of them from the inline ring.
+        CHECK(block_error(rig, ref, 10, 18, 1.0f) == 0.0f);
+        CHECK(block_error(rig, ref, 24, 32, 1.0f) == 0.0f);
+        CHECK(rig.status().shadow_double_miss_blocks == 0);
+    }
+}
+
+TEST_CASE("an Inline shadow stays inline across an offline bounce",
+          "[gpu_audio][neural][shadow-policy]") {
+    Rig rig({.policy = Policy::Inline});
+    REQUIRE(rig.prepare());
+    rig.render(4);
+    rig.bounce(4);
+    rig.render(4);
+    CHECK(rig.mode() == Mode::Inline);
+    // Positive control for the instrument: Inline runs in the callback.
+    CHECK(rig.calls_in_callback() > 0);
+    CHECK(rig.callback_allocations == 0);
+    const auto ref = reference(NeuralFamily::WaveNet, 12ull * kBlock);
+    CHECK(block_error(rig, ref, 0, 12, 1.0f) == 0.0f);
+}
+
 TEST_CASE("a different shadow model is reported and must match the stream shape",
           "[gpu_audio][neural][shadow-policy]") {
     FamilyFixture lite(NeuralFamily::Lstm, kChannels, kBlock);
@@ -617,4 +700,40 @@ TEST_CASE("a lagging shadow under a healthy GPU is not counted late",
     CHECK(status.shadow_delivered_blocks == 0);
     const auto ref = reference(NeuralFamily::WaveNet, 16ull * kBlock);
     CHECK(block_error(rig, ref, 0, 16, 1.0f) == 0.0f);
+}
+
+namespace {
+// Halves a subnormal on the shadow side; flush-to-zero makes it exactly 0.
+void halve_subnormal(void*, const float* input, float* output,
+                     detail::StreamingBlockStamp) noexcept {
+    volatile float half = 0.5f;
+    output[0] = input[0] * half;
+}
+void no_reset(void*) noexcept {}
+} // namespace
+
+TEST_CASE("the shadow thread flushes subnormal results to zero",
+          "[gpu_audio][neural][shadow-policy]") {
+    const float tiny = std::numeric_limits<float>::min() / 4.0f; // subnormal
+    const float* channels[] = {&tiny};
+    detail::StreamingBlockStamp stamp;
+    for (const bool thread : {false, true}) {
+        CAPTURE(thread);
+        detail::NeuralShadowWorker worker;
+        REQUIRE(worker.start({.capacity = 4, .samples_per_block = 1, .spawn_thread = thread},
+                             nullptr, &halve_subnormal, &no_reset));
+        REQUIRE(worker.push_input({.epoch = 1, .sequence = 0}, channels, 1, 1));
+        if (!thread)
+            REQUIRE(worker.pump() == 1);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (worker.front(stamp) == nullptr && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::yield();
+        const float* result = worker.front(stamp);
+        REQUIRE(result != nullptr);
+        if (thread)
+            CHECK(*result == 0.0f);
+        else
+            CHECK(*result == tiny / 2.0f); // control: this thread keeps subnormals
+        worker.stop();
+    }
 }

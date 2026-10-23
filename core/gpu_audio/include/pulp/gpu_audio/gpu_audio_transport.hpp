@@ -301,6 +301,10 @@ class GpuAudioTransport {
     void publish_prepared_configuration() noexcept;
     std::uint64_t callback_sequence_ = 0; // one monotonic RT/offline callback timeline
     bool realtime_gpu_fenced_for_offline_ = false;
+    // Optional node hook bracketing each offline run; `realtime_gpu_offline_`
+    // is set by its first block and cleared by the next realtime callback.
+    void (*realtime_gpu_offline_render_)(void*, bool) noexcept = nullptr;
+    bool realtime_gpu_offline_ = false;
 
     // Synchronous (offline) drive. When `synchronous_` is set, the background
     // worker yields and process_offline() pumps the node inline under

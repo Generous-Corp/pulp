@@ -167,6 +167,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         realtime_gpu_fence_ = realtime_path.fence;
         realtime_gpu_delivered_ = realtime_path.delivered;
         realtime_gpu_health_ = realtime_path.health;
+        realtime_gpu_offline_render_ = realtime_path.offline_render;
         callback_sequence_ = realtime_path.next_sequence(realtime_path.context);
     }
     sample_staged_health_ = !realtime_path.active();
@@ -341,12 +342,14 @@ void GpuAudioTransport::release() noexcept {
     realtime_gpu_fence_ = nullptr;
     realtime_gpu_delivered_ = nullptr;
     realtime_gpu_health_ = nullptr;
+    realtime_gpu_offline_render_ = nullptr;
     sample_staged_health_ = false;
     diagnostics_->health.reset();
     trial_observer_context_ = nullptr;
     trial_observer_ = nullptr;
     callback_sequence_ = 0;
     realtime_gpu_fenced_for_offline_ = false;
+    realtime_gpu_offline_ = false;
     audio_workgroup_ = nullptr;
     join_audio_workgroup_ = false;
     worker_workgroup_joined_.store(false, std::memory_order_release);
@@ -377,6 +380,10 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
                                                   std::uint64_t sequence, bool input_valid,
                                                   std::uint64_t callback_start_ns) noexcept {
     if (realtime_gpu_process_ != nullptr) {
+        if (realtime_gpu_offline_) {
+            realtime_gpu_offline_ = false;
+            realtime_gpu_offline_render_(realtime_gpu_context_, false);
+        }
         process_shared(input, output, n, sequence, input_valid, callback_start_ns, true);
         return;
     }
@@ -570,6 +577,10 @@ void GpuAudioTransport::process_offline_position(const audio::BufferView<const f
     std::lock_guard<std::mutex> lock(pump_mutex_);
 
     if (realtime_gpu_fence_ != nullptr) {
+        if (!realtime_gpu_offline_ && realtime_gpu_offline_render_ != nullptr) {
+            realtime_gpu_offline_ = true;
+            realtime_gpu_offline_render_(realtime_gpu_context_, true);
+        }
         if (!realtime_gpu_fenced_for_offline_) {
             realtime_gpu_fenced_for_offline_ = realtime_gpu_fence_(realtime_gpu_context_);
             refresh_node_health();

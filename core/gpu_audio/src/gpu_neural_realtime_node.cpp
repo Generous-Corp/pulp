@@ -118,11 +118,13 @@ struct GpuNeuralRealtimeNode::Impl {
     // CPU-only path: invalid or out-of-sequence callbacks observed.
     std::atomic<std::uint64_t> contract_violations{0};
 
-    // Shadow placement. `shadow_mode` is the policy in effect; only prepare(),
-    // release() and the offline fence change it, each with the callback idle.
+    // Shadow placement. `shadow_mode` is the policy in effect; prepare() and
+    // release() set it, and an offline render moves Worker or None inline
+    // until the first realtime callback after it restores `realtime_mode`.
     // Atomic because shadow_status() may read them from a host or UI thread
-    // while an offline fence moves Worker to Inline.
+    // during either switch.
     std::atomic<ShadowPolicy> shadow_mode{ShadowPolicy::None};
+    ShadowPolicy realtime_mode = ShadowPolicy::None;
     std::atomic<float> inline_cost_pct{-1.0f};
     float injected_cost_pct = -1.0f; // test seam; negative measures
     bool manual_shadow = false;      // test seam; no thread, pumped explicitly
@@ -309,11 +311,12 @@ struct GpuNeuralRealtimeNode::Impl {
             (void)processor->reset(detail::StreamingResetReason::TransportRestart);
     }
 
-    // Offline fence: finish the queued shadow work on this thread, then let
-    // the Worker's unconsumed results seed the inline delay ring so the next
-    // callbacks continue the same timeline.
+    // Entering an offline render: park the shadow thread, finish its queued
+    // work on this thread, then let the Worker's unconsumed results seed the
+    // inline delay ring so the next callbacks continue the same timeline.
     void switch_worker_to_inline() noexcept {
-        worker.stop();
+        realtime_mode = shadow_mode.load(std::memory_order_relaxed);
+        worker.pause();
         (void)worker.pump();
         const auto n = block_size();
         const auto channels = config.channels;
@@ -340,7 +343,32 @@ struct GpuNeuralRealtimeNode::Impl {
                 break;
             }
         }
+        // Results for slots that already passed are no longer needed.
+        detail::StreamingBlockStamp stale;
+        while (worker.front(stale) != nullptr)
+            worker.pop_front();
         shadow_mode = ShadowPolicy::Inline;
+    }
+
+    // The first realtime callback after an offline render: the reverse of
+    // switch_worker_to_inline(). The inline ring's pending results move to
+    // the Worker's egress, and the parked thread resumes after the last
+    // block the inline model ran. Copies only, on the audio thread.
+    void switch_inline_to_worker() noexcept {
+        const auto n = block_size();
+        const auto lead = config.lead_blocks;
+        const auto block_samples = static_cast<std::size_t>(config.channels) * n;
+        // Slot (cursor + k) holds the result for shadow_sequence - lead + k.
+        for (std::uint32_t k = 0; k < lead; ++k) {
+            if (shadow_sequence + k < first_sequence + lead)
+                continue;
+            const float* slot = shadow_ring.data() + ((shadow_cursor + k) % lead) * block_samples;
+            (void)worker.publish_output(
+                {.epoch = shadow_epoch, .sequence = shadow_sequence - lead + k}, slot);
+        }
+        shadow_hit = false;
+        worker.resume(shadow_sequence);
+        shadow_mode = realtime_mode;
     }
 
     void fail(detail::SharedIoRecoveryReason reason,
@@ -640,6 +668,7 @@ bool GpuNeuralRealtimeNode::prepare() {
         else
             s.shadow_mode =
                 total_cost <= kAutoInlineMaxCostPct ? ShadowPolicy::Inline : ShadowPolicy::Worker;
+        s.realtime_mode = s.shadow_mode;
 
         // Silent prewarm runs through the shadow too, so its causal history
         // starts at the same stream position as the GPU history.
@@ -699,7 +728,7 @@ bool GpuNeuralRealtimeNode::release() noexcept {
     s.prepared = false;
     // The shadow thread steps the processors; join it before releasing them.
     s.worker.stop();
-    s.shadow_mode = ShadowPolicy::None;
+    s.shadow_mode = s.realtime_mode = ShadowPolicy::None;
     if (s.bridge)
         s.bridge->request_recovery(detail::SharedIoRecoveryReason::OfflineFence);
     if (s.backend_active) {
@@ -1081,12 +1110,22 @@ std::uint32_t GpuNeuralRealtimeNode::service(void* self, std::uint64_t) noexcept
     return produced;
 }
 
+void GpuNeuralRealtimeNode::offline_render(void* self, bool offline) noexcept {
+    auto& s = *static_cast<GpuNeuralRealtimeNode*>(self)->impl_;
+    if (!s.prepared)
+        return;
+    // An offline render is synchronous; the asynchronous shadow cannot keep
+    // up with it, so it continues inline from the same timeline. Realtime
+    // gets back the placement it was prepared with.
+    if (offline && s.worker_fed())
+        s.switch_worker_to_inline();
+    else if (!offline && s.shadow_mode.load(std::memory_order_relaxed) == ShadowPolicy::Inline &&
+             s.realtime_mode != ShadowPolicy::Inline)
+        s.switch_inline_to_worker();
+}
+
 bool GpuNeuralRealtimeNode::fence(void* self) noexcept {
     auto& s = *static_cast<GpuNeuralRealtimeNode*>(self)->impl_;
-    // An offline render is synchronous; the asynchronous shadow cannot keep
-    // up with it, so it continues inline from the same timeline.
-    if (s.worker_fed())
-        s.switch_worker_to_inline();
     if (!s.bridge || !s.backend_active)
         return true;
     // The callback is idle during the offline fence, so its position is stable.

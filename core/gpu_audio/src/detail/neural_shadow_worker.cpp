@@ -1,6 +1,7 @@
 #include "neural_shadow_worker.hpp"
 
 #include <pulp/audio/workgroup.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -79,6 +80,8 @@ bool NeuralShadowWorker::start(const Config& config, void* context, StepFn step,
     reset_ = reset;
     has_expected_ = false;
     next_expected_ = 0;
+    paused_.store(0, std::memory_order_relaxed);
+    parked_.store(0, std::memory_order_relaxed);
     for (auto* counter : {&processed_, &input_dropped_, &output_dropped_, &resyncs_, &late_})
         counter->store(0, std::memory_order_relaxed);
     workgroup_joined_.store(false, std::memory_order_relaxed);
@@ -98,6 +101,30 @@ void NeuralShadowWorker::stop() noexcept {
     running_.store(false, std::memory_order_release);
     if (thread_.joinable())
         thread_.join();
+}
+
+void NeuralShadowWorker::pause() noexcept {
+    const auto generation = ++pause_generation_;
+    paused_.store(generation, std::memory_order_seq_cst);
+    // An echo of an older request is stale; only this one proves the thread
+    // has left pump() and will not enter it again until resume().
+    while (running() && parked_.load(std::memory_order_acquire) != generation)
+        std::this_thread::yield();
+}
+
+void NeuralShadowWorker::resume(std::uint64_t next_sequence) noexcept {
+    next_expected_ = next_sequence;
+    has_expected_ = true;
+    paused_.store(0, std::memory_order_release);
+}
+
+bool NeuralShadowWorker::publish_output(StreamingBlockStamp stamp, const float* samples) noexcept {
+    float* slot = output_.begin_push(stamp);
+    if (slot == nullptr)
+        return false;
+    std::copy_n(samples, output_.samples_per_block(), slot);
+    output_.commit_push();
+    return true;
 }
 
 bool NeuralShadowWorker::push_input(StreamingBlockStamp stamp, const float* const* channels,
@@ -184,6 +211,9 @@ std::size_t NeuralShadowWorker::pump(std::size_t max_blocks) noexcept {
 }
 
 void NeuralShadowWorker::loop() noexcept {
+    // The inline shadow runs under the host's flush-to-zero; this thread
+    // gets the same mode, so a decaying recurrent state cannot go subnormal.
+    signal::ScopedFlushDenormals flush_denormals;
     audio::AudioWorkgroup workgroup;
 #if defined(__APPLE__)
     if (config_.audio_workgroup != nullptr) {
@@ -195,6 +225,11 @@ void NeuralShadowWorker::loop() noexcept {
 #endif
     const auto poll = std::chrono::nanoseconds(config_.poll_ns);
     while (running_.load(std::memory_order_acquire)) {
+        if (const auto generation = paused_.load(std::memory_order_seq_cst)) {
+            parked_.store(generation, std::memory_order_release);
+            std::this_thread::sleep_for(poll);
+            continue;
+        }
         if (pump() == 0)
             std::this_thread::sleep_for(poll);
     }

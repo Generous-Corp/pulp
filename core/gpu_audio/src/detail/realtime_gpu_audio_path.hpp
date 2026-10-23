@@ -64,6 +64,11 @@ struct RealtimeGpuHealth {
 using RealtimeGpuHealthFn = bool (*)(const void*, RealtimeGpuHealth&) noexcept;
 // Non-RT: release and re-prepare the provider, opening a new epoch.
 using RealtimeGpuReprepareFn = bool (*)(void*) noexcept;
+// Brackets each offline run. `true` comes on the offline render thread before
+// the run's first block, with the callback idle; `false` comes on the audio
+// thread at the first realtime callback after the run, before that callback
+// touches the node, so it must not allocate, lock or wait.
+using RealtimeGpuOfflineRenderFn = void (*)(void*, bool offline) noexcept;
 
 struct RealtimeGpuNodePath {
     void* context = nullptr;
@@ -75,9 +80,11 @@ struct RealtimeGpuNodePath {
     // across transport release, reconstruction and reprepare.
     RealtimeGpuSequenceFn next_sequence = nullptr;
     // Optional; not part of active(). `health` is populated for the WaveNet
-    // realtime node and the shared GpuConvolver path; `reprepare` is unused.
+    // realtime node and the shared GpuConvolver path; `reprepare` is unused;
+    // `offline_render` is populated for the neural realtime node.
     RealtimeGpuHealthFn health = nullptr;
     RealtimeGpuReprepareFn reprepare = nullptr;
+    RealtimeGpuOfflineRenderFn offline_render = nullptr;
 
     bool active() const noexcept {
         return context != nullptr && process != nullptr && service != nullptr && fence != nullptr &&

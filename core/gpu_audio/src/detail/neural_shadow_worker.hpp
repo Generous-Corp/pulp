@@ -87,6 +87,16 @@ class NeuralShadowWorker {
     bool running() const noexcept {
         return running_.load(std::memory_order_acquire);
     }
+    // Host thread. Parks the thread between steps and returns once it is
+    // parked, so the caller may pump() and own the model until resume().
+    void pause() noexcept;
+    // Callback. Lets a parked thread continue, expecting `next_sequence` as
+    // its next input; the caller already stepped the model through the one
+    // before it. Never waits and never allocates.
+    void resume(std::uint64_t next_sequence) noexcept;
+    // Callback, while paused: the producer side of the output ring, for
+    // results the caller computed itself. False when the ring is full.
+    bool publish_output(StreamingBlockStamp stamp, const float* samples) noexcept;
 
     // Callback. Copy only; false (and a counted drop) when the ring is full.
     bool push_input(StreamingBlockStamp stamp, const float* const* channels,
@@ -127,6 +137,10 @@ class NeuralShadowWorker {
     Config config_{};
     std::thread thread_;
     std::atomic<bool> running_{false};
+    // Nonzero while paused: the pause request's generation, which the thread
+    // echoes into `parked_` once it has stopped stepping.
+    std::atomic<std::uint64_t> paused_{0}, parked_{0};
+    std::uint64_t pause_generation_ = 0; // host side
     std::uint64_t next_expected_ = 0; // shadow side
     bool has_expected_ = false;       // shadow side
     std::atomic<std::uint64_t> processed_{0}, input_dropped_{0}, output_dropped_{0}, resyncs_{0},

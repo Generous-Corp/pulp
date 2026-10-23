@@ -326,8 +326,8 @@ governs only realtime GPU misses:
   shadow thread so that an offline render can continue it. It is rejected
   (`ShadowRequired`) for a family without a GPU kernel. While `None` is in
   effect, the node's own `status_snapshot()` and `capability_report()` report
-  `fallback_policy = Silence` and `fallback_available = false`; once an offline
-  fence moves the shadow inline they report `CpuFallback` again. The
+  `fallback_policy = Silence` and `fallback_available = false`. During an
+  offline render, which runs the shadow inline, they report `CpuFallback`. The
   transport's status still reports the descriptor's `CpuFallback` for such a
   node, so read the node's status or `shadow_mode` to see that misses are
   silent.
@@ -337,9 +337,11 @@ governs only realtime GPU misses:
 
 CPU-only families, and a WaveNet node whose provider could not be prepared,
 always run `Inline`, because the CPU model is their output. An offline render
-always runs the CPU model inline. At the transport's offline fence, a `Worker`
-or `None` shadow finishes its queue and continues inline on the same timeline,
-so a bounce does not go silent; it stays inline until the next `prepare()`.
+always runs the CPU model inline. When an offline render starts, a `Worker` or
+`None` shadow finishes its queue and continues inline on the same timeline, so
+a bounce does not go silent. The first realtime callback after the bounce
+returns the model to the shadow thread, copying only the pending results, so
+an over-budget model never runs on the audio thread after an offline render.
 
 A `Worker` shadow for a large model can still miss: its result must arrive
 within the lead. Inline, the shadow's cost is paid on the audio thread for every

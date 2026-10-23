@@ -71,8 +71,9 @@ GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept;
 ///
 /// The policy governs realtime misses only. An offline render always runs the
 /// CPU model inline on the same timeline: under Worker and None the model is
-/// kept primed off the audio thread, and the offline fence finishes its queue
-/// and continues it inline. The node's `shadow_*` status fields are the
+/// kept primed off the audio thread, the start of an offline render finishes
+/// its queue and continues it inline, and the first realtime callback after
+/// the render hands it back to the shadow thread. The node's `shadow_*` status fields are the
 /// authoritative shadow counts; the transport's CpuFallbackDelivered label
 /// means only that the fallback path ran, which can be a silent double miss.
 ///
@@ -266,6 +267,7 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
                                 std::uint64_t) noexcept;
     static std::uint32_t service(void*, std::uint64_t) noexcept;
     static bool fence(void*) noexcept;
+    static void offline_render(void*, bool offline) noexcept;
     static void delivered(void*, std::uint64_t, std::uint8_t, std::uint64_t,
                           std::uint64_t) noexcept;
     static std::uint64_t next_sequence(void*) noexcept;

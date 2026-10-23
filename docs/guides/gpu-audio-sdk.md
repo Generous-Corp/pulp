@@ -382,10 +382,12 @@ what happens on a realtime GPU miss:
 Families without a GPU backend always run `Inline`, because the CPU model is
 their output. So does a GPU family whose provider could not be prepared.
 
-An offline render always uses the CPU model inline, whatever the policy. On
-the transport's offline fence, a `Worker` or `None` shadow finishes its queue
-and continues inline on the same timeline, so a bounce never goes silent. It
-stays inline until the next `prepare()`.
+An offline render always uses the CPU model inline, whatever the policy. When
+an offline render starts, a `Worker` or `None` shadow finishes its queue and
+continues inline on the same timeline, so a bounce never goes silent. The
+first realtime callback after the bounce hands the model back to the shadow
+thread, so realtime runs with the placement chosen at `prepare()` again. That
+switch only copies the pending results, and it never allocates or waits.
 
 `status_snapshot()` reports the shadow in the public `shadow_*` fields of
 `GpuAudioStatus`: the mode, the total inline cost, and how many blocks were

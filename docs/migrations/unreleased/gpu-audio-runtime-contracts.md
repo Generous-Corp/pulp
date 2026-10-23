@@ -149,8 +149,9 @@ reports its default until the node in question supplies it.
   block at `prepare()` and picks `Inline` when per-channel cost × channels ≤
   `kAutoInlineMaxCostPct` (15%) of the block period, otherwise `Worker` (a
   dedicated thread; the callback only copies). `None` makes a realtime miss
-  silent; offline renders always run the CPU model inline. Families without a
-  GPU backend always run `Inline`.
+  silent. Offline renders always run the CPU model inline, and the first
+  realtime callback after one restores the placement chosen at `prepare()`.
+  Families without a GPU backend always run `Inline`.
 - **New Config fields**, all appended after `miss_policy`, so positional
   initialization of the existing prefix still compiles: `shadow_policy`,
   `shadow_model` (an optional cheaper model; never a default, reported as
@@ -163,8 +164,8 @@ reports its default until the node in question supplies it.
   add the requested policy, per-channel and total cost, queue drops, resyncs
   and workgroup membership. While `ShadowPolicy::None` is in effect, the
   node's own `status_snapshot()` and `capability_report()` report
-  `fallback_policy = Silence` and `fallback_available = false` (back to
-  `CpuFallback` once an offline fence moves the shadow inline); the
+  `fallback_policy = Silence` and `fallback_available = false` (`CpuFallback`
+  during an offline render, which runs the shadow inline); the
   transport's status still reports the descriptor's `CpuFallback` for that
   node.
 - **Preparation.** `PrepareError` appends `ShadowRequired` and
