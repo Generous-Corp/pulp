@@ -1,0 +1,34 @@
+# Local Windows ARM desktop helper
+
+`open-utm-rdp.sh` is a local, non-runner demo helper. It starts one verified
+UTM guest, repairs RDP through that guest's authenticated SSH connection, and
+opens the desktop with SDL FreeRDP. It does not discover a guest by position or
+silently fall back to another VM.
+
+Before first use, verify the guest identity and forwarding values on the host:
+
+```sh
+/Applications/UTM.app/Contents/MacOS/utmctl list
+export SPECTR_WINDOWS_UTM_UUID='<verified-uuid>'
+export SPECTR_WINDOWS_SSH_PORT='<verified-local-ssh-port>'
+export SPECTR_WINDOWS_RDP_PORT='<verified-local-rdp-port>'
+```
+
+Keep those three non-secret values in a machine-local launcher configuration.
+Keep the admin credential in
+`~/.config/pulp/secrets/spectr-windows-utm-admin` with mode `0600` and do not
+put it in this repository. The helper refuses an absent UUID, so a stale
+configuration cannot start the wrong guest.
+
+The loopback SSH connection uses the guest key supplied by the local image and
+does not pin a host key in this repository. Treat the image and its key as a
+local trusted test fixture; do not reuse these scripts for an untrusted remote
+host without adding host-key verification.
+
+Run:
+
+```sh
+./tools/windows/open-utm-rdp.sh
+```
+
+The guest is a bounded development/demo VM and is not a GitHub runner.

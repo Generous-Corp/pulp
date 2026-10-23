@@ -16,18 +16,25 @@ cd "$HOME/Library/Application Support/Pulp/WindowsDemo"
 ./tools/windows/open-utm-rdp.sh
 ```
 
-The helper starts the guest when needed, repairs RDP over the authenticated SSH
-channel, and reads the credential from
-`~/.config/pulp/secrets/spectr-windows-utm-admin`. The retained forwarding is
-SSH `127.0.0.1:50476` and RDP `127.0.0.1:53490`; the Windows account is
-`PULP-WIN\\admin`. Once the RDP desktop is visible, start REAPER from its
-shortcut and insert `VST3: Spectr (Pulp)`.
+The helper starts the selected guest when needed, repairs RDP over the
+authenticated SSH channel, and reads the credential from
+`~/.config/pulp/secrets/spectr-windows-utm-admin`. Its UTM UUID, forwarded
+ports, and Windows account are machine-local configuration; discover them with
+`utmctl list` and the helper's installed README instead of copying values from
+this guide. The account is written as `PULP-WIN\admin` (the domain and user are
+passed separately to RDP). If the helper's configured UUID is absent from
+`utmctl list`, stop and repair the local installation or set the documented
+`SPECTR_WINDOWS_UTM_UUID` override after verifying the guest identity. Once the
+RDP desktop is visible, start REAPER from its shortcut and insert
+`VST3: Spectr (Pulp)`.
 
 Interactive evidence must be driven from that RDP desktop. An SSH service
 session cannot safely create a visible plugin window, so a successful SSH
 command or Task Scheduler result is not a screenshot or interaction receipt.
-Keep the guest running only for the bounded test/demo session; stop Proxmox VM
-300 when its owned build and host processes have returned to idle.
+Keep the selected UTM guest running only for the bounded test/demo session and
+stop that same UTM guest with `utmctl stop <verified-uuid>` afterward. Proxmox
+VM 300 is a separate x64 guest; stop it only after its own build and host
+processes have returned to idle.
 
 ## Inputs
 
