@@ -9,6 +9,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
 #include <algorithm>
 #include <cmath>
@@ -48,7 +49,6 @@ using namespace pulp::canvas;
 // returns null on a stock macOS install — and the next non-ASCII fill_text
 // call would throw std::out_of_range during glyph fallback.
 #include <pulp/canvas/bundled_fonts.hpp>
-#include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/text_run_planner.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/canvas/text_font_context.hpp>
@@ -1275,6 +1275,21 @@ TEST_CASE("Canvas::text_x_for_byte clamps mid-codepoint indices to a UTF-8 "
     }
 }
 
+// The `font-family` list parsing every text path shares. It is Skia-free, so
+// it runs in builds without a GPU backend too. "a quoted generic family is a
+// literal name on every text path" covers what the paths do with it.
+TEST_CASE("a quoted generic family parses as a literal name", "[canvas][text][generic-family]") {
+    CHECK(pulp::canvas::parse_css_font_family(" 'serif' ").quoted);
+    CHECK(pulp::canvas::parse_css_font_family(" 'serif' ").name == "serif");
+    CHECK_FALSE(pulp::canvas::parse_css_font_family("serif").quoted);
+    CHECK(pulp::canvas::split_css_font_family_list(" \"serif\" , Inter,, ") ==
+          std::vector<std::string>{"\"serif\"", "Inter"});
+    CHECK(pulp::canvas::platform_family_for_css_family("\"serif\"") == "serif");
+    CHECK(pulp::canvas::platform_family_for_css_family("'serif'") == "serif");
+#if defined(__APPLE__)
+    CHECK(pulp::canvas::platform_family_for_css_family("serif") == "Times");
+#endif
+}
 
 #ifdef PULP_HAS_SKIA
 
@@ -2129,14 +2144,6 @@ TEST_CASE("a quoted generic family is a literal name on every text path",
 #if !defined(__APPLE__)
     SKIP("the generic-family table covers macOS");
 #else
-    CHECK(parse_css_font_family(" 'serif' ").quoted);
-    CHECK(parse_css_font_family(" 'serif' ").name == "serif");
-    CHECK_FALSE(parse_css_font_family("serif").quoted);
-    CHECK(split_css_font_family_list(" \"serif\" , Inter,, ") ==
-          std::vector<std::string>{"\"serif\"", "Inter"});
-    CHECK(platform_family_for_css_family("serif") == "Times");
-    CHECK(platform_family_for_css_family("\"serif\"") == "serif");
-
     FontResolver::instance().clear_cache();
     SkImageInfo info =
         SkImageInfo::Make(64, 64, kN32_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
