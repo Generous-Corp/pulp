@@ -7519,9 +7519,10 @@
    "kind": "node"
   },
   "pulp-browser-capture-node-unit": {
-   "entry": "tools/import-design/browser_capture/form_control_theme.test.mjs",
+   "entry": "tools/import-design/browser_capture/document_canvas.test.mjs",
    "inputs": [
-    "tools/import-design/browser_capture/form_control_theme.mjs",
+    "tools/import-design/browser_capture/document_canvas.mjs",
+    "tools/import-design/browser_capture/document_canvas.test.mjs",
     "tools/import-design/browser_capture/form_control_theme.test.mjs",
     "tools/import-design/browser_capture/health.test.mjs",
     "tools/import-design/browser_capture/interactions.test.mjs",
