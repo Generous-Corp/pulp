@@ -115,7 +115,8 @@ canvas::AttributedString Label::resolved_attributed_string() const {
 }
 
 void Label::set_text(std::string text) {
-    if (text == text_) return;
+    if (text == text_)
+        return;
     // A horizontal, single-line Label whose laid-out box does not move
     // when its copy changes cannot move its siblings either, so it does
     // not need a layout pass. Live readouts update this kind of Label on
@@ -123,20 +124,18 @@ void Label::set_text(std::string text) {
     // per sample is pure work and can consume the entire input budget.
     //
     // Keep the conservative path for intrinsic-width, multiline,
-    // vertical, attributed, and captured-wrap Labels. Their text can
-    // change measured geometry, so they must still invalidate layout.
+    // vertical, attributed, and captured-wrap Labels unless the box is a
+    // pinned capture. Their text can change measured geometry, so they
+    // must still invalidate layout.
     const auto& style = flex();
     const bool has_explicit_width =
         style.preferred_width > 0.0f ||
-        (style.dim_width.unit != DimensionUnit::auto_ &&
-         style.dim_width.value > 0.0f);
+        (style.dim_width.unit != DimensionUnit::auto_ && style.dim_width.value > 0.0f);
     const bool has_explicit_height =
         style.preferred_height > 0.0f ||
-        (style.dim_height.unit != DimensionUnit::auto_ &&
-         style.dim_height.value > 0.0f);
-    const bool horizontal =
-        text_direction_ != canvas::TextDirection::top_to_bottom &&
-        text_direction_ != canvas::TextDirection::bottom_to_top;
+        (style.dim_height.unit != DimensionUnit::auto_ && style.dim_height.value > 0.0f);
+    const bool horizontal = text_direction_ != canvas::TextDirection::top_to_bottom &&
+                            text_direction_ != canvas::TextDirection::bottom_to_top;
     const bool single_line_simple =
         horizontal && !soft_wraps() && !captured_wrap_fallback_ && !has_attributed_;
     // Baseline alignment reads this Label's ASCENT, not its height, to
@@ -165,14 +164,13 @@ void Label::set_text(std::string text) {
     // do anyway and which the measure memo caches; invalidate_layout()
     // costs a Yoga pass over the whole tree. Probe only when it can pay
     // off -- an intrinsic-width Label must reflow regardless.
-    const bool probe_height = has_explicit_width && single_line_simple &&
-                              !has_explicit_height && !baseline_aligned;
+    const bool probe_height =
+        has_explicit_width && single_line_simple && !has_explicit_height && !baseline_aligned;
     const float height_before = probe_height ? intrinsic_height() : 0.0f;
     // The ink a fixed-box, single-line Label paints can run past its box
     // when the copy is wider than the box; measured before the copy
     // changes so the repaint below covers the old text's ink too.
-    const float ink_before =
-        has_explicit_width && single_line_simple ? intrinsic_width() : 0.0f;
+    const float ink_before = has_explicit_width && single_line_simple ? intrinsic_width() : 0.0f;
     text_ = std::move(text);
     // A captured browser line box describes ONE string. Once the copy
     // diverges from it the Label paints natively, and it must keep doing
@@ -211,17 +209,46 @@ void Label::set_text(std::string text) {
     // PreText-style shaper cache is keyed by (text, family, size), so the
     // new text simply hits a different cache entry — no algorithm change,
     // just cache-correct re-measurement.
-    const bool text_geometry_is_fixed = !captured_basis_dropped && has_explicit_width &&
-                                        single_line_simple &&
-                                        ((has_explicit_height && !baseline_aligned) ||
-                                         (probe_height && intrinsic_height() == height_before));
-    if (!text_geometry_is_fixed) invalidate_layout();
+    //
+    // Layout gives this Label's text an anonymous slot of its own when it
+    // has children or its flex alignment moves lone text, and that slot
+    // is sized from the copy, so new copy moves layout output no matter
+    // how the Label's own box is pinned.
+    const bool text_has_layout_slot = has_own_text_box();
+    const bool box_is_pinned =
+        has_explicit_width && has_explicit_height && !baseline_aligned && !text_has_layout_slot;
+    // A captured box pinned in points on both axes is fixed whatever the
+    // copy wraps to. Yoga never measures a box whose width and height are
+    // definite, it shrinks a flex item toward its explicit min size rather
+    // than a content minimum, and an auto-sized parent reads this box, not
+    // its text. A childless Label with captured lines never gets a text
+    // slot, and scroll extents read child bounds rather than ink, so no line
+    // count or retired capture can move anything. A percent or viewport
+    // dimension stays on the conservative path: it resolves against a
+    // parent whose own size may be content-derived. Most captured
+    // design-import boxes are this kind, and they wrap on a cache miss.
+    const auto pinned_in_points = [](float preferred, const Dimension& dim) {
+        return dim.unit == DimensionUnit::px && (dim.value > 0.0f || preferred > 0.0f);
+    };
+    const bool captured_box_is_pinned =
+        pinned_in_points(style.preferred_width, style.dim_width) &&
+        pinned_in_points(style.preferred_height, style.dim_height) && !baseline_aligned &&
+        !text_has_layout_slot && !cached_line_boxes_.empty() && child_count() == 0;
+    const bool text_geometry_is_fixed =
+        captured_box_is_pinned ||
+        (!captured_basis_dropped && has_explicit_width && single_line_simple &&
+         !text_has_layout_slot &&
+         (box_is_pinned || (probe_height && intrinsic_height() == height_before)));
+    if (!text_geometry_is_fixed)
+        invalidate_layout();
     // selectable_text() already exposes the new source bytes, so geometry
     // from the previous paint can no longer describe it honestly. Keep
     // the capability unmeasured until the repaint records the new run.
     selection_layout_ = {};
     selection_layout_pending_ = {};
-    if (!text_geometry_is_fixed) {
+    // Wrapped lines can overflow a pinned box downward, past what the
+    // bounded rect below covers, so only a single line repaints bounded.
+    if (!text_geometry_is_fixed || !single_line_simple) {
         request_repaint();
         return;
     }
