@@ -152,7 +152,7 @@ class HelperScoringTests(unittest.TestCase):
         registered = [(registered_browser, native, 1.0)]
         geometry = geometry_metrics_with_registration(
             raw_match, registered, {"x": -24.0, "y": -24.0},
-            reference_node_count=1)
+            reference_nodes=[registered_browser])
         self.assertLess(geometry["score"], 1.0)
         recommendation = promotion_recommendation(
             [],

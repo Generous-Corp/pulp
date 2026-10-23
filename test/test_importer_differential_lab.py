@@ -50,6 +50,7 @@ sys.path.insert(0, str(REPO / "tools" / "import-validation"))
 from importer_differential import core as LAB  # noqa: E402
 from importer_differential import cli as LAB_CLI  # noqa: E402
 from importer_differential import form_controls as FORM_CONTROLS  # noqa: E402
+from importer_differential.model import has_reference_box  # noqa: E402
 
 
 def observer_placement(argv: list[str]) -> dict[str, object]:
@@ -1812,7 +1813,8 @@ class GeometryGateTests(unittest.TestCase):
                 self.CHILD[2] * dw_scale, self.CHILD[3])
 
     def build(self, *, native_child=None, recorded_shift=0.0, html_shift=0.0,
-              root_shift=0.0, provide_placement=True, unmatched_reference=0):
+              root_shift=0.0, provide_placement=True, unmatched_reference=0,
+              boxless_reference=0):
         snapshot = surface_snapshot(self.FRAME, [self.CHILD])
         capture = {"reference": {"authored_frame": dict(
             zip(("x", "y", "width", "height"), self.FRAME))}}
@@ -1853,9 +1855,15 @@ class GeometryGateTests(unittest.TestCase):
         raw = list(zip(browser_raw, native_page, [100.0, 100.0]))
         placement = (LAB.frame_placement_check(snapshot, ir, layout, registered, capture)
                      if provide_placement else None)
+        # Reference nodes no native box matched: laid-out boxes, and elements
+        # with no layout object at all (a `<title>`).
+        unmatched = [LAB.BrowserNode(100 + i, "div", 3, "", {}, (0.0, 0.0, 8.0, 8.0), {})
+                     for i in range(unmatched_reference)]
+        boxless = [LAB.BrowserNode(200 + i, "title", 2, "Panel", {}, None, {})
+                   for i in range(boxless_reference)]
         return LAB.geometry_metrics_with_registration(
             raw, registered, registration, placement,
-            reference_node_count=len(browser_raw) + unmatched_reference)
+            reference_nodes=registered_browser + unmatched + boxless)
 
     def test_known_good_panel_local_import_passes_with_raw_reported(self) -> None:
         geometry = self.build()
@@ -1958,6 +1966,37 @@ class GeometryGateTests(unittest.TestCase):
         self.assertEqual(coverage["floor"], LAB.PROMOTION_THRESHOLDS["structural"])
         # Control: the same boxes with every reference node matched pass.
         self.assertTrue(self.build()["gate"]["ok"])
+
+    def test_a_reference_element_without_a_box_does_not_count_against_coverage(self) -> None:
+        # A head `<title>` has no layout row. Every laid-out box matched, so
+        # the page passes; the boxless node is reported, not scored.
+        geometry = self.build(boxless_reference=1)
+        self.assertTrue(geometry["gate"]["ok"], geometry["gate"])
+        coverage = geometry["gate"]["checks"]["registered_coverage"]
+        self.assertEqual(coverage["coverage"], 1.0)
+        self.assertEqual(coverage["reference_node_count"], 2)
+        self.assertEqual(coverage["unmeasurable_reference_count"], 1)
+        # Negative control: an unmatched laid-out box still counts. Two
+        # matched of three is below the floor whether or not a title sits
+        # beside them.
+        for boxless in (0, 1):
+            with self.subTest(boxless=boxless):
+                geometry = self.build(unmatched_reference=1, boxless_reference=boxless)
+                self.assertEqual(geometry["gate"]["failed"], ["registered_coverage"])
+                self.assertAlmostEqual(
+                    geometry["gate"]["checks"]["registered_coverage"]["coverage"], 2 / 3,
+                    places=5)
+
+    def test_reference_box_predicate_follows_layout(self) -> None:
+        node = LAB.BrowserNode(1, "div", 0, "", {}, (0.0, 0.0, 4.0, 4.0), {})
+        self.assertTrue(has_reference_box(node))
+        for bounds in (None, (0.0, 0.0, 0.0, 4.0), (0.0, 0.0, 4.0, 0.0)):
+            with self.subTest(bounds=bounds):
+                self.assertFalse(has_reference_box(
+                    LAB.BrowserNode(1, "div", 0, "", {}, bounds, {})))
+        # A shape inside an inline svg is measured in the svg's frame.
+        self.assertTrue(has_reference_box(LAB.BrowserNode(
+            1, "path", 0, "", {}, None, {}, svg_viewport=(0.0, 0.0, 24.0, 24.0))))
 
     def test_sub_pixel_delta_passes(self) -> None:
         geometry = self.build(native_child=self.local_child(dx=0.9))
