@@ -854,7 +854,8 @@ std::unique_ptr<View> View::add_child(std::unique_ptr<View> child) {
 }
 
 bool View::add_child_transactional(std::unique_ptr<View>& child) {
-    if (!child) return false;
+    if (!child)
+        return false;
     // A view cannot become its own ancestor: linking one turns every walk to
     // the root into an endless loop. The caller keeps the child and learns
     // of the refusal from the result.
