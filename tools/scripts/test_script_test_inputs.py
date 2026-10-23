@@ -959,7 +959,17 @@ class CompiledDataTests(unittest.TestCase):
             seeded["executables_scanned"].append("pulp-opt-diag")
             list_path.write_text(json.dumps(seeded), encoding="utf-8")
 
+            # The removed registration cannot be told apart from one this
+            # configure merely cannot see, so a plain --write refuses and
+            # leaves the list untouched.
+            before = list_path.read_text(encoding="utf-8")
             proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn("refusing to write", proc.stderr)
+            self.assertIn("pulp-removed-test", proc.stderr)
+            self.assertEqual(list_path.read_text(encoding="utf-8"), before)
+
+            proc = self.run_tool(repo, "--write", "--allow-delete")
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             lst = json.loads(list_path.read_text(encoding="utf-8"))
             self.assertEqual(lst["tests"].get("pulp-opt-diag-verify"), diag_test)
@@ -972,6 +982,39 @@ class CompiledDataTests(unittest.TestCase):
             self.assertIn("alpha", lst["tests"])
             self.assertEqual(lst["executables_scanned"],
                              ["pulp-opt-diag", "pulp-test-a", "pulp-test-b", "pulp-test-c", "pulp-test-d"])
+
+    def test_write_never_deletes_an_executable_this_configure_cannot_see(self) -> None:
+        """A fixture executable whose name and target are generated (no CMake
+        token names it, e.g. "Pulp UI Script Fixture" built as
+        PulpUiScriptFixture_Standalone from ${_fmt}) used to vanish from any
+        --write on a configure that does not build it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            list_path = repo.root / sti.DEFAULT_LIST
+            seeded = json.loads(list_path.read_text(encoding="utf-8"))
+            fixture = {"kind": "compiled", "data": "undeclared", "inputs": [], "sources": [],
+                       "detected_sources": [], "undeclared_sources": []}
+            seeded["executables"]["Generated Fixture App"] = fixture
+            seeded["executable_targets"]["Generated Fixture App"] = "GeneratedFixture_Standalone"
+            seeded["executables_scanned"].append("Generated Fixture App")
+            list_path.write_text(json.dumps(seeded, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+            before = list_path.read_text(encoding="utf-8")
+
+            proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn("Generated Fixture App", proc.stderr)
+            self.assertIn("--allow-delete", proc.stderr)
+            self.assertEqual(list_path.read_text(encoding="utf-8"), before)
+
+            # Control: with nothing to delete, --write succeeds as before.
+            seeded.pop("executables")
+            ok = json.loads(before)
+            ok["executables"].pop("Generated Fixture App")
+            ok["executable_targets"].pop("Generated Fixture App")
+            ok["executables_scanned"].remove("Generated Fixture App")
+            list_path.write_text(json.dumps(ok, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
 
     def test_write_regenerates_a_registered_test_rather_than_carrying_its_old_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

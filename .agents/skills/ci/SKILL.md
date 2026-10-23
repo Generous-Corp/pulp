@@ -1947,7 +1947,11 @@ turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
 Before regenerating `test/ctest_script_inputs.json` or
 `.shipyard/changed-surface-families.toml`, run that same locked install and
 reconfigure from the gate profile so both materialized-runtime tests remain
-registered.
+registered. `script_test_inputs.py --write` refuses (exit 2, list unchanged)
+when it would delete a checked-in test or executable your configure does not
+produce, such as the generated-name "Pulp UI Script Fixture" executable. Fix
+the configure; pass `--allow-delete` only when the registration really was
+removed.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:

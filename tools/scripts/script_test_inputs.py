@@ -1234,6 +1234,18 @@ def carry_unconfigured_entries(current: dict, checked_in: dict, inventory: dict,
     return sorted(set(carried))
 
 
+def entries_write_would_delete(current: dict, checked_in: dict) -> list[str]:
+    """Checked-in test and executable names absent from what --write would
+    write, after unconfigured entries were carried. Main's list holds every
+    gate-shaped configuration's entries, so a name missing here is either a
+    registration that was removed or one this configure simply cannot see; the
+    two look identical from here, so --write refuses unless told."""
+    gone = set((checked_in.get("tests") or {})) - set(current.get("tests") or {})
+    if "executables" in current:
+        gone |= set((checked_in.get("executables") or {})) - set(current["executables"])
+    return sorted(gone)
+
+
 def load_inventory(build_dir: str | None, inventory_json: str | None) -> dict | None:
     try:
         if inventory_json:
@@ -1390,6 +1402,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--base", default=None, help="diff-scope --check to changes since this ref "
                     "(default: PULP_SCRIPT_INPUTS_BASE, origin/$GITHUB_BASE_REF, or HEAD^1 in a merge group)")
     ap.add_argument("--full", action="store_true", help="--check every entry, ignoring any base")
+    ap.add_argument("--allow-delete", action="store_true",
+                    help="let --write remove checked-in entries this configure does not produce "
+                         "(only when their registration was really removed)")
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
@@ -1447,6 +1462,18 @@ def main(argv: list[str]) -> int:
         except (OSError, json.JSONDecodeError):
             previous = {}
         carried = carry_unconfigured_entries(current, previous, inventory, root, build_dir)
+        dropped = entries_write_would_delete(current, previous)
+        if dropped and not a.allow_delete:
+            print("script-test-inputs: refusing to write: it would delete "
+                  f"{len(dropped)} checked-in entr{'y' if len(dropped) == 1 else 'ies'} this configure "
+                  "does not produce: " + ", ".join(dropped) + ". A configure that cannot see an "
+                  "entry (an option off, a fixture it does not build) must not remove it; "
+                  f"file={DEFAULT_LIST}; cause_class=UNSEEN_ENTRY_DELETION; "
+                  "fix=regenerate from the gate's configure, or pass --allow-delete if the "
+                  "registration was really removed; safe_to_auto_apply=no; "
+                  "verify=`git diff --stat test/ctest_script_inputs.json` shows no removed entry",
+                  file=sys.stderr)
+            return 2
         list_path.parent.mkdir(parents=True, exist_ok=True)
         list_path.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         print(f"script-test-inputs: wrote {len(current['tests'])} declared tests "
