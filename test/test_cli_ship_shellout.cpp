@@ -1296,8 +1296,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     CHECK(uuid_of(dsym_binary) == uuid_of(shipped));
     // Re-signing the stripped copy keeps the original's entitlements.
     REQUIRE(contains(r.stdout_output, "stripped local symbols from EntMe.clap"));
-    const auto shipped_entitled =
-        packaged_binary(root / "artifacts" / "EntMe-CLAP-1.0.0.pkg", root / "expanded-ent", "EntMe");
+    const auto shipped_entitled = packaged_binary(root / "artifacts" / "EntMe-CLAP-1.0.0.pkg",
+                                                  root / "expanded-ent", "EntMe");
     CHECK(entitlements_of(shipped_entitled.parent_path().parent_path().parent_path()) ==
           original_entitlements);
     // The stripped copy carries a valid (ad hoc) signature, so it still loads.
