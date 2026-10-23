@@ -1,5 +1,6 @@
 React 18.3.1 and React DOM 18.3.1 (development UMD builds), embedded in
-spectr-standalone.html.
+spectr-standalone.html. The license below is the LICENSE file both packages
+ship, verbatim.
 
 MIT License
 

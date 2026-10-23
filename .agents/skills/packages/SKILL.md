@@ -283,6 +283,25 @@ alias differs from the canonical name — add the alias to
 `DEFAULT_ALIASES` in `tools/deps/audit.py` or the `external_names`
 list on the manifest entry.
 
+**Material embedded inside a fixture is redistribution too.** A
+self-contained HTML test fixture (a Claude standalone bundle, a panel with an
+inlined design pack) can carry base64 fonts and whole script builds such as
+React or `@babel/standalone`. Nothing scans for them, so `--strict` stays green
+while the repo ships them undeclared. Decode the bundle's assets and read each
+font's `name` table (IDs 0, 5, 13, 14) and each script's banner before
+committing. Then give every one the four attribution entries above (category
+`test-fixture`) and ship the license text beside the fixture. The
+`holdout/` panels under `test/fixtures/import-differential/` are the worked
+example. For an MIT script, fetch the package's own `LICENSE` from its
+registry tarball instead of reusing another entry's text: `@babel/standalone`
+wraps the same words on different lines from React's.
+
+**Edit `tools/deps/manifest.json` as text, not with `json.dump`.** The file is
+hand-formatted, with one-line `upstream` objects and inline lists, so a
+load-and-dump round trip rewrites every entry. A one-entry change then becomes
+a ~500-line diff. Splice the new block in, then `json.loads` the result to
+confirm it still parses.
+
 ## Bundled Toolchain Pins
 
 Some prebuilt toolchains carry bundled third-party components that are not
