@@ -394,9 +394,9 @@ class CombinedInstallerTest(unittest.TestCase):
                 'mkdir -p "$(dirname "$last")"\n: > "$last"\n',
             )
             # A small pkgutil stand-in that materializes the component payload
-            # the productbuild fixture would have produced.  Keeping this in
-            # the contract test makes the anti-stale gate testable on every
-            # host while still exercising the real package-verifier logic.
+            # the real productbuild/pkgutil path produces.  pkgbuild puts a
+            # component bundle directly under Payload; the install location
+            # is PackageInfo metadata, not a directory in the payload.
             self._write_tool(
                 fake_bin,
                 "pkgutil",
@@ -408,7 +408,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 '  [[ -n "$root" ]] || continue\n'
                 '  bundle="$(basename "$root")"\n'
                 "  exec_name=\"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \"$root/Contents/Info.plist\")\"\n"
-                '  dest="$expanded/component-$idx/Payload/Library/Audio/$bundle/Contents/MacOS/$exec_name"\n'
+                '  dest="$expanded/component-$idx/Payload/$bundle/Contents/MacOS/$exec_name"\n'
                 '  mkdir -p "$(dirname "$dest")"\n'
                 '  if [[ "${PAYLOAD_MODE:-match}" != "missing" || "$idx" != 0 ]]; then\n'
                 '    if [[ "${PAYLOAD_MODE:-match}" == "stale" && "$idx" == 0 ]]; then\n'

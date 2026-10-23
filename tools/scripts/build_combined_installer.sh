@@ -457,8 +457,14 @@ verify_product_payload_identities() {
     bundle="${P_PAYLOAD_BUNDLE[$i]}"; executable="${P_PAYLOAD_EXECUTABLE[$i]}"
     expected="${P_PAYLOAD_SHA256[$i]}"
     matches_file="$STAGE/payload-matches-$i"
+    # pkgbuild --component places the bundle directly at the payload root
+    # (Payload/$bundle).  Keep the nested form as well for products assembled
+    # by a distribution that deliberately preserves an install-prefix tree.
+    # Matching both layouts is required: --install-location is metadata and
+    # does not add Library/Audio/... directories inside Payload.
     find "$expanded" -type f \
-      -path "*/Payload/*/$bundle/Contents/MacOS/$executable" \
+      \( -path "*/Payload/$bundle/Contents/MacOS/$executable" \
+         -o -path "*/Payload/*/$bundle/Contents/MacOS/$executable" \) \
       -print > "$matches_file"
     count="$(wc -l < "$matches_file" | tr -d ' ')"
     [[ "$count" == 1 ]] || {
