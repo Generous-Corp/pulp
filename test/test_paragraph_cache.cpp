@@ -15,10 +15,16 @@
 #include <pulp/canvas/resource_counters.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
 
+#include <pulp/canvas/text_font_context.hpp>
+
+#include "skia_paragraph_cache.hpp"
+#include "skia_unicode.hpp"
+
 #include "include/core/SkBitmap.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImageInfo.h"
+#include "modules/skparagraph/include/ParagraphBuilder.h"
 
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
@@ -129,6 +135,51 @@ Draw text_with(std::string family, float size, int weight, int slant, float spac
 }
 
 } // namespace
+
+// Key fields SkiaCanvas holds constant today, so no draw can vary them; the
+// key must still keep them apart, because the build reads them.
+TEST_CASE("Paragraph cache keys the paragraph style switches the build reads",
+          "[canvas][paragraph-cache]") {
+    CacheScope scope;
+    ParagraphKey base;
+    base.text = "Bold heading";
+    base.families = {"Inter"};
+    base.size = 16.0f;
+    base.weight = 700;
+    base.font_generation = font_registration_generation();
+    int builds = 0;
+    const auto build = [&builds](const ParagraphKey&) {
+        ++builds;
+        // Any laid-out paragraph makes the entry storable.
+        PreparedParagraph prepared;
+        auto collection = TextFontContext::shared()->font_collection();
+        auto builder = skia::textlayout::ParagraphBuilder::make(skia::textlayout::ParagraphStyle(),
+                                                                collection, shared_sk_unicode());
+        builder->addText("x");
+        prepared.paragraph = builder->Build();
+        prepared.paragraph->layout(100.0f);
+        return prepared;
+    };
+    const auto lookup = [&](const ParagraphKey& key) {
+        return static_cast<bool>(find_or_build_paragraph(key, build));
+    };
+    SECTION("fake missing font styles") {
+        ParagraphKey other = base;
+        other.fake_missing_font_styles = !base.fake_missing_font_styles;
+        REQUIRE(lookup(base));
+        REQUIRE(lookup(base));
+        REQUIRE(builds == 1);
+        REQUIRE(lookup(other));
+        CHECK(builds == 2);
+    }
+    SECTION("hinting") {
+        ParagraphKey other = base;
+        other.hinting = !base.hinting;
+        REQUIRE(lookup(base));
+        REQUIRE(lookup(other));
+        CHECK(builds == 2);
+    }
+}
 
 TEST_CASE("Paragraph cache paints the uncached pixels and builds once",
           "[canvas][paragraph-cache]") {

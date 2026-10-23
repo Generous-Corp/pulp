@@ -127,6 +127,7 @@ PreparedParagraph build_paragraph(const ParagraphKey& key, const std::string& fa
     pstyle.setTextAlign(skia::textlayout::TextAlign::kLeft);
     if (!key.hinting)
         pstyle.turnHintingOff();
+    pstyle.setFakeMissingFontStyles(key.fake_missing_font_styles);
     skia::textlayout::TextStyle tstyle;
     std::vector<SkString> families;
     for (const auto& entry : key.families)
@@ -255,6 +256,8 @@ ParagraphUse make_paragraph(const std::string& text, const std::string& family, 
     key.ltr = ltr;
     key.features = features;
     key.font_generation = generation;
+    // SkParagraph's default: synthesize any bold or oblique the face lacks.
+    key.fake_missing_font_styles = true;
     return find_or_build_paragraph(std::move(key), [&family, &primary](const ParagraphKey& k) {
         return build_paragraph(k, family, primary);
     });

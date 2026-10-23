@@ -219,6 +219,9 @@ if(PULP_HAS_SKIA)
         COMPILE_DEFINITIONS
             PULP_TEST_JOST_FONT_PATH="${CMAKE_SOURCE_DIR}/external/fonts/Jost-Regular.ttf")
     pulp_test_data(pulp-test-paragraph-cache NO_DEFINE PATHS external/fonts/Jost-Regular.ttf)
+    # The key-switch case reaches the cache's internal key directly.
+    target_include_directories(pulp-test-group-canvas-text PRIVATE
+        ${PULP_ROOT_DIR}/core/canvas/src)
 endif()
 
 if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
