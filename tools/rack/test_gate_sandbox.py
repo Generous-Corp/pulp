@@ -77,7 +77,7 @@ class GateSandboxTests(unittest.TestCase):
     def setUpClass(cls):
         cls.build = tempfile.TemporaryDirectory()
         source = os.path.join(cls.build.name, "canary.cpp")
-        with open(source, "w") as f:
+        with open(source, "w", encoding="utf-8") as f:
             f.write(CANARY)
         cls.exe = os.path.join(cls.build.name, "canary")
         subprocess.run(["clang++", "-std=c++20", "-O1", source, "-o", cls.exe],
@@ -90,7 +90,8 @@ class GateSandboxTests(unittest.TestCase):
     def run_canary(self, scratch, *args):
         argv, env = generate.gate_launch(self.exe, scratch)
         return subprocess.run(argv + list(args), capture_output=True,
-                              text=True, env=env, timeout=30).returncode
+                              text=True, encoding="utf-8", env=env,
+                              timeout=30).returncode
 
     def test_writes_stay_in_scratch(self):
         with tempfile.TemporaryDirectory() as scratch, \
