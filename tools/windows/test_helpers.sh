@@ -10,7 +10,9 @@ for helper in "$open_helper" "$ssh_helper" "$repo_root/tools/windows/ensure-rdp-
 done
 
 missing_config_output="$({ env -u SPECTR_WINDOWS_UTM_UUID -u SPECTR_WINDOWS_SSH_PORT \
-  -u SPECTR_WINDOWS_RDP_PORT "$open_helper"; } 2>&1 || true)"
+  -u SPECTR_WINDOWS_RDP_PORT \
+  SPECTR_WINDOWS_UTM_CONFIG="${TMPDIR:-/tmp}/pulp-windows-helper-config-does-not-exist" \
+  "$open_helper"; } 2>&1 || true)"
 [[ "$missing_config_output" == *"set guest values"* ]] || {
   echo "open-utm-rdp.sh did not reject missing guest identity" >&2
   exit 1
