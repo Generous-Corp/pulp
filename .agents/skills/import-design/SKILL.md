@@ -118,6 +118,31 @@ JSON (`lineBoxes` / `lineBoxBasis`) is read and written in
 `design_ir_json_primitives.hpp`; add a basis field there, not in
 `design_ir_json.cpp`, which is a frozen hotspot.
 
+### Imported text looks heavier than Chromium: check font smoothing first
+
+Pulp's default glyph raster on macOS is Chromium's `-webkit-font-smoothing:
+auto` pixel for pixel. `kSlight` hinting turns CoreText smoothing on, and the
+default `SkSurfaceProps` preblend applies. A design that sets `antialiased`,
+which Tailwind's `antialiased` class and most design systems put on
+`html, body`, therefore paints about 1.3x the glyph ink of its Chromium
+capture. That looks like a rasterizer difference, but it is not one.
+
+The two smoothing modes need different surface props:
+- `antialiased` is reproduced exactly by hinting `kNone` plus
+  `SkSurfaceProps(0, kUnknown_SkPixelGeometry, 0, 1)`.
+- `auto` needs today's defaults.
+
+`SkFont` edging does not change the ink on a raster surface whose pixel
+geometry is unknown.
+
+Separate weight from placement with
+`tools/import-validation/text_raster_decomposition.py crops` (ink ratio,
+centroid, integer shift, transfer curve per text node) before you touch
+baselines. On macOS the skia screenshot backend lives in
+`core/view/platform/mac/screenshot_mac.mm`. `core/view/src/screenshot_skia.cpp`
+is the non-Apple path, so a surface change made only there never reaches a
+macOS render.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture

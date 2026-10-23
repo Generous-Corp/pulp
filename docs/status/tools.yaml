@@ -1010,6 +1010,23 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: text-raster-decomposition
+  path: tools/import-validation/text_raster_decomposition.py
+  category: visual-compare
+  use_when: Imported text fails a pixel score and you need to know whether the glyphs are too heavy, sit
+    off by a fraction of a pixel, or have a different coverage curve, per text node.
+  invocation: python3 tools/import-validation/text_raster_decomposition.py crops --capture <browser-capture-dir>
+    --cand <render.png> [--json <report.json>]
+  inputs: A browser-capture directory (browser.png plus dom-snapshot.json) and an equal-sized render; or
+    a labels file with Chromium baselines and two renders (analyze).
+  outputs: Per text node ink ratio, lit-pixel ratio, centroid dx/dy, best integer shift and the coverage
+    transfer curve, plus a summary. Writes a Chromium fixture page (html) and a probe spec (spec).
+  caveat: Assumes light text on a locally flat darker background, which the box-border background estimate
+    relies on; boxes with a busy border carry background_spread so a reader can discount them. Ink ratio
+    is position-blind and centroid is ink-blind, so read them together. It decomposes; it gates nothing.
+  availability: always
+  skill: text-metrics
+  docs: guides/importing-designs.md
 - name: thumb-parity
   path: tools/import-design/thumb_parity.py
   category: visual-compare
