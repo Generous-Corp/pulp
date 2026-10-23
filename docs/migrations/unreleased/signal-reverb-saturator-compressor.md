@@ -1,0 +1,97 @@
+---
+breaking = true
+summary = "The FDN reverb's block engine changes its output; LadderSaturation::realtime_efficient uses a minimax tanh in place of the Lambert form; the linear-phase oversampler and the meter's K-weighting shift output by float round-off; new opt-in decoupled compressor ballistics, classic reverb tier, meter feature sets and second-order ADAA"
+---
+
+## FDN reverb: block engine, output changed
+
+`FdnReverbT` now runs its network as a block engine with single-precision
+state. Every existing reverb's output changes: on the reference voicings the
+40 ms RMS envelope stays within 0.01 dB of the previous engine, but the
+samples are not the same, and the previous network's output cannot be
+reproduced. The classic tier (below) is a different, lighter engine, not the
+previous sound.
+
+`FdnReverbT<double>` keeps its double buffer interface but now computes in
+single precision: both tiers' block kernels are four-lane float, so it
+converts at the block boundary and returns exactly the float engine's output.
+`tank()` returns `fdn::FdnTank<float>` for either instantiation.
+
+## Meter K-weighting: Direct Form I
+
+`MultiChannelMeter`'s K-weighting filters run as Direct Form I (two channels
+per vector) instead of Direct Form II transposed. Loudness readings shift by
+float round-off; peak, RMS, clip detection and ballistics are unchanged.
+
+## Ladder realtime-efficient saturator: Lambert form removed
+
+`LadderSaturation::realtime_efficient` (and `process_realtime_efficient()`,
+`PULP_SIGNAL_LADDER_SATURATION=2`, `PULP_SIGNAL_FAST_LADDER_TANH=1`) now
+evaluates `FastMath::tanh_minimax` instead of the Lambert-fraction
+`FastMath::tanh`, and the ladder no longer offers the Lambert form: there is
+no setting that restores it. The new saturator is within 3.8e-6 of `std::tanh` for every
+float input and meets its clamp at |x| = 7 with matching slope; the old one
+stepped by 6.7e-4 at |x| = 4, which moved a hard-driven ladder about -63 dBFS
+from the exact filter. Output under this profile changes by up to that
+deviation; at normal levels the change is below -100 dBFS. Cost is unchanged
+at normal levels; under heavy drive it rises, because the old form skipped its
+division for 4 < |x| < 7. The enum, the macros and the default (`accurate`)
+are unchanged. `FastMath::tanh` itself keeps its coefficients and results.
+
+The `TomVoice` `realtime_efficient` ladder math profile routes through the same
+saturator.
+
+## Linear-phase oversampler output shifts by round-off
+
+`OversamplerT` with `Kind::linear_phase_fir` now filters each polyphase branch a
+block at a time. Designs, tap counts and latencies are unchanged, and output
+remains bit-identical for any caller block partition, but each output's sum is
+now taken oldest-first with one fused multiply-add per tap, so it differs from
+earlier releases by float round-off (below 2e-6). Code that pinned exact output
+bits of this lane must re-record them.
+
+## New: opt-in decoupled compressor ballistics
+
+`CompressorT` keeps its previous behaviour by default
+(`CompressorBallistics::branching`); its output is unchanged.
+`set_ballistics(CompressorBallistics::decoupled)` selects a peak hold that
+decays at the release time followed by an attack one-pole (Giannoulis,
+Massberg and Reiss, JAES 2012). On tones its attack follows the knob, the
+reduction lands on the static curve and the gain stays steady within each
+cycle. At -20 dB, 4:1, hard knee, 5 / 100 ms and a -6 dBFS tone:
+
+| | branching (default) | decoupled |
+|---|---|---|
+| 1 kHz attack, 10% to 90% (knob gives 11.0 ms) | 21.5 ms | 11.0 ms |
+| Settled reduction (static curve -10.50 dB) | -9.75 dB | -10.49 dB |
+| THD+N at 50 / 100 / 1000 Hz | -39.5 / -45.5 / -65.5 dB | -48.8 / -60.3 / -99.8 dB |
+
+Its release is the release hold and the attack one-pole in series, so a level
+step releases in about 2.2 x `release_ms` only while attack is much shorter
+than release: 10% to 90% release measures 220 ms at 5 / 100 ms but 155 ms at
+30 / 60 ms and 168 ms at 50 / 50 ms (branching: 132 and 110 ms).
+
+The Forge lo-fi, sidechain and multiband compressor nodes gain a `ballistics`
+control (`branching` or `decoupled`). It defaults to branching, so saved
+patches render exactly as before.
+
+## New: classic reverb tier, meter feature sets
+
+- `FdnReverbT::set_tier(fdn::Tier::classic)` swaps the network for
+  `ClassicReverbT`, parallel combs into series allpasses, behind the same
+  parameters; the Forge FDN reverb node exposes it as its `tier` control.
+- `MultiChannelMeterT::prepare(sample_rate, channels, roles, MeterFeatures)`
+  measures only the selected features (`levels`, `correlation`, `loudness`,
+  `all`); `features()` reports the set. The overloads without a feature set
+  measure everything.
+
+## New: second-order ADAA and a minimax tanh
+
+- `SaturatorAliasPolicy::adaa2` adds second-order antiderivative antialiasing
+  to `SaturatorT`. It reports one sample of latency (the dry path is delayed to
+  match) and rolls off the top octave as a three-tap mean;
+  `adaa_linear_magnitude()` returns that response. `group_delay_samples()`
+  reports the existing `adaa` policy's half-sample delay, which the integer
+  `latency_samples()` rounds to 0. `adaa` output is unchanged.
+- `FastMath::tanh_minimax` is a bounded [7/6] rational tanh at the cost of
+  `FastMath::tanh` with about 180x lower worst-case error.

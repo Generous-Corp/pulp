@@ -2961,6 +2961,7 @@
   "pulp-test-signal-nonlin-ambience",
   "pulp-test-signal-phaser-stages",
   "pulp-test-signal-pitch-shifter",
+  "pulp-test-signal-saturator",
   "pulp-test-signal-speaker-cabinet",
   "pulp-test-signal-spectral-delay-matrix",
   "pulp-test-signal-sub-oscillator-no-exceptions",
