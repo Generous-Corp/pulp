@@ -78,14 +78,15 @@ class CliTests(unittest.TestCase):
     def run_cli(self, env_value: str | None, event: str, ref: str) -> tuple[int, str, str]:
         with tempfile.TemporaryDirectory() as tmp:
             github_env = Path(tmp) / "env"
-            github_env.write_text("")
+            github_env.write_text("", encoding="utf-8")
             env = {k: v for k, v in os.environ.items() if k != "PULP_CCACHE_REMOTE_STORAGE"}
             env.update(GITHUB_EVENT_NAME=event, GITHUB_REF=ref)
             if env_value is not None:
                 env["PULP_CCACHE_REMOTE_STORAGE"] = env_value
             result = subprocess.run([sys.executable, str(SCRIPT), "--github-env", str(github_env)],
-                                    env=env, capture_output=True, text=True, check=False)
-            return result.returncode, result.stdout, github_env.read_text()
+                                    env=env, capture_output=True, text=True, encoding="utf-8",
+                                    check=False)
+            return result.returncode, result.stdout, github_env.read_text(encoding="utf-8")
 
     def test_unconfigured_writes_nothing(self) -> None:
         for value in (None, "", "   "):
