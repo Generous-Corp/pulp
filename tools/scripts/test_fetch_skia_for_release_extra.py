@@ -86,6 +86,15 @@ class WindowsArm64KeepsItsSlice(unittest.TestCase):
         "build/win-gpu/lib/Release/arm64/skia.lib": b"arm64-skia",
         "build/win-gpu/lib/Release/arm64/dawn_combined.lib": b"arm64-dawn",
         "build/win-gpu/lib/Release/arm64/skparagraph.lib": b"arm64-para",
+        "build/win-gpu/msvc-toolchain.json": json.dumps({
+            "target": {"platform": "windows", "architecture": "arm64"},
+            "producer": {
+                "msvc_toolset_version": "14.51.36231",
+                "windows_sdk_version": "10.0.26100.0",
+                "skia_gn_compiler": {"version": "19.51.36231"},
+                "dawn_cmake_compiler": {"version": "19.51.36231"},
+            },
+        }).encode("utf-8"),
     }
 
     def fetch(self, platform: str, manifest_key: str) -> pathlib.Path:

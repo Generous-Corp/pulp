@@ -4,7 +4,7 @@
 commands:
   - name: build
     status: usable
-    summary: Configure and build the project. Auto-detects CMake reconfiguration needs. Works with repo and standalone projects. When configure is needed, runs the FetchContent cache preflight from `pulp doctor --caches` first and aborts with a clear remediation message on any dangling-symlink / stale-commit entry — bypass via `PULP_SKIP_CACHE_PREFLIGHT=1`. Cold source-checkout builds provision pinned dependencies into the shared machine cache before configure, then require VST3 and AudioUnitSDK for configured macOS targets so format coverage cannot silently drop.
+    summary: Configure and build the project. Auto-detects CMake reconfiguration needs. Works with repo and standalone projects. When configure is needed, runs the FetchContent cache preflight from `pulp doctor --caches` first and aborts with a clear remediation message on any dangling-symlink / stale-commit entry — bypass via `PULP_SKIP_CACHE_PREFLIGHT=1`. Cold source-checkout builds provision pinned dependencies into the shared machine cache before configure, then require VST3 and AudioUnitSDK for configured macOS targets so format coverage cannot silently drop. A standalone project's first configure passes `-DCMAKE_PREFIX_PATH` for the installed SDK its pulp.toml selects (sdk_path, sdk_checkout local build, or ~/.pulp/sdk/<version>); with none installed, the build is handed to pulp-cpp, which downloads or builds it.
     args:
       - name: --format
         kind: option
@@ -130,7 +130,7 @@ commands:
 
   - name: ship
     status: usable
-    summary: Sign, notarize, package, and generate update feeds for all platforms.
+    summary: Sign, notarize, package, and generate update feeds for all platforms. Runs in a Pulp source checkout or an SDK consumer project (pulp.toml, no core/).
     subcommands:
       - name: swap-pack
         summary: "Sign a hot-reload UX bundle into a swap pack. Capabilities are inferred from the bundle's JS; the Ed25519 signing key is reused from the macOS keychain (created + stored on first use, with a loud backup notice) or a --sign-key file. No build dir required."
@@ -207,7 +207,7 @@ commands:
           - name: --dry-run
             required: false
       - name: package
-        summary: Create installers (.pkg, NSIS, APK/AAB)
+        summary: Create installers (.pkg, NSIS, APK/AAB). On macOS, exits 1 when an installer fails to build or nothing was found to package.
         args:
           - name: --version
             required: false
@@ -316,7 +316,7 @@ commands:
           - name: --target
             required: false
       - name: doctor
-        summary: "Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain and validate the file-based .p8 notary key. No build dir required. Run automatically as a best-effort preflight by `ship sign`."
+        summary: "Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain and validate the file-based .p8 notary key. No build dir required. In an SDK consumer project the script comes from the selected SDK's share/pulp/ship. Run automatically as a fail-closed preflight by `ship sign`."
         args:
           - name: --check-online
             required: false
@@ -595,7 +595,7 @@ commands:
 
   - name: create
     status: usable
-    summary: Create a new plugin project from built-in templates or an explicit local template kit. Defaults to sdk mode for external projects, with explicit source-tree example mode for Pulp development and checkout-aware SDK reuse when run from a Pulp source tree.
+    summary: Create a new plugin project from built-in templates or an explicit local template kit. Defaults to sdk mode for external projects, with explicit source-tree example mode for Pulp development and checkout-aware SDK reuse when run from a Pulp source tree. The standalone configure uses `-G Ninja` when ninja is on PATH and the build dir is new.
     args:
       - name: name
         kind: positional

@@ -337,7 +337,13 @@ TEST_CASE("SvfBank voices are bit-identical to independent Svfs in every mode",
         }
     }
     CHECK(mismatches == 0);
+    // The reference design runs on the same runtime path as the bank's: with
+    // literal arguments GCC folds std::tan at compile time, correctly rounded,
+    // while the bank calls the C library's tanf, which may differ by one ULP.
+    volatile float design_fs = 48000.0f;
+    volatile float design_hz = 9000.0f;
+    volatile float design_q = 0.5f;
     const auto c = bank.coefficients(5);
-    const auto d = Svf::design(48000.0f, 9000.0f, 0.5f + 0.3f * 0.0f);
+    const auto d = Svf::design(design_fs, design_hz, design_q);
     CHECK(c.g == d.g);
 }

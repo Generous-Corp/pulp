@@ -129,6 +129,15 @@ pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
         core/music/include/pulp/music/pitch.hpp
         test/fixtures/import-fidelity/assets/fader_ref.png)
 
+# Inert style declarations (`opacity: 1`, `clip-path: none`, ...) must not
+# change the native drawlist, the Skia raster, or the sibling painted next.
+add_executable(pulp-test-design-import-inert-styles
+    test_design_import_inert_styles.cpp)
+target_link_libraries(pulp-test-design-import-inert-styles
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-import-inert-styles
+    PROPERTIES LABELS "parser-import")
+
 # A lowered on/off, proved on BOTH consumers of a control: the native
 # materializer's binder callbacks and the emitted script the widget bridge
 # runs. Links pulp::view (not view-core) because the script half boots a real

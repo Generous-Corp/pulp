@@ -810,6 +810,45 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
             self.text,
         )
 
+    def _run_resolve_step(self, **env: str) -> dict[str, str]:
+        step = next(s for s in yaml.safe_load(self.text)["jobs"]["resolve-macos-runner"]["steps"]
+                    if s.get("id") == "resolve")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            out.touch()
+            base = {k: v for k, v in os.environ.items()
+                    if k in ("PATH", "HOME", "LANG", "TMPDIR")}
+            base.update({"GITHUB_OUTPUT": str(out), "GITHUB_REPOSITORY": "Generous-Corp/pulp"})
+            base.update(env)
+            subprocess.run(["bash", "-c", step["run"]], cwd=REPO_ROOT, env=base,
+                           check=True, capture_output=True, text=True, encoding="utf-8")
+            return dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
+
+    def test_fork_pr_never_reaches_a_self_hosted_selector(self) -> None:
+        persistent = '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]'
+        isolated = '["self-hosted","macOS","ARM64","pulp-release-pr-gate"]'
+        chain = {"RELEASE_JSON": persistent, "LOCAL_JSON": persistent,
+                 "NAMESPACE_JSON": '"nscloud-macos"'}
+
+        # Fork: hosted macos-15 whatever the variables say, the self-hosted
+        # PR-gate selector included, and with every variable unset.
+        for extra in ({"PR_GATE_JSON": isolated}, {}):
+            for head in ("someone/pulp", ""):
+                with self.subTest(extra=extra, head=head):
+                    out = self._run_resolve_step(GITHUB_EVENT_NAME="pull_request",
+                                                 PR_HEAD_REPO=head, **chain, **extra)
+                    self.assertEqual(json.loads(out["runs_on_json"]), ["macos-15"])
+        out = self._run_resolve_step(GITHUB_EVENT_NAME="pull_request", PR_HEAD_REPO="someone/pulp")
+        self.assertEqual(json.loads(out["runs_on_json"]), ["macos-15"])
+        # Same-repo PR and queue batch: the chain is unchanged.
+        for event, head in (("pull_request", "Generous-Corp/pulp"), ("merge_group", "")):
+            with self.subTest(event=event):
+                out = self._run_resolve_step(GITHUB_EVENT_NAME=event, PR_HEAD_REPO=head, **chain)
+                self.assertEqual(out["runs_on_json"], persistent)
+                out = self._run_resolve_step(GITHUB_EVENT_NAME=event, PR_HEAD_REPO=head,
+                                             PR_GATE_JSON=isolated, **chain)
+                self.assertEqual(out["runs_on_json"], isolated)
+
     def test_checkout_does_not_require_git_lfs(self) -> None:
         self.assertIn("lfs: false", self.text)
         self.assertNotIn("lfs: true", self.text)
@@ -1824,16 +1863,16 @@ class NightlyIsTheRealIntelGate(unittest.TestCase):
         self.assertIn('[ "$auval" = "pass" ]', self.text)
 
     def test_universal_capability_proof_precedes_build(self) -> None:
-        proof = self.text.index("Verify both universal Skia m153 capability slices")
+        proof = self.text.index("Verify both universal Skia capability slices")
         configure = self.text.index("Configure (universal arm64;x86_64)")
         self.assertLess(proof, configure)
         self.assertIn("--platform darwin-universal", self.text[proof:configure])
-        self.assertIn("--result skia-m153-universal-capabilities.json", self.text[proof:configure])
+        self.assertIn("--result skia-universal-capabilities.json", self.text[proof:configure])
 
     def test_nightly_result_counts_universal_capabilities(self) -> None:
         self.assertIn("steps.capabilities.outputs.status", self.text)
         self.assertIn('[ "$capabilities" = "pass" ]', self.text)
-        self.assertIn("skia-m153-universal-capabilities.json", self.text)
+        self.assertIn("skia-universal-capabilities.json", self.text)
 
     def test_nightly_watchdog_reports_capability_failure_surface(self) -> None:
         self.assertIn(
@@ -1843,9 +1882,9 @@ class NightlyIsTheRealIntelGate(unittest.TestCase):
             "B_CAPABILITIES: ${{ needs.universal-crosscheck.outputs.capabilities }}",
             self.text,
         )
-        self.assertIn("Skia m153 universal capabilities", self.text)
+        self.assertIn("Skia universal capabilities", self.text)
         self.assertIn("capability-step log first", self.text)
-        self.assertIn("skia-m153-universal-capabilities.json", self.text)
+        self.assertIn("skia-universal-capabilities.json", self.text)
 
 
 class EveryLegIsIndividuallyRoutable(unittest.TestCase):

@@ -1143,7 +1143,17 @@ registration → `wide-non-native-selftest`; any source-selftest lane entry
 script → the `source-selftest-lane-*` contract; a GPU-audio provider-identity
 producer — `core/gpu_audio/CMakeLists.txt`, `PulpGpuAudioProvider*.cmake`, the
 identity script, the deps manifest — → the `pulp-gpu-*` provider probes, whose
-compiled-in Dawn identity no source edge reaches). Direct edges are added even when
+compiled-in Dawn identity no source edge reaches; any file under
+`experimental/pulp-rs/` except its top-level `README.md`/`UPSTREAM_SYNC.md`,
+plus the out-of-crate files it compiles in (`PULP_RS_EXTERNAL_INPUTS`:
+`include_str!`/`include_bytes!` targets and `build.rs` `rerun-if-changed`
+inputs, kept honest by a test that scans the crate) and the hand-listed files
+its tests open at run time (`PULP_RS_TEST_TIME_INPUTS`, the stated coverage
+boundary) → every `pulp-rust-*` test,
+because cargo, not a CMake target, builds that crate, so the projection never
+reaches it and a Rust failure otherwise surfaces only in the merge group; it is
+a required family, so a leg that stops registering those tests fails the step).
+A test is tied to a target when any path its command names is that target's artifact or a bundle directory (`.clap`, `.vst3`, `.app`, ...) holding it, including the value of `-D<VAR>=`, `--flag=` or `NAME=` assignments and `|`/`;` lists (`changed_surface_inventory.command_path_refs`): exact-argument matching alone missed every CMake-script test that takes its binary as `-DCLI=`, so they ran only in the merge group. Direct edges are added even when
 the projection is too wide or the diff is docs-only: tests whose declared inputs
 (`test/ctest_script_inputs.json`) the diff touches, script tests the gates.sh
 rules select, the tests running a program whose own source changed, and the
@@ -4573,6 +4583,17 @@ uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
 
+- **Node 20's npm 10 cannot resolve some packages fresh; a lockless `npm
+  install` job reds permanently while passing on a dev machine.** npm 10
+  crashes in `#loadPeerSet` with "Cannot read properties of null (reading
+  'edgesOut')" on vitest 4's optional peer set (jsdom -> canvas); the npm 11
+  on a dev Mac resolves it fine. `@pulp/import-ir` failed this way on every
+  nightly for a week. Give the package a lockfile and use `npm ci`. Generate
+  that lockfile with npm 10 (`npx -y npm@10 install --legacy-peer-deps`):
+  npm 11.19 wrote vitest's nested `@esbuild/*` platform entries without
+  `optional`, so `npm ci` then refused with `notsup` on every other CPU.
+  Reproduce with `npx -y npm@10 ci` before pushing.
+
 - **An hourly-or-faster cron here fires about once every five hours.** GitHub
   delays `schedule` events under load and drops the backlog; daily crons still
   fire daily, five to seven hours late. Never assume a `*/15` or `*/30` safety
@@ -5229,9 +5250,11 @@ bisectable.
   `runner.sh`, `ccache:` and `configure-checks:`), and PR gate VMs run PR code
   with the same mounts. The FetchContent seed is mounted read-only, but host
   jobs write it. A release that read any of these could link an object or
-  source a PR planted. The configure-check cache is the sharpest of them:
-  `PulpConfigureCheckCache.cmake` `include()`s its files (SDL3 always calls it
-  on Apple), so a planted file runs CMake inside the release configure. Every
+  source a PR planted. The configure-check cache matters too:
+  `PulpConfigureCheckCache.cmake` replays its files (SDL3 always calls it on
+  Apple). It parses them strictly and ignores, with a STATUS line, any file
+  holding a line its writer would not emit, so a planted file cannot run
+  CMake, but a well-formed one still feeds check answers into the configure. Every
   job that signs, notarizes, attests or deploys and also compiles sets
   job-level `CCACHE_DISABLE: "1"` and runs "Isolate the build from shared
   caches" before its first build step. That step uses a fresh `RUNNER_TEMP`
@@ -5965,7 +5988,11 @@ down this list before touching build code:
    `PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON` and the exclusive
    `pulp-release-pr-gate` label; its legacy fallback to the tagged-release
    selector is migration-only and must remain until the separate selector has
-   been deployed and proven. The TartCI release supervisor scans tagged-release
+   been deployed and proven. A fork pull request never reaches that chain:
+   `resolve_release_runners.py --fork-pr-gate-route` gives it GitHub-hosted
+   `["macos-15"]` and reads no repo variable, because every self-hosted pool
+   on the chain (the `pulp-release-pr-gate` VMs included) shares caches with
+   trusted builds; this is build.yml's fork rule. The TartCI release supervisor scans tagged-release
    demand before PR-gate demand, registers a runner with only the selected
    class label, and force-refreshes higher-priority demand immediately before
    minting a lower-priority runner. GitHub remains FIFO within each class. Do
@@ -6113,6 +6140,23 @@ All three aliases now resolve their runner through `PULP_PREAMBLE_RUNS_ON_JSON`
 an advisory lane can no longer strand a PR by being starved. Do not "simplify"
 one back to `ubuntu-latest` —
 `tools/scripts/test_windows_runner_policy.py` fails if you do.
+
+### GitHub-hosted Windows is opt-in on a push or a build.yml dispatch
+
+A plain `build.yml` dispatch or a push to `main` used to start the
+`Windows (x64) [github-hosted]` leg (and a dispatch the three `windows-latest`
+compile gates), so agents kept landing on hosted Windows without asking for it.
+Now none runs unless the dispatch sets `allow_hosted_windows=true` or a
+self-hosted `windows_runner_selector_json`, or the repository sets
+`PULP_ALLOW_HOSTED_WINDOWS=1`. `android.yml`'s windows row runs only on the
+nightly schedule unless that variable is set (pull requests, merge groups,
+pushes and dispatches leave it out). When adding a job that can run on a `windows-*` label in a
+push-triggered workflow, put `vars.PULP_ALLOW_HOSTED_WINDOWS == '1'` in its
+`if:` (or route it through a resolver and list it in
+`COMPUTED_WINDOWS_ROUTING`): `HostedWindowsOptInTests` in
+`tools/scripts/test_windows_runner_policy.py` scans every workflow and fails
+otherwise. `windows-cli-compile.yml` is the one listed exception, because
+`auto-release.yml`'s pre-tag check reads its push verdict.
 
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
@@ -10757,6 +10801,21 @@ Key facts:
   version projection. Any missing script, API/signature error, nested/unknown
   topology, writer drift, extra byte, or ambiguous association retains the full
   native path. The verifier's own PR therefore cannot approve itself.
+- **The bump fast path mostly refused in merge groups, and nothing said why.**
+  On 2026-10-22 only 2 of 13 bump merge groups took it; the rest ran the full
+  `macos` gate (about 9 gate-hours a day). Main had usually moved more than one
+  queue entry past the bump's parent, so `classify` resolved no trusted base and
+  never asked the verifier. `classify` now leaves a `bump-fast-path` notice on
+  every bump run (`taken` or `refused: <reason>`), and
+  `tools/scripts/bump_fastpath_report.py` (weekly in `bump-fastpath-weekly.yml`)
+  counts them. Read that count before changing the verifier, so a fix targets
+  the refusal that actually happens.
+- **Advisory workflows skip the bump.** `coverage.yml`,
+  `control-shipping-native.yml`, `examples-validation.yml` and
+  `intel-portability.yml` AND `github.head_ref != 'release/version-bump'` into
+  every job's `if:`, so bump PRs no longer start hosted Windows, macOS, Linux and
+  coverage runs. A new job in one of them needs the same guard;
+  `test_bump_fastpath.py` fails without it.
 - **PR-event bump runs never fast-path unless `PULP_BUMP_FASTPATH_PR_MERGE_REF=1`.**
   `GITHUB_SHA` on a `pull_request` run is the synthesized `refs/pull/N/merge`
   commit, and a freshly opened bump PR's payload has a null/stale

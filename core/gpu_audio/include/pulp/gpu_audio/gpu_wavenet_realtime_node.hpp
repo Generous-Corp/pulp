@@ -46,6 +46,12 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
         std::uint64_t completion_service_wait_ns = 0;
         MissPolicy miss_policy = MissPolicy::Silence;
         bool supports_cpu_fallback = false;
+        /// Callback blocks that may pass with work in flight and no completion
+        /// before the node latches `GpuAudioRecoveryReason::ProviderUnresponsive`.
+        /// Zero selects `capacity - 1`, which fires before the input ring
+        /// saturates while the worker keeps up with the callback. A provider
+        /// that keeps completing, however late, is never unresponsive.
+        std::uint32_t watchdog_blocks = 0;
     };
     /// Copies all descriptors, dilation arrays and weights. Host thread only.
     explicit GpuWaveNetRealtimeNode(const Config&);
@@ -72,7 +78,7 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
     std::uint64_t recovery_sequence() const noexcept;
     /// Allocation-free provider-neutral lifecycle projection for hosts that
     /// own this stamped node directly.
-    GpuAudioStatus status_snapshot() const noexcept;
+    GpuAudioStatus status_snapshot() const noexcept override;
     /// Not a legacy FIFO node. GpuAudioTransport rejects an unprepared instance.
     void process_block(const audio::BufferView<const float>&, audio::BufferView<float>&,
                        std::uint32_t) final;

@@ -1064,6 +1064,7 @@ TEST_CASE("analytic SDF feather modes render finite chart coverage",
         style.feather_curve = mode == 1 ? 1 : 0;
         style.feather_mode = mode;
         Canvas::ShaderDrawOptions options;
+        options.reach = 3.0f;
         REQUIRE(canvas.draw_sdf_shape_with_shader(
             Canvas::SDFShape::flat_arc, 0, 0, 64, 64, style,
             "half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }", options));
@@ -1124,6 +1125,75 @@ TEST_CASE("SDF geometry gradient stays finite at a field extremum",
     REQUIRE(SkColorGetG(offset) > 200);
 #else
     SUCCEED("SDF geometry gradient test requires PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("SDF chart glow paints past the shape rect out to its reach",
+          "[canvas][sdf][shader][feather][reach]") {
+    Canvas::SDFStyle glow;
+    glow.feather_sigma = 8.0f;
+    glow.feather_mode = 1;
+    REQUIRE(Canvas::sdf_feather_min_reach(glow) == Catch::Approx(24.0f));
+    glow.feather_mode = 3;
+    REQUIRE(Canvas::sdf_feather_min_reach(glow) == Catch::Approx(24.0f));
+    Canvas::SDFStyle inside = glow;
+    inside.feather_mode = 2;
+    REQUIRE(Canvas::sdf_feather_min_reach(inside) == 0.0f);
+    Canvas::SDFStyle unfeathered = glow;
+    unfeathered.feather_sigma = 0.0f;
+    REQUIRE(Canvas::sdf_feather_min_reach(unfeathered) == 0.0f);
+#ifdef PULP_HAS_SKIA
+    // A 64 px flat arc drawn at (32, 32): its ring's outer edge sits 2 px
+    // inside the rect, so x = 31 is 3 px outside the arc and 1 px outside the
+    // rect, and x = 29 is 3 px outside the rect.
+    constexpr const char* kWhite = "half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }";
+    auto render = [&](float sigma, int mode, float reach, bool* drew) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(128, 128));
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::SDFStyle style;
+        style.stroke_width = 8.0f;
+        style.arc_start = 2.356f;
+        style.arc_sweep = 4.713f;
+        style.feather_sigma = sigma;
+        style.feather_mode = mode;
+        Canvas::ShaderDrawOptions options;
+        options.reach = reach;
+        *drew = canvas.draw_sdf_shape_with_shader(Canvas::SDFShape::flat_arc, 32, 32, 64, 64, style,
+                                                  kWhite, options);
+        return surface;
+    };
+    auto alpha_at = [](const sk_sp<SkSurface>& surface, int x, int y) {
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        return SkColorGetA(pixels.getColor(x, y));
+    };
+
+    bool drew = false;
+    auto glowing = render(8.0f, 1, 24.0f, &drew);
+    REQUIRE(drew);
+    CHECK(alpha_at(glowing, 31, 64) > 40);
+    CHECK(alpha_at(glowing, 29, 64) > 30);
+
+    // Negative: with no feather and no reach nothing reaches past the rect,
+    // so the samples above read glow and not some other paint.
+    auto plain = render(0.0f, 0, 0.0f, &drew);
+    REQUIRE(drew);
+    CHECK(alpha_at(plain, 31, 64) == 0);
+    CHECK(alpha_at(plain, 29, 64) == 0);
+
+    // A glow or outer feather without room for 3 sigma is refused and draws
+    // nothing; a feather that stays inside the shape needs no reach.
+    auto short_glow = render(8.0f, 1, 23.0f, &drew);
+    CHECK_FALSE(drew);
+    CHECK(alpha_at(short_glow, 64, 34) == 0);
+    render(8.0f, 3, 0.0f, &drew);
+    CHECK_FALSE(drew);
+    render(8.0f, 2, 0.0f, &drew);
+    CHECK(drew);
+#else
+    SUCCEED("Skia feather probes require PULP_HAS_SKIA");
 #endif
 }
 
@@ -2260,6 +2330,56 @@ TEST_CASE("compile_sksl reports each shader's own error under concurrent compile
     REQUIRE(mismatches.load() == 0);     // no cross-thread error attribution
 }
 
+// Graphite names a runtime shader's coordinate parameter `pos` and keeps the
+// author's locals, so a local `pos` in main() breaks only on the GPU. The
+// raster compiler accepts these sources as written, which is why the refusal
+// has to come from Pulp's cache and is checked here without a GPU.
+TEST_CASE("compile_sksl refuses a local named pos in main on every backend",
+          "[canvas][shader][compile][runtime-effect]") {
+    const char* refused[] = {
+        "half4 main(float2 xy) { float2 pos = xy; return half4(half(pos.x), 0, 0, 1); }",
+        "half4 main(float2 xy) { half r = 0; { float2 pos = float2(0); r = half(xy.x); } "
+        "return half4(r, 0, 0, 1); }",
+        "half4 main(float2 xy) { half r = 0; for (float pos = 0; pos < 2; pos += 1) "
+        "{ r += half(xy.x); } return half4(r); }",
+        "half4 main(float2 xy) { float a = 1, pos = 2; return half4(half(a + pos)); }",
+        "half4 main(float2 xy) {\n  // a comment\n  float2 pos[2];\n  return half4(1);\n}",
+        "half4 main(float2 xy) { float a, pos; pos = a; return half4(half(pos)); }",
+        "half4 main(float2 xy) { float2 a, pos[2]; return half4(1); }",
+        "half4 main(float2 xy) { float a = 1, pos, b; return half4(half(a)); }",
+        "half4 main(float2 xy) { half r = 0; for (int i = 0, pos = 2; i < pos; ++i) "
+        "{ r += 1; } return half4(r); }",
+    };
+    for (const char* src : refused) {
+        INFO(src);
+        const std::string error = Canvas::compile_sksl(src);
+        CHECK(error.find("'pos'") != std::string::npos);
+    }
+    // The diagnostic names the line, so an author can find the local.
+    CHECK(Canvas::compile_sksl(refused[4]).rfind("line 3:", 0) == 0);
+
+    const char* accepted[] = {
+        "half4 main(float2 xy) { float2 q = xy; return half4(half(q.x), 0, 0, 1); }",
+        "half4 main(float2 pos) { { float2 q = pos; } return half4(half(pos.x)); }",
+        "const float2 pos = float2(1); half4 main(float2 xy) { return half4(half(pos.x)); }",
+        "half4 f(float2 p) { float2 pos = p; return half4(half(pos.x)); } "
+        "half4 main(float2 xy) { return f(xy); }",
+        "struct S { float2 pos; }; half4 main(float2 xy) { S s; s.pos = xy; "
+        "return half4(half(s.pos.x)); }",
+        "half4 main(float2 xy) { half4 inColor = half4(1); half4 destColor = inColor; "
+        "return destColor; }",
+        "half4 main(float2 xy) { /* float2 pos = xy; */ return half4(1); }",
+        // A global passed as a call or constructor argument is not a declarator.
+        "const float2 pos = float2(1); half4 f(float2 a, float2 b, float c) "
+        "{ return half4(half(a.x + b.x + c)); } "
+        "half4 main(float2 xy) { return f(xy, pos, 1) + half4(float4(xy.x, pos, 0.0)); }",
+        "uniform float2 pos; half4 main(float2 xy) { return half4(half(xy.x + pos.x)); }",
+    };
+    for (const char* src : accepted) {
+        INFO(src);
+        CHECK(Canvas::compile_sksl(src).empty());
+    }
+}
 
 TEST_CASE("unusable text geometry is refused rather than reaching the glyph stroker",
           "[canvas][skia][text][robustness]") {

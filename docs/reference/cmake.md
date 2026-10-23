@@ -287,6 +287,42 @@ On Linux and Ubuntu, requesting `AAX` in `FORMATS` is a configure-time error.
 LV2 build output is created under `build/LV2/<plugin>.lv2/`; `pulp-install-${target}`
 does not currently copy LV2 bundles to a user plugin folder.
 
+### Binary Footprint
+
+Skia's `libskunicode_icu.a` embeds a full ICU data package (10.9 MB), the
+largest single part of a plug-in with Pulp's editor. With
+`PULP_ICU_DATA_SUBSET` (default `ON`, Apple only), `FindSkia` links a copy whose
+data keeps only what the linked ICU code reads: every break-iterator rule file
+and dictionary, normalization, properties, the converter alias table and
+locale resolution data. Collation, time-zone, currency, display-name, unit,
+transliteration, number spell-out, IDNA, codepage-converter and spoof-check
+data are removed (4.9 MB remains). The copy is generated at configure time
+under `build/pulp-skia-icu-subset/` by `tools/cmake/scripts/icu_data_subset.py`,
+for every Skia consumer and for installed-SDK builds alike; any structural
+surprise falls back to the unchanged archive with a warning, and the footprint
+tests then fail on the size. Turn the option off only if your plug-in calls ICU
+services Pulp does not use itself.
+
+A plug-in without a custom editor that does not need Pulp's generated parameter
+editor should use `NO_EDITOR`: it links none of the view, canvas, Skia, Dawn or
+JavaScript code. Measured on the `pulp-gain` examples (arm64, Release, Skia
+m153), binary bytes per format:
+
+| Build | VST3 | CLAP | AU |
+|-------|------|------|----|
+| `PulpGain`, full ICU data | 44.5 MB | 44.3 MB | 44.3 MB |
+| `PulpGain`, ICU subset | 38.4 MB | 38.2 MB | 38.3 MB |
+| `PulpGainHeadless` (`NO_EDITOR`) | 0.83 MB | 0.61 MB | 0.67 MB |
+
+`tools/scripts/plugin_footprint_check.py` measures a built binary against the
+budgets in `tools/scripts/plugin_footprint_budget.json` (mapped code and data,
+which strip settings do not move; ICU data; and, for an editor-less binary, the
+symbols it must not contain). The `plugin-footprint-PulpGain`,
+`plugin-footprint-PulpGainHeadless` and `icu-data-subset-linked` tests run it,
+and `pulp-test-icu-data-breaks` pins the word, line, sentence and grapheme
+boundaries the full data produces, so a subset that drops a rule file or
+dictionary still in use fails.
+
 ## pulp_add_app
 
 **Status**: partial
@@ -581,6 +617,58 @@ The function delegates the byte-to-C-array encoding to the
 - Python (`find_package(Python3 COMPONENTS Interpreter REQUIRED)`) is the
   only added build-time dependency; Python is already required elsewhere
   in the Pulp build.
+
+
+## pulp_add_js_bytecode
+
+**Status**: usable
+
+Compile scripted-UI JavaScript to QuickJS bytecode at build time and embed it,
+so a fresh process reads the bytecode instead of parsing the script before its
+editor can open.
+
+```cmake
+pulp_add_js_bytecode(my_ui_bytecode
+    SOURCES   ui/runtime.js ui/design.js
+    NAMESPACE my_ui_bytecode
+    WIDGET_BRIDGE_SCRIPT)
+target_link_libraries(MyPlugin PRIVATE my_ui_bytecode)
+```
+
+Generates a static library with, per script:
+```cpp
+namespace my_ui_bytecode {
+    extern const unsigned char runtime_js_pjsbc[];
+    extern const std::size_t runtime_js_pjsbc_size;
+}
+```
+
+Register each blob before the editor opens (the processor's constructor or
+`editor_prewarm()`):
+
+```cpp
+pulp::view::register_embedded_script_bytecode(my_ui_bytecode::runtime_js_pjsbc,
+                                              my_ui_bytecode::runtime_js_pjsbc_size);
+```
+
+### Parameters
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `SOURCES` | Yes | -- | Scripts to compile |
+| `NAMESPACE` | No | `<target>` | C++ namespace for the generated symbols |
+| `WIDGET_BRIDGE_SCRIPT` | No | off | Compile each script as `WidgetBridge::load_script()` evaluates it |
+
+### Behavior
+
+- A blob is used only for the exact source text it was compiled from (length
+  and SHA-256) and only by the engine build that compiled it. A changed script,
+  another Pulp version, or a damaged blob falls back to compiling from source.
+- The generator is built from the same Pulp libraries the product links. When
+  cross-compiling it cannot run; the library then holds placeholder blobs that
+  registration rejects, and the scripts compile at run time.
+- `script_bytecode_cache_stats().embedded` counts scripts served from embedded
+  bytecode.
 
 ## pulp_add_cargo_staticlib
 

@@ -28,6 +28,7 @@
     "tools/scripts/test_gpu_first_visible_a3_role_producers.py": "walks a temporary tree",
     "tools/scripts/test_gpu_probe_acceptance.py": "walks temporary directories",
     "tools/scripts/test_gpu_test_resource_locks.py": "walks test/ and tools/cli CMake",
+    "tools/scripts/test_realtime_pool_resource_locks.py": "walks test/ sources and temporary trees; reads test/ and tools/cli CMake through the GPU lock guard",
     "tools/scripts/test_sdk_plist_templates_installed.py": "walks tools/cmake",
     "tools/scene3d/verify_renderer_probe_route_inventory_contract.py": "walks tools/scene3d",
     "tools/import-validation/check_agent_panel_invariants.py": "walks a build tree",

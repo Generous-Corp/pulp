@@ -7,6 +7,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <algorithm>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -312,6 +314,100 @@ TEST_CASE("pulp create is not gated by release-publishing credentials",
     REQUIRE(r.exit_code == 0);
     REQUIRE(fs::exists(out_dir / "CMakeLists.txt"));
 }
+
+#ifndef _WIN32
+TEST_CASE("pulp create configures a standalone project with Ninja when ninja is on PATH",
+          "[cli][create][shellout][generator]") {
+    // A standalone create used to configure with no -G, so the project got
+    // CMake's platform default (Unix Makefiles) unless CMAKE_GENERATOR happened
+    // to be set in the caller's environment, while `pulp build` picks Ninja.
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    TempDir tmp("pulp-create-ninja");
+    const auto home = tmp.path / "pulp-home";
+
+    // The SDK the CLI pins, already cached, so create does not download one.
+    auto version = run_create({"version"}, tmp.path);
+    std::smatch m;
+    // `pulp` prints "pulp vX.Y.Z", `pulp-cpp` prints "Pulp SDK version: X.Y.Z".
+    const std::string version_text = version.stdout_output + version.stderr_output;
+    INFO(version_text);
+    REQUIRE(std::regex_search(version_text, m, std::regex(R"((\d+\.\d+\.\d+))")));
+    const std::string sdk_version = m[1].str();
+    // Run from inside a checkout the CLI prefers a local SDK built from it;
+    // otherwise the downloaded one. Seed both so neither path builds anything.
+    std::vector<fs::path> sdks{home / "sdk" / sdk_version};
+    for (const auto* platform : {"darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"}) {
+        sdks.push_back(home / "sdk-local" / platform / sdk_version);
+    }
+    for (const auto& sdk : sdks) {
+        fs::create_directories(sdk / "lib" / "cmake" / "Pulp");
+        write_file(sdk / "version.txt", sdk_version + "\n");
+        write_file(sdk / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake", "\n");
+    }
+
+    // Stub cmake: answer probes through the real cmake, record the configure
+    // argv and stop there. A stub ninja makes "ninja is on PATH" true.
+    std::string real_cmake;
+    {
+        std::istringstream path_list(std::getenv("PATH") ? std::getenv("PATH") : "");
+        for (std::string dir; std::getline(path_list, dir, ':');) {
+            if (!dir.empty() && fs::exists(fs::path(dir) / "cmake")) {
+                real_cmake = (fs::path(dir) / "cmake").string();
+                break;
+            }
+        }
+    }
+    if (real_cmake.empty()) {
+        SKIP("cmake not on PATH");
+    }
+    const auto stub_dir = tmp.path / "stubs";
+    const auto argv_log = tmp.path / "configure-argv.txt";
+    fs::create_directories(stub_dir);
+    write_file(stub_dir / "cmake", "#!/bin/sh\n"
+                                   "case \" $* \" in\n"
+                                   "  *\" -S \"*) printf '%s\\n' \"$@\" > '" +
+                                       argv_log.string() +
+                                       "'; exit 3 ;;\n"
+                                       "esac\n"
+                                       "exec '" +
+                                       real_cmake + "' \"$@\"\n");
+    write_file(stub_dir / "ninja", "#!/bin/sh\nexit 0\n");
+    for (const auto* name : {"cmake", "ninja"}) {
+        fs::permissions(stub_dir / name, fs::perms::owner_all, fs::perm_options::replace);
+    }
+    const std::string patched_path =
+        stub_dir.string() + ":" + (std::getenv("PATH") ? std::getenv("PATH") : "");
+    ScopedEnvVar path_with_stub("PATH", patched_path.c_str());
+    ScopedEnvVar pulp_home("PULP_HOME", home.string().c_str());
+    ScopedEnvVar no_generator_env("CMAKE_GENERATOR", "");
+
+    const auto out_dir = tmp.path / "NinjaGain";
+    auto r = run_create({"create", "NinjaGain", "--output", out_dir.string()}, tmp.path);
+    INFO(r.stdout_output);
+    INFO(r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0); // the stub stops the configure
+    REQUIRE(r.stderr_output.find("Configure failed.") != std::string::npos);
+
+    REQUIRE(fs::exists(argv_log));
+    std::vector<std::string> argv;
+    {
+        std::istringstream in(read_file(argv_log));
+        for (std::string line; std::getline(in, line);)
+            argv.push_back(line);
+    }
+    auto g = std::find(argv.begin(), argv.end(), "-G");
+    REQUIRE(g != argv.end());
+    REQUIRE(std::next(g) != argv.end());
+    CHECK(*std::next(g) == "Ninja");
+    CHECK(std::any_of(sdks.begin(), sdks.end(), [&](const fs::path& sdk) {
+        return std::find(argv.begin(), argv.end(), "-DCMAKE_PREFIX_PATH=" + sdk.string()) !=
+               argv.end();
+    }));
+}
+#endif
 
 TEST_CASE("pulp create accepts local template kit paths without executing package code",
           "[cli][create][shellout][kit]") {

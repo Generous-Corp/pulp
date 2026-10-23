@@ -58,7 +58,22 @@ struct GpuAudioNodeDescriptor {
     // about misses is exactly the author who has not made the fallback correct.
     MissPolicy miss_policy = MissPolicy::Silence;
     bool supports_cpu_fallback = false;
+
+    /// Number of blocks the node's worker emits behind its submit (wet(N-D)).
+    /// The transport primes `latency_blocks - worker_pipeline_blocks`, which
+    /// requires `latency_blocks >= worker_pipeline_blocks + 1`; total latency
+    /// stays `latency_blocks`. Appended to keep positional initialization of the
+    /// fields above source-compatible.
+    std::uint32_t worker_pipeline_blocks = 0;
 };
+
+} // namespace pulp::gpu_audio
+
+// After MissPolicy: the status header forward-declares it, and the class below
+// needs GpuAudioStatus complete for status_snapshot().
+#include <pulp/gpu_audio/gpu_audio_status.hpp>
+
+namespace pulp::gpu_audio {
 
 /// A unit of audio work the transport schedules onto a non-real-time worker.
 ///
@@ -118,6 +133,22 @@ public:
             float* dst = output.channel_ptr(c);
             for (uint32_t i = 0; i < n; ++i) dst[i] = src[i];
         }
+    }
+
+    // Appended virtuals: new hooks go after every existing one so established
+    // vtable slots keep their positions (tools/scripts/node_abi_gate.py).
+
+    /// Host/UI thread. Allocation-free health snapshot. The default reports an
+    /// uninitialized provider; nodes that track their provider override it.
+    virtual GpuAudioStatus status_snapshot() const noexcept {
+        return {};
+    }
+
+    /// Host thread, audio stopped. Release provider resources within
+    /// `budget_ns`, returning false if teardown had to be abandoned to stay in
+    /// budget. The default holds nothing to release.
+    virtual bool release_bounded(std::uint64_t /*budget_ns*/) noexcept {
+        return true;
     }
 };
 

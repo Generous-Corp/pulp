@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 3,
+  "revision": 4,
   "fixes": [
     {
       "revision": 1,
@@ -37,6 +37,24 @@
       "id": "batched-host-callbacks",
       "summary": "the setState calls one requestAnimationFrame or timer callback makes commit once when it returns, instead of once per call under LegacyRoot (one editor's post-mount state hydrate made 13 commits from a single animation frame, ~380 ms of its editor-open settle)",
       "signature": "__pulpBatchUpdates__"
+    },
+    {
+      "revision": 4,
+      "id": "phased-metadata-layout-reads",
+      "summary": "a metadata pass reads every layout binding's box metrics before writing any captured geometry, and measures text targets once after all writes, so it lays the tree out twice per pass instead of once per binding (78 layout passes to 2 on one shipped editor's first apply)",
+      "signature": "layoutTargets"
+    },
+    {
+      "revision": 4,
+      "id": "stable-event-trampoline",
+      "summary": "a re-render that only hands an event prop a new closure updates the handler registry and makes no bridge call, instead of re-arming and re-installing the native listener (six inline handlers cost 12 bridge calls per commit)",
+      "signature": "nativeListenersBridge"
+    },
+    {
+      "revision": 4,
+      "id": "typography-length-units",
+      "summary": "fontSize, letterSpacing and lineHeight strings resolve px, em, rem, % and normal to pixels before the bridge, instead of reaching it as a bare leading number ('0.08em' became 0.08 px, '6px' line height became 6x the font size)",
+      "signature": "resolveTypographyLength"
     }
   ]
 }

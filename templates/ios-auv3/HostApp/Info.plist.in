@@ -49,6 +49,11 @@
         <integer>1</integer>
         <integer>2</integer>
     </array>
+    <!-- Without this key iOS caps every CADisplayLink at 60 Hz on ProMotion
+         iPhones, so the render loop's request for the panel's maximum rate
+         while animating has no effect. iPad ignores the key. -->
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>

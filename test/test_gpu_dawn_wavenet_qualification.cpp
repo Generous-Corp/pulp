@@ -2,10 +2,13 @@
 #include "detail/dawn_shared_io_wavenet_program.hpp"
 #include "detail/gpu_convolver_trial_config.hpp"
 #include "detail/nam_tcn_artifact.hpp"
+#include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/shared_io_compute_plan.hpp"
 #include "detail/shared_io_wavenet_spec.hpp"
+#include "detail/wavenet_realtime_channel.hpp"
 #include "support/dawn_transfer_call_counter.hpp"
 #include "support/physical_qualification_outcome.hpp"
+#include "support/wavenet_program_session_channel.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,12 +18,16 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <limits>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
+
+#include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 
 #ifndef PULP_GPU_AUDIO_EXPECTED_DAWN_SHA
 #define PULP_GPU_AUDIO_EXPECTED_DAWN_SHA ""
@@ -74,6 +81,17 @@ struct Result {
     bool immutable_provenance = false;
     bool device_loss_negative = false;
     bool device_loss_receipt = false;
+    // Node-level reasons from the stamped realtime node over a physical
+    // provider with an injected fault: loss after completion registration,
+    // and a slot whose completion is never serviced.
+    bool node_loss_receipt = false;
+    bool node_hang_receipt = false;
+    std::string node_loss_reason = "not_run";
+    std::string node_hang_reason = "not_run";
+    std::uint64_t node_loss_sequence = 0;
+    std::uint64_t node_hang_sequence = 0;
+    std::uint64_t node_loss_blocks = 0;
+    std::uint64_t node_hang_blocks = 0;
     std::uint64_t submissions = 0;
     std::uint64_t gpu_delivered = 0;
     std::uint64_t cpu_fallback = 0;
@@ -104,7 +122,14 @@ void emit(const Result& result, std::string_view status) {
               << (result.reprimed ? "true" : "false") << R"(,"immutable_provenance":)"
               << (result.immutable_provenance ? "true" : "false") << R"(,"device_loss_negative":)"
               << (result.device_loss_negative ? "true" : "false") << R"(,"device_loss_receipt":)"
-              << (result.device_loss_receipt ? "true" : "false") << R"(,"submissions":)"
+              << (result.device_loss_receipt ? "true" : "false") << R"(,"node_loss_receipt":)"
+              << (result.node_loss_receipt ? "true" : "false") << R"(,"node_loss_reason":")"
+              << result.node_loss_reason << R"(","node_loss_sequence":)"
+              << result.node_loss_sequence << R"(,"node_loss_blocks":)" << result.node_loss_blocks
+              << R"(,"node_hang_receipt":)" << (result.node_hang_receipt ? "true" : "false")
+              << R"(,"node_hang_reason":")" << result.node_hang_reason
+              << R"(","node_hang_sequence":)" << result.node_hang_sequence
+              << R"(,"node_hang_blocks":)" << result.node_hang_blocks << R"(,"submissions":)"
               << result.submissions << R"(,"gpu_delivered":)" << result.gpu_delivered
               << R"(,"cpu_fallback_blocks":)" << result.cpu_fallback << R"(,"late_blocks":)"
               << result.late << R"(,"resident_state_copies":)" << result.resident_state_copies
@@ -206,6 +231,159 @@ void run_device_loss_negative(Result& result, const Fixture& fixture, const void
                         std::to_string(receipts.size()) + std::to_string(released);
 }
 
+std::string_view recovery_name(pulp::gpu_audio::GpuAudioRecoveryReason reason) {
+    using R = pulp::gpu_audio::GpuAudioRecoveryReason;
+    switch (reason) {
+    case R::None:
+        return "none";
+    case R::SequenceGap:
+        return "sequence_gap";
+    case R::InputSaturated:
+        return "input_saturated";
+    case R::ProviderFailure:
+        return "provider_failure";
+    case R::ProviderLost:
+        return "provider_lost";
+    case R::OfflineFence:
+        return "offline_fence";
+    case R::InvalidCallback:
+        return "invalid_callback";
+    case R::ProviderUnresponsive:
+        return "provider_unresponsive";
+    case R::ProviderReacquired:
+        return "provider_reacquired";
+    case R::SustainedDeadlineMisses:
+        return "sustained_deadline_misses";
+    }
+    return "unknown";
+}
+
+struct NodeFaultRun {
+    bool ran = false;
+    pulp::gpu_audio::GpuAudioRecoveryReason reason = pulp::gpu_audio::GpuAudioRecoveryReason::None;
+    pulp::gpu_audio::GpuAudioProviderState state =
+        pulp::gpu_audio::GpuAudioProviderState::Uninitialized;
+    std::uint64_t sequence = 0;
+    std::uint64_t blocks = 0;
+    bool status_valid = false;
+    std::string reason_text;
+};
+
+// Drives the stamped node over a physical provider with `fault` until a
+// recovery reason latches. Callbacks and worker pumps alternate on this thread
+// with a short real wait, so the provider sees real device time.
+NodeFaultRun run_node_fault(const Fixture& fixture, const void* proc_table,
+                            DawnSharedIoProvider::Fault fault) {
+    namespace ga = pulp::gpu_audio;
+    NodeFaultRun run;
+    auto created = DawnSharedIoProvider::create(
+        {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+         .proc_table_override_for_testing = proc_table,
+         .fault = fault,
+         .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer});
+    if (!created.provider) {
+        run.reason_text = "provider_unavailable";
+        return run;
+    }
+    auto program = DawnSharedIoWavenetProgram::create(*created.provider, fixture.spec());
+    if (!program) {
+        run.reason_text = "program_unavailable";
+        return run;
+    }
+    const auto bytes = fixture.spec().block_size * sizeof(float);
+    auto session = std::make_unique<SharedIoProgramSession>();
+    if (!session->prepare(
+            {std::move(created.provider), std::move(program)},
+            {.slots = 2,
+             .input_bytes_per_slot = bytes,
+             .output_bytes_per_slot = bytes,
+             .storage_kind = SharedIoArenaProvider::StorageKind::ImportedHostPointer})) {
+        run.reason_text = "session_prepare_failed";
+        return run;
+    }
+    const std::array<std::uint32_t, 1> dilations{1};
+    const ga::GpuWaveNetLayerDescriptor layer{.input_size = 1,
+                                              .condition_size = 1,
+                                              .channels = 1,
+                                              .kernel = 2,
+                                              .head_size = 1,
+                                              .tanh_activation = true,
+                                              .dilations = dilations};
+    ga::GpuWaveNetRealtimeNode::Config config{
+        .session = {.descriptor = {.block_size = fixture.spec().block_size,
+                                   .sample_rate = 48000,
+                                   .stream_instances = 1,
+                                   .layers = {&layer, 1},
+                                   .weight_count = fixture.weights.size()},
+                    .weights = fixture.weights,
+                    .slots = 2},
+        .channels = 1,
+        .lead_blocks = 1,
+        .capacity = 4,
+        .max_inflight = 1};
+    ga::GpuWaveNetRealtimeNode node(config);
+    std::vector<std::unique_ptr<WaveNetRealtimeChannel>> channels;
+    channels.push_back(std::make_unique<pulp::test::ProgramSessionChannel>(std::move(session)));
+    if (!WaveNetRealtimeTestAccess::prepare(node, std::move(channels))) {
+        run.reason_text = "node_prepare_failed";
+        return run;
+    }
+    auto path = realtime_gpu_node_path(&node);
+    std::array<float, 2> input{}, output{};
+    const float* in_ptr = input.data();
+    float* out_ptr = output.data();
+    pulp::audio::BufferView<const float> in(&in_ptr, 1, 2);
+    pulp::audio::BufferView<float> out(&out_ptr, 1, 2);
+    run.ran = true;
+    for (std::uint64_t sequence = 0; sequence < 64; ++sequence) {
+        input = {static_cast<float>(sequence), static_cast<float>(sequence) + 0.25f};
+        const auto status = path.process(path.context, in, out, 2, sequence, true, now_ns());
+        const auto disposition =
+            status == kRealtimeGpuReady     ? SharedIoDeliveryDisposition::GpuDelivered
+            : status == kRealtimeGpuPriming ? SharedIoDeliveryDisposition::Priming
+                                            : SharedIoDeliveryDisposition::SilenceDelivered;
+        path.delivered(path.context, sequence, static_cast<std::uint8_t>(disposition), 0, 0);
+        ++run.blocks;
+        for (int pump = 0; pump < 4; ++pump) {
+            (void)path.service(path.context, 0);
+            std::this_thread::sleep_for(std::chrono::microseconds(250));
+        }
+        if (node.recovery_reason() != ga::GpuAudioRecoveryReason::None)
+            break;
+    }
+    run.reason = node.recovery_reason();
+    run.sequence = node.recovery_sequence();
+    const auto status = node.status_snapshot();
+    run.state = status.provider_state;
+    run.status_valid = ga::validate_gpu_audio_status(status).accepted() &&
+                       status.selected_engine != ga::GpuAudioEngine::Gpu;
+    run.reason_text = std::string(recovery_name(run.reason));
+    if (!node.release())
+        run.reason_text += ":release_retained";
+    return run;
+}
+
+void run_node_faults(Result& result, const Fixture& fixture, const void* proc_table) {
+    using ga_reason = pulp::gpu_audio::GpuAudioRecoveryReason;
+    using ga_state = pulp::gpu_audio::GpuAudioProviderState;
+    const auto loss = run_node_fault(
+        fixture, proc_table, DawnSharedIoProvider::Fault::ForceLossAfterCompletionRegistration);
+    result.node_loss_reason = loss.reason_text;
+    result.node_loss_sequence = loss.sequence;
+    result.node_loss_blocks = loss.blocks;
+    result.node_loss_receipt = loss.ran && loss.reason == ga_reason::ProviderLost &&
+                               loss.sequence == 0 && loss.state == ga_state::Unavailable &&
+                               loss.status_valid;
+    const auto hang =
+        run_node_fault(fixture, proc_table, DawnSharedIoProvider::Fault::DelayCompletion);
+    result.node_hang_reason = hang.reason_text;
+    result.node_hang_sequence = hang.sequence;
+    result.node_hang_blocks = hang.blocks;
+    result.node_hang_receipt = hang.ran && hang.reason == ga_reason::ProviderUnresponsive &&
+                               hang.sequence == 0 && hang.state == ga_state::Unavailable &&
+                               hang.status_valid;
+}
+
 Result run() {
     Result result;
     Fixture fixture;
@@ -293,16 +471,20 @@ Result run() {
     }
     result.generation = plan.preparation_epoch();
 
-    // This one-layer fixture has one causal pad of one sample. Preparation
-    // must allocate and zero exactly one four-byte resident history buffer.
-    // The target-size histogram distinguishes that allocation from the slot
-    // activation buffers and uniforms initialized in the same transaction.
+    // This one-layer fixture has one causal pad of one sample. The provider
+    // keeps the stream state in column rings sized to a power of two holding
+    // the pad plus one block: the layer-input ring is 4 columns (16 bytes) and
+    // the final activation ring, which carries no history, 2 columns (8 bytes).
+    // Preparation zeroes each ring once. In the target-size histogram the 16-byte
+    // bucket also holds the scale uniform, and the 8-byte bucket the two-word
+    // device stream position.
     const auto prepared_transfer = transfer_counter.snapshot();
     constexpr std::size_t expected_history_bytes = sizeof(float);
     result.history_transfer_contract =
         resident_history_bytes == expected_history_bytes &&
-        prepared_transfer.queue_write_buffer_target_size_histogram[expected_history_bytes] == 1 &&
-        prepared_transfer.queue_write_buffer_size_histogram[expected_history_bytes] == 1;
+        prepared_transfer.queue_write_buffer_target_size_histogram[16] == 2 &&
+        prepared_transfer.queue_write_buffer_target_size_histogram[8] == 2 &&
+        prepared_transfer.queue_write_buffer_target_size_histogram[expected_history_bytes] == 0;
 
     transfer_counter.reset();
     float previous = 0.0f;
@@ -426,22 +608,20 @@ Result run() {
     result.reprimed = result.reprimed && result.reprime_generation != result.generation &&
                       second_receipts.size() == 1 && second_receipts.front().terminal;
 
+    // The rings keep history in place and the stream position advances on the
+    // device, so no submission copies state or writes from the host.
     const auto transfer = transfer_counter.snapshot();
     result.resident_state_copies = transfer.copy_buffer_to_buffer_calls;
-    const auto expected_history_copies = (result.submissions + 1u) * 2u;
-    result.history_transfer_contract =
-        result.history_transfer_contract &&
-        transfer.copy_buffer_to_buffer_calls == expected_history_copies &&
-        transfer.copy_buffer_to_buffer_bytes == expected_history_copies * expected_history_bytes &&
-        transfer.copy_buffer_to_buffer_size_histogram[expected_history_bytes] ==
-            expected_history_copies &&
-        transfer.copy_buffer_to_buffer_size_histogram[8] == 0;
+    result.history_transfer_contract = result.history_transfer_contract && result.submissions > 0 &&
+                                       transfer.copy_buffer_to_buffer_calls == 0 &&
+                                       transfer.copy_buffer_to_buffer_bytes == 0;
     result.zero_audio_slot_transfers =
         transfer.queue_write_buffer_calls == 0 && transfer.buffer_map_async_calls == 0 &&
         transfer.buffer_get_mapped_range_calls == 0 && transfer.buffer_unmap_calls == 0 &&
         result.history_transfer_contract;
     result.retired = result.retired && plan.release();
     run_device_loss_negative(result, fixture, transfer_counter.deferred_proc_table());
+    run_node_faults(result, fixture, transfer_counter.deferred_proc_table());
     if (result.device_loss_negative)
         result.reason = result.retired ? "authenticated_one_stream_pass_cpu_fallback_shadow_only"
                                        : "release_failed";
@@ -465,7 +645,8 @@ int main(int argc, char** argv) {
         result.identity && result.resident_state && result.zero_audio_slot_transfers &&
         result.cpu_parity && result.cpu_fallback_parity && result.cpu_fallback_delivered &&
         result.late_result_rejected && result.retired && result.reprimed &&
-        result.immutable_provenance && result.device_loss_negative && result.device_loss_receipt;
+        result.immutable_provenance && result.device_loss_negative && result.device_loss_receipt &&
+        result.node_loss_receipt && result.node_hang_receipt;
     emit(result, passed ? "passed" : "failed");
     return passed ? 0 : 1;
 }

@@ -334,6 +334,11 @@ void SharedIoConvolutionSession::trace_terminal(SharedIoSlotLedger::SlotToken to
                                                 SharedIoFallbackReason reason,
                                                 std::uint64_t gpu_elapsed_ns,
                                                 bool gpu_elapsed_available) noexcept {
+    // Every completion and refused submission reaches exactly one terminal
+    // call, so the tally holds with tracing off. Teardown cancellations are
+    // only known through recorder slots and are counted only with tracing.
+    auto& count = gpu_terminal_counts_[static_cast<std::size_t>(disposition)];
+    count.store(count.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
     if (!trace_recorder_ || token.slot >= trace_slots_.size())
         return;
     auto& slot = trace_slots_[token.slot];
@@ -381,6 +386,8 @@ bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
     if (prepared_ || provider_ || plan_.prepared() || !pair.provider || !pair.program ||
         config.slots == 0 || !convolution_geometry_valid(config.pipeline))
         return false;
+    for (auto& count : gpu_terminal_counts_)
+        count.store(0, std::memory_order_relaxed);
     const auto bytes = complex_slot_bytes(config.pipeline);
     if (!bytes)
         return false;

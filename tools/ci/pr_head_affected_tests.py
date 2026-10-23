@@ -19,7 +19,9 @@ with the Shipyard changed-surface families), plus these rules:
     about 12 minutes on a third of pull requests);
   * path families the projection cannot see: `tools/cmake/**` reaches the
     `cmake-*` fixture tests, and the wide non-native tier's manifest, classifier
-    or any ctest registration under `test/` reaches `wide-non-native-selftest`;
+    or any ctest registration under `test/` reaches `wide-non-native-selftest`,
+    and `experimental/pulp-rs/**` or a file the crate embeds reaches the
+    `pulp-rust-*` tests;
   * `pr-fast` members already ran and are left out;
   * the extra time is capped: tests run in batches, no batch starts once the
     budget is spent, and every test that did not run is listed as skipped;
@@ -77,6 +79,33 @@ PR_FAST_LABEL = "pr-fast"
 NON_TEST_PREFIXES = (".agents/", ".claude", ".codex", ".github/", "docs/", "planning")
 NON_TEST_SUFFIXES = (".md",)
 
+# Files outside experimental/pulp-rs that the crate compiles in: the
+# include_str!/include_bytes! targets and the build script's
+# cargo:rerun-if-changed inputs. A test derives this set from the crate's
+# sources and requires an exact match, so a new compile-time input cannot be
+# missed.
+PULP_RS_EXTERNAL_INPUTS = (
+    ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+    ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+    ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+    "tools/import-design/browser_capture/runtime_manifest.txt",
+    "tools/packages/pulp-packages-verify.cmake",
+    "tools/packages/tool-registry.json",
+    "tools/scripts/release_product_matrix.json",
+)
+
+# Files outside the crate that its cargo tests open at run time through
+# CARGO_MANIFEST_DIR. These are listed by hand: run-time path arithmetic cannot
+# be enumerated statically, so this list is the coverage boundary. A test that
+# reads some other repository file at run time (pkg_pin_test and the trace
+# tool tests compute a repo root and join paths under it) is not selected by an
+# edit to that file; add the file here when such a read is introduced.
+PULP_RS_TEST_TIME_INPUTS = (
+    "tools/ci/record_build_metric.sh",
+    "tools/packages/chrome-for-testing-verification.md",
+    "tools/packages/packages.lock.schema.json",
+)
+
 # Paths the build graph cannot connect to the tests that read them.
 PATH_FAMILIES = (
     ("cmake-fixtures", re.compile(r"^tools/cmake/"), re.compile(r"^cmake-")),
@@ -107,6 +136,17 @@ PATH_FAMILIES = (
     ("no-editor-link-floor",
      re.compile(r"^test/fixtures/no_editor_link_floor/"),
      re.compile(r"^no-editor-plugin-link-floor-artifacts$")),
+    # The Rust CLI is built and tested by cargo, not by CMake targets, so the
+    # crate owns no CMake sources and the projection never reaches its cargo
+    # tests. Without this an edit to the crate, or to a file it reads, runs
+    # them only in the merge group, where a failure ejects the whole batch.
+    # Only the crate's top-level prose selects nothing; Markdown under
+    # tests/fixtures is test input.
+    ("pulp-rs-cargo",
+     re.compile(r"^(experimental/pulp-rs/(?!(README|UPSTREAM_SYNC)\.md$)"
+                r"|(" + "|".join(re.escape(p) for p in
+                                 PULP_RS_EXTERNAL_INPUTS + PULP_RS_TEST_TIME_INPUTS) + r")$)"),
+     re.compile(r"^pulp-rust-")),
     # The sync primitives are included by most of the tree, so an edit to one
     # selects thousands of tests and the budget reaches their own concurrency
     # hammers only by luck. The hammers are the one proof those edits did not
@@ -191,7 +231,7 @@ def source_lane_contract_tests(paths: list[str], names: list[str],
 # renamed case), which would silently reopen the gap it closes, so the step
 # fails. The other families name platform- or configuration-specific tests
 # that are legitimately absent from some builds.
-REQUIRED_FAMILIES = frozenset({"runtime-sync-hammers", "audio-buffer-ops"})
+REQUIRED_FAMILIES = frozenset({"runtime-sync-hammers", "audio-buffer-ops", "pulp-rs-cargo"})
 
 
 def empty_required_families(families: dict[str, list[str]]) -> list[str]:
@@ -320,11 +360,9 @@ def own_tests(build: Path, root: Path, paths: list[str]) -> list[str]:
     edited = {p for p in paths if os.path.splitext(p)[1] in inventory.SOURCE_EXTENSIONS}
     owners = {t.name for t in model.targets.values()
               if t.type == "EXECUTABLE" and edited & set(t.sources)}
-    artifacts = {os.path.normpath(a) for t in model.targets.values() if t.name in owners
-                 for a in t.artifacts}
+    index = inventory.artifact_index(model)
     entries = inventory.load_projection_ctest_entries(build) or []
-    return sorted({e.name for e in entries
-                   if any(os.path.normpath(c) in artifacts for c in e.command)})
+    return sorted({e.name for e in entries if inventory.command_owners(e.command, index) & owners})
 
 
 # A diff reaches only a handful of test executables through a CMake or
@@ -401,9 +439,11 @@ def rebuilt_binary_tests(build: Path, why: list[str] | None = None) -> list[str]
                    f"{REBUILT_EXECUTABLE_CAP}, so the directory's history drove the "
                    "build, not this diff")
         return []
+    # A rebuilt binary inside a bundle is reached through the bundle path too.
+    rebuilt |= {bundle for artifact in rebuilt for bundle in inventory.bundle_dirs(artifact)}
     selected = []
     for entry in entries:
-        if any(key(command) in rebuilt for command in entry.command):
+        if any(key(ref) in rebuilt for ref in inventory.command_path_refs(entry.command)):
             selected.append(entry.name)
     return sorted(set(selected))
 
@@ -438,11 +478,9 @@ def registration_tests(build: Path, paths: list[str], root: Path = REPO_ROOT,
         names |= reached.tests
         targets |= reached.targets
     if targets and inventory.codemodel_reply_available(build):
-        model = inventory.load_codemodel_targets(build)
-        artifacts = {os.path.normpath(a) for t in model.targets.values()
-                     if t.name in targets for a in t.artifacts}
+        index = inventory.artifact_index(inventory.load_codemodel_targets(build))
         for entry in inventory.load_projection_ctest_entries(build) or []:
-            if any(os.path.normpath(c) in artifacts for c in entry.command):
+            if inventory.command_owners(entry.command, index) & targets:
                 names.add(entry.name)
     return sorted(names)
 

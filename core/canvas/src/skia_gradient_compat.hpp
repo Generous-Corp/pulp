@@ -3,6 +3,7 @@
 #ifdef PULP_HAS_SKIA
 
 #include "include/core/SkColorSpace.h"
+#include "include/core/SkPaint.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkShader.h"
@@ -131,6 +132,18 @@ inline sk_sp<SkShader> make_two_point_conical(SkPoint start,
                                                  positions, count, SkTileMode::kClamp,
                                                  css_interpolation(), nullptr);
 #endif
+}
+
+/// Install a fill or stroke shader, dithering it when it is a gradient.
+///
+/// Chromium dithers CSS gradients, so a shallow gradient (a few code values
+/// across hundreds of pixels) reaches the screen as fine row noise rather than
+/// flat bands with hard steps. Undithered, the same gradient bands visibly and
+/// disagrees with every browser capture of it. Image patterns share the same
+/// shader slots and are left undithered, as Chromium leaves images.
+inline void set_paint_shader(SkPaint& paint, sk_sp<SkShader> shader) {
+    paint.setDither(shader != nullptr && !shader->isAImage());
+    paint.setShader(std::move(shader));
 }
 
 } // namespace pulp::canvas::skia_gradient
