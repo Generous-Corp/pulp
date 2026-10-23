@@ -1979,6 +1979,40 @@ protected:
         (void)content_key;
         return draw_image_from_data_rect(data, size, sx, sy, sw, sh, dx, dy, dw, dh);
     }
+
+    /// Intrinsic pixel size of encoded image bytes, read from the image header
+    /// without decoding pixels: the size `draw_image_from_data` would draw the
+    /// full image at. Returns false (sizes 0) when the bytes are not an image
+    /// this backend can decode. The default reads a PNG IHDR only, so a backend
+    /// with no decoder still sizes PNGs; Skia and CoreGraphics read every
+    /// format their decoders accept. Appended after the existing virtuals.
+    virtual bool measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                         float& out_height) {
+        out_width = 0.0f;
+        out_height = 0.0f;
+        static constexpr uint8_t kPngSignature[] = {0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+        if (!data || size < 24)
+            return false;
+        for (size_t i = 0; i < sizeof(kPngSignature); ++i)
+            if (data[i] != kPngSignature[i])
+                return false;
+        const auto read_be32 = [&](size_t offset) {
+            return (static_cast<uint32_t>(data[offset]) << 24) |
+                   (static_cast<uint32_t>(data[offset + 1]) << 16) |
+                   (static_cast<uint32_t>(data[offset + 2]) << 8) |
+                   static_cast<uint32_t>(data[offset + 3]);
+        };
+        // The first chunk must be IHDR; PNG caps each dimension at 2^31 - 1.
+        if (data[12] != 'I' || data[13] != 'H' || data[14] != 'D' || data[15] != 'R')
+            return false;
+        const uint32_t w = read_be32(16);
+        const uint32_t h = read_be32(20);
+        if (w == 0 || h == 0 || w > 0x7fffffffu || h > 0x7fffffffu)
+            return false;
+        out_width = static_cast<float>(w);
+        out_height = static_cast<float>(h);
+        return true;
+    }
 };
 
 } // namespace pulp::canvas

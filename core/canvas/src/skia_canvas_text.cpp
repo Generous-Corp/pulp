@@ -50,6 +50,7 @@
 #include "include/effects/SkImageFilters.h"
 #endif  // PULP_HAS_SKIA
 
+#include <pulp/canvas/resource_counters.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
@@ -189,6 +190,7 @@ PreparedParagraph make_paragraph(const std::string& text,
     pb->addText(text.c_str(), text.size());
     auto paragraph = pb->Build();
     if (!paragraph) return result;
+    note_paragraph_build();
     paragraph->layout(SK_ScalarInfinity);
     // Diagnostic contract for imported typography. A non-empty value filters
     // by text content ("*" traces every run) and reports the typeface that
