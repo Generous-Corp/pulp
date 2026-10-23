@@ -1212,7 +1212,7 @@ class GpuProofTests(unittest.TestCase):
         inv.write_text(json.dumps(inventory), encoding="utf-8")
         return subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root),
                                "--build-dir", str(repo.build), "--inventory-json", str(inv), *args],
-                              capture_output=True, text=True, timeout=60,
+                              capture_output=True, text=True, encoding="utf-8", timeout=60,
                               env=tool_env(event="pull_request", strict=False))
 
     def proof_repo(self, tmp: str) -> Repo:
