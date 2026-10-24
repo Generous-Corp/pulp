@@ -6660,6 +6660,13 @@
    ],
    "kind": "python"
   },
+  "import-design-ir-observe-half-pixel-label": {
+   "entry": "test/test_design_ir_observe_half_pixel_label.py",
+   "inputs": [
+    "test/test_design_ir_observe_half_pixel_label.py"
+   ],
+   "kind": "python"
+  },
   "import-design-ir-observe-interactions": {
    "entry": "test/test_design_ir_observe_interactions.py",
    "inputs": [

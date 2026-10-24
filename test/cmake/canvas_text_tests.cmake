@@ -160,6 +160,12 @@ if(PULP_HAS_SKIA)
         LIBRARIES pulp::canvas)
 endif()
 
+# CSS font-weight matching: the spec order as a table, and the face every
+# picking path reports for real platform families (macOS cases skip where the
+# family is not installed).
+pulp_add_test_suite(pulp-test-font-weight-match GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
+
 # Font subsystem typed options and scope generation tests
 pulp_add_test_suite(pulp-test-font-options GROUP pulp-test-group-canvas-text
     LIBRARIES pulp::canvas)

@@ -206,7 +206,17 @@ if(PULP_HAS_SKIA)
         # SkParagraph paths and owns the per-context FontCollection used
         # for Label/measurement.
         src/text_font_context.cpp
+        # CSS font-weight matching for the paragraph collection's default
+        # font manager (see font_weight_match.hpp).
+        src/font_weight_match.cpp
+        src/css_weight_font_manager.cpp
     )
+    if(NOT MSVC)
+        # It subclasses SkFontMgr, whose type info the prebuilt Skia does not
+        # export.
+        set_source_files_properties(src/css_weight_font_manager.cpp PROPERTIES
+            COMPILE_OPTIONS "-fno-rtti")
+    endif()
     if(APPLE)
         target_sources(pulp-canvas PRIVATE src/system_ui_font_manager.cpp)
         # It subclasses SkFontMgr, whose type info the prebuilt Skia does not

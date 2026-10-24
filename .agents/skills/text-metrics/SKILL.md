@@ -152,7 +152,30 @@ now consults `make_system_ui_font_manager` (`core/canvas/src/system_ui_typeface.
 first. Compare a family's paragraph face with its resolver face per weight,
 names and advances, before trusting either. A subclass of `SkFontMgr` (or of
 SkParagraph's `TypefaceFontProvider`) must live in a TU built with `-fno-rtti`:
-the prebuilt Skia exports no type info for them and the link fails.
+the prebuilt Skia exports no type info for them and the link fails. Keep that
+TU free of anything that can throw (`std::vector`, `std::string`, inline
+helpers that use them): a throw site compiled without RTTI emits hidden copies
+of `std::exception`'s type info, the linker binds the whole binary's catch
+clauses to them, and a `std::runtime_error` thrown anywhere else then escapes
+`catch (const std::exception&)`. Put such code in an ordinary TU, as
+`font_weight_match.cpp` does, and check with `nm -m <tu>.o | grep __ZTISt`.
+
+The weight a family resolves is the other half of the face. CoreText (and
+every platform manager's `matchFamilyStyle`) takes the NEAREST weight; CSS
+Fonts 4 searches in a fixed direction: from 400 to 500 it tries heavier faces
+up to 500, then lighter, then heavier; below 400 lighter first; above 500
+heavier first. Helvetica Neue ships Medium (500) and Bold (700), so at 600
+CoreText picks Medium and Chromium picks Bold. The import painted lighter and
+narrower (dx -0.54 CSS px, ink 0.858 against the capture) and, because the
+resolved face no longer matched the capture's recorded face, Label rejected the
+captured basis and placed the baseline natively (dy +0.45 at whole-pixel
+tops). `css_match_font_weight()` in `core/canvas/src/font_weight_match.hpp`
+is the one matcher: the resolver (and so `resolved_face_identity()`), the
+paragraph collection's default manager and bundled families all go through it.
+Never call `mgr->matchFamilyStyle()` directly for a named family; the face it
+returns is the face the captured-basis check will disagree with. When a weight
+looks wrong, ask the same question at 700 first: if 700 is exact and 600 is
+not, the family is missing the weight and the matcher is deciding.
 
 ## A Label with element children does not paint at its own origin
 
