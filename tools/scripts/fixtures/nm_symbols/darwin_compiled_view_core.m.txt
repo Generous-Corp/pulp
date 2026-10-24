@@ -1,0 +1,36 @@
+
+view_core.o:
+0000000000000024 (__TEXT,__text) weak external __ZN4pulp4view10SliderCore12notify_valueEv
+00000000000000c0 (__TEXT,__text) external __ZN4pulp4view10make_errorEv
+0000000000000068 (__TEXT,__text) external __ZN4pulp4view10make_stripEv
+0000000000000290 (__TEXT,__text) weak external automatically hidden __ZN4pulp4view16ChannelStripView5widthEv
+0000000000000094 (__TEXT,__text) weak external automatically hidden __ZN4pulp4view16ChannelStripViewC1Ev
+0000000000000210 (__TEXT,__text) weak external automatically hidden __ZN4pulp4view16ChannelStripViewC2Ev
+0000000000000260 (__TEXT,__text) weak external automatically hidden __ZN4pulp4view16ChannelStripViewD0Ev
+0000000000000234 (__TEXT,__text) weak external automatically hidden __ZN4pulp4view16ChannelStripViewD1Ev
+00000000000002a4 (__TEXT,__text) weak external automatically hidden __ZN4pulp4view16ChannelStripViewD2Ev
+0000000000000000 (__TEXT,__text) external __ZN4pulp4view16make_slider_funcERNS0_10SliderCoreE
+00000000000001c4 (__TEXT,__text) weak external automatically hidden __ZNSt10__function6__funcIZN4pulp4view10SliderCore12notify_valueEvEUlvE_E4callEv
+0000000000000118 (__TEXT,__text) weak external automatically hidden __ZNSt10__function6__funcIZN4pulp4view10SliderCore12notify_valueEvEUlvE_EC1Ev
+0000000000000144 (__TEXT,__text) weak external automatically hidden __ZNSt10__function6__funcIZN4pulp4view10SliderCore12notify_valueEvEUlvE_EC2Ev
+0000000000000194 (__TEXT,__text) weak external automatically hidden __ZNSt10__function6__funcIZN4pulp4view10SliderCore12notify_valueEvEUlvE_ED0Ev
+0000000000000168 (__TEXT,__text) weak external automatically hidden __ZNSt10__function6__funcIZN4pulp4view10SliderCore12notify_valueEvEUlvE_ED1Ev
+00000000000001ec (__TEXT,__text) weak external automatically hidden __ZNSt10__function6__funcIZN4pulp4view10SliderCore12notify_valueEvEUlvE_ED2Ev
+00000000000000ec (__TEXT,__text) weak external automatically hidden __ZNSt12format_errorC1Ev
+00000000000002b8 (__TEXT,__text) weak external automatically hidden __ZNSt12format_errorC2Ev
+0000000000000308 (__TEXT,__text) weak external automatically hidden __ZNSt12format_errorD0Ev
+00000000000002dc (__TEXT,__text) weak external automatically hidden __ZNSt12format_errorD1Ev
+0000000000000338 (__TEXT,__text) weak external automatically hidden __ZNSt12format_errorD2Ev
+0000000000000428 (__DATA,__const) weak private external __ZTIN4pulp4view16ChannelStripViewE
+00000000000003f0 (__DATA,__const) weak private external __ZTINSt10__function6__funcIZN4pulp4view10SliderCore12notify_valueEvEUlvE_EE
+0000000000000458 (__DATA,__const) weak private external __ZTISt12format_error
+0000000000000395 (__TEXT,__const) weak private external __ZTSN4pulp4view16ChannelStripViewE
+000000000000034d (__TEXT,__const) weak private external __ZTSNSt10__function6__funcIZN4pulp4view10SliderCore12notify_valueEvEUlvE_EE
+00000000000003b4 (__TEXT,__const) weak private external __ZTSSt12format_error
+                 (undefined) external __ZTVN10__cxxabiv117__class_type_infoE
+0000000000000400 (__DATA,__const) weak external automatically hidden __ZTVN4pulp4view16ChannelStripViewE
+00000000000003c8 (__DATA,__const) weak external automatically hidden __ZTVNSt10__function6__funcIZN4pulp4view10SliderCore12notify_valueEvEUlvE_EE
+0000000000000438 (__DATA,__const) weak external automatically hidden __ZTVSt12format_error
+0000000000000200 (__TEXT,__text) weak external __ZZN4pulp4view10SliderCore12notify_valueEvENKUlvE_clEv
+                 (undefined) external __ZdlPv
+                 (undefined) external __Znwm

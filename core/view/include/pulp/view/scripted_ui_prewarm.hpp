@@ -17,6 +17,7 @@
 // The per-open work (evaluating the runtime, laying out the tree, the first
 // GPU frame) still happens in the view-creation call.
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -50,6 +51,18 @@ struct ScriptedUiPrewarmRequest {
 /// A no-op when `PULP_EDITOR_PREWARM=0` is set in the environment (A/B and
 /// negative controls), or when the default script engine is not QuickJS.
 void prewarm_scripted_ui(ScriptedUiPrewarmRequest request);
+
+/// prewarm_scripted_ui(), reachable without naming it. The script runtime
+/// installs it when its session code is linked into the binary (any binary
+/// that constructs a ScriptedUiSession); until then it is null. Editor glue
+/// that is linked into every plug-in calls through this slot, so a plug-in
+/// whose editor never runs a script does not link the runtime just to
+/// schedule a prewarm it can never use.
+using ScriptedUiPrewarmRunner = void (*)(ScriptedUiPrewarmRequest);
+inline std::atomic<ScriptedUiPrewarmRunner>& scripted_ui_prewarm_runner() noexcept {
+    static std::atomic<ScriptedUiPrewarmRunner> runner{nullptr};
+    return runner;
+}
 
 struct ScriptedUiPrewarmStats {
     std::uint64_t requests = 0;            ///< requests accepted

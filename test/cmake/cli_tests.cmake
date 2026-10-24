@@ -452,6 +452,13 @@ endif()
 # for the non-destructive ship subcommand branches.
 add_executable(pulp-test-cli-ship-shellout test_cli_ship_shellout.cpp)
 target_link_libraries(pulp-test-cli-ship-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(APPLE)
+    # A real Mach-O module carrying a local symbol, for the ship-time strip case.
+    add_library(pulp-test-ship-strip-fixture MODULE fixtures/ship_strip/ship_strip_fixture.cpp)
+    add_dependencies(pulp-test-cli-ship-shellout pulp-test-ship-strip-fixture)
+    target_compile_definitions(pulp-test-cli-ship-shellout PRIVATE
+        PULP_SHIP_STRIP_FIXTURE="$<TARGET_FILE:pulp-test-ship-strip-fixture>")
+endif()
 # hdiutil attaches temporary disk images through a machine-wide service. Keep
 # the one real-image case parallel with ordinary CLI tests, but not with another
 # real-image creator: under ctest -j8 that collision has stretched a 17-second

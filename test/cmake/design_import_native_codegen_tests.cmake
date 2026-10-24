@@ -107,6 +107,7 @@ endif()
 add_executable(pulp-test-design-import-native-materializer
     test_design_import_native_materializer.cpp
     test_design_import_native_capture.cpp
+    test_design_import_form_controls.cpp
     fixtures/design_import_generated_binding_runtime_fixture.cpp)
 target_link_libraries(pulp-test-design-import-native-materializer
     PRIVATE pulp::view Catch2::Catch2WithMain)

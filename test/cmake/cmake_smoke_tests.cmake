@@ -132,6 +132,17 @@ add_test(NAME cmake-standalone-document-types
 add_test(NAME cmake-plugin-bundle-icon
     COMMAND ${CMAKE_COMMAND}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_bundle_icon.cmake)
+
+# PULP_DEAD_STRIP_PLUGINS and the per-module PULP_DEAD_STRIP property each
+# remove -dead_strip from an Apple plug-in module's link; the default keeps it.
+add_test(NAME cmake-plugin-dead-strip-switch
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_DEAD_STRIP_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-dead-strip-switch
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_dead_strip_switch.cmake)
+set_tests_properties(cmake-plugin-dead-strip-switch PROPERTIES
+    LABELS "cmake;plugin;packaging"
+    # Three throwaway configures, each paying C compiler detection.
+    TIMEOUT 180)
 set_tests_properties(cmake-standalone-document-types PROPERTIES
     LABELS "cmake;app;standalone;plist"
     # Runs in ~1.5s warm; the budget covers three throwaway project configures

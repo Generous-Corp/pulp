@@ -61,7 +61,14 @@ std::optional<HostVersion> parse_host_version(std::string_view version_string);
 /// should treat that as "unknown" and avoid version-gated quirks.
 HostVersion detect_host_version(HostType type);
 
-/// Combined accessor: detect both type and version in one call.
+/// Whether any host quirk for @p type is version-gated. Unknown, Other and the
+/// Pulp standalone have no version-dependent behavior, so their version is never
+/// read (on macOS that read can cost about a millisecond in a process whose main
+/// bundle has no Info.plist loaded yet).
+bool host_type_uses_version(HostType type) noexcept;
+
+/// Combined accessor: detect both type and version in one call. The version is
+/// left empty for host types where host_type_uses_version() is false.
 struct HostInfo {
     HostType type = HostType::Unknown;
     HostVersion version;

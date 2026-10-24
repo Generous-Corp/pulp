@@ -1019,3 +1019,27 @@ TEST_CASE("WidgetBridge SvgPath compound multi-subpath parses every segment",
     REQUIRE(moves == 10);
     REQUIRE(lines == 10);
 }
+
+TEST_CASE("WidgetBridge setSvgStrokeStyle sets an SvgPath's cap, join and miter limit",
+          "[view][bridge][svg][stroke-style]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 100, 100});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createSvgPath('icon', 'M 4 12 L 20 12')");
+    bridge.load_script("setSvgStrokeStyle('icon', 'round', 'bevel', 8)");
+    auto* w = dynamic_cast<SvgPathWidget*>(bridge.widget("icon"));
+    REQUIRE(w != nullptr);
+    CHECK(w->stroke_cap() == pulp::canvas::LineCap::round);
+    CHECK(w->stroke_join() == pulp::canvas::LineJoin::bevel);
+    CHECK(w->stroke_miter_limit() == 8.0f);
+
+    // Unknown keywords and a missing limit leave those parts as they were, and
+    // an unknown id or a non-path widget is ignored rather than an error.
+    bridge.load_script("setSvgStrokeStyle('icon', 'pointed', '')");
+    CHECK(w->stroke_cap() == pulp::canvas::LineCap::round);
+    CHECK(w->stroke_join() == pulp::canvas::LineJoin::bevel);
+    CHECK(w->stroke_miter_limit() == 8.0f);
+    bridge.load_script("setSvgStrokeStyle('missing', 'round', 'round', 4)");
+}
