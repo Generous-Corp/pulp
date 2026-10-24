@@ -128,8 +128,21 @@ AudioWidgetType audio_widget_from_id(const std::string& id);
 // True when `key` names an asset-reference field; defined in design_ir_json.cpp.
 bool is_asset_reference_key(std::string_view key);
 
+// How a DesignIR node tree is read back.
+struct IRParseOptions {
+    // The node tree was measured from a rendered page (the browser capture),
+    // so its geometry and paint are already what the source draws and its
+    // controls are the ones the capture bound. Rules that make up for how a
+    // design tool draws or names layers do not run.
+    bool measured_geometry = false;
+};
+
+// The parse options a DesignIR's provenance calls for: measured geometry for
+// the browser capture. Defined in design_ir_normalize.cpp.
+IRParseOptions ir_parse_options_for(const DesignIR& ir);
+
 // Parse a single DesignIR node tree; defined in design_ir_json.cpp.
-IRNode parse_ir_node(const choc::value::ValueView& obj);
+IRNode parse_ir_node(const choc::value::ValueView& obj, const IRParseOptions& options = {});
 
 // Heuristic geometry rewrites on a parsed node (separator promotion,
 // rounded-corner inheritance, shadow-driven sibling snap, connector-line
@@ -137,7 +150,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj);
 // per node after that node's children are parsed. Reads and writes only the
 // IR tree — never the source JSON — so the rules are unit-testable in
 // isolation.
-void normalize_design_ir(IRNode& node);
+void normalize_design_ir(IRNode& node, const IRParseOptions& options = {});
 
 // True when `kw` (CSS lowercase-hyphen spelling) is in the supported-blend
 // table every lane shares; defined in design_ir_json.cpp.
