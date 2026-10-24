@@ -365,6 +365,12 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Ccache.cmake)
 # ship; the properties those targets check are also driven by deterministic
 # replays in the normal test suite, which need no special toolchain.
 option(PULP_ENABLE_FUZZING "Build libFuzzer targets (requires a libFuzzer runtime)" OFF)
+# The -fsanitize list every libFuzzer target compiles and links with. The CI
+# lane keeps ASan on; a host whose ASan runtime cannot start (Homebrew LLVM on
+# a macOS release its compiler-rt predates deadlocks in AsanInitFromRtl before
+# main) can still build and run the targets with "fuzzer" alone.
+set(PULP_FUZZ_SANITIZERS "fuzzer,address" CACHE STRING
+    "Comma-separated -fsanitize= list for libFuzzer targets")
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Sanitizers.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstrumentation.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)

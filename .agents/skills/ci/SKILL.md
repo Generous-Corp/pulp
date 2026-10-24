@@ -11739,6 +11739,60 @@ cases/sec, so the whole PR budget is well under a second and the nightly budget 
 almost for free. Budget the build, not the iterations, and keep `timeout-minutes` on both jobs
 plus `-max_total_time` on libFuzzer.
 
+### Adding a libFuzzer target
+
+Register it under `if(PULP_ENABLE_FUZZING)` in the owning `test/cmake/*_tests.cmake` manifest
+through `pulp_add_libfuzzer_target()` (`tools/cmake/PulpTestSuite.cmake`): it adds the
+executable with the fuzzer+ASan flags and a `<name>-smoke` ctest (labels `fuzz;libfuzzer`) that
+runs a fixed, seeded number of mutations over a seed corpus. The smoke gets a scratch directory
+*first* and the seeds second — libFuzzer writes every new interesting input into the first
+corpus directory it is given, so a checked-in corpus named first is grown by every test run.
+Checked-in seeds live under `test/fixtures/fuzz/<target>/`; a seed that has to be produced by
+the code under test (the plugin-state envelope) comes from a small generator executable that is
+built unconditionally and run as a `FIXTURES_SETUP` ctest only in a fuzzing build. The only
+toolchain probe is the one in `timeline_tests.cmake`; it fails the whole configure, so a target
+registered in a manifest included earlier needs no probe of its own.
+
+Then add the target to **both** lists in `timeline-fuzz.yml`'s `libfuzzer` job — the
+`--target` build list and the `Fuzz` step — and raise `timeout-minutes` if the summed
+`-max_total_time` budget would otherwise exceed it. The `Smoke every libFuzzer target` step
+(`ctest -L libfuzzer`) catches a target whose seeds no longer load before the long budget starts.
+Keep it off the per-PR path: the required gate never configures with `PULP_ENABLE_FUZZING`, and
+the libfuzzer job skips `pull_request`.
+
+**Prove the target before trusting it.** A fuzz target that compiles and runs green has proven
+nothing about reaching the parser. Plant a crash — an `abort()` on a magic byte sequence in the
+parser's entry, e.g. `if (size >= 4 && memcmp(data, "FUZZ", 4) == 0) abort();` — build, run the
+target over its seeds with a short `-max_total_time`, and confirm libFuzzer reports
+`deadly signal` with a `crash-*` reproducer that begins with the magic bytes. Then remove the
+plant. Plant it in the parser's own entry, not in the fuzz target: a plant in
+`LLVMFuzzerTestOneInput` proves only that libFuzzer runs.
+
+On macOS the local recipe is a separate build directory. Two host facts shape
+it. The sysroot must be passed explicitly: CMake leaves `CMAKE_OSX_SYSROOT`
+empty for a non-Apple clang, and the Homebrew libc++ then fails on
+`<pthread.h>` / `<sched.h>` in the very first dependency scan rather than
+anywhere near the fuzz target. And `PULP_FUZZ_SANITIZERS=fuzzer` drops ASan:
+Homebrew `llvm@21`'s ASan runtime deadlocks before `main` on macOS 26
+(`AsanInitFromRtl` → `get_dyld_hdr` → `_Block_copy` → malloc re-enters
+`AsanInitFromRtl` and spins on its init lock), so every ASan binary it
+produces, a one-line `int main` included, sits at 70% CPU forever with a
+2 MB RSS. Apple's clang has a working ASan but no libFuzzer. A target that
+"hangs" at startup on this host is that deadlock, not a slow parser:
+`sample <pid>` shows `StaticSpinMutex::LockSlow` under `__asan::AsanInitFromRtl`.
+The Linux nightly keeps the default `fuzzer,address`.
+
+```sh
+cmake -S . -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm@21/bin/clang \
+  -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm@21/bin/clang++ \
+  -DCMAKE_OSX_SYSROOT="$(xcrun --show-sdk-path)" \
+  -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF \
+  -DPULP_ENABLE_FUZZING=ON -DPULP_FUZZ_SANITIZERS=fuzzer
+tools/ci/governed-build.sh cmake --build build-fuzz --target pulp-fuzz-svg
+ctest --test-dir build-fuzz -L libfuzzer --output-on-failure
+```
+
 ## A new `core/` module needs three separate registrations, revealed one at a time
 
 Landing a new subsystem under `core/` is not one edit. Four places have to agree,
