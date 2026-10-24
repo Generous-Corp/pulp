@@ -91,11 +91,13 @@ export const COMPUTED_STYLES = [
   // not describe those pixels: an unstyled range reports a white background it
   // never draws, and an unstyled button reports a 2px outset black border drawn
   // as a thin rounded grey one. `appearance` is what separates a control the
-  // computed style can reproduce from one it cannot. `accent-color` is the one
-  // author input the native theme honours. Padding places the text a control
-  // draws from its value rather than from a DOM text node.
+  // computed style can reproduce from one it cannot. `accent-color` and
+  // `color-scheme` are the author inputs the native theme honours (the latter
+  // picks its light or dark palette). Padding places the text a control draws
+  // from its value rather than from a DOM text node.
   "appearance",
   "accent-color",
+  "color-scheme",
   "padding-top",
   "padding-right",
   "padding-bottom",

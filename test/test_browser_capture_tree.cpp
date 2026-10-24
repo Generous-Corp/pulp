@@ -4313,6 +4313,88 @@ TEST_CASE("form controls draw the string their own state holds",
     CHECK(unresolved == 1);
 }
 
+TEST_CASE("theme-painted ranges, checkboxes and radios record the state the theme paints",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=range] (themed,
+    // disabled, accented), 4 INPUT[type=checkbox] (themed, checked by state
+    // only), 5 INPUT[type=radio name=mode] (themed, checked), 6
+    // INPUT[type=range] whose author styling dropped the theme.
+    //
+    // Row order: display, appearance, accent-color, color-scheme,
+    // background-color.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3,3]",
+        .node_types = "[9,1,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2,2]",
+        .attributes = "[[],[],[],[4,5,6,7,8,9,10,11,12,13],[4,14],[4,15,16,17],[4,5]]",
+        .layout_nodes = "[1,2,3,4,5,6]",
+        .styles = "[[18,19,19,21,26],[18,19,19,21,26],[22,19,20,21,25],[22,19,19,24,25],"
+                  "[22,19,19,21,25],[22,19,19,21,25]]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[10.59375,10.5,129,16],"
+                  "[10,40,13,13],[30,40,13,13],[10,70,129,16]]",
+        .paint_orders = "[0,1,2,3,4,5]",
+        .computed_names =
+            R"(["display","appearance","accent-color","color-scheme","background-color"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","range","min","0","max","1",)J"
+                   R"J("step","0.001","disabled","","checkbox","radio","name","mode","block",)J"
+                   R"J("auto","rgb(71, 180, 235)","normal","inline-block","0.25","dark",)J"
+                   R"J("rgb(255, 255, 255)","rgba(0, 0, 0, 0)")J",
+        .extra_nodes = R"(,"inputValue":{"index":[3],"value":[23]})"
+                       R"(,"inputChecked":{"index":[4,5]})",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"native"},)"
+                     R"({"node_index":5,"theme":"native"},)"
+                     R"({"node_index":6,"theme":"author"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "form-control-theme-state");
+    const auto by_control = [&](const std::string& control) {
+        return find_node(lowered.root,
+                         [&](const IRNode& n) { return attribute(n, "ua_control") == control; });
+    };
+
+    const auto* range = by_control("range");
+    REQUIRE(range != nullptr);
+    CHECK(attribute(*range, "ua_min") == "0");
+    CHECK(attribute(*range, "ua_max") == "1");
+    CHECK(attribute(*range, "ua_step") == "0.001");
+    // The live value, from control state rather than the `value` attribute.
+    CHECK(attribute(*range, "ua_value") == "0.25");
+    CHECK(attribute(*range, "ua_disabled") == "1");
+    CHECK(attribute(*range, "ua_accent") == "rgb(71, 180, 235)");
+    CHECK(attribute(*range, "ua_color_scheme") == "normal");
+    CHECK_FALSE(range->attributes.contains("ua_checked"));
+
+    const auto* checkbox = by_control("checkbox");
+    REQUIRE(checkbox != nullptr);
+    // Checked by `inputChecked` alone: no `checked` attribute was authored.
+    CHECK(attribute(*checkbox, "ua_checked") == "1");
+    CHECK(attribute(*checkbox, "ua_color_scheme") == "dark");
+    // `auto` is the theme's own accent, so nothing is recorded for it.
+    CHECK_FALSE(checkbox->attributes.contains("ua_accent"));
+    CHECK_FALSE(checkbox->attributes.contains("ua_disabled"));
+
+    const auto* radio = by_control("radio");
+    REQUIRE(radio != nullptr);
+    CHECK(attribute(*radio, "ua_checked") == "1");
+    CHECK(attribute(*radio, "ua_radio_group") == "mode");
+
+    // The white background a range or checkbox reports is the user-agent
+    // default the theme replaces, so a theme-painted control carries none.
+    CHECK_FALSE(range->style.background_color.has_value());
+    CHECK_FALSE(checkbox->style.background_color.has_value());
+
+    // The author-styled range is painted from CSS: no theme state at all, and
+    // its computed background is kept.
+    const int recorded = count_nodes(
+        lowered.root, [](const IRNode& n) { return n.attributes.contains("ua_control"); });
+    CHECK(recorded == 3);
+    const auto* styled = find_node(
+        lowered.root, [](const IRNode& n) { return attribute(n, "native_theme") == "author"; });
+    REQUIRE(styled != nullptr);
+    CHECK(styled->style.background_color.value_or("") == "rgb(255, 255, 255)");
+}
+
 namespace {
 
 /// True when `needle` appears in any text run, name, or attribute value of the
