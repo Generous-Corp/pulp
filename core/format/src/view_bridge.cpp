@@ -59,15 +59,14 @@ bool safe_supports_in_place_scripted_ui_reload(Processor& processor) noexcept {
     PULP_CATCH_ALL { return false; }
 }
 
-// The editor assets declared for this processor's plug-in: its keyed bundle
-// entry when it has one, otherwise the binary's own registration.
-EditorAssets editor_assets_for_processor(Processor& processor) noexcept {
-    std::string plugin_id;
+// The processor's plug-in id, or empty when its descriptor cannot be read.
+std::string safe_plugin_id(Processor& processor) noexcept {
     PULP_TRY {
-        plugin_id = processor.descriptor().bundle_id;
+        return processor.descriptor().bundle_id;
     }
-    PULP_CATCH_ALL {}
-    return editor_assets_for(plugin_id.empty() ? nullptr : plugin_id.c_str());
+    PULP_CATCH_ALL {
+        return {};
+    }
 }
 
 ViewSize safe_view_size(Processor& processor) noexcept {
@@ -185,14 +184,14 @@ bool ViewBridge::open(std::string* error) {
         // Fall back to the scripted-UI or AutoUi default.
         auto value_channel_access =
             processor_value_channel_access(processor_, owner_alive_);
-        std::string plugin_id;
-        PULP_TRY {
-            plugin_id = processor_.descriptor().bundle_id;
-        }
-        PULP_CATCH_ALL {}
-        auto instance = build_editor_ui_for_assets(editor_assets_for_processor(processor_), store_,
-                                                   options_.enable_hot_reload, &last_error_,
-                                                   std::move(value_channel_access), plugin_id);
+        // The editor assets declared for this plug-in: its keyed bundle entry
+        // when it has one, otherwise the binary's own registration. The id also
+        // keys an embedded editor's persisted stores.
+        const std::string plugin_id = safe_plugin_id(processor_);
+        const auto assets = editor_assets_for(plugin_id.empty() ? nullptr : plugin_id.c_str());
+        auto instance =
+            build_editor_ui_for_assets(assets, store_, options_.enable_hot_reload, &last_error_,
+                                       std::move(value_channel_access), plugin_id);
         if (!instance.root) {
             if (error) *error = last_error_.empty() ? "ViewBridge: failed to build editor UI" : last_error_;
             return false;
