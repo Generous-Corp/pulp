@@ -3,12 +3,15 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <string_view>
 #include <system_error>
+#include <vector>
 
 namespace pulp::import_design::browser_capture {
 
@@ -16,7 +19,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 
 // Size and modification time of one file, prefixed by its canonical path, so a
 // browser swapped in place, updated, or reached through a different symlink
@@ -57,15 +60,53 @@ std::string hex64(std::uint64_t value) {
     return buffer;
 }
 
-// The file name only spreads keys across entries; the full key stored inside
-// the entry is what a lookup compares.
-std::string entry_name(const std::string& key) {
-    std::uint64_t hash = 1469598103934665603ULL;
-    for (const unsigned char c : key) {
+std::uint64_t fnv1a(std::uint64_t hash, std::string_view bytes) {
+    for (const unsigned char c : bytes) {
         hash ^= c;
         hash *= 1099511628211ULL;
     }
-    return hex64(hash) + ".json";
+    return hash;
+}
+
+constexpr std::uint64_t kFnvOffset = 1469598103934665603ULL;
+
+// The probe runs the capture script (configurePage is in it) and the modules
+// beside it that the script imports (browser_process.mjs launches the
+// browser), so their bytes, the script's included, are part of what produced
+// the answer. Hashing contents rather than modification times means a
+// checkout that rewrites a file with the same bytes keeps its entry. Test
+// files never load.
+std::optional<std::string> sibling_modules_digest(const fs::path& script) {
+    std::error_code ec;
+    std::vector<fs::path> modules;
+    for (fs::directory_iterator it(script.parent_path(), ec), end; !ec && it != end;
+         it.increment(ec)) {
+        const auto name = it->path().filename().string();
+        const bool test = name.size() >= 9 && name.compare(name.size() - 9, 9, ".test.mjs") == 0;
+        if (it->path().extension() == ".mjs" && !test && it->is_regular_file(ec))
+            modules.push_back(it->path());
+    }
+    if (ec)
+        return std::nullopt;
+    std::sort(modules.begin(), modules.end());
+    std::uint64_t hash = kFnvOffset;
+    for (const auto& module : modules) {
+        std::ifstream input(module, std::ios::binary);
+        if (!input)
+            return std::nullopt;
+        const std::string bytes{std::istreambuf_iterator<char>(input), {}};
+        hash = fnv1a(hash, module.filename().string());
+        hash = fnv1a(hash, std::string_view("\0", 1));
+        hash = fnv1a(hash, bytes);
+        hash = fnv1a(hash, std::string_view("\0", 1));
+    }
+    return std::to_string(modules.size()) + ":" + hex64(hash);
+}
+
+// The file name only spreads keys across entries; the full key stored inside
+// the entry is what a lookup compares.
+std::string entry_name(const std::string& key) {
+    return hex64(fnv1a(kFnvOffset, key)) + ".json";
 }
 
 } // namespace
@@ -77,7 +118,8 @@ std::optional<std::string> browser_probe_cache_key(const fs::path& browser_execu
     const auto browser = file_identity(browser_executable);
     const auto script = file_identity(capture_script);
     const auto node = file_identity(node_executable);
-    if (!browser || !script || !node)
+    const auto modules = sibling_modules_digest(capture_script);
+    if (!browser || !script || !node || !modules)
         return std::nullopt;
     key += "\nbrowser=" + *browser;
     std::error_code ec;
@@ -88,6 +130,7 @@ std::optional<std::string> browser_probe_cache_key(const fs::path& browser_execu
         key += "\nbundle=" + *identity;
     }
     key += "\nscript=" + *script;
+    key += "\nmodules=" + *modules;
     key += "\nnode=" + *node;
     return key;
 }
@@ -117,6 +160,26 @@ std::optional<CachedBrowserIdentity> load_cached_browser_identity(const fs::path
     } catch (const std::exception&) {
         return std::nullopt;
     }
+}
+
+void forget_cached_browser_identity(const fs::path& cache_directory, const std::string& key) {
+    if (cache_directory.empty())
+        return;
+    const auto path = cache_directory / entry_name(key);
+    std::ifstream input(path, std::ios::binary);
+    if (!input)
+        return;
+    const std::string text{std::istreambuf_iterator<char>(input), {}};
+    input.close();
+    try {
+        // Only this key's entry: a different key that shares the file name
+        // keeps its answer.
+        if (choc::json::parse(text)["key"].toString() != key)
+            return;
+    } catch (const std::exception&) {
+    }
+    std::error_code ec;
+    fs::remove(path, ec);
 }
 
 void store_cached_browser_identity(const fs::path& cache_directory, const std::string& key,

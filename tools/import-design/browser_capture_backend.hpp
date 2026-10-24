@@ -84,6 +84,10 @@ struct BrowserProbeResult {
     // passed the command-line version probe.
     std::string protocol_version;
     std::string build_hash;
+
+    // The probe-cache key this answer was read from or stored under; empty
+    // when no cache took part.
+    std::string probe_cache_key;
 };
 
 struct BrowserInstallation {
@@ -94,6 +98,7 @@ struct BrowserInstallation {
     int major_version = 0;
     std::string protocol_version;
     std::string build_hash;
+    std::string probe_cache_key;
 };
 
 struct Diagnostic {

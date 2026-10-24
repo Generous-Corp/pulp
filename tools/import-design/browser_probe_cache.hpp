@@ -7,10 +7,12 @@
 // which costs seconds per import. Its answer is a function of the files it
 // executed. The cache key is the identity of every one of them: the browser
 // executable (canonical path, size, modification time), its bundle's
-// Info.plist when it has one, the capture script that ran the probe, and the
-// Node runtime that ran the script, plus a schema version. Any change to any
-// of them is a different key, so a replaced or updated browser is probed
-// again. Only compatible answers are stored; a failure is always re-probed.
+// Info.plist when it has one, the capture script that ran the probe, the
+// bytes of every module beside it that the script can import, and the Node
+// runtime that ran the script, plus a schema version. Any change to any of
+// them is a different key, so a replaced or updated browser is probed again.
+// Only compatible answers are stored; a failure is always re-probed, and an
+// entry the browser later contradicts is forgotten.
 
 #include <filesystem>
 #include <optional>
@@ -40,6 +42,11 @@ load_cached_browser_identity(const std::filesystem::path& cache_directory, const
 // probe, so a failure here never fails the import.
 void store_cached_browser_identity(const std::filesystem::path& cache_directory,
                                    const std::string& key, const CachedBrowserIdentity& identity);
+
+// Removes the entry stored under `key`, so the next import probes again. Best
+// effort, like storing.
+void forget_cached_browser_identity(const std::filesystem::path& cache_directory,
+                                    const std::string& key);
 
 // PULP_HOME/cache/browser-probe, or empty when PULP_DESIGN_BROWSER_PROBE_CACHE
 // is "0" or no Pulp home can be resolved.
