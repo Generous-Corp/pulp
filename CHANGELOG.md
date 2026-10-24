@@ -9,6 +9,24 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v142"></a>
+## [1.4.2] - 2026-10-24
+
+- release/version bump ([#10899](https://github.com/Generous-Corp/pulp/pull/10899))
+- chore/shipyard pin v0353 ([#10898](https://github.com/Generous-Corp/pulp/pull/10898))
+
+<a id="v141"></a>
+## [1.4.1] - 2026-10-24
+
+- release/version bump ([#10896](https://github.com/Generous-Corp/pulp/pull/10896))
+- asr/rack claude tool denial 20261022 ([#10754](https://github.com/Generous-Corp/pulp/pull/10754))
+- ci/view audio archive 20261022 ([#10770](https://github.com/Generous-Corp/pulp/pull/10770))
+- fix/create ci sdk version install layout regex ([#10781](https://github.com/Generous-Corp/pulp/pull/10781))
+- release/version bump ([#10893](https://github.com/Generous-Corp/pulp/pull/10893))
+- ci/queue breaker ([#10808](https://github.com/Generous-Corp/pulp/pull/10808))
+- release/version bump ([#10892](https://github.com/Generous-Corp/pulp/pull/10892))
+- codex/signalgraph tsan selection 20261024 ([#10891](https://github.com/Generous-Corp/pulp/pull/10891))
+
 <a id="v140"></a>
 ## [1.4.0] - 2026-10-24
 
@@ -11464,6 +11482,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.4.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.4.2
+[1.4.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.4.1
 [1.4.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.4.0
 [1.3.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.3.0
 [1.2.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.2.2
