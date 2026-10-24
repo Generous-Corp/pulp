@@ -202,6 +202,8 @@ public:
         // the next one.
         frame_work_submitted_ = false;
         if (!recorder_ || !context_) return nullptr;
+        // Images this frame draws are kept for it even past the byte budget.
+        canvas::ImageFileCache::instance().begin_frame(recorder_.get());
 
         // Persistent-scene mode (FU-2): draw into the retained scene surface,
         // not the swapchain. The scene keeps last frame's pixels, so the host
