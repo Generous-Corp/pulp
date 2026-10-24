@@ -3,6 +3,17 @@
   "gaps": [
     {
       "lane": "js",
+      "field": "paint\\.bounds",
+      "fixtures": [
+        "form-controls-08",
+        "kelvin"
+      ],
+      "anchor": ".*/#text\\[[0-9]+\\]",
+      "issue": "https://github.com/Generous-Corp/pulp/issues/ISSUE_TEXT_WIDTH",
+      "reason": "ui.js leaves a captured one-line text node unbounded, so Pulp's measurement sizes it wider than the box Chromium laid it out in; the snapped paint rect then falls back to that wider layout box."
+    },
+    {
+      "lane": "js",
       "field": "binding",
       "fixtures": [
         "kelvin"
