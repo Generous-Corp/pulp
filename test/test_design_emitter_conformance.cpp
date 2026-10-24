@@ -44,6 +44,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -539,6 +540,23 @@ TEST_CASE("every emitter agrees with the native materializer or names the gap",
         }
         if (!explained)
             unexplained.push_back(describe(d));
+    }
+
+    // PULP_CONFORMANCE_REPORT=<path> writes every divergence, explained or not,
+    // as JSON: the list to start from when closing a gap or adding an entry.
+    if (const char* path = std::getenv("PULP_CONFORMANCE_REPORT"); path && *path) {
+        auto rows = choc::value::createEmptyArray();
+        for (const auto& d : divergences) {
+            auto row = choc::value::createObject("");
+            row.addMember("lane", d.lane);
+            row.addMember("fixture", d.fixture);
+            row.addMember("anchor", d.anchor);
+            row.addMember("field", d.field);
+            row.addMember("native", d.expected);
+            row.addMember("actual", d.actual);
+            rows.addArrayElement(row);
+        }
+        std::ofstream(path) << choc::json::toString(rows, true);
     }
 
     std::ostringstream report;
