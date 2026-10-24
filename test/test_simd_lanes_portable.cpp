@@ -1,7 +1,10 @@
 // The plain-struct lanes (detail::lanes::portable), which compilers without
 // the GCC/Clang vector extension use, against the vector lanes, operation by
 // operation: every lane of every result must be bit-identical, including for
-// NaN, signed zero, infinities and subnormals. The kernels built on these
+// signed zero, infinities and subnormals. A NaN lane must be NaN in both;
+// its payload and sign are not compared, because IEEE 754 leaves which input
+// NaN propagates unspecified and a compiler may reuse a + b for b + a, as
+// GCC may in hadamard4 on x86-64. The kernels built on these
 // lanes are additionally run end to end in portable mode by the
 // pulp-test-fdn-reverb-portable-lanes suite.
 
@@ -34,16 +37,20 @@ std::uint64_t bits(double x) {
     return b;
 }
 
-// Compare every lane of a native and a portable float vector bit for bit.
+// Compare every lane of a native and a portable vector bit for bit; two NaN
+// lanes match whatever their payload.
+template <typename T> bool same_lane(T x, T y) {
+    return (std::isnan(x) && std::isnan(y)) || bits(x) == bits(y);
+}
 bool same(lanes::F4 a, portable::F4 b) {
     for (int i = 0; i < 4; ++i)
-        if (bits(lanes::lane(a, i)) != bits(portable::lane(b, i)))
+        if (!same_lane(lanes::lane(a, i), portable::lane(b, i)))
             return false;
     return true;
 }
 bool same(lanes::D2 a, portable::D2 b) {
     for (int i = 0; i < 2; ++i)
-        if (bits(lanes::lane(a, i)) != bits(portable::lane(b, i)))
+        if (!same_lane(lanes::lane(a, i), portable::lane(b, i)))
             return false;
     return true;
 }
