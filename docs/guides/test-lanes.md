@@ -646,6 +646,11 @@ The one visible difference is `--target`: build the group
 
 ### Hosted macOS advisory lanes and arm-time dispatch
 
+The focused TSan lane also selects the exact SignalGraph mailbox and retirement
+reader race cases. When those cases move, update the selector and verify the
+case inventory with `ctest -N`; the lane remains intentionally narrower than the
+full SignalGraph suite.
+
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
 native matrix are advisory hosted lanes. The control-shipping matrix covers
 macOS universal, Linux x64/arm64, and Windows x64/arm64; the Windows ARM leg

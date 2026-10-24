@@ -12558,6 +12558,11 @@ first.
 
 ## Hosted macOS advisory cadence
 
+The TSan workflow's focused SignalGraph selector must retain exact-name entries
+for mailbox and retirement-reader race cases when those cases are extracted or
+renamed. Validate the selected names with `ctest -N` before changing the regex;
+do not broaden the selector to the entire graph suite.
+
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
 native matrix are scheduled nightly and dispatched on an approved PR head. The
 `pulp pr` wrapper invokes `tools/scripts/dispatch_advisory_lanes.sh` after its
