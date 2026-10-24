@@ -297,3 +297,130 @@ TEST_CASE("GpuSurface has_surface false without native layer", "[render][gpu]") 
 
     REQUIRE_FALSE(surface->has_surface());
 }
+
+namespace {
+
+// Drives SwapchainResizeState the way DawnGpuSurface::begin_frame() does and
+// counts the configures a frame would issue.
+struct FrameLoop {
+    SwapchainResizeState state;
+    int configures = 0;
+
+    // Returns whether the frame has anything to present.
+    bool frame() {
+        if (!state.presentable())
+            return false;
+        if (state.needs_configure()) {
+            ++configures;
+            state.mark_configured();
+        }
+        return true;
+    }
+};
+
+} // namespace
+
+TEST_CASE("Swapchain resizes before one frame configure once", "[render][gpu][swapchain]") {
+    FrameLoop loop;
+    loop.state.request(400, 300);
+    REQUIRE(loop.frame());
+    REQUIRE(loop.configures == 1);
+
+    for (uint32_t i = 1; i <= 60; ++i)
+        loop.state.request(400 + i, 300 + i);
+    REQUIRE(loop.configures == 1);
+    REQUIRE(loop.state.width() == 460);
+    REQUIRE(loop.state.height() == 360);
+
+    REQUIRE(loop.frame());
+    REQUIRE(loop.configures == 2);
+    REQUIRE(loop.frame());
+    REQUIRE(loop.configures == 2);
+}
+
+TEST_CASE("Swapchain resize to the configured size configures nothing",
+          "[render][gpu][swapchain]") {
+    FrameLoop loop;
+    loop.state.request(400, 300);
+    REQUIRE(loop.frame());
+    const int before = loop.configures;
+
+    loop.state.request(400, 300);
+    REQUIRE(loop.frame());
+    REQUIRE(loop.configures == before);
+
+    // A drag that returns to where it started before the frame is also free.
+    loop.state.request(800, 600);
+    loop.state.request(400, 300);
+    REQUIRE(loop.frame());
+    REQUIRE(loop.configures == before);
+}
+
+TEST_CASE("Swapchain at a zero size presents and configures nothing", "[render][gpu][swapchain]") {
+    FrameLoop loop;
+    loop.state.request(400, 300);
+    REQUIRE(loop.frame());
+    const int before = loop.configures;
+
+    loop.state.request(0, 0);
+    REQUIRE_FALSE(loop.frame());
+    loop.state.request(400, 0);
+    REQUIRE_FALSE(loop.frame());
+    REQUIRE(loop.configures == before);
+
+    // Restored to its old size: the swapchain was never rebuilt, so nothing to do.
+    loop.state.request(400, 300);
+    REQUIRE(loop.frame());
+    REQUIRE(loop.configures == before);
+
+    // Restored to a new size: one configure.
+    loop.state.request(0, 0);
+    REQUIRE_FALSE(loop.frame());
+    loop.state.request(640, 480);
+    REQUIRE(loop.frame());
+    REQUIRE(loop.configures == before + 1);
+}
+
+TEST_CASE("Swapchain that starts at a zero size configures on its first sized frame",
+          "[render][gpu][swapchain]") {
+    FrameLoop loop;
+    REQUIRE_FALSE(loop.frame());
+    REQUIRE(loop.configures == 0);
+    loop.state.request(320, 240);
+    REQUIRE(loop.frame());
+    REQUIRE(loop.configures == 1);
+}
+
+TEST_CASE("Invalidated swapchain configures again at an unchanged size",
+          "[render][gpu][swapchain]") {
+    FrameLoop loop;
+    loop.state.request(400, 300);
+    REQUIRE(loop.frame());
+    loop.state.invalidate();
+    REQUIRE(loop.frame());
+    REQUIRE(loop.configures == 2);
+}
+
+TEST_CASE("Offscreen GpuSurface resize reports the size and configures no swapchain",
+          "[render][gpu][swapchain]") {
+    auto surface = GpuSurface::create_dawn();
+    if (!surface)
+        SKIP(kNoGpu);
+
+    GpuSurface::Config config{};
+    config.width = 400;
+    config.height = 300;
+    if (!surface->initialize(config))
+        SKIP(kNoSurfaceInit);
+
+    surface->resize(0, 0);
+    REQUIRE(surface->width() == 0);
+    REQUIRE(surface->begin_frame()); // offscreen is always ready
+    surface->end_frame();
+    surface->resize(512, 256);
+    REQUIRE(surface->width() == 512);
+    REQUIRE(surface->height() == 256);
+    REQUIRE(surface->begin_frame());
+    surface->end_frame();
+    REQUIRE(surface->swapchain_stats().configure_count == 0);
+}

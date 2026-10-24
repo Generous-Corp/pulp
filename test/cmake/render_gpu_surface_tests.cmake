@@ -55,6 +55,24 @@
     target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # Swapchain configures counted on a real CAMetalLayer. Reads the acquired
+    # wgpu::Texture's size, so it needs the Dawn headers Skia ships.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+        add_executable(pulp-test-gpu-surface-swapchain-macos
+            test_gpu_surface_swapchain_macos.mm)
+        target_link_libraries(pulp-test-gpu-surface-swapchain-macos PRIVATE
+            pulp::render Catch2::Catch2WithMain
+            "-framework Metal" "-framework QuartzCore")
+        target_include_directories(pulp-test-gpu-surface-swapchain-macos PRIVATE
+            ${SKIA_INCLUDE_DIRS})
+        if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+            target_include_directories(pulp-test-gpu-surface-swapchain-macos PRIVATE
+                "${SKIA_INCLUDE_DIRS}/dawn")
+        endif()
+        catch_discover_tests(pulp-test-gpu-surface-swapchain-macos
+            ${PULP_GPU_TEST_DISCOVERY_ARGS})
+    endif()
+
     # Skia surface test — also covers SkPicture (.skp) serialization on the
     # Graphite backend. The .skp round-trip cases include
     # Skia headers directly (SkPicture, SkPictureRecorder, SkSerialProcs,

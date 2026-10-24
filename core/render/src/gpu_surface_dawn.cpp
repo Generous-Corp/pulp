@@ -116,8 +116,9 @@ public:
     }
 
     bool initialize(const Config& config) override {
-        width_ = config.width;
-        height_ = config.height;
+        swapchain_ = {};
+        swapchain_.request(config.width, config.height);
+        swapchain_stats_ = {};
         timings_ = {};
         auto stage_start = std::chrono::steady_clock::now();
 
@@ -381,23 +382,36 @@ public:
 
     StartupTimings startup_timings() const override { return timings_; }
 
+    // Only records the size. Live resize delivers several events per frame,
+    // and configuring here rebuilt the swapchain for each of them although
+    // only the last size is ever presented; begin_frame() configures once.
     void resize(uint32_t width, uint32_t height) override {
-        reconfigure(width, height);
+        swapchain_.request(width, height);
     }
 
     bool begin_frame() override {
         if (!initialized_) return false;
 
         if (surface_) {
+            // A minimised or collapsed window has nothing to present, and
+            // Configure rejects a zero dimension. Keep the swapchain at its
+            // last size until the window has an area again.
+            if (!swapchain_.presentable()) {
+                current_texture_ = nullptr;
+                return false;
+            }
+            if (swapchain_.needs_configure())
+                configure_swapchain();
+
             wgpu::SurfaceTexture surface_texture;
             surface_.GetCurrentTexture(&surface_texture);
 
             // SuccessSuboptimal means the swapchain still yields a usable texture
             // but no longer optimally matches the surface — the window was
-            // resized (e.g. a DAW dragged the editor container; see the Windows
-            // WM_SIZE reconcile path) or the DPI/format changed under us.
-            // Reconfigure to the current size and re-acquire the texture EXACTLY
-            // ONCE. If it is still merely suboptimal we render with this texture
+            // resized before the host reported it (e.g. a DAW dragged the editor
+            // container ahead of WM_SIZE) or the DPI/format changed under us.
+            // Reconfigure to the requested size and re-acquire the texture
+            // EXACTLY ONCE. If it is still merely suboptimal we render with this texture
             // for the frame rather than dropping it — we must never loop, or a
             // surface that stays suboptimal (a format Dawn can only approximate)
             // would spin begin_frame() forever.
@@ -409,7 +423,8 @@ public:
                 // move-assignment), so a second acquire into the same struct
                 // would otherwise leak the first texture's reference each frame.
                 surface_texture.texture = nullptr;
-                reconfigure(width_, height_);
+                swapchain_.invalidate();
+                configure_swapchain();
                 surface_.GetCurrentTexture(&surface_texture);
             }
 
@@ -441,8 +456,15 @@ public:
 
     bool is_initialized() const override { return initialized_; }
     bool has_surface() const override { return surface_ != nullptr; }
-    uint32_t width() const override { return width_; }
-    uint32_t height() const override { return height_; }
+    uint32_t width() const override {
+        return swapchain_.width();
+    }
+    uint32_t height() const override {
+        return swapchain_.height();
+    }
+    SwapchainStats swapchain_stats() const override {
+        return swapchain_stats_;
+    }
 
     // Dawn handle accessors — SkiaSurface casts these back to Dawn C++ types
     void* dawn_device_handle() const override {
@@ -489,25 +511,28 @@ public:
         return info;
     }
 
-private:
-    // Reconfigure the surface's swapchain to (width, height) using the format /
-    // present mode chosen at initial configure. Shared by resize() (host-driven)
-    // and the begin_frame() suboptimal-recovery path, so both go through one
+  private:
+    // Configure the surface's swapchain at the requested size using the format
+    // and present mode chosen in configure_surface(). The initial configure,
+    // a pending resize and the suboptimal recovery all go through this one
     // definition of the SurfaceConfiguration.
-    void reconfigure(uint32_t width, uint32_t height) {
-        width_ = width;
-        height_ = height;
-        if (surface_ && device_) {
-            wgpu::SurfaceConfiguration surface_config{};
-            surface_config.device = device_;
-            surface_config.format = preferred_format_;
-            surface_config.width = width_;
-            surface_config.height = height_;
-            surface_config.presentMode = preferred_mode_;
-            surface_config.usage = wgpu::TextureUsage::RenderAttachment
-                | wgpu::TextureUsage::TextureBinding;
-            surface_.Configure(&surface_config);
-        }
+    void configure_swapchain() {
+        if (!surface_ || !device_ || !swapchain_.presentable())
+            return;
+        PULP_TRACE_SCOPE_NAMED("gpu", "gpu_swapchain_configure");
+        const auto start = std::chrono::steady_clock::now();
+        wgpu::SurfaceConfiguration surface_config{};
+        surface_config.device = device_;
+        surface_config.format = preferred_format_;
+        surface_config.width = swapchain_.width();
+        surface_config.height = swapchain_.height();
+        surface_config.presentMode = preferred_mode_;
+        surface_config.usage =
+            wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
+        surface_.Configure(&surface_config);
+        swapchain_.mark_configured();
+        ++swapchain_stats_.configure_count;
+        swapchain_stats_.configure_ms += elapsed_ms(start);
     }
 
     // ── Texture lifetime contract ──────────────────────────────────────
@@ -652,15 +677,9 @@ private:
         runtime::log_info("GpuSurface: present mode {} (vsync requested: {})",
                           dawn_present_mode_name(preferred_mode), config.vsync);
 
-        wgpu::SurfaceConfiguration surface_config{};
-        surface_config.device = device_;
-        surface_config.format = preferred_format_;
-        surface_config.width = config.width;
-        surface_config.height = config.height;
-        surface_config.presentMode = preferred_mode_;
-        surface_config.usage = wgpu::TextureUsage::RenderAttachment
-            | wgpu::TextureUsage::TextureBinding;
-        surface_.Configure(&surface_config);
+        // A zero-sized initial config leaves the swapchain unconfigured; the
+        // first begin_frame() at a non-zero size configures it.
+        configure_swapchain();
 
         runtime::log_info("GpuSurface: configured surface (format: {}, mode: {})",
             static_cast<int>(preferred_format_), static_cast<int>(preferred_mode));
@@ -677,7 +696,8 @@ private:
 
     wgpu::TextureFormat preferred_format_ = wgpu::TextureFormat::BGRA8Unorm;
     wgpu::PresentMode preferred_mode_ = wgpu::PresentMode::Fifo;
-    uint32_t width_ = 0, height_ = 0;
+    SwapchainResizeState swapchain_;
+    SwapchainStats swapchain_stats_{};
     bool initialized_ = false;
     StartupTimings timings_{};
 };

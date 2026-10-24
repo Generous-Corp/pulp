@@ -6,6 +6,62 @@
 
 namespace pulp::render {
 
+/// Decides when a presentable swapchain has to be (re)configured.
+///
+/// A host resize only records the size it wants. The swapchain is rebuilt at
+/// most once, when the next frame acquires its texture. Live resize delivers
+/// several size events per frame and a rebuild costs milliseconds on Vulkan
+/// and D3D12, so configuring on every event rebuilt it for sizes no frame ever
+/// presented.
+class SwapchainResizeState {
+  public:
+    /// Record the size the host wants. Configures nothing.
+    void request(uint32_t width, uint32_t height) {
+        requested_width_ = width;
+        requested_height_ = height;
+    }
+
+    /// The swapchain now matches the requested size.
+    void mark_configured() {
+        configured_width_ = requested_width_;
+        configured_height_ = requested_height_;
+        configured_ = true;
+    }
+
+    /// Make the next frame configure even at an unchanged size, for a
+    /// swapchain the surface reported as suboptimal.
+    void invalidate() {
+        configured_ = false;
+    }
+
+    /// A zero dimension (a minimised or collapsed window) has nothing to
+    /// present, and a swapchain cannot be configured at that size.
+    bool presentable() const {
+        return requested_width_ != 0 && requested_height_ != 0;
+    }
+
+    /// True when the next frame must configure before it acquires a texture.
+    bool needs_configure() const {
+        return presentable() && (!configured_ || requested_width_ != configured_width_ ||
+                                 requested_height_ != configured_height_);
+    }
+
+    /// The requested size, which is what GpuSurface::width()/height() report.
+    uint32_t width() const {
+        return requested_width_;
+    }
+    uint32_t height() const {
+        return requested_height_;
+    }
+
+  private:
+    uint32_t requested_width_ = 0;
+    uint32_t requested_height_ = 0;
+    uint32_t configured_width_ = 0;
+    uint32_t configured_height_ = 0;
+    bool configured_ = false;
+};
+
 /// Abstract GPU surface — a presentable rendering target backed by a native window/view.
 ///
 /// Ownership model:
@@ -112,9 +168,15 @@ public:
     virtual ~GpuSurface() = default;
 
     virtual bool initialize(const Config& config) = 0;
+
+    /// Record a new size. width()/height() report it at once, but a
+    /// presentable surface reconfigures its swapchain only in the next
+    /// begin_frame(), so several resizes before one frame configure once.
     virtual void resize(uint32_t width, uint32_t height) = 0;
 
-    /// Acquire the current presentable texture. Returns false if not ready.
+    /// Acquire the current presentable texture, first configuring the
+    /// swapchain if the size changed since the last frame. Returns false if
+    /// not ready, including while either dimension is zero.
     virtual bool begin_frame() = 0;
 
     /// Present to native surface (or just process events if offscreen).
@@ -159,6 +221,19 @@ public:
     /// implementation reports nothing measured. Kept at the vtable tail so
     /// existing GpuSurface subclasses keep their slot layout.
     virtual StartupTimings startup_timings() const { return {}; }
+
+    /// Swapchain configurations issued since initialize(), the first one
+    /// included, and their total wall-clock milliseconds. Offscreen surfaces
+    /// and implementations without a swapchain report zero.
+    struct SwapchainStats {
+        uint64_t configure_count = 0;
+        double configure_ms = 0.0;
+    };
+
+    /// Kept at the vtable tail for the same reason as startup_timings().
+    virtual SwapchainStats swapchain_stats() const {
+        return {};
+    }
 };
 
 } // namespace pulp::render
