@@ -12,6 +12,8 @@
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/gpu_audio/gpu_audio_program.hpp>
 
+#include "streaming_block_stamp.hpp"
+
 namespace pulp::gpu_audio::detail {
 
 /// Why a prepared streaming model's mutable causal state is being replaced.
@@ -98,13 +100,6 @@ constexpr bool valid_streaming_prepare_context(const StreamingPrepareContext& co
            !context.artifact_id.empty() && !context.artifact_hash.empty() &&
            context.max_frames >= context.spec->block_size;
 }
-
-struct StreamingBlockStamp {
-    std::uint64_t epoch = 0;
-    std::uint64_t sequence = 0;
-
-    friend constexpr bool operator==(StreamingBlockStamp, StreamingBlockStamp) noexcept = default;
-};
 
 struct StreamingBlock {
     StreamingBlockStamp stamp{};

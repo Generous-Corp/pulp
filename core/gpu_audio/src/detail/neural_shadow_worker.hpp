@@ -1,6 +1,6 @@
 #pragma once
 
-#include "streaming_model.hpp"
+#include "streaming_block_stamp.hpp"
 
 #include <atomic>
 #include <cstddef>
