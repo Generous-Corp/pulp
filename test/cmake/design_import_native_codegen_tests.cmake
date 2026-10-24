@@ -130,6 +130,52 @@ pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
         core/music/include/pulp/music/pitch.hpp
         test/fixtures/import-fidelity/assets/fader_ref.png)
 
+# Emitter conformance gate: every fixture IR is built through the native
+# materializer, the ui.js bridge program, the baked C++ exporter and the SwiftUI
+# exporter, and the projections are compared (test_design_emitter_conformance.cpp).
+# The baked C++ is generated here at build time from the fixture IRs, never
+# committed, so the C++ lane is always the exporter's current output.
+add_executable(pulp-emitter-conformance-gen support/emitter_conformance_gen.cpp)
+target_link_libraries(pulp-emitter-conformance-gen PRIVATE pulp::view)
+set(_pulp_conformance_dir "${CMAKE_CURRENT_BINARY_DIR}/emitter_conformance")
+set(_pulp_conformance_sources)
+foreach(_spec
+        "form_controls_08|ir|test/fixtures/emitter-conformance/form-controls-08.ir.json"
+        "spectr|ir|test/fixtures/emitter-conformance/spectr.ir.json"
+        "kelvin|ir|test/fixtures/emitter-conformance/kelvin.ir.json"
+        "fidelity_scene|figma-plugin|test/fixtures/import-fidelity/scene.pulp.json")
+    string(REPLACE "|" ";" _parts "${_spec}")
+    list(GET _parts 0 _stem)
+    list(GET _parts 1 _kind)
+    list(GET _parts 2 _input)
+    set(_outputs
+        "${_pulp_conformance_dir}/${_stem}.hpp"
+        "${_pulp_conformance_dir}/${_stem}.cpp"
+        "${_pulp_conformance_dir}/${_stem}_entry.cpp")
+    add_custom_command(OUTPUT ${_outputs}
+        COMMAND pulp-emitter-conformance-gen ${_kind} "${CMAKE_SOURCE_DIR}/${_input}"
+                "pulp::test::conformance::${_stem}" "${_pulp_conformance_dir}" ${_stem}
+        DEPENDS pulp-emitter-conformance-gen "${CMAKE_SOURCE_DIR}/${_input}"
+        COMMENT "Generating the baked C++ conformance fixture ${_stem}"
+        VERBATIM)
+    list(APPEND _pulp_conformance_sources
+        "${_pulp_conformance_dir}/${_stem}.cpp"
+        "${_pulp_conformance_dir}/${_stem}_entry.cpp")
+endforeach()
+add_executable(pulp-test-design-emitter-conformance
+    test_design_emitter_conformance.cpp
+    ${_pulp_conformance_sources})
+target_include_directories(pulp-test-design-emitter-conformance PRIVATE
+    "${_pulp_conformance_dir}")
+target_link_libraries(pulp-test-design-emitter-conformance
+    PRIVATE pulp::view pulp::state Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-emitter-conformance PRIVATE
+    PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-design-emitter-conformance
+    PROPERTIES LABELS "parser-import")
+pulp_test_data(pulp-test-design-emitter-conformance NO_DEFINE
+    PATHS test/fixtures/emitter-conformance test/fixtures/import-fidelity/scene.pulp.json)
+
 # Inert style declarations (`opacity: 1`, `clip-path: none`, ...) must not
 # change the native drawlist, the Skia raster, or the sibling painted next.
 add_executable(pulp-test-design-import-inert-styles
