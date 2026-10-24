@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "browser_capture_backend.hpp"
 #include "browser_capture_diagnostics.hpp"
+#include "browser_probe_cache.hpp"
 #include "node_runtime.hpp"
 
 #include <choc/text/choc_JSON.h>
@@ -12,6 +13,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <regex>
 #include <set>
@@ -568,6 +570,25 @@ std::optional<fs::path> prepare_capture_output_directory(
     return output;
 }
 
+// Whether a failed capture contradicts the identity discovery answered with:
+// the browser was not the build it reported, or it would not launch. The
+// capture script records where it stopped in capture-error.json, and its exit
+// diagnostic does not carry that phase.
+bool browser_contradicted_probe(const Diagnostic& diagnostic, const fs::path& output_directory) {
+    if (diagnostic.code == "browser-identity-drift" || diagnostic.code == "browser-unavailable" ||
+        diagnostic.phase == "browser-launch")
+        return true;
+    std::ifstream input(output_directory / "capture-error.json", std::ios::binary);
+    if (!input)
+        return false;
+    const std::string text{std::istreambuf_iterator<char>(input), {}};
+    try {
+        return choc::json::parse(text)["phase"].toString() == "browser-launch";
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 CaptureResult capture_failure(std::string code,
                               std::string phase,
                               std::string message,
@@ -604,6 +625,44 @@ BrowserProbeResult probe_browser(
         result.failure_kind = BrowserProbeFailure::browser_unavailable;
         result.failure = "browser executable does not exist or is not executable";
         return result;
+    }
+
+    // A remembered answer replaces only the two browser launches. Node and the
+    // capture script are still resolved here, because the capture itself needs
+    // them, and their identities are part of the key.
+    const fs::path cache_directory = options.probe_cache_directory.value_or(fs::path{});
+    std::optional<std::string> cache_key;
+    const auto keyed_inputs = [&]() -> std::optional<std::string> {
+        if (cache_directory.empty() || !result.node.ok())
+            return std::nullopt;
+        const auto script = resolve_capture_script(options.capture_script);
+        if (!script)
+            return std::nullopt;
+        return browser_probe_cache_key(candidate.executable, *script, *result.node.executable);
+    };
+    if (!cache_directory.empty()) {
+        result.node = resolve_node_runtime(options.node_executable);
+        cache_key = keyed_inputs();
+        if (cache_key) {
+            if (const auto cached = load_cached_browser_identity(cache_directory, *cache_key)) {
+                result.product = cached->product;
+                result.version = cached->version;
+                result.major_version = cached->major_version;
+                result.protocol_version = cached->protocol_version;
+                result.build_hash = cached->build_hash;
+                if (result.major_version < options.minimum_major) {
+                    result.failure_kind = BrowserProbeFailure::browser_incompatible;
+                    result.failure = "browser is too old (found " +
+                                     std::to_string(result.major_version) + ", need " +
+                                     std::to_string(options.minimum_major) + " or newer)";
+                    return result;
+                }
+                result.compatible = true;
+                result.failure_kind = BrowserProbeFailure::none;
+                result.probe_cache_key = *cache_key;
+                return result;
+            }
+        }
     }
 
     platform::ProcessOptions version_options;
@@ -769,6 +828,14 @@ BrowserProbeResult probe_browser(
 
     result.compatible = true;
     result.failure_kind = BrowserProbeFailure::none;
+    if (!cache_key)
+        cache_key = keyed_inputs();
+    if (cache_key) {
+        result.probe_cache_key = *cache_key;
+        store_cached_browser_identity(cache_directory, *cache_key,
+                                      {result.product, result.version, result.major_version,
+                                       result.protocol_version, result.build_hash});
+    }
     return result;
 }
 
@@ -817,7 +884,7 @@ BrowserDiscoveryResult discover_browser(
             BrowserInstallation{candidate.executable,           candidate.origin,
                                 candidate_result.product,       candidate_result.version,
                                 candidate_result.major_version, candidate_result.protocol_version,
-                                candidate_result.build_hash};
+                                candidate_result.build_hash,    candidate_result.probe_cache_key};
         return result;
     }
 
@@ -926,6 +993,8 @@ CaptureResult capture_document(
     args.push_back(request.pinned_width ? "--width" : "--initial-width");
     args.push_back(std::to_string(capture_width));
     if (request.fit_authored_frame) args.push_back("--fit-authored-frame");
+    if (!request.capture_materialized_document)
+        args.push_back("--omit-materialized-document");
     if (request.interaction_plan) {
         args.push_back("--interactions");
         args.push_back(request.interaction_plan->string());
@@ -1023,6 +1092,7 @@ DiscoverAndCaptureResult discover_and_capture(
     BrowserProbeFunction probe) {
     DiscoverAndCaptureResult result;
     result.discovery = discover_browser(discovery_options, std::move(probe));
+    result.discovered_at = std::chrono::steady_clock::now();
     if (!result.discovery.selected) {
         result.capture.diagnostic = result.discovery.diagnostic;
         return result;
@@ -1038,6 +1108,13 @@ DiscoverAndCaptureResult discover_and_capture(
               << result.discovery.selected->version << " at "
               << result.discovery.selected->executable.string() << "\n";
     result.capture = capture_document(*result.discovery.selected, request);
+    const auto& selected = *result.discovery.selected;
+    if (!result.capture.ok() && !selected.probe_cache_key.empty() &&
+        discovery_options.probe_cache_directory &&
+        browser_contradicted_probe(result.capture.diagnostic, request.output_directory)) {
+        forget_cached_browser_identity(*discovery_options.probe_cache_directory,
+                                       selected.probe_cache_key);
+    }
     return result;
 }
 
