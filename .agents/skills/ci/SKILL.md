@@ -600,6 +600,42 @@ cascade: attribute it with `queue_batch_attribute.py`, and check whether the
 landing batch that produced main's current tree reused a receipt (three steps,
 green, ran nothing) — if it did, main's tree has never been tested.
 
+### Main is red: set the merge-queue circuit breaker while the fix lands
+
+When a test fails on main itself, every group the queue forms inherits it and
+burns a gate VM. The agent opening the fix sets the breaker with one call
+(writing a repository variable needs repo admin, or an App token with
+Variables write):
+
+```bash
+until=$(date -u -v+3H +%Y-%m-%dT%H:%M:%SZ)   # GNU: date -u -d '+3 hours' ...
+ghapp api -X POST repos/Generous-Corp/pulp/actions/variables -f name=PULP_QUEUE_BREAKER \
+  -f value="{\"test\":\"<ctest name>\",\"fix_pr\":<fix-pr>,\"until\":\"$until\"}"
+# lift early, or after the fix lands if you set no fix_pr:
+ghapp api -X DELETE repos/Generous-Corp/pulp/actions/variables/PULP_QUEUE_BREAKER
+```
+
+While it is live, classify fails every merge group (`queue-breaker` error
+annotation, plus a comment on each pull request) that carries neither the fix
+nor a `queue-unblock` label. Gotchas:
+- Only reviewers and team-lead apply `queue-unblock`, and it counts only when
+  the fleet App or a repo admin/maintainer applied it last. The name is exact
+  and case-sensitive; tartci's queue tier reads the same string, so tell the
+  tartci owner before renaming it.
+- Set `fix_pr` to the base health detector's `candidate_fix_pr` (`shipyard
+  base-health --repo Generous-Corp/pulp`, or the `base-poison-signal`
+  artifact) when it names one, so the fix Shipyard would jump is the one the
+  breaker admits; a different `fix_pr` leaves the jumped fix blocked.
+- An `until` more than 3 h ahead is IGNORED, not clamped. Re-set it to extend.
+- The breaker lifts by itself once `fix_pr` merges; with no `fix_pr` it holds
+  until `until` or the delete.
+- It fails open: a malformed value or an unreadable group proceeds with a
+  notice. Read the classify log, not the absence of an error, to confirm it is
+  live. `PULP_QUEUE_BREAKER_CONTROL` (same JSON) is judged report-only on every
+  pull_request classify run, the positive control that the variable arrives.
+- Shipyard's steward does not yet know about it and may re-arm ejected pull
+  requests; each re-arm costs a classify run, not a VM.
+
 ### Main is red: land the fix first by jumping it to the head of the queue
 
 When `base_poison_detector.py` says `poisoned`, or the same failing test name
@@ -1284,6 +1320,19 @@ publishes no `shipyard-receipt-decision` annotation, only a
 near-instant bootstrap. The job writes decision notes for `macos` and `linux`
 in file-name order, so the log prints `linux` first; `shipyard landing` shows
 both.
+
+### Lints `Enforce version & skill sync` runs that pre-push also runs
+
+`text_encoding_lint.py --base` and `migration_note_guard.py --base` run in the
+pre-push hook and `gates.sh` as well as in this job, and
+`script_inputs_precheck.py --base` runs there as a build-free stand-in for the
+`script-test-inputs-drift` ctest: a new script-driven `add_test()` must have a
+`test/ctest_script_inputs.json` entry. It cannot see a stale entry (a script
+that gained an import) or a computed test name; those still need the
+configured check. Three PRs on 2026-10-22
+went red here on the encoding lint after the local gates reported clean,
+because only CI ran it. A new lint in this job that needs no build belongs in
+the hook too.
 
 ### `Enforce version & skill sync` compares against the merge-base
 
@@ -2233,6 +2282,69 @@ a second time) means a new unconditional `FetchContent_Declare` was added
 without a registration and a `setup.sh` priming call.
 `test_setup_source_cache.sh` fails on that drift, and on any `setup.sh` curl
 that lacks `--retry-all-errors`.
+
+### Per-commit `pulp-view-audio` archives are immutable release assets
+
+`view-audio-archive.yml` runs only when dispatched on `main` and builds only
+the commit it runs on, so the commit a consumer re-pins to is whichever `main`
+commit was dispatched. It publishes
+`libpulp-view-audio.a`, its manifest, symbol floor, floor-gate verdict,
+`SHA256SUMS` and the Sigstore bundle as an immutable prerelease tagged
+`artifact/pulp-view-audio/<sha>`. Things that look optional are not:
+
+- **There is no commit input, on purpose.** An input naming the commit to
+  check out made CodeQL's cache-poisoning query fire on the build job (a
+  default-branch job running a checked-out tree that an input chose), and
+  validating the input in an earlier job did not change that. Building
+  `github.sha` removes the input, so an archive exists only for `main` commits
+  someone dispatched it on. It has no push trigger on purpose: a prerelease per
+  `main` push would also crowd SDK versions out of `pulp sdk`'s release list.
+- **The build job must never touch the Actions cache.** It runs this commit's
+  `setup.sh` and build in a job whose actions can write the default branch's
+  cache scope. A contract test fails on any `actions/cache`, `setup-*` action
+  or cache input in that job.
+- **`ZERO_AR_DATE=1` is load-bearing.** Apple `ar`/`ranlib` stamp member and
+  symbol-table times. The workflow's `rebuild` field records a second clean
+  configure and build of the same checkout into a separate build directory on
+  the same runner (`kind: separate-build-dir`); without the variable that
+  second archive differs. It says nothing about another runner image.
+- **The floor and the dependency gate count weak symbols differently, on
+  purpose.** Both read `nm` through `tools/scripts/nm_symbols.py`. The floor
+  is a contamination check and uses `defined_any()` (every type but U/w/v, so
+  weak `W`/`V`, GNU unique `u` and indirect `i` all count): a class's typeinfo
+  or vtable is often weak and is still the archive's. The closure gate uses
+  `defined_strong()`, because two archives emitting the same inline function
+  do not depend on each other.
+- **A consumer must check the ref and the manifest, not just the signature.**
+  `view_audio_archive_manifest.py verify-release --dir <assets> --source-sha
+  <sha> --repository Generous-Corp/pulp` is the whole check in one command, and
+  the publish job runs it on the staged draft before publishing. It runs `gh
+  attestation verify` on all five attested files with `--bundle` (the only
+  reason it works without a token), `--source-ref refs/heads/main` (the only
+  thing that rejects a modified copy of the workflow dispatched from a branch)
+  and `--source-digest <sha>`, then `verify` with the floor, the gate output,
+  `--require-gate-pass` and `--require-identical-rebuild`, which carry what the
+  signature alone does not.
+- **Build and publish are separate jobs.** The build job has `contents: read`
+  and no token or OIDC grant, so nothing `setup.sh` fetches can sign; the
+  publish job re-verifies the uploaded bytes before attesting them. A failing
+  floor gate, or a rebuild that is not byte-identical, stops in the build job
+  before any tag exists.
+- **The tag must stay outside `v*`, and is therefore unprotected.** `v*` is the
+  protected release-tag ruleset and the trigger for `release-cli.yml` /
+  `sign-and-release.yml`; a tag such as `view-audio-...` would match that glob.
+  Because `artifact/*` has no ruleset, the publish job refuses an existing tag
+  or draft that does not point at the commit (or a draft with unexpected
+  assets), creates the tag itself, verifies the staged draft (tag, exact
+  assets, attestation of what was downloaded back) and only then flips
+  `--draft=false`; `immutable: true` can only be checked after that flip. A
+  run that finds the commit already published verifies that release instead
+  of trusting it. Keep the release a prerelease with `--latest=false` so
+  `/releases/latest` and `pulp upgrade` never see it.
+- **Never delete one of these releases.** A published immutable release burns
+  its tag name forever; the workflow refuses to rebuild a commit that already
+  has one, because a second build on a newer runner image is different bytes.
+  Downstream identity is the attested manifest, not a rebuild.
 
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
@@ -11726,6 +11838,60 @@ cases/sec, so the whole PR budget is well under a second and the nightly budget 
 almost for free. Budget the build, not the iterations, and keep `timeout-minutes` on both jobs
 plus `-max_total_time` on libFuzzer.
 
+### Adding a libFuzzer target
+
+Register it under `if(PULP_ENABLE_FUZZING)` in the owning `test/cmake/*_tests.cmake` manifest
+through `pulp_add_libfuzzer_target()` (`tools/cmake/PulpTestSuite.cmake`): it adds the
+executable with the fuzzer+ASan flags and a `<name>-smoke` ctest (labels `fuzz;libfuzzer`) that
+runs a fixed, seeded number of mutations over a seed corpus. The smoke gets a scratch directory
+*first* and the seeds second — libFuzzer writes every new interesting input into the first
+corpus directory it is given, so a checked-in corpus named first is grown by every test run.
+Checked-in seeds live under `test/fixtures/fuzz/<target>/`; a seed that has to be produced by
+the code under test (the plugin-state envelope) comes from a small generator executable that is
+built unconditionally and run as a `FIXTURES_SETUP` ctest only in a fuzzing build. The only
+toolchain probe is the one in `timeline_tests.cmake`; it fails the whole configure, so a target
+registered in a manifest included earlier needs no probe of its own.
+
+Then add the target to **both** lists in `timeline-fuzz.yml`'s `libfuzzer` job — the
+`--target` build list and the `Fuzz` step — and raise `timeout-minutes` if the summed
+`-max_total_time` budget would otherwise exceed it. The `Smoke every libFuzzer target` step
+(`ctest -L libfuzzer`) catches a target whose seeds no longer load before the long budget starts.
+Keep it off the per-PR path: the required gate never configures with `PULP_ENABLE_FUZZING`, and
+the libfuzzer job skips `pull_request`.
+
+**Prove the target before trusting it.** A fuzz target that compiles and runs green has proven
+nothing about reaching the parser. Plant a crash — an `abort()` on a magic byte sequence in the
+parser's entry, e.g. `if (size >= 4 && memcmp(data, "FUZZ", 4) == 0) abort();` — build, run the
+target over its seeds with a short `-max_total_time`, and confirm libFuzzer reports
+`deadly signal` with a `crash-*` reproducer that begins with the magic bytes. Then remove the
+plant. Plant it in the parser's own entry, not in the fuzz target: a plant in
+`LLVMFuzzerTestOneInput` proves only that libFuzzer runs.
+
+On macOS the local recipe is a separate build directory. Two host facts shape
+it. The sysroot must be passed explicitly: CMake leaves `CMAKE_OSX_SYSROOT`
+empty for a non-Apple clang, and the Homebrew libc++ then fails on
+`<pthread.h>` / `<sched.h>` in the very first dependency scan rather than
+anywhere near the fuzz target. And `PULP_FUZZ_SANITIZERS=fuzzer` drops ASan:
+Homebrew `llvm@21`'s ASan runtime deadlocks before `main` on macOS 26
+(`AsanInitFromRtl` → `get_dyld_hdr` → `_Block_copy` → malloc re-enters
+`AsanInitFromRtl` and spins on its init lock), so every ASan binary it
+produces, a one-line `int main` included, sits at 70% CPU forever with a
+2 MB RSS. Apple's clang has a working ASan but no libFuzzer. A target that
+"hangs" at startup on this host is that deadlock, not a slow parser:
+`sample <pid>` shows `StaticSpinMutex::LockSlow` under `__asan::AsanInitFromRtl`.
+The Linux nightly keeps the default `fuzzer,address`.
+
+```sh
+cmake -S . -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm@21/bin/clang \
+  -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm@21/bin/clang++ \
+  -DCMAKE_OSX_SYSROOT="$(xcrun --show-sdk-path)" \
+  -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF \
+  -DPULP_ENABLE_FUZZING=ON -DPULP_FUZZ_SANITIZERS=fuzzer
+tools/ci/governed-build.sh cmake --build build-fuzz --target pulp-fuzz-svg
+ctest --test-dir build-fuzz -L libfuzzer --output-on-failure
+```
+
 ## A new `core/` module needs three separate registrations, revealed one at a time
 
 Landing a new subsystem under `core/` is not one edit. Four places have to agree,
@@ -12490,6 +12656,11 @@ Fix a hit with the other quote character, or bind the expression to a local
 first.
 
 ## Hosted macOS advisory cadence
+
+The TSan workflow's focused SignalGraph selector must retain exact-name entries
+for mailbox and retirement-reader race cases when those cases are extracted or
+renamed. Validate the selected names with `ctest -N` before changing the regex;
+do not broaden the selector to the entire graph suite.
 
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
 native matrix are scheduled nightly and dispatched on an approved PR head. The

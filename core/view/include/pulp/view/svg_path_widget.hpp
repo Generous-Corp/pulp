@@ -10,6 +10,8 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/path.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -119,6 +121,24 @@ public:
     /// Stroke width in SVG path-coords (i.e. viewBox space). Default 1.
     void set_stroke_width(float w);
 
+    /// SVG `stroke-linecap`, `stroke-linejoin` and `stroke-miterlimit`. Until
+    /// one is set the stroke uses the canvas's current state, so widgets that
+    /// never call these paint exactly as before. SVG's miter limit is 4, not
+    /// the canvas default of 10; a non-finite or sub-1 limit is ignored, as
+    /// SVG ignores it.
+    void set_stroke_cap(canvas::LineCap cap);
+    void set_stroke_join(canvas::LineJoin join);
+    void set_stroke_miter_limit(float limit);
+    std::optional<canvas::LineCap> stroke_cap() const {
+        return stroke_cap_;
+    }
+    std::optional<canvas::LineJoin> stroke_join() const {
+        return stroke_join_;
+    }
+    std::optional<float> stroke_miter_limit() const {
+        return stroke_miter_limit_;
+    }
+
     /// pulp #3656 — fill winding rule, mirroring SVG's `fill-rule`
     /// (`nonzero` | `evenodd`). Default `nonzero` matches the SVG /
     /// Canvas2D default. `evenodd` is what compound annular paths need:
@@ -157,6 +177,8 @@ public:
 
 private:
     void reparse();
+    /// The parsed segments as a canvas path, in viewBox coordinates.
+    canvas::Path stroke_geometry() const;
     /// Repaint what changed between @p before and the current paint_extent().
     void repaint_extent_change(const Rect& before);
 
@@ -167,6 +189,9 @@ private:
     std::string   fill_gradient_;    // non-empty overrides solid fill
     std::string   stroke_gradient_;  // non-empty overrides solid stroke
     float stroke_width_ = 1.0f;
+    std::optional<canvas::LineCap> stroke_cap_;
+    std::optional<canvas::LineJoin> stroke_join_;
+    std::optional<float> stroke_miter_limit_;
     canvas::FillRule fill_rule_ = canvas::FillRule::nonzero;  // pulp #3656
     float viewbox_w_ = 0.0f;   // 0 means "use widget bounds 1:1"
     float viewbox_h_ = 0.0f;

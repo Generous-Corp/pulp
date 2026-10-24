@@ -74,6 +74,155 @@ fn upgrade_url_linux_x64_uses_targz() {
     assert_eq!(asset, "pulp-linux-x64.tar.gz");
 }
 
+const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+#[test]
+fn manifest_digest_matches_the_exact_basename_only() {
+    let manifest = format!(
+        "{ABC_SHA256}  pulp-darwin-arm64.tar.gz\n\
+         {ABC_SHA256} *pulp-linux-x64.tar.gz\r\n\
+         {}  xpulp-windows-x64.zip\n",
+        ABC_SHA256.to_ascii_uppercase()
+    );
+    assert_eq!(
+        manifest_digest_for(&manifest, "pulp-darwin-arm64.tar.gz").unwrap(),
+        ABC_SHA256
+    );
+    assert_eq!(
+        manifest_digest_for(&manifest, "pulp-linux-x64.tar.gz").unwrap(),
+        ABC_SHA256
+    );
+    let missing = manifest_digest_for(&manifest, "pulp-windows-x64.zip").unwrap_err();
+    assert!(missing
+        .to_string()
+        .contains("no entry for pulp-windows-x64.zip"));
+}
+
+#[test]
+fn manifest_digest_refuses_duplicate_and_malformed_entries() {
+    let duplicate = format!("{ABC_SHA256}  a.tar.gz\n{ABC_SHA256}  a.tar.gz\n");
+    assert!(manifest_digest_for(&duplicate, "a.tar.gz")
+        .unwrap_err()
+        .to_string()
+        .contains("more than once"));
+    let malformed = format!("{ABC_SHA256}  a.tar.gz\nnot-a-digest  b.tar.gz\n");
+    assert!(manifest_digest_for(&malformed, "a.tar.gz")
+        .unwrap_err()
+        .to_string()
+        .contains("malformed SHA256SUMS line 2"));
+}
+
+#[test]
+fn version_floor_comparison_fails_closed() {
+    assert!(version_at_or_above("0.663.1", "0.663.1"));
+    assert!(version_at_or_above("0.663.1-pre", "0.663.1"));
+    assert!(version_at_or_above("0.663.1-rc.1+build.7", "0.663.1"));
+    assert!(version_at_or_above("1.0.0-rc1", "0.663.1"));
+    assert!(version_at_or_above("v0.700.0", "0.663.1"));
+    assert!(!version_at_or_above("0.663.0", "0.663.1"));
+    assert!(!version_at_or_above("0.663.0-pre", "0.663.1"));
+    assert!(!version_at_or_above("0.99.9", "0.663.1"));
+    assert!(version_at_or_above("garbage", "0.663.1"));
+}
+
+#[test]
+fn embedded_checksum_floor_is_a_semver() {
+    let floor = checksum_manifest_floor().unwrap();
+    assert!(semver::Version::parse(&floor).is_ok(), "{floor}");
+}
+
+#[test]
+fn release_archive_verifies_against_its_manifest_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("pulp-darwin-arm64.tar.gz");
+    fs::write(&archive, b"abc").unwrap();
+    let manifest = format!("{ABC_SHA256}  pulp-darwin-arm64.tar.gz\n");
+    let verdict = verify_release_archive(
+        &archive,
+        "pulp-darwin-arm64.tar.gz",
+        "0.700.0",
+        "0.663.1",
+        Some(&manifest),
+    )
+    .unwrap();
+    assert_eq!(
+        verdict,
+        ArchiveVerification::Verified(ABC_SHA256.to_owned())
+    );
+}
+
+#[test]
+fn release_archive_with_wrong_digest_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("pulp-darwin-arm64.tar.gz");
+    fs::write(&archive, b"abd").unwrap();
+    let manifest = format!("{ABC_SHA256}  pulp-darwin-arm64.tar.gz\n");
+    let error = verify_release_archive(
+        &archive,
+        "pulp-darwin-arm64.tar.gz",
+        "0.700.0",
+        "0.663.1",
+        Some(&manifest),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("SHA-256 mismatch"), "{error}");
+    let missing = verify_release_archive(
+        &archive,
+        "pulp-darwin-arm64.tar.gz",
+        "0.700.0",
+        "0.663.1",
+        Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  other.tar.gz\n"),
+    )
+    .unwrap_err();
+    assert!(missing.to_string().contains("no entry"), "{missing}");
+}
+
+#[test]
+fn missing_manifest_is_refused_at_the_floor_and_warned_below_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("pulp-darwin-arm64.tar.gz");
+    fs::write(&archive, b"abc").unwrap();
+    let refused = verify_release_archive(
+        &archive,
+        "pulp-darwin-arm64.tar.gz",
+        "0.663.1",
+        "0.663.1",
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        refused.to_string().contains("could not fetch SHA256SUMS"),
+        "{refused}"
+    );
+    // An exact-floor pre-release is at the floor, so its missing manifest is
+    // refused too (the C++ verifier agrees).
+    let prerelease = verify_release_archive(
+        &archive,
+        "pulp-darwin-arm64.tar.gz",
+        "0.663.1-pre",
+        "0.663.1",
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        prerelease
+            .to_string()
+            .contains("could not fetch SHA256SUMS"),
+        "{prerelease}"
+    );
+    let legacy = verify_release_archive(
+        &archive,
+        "pulp-darwin-arm64.tar.gz",
+        "0.600.0",
+        "0.663.1",
+        None,
+    )
+    .unwrap();
+    assert!(
+        matches!(legacy, ArchiveVerification::UnverifiedLegacy(ref why) if why.contains("NOT verified"))
+    );
+}
+
 #[test]
 fn current_platform_matches_target_os() {
     let p = current_platform();
@@ -823,8 +972,7 @@ fn staged_broker_version_mismatch_refuses_before_installed_state_is_read() {
 
 #[test]
 fn current_broker_without_standalone_closure_is_rejected_after_version_match() {
-    let (_root, archive, mut plan, broker) =
-        broker_lifecycle_fixture("0.803.0", "0.803.1");
+    let (_root, archive, mut plan, broker) = broker_lifecycle_fixture("0.803.0", "0.803.1");
     let staged = archive.path().join(control_broker_basename());
     plan.version = crate::build_info::control_standalone_host_floor().to_owned();
 
@@ -1119,7 +1267,11 @@ fn install_extracted_installs_the_shared_runtime_beside_its_binaries() {
     fs::write(bin_dir.path().join(pulp_basename()), b"old-pulp").unwrap();
     fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
     fs::write(arch_dir.path().join(cpp_basename()), b"new-cpp").unwrap();
-    fs::write(arch_dir.path().join(shared_runtime_basename()), b"new-runtime").unwrap();
+    fs::write(
+        arch_dir.path().join(shared_runtime_basename()),
+        b"new-runtime",
+    )
+    .unwrap();
 
     let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
     install_extracted(&runtime_plan(bin_dir.path()), &arch).unwrap();
@@ -1142,7 +1294,11 @@ fn install_extracted_replaces_a_runtime_symlink_with_the_release_runtime() {
     fs::write(&stale, b"stale-runtime").unwrap();
     std::os::unix::fs::symlink(&stale, bin_dir.path().join(shared_runtime_basename())).unwrap();
     fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
-    fs::write(arch_dir.path().join(shared_runtime_basename()), b"new-runtime").unwrap();
+    fs::write(
+        arch_dir.path().join(shared_runtime_basename()),
+        b"new-runtime",
+    )
+    .unwrap();
 
     let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
     install_extracted(&runtime_plan(bin_dir.path()), &arch).unwrap();
@@ -1150,7 +1306,11 @@ fn install_extracted_replaces_a_runtime_symlink_with_the_release_runtime() {
     let dst = bin_dir.path().join(shared_runtime_basename());
     assert!(!fs::symlink_metadata(&dst).unwrap().file_type().is_symlink());
     assert_eq!(fs::read(&dst).unwrap(), b"new-runtime");
-    assert_eq!(fs::read(&stale).unwrap(), b"stale-runtime", "the link target is left alone");
+    assert_eq!(
+        fs::read(&stale).unwrap(),
+        b"stale-runtime",
+        "the link target is left alone"
+    );
 }
 
 #[test]

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261024-importer-js-svg-stroke-style-20261024-watch",
+  "created_at": "2026-10-24T12:33:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "The JS lane gains the SVG stroke cap/join/miter style the native and baked C++ lanes already apply: a setSvgStrokeStyle WidgetBridge call on SvgPath (manifest row, generated typings, mocks and js-bridge docs regenerated) and one emitted call per styled vector in generated JS, from the shared parser. Additive bridge surface; Chromium stays the only oracle and Skia/Dawn the renderer, so no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-import-codegen-paint",
+    "ctest --test-dir build -R pulp-test-widget-bridge-svg",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

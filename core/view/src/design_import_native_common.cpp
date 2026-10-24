@@ -1,4 +1,5 @@
 #include "design_import_native_common.hpp"
+#include "design_import_svg_stroke.hpp"
 #include "design_ir_helpers.hpp"
 
 #include "design_binding_metadata.hpp"
@@ -1403,31 +1404,16 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         flex.dim_min_height = {100.0f, DimensionUnit::percent};
 }
 
-// Every CSS color a design can write, from ONE place.
-//
-// This exists because the fallback used to live at a single call site. Prefer
-// the hex fast path, then the shared CSS parser for rgb()/rgba()/transparent:
-// Figma demotes a hairline stroke (the FILTER & EQ grid `Line`s) to a 1px frame
-// whose fill is the stroke color — often rgba(171,171,171,0.1) — which
-// parse_hex_color drops, leaving the grid invisible.
-//
-// That fallback was attached to `background_color` alone, while SEVEN paint
-// sites here call parse_hex_color: background, text `color`, `border_color`, and
-// the four per-side border colors. So a design saying `color: rgba(...)` got
-// its background right and silently lost its TEXT and every BORDER. One branch
-// learned the lesson; its six siblings never heard it — the same shape as
-// setBoxShadow being emitted from the frame branch alone, so that 16 declared
-// shadows became 1.
-//
-// A helper rather than six more fallbacks, because the bug is that the
-// knowledge lived at a call site: the eighth paint site added later would have
-// repeated it.
-// The allowlist is what decides whether a colour reaches the paint site at all,
-// so a function missing from it is a colour silently NOT applied — the view
-// keeps its default and nothing reports a loss. `oklab()` / `oklch()` are the
-// forms Chromium serializes every modern colour syntax into, so a captured
-// design's text and fills arrive in them; without these two entries a bright
-// accent label rendered in the default text colour.
+// Every CSS color a design can write, from ONE place: the hex fast path, then
+// the shared CSS parser. Every paint site (background, text `color`, border and
+// the four per-side borders) goes through it, because a fallback that lives at
+// one call site leaves its siblings silently dropping `rgba(...)`: a Figma
+// hairline demoted to a 1px frame filled rgba(171,171,171,0.1) vanished, and a
+// `color: rgba(...)` lost its text and borders while its background survived.
+// The allowlist decides whether a colour reaches the paint site at all, so a
+// function missing from it is a colour silently NOT applied. `oklab()` /
+// `oklch()` are the forms Chromium serializes every modern colour syntax into;
+// without them a captured accent label rendered in the default text colour.
 static std::optional<Color> parse_any_css_color(const std::string& value) {
     if (auto color = parse_hex_color(value)) return color;
     if (value.rfind("rgb", 0) == 0 || value.rfind("hsl", 0) == 0 ||
@@ -1917,6 +1903,13 @@ void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
             break;
         }
     }
+    const auto stroke_style = svg_stroke_style_attributes(node);
+    if (stroke_style.cap)
+        path.set_stroke_cap(*stroke_style.cap);
+    if (stroke_style.join)
+        path.set_stroke_join(*stroke_style.join);
+    if (stroke_style.miter_limit)
+        path.set_stroke_miter_limit(*stroke_style.miter_limit);
 }
 
 void apply_svg_paint(SvgRectWidget& rect, const IRNode& node) {

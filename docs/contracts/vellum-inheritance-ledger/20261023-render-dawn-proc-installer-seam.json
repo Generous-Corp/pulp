@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-render-dawn-proc-installer-seam",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "vellum_obligation": "A Vellum host registers its authenticated Dawn bootstrap as the pulp::render Dawn proc installer before creating any GpuSurface or GpuCompute, so the mirrored surface and compute sources need no overlay; gpu_proc_installer_native.cpp is the single mirrored file that names the proc-table setter.",
+  "evidence": [
+    ".github/vellum-change-events/20261023-render-dawn-proc-installer-seam.json",
+    "ctest --test-dir build -R 'Dawn proc installer'"
+  ]
+}

@@ -406,6 +406,115 @@ add_ref() {
 # small indexed-array lookup assigns each plugin its stable index.
 PLUGIN_NAMES=()
 PLUGIN_ENTRIES=""    # one "pluginIndex<TAB>pluginName<TAB>choiceId" line per format
+# Release provenance captured after the source bundle has been signed.  These
+# hashes are the guard against the failure mode where pkgbuild/productbuild
+# silently packages a different bundle than the signed source bundle.
+declare -a P_PAYLOAD_BUNDLE=() P_PAYLOAD_EXECUTABLE=() P_PAYLOAD_SHA256=() P_PAYLOAD_DIGEST=()
+
+# Produce a stable digest for every regular file in a bundle.  The executable
+# hash catches stale embedded UI, but a plugin can also carry sidecar artwork,
+# presets, or other resources.  Those bytes are part of the shipped payload and
+# must be bound to the exact signed source bundle as well.
+bundle_payload_digest() {  # $1=bundle
+  local bundle="$1" file rel
+  (
+    cd "$bundle" || exit 1
+    find . -type f -print | LC_ALL=C sort | while IFS= read -r file; do
+      rel="${file#./}"
+      printf '%s\0' "$rel"
+      shasum -a 256 "$file" | awk '{print $1}'
+      printf '\n'
+    done
+  ) | shasum -a 256 | awk '{print $1}'
+}
+
+bundle_executable_path() {  # $1=bundle; prints the exact signed executable
+  local bundle="$1" name
+  name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle/Contents/Info.plist" 2>/dev/null)" || {
+    echo "error: cannot read CFBundleExecutable from $bundle" >&2
+    return 1
+  }
+  [[ -n "$name" ]] || { echo "error: empty CFBundleExecutable in $bundle" >&2; return 1; }
+  local executable="$bundle/Contents/MacOS/$name"
+  [[ -f "$executable" ]] || {
+    echo "error: bundle executable is missing: $executable" >&2
+    return 1
+  }
+  printf '%s\n' "$executable"
+}
+
+record_plugin_payload_identity() {  # $1=bundle
+  local bundle="$1" executable sha digest
+  executable="$(bundle_executable_path "$bundle")" || exit 2
+  sha="$(shasum -a 256 "$executable" | awk '{print $1}')" || exit 2
+  [[ "$sha" =~ ^[0-9a-fA-F]{64}$ ]] || {
+    echo "error: unable to hash signed plugin executable: $executable" >&2
+    exit 2
+  }
+  digest="$(bundle_payload_digest "$bundle")" || exit 2
+  [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || {
+    echo "error: unable to digest signed plugin bundle: $bundle" >&2
+    exit 2
+  }
+  P_PAYLOAD_BUNDLE+=("$(basename "$bundle")")
+  P_PAYLOAD_EXECUTABLE+=("$(basename "$executable")")
+  P_PAYLOAD_SHA256+=("$sha")
+  P_PAYLOAD_DIGEST+=("$digest")
+  echo "  source payload identity: $(basename "$bundle")/$(basename "$executable") sha256=$sha bundle-digest=$digest"
+}
+
+verify_product_payload_identities() {
+  # Expand the unsigned product before productsign.  Verifying the unsigned
+  # archive is intentional: productsign only wraps the archive and cannot fix
+  # a stale component payload.  Match by bundle leaf + CFBundleExecutable so
+  # two formats of one product do not get confused with one another.
+  local archive="$1" expanded="$STAGE/expanded-product" i bundle executable expected digest
+  local matches_file match count got packaged_digest
+  [[ "${#P_PAYLOAD_BUNDLE[@]}" -gt 0 ]] || return 0
+  # pkgutil --expand-full requires a destination that does not already exist.
+  # Do not pre-create it: the real macOS tool rejects an existing directory,
+  # while a permissive test double would otherwise hide that release failure.
+  pkgutil --expand-full "$archive" "$expanded" >/dev/null || {
+    echo "error: pkgutil could not expand product archive for payload verification" >&2
+    exit 2
+  }
+  for ((i=0; i<${#P_PAYLOAD_BUNDLE[@]}; i++)); do
+    bundle="${P_PAYLOAD_BUNDLE[$i]}"; executable="${P_PAYLOAD_EXECUTABLE[$i]}"
+    expected="${P_PAYLOAD_SHA256[$i]}"
+    digest="${P_PAYLOAD_DIGEST[$i]}"
+    matches_file="$STAGE/payload-matches-$i"
+    # pkgbuild --component places the bundle directly at the payload root
+    # (Payload/$bundle).  The product archive may put that component beneath
+    # its component package directory, so match exactly one component payload
+    # and never a similarly named bundle nested inside another component.
+    # --install-location is metadata and does not add Library/Audio/... inside
+    # Payload.
+    find "$expanded" -type f \
+      -path "*/Payload/$bundle/Contents/MacOS/$executable" \
+      -print > "$matches_file"
+    count="$(wc -l < "$matches_file" | tr -d ' ')"
+    [[ "$count" == 1 ]] || {
+      echo "error: expected exactly one packaged payload executable for $bundle/$executable; found $count" >&2
+      exit 2
+    }
+    match="$(cat "$matches_file")"
+    got="$(shasum -a 256 "$match" | awk '{print $1}')"
+    [[ "$got" == "$expected" ]] || {
+      echo "error: packaged payload hash mismatch for $bundle/$executable" >&2
+      echo "  source:  $expected" >&2
+      echo "  archive: $got ($match)" >&2
+      exit 2
+    }
+    packaged_digest="$(bundle_payload_digest "${match%/Contents/MacOS/$executable}")"
+    [[ "$packaged_digest" == "$digest" ]] || {
+      echo "error: packaged bundle digest mismatch for $bundle" >&2
+      echo "  source:  $digest" >&2
+      echo "  archive: $packaged_digest ($match)" >&2
+      exit 2
+    }
+    echo "  verified packaged payload: $bundle/$executable sha256=$got bundle-digest=$packaged_digest"
+  done
+}
 # ── Installer panes ─────────────────────────────────────────────────────────
 # Welcome / licence / read-me / conclusion. productbuild resolves these by
 # BASENAME inside --resources, so each file is staged there under its own name;
@@ -505,6 +614,10 @@ for ((i=0; i<${#P_KIND[@]}; i++)); do
     aax) verify_presigned_aax "$p";;
     *) echo "bad plugin kind: $k" >&2; exit 2;;
   esac
+  # Capture the identity only after signing/verification.  pkgbuild below
+  # copies this exact bundle; the product-level gate later proves the archive
+  # still contains this executable byte-for-byte.
+  record_plugin_payload_identity "$p"
   pname="$(basename "$p")"; pname="${pname%.*}"        # e.g. VaDrum
   plugin_idx=-1
   for ((j=0; j<${#PLUGIN_NAMES[@]}; j++)); do
@@ -713,6 +826,10 @@ _unsigned_pkg="$STAGE/$NAME-$VERSION-unsigned.pkg"
 productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE/comp" \
   ${RESOURCE_ARGS:+--resources "$STAGE/resources"} \
   "$_unsigned_pkg" >/dev/null
+# Never sign an archive whose component payload has not been checked against
+# the signed source bundles.  This is the anti-stale-build gate: productsign,
+# notarization, and stapling are intentionally unreachable on mismatch.
+verify_product_payload_identities "$_unsigned_pkg"
 # Bind productsign to the exact keychain that the unattended doctor authorized.
 # A bare productsign can ignore the user search-list ordering in an SSH or GUI
 # session and fall through to a locked login keychain, producing

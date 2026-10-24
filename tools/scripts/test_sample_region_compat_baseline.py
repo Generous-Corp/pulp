@@ -30,6 +30,7 @@ class BaselineTests(unittest.TestCase):
             "test/sample_region_compat/old_graph_serializer_v2.hpp",
             "test/sample_region_compat/CMakeLists.txt",
             "core/host/src/signal_graph.cpp",
+            "core/host/src/signal_graph_mailbox.cpp",
             "core/host/src/graph_serializer.cpp",
             "core/host/src/sample_region_plan.cpp",
         ):
