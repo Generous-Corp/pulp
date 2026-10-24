@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <regex>
 #include <set>
@@ -569,6 +570,25 @@ std::optional<fs::path> prepare_capture_output_directory(
     return output;
 }
 
+// Whether a failed capture contradicts the identity discovery answered with:
+// the browser was not the build it reported, or it would not launch. The
+// capture script records where it stopped in capture-error.json, and its exit
+// diagnostic does not carry that phase.
+bool browser_contradicted_probe(const Diagnostic& diagnostic, const fs::path& output_directory) {
+    if (diagnostic.code == "browser-identity-drift" || diagnostic.code == "browser-unavailable" ||
+        diagnostic.phase == "browser-launch")
+        return true;
+    std::ifstream input(output_directory / "capture-error.json", std::ios::binary);
+    if (!input)
+        return false;
+    const std::string text{std::istreambuf_iterator<char>(input), {}};
+    try {
+        return choc::json::parse(text)["phase"].toString() == "browser-launch";
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 CaptureResult capture_failure(std::string code,
                               std::string phase,
                               std::string message,
@@ -639,6 +659,7 @@ BrowserProbeResult probe_browser(
                 }
                 result.compatible = true;
                 result.failure_kind = BrowserProbeFailure::none;
+                result.probe_cache_key = *cache_key;
                 return result;
             }
         }
@@ -810,6 +831,7 @@ BrowserProbeResult probe_browser(
     if (!cache_key)
         cache_key = keyed_inputs();
     if (cache_key) {
+        result.probe_cache_key = *cache_key;
         store_cached_browser_identity(cache_directory, *cache_key,
                                       {result.product, result.version, result.major_version,
                                        result.protocol_version, result.build_hash});
@@ -862,7 +884,7 @@ BrowserDiscoveryResult discover_browser(
             BrowserInstallation{candidate.executable,           candidate.origin,
                                 candidate_result.product,       candidate_result.version,
                                 candidate_result.major_version, candidate_result.protocol_version,
-                                candidate_result.build_hash};
+                                candidate_result.build_hash,    candidate_result.probe_cache_key};
         return result;
     }
 
@@ -1086,6 +1108,13 @@ DiscoverAndCaptureResult discover_and_capture(
               << result.discovery.selected->version << " at "
               << result.discovery.selected->executable.string() << "\n";
     result.capture = capture_document(*result.discovery.selected, request);
+    const auto& selected = *result.discovery.selected;
+    if (!result.capture.ok() && !selected.probe_cache_key.empty() &&
+        discovery_options.probe_cache_directory &&
+        browser_contradicted_probe(result.capture.diagnostic, request.output_directory)) {
+        forget_cached_browser_identity(*discovery_options.probe_cache_directory,
+                                       selected.probe_cache_key);
+    }
     return result;
 }
 

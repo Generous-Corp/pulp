@@ -4,6 +4,7 @@
 #include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_capture_backend.hpp"
 #include "tools/import-design/browser_capture_provenance.hpp"
+#include "tools/import-design/browser_probe_cache.hpp"
 
 #include <pulp/runtime/crypto.hpp>
 
@@ -842,6 +843,80 @@ TEST_CASE("a failed browser probe is never remembered",
     for (std::string line; std::getline(input, line);)
         ++count;
     CHECK(count == 2);
+}
+
+TEST_CASE("a browser probe cache key follows the bytes of every module the probe can import",
+          "[import-design][browser-capture][probe-cache]") {
+    TempTree tree("probe-cache-modules");
+    const auto browser = tree.write("browser", "#!/bin/sh\n");
+    const auto script = tree.write("capture/capture.mjs", "// script");
+    const auto launcher = tree.write("capture/browser_process.mjs", "// launcher");
+    const fs::path node(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    const auto key = [&] {
+        const auto value = capture::browser_probe_cache_key(browser, script, node);
+        REQUIRE(value);
+        return *value;
+    };
+    const auto original = key();
+
+    // Same size and modification time, different bytes: a different key.
+    const auto modified = fs::last_write_time(launcher);
+    tree.write("capture/browser_process.mjs", "// LAUNCHER");
+    fs::last_write_time(launcher, modified);
+    CHECK(key() != original);
+    tree.write("capture/browser_process.mjs", "// launcher");
+    fs::last_write_time(launcher, modified + std::chrono::seconds(10));
+    CHECK(key() == original);
+
+    // A test file never loads; a new module can.
+    tree.write("capture/browser_process.test.mjs", "// test");
+    CHECK(key() == original);
+    tree.write("capture/settle.mjs", "// module");
+    CHECK(key() != original);
+}
+
+TEST_CASE("a remembered browser probe is forgotten when the browser contradicts it",
+          "[import-design][browser-capture][probe-cache]") {
+    for (const std::string_view name : {"identity-drift.mjs", "launch-fails.mjs", "capture.mjs"}) {
+        INFO(name);
+        TempTree tree("probe-cache-forget");
+        const auto browser = tree.write(
+            "browser-wrapper", "#!/bin/sh\necho launched >> \"$(dirname \"$0\")/launches\"\n"
+                               "echo 'Google Chrome 123.0.0.0'\n");
+        fs::permissions(browser,
+                        fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+        const auto launches = [&] {
+            std::ifstream input(tree.root() / "launches");
+            int count = 0;
+            for (std::string line; std::getline(input, line);)
+                ++count;
+            return count;
+        };
+        const auto script = tree.write(name, "// fixture");
+
+        capture::BrowserDiscoveryOptions options;
+        options.explicit_path = browser;
+        options.environment_override = "";
+        options.mode_override = "";
+        options.include_default_system_candidates = false;
+        options.managed_root = tree.root() / "managed";
+        options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+        options.capture_script = script;
+        options.probe_cache_directory = tree.root() / "cache";
+
+        const auto result = capture::discover_and_capture(options, fixture_request(tree, script));
+        REQUIRE(result.discovery.selected);
+        REQUIRE(launches() == 1);
+        const bool contradicted = name != "capture.mjs";
+        CHECK(result.capture.ok() == !contradicted);
+
+        // A contradicted answer is probed again; a capture that succeeded
+        // leaves the remembered one in place.
+        const capture::BrowserCandidate candidate{browser,
+                                                  capture::BrowserOrigin::explicit_override};
+        REQUIRE(capture::probe_browser(candidate, options).compatible);
+        CHECK(launches() == (contradicted ? 2 : 1));
+    }
 }
 
 TEST_CASE("a transient version read is retried instead of rejecting a browser",
