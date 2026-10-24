@@ -434,7 +434,7 @@ void paint(pulp::canvas::Canvas& canvas) override {
 
 Each distinct preset source is compiled once and cached, so rebuilding the
 same look is cheap but generating a new one every frame is not. From JS, `setWidgetShaderChartPreset('knob-id', 'light-pipe',
-{ accent: '#5ab0ff' })` puts one on a knob's arc. Anything painted outside the
+{ accent: '#5ab0ff' })` puts one on a knob's arc or a fader's track. Anything painted outside the
 shape (a glow, an outer feather) needs `reach`, and a glow or outer feather
 shorter than three sigma is refused rather than clipped. The full contract
 (`PulpGeom`, `PulpChart`, `PulpFragment`, feather modes, presets and their
