@@ -7028,7 +7028,8 @@ Paint consumes them through `svg_stroke_style_attributes()`
 (`design_import_svg_stroke.hpp`) in both the native lane and the baked C++
 lane; `SvgPathWidget::set_stroke_cap` / `_join` / `_miter_limit` keep the style
 local to the draw, because the canvas has no getter to restore its sticky
-stroke state. The JS bridge has no stroke-style setter yet. Two traps when
+stroke state. The JS lane emits one `setSvgStrokeStyle(id, cap, join[, limit])`
+call per styled vector from the same parser. Two traps when
 consuming the attributes: the canvas miter limit defaults to 10 where SVG's is
 4, which is why `svg_stroke_miterlimit` is always written under a miter join; and a
 shape's own `opacity` is already folded into `svg_fill`/`svg_stroke` alpha
