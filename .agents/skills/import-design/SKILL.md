@@ -355,7 +355,11 @@ python3 tools/import-design/layout_parity.py --capture p.pulp-browser-capture --
 
 Three things that are not obvious. Parents come from the DOM, not the IR: a
 native panel is lowered FLAT under `browser:root`, so IR parents would cluster
-the whole page into one finding. The capture must be the IR's OWN capture:
+the whole page into one finding. The DOM parent is the nearest ancestor the
+import LOWERED, walking past wrappers it skipped (the importer drops empty,
+non-painting boxes); stopping at the direct DOM parent leaves such a node
+parentless and reports a moved container's children as misplaced too. The
+capture must be the IR's OWN capture:
 backend ids are small sequential integers, and a second capture of the same
 page joined all 105 of Spectr's ids cleanly — a wrong pairing looks right — so
 the tool compares the IR's recorded capture-image hashes and exits 2 on a
