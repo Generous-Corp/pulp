@@ -139,7 +139,7 @@ class AdoptionTest(unittest.TestCase):
         self.assertNotIn('PULP_DEV_BRIDGE_EXEC', doc['cache_features'])
         self.assertTrue(doc['bridge_exec'])
 
-        with self.cache.open('a') as stream:
+        with self.cache.open('a', encoding='utf-8') as stream:
             stream.write('PULP_DEV_BRIDGE_EXEC:BOOL=OFF\n')
         doc = self.inspect()
         self.assertEqual(doc['cache_features']['PULP_DEV_BRIDGE_EXEC'], 'OFF')
