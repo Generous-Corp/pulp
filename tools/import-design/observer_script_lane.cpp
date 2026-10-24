@@ -30,6 +30,18 @@ std::unique_ptr<ObservedScript> ObservedScript::run(const pulp::view::DesignIR& 
         std::make_unique<pulp::view::WidgetBridge>(state->engine, state->host, state->store);
     state->bridge->set_script_base_dir(asset_directory);
     state->bridge->load_script(pulp::view::generate_pulp_js(ir, pulp::view::CodeGenOptions{}));
+    // The program names its views with bridge ids ("div4") and binds each to
+    // its source anchor with setAnchor(). The native materializer names a view
+    // by that anchor, and the lab joins a layout snapshot to the capture by
+    // view id, so the observed ids are relabelled with the anchors once the
+    // program has run. The program itself is unchanged.
+    const auto relabel = [](auto& self, pulp::view::View& view) -> void {
+        if (!view.anchor_id().empty())
+            view.set_id(view.anchor_id());
+        for (std::size_t i = 0; i < view.child_count(); ++i)
+            self(self, *view.child_at(i));
+    };
+    relabel(relabel, state->host);
     return std::unique_ptr<ObservedScript>(new ObservedScript(std::move(state)));
 }
 
