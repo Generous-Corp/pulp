@@ -731,9 +731,14 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
         }
     }
 
-    SECTION("absolute paths and misses pass through unchanged") {
+    SECTION("absolute paths outside every root are refused; in-root misses pass through") {
         bridge.set_script_base_dir(base);
+        // An absolute path the UI chose resolves to the empty refusal unless
+        // the host opted into unreviewed paths, in which case it is unchanged.
+        REQUIRE(bridge.resolve_script_relative("/abs/elsewhere.png").empty());
+        bridge.set_allow_unreviewed_file_paths(true);
         REQUIRE(bridge.resolve_script_relative("/abs/elsewhere.png") == "/abs/elsewhere.png");
+        bridge.set_allow_unreviewed_file_paths(false);
         REQUIRE(bridge.resolve_script_relative("assets/nope.png") == "assets/nope.png");
         REQUIRE(bridge.resolve_script_relative("memory://sha256=aa") == "memory://sha256=aa");
         REQUIRE(bridge.resolve_script_relative("") == "");

@@ -3804,6 +3804,11 @@ int main(int argc, char* argv[]) {
         WidgetBridge render_bridge(render_engine, render_root, render_store);
         // The generated JS references its assets relative to the output file.
         render_bridge.set_script_base_dir(fs::path(output_file).parent_path());
+        // registerFont() paths are baked absolute and point at the design
+        // pack, outside the output directory. This is the developer's own
+        // import on the developer's machine, so the raw-path opt-in is safe
+        // here; a hosted editor keeps the default refusal.
+        render_bridge.set_allow_unreviewed_file_paths(true);
         try {
             render_bridge.load_script(js);
         } catch (const std::exception& e) {

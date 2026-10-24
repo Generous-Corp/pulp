@@ -796,3 +796,28 @@ TEST_CASE("Theme fill_from fills missing tokens", "[view][theme][validation]") {
     // Missing tokens should come from dark
     REQUIRE(partial.color("text.primary").has_value());
 }
+
+TEST_CASE("AssetManager refuses a file larger than its per-file ceiling", "[view][assets][security]") {
+    auto& assets = AssetManager::instance();
+    const auto previous = assets.max_file_bytes();
+    REQUIRE(previous == AssetManager::kDefaultMaxFileBytes);
+
+    const auto small = make_temp_asset_path("pulp-asset-cap-small", ".bin");
+    const auto large = make_temp_asset_path("pulp-asset-cap-large", ".bin");
+    write_bytes(small, std::vector<uint8_t>(8, 0x5A));
+    write_bytes(large, std::vector<uint8_t>(64, 0x5A));
+
+    assets.set_max_file_bytes(16);
+    REQUIRE(assets.load_blob(small.string()).valid());
+    REQUIRE_FALSE(assets.load_blob(large.string()).valid());
+    REQUIRE_FALSE(assets.load_font(large.string()).valid());
+
+    // Control: lifting the ceiling (0 = unlimited) reads the same file.
+    assets.set_max_file_bytes(0);
+    REQUIRE(assets.load_blob(large.string() ).data.size() == 64);
+
+    assets.set_max_file_bytes(previous);
+    std::error_code ec;
+    std::filesystem::remove(small, ec);
+    std::filesystem::remove(large, ec);
+}

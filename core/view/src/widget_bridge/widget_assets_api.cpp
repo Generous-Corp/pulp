@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -58,13 +59,23 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
         auto id = args.get<std::string>(0, "");
         auto source = args.get<std::string>(1, "");
         if (auto* img = dynamic_cast<ImageView*>(self.widget(id))) {
-            const bool is_supported_uri =
-                source.rfind("data:image/", 0) == 0 || source.rfind("file://", 0) == 0 ||
-                source.rfind("resource:", 0) == 0 || source.rfind("memory:", 0) == 0;
-            if (is_supported_uri)
+            if (source.rfind("file://", 0) == 0) {
+                // A file URL names a filesystem path like any other and is
+                // held to the same containment policy; a refused path leaves
+                // the image untouched rather than probing the disk.
+                if (!self.permits_file_path(std::filesystem::path(source.substr(7))))
+                    return choc::value::Value();
                 img->set_image_source(source);
-            else
-                img->set_image_path(self.resolve_script_relative(source));
+                return choc::value::Value();
+            }
+            const bool is_supported_uri =
+                source.rfind("data:image/", 0) == 0 ||
+                source.rfind("resource:", 0) == 0 || source.rfind("memory:", 0) == 0;
+            if (is_supported_uri) {
+                img->set_image_source(source);
+            } else if (auto resolved = self.resolve_script_relative(source); !resolved.empty()) {
+                img->set_image_path(resolved);
+            }
         }
         return choc::value::Value();
     });
@@ -81,6 +92,7 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
 
         if (path.rfind("file://", 0) == 0) path = path.substr(7);
         path = self.resolve_script_relative(path);
+        if (path.empty()) return choc::value::Value();
 
         std::ifstream f(path, std::ios::binary);
         if (!f.good()) {
@@ -190,6 +202,7 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
                 indicator_path = indicator_path.substr(7);
             body_path = self.resolve_script_relative(body_path);
             indicator_path = self.resolve_script_relative(indicator_path);
+            if (body_path.empty() || indicator_path.empty()) return choc::value::Value();
 
             auto body = std::make_shared<SpriteStrip>();
             body->load_from_file(body_path, body_w, body_h, 1,

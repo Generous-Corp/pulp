@@ -3,6 +3,7 @@
 #include <pulp/canvas/text_font_context.hpp>
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <fstream>
 #include <filesystem>
 
@@ -80,12 +81,20 @@ std::string AssetManager::resolve_path(const std::string& path) const {
 
 // ── File I/O ────────────────────────────────────────────────────────────────
 
-BlobData AssetManager::read_file_bytes(const std::string& path) {
+void AssetManager::set_max_file_bytes(size_t bytes) {
+    std::lock_guard lock(mutex_);
+    max_file_bytes_ = bytes;
+}
+
+BlobData AssetManager::read_file_bytes(const std::string& path) const {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) return {};
 
     auto size = file.tellg();
     if (size <= 0) return {};
+    // The ceiling is checked before the buffer exists, so an oversized file
+    // costs nothing but the open.
+    if (max_file_bytes_ != 0 && static_cast<std::uintmax_t>(size) > max_file_bytes_) return {};
 
     BlobData blob;
     blob.data.resize(static_cast<size_t>(size));

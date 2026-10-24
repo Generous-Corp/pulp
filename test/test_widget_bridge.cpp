@@ -2750,6 +2750,11 @@ TEST_CASE("WidgetBridge extended controls and visualization APIs round-trip JS t
     root.set_bounds({0, 0, 400, 300});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
+    // This round-trip names an absolute path with no asset root configured,
+    // which the bridge refuses by default; it is the app-side raw-path posture
+    // under test here, not the containment policy (see
+    // test_widget_bridge_capabilities.cpp for that).
+    bridge.set_allow_unreviewed_file_paths(true);
 
     bridge.load_script(R"(
         var checkbox_change = -1;
