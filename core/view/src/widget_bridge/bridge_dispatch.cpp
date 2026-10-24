@@ -259,6 +259,10 @@ constexpr const char* kDispatchBatchPrelude = R"(
 // is already open instead of opening its own. __pulpRunHostCallback__ belongs
 // to the runtime API registrar, which a view-core-only consumer may not
 // install; without it the handlers run unbatched.
+//
+// When the outermost dispatch's batch has committed, the UI framework's
+// __pulpAfterDiscreteDispatch__ hook runs, so it sees the props the handlers'
+// state produced. A controlled control uses it to put a rejected edit back.
 var __pulpDispatchDepth__ = 0;
 function __pulpRunDispatchBatch__(body, args) {
     var outermost = __pulpDispatchDepth__ === 0;
@@ -276,6 +280,13 @@ function __pulpRunDispatchBatch__(body, args) {
             __dispatchError__(args[0], args[1], String(e && e.stack ? e.stack : e));
     } finally {
         --__pulpDispatchDepth__;
+    }
+    if (outermost && typeof __pulpAfterDiscreteDispatch__ === 'function') {
+        try { __pulpAfterDiscreteDispatch__(args[0], args[1]); }
+        catch (e) {
+            if (typeof __dispatchError__ === 'function')
+                __dispatchError__(args[0], args[1], String(e && e.stack ? e.stack : e));
+        }
     }
     return result;
 }
