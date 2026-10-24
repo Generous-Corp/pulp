@@ -876,6 +876,8 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
     add_subdirectory(test/fixtures/data_display_editor)
+    add_subdirectory(test/fixtures/linux_plugin_isolation)
+    add_subdirectory(test/fixtures/linux_reload_host)
     add_subdirectory(test/fixtures/ui_script_plugin)
 endif()
 
