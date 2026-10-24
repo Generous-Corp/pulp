@@ -347,7 +347,7 @@ jobs:
         shell: powershell
         run: tools/ci/windows_build_env.ps1
 
-      - name: Configure ccache remote storage
+      - name: Point ccache at the host's remote storage
         shell: bash
         run: python3 tools/ci/ccache_remote_storage.py --github-env "$GITHUB_ENV"
 

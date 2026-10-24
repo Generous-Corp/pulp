@@ -1808,7 +1808,9 @@ jobs:
       # A self-hosted Windows VM keeps nothing between jobs, so a host that
       # serves a shared ccache names it in PULP_CCACHE_REMOTE_STORAGE. Unset,
       # this writes nothing; set, only code already on main may store objects.
-      - name: Configure ccache remote storage (Windows)
+      # The name must not start with "Configure": the pinned-Rust lane test
+      # finds the CMake configure step by that prefix.
+      - name: Point ccache at the host's remote storage (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: python3 tools/ci/ccache_remote_storage.py --github-env "$GITHUB_ENV"
