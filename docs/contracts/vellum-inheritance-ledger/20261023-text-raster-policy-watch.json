@@ -2,6 +2,7 @@
   "schema": "pulp.vellum-inheritance-entry.v1",
   "event_id": "20261023-text-raster-policy-watch",
   "slices": [
+    "render-assets-and-backends",
     "visual-proof-harness"
   ],
   "vellum_obligation": "Carry the per-surface text raster policy into Vellum's capture and render backends when the corresponding Pulp targets adopt Vellum: captures of a panel holding antialiased text render under the chromium tuple (contrast 0, gamma 1) on every surface they create, and the default stays the props-less legacy tuple.",

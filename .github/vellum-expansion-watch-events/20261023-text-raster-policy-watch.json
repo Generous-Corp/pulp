@@ -6,6 +6,7 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
+    "render-assets-and-backends",
     "visual-proof-harness"
   ],
   "rationale": "A generic render-backend change. Skia surfaces are created under an explicit text raster policy (legacy by default, chromium = contrast 0 and gamma 1 for surfaces holding antialiased text), threaded through the frame, offscreen, scene and retained-layer targets and the capture paths; legacy equals a props-less surface, so no existing pixels change. Pulp continues to own these targets under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits the change when the targets adopt the Vellum package. No design-import, Chromium, rendering or packaging authority moves.",
