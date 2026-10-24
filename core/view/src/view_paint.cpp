@@ -1488,6 +1488,12 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
         // floor every backend implements; a rounded box additionally clips to
         // its corner path, and a backend without a path clip no-ops that and
         // leaves the tiles square-cornered rather than spilling past the box.
+        // The interpolation space is canvas state the shader is built from, so
+        // it is set only around a layer that names one and leaves every other
+        // command stream untouched.
+        const bool custom_interpolation = layer->interpolation != canvas::GradientInterpolation{};
+        if (custom_interpolation)
+            canvas.set_gradient_interpolation(layer->interpolation);
         canvas.save();
         canvas.clip_rect(0, 0, paint_w, paint_h);
         if (use_per_corner) {
@@ -1519,6 +1525,8 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
             }
         }
         canvas.restore();
+        if (custom_interpolation)
+            canvas.set_gradient_interpolation({});
     }
 
     paint_border(canvas, paint_w, paint_h, use_per_corner, build_corner_path,

@@ -26,6 +26,15 @@ With no argument it prints the full case list the committed tests assert. With
 a CSS argument it prints the scan for that one string, which is how a new case
 is added: render it here first, paste the numbers into the test.
 
+`--colors` reads COLOURS instead of geometry, for the interpolation tests in
+test/test_css_gradient_interpolation.cpp: each case is painted left to right
+across a 101px box and the mean of each sampled column is printed. Column 50
+is exactly t = 0.5, and averaging the column cancels Chrome's dither.
+
+    python3 tools/import-validation/chrome_gradient_oracle.py --colors
+    python3 tools/import-validation/chrome_gradient_oracle.py --colors \
+        'linear-gradient(to right in oklch longer hue, #ff0000, #0000ff)'
+
 Requires Chromium/Chrome. Set PULP_CHROME to override the binary path.
 """
 
@@ -64,7 +73,29 @@ CASES = [
 ]
 
 
-def render(css, w=W, h=H):
+# The cases test_css_gradient_interpolation.cpp asserts, in the same order.
+COLOR_W, COLOR_H = 101, 16
+COLOR_COLS = (0, 25, 50, 75, 100)
+COLOR_CASES = [
+    "linear-gradient(to right, #ff0000, #0000ff)",
+    "linear-gradient(to right in oklab, #ff0000, #0000ff)",
+    "linear-gradient(to right in oklch, #ff0000, #0000ff)",
+    "linear-gradient(to right in oklch shorter hue, #ff0000, #0000ff)",
+    "linear-gradient(to right in oklch longer hue, #ff0000, #0000ff)",
+    "linear-gradient(to right in oklch increasing hue, #ff0000, #0000ff)",
+    "linear-gradient(to right in oklch decreasing hue, #ff0000, #0000ff)",
+    "linear-gradient(to right in srgb-linear, #ff0000, #0000ff)",
+    "linear-gradient(to right in lab, #ff0000, #0000ff)",
+    "linear-gradient(to right in hsl, #ff0000, #0000ff)",
+    "linear-gradient(to right in display-p3, #ff0000, #0000ff)",
+    "linear-gradient(to right in oklch longer hue, #ff0000, #ffff00)",
+    "linear-gradient(to right in hsl longer hue, #ff0000, #ffff00)",
+    "linear-gradient(to right in hsl, #ffffff, #0000ff)",
+    "linear-gradient(to right in oklch, #ffffff, #0000ff)",
+]
+
+
+def render(css, w=W, h=H, backdrop="#0f0"):
     if not os.path.exists(CHROME):
         sys.exit(f"Chrome not found at {CHROME}; set PULP_CHROME")
     tmp = tempfile.mkdtemp(prefix="pulp-gradient-oracle-")
@@ -80,7 +111,7 @@ def render(css, w=W, h=H):
             # named-colour table and silently resolves an unknown name to
             # opaque WHITE — which would make both sides of the comparison
             # white and every scan read as empty.
-            "html,body{margin:0;padding:0;background:#0f0}\n"
+            f"html,body{{margin:0;padding:0;background:{backdrop}}}\n"
             f"#g{{position:absolute;left:0;top:0;width:{w}px;height:{h}px;"
             f"background:{css}}}\n"
             "</style><div id=g></div>")
@@ -157,8 +188,37 @@ def report(css):
         print(f"    col x={x:3d} inside y: {col_span(im, x)}")
 
 
+def column_means(im, cols=COLOR_COLS):
+    """Mean RGB of each column in `cols`, rounded to a hundredth."""
+    means = []
+    for x in cols:
+        px = [im.getpixel((x, y)) for y in range(im.height)]
+        means.append(tuple(round(sum(p[i] for p in px) / len(px), 2) for i in range(3)))
+    return means
+
+
+def report_colors(css):
+    # A green backdrop cannot tell a refusal from a gradient that is green on
+    # its own (`in oklch longer hue` from red to blue passes through it), so
+    # the case is painted over two backdrops: any pixel the backdrop reaches
+    # differs between the two renders.
+    im = render(css, COLOR_W, COLOR_H)
+    other = render(css, COLOR_W, COLOR_H, backdrop="#f0f")
+    print(f"--- {css}")
+    if im.tobytes() != other.tobytes():
+        print("    !! backdrop shows through — Chrome refused this CSS; no colours to read")
+        return
+    for x, mean in zip(COLOR_COLS, column_means(im)):
+        print(f"    x={x:3d} mean rgb {mean}")
+
+
 def main():
-    for css in (sys.argv[1:] or CASES):
+    args = sys.argv[1:]
+    if args and args[0] == "--colors":
+        for css in (args[1:] or COLOR_CASES):
+            report_colors(css)
+        return
+    for css in (args or CASES):
         report(css)
 
 

@@ -14,6 +14,8 @@ target_sources(pulp-canvas PRIVATE
     # Skia-free on purpose: it is a value, so it must exist in every build
     # config, including the ones with no GPU backend at all.
     src/drawlist_format.cpp
+    # Reference CSS gradient colour interpolation; Skia-free, like Path.
+    src/gradient_interpolation.cpp
     src/path.cpp
     src/path_measure.cpp
     src/recording_canvas.cpp
@@ -397,6 +399,7 @@ set(PULP_CANVAS_UNIT_HEADERS
     include/pulp/canvas/font_options.hpp
     include/pulp/canvas/font_resolver.hpp
     include/pulp/canvas/font_scope.hpp
+    include/pulp/canvas/gradient_interpolation.hpp
     include/pulp/canvas/image_codecs.hpp
     include/pulp/canvas/image_convolution.hpp
     include/pulp/canvas/image_file_cache.hpp
