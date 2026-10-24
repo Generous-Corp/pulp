@@ -867,6 +867,18 @@ knowing before you touch that file:
   rendering the same snapshot nested and flat (`lower_painted_tree` with
   `flatten_to_paint_order`) and comparing bytes.
 
+  **Transform gotcha:** the capture places a node by its post-transform paint
+  box and copies every other length from computed style, which is
+  pre-transform. `transform` itself is not written to the IR (only a recovered
+  lone rotation is). So anything drawn inside the box has to be brought into
+  the box's scale by hand: type through `inherited_type_scale` (uniform only),
+  and border widths, radii and shadows through `inherited_paint_scale` and
+  `apply_paint_scale` (per axis for borders and hard shadow offsets, uniform
+  only for radii and blur). A chain one factor per axis cannot express is
+  refused and counted (`native_nodes_paint_scale_refused`), never approximated.
+  A new length-bearing style field needs the same treatment, or it will draw at
+  its untransformed size inside a scaled box.
+
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
   evidence. The differential matcher must join captured elements by
   `backendNodeId` when both sides provide one and fail closed on a mismatch;
