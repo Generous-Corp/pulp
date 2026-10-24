@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 154,
+  "inventory_version": 155,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 511,
-    "reviewed_headers": 257,
+    "public_headers": 512,
+    "reviewed_headers": 258,
     "legacy_unreviewed_headers": 254,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 88,
+      "infrastructure": 89,
       "legacy_unreviewed": 254,
       "unsupported_capability": 2
     },
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 278,
-        "reviewed_headers": 151,
+        "public_headers": 279,
+        "reviewed_headers": 152,
         "legacy_unreviewed_headers": 127,
         "unsupported_headers": 2
       },
@@ -3170,7 +3170,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fft.hpp",
-      "fingerprint": "sha256:2794461c6ba9fb79a274f86182439f40b0b003454c5c323f853b730ee7ad6083",
+      "fingerprint": "sha256:8e540807d1e39013586eec91a321b077bba48da22a903ce775314807327f6965",
       "include": "pulp/signal/fft.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -3919,6 +3919,15 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/overlap_add_convolver.hpp",
+      "fingerprint": "sha256:a673761c3cbeb7eecaaea03f8f49a663cff7fe63f8e422b8538b6c66bafd3307",
+      "include": "pulp/signal/overlap_add_convolver.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "The single-partition overlap-add ConvolverT, moved out of fft.hpp (which still includes it) with an unchanged interface. A one-block-latency convolution utility that runs its spectra in split form internally; it carries no capability claim of its own, PartitionedConvolver being the advertised engine."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/oversampling.hpp",
       "fingerprint": "sha256:9a716ddcb90581edd9a8f7214a02a604933bd6e355d46d88749c031908bd6568",
       "include": "pulp/signal/oversampling.hpp",
@@ -4263,7 +4272,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:6d6c680ae9ce6f82cc796d8fcaab3d61d25f9c9eaea26318e698c0b85df0440d",
+      "fingerprint": "sha256:26407cd80b39ea50a5d842c23c91a7d0136f5efdad6be9a52a8f381c427df22b",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

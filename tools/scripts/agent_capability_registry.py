@@ -498,7 +498,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     ],
     {
         "include": "pulp/signal/fft.hpp",
-        "fingerprint": "sha256:2794461c6ba9fb79a274f86182439f40b0b003454c5c323f853b730ee7ad6083",
+        "fingerprint": "sha256:8e540807d1e39013586eec91a321b077bba48da22a903ce775314807327f6965",
         "disposition": "capability_support",
         "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
         "rationale": (
@@ -894,7 +894,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:6d6c680ae9ce6f82cc796d8fcaab3d61d25f9c9eaea26318e698c0b85df0440d",
+        "fingerprint": "sha256:26407cd80b39ea50a5d842c23c91a7d0136f5efdad6be9a52a8f381c427df22b",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1595,6 +1595,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "them between a worker thread and the audio thread over runtime::Handoff. "
             "Real-time ownership-transfer infrastructure for that engine rather than an "
             "advertised generator surface; it carries no capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/overlap_add_convolver.hpp",
+        "fingerprint": "sha256:a673761c3cbeb7eecaaea03f8f49a663cff7fe63f8e422b8538b6c66bafd3307",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "The single-partition overlap-add ConvolverT, moved out of fft.hpp (which still "
+            "includes it) with an unchanged interface. A one-block-latency convolution "
+            "utility that runs its spectra in split form internally; it carries no "
+            "capability claim of its own, PartitionedConvolver being the advertised engine."
         ),
     },
     {
