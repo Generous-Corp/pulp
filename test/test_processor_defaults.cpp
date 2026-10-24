@@ -1659,8 +1659,8 @@ TEST_CASE("Processor's layout matches the recorded ABI, tail padding included",
           "[format][processor][abi]") {
     // A plug-in built against an earlier header may place its own first
     // members in Processor's tail padding, so Processor must not gain data
-    // members, even ones that fit there. The size matches
-    // test/fixtures/sample-region-compat/expected/abi.txt on Apple arm64, and
+    // members, even ones that fit there. The size matches the recorded
+    // sample-region-compat ABI fixture (expected/abi.txt) on Apple arm64, and
     // the offset is where that layout puts a direct subclass's first byte.
     struct LeadingBool final : Processor {
         bool first = false;
