@@ -229,3 +229,45 @@ TEST_CASE("generated C++ builds the same theme-painted controls as the native la
     REQUIRE(native_radio != nullptr);
     CHECK(has("->set_radio_group(" + std::to_string(native_radio->radio_group()) + ");"));
 }
+
+TEST_CASE("a theme-painted button lowers to a ButtonSurface that keeps its content",
+          "[view][import][native-materializer][form-controls][button]") {
+    auto button = captured_input("go", "button", 24.0f, 91.0f, 340.0f, 21.0f);
+    button.attributes["source_tag"] = "button";
+    button.attributes["ua_color_scheme"] = "dark";
+    button.attributes["ua_disabled"] = "1";
+    IRNode label;
+    label.type = "text";
+    label.stable_anchor_id = "go-label";
+    label.text_content = "Apply";
+    label.style.position = "absolute";
+    label.style.left = 6.0f;
+    label.style.top = 1.0f;
+    label.style.width = 40.0f;
+    label.style.height = 18.0f;
+    button.children.push_back(label);
+
+    // Author styling dropped the theme: the button stays a plain painted box.
+    auto styled = button;
+    styled.stable_anchor_id = "styled";
+    styled.attributes["native_theme"] = "author";
+
+    auto root = build_native_view_tree(panel_with({button, styled}), {}, {});
+    REQUIRE(root->child_count() == 2);
+    auto* surface = dynamic_cast<ButtonSurface*>(root->child_at(0));
+    REQUIRE(surface != nullptr);
+    CHECK(surface->color_scheme() == UaColorScheme::dark);
+    CHECK_FALSE(surface->enabled());
+    REQUIRE(surface->child_count() == 1);
+    CHECK(dynamic_cast<Label*>(surface->child_at(0)) != nullptr);
+    CHECK(dynamic_cast<ButtonSurface*>(root->child_at(1)) == nullptr);
+    CHECK(root->child_at(1)->child_count() == 1);
+
+    const auto cpp = generate_pulp_cpp(panel_with({button}), {}, {}).source;
+    CHECK(cpp.find("std::make_unique<pulp::view::ButtonSurface>()") != std::string::npos);
+    CHECK(cpp.find("->set_color_scheme(pulp::view::UaColorScheme::dark);") != std::string::npos);
+    CHECK(cpp.find("->set_enabled(false);") != std::string::npos);
+    // A ButtonSurface is the theme's skin; it has no skin switch to set.
+    CHECK(cpp.find("ButtonSurface>()") < cpp.size());
+    CHECK(cpp.find("set_skin(") == std::string::npos);
+}

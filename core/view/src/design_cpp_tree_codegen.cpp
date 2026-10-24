@@ -102,6 +102,8 @@ std::string widget_make_expr(const IRNode& node,
             return "std::make_unique<pulp::view::Checkbox>()";
         case NativeWidgetKind::range_slider:
             return "std::make_unique<pulp::view::RangeSlider>()";
+        case NativeWidgetKind::button_surface:
+            return "std::make_unique<pulp::view::ButtonSurface>()";
         case NativeWidgetKind::toggle_button:
             return "std::make_unique<pulp::view::ToggleButton>()";
         case NativeWidgetKind::segmented:
@@ -265,14 +267,17 @@ void emit_ua_form_control(std::ostringstream& out, int depth, const EmitContext&
         emit_line(out, depth, ctx.opts.indent_spaces, std::string(var) + "->" + call + ";");
     };
     using Control = UaFormControlState::Control;
-    line("set_skin(pulp::view::UaSkin::chromium_refresh)");
+    if (state->control != Control::button) // a ButtonSurface is the theme's skin
+        line("set_skin(pulp::view::UaSkin::chromium_refresh)");
     if (state->scheme == UaColorScheme::dark)
         line("set_color_scheme(pulp::view::UaColorScheme::dark)");
-    if (state->accent) {
+    if (state->accent && state->control != Control::button) {
         if (auto expr = color_expr(ctx, *state->accent); !expr.empty())
             line("set_accent_color(" + expr + ")");
     }
-    if (state->control == Control::range) {
+    if (state->control == Control::button) {
+        // Content stays the node's children; the theme ignores accent-color.
+    } else if (state->control == Control::range) {
         line("set_step(0.0f)");
         line("set_max(" + float_expr(ctx, state->max) + ")");
         line("set_min(" + float_expr(ctx, state->min) + ")");
@@ -318,6 +323,7 @@ void emit_widget_specific(std::ostringstream& out,
             emit_ua_form_control(out, depth, ctx, var, node);
             break;
         case NativeWidgetKind::range_slider:
+        case NativeWidgetKind::button_surface:
             emit_ua_form_control(out, depth, ctx, var, node);
             break;
         case NativeWidgetKind::toggle_button:

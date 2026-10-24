@@ -22,7 +22,7 @@ namespace pulp::view {
 /// The HTML state a theme-painted control is painted from, parsed once so the
 /// native lane and the baked C++ lane build the same widget.
 struct UaFormControlState {
-    enum class Control { range, checkbox, radio };
+    enum class Control { range, checkbox, radio, button };
     Control control = Control::checkbox;
     UaColorScheme scheme = UaColorScheme::light;
     std::optional<std::string> accent; ///< computed `accent-color`, absent for `auto`
@@ -43,6 +43,10 @@ std::optional<NativeWidgetKind> ua_form_control_kind(const IRNode& node);
 /// A `RangeSlider` in the `chromium_refresh` skin with the node's HTML range
 /// state applied.
 std::unique_ptr<RangeSlider> make_ua_range_slider(const IRNode& node);
+
+/// A `ButtonSurface` (Chromium's themed push button) with the node's colour
+/// scheme and disabled state; the button's content stays its children.
+std::unique_ptr<ButtonSurface> make_ua_button_surface(const IRNode& node);
 
 /// Puts a lowered checkbox or radio in the `chromium_refresh` skin with the
 /// node's state applied. A node without `ua_control` is left untouched.

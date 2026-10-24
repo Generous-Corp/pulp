@@ -1943,18 +1943,10 @@ bool body_is_painted_beneath(const IRNode& node) {
 // A single-frame sprite renders the design's disc and core-fits it to the box;
 // the engine overlays the native rotating notch, so the knob stays interactive.
 // No-op when the knob carries no captured-art metadata (a default synth knob).
-// A control that describes its OWN body — a gradient, a background, a border or
-// shadows — has already had that body painted by the box pipeline. Installing
-// the value-only skin makes the widget's stock body rendering unreachable, so
-// the two stop fighting over the same pixels.
-//
-// Without it a model's correct knob idiom (a gradient cap, a hairline border,
-// an inset highlight, a drop shadow) was overpainted by the stock arc, wedge
-// and indicator — the panel showed a blue arc, a teal wedge and a large orange
-// pie slice over a gradient surviving only in patches.
-//
-// Captured art keeps its own skin: that path already composes correctly, and a
-// sprite disc is a body too.
+// A control that describes its OWN body (a gradient, background, border or
+// shadows) has had that body painted by the box pipeline, so the value-only skin
+// keeps the stock arc, wedge and indicator from overpainting it. Captured art
+// keeps its own skin: it already composes, and a sprite disc is a body too.
 bool apply_designed_body_skin(View& control, const IRNode& node) {
     if (attr(node, "asset_path")) return false;  // captured art owns its skin
     // A control whose body is drawn by the layer beneath it — the capture
@@ -2318,6 +2310,8 @@ std::unique_ptr<View> make_widget(const IRNode& node,
         }
         case NativeWidgetKind::range_slider:
             return make_ua_range_slider(node);
+        case NativeWidgetKind::button_surface:
+            return make_ua_button_surface(node);
         case NativeWidgetKind::stepper: {
             auto stepper = std::make_unique<Stepper>();
             stepper->set_range(node.audio_min, node.audio_max);
@@ -2781,6 +2775,7 @@ bool is_interactive_native_kind(NativeWidgetKind kind) {
         case NativeWidgetKind::xy_pad:
             return true;
         case NativeWidgetKind::view:
+        case NativeWidgetKind::button_surface:
         case NativeWidgetKind::label:
         case NativeWidgetKind::meter:
         case NativeWidgetKind::waveform:
@@ -2813,6 +2808,7 @@ bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
         case NativeWidgetKind::spectrum:
             return true;
         case NativeWidgetKind::view:
+        case NativeWidgetKind::button_surface:
         case NativeWidgetKind::label:
         case NativeWidgetKind::image_view:
         case NativeWidgetKind::canvas:
@@ -2883,6 +2879,8 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
         case NativeWidgetKind::checkbox: return "checkbox";
         case NativeWidgetKind::range_slider:
             return "range_slider";
+        case NativeWidgetKind::button_surface:
+            return "button_surface";
         case NativeWidgetKind::toggle_button: return "toggle_button";
         case NativeWidgetKind::segmented: return "segmented";
         case NativeWidgetKind::stepper: return "stepper";
