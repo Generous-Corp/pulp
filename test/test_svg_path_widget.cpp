@@ -859,9 +859,12 @@ TEST_CASE("SvgPathWidget strokes a styled gradient without touching sticky strok
         CHECK(cmd.type != DrawCommand::Type::set_line_join);
         CHECK(cmd.type != DrawCommand::Type::set_miter_limit);
         CHECK(cmd.type != DrawCommand::Type::stroke_current_path);
-        if (cmd.type == DrawCommand::Type::set_stroke_gradient_linear) gradient = static_cast<int>(i);
-        if (cmd.type == DrawCommand::Type::stroke_path_object) stroke = static_cast<int>(i);
-        if (cmd.type == DrawCommand::Type::clear_stroke_gradient) cleared = static_cast<int>(i);
+        if (cmd.type == DrawCommand::Type::set_stroke_gradient_linear)
+            gradient = static_cast<int>(i);
+        if (cmd.type == DrawCommand::Type::stroke_path_object)
+            stroke = static_cast<int>(i);
+        if (cmd.type == DrawCommand::Type::clear_stroke_gradient)
+            cleared = static_cast<int>(i);
     }
     // The gradient is active for the styled draw and cleared after it.
     REQUIRE(gradient >= 0);
