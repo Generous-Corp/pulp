@@ -986,6 +986,19 @@ struct TrimClockGuard {
         SkiaSurface::set_trim_clock_for_testing(nullptr);
     }
 };
+
+// The image cache is process-wide, so a failed REQUIRE must not leave a later
+// test running with this one's capacity.
+struct ImageCacheCapacityGuard {
+    explicit ImageCacheCapacityGuard(std::size_t capacity) {
+        pulp::canvas::ImageFileCache::instance().set_capacity(capacity);
+    }
+    ~ImageCacheCapacityGuard() {
+        auto& cache = pulp::canvas::ImageFileCache::instance();
+        cache.set_capacity(32);
+        cache.clear();
+    }
+};
 } // namespace
 #endif
 
@@ -1053,7 +1066,7 @@ TEST_CASE("SkiaSurface idle trim frees textures unused for two seconds and keeps
     cache.clear();
     REQUIRE(draw_trim_frame(*skia, released_paths));
     // With room for one entry, caching A evicts the other seven.
-    cache.set_capacity(1);
+    ImageCacheCapacityGuard capacity(1);
     REQUIRE(draw_trim_frame(*skia, kept_paths));
     REQUIRE(draw_trim_frame(*skia, kept_paths));
     const auto released = skia->gpu_cache_bytes();
@@ -1098,9 +1111,6 @@ TEST_CASE("SkiaSurface idle trim frees textures unused for two seconds and keeps
     // and the per-frame scratch targets the idle trim spared were reused.
     CHECK(cache.stats().builds == builds);
     CHECK(steady.device_create_texture_calls == warm.device_create_texture_calls);
-
-    cache.set_capacity(32);
-    cache.clear();
 #else
     REQUIRE(true);
 #endif

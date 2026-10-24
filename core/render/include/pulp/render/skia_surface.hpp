@@ -279,7 +279,9 @@ public:
         bool everything_;
     };
 
-    /// Return purgeable GPU memory to the device. Call it between frames.
+    /// Return purgeable GPU memory to the device. Call it between frames,
+    /// on the render thread: it uses the surface's GPU context, which is not
+    /// thread-safe. The same holds for `gpu_cache_bytes()`.
     /// Resources still referenced (cached images, retained layers, the
     /// scene) and work the GPU has not finished are not freed; a host that
     /// wants everything back calls `wait_for_submitted_work()` first.
@@ -291,7 +293,7 @@ public:
     virtual void trim_gpu_resources(TrimLevel /*level*/) {}
 
     /// Bytes held by this surface's GPU resource caches. Zero when the
-    /// surface has no GPU context.
+    /// surface has no GPU context. Render thread only.
     virtual GpuCacheBytes gpu_cache_bytes() const {
         return {};
     }
