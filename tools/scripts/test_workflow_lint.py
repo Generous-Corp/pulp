@@ -79,6 +79,7 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
             "tools/scripts/verify_skia_m153_capabilities.py",
             "tools/scripts/test_verify_skia_m153_capabilities.py",
             "tools/build-skia.sh",
+            "tools/scripts/test_build_skia_source_pin.py",
             "tools/deps/validate_render_update.py",
             "tools/deps/test_validate_render_update.py",
             "tools/deps/validate_hosts.py",
