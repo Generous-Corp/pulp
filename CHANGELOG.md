@@ -9,6 +9,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v122"></a>
+## [1.2.2] - 2026-10-24
+
+- release/version bump ([#10883](https://github.com/Generous-Corp/pulp/pull/10883))
+- fix/installer payload freshness ([#10800](https://github.com/Generous-Corp/pulp/pull/10800))
+- feature/attack surface release integrity 20261022 ([#10855](https://github.com/Generous-Corp/pulp/pull/10855))
+- feature/attack surface fuzz 20261022 ([#10867](https://github.com/Generous-Corp/pulp/pull/10867))
+- feature/importer i8 svg stroke paint 20261023 ([#10870](https://github.com/Generous-Corp/pulp/pull/10870))
+- fix/nm symbols should fixes 20261023 ([#10871](https://github.com/Generous-Corp/pulp/pull/10871))
+- codex/refactor next 20261023 ([#10882](https://github.com/Generous-Corp/pulp/pull/10882))
+- release/version bump ([#10881](https://github.com/Generous-Corp/pulp/pull/10881))
+
 <a id="v121"></a>
 ## [1.2.1] - 2026-10-23
 
@@ -11439,6 +11451,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.2.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.2.2
 [1.2.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.2.0
 [1.1.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.1.0
