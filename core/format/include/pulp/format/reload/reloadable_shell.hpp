@@ -425,6 +425,12 @@ private:
     void start_watcher() {
 #if PULP_RELOAD_DEV_WATCHER
         if (running_.exchange(true)) return;  // already running
+        // The token is the release-artifact scan's string marker for the dev
+        // watcher (tools/cmake/release_artifact_forbidden.json, gate
+        // reload-ship): a stripped shipping build has no symbol table to
+        // show watcher_loop in, so the bytes of this literal are the proof
+        // that the watcher is compiled out.
+        runtime::log_info("[reload-shell] dev watcher running (PULP_RELOAD_DEV_WATCHER_ACTIVE)");
         watcher_ = std::thread([this] { watcher_loop(); });
 #endif
     }

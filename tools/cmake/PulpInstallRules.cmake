@@ -902,6 +902,10 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_control_shipping_artifact.cmake"
+    # Read by check_control_shipping_artifact.cmake relative to its own
+    # directory: the one forbidden-marker list and the scanner over it.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpReleaseArtifactScan.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/release_artifact_forbidden.json"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/install_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/remove_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"

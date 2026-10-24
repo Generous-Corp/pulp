@@ -466,6 +466,9 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     # and touched the stamp. SKIP_IF_FRESH_STAMP lets the scanner return early
     # when the stamp is strictly newer than every input this edge depends on,
     # instead of scanning the same bytes a second time.
+    # The scanner reads the shared forbidden-marker list through its module;
+    # both are policy inputs of the stamp edge, as they are of the scanner's
+    # own SKIP_IF_FRESH_STAMP check.
     set(_scanner "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_shipping_artifact.cmake")
     set(_scan_target "${artifact_target}_ControlShippingScan_${_format_identifier}")
     # The stamp's name carries the sidecar layout, so a build tree from before
@@ -493,6 +496,8 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
         COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
         DEPENDS ${artifact_target} "${_control_manifest}"
             "${_shipping_manifest}" "${_scanner}"
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpReleaseArtifactScan.cmake"
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/release_artifact_forbidden.json"
         VERBATIM)
     add_custom_target(${_scan_target} ALL DEPENDS "${_scan_stamp}")
     set(PULP_${artifact_target}_CONTROL_SHIPPING_SCAN_TARGET
