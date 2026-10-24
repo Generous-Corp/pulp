@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261024-chromium-button-surface-watch",
+  "created_at": "2026-10-24T17:00:20Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "ButtonSurface, a new View subclass in widgets/button_surface.cpp (added to the view source list), paints Chromium's push-button theme: background, border, hover, pressed, disabled and the focus-visible ring. It is widget paint inside Pulp's own view layer, used only where a ButtonSurface is explicitly constructed; TextButton and generated UI are unchanged, and no design-import lowering, Chromium capture, renderer backend, asset or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-widgets",
+    "ctest --test-dir build -R pulp-test-auto-ui",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

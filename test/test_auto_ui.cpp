@@ -946,3 +946,25 @@ TEST_CASE("AutoUi knobs follow automation and show host modulation with no plugi
     REQUIRE(store.get_value(7) == 80.0f);
     REQUIRE(begins.empty());
 }
+
+TEST_CASE("AutoUi never builds Chromium's push-button surface", "[view][auto_ui][button-skin]") {
+    // Only an explicitly constructed ButtonSurface wears the browser skin; the
+    // generated editor keeps Pulp's own widgets for every parameter kind.
+    StateStore store;
+    store.add_parameter(make_param(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param(2, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f}));
+    store.add_parameter(make_param(3, "Mode", "", {0.0f, 3.0f, 0.0f, 1.0f}));
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+    int views = 0, surfaces = 0;
+    std::function<void(const View&)> walk = [&](const View& v) {
+        ++views;
+        if (dynamic_cast<const ButtonSurface*>(&v) != nullptr)
+            ++surfaces;
+        for (size_t i = 0; i < v.child_count(); ++i)
+            walk(*v.child_at(i));
+    };
+    walk(*root);
+    CHECK(views > 3);
+    CHECK(surfaces == 0);
+}
