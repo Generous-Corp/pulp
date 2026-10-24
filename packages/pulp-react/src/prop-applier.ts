@@ -17,6 +17,12 @@ import { applyTypographyProp } from './prop-applier-typography.js';
 import { applyTransformProp } from './prop-applier-transform.js';
 import { applyEventProp, reclaimOverlayForMovedParent } from './prop-applier-events.js';
 import { resetRemovedStyleKeys } from './prop-applier-reset.js';
+import {
+    forgetControlled,
+    noteControlledProps,
+    noteDiscreteEdit,
+    writeControlledValue,
+} from './prop-applier-controlled.js';
 
 // Per-domain handler modules own layout, paint, typography, transform,
 // and declarative event-routing props. `applyOne` below is the thin
@@ -56,6 +62,7 @@ export function clearMaterializedEventCallbacks(id: string): void {
         if (key.startsWith(prefix)) registry.delete(key);
     }
     forgetNativeListeners(id);
+    forgetControlled(id);
 }
 
 /// Native listeners this module has armed and installed, per widget id, by
@@ -446,6 +453,7 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
         return;
     }
     call('on', id, nativeName, (...rawArgs: unknown[]) => {
+        noteDiscreteEdit(id, nativeName, rawArgs[0]);
         const callback = eventCallbackRegistry().get(registryKey);
         return callback ? callback(...rawArgs) : INERT_EVENT_RESULT();
     });
@@ -617,7 +625,9 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             // Waveform use the 'data' prop handled above.
             if (type === 'Progress')   return call('setProgress', id, value as number);
             if (type === 'Meter')      return call('setMeterLevel', id, value as number);
-            return call('setValue', id, value as number);
+            return writeControlledValue(id, value as number);
+        // A Toggle or Checkbox position, as the 0/1 setValue takes.
+        case 'checked':     return writeControlledValue(id, value ? 1 : 0);
         case 'min':         return call('setMin', id, Number(value));
         case 'max':         return call('setMax', id, Number(value));
         case 'step':        return call('setStep', id, Number(value));
@@ -811,6 +821,7 @@ export function applyAllProps(instance: PulpInstance): void {
     // A first attach is a new native widget: nothing is installed on it yet,
     // whatever an earlier widget under this id had.
     forgetNativeListeners(id);
+    noteControlledProps(id, props);
     // For SvgRect / SvgLine, emit the geometry call once up-front from
     // the full props snapshot, then skip the per-prop dispatch for the
     // four geometry keys. Otherwise we'd issue four identical
@@ -856,6 +867,7 @@ export function applyChangedProps(
 ): boolean {
     const { id, type } = instance;
     let mutated = false;
+    noteControlledProps(id, newProps);
     const selectionModeChanged = isVirtualListType(type) &&
         oldProps.selectionMode !== newProps.selectionMode;
     const rowCountChanged = isVirtualListType(type) &&
