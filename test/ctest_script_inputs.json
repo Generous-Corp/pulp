@@ -8291,7 +8291,6 @@
     "tools/cmake/PulpPatchChoc.cmake",
     "tools/cmake/scripts/encode_binary_data.py",
     "tools/import-design/jsx-runtime/package-lock.json",
-    "tools/scripts",
     "tools/scripts/include_boundary.py",
     "tools/scripts/test_vellum_closure.py",
     "tools/scripts/vellum_closure.py",

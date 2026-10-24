@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import contextlib
+import hashlib
 import io
 import os
 import subprocess
@@ -1823,7 +1824,7 @@ class PrunedSourceTests(unittest.TestCase):
         self.repo = Path(self.td.name) / "repo"
         self.repo.mkdir()
         self.git("init", "-q")
-        (self.repo / "tools/scripts").mkdir(parents=True)
+        (self.repo / "tools" / "scripts").mkdir(parents=True)  # spelled in parts: not a script input
         self.base = self.commit({"a.txt": "a1\n", "b.txt": "b1\n", "tools/scripts/vellum_closure.py": "tool\n"})
         self.source = self.commit({"a.txt": "a2\n"})
         self.pruned = self.commit({"b.txt": "b2\n"})
@@ -1840,58 +1841,83 @@ class PrunedSourceTests(unittest.TestCase):
         return self.git("rev-parse", "HEAD")
 
     def rewrite(self, commit):
-        """Rewrite ``commit`` exactly as export does; (commit map, mirror commit)."""
+        """Rewrite ``commit`` exactly as export does; (filter-repo dir, mirror commit)."""
         out = Path(self.td.name) / f"out-{commit[:8]}"
         subprocess.run(["git", "clone", "-q", "--no-local", str(self.repo), str(out)], check=True)
         self.git("update-ref", "refs/heads/export-source", commit, repo=out)
         self.git("checkout", "-q", "--detach", "export-source", repo=out)
         subprocess.run(["git-filter-repo", "--force", "--path", "a.txt", "--path-rename", "a.txt:mirror/a.txt",
                         "--refs", "export-source"], cwd=out, check=True, capture_output=True)
-        return out / ".git" / "filter-repo" / "commit-map", self.git("rev-parse", "refs/heads/export-source", repo=out)
+        return out / ".git" / "filter-repo", self.git("rev-parse", "refs/heads/export-source", repo=out)
 
-    def forged_map(self, mirror_sha, source):
-        path = Path(self.td.name) / "forged-map"
-        path.write_text(f"old new\n{source} {mirror_sha}\n{self.pruned} {'0' * 40}\n", encoding="utf-8")
+    def forged(self, real_dir, commit_rows=None, ref_map=None):
+        """A filter-repo dir with a forged commit map and/or ref map; the real file where not forged."""
+        path = Path(self.td.name) / f"forged-{len(list(Path(self.td.name).glob('forged-*')))}"
+        path.mkdir()
+        (path / "commit-map").write_text("old new\n" + "".join(f"{o} {n}\n" for o, n in commit_rows), encoding="utf-8") \
+            if commit_rows is not None else shutil.copy(real_dir / "commit-map", path / "commit-map")
+        if ref_map is None:
+            shutil.copy(real_dir / "ref-map", path / "ref-map")
+        elif ref_map is not False:
+            (path / "ref-map").write_text(ref_map, encoding="utf-8")
         return path
 
     def test_unpruned_commit_maps_directly_with_no_record(self):
         from vellum_closure import export_source_mapping
-        commit_map, mirror_sha = self.rewrite(self.source)
-        data, record = export_source_mapping(commit_map, self.source, mirror_sha, self.repo, ["a.txt"])
-        self.assertEqual(data, commit_map.read_bytes())
+        fr, mirror_sha = self.rewrite(self.source)
+        data, ref_map, record = export_source_mapping(fr, self.source, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
+        self.assertIsNone(ref_map)
         self.assertIsNone(record)
 
-    def test_pruned_commit_exports_with_its_equality_record(self):
+    def test_pruned_commit_exports_with_its_ref_map_and_equality_proof(self):
         from vellum_closure import export_commit_map, export_source_mapping
-        commit_map, mirror_sha = self.rewrite(self.pruned)
-        self.assertIn(f"{self.pruned} {'0' * 40}", commit_map.read_text(encoding="utf-8"))
+        fr, mirror_sha = self.rewrite(self.pruned)
+        self.assertIn(f"{self.pruned} {'0' * 40}", (fr / "commit-map").read_text(encoding="utf-8"))
         with self.assertRaisesRegex(SystemExit, "does not map"):
-            export_commit_map(commit_map, self.pruned, mirror_sha)
-        data, record = export_source_mapping(commit_map, self.pruned, mirror_sha, self.repo, ["a.txt"])
-        self.assertEqual(data, commit_map.read_bytes())
+            export_commit_map(fr / "commit-map", self.pruned, mirror_sha)
+        data, ref_map, record = export_source_mapping(fr, self.pruned, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
         self.assertNotIn(f"{self.pruned} {mirror_sha}", data.decode())
-        self.assertEqual((record["source_commit"], record["mirror_source_commit"], record["mirror_commit"]),
-                         (self.pruned, self.source, mirror_sha))
-        self.assertTrue(record["source_is_ancestor"] and record["exported_paths_equal"])
-        self.assertEqual(record["exported_path_count"], 1)
+        self.assertEqual(ref_map, (fr / "ref-map").read_bytes())  # filter-repo's own ref map, shipped as written
+        self.assertEqual(record["sha"], self.source)
+        proof = record["proof"]
+        self.assertEqual(proof["ref_map_row"], f"{self.pruned} {mirror_sha} refs/heads/export-source")
+        self.assertEqual(proof["commit_map_rows"], [f"{self.pruned} {'0' * 40}", f"{self.source} {mirror_sha}"])
+        self.assertTrue(proof["source_is_ancestor"] and proof["exported_paths_equal"])
+        self.assertEqual(proof["exported_path_count"], 1)
 
     def test_pruned_commit_whose_exported_content_differs_is_refused(self):
         from vellum_closure import export_source_mapping
-        _, mirror_sha = self.rewrite(self.pruned)
+        fr, mirror_sha = self.rewrite(self.pruned)
+        forged = self.forged(fr, [(self.base, mirror_sha), (self.pruned, "0" * 40)])
         with self.assertRaisesRegex(SystemExit, "exported paths differ"):
-            export_source_mapping(self.forged_map(mirror_sha, self.base), self.pruned, mirror_sha, self.repo, ["a.txt"])
+            export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
 
     def test_mirror_source_that_is_not_an_ancestor_is_refused(self):
         from vellum_closure import export_source_mapping
-        _, mirror_sha = self.rewrite(self.pruned)
+        fr, mirror_sha = self.rewrite(self.pruned)
         self.git("checkout", "-q", "-b", "side", self.base)
         side = self.commit({"a.txt": "a2\n"}, message="side")
         self.assertNotEqual(side, self.source)
+        forged = self.forged(fr, [(side, mirror_sha), (self.pruned, "0" * 40)])
         with self.assertRaisesRegex(SystemExit, "is not an ancestor"):
-            export_source_mapping(self.forged_map(mirror_sha, side), self.pruned, mirror_sha, self.repo, ["a.txt"])
+            export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
+        forged = self.forged(fr, [(self.pruned, mirror_sha), (self.pruned, "0" * 40)])
+        with self.assertRaisesRegex(SystemExit, "is not an ancestor"):  # R itself is not a strict ancestor
+            export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
 
-    def export_receipt(self, commit):
-        """Run cmd_export on ``commit``; the closure checks it applies are not under test."""
+    def test_pruned_commit_needs_the_ref_map_row(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.rewrite(self.pruned)
+        with self.assertRaisesRegex(SystemExit, "wrote no ref map"):
+            export_source_mapping(self.forged(fr, ref_map=False), self.pruned, mirror_sha, self.repo, ["a.txt"])
+        wrong = f"old new ref\n{self.source} {mirror_sha} refs/heads/export-source\n"
+        with self.assertRaisesRegex(SystemExit, "ref map does not move"):
+            export_source_mapping(self.forged(fr, ref_map=wrong), self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+    def export_landing(self, commit):
+        """Run cmd_export on ``commit``; (receipt, landing). The closure checks it applies are not under test."""
         import vellum_closure
         manifest = Path(self.td.name) / "unit.json"
         manifest.write_text(json.dumps({"files": ["a.txt"]}), encoding="utf-8")
@@ -1903,30 +1929,41 @@ class PrunedSourceTests(unittest.TestCase):
                 unittest.mock.patch.object(vellum_closure, "export_owned_file_violations", lambda *_: []), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(vellum_closure.cmd_export(args), 0)
-        return json.loads(next((Path(args.landing) / "provenance/mirror/receipts").glob("*.json")).read_text(encoding="utf-8"))
+        landing = Path(args.landing)
+        return json.loads(next((landing / "provenance/mirror/receipts").glob("*.json")).read_text(encoding="utf-8")), landing
 
-    def test_export_receipt_records_a_pruned_source_and_leaves_others_unchanged(self):
-        receipt = self.export_receipt(self.source)
-        self.assertEqual(receipt["pulp_sha"], self.source)
-        self.assertNotIn("mirror_source_sha", receipt)
-        self.assertNotIn("pruned_source", receipt)
-        unpruned_mirror = receipt["mirror_sha"]
-        receipt = self.export_receipt(self.pruned)
-        self.assertEqual(receipt["pulp_sha"], self.pruned)
-        self.assertEqual(receipt["mirror_source_sha"], self.source)
-        self.assertEqual(receipt["mirror_sha"], unpruned_mirror)
-        self.assertEqual(receipt["pruned_source"]["mirror_source_commit"], self.source)
+    # Vellum tools/provenance/verify_mirror_export.py RECEIPT_KEYS: an exact set.
+    VELLUM_RECEIPT_KEYS = {"schema", "export_id", "pulp_repository", "pulp_sha", "mirror_ref", "mirror_sha",
+                           "mirror_tree", "rename", "commit_map", "units", "files", "generated_inputs", "tool",
+                           "created_at"}
+
+    def test_unpruned_receipt_keeps_exactly_the_keys_vellum_checks(self):
+        receipt, landing = self.export_landing(self.source)
+        self.assertEqual(set(receipt), self.VELLUM_RECEIPT_KEYS)
+        self.assertFalse((landing / "provenance/mirror/ref-maps").exists())
+
+    def test_pruned_receipt_adds_one_mirror_source_field(self):
+        unpruned, _ = self.export_landing(self.source)
+        receipt, landing = self.export_landing(self.pruned)
+        self.assertEqual(set(receipt) - self.VELLUM_RECEIPT_KEYS, {"mirror_source"})
+        self.assertEqual(receipt["pulp_sha"], self.pruned)  # pulp_sha stays R
+        self.assertEqual(receipt["mirror_sha"], unpruned["mirror_sha"])
+        source = receipt["mirror_source"]
+        self.assertEqual(set(source), {"sha", "ref_map", "proof"})
+        self.assertEqual(source["sha"], self.source)
+        ref_map = landing / source["ref_map"]["path"]
+        self.assertEqual(source["ref_map"]["path"], f"provenance/mirror/ref-maps/{receipt['export_id']}.txt")
+        self.assertEqual(source["ref_map"]["sha256"], hashlib.sha256(ref_map.read_bytes()).hexdigest())
+        self.assertIn(f"{self.pruned} {receipt['mirror_sha']} refs/heads/export-source", ref_map.read_text(encoding="utf-8"))
         self.assertEqual([row["blob"] for row in receipt["files"]], [self.git("rev-parse", f"{self.source}:a.txt")])
 
     def test_pruned_commit_with_no_or_two_mirror_sources_is_refused(self):
         from vellum_closure import export_source_mapping
-        _, mirror_sha = self.rewrite(self.pruned)
-        path = Path(self.td.name) / "ambiguous-map"
-        for rows in ([], [self.source, self.base]):
-            body = "".join(f"{row} {mirror_sha}\n" for row in rows)
-            path.write_text(f"old new\n{body}{self.pruned} {'0' * 40}\n", encoding="utf-8")
+        fr, mirror_sha = self.rewrite(self.pruned)
+        for sources in ([], [self.source, self.base]):
+            forged = self.forged(fr, [*((row, mirror_sha) for row in sources), (self.pruned, "0" * 40)])
             with self.assertRaisesRegex(SystemExit, "not exactly one"):
-                export_source_mapping(path, self.pruned, mirror_sha, self.repo, ["a.txt"])
+                export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
 
 
 class ClosureCtestWiringTests(unittest.TestCase):
