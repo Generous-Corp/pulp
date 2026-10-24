@@ -11,12 +11,18 @@ file(MAKE_DIRECTORY "${_sdk}")
 file(MAKE_DIRECTORY "${_sdk}/include/pulp/view" "${_sdk}/lib")
 file(WRITE "${_sdk}/include/pulp/view/widget_bridge.hpp" "header fixture\n")
 file(WRITE "${_sdk}/lib/libpulp-view-script.a" "archive fixture\n")
+file(WRITE "${_sdk}/lib/pulp-view-script.lib" "windows archive fixture\n")
 file(SHA256 "${_sdk}/include/pulp/view/widget_bridge.hpp" _header_hash)
 file(SHA256 "${_sdk}/lib/libpulp-view-script.a" _archive_hash)
+file(SHA256 "${_sdk}/lib/pulp-view-script.lib" _windows_archive_hash)
 string(CONCAT _integrity
     ",\"integrity\":{\"schema\":\"pulp.sdk-integrity.v1\",\"algorithm\":\"sha256\","
     "\"files\":{\"include/pulp/view/widget_bridge.hpp\":\"${_header_hash}\","
     "\"lib/libpulp-view-script.a\":\"${_archive_hash}\"}}")
+string(CONCAT _windows_integrity
+    ",\"integrity\":{\"schema\":\"pulp.sdk-integrity.v1\",\"algorithm\":\"sha256\","
+    "\"files\":{\"include/pulp/view/widget_bridge.hpp\":\"${_header_hash}\","
+    "\"lib/pulp-view-script.lib\":\"${_windows_archive_hash}\"}}")
 
 set(PULP_SDK_DIR "${_sdk}")
 include("${_module}")
@@ -209,3 +215,54 @@ if(NOT "${_unsafe_release_stdout}\n${_unsafe_release_stderr}"
         "unsafe release failed without the expected diagnostic:\n"
         "${_unsafe_release_stdout}\n${_unsafe_release_stderr}")
 endif()
+
+# The same marker must accept a matching native ARM64 consumer and reject a
+# mixed ARM64EC/ARM64X consumer.  The mixed cases can link successfully and
+# later corrupt C++ objects at runtime, so they must fail during provenance
+# resolution, before a consumer target is created.
+function(_write_windows_release_provenance platform)
+    file(WRITE "${_sdk}/sdk-provenance.json"
+        "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+        "\"profile\":\"official-release\",\"distribution_eligible\":true,"
+        "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
+        "\"source_git_sha\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\","
+        "\"source_git_dirty\":false,\"platform\":\"${platform}\","
+        "\"build_type\":\"Release\",\"features\":{"
+        "\"audio_probes\":false,\"inspector\":true}${_windows_integrity}}")
+endfunction()
+
+function(_check_windows_sdk_target platform generator expected_result)
+    _write_windows_release_provenance("${platform}")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}"
+            "-DPULP_SDK_DIR=${_sdk}"
+            "-DWIN32=TRUE"
+            "-DCMAKE_GENERATOR_PLATFORM=${generator}"
+            -P "${_module}"
+        RESULT_VARIABLE _result
+        OUTPUT_VARIABLE _stdout
+        ERROR_VARIABLE _stderr)
+    if(expected_result STREQUAL "pass")
+        if(NOT _result EQUAL 0)
+            message(FATAL_ERROR
+                "matching Windows ${generator} SDK failed unexpectedly:\n"
+                "${_stdout}\n${_stderr}")
+        endif()
+    else()
+        if(_result EQUAL 0)
+            message(FATAL_ERROR
+                "mixed Windows ${platform}/${generator} SDK provenance did not fail closed")
+        endif()
+        if(NOT "${_stdout}\n${_stderr}" MATCHES "Pulp SDK target mismatch")
+            message(FATAL_ERROR
+                "mixed Windows SDK failed without the expected target diagnostic:\n"
+                "${_stdout}\n${_stderr}")
+        endif()
+    endif()
+endfunction()
+
+_check_windows_sdk_target("windows-arm64" "ARM64" "pass")
+_check_windows_sdk_target("windows-arm64" "ARM64EC" "fail")
+_check_windows_sdk_target("windows-arm64" "ARM64X" "fail")
+_check_windows_sdk_target("windows-x64" "x64" "pass")
+_check_windows_sdk_target("windows-x64" "ARM64" "fail")

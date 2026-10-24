@@ -5,13 +5,15 @@ set(_dirty "@PULP_SOURCE_INSTALL_DIRTY@")
 # Whether pulp-view-script carries the shell exec/execAsync JS bridge
 # (PULP_DEV_BRIDGE_EXEC); a consumer reads it as `bridge_exec`.
 set(_bridge_exec "@PULP_SOURCE_INSTALL_BRIDGE_EXEC@")
+set(_platform "@PULP_SOURCE_INSTALL_PLATFORM@")
 string(LENGTH "${_sha}" _sha_length)
 if(NOT _sha_length EQUAL 40 OR NOT _sha MATCHES "^[0-9a-f]+$" OR
-   NOT _dirty MATCHES "^(true|false)$" OR NOT _bridge_exec MATCHES "^(true|false)$")
+   NOT _dirty MATCHES "^(true|false)$" OR NOT _bridge_exec MATCHES "^(true|false)$" OR
+   NOT _platform MATCHES "^(android|darwin|ios|linux|windows)-[a-z0-9-]+$")
     message(FATAL_ERROR "Pulp source install provenance: invalid build identity")
 endif()
 set(_marker "${_prefix}/sdk-provenance.json")
-set(_content "{\n  \"schema\": \"pulp.sdk-provenance.v1\",\n  \"kind\": \"source-install\",\n  \"distribution_eligible\": false,\n  \"source_git_sha\": \"${_sha}\",\n  \"source_git_dirty\": ${_dirty},\n  \"bridge_exec\": ${_bridge_exec}\n}\n")
+set(_content "{\n  \"schema\": \"pulp.sdk-provenance.v1\",\n  \"kind\": \"source-install\",\n  \"distribution_eligible\": false,\n  \"source_git_sha\": \"${_sha}\",\n  \"source_git_dirty\": ${_dirty},\n  \"bridge_exec\": ${_bridge_exec},\n  \"platform\": \"${_platform}\"\n}\n")
 if(EXISTS "${_marker}")
     file(READ "${_marker}" _existing)
     if(NOT _existing STREQUAL _content)
