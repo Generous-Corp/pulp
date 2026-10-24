@@ -1023,6 +1023,7 @@
       "pulp/signal/osc/wt_lofi.hpp",
       "pulp/signal/oscillator.hpp",
       "pulp/signal/ota_cascade_filter.hpp",
+      "pulp/signal/overlap_add_convolver.hpp",
       "pulp/signal/oversampling.hpp",
       "pulp/signal/oversampling_fir.hpp",
       "pulp/signal/panner.hpp",
