@@ -139,6 +139,16 @@ set_tests_properties(cmake-js-engine-selection PROPERTIES
     LABELS "cmake;view;js-engine"
     TIMEOUT 30)
 
+# AUv3 entitlement templates render per engine under `cmake -P`: QuickJS gets
+# no JIT or library-validation entitlement, V8/JSC get allow-jit only, and
+# allow-unsigned-executable-memory never appears.
+add_test(NAME cmake-auv3-entitlements
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_auv3_entitlements.cmake)
+set_tests_properties(cmake-auv3-entitlements PROPERTIES
+    LABELS "cmake;auv3;entitlements;security"
+    TIMEOUT 30)
+
 # ARM64EC selects the scalar SIMD backend. The detection runs under `cmake -P`
 # against the real module, so every host checks the ARM64EC, ARM64 and x64
 # classifications without a Windows ARM64EC toolchain.

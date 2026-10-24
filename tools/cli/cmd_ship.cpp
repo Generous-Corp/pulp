@@ -222,6 +222,54 @@ static int enforce_no_tracing(const std::vector<fs::path>& roots,
     return 0;
 }
 
+// The JS engine the build directory was configured with, read from its
+// CMakeCache (PULP_JS_ENGINE). Empty when no cache or no entry exists.
+static std::string configured_js_engine(const fs::path& build_dir) {
+    std::ifstream in(build_dir / "CMakeCache.txt");
+    std::string line;
+    const std::string prefix = "PULP_JS_ENGINE:";
+    while (std::getline(in, line)) {
+        if (line.rfind(prefix, 0) != 0) continue;
+        const auto eq = line.find('=');
+        if (eq == std::string::npos) return {};
+        auto value = line.substr(eq + 1);
+        while (!value.empty() && (value.back() == '\r' || value.back() == ' '))
+            value.pop_back();
+        return value;
+    }
+    return {};
+}
+
+// A V8 or JavaScriptCore build maps executable memory at run time; under the
+// hardened runtime that needs com.apple.security.cs.allow-jit, and a bundle
+// signed without it loads, then fails the moment its editor starts the engine.
+// The default ship entitlements grant no JIT, so refuse to sign a JIT-engine
+// build with an entitlements file that lacks it rather than produce a signed
+// artifact that is broken in every host. Returns 0 when the engine is an
+// interpreter, the build directory is not configured, or the grant is present.
+static int enforce_jit_entitlement(const fs::path& build_dir, const fs::path& entitlements) {
+    const auto engine = configured_js_engine(build_dir);
+    if (engine != "v8" && engine != "jsc") return 0;
+    std::string plist;
+    {
+        std::ifstream in(entitlements);
+        plist.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const auto key = plist.find("<key>com.apple.security.cs.allow-jit</key>");
+    const bool granted = key != std::string::npos &&
+                         plist.find("<true/>", key) != std::string::npos &&
+                         plist.find("<true/>", key) < plist.find("<key>", key + 1);
+    if (granted) return 0;
+    std::cerr << "Error: refusing to sign a PULP_JS_ENGINE=" << engine
+              << " build without the allow-jit entitlement.\n"
+              << "  Entitlements: " << entitlements.string() << "\n"
+              << "  " << engine << " maps JIT pages with MAP_JIT, which the hardened runtime\n"
+              << "  permits only under com.apple.security.cs.allow-jit; without it the\n"
+              << "  signed editor aborts when the engine starts. Pass --entitlements with\n"
+              << "  a plist that grants allow-jit (the AUv3 templates emit it per engine).\n";
+    return 1;
+}
+
 static int enforce_no_vellum_d15(const std::vector<fs::path>& artifacts) {
     for (const auto& artifact : artifacts) {
         const auto offender = pulp::cli::vellum_d15_artifact_offender(artifact);
@@ -343,6 +391,10 @@ static int ship_sign(const std::vector<std::string>& args,
                                         allow_tracing);
             rc != 0) {
             return rc;
+        }
+        if (target != "android") {
+            if (int rc = enforce_jit_entitlement(build_dir, fs::path(entitlements)); rc != 0)
+                return rc;
         }
 
         if (target == "android") {
