@@ -1009,6 +1009,13 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/ci/test_ccache_job_delta.py")
     set_tests_properties(ccache-job-delta-selftest PROPERTIES TIMEOUT 60)
 
+    # Which Windows jobs may store objects in a host's shared ccache: only code
+    # already on main writes, everything else reads, and an unset
+    # PULP_CCACHE_REMOTE_STORAGE writes nothing.
+    add_test(NAME ccache-remote-storage-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_ccache_remote_storage.py")
+    set_tests_properties(ccache-remote-storage-selftest PROPERTIES TIMEOUT 60)
+
     # Queue-cascade guards. A break that reaches main is amplified by the merge
     # queue: every batch inherits it, fails, ejects its innocent entries, and
     # the next batch pays again. These four cover the rules that stop that.
