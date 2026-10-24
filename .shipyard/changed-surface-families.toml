@@ -7743,6 +7743,7 @@ tests = [
   "changed-surface-script-families-drift",
   "checkout-location-guard-selftest",
   "claude-md-sync-hook",
+  "cli-package-registry-signing-helper",
   "clock-only-temp-key-guard",
   "clock-only-temp-key-guard-selftest",
   "cmake-examples-reorder-init-guard",

@@ -40,6 +40,47 @@ Or read the registry directly for full details:
 cat tools/packages/registry.json | python3 -m json.tool
 ```
 
+## Remote registry signing (registry owner)
+
+`pulp search` reaches the remote registry
+(`default_remote_registry_url()` in `tools/cli/package_registry.hpp`) only
+when the project has no `tools/packages/registry.json`. The CLI trusts that
+remote `registry.json` only with a verified `registry.json.sig` beside it: an
+Ed25519 signature over `"pulp-package-registry-sig-v1\n" + sha256_hex(bytes)
++ "\n"`, checked against `kPinnedRegistrySignerPublicKeyHex` in
+`tools/cli/package_registry_trust.hpp`. Enforcement is keyed on that pin:
+while it is empty (no key pinned yet) the registry is used unsigned and
+`pulp search` prints a one-line notice; once a key is pinned, unsigned or
+mismatching registries are refused (`--allow-unsigned-registry` overrides for
+one run, loudly), and a cached copy is reused only while the
+`registry-cache.json.sig` cached beside it still verifies against the pinned
+key (re-checked on every load, so writing the cache directory cannot forge
+trust).
+Pinning the key is therefore the switch that turns verification on; ship it
+only after `registry.json.sig` is published.
+
+Owner steps, once per registry change, with nothing but Python:
+
+```bash
+# once: create the seed (private; back it up) and pin the printed public key
+python3 tools/scripts/sign_package_registry.py keygen --out ~/.config/pulp/secrets/package-registry.seed
+#   -> paste the public key into kPinnedRegistrySignerPublicKeyHex and ship that CLI
+
+# every change: sign the exact bytes you publish, then publish both files
+python3 tools/scripts/sign_package_registry.py sign --key ~/.config/pulp/secrets/package-registry.seed registry.json
+#   -> registry.json.sig next to registry.json, same URL prefix
+
+# optional: prove the pair before publishing
+python3 tools/scripts/sign_package_registry.py verify --public-key <hex> registry.json registry.json.sig
+```
+
+Sign the bytes as served: any re-serialisation (pretty-printing, CRLF) after
+signing invalidates the signature. Rotating the key means pinning the new
+public key in a CLI release first, then signing with the new seed; CLIs still
+pinned to the old key will refuse the newly signed registry. The helper's
+`test_sign_package_registry.py` and the C++ registry tests share one fixed
+vector so the two implementations cannot drift apart silently.
+
 ## Package Categories
 
 | Category | Packages | What They Provide |

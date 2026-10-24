@@ -315,6 +315,7 @@ add_library(pulp-test-cli-support-objects OBJECT EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry_trust.cpp
 )
 target_include_directories(pulp-test-cli-support-objects PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -332,6 +333,12 @@ file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/tools/cli")
 configure_file(
     "${CMAKE_SOURCE_DIR}/tools/cli/pulp_version_gen.h.in"
     "${CMAKE_BINARY_DIR}/tools/cli/pulp_version_gen.h"
+    @ONLY)
+include("${CMAKE_SOURCE_DIR}/tools/cmake/PulpReleaseMatrix.cmake")
+pulp_release_matrix_floor(PULP_RELEASE_CHECKSUM_MANIFEST_FLOOR checksum_manifest_floor)
+configure_file(
+    "${CMAKE_SOURCE_DIR}/tools/cli/release_floors_gen.h.in"
+    "${CMAKE_BINARY_DIR}/tools/cli/release_floors_gen.h"
     @ONLY)
 target_include_directories(pulp-test-cli-shell-quote PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -503,12 +510,21 @@ catch_discover_tests(pulp-test-cli-upgrade-url)
 add_executable(pulp-test-cli-upgrade-install test_cli_upgrade_install.cpp)
 pulp_test_data(pulp-test-cli-upgrade-install NO_DEFINE
     PATHS tools/import-design/browser_capture tools/cli/cmd_upgrade.cpp
+          tools/cli/cli_sdk.cpp
           tools/import-design/jsx-runtime/materialized_binding_contract.mjs)
 target_include_directories(pulp-test-cli-upgrade-install PRIVATE ${CMAKE_SOURCE_DIR})
 target_compile_definitions(pulp-test-cli-upgrade-install PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 target_link_libraries(pulp-test-cli-upgrade-install PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-upgrade-install)
+
+# Release-archive checksum verifier shared by `pulp upgrade` and
+# `pulp sdk install`: SHA256SUMS lookup, floor comparison, and the
+# verify/refuse/legacy verdicts, all without a network.
+add_executable(pulp-test-cli-release-checksum test_cli_release_checksum.cpp)
+target_include_directories(pulp-test-cli-release-checksum PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-release-checksum PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-release-checksum)
 
 add_executable(pulp-test-cli-json-parser test_cli_json_parser.cpp)
 target_include_directories(pulp-test-cli-json-parser PRIVATE ${CMAKE_SOURCE_DIR})
@@ -640,6 +656,7 @@ add_executable(pulp-test-cli-package-commands
     ${CMAKE_SOURCE_DIR}/tools/cli/package_commands_search.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_commands_add.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry_trust.cpp
     # cmd_add routes `pulp add <importer>` through the importer install path.
     ${CMAKE_SOURCE_DIR}/tools/cli/tool_registry.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/importer_install.cpp
@@ -650,6 +667,7 @@ target_include_directories(pulp-test-cli-package-commands PRIVATE
     ${CMAKE_SOURCE_DIR}/tools/cli)
 target_link_libraries(pulp-test-cli-package-commands PRIVATE
     pulp::platform
+    pulp::runtime
     Catch2::Catch2WithMain)
 # The lock-integrity case reads the shipped verify script from the checkout;
 # this also defines PULP_SOURCE_DIR (tools/cmake/PulpTestData.cmake).
