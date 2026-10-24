@@ -5171,7 +5171,11 @@ def claude_disables_all_tools(claude: str) -> bool:
 
     Read from its --help once per executable. A CLI that predates the flag
     would reject the whole argv as an unknown option, so it is only passed
-    where the help names it.
+    where the help names it, and such a CLI gets the full denylist instead.
+
+    A probe that FAILS (the CLI cannot be run, times out, exits non-zero or
+    prints no help) says nothing about which tools the pass would get, so
+    the pass is refused rather than run on the denylist alone.
     """
     if claude not in _TOOLS_FLAG_SUPPORT:
         import subprocess
@@ -5179,10 +5183,18 @@ def claude_disables_all_tools(claude: str) -> bool:
             out = subprocess.run([claude, "--help"], capture_output=True,
                                  text=True, encoding="utf-8",
                                  errors="replace", timeout=30)
-            _TOOLS_FLAG_SUPPORT[claude] = re.search(
-                r"^\s*--tools\b", out.stdout or "", re.M) is not None
-        except (OSError, subprocess.SubprocessError):
-            _TOOLS_FLAG_SUPPORT[claude] = False
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SystemExit(
+                f"could not ask {claude} which tools it supports "
+                f"({exc}); refusing to run a generation pass that might "
+                "keep tools on") from None
+        if out.returncode != 0 or not (out.stdout or "").strip():
+            raise SystemExit(
+                f"{claude} --help exited {out.returncode} without its help, "
+                "so it is not known which tools a generation pass would "
+                "have; refusing to run it")
+        _TOOLS_FLAG_SUPPORT[claude] = re.search(
+            r"^\s*--tools\b", out.stdout, re.M) is not None
     return _TOOLS_FLAG_SUPPORT[claude]
 
 
