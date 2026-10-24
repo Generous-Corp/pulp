@@ -3,4 +3,6 @@
 // Its generated sibling (release_artifact_forbidden_fixture.cpp, written at
 // configure time from tools/cmake/release_artifact_forbidden.json) carries all
 // of them and must be flagged for each.
-int main() { return 0; }
+int main() {
+    return 0;
+}
