@@ -8,6 +8,7 @@
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/realtime_gpu_health_mirror.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include "support/thread_progress.hpp"
 
@@ -683,6 +684,12 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
 }
 
 bool requires_realtime_gpu_path(GpuAudioNode*) noexcept {
+    return false;
+}
+
+// This suite links the transport without the GPU nodes; none of its nodes
+// takes part in worker pipelining.
+bool set_worker_pipeline_hosting(GpuAudioNode*, bool) noexcept {
     return false;
 }
 
@@ -1815,7 +1822,7 @@ TEST_CASE("GpuAudioTransport status maps each recovery cause to Degraded or Unav
         bool device_lost;
         GpuAudioProviderState expected;
     };
-    const std::array<Case, 11> cases{{
+    const std::array<Case, 12> cases{{
         {GpuAudioRecoveryReason::SequenceGap, false, GpuAudioProviderState::Degraded},
         {GpuAudioRecoveryReason::InputSaturated, false, GpuAudioProviderState::Degraded},
         {GpuAudioRecoveryReason::ProviderFailure, false, GpuAudioProviderState::Degraded},
@@ -1825,9 +1832,10 @@ TEST_CASE("GpuAudioTransport status maps each recovery cause to Degraded or Unav
         {GpuAudioRecoveryReason::SustainedDeadlineMisses, false, GpuAudioProviderState::Degraded},
         {GpuAudioRecoveryReason::ProviderLost, false, GpuAudioProviderState::Unavailable},
         {GpuAudioRecoveryReason::ProviderUnresponsive, false, GpuAudioProviderState::Unavailable},
-        // A loss observed after an earlier latched cause still makes the
-        // provider unavailable; the first cause is preserved.
+        // A loss observed after a failure it caused is reported as the loss.
         {GpuAudioRecoveryReason::ProviderFailure, true, GpuAudioProviderState::Unavailable},
+        // An independent cause stays first: the device was not what failed.
+        {GpuAudioRecoveryReason::SequenceGap, true, GpuAudioProviderState::Unavailable},
         {GpuAudioRecoveryReason::None, true, GpuAudioProviderState::Unavailable},
         // Sustained misses describe a live GPU; a later loss is the loss.
         {GpuAudioRecoveryReason::SustainedDeadlineMisses, true, GpuAudioProviderState::Unavailable},
@@ -1841,10 +1849,13 @@ TEST_CASE("GpuAudioTransport status maps each recovery cause to Degraded or Unav
         const auto status = validated(h.transport.status_snapshot());
         INFO("reason=" << static_cast<int>(c.reason) << " device_lost=" << c.device_lost);
         CHECK(status.provider_state == c.expected);
-        const bool loss_replaces_misses =
-            c.device_lost && c.reason == GpuAudioRecoveryReason::SustainedDeadlineMisses;
+        // A loss outranks the provider failures and stalls it induces.
+        const bool loss_outranks =
+            c.device_lost && (c.reason == GpuAudioRecoveryReason::SustainedDeadlineMisses ||
+                              c.reason == GpuAudioRecoveryReason::ProviderFailure ||
+                              c.reason == GpuAudioRecoveryReason::ProviderUnresponsive);
         CHECK(status.recovery_reason ==
-              (loss_replaces_misses ? GpuAudioRecoveryReason::ProviderLost : c.reason));
+              (loss_outranks ? GpuAudioRecoveryReason::ProviderLost : c.reason));
         CHECK(status.selected_engine == GpuAudioEngine::Cpu);
     }
 
@@ -2249,4 +2260,39 @@ TEST_CASE("GpuAudioTransport status names the engine that delivers after a fence
         CHECK(status.selected_engine ==
               (policy == MissPolicy::CpuFallback ? GpuAudioEngine::Cpu : GpuAudioEngine::Unknown));
     }
+}
+
+TEST_CASE("GpuAudioTransport status carries the node's provider facts",
+          "[gpu_audio][transport][status][health]") {
+    // Realtime node: the facts arrive through the health hook.
+    HealthHarness h;
+    // Positive control: a node that reports nothing leaves the defaults.
+    auto status = validated(h.transport.status_snapshot());
+    CHECK_FALSE(status.gpu_kernel_available);
+    CHECK(status.completion_mode == GpuAudioCompletionMode::Unknown);
+    CHECK_FALSE(status.timestamps_available);
+    CHECK(status.last_delivery_ns == 0);
+
+    h.node.health.gpu_kernel_available = true;
+    h.node.health.completion_mode = GpuAudioCompletionMode::TimedWaitAny;
+    h.node.health.timestamps_available = true;
+    h.node.health.last_delivery_ns = 1234;
+    h.transport.pump();
+    status = validated(h.transport.status_snapshot());
+    CHECK(status.gpu_kernel_available);
+    CHECK(status.completion_mode == GpuAudioCompletionMode::TimedWaitAny);
+    CHECK(status.timestamps_available);
+    CHECK(status.last_delivery_ns == 1234);
+
+    // Staged node: the facts arrive through its own status projection.
+    StatusReportingNode node;
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {8}));
+    node.reported.provider_state = GpuAudioProviderState::Degraded;
+    node.reported.gpu_kernel_available = true;
+    node.reported.completion_mode = GpuAudioCompletionMode::ProcessEvents;
+    t.pump();
+    status = validated(t.status_snapshot());
+    CHECK(status.gpu_kernel_available);
+    CHECK(status.completion_mode == GpuAudioCompletionMode::ProcessEvents);
 }
