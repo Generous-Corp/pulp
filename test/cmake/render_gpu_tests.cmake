@@ -29,6 +29,8 @@ if(PULP_ENABLE_GPU)
 
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_gpu_compute_pool_tests.cmake")
 
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_gpu_proc_installer_tests.cmake")
+
     # Kernel-source seam: read a named pipeline's WGSL, mutate it, and assert the
     # mutation shows up in the convolution output. This is the native mirror of the
     # browser GPU-audio proof — it is what makes "the WGSL is causally upstream of

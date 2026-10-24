@@ -2304,6 +2304,9 @@ public:
             loaded_ = false;
             cached_data_.clear();
             cached_data_key_.clear();
+            cached_data_width_ = 0.0f;
+            cached_data_height_ = 0.0f;
+            inline_decode_failed_ = false;
         }
     }
     const std::string& image_source() const { return path_; }
@@ -2358,6 +2361,9 @@ private:
     bool loaded_ = false;
     std::vector<uint8_t> cached_data_;  // File bytes cached after first successful load
     std::string cached_data_key_;       // SHA-256 hex of cached_data_; empty when unset
+    float cached_data_width_ = 0.0f;    // Intrinsic size of cached_data_; 0 until measured
+    float cached_data_height_ = 0.0f;
+    bool inline_decode_failed_ = false; // Inline bytes no decoder accepted; never retried
     ImageCache* cache_ = nullptr;       // optional; owned externally
     float fill_value_ = -1.0f;          // <0 disables the silhouette fill overlay
     canvas::Color fill_color_ = canvas::Color::rgba(0.49f, 0.42f, 1.0f, 0.55f);

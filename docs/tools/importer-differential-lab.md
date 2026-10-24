@@ -105,11 +105,14 @@ page colour is `unresolved`, so the observer left the page unpainted.
 under a resolved or importer-owned colour. The second and third classes both
 block promotion.
 `comparison.work_counters` judges the observer's own counters from the
-digest-bound render receipt: a tree that outlives its teardown, or a paint
-mutation after the first frame that requested no repaint, makes the fixture
-ineligible. `integrity.*_snapshot_semantic_sha256` hashes each DOM snapshot
-with only its capture-local CDP frame ID removed, which is the digest to
-compare across repeated runs. The receipt paths are relative to
+digest-bound render receipt: a tree that outlives its teardown, a paint
+mutation after the first frame that requested no repaint, or (counter schema
+v2) a read-back that decoded, uploaded or rebuilt an image makes the fixture
+ineligible. v1 receipts carry no resource counters and are judged without
+them; the verdict says `resources: absent`. `integrity.*_snapshot_semantic_sha256` hashes each DOM snapshot
+with only its capture-local CDP identifiers fixed (the frame ID, loader IDs,
+and backend node IDs, which Chromium numbers in a run-dependent order), which
+is the digest to compare across repeated runs. The receipt paths are relative to
 each fixture output, so they can be copied under `/tmp/pulp-p0a-8458/receipts/`
 without exposing machine-local paths.
 
@@ -133,6 +136,15 @@ python3 tools/import-validation/importer_differential_lab.py benchmark \
   --runs 5 \
   --output /tmp/importer-differential/benchmark
 ```
+
+`--input` walks the directory recursively but skips anything under a
+`holdout/` directory, so iterating on the corpus root never scores held-out
+panels; pass `--include-holdout`, or point `--input` at the holdout directory
+itself, to score them. `compare` and `benchmark` take `--viewport
+WIDTHxHEIGHT` for panels taller than the default 1280x800 (manifest fixtures
+declare theirs). Every comparison reads PNGs, so the commands check for Pillow
+once before running and name `tools/ci/install_visual_python_deps.sh` when it is
+missing.
 
 The benchmark preserves the caller's `--cache-state` declaration on every
 run; it does not infer `cold` or `warm` from run order. The `first_invocation`
@@ -549,6 +561,15 @@ placement, background, overflow, and shadow defects remain visible. Missing or
 disagreeing frame metadata fails closed rather than silently mixing registered
 and unregistered metrics.
 
+Chromium reports a transformed element's bounding box after its transform and
+every ancestor's, while the native layout snapshot reports untransformed View
+boxes. Native lowering applies a lone `rotate(<n>deg)` as a rotation about the
+View's centre (the importer folds the authored `transform-origin` into the box
+position), so the lab compares the bounding box of each native box under the
+composed rotations of the node and its ancestors. A transform that native
+lowering does not rotate, such as a list or a non-degree unit, keeps its
+layout box on both counts.
+
 P3 passes only when every in-scope fixture has authenticated three-run receipts,
 structure >=0.99; frame placement |recorded origin - observed Chromium
 origin| <= 0.5 CSS px, verified against the native layout; registered geometry
@@ -589,6 +610,74 @@ not comparable with benchmark JSON produced before that instrumentation;
 ratios between lanes of one build are. `bridge_calls` is zero for every native lane and is not
 a discriminating counter; paint commands are RecordingCanvas counts, not GPU
 draw or resource measurements.
+
+### Benchmark instrument v2
+
+`pulp-design-import-bench` receipts are `pulp-design-import-benchmark-v2`.
+What changed, and what each field can and cannot show:
+
+- **Stages.** Each frame is lapped as `update` (the fixture's state change),
+  `layout`, `record` (painting into the frame's canvas) and `submit`, on one
+  clock. `stages.residual_ms_max` is the largest frame time the laps do not
+  cover; `stages.consistent` is false when more than 5% of sampled frames
+  leave over 50 us or 2% of the frame uncovered.
+  Fixtures no longer lay out inside `update`; v1 receipts laid out twice per
+  baked frame and are not comparable per stage.
+- **Memory.** `memory.rss` and `memory.phys_footprint` are
+  `{median,p99,peak}_bytes` plus `source` and `reason`; an unreadable probe is
+  `null` with a reason, never 0. `--cycles N` (N >= 3) adds settled
+  build/run/teardown cycles and a least-squares memory slope across them,
+  excluding the first; `--plant-cycle-leak` must make that slope rise.
+- **Host conditions.** Load average and Apple thermal state are sampled at
+  every phase boundary. `host_conditions.confounded` is true when the
+  one-minute load exceeds cores/4, a reading is unavailable, or thermal state
+  is not nominal, and a confounded receipt cannot support a speed claim.
+  `--plant-load` replaces the measured load to prove the classification.
+- **Canvas.** `--canvas=skia-raster|skia-graphite` paints through SkiaCanvas,
+  so decodes, uploads, paragraph builds and rasterization are inside the
+  frame. Counter schema v2 reports `image_decodes`, `gpu_uploads`,
+  `paragraph_builds`, `scene_cache.{records,replays}` and
+  `image_cache.{hits,builds}` per phase as total, per-frame maximum, and
+  frames after the first that did any. `steady_state_gate` fails when any
+  frame after a phase's first decodes, uploads or rebuilds an image; the
+  recording canvas reports `blind`. `--require-steady-state` exits 4 unless
+  the gate passes, and `--plant-frame-decode` must make it fail.
+- **Live lane on importer output.** `--lane=live --ir=<panel.ir.json>
+  [--bundle=<behavior.js>]` mounts the DesignIR as generated bridge
+  JavaScript, under the materialized runtime bundle when one is given, and
+  writes every anchored text slot through `setText` plus one host frame tick
+  per step.
+- **Comparison.** `tools/scripts/design_import_benchmark.py --compare BASELINE
+  CANDIDATE --reps N --mechanism COUNTER:down|up|zero --stage STAGE
+  --bench-arg=...` runs the two lanes in ABAB order as separate processes,
+  observes thermal state around every rep with
+  `tools/scripts/p2_thermal_state.swift`, and reports `win` only when every
+  criterion of the pre-registered speed bar holds; otherwise `work-moved`,
+  `no-win`, `confounded`, `insufficient-reps` or `instrument-inconsistent`.
+
+Example: judge a candidate lane against baked-native on the Skia raster lane,
+over an importer-produced DesignIR, under the no-launch environment:
+
+```bash
+PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1 PULP_INSPECTOR_NO_LAUNCH=1 \
+python3 tools/scripts/design_import_benchmark.py --build-dir build \
+  --compare baked-native live --reps 5 --stage frame \
+  --mechanism image_decodes:down \
+  --bench-arg=--frames=600 --bench-arg=--warmup-frames=60 \
+  --bench-arg=--canvas=skia-raster --bench-arg=--ir=/path/panel.ir.json \
+  --output-json /tmp/verdict.json
+```
+
+Every rep also runs `--cycles=3` unless a `--cycles` bench argument is given,
+because the memory slope is part of the criterion. `--mechanism` names the
+per-frame counter the candidate claims to move (a v1 counter such as
+`layout_passes`, or a v2 resource such as `image_decodes` or
+`scene_cache.replays`); without one the best verdict is `work-moved`. Run it
+only on a host below a quarter load per core: elsewhere every rep is
+`confounded` by construction. A single receipt shows where a frame goes:
+`interactive.stages.*.median_ms` splits update, layout, record and submit, and
+`interactive.counters.resources` shows per-frame decodes, uploads and
+paragraph builds.
 
 ### Landed context
 

@@ -524,11 +524,10 @@ fn maybe_reconcile_control_broker_on_startup() -> Result<(), CliError> {
     }
 
     let home = config.home.clone();
-    let temporary = std::env::temp_dir().join(format!(
+    let temporary = pulp_rs::install::private_temp_dir(&format!(
         "pulp-control-broker-transition-{}",
         std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&temporary);
+    ))?;
     let recovery = pulp_rs::install::recover_legacy_control_broker_once_with(
         &plan,
         &home,
@@ -808,12 +807,16 @@ fn real_main() -> Result<(), ExitCode> {
             cmd::pkg::run_list(json, &mut out).map_err(|e| map_err(&e))
         }
         Command::Search(args) => {
-            if args.tail.iter().any(|a| a == "--refresh") {
+            if args
+                .tail
+                .iter()
+                .any(|a| a == "--refresh" || a == "--allow-unsigned-registry")
+            {
                 let mut argv = vec!["search".to_owned()];
                 argv.extend(args.tail);
                 return map_exit(pulp_rs::fallthrough::delegate_or_stub(
                     &argv,
-                    "pulp search --refresh is implemented by the C++ delegate. Build/install pulp-cpp to refresh the remote registry cache.",
+                    "pulp search --refresh / --allow-unsigned-registry is implemented by the C++ delegate. Build/install pulp-cpp to use the remote registry.",
                 ));
             }
             let parsed = cmd::pkg::parse_search_args(&args.tail).map_err(|e| {

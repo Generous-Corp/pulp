@@ -2895,6 +2895,19 @@ ship, so on macOS it requires a Homebrew LLVM. The configure step fails with
 that cause named rather than at link time. The deterministic replay needs no
 special toolchain and is the lane that runs on the PR path.
 
+The same `if(PULP_ENABLE_FUZZING)` block in `test/cmake/timeline_tests.cmake`
+also registers `pulp-fuzz-smf` (`test/fuzz/smf_fuzz_target.cpp`), the
+coverage-guided lane over Standard MIDI File import: one input goes through
+`import_smf` under the strict default policy and again under `IgnoreNonNote`
+with ceilings small enough that the limit checks run on ordinary inputs. It has
+no deterministic twin and no oracle beyond "no crash, no allocation past the
+authorized ceilings", because a rejected import is the expected outcome for
+most inputs. Its seeds are the two `.mid` files under `test/fixtures/fuzz/smf/`
+and its bounded smoke is the `pulp-fuzz-smf-smoke` ctest (label `libfuzzer`),
+registered through `pulp_add_libfuzzer_target()` in
+`tools/cmake/PulpTestSuite.cmake`; the nightly fuzz workflow runs the long
+budget.
+
 ### Writing a render-continuity assertion
 
 A "gap-free during playback" test must distinguish two things that both look

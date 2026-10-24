@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-image-file-cache-byte-budget-watch",
+  "created_at": "2026-10-23T01:43:59Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Bounds the file-image decode and upload cache by bytes as well as entry count without evicting the newest entry or any entry drawn in the frame being painted (GPU surfaces announce frames per backend), and remembers a failed image build for one second in both the file and inline pools, retrying a file as soon as it changes, so a missing or corrupt asset is not decoded on every paint. Pixel output is preserved. Pulp continues to own this editable canvas target under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits this generic cache behaviour when that target adopts the Vellum package. No source-routing or authority boundary moves.",
+  "tests": [
+    "ctest --test-dir build -R 'A failed build is remembered for the retry window'",
+    "ctest --test-dir build -R 'A failed file build is retried as soon as the file changes'",
+    "ctest --test-dir build -R 'File images drawn every frame stay cached'",
+    "ctest --test-dir build -R 'File images not drawn this frame are evicted'",
+    "ctest --test-dir build -R 'File pool keeps a lone image larger than its byte budget'",
+    "ctest --test-dir build -R 'File pool stays within its byte budget'",
+    "ctest --test-dir build -R 'ImageFileCache: null build result is not stored'",
+    "ctest --test-dir build -R 'Inline pool still builds an over-budget image uncached'",
+    "ctest --test-dir build -R 'clear_backend drops only that backend.s failure records'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}

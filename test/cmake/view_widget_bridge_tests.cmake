@@ -143,9 +143,20 @@ if(PULP_ENABLE_FUZZING)
     target_link_libraries(pulp-fuzz-control-protocol PRIVATE
         pulp::inspect-protocol)
     target_compile_options(pulp-fuzz-control-protocol PRIVATE
-        -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+        -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
     target_link_options(pulp-fuzz-control-protocol PRIVATE
-        -fsanitize=fuzzer,address)
+        -fsanitize=${PULP_FUZZ_SANITIZERS})
+
+    # A scripted UI document (ui.js) evaluated through the widget bridge in a
+    # QuickJS realm with no effectful capabilities granted. The smoke keeps a
+    # low iteration count: each input builds a fresh realm, so one run costs
+    # milliseconds rather than microseconds.
+    pulp_add_libfuzzer_target(pulp-fuzz-ui-script
+        SOURCES fuzz/ui_script_fuzz_target.cpp
+        LIBRARIES pulp::view pulp::format
+        CORPUS "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fuzz/ui-script"
+        RUNS 200
+        MAX_LEN 16384)
 endif()
 
 # One executable for the pulp::inspect-control suites that spawn no fixture and

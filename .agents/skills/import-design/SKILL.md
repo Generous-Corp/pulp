@@ -143,6 +143,24 @@ baselines. On macOS the skia screenshot backend lives in
 is the non-Apple path, so a surface change made only there never reaches a
 macOS render.
 
+### DesignIR JSON floats are shortest round-trip, not six digits
+
+`write_float_member` (`design_ir_json_primitives.hpp`) writes each float with
+`std::to_chars`, the shortest text that reads back as the same float. A plain
+`out << value` uses the stream's six significant digits, which silently cut
+Chromium's 1/64 px layout to 0.1 px from 1000 px up (a 1006.703125 px panel
+became 1006.7 and the differential lab refused it as a different frame). Never
+add a float member that bypasses the shared writer.
+
+### Rotated nodes: compare bounding boxes, not layout boxes
+
+A Chromium DOMSnapshot bound is the box after its own and its ancestors' CSS
+transforms; the native layout snapshot is the untransformed View box. Native
+lowering turns a lone `rotate(<n>deg)` into `View::set_rotation` about the
+box centre, so the differential lab maps each native box through the composed
+rotations (`importer_differential/native_transform.py`) before measuring
+geometry. A diagonal ADSR segment otherwise reads as a 90 px geometry failure.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
@@ -616,6 +634,20 @@ knowing before you touch that file:
   hierarchy reports `overlapping_reorders > 0`; the count that forced it is
   recorded as `native_tree_flattened_overlapping_reorders`. Always flattening
   on a canvas cost static canvas panels their sections for no fidelity gain.
+- **The flat list still nests at compositing groups, and must not multiply
+  alpha instead.** An `opacity < 1`, `mix-blend-mode`, `filter`,
+  `backdrop-filter` or mask root keeps its descendants as children so the
+  View composites them as one layer; hung off the root they paint at full
+  strength beside an empty translucent box (Spectr's dimmed captions and
+  disabled ▸A/▸B came out 2.3-3.6x too bright). Pushing the group's alpha
+  into each descendant is only right where they do not overlap: a chip over
+  its button's fill comes out `f/4` levels lighter (50 for a 200 fill).
+  `native_tree_isolating_groups_nested` counts kept groups;
+  `native_tree_isolating_groups_refused` counts groups left flat, each with
+  `isolating_group_refused` (`interleaved-paint-order`,
+  `descendant-ink-outside-group` because the View's layer is bounded by the
+  root's box, `descendant-escapes-group-clip`, `transform`). A refused group
+  is still wrong on screen; the reason says what to fix.
 - **A canvas snapshot is a VIEWPORT PLANE, not an element raster.** Capture
   composites the canvas bitmap into its content box on a transparent,
   capture-sized PNG. Native lowering keeps the canvas as a box (its border and
@@ -759,7 +791,8 @@ knowing before you touch that file:
   `verify_native_authored_frame` read native rects relative to that origin.
 
   **Counter gotcha:** the observer's render receipt carries its own work
-  counters (`pulp-design-ir-observer-counters-v1`), phased as `build`,
+  counters (`pulp-design-ir-observer-counters-v2`; v1 receipts lack the
+  per-phase resource fields and are judged without them), phased as `build`,
   `first_frame` and `readback`, plus views constructed/destroyed and a
   terminal `live_views_after_teardown` read after the tree is destroyed. The
   lab gates eligibility on a zero teardown residue and zero unmarked paint
@@ -767,7 +800,9 @@ knowing before you touch that file:
   paint state on views that have never been drawn (~80 "unmarked" mutations on
   an 8-view card), which stales nothing. Gating those would block every
   fixture for a non-defect; ungating `readback` would let a read-back that
-  mutates the painted tree pass. Raw DOM-snapshot hashes differ per capture
+  mutates the painted tree pass. v2 also gates `readback` on zero
+  `image_decodes`, `gpu_uploads` and `image_cache_builds`, and leaves
+  `paragraph_builds` ungated there because measuring text shapes it. Raw DOM-snapshot hashes differ per capture
   only by the CDP frame ID, so compare `*_snapshot_semantic_sha256` across
   runs, not the raw binding.
 
@@ -2494,6 +2529,32 @@ record the explicit binary-size delta and whether JS evaluation churn is
 actually the dominant bottleneck for the measured fixture. Keep the legacy
 top-level `comparison` entry pointed at `baked-native`, and add per-lane
 results under `comparisons` for both baked lanes.
+
+Benchmark receipt (`pulp-design-import-benchmark-v2`) gotchas:
+
+- **Layout belongs to the frame, not to `step()`.** `run_phase` laps
+  `update`, `layout`, `record` and `submit` on one clock and checks the laps
+  cover the frame (`stages.consistent`). A fixture that calls
+  `layout_children()` inside `step()` bills a layout to `update` and runs two
+  per frame. Before v2 every baked lane and the live script's step did exactly
+  that, so v1 receipts are not comparable per stage or per `layout_passes`.
+- **The default `recording` canvas cannot see decodes, uploads or text
+  shaping** — RecordingCanvas records commands and does none of that work.
+  Resource claims need `--canvas=skia-raster` (or `skia-graphite` where a Dawn
+  adapter exists); `--require-steady-state` exits 4 on a `blind` gate rather
+  than passing it. `paragraph_builds` is reported but never gated: SkiaCanvas
+  shapes every label on every paint until it has a paragraph cache, so a
+  gate on it would fail every text fixture today.
+- **`--lane=live --ir` (optionally `--bundle`) is the production JS path over
+  importer output.** The runtime's `__pulpRuntimeSettle__` called from
+  `engine.evaluate` only records a budget; `WidgetBridge::load_script` drains
+  it. A per-frame step therefore calls `service_frame_callbacks()` itself,
+  the host's frame tick, instead of settling from JavaScript.
+- **Most fleet hosts confound most runs.** A receipt is `confounded` when
+  `getloadavg` exceeds cores/4 or the thermal state is not `nominal`; the gate
+  hosts usually sit above that. `design_import_benchmark.py --compare` then
+  reports `confounded`, never `win` — measure on a quiet host, do not argue
+  the threshold down.
 
 ### Node-type dispatch — exhaustive, never silent (all three producers)
 
@@ -6956,17 +7017,20 @@ stroke IS there. Both consumers already understand the literal string `none`
 clear), so emit it. Found by looking at the render; no IR-level assertion could
 have caught it.
 
-**Stroke style reaches the IR from AUTHORED declarations, so a stylesheet-set
-cap is still invisible.** `stroke-linecap`, `stroke-linejoin`,
-`stroke-miterlimit` and `stroke-dashoffset` are not in the captured property
-list, so `svg_shape_lowering.cpp` resolves them from inline `style` and
-presentation attributes up the ancestor chain (Lucide declares them once on the
-root `<svg>`, so reading only the shape gets every Lucide icon wrong). That
-covers the attribute idiom icon sets use; a `.icon path { stroke-linecap:
-round }` rule stays butt until the property is collected, after which the
-computed value wins automatically (`has_property`). Two traps when consuming
-the attributes: the canvas miter limit defaults to 10 where SVG's is 4, which
-is why `svg_stroke_miterlimit` is always written under a miter join; and a
+**Stroke style: Chromium's computed value first, then authored declarations.**
+`stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit` and
+`stroke-dashoffset` are in the captured property list, so a stylesheet-set cap
+(`.icon path { stroke-linecap: round }`) arrives as computed style and wins
+(`has_property`). An older capture without them still resolves inline `style`
+and presentation attributes up the ancestor chain (Lucide declares them once on
+the root `<svg>`, so reading only the shape gets every Lucide icon wrong).
+Paint consumes them through `svg_stroke_style_attributes()`
+(`design_import_svg_stroke.hpp`) in both the native lane and the baked C++
+lane; `SvgPathWidget::set_stroke_cap` / `_join` / `_miter_limit` keep the style
+local to the draw, because the canvas has no getter to restore its sticky
+stroke state. The JS bridge has no stroke-style setter yet. Two traps when
+consuming the attributes: the canvas miter limit defaults to 10 where SVG's is
+4, which is why `svg_stroke_miterlimit` is always written under a miter join; and a
 shape's own `opacity` is already folded into `svg_fill`/`svg_stroke` alpha
 (multiplied into an `rgba()` alpha, never replacing it), so applying it again
 in paint double-dims the icon. A shape with BOTH paints and an opacity refuses
@@ -7020,11 +7084,9 @@ wrote a newline between them, which a literal `== "xMidYMid meet"` reads as a
 third unknown value and refuses. Per SVG, `meetOrSlice` is ignored once the
 alignment is `none`, so `none`, `none meet` and `none slice` are one mapping.
 
-**Not carried, and not refused:** `stroke-linecap`, `stroke-linejoin` and the
-miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick
-stroke renders with butt caps. Measured on a 1.8-unit stroke this moved ink
-coverage by <1%, which is why it is accepted rather than sent to the fallback —
-refusing on it would capture most real icons. Revisit if a design shows it.
+**Stroke cap, join and miter limit are carried, not refused:** they reach
+`SvgPathWidget` through `svg_stroke_*` (see the stroke-style note above), so a
+round-capped icon keeps the half-disc at each end.
 
 ## Inline `<svg>` — the geometry is captured, the PAINT was not
 
@@ -7188,11 +7250,9 @@ wrote a newline between them, which a literal `== "xMidYMid meet"` reads as a
 third unknown value and refuses. Per SVG, `meetOrSlice` is ignored once the
 alignment is `none`, so `none`, `none meet` and `none slice` are one mapping.
 
-**Not carried, and not refused:** `stroke-linecap`, `stroke-linejoin` and the
-miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick
-stroke renders with butt caps. Measured on a 1.8-unit stroke this moved ink
-coverage by <1%, which is why it is accepted rather than sent to the fallback —
-refusing on it would capture most real icons. Revisit if a design shows it.
+**Stroke cap, join and miter limit are carried, not refused:** they reach
+`SvgPathWidget` through `svg_stroke_*` (see the stroke-style note above), so a
+round-capped icon keeps the half-disc at each end.
 
 ## A marked indicator's colour comes from PAINT, and `fill` is a trap
 

@@ -7,6 +7,7 @@
 
 #include <algorithm>  // std::max / std::min, used by clamp()
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
@@ -43,6 +44,27 @@ enum class FastTrigProfile : std::uint8_t {
 /// quoted "with or without fused multiply-add" hold under either side of
 /// Pulp's contraction policy (tools/cmake/PulpFloatingPointContraction.cmake:
 /// Clang contracts within an expression, GCC does not).
+///
+/// Choosing a tanh — one family, four points on the cost/accuracy curve
+/// (worst absolute error over every float input; cost per element relative to
+/// `tanh()` in a 128-sample loop on an M5 Ultra, all measured in one run):
+///
+/// | Function                 | Worst error | Cost  | Clamp                         |
+/// |--------------------------|-------------|-------|-------------------------------|
+/// | `tanh()`                 | 6.7e-4      | 1x    | at 4: a 6.7e-4 step (a seam)  |
+/// | `tanh_minimax()` block   | 3.8e-6      | 0.8x  | at 7: slope-matched           |
+/// | `tanh_minimax()` scalar  | 3.8e-6      | 1.2x  | at 7: slope-matched           |
+/// | `tanh_accurate()`        | 3.0e-7      | 1.3x  | at 9, branch-free             |
+/// | `std::tanh`              | exact       | 7.4x  | none                          |
+///
+/// The bare [7/6] Padé without `tanh()`'s clamp costs 0.7x but is not a tanh
+/// outside a small range: it is 1e-4 off by |x| = 5, exceeds 1 there and
+/// grows without bound (about x/28), so every bounded entry above pays for
+/// its clamp on purpose. The block form is within 1.15x of it.
+///
+/// `tanh()` keeps its results for existing callers; prefer `tanh_minimax()`
+/// where it would be used, and `tanh_accurate()` inside a resonant recursion
+/// whose loop gain amplifies saturator error.
 ///
 /// @code
 /// float out = FastMath::tanh(input);       // ~4x faster than std::tanh
@@ -201,6 +223,104 @@ struct FastMath {
                         u2 * ((0.0258737793f + u * 0.000328429886f) + u2 * 7.7694232e-07f);
         return x * p / q;
     }
+
+    /// Constrained-minimax [7/6] rational tanh: the evaluation cost of
+    /// `tanh()` above, about 180x lower worst-case error, and no seam.
+    ///
+    /// `tanh()` truncates Lambert's continued fraction, so its error is tiny
+    /// near the origin and grows toward the clamp, where the curve jumps from
+    /// the fraction's value to exactly 1: a step of 6.7e-4 at |x| = 4, which is
+    /// what makes it unfit for a hard-driven feedback saturator. This form
+    /// spends the same coefficients on the worst case instead. They are the
+    /// minimax fit of `x·P(x²)/Q(x²)` (P and Q cubic) to `tanh` on [0, 7] under
+    /// three linear equality constraints: unit slope at the origin, `f(7) = 1`
+    /// and `f'(7) = 0`, so the clamp beyond |x| = 7 meets the curve with
+    /// matching slope. Fit by bisection on the error bound over a
+    /// linear-programming feasibility problem (the linearised rational minimax
+    /// of Cheney & Loeb, Numer. Math. 3, 1961), coefficients rounded to float.
+    ///
+    /// The numerator is then scaled by `1 − 2⁻²¹`. Unscaled, rounding lets the
+    /// rational overshoot 1 by up to two float ulps near the clamp, and how
+    /// far depends on which multiply-adds a compiler contracts; the scale
+    /// keeps every evaluation order strictly inside ±1 without an output
+    /// clamp. Its cost is a 4e-7 step where the clamp takes over and a slope
+    /// of `1 − 2⁻²¹` at the origin, both far below the fit error.
+    ///
+    /// Measured in float over every representable input: absolute error below
+    /// 3.8e-6 (the tail beyond the clamp contributes 1 − tanh(7) = 1.7e-6),
+    /// odd, and bounded by ±1 exactly. The clamps are branches, as in `tanh()`:
+    /// inside a serial recursion such as a ladder they are predicted off the
+    /// critical path, where min/max instructions would sit on it and cost
+    /// 6-65% in a ladder (more under heavy drive, where a predicted branch
+    /// skips the division). Over a buffer use the block overload below, which
+    /// clamps branch-free. A NaN input returns NaN.
+    static float tanh_minimax(float x) {
+        if (x < -kTanhMinimaxClamp)
+            return -1.0f;
+        if (x > kTanhMinimaxClamp)
+            return 1.0f;
+        return tanh_minimax_rational(x);
+    }
+
+    /// Block form of `tanh_minimax()`; `output` may equal `input`.
+    ///
+    /// The clamp is a min/max pair rather than branches, so the whole
+    /// evaluation is straight-line and runs four lanes at a time, four
+    /// vectors per iteration (GNU vector extensions on Clang and GCC; a
+    /// scalar loop the compiler may vectorise elsewhere). A clamped lane
+    /// evaluates the rational at ±7, about 4e-7 short of ±1, so beyond
+    /// the clamp this differs from the scalar form by that much and inside it
+    /// not at all; both stay within the 3.8e-6 bound. On Apple Silicon it
+    /// costs ~1.2x the unclamped [7/6] Padé per element, which is the price of
+    /// the two clamp instructions on a nine-instruction rational: that form
+    /// has no clamp and grows without bound past |x| ~ 5. With
+    /// auto-vectorisation disabled it holds its speed while the scalar forms
+    /// slow by about 3x. The result for a NaN input is unspecified.
+    static void tanh_minimax(const float* input, float* output, std::size_t count) noexcept {
+        std::size_t i = 0;
+#if defined(__clang__) || defined(__GNUC__)
+        using Lanes = float __attribute__((vector_size(16)));
+        constexpr std::size_t kVectors = 4;
+        constexpr std::size_t kStep = kVectors * 4;
+        for (; i + kStep <= count; i += kStep) {
+            Lanes v[kVectors];
+            std::memcpy(v, input + i, sizeof v);
+            for (auto& lane : v) {
+#if defined(__clang__)
+                const Lanes c = __builtin_elementwise_min(
+                    __builtin_elementwise_max(lane, Lanes{} - kTanhMinimaxClamp),
+                    Lanes{} + kTanhMinimaxClamp);
+#else
+                const Lanes lo = Lanes{} - kTanhMinimaxClamp;
+                const Lanes hi = Lanes{} + kTanhMinimaxClamp;
+                const Lanes floored = lane < lo ? lo : lane;
+                const Lanes c = floored > hi ? hi : floored;
+#endif
+                lane = tanh_minimax_rational(c);
+            }
+            std::memcpy(output + i, v, sizeof v);
+        }
+#endif
+        for (; i < count; ++i)
+            output[i] = tanh_minimax_rational(
+                std::fmin(std::fmax(input[i], -kTanhMinimaxClamp), kTanhMinimaxClamp));
+    }
+
+    /// The rational inside `tanh_minimax()` for an argument already clamped
+    /// to [-7, 7], generic over float and a GNU float vector so both forms
+    /// round identically.
+    template <typename T> static T tanh_minimax_rational(T x) noexcept {
+        constexpr float kScale = 1.0f - 0x1p-21f;
+        const T t = x * x;
+        const T num = x * (kScale + t * (1.2183626499918065e-01f * kScale +
+                                         t * (2.1714800492144003e-03f * kScale +
+                                              t * (3.4510574788349538e-06f * kScale))));
+        const T den = 1.0f + t * (4.5515217250939749e-01f +
+                                  t * (2.0577605545641264e-02f + t * 1.3105688057792639e-04f));
+        return num / den;
+    }
+
+    static constexpr float kTanhMinimaxClamp = 7.0f;
 
     /// Fast sin approximation (Bhaskara-style, max error ~0.001 for any x).
     /// Input in radians.
@@ -423,10 +543,15 @@ public:
 ///   and alias levels match to 0.001 dB and resonant ringing frequency and
 ///   decay are unchanged. About 2.4x the throughput of std::tanh. This is the
 ///   default.
-/// - `realtime_efficient`: the Padé `FastMath::tanh`. Its hard clamp at
-///   |x| = 4, where tanh is still climbing, changes the overdrive character
-///   (about -63 dBFS pointwise, -69 dBFS in the filtered output at +10 dBFS
-///   drive and high resonance); kept for callers that ask for it explicitly.
+/// - `realtime_efficient`: `FastMath::tanh_minimax`, within 3.8e-6 of
+///   std::tanh for every input and continuous in value and slope where it
+///   clamps at |x| = 7. Cheapest per evaluation at normal levels; under heavy
+///   drive `accurate` can be faster, because this form's division is on the
+///   recursion's critical path for every argument below 7. The Lambert
+///   `FastMath::tanh` is not offered here: its clamp at |x| = 4 is a 6.7e-4
+///   step that a hard-driven ladder crosses every cycle (about -63 dBFS
+///   pointwise, -69 dBFS in the filtered output at +10 dBFS drive and high
+///   resonance).
 enum class LadderSaturation { exact, accurate, realtime_efficient };
 
 /// Selecting the default ladder saturator at build time:
@@ -467,7 +592,7 @@ template <auto Saturation>
     requires std::is_same_v<decltype(Saturation), LadderSaturation>
 inline float ladder_tanh_profiled(float x) {
     if constexpr (Saturation == LadderSaturation::realtime_efficient)
-        return FastMath::tanh(x);
+        return FastMath::tanh_minimax(x);
     else if constexpr (Saturation == LadderSaturation::accurate)
         return FastMath::tanh_accurate(x);
     else

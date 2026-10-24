@@ -3732,6 +3732,30 @@ or group, the error and the fix (re-run the classify job, or re-queue). A
 stalled queue is the deliberate lesser harm. Only a base branch that does not
 carry the check yet passes, with a notice.
 
+After the HOLD check, the classify job runs the merge-queue circuit breaker,
+the protected base branch's copy of `tools/ci/queue_breaker.py check-group`.
+While the `PULP_QUEUE_BREAKER` repository variable holds
+`{"test": "<ctest name>", "fix_pr": <N>, "until": "<UTC ISO-8601>"}`, it fails
+every merge group that carries neither `fix_pr` nor a `queue-unblock` label
+last applied by the fleet App or a repository admin or maintainer, before any
+VM, through the same classify-fails-`macos`-closed path as the HOLD check. It
+fails the group rather than skipping it: a skipped required job reads as
+green, which would merge untested code. The breaker is inactive when the
+variable is unset, once `until` passes, once `fix_pr` has merged, and when
+`until` is more than three hours ahead (ignored, so a forgotten variable cannot
+hold the queue for long); deleting the variable lifts it at once. Anything it
+cannot read lets the group proceed, since the breaker only saves VMs. Up to two
+groups may already be past classify when the variable is set; they run and
+fail as before. The separate `queue-breaker-notify` job, which checks out only
+the protected base branch and holds the only `pull-requests: write` token,
+comments the reason on each blocked pull request once per breaker state. On
+pull_request events classify judges `PULP_QUEUE_BREAKER_CONTROL` the same way
+but report-only, against the pull request itself, so a run log proves the
+variable reaches the check. Shipyard's steward must not re-arm pull requests
+the breaker ejects while it is open; until it honours the breaker, a re-armed
+pull request costs a classify run, not a VM. Tests:
+`tools/ci/test_queue_breaker.py` (ctest `queue-breaker-selftest`).
+
 Who may sign the fleet App's approvals is set in `.shipyard/config.toml`:
 `[auto_merge] reviewer_signers = ["pulp-review", "infra-review2"]`. Every
 agent posts verdicts as the same App, so Shipyard's guards count an App

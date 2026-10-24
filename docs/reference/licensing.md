@@ -86,10 +86,14 @@ redistributed dependency or a new licensing obligation.
 
 Pulp adopts Google's [DESIGN.md](https://github.com/google-labs-code/design.md) format as a first-class import source (`pulp import-design --from designmd`). The format specification is reimplemented in C++ (no upstream code vendored); the YAML frontmatter is parsed with `yaml-cpp` (see Core Dependencies above). One example file from upstream `examples/paws-and-paths/` is redistributed verbatim as the test fixture at `test/fixtures/imports/designmd/alpha/DESIGN.md`.
 
+The importer differential lab's frozen holdout panels in `test/fixtures/import-differential/holdout/` are self-contained HTML documents that embed third-party material unmodified: the Spectr standalone bundle carries React, React DOM and `@babel/standalone` builds plus Inter and JetBrains Mono WOFF2 subsets, and the lattice and kelvin panels inline JetBrains Mono and Jost faces from Forge's tape-machine design pack. The fonts are covered by the SIL OFL 1.1 (see Embedded Fonts below; the license text ships beside the fixtures as `OFL.txt`), and the scripts by the MIT rows below. Chromium evaluates them only inside the lab's capture; none is built, linked, or shipped.
+
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
+| **Babel standalone (holdout fixture)** | MIT | Unmodified `@babel/standalone` 7.29.0 build embedded in the importer differential lab holdout `test/fixtures/import-differential/holdout/spectr-standalone.html`; evaluated only by Chromium inside the lab capture. | [github.com/babel/babel/tree/main/packages/babel-standalone](https://github.com/babel/babel/tree/main/packages/babel-standalone) |
 | **DESIGN.md format spec + `paws-and-paths` fixture** | Apache-2.0 | Design-system interchange format consumed by `pulp import-design --from designmd`; one upstream example file redistributed verbatim as a Pulp test fixture. Pinned at tag `0.4.0`. | [github.com/google-labs-code/design.md @ 0.4.0](https://github.com/google-labs-code/design.md/releases/tag/0.4.0) |
 | **Khronos Box Textured fixture** | LicenseRef-CC-BY-TM + LicenseRef-LegalMark-Cesium | Official glTF Sample Assets `BoxTextured.glb` redistributed as a Scene3D native loader/render test fixture at `test/fixtures/scene3d/BoxTextured/BoxTextured.glb`. | [github.com/KhronosGroup/glTF-Sample-Assets/Models/BoxTextured](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BoxTextured) |
+| **React (holdout fixture)** | MIT | Unmodified `react` and `react-dom` 18.3.1 development UMD builds embedded in the importer differential lab holdout `test/fixtures/import-differential/holdout/spectr-standalone.html`; evaluated only by Chromium inside the lab capture. | [github.com/facebook/react](https://github.com/facebook/react) |
 
 ### Embedded Fonts
 

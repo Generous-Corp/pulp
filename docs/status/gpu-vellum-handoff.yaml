@@ -467,16 +467,16 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/view.cpp",
           "state": "pulp-owned-retained",
-          "revision": "0fe2f11f899def74ac7fab4ce672103f508314f7",
-          "object_id": "cffb3b99b6c771fbd04dbd7be002a0149dae1d42",
+          "revision": "23cd373f1a8fb2056517e82fbfe94a1fbb7b8849",
+          "object_id": "75e6ffde77a5aaba03a560620bca36625a1c0285",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/widget_bridge.cpp",
           "state": "pulp-owned-retained",
-          "revision": "0b1fc7083b197f0338f509e6d58333a0ec200e06",
-          "object_id": "322e28f0e88854db3dcf7f414019b238ad5be795",
+          "revision": "43edc3b66d0db2ab7a713126d2c0351cbc50c059",
+          "object_id": "1fe87c1d0a91b8921b221c2540609f1ee2882bc2",
           "object_type": "blob"
         },
         {
@@ -2027,8 +2027,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/render/src/skia_surface.cpp",
           "state": "framework-authoritative-transferred-compatibility",
-          "revision": "a58fdc4f00e82da143e8561c988cc92470fc406d",
-          "object_id": "d9c9a143ea482f157be059150c2490951a999a83",
+          "revision": "489c1d05e66b30255cf894b2b9482ffc3d94f252",
+          "object_id": "4cb5ab3b5fca15af3b7161429887d630377629ec",
           "object_type": "blob"
         },
         {
@@ -2783,8 +2783,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/web-plugins/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "e71e9315e1269b464ce362961b50d5dfe41a1572",
-          "object_id": "7c7839f2ff85c25c00fa8ed9ff6f1cf3de321a0a",
+          "revision": "7c65784b30142d95402f3522d1f9121d9cbd3fa7",
+          "object_id": "12d8b2857706446ab06ef454fbec159318b38c63",
           "object_type": "blob"
         },
         {
@@ -3018,24 +3018,24 @@
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/cmd/upgrade.rs",
           "state": "pulp-owned-retained",
-          "revision": "e32bee3b45fe5c7b1ebfc42be9b442b5afcea8a6",
-          "object_id": "413d40091d0afe21039dbbdeacac21a013e56143",
+          "revision": "dbed93d188c4d3b4163fa71d57af26b0898ca25e",
+          "object_id": "e13fe2e76585be1fa8aa6d55dbc89c4b038e6428",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/install.rs",
           "state": "pulp-owned-retained",
-          "revision": "4c9b4a134d0acde0ab5a5627031b62672c608c82",
-          "object_id": "c376f070debdced8c32e2c599a8e976ad5ede1e8",
+          "revision": "52a0bebcc3364fcd12db05a6b98fe86c85f048af",
+          "object_id": "fcef6c95ad46b559a3aa898dbd1d6216f3de7cf7",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/install/tests.rs",
           "state": "pulp-owned-retained",
-          "revision": "4c9b4a134d0acde0ab5a5627031b62672c608c82",
-          "object_id": "a441f3af22c7562d825cb67332b2be91b46f1be3",
+          "revision": "dbed93d188c4d3b4163fa71d57af26b0898ca25e",
+          "object_id": "4ced9f8dc83ae8bdd9f31915232a8c459aecea21",
           "object_type": "blob"
         },
         {
@@ -3058,8 +3058,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_product_matrix.json",
           "state": "pulp-owned-retained",
-          "revision": "f3119b3de37a518e186cf1203a6461ab8ba470e2",
-          "object_id": "ec5dd2ff65172c5e675eadf8c2ba2850b7d0de68",
+          "revision": "8da5618f0f047ed3bc0392e1a1cea4f8ba4276ef",
+          "object_id": "c88fbb4ec37a7c94579fa895a61cc663f6e81494",
           "object_type": "blob"
         },
         {

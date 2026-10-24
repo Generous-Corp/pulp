@@ -126,6 +126,18 @@ HttpResponse http_request(const HttpRequest& request) {
     httplib::Result result;
     try {
         httplib::Client client(base);
+        if (scheme == "https") {
+            // Keep chain verification on for an IP-literal host. Without a
+            // verifier httplib's mbedTLS backend drops to VERIFY_NONE for an
+            // IP host (it has no hostname to pin), the handshake records no
+            // verify flags, and the post-handshake check passes vacuously, so
+            // any self-signed certificate carrying the IP in its SAN is
+            // accepted. With a verifier installed the backend runs the chain
+            // check and reports the result per certificate; accepting exactly
+            // the backend's verdict restores the hostname-URL behavior.
+            client.set_server_certificate_verifier(
+                [](const httplib::tls::VerifyContext& context) { return context.preverify_ok; });
+        }
         client.set_connection_timeout(request.timeout_seconds);
         client.set_read_timeout(request.timeout_seconds);
         client.set_write_timeout(request.timeout_seconds);

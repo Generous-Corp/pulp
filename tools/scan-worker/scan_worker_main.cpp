@@ -5,7 +5,7 @@
 //
 // Reads a single plugin bundle path, runs the appropriate format scanner
 // (CLAP / VST3 / AU / LV2), and emits one JSON object per descriptor on
-// stdout. Exit code 0 on success, non-zero on any failure. The parent
+// its original stdout, which the plugin never sees. Exit code 0 on success, non-zero on any failure. The parent
 // PluginScanner relies on the process exit status to detect crashes so
 // it can add the bundle to its ScanBlacklist — see
 // core/host/include/pulp/host/scan_blacklist.hpp.
@@ -20,6 +20,22 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#if defined(_WIN32)
+#include <io.h>
+#define PULP_DUP _dup
+#define PULP_DUP2 _dup2
+#define PULP_WRITE _write
+#define PULP_STDOUT_FILENO 1
+#define PULP_STDERR_FILENO 2
+#else
+#include <unistd.h>
+#define PULP_DUP ::dup
+#define PULP_DUP2 ::dup2
+#define PULP_WRITE ::write
+#define PULP_STDOUT_FILENO STDOUT_FILENO
+#define PULP_STDERR_FILENO STDERR_FILENO
+#endif
 
 namespace {
 namespace fs = std::filesystem;
@@ -50,22 +66,35 @@ std::string json_escape(std::string_view text) {
     return escaped;
 }
 
-void write_json_descriptor(const pulp::host::PluginInfo& info) {
-    // Minimal JSON emitter — no nested objects, just the flat shape the
-    // parent expects. Keeps this TU free of the full json/value code so
-    // the worker binary stays tiny and quick to fork.
-    const auto name = json_escape(info.name);
-    const auto manufacturer = json_escape(info.manufacturer);
-    const auto version = json_escape(info.version);
-    const auto unique_id = json_escape(info.unique_id);
-    const auto path = json_escape(info.path);
-    std::printf("{\"name\":\"%s\",\"manufacturer\":\"%s\",\"version\":\"%s\",",
-                name.c_str(), manufacturer.c_str(), version.c_str());
-    std::printf("\"unique_id\":\"%s\",\"path\":\"%s\",",
-                unique_id.c_str(), path.c_str());
-    std::printf("\"is_instrument\":%s,\"is_effect\":%s,",
-                info.is_instrument ? "true" : "false",
-                info.is_effect ? "true" : "false");
+// One flat JSON object per descriptor, the shape the parent's
+// parse_descriptor_line reads. Built as a string so it can go to the saved
+// protocol descriptor rather than whatever stdout has become.
+std::string json_descriptor(const pulp::host::PluginInfo& info) {
+    std::string out;
+    out += "{\"name\":\"" + json_escape(info.name) + "\",";
+    out += "\"manufacturer\":\"" + json_escape(info.manufacturer) + "\",";
+    out += "\"version\":\"" + json_escape(info.version) + "\",";
+    out += "\"unique_id\":\"" + json_escape(info.unique_id) + "\",";
+    out += "\"path\":\"" + json_escape(info.path) + "\",";
+    out += std::string("\"is_instrument\":") + (info.is_instrument ? "true" : "false") + ",";
+    out += std::string("\"is_effect\":") + (info.is_effect ? "true" : "false") + ",";
+    out += "\"num_inputs\":" + std::to_string(info.num_inputs) + ",";
+    out += "\"num_outputs\":" + std::to_string(info.num_outputs) + ",";
+    out += "\"category\":\"" + json_escape(info.category) + "\",";
+    out += "\"description\":\"" + json_escape(info.description) + "\",";
+    out += "\"features\":[";
+    for (std::size_t i = 0; i < info.features.size(); ++i) {
+        if (i)
+            out += ",";
+        out += "\"" + json_escape(info.features[i]) + "\"";
+    }
+    out += "],";
+    out += std::string("\"has_editor\":") + (info.has_editor ? "true" : "false") + ",";
+    out +=
+        std::string("\"supports_sidechain\":") + (info.supports_sidechain ? "true" : "false") + ",";
+    out += std::string("\"supports_midi_in\":") + (info.supports_midi_in ? "true" : "false") + ",";
+    out +=
+        std::string("\"supports_midi_out\":") + (info.supports_midi_out ? "true" : "false") + ",";
     const char* fmt = "unknown";
     switch (info.format) {
         case pulp::host::PluginFormat::CLAP: fmt = "clap"; break;
@@ -75,7 +104,20 @@ void write_json_descriptor(const pulp::host::PluginInfo& info) {
         case pulp::host::PluginFormat::LV2:  fmt = "lv2";  break;
         default: break;
     }
-    std::printf("\"format\":\"%s\"}\n", fmt);
+    out += std::string("\"format\":\"") + fmt + "\"}\n";
+    return out;
+}
+
+bool write_all(int fd, const std::string& text) {
+    std::size_t done = 0;
+    while (done < text.size()) {
+        const auto n =
+            PULP_WRITE(fd, text.data() + done, static_cast<unsigned>(text.size() - done));
+        if (n <= 0)
+            return false;
+        done += static_cast<std::size_t>(n);
+    }
+    return true;
 }
 
 // Lex-only normalization: collapse `.`/`..` segments and resolve to an
@@ -107,38 +149,42 @@ int main(int argc, char** argv) {
     const std::string path = argv[1];
 
     // Pick the scanner by file extension and keep the parent in charge of
-    // format routing.
-    // Route through the public scan() API with the containing folder
-    // added to extra_paths. Filtering to the exact bundle keeps us from
-    // reporting other plug-ins that happen to live alongside it.
-    const fs::path input_path(path);
-    const auto parent = input_path.parent_path();
-    std::string dir = parent.empty() ? "." : parent.string();
-
-    pulp::host::PluginScanner scanner;
-    pulp::host::ScanOptions opts;
-    // Narrow the formats to ones we understand so the scanner does less work.
-    opts.scan_vst3 = opts.scan_clap = false;
-    opts.scan_au   = opts.scan_lv2  = false;
+    // format routing. Exactly this bundle runs in this process: scanning its
+    // whole directory would let a crashing neighbour take the worker down and
+    // get this bundle blacklisted for it.
+    pulp::host::PluginFormat format;
     if (path.size() >= 5 && path.compare(path.size() - 5, 5, ".clap") == 0) {
-        opts.scan_clap = true;
+        format = pulp::host::PluginFormat::CLAP;
     } else if (path.size() >= 5 && path.compare(path.size() - 5, 5, ".vst3") == 0) {
-        opts.scan_vst3 = true;
+        format = pulp::host::PluginFormat::VST3;
     } else {
         std::fprintf(stderr, "pulp-scan-worker: unsupported bundle extension: %s\n", path.c_str());
         return 3;
     }
-    opts.only_extra_paths = true;
-    opts.extra_paths.push_back(dir);
-    auto infos = scanner.scan(opts);
+    // The parent reads descriptors from this process's original stdout. A
+    // plugin's entry point may print whatever it likes, so that channel is
+    // saved first and stdout is pointed at stderr before any plugin code runs;
+    // descriptors then go to the saved descriptor and nothing the plugin
+    // prints can land between or inside them.
+    std::fflush(stdout);
+    const int protocol_fd = PULP_DUP(PULP_STDOUT_FILENO);
+    if (protocol_fd < 0 || PULP_DUP2(PULP_STDERR_FILENO, PULP_STDOUT_FILENO) < 0) {
+        std::fprintf(stderr, "pulp-scan-worker: cannot detach stdout from the plugin\n");
+        return 2;
+    }
+    const auto infos = pulp::host::PluginScanner::scan_bundle(path, format);
     // Keep only the descriptor(s) for our target bundle.
     std::vector<pulp::host::PluginInfo> filtered;
     for (const auto& i : infos) {
         if (same_bundle_path(i.path, path)) filtered.push_back(i);
     }
 
-    for (const auto& info : filtered) {
-        write_json_descriptor(info);
+    std::string lines;
+    for (const auto& info : filtered)
+        lines += json_descriptor(info);
+    if (!write_all(protocol_fd, lines)) {
+        std::fprintf(stderr, "pulp-scan-worker: cannot write descriptors\n");
+        return 2;
     }
     std::fflush(stdout);
     return 0;
