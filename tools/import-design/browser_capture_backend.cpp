@@ -926,6 +926,8 @@ CaptureResult capture_document(
     args.push_back(request.pinned_width ? "--width" : "--initial-width");
     args.push_back(std::to_string(capture_width));
     if (request.fit_authored_frame) args.push_back("--fit-authored-frame");
+    if (!request.capture_materialized_document)
+        args.push_back("--omit-materialized-document");
     if (request.interaction_plan) {
         args.push_back("--interactions");
         args.push_back(request.interaction_plan->string());
@@ -1023,6 +1025,7 @@ DiscoverAndCaptureResult discover_and_capture(
     BrowserProbeFunction probe) {
     DiscoverAndCaptureResult result;
     result.discovery = discover_browser(discovery_options, std::move(probe));
+    result.discovered_at = std::chrono::steady_clock::now();
     if (!result.discovery.selected) {
         result.capture.diagnostic = result.discovery.diagnostic;
         return result;
