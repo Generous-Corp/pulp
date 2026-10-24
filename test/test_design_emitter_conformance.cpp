@@ -157,6 +157,10 @@ void project_state(const View& view, std::map<std::string, std::string>& fields)
         fields["state.checked"] = box->is_checked() ? "true" : "false";
         fields["state.skin"] = skin_name(box->skin());
         fields["state.enabled"] = box->enabled() ? "true" : "false";
+        if (box->kind() == Checkbox::Kind::radio)
+            fields["state.radio_group"] = std::to_string(box->radio_group());
+        if (const auto accent = box->accent_color())
+            fields["state.accent"] = colour(*accent);
     }
 }
 
@@ -626,6 +630,76 @@ TEST_CASE("every emitter agrees with the native materializer or names the gap",
              << entry.lane << " " << entry.field << " " << entry.issue);
         CHECK(entry.matched > 0);
     }
+}
+
+namespace {
+
+IRNode theme_control(std::string anchor, std::string control, float left) {
+    IRNode node;
+    node.type = "frame";
+    node.stable_anchor_id = std::move(anchor);
+    node.style.position = "absolute";
+    node.style.left = left;
+    node.style.top = 10.5f;
+    node.style.width = 90.0f;
+    node.style.height = 16.0f;
+    node.attributes["source_tag"] = "input";
+    node.attributes["native_appearance"] = "auto";
+    node.attributes["native_theme"] = "native";
+    node.attributes["ua_control"] = std::move(control);
+    // Chromium's CSS-edge snap of the box at DPR 2.
+    node.attributes["browser_box_paint_left_px"] = std::to_string(static_cast<int>(left * 2));
+    node.attributes["browser_box_paint_top_px"] = "20";
+    node.attributes["browser_box_paint_right_px"] =
+        std::to_string(static_cast<int>(left * 2) + 180);
+    node.attributes["browser_box_paint_bottom_px"] = "54";
+    node.attributes["browser_box_paint_dpr"] = "2";
+    return node;
+}
+
+} // namespace
+
+TEST_CASE("ui.js lowers theme-painted controls and snapped paint rects as the native lane does",
+          "[view][import][emitter-conformance][form-controls]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = 640.0f;
+    ir.root.style.height = 120.0f;
+
+    auto range = theme_control("range", "range", 10.25f);
+    range.attributes["ua_min"] = "0";
+    range.attributes["ua_max"] = "1";
+    range.attributes["ua_step"] = "0.001";
+    range.attributes["ua_value"] = "0.25";
+    range.attributes["ua_disabled"] = "1";
+    range.attributes["ua_accent"] = "rgb(71, 180, 235)";
+    auto checkbox = theme_control("checkbox", "checkbox", 120.5f);
+    checkbox.attributes["ua_checked"] = "1";
+    checkbox.attributes["ua_accent"] = "rgb(200, 30, 90)";
+    checkbox.attributes["ua_color_scheme"] = "dark";
+    auto radio = theme_control("radio", "radio", 230.0f);
+    radio.attributes["ua_radio_group"] = "voice";
+    // A rect no lane may apply: right of its own left edge is required.
+    auto plain = theme_control("plain", "range", 340.0f);
+    plain.attributes["native_theme"] = "author";
+    plain.attributes["browser_box_paint_right_px"] = "10";
+    for (auto* node : {&range, &checkbox, &radio, &plain})
+        ir.root.children.push_back(*node);
+
+    const StagedAssets assets(ir);
+    const auto native = native_lane(ir, assets.dir());
+    const auto js = js_lane(ir, assets.dir());
+    REQUIRE(native.at("range").at("kind") == "pulp::view::RangeSlider");
+    REQUIRE(native.at("radio").at("state.control") == "radio");
+    REQUIRE(native.at("range").count("paint.captured") == 1);
+    REQUIRE(native.at("plain").count("paint.captured") == 0);
+
+    std::ostringstream found;
+    for (const auto& d : compare("js", "synthetic", native, js))
+        found << describe(d) << "\n";
+    INFO(found.str());
+    CHECK(found.str().empty());
 }
 
 TEST_CASE("the conformance comparison reports planted divergences",

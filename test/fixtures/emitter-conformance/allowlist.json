@@ -3,41 +3,6 @@
   "gaps": [
     {
       "lane": "js",
-      "field": "kind",
-      "fixtures": [
-        "form-controls-08",
-        "spectr"
-      ],
-      "expected": "pulp::view::(RangeSlider|Checkbox)",
-      "actual": "pulp::view::View",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/10981",
-      "reason": "ui.js does not lower a theme-painted range, checkbox or radio onto its widget; the node stays a plain View."
-    },
-    {
-      "lane": "js",
-      "field": "state\\..*",
-      "fixtures": [
-        "form-controls-08",
-        "spectr"
-      ],
-      "actual": "<absent>",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/10981",
-      "reason": "With no widget, ui.js carries none of the control's HTML state (value, range, checked, skin, accent, disabled)."
-    },
-    {
-      "lane": "js",
-      "field": "paint\\.(captured|bounds)",
-      "fixtures": [
-        "form-controls-08",
-        "spectr",
-        "kelvin"
-      ],
-      "actual": "<absent>",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/10982",
-      "reason": "ui.js never records the captured snapped paint rect, so its boxes paint in the fractional layout box."
-    },
-    {
-      "lane": "js",
       "field": "binding",
       "fixtures": [
         "kelvin"
