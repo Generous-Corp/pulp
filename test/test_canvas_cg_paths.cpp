@@ -549,6 +549,50 @@ TEST_CASE("CoreGraphicsCanvas::fill_path honors active linear gradient",
     REQUIRE(green_dominant > 0);
 }
 
+TEST_CASE("CoreGraphicsCanvas::stroke_path keeps its own dash under an active stroke gradient",
+          "[canvas][cg][gradient][stroke-style]") {
+    // A sticky dash left on the canvas must not reach a stroke_path draw whose
+    // style is solid: the style is the whole configuration for that draw.
+    constexpr int W = 64;
+    constexpr int H = 16;
+    const auto painted_run = [&](bool styled_dash) {
+        std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+        auto cs = CGColorSpaceCreateDeviceRGB();
+        const uint32_t bitmap_info = static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+                                     static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+        CGContextRef ctx = CGBitmapContextCreate(pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+        CGColorSpaceRelease(cs);
+        REQUIRE(ctx != nullptr);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W), static_cast<float>(H));
+            const float sticky[2] = {2.0f, 2.0f};
+            canvas.set_line_dash(sticky, 2, 0.0f);
+            Color colors[2] = {Color::rgba(1, 0, 0, 1), Color::rgba(0, 1, 0, 1)};
+            float positions[2] = {0.0f, 1.0f};
+            canvas.set_stroke_gradient_linear(0, 0, static_cast<float>(W), 0, colors, positions, 2);
+            Path line;
+            line.move_to(4.0f, 8.0f).line_to(60.0f, 8.0f);
+            StrokeStyle style;
+            style.width = 4.0f;
+            if (styled_dash) style.dash = {8.0f, 8.0f};
+            canvas.stroke_path(line, style);
+        }
+        CGContextRelease(ctx);
+        // Opaque pixels along the line's centre row, x 8..55.
+        int painted = 0;
+        const int row = H / 2;
+        for (int x = 8; x < 56; ++x)
+            if (pixels[(static_cast<size_t>(row) * W + x) * 4u + 3] > 200) ++painted;
+        return painted;
+    };
+    // Solid style: the whole span is painted, with no 2/2 gaps from the sticky dash.
+    CHECK(painted_run(false) == 48);
+    // The style's own dash still applies: about half the span is painted.
+    const int dashed = painted_run(true);
+    CHECK(dashed > 16);
+    CHECK(dashed < 32);
+}
+
 // CoreGraphicsCanvas tracks save_count() and supports restore_to_count() for
 // the CanvasWidget::paint defensive bracket.
 TEST_CASE("CoreGraphicsCanvas tracks save_count and restore_to_count",

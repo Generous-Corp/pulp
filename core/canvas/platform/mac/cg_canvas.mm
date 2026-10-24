@@ -1097,7 +1097,7 @@ void CoreGraphicsCanvas::round_rect(float x, float y, float w, float h,
     CGPathCloseSubpath(path_);
 }
 
-void CoreGraphicsCanvas::stroke_with_active_paint() {
+void CoreGraphicsCanvas::stroke_with_active_paint(bool apply_sticky_dash) {
     if (!has_stroke_gradient_ || stroke_grad_colors_.empty()) {
         apply_stroke_color();
         apply_line_dash_to_ctx();
@@ -1112,7 +1112,7 @@ void CoreGraphicsCanvas::stroke_with_active_paint() {
     // we just opened snapshots the dash and pops it on Restore, so this only
     // affects the stroked-path build itself (and the gradient draw inside the
     // clip is rect-fill semantics that ignore dash anyway).
-    apply_line_dash_to_ctx();
+    if (apply_sticky_dash) apply_line_dash_to_ctx();
     CGContextReplacePathWithStrokedPath(ctx_);
     CGContextClip(ctx_);
 
