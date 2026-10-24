@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-attack-surface-ui-embed-20261022-watch",
+  "created_at": "2026-10-23T01:17:47Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Attack-surface A2: a plugin's UI_SCRIPT and theme are embedded into the format targets at build time and the editor loads the embedded source; the absolute source path and asset roots are compiled in only for PULP_DEV_BUILD. Design import, Chromium capture, rendering and packaging authority are untouched; the render-assets touch is the scripted-UI source selection in core/view and core/format only.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-configure-defaults",
+    "ctest --test-dir build -R pulp-test-cli-create-targets",
+    "ctest --test-dir build -R pulp-test-headless",
+    "ctest --test-dir build -R pulp-test-scripted-ui-embedded",
+    "ctest --test-dir build -R pulp-test-ship-dev-build-guard",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

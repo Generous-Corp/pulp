@@ -25,6 +25,11 @@ namespace pulp::cli {
 // optimization and no NDEBUG.
 inline constexpr std::string_view kDefaultBuildType = "Release";
 
+// CMake option that compiles development-only paths (the on-disk ui.js
+// hot-reload override) into a build. The CLI's configure turns it on; a shipped
+// artifact must come from a build with it off.
+inline constexpr std::string_view kDevBuildCacheName = "PULP_DEV_BUILD";
+
 struct ConfigureDefaults {
     // Text of the build dir's CMakeCache.txt; nullopt for a fresh build dir.
     std::optional<std::string> existing_cache;
@@ -72,6 +77,11 @@ inline std::optional<std::string> cmake_cache_value(std::string_view cache,
 //   and an existing non-empty build type is left alone.
 // - Examples (source checkout only): `--examples` turns them on; a fresh dev
 //   configure turns them off; an existing cache keeps its setting.
+// - Dev build: the CLI is the developer loop, so a fresh configure (or a cache
+//   that never recorded the option) sets `-DPULP_DEV_BUILD=ON`, which compiles
+//   the on-disk ui.js hot-reload path in. A cache that records a value keeps
+//   it: `cmake -B build -DPULP_DEV_BUILD=OFF` is how a build is made shippable,
+//   and `pulp ship` refuses a dev build (ship_dev_build_guard.hpp).
 inline std::vector<std::string> configure_default_args(const ConfigureDefaults& in) {
     std::vector<std::string> args;
     const bool fresh = !in.existing_cache.has_value();
@@ -99,6 +109,11 @@ inline std::vector<std::string> configure_default_args(const ConfigureDefaults& 
         } else if (fresh) {
             args.emplace_back("-DPULP_BUILD_EXAMPLES=OFF");
         }
+    }
+    const bool dev_build_recorded =
+        in.existing_cache && cmake_cache_value(*in.existing_cache, kDevBuildCacheName).has_value();
+    if (!dev_build_recorded) {
+        args.emplace_back(std::string("-D") + std::string(kDevBuildCacheName) + "=ON");
     }
     return args;
 }

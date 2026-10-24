@@ -785,6 +785,9 @@ pub fn cmake_cache_value<'a>(cache: &'a str, name: &str) -> Option<&'a str> {
 ///   empty, and an existing non-empty build type is left alone.
 /// - Examples (source checkout only): `--examples` turns them on; a fresh dev
 ///   configure turns them off. An existing cache keeps its setting.
+/// - Dev build: a fresh configure, or a cache that never recorded the option,
+///   gets `-DPULP_DEV_BUILD=ON` (the on-disk ui.js hot-reload path). A recorded
+///   value is kept, so `-DPULP_DEV_BUILD=OFF` makes a build shippable.
 #[must_use]
 pub fn configure_default_args(inputs: &ConfigureDefaults<'_>) -> Vec<String> {
     let mut args = Vec::new();
@@ -810,8 +813,18 @@ pub fn configure_default_args(inputs: &ConfigureDefaults<'_>) -> Vec<String> {
             args.push("-DPULP_BUILD_EXAMPLES=OFF".to_owned());
         }
     }
+    let dev_build_recorded = inputs
+        .existing_cache
+        .is_some_and(|cache| cmake_cache_value(cache, DEV_BUILD_CACHE_NAME).is_some());
+    if !dev_build_recorded {
+        args.push(format!("-D{DEV_BUILD_CACHE_NAME}=ON"));
+    }
     args
 }
+
+/// CMake option that compiles development-only paths (the on-disk ui.js
+/// hot-reload override) into a build; `pulp ship` refuses a build with it on.
+pub const DEV_BUILD_CACHE_NAME: &str = "PULP_DEV_BUILD";
 
 /// Opt-out that keeps an existing build dir's configuration as it is.
 pub const KEEP_BUILD_CONFIG_ENV: &str = "PULP_KEEP_BUILD_CONFIG";
@@ -2868,9 +2881,26 @@ mod tests {
                 "-G",
                 "Ninja",
                 "-DCMAKE_BUILD_TYPE=Release",
-                "-DPULP_BUILD_EXAMPLES=OFF"
+                "-DPULP_BUILD_EXAMPLES=OFF",
+                "-DPULP_DEV_BUILD=ON"
             ]
         );
+    }
+
+    #[test]
+    fn developer_loop_compiles_the_dev_build_in_and_keeps_a_recorded_value() {
+        let fresh = defaults(ConfigureDefaults::default());
+        assert!(fresh.iter().any(|a| a == "-DPULP_DEV_BUILD=ON"), "{fresh:?}");
+        let unrecorded = defaults(ConfigureDefaults {
+            existing_cache: Some("CMAKE_BUILD_TYPE:STRING=Release\n"),
+            ..Default::default()
+        });
+        assert_eq!(unrecorded, ["-DPULP_DEV_BUILD=ON"]);
+        let off = defaults(ConfigureDefaults {
+            existing_cache: Some("CMAKE_BUILD_TYPE:STRING=Release\nPULP_DEV_BUILD:BOOL=OFF\n"),
+            ..Default::default()
+        });
+        assert!(off.is_empty(), "a deliberate OFF must be kept: {off:?}");
     }
 
     #[test]
@@ -2905,7 +2935,8 @@ mod tests {
     fn existing_cache_keeps_its_generator_build_type_and_examples() {
         let cache = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\n\
                      CMAKE_BUILD_TYPE:STRING=Debug\n\
-                     PULP_BUILD_EXAMPLES:BOOL=ON\n";
+                     PULP_BUILD_EXAMPLES:BOOL=ON\n\
+                     PULP_DEV_BUILD:BOOL=ON\n";
         let args = defaults(ConfigureDefaults {
             existing_cache: Some(cache),
             ninja_available: true,
@@ -2917,7 +2948,8 @@ mod tests {
 
     #[test]
     fn existing_cache_with_empty_build_type_gets_release() {
-        let cache = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\nCMAKE_BUILD_TYPE:STRING=\n";
+        let cache = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\nCMAKE_BUILD_TYPE:STRING=\n\
+                     PULP_DEV_BUILD:BOOL=ON\n";
         let args = defaults(ConfigureDefaults {
             existing_cache: Some(cache),
             ninja_available: true,
@@ -2930,7 +2962,9 @@ mod tests {
     #[test]
     fn examples_flag_opts_in_and_standalone_projects_never_get_the_option() {
         let on = defaults(ConfigureDefaults {
-            existing_cache: Some("PULP_BUILD_EXAMPLES:BOOL=OFF\nCMAKE_BUILD_TYPE:STRING=Release\n"),
+            existing_cache: Some(
+                "PULP_BUILD_EXAMPLES:BOOL=OFF\nCMAKE_BUILD_TYPE:STRING=Release\nPULP_DEV_BUILD:BOOL=ON\n",
+            ),
             examples: true,
             source_checkout: true,
             ..Default::default()
