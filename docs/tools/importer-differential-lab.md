@@ -290,7 +290,14 @@ own control appearance, so the lab states the boundary instead of scoring it as
 an importer failure. `comparison.form_controls` lists every laid-out control
 with its `appearance`, the capture's `theme` verdict, and one status:
 
-- `ua-default-form-chrome` — the native theme painted it; a support boundary;
+- `ua-default-form-chrome`: the native theme painted it and the native
+  lowering has no skin for it (a select's arrow, a text field, a meter, a
+  progress bar, the picker types); a support boundary;
+- `ua-theme-skinned`: the native theme painted it, and the native lowering
+  paints it with Chromium's own theme (a range, checkbox or radio in the
+  `chromium_refresh` skin, a `<button>` or button-type input as a
+  `ButtonSurface`); not a boundary, so its residual counts against the
+  importer like any other;
 - `ua-shadow-form-part` — CSS paints the box, but parts such as a range thumb,
   colour swatch, date fields, or a styled select's arrow come from user-agent
   internals the snapshot does not serialize; a support boundary;
