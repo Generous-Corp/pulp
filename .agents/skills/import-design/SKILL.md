@@ -168,7 +168,11 @@ A captured `<input type=range|checkbox|radio>` whose `native_theme` verdict is
 theme paints from as `ua_*` attributes (`browser_capture_controls.cpp`), and
 `design_import_form_controls.cpp` builds a `RangeSlider` / `Checkbox` in
 `UaSkin::chromium_refresh` from it, in the native lane and the baked C++ lane
-alike (`ua_form_control_state()` is the shared parse). Only those controls get
+alike (`ua_form_control_state()` is the shared parse). The ui.js lane emits the
+same widget and state from that parse (`design_js_capture_lowering.cpp`:
+`createRangeSlider`/`createCheckbox`, `setUaSkin`, `setCheckboxKind`, the range,
+value and checked state), and every lane records the snapped paint rect
+(`setCapturedPaintRect` in ui.js); the emitter conformance gate checks all of it. Only those controls get
 the skin: an `author` or `unresolved` verdict, another import lane's checkbox,
 AutoUi and every hand-built widget keep `UaSkin::platform`. Chromium paints a
 theme part in its CSS-px-snapped box, so the skins paint in
