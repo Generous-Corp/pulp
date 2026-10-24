@@ -836,3 +836,40 @@ TEST_CASE("SvgPathWidget strokes with its SVG cap, join and miter limit, locally
     w.set_stroke_miter_limit(std::numeric_limits<float>::infinity());
     CHECK(w.stroke_miter_limit() == 8.0f);
 }
+
+TEST_CASE("SvgPathWidget strokes a styled gradient without touching sticky stroke state",
+          "[svg_path][stroke-style]") {
+    SvgPathWidget w;
+    w.set_bounds({0, 0, 24, 24});
+    w.set_viewbox(24, 24);
+    w.set_path("M4 12 L20 12");
+    w.clear_fill();
+    w.set_stroke_gradient("linear-gradient(to right, #89b4fa, #cba6f7)");
+    w.set_stroke_width(2.0f);
+    w.set_stroke_cap(pulp::canvas::LineCap::round);
+
+    RecordingCanvas rc;
+    w.paint(rc);
+    int gradient = -1, stroke = -1, cleared = -1;
+    for (size_t i = 0; i < rc.commands().size(); ++i) {
+        const auto& cmd = rc.commands()[i];
+        // Neither the style nor a reset of it reaches the canvas's own state,
+        // so a caller's non-default cap or join survives this draw.
+        CHECK(cmd.type != DrawCommand::Type::set_line_cap);
+        CHECK(cmd.type != DrawCommand::Type::set_line_join);
+        CHECK(cmd.type != DrawCommand::Type::set_miter_limit);
+        CHECK(cmd.type != DrawCommand::Type::stroke_current_path);
+        if (cmd.type == DrawCommand::Type::set_stroke_gradient_linear)
+            gradient = static_cast<int>(i);
+        if (cmd.type == DrawCommand::Type::stroke_path_object)
+            stroke = static_cast<int>(i);
+        if (cmd.type == DrawCommand::Type::clear_stroke_gradient)
+            cleared = static_cast<int>(i);
+    }
+    // The gradient is active for the styled draw and cleared after it.
+    REQUIRE(gradient >= 0);
+    REQUIRE(stroke > gradient);
+    REQUIRE(cleared > stroke);
+    CHECK(rc.commands()[static_cast<size_t>(stroke)].f[1] ==
+          static_cast<float>(pulp::canvas::LineCap::round));
+}
