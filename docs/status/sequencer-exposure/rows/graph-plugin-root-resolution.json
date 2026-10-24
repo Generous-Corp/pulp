@@ -1,0 +1,43 @@
+{
+ "id": "graph-plugin-root-resolution",
+ "title": "Graph plugin nodes resolve inside known plugin roots instead of dlopening last_path",
+ "classification": "public_sdk",
+ "delivery_state": "pending",
+ "claim_id": "e1546e8f-cbb8-4efc-99b8-44d588e6e6cc",
+ "owned_paths": [
+  "core/host/src/graph_serializer.cpp",
+  "docs/status/sequencer-exposure/rows/graph-plugin-root-resolution.json"
+ ],
+ "evidence": [
+  {
+   "path": "core/host/src/graph_serializer.cpp",
+   "needles": [
+    "scan_mode",
+    "allow_unrooted_plugin_paths",
+    "missing_plugins"
+   ]
+  }
+ ],
+ "surfaces": {
+  "installed_sdk": {
+   "disposition": "not_applicable",
+   "rationale": "GraphLoadOptions gains scan_mode, load_plugins and plugin_roots fields with safe defaults; the SDK's graph loading contract is unchanged for callers and no capability key is added."
+  },
+  "offline_timeline_cli": {
+   "disposition": "not_applicable",
+   "rationale": "pulp bake loads graphs with plugin nodes as placeholders; no timeline verb, flag or handler changes."
+  },
+  "offline_timeline_mcp": {
+   "disposition": "not_applicable",
+   "rationale": "No MCP tool definition or handler changes."
+  },
+  "live_product_control": {
+   "disposition": "not_applicable",
+   "rationale": "This hardens how a .pulpgraph file's plugin nodes are resolved before loading and adds no musician-facing control or operation."
+  },
+  "design_time_agent_manifest": {
+   "disposition": "not_applicable",
+   "rationale": "No capability key or design-time manifest is added or changed."
+  }
+ }
+}

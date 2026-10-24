@@ -761,6 +761,81 @@ if(_pulp_source_install_status STREQUAL "")
 else()
     set(PULP_SOURCE_INSTALL_DIRTY true)
 endif()
+# A source-install SDK is intentionally non-distributable, but its target
+# architecture still matters: a native ARM64 archive must never be consumed
+# by an ARM64EC/ARM64X plugin just because both builds run on Windows ARM.
+# Record the actual target identity so PulpConfig.cmake can reject that mix
+# before any consumer target is created.
+if(WIN32)
+    # Keep this source-install marker self-contained: the installed-header
+    # parity checker intentionally permits only the two package-helper
+    # includes in this file.  Mirror the canonical target selection here so
+    # source installs record the actual generator/compiler ABI without adding
+    # another install-time include.
+    string(TOUPPER "${CMAKE_GENERATOR_PLATFORM}" _pulp_source_install_platform)
+    string(TOUPPER "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}" _pulp_source_install_compiler_arch)
+    if(_pulp_source_install_platform MATCHES "(^|,)ARM64EC(,|$)"
+       OR _pulp_source_install_compiler_arch STREQUAL "ARM64EC")
+        set(_pulp_source_install_arch "arm64ec-win")
+    elseif(_pulp_source_install_platform MATCHES "(^|,)ARM64X(,|$)"
+           OR _pulp_source_install_compiler_arch STREQUAL "ARM64X")
+        set(_pulp_source_install_arch "arm64x-win")
+    elseif(_pulp_source_install_platform MATCHES "(^|,)ARM64(,|$)"
+           OR _pulp_source_install_compiler_arch STREQUAL "ARM64")
+        set(_pulp_source_install_arch "arm64-win")
+    elseif(_pulp_source_install_platform MATCHES "(^|,)(X64|AMD64)(,|$)"
+           OR _pulp_source_install_compiler_arch MATCHES "^(X64|AMD64)$"
+           OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|x64)$")
+        set(_pulp_source_install_arch "x86_64-win")
+    else()
+        set(_pulp_source_install_arch "x86-win")
+    endif()
+    if(_pulp_source_install_arch STREQUAL "arm64-win")
+        set(PULP_SOURCE_INSTALL_PLATFORM "windows-arm64")
+    elseif(_pulp_source_install_arch STREQUAL "x86_64-win")
+        set(PULP_SOURCE_INSTALL_PLATFORM "windows-x64")
+    elseif(_pulp_source_install_arch STREQUAL "arm64ec-win")
+        set(PULP_SOURCE_INSTALL_PLATFORM "windows-arm64ec")
+    elseif(_pulp_source_install_arch STREQUAL "arm64x-win")
+        set(PULP_SOURCE_INSTALL_PLATFORM "windows-arm64x")
+    else()
+        set(PULP_SOURCE_INSTALL_PLATFORM "windows-${_pulp_source_install_arch}")
+    endif()
+    unset(_pulp_source_install_arch)
+    unset(_pulp_source_install_platform)
+    unset(_pulp_source_install_compiler_arch)
+elseif(ANDROID)
+    if(CMAKE_ANDROID_ARCH_ABI)
+        set(PULP_SOURCE_INSTALL_PLATFORM "android-${CMAKE_ANDROID_ARCH_ABI}")
+    else()
+        set(PULP_SOURCE_INSTALL_PLATFORM "android-unknown")
+    endif()
+elseif(IOS OR PULP_IOS)
+    if(CMAKE_OSX_ARCHITECTURES MATCHES "(^|;)x86_64(;|$)")
+        set(PULP_SOURCE_INSTALL_PLATFORM "ios-x64")
+    else()
+        set(PULP_SOURCE_INSTALL_PLATFORM "ios-arm64")
+    endif()
+elseif(APPLE)
+    if(CMAKE_OSX_ARCHITECTURES MATCHES "(^|;)x86_64(;|$)")
+        set(PULP_SOURCE_INSTALL_PLATFORM "darwin-x64")
+    else()
+        string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pulp_macos_arch)
+        if(_pulp_macos_arch STREQUAL "")
+            string(TOLOWER "${CMAKE_HOST_SYSTEM_PROCESSOR}" _pulp_macos_arch)
+        endif()
+        set(PULP_SOURCE_INSTALL_PLATFORM "darwin-${_pulp_macos_arch}")
+        unset(_pulp_macos_arch)
+    endif()
+elseif(UNIX)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+        set(PULP_SOURCE_INSTALL_PLATFORM "linux-x64")
+    else()
+        set(PULP_SOURCE_INSTALL_PLATFORM "linux-arm64")
+    endif()
+else()
+    set(PULP_SOURCE_INSTALL_PLATFORM "unknown-unknown")
+endif()
 configure_file("${PULP_ROOT_DIR}/tools/cmake/PulpStampSourceInstall.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake" @ONLY)
 install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake")

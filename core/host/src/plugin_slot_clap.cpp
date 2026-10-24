@@ -1002,7 +1002,10 @@ std::unique_ptr<PluginSlot> load_clap_plugin(const PluginInfo& info) {
     if (filled.name.empty() && desc->name) filled.name = desc->name;
     if (filled.manufacturer.empty() && desc->vendor) filled.manufacturer = desc->vendor;
     if (filled.version.empty() && desc->version) filled.version = desc->version;
-    if (filled.unique_id.empty() && desc->id) filled.unique_id = desc->id;
+    // The slot reports the descriptor that actually loaded, which differs
+    // from the requested id when the bundle no longer lists it.
+    if (desc->id)
+        filled.unique_id = desc->id;
     slot->attach_plugin(plugin, std::move(filled));
     return slot;
 }

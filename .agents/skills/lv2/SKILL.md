@@ -290,6 +290,22 @@ as "not safe for the real-time thread". There is no other channel for that
 claim — which makes it one more thing riding on a manifest that has to be
 written first.
 
+## Exports: `lv2_descriptor` and `pulp_lv2_write_bundle_ttl`, nothing else
+
+On Linux a plug-in image exports only its entry points: `_pulp_apply_elf_exports`
+(`tools/cmake/PulpInstall.cmake`) compiles the format target with
+`-fvisibility=hidden -fvisibility-inlines-hidden` and links it with a version
+script whose `local: *` localizes everything else, including the archives'
+symbols. Without it, every Pulp plug-in in a Linux host shared its inline
+variables and function-local statics with every other one: they are
+`STB_GNU_UNIQUE`, which glibc binds process-wide **even under `RTLD_LOCAL`**,
+so two different plug-ins' factories each listed both plug-ins. Measured on an editor-less LV2 module before the change: each module still
+listed its own URI, but it exported about 400 internal symbols, the unique
+`pulp::format::detail::standalone_processors()::table` among them, so the
+shared state was there even though the descriptor survived. A new symbol that
+`pulp-lv2-ttlgen` or a host `dlsym`s must be added to the version-script list
+in `_pulp_add_lv2`. `linux-plugin-isolation-lv2` covers it.
+
 ## Testing LV2
 
 **Parse the Turtle; do not grep it.** The existing TTL tests are
