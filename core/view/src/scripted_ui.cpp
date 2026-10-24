@@ -117,6 +117,8 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store,
       script_name_(options.script_name.empty() && !options.script_path.empty()
                        ? options.script_path.filename().string()
                        : std::move(options.script_name)),
+      embedded_assets_(std::move(options.embedded_assets)),
+      storage_identity_(std::move(options.storage_identity)),
       asset_roots_(std::move(options.asset_roots)),
       granted_capabilities_(options.granted_capabilities),
       hot_reload_enabled_(options.enable_hot_reload),
@@ -802,6 +804,8 @@ bool ScriptedUiSession::rebuild_from_code(
                 probe_bridge->install_runtime_import_handlers();
             probe_bridge->set_asset_roots(asset_roots_);
             probe_bridge->set_script_base_dir(source_path.parent_path());
+            probe_bridge->set_embedded_assets(embedded_assets_);
+            probe_bridge->set_storage_identity(storage_identity_);
             probe_bridge->set_host_kind(host_kind_);
             probe_bridge->set_time_source(time_source_);
             load_script_before_deadline(*probe_bridge, *probe_engine, code, deadline);
@@ -870,6 +874,8 @@ bool ScriptedUiSession::rebuild_from_code(
         next_bridge->set_value_channel_access(value_channel_access_);
         next_bridge->set_asset_roots(asset_roots_);
         next_bridge->set_script_base_dir(source_path.parent_path());
+        next_bridge->set_embedded_assets(embedded_assets_);
+        next_bridge->set_storage_identity(storage_identity_);
         next_bridge->set_host_kind(host_kind_);
         next_bridge->set_time_source(time_source_);
         if (repaint_callback_) {

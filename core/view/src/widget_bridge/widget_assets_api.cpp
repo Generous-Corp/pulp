@@ -63,6 +63,8 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
                 source.rfind("resource:", 0) == 0 || source.rfind("memory:", 0) == 0;
             if (is_supported_uri)
                 img->set_image_source(source);
+            else if (const auto* embedded = self.embedded_asset(source))
+                img->set_image_source(self.embedded_asset_data_uri(*embedded));
             else
                 img->set_image_path(self.resolve_script_relative(source));
         }
@@ -80,15 +82,18 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
         if (!k || path.empty() || frame_count <= 0) return choc::value::Value();
 
         if (path.rfind("file://", 0) == 0) path = path.substr(7);
-        path = self.resolve_script_relative(path);
-
-        std::ifstream f(path, std::ios::binary);
-        if (!f.good()) {
-            std::cerr << "[setKnobSpriteStrip] could not open " << path << "\n";
-            return choc::value::Value();
+        std::vector<uint8_t> bytes;
+        if (const auto* embedded = self.embedded_asset(path)) {
+            bytes.assign(embedded->data, embedded->data + embedded->size);
+        } else {
+            path = self.resolve_script_relative(path);
+            std::ifstream f(path, std::ios::binary);
+            if (!f.good()) {
+                std::cerr << "[setKnobSpriteStrip] could not open " << path << "\n";
+                return choc::value::Value();
+            }
+            bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
         }
-        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
-                                    std::istreambuf_iterator<char>());
         auto img = AssetManager::instance().load_image_from_memory(bytes.data(), bytes.size());
         if (!img.valid()) {
             std::cerr << "[setKnobSpriteStrip] PNG decode failed for " << path << "\n";

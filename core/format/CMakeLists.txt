@@ -51,8 +51,6 @@ target_sources(pulp-format-core PRIVATE
     src/format.cpp
     src/processor_f64.cpp
     src/registry.cpp
-    # The embedded-editor registry the generated UI_SCRIPT unit installs into.
-    src/editor_ui_embed.cpp
     src/headless.cpp
     src/offline_render_host.cpp
     src/offline_sample_bounce.cpp

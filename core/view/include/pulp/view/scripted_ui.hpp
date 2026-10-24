@@ -58,6 +58,15 @@ struct ScriptedUiOptions {
     /// Diagnostic name for an in-memory script (`ui.js`); log lines and
     /// `script_label()` use it where a path-backed session names its file.
     std::string script_name;
+    /// Files compiled into the image beside an in-memory script. They stand
+    /// in for the script's directory: relative asset lookups
+    /// (`__loadAssetSync__`, `setImageSource`, sprite strips, fonts) resolve
+    /// here first, then in `asset_roots`.
+    std::vector<WidgetBridge::EmbeddedAsset> embedded_assets;
+    /// Identity of the session's persisted stores (widget storage, style
+    /// presets) when the script has no directory to be keyed by. The default
+    /// editor passes the plug-in's bundle id and script name.
+    std::string storage_identity;
     /// Heap ceiling for every realm this session creates, in bytes
     /// (0 = unlimited). Enforced by the QuickJS backend; see
     /// JsEngine::set_memory_limit.
@@ -330,6 +339,8 @@ private:
     std::string script_source_;
     std::string theme_source_;
     std::string script_name_;
+    std::vector<WidgetBridge::EmbeddedAsset> embedded_assets_;
+    std::string storage_identity_;
     std::string last_good_code_;
     std::filesystem::path last_good_script_path_;
     std::vector<std::filesystem::path> asset_roots_;

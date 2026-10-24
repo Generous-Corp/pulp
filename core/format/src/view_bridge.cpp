@@ -185,9 +185,12 @@ bool ViewBridge::open(std::string* error) {
         // Fall back to the scripted-UI or AutoUi default.
         auto value_channel_access =
             processor_value_channel_access(processor_, owner_alive_);
+        std::string plugin_id;
+        PULP_TRY { plugin_id = processor_.descriptor().bundle_id; }
+        PULP_CATCH_ALL {}
         auto instance = build_editor_ui_for_assets(editor_assets_for_processor(processor_), store_,
                                                    options_.enable_hot_reload, &last_error_,
-                                                   std::move(value_channel_access));
+                                                   std::move(value_channel_access), plugin_id);
         if (!instance.root) {
             if (error) *error = last_error_.empty() ? "ViewBridge: failed to build editor UI" : last_error_;
             return false;
