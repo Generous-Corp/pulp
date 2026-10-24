@@ -5185,14 +5185,14 @@ def claude_disables_all_tools(claude: str) -> bool:
                                  errors="replace", timeout=30)
         except (OSError, subprocess.SubprocessError) as exc:
             raise SystemExit(
-                f"could not ask {claude} which tools it supports "
-                f"({exc}); refusing to run a generation pass that might "
-                "keep tools on") from None
+                "refusing to run a generation pass: could not ask "
+                f"{claude} which tools it supports ({exc}), so the pass "
+                "might keep tools on") from None
         if out.returncode != 0 or not (out.stdout or "").strip():
             raise SystemExit(
+                "refusing to run a generation pass: "
                 f"{claude} --help exited {out.returncode} without its help, "
-                "so it is not known which tools a generation pass would "
-                "have; refusing to run it")
+                "so it is not known which tools the pass would have")
         _TOOLS_FLAG_SUPPORT[claude] = re.search(
             r"^\s*--tools\b", out.stdout, re.M) is not None
     return _TOOLS_FLAG_SUPPORT[claude]

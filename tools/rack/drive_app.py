@@ -463,6 +463,7 @@ GENERATOR_ENDED_BADLY = (
     # Line Tools, or the Rack SDK. Each is a real stop with a one-line fix, and
     # each used to report INCONCLUSIVE.
     "is missing something",
+    "refusing to run a generation pass",
     "model cli is not installed",
     "the rack sdk is not installed",
     "could not download the rack sdk",
