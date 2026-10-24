@@ -134,6 +134,16 @@ instance (`JetBrainsMono-Regular_wght2580000`) is rejected. A plain HTML page
 whose `@font-face` uses `url(...)` is not carried yet. The capture only
 packages Blob-backed faces.
 
+`build_native_view_tree` registers them before materializing
+(`core/view/src/design_import_native_fonts.cpp`). Each unicode-range segment of a
+family goes under a private alias, `<family> [<12 hex>]`, named from its
+content. Every font-family stack naming the family is rewritten to list the
+aliases, last-defined first, in place of the family. So when you debug an
+imported Label's face, expect `effective_font_family()` to show aliases, not
+the CSS family. A face that can't be read or fails its manifest hash is
+skipped with `font-asset-unavailable`, and that family keeps resolving to host
+faces.
+
 ### Imported text looks heavier than Chromium: check font smoothing first
 
 Pulp's default glyph raster on macOS is Chromium's `-webkit-font-smoothing:
