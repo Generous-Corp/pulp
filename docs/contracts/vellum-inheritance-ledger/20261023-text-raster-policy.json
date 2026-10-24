@@ -3,7 +3,8 @@
   "event_id": "20261023-text-raster-policy",
   "slices": [
     "canvas-kernel",
-    "capture-primitives"
+    "capture-primitives",
+    "render-skia-dawn"
   ],
   "vellum_obligation": "Every Skia surface a frame's text can pass through (frame target, offscreen and scene targets, retained layers, raster and GPU captures) must be created with the same explicit text raster policy, legacy (Skia default contrast and gamma) or chromium (contrast 0, gamma 1), chosen per surface and never as a global constant; a surface holding any antialiased text node is chromium; text through a retained layer or the scene target must match direct paint under each policy, and the default must equal a props-less surface.",
   "evidence": [
