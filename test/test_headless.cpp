@@ -384,7 +384,8 @@ TEST_CASE("select_editor_ui_source prefers the embedded script over the dev path
         REQUIRE(source.script_path == missing);
     }
     SECTION("nothing configured") {
-        const auto source = pulp::format::select_editor_ui_source(pulp::format::EditorAssets{}, true);
+        const auto source =
+            pulp::format::select_editor_ui_source(pulp::format::EditorAssets{}, true);
         REQUIRE_FALSE(source.available());
     }
     std::filesystem::remove_all(on_disk.parent_path());
@@ -418,7 +419,8 @@ TEST_CASE("build_editor_ui evaluates a registered embedded script without readin
     REQUIRE(ui.scripted_ui->bridge() != nullptr);
     REQUIRE(ui.scripted_ui->bridge()->widget("embedded-editor") != nullptr);
     // The file embedded beside the script answers its relative fetch.
-    auto* asset = dynamic_cast<pulp::view::Label*>(ui.scripted_ui->bridge()->widget("embedded-asset"));
+    auto* asset =
+        dynamic_cast<pulp::view::Label*>(ui.scripted_ui->bridge()->widget("embedded-asset"));
     REQUIRE(asset != nullptr);
     REQUIRE(asset->text() == R"({"from":"embedded"})");
     // Without a plug-in id the stores are keyed by the embedded script alone.

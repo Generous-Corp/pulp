@@ -194,7 +194,9 @@ public:
     /// presets). A path-backed script is keyed by its directory; an embedded
     /// script has no directory, so its host names it here (the plug-in's
     /// bundle id and script name) and the stores keep working across hosts.
-    void set_storage_identity(std::string identity) { storage_identity_ = std::move(identity); }
+    void set_storage_identity(std::string identity) {
+        storage_identity_ = std::move(identity);
+    }
     /// The identity the persisted stores hash: `set_storage_identity()`'s value
     /// when set, else the script base directory, else empty (no store).
     std::string storage_identity() const;

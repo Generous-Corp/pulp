@@ -261,11 +261,12 @@ static int ensure_ship_build(const fs::path& root, const fs::path& dev_build_dir
                  "--allow-dev-build ships the dev build as it is.\n";
     if (!fs::exists(ship_dir / "CMakeCache.txt")) {
         const auto cache = pulp::cli::read_cmake_cache(dev_build_dir);
-        std::string configure = "cmake -S " + shell_quote(root.string()) + " -B " +
-                                shell_quote(ship_dir.string());
+        std::string configure =
+            "cmake -S " + shell_quote(root.string()) + " -B " + shell_quote(ship_dir.string());
         for (const auto& arg : pulp::cli::ship_build_configure_args(cache.value_or("")))
             configure += " " + shell_quote(arg);
-        if (int rc = run_with_spinner(configure, "Configuring (shippable)"); rc != 0) return rc;
+        if (int rc = run_with_spinner(configure, "Configuring (shippable)"); rc != 0)
+            return rc;
     }
     return run_governed_cmake_build(root, ship_dir, {}, "pulp-ship-build",
                                     GovernedBuildOutput::Spinner, "Building (shippable)",
@@ -2623,7 +2624,8 @@ int cmd_ship(const std::vector<std::string>& args) {
     if (reads_native_build && !allow_dev_build && pulp::cli::build_dir_is_dev_build(build_dir)) {
         const auto ship_dir = pulp::cli::ship_build_dir(root);
         if (sub == "sign" || sub == "package" || sub == "release") {
-            if (int rc = ensure_ship_build(root, build_dir, ship_dir); rc != 0) return rc;
+            if (int rc = ensure_ship_build(root, build_dir, ship_dir); rc != 0)
+                return rc;
             build_dir = ship_dir;
         } else if (fs::exists(ship_dir / "CMakeCache.txt")) {
             std::cout << "pulp ship " << sub << ": " << build_dir.filename().string()
@@ -2633,8 +2635,8 @@ int cmd_ship(const std::vector<std::string>& args) {
         } else if (sub == "check") {
             std::cout << "pulp ship check: " << build_dir.filename().string()
                       << "/ is a dev build (PULP_DEV_BUILD=ON); `pulp ship sign` and "
-                         "`pulp ship package` build and ship " << ship_dir.filename().string()
-                      << "/ instead (not built yet)\n";
+                         "`pulp ship package` build and ship "
+                      << ship_dir.filename().string() << "/ instead (not built yet)\n";
         } else {
             std::cerr << "pulp ship " << sub << ": " << build_dir.string()
                       << " is a dev build (PULP_DEV_BUILD=ON) and " << ship_dir.string()

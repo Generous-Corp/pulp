@@ -212,11 +212,10 @@ TEST_CASE("an embedded session resolves the files embedded beside its script",
     View root;
     root.set_bounds({0, 0, 320, 240});
     StateStore store;
-    ScriptedUiSession session(
-        root, store,
-        {.enable_hot_reload = false,
-         .enable_theme_reload = false,
-         .script_source = R"JS(
+    ScriptedUiSession session(root, store,
+                              {.enable_hot_reload = false,
+                               .enable_theme_reload = false,
+                               .script_source = R"JS(
             var sidecar = __loadAssetSync__('assets/data.json');
             createLabel('sidecar', sidecar.ok ? sidecar.text : String(sidecar.status), '');
             createLabel('resolved', sidecar.resolvedPath, '');
@@ -231,9 +230,9 @@ TEST_CASE("an embedded session resolves the files embedded beside its script",
             createImage('knob', '');
             setImageSource('knob', 'assets/knob.png');
          )JS",
-         .script_name = "ui.js",
-         .embedded_assets = embedded_fixture_assets(),
-         .storage_identity = "com.acme.synth/ui.js"});
+                               .script_name = "ui.js",
+                               .embedded_assets = embedded_fixture_assets(),
+                               .storage_identity = "com.acme.synth/ui.js"});
 
     std::string error;
     REQUIRE(session.load(&error));

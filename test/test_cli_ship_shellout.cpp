@@ -2152,9 +2152,10 @@ fs::path make_dev_build_project(std::string_view name) {
 
 } // namespace
 
-TEST_CASE_METHOD(ShipShelloutFixture,
-                 "pulp ship package on a dev build configures and builds build-ship instead of refusing",
-                 "[cli][shellout][ship][dev-build]") {
+TEST_CASE_METHOD(
+    ShipShelloutFixture,
+    "pulp ship package on a dev build configures and builds build-ship instead of refusing",
+    "[cli][shellout][ship][dev-build]") {
     if (!binary_exists()) {
         SKIP("pulp binary not built");
     }

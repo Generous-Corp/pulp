@@ -119,7 +119,9 @@ struct EditorUiSource {
     bool available() const noexcept {
         return !script_path.empty() || !script_source.empty();
     }
-    bool embedded() const noexcept { return script_path.empty() && !script_source.empty(); }
+    bool embedded() const noexcept {
+        return script_path.empty() && !script_source.empty();
+    }
     /// What log lines call the document.
     std::string label() const {
         return script_path.empty() ? script_name : script_path.string();
@@ -149,9 +151,9 @@ inline EditorUiSource select_editor_ui_source(const EditorAssets& assets, bool e
         if (assets.theme != nullptr && assets.theme_size > 0)
             source.theme_source.assign(reinterpret_cast<const char*>(assets.theme),
                                        assets.theme_size);
-        source.script_name =
-            assets.script_name != nullptr && assets.script_name[0] != '\0' ? assets.script_name
-                                                                            : "ui.js";
+        source.script_name = assets.script_name != nullptr && assets.script_name[0] != '\0'
+                                 ? assets.script_name
+                                 : "ui.js";
         source.embedded_assets = embedded_ui_assets(assets);
         return source;
     }
@@ -198,10 +200,9 @@ inline EditorUiInstance build_editor_ui_for_assets(const EditorAssets& assets,
         }
         options.asset_roots = configured_ui_asset_roots(assets);
         if (!on_disk) {
-            options.storage_identity = storage_identity.empty()
-                                           ? "embedded/" + options.script_name
-                                           : std::string(storage_identity) + "/" +
-                                                 options.script_name;
+            options.storage_identity = storage_identity.empty() ? "embedded/" + options.script_name
+                                                                : std::string(storage_identity) +
+                                                                      "/" + options.script_name;
         }
         options.enable_hot_reload = enable_hot_reload;
         options.enable_theme_reload =
@@ -213,12 +214,13 @@ inline EditorUiInstance build_editor_ui_for_assets(const EditorAssets& assets,
         // fallback goes INTO the root instead of replacing it.
         if (view::ScopedDeferredDocumentLoad::active()) {
             scripted_ui->set_document_loaded_callback(
-                [root_ptr = root.get(), &store, label = source.label()](
-                    bool loaded, const std::string& load_error) {
-                    if (loaded) return;
-                    runtime::log_error(
-                        "Scripted editor UI failed to load from '{}': {}. "
-                        "Falling back to AutoUi.", label, load_error);
+                [root_ptr = root.get(), &store,
+                 label = source.label()](bool loaded, const std::string& load_error) {
+                    if (loaded)
+                        return;
+                    runtime::log_error("Scripted editor UI failed to load from '{}': {}. "
+                                       "Falling back to AutoUi.",
+                                       label, load_error);
                     if (auto fallback = view::AutoUi::build(store))
                         root_ptr->add_child(std::move(fallback));
                 });
@@ -229,8 +231,9 @@ inline EditorUiInstance build_editor_ui_for_assets(const EditorAssets& assets,
             return {std::move(root), std::move(scripted_ui), true};
         }
 
-        runtime::log_error("Scripted editor UI failed to load from '{}': {}. Falling back to AutoUi.",
-                           source.label(), load_error);
+        runtime::log_error(
+            "Scripted editor UI failed to load from '{}': {}. Falling back to AutoUi.",
+            source.label(), load_error);
         if (error && error->empty()) {
             *error = load_error;
         }

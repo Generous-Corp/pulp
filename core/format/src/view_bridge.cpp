@@ -186,7 +186,9 @@ bool ViewBridge::open(std::string* error) {
         auto value_channel_access =
             processor_value_channel_access(processor_, owner_alive_);
         std::string plugin_id;
-        PULP_TRY { plugin_id = processor_.descriptor().bundle_id; }
+        PULP_TRY {
+            plugin_id = processor_.descriptor().bundle_id;
+        }
         PULP_CATCH_ALL {}
         auto instance = build_editor_ui_for_assets(editor_assets_for_processor(processor_), store_,
                                                    options_.enable_hot_reload, &last_error_,

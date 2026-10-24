@@ -197,9 +197,11 @@ void WidgetBridge::set_embedded_assets(std::vector<EmbeddedAsset> assets) {
     embedded_assets_.clear();
     embedded_assets_.reserve(assets.size());
     for (auto& asset : assets) {
-        if (asset.name.empty() || asset.data == nullptr || asset.size == 0) continue;
+        if (asset.name.empty() || asset.data == nullptr || asset.size == 0)
+            continue;
         const auto name = std::filesystem::path(asset.name).lexically_normal();
-        if (!safe_relative_asset_path(name)) continue;
+        if (!safe_relative_asset_path(name))
+            continue;
         asset.name = name.generic_string();
         embedded_assets_.push_back(std::move(asset));
     }
@@ -210,12 +212,15 @@ WidgetBridge::embedded_asset(std::string_view path) const noexcept {
     if (embedded_assets_.empty() || path.empty() || path.find("://") != std::string_view::npos)
         return nullptr;
     const std::string stripped = strip_leading_slashes(std::string(path));
-    if (stripped.empty()) return nullptr;
+    if (stripped.empty())
+        return nullptr;
     const auto relative = std::filesystem::path(stripped).lexically_normal();
-    if (!safe_relative_asset_path(relative)) return nullptr;
+    if (!safe_relative_asset_path(relative))
+        return nullptr;
     const std::string wanted = relative.generic_string();
     for (const auto& asset : embedded_assets_) {
-        if (asset.name == wanted) return &asset;
+        if (asset.name == wanted)
+            return &asset;
     }
     return nullptr;
 }
@@ -226,7 +231,8 @@ std::string WidgetBridge::embedded_asset_data_uri(const EmbeddedAsset& asset) co
 }
 
 std::string WidgetBridge::storage_identity() const {
-    if (!storage_identity_.empty()) return storage_identity_;
+    if (!storage_identity_.empty())
+        return storage_identity_;
     return script_base_dir_.generic_string();
 }
 
@@ -356,7 +362,8 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
     // registration is handled by registerFont(family, path) below.
     register_bridge_function(api, "loadFont", [&self](choc::javascript::ArgumentList args) {
         const auto requested = args.get<std::string>(0, "");
-        if (self.embedded_asset(requested) != nullptr) return choc::value::createBool(true);
+        if (self.embedded_asset(requested) != nullptr)
+            return choc::value::createBool(true);
         auto path = self.resolve_script_relative(requested);
         bool exists = !path.empty() && std::filesystem::exists(path);
         return choc::value::createBool(exists);
@@ -375,8 +382,8 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
         if (const auto* embedded = self.embedded_asset(path)) {
             // The face is already in memory; hand it to the font registry
             // under a name only this bridge's embedded set can produce.
-            const std::string key = "pulp-ui-embed/" + self.storage_identity() + "/" +
-                                    embedded->name;
+            const std::string key =
+                "pulp-ui-embed/" + self.storage_identity() + "/" + embedded->name;
             auto& assets = AssetManager::instance();
             assets.register_embedded(key, embedded->data, embedded->size);
             assets.register_font_family(family, key);
