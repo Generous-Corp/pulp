@@ -40,6 +40,15 @@ _SPECIAL_PREFIXES = (
     "guard variable for ", "reference temporary #0 for ", "reference temporary for ",
     "thread-local wrapper routine for ", "TLS init function for ",
 )
+# An operator's own name: brackets and spaces inside it ("operator>",
+# "operator()", "operator bool", "operator new[]") are not nesting or a return
+# type, so member_owner masks it before measuring depth.
+_OPERATOR_NAME = re.compile(
+    r"\boperator(?:\s*(?:new|delete)(?:\s*\[\])?(?![\w])"
+    r"|\s*\(\)|\s*\[\]|\s*->\*?|\s*<=>|\s*(?:<<|>>)=?"
+    r"|\s*(?:&&|\|\||\+\+|--|[-+*/%^&|~!=<>,]=?)"
+    r"|\s*\"\"\s*\w+"
+    r"|\s+[^()]+?(?=\())")
 _CLOSURE = re.compile(r"'lambda|\{lambda|'block|\{block|'unnamed|\{unnamed|\$_\d|\(anonymous namespace\)")
 
 
@@ -108,6 +117,7 @@ def member_owner(demangled: str) -> str | None:
         if demangled.startswith(prefix):
             demangled = demangled[len(prefix):]
             break
+    demangled = _OPERATOR_NAME.sub("operator_", demangled)
     paren = _top_level(demangled, "(")
     name = demangled[:paren] if paren >= 0 else demangled
     # A template instantiation can carry its return type first.

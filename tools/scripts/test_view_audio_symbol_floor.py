@@ -38,6 +38,18 @@ CORE_DIRTY = (
     "libpulp-view-core.a[inspector.cpp.o]: __ZTIN4pulp4view5MeterE U 0 0\n"
 )
 CORE_CLEAN = "libpulp-view-core.a[inspector.cpp.o]: __ZN4pulp4view4View5paintEv T 0 0\n"
+# The `nm -m` captures Apple's nm prints for the two Mach-O-spelled listings
+# above; a Mach-O archive without one cannot have its weak definitions read.
+AUDIO_M = (
+    "visualizers.cpp.o:\n"
+    "0000000000000010 (__DATA,__const) external __ZTIN4pulp4view5MeterE\n"
+    "0000000000000020 (__TEXT,__text) external __ZN4pulp4view5Meter9set_levelEff\n"
+    "                 (undefined) external __ZN4pulp4view4View5paintEv\n"
+)
+CORE_CLEAN_M = (
+    "inspector.cpp.o:\n"
+    "0000000000000000 (__TEXT,__text) external __ZN4pulp4view4View5paintEv\n"
+)
 CORE_WEAK = "libpulp-view-core.a[inspector.cpp.o]: __ZTIN4pulp4view5MeterE w 0 0\n"
 
 
@@ -55,7 +67,7 @@ class SymbolFloorTests(unittest.TestCase):
             'cat "$last.listing" 2>/dev/null || { echo "no such archive" >&2; exit 1; }\n',
             encoding="utf-8")
         self.nm.chmod(self.nm.stat().st_mode | stat.S_IEXEC)
-        self._archive("audio.a", AUDIO)
+        self._archive("audio.a", AUDIO, AUDIO_M)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -95,9 +107,22 @@ class SymbolFloorTests(unittest.TestCase):
         self.assertEqual(rc, 1, out)
 
     def test_a_clean_library_passes(self):
-        core = self._archive("core.a", CORE_CLEAN)
+        core = self._archive("core.a", CORE_CLEAN, CORE_CLEAN_M)
         rc, out = self._run("--check", f"view-core={core}")
         self.assertEqual(rc, 0, out)
+
+    def test_a_mach_o_archive_without_nm_m_is_inconclusive(self):
+        # A GNU nm passed as --nm reads Apple-spelled listings but has no -m,
+        # so a weak copy would be invisible; the floor must not pass.
+        core = self._archive("core.a", CORE_CLEAN)
+        rc, out = self._run("--check", f"view-core={core}")
+        self.assertEqual(rc, 2, out)
+        self.assertIn("INCONCLUSIVE", out)
+        self.assertIn("-m gave no darwin listing", out)
+        self._archive("audio.a", AUDIO)
+        core = self._archive("core.a", CORE_CLEAN, CORE_CLEAN_M)
+        rc, out = self._run("--check", f"view-core={core}")
+        self.assertEqual(rc, 2, out)
 
     def test_an_undefined_symbol_view_audio_also_needs_is_not_a_violation(self):
         # View::paint is undefined in the audio archive too; only symbols the
@@ -110,7 +135,7 @@ class SymbolFloorTests(unittest.TestCase):
         dirty = self._archive("script.a", CORE_DIRTY)
         rc, out = self._run("--check", f"view-script={dirty}", "--debt", "view-script=P19")
         self.assertEqual(rc, 0, out)
-        clean = self._archive("clean.a", CORE_CLEAN)
+        clean = self._archive("clean.a", CORE_CLEAN, CORE_CLEAN_M)
         rc, out = self._run("--check", f"view-script={clean}", "--debt", "view-script=P19")
         self.assertEqual(rc, 1, out)
         self.assertIn("no longer matches", out)
@@ -217,13 +242,19 @@ class SymbolFloorTests(unittest.TestCase):
 
     def test_apple_letters_alone_cannot_see_the_weak_copy(self):
         # The control the darwin read exists for: without `nm -m`, the same
-        # Mach-O archive's letters show no weak definition at all.
+        # Mach-O archive's letters show no weak definition at all, so the
+        # planted copy would pass. The check refuses to judge instead.
         listing = (FIXTURES / "darwin_compiled_view_core_planted.P.txt").read_text(encoding="utf-8")
         self.assertEqual(nm_symbols.weak_defined(listing), set())
+        self.assertTrue(nm_symbols.looks_mach_o(listing))
         self._fixture("audio.a", "darwin_compiled_view_audio")
         core = self._archive("core.a", listing)
         rc, out = self._run("--check", f"view-core={core}")
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("INCONCLUSIVE", out)
+        # ELF letters carry W/V, so the same rule never refuses an ELF read.
+        elf = (FIXTURES / "elf_view_core_planted.P.txt").read_text(encoding="utf-8")
+        self.assertFalse(nm_symbols.looks_mach_o(elf))
 
     def test_the_registered_gate_counts_weak_definitions(self):
         # The ctest calls archive_symbol_closure_check.py directly, so it must
