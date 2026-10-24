@@ -196,8 +196,10 @@ RangeSlider::ChromiumRefreshParts RangeSlider::chromium_refresh_parts(float devi
     const float position = has_modulated_
                                ? (skew_ == 1.0f ? modulated_ : std::pow(modulated_, skew_))
                                : value_to_position_();
+    // Chromium paints a theme part in its pixel-snapped CSS box, so an imported
+    // control paints in the snapped rect its capture recorded.
     auto parts =
-        chromium_refresh_parts(local_bounds(), position, orientation_ == Orientation::vertical,
+        chromium_refresh_parts(self_paint_bounds(), position, orientation_ == Orientation::vertical,
                                control_state(), color_scheme_, accent, device_scale);
     if (has_modulated_) {
         parts.value_fill = resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
@@ -470,8 +472,8 @@ Checkbox::ControlState Checkbox::control_state() const {
 }
 
 Checkbox::ChromiumRefreshParts Checkbox::chromium_refresh_parts() const {
-    return chromium_refresh_parts(local_bounds(), kind_, checked_, indeterminate_, control_state(),
-                                  color_scheme_, accent_color_);
+    return chromium_refresh_parts(self_paint_bounds(), kind_, checked_, indeterminate_,
+                                  control_state(), color_scheme_, accent_color_);
 }
 
 void Checkbox::paint_chromium_refresh_(canvas::Canvas& canvas) {
