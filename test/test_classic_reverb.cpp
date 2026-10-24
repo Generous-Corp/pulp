@@ -10,6 +10,7 @@
 #include <pulp/signal/classic_reverb.hpp>
 #include <pulp/signal/fdn_reverb.hpp>
 
+#include "support/denormal_tail.hpp"
 #include "support/fdn_reverb_fixture.hpp"
 #include "support/reverb_metrics.hpp"
 
@@ -341,7 +342,7 @@ TEST_CASE("fdn reverb classic tier runs the classic engine behind the same contr
 // instruction count does not depend on host load the way wall time does, so
 // the budget can sit between the two and fail only on a real regression.
 TEST_CASE("classic reverb comb bank stays within its instruction budget",
-          "[reverb][classic][throughput]") {
+          "[reverb][classic][throughput][performance]") {
 #if !defined(PULP_CLASSIC_HAS_INSTRUCTION_COUNT)
     SKIP("retired-instruction counts are read on arm64 macOS only");
 #elif !defined(NDEBUG) || defined(PULP_CLASSIC_INSTRUMENTED)
@@ -441,4 +442,51 @@ TEST_CASE("classic reverb sweeps its controls without zipper noise",
         REQUIRE(at_control < floor_control + 3.0);
         REQUIRE(at_block < floor_block + 3.0);
     }
+}
+
+TEST_CASE("classic reverb comb bank decays to exact silence without flush-to-zero",
+          "[reverb][classic][denormal]") {
+    // With subnormals representable, a comb whose loop gain exceeds one half
+    // rounds its smallest subnormal back to itself every pass and never
+    // reaches zero: the bank keeps recirculating subnormals, which is slow on
+    // x86 without FTZ, long after the output has been snapped silent.
+    if (pulp::test::denormal_tail::flush_to_zero_active())
+        SKIP("subnormals flush to zero on this thread; the limit cycle cannot form");
+    for (const double damp_hi : {0.0, 0.5, 1.0}) {
+        INFO("damp_hi " << damp_hi);
+        ClassicReverb reverb;
+        configure(reverb, 0.4, damp_hi);
+        // 20 s: the loop falls 60 dB per 0.4 s, so the 900 dB from full
+        // scale to the smallest subnormal takes about 6 s.
+        std::vector<float> in(static_cast<std::size_t>(kHostRate * 20.0), 0.0f);
+        in[0] = 1.0f;
+        (void)render_classic(reverb, in);
+        CHECK(reverb.combs_silent());
+    }
+}
+
+TEST_CASE("classic reverb follows automated size without a snap", "[reverb][classic][automation]") {
+    // A host automates size by moving the target block by block; nothing
+    // snaps the parameters. The comb lengths must follow the smoothed
+    // control to the lengths a snap at the new size gives.
+    ClassicReverb reverb;
+    configure(reverb, 1.5, 0.3);
+    reverb.set_parameter(Param::size, 0.2);
+    reverb.snap_parameters();
+    const int before = reverb.comb_length(0);
+
+    std::vector<float> in(static_cast<std::size_t>(kHostRate * 0.5), 0.0f);
+    in[0] = 1.0f;
+    reverb.set_parameter(Param::size, 0.8);
+    (void)render_classic(reverb, in);
+
+    ClassicReverb snapped;
+    configure(snapped, 1.5, 0.3);
+    snapped.set_parameter(Param::size, 0.8);
+    snapped.snap_parameters();
+    INFO("before " << before << ", after " << reverb.comb_length(0) << ", snapped "
+                   << snapped.comb_length(0));
+    CHECK(reverb.comb_length(0) != before);
+    for (int c = 0; c < pulp::signal::classic_reverb::kCombs; ++c)
+        CHECK(reverb.comb_length(c) == snapped.comb_length(c));
 }
