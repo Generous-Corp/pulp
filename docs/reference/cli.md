@@ -1161,6 +1161,7 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 `ship` runs in a Pulp source checkout or in an SDK consumer project (`pulp.toml`, no `core/`); both package from `<project>/build`. The signing preflight (`tools/scripts/ensure_signing_ready.sh` in a checkout) and the default entitlements (`ship/templates/entitlements.plist`) come, in a consumer project, from the selected SDK's `share/pulp/ship/`. An SDK installed before that directory existed has neither, and `ship doctor` / `ship sign` name the missing path.
 
 `sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist` (from the SDK in a consumer project).
+When the build directory's `CMakeCache.txt` selects a JIT JS engine (`PULP_JS_ENGINE=v8` or `jsc`), `sign` refuses an entitlements file that does not grant `com.apple.security.cs.allow-jit`: the hardened runtime would let the bundle sign and then abort it when the editor starts the engine. The default entitlements grant no JIT, so a V8/JSC build must pass `--entitlements` (the AUv3 build renders per-engine files under `build/AUv3/`).
 `--path` signs exactly one explicit desktop artifact instead of scanning the build dirs:
 macOS `.app`/`.dmg`/plugin bundles, or Windows `.exe`/plugin bundles. `.pkg`
 installers are signed at creation time with a Developer ID **Installer**

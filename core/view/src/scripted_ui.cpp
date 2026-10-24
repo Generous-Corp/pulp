@@ -106,6 +106,7 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store,
                                              : std::move(options.theme_path)),
       asset_roots_(std::move(options.asset_roots)),
       granted_capabilities_(options.granted_capabilities),
+      allow_unreviewed_file_paths_(options.allow_unreviewed_file_paths),
       hot_reload_enabled_(options.enable_hot_reload),
       theme_reload_enabled_(options.enable_theme_reload),
       runtime_import_enabled_(options.enable_runtime_import),
@@ -750,6 +751,7 @@ bool ScriptedUiSession::rebuild_from_code(
                 probe_bridge->install_runtime_import_handlers();
             probe_bridge->set_asset_roots(asset_roots_);
             probe_bridge->set_script_base_dir(source_path.parent_path());
+            probe_bridge->set_allow_unreviewed_file_paths(allow_unreviewed_file_paths_);
             probe_bridge->set_host_kind(host_kind_);
             probe_bridge->set_time_source(time_source_);
             load_script_before_deadline(*probe_bridge, *probe_engine, code, deadline);
@@ -818,6 +820,7 @@ bool ScriptedUiSession::rebuild_from_code(
         next_bridge->set_value_channel_access(value_channel_access_);
         next_bridge->set_asset_roots(asset_roots_);
         next_bridge->set_script_base_dir(source_path.parent_path());
+        next_bridge->set_allow_unreviewed_file_paths(allow_unreviewed_file_paths_);
         next_bridge->set_host_kind(host_kind_);
         next_bridge->set_time_source(time_source_);
         if (repaint_callback_) {

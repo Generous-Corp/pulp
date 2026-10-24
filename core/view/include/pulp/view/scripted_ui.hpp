@@ -50,6 +50,10 @@ struct ScriptedUiOptions {
     /// (0 = unlimited). Enforced by the QuickJS backend; see
     /// JsEngine::set_memory_limit.
     std::size_t js_memory_limit_bytes = kDefaultJsMemoryLimitBytes;
+    /// Let path-taking bridge APIs open files outside the script directory
+    /// and `asset_roots` (WidgetBridge::set_allow_unreviewed_file_paths). Off
+    /// by default; a DAW-hosted editor must leave it off.
+    bool allow_unreviewed_file_paths = false;
 };
 
 /// Present while the SDK has view-first document loading (ScopedDeferredDocumentLoad,
@@ -303,6 +307,7 @@ private:
     std::filesystem::path last_good_script_path_;
     std::vector<std::filesystem::path> asset_roots_;
     CapabilitySet granted_capabilities_ = CapabilitySet::all();
+    bool allow_unreviewed_file_paths_ = false;
     bool hot_reload_enabled_ = false;
     bool theme_reload_enabled_ = false;
     bool runtime_import_enabled_ = false;
@@ -375,8 +380,12 @@ private:
                                 std::string* error) const;
     bool poll_theme_reload(std::string* error);
     void attach_inspector_port(ScriptEngine* engine) {
-        if (inspector_port_)
-            inspector_port_->attach(engine);
+        if (!inspector_port_)
+            return;
+        // The grant precedes the engine so the port never reports an
+        // evaluable realm it has not yet been told about.
+        inspector_port_->set_realm_capabilities(granted_capabilities_);
+        inspector_port_->attach(engine);
     }
     void detach_inspector_port() {
         if (inspector_port_)

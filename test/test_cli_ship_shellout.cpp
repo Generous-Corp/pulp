@@ -2124,3 +2124,69 @@ TEST_CASE("shellout timeout falls back to the default on unusable overrides",
                 pulp_test_cli::kDefaultShelloutTimeoutMs);
     }
 }
+
+// A V8 / JavaScriptCore build needs com.apple.security.cs.allow-jit under the
+// hardened runtime. `pulp ship sign` reads the configured engine from the
+// build's CMakeCache and fails closed when the entitlements it is about to
+// apply grant no JIT, before any codesign or signing preflight runs.
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign refuses a JIT-engine build whose entitlements lack allow-jit",
+                 "[cli][shellout][ship][entitlements][security]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("jit-entitlement", /*with_build_cache=*/true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_JS_ENGINE:STRING=v8\n";
+    }
+    make_fake_bundle(root, "VST3", "JitPlugin.vst3");
+    write_signing_doctor_stub(root);
+
+    auto no_jit = root / "no-jit.plist";
+    {
+        std::ofstream plist(no_jit);
+        plist << "<plist version=\"1.0\"><dict>\n"
+              << "    <key>com.apple.security.device.audio-input</key>\n    <true/>\n"
+              << "</dict></plist>\n";
+    }
+    auto refused = run_pulp_in(
+        root, {"ship", "sign", "--identity", "fake-id", "--entitlements", no_jit.string()});
+    REQUIRE_FALSE(refused.timed_out);
+    REQUIRE(refused.exit_code != 0);
+    auto combined = refused.stdout_output + refused.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "allow-jit"));
+    REQUIRE(contains(combined, "PULP_JS_ENGINE=v8"));
+    // Refused before signing: no "Signing" progress line was printed.
+    REQUIRE_FALSE(contains(combined, "Signing JitPlugin"));
+
+    // Control: the same build with allow-jit granted gets past the gate (and
+    // then fails on the fake identity, or succeeds, but not on entitlements).
+    auto with_jit = root / "jit.plist";
+    {
+        std::ofstream plist(with_jit);
+        plist << "<plist version=\"1.0\"><dict>\n"
+              << "    <key>com.apple.security.cs.allow-jit</key>\n    <true/>\n"
+              << "</dict></plist>\n";
+    }
+    auto admitted = run_pulp_in(
+        root, {"ship", "sign", "--identity", "fake-id", "--entitlements", with_jit.string()});
+    REQUIRE_FALSE(admitted.timed_out);
+    auto admitted_out = admitted.stdout_output + admitted.stderr_output;
+    INFO(admitted_out);
+    REQUIRE_FALSE(contains(admitted_out, "refusing to sign a PULP_JS_ENGINE"));
+
+    // A QuickJS build never triggers the gate.
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt");
+        cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << root.string() << "\n"
+              << "PULP_JS_ENGINE:STRING=quickjs\n";
+    }
+    auto quickjs = run_pulp_in(
+        root, {"ship", "sign", "--identity", "fake-id", "--entitlements", no_jit.string()});
+    REQUIRE_FALSE(quickjs.timed_out);
+    REQUIRE_FALSE(contains(quickjs.stdout_output + quickjs.stderr_output,
+                           "refusing to sign a PULP_JS_ENGINE"));
+    fs::remove_all(root);
+}

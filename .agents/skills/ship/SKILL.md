@@ -277,6 +277,23 @@ Unit-tested in both directions in `test/test_sdk_distribution_guard.cpp`, plus
 the CMake-level provenance contract in
 `test/cmake/test_sdk_provenance_contract.cmake`.
 
+## JIT-engine entitlement guard
+
+`pulp ship sign` reads `PULP_JS_ENGINE` from `<build>/CMakeCache.txt`. For
+`v8` or `jsc` it refuses to sign unless the entitlements plist it is about to
+apply grants `com.apple.security.cs.allow-jit`, and it does so before the
+signing preflight or any `codesign` runs. The reason is that the failure it
+prevents is silent at sign time: the hardened runtime signs the bundle
+happily, and the editor then aborts the instant V8/JSC maps its first JIT
+page. The default `ship/templates/entitlements.plist` grants no JIT, so a
+JIT-engine build must pass `--entitlements` explicitly; the AUv3 build renders
+per-engine files (`build/AUv3/<target>_AUv3.entitlements`) via
+`tools/cmake/PulpAuv3Entitlements.cmake`, which emits `allow-jit` only for
+those engines and never `allow-unsigned-executable-memory` (MAP_JIT is
+covered by `allow-jit`). QuickJS builds are untouched by the guard. The
+check is keyed on the configured engine, not on symbols in the binary, so a
+bundle copied from another build directory is not detected.
+
 ## Workflows
 
 ### One-off share (macOS): hand a build to a friend, properly signed

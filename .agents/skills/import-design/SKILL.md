@@ -1976,6 +1976,19 @@ When testing emitted JS, note the unquoted `// Source:` header comment still
 names the decode-time input; assert on QUOTED paths (`'assets/...'`) when
 pinning "no absolute references".
 
+**Fonts are NOT localized, and a hosted editor now refuses the absolute
+path.** `localize_ir_assets` rewrites image/sprite paths to `assets/<file>`
+but leaves `font.resolved_path` absolute (it points into the design pack or
+`base_dir`), so emitted `registerFont('Family', '/abs/.../face.ttf')` names a
+file outside the script directory. `WidgetBridge` refuses an absolute path
+that is not inside the script directory or a reviewed asset root unless the
+host calls `set_allow_unreviewed_file_paths(true)`; `--validate`,
+`pulp-screenshot` and `pulp-design-tool` opt in (developer tools rendering
+the developer's own import), but `ScriptedUiSession` (every DAW-hosted
+editor) does not, so such a font silently falls back to the system face in a
+plugin. Until fonts are localized like images, copy the face beside `ui.js`
+and reference it as `assets/<face>.ttf`.
+
 **Windows path-separator gotcha (asset/font paths baked into generated JS):**
 when the CLI's asset pass (`resolve_sprite_skins` in `sprite_skins.cpp`) resolves an `asset_ref`/font `asset_id` to a path
 that is stamped into `attributes["asset_path"]` / `font.resolved_path` (and from

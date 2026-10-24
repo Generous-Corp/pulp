@@ -177,10 +177,35 @@ public:
     }
     const std::filesystem::path& script_base_dir() const noexcept { return script_base_dir_; }
 
-    /// Resolve an existing relative file against the script directory or a
-    /// reviewed asset root. Asset-root candidates are canonicalized and must
-    /// remain inside their root so symlinks and `..` cannot escape it.
-    /// Absolute paths, URIs, and misses pass through unchanged.
+    /// Whether path-taking bridge APIs (setImageSource, registerFont,
+    /// loadFont, sprite strips, __loadAssetSync__) may open a file that lies
+    /// outside the script directory and the reviewed asset roots. Off by
+    /// default: an absolute path or `file://` URL is refused unless it
+    /// resolves inside one of those roots, and `__loadAssetSync__` never falls
+    /// back to a raw filesystem read. A desktop tool that renders its own
+    /// import output, or an app whose UI legitimately previews user-picked
+    /// files, opts in; a DAW-hosted editor never should. The Filesystem
+    /// capability is still required for the API group to exist at all.
+    void set_allow_unreviewed_file_paths(bool allow) noexcept {
+        allow_unreviewed_file_paths_ = allow;
+    }
+    bool allow_unreviewed_file_paths() const noexcept {
+        return allow_unreviewed_file_paths_;
+    }
+
+    /// Whether a script may open `path`, an absolute filesystem path. True
+    /// when the realm holds Filesystem AND either unreviewed paths are allowed
+    /// or the canonicalized path stays inside the script directory or a
+    /// reviewed asset root. Pure; opens nothing.
+    bool permits_file_path(const std::filesystem::path& path) const;
+
+    /// Resolve a file a script named against the script directory or a
+    /// reviewed asset root. Candidates are canonicalized and must remain
+    /// inside their root so symlinks and `..` cannot escape it. An absolute
+    /// path is returned unchanged only when permits_file_path() allows it;
+    /// otherwise, like a relative path that escapes its root, it resolves to
+    /// the empty string and the caller treats that as a refusal. URIs and
+    /// in-root relative misses pass through unchanged.
     std::string resolve_script_relative(const std::string& path) const;
 
     /// load_script overload that retains a script identifier. `script_id` is
@@ -457,6 +482,7 @@ private:
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;
     std::filesystem::path script_base_dir_;
+    bool allow_unreviewed_file_paths_ = false;
 
     /// Per-bridge persisted-store directories (widget storage, style presets),
     /// resolved once per script base dir by the storage registrars so a UI
