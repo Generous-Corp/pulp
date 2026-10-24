@@ -248,6 +248,8 @@ public:
     bool draw_image_from_file_rect(const std::string& path,
                                    float sx, float sy, float sw, float sh,
                                    float dx, float dy, float dw, float dh) override;
+    bool measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                 float& out_height) override;
     bool measure_image_from_file(const std::string& path,
                                  float& out_width, float& out_height) override;
 

@@ -1,5 +1,6 @@
 #include <chrono>
 #include <optional>
+#include <pulp/format/editor_assets.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/editor_ui.hpp>
@@ -56,6 +57,17 @@ view::ScriptedUiSession* safe_active_scripted_ui(Processor& processor) noexcept 
 bool safe_supports_in_place_scripted_ui_reload(Processor& processor) noexcept {
     PULP_TRY { return processor.supports_in_place_scripted_ui_reload(); }
     PULP_CATCH_ALL { return false; }
+}
+
+// The editor assets declared for this processor's plug-in: its keyed bundle
+// entry when it has one, otherwise the binary's own registration.
+EditorAssets editor_assets_for_processor(Processor& processor) noexcept {
+    std::string plugin_id;
+    PULP_TRY {
+        plugin_id = processor.descriptor().bundle_id;
+    }
+    PULP_CATCH_ALL {}
+    return editor_assets_for(plugin_id.empty() ? nullptr : plugin_id.c_str());
 }
 
 ViewSize safe_view_size(Processor& processor) noexcept {
@@ -173,9 +185,9 @@ bool ViewBridge::open(std::string* error) {
         // Fall back to the scripted-UI or AutoUi default.
         auto value_channel_access =
             processor_value_channel_access(processor_, owner_alive_);
-        auto instance = build_editor_ui_with_value_channel_access(
-            store_, options_.enable_hot_reload, &last_error_,
-            std::move(value_channel_access));
+        auto instance = build_editor_ui_for_assets(editor_assets_for_processor(processor_), store_,
+                                                   options_.enable_hot_reload, &last_error_,
+                                                   std::move(value_channel_access));
         if (!instance.root) {
             if (error) *error = last_error_.empty() ? "ViewBridge: failed to build editor UI" : last_error_;
             return false;

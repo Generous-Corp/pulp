@@ -1,0 +1,9 @@
+# The importer differential holdout is a byte-frozen, third-party browser
+# corpus.  It is loaded by the fixture harness as a complete document and is
+# never shipped or executed as Pulp application code.  Keep it out of CodeQL's
+# application-data-flow scan so a corpus-preserving DOMParser operation does
+# not become a product security finding.  The harness and native importer
+# gates still validate the corpus and its provenance.
+name: pulp-codeql
+paths-ignore:
+  - test/fixtures/import-differential/holdout/**

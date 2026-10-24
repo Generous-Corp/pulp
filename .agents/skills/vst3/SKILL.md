@@ -777,6 +777,20 @@ structural test enforces that every hosted adapter uses the factory. See the
 
 ## Gotchas
 
+### Linux: export only `GetPluginFactory` / `ModuleEntry` / `ModuleExit`
+
+On Linux a plug-in image exports only its entry points: `_pulp_apply_elf_exports`
+(`tools/cmake/PulpInstall.cmake`) compiles the format target with
+`-fvisibility=hidden -fvisibility-inlines-hidden` and links it with a version
+script whose `local: *` localizes everything else, including the archives'
+symbols. Without it, every Pulp plug-in in a Linux host shared its inline
+variables and function-local statics with every other one: they are
+`STB_GNU_UNIQUE`, which glibc binds process-wide **even under `RTLD_LOCAL`**,
+so two different plug-ins' factories each listed both plug-ins. For VST3 the measured failure was under `RTLD_GLOBAL`: the second module's
+factory reported the first module's class. `linux-plugin-isolation-vst3` checks
+that each module's factory lists only its own class under both modes and that
+nothing else is exported.
+
 ### Missing `vst3_entry.cpp` → no `GetPluginFactory` symbol → silent host reject
 
 `PulpPluginFormats.cmake`'s `_pulp_add_vst3()` only links a user-side

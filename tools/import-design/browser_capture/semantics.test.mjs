@@ -51,6 +51,20 @@ test("the capture collects the properties a whole panel needs to be drawn",
       // Read but not drawn: a dashed stroke rendered solid is a wrong picture,
       // so its presence sends the subtree to the element fallback instead.
       "stroke-dasharray",
+      // A stylesheet-set cap, join or limit is visible only as computed style.
+      "stroke-linecap",
+      "stroke-linejoin",
+      "stroke-miterlimit",
+      "stroke-dashoffset",
+      // A themed form control's computed fills and borders are not what the
+      // native theme paints, and only `appearance` says which kind it is.
+      // Padding places the value text a text input or select draws itself.
+      "appearance",
+      "accent-color",
+      "padding-top",
+      "padding-right",
+      "padding-bottom",
+      "padding-left",
     ]) {
       assert.ok(COMPUTED_STYLES.includes(property),
         `${property} must be collected; a property the capture skips is one ` +

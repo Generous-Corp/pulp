@@ -1,0 +1,1142 @@
+{
+  "schema": "pulp.gpu-audio.render-loss-consumer-vectors.v1",
+  "provenance": "Transcribed from the Pulp/Vellum render-owner loss handoff package (2026-10-21). Pulp-side inputs only; not an execution of any Vellum vector.",
+  "vectors": [
+    {
+      "id": "P-10 replay-then-second-loss",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "accepted",
+            "admission": "open"
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 3,
+          "gen": 8,
+          "ep": 4,
+          "event": "E2",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 4,
+          "gen": 8,
+          "ep": 4,
+          "event": "E2",
+          "replay": "succeeded",
+          "next_gen": 9,
+          "next_ep": 5,
+          "expect": {
+            "outcome": "accepted",
+            "admission": "open"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 4,
+        "gen": 9,
+        "ep": 5,
+        "closure": "open",
+        "admission": "open",
+        "fence_transitions": 2,
+        "reopen_transitions": 2
+      }
+    },
+    {
+      "id": "P-11 epoch-only change",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 3,
+          "gen": 8,
+          "ep": 5,
+          "event": "E2",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "fenced"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 3,
+        "gen": 8,
+        "ep": 5,
+        "closure": "open",
+        "admission": "fenced"
+      }
+    },
+    {
+      "id": "N-12 unknown-contract-version",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "contract_version": 2,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "unknown_contract_version",
+            "admission": "open"
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "fenced"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 1,
+        "gen": 7,
+        "ep": 3,
+        "closure": "open",
+        "admission": "fenced"
+      }
+    },
+    {
+      "id": "N-13 terminal-with-replay-success",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "replay": "succeeded",
+          "terminal": {
+            "kind": "provider_refused",
+            "replay": "succeeded"
+          },
+          "reason": "provider_refused",
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "invalid_terminal_block",
+            "admission": "open"
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "next_gen": 8,
+          "next_ep": 4,
+          "terminal": {
+            "kind": "provider_refused"
+          },
+          "reason": "provider_refused",
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "invalid_terminal_block",
+            "admission": "open"
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "terminal": {
+            "kind": "provider_refused"
+          },
+          "reason": "provider_refused",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "closed"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 1,
+        "gen": 7,
+        "ep": 3,
+        "closure": "terminal",
+        "admission": "closed",
+        "fallback_reason": "device_lost"
+      }
+    },
+    {
+      "id": "N-14 quiescence-regression",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "quiescence": "quiescent",
+          "expect": {
+            "outcome": "accepted",
+            "lost_generation_quiescent": true
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E2",
+          "quiescence": "draining",
+          "expect": {
+            "outcome": "rejected_fail_closed",
+            "refusal": "quiescence_regression",
+            "admission": "closed"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 1,
+        "gen": 7,
+        "ep": 3,
+        "closure": "resync_required",
+        "admission": "closed"
+      }
+    },
+    {
+      "id": "N-15 unknown-reason-replay-success",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "reason": "unknown",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "reason": "unknown",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "replay_success_requires_known_reason",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "reason": "unknown",
+          "replay": "failed",
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "terminal": {
+            "kind": "replay_failed"
+          },
+          "expect": {
+            "outcome": "accepted",
+            "admission": "closed"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 2,
+        "gen": 7,
+        "ep": 3,
+        "closure": "terminal",
+        "admission": "closed"
+      }
+    },
+    {
+      "id": "N-16 generation-exhaustion",
+      "scope": "consumer-half",
+      "vellum_gated_reason": "The owner choosing replay_failed at UINT64_MAX instead of wrapping is producer behaviour only Vellum can supply. The consumer half refuses any success that would wrap and accepts the terminal replay_failed result.",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": "u64max",
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": "u64max",
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_gen": 1,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "replay_success_requires_new_generation_and_surface_epoch",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": "u64max",
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_ep": 4,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "replay_success_requires_new_generation_and_surface_epoch",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": "u64max",
+          "ep": 3,
+          "event": "E1",
+          "replay": "failed",
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "terminal": {
+            "kind": "replay_failed"
+          },
+          "expect": {
+            "outcome": "accepted",
+            "admission": "closed"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 2,
+        "gen": "u64max",
+        "ep": 3,
+        "closure": "terminal",
+        "admission": "closed"
+      }
+    },
+    {
+      "id": "N-17 implicit-reset",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 3,
+          "gen": 8,
+          "ep": 4,
+          "event": "E2",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "install",
+          "owner": "A",
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "implicit_reset_forbidden"
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 1,
+          "ep": 1,
+          "event": "E9",
+          "expect": {
+            "outcome": "ignored_stale",
+            "refusal": "stale_sequence",
+            "admission": "fenced"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 3,
+        "gen": 8,
+        "ep": 4,
+        "closure": "open",
+        "admission": "fenced"
+      }
+    },
+    {
+      "id": "R-01 loss-before-replay",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "fenced",
+            "replay_pending": true
+          }
+        },
+        {
+          "op": "completion",
+          "gen": 7,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "completion_while_fenced"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "accepted",
+            "admission": "open",
+            "replay_pending": false
+          }
+        },
+        {
+          "op": "completion",
+          "gen": 8,
+          "expect": {
+            "outcome": "accepted"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 2,
+        "gen": 8,
+        "ep": 4,
+        "closure": "open",
+        "admission": "open",
+        "fence_transitions": 1,
+        "reopen_transitions": 1
+      }
+    },
+    {
+      "id": "R-02 replay-before-loss",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "replay_result",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "rejected_fail_closed",
+            "refusal": "replay_without_loss",
+            "admission": "closed"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 0,
+        "closure": "resync_required",
+        "admission": "closed"
+      }
+    },
+    {
+      "id": "R-03a second-replay-result",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "accepted",
+            "admission": "open"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 3,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "expect": {
+            "outcome": "rejected_fail_closed",
+            "refusal": "duplicate_replay_result",
+            "admission": "closed"
+          },
+          "next_gen": 8,
+          "next_ep": 4
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 2,
+        "gen": 8,
+        "ep": 4,
+        "closure": "resync_required",
+        "admission": "closed"
+      }
+    },
+    {
+      "id": "R-03b byte-identical replay retransmit",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "accepted",
+            "admission": "open"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "ignored_duplicate",
+            "admission": "open"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 2,
+        "gen": 8,
+        "ep": 4,
+        "closure": "open",
+        "admission": "open",
+        "fence_transitions": 1,
+        "reopen_transitions": 1
+      }
+    },
+    {
+      "id": "R-04 replay-for-other-event",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E2",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "rejected_fail_closed",
+            "refusal": "replay_event_id_mismatch",
+            "admission": "closed"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 1,
+        "gen": 7,
+        "ep": 3,
+        "closure": "resync_required",
+        "admission": "closed"
+      }
+    },
+    {
+      "id": "R-05 missing-replay-result",
+      "scope": "consumer-half",
+      "vellum_gated_reason": "The owner-declared replay bound and the receipt's replay=missing field are open for Vellum (package section 13.11). The consumer half proves silence never reopens admission.",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "fenced",
+            "replay_pending": true
+          }
+        },
+        {
+          "op": "completion",
+          "gen": 7,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "completion_while_fenced",
+            "admission": "fenced",
+            "replay_pending": true
+          }
+        },
+        {
+          "op": "completion",
+          "gen": 7,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "completion_while_fenced",
+            "admission": "fenced",
+            "replay_pending": true
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 1,
+        "gen": 7,
+        "ep": 3,
+        "closure": "open",
+        "admission": "fenced",
+        "reopen_transitions": 0
+      }
+    },
+    {
+      "id": "R-06 replay-identity-drift",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "provider": "other",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "replay_identity_mismatch",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "owner": "B",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "replay_identity_mismatch",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "accepted",
+            "admission": "open"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 2,
+        "gen": 8,
+        "ep": 4,
+        "closure": "open",
+        "admission": "open"
+      }
+    },
+    {
+      "id": "R-07 manifest-schema-change",
+      "scope": "consumer",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "manifest_schema": "fixture.resource-manifest.v2",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "resource_manifest_identity_changed",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "manifest": "M2",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "resource_manifest_digest_changed",
+            "admission": "fenced"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 1,
+        "gen": 7,
+        "ep": 3,
+        "closure": "open",
+        "admission": "fenced"
+      }
+    },
+    {
+      "id": "R-08a interleaved-loss-during-replay",
+      "scope": "consumer-half",
+      "vellum_gated_reason": "R-08 is an open question for Vellum (package sections 7 and 13.11). The consumer implements the package's proposed rule: a second open loss on one owner is refused and the cursor closes.",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E2",
+          "expect": {
+            "outcome": "rejected_fail_closed",
+            "refusal": "interleaved_loss_during_replay",
+            "admission": "closed"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 1,
+        "gen": 7,
+        "ep": 3,
+        "closure": "resync_required",
+        "admission": "closed"
+      }
+    },
+    {
+      "id": "R-08b proposed resolution through replay failure and handoff",
+      "scope": "consumer-half",
+      "vellum_gated_reason": "Same open question as R-08a. This is the package's proposed continuation: E1 ends with replay failed (terminal kind device_lost), then H9 installs a new owner.",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "failed",
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "terminal": {
+            "kind": "device_lost"
+          },
+          "expect": {
+            "outcome": "accepted",
+            "admission": "closed"
+          }
+        },
+        {
+          "op": "handoff",
+          "from": "A",
+          "to": "B",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "open"
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 8,
+          "ep": 4,
+          "event": "E2",
+          "owner": "B",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "fenced"
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 3,
+          "gen": 9,
+          "ep": 5,
+          "event": "E3",
+          "owner": "A",
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "owner_reuse_without_explicit_handoff",
+            "admission": "fenced"
+          }
+        }
+      ],
+      "final": {
+        "owner": "B",
+        "seq": 1,
+        "gen": 8,
+        "ep": 4,
+        "closure": "open",
+        "admission": "fenced"
+      }
+    },
+    {
+      "id": "T-01 teardown-suppresses-late-completion",
+      "scope": "consumer-half",
+      "vellum_gated_reason": "That the owner itself never fires cb1, and the fake-backend receipt's suppression count, need Vellum's fake backend. The consumer half proves a late completion cannot retire audio work.",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "reason": "owner_teardown",
+          "terminal": {
+            "kind": "owner_teardown"
+          },
+          "expect": {
+            "outcome": "accepted",
+            "admission": "closed",
+            "lost_generation_quiescent": true
+          }
+        },
+        {
+          "op": "completion",
+          "gen": 7,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "callback_after_teardown"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 1,
+        "gen": 7,
+        "ep": 3,
+        "closure": "terminal",
+        "admission": "closed",
+        "fallback_reason": "teardown"
+      }
+    },
+    {
+      "id": "T-02 teardown-races-callback",
+      "scope": "vellum-gated",
+      "vellum_gated_reason": "cb1_end < quiescent is an ordering property of the owner's own trace. The consumer receives only the published event and cannot observe when cb1 returned."
+    },
+    {
+      "id": "T-03 no-event-after-terminal",
+      "scope": "consumer-half",
+      "vellum_gated_reason": "Failing the receipt when the fake backend's own trace shows an emission needs Vellum's fake backend. The consumer half rejects every event after terminal.",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "reason": "provider_refused",
+          "terminal": {
+            "kind": "provider_refused"
+          },
+          "expect": {
+            "outcome": "accepted",
+            "admission": "closed"
+          }
+        },
+        {
+          "op": "loss",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E2",
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "event_after_terminal",
+            "admission": "closed"
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "rejected",
+            "refusal": "event_after_terminal",
+            "admission": "closed"
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 1,
+        "gen": 7,
+        "ep": 3,
+        "closure": "terminal",
+        "admission": "closed"
+      }
+    },
+    {
+      "id": "T-04 post-loss-quiescence-bound",
+      "scope": "consumer-half",
+      "vellum_gated_reason": "Reaching quiescent within an owner-declared bound is producer behaviour, and the bound itself is open for Vellum. The consumer half proves shared resources stay held while draining and become releasable only on a quiescent event, with no waiting.",
+      "trace": [
+        {
+          "op": "loss",
+          "seq": 1,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "quiescence": "draining",
+          "expect": {
+            "outcome": "accepted",
+            "admission": "fenced",
+            "lost_generation_quiescent": false
+          }
+        },
+        {
+          "op": "replay_result",
+          "seq": 2,
+          "gen": 7,
+          "ep": 3,
+          "event": "E1",
+          "quiescence": "quiescent",
+          "replay": "succeeded",
+          "next_gen": 8,
+          "next_ep": 4,
+          "expect": {
+            "outcome": "accepted",
+            "admission": "open",
+            "lost_generation_quiescent": true
+          }
+        }
+      ],
+      "final": {
+        "owner": "A",
+        "seq": 2,
+        "gen": 8,
+        "ep": 4,
+        "closure": "open",
+        "admission": "open"
+      }
+    },
+    {
+      "id": "T-05 drain-never-proven-by-deadline",
+      "scope": "vellum-gated",
+      "vellum_gated_reason": "Whether the owner derived quiescent from a timeout is invisible in the published event. Only Vellum's fake-backend trace can show it. The consumer has no deadline path that marks a generation quiescent."
+    }
+  ]
+}

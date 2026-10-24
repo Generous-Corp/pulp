@@ -60,6 +60,19 @@ consume `pulp/canvas/sdf_text.hpp`.
    against a tree that ships `libskia.a` (e.g.
    `SKIA_DIR=<other-worktree>/external/skia-build`) so the compile path
    exercises real Skia libraries, not just headers.
+7. **Chart shaders: `d` is the band's distance, `cross` is the coordinate.**
+   In `shade(PulpChart g)`, `g.d` is negative inside the band and reads
+   `-halfWidth` on the centre line (it also includes flat caps), so it
+   is right for coverage and feathering and wrong for a cross-section
+   profile. Profiles (bevels, tubes, centre highlights) want
+   `u = g.cross / g.halfWidth`, which is 0 on the centre line and +/-1 at
+   the edges. The shader runs over the whole reach-padded rect and owns
+   its coverage, and it returns premultiplied colour, which the feather
+   scales as a whole. Chart and preset pixel probes are easiest with
+   the draw offset by (0.5, 0.5): pixel (i, j) then samples the chart at
+   exactly p = (i - w/2, j - h/2). Render a probe view as the root of
+   `render_to_rgba`; as the child of a plain `View` the layout pass can
+   resize it to nothing and the draw still reports success.
 
 ## Build + test loop
 

@@ -1,0 +1,23 @@
+{
+  "schema": "pulp.sample-bank.v1",
+  "id": "fuzz-bank",
+  "name": "Fuzz Sample Bank",
+  "samples": [
+    {
+      "id": 7,
+      "path": "audio/tone.wav",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "license_ref": "license.txt",
+      "extensions": {}
+    }
+  ],
+  "zones": [
+    {
+      "sample_id": 7,
+      "lowest_note": 12,
+      "highest_note": 96,
+      "root_note": 60,
+      "extensions": {}
+    }
+  ]
+}

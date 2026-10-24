@@ -893,10 +893,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME import-fidelity-diff
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_import_fidelity_diff.py)
+    # 72-93 s on a GitHub-hosted Linux runner, so the 120 s cap timed out
+    # about one main push run in three; 240 s keeps it a hang guard.
     set_tests_properties(import-fidelity-diff PROPERTIES
         SKIP_RETURN_CODE 77
         LABELS "import;fidelity;slow"
-        TIMEOUT 120)
+        TIMEOUT 240)
 
     # Pure comparison-protocol tests for the Chromium-oracle differential lab.
     # Corpus execution is intentionally not a unit test: it launches the

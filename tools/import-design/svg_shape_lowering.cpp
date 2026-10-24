@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include <map>
 #include <optional>
 #include <string_view>
@@ -210,27 +211,158 @@ std::optional<std::string> points_path(const CapturedStyleIndex& index,
     return d;
 }
 
-/// Fold `fill-opacity` / `stroke-opacity` into the colour's own alpha, so a
-/// consumer that only understands a CSS colour still gets the right pixel.
-/// Chrome serializes an SVG paint as `rgb(…)` / `rgba(…)` / `none`.
-std::optional<std::string> paint_colour(const std::string& colour,
-                                        const std::string& opacity) {
-    const std::string value = trim(colour);
-    if (value.empty() || value == "none" || value == "transparent")
+/// A plain number, as `stroke-miterlimit` and `pathLength` are written.
+std::optional<double> parse_number(std::string_view raw) {
+    const std::string text = trim(raw);
+    if (text.empty())
         return std::nullopt;
-    double alpha = 1.0;
-    if (const auto parsed = parse_length(opacity)) alpha = *parsed;
-    alpha = std::clamp(alpha, 0.0, 1.0);
-    if (alpha >= 1.0) return value;
-    if (alpha <= 0.0) return std::nullopt;
-    // `rgb(r, g, b)` → `rgba(r, g, b, a)`; anything already carrying an alpha
-    // (`rgba(…)`) is left alone rather than multiplied blind, because the
-    // arithmetic would have to re-serialize a colour we did not parse.
-    if (value.rfind("rgb(", 0) == 0 && value.back() == ')') {
-        return "rgba(" + value.substr(4, value.size() - 5) + ", " +
-               number(alpha) + ")";
-    }
+    char* end = nullptr;
+    const double value = std::strtod(text.c_str(), &end);
+    if (end == text.c_str() || *end != '\0' || !std::isfinite(value))
+        return std::nullopt;
     return value;
+}
+
+/// An `<alpha-value>`: a number, or a percentage of 1. Clamped to [0, 1] as
+/// CSS clamps it at computed-value time.
+std::optional<double> parse_alpha(std::string_view raw) {
+    std::string text = trim(raw);
+    bool percent = false;
+    if (!text.empty() && text.back() == '%') {
+        percent = true;
+        text.pop_back();
+    }
+    auto value = parse_number(text);
+    if (!value)
+        return std::nullopt;
+    return std::clamp(percent ? *value / 100.0 : *value, 0.0, 1.0);
+}
+
+std::string lowercase(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+bool is_paint(const std::string& value) {
+    return !value.empty() && value != "none" && value != "transparent";
+}
+
+/// `colour` with `alpha` multiplied into its own alpha, or nullopt when the
+/// colour is not one Chrome serializes as `rgb(r, g, b)` / `rgba(r, g, b, a)`
+/// and so cannot be re-serialized without a colour parser this lowering does
+/// not carry.
+std::optional<std::string> with_alpha(const std::string& colour, double alpha) {
+    if (alpha >= 1.0)
+        return colour;
+    const bool rgba = colour.rfind("rgba(", 0) == 0;
+    if ((!rgba && colour.rfind("rgb(", 0) != 0) || colour.back() != ')')
+        return std::nullopt;
+    const std::size_t open = colour.find('(');
+    std::vector<std::string> parts;
+    std::string_view body(colour);
+    body = body.substr(open + 1, body.size() - open - 2);
+    while (true) {
+        const auto comma = body.find(',');
+        parts.push_back(trim(body.substr(0, comma)));
+        if (comma == std::string_view::npos)
+            break;
+        body.remove_prefix(comma + 1);
+    }
+    if (parts.size() == 4) {
+        const auto own = parse_alpha(parts[3]);
+        if (!own)
+            return std::nullopt;
+        alpha *= *own;
+    } else if (parts.size() != 3) {
+        return std::nullopt;
+    }
+    return "rgba(" + parts[0] + ", " + parts[1] + ", " + parts[2] + ", " + number(alpha) + ")";
+}
+
+/// One `name: value` declaration out of an inline `style` attribute, with
+/// `!important` dropped. Empty when the attribute does not declare `name`;
+/// the LAST declaration wins, as it does in the cascade.
+std::string inline_declaration(std::string_view style, std::string_view name) {
+    std::string found;
+    while (!style.empty()) {
+        const auto semicolon = style.find(';');
+        const std::string_view declaration = style.substr(0, semicolon);
+        style.remove_prefix(semicolon == std::string_view::npos ? style.size() : semicolon + 1);
+        const auto colon = declaration.find(':');
+        if (colon == std::string_view::npos)
+            continue;
+        if (lowercase(trim(declaration.substr(0, colon))) != name)
+            continue;
+        std::string value = trim(declaration.substr(colon + 1));
+        if (const auto bang = value.find('!'); bang != std::string::npos)
+            value = trim(std::string_view(value).substr(0, bang));
+        found = std::move(value);
+    }
+    return found;
+}
+
+/// How one presentation property resolved for a shape.
+///
+/// Chrome's computed value is the authority whenever the capture collected
+/// the property: it alone has seen the stylesheet. A capture that did not
+/// collect it still carries the AUTHORED declarations, so those are walked the
+/// way the cascade walks them — an inline `style` declaration outranks a
+/// presentation attribute on the same element, a nearer element outranks a
+/// farther one, and an inherited property keeps climbing past the shape (icon
+/// sets declare `stroke-linecap` once on the root `<svg>`). Presentation
+/// attributes are read only on the root and inside it; above it only an
+/// inline `style` can reach the shape.
+///
+/// `valid` rejects a value the browser would reject, so the walk continues to
+/// the inherited value exactly as an invalid declaration is dropped by the
+/// cascade. nullopt means the initial value applies.
+template <typename Valid>
+std::optional<std::string> presentation_value(const CapturedStyleIndex& index,
+                                              const std::map<std::string, std::string>& computed,
+                                              int node, int svg_root, std::string_view name,
+                                              bool inherited, Valid valid) {
+    if (index.has_property(name)) {
+        const auto found = computed.find(std::string(name));
+        if (found != computed.end()) {
+            const std::string value = trim(found->second);
+            if (valid(value))
+                return value;
+            return std::nullopt;
+        }
+    }
+    bool in_svg = true;
+    for (int current = node, steps = 0; current >= 0 && steps < index.node_count(); ++steps) {
+        if (index.node_type_of(current) == kElementNode) {
+            for (const bool from_style : {true, false}) {
+                if (!from_style && !in_svg)
+                    continue;
+                const std::string raw =
+                    from_style ? inline_declaration(index.attribute(current, "style"), name)
+                               : trim(index.attribute(current, name));
+                if (raw.empty())
+                    continue;
+                const std::string keyword = lowercase(raw);
+                if (keyword == "initial")
+                    return std::nullopt;
+                if (keyword == "inherit" || keyword == "unset")
+                    break;
+                if (valid(raw))
+                    return raw;
+            }
+        }
+        if (!inherited)
+            break;
+        if (current == svg_root)
+            in_svg = false;
+        current = index.parent_of(current);
+    }
+    return std::nullopt;
+}
+
+bool is_keyword_of(const std::string& value, std::initializer_list<std::string_view> keywords) {
+    const std::string keyword = lowercase(value);
+    return std::find(keywords.begin(), keywords.end(), keyword) != keywords.end();
 }
 
 /// `viewBox` is "min-x min-y width height". Only the size is read: the
@@ -292,7 +424,11 @@ std::string_view to_string(SvgRefusal refusal) {
         case SvgRefusal::shape_geometry: return "shape-geometry";
         case SvgRefusal::empty: return "empty";
         case SvgRefusal::paint_unavailable: return "paint-unavailable";
-    }
+        case SvgRefusal::shape_opacity:
+            return "shape-opacity";
+        case SvgRefusal::paint_alpha:
+            return "paint-alpha";
+        }
     return "none";
 }
 
@@ -427,19 +563,29 @@ SvgSubtree lower_svg_subtree(const CapturedStyleIndex& index,
             refuse(out, SvgRefusal::paint_reference, tag);
             break;
         }
-        const std::string dash = trim(style("stroke-dasharray"));
-        if (!dash.empty() && dash != "none") {
+        const auto resolved = [&](std::string_view name, bool inherited, auto valid) {
+            return presentation_value(index, computed, node, svg_node_index, name, inherited,
+                                      valid);
+        };
+        const auto any_value = [](const std::string& value) { return !value.empty(); };
+        const auto dash = resolved("stroke-dasharray", /*inherited=*/true, any_value);
+        if (dash && lowercase(*dash) != "none") {
             refuse(out, SvgRefusal::dashed_stroke, tag);
             break;
         }
-        // The other three references into `<defs>`. A shape drawn without the
-        // clip, mask, or filter it was authored with is not a smaller version
-        // of the icon — it is a different one, usually a solid slab where a
-        // cut-out was intended.
+        // The other references into `<defs>`. A shape drawn without the clip,
+        // mask, filter, or marker it was authored with is not a smaller
+        // version of the icon — it is a different one, usually a solid slab
+        // where a cut-out was intended, or a line missing its arrowhead.
         bool referenced = false;
         for (const char* property : {"clip-path", "mask-image", "filter"}) {
             const std::string value = trim(style(property));
             if (!value.empty() && value != "none") referenced = true;
+        }
+        for (const char* property : {"marker-start", "marker-mid", "marker-end"}) {
+            const auto marker = resolved(property, /*inherited=*/true, any_value);
+            if (marker && lowercase(*marker) != "none")
+                referenced = true;
         }
         if (referenced) {
             refuse(out, SvgRefusal::paint_reference, tag);
@@ -473,16 +619,73 @@ SvgSubtree lower_svg_subtree(const CapturedStyleIndex& index,
         // refusal: there is nothing to capture either.
         if (path_data->empty()) continue;
 
+        const auto alpha_of = [&](std::string_view name, bool inherited) {
+            const auto value = resolved(
+                name, inherited, [](const std::string& v) { return parse_alpha(v).has_value(); });
+            return value ? *parse_alpha(*value) : 1.0;
+        };
+        const double opacity = alpha_of("opacity", /*inherited=*/false);
+        const double fill_alpha = alpha_of("fill-opacity", /*inherited=*/true);
+        const double stroke_alpha = alpha_of("stroke-opacity", /*inherited=*/true);
+        // A `<line>` encloses no area, so its fill (black by default) paints
+        // nothing and must not count as a second paint under `opacity`.
+        const bool fills = tag != "line" && is_paint(fill_value) && fill_alpha > 0.0;
+        const bool strokes = is_paint(stroke_value) && stroke_alpha > 0.0;
+        if (opacity <= 0.0 || (!fills && !strokes))
+            continue; // invisible, not refused
+        // With one paint, the shape's layer holds exactly that paint, so
+        // compositing the layer at `opacity` is the same pixel as drawing the
+        // paint at `opacity` times its own alpha. With two it is not.
+        if (opacity < 1.0 && fills && strokes) {
+            refuse(out, SvgRefusal::shape_opacity, tag);
+            break;
+        }
+
         SvgShape shape;
         shape.node_index = node;
         shape.tag = tag;
         shape.path_data = *std::move(path_data);
-        shape.fill = paint_colour(fill_value, style("fill-opacity"));
-        shape.stroke = paint_colour(stroke_value, style("stroke-opacity"));
+        if (fills) {
+            shape.fill = with_alpha(fill_value, fill_alpha * opacity);
+            if (!shape.fill) {
+                refuse(out, SvgRefusal::paint_alpha, tag);
+                break;
+            }
+        }
+        if (strokes) {
+            shape.stroke = with_alpha(stroke_value, stroke_alpha * opacity);
+            if (!shape.stroke) {
+                refuse(out, SvgRefusal::paint_alpha, tag);
+                break;
+            }
+        }
         if (const auto width = parse_length(style("stroke-width")))
             shape.stroke_width = *width;
         shape.even_odd_fill = trim(style("fill-rule")) == "evenodd";
-        if (!shape.fill && !shape.stroke) continue;  // invisible, not refused
+
+        if (const auto cap =
+                resolved("stroke-linecap", /*inherited=*/true, [](const std::string& v) {
+                    return is_keyword_of(v, {"butt", "round", "square"});
+                }))
+            shape.stroke_linecap = lowercase(*cap);
+        if (const auto join =
+                resolved("stroke-linejoin", /*inherited=*/true, [](const std::string& v) {
+                    return is_keyword_of(v, {"miter", "round", "bevel"});
+                }))
+            shape.stroke_linejoin = lowercase(*join);
+        if (const auto limit =
+                resolved("stroke-miterlimit", /*inherited=*/true, [](const std::string& v) {
+                    const auto n = parse_number(v);
+                    return n && *n >= 1.0;
+                }))
+            shape.stroke_miterlimit = *parse_number(*limit);
+        if (const auto offset =
+                resolved("stroke-dashoffset", /*inherited=*/true,
+                         [](const std::string& v) { return parse_length(v).has_value(); }))
+            shape.stroke_dashoffset = *parse_length(*offset);
+        if (const auto length = parse_number(index.attribute(node, "pathLength"));
+            length && *length > 0.0)
+            shape.path_length = *length;
         out.shapes.push_back(std::move(shape));
     }
 

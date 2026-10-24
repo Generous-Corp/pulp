@@ -894,6 +894,55 @@ EOF
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+echo "== a git shared cache must sit on the registered commit pin"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/cache/choc-seed" "$tmp/src"
+    printf 'pinned\n' > "$tmp/cache/choc-seed/value.txt"
+    git init -q "$tmp/cache/choc-seed"
+    git -C "$tmp/cache/choc-seed" config user.email fixture@pulp.audio
+    git -C "$tmp/cache/choc-seed" config user.name fixture
+    git -C "$tmp/cache/choc-seed" add value.txt
+    git -C "$tmp/cache/choc-seed" commit -qm fixture
+    head="$(git -C "$tmp/cache/choc-seed" rev-parse HEAD)"
+    other="0123456789abcdef0123456789abcdef01234567"
+    # Three cache entries holding the same checkout: one keyed by its own
+    # commit, one keyed by a commit it is not on, one keyed by a tag name.
+    cp -R "$tmp/cache/choc-seed" "$tmp/cache/choc-$head"
+    cp -R "$tmp/cache/choc-seed" "$tmp/cache/choc-$other"
+    cp -R "$tmp/cache/choc-seed" "$tmp/cache/choc-v1"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(shared_pin_check NONE)
+set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "$tmp/cache")
+set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_register_fetchcontent_source(choc REF "\${TEST_REF}")
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY fixture)
+file(WRITE "\${CMAKE_BINARY_DIR}/selected.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
+EOF
+    # Control: the pin that matches HEAD configures and materializes.
+    cmake -S "$tmp/src" -B "$tmp/build-ok" -DTEST_REF="$head" >"$tmp/ok.log" 2>&1; rc=$?
+    check "$rc" "0" "a checkout on the registered commit configures"
+    check "$(cat "$tmp/build-ok/selected.txt" 2>/dev/null)" "$tmp/build-ok/_deps/pulp-mutable-choc-src" \
+        "the matching checkout is still copied build-local"
+    # A checkout that drifted from its pin fails closed, naming both commits.
+    cmake -S "$tmp/src" -B "$tmp/build-drift" -DTEST_REF="$other" >"$tmp/drift.log" 2>&1; rc=$?
+    check "$([ "$rc" -eq 0 ] && echo configured || echo refused)" "refused" \
+        "a checkout off the registered commit fails configure"
+    # CMake re-wraps message() text, so compare against the joined log.
+    joined="$(tr -s '\n ' '  ' < "$tmp/drift.log")"
+    check "$(printf '%s' "$joined" | grep -c "is at commit $head, but pulp_register_fetchcontent_source pinned $other")" "1" \
+        "the refusal names the checkout commit and the registered pin"
+    check "$([ -e "$tmp/build-drift/_deps/pulp-mutable-choc-src" ] && echo copied || echo absent)" "absent" \
+        "no build-local copy is made from a drifted checkout"
+    # A symbolic pin has no commit to compare and stays keyed by name only.
+    cmake -S "$tmp/src" -B "$tmp/build-tag" -DTEST_REF=v1 >"$tmp/tag.log" 2>&1; rc=$?
+    check "$rc" "0" "a symbolic pin does not trip the commit check"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo "== the CHOC patch set applies once, is idempotent, and fails closed"
 (
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT

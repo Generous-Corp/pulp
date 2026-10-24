@@ -28,6 +28,7 @@
 #include "include/core/SkPoint.h"
 #include "include/core/SkShader.h"
 #include "skia_gradient_compat.hpp"
+#include "skia_resource_counting.hpp"
 
 #endif  // PULP_HAS_SKIA
 
@@ -280,7 +281,7 @@ sk_sp<SkImage> decode_pattern_image(const std::string& src) {
     }
     auto data = SkData::MakeFromFileName(src.c_str());
     if (!data) return nullptr;
-    return SkImages::DeferredFromEncodedData(data);
+    return decode_encoded_image(data);
 }
 
 } // namespace

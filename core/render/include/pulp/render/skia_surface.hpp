@@ -217,6 +217,12 @@ public:
     /// pass nullptr to remove.
     using InsertOutcomeHook = bool (*)(bool accepted);
     static void set_insert_outcome_hook_for_testing(InsertOutcomeHook hook);
+
+    /// Test seam for `read_current_rgba()`. Passing false makes every
+    /// SkiaSurface skip the asynchronous GPU readback and take the synchronous
+    /// fallback that a timed-out readback takes, which a healthy device never
+    /// reaches. Process-wide and not synchronized; pass true to restore.
+    static void set_async_readback_for_testing(bool enabled);
 #endif
 };
 

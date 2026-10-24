@@ -545,6 +545,8 @@ block and renders `--demo cube --capture` to a non-empty PNG.
 
 ## Gotchas
 
+- **Every QuickJS realm starts with a 512 MiB heap ceiling** (`kDefaultJsMemoryLimitBytes`, applied via `JS_SetMemoryLimit` right after the stack-size call in `js_quickjs_engine.cpp`). A script that allocates past it gets a JS `InternalError: out of memory`, not a dead host. Raise or disable (0) per session with `ScriptedUiOptions::js_memory_limit_bytes` or `JsEngine::set_memory_limit()`. JSC and V8 return `false` from `set_memory_limit()`; they have no cap today.
+
 **Selector parses are memoized.** `_parseSelector` (web-compat-document-
 selectors.js) caches its record by selector text (bounded, cleared when
 full), so `Element.matches()`/`closest()` in a loop over many elements parse

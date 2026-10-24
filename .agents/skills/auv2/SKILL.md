@@ -679,12 +679,34 @@ The attribute is a static-analysis hint only — dropping it from derived-class 
 
 ### Editor `dealloc` ordering — never call `bridge->close()` explicitly
 
-`PulpAUEditorOwnership` (in `core/format/src/au_v2_cocoa_view.mm`) declares its members as `unique_ptr<ViewBridge> bridge` then `unique_ptr<PluginViewHost> host`. C++ destroys members in REVERSE declaration order, so when `delete _ownership` runs in `PulpAUEditorOwner::dealloc`:
+`PulpAUEditorOwnership` (in `core/format/src/au_v2_cocoa_view.mm`) declares its members as `unique_ptr<ViewBridge> bridge` then `unique_ptr<PluginViewHost> host`. C++ destroys members in REVERSE declaration order, so when `delete _ownership` runs in `-[PulpAUEditorOwner releaseEditor]` (from the view's will-dealloc hook, or the owner's `-dealloc` as fallback):
 
 1. `~PluginViewHost` runs first. The host calls `root_.set_plugin_view_host(nullptr)` to clear the View → host back-pointer. The View it references is still alive (still owned by `bridge->view_`), so the call is safe.
 2. `~ViewBridge` runs second. Its destructor calls `close()` → `Processor::on_view_closed(*view_raw_)` fires → `view_.reset()` destroys the View. The back-pointer was already cleared in step 1, so the View's own teardown can't reach a dead host.
 
 Calling `_ownership->bridge->close()` HERE explicitly (BEFORE `delete _ownership`) reverses that order: the View dies first, then `~PluginViewHost` dereferences a dangling `root_` reference and crashes the AU v2 editor close path. The fix is to remove the explicit close, NOT to add it. Same rule applies to any future Cocoa-View ownership wrapper that mixes a `ViewBridge` and a `PluginViewHost` in the same C++ scope.
+
+### The host app's reference decides the editor's lifetime
+
+The factory returns the `PluginViewHost`'s own NSView. The host keeps the view
+it created, and the view keeps the editor owner (an associated object), so the
+factory must hand the host's reference to the caller: `uiViewForAudioUnit:`
+returns the view autoreleased, and the plug-in views' `pulpWillDeallocHandler`
+runs `-[PulpAUEditorOwner releaseEditor]` at the START of the view's `-dealloc`.
+Kept as one cycle (view -> owner -> host -> view), a closed editor was never
+deallocated: `Processor::on_view_closed` never fired and every open leaked its
+host, about 108 MB per GPU editor open/close in a neutral AU host.
+
+- Tear down in the will-dealloc hook, never from the owner's own `-dealloc`
+  alone: associated objects are released after the view's `-dealloc` has run,
+  and `~PluginViewHost` still messages the view.
+- Do not tear down on `removeFromSuperview` / `viewDidMoveToWindow:nil`: Logic
+  and other hosts re-parent or keep the returned view after closing the window,
+  and only the last release means "closed".
+- Gate: `test_au_v2_cocoa_ui.mm` "AU v2 editor views close and deallocate when
+  the host drops them" builds real editors through the factory against an
+  in-process fake AU, and checks the view deallocates, `on_view_closed` fires,
+  and the close lands before NSView's own `-dealloc` starts.
 
 ### Plugin-initiated resize is a Logic-only editor transaction
 

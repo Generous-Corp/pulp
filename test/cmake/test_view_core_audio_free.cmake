@@ -5,7 +5,7 @@
 # direct target edge.
 
 foreach(_input PULP_SOURCE_DIR PULP_VIEW_CORE_LINKS PULP_VIEW_LINKS
-        PULP_VIEW_NATIVE_LINKS PULP_VIEW_AUDIO_LINKS PULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE)
+        PULP_VIEW_NATIVE_LINKS PULP_VIEW_PLATFORM_LINKS PULP_VIEW_AUDIO_LINKS PULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE)
     if(NOT DEFINED ${_input})
         message(FATAL_ERROR "pulp-view-core-audio-free: missing test input ${_input}")
     endif()
@@ -39,6 +39,29 @@ link_matches("${PULP_VIEW_CORE_LINKS}" "signal|audio|host|midi|format|view-audio
 if(_hit)
     message(FATAL_ERROR
         "pulp-view-core-audio-free: forbidden pulp-view-core LINK_LIBRARIES=${PULP_VIEW_CORE_LINKS}")
+endif()
+
+# The extracted view-platform target links only extracted view units: no audio,
+# MIDI or host target, no audio widget or recognition pack, and not the Pulp-kept
+# umbrella or tooling layer that carry them.
+set(_view_platform_forbidden
+    "signal|audio|host|midi|format|timebase|sample-bank-manifest|view-audio|view-graph-editor|design-import-audio-pack|view-native|view-tooling|view")
+foreach(_control "pulp::view-script|pulp::view-audio" "pulp::design-import|pulp::design-import-audio-pack"
+        "pulp::view-script|pulp-midi" "pulp::view-native")
+    link_matches("${_control}" "${_view_platform_forbidden}" _hit)
+    if(NOT _hit)
+        message(FATAL_ERROR
+            "pulp-view-core-audio-free: view-platform negative control '${_control}' was not detected")
+    endif()
+endforeach()
+link_matches("pulp::view-script|pulp::design-import|pulp::view-core" "${_view_platform_forbidden}" _hit)
+if(_hit)
+    message(FATAL_ERROR "pulp-view-core-audio-free: view-platform positive control was rejected")
+endif()
+link_matches("${PULP_VIEW_PLATFORM_LINKS}" "${_view_platform_forbidden}" _hit)
+if(_hit)
+    message(FATAL_ERROR
+        "pulp-view-core-audio-free: forbidden pulp-view-platform LINK_LIBRARIES=${PULP_VIEW_PLATFORM_LINKS}")
 endif()
 
 # The audio widgets reach audio/signal but never the plug-in host stack.

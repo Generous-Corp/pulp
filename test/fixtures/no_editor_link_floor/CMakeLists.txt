@@ -51,8 +51,10 @@ pulp_add_plugin(PulpNoEditorLinkFloorControl
 # hide a regression in the binary.
 foreach(_fmt IN LISTS _no_editor_formats)
     pulp_link_closure(PulpNoEditorLinkFloor_${_fmt} TARGETS_OUT _no_editor_closure)
+    # pulp-host and pulp-content are retained subsystems the authoring surface
+    # does not need; a pulp-format-core edge to either would drag them in.
     foreach(_forbidden pulp-format pulp-format-view pulp-view pulp-view-core pulp-view-native pulp-view-tooling
-                       pulp-view-script pulp-canvas pulp-render pulp-standalone)
+                       pulp-view-script pulp-canvas pulp-render pulp-standalone pulp-host pulp-content)
         if(_forbidden IN_LIST _no_editor_closure)
             message(FATAL_ERROR
                 "PulpNoEditorLinkFloor_${_fmt} reaches ${_forbidden}: ${_no_editor_closure}")

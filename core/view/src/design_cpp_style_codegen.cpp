@@ -1,5 +1,6 @@
 #include "design_cpp_codegen_internal.hpp"
 
+#include "design_import_svg_stroke.hpp"
 #include "design_ir_helpers.hpp"
 
 #include <pulp/view/css_effect_parse.hpp>
@@ -318,6 +319,10 @@ void emit_visual_style(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_size(" + cpp_string_literal(*style.background_size) + ");");
     if (style.background_position)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_position(" + cpp_string_literal(*style.background_position) + ");");
+    if (style.background_origin)
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_background_origin(" +
+                      cpp_string_literal(*style.background_origin) + ");");
     const auto box_paint_dpr = attr_float(node, "browser_box_paint_dpr");
     const auto box_paint_left = attr_float(node, "browser_box_paint_left_px");
     const auto box_paint_top = attr_float(node, "browser_box_paint_top_px");
@@ -618,6 +623,25 @@ void emit_svg_paint(std::ostringstream& out,
             break;
         }
     }
+    const auto stroke_style = svg_stroke_style_attributes(node);
+    if (stroke_style.cap) {
+        const char* cap = *stroke_style.cap == canvas::LineCap::round    ? "round"
+                          : *stroke_style.cap == canvas::LineCap::square ? "square"
+                                                                         : "butt";
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_stroke_cap(pulp::canvas::LineCap::" + cap + ");");
+    }
+    if (stroke_style.join) {
+        const char* join = *stroke_style.join == canvas::LineJoin::round   ? "round"
+                           : *stroke_style.join == canvas::LineJoin::bevel ? "bevel"
+                                                                           : "miter";
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_stroke_join(pulp::canvas::LineJoin::" + join + ");");
+    }
+    if (stroke_style.miter_limit)
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_stroke_miter_limit(" +
+                      float_expr(ctx, *stroke_style.miter_limit) + ");");
 }
 
 
