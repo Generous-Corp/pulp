@@ -1301,9 +1301,12 @@
    "data": "declared",
    "detected_sources": [
     "test/test_design_import_ir.cpp",
+    "test/test_design_import_native_fonts.cpp",
     "test/test_recognition_resolver.cpp"
    ],
    "inputs": [
+    "external/fonts/FunnelDisplay-VariableFont_wght.ttf",
+    "test/fixtures/design-ir-observe/variable-font-label",
     "test/fixtures/import-fidelity/assets/knob_ref.png",
     "test/fixtures/imports/claude/vite-assets.html",
     "test/fixtures/imports/figma-plugin/synthetic-knob.png",
@@ -1312,6 +1315,7 @@
    "kind": "compiled",
    "sources": [
     "test/test_design_import_ir.cpp",
+    "test/test_design_import_native_fonts.cpp",
     "test/test_recognition_resolver.cpp"
    ],
    "undeclared_sources": []
@@ -6687,6 +6691,13 @@
    "inputs": [
     "test/test_design_ir_observe_provider_boundary.py",
     "tools/import-design/design_ir_observe.cpp"
+   ],
+   "kind": "python"
+  },
+  "import-design-ir-observe-variable-font-label": {
+   "entry": "test/test_design_ir_observe_variable_font_label.py",
+   "inputs": [
+    "test/test_design_ir_observe_variable_font_label.py"
    ],
    "kind": "python"
   },

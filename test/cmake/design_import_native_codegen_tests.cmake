@@ -4,7 +4,7 @@
 # Design import tests (Figma/Stitch/v0/Pencil -> Pulp, W3C tokens)
 pulp_add_test_suite(pulp-test-design-import
     SOURCES test_design_update.cpp
-    SOURCES test_design_import_ir.cpp test_design_ir_normalize.cpp test_design_import_codegen.cpp test_design_import_codegen_layout_text.cpp test_design_import_codegen_paint.cpp test_design_import_codegen_web_controls.cpp test_design_cpp_codegen_golden.cpp test_design_browser_capture.cpp test_design_import_sources.cpp test_design_import_masks.cpp test_design_import_fidelity.cpp test_design_ir_font_assets.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp test_design_tweaks.cpp test_design_knobs.cpp
+    SOURCES test_design_import_ir.cpp test_design_ir_normalize.cpp test_design_import_codegen.cpp test_design_import_codegen_layout_text.cpp test_design_import_codegen_paint.cpp test_design_import_codegen_web_controls.cpp test_design_cpp_codegen_golden.cpp test_design_browser_capture.cpp test_design_import_sources.cpp test_design_import_masks.cpp test_design_import_fidelity.cpp test_design_ir_font_assets.cpp test_design_import_native_fonts.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp test_design_tweaks.cpp test_design_knobs.cpp
     LIBRARIES pulp::view
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     TEST_SPEC "~[network]~[bench]"
@@ -16,7 +16,10 @@ catch_discover_tests(pulp-test-design-import
     PROPERTIES LABELS "bench")
 pulp_test_data(pulp-test-design-import NO_DEFINE
     SOURCES test_design_import_ir.cpp test_recognition_resolver.cpp
+        test_design_import_native_fonts.cpp
     PATHS test/fixtures/imports/claude/vite-assets.html
+        external/fonts/FunnelDisplay-VariableFont_wght.ttf
+        test/fixtures/design-ir-observe/variable-font-label
         test/fixtures/imports/figma-plugin/synthetic-knob.png
         test/fixtures/import-fidelity/assets/knob_ref.png
         tools/figma-plugin/library-manifest.json)

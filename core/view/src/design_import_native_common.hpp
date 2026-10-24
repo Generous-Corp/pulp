@@ -163,6 +163,13 @@ PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
 // a copy so callers never mutate the imported IR they were handed.
 DesignIR prepare_native_design_ir(const DesignIR& ir);
 
+// prepare_native_design_ir, then register the IR's shipped fonts under
+// private per-segment aliases and point every font-family stack naming them at
+// those aliases, for a tree that is about to be materialized; defined in
+// design_import_native_fonts.cpp.
+DesignIR prepare_native_ir_with_fonts(const DesignIR& ir, const IRAssetManifest& manifest,
+                                      const NativeMaterializeOptions& options);
+
 ResolvedNativeNode resolve_design_ir_native(const DesignIR& ir,
                                             const IRAssetManifest& manifest);
 
