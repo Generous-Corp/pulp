@@ -651,6 +651,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-b76022563ab8"
+paths = ["tools/scripts/format_header_view_boundary.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "format-header-view-boundary",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-73de1f6e005c"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
@@ -7288,6 +7322,7 @@ paths = [
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
+  "tools/scripts/format_header_view_boundary.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
   "tools/scripts/frontend_ir_codegen_artifacts.py",
   "tools/scripts/frontend_ir_common.py",
@@ -7860,6 +7895,7 @@ paths = [
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
+  "tools/scripts/format_header_view_boundary.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
   "tools/scripts/frontend_ir_codegen_artifacts.py",
   "tools/scripts/frontend_ir_common.py",

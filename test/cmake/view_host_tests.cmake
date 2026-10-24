@@ -683,7 +683,10 @@ if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio AND TAR
             ${_pulp_view_boundary_args}
             "-DPULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE=${_pulp_view_audio_interface_definitions_file}"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_core_audio_free.cmake)
-    set_tests_properties(pulp-view-core-audio-free PROPERTIES LABELS "pr;view;gate")
+    # It reads the link and definition interfaces CMake records for these
+    # targets, not an artifact of them.
+    set_tests_properties(pulp-view-core-audio-free PROPERTIES LABELS "pr;view;gate"
+        PULP_SELECT_WITH_TARGETS "pulp-view-core;pulp-view-audio")
 endif()
 
 # The include half of the same boundary: no core/view source outside
@@ -735,8 +738,11 @@ if(TARGET pulp-view-audio AND TARGET pulp-view-core)
             "-DOSX_SYSROOT=${CMAKE_OSX_SYSROOT}"
             "-DOSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_audio_widgets_gate.cmake")
+    # FLAGS_FILE is generated from these targets' include and definition
+    # properties, so the test reads the targets, not an artifact of them.
     set_tests_properties(pulp-view-audio-widgets-gate PROPERTIES
-        LABELS "pr;view;gate" TIMEOUT 300)
+        LABELS "pr;view;gate" TIMEOUT 300
+        PULP_SELECT_WITH_TARGETS "${_widgets_gate_targets};pulp-view-audio")
 endif()
 
 # Explicit registration without the build-tree convenience shim: the support
