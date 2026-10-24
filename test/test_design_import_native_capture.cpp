@@ -187,7 +187,7 @@ TEST_CASE("an imported label's vertical alignment is the same in the native and 
     // With no recorded alignment, a slot well taller than its font is centred,
     // and one that barely fits keeps the default.
     ir.root.children.push_back(text_in_slot("Slot", std::nullopt, 40.0f, 12.0f, 140.0f));
-    ir.root.children.push_back(text_in_slot("Tight", std::nullopt, 14.0f, 12.0f, 190.0f));
+    ir.root.children.push_back(text_in_slot("Tight", std::nullopt, 13.0f, 12.0f, 190.0f));
     using V = pulp::canvas::TextVerticalAlign;
     const V expected[] = {V::center, V::top, V::bottom, V::center, V::top};
 
