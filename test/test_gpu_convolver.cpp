@@ -365,7 +365,7 @@ TEST_CASE("GpuConvolver rejects a non-power-of-two block size", "[gpu_audio][con
 // engines the fixed-IR fallback can select.
 TEST_CASE("GpuConvolver process_block uses CPU fallback without a GPU", "[gpu_audio][convolver]") {
     constexpr uint32_t CH = 1, BS = 64, SR = 48000;
-#if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
+#if PULP_FIXED_IR_MEASURED_TABLE
     // Where the policy has a direct-engine range, the short IR exercises it.
     REQUIRE(pulp::signal::FixedIrConvolver::choose_backend(100, BS) !=
             pulp::signal::FixedIrConvolver::choose_backend(1025, BS));
@@ -515,7 +515,7 @@ TEST_CASE("GpuConvolver fallback latency matches reported PDC", "[gpu_audio][con
     constexpr int kLongIr = 1025;
     static_assert(kDirectLimit < static_cast<std::size_t>(kLongIr),
                   "the long IR must select the FFT engine at this block size");
-#if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
+#if PULP_FIXED_IR_MEASURED_TABLE
     // Where the policy has a direct-engine range, the short IR exercises it.
     REQUIRE(pulp::signal::FixedIrConvolver::choose_backend(kShortIr, BS) ==
             pulp::signal::ConvolutionBackend::direct_fir);
@@ -1441,7 +1441,7 @@ std::size_t staged_engine_ir_taps(bool direct) {
 }
 
 void require_staged_engine(std::size_t taps, bool direct) {
-#if defined(PULP_SIMD_DEFAULT_BACKEND_ACCELERATE)
+#if PULP_FIXED_IR_MEASURED_TABLE
     REQUIRE(pulp::signal::FixedIrConvolver::choose_backend(taps, 64) ==
             (direct ? pulp::signal::ConvolutionBackend::direct_fir
                     : pulp::signal::ConvolutionBackend::partitioned_fft));
