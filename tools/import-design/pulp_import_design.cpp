@@ -3201,6 +3201,23 @@ int main(int argc, char* argv[]) {
                      "--file b.pulp.json ...\n";
         return 2;
     }
+    // A repeated stable anchor is a hard error for the same reason: every
+    // emitter addresses a node by its anchor, so the repeat silently loses its
+    // binding (the generated C++ binder requires exactly one match and binds
+    // neither node), its tweaks and its lock-to-source edits.
+    if (const auto duplicates = find_duplicate_anchors(ir.root); !duplicates.empty()) {
+        std::cerr << "Error: " << duplicates.size() << " node"
+                  << (duplicates.size() == 1 ? " repeats" : "s repeat")
+                  << " an earlier node's stable anchor, so bindings, tweaks and "
+                     "lock-to-source could not tell them apart:\n";
+        for (const auto& d : duplicates)
+            std::cerr << "       - '" << d.node_name << "' at " << d.path << " has anchor '"
+                      << d.anchor << "', already used by '" << d.first_node_name << "' at "
+                      << d.first_path << "\n";
+        std::cerr << "       Give each node its own source identity (a Figma or Pencil node "
+                     "id, or a distinct data-pulp-key) and import again.\n";
+        return 2;
+    }
     const auto import_report = collect_import_report(ir.root);
     if (!import_report.controls.empty())
         std::cerr << import_report_to_text(import_report);
