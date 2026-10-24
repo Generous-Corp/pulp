@@ -33,6 +33,8 @@ import {
   captureStableScreenshot,
   disableMotion,
   freezeAndMeasureDocumentExtent,
+  freezeMotion,
+  horizonPresentationEncoding,
   installDynamicWorkTracker,
   MAX_LOGICAL_CAPTURE_DIMENSION,
   measureClippedControls,
@@ -607,7 +609,8 @@ async function verifyCanvasRasterSignatures(
   }
 }
 
-async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
+async function captureCanvasAssets(
+  cdp, snapshot, screenshotOptions, presentationEncoding) {
   const canvases = capturedCanvasNodes(snapshot);
 
   const assets = [];
@@ -716,7 +719,7 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
       });
       const bytes = await captureStableScreenshot(cdp, {
         ...screenshotOptions,
-      }, 6, 16, 2);
+      }, 6, 16, 2, presentationEncoding);
       if (!bytes) throw new Error(
         `canvas backend node ${backendNodeId} did not present a stable isolated frame`);
       const dimensions = pngDimensions(bytes);
@@ -1499,6 +1502,14 @@ async function runCapture(options) {
       pendingNetwork.delete(requestId);
     });
 
+    // Each page-settle round first settles the Web Animations and videos the
+    // page has by then, so a moving one, including one started mid-settle by
+    // a font load or a late timer, cannot keep the layout from settling.
+    const settleFrozen = (settleOptions) => waitForStable(cdp, {
+      ...settleOptions,
+      beforeSample: () => freezeMotion(cdp, { declareSources: false }),
+    });
+
     progress.enterPhase("navigation");
     const loaded = cdp.waitFor("Page.loadEventFired");
     const navigation = await cdp.call("Page.navigate", {
@@ -1511,7 +1522,7 @@ async function runCapture(options) {
 
     progress.enterPhase("page-settle");
     await disableMotion(cdp);
-    const firstSettle = await waitForStable(cdp, {
+    const firstSettle = await settleFrozen({
       networkIdle: () => pendingNetwork.size === 0,
       // Runnable design frameworks can briefly plateau before their
       // dynamically-loaded render helpers commit. Observe a full readiness
@@ -1520,7 +1531,7 @@ async function runCapture(options) {
     });
     let readiness = await awaitExplicitReadiness(cdp);
     let rendererHooks = await finalizeKnownRenderers(cdp);
-    const rendererSettle = await waitForStable(cdp, {
+    const rendererSettle = await settleFrozen({
       networkIdle: () => pendingNetwork.size === 0,
     });
     let resolvedViewportWidth = initialWidth;
@@ -1556,13 +1567,13 @@ async function runCapture(options) {
       await reloaded;
       progress.enterPhase("page-settle");
       await disableMotion(cdp);
-      const reloadSettle = await waitForStable(cdp, {
+      const reloadSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
         minimumElapsedMs: 1000,
       });
       readiness = await awaitExplicitReadiness(cdp);
       rendererHooks = await finalizeKnownRenderers(cdp);
-      const reloadRendererSettle = await waitForStable(cdp, {
+      const reloadRendererSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
       });
       fitSettle = {
@@ -1597,7 +1608,7 @@ async function runCapture(options) {
       interactionNavigationGuard =
         await createMainFrameNavigationGuard(cdp);
       const settleAfterInteraction = async () => {
-        const settled = await waitForStable(cdp, {
+        const settled = await settleFrozen({
           networkIdle: () => pendingNetwork.size === 0,
           minimumElapsedMs: 100,
         });
@@ -1655,7 +1666,7 @@ async function runCapture(options) {
         screenWidth: resolvedViewportWidth,
         screenHeight: resolvedViewportHeight,
       });
-      widthSettle = await waitForStable(cdp, {
+      widthSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
       });
       finalExtent = await measureDocumentExtent(cdp);
@@ -1683,7 +1694,7 @@ async function runCapture(options) {
         screenWidth: resolvedViewportWidth,
         screenHeight: resolvedViewportHeight,
       });
-      heightSettle = await waitForStable(cdp, {
+      heightSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
       });
       finalExtent = await measureDocumentExtent(cdp);
@@ -1710,7 +1721,7 @@ async function runCapture(options) {
             ` document.head.appendChild(s); return true; })()`,
           returnByValue: true,
         });
-        heightSettle = await waitForStable(cdp, {
+        heightSettle = await settleFrozen({
           networkIdle: () => pendingNetwork.size === 0,
         });
         finalExtent = await measureDocumentExtent(cdp);
@@ -1764,7 +1775,7 @@ async function runCapture(options) {
         await setCaptureViewport(cdp, settledWidth, settledHeight, dpr);
         resolvedViewportWidth = settledWidth;
         resolvedViewportHeight = settledHeight;
-        await waitForStable(cdp, {
+        await settleFrozen({
           networkIdle: () => pendingNetwork.size === 0,
         });
         finalExtent = await measureDocumentExtent(cdp);
@@ -1794,6 +1805,15 @@ async function runCapture(options) {
 
     progress.enterPhase("same-frame-capture");
     await interactionNavigationGuard?.assertUnchanged();
+    // After load, fonts, readiness and every settle, and before anything of
+    // the frame is read: Web Animations, videos and the clock they run on are
+    // the motion the stylesheet and scheduler stubs above cannot stop. The
+    // page-settle passes above already settled what existed at load.
+    const motion = await freezeMotion(cdp);
+    const presentationEncoding = horizonPresentationEncoding(motion);
+    motion.horizon_presentation_format = presentationEncoding?.format ?? null;
+    const stableScreenshot = (options) => captureStableScreenshot(cdp, options,
+      undefined, undefined, undefined, presentationEncoding);
     const materializedDocument = await captureMaterializedDocument(cdp);
     // Pause page virtual time before collecting any sidecar. Canvas/WebGL
     // requestAnimationFrame callbacks and timers must not advance while DOM,
@@ -2010,14 +2030,14 @@ async function runCapture(options) {
     // complete bounded horizon, then require a byte-identical trailing run;
     // an early A,A plateau must not hide a later B,B presentation.
     let screenshotBytes =
-      await captureStableScreenshot(cdp, screenshotOptions);
+      await stableScreenshot(screenshotOptions);
     // A compositor can miss the required identical tail at the very end of a
     // bounded horizon even though its next horizon is completely still. Give
     // that observable proof one fresh bounded attempt; keeping the common path
     // at 32 frames avoids spending the whole capture deadline on pages that
     // were already stable.
     if (!screenshotBytes)
-      screenshotBytes = await captureStableScreenshot(cdp, screenshotOptions);
+      screenshotBytes = await stableScreenshot(screenshotOptions);
     if (!screenshotBytes) {
       const error = new Error(
         "the visual frame did not stabilize while capture evidence was collected");
@@ -2056,7 +2076,8 @@ async function runCapture(options) {
     // assets with the accepted stable browser pixels, not with the earlier
     // pre-presentation backing stores; otherwise the chrome plate and canvas
     // layers are individually valid but can never reconstruct browser.png.
-    canvasAssets = await captureCanvasAssets(cdp, snapshot, screenshotOptions);
+    canvasAssets = await captureCanvasAssets(
+      cdp, snapshot, screenshotOptions, presentationEncoding);
     if (materializedDocument) {
       materializedDocument.canvas_bindings = canvasAssets.map(
         (asset, index) => ({
@@ -2099,7 +2120,7 @@ async function runCapture(options) {
     let staticScreenshotBytes = screenshotBytes;
     if (hiddenIndicatorCount > 0) {
       staticScreenshotBytes =
-        await captureStableScreenshot(cdp, screenshotOptions);
+        await stableScreenshot(screenshotOptions);
       await cdp.call("Runtime.evaluate", {
         expression: `(() => {
           for (const entry of (window.__pulpCaptureIndicatorStyles || [])) {
@@ -2142,7 +2163,8 @@ async function runCapture(options) {
       returnByValue: true,
     });
     const chromeBytes = await captureStableFrameWithHiddenPaint(
-      cdp, screenshotOptions, screenshotBytes, hiddenCanvases.result?.value);
+      cdp, screenshotOptions, screenshotBytes, hiddenCanvases.result?.value,
+      presentationEncoding);
     await cdp.call("Runtime.evaluate", {
       expression: `(() => {
         for (const item of globalThis.__pulpCanvasVisibilityRestore || []) {
@@ -2283,6 +2305,7 @@ async function runCapture(options) {
         timezone: "UTC",
         color_scheme: "light",
         reduced_motion: false,
+        motion,
         settle: {
           rounds:
             firstSettle.rounds + rendererSettle.rounds +
