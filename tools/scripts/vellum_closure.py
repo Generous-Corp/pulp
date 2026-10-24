@@ -2204,6 +2204,19 @@ def git_blob_rows(repo: Path, commit: str, paths: Iterable[str], strict: bool = 
     return rows
 
 
+PRUNED_SHA = "0" * 40
+
+
+def read_commit_map(data: bytes) -> list[tuple[str, str]]:
+    """(old, new) rows of a git-filter-repo commit map, header excluded."""
+    rows: list[tuple[str, str]] = []
+    for line in data.decode("ascii", errors="replace").splitlines():
+        fields = line.split()
+        if len(fields) == 2 and all(FULL_SHA_RE.fullmatch(field) for field in fields):
+            rows.append((fields[0], fields[1]))
+    return rows
+
+
 def export_commit_map(commit_map_src: Path, pulp_sha: str, mirror_sha: str) -> bytes:
     """The commit map git-filter-repo wrote, which must map the exported commit.
 
@@ -2216,6 +2229,53 @@ def export_commit_map(commit_map_src: Path, pulp_sha: str, mirror_sha: str) -> b
     if f"{pulp_sha} {mirror_sha}".encode() not in data.splitlines():
         raise SystemExit(f"git-filter-repo commit map does not map {pulp_sha} to {mirror_sha}")
     return data
+
+
+def export_source_mapping(commit_map_src: Path, pulp_sha: str, mirror_sha: str,
+                          repo: Path, paths: Iterable[str]) -> tuple[bytes, dict | None]:
+    """The commit map git-filter-repo wrote, and the pruned-source proof if any.
+
+    Normally the map carries ``pulp_sha mirror_sha``. When the exported commit
+    changes no exported path, git-filter-repo prunes it (``pulp_sha 0000...``)
+    and the export ref lands on the rewrite of its nearest ancestor that does.
+    That ancestor is taken from the map's own row for ``mirror_sha``, and is
+    accepted only if it is an ancestor of ``pulp_sha`` and every exported path
+    is identical in both. A row is never written in: nothing would attest it.
+    """
+    if not commit_map_src.is_file():
+        raise SystemExit(f"git-filter-repo wrote no commit map: {commit_map_src}")
+    data = commit_map_src.read_bytes()
+    rows = read_commit_map(data)
+    if (pulp_sha, PRUNED_SHA) not in rows:
+        return export_commit_map(commit_map_src, pulp_sha, mirror_sha), None
+    sources = sorted({old for old, new in rows if new == mirror_sha})
+    if len(sources) != 1:
+        raise SystemExit(f"git-filter-repo pruned {pulp_sha}, and its map names {len(sources)} source commit(s) "
+                         f"for mirror commit {mirror_sha}, not exactly one")
+    source = sources[0]
+    paths = sorted(set(paths))
+    if not paths:
+        raise SystemExit(f"git-filter-repo pruned {pulp_sha}; there are no exported paths to compare")
+    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if source == pulp_sha or subprocess.run(
+            ["git", "-C", str(repo), "merge-base", "--is-ancestor", source, pulp_sha], **quiet).returncode != 0:
+        raise SystemExit(f"mirror source commit {source} is not an ancestor of pruned export commit {pulp_sha}")
+    if subprocess.run(["git", "--literal-pathspecs", "-C", str(repo), "diff", "--quiet", source, pulp_sha, "--", *paths], **quiet).returncode != 0:
+        raise SystemExit(f"exported paths differ between mirror source commit {source} and pruned export commit {pulp_sha}")
+    source_rows = git_blob_rows(repo, source, paths)
+    if source_rows != git_blob_rows(repo, pulp_sha, paths):
+        raise SystemExit(f"exported blobs differ between mirror source commit {source} and pruned export commit {pulp_sha}")
+    listing = "".join(f"{row['path']} {row['mode']} {row['blob']}\n" for row in source_rows).encode()
+    return data, {
+        "source_commit": pulp_sha,
+        "mirror_source_commit": source,
+        "mirror_commit": mirror_sha,
+        "commit_map_row": f"{pulp_sha} {PRUNED_SHA}",
+        "source_is_ancestor": True,
+        "exported_paths_equal": True,
+        "exported_path_count": len(source_rows),
+        "exported_blobs_sha256": hashlib.sha256(listing).hexdigest(),
+    }
 
 
 def claim_export_paths(paths: Iterable[Path]) -> None:
@@ -2376,7 +2436,8 @@ def cmd_export(args: argparse.Namespace) -> int:
     commit_map_path = landing / "provenance" / "mirror" / "commit-maps" / f"{export_id}.txt"
     receipt_path = landing / "provenance" / "mirror" / "receipts" / f"{export_id}.json"
     claim_export_paths([closure_dir, commit_map_path, receipt_path])
-    commit_map_bytes = export_commit_map(out / ".git" / "filter-repo" / "commit-map", args.pulp_sha, mirror_sha)
+    commit_map_bytes, pruned_source = export_source_mapping(
+        out / ".git" / "filter-repo" / "commit-map", args.pulp_sha, mirror_sha, repo, paths)
     closure_dir.mkdir(parents=True)
     units = []
     for index, manifest in enumerate(manifests):
@@ -2430,6 +2491,12 @@ def cmd_export(args: argparse.Namespace) -> int:
         "tool": {"path": "tools/scripts/vellum_closure.py", "pulp_blob": tool_rows[0]["blob"] if tool_rows else ""},
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if pruned_source is not None:
+        # pulp_sha stays the commit that was asked for; the mirror commit is
+        # the rewrite of mirror_source_sha, which pruned_source proves equal
+        # to it on every exported path.
+        receipt["mirror_source_sha"] = pruned_source["mirror_source_commit"]
+        receipt["pruned_source"] = pruned_source
     path_violations = receipt_path_violations(receipt)
     if path_violations:
         raise SystemExit("receipt contains host paths: " + "; ".join(path_violations))

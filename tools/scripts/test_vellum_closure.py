@@ -1813,6 +1813,122 @@ class ExportIntegrityTests(unittest.TestCase):
                 claim_export_paths([Path(td) / "closures" / "20261023-0123456789ab", receipt])
 
 
+@unittest.skipUnless(shutil.which("git-filter-repo"), "git-filter-repo is not installed")
+class PrunedSourceTests(unittest.TestCase):
+    """An export commit that changes no exported path is pruned by the rewrite."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        self.repo = Path(self.td.name) / "repo"
+        self.repo.mkdir()
+        self.git("init", "-q")
+        (self.repo / "tools/scripts").mkdir(parents=True)
+        self.base = self.commit({"a.txt": "a1\n", "b.txt": "b1\n", "tools/scripts/vellum_closure.py": "tool\n"})
+        self.source = self.commit({"a.txt": "a2\n"})
+        self.pruned = self.commit({"b.txt": "b2\n"})
+
+    def git(self, *args, repo=None):
+        return subprocess.run(["git", "-C", str(repo or self.repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                              check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
+
+    def commit(self, files, message=None):
+        for name, text in files.items():
+            (self.repo / name).write_text(text, encoding="utf-8")
+        self.git("add", *files)
+        self.git("commit", "-q", "-m", message or ",".join(files))
+        return self.git("rev-parse", "HEAD")
+
+    def rewrite(self, commit):
+        """Rewrite ``commit`` exactly as export does; (commit map, mirror commit)."""
+        out = Path(self.td.name) / f"out-{commit[:8]}"
+        subprocess.run(["git", "clone", "-q", "--no-local", str(self.repo), str(out)], check=True)
+        self.git("update-ref", "refs/heads/export-source", commit, repo=out)
+        self.git("checkout", "-q", "--detach", "export-source", repo=out)
+        subprocess.run(["git-filter-repo", "--force", "--path", "a.txt", "--path-rename", "a.txt:mirror/a.txt",
+                        "--refs", "export-source"], cwd=out, check=True, capture_output=True)
+        return out / ".git" / "filter-repo" / "commit-map", self.git("rev-parse", "refs/heads/export-source", repo=out)
+
+    def forged_map(self, mirror_sha, source):
+        path = Path(self.td.name) / "forged-map"
+        path.write_text(f"old new\n{source} {mirror_sha}\n{self.pruned} {'0' * 40}\n", encoding="utf-8")
+        return path
+
+    def test_unpruned_commit_maps_directly_with_no_record(self):
+        from vellum_closure import export_source_mapping
+        commit_map, mirror_sha = self.rewrite(self.source)
+        data, record = export_source_mapping(commit_map, self.source, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, commit_map.read_bytes())
+        self.assertIsNone(record)
+
+    def test_pruned_commit_exports_with_its_equality_record(self):
+        from vellum_closure import export_commit_map, export_source_mapping
+        commit_map, mirror_sha = self.rewrite(self.pruned)
+        self.assertIn(f"{self.pruned} {'0' * 40}", commit_map.read_text(encoding="utf-8"))
+        with self.assertRaisesRegex(SystemExit, "does not map"):
+            export_commit_map(commit_map, self.pruned, mirror_sha)
+        data, record = export_source_mapping(commit_map, self.pruned, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, commit_map.read_bytes())
+        self.assertNotIn(f"{self.pruned} {mirror_sha}", data.decode())
+        self.assertEqual((record["source_commit"], record["mirror_source_commit"], record["mirror_commit"]),
+                         (self.pruned, self.source, mirror_sha))
+        self.assertTrue(record["source_is_ancestor"] and record["exported_paths_equal"])
+        self.assertEqual(record["exported_path_count"], 1)
+
+    def test_pruned_commit_whose_exported_content_differs_is_refused(self):
+        from vellum_closure import export_source_mapping
+        _, mirror_sha = self.rewrite(self.pruned)
+        with self.assertRaisesRegex(SystemExit, "exported paths differ"):
+            export_source_mapping(self.forged_map(mirror_sha, self.base), self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+    def test_mirror_source_that_is_not_an_ancestor_is_refused(self):
+        from vellum_closure import export_source_mapping
+        _, mirror_sha = self.rewrite(self.pruned)
+        self.git("checkout", "-q", "-b", "side", self.base)
+        side = self.commit({"a.txt": "a2\n"}, message="side")
+        self.assertNotEqual(side, self.source)
+        with self.assertRaisesRegex(SystemExit, "is not an ancestor"):
+            export_source_mapping(self.forged_map(mirror_sha, side), self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+    def export_receipt(self, commit):
+        """Run cmd_export on ``commit``; the closure checks it applies are not under test."""
+        import vellum_closure
+        manifest = Path(self.td.name) / "unit.json"
+        manifest.write_text(json.dumps({"files": ["a.txt"]}), encoding="utf-8")
+        args = Namespace(repo=str(self.repo), manifest=[str(manifest)], unit_name=["unit"], pulp_sha=commit,
+                         output=str(Path(self.td.name) / f"export-{commit[:8]}"), landing=str(Path(self.td.name) / f"landing-{commit[:8]}"),
+                         mirror_root="mirror", mirror_ref="refs/heads/mirror/pulp-framework", dry_run=False,
+                         rename_map=None, cpu_only_unit=[])
+        with unittest.mock.patch.object(vellum_closure, "exportable_closure", lambda m, *_: dict(m)), \
+                unittest.mock.patch.object(vellum_closure, "export_owned_file_violations", lambda *_: []), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(vellum_closure.cmd_export(args), 0)
+        return json.loads(next((Path(args.landing) / "provenance/mirror/receipts").glob("*.json")).read_text(encoding="utf-8"))
+
+    def test_export_receipt_records_a_pruned_source_and_leaves_others_unchanged(self):
+        receipt = self.export_receipt(self.source)
+        self.assertEqual(receipt["pulp_sha"], self.source)
+        self.assertNotIn("mirror_source_sha", receipt)
+        self.assertNotIn("pruned_source", receipt)
+        unpruned_mirror = receipt["mirror_sha"]
+        receipt = self.export_receipt(self.pruned)
+        self.assertEqual(receipt["pulp_sha"], self.pruned)
+        self.assertEqual(receipt["mirror_source_sha"], self.source)
+        self.assertEqual(receipt["mirror_sha"], unpruned_mirror)
+        self.assertEqual(receipt["pruned_source"]["mirror_source_commit"], self.source)
+        self.assertEqual([row["blob"] for row in receipt["files"]], [self.git("rev-parse", f"{self.source}:a.txt")])
+
+    def test_pruned_commit_with_no_or_two_mirror_sources_is_refused(self):
+        from vellum_closure import export_source_mapping
+        _, mirror_sha = self.rewrite(self.pruned)
+        path = Path(self.td.name) / "ambiguous-map"
+        for rows in ([], [self.source, self.base]):
+            body = "".join(f"{row} {mirror_sha}\n" for row in rows)
+            path.write_text(f"old new\n{body}{self.pruned} {'0' * 40}\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "not exactly one"):
+                export_source_mapping(path, self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+
 class ClosureCtestWiringTests(unittest.TestCase):
     def test_manifest_readers_require_the_boundary_fixture(self):
         # DEPENDS only orders tests; a filtered run would grade a stale manifest.
