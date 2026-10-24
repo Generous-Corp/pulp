@@ -17,6 +17,7 @@
 #include <pulp/canvas/canvas.hpp>
 
 #include <cmath>
+#include <memory>
 #include <limits>
 #include <optional>
 #include <utility>
@@ -872,4 +873,46 @@ TEST_CASE("SvgPathWidget strokes a styled gradient without touching sticky strok
     REQUIRE(cleared > stroke);
     CHECK(rc.commands()[static_cast<size_t>(stroke)].f[1] ==
           static_cast<float>(pulp::canvas::LineCap::round));
+}
+
+TEST_CASE("SvgPathWidget paints in the captured CSS-px-snapped box", "[svg_path][snap]") {
+    // An inline <svg> laid out at top 13.5: Chromium paints its content at the
+    // snapped 14, as it does a box background, and the capture records that.
+    pulp::view::View root;
+    root.set_bounds({0, 0, 100, 100});
+    auto owned = std::make_unique<SvgPathWidget>();
+    auto* svg = owned.get();
+    root.add_child(std::move(owned));
+    svg->set_bounds({20.0f, 13.5f, 24.0f, 24.0f});
+    svg->set_viewbox(24, 24);
+    svg->set_path("M4 12 L20 12");
+    svg->clear_fill();
+    svg->set_stroke_color(pulp::canvas::Color::rgba8(255, 255, 255));
+    svg->set_captured_box_paint_rect(40.0f / 2, 28.0f / 2, 88.0f / 2, 76.0f / 2, 2.0f);
+
+    const auto snapped = svg->self_paint_bounds();
+    CHECK(snapped.x == 0.0f);
+    CHECK(snapped.y == 0.5f);
+    const auto extent = svg->paint_extent();
+    CHECK(extent.y < 12.5f); // the stroke's own padding, offset by the snap
+    CHECK(extent.y + extent.height > 12.5f);
+
+    RecordingCanvas rc;
+    svg->paint(rc);
+    const DrawCommand* first_translate = nullptr;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::translate) {
+            first_translate = &cmd;
+            break;
+        }
+    }
+    REQUIRE(first_translate != nullptr);
+    CHECK(first_translate->f[0] == 0.0f);
+    CHECK(first_translate->f[1] == 0.5f);
+
+    // Without a captured rect the widget paints in its own bounds.
+    SvgPathWidget plain;
+    plain.set_bounds({0, 0, 24, 24});
+    plain.set_path("M4 12 L20 12");
+    CHECK(plain.self_paint_bounds().y == 0.0f);
 }

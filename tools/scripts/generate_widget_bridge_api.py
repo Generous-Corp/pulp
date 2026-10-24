@@ -355,6 +355,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "setSvgLine": "(id: string, x1: number, y1: number, x2: number, y2: number) => void",
     "setSvgPath": "(id: string, pathData: string) => void",
     "setSvgRect": "(id: string, x: number, y: number, width: number, height: number) => void",
+    "setSvgStrokeStyle": "(id: string, linecap: string, linejoin: string, miterLimit?: number) => void",
     "setSvgStrokeWidth": "(id: string, width: number) => void",
     "setSvgStrokeGradient": "(id: string, value: string) => void",
     "setSvgViewBox": "(id: string, width: number, height: number) => void",
