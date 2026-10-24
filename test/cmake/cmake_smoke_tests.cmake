@@ -110,6 +110,15 @@ set_tests_properties(cmake-au-v2-type-selection PROPERTIES
     LABELS "cmake;au;au-v2;midi"
     TIMEOUT 30)
 
+# SDL3 Linux X11 extension defaults: which SDL_X11_* options are defaulted OFF
+# because their development header is absent.
+add_test(NAME cmake-sdl3-linux-x11-defaults
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_sdl3_linux_x11_defaults.cmake)
+set_tests_properties(cmake-sdl3-linux-x11-defaults PROPERTIES
+    LABELS "cmake;sdl3;linux"
+    TIMEOUT 30)
+
 # Standalone document-type / exported-UTType declaration contract. Argument
 # validation runs under `cmake -P` everywhere; on macOS the same test also
 # configures a throwaway bundle project and reads the Info.plist CMake

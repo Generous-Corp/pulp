@@ -742,11 +742,11 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     set_tests_properties(pulp.vellum-closure-policy-selftest PROPERTIES
         LABELS "pr")
     include(FetchContent)
-    pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
+    pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.16.1)
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.7.1
+        GIT_TAG v3.16.1
     )
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
