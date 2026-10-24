@@ -1,6 +1,7 @@
 // Theme-painted form controls in a browser capture lower onto the widgets'
 // Chromium-refresh skins; every other control and every widget Pulp builds
 // itself keeps the platform skin.
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
@@ -162,6 +163,97 @@ TEST_CASE("theme-painted checkboxes and radios lower to the Chromium skin with t
     CHECK(boxes[4]->radio_group() != boxes[2]->radio_group());
 }
 
+namespace {
+
+IRNode captured_button(std::string id, float top) {
+    auto node = captured_input(std::move(id), "button", 10.0f, top, 80.0f, 24.0f);
+    node.attributes["source_tag"] = "button";
+    IRNode text;
+    text.type = "text";
+    text.text_content = "Save preset";
+    text.style.position = "absolute";
+    text.style.left = 8.0f;
+    text.style.top = 4.0f;
+    text.style.width = 64.0f;
+    text.style.height = 16.0f;
+    node.children.push_back(text);
+    return node;
+}
+
+} // namespace
+
+TEST_CASE("a theme-painted button lowers to a ButtonSurface that keeps its content",
+          "[view][import][native-materializer][form-controls]") {
+    auto node = captured_button("save", 10.25f);
+    node.attributes["ua_color_scheme"] = "dark";
+    node.attributes["ua_disabled"] = "1";
+    node.attributes["browser_box_paint_left_px"] = "20";
+    node.attributes["browser_box_paint_top_px"] = "20";
+    node.attributes["browser_box_paint_right_px"] = "180";
+    node.attributes["browser_box_paint_bottom_px"] = "69";
+    node.attributes["browser_box_paint_dpr"] = "2";
+    auto root = build_native_view_tree(panel_with({node, captured_button("plain", 50.0f)}), {}, {});
+    REQUIRE(root != nullptr);
+    root->layout_children();
+    REQUIRE(root->child_count() == 2);
+    auto* surface = dynamic_cast<ButtonSurface*>(root->child_at(0));
+    REQUIRE(surface != nullptr);
+    CHECK(surface->color_scheme() == UaColorScheme::dark);
+    CHECK_FALSE(surface->enabled());
+    CHECK(surface->control_state() == UaControlState::disabled);
+
+    // The content stays the button's child, and the button takes the pointer
+    // so hover and press land on the surface rather than its label.
+    REQUIRE(surface->child_count() == 1);
+    auto* label = dynamic_cast<Label*>(surface->child_at(0));
+    REQUIRE(label != nullptr);
+    CHECK(label->text() == "Save preset");
+    CHECK_FALSE(label->hit_testable());
+
+    // The surface paints in the snapped box: (10, 10) is 0.25 CSS px above the
+    // fractional layout box.
+    const Rect snapped = surface->self_paint_bounds();
+    CHECK(snapped.y == Catch::Approx(-0.25f));
+    CHECK(snapped.height == Catch::Approx(24.5f));
+
+    // A button with no recorded scheme is light and enabled.
+    auto* plain = dynamic_cast<ButtonSurface*>(root->child_at(1));
+    REQUIRE(plain != nullptr);
+    CHECK(plain->color_scheme() == UaColorScheme::light);
+    CHECK(plain->enabled());
+}
+
+TEST_CASE("an author-styled button, and a button from another lane, do not get the browser skin",
+          "[view][import][native-materializer][form-controls]") {
+    // Author box styling dropped the theme, so the capture recorded no theme
+    // state and kept the button's own paint.
+    auto author = captured_button("styled", 10.0f);
+    author.attributes["native_theme"] = "author";
+    author.attributes.erase("ua_control");
+    author.style.background_color = "rgb(200, 0, 0)";
+    // A verdict without recorded state is not enough either.
+    auto stateless = captured_button("bare", 50.0f);
+    stateless.attributes.erase("ua_control");
+    auto root = build_native_view_tree(panel_with({author, stateless}), {}, {});
+    REQUIRE(root->child_count() == 2);
+    for (std::size_t i = 0; i < 2; ++i) {
+        CHECK(dynamic_cast<ButtonSurface*>(root->child_at(i)) == nullptr);
+        CHECK(root->child_at(i)->child_count() == 1);
+    }
+
+    // A designed button from another import lane stays Pulp's TextButton.
+    IRNode figma_button;
+    figma_button.type = "button";
+    figma_button.stable_anchor_id = "figma:save";
+    figma_button.text_content = "Save";
+    figma_button.style.width = 80.0f;
+    figma_button.style.height = 24.0f;
+    root = build_native_view_tree(panel_with({figma_button}), {}, {});
+    REQUIRE(root->child_count() == 1);
+    CHECK(dynamic_cast<ButtonSurface*>(root->child_at(0)) == nullptr);
+    CHECK(dynamic_cast<TextButton*>(root->child_at(0)) != nullptr);
+}
+
 TEST_CASE("controls the theme did not paint, and widgets Pulp builds, keep the platform skin",
           "[view][import][native-materializer][form-controls]") {
     // Author box styling dropped the theme: the capture painted it from CSS.
@@ -228,4 +320,24 @@ TEST_CASE("generated C++ builds the same theme-painted controls as the native la
     auto* native_radio = dynamic_cast<Checkbox*>(root->child_at(1));
     REQUIRE(native_radio != nullptr);
     CHECK(has("->set_radio_group(" + std::to_string(native_radio->radio_group()) + ");"));
+}
+
+TEST_CASE("generated C++ builds the same ButtonSurface as the native lane",
+          "[view][import][native-materializer][form-controls][cpp-codegen]") {
+    auto button = captured_button("save", 10.0f);
+    button.attributes["ua_color_scheme"] = "dark";
+    button.attributes["ua_disabled"] = "1";
+    // An accent the page sets never reaches a push button.
+    button.attributes["ua_accent"] = "rgb(71, 180, 235)";
+    const auto result = generate_pulp_cpp(panel_with({button}), {}, {});
+    const auto has = [&](const std::string& text) {
+        return result.source.find(text) != std::string::npos;
+    };
+    CHECK(has("std::make_unique<pulp::view::ButtonSurface>()"));
+    CHECK(has("->set_color_scheme(pulp::view::UaColorScheme::dark);"));
+    CHECK(has("->set_enabled(false);"));
+    CHECK(has("Save preset"));
+    CHECK_FALSE(has("set_skin("));
+    CHECK_FALSE(has("set_accent_color("));
+    CHECK_FALSE(has("pulp::view::TextButton"));
 }
