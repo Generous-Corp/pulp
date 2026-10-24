@@ -73,7 +73,11 @@ def cell(lane, side, role, frames, load, *, s2v=200_000, tail=None, cpu=20_000,
         samples["oracle"].append(1)
         samples["stalled"].append(0)
     driven = blocks + WARMUP
+    wake_domain = ("unobservable_no_host_completion_time_exposed" if side == "dawn" else
+                   comparator.WAKE_GPU_END_UNORDERED if "shared_event" in lane else
+                   "metal_gpu_end_to_worker_observed")
     return {"lane": lane, "side": side, "role": role, "frames": frames, "load": load,
+            "wake_domain": wake_domain,
             "status": "completed", "reason": "", "blocks": blocks, "warmup_blocks": WARMUP,
             "kernel": kernel(frames, robustness="none" if role != "gating"
                              else "tint_equivalent"),
@@ -422,10 +426,37 @@ class ComparatorV2Tests(unittest.TestCase):
         self.assertIn("sample_order:metal_shared_event:64:idle", evaluate(seal(r))["reasons"])
 
     def test_gpu_end_after_visible_is_refused(self):
+        # A completed handler runs after the command buffer completes, so its
+        # GPU end must precede visibility.
         r = receipt()
-        c = find(r, "metal_shared_event", 128)
+        c = find(r, "metal_completed_handler", 128)
         c["samples"]["gpu_end_ns"][7] = c["samples"]["visible_ns"][7] + 500_000
-        self.assertIn("sample_gpu_end_order:metal_shared_event:128:idle",
+        self.assertIn("sample_gpu_end_order:metal_completed_handler:128:idle",
+                      evaluate(seal(r))["reasons"])
+
+    def test_shared_event_gpu_end_may_trail_visible(self):
+        # A shared-event listener can fire before the command buffer records
+        # GPUEndTime (a paravirtual-GPU CI flake); that is a valid timeline,
+        # and such cells never time wake latency from GPU end.
+        r = receipt()
+        c = find(r, "metal_shared_event", 256)
+        for i in range(0, c["blocks"], 3):
+            c["samples"]["gpu_end_ns"][i] = c["samples"]["visible_ns"][i] + 500_000
+            c["samples"]["gpu_busy_ns"][i] = (c["samples"]["visible_ns"][i] -
+                                              c["samples"]["submit_ns"][i] + 400_000)
+        result = evaluate(seal(r))
+        self.assertFalse(any(x.startswith("sample_gpu") for x in result["reasons"]),
+                         result["reasons"])
+        metrics = next(m for m in result["campaigns"][0]["metrics"]
+                       if m["lane"] == "metal_shared_event" and m["frames"] == 256
+                       and m["load"] == "idle")
+        self.assertEqual(metrics["wake_ns"]["count"], 0)
+
+    def test_shared_event_gpu_end_before_submit_is_refused(self):
+        r = receipt()
+        c = find(r, "metal_shared_event", 64)
+        c["samples"]["gpu_end_ns"][4] = c["samples"]["submit_ns"][4] - 500_000
+        self.assertIn("sample_gpu_end_order:metal_shared_event:64:idle",
                       evaluate(seal(r))["reasons"])
 
     def test_gpu_busy_longer_than_latency_is_refused(self):
