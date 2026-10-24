@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261024-css-font-weight-matching",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "Every path that picks a face from a named family's style set (the font resolver and resolved_face_identity(), the paragraph collection's default font manager, and registered or bundled families) must choose the weight by the CSS Fonts 4 order through one shared matcher, never the platform's nearest weight, so the face painted and the face a captured basis is checked against cannot differ.",
+  "evidence": [
+    ".github/vellum-change-events/20261024-css-font-weight-matching.json",
+    "pulp-test-font-weight-match [weight-match]",
+    "import-design-ir-observe-half-pixel-label"
+  ]
+}
