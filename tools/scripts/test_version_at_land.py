@@ -31,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -1280,6 +1281,172 @@ class PrRouteTest(unittest.TestCase):
         self.assertGreater(val._semver("0.10.0"), val._semver("0.9.9"))
         self.assertGreater(val._semver("1.0.0"), val._semver("0.99.99"))
         self.assertFalse(val._semver("0.2.0") > val._semver("0.2.0"))
+
+
+class CoalesceDecisionTest(unittest.TestCase):
+    """`coalesce_decision`: a new bump PR is held only while other PRs wait in
+    the merge queue AND the last bump landed inside the window, and never when
+    a release needs the number or a fact could not be read."""
+
+    def decide(self, **overrides):
+        args = dict(other_queue_entries=3, minutes_since_last_bump=30,
+                    window_minutes=120, release_now=False)
+        args.update(overrides)
+        return val.coalesce_decision(**args)
+
+    def test_holds_while_the_queue_is_busy_inside_the_window(self) -> None:
+        hold, why = self.decide()
+        self.assertTrue(hold)
+        self.assertIn("3 other PR(s)", why)
+
+    def test_each_opening_condition_opens_the_bump(self) -> None:
+        # Negative controls: change exactly one input of the holding case.
+        for name, overrides in (
+                ("empty queue", dict(other_queue_entries=0)),
+                ("window reached", dict(minutes_since_last_bump=120)),
+                ("window passed", dict(minutes_since_last_bump=500)),
+                ("release needs the number", dict(release_now=True)),
+                ("coalescing off", dict(window_minutes=0))):
+            with self.subTest(name):
+                hold, why = self.decide(**overrides)
+                self.assertFalse(hold, why)
+
+    def test_an_unreadable_fact_never_holds(self) -> None:
+        for overrides in (dict(other_queue_entries=None),
+                          dict(minutes_since_last_bump=None)):
+            with self.subTest(**{k: str(v) for k, v in overrides.items()}):
+                self.assertFalse(self.decide(**overrides)[0])
+
+    def test_one_minute_inside_the_window_still_holds(self) -> None:
+        self.assertTrue(self.decide(minutes_since_last_bump=119)[0])
+
+
+class MergeQueueReaderTest(unittest.TestCase):
+    """`_other_merge_queue_entries` counts queue entries other than the bump PR
+    and reports None for anything it cannot read."""
+
+    def setUp(self) -> None:
+        self._orig_gh = val._gh
+        self._env = mock_env = dict(os.environ)
+        mock_env["GITHUB_REPOSITORY"] = "owner/repo"
+        self._patch = unittest.mock.patch.dict(os.environ, mock_env, clear=True)
+        self._patch.start()
+
+    def tearDown(self) -> None:
+        val._gh = self._orig_gh
+        self._patch.stop()
+
+    def answer(self, stdout: str, rc: int = 0) -> None:
+        val._gh = lambda repo, *a, check=True: subprocess.CompletedProcess(
+            a, rc, stdout=stdout, stderr="")
+
+    @staticmethod
+    def queue(*heads: str, total: int | None = None) -> str:
+        nodes = [{"pullRequest": {"headRefName": h}} for h in heads]
+        return json.dumps({"data": {"repository": {"mergeQueue": {"entries": {
+            "totalCount": len(nodes) if total is None else total,
+            "nodes": nodes}}}}})
+
+    def test_counts_entries_other_than_the_bump_pr(self) -> None:
+        self.answer(self.queue("feature/a", val.BUMP_BRANCH, "fix/b"))
+        self.assertEqual(val._other_merge_queue_entries(Path("."), "main"), 2)
+        self.answer(self.queue(val.BUMP_BRANCH))
+        self.assertEqual(val._other_merge_queue_entries(Path("."), "main"), 0)
+        self.answer(self.queue())
+        self.assertEqual(val._other_merge_queue_entries(Path("."), "main"), 0)
+
+    def test_entries_beyond_the_first_page_still_count(self) -> None:
+        self.answer(self.queue("feature/a", total=140))
+        self.assertEqual(val._other_merge_queue_entries(Path("."), "main"), 140)
+
+    def test_an_unreadable_queue_is_none(self) -> None:
+        for stdout, rc in (("", 1), ("not json", 0),
+                           (json.dumps({"data": {"repository": None}}), 0),
+                           (json.dumps({"data": {"repository": {"mergeQueue": None}}}), 0)):
+            with self.subTest(stdout=stdout[:30], rc=rc):
+                self.answer(stdout, rc)
+                self.assertIsNone(val._other_merge_queue_entries(Path("."), "main"))
+
+    def test_no_repository_identity_is_none(self) -> None:
+        os.environ.pop("GITHUB_REPOSITORY", None)
+        self.answer(self.queue("feature/a"))
+        self.assertIsNone(val._other_merge_queue_entries(Path("."), "main"))
+
+
+class PrRouteCoalesceTest(unittest.TestCase):
+    """`apply_via_pr` with coalescing on: a bump landed recently and another
+    fix merged after it. While other PRs wait in the queue the drain holds
+    the new bump PR; any opening condition opens it as before."""
+
+    setUp = PrRouteTest.setUp
+    tearDown = PrRouteTest.tearDown
+    _config = staticmethod(PrRouteTest._config)
+    _cfg = PrRouteTest._cfg
+    _origin_has_branch = PrRouteTest._origin_has_branch
+
+    def _land_bump_then_fix(self) -> int:
+        """A bump lands, then a fix carrying intent. Returns the bump's
+        committer time, the 'last bump landed' instant the drain measures."""
+        land = self.root / "land2"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(land)],
+                       check=True)
+        self._config(land)
+        _git(land, "commit", "-q", "--allow-empty", "-m",
+             f"chore: bump versions\n\n{val.APPLIED_MARKER}: prior\n")
+        landed = int(_git(land, "log", "-1", "--format=%ct").strip())
+        (land / "core/runtime/src/foo.cpp").write_text("int foo(){return 10;}\n", encoding="utf-8")
+        _git(land, "add", "--", "core/runtime/src/foo.cpp")
+        _git(land, "commit", "-q", "-m",
+             "fix(core): later change\n\nVersion-Bump: sdk=patch\n")
+        _git(land, "push", "-q", "origin", "HEAD:main")
+        return landed
+
+    def drain(self, *, queue: int | None, minutes_after: int, **kw):
+        landed = self._land_bump_then_fix()
+        fake = _FakeGh(open_prs=kw.pop("open_prs", 0))
+        val._gh = fake
+        report: dict[str, str] = {}
+        status, plan = val.apply_via_pr(
+            self.clone, self._cfg(), report=report, coalesce_window=120,
+            queue_reader=lambda repo, branch: queue,
+            now=landed + minutes_after * 60, **kw)
+        return status, plan, fake, report
+
+    def test_holds_the_new_bump_pr_while_the_queue_is_busy(self) -> None:
+        status, plan, fake, report = self.drain(queue=4, minutes_after=20)
+        self.assertEqual(status, "coalesced")
+        self.assertTrue(plan, "the held bump still has intent to apply")
+        self.assertIn("4 other PR(s)", report["coalesce"])
+        self.assertFalse(fake.did("pr", "create"))
+        self.assertFalse(self._origin_has_branch(f"refs/heads/{val.BUMP_BRANCH}"))
+
+    def test_opens_the_bump_pr_when_any_condition_holds(self) -> None:
+        # Negative controls for the hold above, one condition at a time.
+        for name, kw in (("queue empty", dict(queue=0, minutes_after=20)),
+                         ("window over", dict(queue=4, minutes_after=121)),
+                         ("queue unreadable", dict(queue=None, minutes_after=20)),
+                         ("release now", dict(queue=4, minutes_after=20,
+                                              release_now=True))):
+            with self.subTest(name):
+                self.tearDown()
+                self.setUp()
+                status, _, fake, _ = self.drain(**kw)
+                self.assertEqual(status, "pr-opened")
+                self.assertTrue(fake.did("pr", "create"))
+
+    def test_an_open_bump_pr_is_never_held(self) -> None:
+        # Coalescing only gates opening a NEW PR; an open one is still re-armed.
+        status, _, fake, _ = self.drain(queue=4, minutes_after=20, open_prs=1)
+        self.assertEqual(status, "pending")
+        self.assertTrue(fake.did("pr", "merge"))
+
+    def test_coalescing_off_by_default_in_the_function(self) -> None:
+        self._land_bump_then_fix()
+        fake = _FakeGh(open_prs=0)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg(),
+                                     queue_reader=lambda repo, branch: 9)
+        self.assertEqual(status, "pr-opened")
 
 
 class BumpPrLivenessTest(unittest.TestCase):
