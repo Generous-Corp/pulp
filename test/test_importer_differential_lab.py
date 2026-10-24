@@ -2342,6 +2342,36 @@ class FormControlBoundaryTests(unittest.TestCase):
             }
         return snapshot
 
+    def test_a_theme_control_the_import_skinned_is_not_a_support_boundary(self) -> None:
+        from importer_differential.form_controls import form_controls
+
+        nodes = [LAB.BrowserNode(1, "button", 0, "Apply", {}, (10, 10, 80, 21),
+                                 {"appearance": "auto"}, 41),
+                 LAB.BrowserNode(2, "input", 0, "", {"type": "range"}, (10, 40, 129, 16),
+                                 {"appearance": "auto"}, 42),
+                 LAB.BrowserNode(3, "select", 0, "", {}, (10, 60, 80, 21),
+                                 {"appearance": "auto"}, 43)]
+        snapshot = {"strings": [], "documents": [], "formControlTheme": {"controls": [
+            {"node_index": 1, "theme": "native"}, {"node_index": 2, "theme": "native"},
+            {"node_index": 3, "theme": "native"}]}}
+
+        def ir(*skinned: int) -> dict:
+            return {"root": {"children": [
+                {"attributes": {"native_theme": "native", "ua_control": "button",
+                                "backend_node_id": str(backend)}, "children": []}
+                for backend in skinned]}}
+
+        status = {row["browser_node"]: row["status"]
+                  for row in form_controls(nodes, snapshot, ir(41, 42))}
+        # Lowered onto a Chromium skin: drawn natively and scored, not excluded.
+        self.assertEqual(status[1], "native-theme-skin")
+        self.assertEqual(status[2], "native-theme-skin")
+        # A themed control with no skin (a select) stays a boundary.
+        self.assertEqual(status[3], "ua-default-form-chrome")
+        # Control: without the native IR, nothing is reclassified.
+        status = {row["browser_node"]: row["status"] for row in form_controls(nodes, snapshot)}
+        self.assertEqual(set(status.values()), {"ua-default-form-chrome"})
+
     def test_unlaid_out_options_are_not_expected_boxes(self) -> None:
         tags = [node.tag for node in LAB.browser_nodes(self.form_snapshot())]
         # The select draws its option; the option has no box to lower.

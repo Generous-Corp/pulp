@@ -64,6 +64,10 @@ UA_SHADOW_FORM_PART = "ua-shadow-form-part"
 AUTHOR_STYLED = "author-styled"
 APPEARANCE_UNRECORDED = "appearance-unrecorded"
 THEME_UNRESOLVED = "theme-unresolved"
+# The theme painted it and the native import lowered it onto the matching
+# Chromium-refresh widget skin, so the renderer reproduces it and the visual
+# gate scores it like any other content; it is not a support boundary.
+NATIVE_THEME_SKIN = "native-theme-skin"
 
 BOUNDARY_STATUSES = frozenset({UA_DEFAULT_FORM_CHROME, UA_SHADOW_FORM_PART})
 
@@ -114,8 +118,31 @@ def theme_verdicts(
     return verdicts
 
 
+def skinned_backend_ids(native_ir: dict[str, Any] | None) -> set[int]:
+    """Backend node ids of the controls the native IR lowered onto a theme skin.
+
+    Native lowering skins a node whose capture verdict is `native` and that
+    carries a `ua_control`; the backend id ties it to the browser node.
+    """
+    found: set[int] = set()
+
+    def visit(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        attributes = node.get("attributes")
+        if isinstance(attributes, dict) and attributes.get("native_theme") == "native" \
+                and attributes.get("ua_control") and str(attributes.get("backend_node_id", "")).isdigit():
+            found.add(int(attributes["backend_node_id"]))
+        for child in node.get("children") or []:
+            visit(child)
+
+    visit((native_ir or {}).get("root"))
+    return found
+
+
 def form_controls(browser_flat: list[Any],
                   snapshot: DomSnapshot | dict[str, Any] | None = None,
+                  native_ir: dict[str, Any] | None = None,
                   ) -> list[dict[str, Any]]:
     """Every laid-out, visible form control with its support status.
 
@@ -124,6 +151,7 @@ def form_controls(browser_flat: list[Any],
     the DOM snapshot carrying the capture's theme verdicts.
     """
     verdicts = theme_verdicts(snapshot)
+    skinned = skinned_backend_ids(native_ir)
     result = []
     for node in browser_flat:
         if node.tag not in FORM_CONTROL_TAGS or node.bounds is None:
@@ -133,14 +161,16 @@ def form_controls(browser_flat: list[Any],
         if node.tag == "input" and input_type == "hidden":
             continue
         theme = verdicts.get(node.index) if verdicts is not None else None
+        status = control_status(node.tag, input_type, node.styles, theme, verdicts is not None)
+        if status == UA_DEFAULT_FORM_CHROME and node.backend_node_id in skinned:
+            status = NATIVE_THEME_SKIN
         result.append({
             "browser_node": node.index,
             "tag": node.tag,
             "type": input_type if node.tag == "input" else None,
             "appearance": node.styles.get("appearance"),
             "theme": theme,
-            "status": control_status(node.tag, input_type, node.styles,
-                                     theme, verdicts is not None),
+            "status": status,
             "bounds": list(node.bounds),
         })
     return result

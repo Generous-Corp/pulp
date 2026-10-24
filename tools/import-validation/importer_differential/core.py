@@ -649,13 +649,14 @@ def form_control_residual(
     candidate_path: Path,
     visual: dict[str, Any],
     snapshot: DomSnapshot | dict[str, Any] | None = None,
+    native_ir: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Form controls, their support status, and their share of the residual.
 
     Attributed on the image pair the visual gate scored: the registered
     authored-frame crops when registration ran, the full frames otherwise.
     """
-    controls = form_controls(browser_flat_raw, snapshot)
+    controls = form_controls(browser_flat_raw, snapshot, native_ir)
     if not controls:
         return {"controls": [], "support_boundaries": [],
                 "foreground_error_total": 0.0,
@@ -1287,7 +1288,7 @@ def score_lanes(lanes: LaneOutputs, source: Path) -> Scores:
     blockers = unsupported_features(recognition)
     form_control_report = form_control_residual(
         browser_flat_raw, lanes.browser_dir / "browser.png", lanes.native_render, visual,
-        browser_snapshot)
+        browser_snapshot, lanes.native_doc)
     classifications = classify_gaps(
         recognition, structural, geometry, typography, visual,
         form_control_report)

@@ -175,7 +175,12 @@ theme part in its CSS-px-snapped box, so the skins paint in
 `View::self_paint_bounds()` (the captured `browser_box_paint_*` rect), never the
 fractional layout box; that is the 1 device px the Spectr slider was off by.
 `indeterminate` and a `disabled` inherited from a `<fieldset>` are not in the
-DOMSnapshot, so they are not recorded.
+DOMSnapshot, so they are not recorded. A native-verdict `<button>` (or a
+button/submit/reset `<input>`) records `ua_control=button` and lowers to a
+`ButtonSurface` whose children are its content; the theme ignores
+`accent-color` there. The differential lab marks a control the import skinned
+`native-theme-skin` rather than the `ua-default-form-chrome` support boundary,
+so it is scored like any other content.
 
 ### Packaged SDK runtime contract
 
