@@ -98,7 +98,7 @@ class AdoptionTest(unittest.TestCase):
             self.inspect()
 
     def test_cache_source_drift_rejected(self):
-        self.cache.write_text(self.cache.read_text(encoding='utf-8').replace(str(self.source), str(self.prefix)))
+        self.cache.write_text(self.cache.read_text(encoding='utf-8').replace(str(self.source), str(self.prefix)), encoding='utf-8')
         with self.assertRaisesRegex(tool.ProvenanceError, 'cache source'):
             self.inspect()
 

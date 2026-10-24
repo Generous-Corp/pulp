@@ -12594,7 +12594,6 @@ first.
 
 ## Hosted macOS advisory cadence
 
-<<<<<<< HEAD
 ## Release lanes pin the shell exec JS bridge OFF
 
 `PULP_DEV_BRIDGE_EXEC` compiles the developer-only `exec` / `execAsync` JS
@@ -12610,12 +12609,10 @@ adding a release configure site, carry the flag; when a release leg fails on
 that predates the option — neither is a test failure. The same refusal
 stops a `workflow_dispatch` backfill of a tag older than the option: those
 SDKs do carry the bridge, so re-minting their provenance is refused by design.
-=======
 The TSan workflow's focused SignalGraph selector must retain exact-name entries
 for mailbox and retirement-reader race cases when those cases are extracted or
 renamed. Validate the selected names with `ctest -N` before changing the regex;
 do not broaden the selector to the entire graph suite.
->>>>>>> origin/main
 
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
 native matrix are scheduled nightly and dispatched on an approved PR head. The
