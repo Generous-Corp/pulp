@@ -856,7 +856,41 @@ pulp_add_test_suite(pulp-test-widget-bridge-gpu-tail
     SOURCES test_widget_bridge_gpu_tail.cpp
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/view/src/widget_bridge
     LIBRARIES ${_pulp_widget_bridge_test_libs})
-pulp_add_test_suite(pulp-test-widget-bridge-capabilities GROUP pulp-test-group-view-widgets LIBRARIES ${_pulp_widget_bridge_test_libs})
+# The capability suite also proves the compile-time exec gate, so it needs the
+# same PULP_BRIDGE_EXEC_ENABLED value pulp-view-script was built with. The
+# definition is private to that archive on purpose; mirror the option here.
+if(PULP_DEV_BRIDGE_EXEC)
+    set(_pulp_bridge_exec_enabled 1)
+else()
+    set(_pulp_bridge_exec_enabled 0)
+endif()
+pulp_add_test_suite(pulp-test-widget-bridge-capabilities GROUP pulp-test-group-view-widgets
+    LIBRARIES ${_pulp_widget_bridge_test_libs}
+    COMPILE_DEFINITIONS PULP_BRIDGE_EXEC_ENABLED=${_pulp_bridge_exec_enabled})
+
+# Ship-safety for the shell exec bridge. The registrar body lives in
+# platform_services_api.cpp beside always-present registrars, so gating only the
+# API-group table would still link the /bin/sh body into every consumer. Compile
+# that one translation unit twice — once per gate value — and inspect the
+# objects: the dev object must carry the registrar symbol and the "execAsync"
+# literal (positive control), the ship object must carry neither.
+if(UNIX AND PULP_ENABLE_JS)
+    set(_pulp_bridge_exec_fixture_src
+        "${CMAKE_SOURCE_DIR}/core/view/src/widget_bridge/platform_services_api.cpp")
+    add_library(pulp-bridge-exec-fixture-dev OBJECT ${_pulp_bridge_exec_fixture_src})
+    target_compile_definitions(pulp-bridge-exec-fixture-dev PRIVATE PULP_BRIDGE_EXEC_ENABLED=1)
+    target_link_libraries(pulp-bridge-exec-fixture-dev PRIVATE pulp::view-script pulp::platform)
+
+    add_library(pulp-bridge-exec-fixture-ship OBJECT ${_pulp_bridge_exec_fixture_src})
+    target_compile_definitions(pulp-bridge-exec-fixture-ship PRIVATE PULP_BRIDGE_EXEC_ENABLED=0)
+    target_link_libraries(pulp-bridge-exec-fixture-ship PRIVATE pulp::view-script pulp::platform)
+
+    add_test(NAME pulp-bridge-exec-ship-symbol-absence
+        COMMAND ${CMAKE_COMMAND}
+            -DDEV_OBJ=$<TARGET_OBJECTS:pulp-bridge-exec-fixture-dev>
+            -DSHIP_OBJ=$<TARGET_OBJECTS:pulp-bridge-exec-fixture-ship>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/bridge_exec_ship_symbol_check.cmake)
+endif()
 pulp_add_test_suite(pulp-test-widget-bridge-removal-lifetime GROUP pulp-test-group-view-widgets
     LIBRARIES ${_pulp_widget_bridge_test_libs})
 # Widget bridge — child ordering. Every createX appends, so a widget that

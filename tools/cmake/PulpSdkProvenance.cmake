@@ -11,6 +11,10 @@ set(PULP_SDK_SOURCE_GIT_SHA "")
 set(PULP_SDK_PLATFORM "")
 set(PULP_SDK_AUDIO_PROBES_ENABLED "")
 set(PULP_SDK_INSPECTOR_ENABLED "")
+# Whether the installed pulp-view-script carries the shell exec/execAsync JS
+# bridge (`features.bridge_exec` on a release or profile marker, top-level
+# `bridge_exec` on a source install). Empty when the marker predates the key.
+set(PULP_SDK_BRIDGE_EXEC_ENABLED "")
 
 set(_pulp_sdk_provenance "${PULP_SDK_DIR}/sdk-provenance.json")
 if(EXISTS "${_pulp_sdk_provenance}")
@@ -59,6 +63,23 @@ if(EXISTS "${_pulp_sdk_provenance}")
                 "or unsafe contract; refusing to consume it.")
         endif()
         set(PULP_SDK_DEVELOPMENT TRUE)
+        # Development profiles may legitimately carry either value; export it so
+        # a consumer can refuse a shell-capable SDK for its own reasons. The
+        # forge-dev/trace profiles record it under features; the dev-experiment
+        # document records it at top level, so read either.
+        string(JSON _pulp_sdk_bridge_exec_type ERROR_VARIABLE _pulp_sdk_bridge_exec_error
+               TYPE "${_pulp_sdk_provenance_json}" features bridge_exec)
+        if(NOT _pulp_sdk_bridge_exec_error AND _pulp_sdk_bridge_exec_type STREQUAL "BOOLEAN")
+            string(JSON PULP_SDK_BRIDGE_EXEC_ENABLED
+                   GET "${_pulp_sdk_provenance_json}" features bridge_exec)
+        else()
+            string(JSON _pulp_sdk_bridge_exec_type ERROR_VARIABLE _pulp_sdk_bridge_exec_error
+                   TYPE "${_pulp_sdk_provenance_json}" bridge_exec)
+            if(NOT _pulp_sdk_bridge_exec_error AND _pulp_sdk_bridge_exec_type STREQUAL "BOOLEAN")
+                string(JSON PULP_SDK_BRIDGE_EXEC_ENABLED
+                       GET "${_pulp_sdk_provenance_json}" bridge_exec)
+            endif()
+        endif()
     elseif(_pulp_sdk_kind STREQUAL "source-install")
         # New source installs carry the target platform even though they are
         # not distribution eligible.  Keep accepting older markers locally,
@@ -85,6 +106,12 @@ if(EXISTS "${_pulp_sdk_provenance}")
            _pulp_sdk_dirty_type_error OR
            NOT _pulp_sdk_dirty_type STREQUAL "BOOLEAN")
             message(FATAL_ERROR "Pulp source install provenance is unsafe at ${_pulp_sdk_provenance}")
+        endif()
+        string(JSON _pulp_sdk_bridge_exec_type ERROR_VARIABLE _pulp_sdk_bridge_exec_error
+               TYPE "${_pulp_sdk_provenance_json}" bridge_exec)
+        if(NOT _pulp_sdk_bridge_exec_error AND _pulp_sdk_bridge_exec_type STREQUAL "BOOLEAN")
+            string(JSON PULP_SDK_BRIDGE_EXEC_ENABLED
+                   GET "${_pulp_sdk_provenance_json}" bridge_exec)
         endif()
         set(PULP_SDK_DEVELOPMENT TRUE)
     elseif(_pulp_sdk_kind STREQUAL "release")
@@ -154,6 +181,22 @@ if(EXISTS "${_pulp_sdk_provenance}")
             message(FATAL_ERROR
                 "Pulp SDK provenance at ${_pulp_sdk_provenance} has an unknown "
                 "or unsafe release contract; refusing to consume it.")
+        endif()
+        # Markers minted before the key existed carry no claim; a present key
+        # must be a boolean false, because an official SDK never ships the
+        # shell bridge.
+        string(JSON _pulp_sdk_bridge_exec_type ERROR_VARIABLE _pulp_sdk_bridge_exec_error
+               TYPE "${_pulp_sdk_provenance_json}" features bridge_exec)
+        if(NOT _pulp_sdk_bridge_exec_error)
+            string(JSON _pulp_sdk_bridge_exec
+                   GET "${_pulp_sdk_provenance_json}" features bridge_exec)
+            if(NOT _pulp_sdk_bridge_exec_type STREQUAL "BOOLEAN" OR _pulp_sdk_bridge_exec)
+                message(FATAL_ERROR
+                    "Pulp SDK provenance at ${_pulp_sdk_provenance} has an unknown "
+                    "or unsafe release contract: it claims the shell exec bridge "
+                    "(features.bridge_exec); refusing to consume it.")
+            endif()
+            set(PULP_SDK_BRIDGE_EXEC_ENABLED FALSE)
         endif()
         set(PULP_SDK_DISTRIBUTION_ELIGIBLE TRUE)
         set(PULP_SDK_PLATFORM "${_pulp_sdk_platform}")
