@@ -1804,7 +1804,7 @@ too, and the gate names the over-claimed family.
 
 **The authoritative check stays in CI, from a trusted root.**
 `.github/workflows/vellum-trusted-gate.yml` runs the checker from a trusted root
-rather than the pull request's copy, and `.github/CODEOWNERS` locks the events
+rather than the pull request's copy, and `.github/CODEOWNERS` lists the events
 directory, the checker and its test. A local refusal does not weaken that: it
 can only stop a push the required checks would also refuse, and it never
 accepts anything on CI's behalf. The real risk of a local copy is a FALSE red,
