@@ -39,6 +39,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
 
@@ -266,7 +267,7 @@ struct Fixture {
     std::string name;
     fs::path file;
     bool figma_plugin = false;
-    std::function<std::unique_ptr<View>()> build_cpp;
+    std::function<std::unique_ptr<View>(const fs::path&)> build_cpp;
     std::function<void(View&, NativeImportBindingContext&)> bind_cpp;
 };
 
@@ -291,13 +292,62 @@ DesignIR load(const Fixture& fixture) {
     return fixture.figma_plugin ? parse_figma_plugin_json(json) : parse_design_ir_json(json);
 }
 
+/// A valid 1x1 PNG, CRCs included, so every lane resolves and decodes an image.
+constexpr unsigned char kTinyPng[] = {
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+    0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+    0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+    0x9c, 0x63, 0x68, 0x68, 0x68, 0xf8, 0x0f, 0x00, 0x05, 0x84, 0x02, 0x80, 0x8c, 0xcd,
+    0x66, 0x26, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+
+/// The fixtures do not commit their captured bitmaps: the gate compares
+/// structure, not pixels. Every image a fixture references is staged as a tiny
+/// valid PNG instead, so an image node lowers as an image in every lane rather
+/// than as whatever each lane does with a missing file.
+class StagedAssets {
+  public:
+    explicit StagedAssets(const DesignIR& ir)
+        : dir_(pulp::test::make_unique_temp_dir("pulp-emitter-conformance")) {
+        std::set<std::string> paths;
+        const auto visit = [&](auto& self, const IRNode& node) -> void {
+            if (const auto it = node.attributes.find("asset_path"); it != node.attributes.end())
+                paths.insert(it->second);
+            for (const auto& child : node.children)
+                self(self, child);
+        };
+        visit(visit, ir.root);
+        for (const auto& asset : ir.asset_manifest.assets)
+            if (asset.local_path)
+                paths.insert(*asset.local_path);
+        for (const auto& relative : paths) {
+            const fs::path path(relative);
+            if (path.empty() || path.is_absolute())
+                continue;
+            fs::create_directories((dir_ / path).parent_path());
+            std::ofstream(dir_ / path, std::ios::binary)
+                .write(reinterpret_cast<const char*>(kTinyPng), sizeof(kTinyPng));
+        }
+    }
+    ~StagedAssets() {
+        std::error_code ec;
+        fs::remove_all(dir_, ec);
+    }
+    const fs::path& dir() const {
+        return dir_;
+    }
+
+  private:
+    fs::path dir_;
+};
+
 Rect root_rect(const DesignIR& ir) {
     return {0.0f, 0.0f, ir.root.style.width.value_or(800.0f),
             ir.root.style.height.value_or(600.0f)};
 }
 
-Projection native_lane(const DesignIR& ir) {
-    auto root = build_native_view_tree(ir, ir.asset_manifest, {.preview_mode = true});
+Projection native_lane(const DesignIR& ir, const fs::path& assets) {
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.preview_mode = true, .asset_base_directory = assets});
     REQUIRE(root != nullptr);
     root->set_bounds(root_rect(ir));
     root->layout_children();
@@ -307,8 +357,8 @@ Projection native_lane(const DesignIR& ir) {
     return out;
 }
 
-Projection cpp_lane(const Fixture& fixture, const DesignIR& ir) {
-    auto root = fixture.build_cpp();
+Projection cpp_lane(const Fixture& fixture, const DesignIR& ir, const fs::path& assets) {
+    auto root = fixture.build_cpp(assets);
     REQUIRE(root != nullptr);
     root->set_bounds(root_rect(ir));
     root->layout_children();
@@ -339,12 +389,13 @@ var __pulpConformance = {params: [], meters: []};
 })();
 )js";
 
-Projection js_lane(const DesignIR& ir) {
+Projection js_lane(const DesignIR& ir, const fs::path& assets) {
     View host;
     host.set_bounds(root_rect(ir));
     ScriptEngine engine;
     pulp::state::StateStore store;
     WidgetBridge bridge(engine, host, store);
+    bridge.set_script_base_dir(assets);
     bridge.load_script(std::string(kBindingProbe) + generate_pulp_js(ir, CodeGenOptions{}));
     host.layout_children();
     REQUIRE(host.child_count() > 0);
@@ -498,11 +549,12 @@ std::vector<Divergence> all_divergences() {
     for (const auto& fixture : fixtures()) {
         INFO("fixture " << fixture.name);
         const auto ir = load(fixture);
-        const auto native = native_lane(ir);
+        const StagedAssets assets(ir);
+        const auto native = native_lane(ir, assets.dir());
         REQUIRE_FALSE(native.empty());
-        for (auto&& d : compare("js", fixture.name, native, js_lane(ir)))
+        for (auto&& d : compare("js", fixture.name, native, js_lane(ir, assets.dir())))
             out.push_back(std::move(d));
-        for (auto&& d : compare("cpp", fixture.name, native, cpp_lane(fixture, ir)))
+        for (auto&& d : compare("cpp", fixture.name, native, cpp_lane(fixture, ir, assets.dir())))
             out.push_back(std::move(d));
         // SwiftUI compares only the anchors that bind on at least one side.
         Projection native_bindings;
