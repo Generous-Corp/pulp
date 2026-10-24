@@ -650,7 +650,7 @@ void SvgPathWidget::set_path(std::string data) {
 Rect SvgPathWidget::paint_extent() const {
     if (segments_.empty() || (!has_fill_ && !(has_stroke_ && stroke_width_ > 0)))
         return {};
-    const auto b = local_bounds();
+    const auto b = self_paint_bounds();
     if (b.width <= 0 || b.height <= 0)
         return {};
     float min_x = std::numeric_limits<float>::max(), min_y = min_x;
@@ -698,8 +698,8 @@ Rect SvgPathWidget::paint_extent() const {
     // anti-aliasing. A square cap's sqrt(2) x width / 2 is always inside that.
     const float stroke = has_stroke_ ? stroke_width_ * std::max(sx, sy) : 0.0f;
     const float pad = stroke * std::max(5.0f, stroke_miter_limit_.value_or(10.0f) * 0.5f) + 2.0f;
-    const float x0 = ox + min_x * sx - pad, y0 = oy + min_y * sy - pad;
-    const float x1 = ox + max_x * sx + pad, y1 = oy + max_y * sy + pad;
+    const float x0 = b.x + ox + min_x * sx - pad, y0 = b.y + oy + min_y * sy - pad;
+    const float x1 = b.x + ox + max_x * sx + pad, y1 = b.y + oy + max_y * sy + pad;
     if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1))
         return local_bounds();
     return {x0, y0, x1 - x0, y1 - y0};
@@ -842,13 +842,17 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
     if (segments_.empty()) return;
     if (!has_fill_ && !has_stroke_) return;
 
-    const auto b = local_bounds();
+    // Chromium paints an inline <svg>'s content in its CSS-px-snapped box, the
+    // same snap a box background gets, so an imported path paints in the
+    // captured snapped rect; a widget without one paints in its own bounds.
+    const auto b = self_paint_bounds();
     if (b.width <= 0 || b.height <= 0) return;
 
     const float vw = viewbox_w_ > 0 ? viewbox_w_ : b.width;
     const float vh = viewbox_h_ > 0 ? viewbox_h_ : b.height;
 
     canvas.save();
+    if (b.x != 0.0f || b.y != 0.0f) canvas.translate(b.x, b.y);
     const float sx = b.width / vw;
     const float sy = b.height / vh;
     if (stretch_to_bounds_) {
