@@ -500,6 +500,20 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
         SKIP_RETURN_CODE 77)
 endif()
 
+# Labels set in a captured page's own variable font render where Chromium put
+# them: the import carries the font and the native tree registers it, so each
+# label is shaped with the variable instance at its weight.
+if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-design-ir-observe-variable-font-label
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_variable_font_label.py
+                --observer $<TARGET_FILE:pulp-design-ir-observe>)
+    set_tests_properties(import-design-ir-observe-variable-font-label PROPERTIES
+        LABELS "parser-import;import"
+        TIMEOUT 120
+        SKIP_RETURN_CODE 77)
+endif()
+
 # pulp-import-design carries a local asset named outside the source design's
 # directory into the saved document's assets/, so the document still renders
 # under the loader's document-root containment after the source is gone.
