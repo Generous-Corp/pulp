@@ -51,7 +51,8 @@ pulp_add_test_suite(pulp-test-fdn-reverb-portable-lanes
     SOURCES test_fdn_reverb_block_engine.cpp test_classic_reverb.cpp
             test_multi_channel_meter_block.cpp
     LIBRARIES pulp::signal pulp::audio-analysis pulp::audio
-    TEST_SPEC "~[performance]")
+    TEST_SPEC "~[performance]"
+    TEST_PREFIX "portable-lanes::")
 target_compile_definitions(pulp-test-fdn-reverb-portable-lanes PRIVATE PULP_SIMD_LANES_PORTABLE)
 # The plain-struct path's partition exactness assumes, as with MSVC's default
 # /fp:precise, that a scalar tail's a * b + c is computed unfused, like the
