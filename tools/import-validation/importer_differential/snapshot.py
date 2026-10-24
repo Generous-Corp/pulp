@@ -184,7 +184,9 @@ class DomSnapshot:
         return self.raw.get("documentCanvas")
 
 
-_CSS_WHITESPACE = " \t\n\r\f"
+# The same set as `kCssWhitespace` in browser_capture_tree.cpp, vertical tab
+# included.
+_CSS_WHITESPACE = " \t\r\n\f\v"
 _SEGMENT_ESCAPES = {"\\": "\\\\", "/": "\\/", "[": "\\[", "]": "\\]",
                     '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
 
@@ -200,6 +202,9 @@ def capture_anchors(snapshot: DomSnapshot | dict[str, Any]) -> list[str]:
     document's structure, so two captures of one page spell it the same way
     whatever backend node ids each session handed out. A node with no
     signature (the document, a doctype, a comment) gets an empty anchor.
+
+    test/fixtures/capture-anchor-vectors.json pins this port and the C++
+    `capture_anchor_paths` to the same expected anchors; change both together.
     """
     snap = DomSnapshot.coerce(snapshot)
     count = len(snap.parents)

@@ -355,38 +355,19 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual([(b.anchor, n.anchor) for b, n, _ in matches],
                          [("capture:div#panel[0]", "capture:div#panel[0]")])
 
-    def test_capture_anchors_follow_the_importer_spelling(self) -> None:
-        # tools/import-design/browser_capture_tree.cpp `anchor_path`, checked
-        # against a committed Chrome capture and against its edge cases.
-        fixture = REPO / "test/fixtures/browser-capture-clip-transform/dom-snapshot.json"
-        snapshot = json.loads(fixture.read_text(encoding="utf-8"))
-        anchors = set(LAB.capture_anchors(snapshot))
-        for expected in ("capture:html[0]/body[0]/div#panel[0]",
-                         "capture:html[0]/body[0]/div#panel[0]/div#bar[0]",
-                         "capture:html[0]/body[0]/div#panel[0]/div#bar[0]/span#label[0]",
-                         "capture:html[0]/body[0]/div#panel[0]/div#scaled[0]"):
-            self.assertIn(expected, anchors)
-        strings = ["DIV", "id", "class", "data-pulp-key", "#comment", "a/b",
-                   "\n  card  wide", "k1", "k2", "#text", "x"]
-        edge = {"strings": strings, "computedStyleNames": [], "documents": [{
-            "nodes": {
-                "parentIndex": [-1, 0, 0, 0, 0, 0, 0, 0],
-                "nodeType": [1, 1, 1, 1, 1, 1, 8, 3],
-                "nodeName": [0, 0, 0, 0, 0, 0, 4, 9],
-                "nodeValue": [-1, -1, -1, -1, -1, -1, -1, 10],
-                "attributes": [[], [1, 5], [2, 6], [2, 6], [3, 7], [3, 8], [], []],
-            },
-            "layout": {"nodeIndex": [], "bounds": [], "styles": []}}]}
-        self.assertEqual(LAB.capture_anchors(edge), [
-            "capture:div[0]",
-            "capture:div[0]/div#a\\/b[0]",
-            "capture:div[0]/div.card[0]",
-            "capture:div[0]/div.card[1]",
-            "capture:div[0]/div[key=k1]",
-            "capture:div[0]/div[key=k2]",
-            "",
-            "capture:div[0]/#text[0]",
-        ])
+    def test_capture_anchors_match_the_vectors_anchor_path_is_pinned_to(self) -> None:
+        # test_browser_capture_tree.cpp asserts the same file through the
+        # importer's own `anchor_path`, so a spelling change on either side
+        # fails the other instead of reading here as every node missing.
+        fixtures = REPO / "test/fixtures"
+        vectors = json.loads(
+            (fixtures / "capture-anchor-vectors.json").read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(vectors["cases"]), 8)
+        for case in vectors["cases"]:
+            with self.subTest(case=case["name"]):
+                snapshot = case.get("snapshot") or json.loads(
+                    (fixtures / case["snapshot_path"]).read_text(encoding="utf-8"))
+                self.assertEqual(LAB.capture_anchors(snapshot), case["anchors"])
 
     @staticmethod
     def _panel_with_gain_span():

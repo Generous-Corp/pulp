@@ -6,12 +6,14 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
+    "chromium-authoring-frontend",
     "design-output-and-packaging",
     "design-source-ingest",
     "visual-proof-harness"
   ],
-  "rationale": "Importer differential lab only: browser-lane and candidate-lane nodes are now paired by the capture's DOM-path anchor, derived from the browser snapshot with a port of the importer's anchor_path, instead of by backendNodeId, which each Chromium session numbers in its own order. An anchor disagreement stays a non-match. The lab doc lists the ten fixtures that cannot be captured standalone. No importer, capture or renderer code changes. Chromium stays the only oracle and Skia/Dawn the renderer; no design-import, Chromium, rendering, or packaging authority moves.",
+  "rationale": "Importer differential lab only: browser-lane and candidate-lane nodes are now paired by the capture's DOM-path anchor, derived from the browser snapshot with a port of the importer's anchor_path, instead of by backendNodeId, which each Chromium session numbers in its own order. An anchor disagreement stays a non-match. The lab doc lists the ten fixtures that cannot be captured standalone. The capture's anchor_path is exposed unchanged to tests as capture_anchor_paths, and a shared vector file (test/fixtures/capture-anchor-vectors.json) is asserted through it and through the lab's port so the two cannot drift. No capture output or renderer behaviour changes. Chromium stays the only oracle and Skia/Dawn the renderer; no design-import, Chromium, rendering, or packaging authority moves.",
   "tests": [
+    "ctest --test-dir build -R pulp-test-browser-capture-import",
     "python3 test/test_importer_differential_lab.py",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"

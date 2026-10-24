@@ -919,6 +919,16 @@ private:
 
 }  // namespace
 
+std::vector<std::string> capture_anchor_paths(const CapturedStyleIndex& index) {
+    const auto identity = sibling_identity(index);
+    std::vector<std::string> anchors(static_cast<size_t>(std::max(index.node_count(), 0)));
+    for (int node = 0; node < static_cast<int>(anchors.size()); ++node) {
+        if (!describe(index, node).empty())
+            anchors[static_cast<size_t>(node)] = anchor_path(index, identity, node);
+    }
+    return anchors;
+}
+
 std::string_view to_string(PaintClass paint_class) {
     switch (paint_class) {
         case PaintClass::native: return "native";
