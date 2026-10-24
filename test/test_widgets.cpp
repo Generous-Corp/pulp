@@ -979,6 +979,93 @@ TEST_CASE("Knob and Fader render loaded sprite strips",
     REQUIRE_THAT(fader_image.f[3], WithinAbs(4.0, 0.001));
 }
 
+TEST_CASE("Sprite strips draw every declared frame of decodable bytes and bound raw bytes by "
+          "byte count",
+          "[view][widget][sprite]") {
+    // A PNG signature and IHDR for a 16x48 image: three 16x16 frames. The
+    // recording canvas sizes PNGs from IHDR, and these 33 bytes stand in for a
+    // compressed strip whose later frames start past its byte length.
+    std::vector<uint8_t> png = {0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00,
+                                0x0d, 'I',  'H',  'D',  'R',  0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
+                                0x00, 0x30, 0x08, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    auto encoded = std::make_shared<SpriteStrip>();
+    encoded->load(png.data(), png.size(), 16, 48, 3);
+
+    Knob knob;
+    knob.set_bounds({0, 0, 32, 32});
+    knob.set_value(1.0f);
+    knob.set_sprite_strip(encoded);
+    RecordingCanvas knob_canvas;
+    knob.paint(knob_canvas);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::draw_image) == 1);
+    CHECK(encoded->decoded_size_known());
+    CHECK(encoded->decoded_width() == 16);
+    CHECK(encoded->decoded_height() == 48);
+
+    Fader fader;
+    fader.set_bounds({0, 0, 32, 32});
+    fader.set_value(1.0f);
+    fader.set_sprite_strip(encoded);
+    RecordingCanvas fader_canvas;
+    fader.paint(fader_canvas);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::draw_image) == 1);
+
+    // The draw scales the decoded image to the declared size, so a strip
+    // declared at twice the image's pixel size still draws its last frame.
+    auto doubled = std::make_shared<SpriteStrip>();
+    doubled->load(png.data(), png.size(), 32, 96, 3);
+    knob.set_sprite_strip(doubled);
+    RecordingCanvas doubled_canvas;
+    knob.paint(doubled_canvas);
+    REQUIRE(doubled_canvas.count(DrawCommand::Type::draw_image) == 1);
+    const auto doubled_image = commands_of(doubled_canvas, DrawCommand::Type::draw_image).front();
+    CHECK_THAT(doubled_image.f[2], WithinAbs(32.0, 0.001));
+    CHECK_THAT(doubled_image.f[3], WithinAbs(96.0, 0.001));
+
+    // Raw RGBA bytes keep the byte-count bound: one frame short of the last.
+    std::vector<uint8_t> raw(static_cast<size_t>(16) * 16 * 4 * 2, 0x7f);
+    auto truncated = std::make_shared<SpriteStrip>();
+    truncated->load(raw.data(), raw.size(), 16, 48, 3);
+    knob.set_sprite_strip(truncated);
+    RecordingCanvas raw_canvas;
+    knob.paint(raw_canvas);
+    CHECK(raw_canvas.count(DrawCommand::Type::draw_image) == 0);
+    CHECK_FALSE(truncated->decoded_size_known());
+}
+
+TEST_CASE("A sprite strip one canvas cannot measure still draws on a canvas that can",
+          "[view][widget][sprite]") {
+    // 33 bytes of a format the recording canvas cannot size (it reads PNG
+    // only), standing in for a compressed JPEG, WebP or GIF strip of three
+    // 16x16 frames.
+    std::vector<uint8_t> bytes(33, 0x5a);
+    auto strip = std::make_shared<SpriteStrip>();
+    strip->load(bytes.data(), bytes.size(), 16, 48, 3);
+    Knob knob;
+    knob.set_bounds({0, 0, 32, 32});
+    knob.set_value(1.0f);
+    knob.set_sprite_strip(strip);
+
+    // A headless snapshot first: no decoder, so the byte bound refuses the
+    // last frame, and nothing is recorded on the shared strip.
+    RecordingCanvas snapshot;
+    knob.paint(snapshot);
+    CHECK(snapshot.count(DrawCommand::Type::draw_image) == 0);
+    CHECK_FALSE(strip->decoded_size_known());
+
+    // Then a decoding canvas: the strip measures and its last frame draws.
+    struct DecodingCanvas : RecordingCanvas {
+        bool measure_image_from_data(const uint8_t*, size_t, float& w, float& h) override {
+            w = 16.0f;
+            h = 48.0f;
+            return true;
+        }
+    } decoding;
+    knob.paint(decoding);
+    CHECK(decoding.count(DrawCommand::Type::draw_image) == 1);
+    CHECK(strip->decoded_size_known());
+}
+
 // ── RangeSlider (pulp issue-966) ────────────────────────────────────────────
 
 TEST_CASE("RangeSlider default state matches HTML <input type=\"range\">",

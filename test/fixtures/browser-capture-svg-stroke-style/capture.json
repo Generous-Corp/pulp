@@ -1,0 +1,161 @@
+{
+  "schema": "pulp-browser-capture-v1",
+  "version": 1,
+  "provenance": {
+    "capture_method": "chromium-cdp",
+    "browser": {
+      "product": "Chrome",
+      "version": "155.0.8059.85",
+      "protocol_version": "1.3",
+      "build_hash": "@0e66b94549a8bd85f03fbdf189b752d6e7b63c32",
+      "origin": "system"
+    },
+    "source": {
+      "entry": "stroke-style.html",
+      "sha256": "2ad627b37f9be6c26ce2277a9772f9b839772131afd1312a29620969f8ac0383"
+    },
+    "viewport": {
+      "initial": {
+        "width": 1280,
+        "height": 800
+      },
+      "width_pinned": false,
+      "resolved": {
+        "width": 1280,
+        "height": 800
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "primary_surface": {
+          "left": 0,
+          "top": 0,
+          "width": 560,
+          "height": 122
+        }
+      },
+      "device_scale_factor": 2
+    },
+    "locale": "en-US",
+    "timezone": "UTC",
+    "color_scheme": "light",
+    "reduced_motion": false,
+    "settle": {
+      "rounds": 15,
+      "stable_rounds": 13,
+      "elapsed_ms": 1388
+    },
+    "network": {
+      "external_allowed": false,
+      "allowed_origins": [],
+      "external_resources": [],
+      "blocked_requests": []
+    },
+    "health": {
+      "status": "healthy",
+      "layout_count": 43,
+      "visible_elements": 33,
+      "visible_text_characters": 0,
+      "painted_surfaces": 20,
+      "failed_fonts": [],
+      "runtime_exceptions": [],
+      "log_errors": [],
+      "failed_responses": []
+    },
+    "readiness": {
+      "contract": "",
+      "awaited": false
+    },
+    "renderer_hooks": []
+  },
+  "documents": [
+    {
+      "id": "document:0",
+      "url": "pulp-capture:///stroke-style.html",
+      "node_count": 115,
+      "layout_count": 43,
+      "paint_order": true,
+      "snapshot_asset": "dom-snapshot.json",
+      "snapshot_sha256": "0dfa2a8a50006b7d42c8ac3fc0f07c102ec45e092b173b48b066df441ddfcced"
+    }
+  ],
+  "assets": [
+    {
+      "id": "reference:browser",
+      "kind": "screenshot",
+      "mime_type": "image/png",
+      "path": "browser.png",
+      "sha256": "c33ba028385947c5880fed97a7feb5692d0b95f9714974b9d7ca5b40fbc4c756",
+      "width_px": 2560,
+      "height_px": 1600
+    },
+    {
+      "id": "reference:browser-static",
+      "kind": "screenshot",
+      "mime_type": "image/png",
+      "path": "browser-static.png",
+      "sha256": "c33ba028385947c5880fed97a7feb5692d0b95f9714974b9d7ca5b40fbc4c756",
+      "width_px": 2560,
+      "height_px": 1600
+    },
+    {
+      "id": "reference:browser-chrome",
+      "kind": "chrome-screenshot",
+      "mime_type": "image/png",
+      "path": "browser-chrome.png",
+      "sha256": "c33ba028385947c5880fed97a7feb5692d0b95f9714974b9d7ca5b40fbc4c756",
+      "width_px": 2560,
+      "height_px": 1600
+    },
+    {
+      "id": "evidence:browser-canvas-composite",
+      "kind": "canvas-composite-evidence",
+      "mime_type": "image/png",
+      "path": "browser-canvas-composite.png",
+      "sha256": "f916cc9675795941b03fe54534c5dd23923ec6b8dd33961209a6abd59734c7b5",
+      "width_px": 2560,
+      "height_px": 1600,
+      "changed_pixels": 0
+    }
+  ],
+  "semantics": {
+    "schema": "pulp-browser-semantics-v1",
+    "report": "semantic-report.json",
+    "candidate_count": 0,
+    "resolved_count": 0,
+    "unresolved_count": 0
+  },
+  "tokens": {
+    "schema": "pulp-browser-tokens-v1",
+    "report": "tokens.json",
+    "color_count": 0,
+    "dimension_count": 0,
+    "string_count": 0
+  },
+  "platform_fonts": {
+    "schema": "pulp-browser-platform-fonts-v1",
+    "report": "platform-fonts.json",
+    "text_run_count": 0,
+    "resolved_run_count": 0,
+    "face_count": 0
+  },
+  "states": [
+    {
+      "name": "default",
+      "reference_asset_id": "reference:browser"
+    }
+  ],
+  "reference": {
+    "asset_id": "reference:browser",
+    "path": "browser.png",
+    "logical_width": 1280,
+    "logical_height": 800,
+    "device_scale_factor": 2,
+    "authored_frame": {
+      "x": 0,
+      "y": 0,
+      "width": 560,
+      "height": 122
+    }
+  }
+}

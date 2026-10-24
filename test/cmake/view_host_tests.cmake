@@ -374,6 +374,29 @@ if(NOT IOS AND NOT ANDROID)
     add_dependencies(pulp-test-isolated-scanner
         pulp-scan-worker
         pulp-isolated-scanner-crash-helper)
+    if(PULP_HAS_CLAP)
+        # Two bundles from one source (fixtures/scan_probe_clap.cpp): the
+        # probe marks the file PULP_TEST_DLOPEN_MARKER names when it is
+        # loaded and lists one descriptor; the other aborts in
+        # clap_entry.init. Flat `.clap` files, so every platform's scanner
+        # and loader open them the same way.
+        add_library(pulp-test-fixture-clap-probe MODULE fixtures/scan_probe_clap.cpp)
+        target_link_libraries(pulp-test-fixture-clap-probe PRIVATE clap)
+        set_target_properties(pulp-test-fixture-clap-probe PROPERTIES
+            OUTPUT_NAME "PulpScanProbe" PREFIX "" SUFFIX ".clap")
+        add_library(pulp-test-fixture-clap-abort MODULE fixtures/scan_probe_clap.cpp)
+        target_link_libraries(pulp-test-fixture-clap-abort PRIVATE clap)
+        target_compile_definitions(pulp-test-fixture-clap-abort PRIVATE
+            PULP_SCAN_FIXTURE_ABORT_ON_INIT=1)
+        set_target_properties(pulp-test-fixture-clap-abort PROPERTIES
+            OUTPUT_NAME "PulpScanAbort" PREFIX "" SUFFIX ".clap")
+        target_compile_definitions(pulp-test-isolated-scanner PRIVATE
+            PULP_SCAN_FIXTURE_PROBE_CLAP="$<TARGET_FILE:pulp-test-fixture-clap-probe>"
+            PULP_SCAN_FIXTURE_ABORT_CLAP="$<TARGET_FILE:pulp-test-fixture-clap-abort>")
+        add_dependencies(pulp-test-isolated-scanner
+            pulp-test-fixture-clap-probe
+            pulp-test-fixture-clap-abort)
+    endif()
     catch_discover_tests(pulp-test-isolated-scanner)
 endif()
 # Hosted editor API
@@ -664,8 +687,9 @@ if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio AND TAR
 endif()
 
 # The include half of the same boundary: no core/view source outside
-# core/view/audio may reach an audio, signal, host, midi or format header, or an
-# audio widget's header, in any spelling (angle, quoted, #import, relative).
+# core/view/audio may reach an audio, signal, host, midi, format, timebase,
+# graph, playback, content or sample-bank header, or an audio widget's header,
+# in any spelling (angle, quoted, #import, relative).
 # The self-test plants each spelling and must turn red.
 add_test(NAME pulp-view-core-include-boundary
     COMMAND ${Python3_EXECUTABLE}
@@ -758,7 +782,8 @@ if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET p
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/archive_symbol_closure_check.py"
             --nm "${CMAKE_NM}"
-            --forbidden "$<TARGET_FILE:pulp-view-audio>" --no-control
+            --forbidden "$<TARGET_FILE:pulp-view-audio>" --forbidden-defines any
+            --weak-rtti-contamination --no-control
             --check "view-core=$<TARGET_FILE:pulp-view-core>"
             --check "view-script=$<TARGET_FILE:pulp-view-script>"
             --check "design-import=$<TARGET_FILE:pulp-design-import>"

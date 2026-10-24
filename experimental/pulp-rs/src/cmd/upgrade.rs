@@ -390,13 +390,14 @@ fn do_install<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Write)
     // binary swap test so we can validate the replacement logic
     // without a real GitHub round-trip.
     let tarball_dir_override = std::env::var("PULP_UPGRADE_INSTALL_TARBALL_DIR").ok();
-    let tmp_dir = std::env::temp_dir().join(format!("pulp-upgrade-{}", plan.version));
-    let archive = match tarball_dir_override.as_deref() {
-        Some(dir) => crate::install::locate_binaries_in_archive(std::path::Path::new(dir))?,
-        None => {
-            let _ = std::fs::remove_dir_all(&tmp_dir);
-            crate::install::fetch_and_extract(&plan, &tmp_dir)?
-        }
+    let mut tmp_dir: Option<std::path::PathBuf> = None;
+    let archive = if let Some(dir) = tarball_dir_override.as_deref() {
+        crate::install::locate_binaries_in_archive(std::path::Path::new(dir))?
+    } else {
+        let dir = crate::install::private_temp_dir(&format!("pulp-upgrade-{}", plan.version))?;
+        let archive = crate::install::fetch_and_extract(&plan, &dir);
+        tmp_dir = Some(dir);
+        archive?
     };
 
     let broker_config = verified_broker_config(&plan, &archive)?;
@@ -426,7 +427,9 @@ fn do_install<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Write)
     // Best-effort cleanup of our own download dir; leave caller-
     // provided fixtures alone.
     if tarball_dir_override.is_none() {
-        let _ = std::fs::remove_dir_all(&tmp_dir);
+        if let Some(dir) = tmp_dir.as_deref() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     if !args.json {

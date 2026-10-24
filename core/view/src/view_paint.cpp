@@ -9,6 +9,7 @@
 // as text_editor_paint.cpp. All definitions are View:: members declared in
 // view.hpp, so the move needs no friend decls or header churn.
 
+#include <pulp/canvas/resource_counters.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/border_style.hpp>
 #include <pulp/view/tracing_badge.hpp>
@@ -1133,6 +1134,49 @@ BackgroundPosition resolve_background_position(std::string_view position_css,
 
 // The first tile must cover the element's origin. A positive CSS offset of
 // 2px on a 4px tile therefore starts its visible sequence at -2px, then 2px.
+// The widths each border side paints in a `w` x `h` border box. An explicitly
+// set side wins even when it is 0, otherwise the uniform shorthand applies, as
+// in yoga_layout.cpp's `resolve_edge`. Opposite sides cannot want more than the
+// box has: Chrome gives the NEAR side its full width and the far side only what
+// is left (`border-left: 50px; border-right: 50px` on a 60px-wide box paints
+// 50 and 10, measured). A `none` or `hidden` border has no width at all.
+struct BorderEdges {
+    float top = 0.0f, right = 0.0f, bottom = 0.0f, left = 0.0f;
+};
+
+struct BorderSide {
+    bool set = false;
+    float width = 0.0f;
+};
+
+BorderEdges resolve_border_edges(bool styled, bool has_uniform, float uniform, BorderSide top,
+                                 BorderSide right, BorderSide bottom, BorderSide left, float w,
+                                 float h) {
+    if (!styled)
+        return {};
+    const float uniform_w = has_uniform ? std::max(0.0f, uniform) : 0.0f;
+    const auto edge = [&](BorderSide side) {
+        return side.set ? std::max(0.0f, side.width) : uniform_w;
+    };
+    BorderEdges out;
+    out.top = std::min(edge(top), h);
+    out.bottom = std::min(edge(bottom), std::max(0.0f, h - out.top));
+    out.left = std::min(edge(left), w);
+    out.right = std::min(edge(right), std::max(0.0f, w - out.left));
+    return out;
+}
+
+// Which box a background layer's `background-origin` keyword positions and
+// sizes its tile in. Empty is the initial `padding-box`. `content-box` would
+// also inset by the padding, which paint does not resolve, so it positions in
+// the padding box.
+enum class BackgroundOriginBox { border, padding };
+
+BackgroundOriginBox background_origin_box(std::string_view keyword) {
+    return trim_css(keyword) == "border-box" ? BackgroundOriginBox::border
+                                             : BackgroundOriginBox::padding;
+}
+
 float first_tiled_origin(float offset, float tile_extent) {
     if (!(tile_extent > 0.0f)) return 0.0f;
     return offset - std::ceil(offset / tile_extent) * tile_extent;
@@ -1275,6 +1319,11 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     // whole element — a monotone wash where the design asked for a stripe every
     // 32px. Size and repeat are CSS layers too: resolve the value paired with
     // each image, cycling a shorter list per the CSS list-matching rule.
+    const BorderEdges border_edges = resolve_border_edges(
+        border_style_ != BorderStyle::none && border_style_ != BorderStyle::hidden, has_border_,
+        border_width_, {border_top_set_, border_top_.width},
+        {border_right_set_, border_right_.width}, {border_bottom_set_, border_bottom_.width},
+        {border_left_set_, border_left_.width}, bounds_.width, bounds_.height);
     for (std::size_t reverse_index = bg_gradients_.size(); reverse_index > 0;
          --reverse_index) {
         const std::size_t gradient_index = reverse_index - 1;
@@ -1286,10 +1335,22 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
         // a non-painting `none`).  Keep the authored list association while
         // reverse-walking the compact paint stack.
         const std::size_t css_layer_index = layer->css_image_layer_index;
+        // `background-origin` is the box the tile is sized and positioned in;
+        // the clip below stays the border box. The initial `padding-box`
+        // origin is why a repeating tile wraps into the border strip: under a
+        // translucent bottom border Chrome shows the tile's first rows.
+        float area_x = 0.0f, area_y = 0.0f;
+        float area_w = bounds_.width, area_h = bounds_.height;
+        if (background_origin_box(background_layer_value(background_origin(), css_layer_index)) ==
+            BackgroundOriginBox::padding) {
+            area_x = border_edges.left;
+            area_y = border_edges.top;
+            area_w = std::max(0.0f, bounds_.width - border_edges.left - border_edges.right);
+            area_h = std::max(0.0f, bounds_.height - border_edges.top - border_edges.bottom);
+        }
         const BackgroundTile bg_tile = resolve_background_tile(
             background_layer_value(background_size(), css_layer_index),
-            background_layer_value(background_repeat(), css_layer_index),
-            bounds_.width, bounds_.height);
+            background_layer_value(background_repeat(), css_layer_index), area_w, area_h);
         if (!bg_tile.valid || !(bg_tile.w > 0.0f) || !(bg_tile.h > 0.0f))
             continue;  // unsupported authoring must not silently phase at 0,0
         const bool tile_count_safe =
@@ -1298,10 +1359,12 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
         if (!tile_count_safe) continue;
         const float tile_w = bg_tile.w;
         const float tile_h = bg_tile.h;
-        const BackgroundPosition bg_position = resolve_background_position(
-            background_layer_value(background_position(), css_layer_index),
-            bounds_.width, bounds_.height, tile_w, tile_h);
+        BackgroundPosition bg_position = resolve_background_position(
+            background_layer_value(background_position(), css_layer_index), area_w, area_h, tile_w,
+            tile_h);
         if (!bg_position.supported) continue;
+        bg_position.x += area_x;
+        bg_position.y += area_y;
         const int grad_n = static_cast<int>(layer->colors.size());
         const Color* grad_c = layer->colors.data();
         const float* grad_p = layer->positions.data();
@@ -1495,27 +1558,20 @@ void View::paint_border(canvas::Canvas& canvas, float paint_w, float paint_h,
         return;
     }
 
-    // Resolution order matches yoga_layout.cpp's `resolve_edge`: an explicitly
-    // set edge wins even when it is 0, otherwise the uniform shorthand applies.
-    const float uniform_w = has_border_ ? std::max(0.0f, border_width_) : 0.0f;
-    const auto edge_w = [&](bool was_set, float value) {
-        return was_set ? std::max(0.0f, value) : uniform_w;
-    };
     const float w = paint_w;
     const float h = paint_h;
 
-    // Opposite sides cannot want more than the box has. Chrome resolves that
-    // over-constraint by giving the NEAR side its full width and handing the
-    // far side only what is left: `border-left: 50px; border-right: 50px` on a
-    // 60px-wide box paints 50 on the left and 10 on the right, measured. It is
-    // also what keeps the inset stroke below from being handed a negative
-    // rectangle, which no backend has a sensible answer for.
-    const float wt = std::min(edge_w(border_top_set_, border_top_.width), h);
-    const float wb = std::min(edge_w(border_bottom_set_, border_bottom_.width),
-                              std::max(0.0f, h - wt));
-    const float wl = std::min(edge_w(border_left_set_, border_left_.width), w);
-    const float wr = std::min(edge_w(border_right_set_, border_right_.width),
-                              std::max(0.0f, w - wl));
+    // The clamp is also what keeps the inset stroke below from being handed a
+    // negative rectangle, which no backend has a sensible answer for.
+    const BorderEdges edges = resolve_border_edges(
+        border_style_ != BorderStyle::none && border_style_ != BorderStyle::hidden, has_border_,
+        border_width_, {border_top_set_, border_top_.width},
+        {border_right_set_, border_right_.width}, {border_bottom_set_, border_bottom_.width},
+        {border_left_set_, border_left_.width}, w, h);
+    const float wt = edges.top;
+    const float wb = edges.bottom;
+    const float wl = edges.left;
+    const float wr = edges.right;
     if (wt <= 0.0f && wr <= 0.0f && wb <= 0.0f && wl <= 0.0f) return;
 
     const auto edge_c = [&](bool was_set, Color value) {
@@ -2060,14 +2116,18 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
                 paint_content(rec, layers, children_ns);
             });
         scene_cache_valid_ = (scene_cache_ != nullptr);
+        if (scene_cache_valid_)
+            canvas::note_scene_record();
     }
 
     // Replay the recording. On a cache HIT children are NOT re-walked, so
     // children_ns stays 0 and the whole replay is attributed as self-time
     // (which it is — one drawPicture). If replay is refused (foreign recording,
     // defensive), fall back to a direct paint so the frame is never blank.
-    if (scene_cache_valid_ && scene_cache_ && canvas.draw_scene(*scene_cache_))
+    if (scene_cache_valid_ && scene_cache_ && canvas.draw_scene(*scene_cache_)) {
+        canvas::note_scene_replay();
         return;
+    }
     paint_content(canvas, layers, children_ns);
 }
 

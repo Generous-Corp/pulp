@@ -1347,6 +1347,171 @@ TEST_CASE("each refusal names the construct that caused it",
     CHECK(attribute(*vector_shapes.front(), "source_tag") == "rect");
 }
 
+// ── SVG stroke style and shape opacity ──────────────────────────────────────
+// test/fixtures/browser-capture-svg-stroke-style is a real Chromium capture of
+// the stroke constructs icon sets actually use. The first three icons are
+// Spectr's PEAK, SCULPT and PRESETS glyphs verbatim; the fourth is the Lucide
+// convention of declaring the stroke style once on the root `<svg>`.
+
+TEST_CASE("an svg stroke's cap, join and miter limit reach the IR",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // PEAK: ten 1.3-unit ticks. Butt caps cut every tick short by the
+    // half-disc a round cap adds at each end, which reads as a lighter icon.
+    const auto* peak =
+        vector_from(root, "M 3 20 L 3 14 M 7 20 L 7 10 M 11 20 L 11 6 M 15 20 L 15 12 "
+                          "M 19 20 L 19 8 M 1 14 L 5 14 M 5 10 L 9 10 M 9 6 L 13 6 "
+                          "M 13 12 L 17 12 M 17 8 L 21 8");
+    REQUIRE(peak != nullptr);
+    CHECK(attribute(*peak, "svg_stroke_linecap") == "round");
+    CHECK(attribute(*peak, "svg_stroke_linejoin") == "round");
+    // The limit only means something under a miter join.
+    CHECK(attribute(*peak, "svg_stroke_miterlimit").empty());
+
+    // SCULPT: one curve, round at both ends.
+    const auto* sculpt = vector_from(root, "M 2 14 Q 5 4 9 10 T 16 8 T 22 6");
+    REQUIRE(sculpt != nullptr);
+    CHECK(attribute(*sculpt, "svg_stroke_linecap") == "round");
+    CHECK(attribute(*sculpt, "svg_stroke_linejoin") == "round");
+
+    // Lucide: neither shape declares a cap or join; both inherit the root's.
+    for (const char* data :
+         {"M2 12 A10 10 0 0 1 22 12 A10 10 0 0 1 2 12 Z", "M12 6 L12 12 L16 14"}) {
+        const auto* shape = vector_from(root, data);
+        REQUIRE(shape != nullptr);
+        CHECK(attribute(*shape, "svg_stroke_linecap") == "round");
+        CHECK(attribute(*shape, "svg_stroke_linejoin") == "round");
+        CHECK(attribute(*shape, "svg_stroke_width") == "2");
+    }
+
+    // A miter join carries its limit, authored or not: SVG's initial value is
+    // 4 and a 2D canvas's is 10, so leaving it out changes which corners
+    // collapse to a bevel.
+    const auto* mitred = vector_from(root, "M2 20 L8 4 L14 20");
+    REQUIRE(mitred != nullptr);
+    CHECK(attribute(*mitred, "svg_stroke_linecap") == "butt");
+    CHECK(attribute(*mitred, "svg_stroke_linejoin") == "miter");
+    CHECK(attribute(*mitred, "svg_stroke_miterlimit") == "2");
+    // An inline `style` declaration is as authored as an attribute.
+    const auto* bevelled = vector_from(root, "M18 20 L24 4 L30 20");
+    REQUIRE(bevelled != nullptr);
+    CHECK(attribute(*bevelled, "svg_stroke_linejoin") == "bevel");
+    // A group's inline style is inherited like its attributes are.
+    const auto* squared = vector_from(root, "M4 12 L20 12");
+    REQUIRE(squared != nullptr);
+    CHECK(attribute(*squared, "svg_stroke_linecap") == "square");
+    CHECK(attribute(*squared, "svg_stroke_miterlimit") == "4");
+
+    // `pathLength` and `stroke-dashoffset` change nothing on a solid stroke,
+    // and are carried so a dash pattern drawn later measures against them.
+    const auto* measured = vector_from(root, "M 4 12 H 20");
+    REQUIRE(measured != nullptr);
+    CHECK(attribute(*measured, "svg_path_length") == "100");
+    CHECK(attribute(*measured, "svg_stroke_dashoffset") == "3");
+}
+
+TEST_CASE("an svg shape's own opacity folds into its one paint",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // PRESETS: three waves at 0.45, 0.7 and 1, stroked in an inherited
+    // `rgba(255, 255, 255, 0.85)`. The shape's opacity multiplies the alpha
+    // the colour already has rather than replacing it.
+    const std::pair<const char*, const char*> waves[] = {
+        {"M 2 13 Q 7 13 10 9 Q 13 5 17 5 Q 20 5 22 7", "rgba(255, 255, 255, 0.3825)"},
+        {"M 2 11 Q 6 11 9 7 Q 13 3 17 7 Q 20 10 22 10", "rgba(255, 255, 255, 0.595)"},
+        {"M 2 9 Q 5 4 9 10 Q 13 15 17 9 Q 20 5 22 6", "rgba(255, 255, 255, 0.85)"},
+    };
+    for (const auto& [data, stroke] : waves) {
+        const auto* wave = vector_from(root, data);
+        REQUIRE(wave != nullptr);
+        CHECK(attribute(*wave, "svg_stroke") == stroke);
+        CHECK(attribute(*wave, "svg_fill") == "none");
+        CHECK(attribute(*wave, "svg_stroke_linecap") == "round");
+    }
+
+    const auto* faded = vector_from(root, "M2 2 H11 V22 H2 Z");
+    REQUIRE(faded != nullptr);
+    CHECK(attribute(*faded, "svg_fill") == "rgba(143, 214, 148, 0.5)");
+    // `fill-opacity` over a colour that already has an alpha multiplies it.
+    const auto* translucent = vector_from(root, "M13 2 H22 V22 H13 Z");
+    REQUIRE(translucent != nullptr);
+    CHECK(attribute(*translucent, "svg_fill") == "rgba(240, 160, 75, 0.4)");
+}
+
+TEST_CASE("svg stroke constructs the lowering cannot draw refuse by name",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    CHECK(attribute(root, "native_svg_lowered") == "8");
+    CHECK(attribute(root, "native_svg_refused") == "2");
+
+    std::map<std::string, std::string> refusals; // reason → detail
+    const std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (attribute(child, "capture_fallback_element") == "svg") {
+                refusals[attribute(child, "capture_fallback_reason")] =
+                    attribute(child, "capture_fallback_detail");
+            }
+            walk(child);
+        }
+    };
+    walk(root);
+    // A fill and a stroke under one opacity composite as a layer; per-paint
+    // alpha would double-darken where the stroke overlaps the fill.
+    CHECK(refusals["svg-shape-opacity"] == "circle");
+    // A marker is a `<defs>` reference like a clip or a mask: the line drawn
+    // without it loses its arrowhead.
+    CHECK(refusals["svg-paint-reference"] == "line");
+    CHECK(refusals.size() == 2);
+}
+
+TEST_CASE("a captured stroke property outranks the authored attribute",
+          "[browser-capture][native-lowering][svg]") {
+    // A stylesheet rule can override `stroke-linecap="round"`, and only the
+    // browser has seen the stylesheet. When the capture collected the
+    // property, Chrome's value wins; when it did not, the attribute is the
+    // best evidence there is.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 svg, 4 path
+    // strings: 0 #document 1 HTML 2 BODY 3 svg 4 path 5 none
+    //   6 rgb(1, 2, 3) 7 butt 8 d 9 "M0 0 L10 10" 10 stroke-linecap 11 round
+    //   12 viewBox 13 "0 0 10 10"
+    SnapshotSpec spec{
+        .node_names = "[0,1,2,3,4]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,3]",
+        .attributes = "[[],[],[],[12,13],[8,9,10,11]]",
+        .layout_nodes = "[0,1,2,3,4]",
+        .styles = "[[5,5,7],[5,5,7],[5,5,7],[5,5,7],[5,6,7]]",
+        .bounds = "[[0,0,100,100],[0,0,100,100],[0,0,100,100],"
+                  "[10,10,20,20],[10,10,20,20]]",
+        .paint_orders = "[0,1,1,2,3]",
+        .computed_names = R"(["fill","stroke","stroke-linecap"])",
+        .strings = R"J("#document","HTML","BODY","svg","path","none",)J"
+                   R"J("rgb(1, 2, 3)","butt","d","M0 0 L10 10",)J"
+                   R"J("stroke-linecap","round","viewBox","0 0 10 10")J",
+    };
+    const auto captured = lower_snapshot(spec, "svg");
+    const auto captured_shapes = vector_nodes(captured.root);
+    REQUIRE(captured_shapes.size() == 1);
+    CHECK(attribute(*captured_shapes.front(), "svg_stroke") == "rgb(1, 2, 3)");
+    CHECK(attribute(*captured_shapes.front(), "svg_stroke_linecap") == "butt");
+
+    spec.computed_names = R"(["fill","stroke","cursor"])";
+    const auto authored = lower_snapshot(spec, "svg");
+    const auto authored_shapes = vector_nodes(authored.root);
+    REQUIRE(authored_shapes.size() == 1);
+    CHECK(attribute(*authored_shapes.front(), "svg_stroke_linecap") == "round");
+}
+
 TEST_CASE("a capture with no SVG paint says so out loud",
           "[browser-capture][native-lowering][svg]") {
     // The same six icons, byte-identical, with ONLY the seven SVG paint
@@ -4298,4 +4463,148 @@ TEST_CASE("a control masked by -webkit-text-security never draws its value",
     CHECK(find_by_text(lowered.root, "visible-value") != nullptr);
     CHECK(lowered.counts.control_value_text == 1);
     CHECK_FALSE(tree_mentions(lowered.root, "hunter2"));
+}
+
+namespace {
+
+/// A panel of plain `div`s for the compositing-group cases: `display`,
+/// `opacity`, `overflow`, `transform` and `background-color` per row.
+///
+/// Strings: 0 #document  1 HTML  2 BODY  3 DIV  4 block  5 "1"  6 "0.5"
+///          7 none  8 visible  9 rgb(200, 200, 200)  10 rgba(0, 0, 0, 0)
+///          11 matrix(2, 0, 0, 2, 0, 0)
+constexpr std::string_view kGroupProperties =
+    R"(["display","opacity","overflow","transform","background-color"])";
+constexpr std::string_view kGroupStrings =
+    R"J("#document","HTML","BODY","DIV","block","1","0.5","none","visible",)J"
+    R"J("rgb(200, 200, 200)","rgba(0, 0, 0, 0)","matrix(2, 0, 0, 2, 0, 0)")J";
+constexpr std::string_view kPlainRow = "[4,5,8,7,10]";
+constexpr std::string_view kFilledRow = "[4,5,8,7,9]";
+constexpr std::string_view kGroupRow = "[4,6,8,7,10]";
+constexpr std::string_view kTransformedGroupRow = "[4,6,8,11,10]";
+
+/// Six nodes: #document, HTML, BODY, then three `div`s whose parents, rows,
+/// boxes and paint ranks the case supplies.
+SnapshotSpec group_spec(std::string parents, std::string_view row3, std::string_view row4,
+                        std::string_view row5, std::string box3, std::string box4, std::string box5,
+                        std::string paint_orders) {
+    const auto plain = std::string(kPlainRow);
+    return SnapshotSpec{
+        .node_names = "[0,1,2,3,3,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = std::move(parents),
+        .attributes = "[[],[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4,5]",
+        .styles = "[" + plain + "," + plain + "," + plain + "," + std::string(row3) + "," +
+                  std::string(row4) + "," + std::string(row5) + "]",
+        .bounds =
+            "[[0,0,200,100],[0,0,200,100],[0,0,200,100]," + box3 + "," + box4 + "," + box5 + "]",
+        .paint_orders = std::move(paint_orders),
+        .computed_names = std::string(kGroupProperties),
+        .strings = std::string(kGroupStrings),
+    };
+}
+
+const IRNode* translucent_node(const IRNode& root) {
+    return find_node(
+        root, [](const IRNode& node) { return node.style.opacity && *node.style.opacity < 1.0f; });
+}
+
+} // namespace
+
+TEST_CASE("a flattened panel keeps a translucent group's descendants inside it",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    // div.group{opacity:.5} holding one filled child, beside a filled sibling.
+    // Hung off the root, the child would paint at full strength next to an
+    // empty translucent box; the browser composites the two as one layer.
+    const auto lowered = lower_snapshot(
+        group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow, "[10,10,100,60]",
+                   "[20,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+        "group-opacity-nested", {}, /*flatten_to_paint_order=*/true);
+
+    CHECK(lowered.counts.isolating_groups_nested == 1);
+    CHECK(lowered.counts.isolating_groups_refused == 0);
+    CHECK(lowered.counts.max_depth == 2);
+    const auto* group = translucent_node(lowered.root);
+    REQUIRE(group != nullptr);
+    CHECK(*group->style.opacity == Catch::Approx(0.5f));
+    REQUIRE(group->children.size() == 1);
+    const auto& child = group->children[0];
+    CHECK(attribute(child, "paint_order") == "3");
+    // Re-expressed against the group, and carrying no alpha of its own: the
+    // group's layer applies it once.
+    CHECK(*child.style.left == Catch::Approx(10.0f));
+    CHECK(*child.style.top == Catch::Approx(10.0f));
+    CHECK_FALSE(child.style.opacity.has_value());
+    // Everything else stays a root child, in paint order.
+    for (const auto& top : lowered.root.children)
+        if (&top != group)
+            CHECK(top.children.empty());
+    CHECK(std::any_of(lowered.root.children.begin(), lowered.root.children.end(),
+                      [](const IRNode& node) { return attribute(node, "paint_order") == "4"; }));
+}
+
+TEST_CASE("a translucent group inside a translucent group nests twice",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    const auto lowered = lower_snapshot(group_spec("[-1,0,1,2,3,4]", kGroupRow, kGroupRow,
+                                                   kFilledRow, "[10,10,100,60]", "[15,15,80,40]",
+                                                   "[20,20,40,20]", "[0,1,1,2,3,4]"),
+                                        "group-opacity-twice", {}, /*flatten_to_paint_order=*/true);
+
+    CHECK(lowered.counts.isolating_groups_nested == 2);
+    CHECK(lowered.counts.max_depth == 3);
+    const auto* outer = translucent_node(lowered.root);
+    REQUIRE(outer != nullptr);
+    REQUIRE(outer->children.size() == 1);
+    const auto& inner = outer->children[0];
+    REQUIRE(inner.style.opacity);
+    CHECK(*inner.style.opacity == Catch::Approx(0.5f));
+    REQUIRE(inner.children.size() == 1);
+    CHECK_FALSE(inner.children[0].style.opacity.has_value());
+    CHECK(*inner.children[0].style.left == Catch::Approx(5.0f));
+}
+
+TEST_CASE("a translucent group that cannot be nested exactly stays flat and says why",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    const auto refused = [](const SnapshotSpec& spec, const std::string& name) {
+        const auto lowered = lower_snapshot(spec, name, {}, /*flatten_to_paint_order=*/true);
+        CHECK(lowered.counts.isolating_groups_nested == 0);
+        CHECK(lowered.counts.isolating_groups_refused == 1);
+        CHECK(lowered.counts.max_depth == 1);
+        const auto* group = translucent_node(lowered.root);
+        REQUIRE(group != nullptr);
+        CHECK(group->children.empty());
+        return attribute(*group, "isolating_group_refused");
+    };
+    SECTION("a descendant reaching past the group's box") {
+        // The group's layer is the size of its box, so nesting would cut the
+        // child where it overhangs.
+        CHECK(
+            refused(group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow, "[10,10,60,60]",
+                               "[50,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+                    "group-opacity-overhang") == "descendant-ink-outside-group");
+    }
+    SECTION("an outside node painting between the group and its descendant") {
+        CHECK(
+            refused(group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow,
+                               "[10,10,100,60]", "[20,20,40,20]", "[30,30,40,40]", "[0,1,1,2,4,3]"),
+                    "group-opacity-interleaved") == "interleaved-paint-order");
+    }
+}
+
+TEST_CASE("a scaled translucent group still nests, at its scaled page box",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    // An axis-preserving transform reaches the IR only through the boxes,
+    // which are already Chrome's post-transform page boxes, so nesting adds no
+    // second transform and the group stays exact.
+    const auto lowered = lower_snapshot(
+        group_spec("[-1,0,1,2,3,2]", kTransformedGroupRow, kFilledRow, kFilledRow, "[10,10,100,60]",
+                   "[20,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+        "group-opacity-scaled", {}, /*flatten_to_paint_order=*/true);
+    CHECK(lowered.counts.isolating_groups_nested == 1);
+    const auto* group = translucent_node(lowered.root);
+    REQUIRE(group != nullptr);
+    CHECK_FALSE(group->style.transform.has_value());
+    REQUIRE(group->children.size() == 1);
+    CHECK(*group->children[0].style.left == Catch::Approx(10.0f));
 }

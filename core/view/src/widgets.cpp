@@ -32,9 +32,12 @@ namespace {
 // widget's normal C++ body instead of leaving it blank — the failure used to be
 // swallowed (the bool was ignored), so a bad draw-time shader painted only the
 // labels over an empty body. Logs the failure exactly once per host instance.
-bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
-                             View& view, float w, float h,
-                             float value, float shader_time) {
+//
+// A knob's chart shader paints first and a body shader, if any, paints over
+// it. `chart_only` reports that the chart painted and no body shader did, so
+// nothing has shown the value yet.
+bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host, View& view, float w,
+                             float h, float value, float shader_time, bool* chart_only = nullptr) {
     canvas::Canvas::ShaderUniforms u;
     u.value = value;
     u.time = shader_time;
@@ -51,6 +54,7 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
                                ? host.shader_scope_binding()->data
                                : nullptr;
     options.geometry = host.shader_geometry();
+    bool chart_painted = false;
     if (!host.chart_shader().empty()) {
         if (dynamic_cast<Knob*>(&view) != nullptr) {
             canvas::Canvas::SDFStyle style;
@@ -70,29 +74,36 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
             // in a hard edge at the draw rect. The chart draw is refused out
             // loud and the body shader below paints instead, exactly as for a
             // chart draw that fails.
+            // The chart also gets the reach its own source declared (a glow
+            // preset's halo); the body shader below keeps the widget's reach.
+            auto chart_options = options;
+            chart_options.reach = std::max(options.reach, host.chart_reach());
             const float min_reach = canvas::Canvas::sdf_feather_min_reach(style);
-            if (options.reach < min_reach) {
+            if (chart_options.reach < min_reach) {
                 if (!host.shader_draw_failure_logged()) {
                     runtime::log_error("[custom-shader] chart feather sigma {} needs reach >= {} "
                                        "but the shader's reach is {}; painting the body "
                                        "shader instead of the chart",
-                                       style.feather_sigma, min_reach, options.reach);
+                                       style.feather_sigma, min_reach, chart_options.reach);
                     host.mark_shader_draw_failure_logged();
                 }
-            } else if (canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc, 0, 0,
-                                                         w, h, style, host.chart_shader(),
-                                                         options)) {
-                return true;
+            } else {
+                chart_painted =
+                    canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc, 0, 0, w,
+                                                      h, style, host.chart_shader(), chart_options);
             }
         }
     }
-    if (canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, options)) {
+    const bool body_painted = (!chart_painted || host.has_custom_shader()) &&
+                              canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, options);
+    if (chart_only)
+        *chart_only = chart_painted && !body_painted;
+    if (body_painted || chart_painted)
         return true;
-    }
     if (!host.shader_draw_failure_logged()) {
-        runtime::log_info(
-            "[custom-shader] body shader failed to draw; painting the default "
-            "widget body instead");
+        runtime::log_info("[custom-shader] {} shader failed to draw; painting the default "
+                          "widget body instead",
+                          host.has_custom_shader() ? "body" : "chart");
         host.mark_shader_draw_failure_logged();
     }
     return false;
@@ -482,6 +493,7 @@ void Knob::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     float cx = b.width * 0.5f;
     float cy = b.height * 0.5f;
+    bool chart_only = false; // set by draw_custom_shader_body below
     float radius = std::min(cx, cy) * 0.8f;
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
     bool captured_indicator_drawn = false;
@@ -563,25 +575,19 @@ void Knob::paint(canvas::Canvas& canvas) {
                 });
             }
         } else {
-            // Legacy raw-RGBA path. NOTE: SkiaCanvas::draw_image_from_data
-            // expects ENCODED bytes (PNG/JPEG), so callers that fed decoded
-            // pixels here will draw nothing. Kept for backward compatibility
-            // and any future raw-pixmap canvas API.
-            size_t frame_bytes = static_cast<size_t>(fw * fh * 4);
-            size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 +
-                                                 fx * 4);
-            if (offset + frame_bytes <= sprite_strip_->data_size()) {
+            // Byte-backed strip. The draw decodes ENCODED bytes (PNG/JPEG);
+            // raw RGBA pixels pass the bounds check but draw nothing on Skia.
+            if (byte_strip_frame_in_bounds(canvas, *sprite_strip_, fx, fy)) {
                 canvas.save();
                 canvas.clip_rect(0, 0, b.width, b.height);
                 float sx = b.width / fw;
                 float sy = b.height / fh;
                 canvas.scale(sx, sy);
                 canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
-                canvas.draw_image_from_data(sprite_strip_->data(),
-                                             sprite_strip_->data_size(),
-                                             0, 0,
-                                             static_cast<float>(sprite_strip_->total_width()),
-                                             static_cast<float>(sprite_strip_->total_height()));
+                canvas.draw_image_from_keyed_data(
+                    sprite_strip_->data_key(), sprite_strip_->data(), sprite_strip_->data_size(), 0,
+                    0, static_cast<float>(sprite_strip_->total_width()),
+                    static_cast<float>(sprite_strip_->total_height()));
                 canvas.restore();
             }
         }
@@ -608,13 +614,19 @@ void Knob::paint(canvas::Canvas& canvas) {
         render_schema(canvas, widget_schema_, b.width, b.height, shown, *this);
         // Fall through to draw labels on top
     }
-    // ── Custom shader path: replaces body/track/fill, keeps labels/glow ──
+    // ── Custom shader path (a body shader, a chart shader, or both) ──
     // The `&& draw_custom_shader_body(...)` guard means a draw-time shader
     // FAILURE falls through to the normal body branches below (not a blank
     // widget); on success the shader painted the body and we skip them.
-    else if (has_custom_shader() &&
-             draw_custom_shader_body(canvas, *this, *this, b.width, b.height, shown, shader_time)) {
+    else if ((has_custom_shader() || !chart_shader().empty()) &&
+             draw_custom_shader_body(canvas, *this, *this, b.width, b.height, shown, shader_time,
+                                     &chart_only)) {
         // Shader painted the body; fall through to draw labels and value text.
+        // A chart paints the knob's material, not its value: a body shader
+        // over it owns the value display, and without one the rotating
+        // pointer goes on top.
+        if (chart_only)
+            draw_knob_indicator_notch(canvas, cx, cy, std::min(cx, cy), std::min(cx, cy), shown);
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal/design-preview: simple circle outline (matches design tools) ──
         float full_r = std::min(cx, cy) - 2.0f;
@@ -1004,20 +1016,17 @@ void Fader::paint(canvas::Canvas& canvas) {
         int frame = sprite_strip_->frame_for_value(shown);
         int fx, fy;
         sprite_strip_->frame_offset(frame, fx, fy);
-        size_t frame_bytes = static_cast<size_t>(sprite_strip_->frame_width() *
-                                                  sprite_strip_->frame_height() * 4);
-        size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 + fx * 4);
-        if (offset + frame_bytes <= sprite_strip_->data_size()) {
+        if (byte_strip_frame_in_bounds(canvas, *sprite_strip_, fx, fy)) {
             canvas.save();
             canvas.clip_rect(0, 0, b.width, b.height);
             float sx = b.width / static_cast<float>(sprite_strip_->frame_width());
             float sy = b.height / static_cast<float>(sprite_strip_->frame_height());
             canvas.scale(sx, sy);
             canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
-            canvas.draw_image_from_data(sprite_strip_->data(), sprite_strip_->data_size(),
-                                         0, 0,
-                                         static_cast<float>(sprite_strip_->total_width()),
-                                         static_cast<float>(sprite_strip_->total_height()));
+            canvas.draw_image_from_keyed_data(sprite_strip_->data_key(), sprite_strip_->data(),
+                                              sprite_strip_->data_size(), 0, 0,
+                                              static_cast<float>(sprite_strip_->total_width()),
+                                              static_cast<float>(sprite_strip_->total_height()));
             canvas.restore();
         }
     } else if (!widget_schema_.empty()) {

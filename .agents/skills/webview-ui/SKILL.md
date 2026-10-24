@@ -67,7 +67,7 @@ WebView2 can't start a drag from web content without moving to composition
 hosting). The JS call exists on all platforms for parity.
 
 ⚠ **Interim source:** this lands via an interim fork pin of CHOC
-(`danielraffel/choc` tag `pulp-webview-dnd-poc1`, carrying WebView drag-and-drop
+(`danielraffel/choc` tag `pulp-webview-dnd-poc2`, carrying WebView drag-and-drop
 support; Tracktion/choc pull request 64 is the upstream tracker).
 When that support is available upstream, the pin reverts to
 Tracktion/choc with no API change. The runnable reference lives in the choc repo

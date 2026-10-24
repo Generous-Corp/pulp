@@ -703,6 +703,11 @@ docs:
     kind: reference
     summary: Reproducible fast-sine consumer benchmarks, quality gates, selected paths, rejected alternatives, and reopen rules
 
+  - slug: convolver-crossover
+    path: validation/convolver-crossover.md
+    kind: reference
+    summary: Measured direct-FIR versus partitioned-FFT crossover behind FixedIrConvolver, per-chip receipts, and the command that regenerates them
+
   - slug: drum-whole-voice-math
     path: validation/drum-whole-voice-math.md
     kind: reference

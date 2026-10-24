@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-inline-image-any-format-20261022-watch",
+  "created_at": "2026-10-22T08:13:57Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Lets inline encoded images in any format a canvas decoder accepts (JPEG, WebP, GIF and PNG, base64 or percent-encoded per RFC 2397) and Knob/Fader sprite strips held as encoded bytes draw through the content-keyed inline image cache, with intrinsic sizes read from the image header by Canvas::measure_image_from_data and no pixel decode. Undecodable payloads are tried once and paint a placeholder; decodable sprite frames are bounded by the declared strip size and raw RGBA strips by their byte count. Pixel output for PNG sources is unchanged; backends without a cache or decoder draw as before. Pulp continues to own this editable canvas target under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits these generic rendering-asset behaviours when that target adopts the Vellum package. No source-routing or authority boundary moves.",
+  "tests": [
+    "ctest --test-dir build -R 'A sprite strip one canvas cannot measure still draws on a canvas that can'",
+    "ctest --test-dir build -R 'AssetManager data URI bytes are returned whatever the image format'",
+    "ctest --test-dir build -R 'AssetManager data URI decodes PNG dimensions'",
+    "ctest --test-dir build -R 'AssetManager data URI without ;base64 is percent-decoded'",
+    "ctest --test-dir build -R 'Canvas default measure_image_from_data reads a PNG header only'",
+    "ctest --test-dir build -R 'CoreGraphicsCanvas measures encoded bytes of any ImageIO format'",
+    "ctest --test-dir build -R 'Disabling the image cache decodes a sprite strip on every Graphite paint'",
+    "ctest --test-dir build -R 'ImageView JPEG'",
+    "ctest --test-dir build -R 'ImageView draws a percent-encoded data URI through the keyed entry'",
+    "ctest --test-dir build -R 'ImageView fails a malformed percent-encoded data URI once'",
+    "ctest --test-dir build -R 'ImageView fails an undecodable inline payload once'",
+    "ctest --test-dir build -R 'ImageView percent-encoded PNG data URI draws and hits the cache'",
+    "ctest --test-dir build -R 'ImageView sizes a non-PNG data URI from the decoder'",
+    "ctest --test-dir build -R 'ImageView stretches an inline image the backend cannot measure'",
+    "ctest --test-dir build -R 'ImageView with an undecodable inline payload attempts one decode'",
+    "ctest --test-dir build -R 'Knob and Fader draw the last frame of a compressed sprite strip'",
+    "ctest --test-dir build -R 'Knob and Fader sprite strips decode their encoded bytes once across Graphite paints'",
+    "ctest --test-dir build -R 'Sprite strips draw every declared frame of decodable bytes'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}

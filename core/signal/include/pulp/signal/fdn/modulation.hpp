@@ -91,6 +91,98 @@ private:
     double increment_ = 0.0;
 };
 
+// A bank of N unit sines advanced in lockstep by rotation: one complex
+// multiply per oscillator per sample instead of a sin() call. The exact phase
+// is carried separately and the rotation re-derived from it every
+// kOscReanchorSamples steps, so rounding cannot accumulate; the re-anchor
+// points depend only on how many samples have been rendered, never on how
+// they were split into blocks, which keeps renders block-partition exact.
+//
+// Each oscillator matches PhaseOsc: a tick advances the phase, then reports
+// sin (and cos) of the new phase.
+template <int N> class QuadratureBank {
+  public:
+    // Restart the shared clock. Follow with reset(i, phase) for every
+    // oscillator.
+    void restart() {
+        count_ = 0;
+    }
+
+    // Place oscillator i at `phase` (in cycles) without ticking it.
+    void reset(int i, double phase) {
+        const auto u = static_cast<std::size_t>(i);
+        phase_[u] = wrap(phase - static_cast<double>(count_) * increment_[u]);
+        derive(u, wrap(phase));
+    }
+
+    // Change oscillator i's rate, keeping its current phase.
+    void set_rate(int i, double hz, double sample_rate) {
+        const auto u = static_cast<std::size_t>(i);
+        const double current = position(i);
+        increment_[u] = (sample_rate > 0.0) ? hz / sample_rate : 0.0;
+        phase_[u] = wrap(current - static_cast<double>(count_) * increment_[u]);
+        derive(u, current);
+    }
+
+    // Advance every oscillator one sample.
+    void tick() {
+        if (++count_ >= kOscReanchorSamples) {
+            for (std::size_t u = 0; u < static_cast<std::size_t>(N); ++u) {
+                phase_[u] = wrap(phase_[u] + static_cast<double>(count_) * increment_[u]);
+                derive(u, phase_[u]);
+            }
+            count_ = 0;
+            return;
+        }
+        for (std::size_t u = 0; u < static_cast<std::size_t>(N); ++u) {
+            const double s = sin_[u] * step_cos_[u] + cos_[u] * step_sin_[u];
+            const double c = cos_[u] * step_cos_[u] - sin_[u] * step_sin_[u];
+            sin_[u] = s;
+            cos_[u] = c;
+        }
+    }
+
+    double sin(int i) const {
+        return sin_[static_cast<std::size_t>(i)];
+    }
+    double cos(int i) const {
+        return cos_[static_cast<std::size_t>(i)];
+    }
+    const double* sin_data() const {
+        return sin_.data();
+    }
+
+    // Current phase in cycles, [0, 1).
+    double position(int i) const {
+        const auto u = static_cast<std::size_t>(i);
+        return wrap(phase_[u] + static_cast<double>(count_) * increment_[u]);
+    }
+
+  private:
+    static constexpr double kTwoPi = 6.283185307179586;
+
+    static double wrap(double phase) {
+        return phase - std::floor(phase);
+    }
+
+    void derive(std::size_t u, double position) {
+        sin_[u] = std::sin(position * kTwoPi);
+        cos_[u] = std::cos(position * kTwoPi);
+        step_sin_[u] = std::sin(increment_[u] * kTwoPi);
+        step_cos_[u] = std::cos(increment_[u] * kTwoPi);
+    }
+
+    // Phase at the start of the shared clock, so phase + count * increment is
+    // the current phase of every oscillator.
+    std::array<double, N> phase_{};
+    std::array<double, N> increment_{};
+    std::array<double, N> sin_{};
+    std::array<double, N> cos_{};
+    std::array<double, N> step_sin_{};
+    std::array<double, N> step_cos_{};
+    int count_ = 0;
+};
+
 // How much the modulation depth shrinks as the decay lengthens. Constant-depth
 // modulation on a very long tail accumulates audible pitch drift; scaling depth
 // down with T60 keeps long tails still while short tails stay lush.
@@ -103,20 +195,22 @@ inline double mod_depth_shrink(double decay_seconds) {
 }
 
 // Per-channel delay modulation: sine + mean-reverting walk, mixed by the
-// kModSineMix / kModWalkMix pair. One instance drives all kNumChannels lines;
-// the rates are spread across the channels so no two lines beat together.
+// kModSineMix / kModWalkMix pair. One instance drives all kNumChannels lines in
+// lockstep; the rates are spread across the channels so no two lines beat
+// together.
 class DelayModulationBank {
 public:
     // Seeds are fixed per channel; `reset()` restores them, so a reset render
     // reproduces the previous one exactly.
     void reset() {
+        osc_.restart();
         for (int i = 0; i < kNumChannels; ++i) {
             rng_[i].reset(kSeedBase + static_cast<std::uint32_t>(i) * kSeedStride);
             walk_[i].reset();
             // Spread the starting phases evenly so the lines never start in
             // lockstep (a 16-line unison sweep is exactly the artifact the
             // per-line rate spread exists to avoid).
-            osc_[i].reset(static_cast<double>(i) / static_cast<double>(kNumChannels));
+            osc_.reset(i, static_cast<double>(i) / static_cast<double>(kNumChannels));
         }
     }
 
@@ -126,8 +220,7 @@ public:
                                     ? static_cast<double>(i) /
                                           static_cast<double>(kNumChannels - 1)
                                     : 0.0;
-            osc_[i].set_rate(kModRateMinHz + frac * (kModRateMaxHz - kModRateMinHz),
-                             tank_rate);
+            osc_.set_rate(i, kModRateMinHz + frac * (kModRateMaxHz - kModRateMinHz), tank_rate);
         }
     }
 
@@ -137,9 +230,13 @@ public:
             walk_[i].step(rng_[i], kWalkReversion, kWalkStep);
     }
 
-    // Per-sample modulation signal for one channel, in [-1, 1].
-    double tick(int channel) {
-        return kModSineMix * osc_[channel].tick() + kModWalkMix * walk_[channel].value();
+    // Advance every channel one sample and write each channel's modulation
+    // signal, in [-1, 1], to out[0 .. kNumChannels).
+    void tick(double* out) {
+        osc_.tick();
+        const double* s = osc_.sin_data();
+        for (int i = 0; i < kNumChannels; ++i)
+            out[i] = kModSineMix * s[i] + kModWalkMix * walk_[i].value();
     }
 
 private:
@@ -148,7 +245,7 @@ private:
 
     std::array<XorShift32, kNumChannels> rng_{};
     std::array<MeanRevertingWalk, kNumChannels> walk_{};
-    std::array<PhaseOsc, kNumChannels> osc_{};
+    QuadratureBank<kNumChannels> osc_{};
 };
 
 }  // namespace pulp::signal::fdn

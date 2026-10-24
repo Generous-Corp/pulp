@@ -5,6 +5,7 @@
 #include <pulp/simd/lanes.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <type_traits>
@@ -596,47 +597,74 @@ public:
         }
     }
 
+    // Largest ratio of a derived DF1 history to the DF2T state it reproduces
+    // that the block path accepts.
+    static constexpr double kMaxHistoryGain = 1.0e4;
+
     // Make the DF1 history describe the current DF2T state: if the last
     // writer was the sample path or a coefficient change, derive an
-    // equivalent history (zero past inputs where possible) that produces the
-    // same future output in exact arithmetic. Returns false for a degenerate
-    // section whose state no history reproduces.
+    // equivalent history that produces the same future output in exact
+    // arithmetic. Returns false for a degenerate or ill-conditioned section;
+    // the caller then runs the sample order instead.
+    //
+    // The history (x1, x2, y1, y2) must satisfy two equations:
+    //   s2 = b2 x1 - a2 y1
+    //   s1 = b1 x1 - a1 y1 + b2 x2 - a2 y2
+    // The minimum-norm solution keeps the history on the scale of the state.
+    // Solving by dividing by one coefficient does not: a tiny nonzero a2
+    // makes the history huge, and its terms then cancel in the block output.
     bool prepare_history() noexcept {
         if (history_valid_)
             return true;
         const double b1 = b1_, b2 = b2_, a1 = a1_, a2 = a2_;
         const double s1 = s1_, s2 = s2_;
-        // s2 = b2 x1 - a2 y1;  s1 = b1 x1 - a1 y1 + b2 x2 - a2 y2
-        if (a2 != 0.0) {
-            hx1_ = 0.0;
-            hx2_ = 0.0;
-            hy1_ = -s2 / a2;
-            hy2_ = (-a1 * hy1_ - s1) / a2;
-        } else if (b2 != 0.0) {
-            hy1_ = 0.0;
-            hy2_ = 0.0;
-            hx1_ = s2 / b2;
-            hx2_ = (s1 - b1 * hx1_) / b2;
-        } else if (s2 != 0.0) {
-            return false;
-        } else if (a1 != 0.0) {
-            hx1_ = 0.0;
-            hx2_ = 0.0;
-            hy1_ = -s1 / a1;
-            hy2_ = 0.0;
-        } else if (b1 != 0.0) {
-            hy1_ = 0.0;
-            hy2_ = 0.0;
-            hx1_ = s1 / b1;
-            hx2_ = 0.0;
-        } else if (s1 != 0.0) {
-            return false;
+        const double m1 = std::max(std::abs(b2), std::abs(a2));
+        const double m2 = std::max({std::abs(b1), std::abs(b2), std::abs(a1), std::abs(a2)});
+        // Rows of the system, each scaled to a largest entry of 1.
+        const std::array<double, 4> q =
+            m2 > 0.0 ? std::array<double, 4>{b1 / m2, b2 / m2, -a1 / m2, -a2 / m2}
+                     : std::array<double, 4>{};
+        const double t2 = m2 > 0.0 ? s1 / m2 : 0.0;
+        std::array<double, 4> v{};
+        if (m2 == 0.0) {
+            if (s1 != 0.0 || s2 != 0.0)
+                return false;
+        } else if (m1 == 0.0) {
+            if (s2 != 0.0)
+                return false;
+            const double qq = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
+            for (std::size_t i = 0; i < 4; ++i)
+                v[i] = q[i] * (t2 / qq);
         } else {
-            hx1_ = hx2_ = hy1_ = hy2_ = 0.0;
+            const std::array<double, 4> p{b2 / m1, 0.0, -a2 / m1, 0.0};
+            const double t1 = s2 / m1;
+            const double pp = p[0] * p[0] + p[2] * p[2];
+            const double qq = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
+            const double pq = p[0] * q[0] + p[2] * q[2];
+            const double det = pp * qq - pq * pq;
+            // Nearly parallel rows: every solution is large, so the block
+            // output would lose precision to cancellation.
+            if (!(det > 1.0e-6 * pp * qq))
+                return false;
+            const double w1 = (qq * t1 - pq * t2) / det;
+            const double w2 = (pp * t2 - pq * t1) / det;
+            for (std::size_t i = 0; i < 4; ++i)
+                v[i] = p[i] * w1 + q[i] * w2;
         }
-        if (!(std::isfinite(hy1_) && std::isfinite(hy2_) && std::isfinite(hx1_) &&
-              std::isfinite(hx2_)))
+        // Even the minimum-norm history can be forced large: retuning to
+        // b2 = 0 with a tiny a2 leaves s2 = -a2 y1, so |y1| = |s2| / |a2| for
+        // every solution. A history far above the state it reproduces would
+        // lose the block output to cancellation, so that case runs the
+        // sample order too.
+        const double state = std::max(std::abs(s1), std::abs(s2));
+        const double largest =
+            std::max({std::abs(v[0]), std::abs(v[1]), std::abs(v[2]), std::abs(v[3])});
+        if (!std::isfinite(largest) || largest > kMaxHistoryGain * state)
             return false;
+        hx1_ = v[0];
+        hx2_ = v[1];
+        hy1_ = v[2];
+        hy2_ = v[3];
         history_valid_ = true;
         return true;
     }

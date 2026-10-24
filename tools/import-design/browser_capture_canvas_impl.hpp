@@ -246,15 +246,23 @@ extract_document_canvas_paint(const choc::value::ValueView& snapshot,
         if (number(box[0]) != 0 || number(box[1]) != 0 || number(box[2]) <= 0 ||
             number(box[3]) <= 0 || number(box[2]) > width || number(box[3]) > height)
             return std::nullopt;
-        // CSS leaves the document canvas transparent when html and body are
-        // transparent, but Chromium composites that default canvas onto
-        // opaque white. A solid body background also paints the document
-        // canvas. Preserve either browser-visible result for native lowering
-        // instead of exposing Pulp's host dark clear color.
+        // When html and body are transparent the canvas is the user agent's:
+        // Chromium paints the `Canvas` system colour of the root's used
+        // color-scheme, which the capture records as `documentCanvas`. A
+        // capture without that report keeps opaque white, the light-scheme
+        // colour. A solid body background also paints the document canvas.
+        // Preserve the browser-visible result for native lowering instead of
+        // exposing Pulp's host dark clear color.
+        std::array<double, 4> ua_canvas{255, 255, 255, 1};
+        const auto report = member(snapshot, "documentCanvas");
+        if (member(report, "schema").isString() &&
+            member(report, "schema").toString() == "pulp-document-canvas-v1" &&
+            member(report, "canvas_color").isString())
+            if (const auto recorded = color(member(report, "canvas_color").toString());
+                recorded && (*recorded)[3] == 1)
+                ua_canvas = *recorded;
         const auto& canvas_color =
-            (*html_color)[3] == 1
-                ? *html_color
-                : ((*body_color)[3] == 1 ? *body_color : std::array<double, 4>{255, 255, 255, 1});
+            (*html_color)[3] == 1 ? *html_color : ((*body_color)[3] == 1 ? *body_color : ua_canvas);
         return DocumentCanvasPaint{"rgb(" + std::to_string(static_cast<int>(canvas_color[0])) +
                                        ", " + std::to_string(static_cast<int>(canvas_color[1])) +
                                        ", " + std::to_string(static_cast<int>(canvas_color[2])) +

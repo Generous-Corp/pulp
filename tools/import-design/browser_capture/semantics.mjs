@@ -122,6 +122,12 @@ export const COMPUTED_STYLES = [
   // rendered solid is a wrong picture, so its presence sends the subtree to the
   // element fallback instead.
   "stroke-dasharray",
+  // The shape of the stroke: Chromium's computed value is the only one that
+  // sees a cap, join or limit set from a stylesheet rather than inline.
+  "stroke-linecap",
+  "stroke-linejoin",
+  "stroke-miterlimit",
+  "stroke-dashoffset",
 ];
 
 export function semanticExpression(snapshotClickableIndexes = []) {

@@ -67,6 +67,7 @@ import {
   createCaptureProgress,
 } from "./lifecycle.mjs";
 import { evaluateDesignTokens } from "./tokens.mjs";
+import { evaluateDocumentCanvas } from "./document_canvas.mjs";
 import { evaluateFormControlTheme } from "./form_control_theme.mjs";
 import { evaluatePlatformFonts } from "./platform_fonts.mjs";
 import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs";
@@ -2170,6 +2171,10 @@ async function runCapture(options) {
     // and command-stream bindings remain the shipping/runtime contract.
     const canvasComposition = await deriveCanvasCompositionEvidence(
       cdp, screenshotBytes, chromeBytes);
+    // The UA canvas colour, read with a transient probe now that every frame
+    // has been captured. Written INTO the snapshot below, beside the
+    // transparent root and body backgrounds it completes.
+    const documentCanvas = await evaluateDocumentCanvas(cdp);
     await interactionNavigationGuard?.assertUnchanged();
     const pixels = pngDimensions(screenshotBytes);
     if (pixels.width !== captureWidth * dpr ||
@@ -2188,6 +2193,7 @@ async function runCapture(options) {
       ...sanitizedSnapshot,
       computedStyleNames: COMPUTED_STYLES,
       formControlTheme,
+      documentCanvas,
     }), "utf8");
     const interactionReportBytes = interactionReport
       ? serializeJson(interactionReport)

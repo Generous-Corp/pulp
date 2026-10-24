@@ -72,7 +72,7 @@ if(NOT PULP_WCLAP_CHOC_INCLUDE)
     FetchContent_Declare(
         choc_wclap
         GIT_REPOSITORY https://github.com/danielraffel/choc.git
-        GIT_TAG pulp-webview-dnd-poc1)
+        GIT_TAG pulp-webview-dnd-poc2)
     FetchContent_MakeAvailable(choc_wclap)
     # The choc checkout has a top-level choc/ subdir, so the checkout dir itself
     # is the include root (headers resolve as <choc/audio/...>).

@@ -694,9 +694,10 @@ Rect SvgPathWidget::paint_extent() const {
         sx = sy = scale;
     }
     // A miter join reaches up to miterLimit x width / 2 past the vertex (10,
-    // the Canvas2D default); 2 more px cover anti-aliasing.
+    // the Canvas2D default, unless a larger SVG limit is set); 2 more px cover
+    // anti-aliasing. A square cap's sqrt(2) x width / 2 is always inside that.
     const float stroke = has_stroke_ ? stroke_width_ * std::max(sx, sy) : 0.0f;
-    const float pad = stroke * 5.0f + 2.0f;
+    const float pad = stroke * std::max(5.0f, stroke_miter_limit_.value_or(10.0f) * 0.5f) + 2.0f;
     const float x0 = ox + min_x * sx - pad, y0 = oy + min_y * sy - pad;
     const float x1 = ox + max_x * sx + pad, y1 = oy + max_y * sy + pad;
     if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1))
@@ -775,6 +776,30 @@ void SvgPathWidget::clear_stroke_gradient() {
     request_repaint();
 }
 
+void SvgPathWidget::set_stroke_cap(canvas::LineCap cap) {
+    if (stroke_cap_ == cap)
+        return;
+    const Rect before = paint_extent();
+    stroke_cap_ = cap;
+    repaint_extent_change(before);
+}
+
+void SvgPathWidget::set_stroke_join(canvas::LineJoin join) {
+    if (stroke_join_ == join)
+        return;
+    const Rect before = paint_extent();
+    stroke_join_ = join;
+    repaint_extent_change(before);
+}
+
+void SvgPathWidget::set_stroke_miter_limit(float limit) {
+    if (!std::isfinite(limit) || limit < 1.0f || stroke_miter_limit_ == limit)
+        return;
+    const Rect before = paint_extent();
+    stroke_miter_limit_ = limit;
+    repaint_extent_change(before);
+}
+
 void SvgPathWidget::set_stroke_width(float w) {
     stroke_width_ = std::max(0.0f, w);
     request_repaint();
@@ -787,6 +812,30 @@ void SvgPathWidget::set_fill_rule(canvas::FillRule rule) {
 
 void SvgPathWidget::reparse() {
     parse_path(path_data_, segments_);
+}
+
+canvas::Path SvgPathWidget::stroke_geometry() const {
+    canvas::Path path;
+    for (const auto& seg : segments_) {
+        switch (seg.op) {
+        case SvgPathSegment::Op::move_to:
+            path.move_to(seg.p[0], seg.p[1]);
+            break;
+        case SvgPathSegment::Op::line_to:
+            path.line_to(seg.p[0], seg.p[1]);
+            break;
+        case SvgPathSegment::Op::quad_to:
+            path.quad_to(seg.p[0], seg.p[1], seg.p[2], seg.p[3]);
+            break;
+        case SvgPathSegment::Op::cubic_to:
+            path.cubic_to(seg.p[0], seg.p[1], seg.p[2], seg.p[3], seg.p[4], seg.p[5]);
+            break;
+        case SvgPathSegment::Op::close_path:
+            path.close();
+            break;
+        }
+    }
+    return path;
 }
 
 void SvgPathWidget::paint(canvas::Canvas& canvas) {
@@ -874,6 +923,17 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
             canvas.fill_current_path(fill_rule_);
         }
     }
+    // An explicit SVG stroke style resolves unset parts to SVG's defaults
+    // (butt, miter, limit 4). The canvas has no getter for its sticky stroke
+    // state, so the style is never left set: a solid stroke goes through
+    // stroke_path, which keeps it local to the draw, and a gradient stroke
+    // resets the canvas defaults after drawing.
+    const bool styled = stroke_cap_ || stroke_join_ || stroke_miter_limit_;
+    canvas::StrokeStyle style;
+    style.width = stroke_width_;
+    style.cap = stroke_cap_.value_or(canvas::LineCap::butt);
+    style.join = stroke_join_.value_or(canvas::LineJoin::miter);
+    style.miter_limit = stroke_miter_limit_.value_or(4.0f);
     if (has_stroke_ && stroke_width_ > 0) {
         // Gradient stroke mirrors the gradient fill above: parsed against
         // the viewBox-space rect (the active transform maps it to the
@@ -888,15 +948,29 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
                                                   pg->positions.data(),
                                                   static_cast<int>(pg->colors.size()));
                 canvas.set_line_width(stroke_width_);
+                if (styled) {
+                    canvas.set_line_cap(style.cap);
+                    canvas.set_line_join(style.join);
+                    canvas.set_miter_limit(style.miter_limit);
+                }
                 canvas.stroke_current_path();
                 canvas.clear_stroke_gradient();
+                if (styled) {
+                    canvas.set_line_cap(canvas::LineCap::butt);
+                    canvas.set_line_join(canvas::LineJoin::miter);
+                    canvas.set_miter_limit(10.0f);
+                }
                 stroke_gradient_applied = true;
             }
         }
         if (!stroke_gradient_applied) {
             canvas.set_stroke_color(stroke_color_);
-            canvas.set_line_width(stroke_width_);
-            canvas.stroke_current_path();
+            if (styled) {
+                canvas.stroke_path(stroke_geometry(), style);
+            } else {
+                canvas.set_line_width(stroke_width_);
+                canvas.stroke_current_path();
+            }
         }
     }
 

@@ -247,6 +247,7 @@ paths = [
   "tools/scripts/test_verify_skia_m153_capabilities.py",
   "tools/scripts/test_version_consistency_check.py",
   "tools/scripts/test_version_consistency_check_extra.py",
+  "tools/scripts/test_view_audio_archive_manifest.py",
   "tools/scripts/test_visual_python_deps_step.py",
   "tools/scripts/test_webclap_relevance.py",
   "tools/scripts/test_win32_include_lint.py",
@@ -268,6 +269,7 @@ paths = [
   "tools/scripts/verify_skia_m153_capabilities.py",
   "tools/scripts/verify_standalone_trace_close.py",
   "tools/scripts/version_consistency_check.py",
+  "tools/scripts/view_audio_archive_manifest.py",
   "tools/scripts/webclap_relevance.py",
   "tools/scripts/windows_cli_compile_scope.py",
   "tools/scripts/windows_cli_release_precheck.py",
@@ -454,6 +456,40 @@ tests = [
   "ci-routing-digest-check",
   "ci-routing-digest-selftest",
   "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-0370209d6f8d"
+paths = ["tools/scripts/convolver_crossover_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "convolver-crossover-table",
   "gate-common-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1729,6 +1765,40 @@ tests = [
   "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-registration-projection-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-db7e478e0320"
+paths = ["tools/scripts/test_check_android_jni_exports.py"]
+tests = [
+  "android-jni-exports-selftest",
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
   "changed-surface-shadow-plans-selftest",
@@ -4072,6 +4142,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-3f34094e685a"
+paths = ["tools/scripts/test_migration_note_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "migration-note-guard-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-ab00cd3f57c4"
 paths = ["tools/scripts/test_minos_registry_absent.py"]
 tests = [
@@ -4091,6 +4195,40 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "minos-registry-absent-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-97b6c4022baa"
+paths = ["tools/scripts/test_nm_symbols.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "nm-symbols-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-refresh-push",
@@ -5049,6 +5187,40 @@ tests = [
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
   "script-argv-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-6049bdb32912"
+paths = ["tools/scripts/test_script_inputs_precheck.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "script-inputs-precheck-selftest",
   "wide-non-native-selftest",
 ]
 build_targets = ["pulp-cli"]
@@ -7108,6 +7280,7 @@ paths = [
   "tools/scripts/ci_diff_base.py",
   "tools/scripts/ci_routing_digest.py",
   "tools/scripts/clean_worktree_planning.py",
+  "tools/scripts/convolver_crossover_check.py",
   "tools/scripts/coverage_diff_comment.py",
   "tools/scripts/ctest_inventory_parity.py",
   "tools/scripts/ctest_nonruns.py",
@@ -7217,6 +7390,7 @@ paths = [
   "tools/scripts/test_changed_surface_registration_projection.py",
   "tools/scripts/test_changed_surface_script_families.py",
   "tools/scripts/test_changed_surface_shadow_plans.py",
+  "tools/scripts/test_check_android_jni_exports.py",
   "tools/scripts/test_check_apple_bundle_signing.py",
   "tools/scripts/test_check_au_component_preflight.py",
   "tools/scripts/test_check_bundle_architectures.py",
@@ -7371,8 +7545,10 @@ paths = [
   "tools/scripts/test_merge_cobertura.py",
   "tools/scripts/test_merge_cobertura_extra.py",
   "tools/scripts/test_merge_stall_watchdog.py",
+  "tools/scripts/test_migration_note_guard.py",
   "tools/scripts/test_minos_registry_absent.py",
   "tools/scripts/test_mkdocs_hooks.py",
+  "tools/scripts/test_nm_symbols.py",
   "tools/scripts/test_node_abi_gate.py",
   "tools/scripts/test_node_build_deps_step.py",
   "tools/scripts/test_package_cli_extra.py",
@@ -7449,6 +7625,7 @@ paths = [
   "tools/scripts/test_schema_drift_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
   "tools/scripts/test_script_argv.py",
+  "tools/scripts/test_script_inputs_precheck.py",
   "tools/scripts/test_script_test_inputs.py",
   "tools/scripts/test_sdk_capability_handoff.py",
   "tools/scripts/test_sdk_consumer_sweep.py",
@@ -7507,6 +7684,7 @@ paths = [
   "tools/scripts/test_version_at_land.py",
   "tools/scripts/test_version_consistency_check.py",
   "tools/scripts/test_version_consistency_check_extra.py",
+  "tools/scripts/test_view_audio_archive_manifest.py",
   "tools/scripts/test_view_audio_symbol_floor.py",
   "tools/scripts/test_visual_python_deps_step.py",
   "tools/scripts/test_web_timeline_source_closure_check.py",
@@ -7548,6 +7726,7 @@ paths = [
   "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
   "tools/scripts/verify_wasm_skia_slice.py",
   "tools/scripts/version_consistency_check.py",
+  "tools/scripts/view_audio_archive_manifest.py",
   "tools/scripts/view_audio_seam_debts.py",
   "tools/scripts/web_timeline_source_closure_check.py",
   "tools/scripts/webclap_relevance.py",
@@ -7568,6 +7747,7 @@ tests = [
   "changed-surface-script-families-drift",
   "checkout-location-guard-selftest",
   "claude-md-sync-hook",
+  "cli-package-registry-signing-helper",
   "clock-only-temp-key-guard",
   "clock-only-temp-key-guard-selftest",
   "cmake-examples-reorder-init-guard",
@@ -7600,6 +7780,7 @@ tests = [
   "interchange-tables-drift",
   "mac-objc-source-list-guard",
   "mac-objc-source-list-guard-selftest",
+  "migration-note-guard-selftest",
   "minos-registry-absent-selftest",
   "msvc-string-literal-guard",
   "planning-gitlink-guard-selftest",
@@ -7630,6 +7811,7 @@ tests = [
   "timeline-sync-soak-verifier-self-test",
   "tmp-leak-guard-selftest",
   "tool-registry-reminder-hook",
+  "toolchain-host_sync-selftest",
   "tools-registry-check",
   "tools-registry-check-selftest",
   "trace-span-category-lint",
@@ -7670,6 +7852,7 @@ paths = [
   "tools/scripts/ci_diff_base.py",
   "tools/scripts/ci_routing_digest.py",
   "tools/scripts/clean_worktree_planning.py",
+  "tools/scripts/convolver_crossover_check.py",
   "tools/scripts/coverage_diff_comment.py",
   "tools/scripts/ctest_inventory_parity.py",
   "tools/scripts/ctest_nonruns.py",
@@ -7779,6 +7962,7 @@ paths = [
   "tools/scripts/test_changed_surface_registration_projection.py",
   "tools/scripts/test_changed_surface_script_families.py",
   "tools/scripts/test_changed_surface_shadow_plans.py",
+  "tools/scripts/test_check_android_jni_exports.py",
   "tools/scripts/test_check_apple_bundle_signing.py",
   "tools/scripts/test_check_au_component_preflight.py",
   "tools/scripts/test_check_bundle_architectures.py",
@@ -7933,8 +8117,10 @@ paths = [
   "tools/scripts/test_merge_cobertura.py",
   "tools/scripts/test_merge_cobertura_extra.py",
   "tools/scripts/test_merge_stall_watchdog.py",
+  "tools/scripts/test_migration_note_guard.py",
   "tools/scripts/test_minos_registry_absent.py",
   "tools/scripts/test_mkdocs_hooks.py",
+  "tools/scripts/test_nm_symbols.py",
   "tools/scripts/test_node_abi_gate.py",
   "tools/scripts/test_node_build_deps_step.py",
   "tools/scripts/test_package_cli_extra.py",
@@ -8011,6 +8197,7 @@ paths = [
   "tools/scripts/test_schema_drift_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
   "tools/scripts/test_script_argv.py",
+  "tools/scripts/test_script_inputs_precheck.py",
   "tools/scripts/test_script_test_inputs.py",
   "tools/scripts/test_sdk_capability_handoff.py",
   "tools/scripts/test_sdk_consumer_sweep.py",
@@ -8069,6 +8256,7 @@ paths = [
   "tools/scripts/test_version_at_land.py",
   "tools/scripts/test_version_consistency_check.py",
   "tools/scripts/test_version_consistency_check_extra.py",
+  "tools/scripts/test_view_audio_archive_manifest.py",
   "tools/scripts/test_view_audio_symbol_floor.py",
   "tools/scripts/test_visual_python_deps_step.py",
   "tools/scripts/test_web_timeline_source_closure_check.py",
@@ -8110,6 +8298,7 @@ paths = [
   "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
   "tools/scripts/verify_wasm_skia_slice.py",
   "tools/scripts/version_consistency_check.py",
+  "tools/scripts/view_audio_archive_manifest.py",
   "tools/scripts/view_audio_seam_debts.py",
   "tools/scripts/web_timeline_source_closure_check.py",
   "tools/scripts/webclap_relevance.py",

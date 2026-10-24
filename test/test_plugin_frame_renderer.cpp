@@ -24,13 +24,22 @@
 
 #ifdef PULP_HAS_SKIA
 
+#include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/canvas/recording_canvas.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/view/view.hpp>
 
+#include "include/core/SkCanvas.h"
+#include "include/core/SkData.h"
+#include "include/core/SkSurface.h"
+#include "include/encode/SkPngEncoder.h"
+
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <string>
 #include <vector>
 
 using namespace pulp::view;
@@ -496,6 +505,74 @@ TEST_CASE("encode_rgba_png emits a real PNG and rejects empty input",
 
     REQUIRE(encode_rgba_png({}, 8, 8).empty());
     REQUIRE(encode_rgba_png(pixels, 0, 8).empty());
+}
+
+namespace {
+
+// A root that draws one full-size file image per layer, the way an imported
+// panel draws its captured chrome and canvases.
+class FileImageLayers : public View {
+  public:
+    explicit FileImageLayers(std::vector<std::string> paths) : paths_(std::move(paths)) {}
+    void paint(pulp::canvas::Canvas& canvas) override {
+        for (const auto& path : paths_)
+            canvas.draw_image_from_file(path, 0, 0, bounds().width, bounds().height);
+    }
+
+  private:
+    std::vector<std::string> paths_;
+};
+
+// Writes a solid @p w x @p h PNG and returns its path.
+std::string write_png(const std::string& name, int w, int h, SkColor color) {
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(w, h));
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(color);
+    SkPixmap pixmap;
+    REQUIRE(surface->peekPixels(&pixmap));
+    sk_sp<SkData> png = SkPngEncoder::Encode(pixmap, SkPngEncoder::Options{});
+    REQUIRE(png != nullptr);
+    const auto path = (std::filesystem::temp_directory_path() / name).string();
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(static_cast<const char*>(png->data()), static_cast<std::streamsize>(png->size()));
+    REQUIRE(out.good());
+    return path;
+}
+
+} // namespace
+
+TEST_CASE("the raster present keeps every layer of a frame over the image cache budget",
+          "[plugin-frame][raster][image-cache]") {
+    // Four 6 MiB layers, each 30% of a 20 MiB budget, presented for ten
+    // frames: the CPU present announces each frame, so the cache overshoots
+    // for the frame instead of decoding every layer on every frame.
+    auto& cache = pulp::canvas::ImageFileCache::instance();
+    cache.clear();
+    cache.reset_stats();
+    cache.set_enabled(true);
+    cache.set_byte_budget(20u * 1024u * 1024u);
+    std::vector<std::string> paths;
+    for (int i = 0; i < 4; ++i)
+        paths.push_back(write_png("pulp-raster-layer-" + std::to_string(i) + ".png", 1024, 1536,
+                                  SkColorSetARGB(255, 40 * i, 80, 160)));
+
+    FileImageLayers root(paths);
+    root.set_bounds({0, 0, 32, 32});
+    FrameGeometry g;
+    g.width = 32.0f;
+    g.height = 32.0f;
+    for (int frame = 0; frame < 10; ++frame) {
+        std::uint32_t w = 0, h = 0;
+        REQUIRE_FALSE(raster_plugin_scene_rgba(root, g, &w, &h).empty());
+    }
+    const auto stats = cache.stats();
+    CHECK(stats.builds == 4);
+    CHECK(stats.hits == 36);
+
+    cache.set_byte_budget(pulp::canvas::ImageFileCache::kDefaultFileByteBudget);
+    cache.clear();
+    for (const auto& path : paths)
+        std::filesystem::remove(path);
 }
 
 #else

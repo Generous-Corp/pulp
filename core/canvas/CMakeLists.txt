@@ -207,6 +207,13 @@ if(PULP_HAS_SKIA)
         # for Label/measurement.
         src/text_font_context.cpp
     )
+    if(APPLE)
+        target_sources(pulp-canvas PRIVATE src/system_ui_font_manager.cpp)
+        # It subclasses SkFontMgr, whose type info the prebuilt Skia does not
+        # export.
+        set_source_files_properties(src/system_ui_font_manager.cpp PROPERTIES
+            COMPILE_OPTIONS "-fno-rtti")
+    endif()
 
 
     # Optional bundled Noto Color Emoji typeface — gated by the
@@ -401,6 +408,7 @@ set(PULP_CANVAS_UNIT_HEADERS
     include/pulp/canvas/path_to_sdf.hpp
     include/pulp/canvas/psdf_atlas.hpp
     include/pulp/canvas/recording_canvas.hpp
+    include/pulp/canvas/resource_counters.hpp
     include/pulp/canvas/rectangle_list.hpp
     include/pulp/canvas/scene/scene.hpp
     include/pulp/canvas/scene/scene_group.hpp

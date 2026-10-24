@@ -118,12 +118,17 @@ int cmd_scan(const std::vector<std::string>& args) {
     // --help` does and what users expect.
     for (const auto& a : args) {
         if (a == "--help" || a == "-h") {
-            std::printf("Usage: pulp scan [--format clap|vst3|au|auv3|lv2] [--no-load]\n");
+            std::printf(
+                "Usage: pulp scan [--format clap|vst3|au|auv3|lv2] [--no-load] [--in-process]\n");
             std::printf("\nWalks the system plug-in paths and prints discovered\n");
             std::printf("plugins. Without --format, all formats are scanned.\n");
-            std::printf("\n  --no-load  Filesystem-only enumeration (#812). Names are\n");
-            std::printf("             filename-derived; vendor/version/unique-id are\n");
-            std::printf("             omitted. Cannot crash on a malformed plugin.\n");
+            std::printf("\n  --no-load    Filesystem-only enumeration (#812). Names are\n");
+            std::printf("               filename-derived; vendor/version/unique-id are\n");
+            std::printf("               omitted. Cannot crash on a malformed plugin.\n");
+            std::printf("  --in-process Run each CLAP bundle's entry point in this process.\n");
+            std::printf("               Without it CLAP bundles are enumerated by a disposable\n");
+            std::printf("               pulp-scan-worker child (beside the executable or named\n");
+            std::printf("               by PULP_SCAN_WORKER) and skipped when none is found.\n");
             return 0;
         }
     }
@@ -131,6 +136,7 @@ int cmd_scan(const std::vector<std::string>& args) {
     PluginFormat requested = PluginFormat::CLAP;
     bool all_formats = true;
     bool no_load = false;
+    bool in_process = false;
     for (std::size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--format" || args[i] == "-f") {
             if (i + 1 >= args.size() || args[i + 1].empty() || args[i + 1][0] == '-') {
@@ -142,6 +148,8 @@ int cmd_scan(const std::vector<std::string>& args) {
             ++i;
         } else if (args[i] == "--no-load") {
             no_load = true;
+        } else if (args[i] == "--in-process") {
+            in_process = true;
         } else if (!args[i].empty() && args[i][0] == '-') {
             std::fprintf(stderr, "pulp scan: unknown flag: %s\n", args[i].c_str());
             return 2;
@@ -181,7 +189,16 @@ int cmd_scan(const std::vector<std::string>& args) {
             opts.scan_au   = (f == PluginFormat::AudioUnit || f == PluginFormat::AudioUnitV3);
             opts.scan_clap = (f == PluginFormat::CLAP);
             opts.scan_lv2  = (f == PluginFormat::LV2);
-            results = scanner.scan(opts);
+            opts.in_process_clap = in_process;
+            auto report = scanner.scan_report(opts);
+            results = std::move(report.plugins);
+            if (report.clap_skipped_no_worker) {
+                std::fprintf(stderr,
+                             "pulp scan: %s\n"
+                             "pulp scan: pass --in-process to run CLAP entry points in this "
+                             "process instead\n",
+                             report.error.c_str());
+            }
         }
         // Narrow AU / AUv3 results to the exact requested flavor. When
         // `all_formats` is in play each iteration's `f` is authoritative

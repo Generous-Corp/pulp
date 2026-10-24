@@ -629,11 +629,16 @@ while stopped because it changes latency. Drive is `[-12,36]` dB, bias is
 dB. `process(SampleType)` advances state and returns audio; `shaped(SampleType)`
 is the pure memoryless transfer used by plots/tests. Inspectors return effective
 controls, host latency, or a conservative linear gain bound.
+`latency_samples()` is the integer delay a host compensates and the dry path
+matches: 0 for `off` and `adaa`, 1 for `adaa2`, and the oversampler's reported
+latency for `oversample_2x`. `group_delay_samples()` is the wet path's exact
+delay on the linear part of the curve, fractional where an integer cannot hold
+it: 0.5 for `adaa`, whose half sample `latency_samples()` rounds down to 0.
 
 - Lifecycle: `prepare(sample_rate)`, `reset()`.
 - Controls: `set_shape()`, `set_drive_db()`, `set_bias()`, `set_tone_pre_hz()`, `set_tone_tracking()`, `set_tone_de_hz()`, `set_pre_boost_db()`, `set_alias_policy()`, `set_mix()`, `set_output_trim_db()`.
 - Processing and pure transfer: `process()`, `shaped()`.
-- Inspection: `shape()`, `drive_db()`, `bias()`, `alias_policy()`, `latency_samples()`, `worst_case_gain()`.
+- Inspection: `shape()`, `drive_db()`, `bias()`, `alias_policy()`, `latency_samples()`, `group_delay_samples()`, `worst_case_gain()`.
 
 ### Circuit clippers and tone stack
 

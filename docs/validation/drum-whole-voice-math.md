@@ -15,8 +15,12 @@ whole-voice gain, so those voices remain on their reference paths.
 
 The generic and SDS-V-family toms were the sole exception: their noise ladder's
 exact `tanhf` accounted for 37.30% and 34.00% of sampled whole-voice time.
-Selecting the existing `FastMath::tanh` implementation at that consumer produced
-the following complete-hit Release results across all 24 tom rate/block cells.
+Selecting the ladder's efficient saturator at that consumer produced the
+following complete-hit Release results across all 24 tom rate/block cells. These
+gains were measured with the Lambert-fraction `FastMath::tanh`; the efficient
+profile now evaluates `FastMath::tanh_minimax`, which removes that fraction's
+clamp seam at |x| = 4 and costs the same per evaluation below it, where the noise
+ladder operates. Re-run the matrix before relying on the exact margins.
 Each cell reports the median paired gain from independent processes; each process
 itself uses 11 trials of three complete hits. Executable order was counterbalanced
 to limit temperature and frequency-order bias. The generic voice used three
