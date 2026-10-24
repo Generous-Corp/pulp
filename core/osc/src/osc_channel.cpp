@@ -15,8 +15,9 @@ std::unique_ptr<OscChannel> OscChannel::open(
     }
     ReceiverOptions receiver_options;
     receiver_options.bind_address = chan->options_.bind_address;
-    receiver_options.on_message =
-        [raw = chan.get()](const Message& m) { raw->dispatch_message(m); };
+    receiver_options.on_message = [raw = chan.get()](const Message& m) {
+        raw->dispatch_message(m);
+    };
     const bool listen_ok =
         chan->receiver_.listen_with_options(local_port, std::move(receiver_options));
     if (!listen_ok) {

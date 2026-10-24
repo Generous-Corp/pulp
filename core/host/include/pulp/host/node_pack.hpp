@@ -168,17 +168,17 @@ struct NodePackHostPolicy {
 
 enum class NodePackError {
     Ok = 0,
-    ManifestInvalid = 1,   // unparseable / missing fields / wrong key sizes
-    UntrustedSigner = 2,   // signer_public_key not in the trust set
-    BadSignature = 3,      // Ed25519 verification failed
-    HashMismatch = 4,      // binary's SHA-256 != manifest sha256_hex
-    AbiMismatch = 5,       // manifest or entry abi_major != PULP_NODE_V1_ABI_MAJOR
-    LoadFailed = 6,        // dlopen/LoadLibrary failed
-    SymbolMissing = 7,     // no pulp_node_v1_entry export
+    ManifestInvalid = 1,         // unparseable / missing fields / wrong key sizes
+    UntrustedSigner = 2,         // signer_public_key not in the trust set
+    BadSignature = 3,            // Ed25519 verification failed
+    HashMismatch = 4,            // binary's SHA-256 != manifest sha256_hex
+    AbiMismatch = 5,             // manifest or entry abi_major != PULP_NODE_V1_ABI_MAJOR
+    LoadFailed = 6,              // dlopen/LoadLibrary failed
+    SymbolMissing = 7,           // no pulp_node_v1_entry export
     UnsupportedRequirements = 8, // capabilities / RT / resource needs unsupported
-    NodeMetadataMismatch = 9, // manifest node declarations != loaded descriptor
-    PlatformPolicyDenied = 10, // native artifact is forbidden on this platform/origin
-    BinaryChanged = 11,    // the mapped module is not the file whose bytes were verified
+    NodeMetadataMismatch = 9,    // manifest node declarations != loaded descriptor
+    PlatformPolicyDenied = 10,   // native artifact is forbidden on this platform/origin
+    BinaryChanged = 11,          // the mapped module is not the file whose bytes were verified
 };
 
 struct NodePackLoadResult {
@@ -213,7 +213,7 @@ std::vector<std::uint8_t> node_pack_signed_message(const NodePackManifest& m);
 struct NodePackVerifyResult;
 
 class VerifiedNodePackBinary {
-public:
+  public:
     VerifiedNodePackBinary();
     ~VerifiedNodePackBinary();
     VerifiedNodePackBinary(VerifiedNodePackBinary&&) noexcept;
@@ -230,21 +230,20 @@ public:
     // Opaque on-disk handle; the loader's platform helpers operate on it.
     struct Impl;
 
-private:
+  private:
     std::unique_ptr<Impl> impl_;
 
     friend NodePackVerifyResult verify_node_pack_binary(const std::string&,
                                                         const NodePackManifest&);
     friend NodePackLoadResult load_verified_node_pack(VerifiedNodePackBinary,
-                                                      const NodePackManifest&,
-                                                      const NodePackTrust&,
+                                                      const NodePackManifest&, const NodePackTrust&,
                                                       const NodePackHostPolicy&);
 };
 
 struct NodePackVerifyResult {
     // Ok, LoadFailed (cannot open, or not a regular file) or HashMismatch.
     NodePackError error = NodePackError::LoadFailed;
-    VerifiedNodePackBinary binary;  // open only when error == Ok
+    VerifiedNodePackBinary binary; // open only when error == Ok
 };
 
 // Stage one of loading: open the pack binary once and compare the hash of the

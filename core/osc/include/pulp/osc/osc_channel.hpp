@@ -60,8 +60,12 @@ public:
     bool send(const Message& msg);
 
     /// Address and port the receiving side is bound to; empty / 0 when closed.
-    std::string local_address() const { return receiver_.local_address(); }
-    std::uint16_t local_port() const { return receiver_.local_port(); }
+    std::string local_address() const {
+        return receiver_.local_address();
+    }
+    std::uint16_t local_port() const {
+        return receiver_.local_port();
+    }
 
 private:
     OscChannel(OscChannelOptions options);

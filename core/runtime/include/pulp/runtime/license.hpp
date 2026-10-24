@@ -165,25 +165,20 @@ struct OnlineActivationOptions {
 struct OnlineActivation {
     /// Activate online with a serial number.
     /// Returns the license key on success.
-    static std::optional<std::string> activate(
-        std::string_view server_url,
-        std::string_view serial_number,
-        std::string_view product_id,
-        const OnlineActivationOptions& options = {});
+    static std::optional<std::string> activate(std::string_view server_url,
+                                               std::string_view serial_number,
+                                               std::string_view product_id,
+                                               const OnlineActivationOptions& options = {});
 
     /// Deactivate a license (free up a machine slot).
-    static bool deactivate(
-        std::string_view server_url,
-        std::string_view license_key,
-        const OnlineActivationOptions& options = {});
+    static bool deactivate(std::string_view server_url, std::string_view license_key,
+                           const OnlineActivationOptions& options = {});
 
     /// Check license status with the server. Returns NotFound when the server
     /// is refused or unreachable, and InvalidSignature when it answered but did
     /// not vouch for the key (see parse_status_response).
-    static LicenseStatus check_status(
-        std::string_view server_url,
-        std::string_view license_key,
-        const OnlineActivationOptions& options = {});
+    static LicenseStatus check_status(std::string_view server_url, std::string_view license_key,
+                                      const OnlineActivationOptions& options = {});
 
     /// True when `server_url` is an `https://` origin, or `http://` and the
     /// options allow it. Nothing is sent to a URL this rejects.

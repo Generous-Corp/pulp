@@ -304,7 +304,8 @@ TEST_CASE("node pack: the bytes that were hashed are the bytes that load",
     const pulp_node_descriptor_v1* d = r.entry->descriptor();
     REQUIRE(std::string_view(d->stable_id, d->stable_id_len) == "pulp.test.pack.gain");
 #endif
-    if (r.ok()) unload_node_pack(r.handle);
+    if (r.ok())
+        unload_node_pack(r.handle);
 
     // A binary verified against one manifest does not satisfy another.
     auto again = verify_node_pack_binary(fs::path(module_path).parent_path().string(),

@@ -258,10 +258,10 @@ namespace {
 // Trust + policy checks that need only the manifest. Run before the binary
 // is opened and again by load_verified_node_pack so the second stage is never
 // a bypass.
-NodePackError check_manifest_admission(const NodePackManifest& manifest,
-                                       const NodePackTrust& trust,
+NodePackError check_manifest_admission(const NodePackManifest& manifest, const NodePackTrust& trust,
                                        const NodePackHostPolicy& policy) {
-    if (manifest.abi_major != PULP_NODE_V1_ABI_MAJOR) return NodePackError::AbiMismatch;
+    if (manifest.abi_major != PULP_NODE_V1_ABI_MAJOR)
+        return NodePackError::AbiMismatch;
     if (manifest.signer_public_key.size() != runtime::ed25519_public_key_size ||
         manifest.signature.size() != runtime::ed25519_signature_size ||
         !has_valid_node_declarations(manifest.nodes) ||
@@ -273,7 +273,8 @@ NodePackError check_manifest_admission(const NodePackManifest& manifest,
              .allowed) {
         return NodePackError::PlatformPolicyDenied;
     }
-    if (!key_is_trusted(manifest.signer_public_key, trust)) return NodePackError::UntrustedSigner;
+    if (!key_is_trusted(manifest.signer_public_key, trust))
+        return NodePackError::UntrustedSigner;
     const std::vector<std::uint8_t> message = node_pack_signed_message(manifest);
     if (!runtime::ed25519_verify(
             manifest.signer_public_key.data(), manifest.signer_public_key.size(),
@@ -281,33 +282,42 @@ NodePackError check_manifest_admission(const NodePackManifest& manifest,
             message.data(), message.size())) {
         return NodePackError::BadSignature;
     }
-    if (!requirements_are_supported(manifest, policy)) return NodePackError::UnsupportedRequirements;
+    if (!requirements_are_supported(manifest, policy))
+        return NodePackError::UnsupportedRequirements;
     return NodePackError::Ok;
 }
 
-}  // namespace
+} // namespace
 
 // ── Verified binary: open once, hash from the open file, map that file ──────
 
 struct VerifiedNodePackBinary::Impl {
 #if defined(_WIN32)
     HANDLE file = INVALID_HANDLE_VALUE;
-    bool is_open() const { return file != INVALID_HANDLE_VALUE; }
+    bool is_open() const {
+        return file != INVALID_HANDLE_VALUE;
+    }
     void close() {
-        if (is_open()) ::CloseHandle(file);
+        if (is_open())
+            ::CloseHandle(file);
         file = INVALID_HANDLE_VALUE;
     }
 #else
     int fd = -1;
-    bool is_open() const { return fd >= 0; }
+    bool is_open() const {
+        return fd >= 0;
+    }
     void close() {
-        if (is_open()) ::close(fd);
+        if (is_open())
+            ::close(fd);
         fd = -1;
     }
 #endif
     std::string path;
     std::string sha256_hex;
-    ~Impl() { close(); }
+    ~Impl() {
+        close();
+    }
 };
 
 namespace {
@@ -319,9 +329,10 @@ using BinaryImpl = VerifiedNodePackBinary::Impl;
 // be neither rewritten nor renamed away while the handle is held.
 bool open_regular_file(BinaryImpl& impl, const std::string& path) {
 #if defined(_WIN32)
-    impl.file = ::CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (impl.file == INVALID_HANDLE_VALUE) return false;
+    impl.file = ::CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (impl.file == INVALID_HANDLE_VALUE)
+        return false;
     if (::GetFileType(impl.file) != FILE_TYPE_DISK) {
         impl.close();
         return false;
@@ -329,7 +340,8 @@ bool open_regular_file(BinaryImpl& impl, const std::string& path) {
     return true;
 #else
     impl.fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
-    if (impl.fd < 0) return false;
+    if (impl.fd < 0)
+        return false;
     struct stat st{};
     if (::fstat(impl.fd, &st) != 0 || !S_ISREG(st.st_mode)) {
         impl.close();
@@ -347,8 +359,10 @@ bool read_open_file(BinaryImpl& impl, std::vector<std::uint8_t>& out) {
 #if defined(_WIN32)
     for (;;) {
         DWORD got = 0;
-        if (!::ReadFile(impl.file, chunk, static_cast<DWORD>(sizeof(chunk)), &got, nullptr)) return false;
-        if (got == 0) break;
+        if (!::ReadFile(impl.file, chunk, static_cast<DWORD>(sizeof(chunk)), &got, nullptr))
+            return false;
+        if (got == 0)
+            break;
         out.insert(out.end(), chunk, chunk + got);
     }
     return true;
@@ -356,10 +370,12 @@ bool read_open_file(BinaryImpl& impl, std::vector<std::uint8_t>& out) {
     for (;;) {
         const ssize_t got = ::read(impl.fd, chunk, sizeof(chunk));
         if (got < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             return false;
         }
-        if (got == 0) break;
+        if (got == 0)
+            break;
         out.insert(out.end(), chunk, chunk + got);
     }
     return true;
@@ -369,7 +385,8 @@ bool read_open_file(BinaryImpl& impl, std::vector<std::uint8_t>& out) {
 #if defined(_WIN32)
 bool same_file_identity(HANDLE a, HANDLE b) {
     BY_HANDLE_FILE_INFORMATION ia{}, ib{};
-    if (!::GetFileInformationByHandle(a, &ia) || !::GetFileInformationByHandle(b, &ib)) return false;
+    if (!::GetFileInformationByHandle(a, &ia) || !::GetFileInformationByHandle(b, &ib))
+        return false;
     return ia.dwVolumeSerialNumber == ib.dwVolumeSerialNumber &&
            ia.nFileIndexHigh == ib.nFileIndexHigh && ia.nFileIndexLow == ib.nFileIndexLow;
 }
@@ -386,7 +403,8 @@ void* dl_open_verified(BinaryImpl& impl, NodePackError& error) {
         return nullptr;
     }
     char module_path[MAX_PATH * 4] = {};
-    const DWORD len = ::GetModuleFileNameA(module, module_path, static_cast<DWORD>(sizeof(module_path)));
+    const DWORD len =
+        ::GetModuleFileNameA(module, module_path, static_cast<DWORD>(sizeof(module_path)));
     bool same = false;
     if (len > 0 && len < sizeof(module_path)) {
         HANDLE mapped = ::CreateFileA(module_path, GENERIC_READ,
@@ -422,7 +440,7 @@ void* dl_open_verified(BinaryImpl& impl, NodePackError& error) {
             Dl_info info{};
             if (::dladdr(sym, &info) != 0 && info.dli_fname != nullptr &&
                 std::strcmp(info.dli_fname, fd_path) != 0) {
-                other_name = true;  // the same inode, loaded under another path
+                other_name = true; // the same inode, loaded under another path
             }
         }
         ::dlclose(probe);
@@ -433,7 +451,8 @@ void* dl_open_verified(BinaryImpl& impl, NodePackError& error) {
     }
 #endif
     void* handle = ::dlopen(fd_path, RTLD_NOW | RTLD_LOCAL);
-    if (handle == nullptr) error = NodePackError::LoadFailed;
+    if (handle == nullptr)
+        error = NodePackError::LoadFailed;
     return handle;
 #endif
 }
@@ -449,14 +468,17 @@ std::vector<std::pair<void*, VerifiedNodePackBinary>>& loaded_binaries() {
     return v;
 }
 
-}  // namespace
+} // namespace
 
 VerifiedNodePackBinary::VerifiedNodePackBinary() : impl_(std::make_unique<Impl>()) {}
 VerifiedNodePackBinary::~VerifiedNodePackBinary() = default;
 VerifiedNodePackBinary::VerifiedNodePackBinary(VerifiedNodePackBinary&&) noexcept = default;
-VerifiedNodePackBinary& VerifiedNodePackBinary::operator=(VerifiedNodePackBinary&&) noexcept = default;
+VerifiedNodePackBinary&
+VerifiedNodePackBinary::operator=(VerifiedNodePackBinary&&) noexcept = default;
 
-bool VerifiedNodePackBinary::is_open() const { return impl_ && impl_->is_open(); }
+bool VerifiedNodePackBinary::is_open() const {
+    return impl_ && impl_->is_open();
+}
 const std::string& VerifiedNodePackBinary::path() const {
     static const std::string empty;
     return impl_ ? impl_->path : empty;
@@ -493,7 +515,8 @@ NodePackLoadResult load_verified_node_pack(VerifiedNodePackBinary binary,
                                            const NodePackHostPolicy& policy) {
     NodePackLoadResult r;
     r.error = check_manifest_admission(manifest, trust, policy);
-    if (r.error != NodePackError::Ok) return r;
+    if (r.error != NodePackError::Ok)
+        return r;
     if (!binary.is_open()) {
         r.error = NodePackError::LoadFailed;
         return r;
@@ -539,20 +562,18 @@ NodePackLoadResult load_verified_node_pack(VerifiedNodePackBinary binary,
     return r;
 }
 
-NodePackLoadResult load_node_pack(const std::string& manifest_dir,
-                                  const NodePackManifest& manifest,
+NodePackLoadResult load_node_pack(const std::string& manifest_dir, const NodePackManifest& manifest,
                                   const NodePackTrust& trust) {
     return load_node_pack(manifest_dir, manifest, trust, NodePackHostPolicy{});
 }
 
-NodePackLoadResult load_node_pack(const std::string& manifest_dir,
-                                  const NodePackManifest& manifest,
-                                  const NodePackTrust& trust,
-                                  const NodePackHostPolicy& policy) {
+NodePackLoadResult load_node_pack(const std::string& manifest_dir, const NodePackManifest& manifest,
+                                  const NodePackTrust& trust, const NodePackHostPolicy& policy) {
     // Only an admitted manifest gets its binary opened at all.
     NodePackLoadResult r;
     r.error = check_manifest_admission(manifest, trust, policy);
-    if (r.error != NodePackError::Ok) return r;
+    if (r.error != NodePackError::Ok)
+        return r;
 
     NodePackVerifyResult verified = verify_node_pack_binary(manifest_dir, manifest);
     if (verified.error != NodePackError::Ok) {
@@ -563,13 +584,14 @@ NodePackLoadResult load_node_pack(const std::string& manifest_dir,
 }
 
 void unload_node_pack(void* handle) {
-    if (handle == nullptr) return;
+    if (handle == nullptr)
+        return;
     dl_close(handle);
     std::lock_guard<std::mutex> lock(loaded_binaries_mutex());
     auto& entries = loaded_binaries();
     for (auto it = entries.begin(); it != entries.end(); ++it) {
         if (it->first == handle) {
-            entries.erase(it);  // releases the open file
+            entries.erase(it); // releases the open file
             return;
         }
     }

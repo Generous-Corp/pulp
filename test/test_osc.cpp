@@ -422,10 +422,10 @@ namespace {
 
 // Sends `msg` until the receiver reports it or the retry budget runs out;
 // loopback UDP is best-effort, so one send is not a verdict.
-bool deliver_until_received(Sender& tx, const Message& msg,
-                            const std::atomic<bool>& received) {
+bool deliver_until_received(Sender& tx, const Message& msg, const std::atomic<bool>& received) {
     for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
-        if (!tx.send(msg)) return false;
+        if (!tx.send(msg))
+            return false;
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
     return received.load(std::memory_order_acquire);
@@ -433,12 +433,9 @@ bool deliver_until_received(Sender& tx, const Message& msg,
 
 } // namespace
 
-TEST_CASE("OSC Receiver binds loopback unless told to bind all interfaces",
-          "[osc][udp][bind]") {
+TEST_CASE("OSC Receiver binds loopback unless told to bind all interfaces", "[osc][udp][bind]") {
     std::atomic<bool> got_message{false};
-    auto handler = [&](const Message&) {
-        got_message.store(true, std::memory_order_release);
-    };
+    auto handler = [&](const Message&) { got_message.store(true, std::memory_order_release); };
 
     SECTION("default bind is loopback and reachable from loopback") {
         Receiver rx;

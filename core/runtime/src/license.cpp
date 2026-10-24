@@ -445,20 +445,24 @@ std::optional<std::string> migrate_v1_to_v2(
 namespace {
 
 bool has_scheme(std::string_view url, std::string_view scheme) {
-    if (url.size() <= scheme.size()) return false;
+    if (url.size() <= scheme.size())
+        return false;
     for (size_t i = 0; i < scheme.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(url[i])) != scheme[i]) return false;
+        if (std::tolower(static_cast<unsigned char>(url[i])) != scheme[i])
+            return false;
     }
     return true;
 }
 
 // `{"a":"...","b":"..."}` with every value JSON-escaped, so user-typed input
 // (serials, keys) cannot close the string and add fields of its own.
-std::string json_object(std::initializer_list<std::pair<std::string_view, std::string_view>> fields) {
+std::string
+json_object(std::initializer_list<std::pair<std::string_view, std::string_view>> fields) {
     std::string out = "{";
     bool first = true;
     for (const auto& [key, value] : fields) {
-        if (!first) out += ',';
+        if (!first)
+            out += ',';
         first = false;
         out += choc::json::getEscapedQuotedString(std::string(key));
         out += ':';
@@ -468,8 +472,8 @@ std::string json_object(std::initializer_list<std::pair<std::string_view, std::s
     return out;
 }
 
-HttpResponse post_json(std::string_view server_url, std::string_view path,
-                       std::string body, const OnlineActivationOptions& options) {
+HttpResponse post_json(std::string_view server_url, std::string_view path, std::string body,
+                       const OnlineActivationOptions& options) {
     HttpRequest request;
     request.url = std::string(server_url) + std::string(path);
     request.method = "POST";
@@ -479,11 +483,12 @@ HttpResponse post_json(std::string_view server_url, std::string_view path,
     return http_request(request);
 }
 
-}  // namespace
+} // namespace
 
 bool OnlineActivation::server_url_allowed(std::string_view server_url,
                                           const OnlineActivationOptions& options) {
-    if (has_scheme(server_url, "https://")) return true;
+    if (has_scheme(server_url, "https://"))
+        return true;
     return options.allow_insecure_http && has_scheme(server_url, "http://");
 }
 
@@ -494,48 +499,52 @@ LicenseStatus OnlineActivation::parse_status_response(std::string_view body) {
     } catch (...) {
         return LicenseStatus::InvalidSignature;
     }
-    if (!root.isObject() || !root.hasObjectMember("status")) return LicenseStatus::InvalidSignature;
+    if (!root.isObject() || !root.hasObjectMember("status"))
+        return LicenseStatus::InvalidSignature;
     const auto status = root["status"];
-    if (!status.isString()) return LicenseStatus::InvalidSignature;
+    if (!status.isString())
+        return LicenseStatus::InvalidSignature;
     const auto text = status.getString();
-    if (text == "valid") return LicenseStatus::Valid;
-    if (text == "expired") return LicenseStatus::Expired;
+    if (text == "valid")
+        return LicenseStatus::Valid;
+    if (text == "expired")
+        return LicenseStatus::Expired;
     return LicenseStatus::InvalidSignature;
 }
 
-std::optional<std::string> OnlineActivation::activate(
-    std::string_view server_url, std::string_view serial_number,
-    std::string_view product_id, const OnlineActivationOptions& options)
-{
-    if (!server_url_allowed(server_url, options)) return std::nullopt;
-    auto response = post_json(server_url, "/activate",
-                              json_object({{"serial", serial_number},
-                                           {"product", product_id},
-                                           {"machine", machine_id()}}),
-                              options);
+std::optional<std::string> OnlineActivation::activate(std::string_view server_url,
+                                                      std::string_view serial_number,
+                                                      std::string_view product_id,
+                                                      const OnlineActivationOptions& options) {
+    if (!server_url_allowed(server_url, options))
+        return std::nullopt;
+    auto response = post_json(
+        server_url, "/activate",
+        json_object(
+            {{"serial", serial_number}, {"product", product_id}, {"machine", machine_id()}}),
+        options);
     if (!response.ok()) return std::nullopt;
     return response.body;
 }
 
-bool OnlineActivation::deactivate(std::string_view server_url,
-                                  std::string_view license_key,
+bool OnlineActivation::deactivate(std::string_view server_url, std::string_view license_key,
                                   const OnlineActivationOptions& options) {
-    if (!server_url_allowed(server_url, options)) return false;
-    auto response = post_json(server_url, "/deactivate",
-                              json_object({{"key", license_key},
-                                           {"machine", machine_id()}}),
-                              options);
+    if (!server_url_allowed(server_url, options))
+        return false;
+    auto response =
+        post_json(server_url, "/deactivate",
+                  json_object({{"key", license_key}, {"machine", machine_id()}}), options);
     return response.ok();
 }
 
 LicenseStatus OnlineActivation::check_status(std::string_view server_url,
                                              std::string_view license_key,
                                              const OnlineActivationOptions& options) {
-    if (!server_url_allowed(server_url, options)) return LicenseStatus::NotFound;
-    auto response = post_json(server_url, "/status",
-                              json_object({{"key", license_key},
-                                           {"machine", machine_id()}}),
-                              options);
+    if (!server_url_allowed(server_url, options))
+        return LicenseStatus::NotFound;
+    auto response =
+        post_json(server_url, "/status",
+                  json_object({{"key", license_key}, {"machine", machine_id()}}), options);
     if (!response.ok()) return LicenseStatus::NotFound;
     return parse_status_response(response.body);
 }

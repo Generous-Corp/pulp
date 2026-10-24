@@ -286,13 +286,14 @@ bool Receiver::listen_with_options(uint16_t port, ReceiverOptions options) {
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    if (options.bind_address.empty()
-        || inet_pton(AF_INET, options.bind_address.c_str(), &addr.sin_addr) != 1) {
+    if (options.bind_address.empty() ||
+        inet_pton(AF_INET, options.bind_address.c_str(), &addr.sin_addr) != 1) {
         return false;
     }
 
     auto sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock == kInvalidSocket) return false;
+    if (sock == kInvalidSocket)
+        return false;
 
     // Keep receivers exclusive. Linux permits multiple UDP binds when all
     // participants opt into SO_REUSEADDR, which makes packet delivery
@@ -460,11 +461,13 @@ uint16_t Receiver::local_port() const {
 }
 
 std::string Receiver::local_address() const {
-    if (!is_listening()) return {};
+    if (!is_listening())
+        return {};
     in_addr addr{};
     addr.s_addr = impl_->local_addr.load(std::memory_order_relaxed);
     char text[INET_ADDRSTRLEN] = {};
-    if (inet_ntop(AF_INET, &addr, text, sizeof(text)) == nullptr) return {};
+    if (inet_ntop(AF_INET, &addr, text, sizeof(text)) == nullptr)
+        return {};
     return text;
 }
 

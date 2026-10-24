@@ -157,7 +157,7 @@ public:
     // empty when not listening.
     std::string local_address() const;
 
-private:
+  private:
     void stop_impl(bool destroying);
 
     struct Impl;

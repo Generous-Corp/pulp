@@ -905,7 +905,7 @@ std::string request_line(const std::string& request) {
     return request.substr(0, request.find("\r\n"));
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("OnlineActivation treats empty server URL as failed request",
           "[crypto][license]") {
@@ -933,8 +933,8 @@ TEST_CASE("OnlineActivation deactivate accepts successful loopback response",
           "[crypto][license]") {
     auto exchange = serve_loopback_http_response(R"({"ok":true})");
 
-    REQUIRE(OnlineActivation::deactivate(exchange.base_url, "license-key",
-                                         loopback_http_options()));
+    REQUIRE(
+        OnlineActivation::deactivate(exchange.base_url, "license-key", loopback_http_options()));
     exchange.worker.join();
 
     REQUIRE(exchange.request->find("POST /deactivate HTTP/1.1") != std::string::npos);
@@ -981,8 +981,8 @@ TEST_CASE("OnlineActivation treats non-2xx loopback responses as activation fail
 
     {
         auto exchange = serve_loopback_http_status(500, R"({"error":"server"})");
-        REQUIRE_FALSE(OnlineActivation::deactivate(exchange.base_url, "license",
-                                                   loopback_http_options()));
+        REQUIRE_FALSE(
+            OnlineActivation::deactivate(exchange.base_url, "license", loopback_http_options()));
         exchange.worker.join();
         REQUIRE(exchange.request->find("POST /deactivate HTTP/1.1") != std::string::npos);
     }
@@ -1006,8 +1006,8 @@ TEST_CASE("OnlineActivation refuses plain http unless the caller allows it",
         REQUIRE_FALSE(OnlineActivation::server_url_allowed("ftp://license.example.com"));
         REQUIRE_FALSE(OnlineActivation::server_url_allowed("https://"));
         REQUIRE_FALSE(OnlineActivation::server_url_allowed(""));
-        REQUIRE(OnlineActivation::server_url_allowed("http://127.0.0.1:8080",
-                                                     loopback_http_options()));
+        REQUIRE(
+            OnlineActivation::server_url_allowed("http://127.0.0.1:8080", loopback_http_options()));
         REQUIRE_FALSE(OnlineActivation::server_url_allowed("ftp://x", loopback_http_options()));
     }
 
@@ -1051,18 +1051,17 @@ TEST_CASE("OnlineActivation sends the key and machine id in the body, not the UR
     REQUIRE(body["machine"].getString() == machine_id());
 }
 
-TEST_CASE("OnlineActivation JSON-escapes user-typed fields",
-          "[crypto][license][transport]") {
+TEST_CASE("OnlineActivation JSON-escapes user-typed fields", "[crypto][license][transport]") {
     const std::string serial = R"(SER-"quoted"-back\slash-,"admin":true)";
     const std::string product = "Pulp\nSynth\t\"β\"";
     auto exchange = serve_loopback_http_response("license-key");
-    REQUIRE(OnlineActivation::activate(exchange.base_url, serial, product,
-                                       loopback_http_options()));
+    REQUIRE(
+        OnlineActivation::activate(exchange.base_url, serial, product, loopback_http_options()));
     exchange.worker.join();
 
     const auto body = choc::json::parse(request_body(*exchange.request));
     REQUIRE(body.isObject());
-    REQUIRE(body.size() == 3);  // serial, product, machine — the injected "admin" is text
+    REQUIRE(body.size() == 3); // serial, product, machine — the injected "admin" is text
     REQUIRE(body["serial"].getString() == serial);
     REQUIRE(body["product"].getString() == product);
     REQUIRE_FALSE(body.hasObjectMember("admin"));
@@ -1090,7 +1089,8 @@ TEST_CASE("OnlineActivation status parse is exact rather than a substring match"
     REQUIRE(OA::parse_status_response("") == LicenseStatus::InvalidSignature);
 
     // End to end: the server answers with the word in the wrong field.
-    auto exchange = serve_loopback_http_response(R"({"status":"revoked","reason":"\"valid\" until 2025"})");
+    auto exchange =
+        serve_loopback_http_response(R"({"status":"revoked","reason":"\"valid\" until 2025"})");
     REQUIRE(OA::check_status(exchange.base_url, "key", loopback_http_options()) ==
             LicenseStatus::InvalidSignature);
     exchange.worker.join();
@@ -1130,7 +1130,8 @@ TEST_CASE("OnlineActivation handles successful loopback activation flows",
         std::string key;
         try {
             const auto body = choc::json::parse(request.body);
-            if (body.isObject() && body["key"].isString()) key = body["key"].getString();
+            if (body.isObject() && body["key"].isString())
+                key = body["key"].getString();
         } catch (...) {
         }
         if (key == "license-key") {
