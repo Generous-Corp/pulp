@@ -139,6 +139,23 @@ std::string detect_webview_backend();
 /// Returns true if the host process has a usable WebView backend.
 bool webview_backend_available();
 
+namespace detail {
+
+/// The answer behind detect_webview_backend() and webview_backend_available().
+/// The detector has one definition, in pulp::view-platform, and reports
+/// "none" until a composition that compiles WebView in installs a provider;
+/// pulp::view-webview installs one during static initialization.
+struct WebViewBackendProvider {
+    std::string (*detect)() = nullptr;
+    bool (*available)() = nullptr;
+};
+
+/// Install (or, with nullptr, remove) the provider and return the one it
+/// replaced. The pointee must outlive every later call to the detector.
+const WebViewBackendProvider* set_webview_backend_provider(const WebViewBackendProvider* provider);
+
+} // namespace detail
+
 // Embedded web view component.
 // Create with WebViewPanel::create(), then use native_handle() to embed the
 // platform WebView in a WindowHost/PluginViewHost that actually exposes and

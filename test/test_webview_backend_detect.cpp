@@ -96,3 +96,25 @@ TEST_CASE("WebView backend on Android is chromium when enabled",
 #endif
 }
 #endif
+
+TEST_CASE("WebView backend detector answers from the installed provider",
+          "[webview][backend-detect][provider]") {
+    using pulp::view::detail::set_webview_backend_provider;
+    using pulp::view::detail::WebViewBackendProvider;
+    const auto before = pulp::view::detect_webview_backend();
+
+    static const WebViewBackendProvider fake{
+        [] { return std::string("webkitgtk"); },
+        [] { return true; },
+    };
+    const auto* previous = set_webview_backend_provider(&fake);
+    CHECK(pulp::view::detect_webview_backend() == "webkitgtk");
+    CHECK(pulp::view::webview_backend_available());
+
+    set_webview_backend_provider(nullptr);
+    CHECK(pulp::view::detect_webview_backend() == "none");
+    CHECK_FALSE(pulp::view::webview_backend_available());
+
+    CHECK(set_webview_backend_provider(previous) == nullptr);
+    REQUIRE(pulp::view::detect_webview_backend() == before);
+}
