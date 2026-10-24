@@ -25,6 +25,7 @@
 // (which anchors bind to what) is compared for that lane.
 
 #include <pulp/state/store.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/data_display.hpp>
 #include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_import.hpp>
