@@ -1888,7 +1888,31 @@ class PrunedSourceFixture(unittest.TestCase):
 
 
 class PrunedSourceRefusalTests(PrunedSourceFixture):
-    """The refusals read only the maps and the Pulp history, so they run without git-filter-repo."""
+    """The source check reads only the maps and the Pulp history, so it runs without git-filter-repo."""
+
+    def test_pruned_commit_is_accepted_with_its_proof(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.pruned)
+        data, ref_map, record = export_source_mapping(fr, self.pruned, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
+        self.assertNotIn(f"{self.pruned} {mirror_sha}", data.decode())  # no row is written in
+        self.assertEqual(ref_map, (fr / "ref-map").read_bytes())
+        self.assertEqual(record["sha"], self.source)
+        proof = record["proof"]
+        self.assertEqual(proof["ref_map_row"], f"{self.pruned} {mirror_sha} refs/heads/export-source")
+        self.assertEqual(proof["commit_map_rows"], [f"{self.pruned} {PRUNED}", f"{self.source} {mirror_sha}"])
+        self.assertTrue(proof["source_is_ancestor"] and proof["exported_paths_equal"])
+        self.assertEqual(proof["exported_path_count"], 1)
+        listing = f"a.txt 100644 {self.git('rev-parse', f'{self.source}:a.txt')}\n".encode()
+        self.assertEqual(proof["exported_blobs_sha256"], hashlib.sha256(listing).hexdigest())
+
+    def test_unpruned_commit_returns_the_map_with_no_record(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.source)
+        data, ref_map, record = export_source_mapping(fr, self.source, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
+        self.assertIsNone(ref_map)
+        self.assertIsNone(record)
 
     def test_pruned_commit_whose_exported_content_differs_is_refused(self):
         from vellum_closure import export_source_mapping
