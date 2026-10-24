@@ -3,6 +3,7 @@
 #include <pulp/view/ui_components.hpp>
 
 #include "bridge_dispatch.hpp"
+#include "layout_baselines.hpp"
 #include "value_widget_access.hpp"
 
 #include <algorithm>
@@ -171,6 +172,14 @@ void WidgetBridge::clear_quarantined_realm() {
     if (!realm_views.empty())
         invalidate_cached_subtrees_everywhere(realm_views);
 
+    // Saved starting layouts belong to widgets this bridge no longer reaches.
+    {
+        std::vector<std::uint64_t> ids;
+        ids.reserve(owned_widgets_.size());
+        for (const auto& owned : owned_widgets_)
+            ids.push_back(owned.instance_id);
+        forget_layout_baselines(ids);
+    }
     owned_widgets_.clear();
     widgets_.clear();
     scroll_wrappers_.clear();

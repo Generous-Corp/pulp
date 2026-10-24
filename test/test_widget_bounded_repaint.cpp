@@ -112,6 +112,35 @@ TEST_CASE("Knob bounded repaint includes a halo for glow and rings",
     CHECK(d.bounds.height > kb.height);
 }
 
+TEST_CASE("A Knob drag requests a bounded repaint per pointer sample",
+          "[view][widgets][partial-repaint]") {
+    // The drag path writes value_ itself (it does not go through set_value), so
+    // it needs its own bounded request: a drag is the hottest value path a knob
+    // has, one repaint per pointer sample.
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 400, 300});
+    auto knob_owned = std::make_unique<Knob>();
+    auto* knob = knob_owned.get();
+    knob_owned->flex().preferred_width = 64;
+    knob_owned->flex().preferred_height = 64;
+    root->add_child(std::move(knob_owned));
+    root->layout_children();
+    const auto kb = knob->local_bounds();
+    REQUIRE(kb.width < 200.0f);
+
+    knob->on_mouse_down({32, 32});
+    const float before = knob->value();
+    const auto d = damage_of(*root, [&] { knob->on_mouse_drag({32, 2}); });
+    knob->on_mouse_up({32, 2});
+    REQUIRE(knob->value() != before); // the drag really moved the value
+
+    REQUIRE_FALSE(d.full);
+    CHECK(d.bounds.width >= kb.width);
+    CHECK(d.bounds.height >= kb.height);
+    CHECK(d.bounds.width <= kb.width + 32.0f);
+    CHECK(d.bounds.height <= kb.height + 32.0f);
+}
+
 TEST_CASE("A redundant Knob write requests no repaint at all",
           "[view][widgets][partial-repaint]") {
     auto root = std::make_unique<View>();

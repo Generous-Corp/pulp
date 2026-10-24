@@ -425,6 +425,17 @@ do the same, or it will run a floor grant at default QoS and take CPU the host
 never agreed to give. A grant larger than the request, or one without a
 `lease_size_cores`, is released and treated as the original denial.
 
+### The browser-capture runtime file list is duplicated across both CLIs
+
+`tools/cli/upgrade_install.hpp` (`browser_capture_runtime_files`) and the Rust
+`experimental/pulp-rs/src/install_import_design.rs`
+(`BROWSER_CAPTURE_RUNTIME_FILES`) each pin the browser-capture modules an
+upgrade installs, and their tests compare against
+`tools/import-design/browser_capture/runtime_manifest.txt`. A module added to
+the manifest alone passes a source build and fails both upgrade tests; the
+release `common_cli_members` in `tools/scripts/release_product_matrix.json`
+needs it too. Update all four together.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source
@@ -605,6 +616,30 @@ Ed25519-signed artifact atomically. `pulp bake verify <artifact> --trust <file>`
 performs signature/trust and bounded-parse checks only; it never executes Custom
 code or restores state. `--no-mint` is the non-interactive guard that refuses an
 absent signing key instead of silently creating a new identity.
+
+`pulp bake` never loads a plugin: `cmd_bake.cpp` passes
+`GraphLoadOptions::load_plugins = false`, because the lowerability check
+refuses hosted Plugin nodes anyway and loading one first would run whatever
+library the graph file names, for nothing. There is deliberately no
+`--allow-path` flag on bake (it could never produce a successful bake), and
+`pulp host <path>` needs none either, since its positional path *is* the
+operator's explicit choice. `pulp scan --in-process` is the only way CLAP
+entry points run in the scanning process: by default `PluginScanner::scan`
+runs each `.clap` in a `pulp-scan-worker` child, found beside the executable
+(an installed SDK's `bin/`, or `tools/scan-worker/` in a build tree) or via
+`PULP_SCAN_WORKER`, and when no worker exists CLAP is **skipped**, not scanned
+in-process; `cmd_scan` reads `scan_report()` and prints the "pass
+`--in-process`" guidance to stderr. Both behaviours are `pulp-cpp`-side; the
+Rust front end forwards `bake` arguments untouched, while its own `scan` is
+filesystem-only and never reaches the worker.
+
+`tools/cli` is configured only when `PULP_ENABLE_GPU` is ON (root
+`CMakeLists.txt`), so a GPU-off worktree has no `pulp-cli` target at all and
+`cmake --build build --target pulp-cli` fails with "unknown target". To
+compile-check a CLI edit there, run the compiler with `-fsyntax-only` using
+the `FLAGS`/`DEFINES`/`INCLUDES` of a sibling target that links `pulp::host`
+(for example `pulp-scan-worker`'s rule in `build/build.ninja`) plus
+`-Itools/cli`; the real link still happens on the GPU-enabled `macos` gate.
 
 Stateful Custom records persist the graph's authored/staged
 `custom_state_blob`, not a live instance's `save_state()` result. This is a
@@ -2593,6 +2628,20 @@ Gotchas:
 - **If you change `upgrade_url.hpp`, update the regression test in the
   same PR.** Both live at HEAD; drift between them is the whole reason
   the header exists.
+
+## Release floors reach C++ through a generated header
+
+`tools/scripts/release_product_matrix.json` is the single home of release
+floors such as `checksum_manifest_floor`. C++ consumers (`cmd_upgrade.cpp`,
+`cli_sdk.cpp`) never spell the number: `tools/cmake/PulpReleaseMatrix.cmake`
+reads it and `release_floors_gen.h.in` is configured into
+`${CMAKE_BINARY_DIR}/tools/cli/release_floors_gen.h`, next to
+`pulp_version_gen.h`. Any target that compiles one of those sources outside
+`pulp-cli` must configure that header too; `cli_tests.cmake` does it for
+`pulp-test-cli-support-objects`, which compiles `cli_sdk.cpp`. The
+`SingleOwnerReleasePublication` tests in
+`test_release_workflow_test_step.py` fail if a CLI source carries its own
+copy of the floor literal.
 
 ## `pulp version --json`
 

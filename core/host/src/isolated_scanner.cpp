@@ -4,20 +4,34 @@
 //
 // Spawns `pulp-scan-worker` per bundle via `pulp::platform::ChildProcess`
 // and classifies the worker's outcome into a `ScanStatus`. The worker's
-// stdout is the JSON line(s) it emits per descriptor (see
-// tools/scan-worker/scan_worker_main.cpp); we keep the parser deliberately
-// small — flat, double-quoted-only, no escapes-with-unicode reassembly —
-// because the worker is the only producer and we control its format.
+// stdout is one flat JSON object per line, one per descriptor (see
+// tools/scan-worker/scan_worker_main.cpp); each line is parsed as JSON so a
+// descriptor carries the same PluginInfo fields an in-process scan fills.
 
 #include <pulp/host/isolated_scanner.hpp>
 
 #include <pulp/platform/child_process.hpp>
+#include <pulp/runtime/log.hpp>
+#include <pulp/runtime/system.hpp>
+
+#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <filesystem>
 #include <string>
 #include <string_view>
+
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <sys/stat.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -38,70 +52,6 @@ std::string_view trim(std::string_view s) {
     return s;
 }
 
-// Unescape the small set of escapes the worker emits (json_escape in
-// scan_worker_main.cpp). Anything else is passed through unchanged —
-// good enough for worker-controlled output.
-std::string json_unescape(std::string_view raw) {
-    std::string out;
-    out.reserve(raw.size());
-    for (std::size_t i = 0; i < raw.size(); ++i) {
-        char c = raw[i];
-        if (c == '\\' && i + 1 < raw.size()) {
-            char n = raw[i + 1];
-            switch (n) {
-                case '"':  out += '"';  ++i; continue;
-                case '\\': out += '\\'; ++i; continue;
-                case 'b':  out += '\b'; ++i; continue;
-                case 'f':  out += '\f'; ++i; continue;
-                case 'n':  out += '\n'; ++i; continue;
-                case 'r':  out += '\r'; ++i; continue;
-                case 't':  out += '\t'; ++i; continue;
-                default: break;
-            }
-        }
-        out += c;
-    }
-    return out;
-}
-
-// Locate `"key":"value"` and return value. Returns std::nullopt when the
-// key isn't present in `line`. Deliberately string-search rather than a
-// real JSON parser — keeps this TU tiny and the worker output schema is
-// frozen by us.
-std::optional<std::string> find_string(std::string_view line, std::string_view key) {
-    std::string needle = "\"";
-    needle += std::string(key);
-    needle += "\":\"";
-    auto k = line.find(needle);
-    if (k == std::string_view::npos) return std::nullopt;
-    auto value_start = k + needle.size();
-    // Find the closing quote, honouring a single level of backslash escape.
-    auto i = value_start;
-    while (i < line.size()) {
-        if (line[i] == '\\' && i + 1 < line.size()) {
-            i += 2;
-            continue;
-        }
-        if (line[i] == '"') break;
-        ++i;
-    }
-    if (i >= line.size()) return std::nullopt;
-    return json_unescape(line.substr(value_start, i - value_start));
-}
-
-// Locate `"key":true|false` and return the bool. Defaults to `dflt`.
-bool find_bool(std::string_view line, std::string_view key, bool dflt) {
-    std::string needle = "\"";
-    needle += std::string(key);
-    needle += "\":";
-    auto k = line.find(needle);
-    if (k == std::string_view::npos) return dflt;
-    auto v = k + needle.size();
-    if (v + 4 <= line.size() && line.compare(v, 4, "true") == 0) return true;
-    if (v + 5 <= line.size() && line.compare(v, 5, "false") == 0) return false;
-    return dflt;
-}
-
 PluginFormat parse_format(std::string_view s) {
     if (s == "clap") return PluginFormat::CLAP;
     if (s == "vst3") return PluginFormat::VST3;
@@ -111,23 +61,128 @@ PluginFormat parse_format(std::string_view s) {
     return PluginFormat::VST3;  // arbitrary default; caller checks status==Ok first
 }
 
+std::string member_string(const choc::value::ValueView& object, std::string_view key) {
+    if (!object.hasObjectMember(key))
+        return {};
+    const auto member = object[key];
+    return member.isString() ? std::string(member.getString()) : std::string{};
+}
+
+bool member_bool(const choc::value::ValueView& object, std::string_view key, bool fallback) {
+    if (!object.hasObjectMember(key))
+        return fallback;
+    const auto member = object[key];
+    return member.isBool() ? member.getBool() : fallback;
+}
+
+int member_int(const choc::value::ValueView& object, std::string_view key, int fallback) {
+    if (!object.hasObjectMember(key))
+        return fallback;
+    const auto member = object[key];
+    if (member.isInt32() || member.isInt64())
+        return static_cast<int>(member.getInt64());
+    return fallback;
+}
+
+// One worker line is one flat JSON object. A line that is not an object, or
+// that names neither a plugin nor a path, is a contract violation.
 std::optional<PluginInfo> parse_descriptor_line(std::string_view line) {
     line = trim(line);
     if (line.empty() || line.front() != '{') return std::nullopt;
 
+    // choc::json::parse walks a NUL-terminated buffer, not the view's
+    // length, so the line is copied: the parser then stops at this line's
+    // end instead of reading on into the next one.
+    const std::string owned_line(line);
+    choc::value::Value parsed;
+    try {
+        parsed = choc::json::parse(owned_line);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    if (!parsed.isObject())
+        return std::nullopt;
+    const choc::value::ValueView object = parsed.getView();
+
     PluginInfo info;
-    info.name = find_string(line, "name").value_or("");
-    info.manufacturer = find_string(line, "manufacturer").value_or("");
-    info.version = find_string(line, "version").value_or("");
-    info.unique_id = find_string(line, "unique_id").value_or("");
-    info.path = find_string(line, "path").value_or("");
-    info.is_instrument = find_bool(line, "is_instrument", false);
-    info.is_effect = find_bool(line, "is_effect", true);
-    info.format = parse_format(find_string(line, "format").value_or(""));
+    info.name = member_string(object, "name");
+    info.manufacturer = member_string(object, "manufacturer");
+    info.version = member_string(object, "version");
+    info.unique_id = member_string(object, "unique_id");
+    info.path = member_string(object, "path");
+    info.format = parse_format(member_string(object, "format"));
+    info.is_instrument = member_bool(object, "is_instrument", false);
+    info.is_effect = member_bool(object, "is_effect", true);
+    info.num_inputs = member_int(object, "num_inputs", info.num_inputs);
+    info.num_outputs = member_int(object, "num_outputs", info.num_outputs);
+    info.category = member_string(object, "category");
+    info.description = member_string(object, "description");
+    info.has_editor = member_bool(object, "has_editor", false);
+    info.supports_sidechain = member_bool(object, "supports_sidechain", false);
+    info.supports_midi_in = member_bool(object, "supports_midi_in", false);
+    info.supports_midi_out = member_bool(object, "supports_midi_out", false);
+    if (object.hasObjectMember("features")) {
+        const auto features = object["features"];
+        if (features.isArray()) {
+            for (uint32_t i = 0; i < features.size(); ++i) {
+                const auto feature = features[i];
+                if (feature.isString())
+                    info.features.emplace_back(feature.getString());
+            }
+        }
+    }
 
     // A well-formed worker descriptor always has at least a name+path.
     if (info.name.empty() && info.path.empty()) return std::nullopt;
     return info;
+}
+
+std::filesystem::path current_executable_directory() {
+#if defined(__APPLE__)
+    char buffer[4096];
+    uint32_t size = sizeof(buffer);
+    if (_NSGetExecutablePath(buffer, &size) != 0)
+        return {};
+    std::error_code ec;
+    const auto canonical = fs::canonical(buffer, ec);
+    return (ec ? fs::path(buffer) : canonical).parent_path();
+#elif defined(_WIN32)
+    char buffer[MAX_PATH];
+    const DWORD length = GetModuleFileNameA(nullptr, buffer, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH)
+        return {};
+    return fs::path(buffer).parent_path();
+#else
+    char buffer[4096];
+    const ssize_t length = ::readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+    if (length <= 0)
+        return {};
+    buffer[length] = '\0';
+    return fs::path(buffer).parent_path();
+#endif
+}
+
+bool is_existing_regular_file(const fs::path& path) {
+    std::error_code ec;
+    return !path.empty() && fs::is_regular_file(path, ec);
+}
+
+// A worker runs in every scan with the scanning user's privileges, so a copy
+// that another account could rewrite is refused, not merely warned about.
+bool worker_candidate_qualifies(const fs::path& path) {
+    if (!is_existing_regular_file(path))
+        return false;
+#if !defined(_WIN32)
+    struct stat st{};
+    if (::stat(path.c_str(), &st) != 0)
+        return false;
+    if ((st.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
+        runtime::log_warn("scan worker '{}' is group- or world-writable; refusing to run it",
+                          path.string());
+        return false;
+    }
+#endif
+    return true;
 }
 
 // Tail of stderr, capped so the error_message stays small (the parent
@@ -141,6 +196,47 @@ std::string short_stderr(const std::string& s) {
 }
 
 }  // namespace
+
+std::string find_scan_worker(std::string_view explicit_path) {
+    if (!explicit_path.empty()) {
+        const fs::path candidate{std::string(explicit_path)};
+        return worker_candidate_qualifies(candidate) ? candidate.string() : std::string{};
+    }
+    if (const auto from_env = runtime::get_env("PULP_SCAN_WORKER");
+        from_env && !from_env->empty()) {
+        const fs::path candidate{*from_env};
+        return worker_candidate_qualifies(candidate) ? candidate.string() : std::string{};
+    }
+#if defined(_WIN32)
+    const char* worker_name = "pulp-scan-worker.exe";
+#else
+    const char* worker_name = "pulp-scan-worker";
+#endif
+    auto dir = current_executable_directory();
+    for (int level = 0; level < 5 && !dir.empty(); ++level) {
+        const std::array<fs::path, 3> candidates{
+            dir / worker_name,
+            dir / "bin" / worker_name,
+            dir / "tools" / "scan-worker" / worker_name,
+        };
+        for (const auto& candidate : candidates) {
+            if (worker_candidate_qualifies(candidate))
+                return candidate.string();
+        }
+        // An application bundle is the outermost directory an app may trust;
+        // its parent is /Applications or a user folder full of other apps. A
+        // directory holding bin/ is an install prefix, and the prefix above it
+        // belongs to someone else.
+        std::error_code ec;
+        if (dir.extension() == ".app" || fs::is_directory(dir / "bin", ec))
+            break;
+        const auto parent = dir.parent_path();
+        if (parent == dir)
+            break;
+        dir = parent;
+    }
+    return {};
+}
 
 ScanResult IsolatedPluginScanner::scan(const std::string& bundle_path,
                                        int timeout_ms) const {
@@ -177,6 +273,15 @@ ScanResult IsolatedPluginScanner::scan(const std::string& bundle_path,
         result.error_message = "scan timed out after " +
                                std::to_string(timeout_ms) + " ms: " +
                                short_stderr(proc.stderr_output);
+        return result;
+    }
+
+    // The capture cap is far above any real descriptor set. Exceeding it means
+    // the worker's protocol channel is flooded, which the worker owns; the
+    // bundle gets no verdict and must not be blacklisted for it.
+    if (proc.output_limit_exceeded) {
+        result.status = ScanStatus::ProtocolError;
+        result.error_message = "worker output exceeded the capture limit for " + bundle_path;
         return result;
     }
 
@@ -217,24 +322,28 @@ ScanResult IsolatedPluginScanner::scan(const std::string& bundle_path,
         return result;
     }
 
-    // Parse the first line. The worker emits one JSON object per line;
-    // we report the first descriptor and ignore the rest (multi-class
-    // CLAPs are rare and the bundle-level identity is what matters for
-    // the host-side blacklist + cache).
-    auto nl = out.find('\n');
-    std::string_view first = (nl == std::string_view::npos) ? out : out.substr(0, nl);
-    auto parsed = parse_descriptor_line(first);
-    if (!parsed) {
-        // exit 0 but unparseable output — treat as crash so the bundle
-        // is blacklisted; a malformed descriptor is a worker-level
-        // contract violation we shouldn't trust.
-        result.status = ScanStatus::Crash;
-        result.error_message = "worker stdout not parseable: " +
-                               short_stderr(proc.stdout_output);
-        return result;
+    // The worker emits one JSON object per line, one per descriptor, on a
+    // channel the plugin cannot reach. A line that does not parse is a
+    // worker-level contract violation: nothing from the bundle is trusted,
+    // and nothing is held against the bundle either.
+    while (!out.empty()) {
+        const auto nl = out.find('\n');
+        const std::string_view line = (nl == std::string_view::npos) ? out : out.substr(0, nl);
+        out = (nl == std::string_view::npos) ? std::string_view{} : out.substr(nl + 1);
+        if (trim(line).empty())
+            continue;
+        auto parsed = parse_descriptor_line(line);
+        if (!parsed) {
+            result.status = ScanStatus::ProtocolError;
+            result.descriptors.clear();
+            result.error_message =
+                "worker stdout not parseable: " + short_stderr(proc.stdout_output);
+            return result;
+        }
+        result.descriptors.push_back(std::move(*parsed));
     }
     result.status = ScanStatus::Ok;
-    result.descriptor = std::move(parsed);
+    result.descriptor = result.descriptors.front();
     return result;
 }
 

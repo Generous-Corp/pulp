@@ -3220,8 +3220,15 @@ else:
 import json
 import sys
 
+if sys.argv[1:] == ["--help"]:
+    print("  --tools <tools...>   Specify the list of available tools")
+    raise SystemExit(0)
 expected = ["-p", "--strict-mcp-config", "--verbose",
             "--output-format=stream-json", "--include-partial-messages",
+            "--tools", "",
+            "--disallowedTools", "Write", "Edit", "NotebookEdit", "Bash",
+            "WebFetch", "WebSearch", "Read", "Glob", "Grep", "Task", "Skill",
+            "ToolSearch",
             "--model", "claude-opus-5"]
 if sys.argv[1:] != expected:
     print("wrong Claude protocol: " + repr(sys.argv[1:]), file=sys.stderr)

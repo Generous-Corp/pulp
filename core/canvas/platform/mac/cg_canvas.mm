@@ -1365,6 +1365,43 @@ bool CoreGraphicsCanvas::measure_image_from_file(const std::string& path,
     return true;
 }
 
+bool CoreGraphicsCanvas::measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                                 float& out_height) {
+    out_width = 0.0f;
+    out_height = 0.0f;
+    if (!data || size == 0)
+        return false;
+    // Header properties only: ImageIO reports the pixel size without
+    // decoding, the same size draw_image_from_data draws the image at.
+    bool measured = false;
+    @autoreleasepool {
+        CFDataRef cf = CFDataCreate(kCFAllocatorDefault, data, static_cast<CFIndex>(size));
+        if (!cf)
+            return false;
+        CGImageSourceRef source = CGImageSourceCreateWithData(cf, nullptr);
+        CFRelease(cf);
+        if (!source)
+            return false;
+        CFDictionaryRef props = CGImageSourceCopyPropertiesAtIndex(source, 0, nullptr);
+        CFRelease(source);
+        if (!props)
+            return false;
+        int w = 0, h = 0;
+        auto* pw =
+            static_cast<CFNumberRef>(CFDictionaryGetValue(props, kCGImagePropertyPixelWidth));
+        auto* ph =
+            static_cast<CFNumberRef>(CFDictionaryGetValue(props, kCGImagePropertyPixelHeight));
+        if (pw && ph && CFNumberGetValue(pw, kCFNumberIntType, &w) &&
+            CFNumberGetValue(ph, kCFNumberIntType, &h) && w > 0 && h > 0) {
+            out_width = static_cast<float>(w);
+            out_height = static_cast<float>(h);
+            measured = true;
+        }
+        CFRelease(props);
+    }
+    return measured;
+}
+
 // Canvas2D ctx.miterLimit.
 // CGContextSetMiterLimit attaches the value to the current GState, so
 // save()/restore() snapshots and pops it naturally. Spec: non-positive

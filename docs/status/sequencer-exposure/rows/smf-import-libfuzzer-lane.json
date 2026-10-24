@@ -1,0 +1,57 @@
+{
+  "id": "smf-import-libfuzzer-lane",
+  "title": "Standard MIDI File import gains a coverage-guided libFuzzer lane with a bounded ctest smoke",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "639f5830-0d6a-42c3-ad10-7b1728bfae54",
+  "owned_paths": [
+    "test/cmake/timeline_tests.cmake",
+    ".agents/skills/timeline/SKILL.md",
+    ".github/workflows/timeline-fuzz.yml",
+    "docs/status/sequencer-exposure/rows/smf-import-libfuzzer-lane.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/cmake/timeline_tests.cmake",
+      "needles": [
+        "pulp_add_libfuzzer_target(pulp-fuzz-smf",
+        "fixtures/fuzz/smf"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "also registers `pulp-fuzz-smf`"
+      ]
+    },
+    {
+      "path": ".github/workflows/timeline-fuzz.yml",
+      "needles": [
+        "pulp-fuzz-smf",
+        "Smoke every libFuzzer target"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "Test registration only, behind PULP_ENABLE_FUZZING which defaults OFF: no header, library target, or installed artifact changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, handler, or document shape changes; import_smf is exercised by a fuzz target, not changed."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition, schema entry, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, grant, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged; a nightly fuzz lane is CI test topology, not a design-time capability."
+    }
+  }
+}

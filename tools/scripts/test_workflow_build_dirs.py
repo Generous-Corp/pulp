@@ -543,7 +543,7 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertRegex(
             text,
             r"pulp-fuzz-control-protocol[\s\S]*?"
-            r"-max_total_time=\$\{\{ inputs\.libfuzzer_seconds \|\| 900 \}\}",
+            r"-max_total_time=\$\{\{ inputs\.libfuzzer_seconds \|\| 600 \}\}",
         )
         self.assertIn("- 'inspect/include/pulp/inspect/control_protocol.hpp'", text)
         self.assertIn("- 'inspect/src/control_protocol*.cpp'", text)

@@ -107,6 +107,10 @@ public:
     /// Bound local port, or 0 when unavailable/unbound.
     uint16_t local_port() const;
 
+    /// Bound local IPv4 address in dotted form, or empty when
+    /// unavailable/unbound.
+    std::string local_address() const;
+
     // No copy, move OK
     Socket(const Socket&) = delete;
     Socket& operator=(const Socket&) = delete;

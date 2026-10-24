@@ -1430,7 +1430,7 @@ FETCHCONTENT_CACHE_ROOT="$(fetchcontent_cache_root)"
 info "Shared FetchContent source cache: $FETCHCONTENT_CACHE_ROOT"
 
 ensure_shared_git_source_with_retry "CHOC" "https://github.com/danielraffel/choc.git" \
-    "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60" "$(fetchcontent_cache_dir_name "choc" "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60")"
+    "b586f33d1c9e8bee98c2b420a5b20bf525c3c7be" "$(fetchcontent_cache_dir_name "choc" "b586f33d1c9e8bee98c2b420a5b20bf525c3c7be")"
 
 ensure_shared_git_source_with_retry "WebGPU-distribution" "https://github.com/eliemichel/WebGPU-distribution.git" \
     "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab" "$(fetchcontent_cache_dir_name "webgpu" "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab")"

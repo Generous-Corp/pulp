@@ -1,3 +1,4 @@
+#include <pulp/canvas/resource_counters.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -6,6 +7,7 @@
 
 #if defined(PULP_HAS_SKIA)
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/headless_surface.hpp>
 #include "render_observer_private.hpp"
@@ -438,6 +440,13 @@ struct RenderReport {
         std::uint64_t layout_passes = 0;
         std::uint64_t damage_requests = 0;
         std::uint64_t unmarked_paint_mutations = 0;
+        // Resource work beneath the canvas (pulp/canvas/resource_counters.hpp).
+        std::uint64_t image_decodes = 0;
+        std::uint64_t gpu_uploads = 0;
+        std::uint64_t paragraph_builds = 0;
+        std::uint64_t scene_records = 0;
+        std::uint64_t scene_replays = 0;
+        std::uint64_t image_cache_builds = 0;
     };
     struct Counters {
         // Materialization and interaction replay. Paint state set here has no
@@ -467,11 +476,24 @@ struct ViewCounterSnapshot {
     std::uint64_t layout_passes = pulp::view::View::layout_pass_count();
     std::uint64_t damage_requests = pulp::view::View::damage_request_count();
     std::uint64_t unmarked = pulp::view::View::unmarked_paint_mutation_count();
+    pulp::canvas::ResourceCounters resources = pulp::canvas::resource_counters();
+#if defined(PULP_HAS_SKIA)
+    std::uint64_t image_cache_builds = pulp::canvas::ImageFileCache::instance().stats().builds;
+#else
+    std::uint64_t image_cache_builds = 0;
+#endif
 };
 
 RenderReport::Phase phase_between(const ViewCounterSnapshot& from, const ViewCounterSnapshot& to) {
-    return {to.layout_passes - from.layout_passes, to.damage_requests - from.damage_requests,
-            to.unmarked - from.unmarked};
+    return {to.layout_passes - from.layout_passes,
+            to.damage_requests - from.damage_requests,
+            to.unmarked - from.unmarked,
+            to.resources.image_decodes - from.resources.image_decodes,
+            to.resources.gpu_uploads - from.resources.gpu_uploads,
+            to.resources.paragraph_builds - from.resources.paragraph_builds,
+            to.resources.scene_records - from.resources.scene_records,
+            to.resources.scene_replays - from.resources.scene_replays,
+            to.image_cache_builds - from.image_cache_builds};
 }
 
 choc::value::Value phase_json(const RenderReport::Phase& phase) {
@@ -482,6 +504,15 @@ choc::value::Value phase_json(const RenderReport::Phase& phase) {
                   choc::value::createInt64(static_cast<std::int64_t>(phase.damage_requests)));
     out.addMember("unmarked_paint_mutations", choc::value::createInt64(static_cast<std::int64_t>(
                                                   phase.unmarked_paint_mutations)));
+    const auto count = [&](const char* name, std::uint64_t value) {
+        out.addMember(name, choc::value::createInt64(static_cast<std::int64_t>(value)));
+    };
+    count("image_decodes", phase.image_decodes);
+    count("gpu_uploads", phase.gpu_uploads);
+    count("paragraph_builds", phase.paragraph_builds);
+    count("scene_records", phase.scene_records);
+    count("scene_replays", phase.scene_replays);
+    count("image_cache_builds", phase.image_cache_builds);
     return out;
 }
 
@@ -653,7 +684,7 @@ std::string render_receipt_json(const RenderReport& report) {
         const auto& c = *report.counters;
         auto counters = choc::value::createObject("");
         counters.addMember("schema",
-                           choc::value::createString("pulp-design-ir-observer-counters-v1"));
+                           choc::value::createString("pulp-design-ir-observer-counters-v2"));
         // The observer materializes DesignIR as native views; no script
         // context is created, so there is no bridge traffic to count.
         counters.addMember("script_bridge", choc::value::createString("not-instantiated"));

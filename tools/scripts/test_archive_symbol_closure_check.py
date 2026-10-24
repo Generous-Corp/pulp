@@ -77,13 +77,13 @@ class ArchiveSymbolClosureCheckTest(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def run_gate(self, state: str) -> int:
+    def run_gate(self, state: str, *extra: str) -> int:
         subject = self.nm.archive("libstate.a", state)
         runtime = self.nm.archive("libruntime.a", RUNTIME)
         content = self.nm.archive("libcontent.a", CONTENT)
         nm = self.nm.write()
         return gate.main(["--nm", nm, "--subject", str(subject),
-                          "--forbidden", str(content), "--control", str(runtime)])
+                          "--forbidden", str(content), "--control", str(runtime), *extra])
 
     def test_clean_subject_passes(self) -> None:
         self.assertEqual(self.run_gate(STATE), 0)
@@ -97,6 +97,44 @@ class ArchiveSymbolClosureCheckTest(unittest.TestCase):
 
     def test_weak_definition_is_not_a_dependency(self) -> None:
         self.assertEqual(self.run_gate(STATE + "    _inline_shared U\n"), 0)
+
+    def test_a_contamination_floor_counts_weak_definitions(self) -> None:
+        # --forbidden-defines any: a weak definition (typeinfo, vtable) is
+        # still the forbidden archive's, so referencing it is contamination.
+        self.assertEqual(self.run_gate(STATE + "    _inline_shared U\n", "--forbidden-defines", "any"), 1)
+        self.assertEqual(self.run_gate(STATE, "--forbidden-defines", "any"), 0)
+
+    def test_a_subject_weak_definition_resolves_its_own_reference_under_any(self) -> None:
+        # The subject defines _inline_shared weakly itself, so its own
+        # reference is internal even when the forbidden archive defines it too.
+        state = STATE + "    _inline_shared U\n    libstate.a[inline.o]:\n    _inline_shared W 0 0\n"
+        self.assertEqual(self.run_gate(state, "--forbidden-defines", "any"), 0)
+
+    def test_weak_rtti_contamination_is_opt_in(self) -> None:
+        content = self.nm.archive("libcontent.a", CONTENT + "    __ZTIN7content8RegistryE S 0 0\n")
+        core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n__ZTIN7content8RegistryE W 0 0\n")
+        nm = self.nm.write()
+        argv = ["--nm", nm, "--forbidden", str(content), "--forbidden-defines", "any",
+                "--no-control", "--check", f"core={core}"]
+        self.assertEqual(gate.main(argv), 0)
+        self.assertEqual(gate.main([*argv, "--weak-rtti-contamination"]), 1)
+
+    def test_rtti_names_in_both_manglings(self) -> None:
+        listing = ("a.a[x.o]: __ZTIN3foo3BarE W 0 0\n"
+                   "a.a[x.o]: _ZTVN3foo3BarE V 0 0\n"
+                   "a.a[x.o]: _ZTSN3foo3BarE W 0 0\n"
+                   "a.a[x.o]: _ZN3foo3Bar3bazEv W 0 0\n"
+                   "a.a[x.o]: __ZTIN3foo3QuxE T 0 0\n")
+        self.assertEqual(gate.weak_rtti(listing),
+                         {"__ZTIN3foo3BarE", "_ZTVN3foo3BarE", "_ZTSN3foo3BarE"})
+
+    def test_check_mode_uses_the_chosen_rule(self) -> None:
+        content = self.nm.archive("libcontent.a", CONTENT)
+        core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n_inline_shared U\n")
+        nm = self.nm.write()
+        argv = ["--nm", nm, "--forbidden", str(content), "--no-control", "--check", f"core={core}"]
+        self.assertEqual(gate.main(argv), 0)
+        self.assertEqual(gate.main([*argv, "--forbidden-defines", "any"]), 1)
 
     def test_weak_undefined_reference_to_forbidden_definition_fails(self) -> None:
         # A weak call can still resolve from the forbidden archive. Lowercase

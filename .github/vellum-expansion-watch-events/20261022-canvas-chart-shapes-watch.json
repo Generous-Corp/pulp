@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-canvas-chart-shapes-watch",
+  "created_at": "2026-10-22T06:52:11Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Generic chart-shader work. The Skia chart composer derives its along/across chart for ring, flat and rounded segments and stadium as well as the flat arc, adds cross and halfWidth to PulpChart, cuts the flat arc's d at its flat caps, and scales the premultiplied colour (not alpha alone) by the chart feather. Pulp-owned named chart-shader presets (bevel, inset channel, tube, light pipe, centre highlight, glow) are plain SkSL fed to that existing API, reachable from JS, and the widget gallery gains a row of knobs showing each one, which adds them to the gallery's render corpus; a knob with a chart shader and no body shader now paints the chart. Pulp continues to own these targets under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits the canvas changes when the targets adopt the Vellum package. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'SDF chart feather keeps the colour premultiplied'",
+    "ctest --test-dir build -R 'SDF chart: ring and flat arc chart t around and cross radially'",
+    "ctest --test-dir build -R 'SDF chart: segments and stadium chart t along and cross across'",
+    "ctest --test-dir build -R 'WidgetBridge installs named chart shader presets on a knob'",
+    "ctest --test-dir build -R 'lit chart presets follow the light direction'",
+    "ctest --test-dir build -R 'widget gallery shows every chart shader preset on a knob'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}

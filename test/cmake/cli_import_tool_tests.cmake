@@ -145,6 +145,7 @@ add_executable(pulp-test-cli-project-command
     ${CMAKE_SOURCE_DIR}/tools/cli/project_bump.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry_trust.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/migration_runtime.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp

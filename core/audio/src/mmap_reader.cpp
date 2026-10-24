@@ -294,7 +294,9 @@ bool MemoryMappedAudioReader::read_frames_impl(float** dest_channels, uint32_t n
 
     // Fallback: decode the whole file once, cache it, and serve ranges from it.
     if (!ranged_->fallback) {
-        ranged_->fallback = FormatRegistry::instance().read(backing_->snapshot_path.string());
+        // The snapshot path was chosen by the user or host; the caller owns the bound.
+        ranged_->fallback = FormatRegistry::instance().read(backing_->snapshot_path.string(),
+                                                            DecodeLimits::unbounded());
         if (!ranged_->fallback)
             return false;
     }
@@ -323,7 +325,9 @@ std::optional<AudioFileData> MemoryMappedAudioReader::read_all() {
     std::unique_lock<std::mutex> read_lock;
     if (ranged_)
         read_lock = std::unique_lock<std::mutex>(ranged_->mutex);
-    return FormatRegistry::instance().read(backing_->snapshot_path.string());
+    // The snapshot path was chosen by the user or host; the caller owns the bound.
+    return FormatRegistry::instance().read(backing_->snapshot_path.string(),
+                                           DecodeLimits::unbounded());
 }
 
 bool MemoryMappedAudioReader::is_open() const {

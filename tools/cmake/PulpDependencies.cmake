@@ -24,20 +24,25 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 #
 # ⚠ INTERIM FORK PIN — temporarily pinned to a fork tag that adds WebView
 # file drag-and-drop (window.chocStartFileDrag([...]) + `chocfilesdropped`
-# event) — the PoC from upstream Tracktion/choc#64. The fork
-# is upstream f0f5cdf5a938 + 5 commits, 0 behind, so reverting is a one-line
-# repoint. WHEN choc#64 MERGES UPSTREAM, restore:
+# event) — the PoC from upstream Tracktion/choc#64 — plus a cherry-pick of
+# upstream 9181665, which makes choc::json parseString() throw at end of
+# input instead of reading past an unterminated string (a fuzzed content-pack
+# manifest reached that heap over-read). The fork is upstream f0f5cdf5a938 +
+# the DnD and EOF commits, 0 behind, so reverting is a one-line repoint once
+# upstream carries both. WHEN choc#64 MERGES UPSTREAM, restore:
 #     GIT_REPOSITORY https://github.com/Tracktion/choc.git
 #     GIT_TAG        <upstream merge commit>   (was f0f5cdf5a938b8b779fea6c083571cce5ccab925)
 # and update tools/deps/manifest.json + DEPENDENCIES.md back to Tracktion/choc.
-pulp_register_fetchcontent_source(choc REF df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60)
+pulp_register_fetchcontent_source(choc REF b586f33d1c9e8bee98c2b420a5b20bf525c3c7be)
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake" _pulp_choc_patch_key)
 pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY "${_pulp_choc_patch_key}")
 unset(_pulp_choc_patch_key)
 FetchContent_Declare(
     choc
     GIT_REPOSITORY https://github.com/danielraffel/choc.git
-    GIT_TAG pulp-webview-dnd-poc1  # df148a41 — fork of Tracktion/choc#64 PoC
+    # Pinned to the commit the shared-cache REF above names, so the fetched
+    # tree and the cache key cannot drift apart (tag pulp-webview-dnd-poc2).
+    GIT_TAG b586f33d1c9e8bee98c2b420a5b20bf525c3c7be  # tag pulp-webview-dnd-poc2 on the danielraffel/choc fork
 )
 FetchContent_MakeAvailable(choc)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
+import { closeSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -480,12 +481,19 @@ async function runBrowserAnchor(browserPath, browserArgs) {
       });
     } catch {}
   };
+  // The owner's CDP pipe arrives on this anchor's fds 3 and 4 and is handed to
+  // Chromium at the same numbers. The anchor then drops its own copies, so the
+  // owner sees end-of-file when the browser exits instead of a pipe this idle
+  // process keeps open.
   const browser = spawn(browserPath, browserArgs, {
     detached: false,
     env: process.env,
-    stdio: ["ignore", "ignore", "pipe"],
+    stdio: ["ignore", "ignore", "pipe", 3, 4],
     windowsHide: true,
   });
+  for (const fd of [3, 4]) {
+    try { closeSync(fd); } catch {}
+  }
   let forwardedBytes = 0;
   browser.stderr?.on("data", (chunk) => {
     if (forwardedBytes >= 256 * 1024 || process.stderr.destroyed) return;
@@ -507,11 +515,108 @@ async function runBrowserAnchor(browserPath, browserArgs) {
   setInterval(() => {}, 60 * 60 * 1000);
 }
 
-async function waitForDevToolsPort(profileDir, child, timeoutMs) {
+// Chromium's --remote-debugging-pipe transport: the browser reads protocol
+// messages from its fd 3 and writes them to its fd 4, each terminated by a NUL
+// byte. Unlike --remote-debugging-port it listens on no socket, so no other
+// local process can attach to the capture browser and drive it.
+export class CdpPipe {
+  constructor(writable, readable) {
+    this.writable = writable;
+    this.readable = readable;
+    this.closed = false;
+    this.partial = [];
+    this.messageListeners = new Set();
+    this.closeListeners = new Set();
+    readable.on("data", (chunk) => this.receive(chunk));
+    const finish = () => this.finish();
+    readable.once("end", finish);
+    readable.once("close", finish);
+    readable.on("error", finish);
+    writable.once("close", finish);
+    writable.on("error", finish);
+  }
+
+  receive(chunk) {
+    let start = 0;
+    for (let end = chunk.indexOf(0); end !== -1; end = chunk.indexOf(0, start)) {
+      this.partial.push(chunk.subarray(start, end));
+      const message = Buffer.concat(this.partial).toString("utf8");
+      this.partial = [];
+      start = end + 1;
+      for (const listener of [...this.messageListeners]) listener(message);
+    }
+    if (start < chunk.length) this.partial.push(chunk.subarray(start));
+  }
+
+  onMessage(listener) {
+    this.messageListeners.add(listener);
+    return () => this.messageListeners.delete(listener);
+  }
+
+  onClose(listener) {
+    if (this.closed) queueMicrotask(listener);
+    else this.closeListeners.add(listener);
+  }
+
+  send(message) {
+    if (this.closed) throw new Error("CDP pipe closed");
+    this.writable.write(`${message}\0`);
+  }
+
+  finish() {
+    if (this.closed) return;
+    this.closed = true;
+    this.writable.destroy();
+    this.readable.destroy();
+    for (const listener of this.closeListeners) listener();
+    this.closeListeners.clear();
+    this.messageListeners.clear();
+  }
+
+  close() {
+    this.finish();
+  }
+}
+
+const pipes = new WeakMap();
+const PIPE_READY_REQUEST_ID = 1;
+
+// The pipe exists from spawn, so readiness is the browser answering on it.
+// The request is written at once and the listener registered before any data
+// can be read; Chromium reads it when its DevTools handler starts.
+function requestPipeReadiness(pipe) {
+  return new Promise((resolve, reject) => {
+    const unsubscribe = pipe.onMessage((message) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(message);
+      } catch {
+        return;
+      }
+      if (parsed?.id !== PIPE_READY_REQUEST_ID) return;
+      unsubscribe();
+      if (parsed.error) {
+        reject(new Error(`browser CDP readiness failed: ${parsed.error.message}`));
+      } else {
+        resolve();
+      }
+    });
+    pipe.onClose(() => reject(new Error(
+      "browser exited before CDP was ready (pipe closed)")));
+    try {
+      pipe.send(JSON.stringify({
+        id: PIPE_READY_REQUEST_ID, method: "Browser.getVersion" }));
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function waitForPipeReady(ready, profileDir, child, timeoutMs) {
+  let state = null;
+  ready.then(() => { state = true; }, (error) => { state = error; });
   const deadline = Date.now() + timeoutMs;
-  const activePortFile = path.join(profileDir, "DevToolsActivePort");
   const anchorFailureFile = path.join(profileDir, ANCHOR_FAILURE);
-  let lastError = "";
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(`browser exited before CDP was ready (${child.exitCode})`);
@@ -524,22 +629,17 @@ async function waitForDevToolsPort(profileDir, child, timeoutMs) {
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
-    try {
-      const content = await readFile(activePortFile, "utf8");
-      const [port, endpoint] = content.trim().split(/\r?\n/);
-      if (/^[0-9]+$/.test(port) && endpoint) {
-        return { port: Number(port), endpoint };
-      }
-    } catch (error) {
-      lastError = String(error);
-    }
+    if (state === true) return;
+    if (state) throw state;
     await delay(50);
   }
-  throw new Error(`timed out waiting for browser CDP endpoint: ${lastError}`);
+  throw new Error("timed out waiting for browser CDP pipe");
 }
 
 export async function terminateBrowser(child) {
   if (!child) return;
+  pipes.get(child)?.close();
+  pipes.delete(child);
   if (child.exitCode !== null) {
     // Once the leader has exited its numeric PID is no longer an identity.
     // The guardian established custody while that identity was live, so only
@@ -637,8 +737,7 @@ export async function launchBrowser(
   extraArgs = []) {
   const args = [
     "--headless=new",
-    "--remote-debugging-address=127.0.0.1",
-    "--remote-debugging-port=0",
+    "--remote-debugging-pipe",
     `--user-data-dir=${profileDir}`,
     "--disable-background-networking",
     "--disable-background-timer-throttling",
@@ -675,12 +774,19 @@ export async function launchBrowser(
   const launchArgs = process.platform === "win32" ? args : [
     fileURLToPath(import.meta.url), "anchor", browserPath, ...args,
   ];
+  // fds 3 and 4 carry CDP (see CdpPipe). On POSIX they reach Chromium through
+  // the anchor; on Windows libuv hands them to the browser as CRT handles 3 and
+  // 4, which is what Chromium's pipe handler reads there.
   const child = spawn(executable, launchArgs, {
     detached: process.platform !== "win32",
     env: environment,
-    stdio: ["ignore", "ignore", "pipe"],
+    stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"],
     windowsHide: true,
   });
+  const pipe = new CdpPipe(child.stdio[3], child.stdio[4]);
+  pipes.set(child, pipe);
+  const ready = requestPipeReadiness(pipe);
+  ready.catch(() => {});
   onSpawn(child);
   let stderr = "";
   child.stderr.on("data", (chunk) => {
@@ -693,8 +799,8 @@ export async function launchBrowser(
   });
   try {
     await startBrowserGuardian(child, profileDir, timeoutMs);
-    const endpoint = await waitForDevToolsPort(profileDir, child, timeoutMs);
-    return { child, endpoint, stderr: () => stderr };
+    await waitForPipeReady(ready, profileDir, child, timeoutMs);
+    return { child, pipe, stderr: () => stderr };
   } catch (error) {
     await terminateBrowser(child);
     error.message += stderr ? `: ${stderr.trim().slice(0, 1000)}` : "";
@@ -726,17 +832,17 @@ if (process.argv[1] &&
   }
 }
 
-export async function pageTarget(port, timeoutMs) {
+// The pipe is the browser-level CDP session, so the page is found and
+// attached to through Target.* rather than the HTTP /json listing a debugging
+// port serves. `call` sends a browser-session command.
+export async function pageTarget(call, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let lastError = "";
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`);
-      if (response.ok) {
-        const targets = await response.json();
-        const page = targets.find((target) => target.type === "page");
-        if (page?.webSocketDebuggerUrl) return page;
-      }
+      const { targetInfos = [] } = await call("Target.getTargets");
+      const page = targetInfos.find((target) => target.type === "page");
+      if (page?.targetId) return page;
     } catch (error) {
       lastError = String(error);
     }

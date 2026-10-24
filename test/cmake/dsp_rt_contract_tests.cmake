@@ -82,7 +82,8 @@ pulp_add_test_suite(pulp-test-signal-mod-rt-safety GROUP pulp-test-group-dsp-rt-
     LIBRARIES pulp::signal)
 
 pulp_add_test_suite(pulp-test-multi-channel-meter
-    SOURCES test_multi_channel_meter.cpp harness/rt_allocation_probe.cpp
+    SOURCES test_multi_channel_meter.cpp test_multi_channel_meter_block.cpp
+            harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::audio)
 
 pulp_add_test_suite(pulp-test-signal-sub-oscillator GROUP pulp-test-group-dsp-rt-signal
@@ -260,10 +261,12 @@ pulp_add_test_suite(pulp-test-lfo-sampling
 
 # The saturation toolkit — the memoryless nonlinearity every drive/fuzz/tape/
 # tube stage composes. The suite is the spec's acceptance set A1-A12; harmonic
-# expectations are computed from the shipped closed forms, not restated.
-pulp_add_test_suite(pulp-test-signal-saturator GROUP pulp-test-group-dsp-rt-signal
+# expectations are computed from the shipped closed forms, not restated. Alias
+# floors are measured with the shared tone-projection analyzer, which the
+# signal group does not link, so the suite builds its own binary.
+pulp_add_test_suite(pulp-test-signal-saturator
     SOURCES test_signal_saturator.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::signal
+    LIBRARIES pulp::signal pulp::audio-analysis
     TIMEOUT 900)
 
 pulp_add_test_suite(pulp-test-signal-nonlinear-shaping GROUP pulp-test-group-dsp-rt-signal

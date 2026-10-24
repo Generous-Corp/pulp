@@ -28,6 +28,11 @@ inline double hermite4(double y0, double y1, double y2, double y3, double t) {
     return Interpolator::hermite<double>(t, y0, y1, y2, y3);
 }
 
+// The same curve at the caller's precision — the block kernels' spelling.
+template <typename T> inline T hermite4_t(T y0, T y1, T y2, T y3, T t) {
+    return Interpolator::hermite<T>(t, y0, y1, y2, y3);
+}
+
 // A 4-sample sliding window over a source stream, for consumers that pull
 // samples one at a time rather than indexing a buffer (the resampler).
 class HermiteHistory {

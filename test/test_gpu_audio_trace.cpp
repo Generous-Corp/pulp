@@ -4,6 +4,7 @@
 #include "detail/shared_io_host_scheduling.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
+#include "harness/fake_shared_io_provider.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include "support/physical_qualification_outcome.hpp"
 
@@ -67,140 +68,18 @@ SharedIoTraceConfig config(std::uint32_t stride = 4) {
     return value;
 }
 
-class ProductTraceProvider final : public SharedIoArenaProvider {
-    struct Slot {
-        std::uint32_t index = 0;
-        std::vector<std::byte> input;
-        std::vector<std::byte> output;
-        bool retired = false;
-    };
-    struct Pending {
-        SlotToken token;
-        std::shared_ptr<SharedIoTerminalInbox> inbox;
-    };
+using ProductTraceProvider = pulp::test::FakeSharedIoProvider;
 
-  public:
-    bool create_slot(std::uint32_t index, std::size_t input_bytes, std::size_t output_bytes,
-                     SlotResources& resources) noexcept override {
-        try {
-            auto slot = std::make_unique<Slot>();
-            slot->index = index;
-            slot->input.resize(input_bytes);
-            slot->output.resize(output_bytes);
-            resources.input = slot->input.data();
-            resources.input_size = input_bytes;
-            resources.output = slot->output.data();
-            resources.output_size = output_bytes;
-            resources.opaque = slot.get();
-            resources.input_lifecycle = {
-                .allocated = true, .import_attempted = true, .import_succeeded = true};
-            resources.output_lifecycle = resources.input_lifecycle;
-            slots_.push_back(std::move(slot));
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    void retire_slot(SlotResources& resources) noexcept override {
-        if (auto* slot = static_cast<Slot*>(resources.opaque))
-            slot->retired = true;
-        resources.input_lifecycle.dispose_observed = true;
-        resources.output_lifecycle.dispose_observed = true;
-    }
-
-    void destroy_slot(SlotResources& resources) noexcept override {
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        std::erase_if(slots_, [slot](const auto& candidate) { return candidate.get() == slot; });
-        resources.input_lifecycle.host_freed = true;
-        resources.output_lifecycle.host_freed = true;
-        resources.opaque = nullptr;
-    }
-
-    bool acquire_slot_buffers(const SlotResources& resources,
-                              SlotBufferHandle& handle) const noexcept override {
-        const auto* slot = static_cast<const Slot*>(resources.opaque);
-        if (!slot || slot->retired)
-            return false;
-        handle = {.provider = this,
-                  .device = this,
-                  .input_buffer = slot->input.data(),
-                  .output_buffer = slot->output.data(),
-                  .slot = slot->index,
-                  .generation = 1,
-                  .lifetime = lifetime_};
-        return true;
-    }
-
-    bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override {
-        return handle.provider == this && handle.device == this && !handle.lifetime.expired() &&
-               std::any_of(slots_.begin(), slots_.end(), [&](const auto& slot) {
-                   return !slot->retired && handle.slot == slot->index &&
-                          handle.input_buffer == slot->input.data() &&
-                          handle.output_buffer == slot->output.data();
-               });
-    }
-
-    bool submit(const SlotResources& resources, SlotToken token,
-                std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept override {
-        return submit_program(resources, token, std::move(inbox));
-    }
-
-    bool can_resume_after_drain() const noexcept override {
-        return true;
-    }
-    void poll() noexcept override {}
-
-    bool drain() noexcept override {
-        if (!allow_drain)
-            return false;
-        complete_all();
-        return pending_.empty();
-    }
-
-    bool submit_program(const SlotResources& resources, SlotToken token,
-                        std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept {
-        ++submits;
-        if (!accept_submissions)
-            return false;
-        const auto bytes = std::min(resources.input_size, resources.output_size);
-        std::memcpy(resources.output, resources.input, bytes);
-        pending_.push_back({token, std::move(inbox)});
-        return true;
-    }
-
-    void complete_sequence(std::uint64_t sequence) noexcept {
-        const auto found =
-            std::find_if(pending_.begin(), pending_.end(), [sequence](const auto& item) {
-                return item.token.stream_sequence == sequence;
-            });
-        if (found == pending_.end())
-            return;
-        const auto pushed = found->inbox->push(found->token, terminal_status);
-        if (pushed == SharedIoTerminalInbox::PushResult::Accepted)
-            pending_.erase(found);
-    }
-
-    void complete_all() noexcept {
-        for (auto cursor = pending_.begin(); cursor != pending_.end();) {
-            const auto pushed = cursor->inbox->push(cursor->token, terminal_status);
-            if (pushed == SharedIoTerminalInbox::PushResult::Accepted)
-                cursor = pending_.erase(cursor);
-            else
-                ++cursor;
-        }
-    }
-
-    bool accept_submissions = true;
-    bool allow_drain = true;
-    CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
-    std::uint32_t submits = 0;
-
-  private:
-    std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
-    std::vector<std::unique_ptr<Slot>> slots_;
-    std::vector<Pending> pending_;
-};
+// Copies input to output at submission; each terminal is published only when
+// the test completes its sequence, and drain() retires what is left.
+std::unique_ptr<ProductTraceProvider> make_product_trace_provider() {
+    auto provider = std::make_unique<ProductTraceProvider>();
+    provider->transform = ProductTraceProvider::Transform::Affine;
+    provider->transform_at_submit = true;
+    provider->drain_completes = true;
+    provider->resume_supported = true;
+    return provider;
+}
 
 class ProductTraceProgram final : public SharedIoPreparedProgram {
   public:
@@ -243,7 +122,7 @@ struct ProductTraceFixture {
         trace.retention_capacity = retention_capacity;
         trace.enabled = true;
 
-        auto owner = std::make_unique<ProductTraceProvider>();
+        auto owner = make_product_trace_provider();
         provider = owner.get();
         auto program = std::make_unique<ProductTraceProgram>(*provider);
         REQUIRE(session.prepare(
@@ -1188,7 +1067,7 @@ TEST_CASE("diagnostic overflow never refuses physical session submissions", "[gp
         fixture.provider->complete_sequence(sequence);
         REQUIRE(fixture.session.service(0).completions == 1);
     }
-    REQUIRE(fixture.provider->submits == submissions);
+    REQUIRE(fixture.provider->lifecycle_state->submits == submissions);
     REQUIRE(fixture.session.trace_stats().dropped > 0);
     REQUIRE(fixture.session.trace_stats().admissions_dropped > 0);
     REQUIRE(fixture.session.trace_stats().invalid == 0);

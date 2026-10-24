@@ -44,6 +44,32 @@ Change the engine in Forge, and test the app-to-generator boundary there
 against these tools. A stub generator in a Forge test must read
 `--prompt-file`, not `sys.argv[2]`, once the engine passes it.
 
+## Automatic plugin downloads can be held for consent
+
+`ensure_named_installed()` (modules a prompt names) and the lint gap-fill both
+ask `downloads_held(settings())` before calling `install_module()`. A held
+download prints a readable line and then
+`FORGE-DOWNLOAD-CONSENT {"plugin","version","modules","why"}` (JSON) for the
+app to read from the log, and the patch is built without that plugin. Two
+things hold one: `auto_download: "ask"`, or a run the app launched with
+`FORGE_INTERACTIVE_DOWNLOADS=1` while `auto_download_acknowledged` is still
+false (the app's one-time notice is unanswered). A run without that variable
+never holds on the notice, so CI, agents and the CLI keep following
+`auto_download` as before. `patch.py install <slug>` is an explicit request
+and is never held. `test_download_consent.py` holds the matrix.
+
+## The Claude pass runs with no tools and no MCP servers
+
+`patch.ask_model` is the only `claude -p` builder; `generate.ask_model` calls
+it. It passes `--strict-mcp-config` (no `--mcp-config`, so no MCP server loads)
+and `--disallowedTools Write Edit NotebookEdit Bash WebFetch WebSearch`. The
+answer is the JSON on stdout, and the prompt carries network-fetched library
+text and a base patch, so any tool left on is a prompt-injection channel that
+depends only on the user's own permission settings. Keep both when the argv
+changes. The exact argv is pinned in `test_generate_model.py` and
+`test_patch.py`, and the effort test requires `--effort` to stay last, so new
+flags go before `--model`.
+
 ## One generation per output directory, held by an OS lock
 
 `patch.py build` and `generate.py` take `generation_lock.acquire_or_exit()` on
@@ -313,6 +339,25 @@ a string match.
 **Audibility and behaviour are independent layers.** `held.vcv` — a bare VCO
 into the interface — is genuinely `AUDIBLE` and genuinely fails `melodic`. Both
 are correct. Presence was never the property; it is also not nothing.
+
+## The behaviour gate runs fenced in
+
+The gate links and RUNS model-written C++, so both `preflight_behaviour_gate()`
+and `run_behaviour_gate()` launch it through `generate.gate_launch()`. The
+environment keeps only `PATH`, `LANG`, `LC_*` and `TMPDIR`, with `HOME` set to
+the scratch directory, so no API key or token reaches generated code. On macOS
+it runs under `/usr/bin/sandbox-exec` with no network, no process spawning and
+writes confined to the scratch directory, and no reads under the account's
+home except the scratch directory, the Rack SDK and this toolchain (gate output
+feeds the next prompt, so a readable home is a way to print a secret to the
+model). `DYLD_*` is stripped when a protected binary
+like sandbox-exec starts, so `DYLD_LIBRARY_PATH` is passed by `/usr/bin/env`
+inside the sandbox, and the gate executable is the last argv entry. Without
+sandbox-exec the gate FAILS CLOSED (BehaviourGateUnavailable, before any model
+call) unless `FORGE_UNSANDBOXED_GATE=1` opts out, which prints a warning. A gate change that
+needs a new write location, a child process or the network has to widen the
+profile in `gate_launch()` on purpose. `test_gate_sandbox.py` holds the fence
+with a canary binary.
 
 ## The gate measures behaviour; it never judges it
 

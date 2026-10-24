@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-attack-surface-fuzz-20261022-watch",
+  "created_at": "2026-10-23T05:19:23Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Attack-surface hardening fuzz slice: libFuzzer targets for the host-facing plugin state blob, a ui.js document through the widget bridge in a QuickJS realm, SVG ingest, Standard MIDI File import and the content-pack manifests, each with a seed corpus and a bounded ctest smoke, plus a real-TLS negative control in the http test, a single-open WAV decode-limit check (read_audio_file admits the header on the reader that decodes), and a View guard that refuses a child which is itself or an ancestor (a ui.js naming a widget as its own parent used to hang the UI thread). The visual-proof-harness touch is test registration in view_widget_bridge_tests.cmake and checked-in fuzz seed fixtures; no design-import, Chromium, rendering, or packaging authority moves, and nothing runs on the per-PR required gate.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-http",
+    "ctest --test-dir build -R pulp-test-format-registry-limits",
+    "ctest --test-dir build-fuzz -L libfuzzer",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

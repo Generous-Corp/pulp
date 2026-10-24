@@ -75,6 +75,39 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py")
 
+    add_test(NAME gpu-audio-daw-continuity-v2-receipt-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py")
+    # 53 cases: about 45 s on an M1 and 86 s to past 120 s on a GitHub-hosted
+    # Linux runner, so it needs more than ctest's default 120 s.
+    set_tests_properties(gpu-audio-daw-continuity-v2-receipt-verifier-selftest PROPERTIES
+        TIMEOUT 300)
+
+    # The GPU fault-injection test hooks never reach a build that did not ask
+    # for them: the self-test plants each way in; the gate scans this tree.
+    add_test(NAME gpu-fault-real-host-driver-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/testing/daw-smoke/test_real_host_smoke.py")
+
+    add_test(NAME gpu-fault-hooks-release-gate-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_fault_hooks_release_gate.py")
+    if(APPLE)
+        add_test(NAME gpu-fault-hooks-release-gate-macos-selftest
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_fault_hooks_release_gate_macos.py")
+    endif()
+    if(NOT PULP_GPU_AUDIO_FAULT_HOOKS)
+        add_test(NAME gpu-fault-hooks-release-gate
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/gpu_fault_hooks_release_gate.py"
+                --build-dir "${CMAKE_BINARY_DIR}")
+    endif()
+
+    add_test(NAME gpu-audio-provider-conformance-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_provider_conformance.py")
+
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include
@@ -1029,6 +1062,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME base-poison-detector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_base_poison_detector.py")
     set_tests_properties(base-poison-detector-selftest PROPERTIES TIMEOUT 120)
+    # Merge-queue circuit breaker: the PULP_QUEUE_BREAKER state, which groups
+    # it fails pre-VM, the trusted queue-unblock override, fail-open on
+    # unreadable input, and the classify/notify wiring in build.yml.
+    add_test(NAME queue-breaker-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_queue_breaker.py")
+    set_tests_properties(queue-breaker-selftest PROPERTIES TIMEOUT 60)
 
     # ODR macro-gated-header guard. A macro-gated inline/template function in a
     # header, plus a TU that redefines that macro, is an ODR violation a Release
@@ -1585,6 +1624,16 @@ if(Python3_Interpreter_FOUND)
     # assigns. Pure file fixtures in a temporary directory.
     add_test(NAME fold-migration-notes-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_fold_migration_notes.py")
+
+    # A pull request may not add docs/migrations/vX.Y.Z.md by hand; only the
+    # version-at-land bump commit adds one. Throwaway git ranges.
+    add_test(NAME migration-note-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_migration_note_guard.py")
+
+    # The build-free pre-push stand-in for script-test-inputs-drift: a new
+    # script-driven add_test needs a ctest_script_inputs.json entry.
+    add_test(NAME script-inputs-precheck-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_inputs_precheck.py")
 
     # GitHub's itemTypes-filtered timelineItems connection reports totalCount
     # over EVERY timeline item, so a filtered totalCount reads a never-queued

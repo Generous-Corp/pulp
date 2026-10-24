@@ -32,9 +32,12 @@ namespace {
 // widget's normal C++ body instead of leaving it blank — the failure used to be
 // swallowed (the bool was ignored), so a bad draw-time shader painted only the
 // labels over an empty body. Logs the failure exactly once per host instance.
-bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
-                             View& view, float w, float h,
-                             float value, float shader_time) {
+//
+// A knob's chart shader paints first and a body shader, if any, paints over
+// it. `chart_only` reports that the chart painted and no body shader did, so
+// nothing has shown the value yet.
+bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host, View& view, float w,
+                             float h, float value, float shader_time, bool* chart_only = nullptr) {
     canvas::Canvas::ShaderUniforms u;
     u.value = value;
     u.time = shader_time;
@@ -51,6 +54,7 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
                                ? host.shader_scope_binding()->data
                                : nullptr;
     options.geometry = host.shader_geometry();
+    bool chart_painted = false;
     if (!host.chart_shader().empty()) {
         if (dynamic_cast<Knob*>(&view) != nullptr) {
             canvas::Canvas::SDFStyle style;
@@ -70,29 +74,36 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
             // in a hard edge at the draw rect. The chart draw is refused out
             // loud and the body shader below paints instead, exactly as for a
             // chart draw that fails.
+            // The chart also gets the reach its own source declared (a glow
+            // preset's halo); the body shader below keeps the widget's reach.
+            auto chart_options = options;
+            chart_options.reach = std::max(options.reach, host.chart_reach());
             const float min_reach = canvas::Canvas::sdf_feather_min_reach(style);
-            if (options.reach < min_reach) {
+            if (chart_options.reach < min_reach) {
                 if (!host.shader_draw_failure_logged()) {
                     runtime::log_error("[custom-shader] chart feather sigma {} needs reach >= {} "
                                        "but the shader's reach is {}; painting the body "
                                        "shader instead of the chart",
-                                       style.feather_sigma, min_reach, options.reach);
+                                       style.feather_sigma, min_reach, chart_options.reach);
                     host.mark_shader_draw_failure_logged();
                 }
-            } else if (canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc, 0, 0,
-                                                         w, h, style, host.chart_shader(),
-                                                         options)) {
-                return true;
+            } else {
+                chart_painted =
+                    canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc, 0, 0, w,
+                                                      h, style, host.chart_shader(), chart_options);
             }
         }
     }
-    if (canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, options)) {
+    const bool body_painted = (!chart_painted || host.has_custom_shader()) &&
+                              canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, options);
+    if (chart_only)
+        *chart_only = chart_painted && !body_painted;
+    if (body_painted || chart_painted)
         return true;
-    }
     if (!host.shader_draw_failure_logged()) {
-        runtime::log_info(
-            "[custom-shader] body shader failed to draw; painting the default "
-            "widget body instead");
+        runtime::log_info("[custom-shader] {} shader failed to draw; painting the default "
+                          "widget body instead",
+                          host.has_custom_shader() ? "body" : "chart");
         host.mark_shader_draw_failure_logged();
     }
     return false;
@@ -285,7 +296,7 @@ void Knob::on_mouse_drag(Point pos) {
     const float snapped = static_cast<float>(core_.normalized());
     if (snapped == value_) return;
     value_ = snapped;
-    request_repaint();
+    request_repaint_self();
     if (on_change) on_change(value_);
 }
 
@@ -482,6 +493,7 @@ void Knob::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     float cx = b.width * 0.5f;
     float cy = b.height * 0.5f;
+    bool chart_only = false; // set by draw_custom_shader_body below
     float radius = std::min(cx, cy) * 0.8f;
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
     bool captured_indicator_drawn = false;
@@ -563,25 +575,19 @@ void Knob::paint(canvas::Canvas& canvas) {
                 });
             }
         } else {
-            // Legacy raw-RGBA path. NOTE: SkiaCanvas::draw_image_from_data
-            // expects ENCODED bytes (PNG/JPEG), so callers that fed decoded
-            // pixels here will draw nothing. Kept for backward compatibility
-            // and any future raw-pixmap canvas API.
-            size_t frame_bytes = static_cast<size_t>(fw * fh * 4);
-            size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 +
-                                                 fx * 4);
-            if (offset + frame_bytes <= sprite_strip_->data_size()) {
+            // Byte-backed strip. The draw decodes ENCODED bytes (PNG/JPEG);
+            // raw RGBA pixels pass the bounds check but draw nothing on Skia.
+            if (byte_strip_frame_in_bounds(canvas, *sprite_strip_, fx, fy)) {
                 canvas.save();
                 canvas.clip_rect(0, 0, b.width, b.height);
                 float sx = b.width / fw;
                 float sy = b.height / fh;
                 canvas.scale(sx, sy);
                 canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
-                canvas.draw_image_from_data(sprite_strip_->data(),
-                                             sprite_strip_->data_size(),
-                                             0, 0,
-                                             static_cast<float>(sprite_strip_->total_width()),
-                                             static_cast<float>(sprite_strip_->total_height()));
+                canvas.draw_image_from_keyed_data(
+                    sprite_strip_->data_key(), sprite_strip_->data(), sprite_strip_->data_size(), 0,
+                    0, static_cast<float>(sprite_strip_->total_width()),
+                    static_cast<float>(sprite_strip_->total_height()));
                 canvas.restore();
             }
         }
@@ -608,13 +614,19 @@ void Knob::paint(canvas::Canvas& canvas) {
         render_schema(canvas, widget_schema_, b.width, b.height, shown, *this);
         // Fall through to draw labels on top
     }
-    // ── Custom shader path: replaces body/track/fill, keeps labels/glow ──
+    // ── Custom shader path (a body shader, a chart shader, or both) ──
     // The `&& draw_custom_shader_body(...)` guard means a draw-time shader
     // FAILURE falls through to the normal body branches below (not a blank
     // widget); on success the shader painted the body and we skip them.
-    else if (has_custom_shader() &&
-             draw_custom_shader_body(canvas, *this, *this, b.width, b.height, shown, shader_time)) {
+    else if ((has_custom_shader() || !chart_shader().empty()) &&
+             draw_custom_shader_body(canvas, *this, *this, b.width, b.height, shown, shader_time,
+                                     &chart_only)) {
         // Shader painted the body; fall through to draw labels and value text.
+        // A chart paints the knob's material, not its value: a body shader
+        // over it owns the value display, and without one the rotating
+        // pointer goes on top.
+        if (chart_only)
+            draw_knob_indicator_notch(canvas, cx, cy, std::min(cx, cy), std::min(cx, cy), shown);
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal/design-preview: simple circle outline (matches design tools) ──
         float full_r = std::min(cx, cy) - 2.0f;
@@ -1004,20 +1016,17 @@ void Fader::paint(canvas::Canvas& canvas) {
         int frame = sprite_strip_->frame_for_value(shown);
         int fx, fy;
         sprite_strip_->frame_offset(frame, fx, fy);
-        size_t frame_bytes = static_cast<size_t>(sprite_strip_->frame_width() *
-                                                  sprite_strip_->frame_height() * 4);
-        size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 + fx * 4);
-        if (offset + frame_bytes <= sprite_strip_->data_size()) {
+        if (byte_strip_frame_in_bounds(canvas, *sprite_strip_, fx, fy)) {
             canvas.save();
             canvas.clip_rect(0, 0, b.width, b.height);
             float sx = b.width / static_cast<float>(sprite_strip_->frame_width());
             float sy = b.height / static_cast<float>(sprite_strip_->frame_height());
             canvas.scale(sx, sy);
             canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
-            canvas.draw_image_from_data(sprite_strip_->data(), sprite_strip_->data_size(),
-                                         0, 0,
-                                         static_cast<float>(sprite_strip_->total_width()),
-                                         static_cast<float>(sprite_strip_->total_height()));
+            canvas.draw_image_from_keyed_data(sprite_strip_->data_key(), sprite_strip_->data(),
+                                              sprite_strip_->data_size(), 0, 0,
+                                              static_cast<float>(sprite_strip_->total_width()),
+                                              static_cast<float>(sprite_strip_->total_height()));
             canvas.restore();
         }
     } else if (!widget_schema_.empty()) {
@@ -1353,133 +1362,6 @@ void RangeSlider::on_mouse_leave() {
     hover_scale_.animate_to(1.0f, dur, easing::ease_out_quad);
 }
 
-void RangeSlider::paint(canvas::Canvas& canvas) {
-    auto b = local_bounds();
-    bool horiz = orientation_ == Orientation::horizontal;
-
-    // CSS accent-color affects the active portion, not the handle. Keeping
-    // the thumb independently opaque is important: painting an accent with
-    // alpha over the already-painted track makes the track appear to show
-    // through the handle.
-    auto track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
-    auto theme_fill  = resolve_color("control.fill",  canvas::Color::rgba8(100, 150, 255));
-    auto theme_thumb = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-    const bool active = enabled();
-    auto fill_color  = active && has_accent_color_ ? accent_color_ : theme_fill;
-    auto thumb_color = active && has_accent_color_
-        ? canvas::Color::rgba8(248, 248, 248) // token-lint:allow -- Chromium accented-range keyline material
-        : theme_thumb;
-    // One thumb: while modulated, the fill and thumb sit at the value
-    // playing in the modulation colour; the base is a tick (below).
-    auto keyline_color = thumb_color;
-    if (has_modulated_) {
-        const auto modulation =
-            resolve_color("knob.modulation", canvas::Color::rgba8(190, 150, 255));
-        fill_color = modulation;
-        thumb_color = modulation;
-    }
-
-    // Track thickness — typical HTML range visuals sit in 4..6px.
-    float track_thick = std::min(track_thickness_,
-                                 horiz ? std::max(b.height, 1.0f)
-                                       : std::max(b.width,  1.0f));
-
-    // Normalized position along the track, taking the (possibly-collapsed)
-    // [min,max] range and the skew curve into account.
-    const float base_t = value_to_position_();
-    float t = has_modulated_ ? (skew_ == 1.0f ? modulated_ : std::pow(modulated_, skew_)) : base_t;
-
-    // Background track.
-    canvas.set_fill_color(track_color);
-    if (horiz) {
-        float ty = (b.height - track_thick) * 0.5f;
-        canvas.fill_rounded_rect(0, ty, b.width, track_thick, track_thick * 0.5f);
-    } else {
-        float tx = (b.width - track_thick) * 0.5f;
-        canvas.fill_rounded_rect(tx, 0, track_thick, b.height, track_thick * 0.5f);
-    }
-
-    // Active fill — only the portion between min and current value.
-    canvas.set_fill_color(active ? fill_color : track_color);
-    if (horiz) {
-        float fill_w = t * b.width;
-        float ty = (b.height - track_thick) * 0.5f;
-        if (fill_w > 0)
-            canvas.fill_rounded_rect(0, ty, fill_w, track_thick, track_thick * 0.5f);
-    } else {
-        float fill_h = t * b.height;
-        float tx = (b.width - track_thick) * 0.5f;
-        // Vertical: fill the lower portion (closer to min at the bottom).
-        if (fill_h > 0)
-            canvas.fill_rounded_rect(tx, b.height - fill_h, track_thick, fill_h, track_thick * 0.5f);
-    }
-
-    // Chromium's accented macOS range has a one-pixel light keyline around
-    // the track. It is part of the control skin (not the element's CSS box
-    // border), so draw it only for an enabled accented range. A disabled
-    // range remains the neutral unoutlined home-screen control.
-    if (active && has_accent_color_) {
-        canvas.set_stroke_color(keyline_color);
-        canvas.set_line_width(1.0f);
-        if (horiz) {
-            float ty = (b.height - track_thick) * 0.5f;
-            canvas.stroke_rounded_rect(0.5f, ty + 0.5f,
-                                       std::max(0.0f, b.width - 1.0f),
-                                       std::max(0.0f, track_thick - 1.0f),
-                                       std::max(0.0f, (track_thick - 1.0f) * 0.5f));
-        } else {
-            float tx = (b.width - track_thick) * 0.5f;
-            canvas.stroke_rounded_rect(tx + 0.5f, 0.5f,
-                                       std::max(0.0f, track_thick - 1.0f),
-                                       std::max(0.0f, b.height - 1.0f),
-                                       std::max(0.0f, (track_thick - 1.0f) * 0.5f));
-        }
-    }
-
-    // Chrome/macOS uses a 24x16 pill rather than a circular thumb. Inset by
-    // half its major-axis extent so it never overshoots the element bounds.
-    canvas.set_fill_color(thumb_color);
-    const float thumb_minor = (horiz ? std::min(b.height, 16.0f)
-                                     : std::min(b.width, 16.0f))
-                              * hover_scale_.value();
-    const float thumb_major = std::min(horiz ? b.width : b.height, 24.0f)
-                              * hover_scale_.value();
-    if (horiz) {
-        float usable = std::max(0.0f, b.width - thumb_major);
-        float hx = thumb_major * 0.5f + t * usable;
-        canvas.fill_rounded_rect(hx - thumb_major * 0.5f,
-                                 (b.height - thumb_minor) * 0.5f,
-                                 thumb_major, thumb_minor,
-                                 thumb_minor * 0.5f);
-    } else {
-        float usable = std::max(0.0f, b.height - thumb_major);
-        // Vertical: t=0 → bottom (handle near max-y), t=1 → top.
-        float hy = thumb_major * 0.5f + (1.0f - t) * usable;
-        canvas.fill_rounded_rect((b.width - thumb_minor) * 0.5f,
-                                 hy - thumb_major * 0.5f,
-                                 thumb_minor, thumb_major,
-                                 thumb_minor * 0.5f);
-    }
-
-    // The base a modulator moves this slider around: a quiet tick across the
-    // track, on top of the thumb so it stays visible under it.
-    if (has_modulated_) {
-        canvas.set_stroke_color(theme_thumb);
-        canvas.set_line_cap(canvas::LineCap::round);
-        canvas.set_line_width(1.5f);
-        const float half = track_thick * 0.5f + 3.0f;
-        if (horiz) {
-            const float usable = std::max(0.0f, b.width - thumb_major);
-            const float bx = thumb_major * 0.5f + base_t * usable;
-            canvas.stroke_line(bx, b.height * 0.5f - half, bx, b.height * 0.5f + half);
-        } else {
-            const float usable = std::max(0.0f, b.height - thumb_major);
-            const float by = thumb_major * 0.5f + (1.0f - base_t) * usable;
-            canvas.stroke_line(b.width * 0.5f - half, by, b.width * 0.5f + half, by);
-        }
-    }
-}
-
 // ── Toggle ───────────────────────────────────────────────────────────────────
 
 // Vertical space the caption occupies: its 10px font sits on a baseline 6px off
@@ -1549,41 +1431,6 @@ void Toggle::paint(canvas::Canvas& canvas) {
         canvas.set_text_align(canvas::TextAlign::center);
         canvas.fill_text_anchored(label_, b.width * 0.5f, b.height - 6, canvas::Canvas::TextAnchor::Baseline);
     }
-}
-
-// ── Checkbox ────────────────────────────────────────────────────────────────
-
-void Checkbox::paint(canvas::Canvas& canvas) {
-    auto b = local_bounds();
-    float size = std::min(b.width, b.height);
-    float cx = b.width * 0.5f;
-    float cy = b.height * 0.5f;
-    float r = size * 0.35f;  // smaller radius to avoid clipping at bounds edge
-
-    // Rounded SQUARE (matches the Figma design language — not a circle).
-    float corner = r * 0.35f;
-    if (checked_) {
-        // Filled rounded square
-        auto fill = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
-        canvas.set_fill_color(fill);
-        canvas.fill_rounded_rect(cx - r, cy - r, r * 2, r * 2, corner);
-        // Check glyph (simple checkmark using lines)
-        canvas.set_stroke_color(canvas::Color::rgba8(30, 30, 40));
-        canvas.set_line_width(2.0f);
-        canvas.stroke_line(cx - r * 0.35f, cy, cx - r * 0.05f, cy + r * 0.3f);
-        canvas.stroke_line(cx - r * 0.05f, cy + r * 0.3f, cx + r * 0.4f, cy - r * 0.3f);
-    } else {
-        // Stroked rounded square
-        auto border = resolve_color("control.border", canvas::Color::rgba8(80, 80, 100));
-        canvas.set_stroke_color(border);
-        canvas.set_line_width(1.5f);
-        canvas.stroke_rounded_rect(cx - r, cy - r, r * 2, r * 2, corner);
-    }
-}
-
-void Checkbox::on_mouse_down(Point) {
-    checked_ = !checked_;
-    if (on_change) on_change(checked_);
 }
 
 // ── ToggleButton ────────────────────────────────────────────────────────────
