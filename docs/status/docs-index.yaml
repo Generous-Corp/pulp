@@ -19,6 +19,11 @@ docs:
     summary: Subsystem dependencies, thread model, build system, GPU stack
 
   # Guides
+  - slug: gpu-audio-macos-reliability
+    path: guides/gpu-audio-macos-reliability.md
+    kind: guide
+    summary: What GPU audio guarantees on macOS when the GPU is slow, hung or lost, how to read its health, and what real DAWs have validated
+
   - slug: gpu-audio-wavenet-trace
     path: guides/gpu-audio-wavenet-trace.md
     kind: guide

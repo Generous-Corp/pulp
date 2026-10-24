@@ -2071,6 +2071,20 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-neural-cpu-simd": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_neural_cpu_simd.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/neural/example.nam"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_neural_cpu_simd.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-node-pack": {
    "data": "none",
    "inputs": [],
@@ -2706,8 +2720,11 @@
   "pulp-test-gpu-health-provider",
   "pulp-test-gpu-health-read-result",
   "pulp-test-gpu-health-result",
+  "pulp-test-gpu-neural-model-factory",
   "pulp-test-gpu-neural-plugin-boundary-continuity",
   "pulp-test-gpu-neural-realtime-node",
+  "pulp-test-gpu-neural-shadow-policy",
+  "pulp-test-gpu-neural-shadow-simd",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-proc-installer",
@@ -2893,6 +2910,7 @@
   "pulp-test-native-metal-compute",
   "pulp-test-negative-path",
   "pulp-test-network-service-discovery",
+  "pulp-test-neural-cpu-simd",
   "pulp-test-node-pack",
   "pulp-test-notary-env",
   "pulp-test-nsis-installer",
