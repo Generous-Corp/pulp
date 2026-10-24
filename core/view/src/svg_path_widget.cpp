@@ -852,7 +852,8 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
     const float vh = viewbox_h_ > 0 ? viewbox_h_ : b.height;
 
     canvas.save();
-    if (b.x != 0.0f || b.y != 0.0f) canvas.translate(b.x, b.y);
+    if (b.x != 0.0f || b.y != 0.0f)
+        canvas.translate(b.x, b.y);
     const float sx = b.width / vw;
     const float sy = b.height / vh;
     if (stretch_to_bounds_) {

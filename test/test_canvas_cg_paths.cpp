@@ -574,7 +574,8 @@ TEST_CASE("CoreGraphicsCanvas::stroke_path keeps its own dash under an active st
             line.move_to(4.0f, 8.0f).line_to(60.0f, 8.0f);
             StrokeStyle style;
             style.width = 4.0f;
-            if (styled_dash) style.dash = {8.0f, 8.0f};
+            if (styled_dash)
+                style.dash = {8.0f, 8.0f};
             canvas.stroke_path(line, style);
         }
         CGContextRelease(ctx);
@@ -582,7 +583,8 @@ TEST_CASE("CoreGraphicsCanvas::stroke_path keeps its own dash under an active st
         int painted = 0;
         const int row = H / 2;
         for (int x = 8; x < 56; ++x)
-            if (pixels[(static_cast<size_t>(row) * W + x) * 4u + 3] > 200) ++painted;
+            if (pixels[(static_cast<size_t>(row) * W + x) * 4u + 3] > 200)
+                ++painted;
         return painted;
     };
     // Solid style: the whole span is painted, with no 2/2 gaps from the sticky dash.

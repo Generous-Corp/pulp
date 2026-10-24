@@ -894,7 +894,7 @@ TEST_CASE("SvgPathWidget paints in the captured CSS-px-snapped box", "[svg_path]
     CHECK(snapped.x == 0.0f);
     CHECK(snapped.y == 0.5f);
     const auto extent = svg->paint_extent();
-    CHECK(extent.y < 12.5f);  // the stroke's own padding, offset by the snap
+    CHECK(extent.y < 12.5f); // the stroke's own padding, offset by the snap
     CHECK(extent.y + extent.height > 12.5f);
 
     RecordingCanvas rc;
