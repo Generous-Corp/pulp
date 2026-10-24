@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-image-file-cache-byte-budget-watch",
+  "slices": [
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "Carry the file-image cache's byte budget (newest entry and entries drawn in the current frame never evicted for bytes) and the one-second failed-build memo for both file and inline images, retried when a file changes, into Vellum's native rendering asset path when the corresponding Pulp target adopts Vellum.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261023-image-file-cache-byte-budget-watch.json",
+    "pulp-test-image-file-cache"
+  ]
+}

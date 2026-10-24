@@ -121,6 +121,10 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         "_bundleEntry"
         "_bundleExit"
         "_GetPluginFactory")
+    _pulp_apply_elf_exports(${target}_VST3 "${target}_VST3"
+        "GetPluginFactory"
+        "ModuleEntry"
+        "ModuleExit")
     target_include_directories(${target}_VST3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     # VST3 bundle structure
@@ -305,6 +309,8 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     endif()
     _pulp_apply_macho_exports(${target}_CLAP "${target}_CLAP"
         "_clap_entry")
+    _pulp_apply_elf_exports(${target}_CLAP "${target}_CLAP"
+        "clap_entry")
     target_include_directories(${target}_CLAP PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     set_target_properties(${target}_CLAP PROPERTIES
@@ -409,6 +415,11 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         )
     endif()
     target_include_directories(${target}_LV2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    # lv2_descriptor is the host entry point; pulp-lv2-ttlgen dlopens the
+    # module and calls pulp_lv2_write_bundle_ttl to describe it.
+    _pulp_apply_elf_exports(${target}_LV2 "${target}_LV2"
+        "lv2_descriptor"
+        "pulp_lv2_write_bundle_ttl")
 
     # LV2 bundles: <name>.lv2/ directory containing the .so and .ttl files
     set_target_properties(${target}_LV2 PROPERTIES

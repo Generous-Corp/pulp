@@ -740,6 +740,60 @@ TEST_CASE("SVG fill and stroke accept non-hex CSS across every shape widget",
                 171.0f / 255.0f, 0.1f);
 }
 
+TEST_CASE("native SVG path and baked C++ take the imported stroke cap, join and miter limit",
+          "[view][import][native-common][svg-stroke]") {
+    const auto vector = [](std::string cap, std::string join, std::string limit) {
+        IRNode path;
+        path.type = "vector";
+        path.attributes["path_data"] = "M4 12L12 4L20 12";
+        path.attributes["svg_viewbox"] = "0 0 24 24";
+        path.attributes["svg_fill"] = "none";
+        path.attributes["svg_stroke"] = "#89b4fa";
+        path.attributes["svg_stroke_width"] = "2";
+        if (!cap.empty())
+            path.attributes["svg_stroke_linecap"] = std::move(cap);
+        if (!join.empty())
+            path.attributes["svg_stroke_linejoin"] = std::move(join);
+        if (!limit.empty())
+            path.attributes["svg_stroke_miterlimit"] = std::move(limit);
+        return path;
+    };
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.children.push_back(vector("round", "round", ""));
+    ir.root.children.push_back(vector("square", "miter-clip", "8"));
+    // Values the browser would also reject leave the widget on its own state.
+    ir.root.children.push_back(vector("pointed", "spiky", "0.5"));
+    ir.root.children.push_back(vector("", "", ""));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root->child_count() == 4);
+    auto* round = dynamic_cast<SvgPathWidget*>(root->child_at(0));
+    auto* square = dynamic_cast<SvgPathWidget*>(root->child_at(1));
+    auto* invalid = dynamic_cast<SvgPathWidget*>(root->child_at(2));
+    auto* plain = dynamic_cast<SvgPathWidget*>(root->child_at(3));
+    REQUIRE((round && square && invalid && plain));
+    CHECK(round->stroke_cap() == pulp::canvas::LineCap::round);
+    CHECK(round->stroke_join() == pulp::canvas::LineJoin::round);
+    CHECK_FALSE(round->stroke_miter_limit().has_value());
+    CHECK(square->stroke_cap() == pulp::canvas::LineCap::square);
+    CHECK(square->stroke_join() == pulp::canvas::LineJoin::miter);
+    CHECK(square->stroke_miter_limit() == 8.0f);
+    for (auto* widget : {invalid, plain}) {
+        CHECK_FALSE(widget->stroke_cap().has_value());
+        CHECK_FALSE(widget->stroke_join().has_value());
+        CHECK_FALSE(widget->stroke_miter_limit().has_value());
+    }
+
+    const auto cpp = generate_pulp_cpp(ir, ir.asset_manifest, {}).source;
+    CHECK(cpp.find("->set_stroke_cap(pulp::canvas::LineCap::round);") != std::string::npos);
+    CHECK(cpp.find("->set_stroke_join(pulp::canvas::LineJoin::round);") != std::string::npos);
+    CHECK(cpp.find("->set_stroke_cap(pulp::canvas::LineCap::square);") != std::string::npos);
+    CHECK(cpp.find("->set_stroke_join(pulp::canvas::LineJoin::miter);") != std::string::npos);
+    CHECK(cpp.find("->set_stroke_miter_limit(8") != std::string::npos);
+    CHECK(cpp.find("pointed") == std::string::npos);
+}
+
 TEST_CASE("native SVG path consumes canonical imported stroke channels",
           "[view][import][native-common][svg-stroke]") {
     DesignIR ir;

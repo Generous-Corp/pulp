@@ -1,0 +1,5 @@
+#pragma once
+// Generated from tools/scripts/release_product_matrix.json by
+// tools/cmake/PulpReleaseMatrix.cmake. The matrix is the only place a
+// release floor is written; edit it there.
+#define PULP_RELEASE_CHECKSUM_MANIFEST_FLOOR "@PULP_RELEASE_CHECKSUM_MANIFEST_FLOOR@"

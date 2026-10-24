@@ -944,11 +944,26 @@ void WidgetBridge::sync_from_store() {
     }
 }
 
-View* WidgetBridge::resolve_parent(const std::string& parent_id) {
+View* WidgetBridge::resolve_parent(const std::string& parent_id, const View* child) {
     if (parent_id.empty()) return &root_;
     auto it = widgets_.find(parent_id);
     if (it == widgets_.end() || !it->second.view) return &root_;
-    return it->second.view;
+    View* parent = it->second.view;
+    if (child)
+        for (const View* ancestor = parent; ancestor; ancestor = ancestor->parent())
+            if (ancestor == child)
+                return &root_;
+    return parent;
+}
+
+bool WidgetBridge::attach_created(const std::string& id, const std::string& parent_id,
+                                  std::unique_ptr<View> view) {
+    auto* child = view.get();
+    auto refused = resolve_parent(parent_id, child)->add_child(std::move(view));
+    if (!refused)
+        return true;
+    widgets_.erase(id);
+    return false;
 }
 
 ScrollView* WidgetBridge::scroll_wrapper(const std::string& id) const noexcept {

@@ -1061,6 +1061,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME base-poison-detector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_base_poison_detector.py")
     set_tests_properties(base-poison-detector-selftest PROPERTIES TIMEOUT 120)
+    # Merge-queue circuit breaker: the PULP_QUEUE_BREAKER state, which groups
+    # it fails pre-VM, the trusted queue-unblock override, fail-open on
+    # unreadable input, and the classify/notify wiring in build.yml.
+    add_test(NAME queue-breaker-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_queue_breaker.py")
+    set_tests_properties(queue-breaker-selftest PROPERTIES TIMEOUT 60)
 
     # ODR macro-gated-header guard. A macro-gated inline/template function in a
     # header, plus a TU that redefines that macro, is an ODR violation a Release
@@ -1617,6 +1623,16 @@ if(Python3_Interpreter_FOUND)
     # assigns. Pure file fixtures in a temporary directory.
     add_test(NAME fold-migration-notes-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_fold_migration_notes.py")
+
+    # A pull request may not add docs/migrations/vX.Y.Z.md by hand; only the
+    # version-at-land bump commit adds one. Throwaway git ranges.
+    add_test(NAME migration-note-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_migration_note_guard.py")
+
+    # The build-free pre-push stand-in for script-test-inputs-drift: a new
+    # script-driven add_test needs a ctest_script_inputs.json entry.
+    add_test(NAME script-inputs-precheck-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_inputs_precheck.py")
 
     # GitHub's itemTypes-filtered timelineItems connection reports totalCount
     # over EVERY timeline item, so a filtered totalCount reads a never-queued

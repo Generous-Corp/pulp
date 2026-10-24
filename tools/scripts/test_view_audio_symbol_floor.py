@@ -158,6 +158,34 @@ class SymbolFloorTests(unittest.TestCase):
         rc, out = self._run("--check", f"view-core={core}")
         self.assertEqual(rc, 1, out)
 
+    def test_a_planted_weak_copy_of_view_audio_rtti_fails(self):
+        # view-core carries its own weak typeinfo, vtable and typeinfo name for
+        # Meter: nothing is left undefined, yet it was compiled against Meter.
+        self._archive("audio.a", (
+            "libpulp-view-audio.a[m.o]: __ZTIN4pulp4view5MeterE S 10 0\n"
+            "libpulp-view-audio.a[m.o]: __ZTVN4pulp4view5MeterE S 20 0\n"
+            "libpulp-view-audio.a[m.o]: __ZTSN4pulp4view5MeterE S 30 0\n"
+            "libpulp-view-audio.a[m.o]: __ZN4pulp4view6inlineEv W 0 0\n"))
+        for symbol in ("__ZTIN4pulp4view5MeterE", "__ZTVN4pulp4view5MeterE", "__ZTSN4pulp4view5MeterE"):
+            with self.subTest(symbol=symbol):
+                core = self._archive("core.a", f"libpulp-view-core.a[x.o]: {symbol} W 0 0\n")
+                rc, out = self._run("--check", f"view-core={core}")
+                self.assertEqual(rc, 1, out)
+                self.assertIn(symbol, out)
+
+    def test_a_shared_weak_inline_function_is_not_rtti_contamination(self):
+        self._archive("audio.a", (
+            "libpulp-view-audio.a[m.o]: __ZTIN4pulp4view5MeterE S 10 0\n"
+            "libpulp-view-audio.a[m.o]: __ZN4pulp4view6inlineEv W 0 0\n"))
+        core = self._archive("core.a", "libpulp-view-core.a[x.o]: __ZN4pulp4view6inlineEv W 0 0\n")
+        rc, out = self._run("--check", f"view-core={core}")
+        self.assertEqual(rc, 0, out)
+
+    def test_weak_rtti_of_a_class_view_audio_does_not_own_is_clean(self):
+        core = self._archive("core.a", "libpulp-view-core.a[x.o]: __ZTIN4pulp4view4ViewE W 0 0\n")
+        rc, out = self._run("--check", f"view-core={core}")
+        self.assertEqual(rc, 0, out)
+
     def test_the_registered_gate_counts_weak_definitions(self):
         # The ctest calls archive_symbol_closure_check.py directly, so it must
         # ask for the same rule this wrapper uses.
@@ -165,6 +193,7 @@ class SymbolFloorTests(unittest.TestCase):
         text = manifest.read_text(encoding="utf-8")
         block = text.split("add_test(NAME pulp-view-audio-symbol-floor\n", 1)[1].split(")\n", 1)[0]
         self.assertIn('--forbidden "$<TARGET_FILE:pulp-view-audio>" --forbidden-defines any', block)
+        self.assertIn("--weak-rtti-contamination", block)
 
     def test_a_missing_archive_is_a_scan_error(self):
         rc, _ = self._run("--check", f"view-core={self.dir / 'missing.a'}")

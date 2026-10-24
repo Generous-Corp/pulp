@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-importer-i8-svg-stroke-paint-20261023-watch",
+  "created_at": "2026-10-23T19:23:07Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Consumes the SVG stroke style the vector lowering already records (svg_stroke_linecap / _linejoin / _miterlimit) in the native materializer and the baked C++ codegen, through one shared parser, and collects stroke-linecap, stroke-linejoin, stroke-miterlimit and stroke-dashoffset as computed style so a stylesheet-set cap reaches the existing lowering. Additive paint state on SvgPathWidget; Chromium stays the only oracle and Skia/Dawn the renderer, so no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-import-native-common",
+    "ctest --test-dir build -R pulp-test-svg-path-widget",
+    "node --test tools/import-design/browser_capture/semantics.test.mjs",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
