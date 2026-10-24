@@ -639,9 +639,15 @@ What changed, and what each field can and cannot show:
   `paragraph_builds`, `scene_cache.{records,replays}` and
   `image_cache.{hits,builds}` per phase as total, per-frame maximum, and
   frames after the first that did any. `steady_state_gate` fails when any
-  frame after a phase's first decodes, uploads or rebuilds an image; the
-  recording canvas reports `blind`. `--require-steady-state` exits 4 unless
-  the gate passes, and `--plant-frame-decode` must make it fail.
+  frame after a phase's first decodes, uploads or rebuilds an image, or
+  shapes text its update did not write (`paragraph_builds.unwritten`, from a
+  build observer matched against the text the fixture's step wrote); the
+  recording canvas reports `blind`.
+  `--require-steady-state` exits 4 unless the gate passes, and
+  `--plant-frame-decode` and `--paragraph-cache=off` must each make it fail.
+  SkiaCanvas keeps laid-out paragraphs in a process-wide cache
+  (`pulp/canvas/paragraph_cache.hpp`), so a static label shapes once;
+  `--paragraph-cache=off` measures the uncached text path.
 - **Live lane on importer output.** `--lane=live --ir=<panel.ir.json>
   [--bundle=<behavior.js>]` mounts the DesignIR as generated bridge
   JavaScript, under the materialized runtime bundle when one is given, and
@@ -654,6 +660,10 @@ What changed, and what each field can and cannot show:
   `tools/scripts/p2_thermal_state.swift`, and reports `win` only when every
   criterion of the pre-registered speed bar holds; otherwise `work-moved`,
   `no-win`, `confounded`, `insufficient-reps` or `instrument-inconsistent`.
+  `--baseline-arg` and `--candidate-arg` add arguments to one side only, so
+  a lane can be judged against itself, for example
+  `--compare baked-native baked-native --baseline-arg=--paragraph-cache=off
+  --mechanism paragraph_builds:down`.
 
 Example: judge a candidate lane against baked-native on the Skia raster lane,
 over an importer-produced DesignIR, under the no-launch environment:
