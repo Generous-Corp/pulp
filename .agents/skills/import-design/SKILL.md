@@ -177,6 +177,15 @@ fractional layout box; that is the 1 device px the Spectr slider was off by.
 `indeterminate` and a `disabled` inherited from a `<fieldset>` are not in the
 DOMSnapshot, so they are not recorded.
 
+A native-verdict `<button>` records `ua_control=button`, `ua_color_scheme` and
+`ua_disabled`, loses the UA stylesheet's grey background and 2px outset border,
+and becomes a `ButtonSurface` (Chromium's push-button paint) in place of the
+frame, with its text and icons kept as children. An `<input
+type=button|submit|reset>` is the same theme part: it lowers the same way, its
+value (or the UA's `Submit` / `Reset` default) the `#control-value` label child.
+An author-styled button or button input keeps its captured paint and stays a
+frame.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
