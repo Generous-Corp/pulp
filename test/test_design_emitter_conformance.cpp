@@ -76,7 +76,7 @@ namespace fs = std::filesystem;
 // pulp-emitter-conformance-gen (test/cmake/design_import_native_codegen_tests.cmake).
 #define PULP_CONFORMANCE_FIXTURE(ns)                                                               \
     namespace pulp::test::conformance::ns {                                                        \
-    std::unique_ptr<pulp::view::View> conformance_build();                                         \
+    std::unique_ptr<pulp::view::View> conformance_build(const std::filesystem::path& assets);      \
     void conformance_bind(pulp::view::View& root, pulp::view::NativeImportBindingContext& ctx);    \
     }
 PULP_CONFORMANCE_FIXTURE(form_controls_08)
