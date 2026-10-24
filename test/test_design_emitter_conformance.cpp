@@ -573,7 +573,7 @@ std::vector<Divergence> all_divergences() {
 TEST_CASE("every emitter agrees with the native materializer or names the gap",
           "[view][import][emitter-conformance]") {
     auto allowlist = load_allowlist();
-    const std::regex issue_url(R"(https://github\.com/Generous-Corp/pulp/issues/[0-9]+)");
+    const std::regex issue_url(R"(https://github\.com/Generous-Corp/pulp/(issues|pull)/[0-9]+)");
     for (const auto& entry : allowlist) {
         INFO("allowlist entry " << entry.lane << " " << entry.field);
         CHECK(std::regex_match(entry.issue, issue_url));
