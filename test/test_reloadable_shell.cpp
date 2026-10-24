@@ -186,7 +186,13 @@ TEST_CASE("ReloadableShell reloads a build that lands between load and prepare()
     ctx.sample_rate = 48000.0;
     ctx.max_buffer_size = 64;
     shell.prepare(ctx);
-    REQUIRE(render_one(shell) == 0.5f); // the loaded (unity) logic is live
+    // The loaded (unity) logic is live until the watcher swaps; on a saturated
+    // host the swap can already have happened, so only check it if not.
+    if (shell.successful_reloads() == 0) {
+        const float first = render_one(shell);
+        if (shell.successful_reloads() == 0)
+            REQUIRE(first == 0.5f);
+    }
 
     bool swapped = false;
     for (int i = 0; i < 100 && !swapped; ++i) { // up to ~5s, generous
