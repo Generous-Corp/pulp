@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261024-importer-svg-snap-20261024",
+  "kind": "change",
+  "created_at": "2026-10-24T16:37:34Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "retained-ui-kernel: View::self_paint_bounds() factors the existing captured-box-paint snap out of paint_background_and_border (behaviour unchanged there) and SvgPathWidget paints in it, so imported SVG lands on Chromium's snapped grid; without a captured rect a widget paints in its own bounds as before. Additive public accessor, no authority boundary moves; Pulp-only.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-canvas-cg-paths",
+    "ctest --test-dir build -R pulp-test-svg-path-widget",
+    "python3 test/test_importer_differential_lab.py"
+  ],
+  "disposition": "pulp-only"
+}
