@@ -284,7 +284,10 @@ class CoverageWorkflowTests(unittest.TestCase):
     def test_native_graph_preserves_example_driven_core_coverage(self) -> None:
         self.assertIn("-DPULP_BUILD_EXAMPLES=ON", self.coverage)
         self.assertIn("-DPULP_BUILD_PYTHON=ON -DPULP_BUILD_EXAMPLES=ON", self.coverage)
-        self.assertNotIn("-DPULP_BUILD_EXAMPLES=OFF", self.coverage)
+        self.assertIn(
+            "matrix.os == 'windows' && '-DPULP_BUILD_EXAMPLES=OFF' || '-DPULP_BUILD_EXAMPLES=ON'",
+            self.coverage,
+        )
         self.assertIn("timeout-minutes: 300", self.coverage)
         self.assertIn("budget=$(( 240 * 60 ))", self.coverage)
         self.assertIn("PULP_COVERAGE_JOBS: '2'", self.coverage)
