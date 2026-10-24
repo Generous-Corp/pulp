@@ -16,15 +16,32 @@ param(
   [ValidateRange(1,60)][int]$AutomationSec = 8,
   [ValidateRange(5,300)][int]$TimeoutSec = 60,
   [int]$ContextX = -1,
-  [int]$ContextY = -1
+  [int]$ContextY = -1,
+  [switch]$Headless
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windows_editor_common.ps1')
 $token = [Guid]::NewGuid().ToString('N')
 New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
-$run = Join-Path (Resolve-Path -LiteralPath $EvidenceDir).Path ('run-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + $token.Substring(0,8))
+$resolvedEvidenceDir = (Resolve-Path -LiteralPath $EvidenceDir).Path
+$run = Join-Path $resolvedEvidenceDir ('run-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + $token.Substring(0,8))
 New-Item -ItemType Directory -Path $run | Out-Null
 $receipt = [ordered]@{schema=2;token=$token;verdict='INCONCLUSIVE';scope='host insertion/editor/optional host parameter readback';started_utc=[DateTime]::UtcNow.ToString('o');error=$null;cleanup_errors=@()}
+if($Headless){$receipt.scope='host insertion/optional host parameter readback (headless)'}
+# Fail before launching REAPER when the selected evidence root belongs to a
+# different Windows account. Without this probe, the Lua status handshake can
+# be mistaken for a plugin failure after an ACL-denied write.
+$writeProbe = Join-Path $EvidenceDir ('.pulp-write-probe-' + $token)
+try {
+  [IO.File]::WriteAllText($writeProbe, 'probe', [Text.UTF8Encoding]::new($false))
+  Remove-Item -LiteralPath $writeProbe -Force
+} catch {
+  $receipt.error = "EvidenceDir is not writable by $env:USERNAME: $EvidenceDir ($($_.Exception.Message))"
+  $receipt.finished_utc=[DateTime]::UtcNow.ToString('o')
+  $receipt | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $run 'receipt.json') -Encoding utf8
+  Write-Warning $receipt.error
+  exit 3
+}
 $owned = New-Object 'System.Collections.Generic.List[object]'
 $priorEnv = @{}
 $envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION') | ForEach-Object {'PULP_DAW_SMOKE_'+$_}
@@ -132,6 +149,7 @@ try {
   }
   if($bound.Count -ne 1){throw 'Expected exactly one manifest-bound loaded plugin PE'}
   $receipt.loaded_plugin=$bound[0]
+  if(-not $Headless){
   Add-Type -AssemblyName System.Drawing
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type @'
@@ -166,7 +184,10 @@ public static class OwnedWindow {
     $current=@($proc.process.Modules | Where-Object {$_.FileName -ieq $receipt.loaded_plugin.path})
     if($current.Count -ne 1){throw 'Bound plugin module disappeared'}
     Assert-ModuleBinding $current[0].FileName (Get-FileHash -LiteralPath $current[0].FileName -Algorithm SHA256).Hash $manifest
-    Assert-EditorWindow $Hwnd ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id))
+    # Saving a project can temporarily hide the floating editor.  Validate the
+    # HWND and process ownership here; visibility is checked after activation
+    # has had a chance to restore the owned window.
+    if($Hwnd -eq 0 -or -not [OwnedWindow]::IsWindow($editor) -or -not [OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id)){throw 'Floating editor HWND absent or foreign'}
   }
   $receipt.editor_activation=[ordered]@{editor_hwnd=$editor.ToInt64()}
   Invoke-OwnedEditorActivation $editor.ToInt64() ${function:Guard-EditorOwner} {
@@ -179,9 +200,14 @@ public static class OwnedWindow {
     [OwnedWindow]::Belongs([IntPtr]$Hwnd,$foreground)
   } {
     param([long]$Hwnd)
-    [OwnedWindow]::ShowWindow([IntPtr]$Hwnd,9) | Out-Null
-    [OwnedWindow]::SetForegroundWindow([IntPtr]$Hwnd)
+    for($i=0;$i -lt 20;$i++){
+      [OwnedWindow]::ShowWindow([IntPtr]$Hwnd,9) | Out-Null
+      [OwnedWindow]::SetForegroundWindow([IntPtr]$Hwnd) | Out-Null
+      if([OwnedWindow]::IsWindowVisible([IntPtr]$Hwnd)){break}
+      Start-Sleep -Milliseconds 100
+    }
   } -Observation $receipt.editor_activation -MaxObservations 51 | Out-Null
+  Assert-EditorWindow $editor.ToInt64() ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id))
   function Guard-Editor {
     Guard-EditorOwner $editor.ToInt64()
     Assert-EditorEvidence $editor.ToInt64() ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id)) ([OwnedWindow]::Belongs($editor,[OwnedWindow]::GetForegroundWindow()))
@@ -203,6 +229,7 @@ public static class OwnedWindow {
     Start-Sleep -Milliseconds 300;Capture 'editor-context-menu.png'
     Guard-Editor
     [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+  }
   }
   $receipt.verdict='PASS';$receipt.product_ui_acceptance='NOT_EVALUATED';$receipt.live_audio='NOT_EVALUATED';$exitCode=0
 } catch {$receipt.error=$_.Exception.Message;Write-Warning $receipt.error} finally {
