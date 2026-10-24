@@ -2651,9 +2651,14 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::find(args.begin(), args.end(), "--allow-dev-build") != args.end();
     const bool reads_native_build =
         sub != "swap-pack" && sub != "auv3-xcodeproj" && sub != "appcast" && !android_check;
+    // `sign --path <artifact>` signs something the caller already built; it
+    // reads build-ship/ when that exists but never builds it, so signing one
+    // bundle from an in-tree checkout is not a second full build.
+    const bool signs_explicit_path =
+        sub == "sign" && std::find(args.begin(), args.end(), "--path") != args.end();
     if (reads_native_build && !allow_dev_build && pulp::cli::build_dir_is_dev_build(build_dir)) {
         const auto ship_dir = pulp::cli::ship_build_dir(root);
-        if (sub == "sign" || sub == "package" || sub == "release") {
+        if ((sub == "sign" && !signs_explicit_path) || sub == "package" || sub == "release") {
             if (int rc = ensure_ship_build(root, build_dir, ship_dir); rc != 0)
                 return rc;
             build_dir = ship_dir;

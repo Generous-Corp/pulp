@@ -2204,6 +2204,27 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign --path on a dev build signs the named artifact without building build-ship",
+                 "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-sign-path");
+    ScopedEnvVar leases("PULP_TARTCI_LEASES", "0");
+
+    // The artifact is explicit, so the dev build dir is never a reason to
+    // configure and build a second tree; the missing path is reported as such.
+    auto r = run_pulp_in(root, {"ship", "sign", "--path", (root / "does-not-exist.app").string()});
+    REQUIRE_FALSE(r.timed_out);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "--path not found"));
+    REQUIRE_FALSE(contains(combined, "Building the shippable build"));
+    REQUIRE_FALSE(fs::exists(root / "build-ship"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship check names the shippable build dir a dev build will ship from",
                  "[cli][shellout][ship][dev-build]") {
     if (!binary_exists()) {
