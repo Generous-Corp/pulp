@@ -39,10 +39,18 @@ std::string normalized_input_type(std::string raw) {
 bool record_ua_control_state(const CapturedStyleIndex& index, int node_index,
                              const std::map<std::string, std::string>& computed,
                              decltype(pulp::view::IRNode::attributes)& attributes) {
-    const auto type = normalized_input_type(index.attribute(node_index, "type"));
-    if (type != "range" && type != "checkbox" && type != "radio")
+    // A <button>, and an <input> of a button type, is the theme's push button;
+    // its content stays the node's children (a button input's label is the
+    // #control-value run).
+    const bool is_button_element = index.tag_name(node_index) == "button";
+    const auto type = is_button_element
+                          ? std::string("button")
+                          : normalized_input_type(index.attribute(node_index, "type"));
+    const bool push_button =
+        is_button_element || type == "button" || type == "submit" || type == "reset";
+    if (!push_button && type != "range" && type != "checkbox" && type != "radio")
         return false;
-    attributes["ua_control"] = type;
+    attributes["ua_control"] = push_button ? std::string("button") : type;
     if (type == "range") {
         // Raw HTML strings: the widget applies HTML's own defaults and
         // sanitising, so an absent or invalid value is not guessed here.
@@ -53,7 +61,7 @@ bool record_ua_control_state(const CapturedStyleIndex& index, int node_index,
         // The live value; a script or a drag can leave it away from `value`.
         if (auto value = index.control_value(node_index); !value.empty())
             attributes["ua_value"] = std::move(value);
-    } else {
+    } else if (!push_button) {
         attributes["ua_checked"] = index.control_checked(node_index) ? "1" : "0";
         if (type == "radio" && index.has_attribute(node_index, "name"))
             attributes["ua_radio_group"] = index.attribute(node_index, "name");

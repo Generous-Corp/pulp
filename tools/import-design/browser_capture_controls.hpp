@@ -50,13 +50,14 @@ std::optional<ControlValueText>
 control_value_text(const CapturedStyleIndex& index, int node_index, const CapturedBox& box,
                    const std::map<std::string, std::string>& computed);
 
-/// The state the native theme paints a themed range, checkbox or radio from,
+/// The state the native theme paints a themed range, checkbox, radio or push
+/// button (`ua_control` "button" for a <button> or a button-type <input>) from,
 /// recorded as `ua_*` attributes on its lowered node: `ua_control` (the input
 /// type), the HTML `ua_min` / `ua_max` / `ua_step` / `ua_value` of a range, the
 /// live `ua_checked` of a checkbox or radio and the `ua_radio_group` its `name`
 /// puts it in, `ua_disabled`, and the computed `ua_accent` (absent for `auto`)
-/// and `ua_color_scheme`. Other input types record nothing; returns whether
-/// the node is one of the three.
+/// and `ua_color_scheme`. Other controls record nothing; returns whether the
+/// node is one of these.
 bool record_ua_control_state(const CapturedStyleIndex& index, int node_index,
                              const std::map<std::string, std::string>& computed,
                              decltype(pulp::view::IRNode::attributes)& attributes);

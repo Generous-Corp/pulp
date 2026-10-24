@@ -4395,6 +4395,56 @@ TEST_CASE("theme-painted ranges, checkboxes and radios record the state the them
     CHECK(styled->style.background_color.value_or("") == "rgb(255, 255, 255)");
 }
 
+TEST_CASE("a theme-painted button records the push-button state and loses its UA box",
+          "[browser-capture][native-lowering][form-controls][button]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 BUTTON (themed, disabled),
+    // 4 INPUT[type=submit] (themed), 5 BUTTON whose author styling dropped the theme.
+    // Row order: display, appearance, accent-color, color-scheme, background-color.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,4,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2]",
+        .attributes = "[[],[],[],[5,6],[7,8],[]]",
+        .layout_nodes = "[1,2,3,4,5]",
+        .styles = "[[9,10,10,11,13],[9,10,10,11,13],[14,10,10,15,12],[14,10,10,11,12],"
+                  "[14,10,10,11,12]]",
+        .bounds = "[[0,0,300,120],[0,0,300,120],[10,10,80,21],[10,40,80,21],[10,70,80,21]]",
+        .paint_orders = "[0,1,2,3,4]",
+        .computed_names =
+            R"(["display","appearance","accent-color","color-scheme","background-color"])",
+        .strings = R"J("#document","HTML","BODY","BUTTON","INPUT","disabled","","type",)J"
+                   R"J("submit","block","auto","normal","rgb(239, 239, 239)",)J"
+                   R"J("rgba(0, 0, 0, 0)","inline-block","dark")J",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"native"},)"
+                     R"({"node_index":5,"theme":"author"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "form-control-button-state");
+    std::vector<const IRNode*> buttons;
+    const std::function<void(const IRNode&)> collect = [&](const IRNode& node) {
+        if (attribute(node, "ua_control") == "button")
+            buttons.push_back(&node);
+        for (const auto& child : node.children)
+            collect(child);
+    };
+    collect(lowered.root);
+    // The <button> and the submit input; the author-styled button records nothing.
+    REQUIRE(buttons.size() == 2);
+    for (const auto* button : buttons) {
+        CHECK_FALSE(button->style.background_color.has_value());
+        CHECK_FALSE(button->attributes.contains("ua_checked"));
+    }
+    const auto* disabled = buttons[0]->attributes.contains("ua_disabled") ? buttons[0] : buttons[1];
+    CHECK(attribute(*disabled, "ua_disabled") == "1");
+    CHECK(attribute(*disabled, "ua_color_scheme") == "dark");
+    CHECK(attribute(*disabled, "source_tag") == "button");
+    const auto* styled = find_node(
+        lowered.root, [](const IRNode& n) { return attribute(n, "native_theme") == "author"; });
+    REQUIRE(styled != nullptr);
+    CHECK(styled->style.background_color.value_or("") == "rgb(239, 239, 239)");
+}
+
 namespace {
 
 /// True when `needle` appears in any text run, name, or attribute value of the
