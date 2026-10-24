@@ -616,7 +616,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
             child->set_default_hover_feedback(true);
         }
         self.widgets_[childId] = child.get();
-        self.resolve_parent(parentId)->add_child(std::move(child));
+        self.attach_created(childId, parentId, std::move(child));
         return choc::value::Value();
     });
 

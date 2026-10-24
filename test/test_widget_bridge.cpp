@@ -22,6 +22,30 @@ TEST_CASE("WidgetBridge counts native calls used by imported UI mount and steps"
     REQUIRE(bridge.bridge_call_count() > 0);
 }
 
+TEST_CASE("WidgetBridge attaches a widget named as its own parent under the root",
+          "[view][bridge]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The widget is registered under its id before it is attached, so a
+    // script naming that id as the parent used to link the view to itself
+    // and send every walk to the root into an endless loop.
+    bridge.load_script("createKnob('gain', 'gain'); setValue('gain', 0.5);");
+    REQUIRE(root.child_count() == 1);
+    REQUIRE(root.child_at(0)->id() == "gain");
+    REQUIRE(root.child_at(0)->parent() == &root);
+    REQUIRE(root.child_at(0)->child_count() == 0);
+
+    // A parent that is a descendant of the new widget cannot exist at create
+    // time, but one that is the widget itself can on every factory path.
+    bridge.load_script("createRow('row', 'row');");
+    REQUIRE(root.child_count() == 2);
+    REQUIRE(root.child_at(1)->parent() == &root);
+}
+
 TEST_CASE("WidgetBridge counter ignores pure JavaScript work",
           "[view][bridge][wp0][negative-control]") {
     ScriptEngine engine;

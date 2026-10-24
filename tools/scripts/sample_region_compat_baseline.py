@@ -317,6 +317,7 @@ COMPAT_INPUTS = (
     'core/host/src/scanner_clap.cpp',
     'core/host/src/scanner_vst3.cpp',
     'core/host/src/signal_graph.cpp',
+    'core/host/src/signal_graph_mailbox.cpp',
     'core/host/src/signal_graph_control.cpp',
     'core/host/src/signal_graph_diagnostics.cpp',
     'core/host/src/signal_graph_executor_routing.cpp',

@@ -868,6 +868,21 @@ The ARA companion factory is keyed on
 reserved `CLAP_EXT_*` strings. Don't rename it; other Pulp + ARA hosts
 already search for that exact key. Defined in `pulp/format/ara.hpp`.
 
+### Linux: export only `clap_entry`, or two Pulp CLAPs share one registry
+
+On Linux a plug-in image exports only its entry points: `_pulp_apply_elf_exports`
+(`tools/cmake/PulpInstall.cmake`) compiles the format target with
+`-fvisibility=hidden -fvisibility-inlines-hidden` and links it with a version
+script whose `local: *` localizes everything else, including the archives'
+symbols. Without it, every Pulp plug-in in a Linux host shared its inline
+variables and function-local statics with every other one: they are
+`STB_GNU_UNIQUE`, which glibc binds process-wide **even under `RTLD_LOCAL`**,
+so two different plug-ins' factories each listed both plug-ins. For CLAP the shared state was `clap_generic::g_clap_records` / `g_clap_index` and every
+`*_ext` table, so extension calls ran the other image's code.
+`linux-plugin-isolation-clap` (`test/fixtures/linux_plugin_isolation/`) loads
+two plug-ins together under both dlopen modes and in both orders; keep it green
+when adding an entry point that hosts `dlsym` (add it to the version-script list).
+
 ### `clap-validator` is optional — fallback is dlopen
 
 `pulp validate` (`tools/cli/cmd_validate.cpp`) runs

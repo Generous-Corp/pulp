@@ -79,6 +79,11 @@ class NotarizationHeartbeatTest(unittest.TestCase):
                              'mkdir -p "$(dirname "$last")"\n: > "$last"\n')
         tool("productsign", 'last=""\nfor a in "$@"; do last="$a"; done\n'
                             'mkdir -p "$(dirname "$last")"\n: > "$last"\n')
+        tool("pkgutil", '[[ "${1:-}" == "--expand-full" ]] || exit 2\n'
+             'expanded="$3"; [[ ! -e "$expanded" ]] || { echo "destination already exists" >&2; exit 1; }; mkdir -p "$expanded"\n'
+             'root="${PAYLOAD_BUNDLE_ROOTS}"; bundle="$(basename "$root")"\n'
+             'mkdir -p "$expanded/Payload"\n'
+             'cp -R "$root" "$expanded/Payload/"\n')
         # The stand-in for Apple. `submit --wait` sleeps (standing in for the
         # dark poll phase), prints what notarytool prints, and exits with the
         # status under test. `staple` records that it ran at all — that record
@@ -138,6 +143,7 @@ class NotarizationHeartbeatTest(unittest.TestCase):
             "PULP_SIGN_P12_PW": "test-p12-password",
             "PULP_SIGN_IDENTITY_HASH": "ABC",
             "PULP_NOTARIZE_HEARTBEAT_SECS": "1",
+            "PAYLOAD_BUNDLE_ROOTS": str(bundle),
         }
         Path(env["PULP_NOTARY_KEY_PATH"]).touch()
         Path(env["PULP_SIGN_KEYCHAIN"]).touch()
@@ -261,6 +267,8 @@ class CombinedInstallerTest(unittest.TestCase):
         legacy_evidence: bool = False,
         unsigned_bundles: set[str] | None = None,
         refused_after_verification: bool = False,
+        payload_gate_failure: bool = False,
+        payload_mode: str = "match",
         wraptool: str = "pass",
         allow_unverified_aax_wrap: bool = False,
         macho_plugins: bool = False,
@@ -391,6 +399,34 @@ class CombinedInstallerTest(unittest.TestCase):
                 'last=""\nfor arg in "$@"; do last="$arg"; done\n'
                 'mkdir -p "$(dirname "$last")"\n: > "$last"\n',
             )
+            # A small pkgutil stand-in that materializes the component payload
+            # the real productbuild/pkgutil path produces.  pkgbuild puts a
+            # component bundle directly under Payload; the install location
+            # is PackageInfo metadata, not a directory in the payload.
+            self._write_tool(
+                fake_bin,
+                "pkgutil",
+                '[[ "${1:-}" == "--expand-full" ]] || exit 2\n'
+                'archive="$2"; expanded="$3"; [[ ! -e "$expanded" ]] || { echo "destination already exists" >&2; exit 1; }; mkdir -p "$expanded"\n'
+                'idx=0\n'
+                'IFS=: read -r -a roots <<< "${PAYLOAD_BUNDLE_ROOTS:-}"\n'
+                'for root in "${roots[@]}"; do\n'
+                '  [[ -n "$root" ]] || continue\n'
+                '  bundle="$(basename "$root")"\n'
+                "  exec_name=\"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \"$root/Contents/Info.plist\")\"\n"
+                '  mkdir -p "$expanded/Payload"\n'
+                '  if [[ "${PAYLOAD_MODE:-match}" != "missing" || "$idx" != 0 ]]; then\n'
+                '    cp -R "$root" "$expanded/Payload/"\n'
+                '    dest="$expanded/Payload/$bundle/Contents/MacOS/$exec_name"\n'
+                '    if [[ "${PAYLOAD_MODE:-match}" == "stale" && "$idx" == 0 ]]; then\n'
+                '      printf "stale payload\\n" > "$dest"\n'
+                '    elif [[ "${PAYLOAD_MODE:-match}" == "stale_asset" && "$idx" == 0 ]]; then\n'
+                '      printf "<svg data-fixture=\\"stale\\"/>\\n" > "$expanded/Payload/$bundle/Contents/Resources/faceplate.svg"\n'
+                '    fi\n'
+                '  fi\n'
+                '  idx=$((idx+1))\n'
+                'done\n',
+            )
 
             # Records each strip and marks the file it was given, so a case can
             # tell which copy of a module was stripped.
@@ -457,6 +493,11 @@ class CombinedInstallerTest(unittest.TestCase):
                 else:
                     executable.write_text("fixture executable\n", encoding="utf-8")
                 executable.chmod(0o755)
+                resources = bundle / "Contents" / "Resources"
+                resources.mkdir(parents=True)
+                (resources / "faceplate.svg").write_text(
+                    "<svg data-fixture=\"fresh\"/>\n", encoding="utf-8"
+                )
                 if d15_fixture and not plugin_bundles:
                     if d15_fixture == "file":
                         (macos / "libvellum-gpu.dylib").write_bytes(
@@ -556,6 +597,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 "PULP_SIGN_IDENTITY_HASH": "ABC",
                 "ANALYZE_OMITS_RELOCATABLE": "1" if analyze_omits_relocatable else "0",
                 "UNSIGNED_BUNDLES": " ".join(sorted(unsigned_bundles or set())),
+                "PAYLOAD_MODE": payload_mode,
                 # A fake PACE wraptool, so no test depends on PACE's tooling:
                 # "pass" verifies every bundle, "fail" rejects every bundle,
                 # and "absent" names a path that does not exist.
@@ -566,6 +608,7 @@ class CombinedInstallerTest(unittest.TestCase):
             }
             Path(env["PULP_SIGN_KEYCHAIN"]).touch()
             Path(env["PULP_SIGN_P12"]).touch()
+            env["PAYLOAD_BUNDLE_ROOTS"] = ":".join(str(p) for p in plugin_bundles)
             completed = subprocess.run(
                 args,
                 cwd=ROOT,
@@ -576,6 +619,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 check=False,
             )
             self._last_returncode = completed.returncode
+            self._last_installer_output = completed.stdout + completed.stderr
             self._last_wraptool_argv = (
                 wraptool_argv_capture.read_text(encoding="utf-8")
                 if wraptool_argv_capture.is_file()
@@ -587,7 +631,10 @@ class CombinedInstallerTest(unittest.TestCase):
                 # already run `codesign --verify`; only a pre-signing refusal
                 # (D15, legacy evidence) must leave every release tool unrun.
                 if refused_after_verification:
-                    self.assertFalse(productbuild_argv_capture.exists())
+                    if payload_gate_failure:
+                        self.assertTrue(productbuild_argv_capture.exists())
+                    else:
+                        self.assertFalse(productbuild_argv_capture.exists())
                     self.assertFalse(productsign_argv_capture.exists())
                     return completed.stdout + completed.stderr, ""
                 for forbidden_capture in (
@@ -696,6 +743,45 @@ class CombinedInstallerTest(unittest.TestCase):
             self._last_productsign_argv,
             msg="productsign must use the exact unattended signing keychain",
         )
+
+    def test_product_payload_hash_matches_the_signed_source_bundle(self) -> None:
+        """The happy path proves the package contains the exact build output."""
+        self._run_installer([("Kick", "clap")])
+        self.assertIn(
+            "verified packaged payload: Kick.clap/Kick sha256=",
+            self._last_installer_output,
+        )
+
+    def test_stale_product_payload_is_rejected_before_productsign(self) -> None:
+        output, _ = self._run_installer(
+            [("Kick", "clap")],
+            payload_mode="stale",
+            expect_success=False,
+            refused_after_verification=True,
+            payload_gate_failure=True,
+        )
+        self.assertIn("packaged payload hash mismatch", output)
+
+    def test_stale_sidecar_asset_is_rejected_before_productsign(self) -> None:
+        """A stale faceplate/resource cannot hide behind a fresh executable."""
+        output, _ = self._run_installer(
+            [("Kick", "clap")],
+            payload_mode="stale_asset",
+            expect_success=False,
+            refused_after_verification=True,
+            payload_gate_failure=True,
+        )
+        self.assertIn("packaged bundle digest mismatch", output)
+
+    def test_missing_product_payload_is_rejected_before_productsign(self) -> None:
+        output, _ = self._run_installer(
+            [("Kick", "clap")],
+            payload_mode="missing",
+            expect_success=False,
+            refused_after_verification=True,
+            payload_gate_failure=True,
+        )
+        self.assertIn("expected exactly one packaged payload executable", output)
 
     def test_multi_plugin_packages_are_unique_and_grouped_by_plugin(self) -> None:
         xml, _ = self._run_installer(

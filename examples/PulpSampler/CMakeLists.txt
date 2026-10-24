@@ -19,6 +19,13 @@ if(PULP_HAS_CLAP)
             MACOSX_BUNDLE_GUI_IDENTIFIER "com.pulp.sampler"
             MACOSX_BUNDLE_BUNDLE_VERSION "1.0.0"
         )
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # BUNDLE is Apple-only, so a Linux MODULE would land as
+        # CLAP/libPulpSampler.so, which CLAP hosts do not scan. A Linux CLAP is a
+        # single <name>.clap image, and like pulp_add_plugin's CLAP targets it
+        # exports only clap_entry (see _pulp_apply_elf_exports).
+        set_target_properties(PulpSampler_CLAP PROPERTIES PREFIX "" SUFFIX ".clap")
+        _pulp_apply_elf_exports(PulpSampler_CLAP PulpSampler_CLAP clap_entry)
     endif()
 endif()
 
