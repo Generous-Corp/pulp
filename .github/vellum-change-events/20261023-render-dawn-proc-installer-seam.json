@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261023-render-dawn-proc-installer-seam",
+  "kind": "change",
+  "created_at": "2026-10-23T10:01:55Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); GpuSurface (gpu_surface_dawn.cpp) no longer installs Dawn's process-global proc table itself. It calls the framework-neutral pulp::render::ensure_dawn_procs() seam, which runs Pulp's native default once per process unless an embedding host registered its own installer (install or verify-only) with set_dawn_proc_installer() beforehand; a late registration is refused. The only proc-table setter moves to gpu_proc_installer_native.cpp. No frame, present, readback, design-import, Chromium, packaging or authority boundary moves; the Pulp render target has not adopted a Vellum package.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R 'Dawn proc installer'"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

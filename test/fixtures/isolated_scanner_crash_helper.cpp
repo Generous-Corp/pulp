@@ -8,6 +8,8 @@
 //   crash    — deref a null pointer (SIGSEGV / Windows AV exception)
 //   timeout  — sleep for 60s so the parent's 1s timeout fires
 //   garbage  — exit 0 with non-JSON stdout (worker contract violation)
+//   flood    — exit 0 after printing more descriptor lines than the
+//              parent's capture cap admits
 //
 // Anything else exits 0 silently (mimics the NotPlugin path the real
 // worker takes when it can't extract a descriptor).
@@ -65,6 +67,14 @@ int main(int argc, char** argv) {
     }
     if (mode == "garbage") {
         std::printf("this is not json\n");
+        return 0;
+    }
+    if (mode == "flood") {
+        // Valid descriptor lines, far past the parent's capture cap.
+        for (int i = 0; i < 4096; ++i) {
+            std::printf("{\"name\":\"flood %d\",\"path\":\"/flood/%d.clap\",\"format\":\"clap\"}\n",
+                        i, i);
+        }
         return 0;
     }
     if (mode == "unsupported") {

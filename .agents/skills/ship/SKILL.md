@@ -408,6 +408,8 @@ install`) rather than copying the script into the project.
 
 **Start every array in `build_combined_installer.sh` as `=()`.** The script runs under `set -u`, and bash 4.4 or later reports `${#X[@]}` of a declared-but-unassigned array as unbound, while macOS's `/bin/bash` 3.2 does not. A bare `declare -a X` passes every macOS run and fails on Linux (where the Python coverage pass runs the recipe tests) or under a newer bash on PATH.
 
+**Verify component payloads before signing the product archive.** The combined installer records each signed plugin's `CFBundleExecutable` SHA-256, expands the unsigned `productbuild` archive with `pkgutil --expand-full`, and refuses to run `productsign`, notarization, or stapling if the packaged executable is missing or does not match. This gate prevents a stale or metadata-only build directory from turning into an apparently successful release. The contract tests cover matching, stale, and missing payloads in `test_build_combined_installer.py`.
+
 **macOS 27 `pkgbuild --analyze` omits `BundleIsRelocatable`.** `build_combined_installer.sh` pins every app component non-relocatable, so it must `Add :N:BundleIsRelocatable bool false` when `Set` finds no entry — a bare `Set` aborts with `Entry, ":0:BundleIsRelocatable", Does Not Exist` (covered by `test_build_combined_installer.py`).
 
 ### A packaging run that looks dead is almost always alive

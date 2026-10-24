@@ -165,6 +165,54 @@ function(_pulp_apply_macho_exports target file_stem)
         "LINKER:-exported_symbols_list,${_pulp_export_file}")
 endfunction()
 
+# Linux plug-in images export only their format's entry points.
+#
+# A Linux MODULE exports every default-visibility symbol, and the archives a
+# plug-in links (pulp-format, pulp-view, Yoga, ...) are compiled with default
+# visibility. That is not just a large symbol table. Inline variables and
+# function-local statics in inline functions are emitted as STB_GNU_UNIQUE,
+# which glibc binds process-wide whatever the dlopen mode, so two Pulp plug-ins
+# loaded into one host share them even with RTLD_LOCAL: the CLAP registry
+# (clap_generic::g_clap_records) and the CLAP extension tables, so each CLAP
+# factory lists the other's plug-in and its extension pointers run the other
+# image's code. With RTLD_GLOBAL every exported pulp:: symbol interposes as
+# well; a VST3 module's factory then reports the other module's class.
+#
+# A version script with `local: *` turns everything but the entry points into
+# local symbols at link time, including the archives' unique ones; hidden
+# visibility does the same for the plug-in's own sources at compile time.
+# Mach-O (two-level namespace plus -exported_symbols_list above) and PE
+# (dllexport only) are not affected, so this applies to Linux only.
+#
+# The PULP_ELF_EXTRA_EXPORTS target property adds version-script patterns;
+# pulp_reload_host() uses it to republish the SDK for thin reload logic.
+function(_pulp_apply_elf_exports target file_stem)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        return()
+    endif()
+    if("${ARGN}" STREQUAL "")
+        return()
+    endif()
+    set(_pulp_globals "")
+    foreach(_pulp_symbol IN LISTS ARGN)
+        string(APPEND _pulp_globals "    ${_pulp_symbol};\n")
+    endforeach()
+    set(_pulp_extra "$<TARGET_PROPERTY:${target},PULP_ELF_EXTRA_EXPORTS>")
+    set(_pulp_version_script "${CMAKE_CURRENT_BINARY_DIR}/${file_stem}.version")
+    file(GENERATE OUTPUT "${_pulp_version_script}" CONTENT
+"{
+  global:
+${_pulp_globals}$<$<BOOL:${_pulp_extra}>:    $<JOIN:${_pulp_extra},;\n    >;\n>  local:
+    *;
+};
+")
+    # A reload host republishes the SDK and so keeps default visibility.
+    target_compile_options(${target} PRIVATE
+        "$<$<NOT:$<BOOL:${_pulp_extra}>>:-fvisibility=hidden;-fvisibility-inlines-hidden>")
+    target_link_options(${target} PRIVATE "LINKER:--version-script=${_pulp_version_script}")
+    set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${_pulp_version_script}")
+endfunction()
+
 # Create the opt-in per-plugin install target. This remains private because the
 # public install policy is driven by pulp_add_plugin(...), while the implementation
 # is isolated here with the other install/export concerns.

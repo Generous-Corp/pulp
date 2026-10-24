@@ -1124,6 +1124,23 @@ EOF
     done
 fi
 
+# ── 21. migration notes, text encoding, script inputs (diff-scoped) ────────
+# Each fails a required CI check and costs about a second here. A hand-written
+# docs/migrations/vX.Y.Z.md guesses a version that version-at-land assigns later;
+# the text-encoding lint refuses text I/O without encoding= beyond the committed
+# baseline; a new script-driven add_test() with no test/ctest_script_inputs.json
+# entry fails script-test-inputs-drift, which needs a configured build and so ran
+# only in CI. Each went red there on a push the local gates had called clean.
+for local_gate in migration_note_guard.py text_encoding_lint.py script_inputs_precheck.py; do
+    local_path="$ROOT/tools/scripts/$local_gate"
+    [ -f "$local_path" ] || continue
+    echo "" >&2
+    echo "▸ ${local_gate%.py}" >&2
+    if ! "$PYTHON" "$local_path" --root "$ROOT" --base "$BASE" >&2; then
+        fail=1
+    fi
+done
+
 # ── Summary ────────────────────────────────────────────────────────────────
 diff_cover_hint() {
     if [ "$gate_host_builds_skipped" -eq 1 ]; then
