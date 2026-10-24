@@ -74,9 +74,8 @@ void paint_root(SkCanvas* sk_canvas, View& root, uint32_t width,
 
 // Raster-render `root` into a tightly packed pixel buffer of `color_type`.
 // Returns empty on failure; writes pixel dims to out_w/out_h on success.
-std::vector<uint8_t> raster_render(View& root, uint32_t width, uint32_t height,
-                                   float scale, SkColorType color_type,
-                                   uint32_t* out_w, uint32_t* out_h,
+std::vector<uint8_t> raster_render(View& root, uint32_t width, uint32_t height, float scale,
+                                   SkColorType color_type, uint32_t* out_w, uint32_t* out_h,
                                    canvas::TextRasterPolicy text_raster) {
     const uint32_t pixel_w = static_cast<uint32_t>(width * scale);
     const uint32_t pixel_h = static_cast<uint32_t>(height * scale);
@@ -104,8 +103,8 @@ std::vector<uint8_t> raster_render(View& root, uint32_t width, uint32_t height,
 
 }  // namespace
 
-std::vector<uint8_t> render_to_png(View& root, uint32_t width, uint32_t height,
-                                   float scale, ScreenshotBackend backend,
+std::vector<uint8_t> render_to_png(View& root, uint32_t width, uint32_t height, float scale,
+                                   ScreenshotBackend backend,
                                    canvas::TextRasterPolicy text_raster) {
     // Honor an explicit host-registered provider first (parity with the
     // pre-built-in-backend contract: a host that installed a provider expects
@@ -130,8 +129,8 @@ std::vector<uint8_t> render_to_png(View& root, uint32_t width, uint32_t height,
     // The only built-in non-Apple backend is Skia raster; coregraphics is
     // Apple-only, so any requested backend maps to the Skia path here.
     uint32_t pw = 0, ph = 0;
-    auto pixels = raster_render(root, width, height, scale, kRGBA_8888_SkColorType,
-                                &pw, &ph, text_raster);
+    auto pixels =
+        raster_render(root, width, height, scale, kRGBA_8888_SkColorType, &pw, &ph, text_raster);
     if (pixels.empty()) return {};
 
     SkImageInfo info = SkImageInfo::Make(pw, ph, kRGBA_8888_SkColorType,
@@ -148,9 +147,8 @@ std::vector<uint8_t> render_to_png(View& root, uint32_t width, uint32_t height,
     return std::vector<uint8_t>(bytes, bytes + png->size());
 }
 
-bool render_to_file(View& root, uint32_t width, uint32_t height,
-                    const std::string& output_path, float scale,
-                    ScreenshotBackend backend, canvas::TextRasterPolicy text_raster) {
+bool render_to_file(View& root, uint32_t width, uint32_t height, const std::string& output_path,
+                    float scale, ScreenshotBackend backend, canvas::TextRasterPolicy text_raster) {
     auto png = render_to_png(root, width, height, scale, backend, text_raster);
     if (png.empty()) return false;
     std::ofstream out(output_path, std::ios::binary);
@@ -160,16 +158,15 @@ bool render_to_file(View& root, uint32_t width, uint32_t height,
     return out.good();
 }
 
-std::vector<uint8_t> render_to_rgba(View& root, uint32_t width, uint32_t height,
-                                    float scale, uint32_t* out_width,
-                                    uint32_t* out_height,
+std::vector<uint8_t> render_to_rgba(View& root, uint32_t width, uint32_t height, float scale,
+                                    uint32_t* out_width, uint32_t* out_height,
                                     canvas::TextRasterPolicy text_raster) {
     if (out_width) *out_width = 0;
     if (out_height) *out_height = 0;
     // Explicit RGBA byte order (R,G,B,A) so the buffer is endianness-
     // independent and host-uploadable, matching render_to_rgba_skia on macOS.
-    return raster_render(root, width, height, scale, kRGBA_8888_SkColorType,
-                         out_width, out_height, text_raster);
+    return raster_render(root, width, height, scale, kRGBA_8888_SkColorType, out_width, out_height,
+                         text_raster);
 }
 
 bool raw_rgba_render_available() { return true; }

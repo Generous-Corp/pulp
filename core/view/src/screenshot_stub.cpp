@@ -86,19 +86,16 @@ std::vector<uint8_t> invoke_screenshot_provider(View& root, uint32_t width,
 //   - Linux/Windows WITHOUT Skia / Android: provider-backed fallback below.
 #if (!defined(__APPLE__) && !defined(PULP_HAS_SKIA)) || (defined(__APPLE__) && TARGET_OS_IOS)
 
-std::vector<uint8_t> render_to_png(
-    View& root, uint32_t width, uint32_t height, float scale,
-    ScreenshotBackend backend, canvas::TextRasterPolicy /*text_raster*/)
-{
+std::vector<uint8_t> render_to_png(View& root, uint32_t width, uint32_t height, float scale,
+                                   ScreenshotBackend backend,
+                                   canvas::TextRasterPolicy /*text_raster*/) {
     bool had = false;
     return invoke_screenshot_provider(root, width, height, scale, backend, &had);
 }
 
-bool render_to_file(
-    View& root, uint32_t width, uint32_t height,
-    const std::string& output_path, float scale,
-    ScreenshotBackend backend, canvas::TextRasterPolicy /*text_raster*/)
-{
+bool render_to_file(View& root, uint32_t width, uint32_t height, const std::string& output_path,
+                    float scale, ScreenshotBackend backend,
+                    canvas::TextRasterPolicy /*text_raster*/) {
     auto bytes = render_to_png(root, width, height, scale, backend);
     if (bytes.empty()) return false;
     std::ofstream out(output_path, std::ios::binary);
@@ -111,10 +108,9 @@ bool render_to_file(
 // Raw-RGBA render is unsupported on platforms without a native raster path.
 // The registered ScreenshotProvider is PNG-only (no raw-pixel contract), so
 // there is no portable producer here yet — return empty explicitly.
-std::vector<uint8_t> render_to_rgba(
-    View& /*root*/, uint32_t /*width*/, uint32_t /*height*/, float /*scale*/,
-    uint32_t* out_width, uint32_t* out_height, canvas::TextRasterPolicy /*text_raster*/)
-{
+std::vector<uint8_t> render_to_rgba(View& /*root*/, uint32_t /*width*/, uint32_t /*height*/,
+                                    float /*scale*/, uint32_t* out_width, uint32_t* out_height,
+                                    canvas::TextRasterPolicy /*text_raster*/) {
     if (out_width) *out_width = 0;
     if (out_height) *out_height = 0;
     return {};

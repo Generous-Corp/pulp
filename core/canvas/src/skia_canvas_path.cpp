@@ -444,7 +444,8 @@ Canvas::LayerHandle SkiaCanvas::begin_layer(Rect2D bounds, bool cacheable) {
     } else if (gr_context_ != nullptr) {
         surface = SkSurfaces::RenderTarget(gr_context_, skgpu::Budgeted::kYes, info, 0, &props);
     }
-    if (!surface) surface = SkSurfaces::Raster(info, &props);
+    if (!surface)
+        surface = SkSurfaces::Raster(info, &props);
     if (!surface) return LayerHandle{};  // out of memory — caller draws direct
 
     SkCanvas* lc = surface->getCanvas();

@@ -37,25 +37,17 @@ enum class ScreenshotBackend {
 // panel passes select_text_raster_policy() over its captured text so the
 // capture renders the way its live surface does. The CoreGraphics backend and
 // a host-registered provider ignore it.
-std::vector<uint8_t> render_to_png(
-    View& root,
-    uint32_t width,
-    uint32_t height,
-    float scale = 2.0f,  // Retina scale factor
-    ScreenshotBackend backend = ScreenshotBackend::default_backend,
-    canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy
-);
+std::vector<uint8_t>
+render_to_png(View& root, uint32_t width, uint32_t height,
+              float scale = 2.0f, // Retina scale factor
+              ScreenshotBackend backend = ScreenshotBackend::default_backend,
+              canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy);
 
 // Render a view tree to a PNG file
-bool render_to_file(
-    View& root,
-    uint32_t width,
-    uint32_t height,
-    const std::string& output_path,
-    float scale = 2.0f,
-    ScreenshotBackend backend = ScreenshotBackend::default_backend,
-    canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy
-);
+bool render_to_file(View& root, uint32_t width, uint32_t height, const std::string& output_path,
+                    float scale = 2.0f,
+                    ScreenshotBackend backend = ScreenshotBackend::default_backend,
+                    canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy);
 
 // ── Smart, always-honest capture (the "always-capturable" must-have) ─────
 //
@@ -101,13 +93,9 @@ CaptureResult capture_view(
 // pulp::render::HeadlessSurface). Returns empty bytes if this build has no GPU
 // backend (PULP_HAS_SKIA off / no pulp-render). Unlike the raster backends,
 // this renders `requires_gpu_host()` views correctly.
-std::vector<uint8_t> render_to_png_gpu(
-    View& root,
-    uint32_t width,
-    uint32_t height,
-    float scale = 2.0f,
-    canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy
-);
+std::vector<uint8_t>
+render_to_png_gpu(View& root, uint32_t width, uint32_t height, float scale = 2.0f,
+                  canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy);
 
 // True when render_to_png_gpu can produce frames in this build (GPU backend
 // compiled in). Lets capture_view fall back honestly when GPU is unavailable.
@@ -146,15 +134,10 @@ bool passes_capture_content_floor(const std::vector<uint8_t>& png);
 // Backend: forces the Skia raster path when available (the only backend that
 // produces a stable, host-independent RGBA buffer). Without Skia this returns
 // empty (CoreGraphics capture is PNG-only here).
-std::vector<uint8_t> render_to_rgba(
-    View& root,
-    uint32_t width,
-    uint32_t height,
-    float scale,
-    uint32_t* out_width,
-    uint32_t* out_height,
-    canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy
-);
+std::vector<uint8_t>
+render_to_rgba(View& root, uint32_t width, uint32_t height, float scale, uint32_t* out_width,
+               uint32_t* out_height,
+               canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy);
 
 // Whether this BUILD has a raw-RGBA producer at all — a property of which
 // backend was compiled in, not of any particular render.

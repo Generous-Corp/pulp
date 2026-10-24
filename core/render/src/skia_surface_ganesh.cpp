@@ -77,7 +77,7 @@ constexpr int kStencilBits = 8;
 } // namespace
 
 class SkiaSurfaceGanesh : public SkiaSurface {
-public:
+  public:
     SkiaSurfaceGanesh(std::string selector, uint32_t width, uint32_t height, float scale,
                       canvas::TextRasterPolicy text_raster_policy)
         : selector_(std::move(selector)), width_(width), height_(height), scale_(scale),
@@ -231,12 +231,9 @@ public:
 
         const SkSurfaceProps props = canvas::surface_props_for(text_raster_policy_);
         frame_surface_ = SkSurfaces::WrapBackendRenderTarget(
-            context_.get(),
-            target,
-            kBottomLeft_GrSurfaceOrigin,  // GL's origin for the default framebuffer
-            kRGBA_8888_SkColorType,
-            SkColorSpace::MakeSRGB(),
-            &props);
+            context_.get(), target,
+            kBottomLeft_GrSurfaceOrigin, // GL's origin for the default framebuffer
+            kRGBA_8888_SkColorType, SkColorSpace::MakeSRGB(), &props);
 
         SkCanvas* sk_canvas = nullptr;
         if (frame_surface_) {
@@ -298,13 +295,15 @@ public:
     }
 
     void set_text_raster_policy(canvas::TextRasterPolicy policy) override {
-        if (policy == text_raster_policy_) return;
+        if (policy == text_raster_policy_)
+            return;
         text_raster_policy_ = policy;
         // Retained layers hold text rasterized under the old preblend.
         canvas_.reset();
         retained_layers_ = canvas::SkiaCanvas::create_retained_layer_store();
-        frame_surface_.reset();  // rewrapped with the new props on the next begin_frame()
-        if (lost_) return;
+        frame_surface_.reset(); // rewrapped with the new props on the next begin_frame()
+        if (lost_)
+            return;
         create_offscreen_target();
     }
 
@@ -444,11 +443,8 @@ private:
 
 std::unique_ptr<SkiaSurface> SkiaSurface::create_webgl(const WebGlConfig& config) {
     auto surface = std::make_unique<SkiaSurfaceGanesh>(
-        config.canvas_selector ? config.canvas_selector : "#pulp",
-        config.width,
-        config.height,
-        config.scale_factor,
-        config.text_raster_policy);
+        config.canvas_selector ? config.canvas_selector : "#pulp", config.width, config.height,
+        config.scale_factor, config.text_raster_policy);
     if (!surface->init()) return nullptr;
     return surface;
 }

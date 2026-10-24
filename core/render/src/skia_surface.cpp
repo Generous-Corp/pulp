@@ -120,7 +120,7 @@ void SkiaSurface::set_trim_clock_for_testing(TrimClockHook hook) {
 }
 
 class SkiaSurfaceImpl : public SkiaSurface {
-public:
+  public:
     SkiaSurfaceImpl(GpuSurface& gpu, uint32_t width, uint32_t height, float scale,
                     canvas::TextRasterPolicy text_raster_policy)
         : gpu_(gpu), width_(width), height_(height), scale_(scale),
@@ -278,11 +278,8 @@ public:
                     } else {
                         const SkSurfaceProps props = surface_props();
                         frame_surface_ = SkSurfaces::WrapBackendTexture(
-                            recorder_.get(),
-                            backend_tex,
-                            surface_color_type,
-                            SkColorSpace::MakeSRGB(),
-                            &props);
+                            recorder_.get(), backend_tex, surface_color_type,
+                            SkColorSpace::MakeSRGB(), &props);
                     }
 
                     if (frame_surface_) {
@@ -461,13 +458,15 @@ public:
     }
 
     void set_text_raster_policy(canvas::TextRasterPolicy policy) override {
-        if (policy == text_raster_policy_) return;
+        if (policy == text_raster_policy_)
+            return;
         text_raster_policy_ = policy;
         // Retained layers hold text rasterized under the old preblend.
         canvas_.reset();
         retained_layers_ = canvas::SkiaCanvas::create_retained_layer_store();
         create_offscreen_target();
-        if (persistent_scene_) create_scene_target();
+        if (persistent_scene_)
+            create_scene_target();
     }
 
     canvas::TextRasterPolicy text_raster_policy() const override {
@@ -803,8 +802,7 @@ private:
         }
         const SkSurfaceProps props = surface_props();
         frame_surface_ = SkSurfaces::WrapBackendTexture(
-            recorder_.get(), backend_tex, surface_color_type,
-            SkColorSpace::MakeSRGB(), &props);
+            recorder_.get(), backend_tex, surface_color_type, SkColorSpace::MakeSRGB(), &props);
         if (!frame_surface_) {
             runtime::log_error(
                 "SkiaSurface: WrapBackendTexture failed for persistent-scene "
@@ -863,8 +861,8 @@ private:
 };
 
 std::unique_ptr<SkiaSurface> SkiaSurface::create(GpuSurface& gpu, const Config& config) {
-    auto surface = std::make_unique<SkiaSurfaceImpl>(gpu, config.width, config.height,
-                                                     config.scale_factor, config.text_raster_policy);
+    auto surface = std::make_unique<SkiaSurfaceImpl>(
+        gpu, config.width, config.height, config.scale_factor, config.text_raster_policy);
     if (!surface->init()) return nullptr;
     return surface;
 }
