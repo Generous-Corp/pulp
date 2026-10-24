@@ -7,6 +7,15 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/pulp_version_gen.h"
     @ONLY)
 
+# Release floors come from tools/scripts/release_product_matrix.json, the
+# same file the release workflow publishes with.
+include("${PROJECT_SOURCE_DIR}/tools/cmake/PulpReleaseMatrix.cmake")
+pulp_release_matrix_floor(PULP_RELEASE_CHECKSUM_MANIFEST_FLOOR checksum_manifest_floor)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/release_floors_gen.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/release_floors_gen.h"
+    @ONLY)
+
 # ── Migration index codegen ─────────────────────────────────────────────────
 #
 # Scan docs/migrations/*.md at configure time, parse the TOML
@@ -133,6 +142,7 @@ add_executable(pulp-cli
     create_build_commands.cpp
     create_targets.cpp
     package_registry.cpp
+    package_registry_trust.cpp
     package_analyzer_descriptors.cpp
     package_commands.cpp
     package_commands_util.cpp

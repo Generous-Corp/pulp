@@ -1069,3 +1069,41 @@ TEST_CASE("Windows upgrade persists MCP path without command-shell expansion",
             std::string::npos);
     REQUIRE(source.find("setx PULP_MCP_BINARY") == std::string::npos);
 }
+
+// The checksum gate only protects an install if it runs before the archive
+// is handed to tar; both download paths are read as text so a reordering or
+// a removed call fails here rather than in a user's shell.
+TEST_CASE("release downloads are verified against SHA256SUMS before tar runs",
+          "[cli][upgrade][release-checksum]") {
+    for (const char* file : {"cmd_upgrade.cpp", "cli_sdk.cpp"}) {
+        INFO(file);
+        const auto source = read_file(fs::path{PULP_REPO_ROOT} / "tools" / "cli" / file);
+        const auto verify = source.find("relcheck::verify_release_archive(");
+        const auto extract = source.find("tar -xzf");
+        REQUIRE(verify != std::string::npos);
+        REQUIRE(extract != std::string::npos);
+        REQUIRE(verify < extract);
+        REQUIRE(source.find("if (!verdict.ok())", verify) < extract);
+        REQUIRE(source.find("PULP_RELEASE_CHECKSUM_MANIFEST_FLOOR", verify) < extract);
+    }
+}
+
+// The user-supplied version is refused unless it is a plain M.m.p before any
+// command interpolates it, and the one place it still enters a shell command
+// is quoted.
+TEST_CASE("the upgrade version is validated before it reaches a shell command",
+          "[cli][upgrade][release-checksum]") {
+    for (const char* file : {"cmd_upgrade.cpp", "cli_sdk.cpp"}) {
+        INFO(file);
+        const auto source = read_file(fs::path{PULP_REPO_ROOT} / "tools" / "cli" / file);
+        const auto guard = source.find("pulp_release_version_is_well_formed(version)");
+        const auto first_command =
+            std::min(source.find("run(\""), source.find("run_with_spinner("));
+        REQUIRE(guard != std::string::npos);
+        REQUIRE(first_command != std::string::npos);
+        REQUIRE(guard < first_command);
+    }
+    const auto upgrade = read_file(fs::path{PULP_REPO_ROOT} / "tools" / "cli" / "cmd_upgrade.cpp");
+    REQUIRE(upgrade.find("--version \" + version") == std::string::npos);
+    REQUIRE(upgrade.find("shell_quote(version)") != std::string::npos);
+}

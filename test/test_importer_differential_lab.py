@@ -67,7 +67,17 @@ def observer_root_rect(argv: list[str], width: float, height: float) -> dict[str
     return {"x": placement["origin_x"], "y": placement["origin_y"], "w": width, "h": height}
 
 
+REAL_PILLOW_MISSING = LAB_CLI.pillow_missing
+
+
 class DifferentialLabTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Command tests stub compare_one, so they must not depend on whether
+        # the interpreter running them has Pillow; the preflight has its own test.
+        patcher = patch.object(LAB_CLI, "pillow_missing", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_source_recognition_records_dynamic_blockers(self) -> None:
         recognition = LAB.source_recognition("""
             import {Dialog} from "@radix-ui/react-dialog";
@@ -192,6 +202,65 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(matches[0][1].backend_node_id, 35)
         self.assertEqual(len(missing), 0)
         self.assertEqual(len(extra), 1)
+
+    def test_native_rotation_maps_the_layout_box_like_chromium(self) -> None:
+        # kelvin's ADSR attack segment: a 3 px bar under rotate(-56.02deg). The
+        # native layout reports the unrotated bar; Chromium reported the
+        # rotated bar's bounding box, (501.75, 274.48) 64.5 x 93.69.
+        def ir(transform, child_transform=None):
+            child = {"type": "frame", "stable_anchor_id": "dot", "children": [],
+                     "style": {"transform": child_transform} if child_transform else {}}
+            return {"root": {"type": "frame", "stable_anchor_id": "bar",
+                             "style": {"transform": transform}, "children": [child]}}
+        layout = {"views": [
+            {"anchor_id": "bar", "x": 478.518, "y": 319.831, "width": 110.963, "height": 2.993},
+            {"anchor_id": "dot", "x": 478.518, "y": 319.831, "width": 2.0, "height": 2.993},
+        ]}
+        bar, dot = LAB.native_nodes(ir("rotate(-56.02deg)"), layout)
+        for got, want in zip(bar.bounds, (501.75, 274.484, 64.5, 93.6875)):
+            self.assertAlmostEqual(got, want, delta=0.05)
+        # A child turns with its parent, about the parent's centre: the dot at
+        # the bar's left end lands at the bar's lower-left corner.
+        self.assertAlmostEqual(dot.bounds[0], bar.bounds[0], delta=0.05)
+        self.assertAlmostEqual(dot.bounds[1] + dot.bounds[3],
+                               bar.bounds[1] + bar.bounds[3], delta=0.05)
+        # Native lowering rotates only a lone rotate() in degrees; anything it
+        # does not rotate keeps its layout box here too.
+        for transform in ("rotate(30deg) scale(2)", "rotate(1rad)", "scale(2)", None):
+            with self.subTest(transform=transform):
+                untouched, _ = LAB.native_nodes(ir(transform), layout)
+                self.assertEqual(untouched.bounds, (478.518, 319.831, 110.963, 2.993))
+
+    def test_nested_native_rotations_compose_like_chromium(self) -> None:
+        # Chromium 151 (DPR 2) bounds for a 160x40 box at (120, 90) under
+        # rotate(30deg), holding a 50x12 box at (100, 10) under rotate(-75deg),
+        # both about their own centres (the CSS default origin):
+        #   outer (120.703125, 52.671875) 158.59375 x 114.65625
+        #   inner (219.046875, 107.109375) 43.859375 x 43.859375
+        # The native layout reports the untransformed boxes; the lab must
+        # apply the child's rotation inside the parent's, not before it.
+        ir = {"root": {"type": "frame", "stable_anchor_id": "outer",
+                       "style": {"transform": "rotate(30deg)"},
+                       "children": [{"type": "frame", "stable_anchor_id": "inner",
+                                     "style": {"transform": "rotate(-75deg)"},
+                                     "children": []}]}}
+        layout = {"views": [
+            {"anchor_id": "outer", "x": 120.0, "y": 90.0, "width": 160.0, "height": 40.0},
+            {"anchor_id": "inner", "x": 220.0, "y": 100.0, "width": 50.0, "height": 12.0},
+        ]}
+        outer, inner = LAB.native_nodes(ir, layout)
+        chromium = {"outer": (120.703125, 52.671875, 158.59375, 114.65625),
+                    "inner": (219.046875, 107.109375, 43.859375, 43.859375)}
+        for node in (outer, inner):
+            for got, want in zip(node.bounds, chromium[node.anchor]):
+                self.assertAlmostEqual(got, want, delta=0.05)
+        # Negative control: the child's rotation applied outside the parent's
+        # lands about 25 px away, so the assertion above can tell the orders apart.
+        from importer_differential.native_transform import compose, rotation_about, transformed_bounds
+        parent = rotation_about(30.0, 200.0, 110.0)
+        wrong = transformed_bounds(compose(rotation_about(-75.0, 245.0, 106.0), parent),
+                                   (220.0, 100.0, 50.0, 12.0))
+        self.assertGreater(abs(wrong[0] - chromium["inner"][0]), 20.0)
 
     def test_mismatched_backend_ids_fail_closed_despite_same_text_and_tag(self) -> None:
         browser = LAB.BrowserNode(
@@ -1272,11 +1341,13 @@ class DifferentialLabTests(unittest.TestCase):
                             LAB.canonical_json_sha256(json.dumps(first).encode()))
 
     def test_semantic_dom_digest_sees_content_and_ignores_session_ids(self) -> None:
-        def snapshot(frame: str, theme: str, loader: str = "L1") -> bytes:
+        def snapshot(frame: str, theme: str, loader: str = "L1",
+                     backend: tuple[int, ...] = (7, 9)) -> bytes:
             return json.dumps({
                 "strings": ["about:blank", frame, "INPUT"],
                 "documents": [{"documentURL": 0, "frameId": 1,
-                               "nodes": {"nodeName": [2]},
+                               "nodes": {"nodeName": [2, 2],
+                                         "backendNodeId": list(backend)},
                                "loaderId": loader}],
                 "formControlTheme": {"controls": [
                     {"node_index": 0, "theme": theme}]},
@@ -1286,6 +1357,9 @@ class DifferentialLabTests(unittest.TestCase):
         # Per-session CDP identifiers do not move it.
         self.assertEqual(baseline, LAB.snapshot_semantic_sha256(
             snapshot("A" * 32, "native", loader="L2")))
+        # Chromium can number the same nodes in a different order per run.
+        self.assertEqual(baseline, LAB.snapshot_semantic_sha256(
+            snapshot("F" * 32, "native", backend=(12, 4))))
         # Content inside the snapshot does, where the canonical capture digest
         # (which drops the snapshot binding) cannot.
         self.assertNotEqual(baseline, LAB.snapshot_semantic_sha256(
@@ -1494,7 +1568,7 @@ class DifferentialLabTests(unittest.TestCase):
             LAB.canonical_json_sha256(json.dumps({"root": {"settle_rounds": 1}}).encode()),
             LAB.canonical_json_sha256(json.dumps({"root": {"settle_rounds": 2}}).encode()))
 
-    def test_semantic_snapshot_digest_ignores_only_the_frame_id(self) -> None:
+    def test_semantic_snapshot_digest_ignores_the_frame_id_but_not_text(self) -> None:
         def snapshot(frame: str, text: str) -> bytes:
             return json.dumps({"strings": ["#document", frame, text],
                                "documents": [{"frameId": 1, "nodes": {"nodeValue": [2]}}]}
@@ -1771,6 +1845,70 @@ class DifferentialLabTests(unittest.TestCase):
             with patch.object(LAB_CLI, "compare_one", side_effect=lambda *args, **kwargs: next(reports)), \
                     redirect_stdout(io.StringIO()):
                 self.assertEqual(LAB_CLI.command_benchmark(args), 1)
+
+    def test_corpus_input_skips_holdout_fixtures_unless_asked(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            for name in ("a.html", "nested/b.html", "holdout/c.html", "nested/holdout/d.html"):
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text("<p>x</p>", encoding="utf-8")
+            def names(files, base=root):
+                return [path.relative_to(base).as_posix() for path in files]
+            self.assertEqual(names(LAB.source_files(root)), ["a.html", "nested/b.html"])
+            self.assertEqual(names(LAB.source_files(root, include_holdout=True)), [
+                "a.html", "holdout/c.html", "nested/b.html", "nested/holdout/d.html"])
+            # A fixture's own file name is not a directory and is never excluded.
+            (root / "holdout.html").write_text("<p>x</p>", encoding="utf-8")
+            self.assertIn("holdout.html", names(LAB.source_files(root)))
+            # Naming the holdout directory as the corpus root asks for it.
+            seen = []
+            args = Namespace(manifest=None, input=root / "holdout", include_holdout=False,
+                             output=root / "out", importer=root / "i", observer=root / "o",
+                             timeout_seconds=1, from_source="claude", browser=None,
+                             fail_fast=False, cache_state="unknown", timing_budget=None)
+            with patch.object(LAB_CLI, "compare_one",
+                              side_effect=lambda *a, **k: seen.append(a[2]) or (_ for _ in ()).throw(
+                                  LAB.LabError("stop"))), \
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                LAB_CLI.command_corpus(args)
+            self.assertEqual(names(seen, root / "holdout"), ["c.html"])
+
+    def test_compare_and_benchmark_pass_a_declared_viewport(self) -> None:
+        self.assertEqual(LAB_CLI.viewport_size("1280x1127"), {"width": 1280, "height": 1127})
+        for bad in ("1280", "0x800", "1280x", "1280 x 800", "-1x2"):
+            with self.subTest(bad=bad), self.assertRaises(Exception):
+                LAB_CLI.viewport_size(bad)
+        parser = LAB_CLI.build_parser()
+        for command in ("compare", "benchmark"):
+            with self.subTest(command=command):
+                args = parser.parse_args([command, "--importer", "i", "--observer", "o",
+                                          "--file", "f.html", "--output", "out",
+                                          "--viewport", "1280x1007"])
+                seen = {}
+                def capture(*_args, **kwargs):
+                    seen.update(kwargs)
+                    raise LAB.LabError("stop")
+                with patch.object(LAB_CLI, "compare_one", side_effect=capture), \
+                        redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    self.assertEqual(args.func(args), 2)
+                self.assertEqual(seen["fixture_metadata"],
+                                 {"viewport": {"width": 1280, "height": 1007}})
+
+    def test_missing_pillow_is_one_clear_preflight_error(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            args = LAB_CLI.build_parser().parse_args([
+                "compare", "--importer", "i", "--observer", "o",
+                "--file", str(root / "f.html"), "--output", str(root / "out")])
+            stderr = io.StringIO()
+            with patch.dict(sys.modules, {"PIL": None, "PIL.Image": None}), \
+                    patch.object(LAB_CLI, "pillow_missing", REAL_PILLOW_MISSING), \
+                    patch.object(LAB_CLI, "compare_one") as compare_one, \
+                    redirect_stderr(stderr):
+                self.assertEqual(args.func(args), 2)
+            compare_one.assert_not_called()
+            self.assertIn("Pillow is required", stderr.getvalue())
+            self.assertIn("install_visual_python_deps.sh", stderr.getvalue())
 
     def test_missing_corpus_fixture_is_counted_in_report(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

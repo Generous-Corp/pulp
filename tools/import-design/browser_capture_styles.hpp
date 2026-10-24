@@ -214,6 +214,11 @@ class CapturedStyleIndex {
     /// node, which means unknown — computed `appearance` cannot answer it.
     std::string control_theme(int node_index) const;
 
+    /// Whether a checkbox or radio is checked (`inputChecked`): the live state,
+    /// which a script or a click can leave different from the `checked`
+    /// attribute.
+    bool control_checked(int node_index) const;
+
     /// The product of every ancestor `transform` scale above `node_index`.
     ///
     /// Nested transforms multiply, so a run three levels down inherits the
@@ -280,6 +285,7 @@ class CapturedStyleIndex {
     std::vector<int> node_value_;                    ///< node index → nodeValue
     std::unordered_map<int, int> input_value_;       ///< node index → string
     std::vector<int> option_selected_;               ///< selected option nodes
+    std::vector<int> input_checked_;                 ///< checked input nodes
     std::unordered_map<int, std::string> control_theme_; ///< node → verdict
     std::unordered_map<int, int> backend_to_node_;
     std::vector<int> node_to_backend_;               ///< node index → backend

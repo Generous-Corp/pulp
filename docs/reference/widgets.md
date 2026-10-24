@@ -19,15 +19,28 @@ interactive version of this set (dark + light), build and run
 |--------|---------|------------------|--------|
 | `Knob` | Rotary parameter control | value 0–1, default, label, format fn, modulation rings (Saturn), custom SkSL shader, sprite strip, hover glow, wheel | `widgets.hpp` |
 | `Fader` | Linear parameter slider | value 0–1, orientation, thumb shape/size, skin overrides, shader/sprite, hover-grow, wheel | `widgets.hpp` |
-| `RangeSlider` | Min/max/step slider (HTML range) | min/max/step, orientation, accent, track thickness, quantize, hover-grow, wheel | `widgets.hpp` |
+| `RangeSlider` | Min/max/step slider (HTML range) | min/max/step, orientation, accent, track thickness, quantize, hover-grow, wheel, Chromium form-control skin (`UaSkin::chromium_refresh`) | `widgets.hpp` |
 | `DualRangeSlider` | Two-thumb min–max range slider | low/high values, no-cross clamp, orientation, accent, hover-grow, per-thumb drag | `widgets.hpp` |
 | `InlineValueEditor` | Inline readout that becomes an editor | label + value, click-to-type, range clamp + danger ring, suffix, change callback, configurable caret style + blink | `widgets.hpp` |
 | `PanControl` | Bipolar pan with centre detent | value −1..+1, hover-grow, wheel | `gap_widgets.hpp` |
 | `XYPad` | 2-D parameter surface | x/y 0–1, axis labels, drag + gesture callbacks | `widgets.hpp` |
 | `Toggle` | Animated on/off switch | on state, label, animated thumb + hover | `widgets.hpp` |
-| `Checkbox` | Check box | checked state, change callback | `widgets.hpp` |
+| `Checkbox` | Check box or radio button (HTML checkbox / radio) | checked, indeterminate, radio kind and group, accent, change callback, Chromium form-control skin (`UaSkin::chromium_refresh`) | `widgets.hpp` |
 | `Stepper` | `[−] value [+]` numeric stepper | value/range/step/suffix, click-to-type, decimal wheel, blinking caret | `gap_widgets.hpp` |
 | `NumberBox` | Compact `‹ value ›` numeric pill | value/range/step/suffix, chevron step zones, wheel | `gap_widgets.hpp` |
+
+### Browser form-control skins
+
+`RangeSlider` and `Checkbox` can wear Chromium's cross-platform form-control
+theme, so a design-imported `appearance: auto` control renders the way the
+browser drew it: `set_skin(UaSkin::chromium_refresh)`, plus
+`set_color_scheme` (CSS `color-scheme`) and `set_accent_color` (CSS
+`accent-color`). Disabled and hover come from the view's enabled and hover
+state. The geometry and per-state palette are pure functions,
+`RangeSlider::chromium_refresh_parts` and `Checkbox::chromium_refresh_parts`,
+so a test or the importer can inspect what will be drawn without painting.
+Like Chromium, an accent with under 3:1 contrast against the control's light
+colour switches the control to the dark palette (`ua_scheme_for_accent`).
 
 ## Buttons
 

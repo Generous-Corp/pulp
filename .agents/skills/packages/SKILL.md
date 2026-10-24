@@ -40,6 +40,47 @@ Or read the registry directly for full details:
 cat tools/packages/registry.json | python3 -m json.tool
 ```
 
+## Remote registry signing (registry owner)
+
+`pulp search` reaches the remote registry
+(`default_remote_registry_url()` in `tools/cli/package_registry.hpp`) only
+when the project has no `tools/packages/registry.json`. The CLI trusts that
+remote `registry.json` only with a verified `registry.json.sig` beside it: an
+Ed25519 signature over `"pulp-package-registry-sig-v1\n" + sha256_hex(bytes)
++ "\n"`, checked against `kPinnedRegistrySignerPublicKeyHex` in
+`tools/cli/package_registry_trust.hpp`. Enforcement is keyed on that pin:
+while it is empty (no key pinned yet) the registry is used unsigned and
+`pulp search` prints a one-line notice; once a key is pinned, unsigned or
+mismatching registries are refused (`--allow-unsigned-registry` overrides for
+one run, loudly), and a cached copy is reused only while the
+`registry-cache.json.sig` cached beside it still verifies against the pinned
+key (re-checked on every load, so writing the cache directory cannot forge
+trust).
+Pinning the key is therefore the switch that turns verification on; ship it
+only after `registry.json.sig` is published.
+
+Owner steps, once per registry change, with nothing but Python:
+
+```bash
+# once: create the seed (private; back it up) and pin the printed public key
+python3 tools/scripts/sign_package_registry.py keygen --out ~/.config/pulp/secrets/package-registry.seed
+#   -> paste the public key into kPinnedRegistrySignerPublicKeyHex and ship that CLI
+
+# every change: sign the exact bytes you publish, then publish both files
+python3 tools/scripts/sign_package_registry.py sign --key ~/.config/pulp/secrets/package-registry.seed registry.json
+#   -> registry.json.sig next to registry.json, same URL prefix
+
+# optional: prove the pair before publishing
+python3 tools/scripts/sign_package_registry.py verify --public-key <hex> registry.json registry.json.sig
+```
+
+Sign the bytes as served: any re-serialisation (pretty-printing, CRLF) after
+signing invalidates the signature. Rotating the key means pinning the new
+public key in a CLI release first, then signing with the new seed; CLIs still
+pinned to the old key will refuse the newly signed registry. The helper's
+`test_sign_package_registry.py` and the C++ registry tests share one fixed
+vector so the two implementations cannot drift apart silently.
+
 ## Package Categories
 
 | Category | Packages | What They Provide |
@@ -282,6 +323,25 @@ DEPENDENCIES, NOTICE, licensing) plus — if the CMake / pip / vendored
 alias differs from the canonical name — add the alias to
 `DEFAULT_ALIASES` in `tools/deps/audit.py` or the `external_names`
 list on the manifest entry.
+
+**Material embedded inside a fixture is redistribution too.** A
+self-contained HTML test fixture (a Claude standalone bundle, a panel with an
+inlined design pack) can carry base64 fonts and whole script builds such as
+React or `@babel/standalone`. Nothing scans for them, so `--strict` stays green
+while the repo ships them undeclared. Decode the bundle's assets and read each
+font's `name` table (IDs 0, 5, 13, 14) and each script's banner before
+committing. Then give every one the four attribution entries above (category
+`test-fixture`) and ship the license text beside the fixture. The
+`holdout/` panels under `test/fixtures/import-differential/` are the worked
+example. For an MIT script, fetch the package's own `LICENSE` from its
+registry tarball instead of reusing another entry's text: `@babel/standalone`
+wraps the same words on different lines from React's.
+
+**Edit `tools/deps/manifest.json` as text, not with `json.dump`.** The file is
+hand-formatted, with one-line `upstream` objects and inline lists, so a
+load-and-dump round trip rewrites every entry. A one-entry change then becomes
+a ~500-line diff. Splice the new block in, then `json.loads` the result to
+confirm it still parses.
 
 ## Bundled Toolchain Pins
 

@@ -43,6 +43,7 @@ from .model import (
     LabError,
     NativeNode,
 )
+from .native_transform import IDENTITY, Affine, node_transform, transformed_bounds
 from .recognition import source_recognition, unsupported_features
 from .reports import format_summary
 from .snapshot import (
@@ -243,6 +244,9 @@ def canonical_json_sha256(source: Path | bytes) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+_SESSION_TOKEN_KEYS = {"loaderId": "<loader>", "backendNodeId": "<backend-node>"}
+
+
 def snapshot_semantic_sha256(snapshot_bytes: bytes) -> str:
     """Hash a DOM snapshot with only its capture-local CDP identifiers fixed.
 
@@ -251,9 +255,11 @@ def snapshot_semantic_sha256(snapshot_bytes: bytes) -> str:
     DOM change, a different form-control theme verdict, or any other content
     inside the snapshot moved no determinism digest. This one covers the whole
     snapshot. Each document's `frameId` string is replaced by its document
-    position, and any `loaderId` value by a constant; both are opaque per-run
-    tokens that name no content. Everything else, including the string table
-    and the capture's `formControlTheme` report, enters the digest unchanged.
+    position, and any `loaderId` or `backendNodeId` value by a constant; they
+    are opaque per-run tokens that name no content (Chromium hands out backend
+    node ids in a run-dependent order). Everything else, including the string
+    table and the capture's `formControlTheme` report, enters the digest
+    unchanged.
     """
     document = json.loads(snapshot_bytes)
     if not isinstance(document, dict):
@@ -269,7 +275,8 @@ def snapshot_semantic_sha256(snapshot_bytes: bytes) -> str:
 
     def scrub(value: Any) -> Any:
         if isinstance(value, dict):
-            return {key: ("<loader>" if key == "loaderId" else scrub(item))
+            return {key: (_SESSION_TOKEN_KEYS[key] if key in _SESSION_TOKEN_KEYS
+                          else scrub(item))
                     for key, item in value.items()}
         if isinstance(value, list):
             return [scrub(item) for item in value]
@@ -354,20 +361,23 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
     result: list[NativeNode] = []
 
     def visit(node: dict[str, Any], parent: str | None,
-              parent_captured: bool = False) -> None:
+              parent_captured: bool = False, parent_matrix: Affine = IDENTITY) -> None:
         anchor = str(node.get("stable_anchor_id") or "")
         attributes = node.get("attributes") if isinstance(
             node.get("attributes"), dict) else {}
         node_type = str(node.get("type") or "unknown")
         text = str(node.get("content") or node.get("text") or "").strip()
+        style = node.get("style") if isinstance(node.get("style"), dict) else {}
+        box = layout_by_anchor.get(anchor)
+        matrix = node_transform(parent_matrix, style.get("transform"), box)
         result.append(NativeNode(
             anchor=anchor,
             node_type=node_type,
             name=str(node.get("name") or ""),
             text=text,
             parent_anchor=parent,
-            style=node.get("style") if isinstance(node.get("style"), dict) else {},
-            bounds=layout_by_anchor.get(anchor),
+            style=style,
+            bounds=transformed_bounds(matrix, box),
             backend_node_id=(
                 int(node.get("attributes", {}).get("backend_node_id"))
                 if isinstance(node.get("attributes"), dict)
@@ -379,7 +389,7 @@ def native_nodes(ir: dict[str, Any], layout: dict[str, Any]) -> list[NativeNode]
         ))
         for child in node.get("children", []):
             if isinstance(child, dict):
-                visit(child, anchor or parent, "captured_element" in attributes)
+                visit(child, anchor or parent, "captured_element" in attributes, matrix)
 
     root = ir.get("root")
     if isinstance(root, dict):
@@ -1493,10 +1503,17 @@ def compare_one(
     return report
 
 
-def source_files(root: Path) -> list[Path]:
+HOLDOUT_DIRECTORY = "holdout"
+
+
+def source_files(root: Path, include_holdout: bool = False) -> list[Path]:
     # JSX/TSX requires a build/staging contract before it becomes runnable
     # browser input. The first slice compares only self-contained HTML.
+    # Held-out fixtures under a `holdout/` directory score only when asked
+    # for, so iterating on a corpus root cannot tune against them.
     suffixes = {".html", ".htm"}
     return sorted(
         path for path in root.rglob("*")
-        if path.is_file() and path.suffix.lower() in suffixes)
+        if path.is_file() and path.suffix.lower() in suffixes
+        and (include_holdout
+             or HOLDOUT_DIRECTORY not in path.relative_to(root).parts[:-1]))
