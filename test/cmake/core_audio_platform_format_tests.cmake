@@ -246,6 +246,11 @@ add_test(
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_archive_symbol_closure_check.py")
 set_tests_properties(archive-symbol-closure-selftest PROPERTIES LABELS "state;link-closure")
+add_test(
+    NAME nm-symbols-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_nm_symbols.py")
+set_tests_properties(nm-symbols-selftest PROPERTIES LABELS "state;link-closure")
 
 # The one parameter payload (param_json) and the pin that keeps its wire field
 # set from drifting — the bridge and the inspector both serialize through it.
