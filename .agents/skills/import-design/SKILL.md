@@ -20,6 +20,12 @@ The rebuild control must replay the complete fixture state, including secondary
 meter state such as the `peak` value; matching only a primary value changes the
 rendered workload and invalidates retained-versus-rebuild comparisons.
 
+The benchmark's host probes also compile into the Android APK, where
+`__linux__` is defined but bionic declares `getloadavg` only from API 29
+(minSdk is 26). Guard a Linux-only libc call with
+`defined(__linux__) && !defined(__ANDROID__)`; `android-build` is skipped
+on most PRs, so the break first shows on `main`.
+
 To measure importer output rather than the built-in panel, pass
 `--ir=<design.ir.json>` (baked-native and baked-native-rebuild only; `live`
 and `baked-cpp` refuse it because neither can be built from a DesignIR) with

@@ -4738,6 +4738,15 @@ uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
 
+- **A workflow that runs a test binary by name breaks when that suite joins
+  a test group.** `pulp_add_test_suite(... GROUP <group>)` compiles the
+  member into the group executable, so `./build/test/<member>` no longer
+  exists. The tracing workflow kept calling the old session binary for a
+  month (exit 127) after its build step had been moved to the groups. Run a
+  member as `./build/test/<group> -# "[#<source stem>]~[.]"`, the spec
+  ctest uses; Catch2 fails a spec that matches no case, so a later move
+  fails loudly.
+
 - **Node 20's npm 10 cannot resolve some packages fresh; a lockless `npm
   install` job reds permanently while passing on a dev machine.** npm 10
   crashes in `#loadPeerSet` with "Cannot read properties of null (reading
