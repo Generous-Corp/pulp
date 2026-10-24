@@ -167,6 +167,16 @@ set_tests_properties(pulp-windows-target-arch PROPERTIES
     LABELS "cmake;windows;packaging"
     TIMEOUT 30)
 
+# The platform a source install stamps: the real install-time script, run
+# under `cmake -P` for every target's OS/architecture, so a name the script
+# refuses fails here rather than in a native Intel or Android install.
+add_test(NAME pulp-source-install-platform
+    COMMAND ${CMAKE_COMMAND} -DPULP_TEST_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_source_install_platform.cmake)
+set_tests_properties(pulp-source-install-platform PROPERTIES
+    LABELS "cmake;packaging"
+    TIMEOUT 60)
+
 add_test(NAME pulp-gpu-provider-decision
     COMMAND ${CMAKE_COMMAND} -P
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_gpu_provider_decision.cmake)
