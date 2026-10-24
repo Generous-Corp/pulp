@@ -82,21 +82,21 @@ RetainedChargeOracle exact_owned_store_charge(
         store_bytes<float>(prepared.finalize_zero_elements),
         store_bytes<float*>(channels),
         store_bytes<const float*>(channels),
-        3u * store_bytes<double>(bins), // coordinator phases
-        store_bytes<float>(bins), // coordinator reference magnitude
-        store_bytes<int>(bins), // coordinator peaks
-        store_bytes<float>(bins), // transient history
-        store_bytes<float>(channels * capture_bins), // freeze capture magnitudes
-        store_bytes<double>(bins), // freeze newest phase increment
+        3u * store_bytes<double>(bins),                 // coordinator phases
+        store_bytes<float>(bins),                       // coordinator reference magnitude
+        store_bytes<int>(bins),                         // coordinator peaks
+        store_bytes<float>(bins),                       // transient history
+        store_bytes<float>(channels * capture_bins),    // freeze capture magnitudes
+        store_bytes<double>(bins),                      // freeze newest phase increment
         store_bytes<std::complex<float>>(channel_bins), // freeze previous frame
-        store_bytes<float>(channel_bins), // freeze held magnitudes
-        store_bytes<double>(channel_bins), // freeze held phases
-        store_bytes<double>(bins), // freeze instantaneous frequency
-        store_bytes<float>(channel_bins), // freeze staged-restore slot
+        store_bytes<float>(channel_bins),               // freeze held magnitudes
+        store_bytes<double>(channel_bins),              // freeze held phases
+        store_bytes<double>(bins),                      // freeze instantaneous frequency
+        store_bytes<float>(channel_bins),               // freeze staged-restore slot
         store_bytes<double>(channel_bins),
         store_bytes<double>(bins),
-        3u * store_bytes<float>(bins), // envelope scratch vectors
-        store_bytes<std::complex<float>>(fft_size), // envelope cepstrum
+        3u * store_bytes<float>(bins),                    // envelope scratch vectors
+        store_bytes<std::complex<float>>(fft_size),       // envelope cepstrum
         store_bytes<std::complex<double>>(fft_size / 2u), // envelope twiddles
     };
     for (const auto bytes : base_stores) result.total += bytes;
