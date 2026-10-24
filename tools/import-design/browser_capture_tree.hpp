@@ -141,6 +141,17 @@ struct PaintedTreeCounts {
     /// reason the emission gave up its hierarchy. Zero means nothing was
     /// flattened.
     int flattened_overlapping_reorders = 0;
+    /// Of a flattened emission: groups kept nested because they composite as
+    /// one layer (`opacity < 1`, `mix-blend-mode`, `filter`,
+    /// `backdrop-filter`, a mask). Hung off the root instead, their
+    /// descendants would paint at full strength beside an empty translucent
+    /// box.
+    int isolating_groups_nested = 0;
+    /// Of a flattened emission: such groups left flat because nesting them
+    /// would draw something the browser did not. Each carries
+    /// `isolating_group_refused` naming why, and its descendants lose the
+    /// group's compositing.
+    int isolating_groups_refused = 0;
     /// Nodes whose type lengths were multiplied by the scale their box already
     /// carried from an ancestor `transform`. Chrome scales glyphs along with
     /// the box; the snapshot reports the box post-transform and `font-size`

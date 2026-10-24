@@ -161,6 +161,7 @@ endif()
 # can be tested without launching Chromium.
 add_executable(pulp-test-browser-capture-import
     test_browser_capture_backdrop_filter.cpp
+    test_browser_capture_group_opacity.cpp
     test_browser_capture_gradient_border.cpp
     test_browser_capture_ir.cpp
     test_browser_knob_sprites.cpp
@@ -188,6 +189,7 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/import_png_codec.cpp)
 pulp_test_data(pulp-test-browser-capture-import NO_DEFINE
     SOURCES test_browser_capture_backdrop_filter.cpp
+        test_browser_capture_group_opacity.cpp
         test_browser_capture_gradient_border.cpp test_browser_capture_ir.cpp
         test_browser_capture_text_metrics.cpp test_browser_capture_tree.cpp
         test_browser_capture_svg_render.cpp

@@ -3193,6 +3193,10 @@
           {
             "name": "--no-load",
             "kind": "flag"
+          },
+          {
+            "name": "--in-process",
+            "kind": "flag"
           }
         ],
         "subcommands": []
@@ -3260,6 +3264,10 @@
           },
           {
             "name": "--refresh",
+            "kind": "flag"
+          },
+          {
+            "name": "--allow-unsigned-registry",
             "kind": "flag"
           }
         ],
@@ -4971,7 +4979,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.490.1",
+        "version": "0.491.3",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4986,13 +4994,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.490.1",
+        "catalog_version": "0.491.3",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.490.1",
+        "version": "0.491.3",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

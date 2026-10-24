@@ -12,7 +12,12 @@ undefined symbols of every object and fails on any that pulp-view-audio
 defines, naming the object and the demangled symbol. "Defines" includes weak
 definitions (W/V): Meter's typeinfo is often weak, and a library that needs it
 needs pulp-view-audio. The reading and the verdict are
-archive_symbol_closure_check.py's, run with --forbidden-defines any. A library may carry a
+archive_symbol_closure_check.py's, run with --forbidden-defines any and
+--weak-rtti-contamination. A checked library's own weak definition of an
+inline function view-audio also emits resolves its reference and is not
+flagged, but its own weak copy of a view-audio class's typeinfo, vtable or
+typeinfo name (_ZTI/_ZTV/_ZTS) is: it means the library was compiled against
+that class's definition. A library may carry a
 named debt (--debt LIB=REASON) while a known edge is being removed; a debt that
 no longer matches anything is itself a failure, so a fixed edge cannot leave a
 stale exemption behind.
@@ -46,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     checker = pathlib.Path(__file__).with_name("archive_symbol_closure_check.py")
     command = [sys.executable, str(checker), "--nm", args.nm, "--forbidden", str(args.audio),
-               "--forbidden-defines", "any", "--no-control"]
+               "--forbidden-defines", "any", "--weak-rtti-contamination", "--no-control"]
     for item in args.check:
         command.extend(["--check", item])
     for item in args.debt:

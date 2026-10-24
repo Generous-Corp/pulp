@@ -760,3 +760,28 @@ TEST_CASE("pulp content validation rejects sample-bank symlink escapes",
 
     REQUIRE(cmd_content({"validate", pack.path.string(), "--json"}) == 1);
 }
+
+TEST_CASE("pulp content preview rejects a manifest whose string never closes",
+          "[cli][content][attack-surface]") {
+    // A downloaded pack manifest is attacker-controlled. An unterminated
+    // string used to carry the JSON parser past the end of the manifest
+    // buffer; it must now surface as an ordinary parse error.
+    const std::string unterminated = R"json({"schema": "pulp-package-v1", "id": "never-closed)json";
+    REQUIRE_THROWS_AS(choc::json::parse(std::string_view(unterminated)), choc::json::ParseError);
+
+    TempDir data;
+    TempDir pack;
+    write_file(pack.path / "pulp.package.json", unterminated);
+
+    ContentCapabilityManifest plugin;
+    plugin.plugin_id = "dev.pulp.tests.unterminated-target";
+    plugin.capabilities = {"content.presets.v1"};
+    plugin.content_kinds = {"presets"};
+
+    const auto preview = pulp::state::preview_content_pack_install(pack.path, plugin, data.path);
+    REQUIRE_FALSE(preview.ok);
+    REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& issue) {
+        return issue.rfind("invalid-json", 0) == 0;
+    }));
+    REQUIRE_FALSE(fs::exists(data.path / "Content"));
+}

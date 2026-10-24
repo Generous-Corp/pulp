@@ -1,0 +1,39 @@
+{
+  "schema": "pulp-importer-differential-holdout-receipt-v1",
+  "fixture": "lattice-panel.html",
+  "source_sha256": "d0f2bf0f297fc81852fc4bc2b01f526ab7a9c59ecb19b87106da6ccb364fe2d9",
+  "source_bytes": 833090,
+  "campaign": {
+    "command": "analyze-corpus",
+    "runs": 3,
+    "cache_state": "unknown",
+    "pulp_commit": "f3119b3de37a518e186cf1203a6461ab8ba470e2",
+    "host_class": "macOS arm64",
+    "viewport": {
+      "width": 1280,
+      "height": 1127
+    }
+  },
+  "determinism": {
+    "status": "not-measured",
+    "completed_runs": 0,
+    "reason": "the lab refused every run before scoring"
+  },
+  "runs": [
+    {
+      "run": 1,
+      "status": "lab-error",
+      "error": "native authored panel bounds differ from authenticated frame: expected (0.0, 0.0, 760.0, 1006.703125), got (0.0, 0.0, 760.0, 1006.7)"
+    },
+    {
+      "run": 2,
+      "status": "lab-error",
+      "error": "native authored panel bounds differ from authenticated frame: expected (0.0, 0.0, 760.0, 1006.703125), got (0.0, 0.0, 760.0, 1006.7)"
+    },
+    {
+      "run": 3,
+      "status": "lab-error",
+      "error": "native authored panel bounds differ from authenticated frame: expected (0.0, 0.0, 760.0, 1006.703125), got (0.0, 0.0, 760.0, 1006.7)"
+    }
+  ]
+}
