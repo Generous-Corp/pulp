@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <ctime>
 #include <thread>
 #include <vector>
 
@@ -79,6 +80,64 @@ TEST_CASE("A restore waits for an in-flight render to finish",
     REQUIRE(restore_acquired.load(std::memory_order_acquire));
 }
 
+TEST_CASE("A waiting restore refuses new renders until it completes",
+          "[format][state-restore-gate]") {
+    StateRestoreGate gate;
+    std::atomic<bool> restore_acquired{false};
+    std::atomic<bool> release_restore{false};
+
+    std::thread restorer;
+    {
+        auto first = gate.lock_for_render();
+        REQUIRE(static_cast<bool>(first));
+        restorer = std::thread([&] {
+            auto restore = gate.lock_for_restore();
+            restore_acquired.store(true, std::memory_order_release);
+            while (!release_restore.load(std::memory_order_acquire))
+                std::this_thread::yield();
+        });
+        // Wait until the restorer has raised its claim (it is spinning on the
+        // in-flight render), then a fresh render must be refused so the restore
+        // cannot be starved by back-to-back audio blocks.
+        bool refused = false;
+        for (int i = 0; i < 2000 && !refused; ++i) {
+            auto later = gate.lock_for_render();
+            refused = !static_cast<bool>(later);
+            if (!refused)
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        REQUIRE(refused);
+        REQUIRE_FALSE(restore_acquired.load(std::memory_order_acquire));
+    }
+    // The first render released: the restore now owns the gate.
+    while (!restore_acquired.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    REQUIRE_FALSE(static_cast<bool>(gate.lock_for_render()));
+    release_restore.store(true, std::memory_order_release);
+    restorer.join();
+    REQUIRE(static_cast<bool>(gate.lock_for_render()));
+}
+
+TEST_CASE("Two restores never hold the gate at once", "[format][state-restore-gate]") {
+    StateRestoreGate gate;
+    std::atomic<int> inside{0};
+    std::atomic<int> overlaps{0};
+    auto restorer = [&] {
+        for (int i = 0; i < 200; ++i) {
+            auto restore = gate.lock_for_restore();
+            if (inside.fetch_add(1, std::memory_order_acq_rel) != 0)
+                overlaps.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+            inside.fetch_sub(1, std::memory_order_acq_rel);
+        }
+    };
+    std::thread a(restorer), b(restorer);
+    a.join();
+    b.join();
+    REQUIRE(overlaps.load() == 0);
+    REQUIRE(static_cast<bool>(gate.lock_for_render()));
+}
+
 TEST_CASE("Restores and renders never overlap under contention",
           "[format][state-restore-gate]") {
     StateRestoreGate gate;
@@ -92,8 +151,8 @@ TEST_CASE("Restores and renders never overlap under contention",
     //
     // The writer must release the gate between restores and stay off it long
     // enough for a reader to get in. A writer that re-acquires immediately
-    // starves them: shared_mutex favours a waiting writer, so try_lock_shared
-    // keeps failing and every render is refused — which would leave this test
+    // starves them: the gate favours a waiting restore, so every render
+    // attempt is refused — which would leave this test
     // asserting nothing at all (see the renders_run guard below).
     std::thread writer([&] {
         for (int i = 0; i < 50; ++i) {
@@ -111,8 +170,8 @@ TEST_CASE("Restores and renders never overlap under contention",
     std::vector<std::thread> readers;
     for (int t = 0; t < 3; ++t) {
         readers.emplace_back([&] {
-            // Bound shared-lock attempts so readers cannot indefinitely starve
-            // a writer on platforms where shared_mutex has reader preference.
+            // Bound render attempts so readers cannot indefinitely starve
+            // the writer.
             for (int attempt = 0; attempt < 5000 && !writer_done.load(std::memory_order_acquire);
                  ++attempt) {
                 auto render = gate.lock_for_render();
@@ -173,3 +232,36 @@ TEST_CASE("Silence zeroes every output channel",
     REQUIRE(out_r[0] == 0.0f);
     REQUIRE(out_r[1] == 0.0f);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("A restore waiting on a long render sleeps instead of spinning",
+          "[format][state-restore][gate]") {
+    // A render can hold the gate for a whole block. The restoring thread must
+    // block until that render finishes, not burn a core yielding in a loop.
+    StateRestoreGate gate;
+    std::atomic<bool> restored{false};
+    double restore_cpu_ms = 0.0;
+    std::thread restorer;
+    {
+        auto render = gate.lock_for_render();
+        REQUIRE(render);
+        restorer = std::thread([&] {
+            timespec start{}, end{};
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            {
+                auto restore = gate.lock_for_restore();
+                restored.store(true);
+            }
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            restore_cpu_ms = static_cast<double>(end.tv_sec - start.tv_sec) * 1e3 +
+                             static_cast<double>(end.tv_nsec - start.tv_nsec) / 1e6;
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        REQUIRE_FALSE(restored.load());
+    } // the render finishes here
+    restorer.join();
+    REQUIRE(restored.load());
+    // A yield loop spends most of the 300 ms on the CPU.
+    REQUIRE(restore_cpu_ms < 60.0);
+}
+#endif

@@ -159,7 +159,7 @@ inline void warn_if_unexpected_cpu_fallback(const GpuHostDecision& d,
 /// adapters keep it next to their host and reset it in their close/removed
 /// path. Dropping it is enough: no callback can fire afterwards.
 [[nodiscard]] inline view::PluginViewHost::GpuSurfaceSubscription
-bind_gpu_surface(view::PluginViewHost& host, view::ScriptedUiSession* session,
+bind_gpu_surface(view::PluginViewHost& host, view::ScriptedEditorSession* session,
                  const GpuHostDecision& decision, const char* format_tag) {
     using State = view::PluginViewHost::GpuSurfaceState;
     const bool expected_gpu = decision.use_gpu;
