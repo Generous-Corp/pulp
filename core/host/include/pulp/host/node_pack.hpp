@@ -17,6 +17,7 @@
 #include <pulp/native_components/pulp_node_v1.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -177,6 +178,7 @@ enum class NodePackError {
     UnsupportedRequirements = 8, // capabilities / RT / resource needs unsupported
     NodeMetadataMismatch = 9, // manifest node declarations != loaded descriptor
     PlatformPolicyDenied = 10, // native artifact is forbidden on this platform/origin
+    BinaryChanged = 11,    // the mapped module is not the file whose bytes were verified
 };
 
 struct NodePackLoadResult {
@@ -195,10 +197,75 @@ bool parse_node_pack_manifest(const std::string& json, NodePackManifest& out);
 // runtime requirements. Publishers sign exactly these bytes.
 std::vector<std::uint8_t> node_pack_signed_message(const NodePackManifest& m);
 
+// The pack binary, opened once and hashed from that open file. The load stage
+// maps exactly these bytes, so a file swapped at the path after verification
+// is never the code that runs:
+//   - macOS / Linux: the dynamic loader is handed the descriptor path
+//     (/dev/fd/N, /proc/self/fd/N), which the kernel resolves to this open file
+//     instead of walking the pack directory again. dyld maps the inode behind
+//     the descriptor even when the directory entry already points elsewhere.
+//   - Windows: the file is held open without FILE_SHARE_WRITE / FILE_SHARE_DELETE
+//     so the path cannot be rewritten or replaced while it is held, and the
+//     mapped module's volume + file index are compared with this handle after
+//     LoadLibrary; a mismatch unloads it and reports BinaryChanged.
+// The file stays open for as long as the pack is loaded; unload_node_pack
+// releases it.
+struct NodePackVerifyResult;
+
+class VerifiedNodePackBinary {
+public:
+    VerifiedNodePackBinary();
+    ~VerifiedNodePackBinary();
+    VerifiedNodePackBinary(VerifiedNodePackBinary&&) noexcept;
+    VerifiedNodePackBinary& operator=(VerifiedNodePackBinary&&) noexcept;
+    VerifiedNodePackBinary(const VerifiedNodePackBinary&) = delete;
+    VerifiedNodePackBinary& operator=(const VerifiedNodePackBinary&) = delete;
+
+    bool is_open() const;
+    // Path that was opened (manifest_dir + "/" + manifest.binary).
+    const std::string& path() const;
+    // SHA-256 of the bytes actually read from the open file.
+    const std::string& sha256_hex() const;
+
+    // Opaque on-disk handle; the loader's platform helpers operate on it.
+    struct Impl;
+
+private:
+    std::unique_ptr<Impl> impl_;
+
+    friend NodePackVerifyResult verify_node_pack_binary(const std::string&,
+                                                        const NodePackManifest&);
+    friend NodePackLoadResult load_verified_node_pack(VerifiedNodePackBinary,
+                                                      const NodePackManifest&,
+                                                      const NodePackTrust&,
+                                                      const NodePackHostPolicy&);
+};
+
+struct NodePackVerifyResult {
+    // Ok, LoadFailed (cannot open, or not a regular file) or HashMismatch.
+    NodePackError error = NodePackError::LoadFailed;
+    VerifiedNodePackBinary binary;  // open only when error == Ok
+};
+
+// Stage one of loading: open the pack binary once and compare the hash of the
+// bytes read from that open file with the manifest's signed hash. Does not
+// check trust or policy; load_verified_node_pack re-checks both.
+NodePackVerifyResult verify_node_pack_binary(const std::string& manifest_dir,
+                                             const NodePackManifest& manifest);
+
+// Stage two: re-run the manifest trust and policy checks, then map the bytes
+// behind `binary` and resolve the node entry. Takes ownership of the open
+// file; it is released on any failure and otherwise by unload_node_pack.
+NodePackLoadResult load_verified_node_pack(VerifiedNodePackBinary binary,
+                                           const NodePackManifest& manifest,
+                                           const NodePackTrust& trust,
+                                           const NodePackHostPolicy& policy);
+
 // Verify trust + integrity, then load the binary and resolve the node entry.
 // `manifest_dir` is the directory containing the manifest and the binary. No
 // code is loaded unless the signer is trusted, the signature is authentic, and
-// the on-disk binary matches the signed hash.
+// the binary matches the signed hash; the two stages above are composed so the
+// bytes that were hashed are the bytes that are mapped.
 NodePackLoadResult load_node_pack(const std::string& manifest_dir,
                                   const NodePackManifest& manifest,
                                   const NodePackTrust& trust);
@@ -207,7 +274,8 @@ NodePackLoadResult load_node_pack(const std::string& manifest_dir,
                                   const NodePackTrust& trust,
                                   const NodePackHostPolicy& policy);
 
-// Unload a previously loaded pack (dlclose/FreeLibrary). Safe on nullptr.
+// Unload a previously loaded pack (dlclose/FreeLibrary) and release the open
+// file it was mapped from. Safe on nullptr.
 void unload_node_pack(void* handle);
 
 }  // namespace pulp::host

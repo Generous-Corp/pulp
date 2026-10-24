@@ -7,16 +7,22 @@
 #include <choc/text/choc_JSON.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace pulp::host {
@@ -41,21 +47,6 @@ std::vector<std::uint8_t> hex_decode(const std::string& hex) {
     return out;
 }
 
-std::vector<std::uint8_t> read_file_bytes(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return {};
-    return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(f)),
-                                     std::istreambuf_iterator<char>());
-}
-
-// Platform dlopen shim. Returns an opaque handle or nullptr.
-void* dl_open(const std::string& path) {
-#if defined(_WIN32)
-    return reinterpret_cast<void*>(::LoadLibraryA(path.c_str()));
-#else
-    return ::dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
-#endif
-}
 void* dl_sym(void* handle, const char* name) {
 #if defined(_WIN32)
     return reinterpret_cast<void*>(
@@ -262,67 +253,261 @@ std::vector<std::uint8_t> node_pack_signed_message(const NodePackManifest& m) {
     return std::vector<std::uint8_t>(s.begin(), s.end());
 }
 
-NodePackLoadResult load_node_pack(const std::string& manifest_dir,
-                                  const NodePackManifest& manifest,
-                                  const NodePackTrust& trust) {
-    return load_node_pack(manifest_dir, manifest, trust, NodePackHostPolicy{});
-}
+namespace {
 
-NodePackLoadResult load_node_pack(const std::string& manifest_dir,
-                                  const NodePackManifest& manifest,
-                                  const NodePackTrust& trust,
-                                  const NodePackHostPolicy& policy) {
-    NodePackLoadResult r;
-
-    if (manifest.abi_major != PULP_NODE_V1_ABI_MAJOR) {
-        r.error = NodePackError::AbiMismatch;
-        return r;
-    }
+// Trust + policy checks that need only the manifest. Run before the binary
+// is opened and again by load_verified_node_pack so the second stage is never
+// a bypass.
+NodePackError check_manifest_admission(const NodePackManifest& manifest,
+                                       const NodePackTrust& trust,
+                                       const NodePackHostPolicy& policy) {
+    if (manifest.abi_major != PULP_NODE_V1_ABI_MAJOR) return NodePackError::AbiMismatch;
     if (manifest.signer_public_key.size() != runtime::ed25519_public_key_size ||
         manifest.signature.size() != runtime::ed25519_signature_size ||
         !has_valid_node_declarations(manifest.nodes) ||
         !has_valid_resource_declarations(manifest.resources)) {
-        r.error = NodePackError::ManifestInvalid;
-        return r;
+        return NodePackError::ManifestInvalid;
     }
     if (!generated_device_admission(policy.platform, GeneratedDeviceArtifact::NativePack,
                                     policy.origin)
              .allowed) {
-        r.error = NodePackError::PlatformPolicyDenied;
-        return r;
+        return NodePackError::PlatformPolicyDenied;
     }
-    if (!key_is_trusted(manifest.signer_public_key, trust)) {
-        r.error = NodePackError::UntrustedSigner;
-        return r;
-    }
+    if (!key_is_trusted(manifest.signer_public_key, trust)) return NodePackError::UntrustedSigner;
     const std::vector<std::uint8_t> message = node_pack_signed_message(manifest);
     if (!runtime::ed25519_verify(
             manifest.signer_public_key.data(), manifest.signer_public_key.size(),
             manifest.signature.data(), manifest.signature.size(),
             message.data(), message.size())) {
-        r.error = NodePackError::BadSignature;
-        return r;
+        return NodePackError::BadSignature;
     }
-    if (!requirements_are_supported(manifest, policy)) {
-        r.error = NodePackError::UnsupportedRequirements;
-        return r;
-    }
+    if (!requirements_are_supported(manifest, policy)) return NodePackError::UnsupportedRequirements;
+    return NodePackError::Ok;
+}
 
-    // Only now do we touch the binary. Verify its hash matches the signed value.
-    const std::string binary_path = manifest_dir + "/" + manifest.binary;
-    const std::vector<std::uint8_t> bytes = read_file_bytes(binary_path);
-    if (bytes.empty()) {
+}  // namespace
+
+// ── Verified binary: open once, hash from the open file, map that file ──────
+
+struct VerifiedNodePackBinary::Impl {
+#if defined(_WIN32)
+    HANDLE file = INVALID_HANDLE_VALUE;
+    bool is_open() const { return file != INVALID_HANDLE_VALUE; }
+    void close() {
+        if (is_open()) ::CloseHandle(file);
+        file = INVALID_HANDLE_VALUE;
+    }
+#else
+    int fd = -1;
+    bool is_open() const { return fd >= 0; }
+    void close() {
+        if (is_open()) ::close(fd);
+        fd = -1;
+    }
+#endif
+    std::string path;
+    std::string sha256_hex;
+    ~Impl() { close(); }
+};
+
+namespace {
+
+using BinaryImpl = VerifiedNodePackBinary::Impl;
+
+// Opens `path` read-only and keeps the descriptor; refuses anything that is
+// not a regular file. On Windows the open shares reads only, so the file can
+// be neither rewritten nor renamed away while the handle is held.
+bool open_regular_file(BinaryImpl& impl, const std::string& path) {
+#if defined(_WIN32)
+    impl.file = ::CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (impl.file == INVALID_HANDLE_VALUE) return false;
+    if (::GetFileType(impl.file) != FILE_TYPE_DISK) {
+        impl.close();
+        return false;
+    }
+    return true;
+#else
+    impl.fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (impl.fd < 0) return false;
+    struct stat st{};
+    if (::fstat(impl.fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        impl.close();
+        return false;
+    }
+    return true;
+#endif
+}
+
+// Reads the whole open file. The bytes come from the descriptor, never from a
+// second walk of the path.
+bool read_open_file(BinaryImpl& impl, std::vector<std::uint8_t>& out) {
+    out.clear();
+    std::uint8_t chunk[64 * 1024];
+#if defined(_WIN32)
+    for (;;) {
+        DWORD got = 0;
+        if (!::ReadFile(impl.file, chunk, static_cast<DWORD>(sizeof(chunk)), &got, nullptr)) return false;
+        if (got == 0) break;
+        out.insert(out.end(), chunk, chunk + got);
+    }
+    return true;
+#else
+    for (;;) {
+        const ssize_t got = ::read(impl.fd, chunk, sizeof(chunk));
+        if (got < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        if (got == 0) break;
+        out.insert(out.end(), chunk, chunk + got);
+    }
+    return true;
+#endif
+}
+
+#if defined(_WIN32)
+bool same_file_identity(HANDLE a, HANDLE b) {
+    BY_HANDLE_FILE_INFORMATION ia{}, ib{};
+    if (!::GetFileInformationByHandle(a, &ia) || !::GetFileInformationByHandle(b, &ib)) return false;
+    return ia.dwVolumeSerialNumber == ib.dwVolumeSerialNumber &&
+           ia.nFileIndexHigh == ib.nFileIndexHigh && ia.nFileIndexLow == ib.nFileIndexLow;
+}
+#endif
+
+// Maps the verified file. Sets `error` and returns nullptr on failure.
+void* dl_open_verified(BinaryImpl& impl, NodePackError& error) {
+#if defined(_WIN32)
+    // The held handle blocks writes and renames at `path`, so LoadLibrary maps
+    // the same file; the identity check below proves it rather than assuming.
+    HMODULE module = ::LoadLibraryA(impl.path.c_str());
+    if (module == nullptr) {
+        error = NodePackError::LoadFailed;
+        return nullptr;
+    }
+    char module_path[MAX_PATH * 4] = {};
+    const DWORD len = ::GetModuleFileNameA(module, module_path, static_cast<DWORD>(sizeof(module_path)));
+    bool same = false;
+    if (len > 0 && len < sizeof(module_path)) {
+        HANDLE mapped = ::CreateFileA(module_path, GENERIC_READ,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (mapped != INVALID_HANDLE_VALUE) {
+            same = same_file_identity(impl.file, mapped);
+            ::CloseHandle(mapped);
+        }
+    }
+    if (!same) {
+        ::FreeLibrary(module);
+        error = NodePackError::BinaryChanged;
+        return nullptr;
+    }
+    return reinterpret_cast<void*>(module);
+#else
+    char fd_path[64] = {};
+#if defined(__APPLE__)
+    // dyld opens this path, which devfs resolves to the held descriptor's
+    // vnode, and keys the load on that inode: a different file now sitting at
+    // the directory entry is not what gets mapped (measured, not assumed).
+    std::snprintf(fd_path, sizeof(fd_path), "/dev/fd/%d", impl.fd);
+#else
+    std::snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", impl.fd);
+    // glibc keys already-loaded objects by the name string they were opened
+    // with. The descriptor stays open while a pack is loaded, so a live pack
+    // never shares this name; an object dlclose() could not unload still can.
+    // Refuse that stale alias instead of handing back the wrong image.
+    if (void* probe = ::dlopen(fd_path, RTLD_NOW | RTLD_NOLOAD)) {
+        bool other_name = false;
+        if (void* sym = ::dlsym(probe, "pulp_node_v1_entry")) {
+            Dl_info info{};
+            if (::dladdr(sym, &info) != 0 && info.dli_fname != nullptr &&
+                std::strcmp(info.dli_fname, fd_path) != 0) {
+                other_name = true;  // the same inode, loaded under another path
+            }
+        }
+        ::dlclose(probe);
+        if (!other_name) {
+            error = NodePackError::BinaryChanged;
+            return nullptr;
+        }
+    }
+#endif
+    void* handle = ::dlopen(fd_path, RTLD_NOW | RTLD_LOCAL);
+    if (handle == nullptr) error = NodePackError::LoadFailed;
+    return handle;
+#endif
+}
+
+// Open files behind loaded packs, released by unload_node_pack. A pack loaded
+// twice holds two entries, matching the loader's own reference count.
+std::mutex& loaded_binaries_mutex() {
+    static std::mutex m;
+    return m;
+}
+std::vector<std::pair<void*, VerifiedNodePackBinary>>& loaded_binaries() {
+    static std::vector<std::pair<void*, VerifiedNodePackBinary>> v;
+    return v;
+}
+
+}  // namespace
+
+VerifiedNodePackBinary::VerifiedNodePackBinary() : impl_(std::make_unique<Impl>()) {}
+VerifiedNodePackBinary::~VerifiedNodePackBinary() = default;
+VerifiedNodePackBinary::VerifiedNodePackBinary(VerifiedNodePackBinary&&) noexcept = default;
+VerifiedNodePackBinary& VerifiedNodePackBinary::operator=(VerifiedNodePackBinary&&) noexcept = default;
+
+bool VerifiedNodePackBinary::is_open() const { return impl_ && impl_->is_open(); }
+const std::string& VerifiedNodePackBinary::path() const {
+    static const std::string empty;
+    return impl_ ? impl_->path : empty;
+}
+const std::string& VerifiedNodePackBinary::sha256_hex() const {
+    static const std::string empty;
+    return impl_ ? impl_->sha256_hex : empty;
+}
+
+NodePackVerifyResult verify_node_pack_binary(const std::string& manifest_dir,
+                                             const NodePackManifest& manifest) {
+    NodePackVerifyResult r;
+    auto& impl = *r.binary.impl_;
+    impl.path = manifest_dir + "/" + manifest.binary;
+    std::vector<std::uint8_t> bytes;
+    if (!open_regular_file(impl, impl.path) || !read_open_file(impl, bytes) || bytes.empty()) {
+        impl.close();
         r.error = NodePackError::LoadFailed;
         return r;
     }
-    if (runtime::sha256_hex(bytes.data(), bytes.size()) != manifest.sha256_hex) {
+    impl.sha256_hex = runtime::sha256_hex(bytes.data(), bytes.size());
+    if (impl.sha256_hex != manifest.sha256_hex) {
+        impl.close();
+        r.error = NodePackError::HashMismatch;
+        return r;
+    }
+    r.error = NodePackError::Ok;
+    return r;
+}
+
+NodePackLoadResult load_verified_node_pack(VerifiedNodePackBinary binary,
+                                           const NodePackManifest& manifest,
+                                           const NodePackTrust& trust,
+                                           const NodePackHostPolicy& policy) {
+    NodePackLoadResult r;
+    r.error = check_manifest_admission(manifest, trust, policy);
+    if (r.error != NodePackError::Ok) return r;
+    if (!binary.is_open()) {
+        r.error = NodePackError::LoadFailed;
+        return r;
+    }
+    // A binary verified against some other manifest does not satisfy this one.
+    if (binary.sha256_hex() != manifest.sha256_hex) {
         r.error = NodePackError::HashMismatch;
         return r;
     }
 
-    void* handle = dl_open(binary_path);
+    NodePackError load_error = NodePackError::LoadFailed;
+    void* handle = dl_open_verified(*binary.impl_, load_error);
     if (handle == nullptr) {
-        r.error = NodePackError::LoadFailed;
+        r.error = load_error;
         return r;
     }
     using entry_fn = const pulp_node_entry_v1* (*)(void);
@@ -344,14 +529,50 @@ NodePackLoadResult load_node_pack(const std::string& manifest_dir,
         return r;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(loaded_binaries_mutex());
+        loaded_binaries().emplace_back(handle, std::move(binary));
+    }
     r.error = NodePackError::Ok;
     r.entry = entry;
     r.handle = handle;
     return r;
 }
 
+NodePackLoadResult load_node_pack(const std::string& manifest_dir,
+                                  const NodePackManifest& manifest,
+                                  const NodePackTrust& trust) {
+    return load_node_pack(manifest_dir, manifest, trust, NodePackHostPolicy{});
+}
+
+NodePackLoadResult load_node_pack(const std::string& manifest_dir,
+                                  const NodePackManifest& manifest,
+                                  const NodePackTrust& trust,
+                                  const NodePackHostPolicy& policy) {
+    // Only an admitted manifest gets its binary opened at all.
+    NodePackLoadResult r;
+    r.error = check_manifest_admission(manifest, trust, policy);
+    if (r.error != NodePackError::Ok) return r;
+
+    NodePackVerifyResult verified = verify_node_pack_binary(manifest_dir, manifest);
+    if (verified.error != NodePackError::Ok) {
+        r.error = verified.error;
+        return r;
+    }
+    return load_verified_node_pack(std::move(verified.binary), manifest, trust, policy);
+}
+
 void unload_node_pack(void* handle) {
-    if (handle != nullptr) dl_close(handle);
+    if (handle == nullptr) return;
+    dl_close(handle);
+    std::lock_guard<std::mutex> lock(loaded_binaries_mutex());
+    auto& entries = loaded_binaries();
+    for (auto it = entries.begin(); it != entries.end(); ++it) {
+        if (it->first == handle) {
+            entries.erase(it);  // releases the open file
+            return;
+        }
+    }
 }
 
 }  // namespace pulp::host
