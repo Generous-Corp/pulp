@@ -1359,6 +1359,25 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
                               is_text ? ComputedStyleScope::text_only
                                       : ComputedStyleScope::box_and_text,
                               type_scale.ok() ? type_scale.scale : 1.0);
+        // The same post-transform box holds untransformed border, radius and
+        // shadow lengths. Scale them per axis where one factor per axis can
+        // carry them; refuse and record the rest.
+        if (!is_text && has_scale_variant_paint(lowered.style)) {
+            const auto paint_scale = index.inherited_paint_scale(node.node_index);
+            const auto applied =
+                paint_scale.ok() ? apply_paint_scale(lowered.style, paint_scale.x, paint_scale.y)
+                                 : PaintScaleResult{false, "transform"};
+            if (applied.scaled)
+                ++counts.paint_scaled;
+            if (!applied.refused.empty()) {
+                ++counts.paint_scale_refused;
+                lowered.attributes["paint_scale_refused"] =
+                    applied.refused + " under " +
+                    (paint_scale.ok() ? "scale(" + format_number(paint_scale.x) + ", " +
+                                            format_number(paint_scale.y) + ")"
+                                      : paint_scale.refused);
+            }
+        }
         // The style carrier deliberately drops most transforms because the
         // captured box is already post-transform. A descendant's page-space
         // rect is post-transform too, even when it has no transform of its

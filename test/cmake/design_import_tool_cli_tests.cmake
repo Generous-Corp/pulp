@@ -165,6 +165,7 @@ add_executable(pulp-test-browser-capture-import
     test_browser_capture_group_opacity.cpp
     test_browser_capture_gradient_border.cpp
     test_browser_capture_ir.cpp
+    test_browser_capture_paint_scale.cpp
     test_browser_knob_sprites.cpp
     test_browser_capture_text_metrics.cpp
     test_browser_capture_tree.cpp

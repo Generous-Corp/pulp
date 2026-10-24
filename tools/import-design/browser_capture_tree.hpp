@@ -163,6 +163,16 @@ struct PaintedTreeCounts {
     /// is NOT applied and the node records the value that refused it. A
     /// recorded refusal is findable; a plausible wrong number is not.
     int type_scale_refused = 0;
+    /// Nodes whose border widths, corner radii or shadow lengths were
+    /// multiplied by the per-axis scale their box already carries from their
+    /// own or an ancestor's `transform`, so a bordered box under `scale()`
+    /// keeps its border in proportion instead of at its untransformed width.
+    int paint_scaled = 0;
+    /// Nodes with a border, radius or shadow whose scale could not be carried:
+    /// a chain with a flip, skew, `matrix3d` or rotation alongside a
+    /// non-uniform scale, or an elliptical corner or soft shadow under two
+    /// axes. The node records what was refused and leaves it unscaled.
+    int paint_scale_refused = 0;
     /// Nodes whose anchor segment comes from an author `data-pulp-key`, so a
     /// reorder carries the anchor with the node instead of leaving it at the
     /// position.
