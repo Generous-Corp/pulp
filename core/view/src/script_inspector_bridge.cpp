@@ -51,6 +51,30 @@ void ScriptInspectorBridge::attach(ScriptEngine* engine) {
             caps_.can_interrupt && engine->supports_bounded_json_evaluation();
         // can_break / can_step / can_inspect_locals stay false — mainline
         // QuickJS exposes no source-line breakpoint or scope-inspection API.
+        apply_realm_gate_locked();
+    }
+}
+
+void ScriptInspectorBridge::set_realm_capabilities(const CapabilitySet& granted) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    realm_capabilities_ = granted;
+    apply_realm_gate_locked();
+}
+
+void ScriptInspectorBridge::apply_realm_gate_locked() {
+    caps_.refused_capability.clear();
+    if (!engine_)
+        return;
+    caps_.can_evaluate = caps_.can_interrupt && engine_->supports_bounded_json_evaluation();
+    // The legacy all() default is the unenforced grant every trusted/local
+    // realm still receives; refusing it would refuse every evaluation in a
+    // research-unsafe build. Only an explicit effectful grant is a decision
+    // this gate honors.
+    if (realm_capabilities_.is_legacy_default())
+        return;
+    if (const auto effectful = realm_capabilities_.first_effectful()) {
+        caps_.refused_capability = std::string(capability_name(*effectful));
+        caps_.can_evaluate = false;
     }
 }
 
@@ -181,6 +205,15 @@ ScriptInspectorBridge::evaluate(const std::string& code,
             EvalResult r;
             r.detached = true;
             r.error = "no engine attached";
+            return r;
+        }
+        if (!caps_.refused_capability.empty()) {
+            // Refused before the single-flight slot is taken: a refused
+            // request must not block a later eligible one.
+            EvalResult r;
+            r.refused = true;
+            r.error = "live realm holds the effectful capability '" +
+                      caps_.refused_capability + "'; evaluation is refused";
             return r;
         }
         if (in_flight_) {

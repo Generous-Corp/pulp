@@ -729,3 +729,55 @@ TEST_CASE("ScriptedUiSession destruction contains throwing descendant detach hoo
     std::error_code cleanup_error;
     fs::remove_all(temp, cleanup_error);
 }
+
+TEST_CASE("A session with an explicit effectful grant refuses runtime evaluation",
+          "[view][scripted-ui][inspector][runtime-eval][capabilities][security]") {
+    const auto temp = make_temp_dir("pulp-scripted-ui-eval-effectful-grant");
+    const auto script = temp / "ui.js";
+    write_text(script, "createLabel('status', 'ready', '');");
+
+    CapabilitySet storage_only;
+    storage_only.grant(ReloadCapability::Storage);
+    View root;
+    StateStore store;
+    ScriptedUiSession session(root, store, {
+        .script_path = script,
+        .granted_capabilities = storage_only,
+    });
+    REQUIRE(session.load());
+
+    auto* inspector = script_inspector(session);
+    REQUIRE(inspector != nullptr);
+    REQUIRE(inspector->capabilities().refused_capability == "storage");
+    REQUIRE_FALSE(inspector->capabilities().can_evaluate);
+    const auto result = inspector->evaluate("40 + 2");
+    REQUIRE(result.refused);
+    REQUIRE_FALSE(result.ok);
+
+    std::error_code cleanup_error;
+    fs::remove_all(temp, cleanup_error);
+}
+
+TEST_CASE("A session on the legacy default grant still evaluates",
+          "[view][scripted-ui][inspector][runtime-eval][capabilities]") {
+    const auto temp = make_temp_dir("pulp-scripted-ui-eval-legacy-grant");
+    const auto script = temp / "ui.js";
+    write_text(script, "createLabel('status', 'ready', '');");
+
+    View root;
+    StateStore store;
+    // No granted_capabilities: the trusted/local all() default.
+    ScriptedUiSession session(root, store, {.script_path = script});
+    REQUIRE(session.load());
+    REQUIRE(CapabilitySet::all().is_legacy_default());  // the default the session took
+
+    auto* inspector = script_inspector(session);
+    REQUIRE(inspector != nullptr);
+    REQUIRE(inspector->capabilities().refused_capability.empty());
+    const auto result = inspector->evaluate("40 + 2");
+    REQUIRE(result.ok);
+    REQUIRE(result.json == "42");
+
+    std::error_code cleanup_error;
+    fs::remove_all(temp, cleanup_error);
+}

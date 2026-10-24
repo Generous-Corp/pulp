@@ -61,9 +61,17 @@ The engine contract remains deliberately smaller than a step debugger:
   rebuilding inside the evaluation call would invalidate view-tree pointers
   still held by the caller. Reset failure detaches and destroys the scripted
   engine rather than leaving the evaluated realm active.
-- A live scripted realm with any effectful `ReloadCapability` grant refuses
-  evaluation. Exec, clipboard, filesystem, storage, AI, runtime-import, or
-  network authority cannot be masked in place to make evaluation eligible.
+- A live scripted realm whose *explicit* grant holds any effectful
+  `ReloadCapability` refuses evaluation. `ScriptedUiSession` hands the realm's
+  grant to the inspector port before every attach; `ScriptInspectorBridge`
+  then reports `can_evaluate=false` with the offending capability name, and
+  the control executor answers `PolicyDenied` before any source runs. Exec,
+  clipboard, filesystem, storage, AI, runtime-import, or network authority
+  cannot be masked in place to make evaluation eligible. The legacy
+  `CapabilitySet::all()` default that trusted and local sessions still receive
+  (`CapabilitySet::is_legacy_default()`) is not an explicit decision and does
+  not trigger the refusal; when that default is retired in favor of explicit
+  grants, the same check will apply to every realm.
 
 Focused component tests may exercise these contracts directly. That test seam
 does not create a shipped server, discovery record, or public raw-protocol

@@ -380,8 +380,12 @@ private:
                                 std::string* error) const;
     bool poll_theme_reload(std::string* error);
     void attach_inspector_port(ScriptEngine* engine) {
-        if (inspector_port_)
-            inspector_port_->attach(engine);
+        if (!inspector_port_)
+            return;
+        // The grant precedes the engine so the port never reports an
+        // evaluable realm it has not yet been told about.
+        inspector_port_->set_realm_capabilities(granted_capabilities_);
+        inspector_port_->attach(engine);
     }
     void detach_inspector_port() {
         if (inspector_port_)

@@ -20,6 +20,10 @@ struct RuntimeEvaluatorCapabilities {
     bool can_break = false;
     bool can_step = false;
     bool can_inspect_locals = false;
+    /// Wire name of the first effectful capability the live realm's explicit
+    /// grant holds; empty when evaluation is eligible. The executor refuses
+    /// with PolicyDenied when this is set, before any source is evaluated.
+    std::string effectful_grant;
 };
 
 struct RuntimeEvaluationResult {
@@ -27,6 +31,7 @@ struct RuntimeEvaluationResult {
     bool timed_out = false;
     bool busy = false;
     bool detached = false;
+    bool refused = false;  ///< realm holds an explicit effectful grant
     std::string json;
     std::string error;
 };

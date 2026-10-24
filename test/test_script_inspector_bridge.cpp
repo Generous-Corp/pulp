@@ -496,3 +496,66 @@ TEST_CASE("Detach interrupts a running eval and waits for engine quiescence",
     REQUIRE_FALSE(bridge.capabilities().can_evaluate);
     REQUIRE(engine == nullptr);
 }
+
+// ── Realm grant gate ──────────────────────────────────────────────────────────
+//
+// An explicit effectful grant refuses evaluation and is reported in the
+// capability snapshot; the legacy all() default and an explicit empty grant
+// leave the realm evaluable.
+
+TEST_CASE("An explicit effectful grant refuses evaluation and names the capability",
+          "[view][script][inspector][capabilities][security]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    CapabilitySet filesystem_only;
+    filesystem_only.grant(ReloadCapability::Filesystem);
+    bridge.set_realm_capabilities(filesystem_only);
+    bridge.attach(&engine);
+
+    auto caps = bridge.capabilities();
+    REQUIRE(caps.refused_capability == "filesystem");
+    REQUIRE_FALSE(caps.can_evaluate);
+    REQUIRE(caps.can_interrupt);  // the engine itself is unchanged
+
+    auto r = bridge.evaluate("1 + 1");
+    REQUIRE(r.refused);
+    REQUIRE_FALSE(r.ok);
+    REQUIRE_FALSE(r.busy);
+    REQUIRE(r.error.find("filesystem") != std::string::npos);
+    // A refused request never took the single-flight slot.
+    REQUIRE_FALSE(bridge.is_busy());
+}
+
+TEST_CASE("The legacy all() default grant leaves evaluation eligible",
+          "[view][script][inspector][capabilities]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.set_realm_capabilities(CapabilitySet::all());
+    bridge.attach(&engine);
+
+    auto caps = bridge.capabilities();
+    REQUIRE(caps.refused_capability.empty());
+    REQUIRE(caps.can_evaluate);
+    auto r = bridge.evaluate("1 + 1");
+    REQUIRE(r.ok);
+    REQUIRE(r.json == "2");
+}
+
+TEST_CASE("Replacing an effectful grant with an explicit empty one restores eligibility",
+          "[view][script][inspector][capabilities]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+    REQUIRE(bridge.capabilities().can_evaluate);
+
+    CapabilitySet exec_only;
+    exec_only.grant(ReloadCapability::Exec);
+    bridge.set_realm_capabilities(exec_only);
+    REQUIRE(bridge.capabilities().refused_capability == "exec");
+    REQUIRE(bridge.evaluate("1").refused);
+
+    bridge.set_realm_capabilities(CapabilitySet{});
+    REQUIRE(bridge.capabilities().refused_capability.empty());
+    REQUIRE(bridge.capabilities().can_evaluate);
+    REQUIRE(bridge.evaluate("1").ok);
+}
