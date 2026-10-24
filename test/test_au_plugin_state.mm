@@ -3408,6 +3408,41 @@ TEST_CASE("current_auv3_wrapper_identifier — AU_HOST_BUNDLE_ID env wins",
     // test confirms the env-var override the fix preserves.
 }
 
+// The lookup reads the main bundle through CoreFoundation and the process
+// name through getprogname(), not NSBundle / NSProcessInfo (which cost a few
+// hundred microseconds per instantiation in a host that had not created
+// them). With no override in the environment it must answer exactly what the
+// Foundation reading answers for this process.
+TEST_CASE("current_auv3_wrapper_identifier — matches the Foundation reading of this process",
+          "[au][auv3][host-detection]") {
+    const char* prior_bundle = std::getenv("AU_HOST_BUNDLE_ID");
+    const char* prior_identifier = std::getenv("AU_HOST_IDENTIFIER");
+    const std::string saved_bundle = prior_bundle ? prior_bundle : "";
+    const std::string saved_identifier = prior_identifier ? prior_identifier : "";
+    unsetenv("AU_HOST_BUNDLE_ID");
+    unsetenv("AU_HOST_IDENTIFIER");
+
+    std::string expected;
+    @autoreleasepool {
+        NSBundle* main = [NSBundle mainBundle];
+        const bool is_extension = [[[main bundlePath] pathExtension] isEqualToString:@"appex"];
+        NSString* process = [[NSProcessInfo processInfo] processName];
+        if ([process hasPrefix:@"AUHostingService"]) {
+            expected = [process UTF8String];
+        } else if (!is_extension && [main bundleIdentifier] != nil) {
+            expected = [[main bundleIdentifier] UTF8String];
+        }
+    }
+    REQUIRE(std::string(getprogname()) ==
+            std::string([[[NSProcessInfo processInfo] processName] UTF8String]));
+    REQUIRE(pulp::format::current_auv3_wrapper_identifier() == expected);
+
+    if (prior_bundle)
+        setenv("AU_HOST_BUNDLE_ID", saved_bundle.c_str(), 1);
+    if (prior_identifier)
+        setenv("AU_HOST_IDENTIFIER", saved_identifier.c_str(), 1);
+}
+
 TEST_CASE("detect_host_type — wrapper id wins when wrapper is recognized",
           "[au][auv3][host-detection][item-3.1]") {
     // `detect_host_type()` consults `current_auv3_wrapper_identifier()`
