@@ -1148,8 +1148,8 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 |------------|-------------|
 | `sign`     | Code-sign all built plugin bundles (VST3, CLAP, AU), or one `--path` artifact |
 | `notarize` | Submit packaged artifacts to Apple notarytool (macOS); prefer `release` or `--path` with `.pkg`, `.dmg`, or `.zip` |
-| `package`  | Create macOS `.pkg`/`.dmg`, Windows NSIS, Linux `.deb`/`.tar.gz`, or Android APK/AAB packages in `artifacts/` |
-| `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
+| `package`  | Create macOS `.pkg`/`.dmg`, Windows NSIS, Linux `.deb`/`.tar.gz`, or Android APK/AAB packages in `artifacts/`. On macOS each AU/VST3/CLAP bundle ships as a copy with local symbols stripped (`strip -x`) and re-signed (`--identity`, or ad hoc for an unsigned build); a dSYM of the unstripped executable is written first to `artifacts/symbols/<FORMAT>/<bundle>.dSYM` for crash symbolication, and the build output keeps its symbols. The stripped copy is re-signed with the original's entitlements unless `--entitlements` names a file. `--keep-symbols` opts out |
+| `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple. `--entitlements <plist>` is passed to both the sign and package stages |
 | `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
 | `appcast`  | Generate a Sparkle-compatible appcast feed from a package URL or local artifact |
 | `auv3-xcodeproj` | Generate an Xcode project for an AUv3 target (macOS) |
@@ -2229,6 +2229,8 @@ pulp sdk clean                                # Remove all cached SDK versions
 
 Set `PULP_HOME` to relocate the SDK cache, asset cache, and config root.
 
+`pulp sdk install` verifies the downloaded SDK archive against the release's `SHA256SUMS` before extracting it, under the same rules as [`pulp upgrade`](#upgrade): a mismatch or a missing manifest on a release at or above `checksum_manifest_floor` refuses the install; older manifest-less releases install with a warning.
+
 The `forge-dev` profile is for trying newly committed Pulp DSP in a local Forge
 build before publishing a versioned SDK. It is deliberately stricter than the
 ordinary `--local` cache:
@@ -2551,6 +2553,8 @@ pulp upgrade --notes --from 0.25.0 --to 0.29.0    # explicit hop override
 ```
 
 Downloads the release from GitHub, installs the archive's top-level companion payloads next to the current binary, replaces the current binary, and verifies. Current archives install Rust `pulp` plus the `pulp-cpp` fallthrough delegate together. Requires `curl`.
+
+Before anything is extracted, the archive is checked against the release's `SHA256SUMS` asset (the manifest every release publishes beside its archives). A digest mismatch, a manifest with no entry for the archive, or a missing manifest on a release at or above the floor in `tools/scripts/release_product_matrix.json` (`checksum_manifest_floor`) refuses the upgrade and prints the expected and observed digests. Older releases without a manifest still install, with a `WARNING:` line saying the archive was not verified. A successful check prints `Verified SHA-256: <digest>`.
 
 `--check-only` reads the on-disk cache written by the on-every-invocation background refresh and prints installed/latest/notes. If the cache is empty (first run), it falls through to a single live GitHub query.
 
@@ -3187,11 +3191,24 @@ pulp search "pitch detection"
 pulp search dsp
 pulp search fft --format json
 pulp search fft --refresh
+pulp search fft --refresh --allow-unsigned-registry
 ```
 
 Use `--refresh` with a query to bypass the remote-registry cache while
 searching. `--format json` emits machine-readable output; omit `--format` for
 the default text output.
+
+When no project registry (`tools/packages/registry.json`) is present, search
+falls back to the remote registry. Once the CLI pins a signer key
+(`kPinnedRegistrySignerPublicKeyHex` in `tools/cli/package_registry_trust.hpp`),
+that registry is only trusted when the `registry.json.sig` published beside it
+carries an Ed25519 signature that verifies against the key; an unsigned,
+tampered, or unverifiable registry is refused, and a cached copy is reused only
+if it was verified when fetched. `--allow-unsigned-registry` overrides the
+refusal for one invocation and prints a `WARNING:` naming the gap. While no key
+is pinned, the registry is used unsigned as before and a one-line notice says
+verification is enforced once a signer key is pinned. The registry owner signs
+with `tools/scripts/sign_package_registry.py` (see the `packages` skill).
 
 ### update
 

@@ -630,6 +630,43 @@ TEST_CASE("native codegen paints a stroke declared as the CSS border shorthand",
     REQUIRE(js.find("setSvgStrokeWidth('") != std::string::npos);
 }
 
+TEST_CASE("generated JS carries an imported vector's stroke cap, join and miter limit",
+          "[view][import][svg-stroke]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 100.0f;
+    ir.root.style.height = 100.0f;
+    const auto vector = [](std::string name, std::string cap, std::string join, std::string limit) {
+        IRNode path;
+        path.type = "vector";
+        path.name = std::move(name);
+        path.attributes["path_data"] = "M4 12L12 4L20 12";
+        path.attributes["svg_stroke"] = "#89b4fa";
+        path.attributes["svg_stroke_width"] = "2";
+        if (!cap.empty())
+            path.attributes["svg_stroke_linecap"] = std::move(cap);
+        if (!join.empty())
+            path.attributes["svg_stroke_linejoin"] = std::move(join);
+        if (!limit.empty())
+            path.attributes["svg_stroke_miterlimit"] = std::move(limit);
+        path.style.width = 24.0f;
+        path.style.height = 24.0f;
+        return path;
+    };
+    ir.root.children.push_back(vector("Peak", "round", "round", ""));
+    ir.root.children.push_back(vector("Miter", "", "miter", "8"));
+    ir.root.children.push_back(vector("Plain", "", "", ""));
+    const auto js = native_js(ir);
+    CHECK(js.find("', 'round', 'round');") != std::string::npos);
+    CHECK(js.find("', '', 'miter', 8);") != std::string::npos);
+    // A vector with no stroke style emits no call at all.
+    std::size_t calls = 0;
+    for (auto at = js.find("setSvgStrokeStyle("); at != std::string::npos;
+         at = js.find("setSvgStrokeStyle(", at + 1))
+        ++calls;
+    CHECK(calls == 2);
+}
+
 namespace {
 
 // Build the TRIAZ slider triplet: a short wide container with a full-width dark

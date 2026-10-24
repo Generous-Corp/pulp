@@ -367,6 +367,8 @@ install`) rather than copying the script into the project.
 
 **Start every array in `build_combined_installer.sh` as `=()`.** The script runs under `set -u`, and bash 4.4 or later reports `${#X[@]}` of a declared-but-unassigned array as unbound, while macOS's `/bin/bash` 3.2 does not. A bare `declare -a X` passes every macOS run and fails on Linux (where the Python coverage pass runs the recipe tests) or under a newer bash on PATH.
 
+**Verify component payloads before signing the product archive.** The combined installer records each signed plugin's `CFBundleExecutable` SHA-256, expands the unsigned `productbuild` archive with `pkgutil --expand-full`, and refuses to run `productsign`, notarization, or stapling if the packaged executable is missing or does not match. This gate prevents a stale or metadata-only build directory from turning into an apparently successful release. The contract tests cover matching, stale, and missing payloads in `test_build_combined_installer.py`.
+
 **macOS 27 `pkgbuild --analyze` omits `BundleIsRelocatable`.** `build_combined_installer.sh` pins every app component non-relocatable, so it must `Add :N:BundleIsRelocatable bool false` when `Set` finds no entry — a bare `Set` aborts with `Entry, ":0:BundleIsRelocatable", Does Not Exist` (covered by `test_build_combined_installer.py`).
 
 ### A packaging run that looks dead is almost always alive
@@ -529,6 +531,73 @@ Watch out for:
   from the linked headers, so it disagrees with the pin in that case too.
 - **An SDK older than the record** yields `runtime_pins: null`; the rest of the
   file is still produced by the consumer's own CMake helpers.
+
+### Shipped plug-in modules are dead-stripped
+
+Non-Debug Apple VST3, CLAP, AU v2, LV2 and AAX modules link with `-dead_strip`
+(`_pulp_plugin_module_link_hygiene` in `tools/cmake/PulpPluginFormats.cmake`);
+AU v3 is not. Exported entry points, static initializers and what they reach,
+Objective-C class and category metadata, and `__attribute__((used))` code stay
+live. Code reached only by `dlsym()` of an unexported symbol, or an Objective-C
+class found only through `NSClassFromString()`, can vanish with no link error:
+export it, mark it `used`, or reference it. Opt out with
+`-DPULP_DEAD_STRIP_PLUGINS=OFF`, or per module with the `PULP_DEAD_STRIP`
+target property set OFF after `pulp_add_plugin()`. The property is read through
+`$<TARGET_PROPERTY:<module>,PULP_DEAD_STRIP>` with the module named explicitly,
+so the packaging ctest's `$<TARGET_PROPERTY:PulpGain_VST3,LINK_OPTIONS>`
+evaluates it without a head target. Coverage:
+`plugin-module-dead-strip-PulpGain-<FORMAT>` and
+`cmake-plugin-dead-strip-switch`. No test yet opens a dead-stripped module's
+editor in every format.
+
+### Shipped plug-ins have local symbols stripped; the build output does not
+
+`pulp ship package` and `build_combined_installer.sh` package a COPY of each
+AU/VST3/CLAP bundle with `strip -x` applied to its main executable, then sign
+that copy. On a first load the system checks the whole module file, at roughly
+17 ms per MB on Apple Silicon, and local symbols are several MB of a Release
+editor module that nothing at run time reads. The bundle in the build directory
+keeps its symbols, so a debugger and the nm-based packaging ctests still see
+them.
+
+Watch out for:
+
+- **Strip before signing, never after.** Stripping changes the code the
+  signature seals. The installer script strips the staged copy and then
+  `deep_sign`s it. `pulp ship package` runs after `pulp ship sign`, so it
+  re-signs the stripped copy itself: with `--identity` (or
+  `signing.apple.identity` / `PULP_SIGN_IDENTITY`) when the original carries a
+  Developer ID signature, ad hoc otherwise. `pulp ship release` passes its
+  identity through. If a bundle is Developer-ID-signed and no identity
+  resolves, it ships unstripped with a warning rather than with a broken seal.
+- **Re-signing keeps the entitlements.** A new signature replaces the old one,
+  entitlements included, so `stage_stripped_bundle()` extracts the original's
+  entitlements (`codesign -d --entitlements <file> --xml`) and signs the copy
+  with them, for Developer ID and ad hoc alike, unless `--entitlements` names a
+  file. `pulp ship release --entitlements` passes the file to both its sign and
+  package stages.
+- **A dSYM is written before every strip.** `dsymutil` runs on the UNSTRIPPED
+  build-output executable, writing `artifacts/symbols/<FORMAT>/<bundle>.dSYM`
+  (`pulp ship package`) or `<out>/symbols/<kind>/<bundle>.dSYM` (the installer
+  script). It carries the full symbol table under the UUID the stripped copy
+  keeps, so a crash report from an installed plug-in symbolicates against it
+  (`atos -o <bundle>.dSYM/Contents/Resources/DWARF/<exe> -l <load address>
+  <address>`, or let Xcode find it by UUID). Archive the symbols directory with
+  every release you ship; a dSYM regenerated from a later build has a different
+  UUID and does not match. Release builds carry no DWARF, so the dSYM gives
+  function names, not file and line. A failed `dsymutil` refuses the strip
+  rather than shipping a binary nothing can symbolicate.
+- **`--keep-symbols`** (both paths) packages the build output untouched and
+  writes no dSYM. It is the opt-out; stripping happens at packaging, so there
+  is no CMake switch for it.
+- **AAX is never stripped**: it arrives PACE-wrapped and any edit voids the wrap.
+- **Only `-x`** (local symbols). Exported symbols such as the format entry
+  points and anything `dlsym` reaches are untouched.
+- Coverage: `pulp ship package strips local symbols from the shipped copy
+  only` in `test/test_cli_ship_shellout.cpp` (real Mach-O fixture, expands the
+  `.pkg`, runs `nm`, and checks the dSYM keeps the local symbol under the
+  shipped binary's UUID), and the strip and dSYM-order cases in
+  `tools/scripts/test_build_combined_installer.py`.
 
 ### macOS one-command pipeline: `pulp ship release`
 

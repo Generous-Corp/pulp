@@ -11,6 +11,7 @@ from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 REVIEWED_MINIMAL_TARGETS = {
     "pulp/audio/impulse_response.hpp": "Pulp::audio",
     "pulp/audio/format_registry.hpp": "Pulp::audio",
+    "pulp/audio/audio_file.hpp": "Pulp::audio",
     "pulp/signal/parametric_eq.hpp": "Pulp::signal",
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
     "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
@@ -190,6 +191,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "infrastructure that sample, impulse-response and offline-render "
             "capabilities consume; it is not an independently selected "
             "generator-facing capability in the installed contract."
+        ),
+    },
+    {
+        "include": "pulp/audio/audio_file.hpp",
+        "fingerprint": "sha256:6a97b20f7bb9a869f33f6cc52367cc2f9629660a9cb1341b284bfdf3479ee990",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Whole-file audio decoding (read_audio_file with an admission "
+            "predicate over the opened reader) is host infrastructure consumed "
+            "by sample, impulse-response and offline-render capabilities; it "
+            "is not an independently selected generator-facing capability."
         ),
     },
     {
@@ -859,7 +872,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/scoped_flush_denormals.hpp",
-        "fingerprint": "sha256:c394e664d37399ccc736a32dda40b6bae5b2883c8fc5a76f45f8b6d6361c1482",
+        "fingerprint": "sha256:c9d2a472c1f096bc19969299925b933c21976d66a0e6492fa306ca309bc942ad",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

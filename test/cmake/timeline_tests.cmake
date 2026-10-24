@@ -728,8 +728,15 @@ if(PULP_ENABLE_FUZZING)
     target_include_directories(pulp-fuzz-timeline-document PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(pulp-fuzz-timeline-document PRIVATE
-        -fsanitize=fuzzer,address -fno-omit-frame-pointer)
-    target_link_options(pulp-fuzz-timeline-document PRIVATE -fsanitize=fuzzer,address)
+        -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
+    target_link_options(pulp-fuzz-timeline-document PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS})
+
+    # Standard MIDI File import: chunk framing, variable-length quantities,
+    # running status and meta payload lengths all come from the file.
+    pulp_add_libfuzzer_target(pulp-fuzz-smf
+        SOURCES fuzz/smf_fuzz_target.cpp
+        LIBRARIES pulp::smf-interop
+        CORPUS "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fuzz/smf")
 endif()
 
 # Engine-side half of the reference-clock sync soak, owned by this subsystem.

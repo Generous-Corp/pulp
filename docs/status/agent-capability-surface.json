@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 152,
+  "inventory_version": 154,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,21 +43,21 @@
   ],
   "counts": {
     "public_headers": 511,
-    "reviewed_headers": 256,
-    "legacy_unreviewed_headers": 255,
+    "reviewed_headers": 257,
+    "legacy_unreviewed_headers": 254,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 87,
-      "legacy_unreviewed": 255,
+      "infrastructure": 88,
+      "legacy_unreviewed": 254,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
         "public_headers": 113,
-        "reviewed_headers": 14,
-        "legacy_unreviewed_headers": 99,
+        "reviewed_headers": 15,
+        "legacy_unreviewed_headers": 98,
         "unsupported_headers": 0
       },
       "midi": {
@@ -144,11 +144,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/audio_file.hpp",
-      "fingerprint": "sha256:421cd28fdbc1bd053d8cae09c8b6771031c410e1521f17fd6d2a030ef911d3d6",
+      "fingerprint": "sha256:6a97b20f7bb9a869f33f6cc52367cc2f9629660a9cb1341b284bfdf3479ee990",
       "include": "pulp/audio/audio_file.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Whole-file audio decoding (read_audio_file with an admission predicate over the opened reader) is host infrastructure consumed by sample, impulse-response and offline-render capabilities; it is not an independently selected generator-facing capability."
     },
     {
       "domain": "audio",
@@ -4254,7 +4254,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/scoped_flush_denormals.hpp",
-      "fingerprint": "sha256:c394e664d37399ccc736a32dda40b6bae5b2883c8fc5a76f45f8b6d6361c1482",
+      "fingerprint": "sha256:c9d2a472c1f096bc19969299925b933c21976d66a0e6492fa306ca309bc942ad",
       "include": "pulp/signal/scoped_flush_denormals.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

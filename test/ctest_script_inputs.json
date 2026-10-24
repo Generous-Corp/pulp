@@ -137,6 +137,7 @@
     "tools/cli/package_commands_search.cpp",
     "tools/cli/package_commands_util.cpp",
     "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp",
     "tools/cli/project_bump.cpp",
     "tools/cli/projects_registry.cpp",
     "tools/cli/pulp_cli.cpp",
@@ -144,6 +145,7 @@
     "tools/cli/sdk_distribution_guard.cpp",
     "tools/cli/shell_quote.cpp",
     "tools/cli/shell_redirect.cpp",
+    "tools/cli/ship_bundle_strip.cpp",
     "tools/cli/tartci_lease.cpp",
     "tools/cli/tool_registry.cpp",
     "tools/cli/update_check.cpp",
@@ -261,6 +263,7 @@
    "detected_sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
     "test/test_browser_capture_gradient_border.cpp",
+    "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
@@ -274,6 +277,7 @@
    "sources": [
     "test/test_browser_capture_backdrop_filter.cpp",
     "test/test_browser_capture_gradient_border.cpp",
+    "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
@@ -395,7 +399,8 @@
     "tools/cli/kit_manifest_validation.cpp",
     "tools/cli/kit_policy.cpp",
     "tools/cli/kit_profile_verification.cpp",
-    "tools/cli/package_registry.cpp"
+    "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp"
    ],
    "spawning_sources": [
     "tools/cli/kit_profile_verification.cpp",
@@ -414,6 +419,7 @@
     "fixtures/packages/gain-dsp-kit",
     "fixtures/packages/simple-plugin-template",
     "tools/packages/registry.json",
+    "tools/templates/effect",
     "tools/templates/gain",
     "tools/templates/standalone"
    ],
@@ -663,7 +669,8 @@
     "tools/cli/kit_manifest_validation.cpp",
     "tools/cli/kit_policy.cpp",
     "tools/cli/kit_profile_verification.cpp",
-    "tools/cli/package_registry.cpp"
+    "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp"
    ],
    "spawning_sources": [
     "test/test_cli_kit_commands.cpp",
@@ -732,7 +739,8 @@
    "sources": [
     "test/test_cli_package_analyzer_descriptors.cpp",
     "tools/cli/package_analyzer_descriptors.cpp",
-    "tools/cli/package_registry.cpp"
+    "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp"
    ],
    "spawning_sources": [
     "tools/cli/package_registry.cpp"
@@ -759,6 +767,7 @@
     "tools/cli/package_commands_search.cpp",
     "tools/cli/package_commands_util.cpp",
     "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp",
     "tools/cli/tool_registry.cpp"
    ],
    "spawning_sources": [
@@ -806,6 +815,7 @@
     "tools/cli/local_sdk_profile.cpp",
     "tools/cli/migration_runtime.cpp",
     "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp",
     "tools/cli/project_bump.cpp",
     "tools/cli/projects_registry.cpp",
     "tools/cli/shell_quote.cpp",
@@ -925,7 +935,8 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-cli"
+    "pulp-cli",
+    "pulp-test-ship-strip-fixture"
    ],
    "sources": [],
    "spawning_sources": [
@@ -1071,6 +1082,7 @@
     "test/test_cli_upgrade_install.cpp"
    ],
    "inputs": [
+    "tools/cli/cli_sdk.cpp",
     "tools/cli/cmd_upgrade.cpp",
     "tools/import-design/browser_capture",
     "tools/import-design/jsx-runtime/materialized_binding_contract.mjs"
@@ -2437,6 +2449,7 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
+  "pulp-generate-plugin-state-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
   "pulp-gpu-wavenet-scaling-bench",
@@ -2549,6 +2562,7 @@
   "pulp-test-cli-project-bump-all",
   "pulp-test-cli-project-command",
   "pulp-test-cli-projects-registry",
+  "pulp-test-cli-release-checksum",
   "pulp-test-cli-run-options",
   "pulp-test-cli-sdk-tarball-filename",
   "pulp-test-cli-shell-quote",
@@ -3376,6 +3390,7 @@
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
     "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py",
     "tools/scripts/test_archive_symbol_closure_check.py"
    ],
    "kind": "python"
@@ -3898,6 +3913,8 @@
     "docs/status/gpu-recipes.yaml",
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
+    "test/cmake/check_plugin_module_dead_strip.cmake",
+    "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
@@ -4160,6 +4177,14 @@
     "docs/status/dsp-capabilities.json",
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/test_dsp_capability_registry.py"
+   ],
+   "kind": "python"
+  },
+  "cli-package-registry-signing-helper": {
+   "entry": "tools/scripts/test_sign_package_registry.py",
+   "inputs": [
+    "tools/scripts/sign_package_registry.py",
+    "tools/scripts/test_sign_package_registry.py"
    ],
    "kind": "python"
   },
@@ -7176,6 +7201,14 @@
    ],
    "kind": "python"
   },
+  "migration-note-guard-selftest": {
+   "entry": "tools/scripts/test_migration_note_guard.py",
+   "inputs": [
+    "tools/scripts/migration_note_guard.py",
+    "tools/scripts/test_migration_note_guard.py"
+   ],
+   "kind": "python"
+  },
   "minblep-table-reproducible": {
    "entry": "tools/scripts/generate_minblep_table.py",
    "inputs": [
@@ -7220,6 +7253,14 @@
    "entry": "tools/ci/test_native_intel_runner.py",
    "inputs": [
     "tools/ci/test_native_intel_runner.py"
+   ],
+   "kind": "python"
+  },
+  "nm-symbols-selftest": {
+   "entry": "tools/scripts/test_nm_symbols.py",
+   "inputs": [
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/test_nm_symbols.py"
    ],
    "kind": "python"
   },
@@ -7781,7 +7822,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7789,7 +7831,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7797,7 +7840,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7916,7 +7960,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -8002,7 +8047,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -8050,7 +8096,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -8322,6 +8369,15 @@
     "tools/scripts/script_argv.py",
     "tools/scripts/test_prepush_cannot_measure.py",
     "tools/scripts/test_queue_batch_attribute.py"
+   ],
+   "kind": "python"
+  },
+  "queue-breaker-selftest": {
+   "entry": "tools/ci/test_queue_breaker.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/queue_breaker.py",
+    "tools/ci/test_queue_breaker.py"
    ],
    "kind": "python"
   },
@@ -9903,6 +9959,8 @@
     "docs/status/gpu-recipes.yaml",
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
+    "test/cmake/check_plugin_module_dead_strip.cmake",
+    "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
@@ -10340,6 +10398,7 @@
     "core/host/src/signal_graph_diagnostics.cpp",
     "core/host/src/signal_graph_executor_routing.cpp",
     "core/host/src/signal_graph_live_swap.cpp",
+    "core/host/src/signal_graph_mailbox.cpp",
     "core/host/src/signal_graph_prepare.cpp",
     "core/host/src/signal_graph_prepared_topology_edit.cpp",
     "core/host/src/signal_graph_reference_walk.cpp",
@@ -11170,6 +11229,7 @@
     "core/host/src/signal_graph_diagnostics.cpp",
     "core/host/src/signal_graph_executor_routing.cpp",
     "core/host/src/signal_graph_live_swap.cpp",
+    "core/host/src/signal_graph_mailbox.cpp",
     "core/host/src/signal_graph_prepare.cpp",
     "core/host/src/signal_graph_prepared_topology_edit.cpp",
     "core/host/src/signal_graph_reference_walk.cpp",
@@ -11826,6 +11886,27 @@
     "tools/scripts/script_argv.py",
     "tools/scripts/test_script_argv.py",
     "tools/scripts/trace_frame_cost.py"
+   ],
+   "kind": "python"
+  },
+  "script-inputs-precheck-selftest": {
+   "entry": "tools/scripts/test_script_inputs_precheck.py",
+   "inputs": [
+    ".github/workflows",
+    "core/host",
+    "core/host/include",
+    "docs/status",
+    "test/ctest_script_inputs.json",
+    "test/fixtures",
+    "test/support",
+    "tools/ci/cmake_registration_impact.py",
+    "tools/ci/load_api_exemptions.json",
+    "tools/ci/spawn_none_build_path_reviews.json",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/script_inputs_precheck.py",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/test_script_inputs_precheck.py"
    ],
    "kind": "python"
   },

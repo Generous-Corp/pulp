@@ -2629,6 +2629,20 @@ Gotchas:
   same PR.** Both live at HEAD; drift between them is the whole reason
   the header exists.
 
+## Release floors reach C++ through a generated header
+
+`tools/scripts/release_product_matrix.json` is the single home of release
+floors such as `checksum_manifest_floor`. C++ consumers (`cmd_upgrade.cpp`,
+`cli_sdk.cpp`) never spell the number: `tools/cmake/PulpReleaseMatrix.cmake`
+reads it and `release_floors_gen.h.in` is configured into
+`${CMAKE_BINARY_DIR}/tools/cli/release_floors_gen.h`, next to
+`pulp_version_gen.h`. Any target that compiles one of those sources outside
+`pulp-cli` must configure that header too; `cli_tests.cmake` does it for
+`pulp-test-cli-support-objects`, which compiles `cli_sdk.cpp`. The
+`SingleOwnerReleasePublication` tests in
+`test_release_workflow_test_step.py` fail if a CLI source carries its own
+copy of the floor literal.
+
 ## `pulp version --json`
 
 The Rust user-facing `pulp` binary supports `pulp version --json` for a
@@ -4004,3 +4018,16 @@ after a successful delegated Shipyard arm/ship path, and deliberately skips
 `--no-arm`. Keep this hook after arming so advisory workflow dispatches bind to
 the approved head; direct `shipyard pr` remains an interim gap until Shipyard
 provides a native arm hook.
+
+## `pulp ship package` ships stripped copies; its shell-out tests need the test cwd
+
+`pulp ship package` stages a copy of each AU/VST3/CLAP bundle outside the
+build tree, writes a dSYM of the unstripped executable to
+`artifacts/symbols/`, strips local symbols from the copy's main executable and
+re-signs it (`tools/cli/ship_bundle_strip.cpp`); the build output is never
+modified. A new
+package option that edits a bundle must work on that staged copy, before the
+copy is signed, never on the build output. `test_cli_ship_shellout.cpp` finds
+the CLI relative to its working directory (`../tools/cli/pulp-cpp`), so run the
+binary from `build/test` (ctest does). From the repo root every ship case
+SKIPs and the run still exits 0, which looks like a pass.
