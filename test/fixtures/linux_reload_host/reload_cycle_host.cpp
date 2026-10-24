@@ -255,6 +255,10 @@ int reload_cycle(const char* plugin_path, const char* warm, const char* harsh,
                 name(first));
     failures += first == Shape::warm ? 0 : 1;
 
+    // No wait before the swap: the shell seeds its watcher with the version it
+    // loaded, so a build that lands before the watcher's first poll is still a
+    // change.
+
     // Replace the watched file with a fresh inode, as a build output step does.
     const std::string staged = dir + "/logic.so.next";
     fs::copy_file(harsh, staged, fs::copy_options::overwrite_existing, ec);
@@ -272,6 +276,18 @@ int reload_cycle(const char* plugin_path, const char* warm, const char* harsh,
     }
     std::printf("%s after the hot swap the plug-in renders as %s\n",
                 now == Shape::harsh ? "ok  " : "FAIL", name(now));
+    if (now != Shape::harsh) {
+        // Say why on stdout, so the reason is in a plain ctest log. The shell
+        // logs a rejected reload ("[reload-shell] reload rejected ...") to stderr;
+        // no such line plus an unchanged shape means the watcher never acted.
+        std::error_code mec;
+        const auto size = fs::file_size(watched, mec);
+        std::printf("     watched %s (%s, %llu bytes); staged copies in %s:\n", watched.c_str(),
+                    mec ? mec.message().c_str() : "present",
+                    static_cast<unsigned long long>(mec ? 0 : size), dir.c_str());
+        for (const auto& item : fs::directory_iterator(dir, mec))
+            std::printf("       %s\n", item.path().filename().c_str());
+    }
     failures += now == Shape::harsh ? 0 : 1;
 
     plugin->stop_processing(plugin);

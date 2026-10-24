@@ -1194,53 +1194,53 @@ constexpr int kMaxTilesPerAxis = 512;
 
 }  // namespace
 
-void View::paint_background_and_border(canvas::Canvas& canvas) {
+Rect View::self_paint_bounds() const {
     // Browser lowering retains the capture-time browser-compatible paint rect
-    // for this box. Layout stays fractional; adjusting only this self-paint
-    // restores its snapped edges without moving descendants or hit bounds. A
-    // transformed node never receives this metadata, and an implausibly
-    // distant target is ignored rather than turning stale capture data into a
-    // visible jump.
-    bool captured_box_paint = false;
-    float paint_w = bounds_.width;
-    float paint_h = bounds_.height;
-    if (captured_box_paint_scale_ > 0.0f &&
-        std::isfinite(captured_box_paint_left_) &&
-        std::isfinite(captured_box_paint_top_) &&
-        std::isfinite(captured_box_paint_right_) &&
-        std::isfinite(captured_box_paint_bottom_)) {
-        float actual_x = bounds_.x, actual_y = bounds_.y;
-        for (const View* parent = parent_; parent != nullptr;
-             parent = parent->parent_) {
-            actual_x += parent->bounds_.x;
-            actual_y += parent->bounds_.y;
-        }
-        const float target_w = captured_box_paint_right_ - captured_box_paint_left_;
-        const float target_h = captured_box_paint_bottom_ - captured_box_paint_top_;
-        const float dx = captured_box_paint_left_ - actual_x;
-        const float dy = captured_box_paint_top_ - actual_y;
-        // CSS edges are snapped before DPR is applied, so a valid origin can
-        // move by half a CSS pixel at every DPR. Both independently snapped
-        // far edges can change the width or height by one CSS pixel.
-        constexpr float kOriginLimit = 0.501f;
-        constexpr float kExtentLimit = 1.001f;
-        const float width_delta = target_w - bounds_.width;
-        const float height_delta = target_h - bounds_.height;
-        if (bounds_.width > 0.0f && bounds_.height > 0.0f &&
-            target_w > 0.0f && target_h > 0.0f &&
-            std::fabs(dx) <= kOriginLimit && std::fabs(dy) <= kOriginLimit &&
-            std::fabs(width_delta) <= kExtentLimit &&
-            std::fabs(height_delta) <= kExtentLimit) {
-            canvas.save();
-            canvas.translate(dx, dy);
-            // This is outer paint geometry only. CSS percentage background
-            // sizes/positions, gradient vectors, border widths, and radii
-            // continue resolving from bounds_ below; only the final coverage
-            // rect and border outline use paint_w/paint_h.
-            paint_w = target_w;
-            paint_h = target_h;
-            captured_box_paint = true;
-        }
+    // for this box. Layout stays fractional; adjusting only self-paint restores
+    // its snapped edges without moving descendants or hit bounds. A transformed
+    // node never receives this metadata, and an implausibly distant target is
+    // ignored rather than turning stale capture data into a visible jump.
+    const Rect local = local_bounds();
+    if (!(captured_box_paint_scale_ > 0.0f) || !std::isfinite(captured_box_paint_left_) ||
+        !std::isfinite(captured_box_paint_top_) || !std::isfinite(captured_box_paint_right_) ||
+        !std::isfinite(captured_box_paint_bottom_))
+        return local;
+    float actual_x = bounds_.x, actual_y = bounds_.y;
+    for (const View* parent = parent_; parent != nullptr; parent = parent->parent_) {
+        actual_x += parent->bounds_.x;
+        actual_y += parent->bounds_.y;
+    }
+    const float target_w = captured_box_paint_right_ - captured_box_paint_left_;
+    const float target_h = captured_box_paint_bottom_ - captured_box_paint_top_;
+    const float dx = captured_box_paint_left_ - actual_x;
+    const float dy = captured_box_paint_top_ - actual_y;
+    // CSS edges are snapped before DPR is applied, so a valid origin can move
+    // by half a CSS pixel at every DPR. Both independently snapped far edges
+    // can change the width or height by one CSS pixel.
+    constexpr float kOriginLimit = 0.501f;
+    constexpr float kExtentLimit = 1.001f;
+    if (bounds_.width > 0.0f && bounds_.height > 0.0f && target_w > 0.0f && target_h > 0.0f &&
+        std::fabs(dx) <= kOriginLimit && std::fabs(dy) <= kOriginLimit &&
+        std::fabs(target_w - bounds_.width) <= kExtentLimit &&
+        std::fabs(target_h - bounds_.height) <= kExtentLimit)
+        return {dx, dy, target_w, target_h};
+    return local;
+}
+
+void View::paint_background_and_border(canvas::Canvas& canvas) {
+    const Rect snapped = self_paint_bounds();
+    const bool captured_box_paint = snapped.x != 0.0f || snapped.y != 0.0f ||
+                                    snapped.width != bounds_.width ||
+                                    snapped.height != bounds_.height;
+    // This is outer paint geometry only. CSS percentage background sizes and
+    // positions, gradient vectors, border widths, and radii continue resolving
+    // from bounds_ below; only the final coverage rect and border outline use
+    // paint_w/paint_h.
+    const float paint_w = snapped.width;
+    const float paint_h = snapped.height;
+    if (captured_box_paint) {
+        canvas.save();
+        canvas.translate(snapped.x, snapped.y);
     }
     // Per-corner border-radius: when any of the
     // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters

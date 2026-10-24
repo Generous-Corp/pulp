@@ -324,6 +324,18 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
         }
     }
 
+    const auto input_checked = member(nodes, "inputChecked");
+    if (input_checked.isObject()) {
+        const auto which = member(input_checked, "index");
+        if (which.isArray()) {
+            for (uint32_t i = 0; i < which.size(); ++i) {
+                const int node = json_int(which[static_cast<int>(i)], -1);
+                if (node >= 0)
+                    index.input_checked_.push_back(node);
+            }
+        }
+    }
+
     // The capture's theme verdicts, written beside the snapshot's own arrays.
     const auto theme = member(snapshot, "formControlTheme");
     if (theme.isObject()) {
@@ -695,6 +707,11 @@ std::string CapturedStyleIndex::string_at(int index) const {
 std::string CapturedStyleIndex::control_theme(int node_index) const {
     const auto found = control_theme_.find(node_index);
     return found == control_theme_.end() ? std::string() : found->second;
+}
+
+bool CapturedStyleIndex::control_checked(int node_index) const {
+    return std::find(input_checked_.begin(), input_checked_.end(), node_index) !=
+           input_checked_.end();
 }
 
 std::string CapturedStyleIndex::control_value(int node_index) const {
