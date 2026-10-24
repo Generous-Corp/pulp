@@ -1379,6 +1379,46 @@ class DifferentialLabTests(unittest.TestCase):
             json.loads(snapshot("F" * 32, "native")), indent=2,
             sort_keys=True).encode()))
 
+    def test_platform_fonts_digest_sees_faces_and_ignores_backend_ids(self) -> None:
+        def report(backend: tuple[int, int] = (28, 31),
+                   face: str = "JetBrainsMono-Medium") -> dict:
+            return {
+                "schema": "pulp-browser-platform-fonts-v1", "version": 1,
+                "runs": [
+                    {"layout_index": 9, "node_index": 26, "owner_node_index": 25,
+                     "backend_node_id": backend[0],
+                     "requested": {"font_family": "JetBrains Mono", "font_weight": "500"},
+                     "resolved": [{"family_name": "JetBrains Mono Medium",
+                                   "post_script_name": face, "glyph_count": 37}]},
+                    {"layout_index": 12, "node_index": 30, "owner_node_index": 29,
+                     "backend_node_id": backend[1],
+                     "requested": {"font_family": "JetBrains Mono", "font_weight": "400"},
+                     "resolved": [{"family_name": "JetBrains Mono",
+                                   "post_script_name": "JetBrainsMono-Regular",
+                                   "glyph_count": 12}]},
+                ],
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "platform-fonts.json"
+
+            def digest(value: dict) -> str | None:
+                path.write_text(json.dumps(value), encoding="utf-8")
+                return LAB.platform_fonts_semantic_sha256(path)
+
+            baseline = digest(report())
+            self.assertIsNotNone(baseline)
+            # Chromium numbered the same nodes 4 lower in one of three runs.
+            self.assertEqual(baseline, digest(report(backend=(24, 27))))
+            self.assertEqual(baseline, digest(report(backend=(31, 28))))
+            # A different resolved face is content.
+            self.assertNotEqual(baseline, digest(report(face="JetBrainsMono-Regular")))
+            moved = report()
+            moved["runs"][1]["node_index"] = 31
+            self.assertNotEqual(baseline, digest(moved))
+            path.unlink()
+            self.assertIsNone(LAB.platform_fonts_semantic_sha256(path))
+
     def test_semantic_dom_digests_are_determinism_fields(self) -> None:
         self.assertIn("browser_snapshot_semantic_sha256", LAB_CLI.DETERMINISM_FIELDS)
         self.assertIn("native_snapshot_semantic_sha256", LAB_CLI.DETERMINISM_FIELDS)
