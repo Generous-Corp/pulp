@@ -2150,8 +2150,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
               << "    <key>com.apple.security.device.audio-input</key>\n    <true/>\n"
               << "</dict></plist>\n";
     }
-    auto refused = run_pulp_in(root, {"ship", "sign", "--identity", "fake-id",
-                                      "--entitlements", no_jit.string()});
+    auto refused = run_pulp_in(
+        root, {"ship", "sign", "--identity", "fake-id", "--entitlements", no_jit.string()});
     REQUIRE_FALSE(refused.timed_out);
     REQUIRE(refused.exit_code != 0);
     auto combined = refused.stdout_output + refused.stderr_output;
@@ -2170,8 +2170,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
               << "    <key>com.apple.security.cs.allow-jit</key>\n    <true/>\n"
               << "</dict></plist>\n";
     }
-    auto admitted = run_pulp_in(root, {"ship", "sign", "--identity", "fake-id",
-                                       "--entitlements", with_jit.string()});
+    auto admitted = run_pulp_in(
+        root, {"ship", "sign", "--identity", "fake-id", "--entitlements", with_jit.string()});
     REQUIRE_FALSE(admitted.timed_out);
     auto admitted_out = admitted.stdout_output + admitted.stderr_output;
     INFO(admitted_out);
@@ -2183,8 +2183,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
         cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << root.string() << "\n"
               << "PULP_JS_ENGINE:STRING=quickjs\n";
     }
-    auto quickjs = run_pulp_in(root, {"ship", "sign", "--identity", "fake-id",
-                                      "--entitlements", no_jit.string()});
+    auto quickjs = run_pulp_in(
+        root, {"ship", "sign", "--identity", "fake-id", "--entitlements", no_jit.string()});
     REQUIRE_FALSE(quickjs.timed_out);
     REQUIRE_FALSE(contains(quickjs.stdout_output + quickjs.stderr_output,
                            "refusing to sign a PULP_JS_ENGINE"));

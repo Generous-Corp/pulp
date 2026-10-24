@@ -448,8 +448,7 @@ TEST_CASE("asset loader refuses file:// and absolute paths when no root is confi
     REQUIRE(rig.load_status("file://" + (rig.outside / "secret.png").generic_string()) == 200);
 }
 
-TEST_CASE("embedded pulp:// assets load without any root or opt-in",
-          "[view][bridge][assets]") {
+TEST_CASE("embedded pulp:// assets load without any root or opt-in", "[view][bridge][assets]") {
     AssetPathRig rig;
     const std::string name = "bridge-caps-" + rig.root.filename().string() + ".txt";
     static const char payload[] = "embedded-ok";
@@ -493,15 +492,17 @@ TEST_CASE("registerFont and loadFont refuse an existing font outside every root"
     rig.bridge.set_script_base_dir(rig.script_dir);
     const auto font = (rig.outside / "face.ttf").generic_string();
     REQUIRE(fs::exists(font));
-    REQUIRE(rig.engine.evaluate("registerFont('Face', '" + font + "')").getWithDefault<bool>(true) ==
-            false);
+    REQUIRE(
+        rig.engine.evaluate("registerFont('Face', '" + font + "')").getWithDefault<bool>(true) ==
+        false);
     REQUIRE(rig.engine.evaluate("loadFont('" + font + "')").getWithDefault<bool>(true) == false);
 
     // Control: the same font under the script directory registers.
     fs::copy_file(rig.outside / "face.ttf", rig.script_dir / "assets" / "face.ttf");
     const auto contained = (rig.script_dir / "assets" / "face.ttf").generic_string();
     REQUIRE(rig.engine.evaluate("loadFont('" + contained + "')").getWithDefault<bool>(false));
-    REQUIRE(rig.engine.evaluate("registerFont('Face', 'assets/face.ttf')").getWithDefault<bool>(false));
+    REQUIRE(
+        rig.engine.evaluate("registerFont('Face', 'assets/face.ttf')").getWithDefault<bool>(false));
 }
 
 TEST_CASE("a reviewed asset root admits absolute paths beneath it", "[view][bridge][assets]") {

@@ -31,7 +31,7 @@ struct RuntimeEvaluationResult {
     bool timed_out = false;
     bool busy = false;
     bool detached = false;
-    bool refused = false;  ///< realm holds an explicit effectful grant
+    bool refused = false; ///< realm holds an explicit effectful grant
     std::string json;
     std::string error;
 };

@@ -91,7 +91,9 @@ public:
     /// so an EXPLICIT grant of the same capabilities counts as a decision
     /// while the legacy default does not. Parsing a manifest or granting onto
     /// an empty set never yields a legacy-default set.
-    bool is_legacy_default() const noexcept { return legacy_default_; }
+    bool is_legacy_default() const noexcept {
+        return legacy_default_;
+    }
 
     /// Return the first granted effectful capability in stable declaration
     /// order. All current reload capabilities expose native side effects, so a

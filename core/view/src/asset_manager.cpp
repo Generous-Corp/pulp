@@ -94,7 +94,8 @@ BlobData AssetManager::read_file_bytes(const std::string& path) const {
     if (size <= 0) return {};
     // The ceiling is checked before the buffer exists, so an oversized file
     // costs nothing but the open.
-    if (max_file_bytes_ != 0 && static_cast<std::uintmax_t>(size) > max_file_bytes_) return {};
+    if (max_file_bytes_ != 0 && static_cast<std::uintmax_t>(size) > max_file_bytes_)
+        return {};
 
     BlobData blob;
     blob.data.resize(static_cast<size_t>(size));

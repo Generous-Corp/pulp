@@ -189,7 +189,9 @@ public:
     void set_allow_unreviewed_file_paths(bool allow) noexcept {
         allow_unreviewed_file_paths_ = allow;
     }
-    bool allow_unreviewed_file_paths() const noexcept { return allow_unreviewed_file_paths_; }
+    bool allow_unreviewed_file_paths() const noexcept {
+        return allow_unreviewed_file_paths_;
+    }
 
     /// Whether a script may open `path`, an absolute filesystem path. True
     /// when the realm holds Filesystem AND either unreviewed paths are allowed

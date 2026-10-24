@@ -6,7 +6,7 @@
   "slices": [
     "retained-ui-kernel"
   ],
-  "rationale": "AssetManager::read_file_bytes gains a size cap and the asset resolver refuses absolute paths outside reviewed roots unless the realm holds the Filesystem capability. This is security hardening of the retained UI kernel that Vellum should carry too, so it is recorded for backport rather than as a Pulp-only divergence.",
+  "rationale": "AssetManager::read_file_bytes gains a size cap and the asset resolver refuses absolute paths outside reviewed roots unless the realm holds the Filesystem capability. Pulp-side hardening of the retained UI kernel; Vellum has no framework commit for it yet and may adopt the same refusal independently.",
   "tests": [
     "Vellum freeze",
     "Vellum trusted freeze",
@@ -20,5 +20,5 @@
     "ctest --test-dir build -R pulp-test-widget-bridge-capabilities",
     "ctest --test-dir build -R pulp-test-widget-bridge-gpu-tail"
   ],
-  "disposition": "framework-backport"
+  "disposition": "pulp-only"
 }

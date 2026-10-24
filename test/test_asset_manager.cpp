@@ -797,7 +797,8 @@ TEST_CASE("Theme fill_from fills missing tokens", "[view][theme][validation]") {
     REQUIRE(partial.color("text.primary").has_value());
 }
 
-TEST_CASE("AssetManager refuses a file larger than its per-file ceiling", "[view][assets][security]") {
+TEST_CASE("AssetManager refuses a file larger than its per-file ceiling",
+          "[view][assets][security]") {
     auto& assets = AssetManager::instance();
     const auto previous = assets.max_file_bytes();
     REQUIRE(previous == AssetManager::kDefaultMaxFileBytes);
@@ -814,7 +815,7 @@ TEST_CASE("AssetManager refuses a file larger than its per-file ceiling", "[view
 
     // Control: lifting the ceiling (0 = unlimited) reads the same file.
     assets.set_max_file_bytes(0);
-    REQUIRE(assets.load_blob(large.string() ).data.size() == 64);
+    REQUIRE(assets.load_blob(large.string()).data.size() == 64);
 
     assets.set_max_file_bytes(previous);
     std::error_code ec;

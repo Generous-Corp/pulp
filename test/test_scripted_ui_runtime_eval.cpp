@@ -740,10 +740,11 @@ TEST_CASE("A session with an explicit effectful grant refuses runtime evaluation
     storage_only.grant(ReloadCapability::Storage);
     View root;
     StateStore store;
-    ScriptedUiSession session(root, store, {
-        .script_path = script,
-        .granted_capabilities = storage_only,
-    });
+    ScriptedUiSession session(root, store,
+                              {
+                                  .script_path = script,
+                                  .granted_capabilities = storage_only,
+                              });
     REQUIRE(session.load());
 
     auto* inspector = script_inspector(session);
@@ -769,7 +770,7 @@ TEST_CASE("A session on the legacy default grant still evaluates",
     // No granted_capabilities: the trusted/local all() default.
     ScriptedUiSession session(root, store, {.script_path = script});
     REQUIRE(session.load());
-    REQUIRE(CapabilitySet::all().is_legacy_default());  // the default the session took
+    REQUIRE(CapabilitySet::all().is_legacy_default()); // the default the session took
 
     auto* inspector = script_inspector(session);
     REQUIRE(inspector != nullptr);

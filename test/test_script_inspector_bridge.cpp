@@ -515,7 +515,7 @@ TEST_CASE("An explicit effectful grant refuses evaluation and names the capabili
     auto caps = bridge.capabilities();
     REQUIRE(caps.refused_capability == "filesystem");
     REQUIRE_FALSE(caps.can_evaluate);
-    REQUIRE(caps.can_interrupt);  // the engine itself is unchanged
+    REQUIRE(caps.can_interrupt); // the engine itself is unchanged
 
     auto r = bridge.evaluate("1 + 1");
     REQUIRE(r.refused);

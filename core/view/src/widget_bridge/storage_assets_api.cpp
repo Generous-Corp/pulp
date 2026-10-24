@@ -99,10 +99,12 @@ struct BridgeAssetLoad {
 };
 
 bool looks_like_absolute_file_path(const std::string& path) {
-    if (path.empty()) return false;
-    if (path.front() == '/' || path.front() == '\\') return true;
-    return path.size() > 2 && std::isalpha(static_cast<unsigned char>(path[0])) &&
-           path[1] == ':' && (path[2] == '/' || path[2] == '\\');
+    if (path.empty())
+        return false;
+    if (path.front() == '/' || path.front() == '\\')
+        return true;
+    return path.size() > 2 && std::isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':' &&
+           (path[2] == '/' || path[2] == '\\');
 }
 
 // `allow_raw_files` is the bridge's unreviewed-path opt-in. Without it a
@@ -211,15 +213,19 @@ std::string base64_encode_blob(const std::vector<uint8_t>& data) {
 } // namespace
 
 bool WidgetBridge::permits_file_path(const std::filesystem::path& path) const {
-    if (path.empty()) return false;
-    if (!granted_capabilities_.has(ReloadCapability::Filesystem)) return false;
-    if (allow_unreviewed_file_paths_) return true;
+    if (path.empty())
+        return false;
+    if (!granted_capabilities_.has(ReloadCapability::Filesystem))
+        return false;
+    if (allow_unreviewed_file_paths_)
+        return true;
     const auto candidate = best_effort_canonical(path);
     if (!script_base_dir_.empty() &&
         path_within(candidate, best_effort_canonical(script_base_dir_)))
         return true;
     for (const auto& root : asset_roots_) {
-        if (path_within(candidate, best_effort_canonical(root))) return true;
+        if (path_within(candidate, best_effort_canonical(root)))
+            return true;
     }
     return false;
 }
@@ -232,14 +238,16 @@ std::string WidgetBridge::resolve_script_relative(const std::string& path) const
     // A relative path that climbs out of its directory is refused outright;
     // the per-root containment checks below would otherwise be bypassed by a
     // miss that falls through to the caller's working directory.
-    if (!safe_relative_asset_path(relative)) return std::string{};
+    if (!safe_relative_asset_path(relative))
+        return std::string{};
 
     if (!script_base_dir_.empty()) {
         // Containment is judged on canonical forms (so a symlink cannot
         // escape), but the returned path keeps the caller's spelling.
         auto candidate = (script_base_dir_ / relative).lexically_normal();
         std::error_code ec;
-        if (path_within(best_effort_canonical(candidate), best_effort_canonical(script_base_dir_)) &&
+        if (path_within(best_effort_canonical(candidate),
+                        best_effort_canonical(script_base_dir_)) &&
             std::filesystem::exists(candidate, ec) && !ec)
             return candidate.generic_string();
     }
@@ -361,7 +369,8 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
         if (family.empty() || path.empty()) return choc::value::createBool(false);
         if (path.rfind("file://", 0) == 0) path = path.substr(7);
         path = self.resolve_script_relative(path);
-        if (path.empty() || !std::filesystem::exists(path)) return choc::value::createBool(false);
+        if (path.empty() || !std::filesystem::exists(path))
+            return choc::value::createBool(false);
         // register_font_family decodes the file + registers the typeface with
         // the canvas font registry (Skia on GPU builds; no-op stub otherwise).
         AssetManager::instance().register_font_family(family, path);

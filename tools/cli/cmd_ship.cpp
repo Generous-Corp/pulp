@@ -229,9 +229,11 @@ static std::string configured_js_engine(const fs::path& build_dir) {
     std::string line;
     const std::string prefix = "PULP_JS_ENGINE:";
     while (std::getline(in, line)) {
-        if (line.rfind(prefix, 0) != 0) continue;
+        if (line.rfind(prefix, 0) != 0)
+            continue;
         const auto eq = line.find('=');
-        if (eq == std::string::npos) return {};
+        if (eq == std::string::npos)
+            return {};
         auto value = line.substr(eq + 1);
         while (!value.empty() && (value.back() == '\r' || value.back() == ' '))
             value.pop_back();
@@ -249,7 +251,8 @@ static std::string configured_js_engine(const fs::path& build_dir) {
 // interpreter, the build directory is not configured, or the grant is present.
 static int enforce_jit_entitlement(const fs::path& build_dir, const fs::path& entitlements) {
     const auto engine = configured_js_engine(build_dir);
-    if (engine != "v8" && engine != "jsc") return 0;
+    if (engine != "v8" && engine != "jsc")
+        return 0;
     std::string plist;
     {
         std::ifstream in(entitlements);
@@ -259,7 +262,8 @@ static int enforce_jit_entitlement(const fs::path& build_dir, const fs::path& en
     const bool granted = key != std::string::npos &&
                          plist.find("<true/>", key) != std::string::npos &&
                          plist.find("<true/>", key) < plist.find("<key>", key + 1);
-    if (granted) return 0;
+    if (granted)
+        return 0;
     std::cerr << "Error: refusing to sign a PULP_JS_ENGINE=" << engine
               << " build without the allow-jit entitlement.\n"
               << "  Entitlements: " << entitlements.string() << "\n"

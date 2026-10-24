@@ -212,8 +212,8 @@ ScriptInspectorBridge::evaluate(const std::string& code,
             // request must not block a later eligible one.
             EvalResult r;
             r.refused = true;
-            r.error = "live realm holds the effectful capability '" +
-                      caps_.refused_capability + "'; evaluation is refused";
+            r.error = "live realm holds the effectful capability '" + caps_.refused_capability +
+                      "'; evaluation is refused";
             return r;
         }
         if (in_flight_) {

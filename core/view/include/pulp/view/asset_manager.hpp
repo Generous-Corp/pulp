@@ -140,7 +140,9 @@ public:
     /// file into memory. Default 256 MiB; 0 disables the ceiling.
     static constexpr size_t kDefaultMaxFileBytes = size_t{256} * 1024 * 1024;
     void set_max_file_bytes(size_t bytes);
-    size_t max_file_bytes() const { return max_file_bytes_; }
+    size_t max_file_bytes() const {
+        return max_file_bytes_;
+    }
 
     /// Load raw bytes from embedded resource.
     BlobData load_blob_embedded(const std::string& name);

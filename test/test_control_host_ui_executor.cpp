@@ -740,7 +740,9 @@ TEST_CASE("runtime evaluation is policy-denied when the live realm holds an effe
             ++calls;
             return {.ok = true, .json = "1"};
         }
-        bool interrupt() override { return false; }
+        bool interrupt() override {
+            return false;
+        }
         std::string_view binary_marker() const noexcept override {
             return "PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1";
         }
@@ -749,13 +751,13 @@ TEST_CASE("runtime evaluation is policy-denied when the live realm holds an effe
     PostedQueue queue;
     auto evaluator = std::make_shared<RefusingEvaluator>();
     auto unsafe = binding(ControlBuildProfile::ResearchUnsafe);
-    auto executor = ControlHostUiExecutor::create(
-        {.binding = unsafe,
-         .main_thread_rpc = rpc(queue),
-         .runtime_evaluator = evaluator,
-         .redact_runtime_eval_result = [](std::string_view value) {
-             return std::optional<std::string>{std::string(value)};
-         }});
+    auto executor =
+        ControlHostUiExecutor::create({.binding = unsafe,
+                                       .main_thread_rpc = rpc(queue),
+                                       .runtime_evaluator = evaluator,
+                                       .redact_runtime_eval_result = [](std::string_view value) {
+                                           return std::optional<std::string>{std::string(value)};
+                                       }});
     REQUIRE(executor);
     const auto admission = plan(InspectorCapability::RuntimeEval, "dev.pulp.runtime/evaluate@1");
     const auto envelope = request(

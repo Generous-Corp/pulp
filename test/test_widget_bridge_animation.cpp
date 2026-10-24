@@ -1268,7 +1268,7 @@ TEST_CASE("WidgetBridge loadAssetSync covers text mime variants and path normali
     root.set_bounds({0, 0, 400, 300});
     StateStore store;
     WidgetBridge bridge(engine, root, store);
-    bridge.set_allow_unreviewed_file_paths(true);  // raw file:// read below
+    bridge.set_allow_unreviewed_file_paths(true); // raw file:// read below
 
     static const char kEmbeddedCss[] = "body { color: red; }\n";
     static const char kEmbeddedSvg[] = "<svg><path d='M0 0h1v1z'/></svg>";
