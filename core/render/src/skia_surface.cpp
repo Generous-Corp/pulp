@@ -96,6 +96,13 @@ SkiaSurface::InsertOutcomeHook g_insert_outcome_hook = nullptr;
 // Cleared by set_async_readback_for_testing(false); true in production.
 bool g_async_readback_enabled = true;
 
+// Installed by set_trim_clock_for_testing(); null in production.
+SkiaSurface::TrimClockHook g_trim_clock_hook = nullptr;
+
+GpuIdleTrimSchedule::Clock::time_point trim_clock_now() {
+    return g_trim_clock_hook ? g_trim_clock_hook() : GpuIdleTrimSchedule::Clock::now();
+}
+
 }  // namespace
 
 void SkiaSurface::set_insert_outcome_hook_for_testing(InsertOutcomeHook hook) {
@@ -104,6 +111,10 @@ void SkiaSurface::set_insert_outcome_hook_for_testing(InsertOutcomeHook hook) {
 
 void SkiaSurface::set_async_readback_for_testing(bool enabled) {
     g_async_readback_enabled = enabled;
+}
+
+void SkiaSurface::set_trim_clock_for_testing(TrimClockHook hook) {
+    g_trim_clock_hook = hook;
 }
 
 class SkiaSurfaceImpl : public SkiaSurface {
@@ -389,6 +400,9 @@ public:
             frame_work_submitted_ = true;
         }
 
+        if (idle_trim_.due(trim_clock_now()))
+            trim_gpu_resources(TrimLevel::unused_for(GpuIdleTrimSchedule::kUnusedAge));
+
         // A null snap() with no earlier submit means this frame produced no GPU
         // work at all. When read_current_rgba() already flushed the frame, the
         // absent second recording is expected and the drawable is fine.
@@ -600,6 +614,36 @@ public:
 
     int gpu_frames_in_flight() const override { return frames_in_flight_.count(); }
 
+    void trim_gpu_resources(TrimLevel level) override {
+        if (!recorder_ || !context_ || canvas_)
+            return;
+        PULP_TRACE_SCOPE_NAMED("gpu", "gpu_trim");
+        // Retire finished recordings first: until their callbacks run, the
+        // textures they drew are still referenced and cannot be purged.
+        context_->checkAsyncWorkCompletion();
+        // Images uploaded through the recorder (ImageFileCache, the image
+        // provider, layer and scene targets) live in the recorder's cache;
+        // the context holds the resources it creates for submission.
+        if (level.frees_everything()) {
+            recorder_->freeGpuResources();
+            context_->freeGpuResources();
+        } else {
+            recorder_->performDeferredCleanup(level.idle());
+            context_->performDeferredCleanup(level.idle());
+        }
+    }
+
+    GpuCacheBytes gpu_cache_bytes() const override {
+        if (!recorder_ || !context_)
+            return {};
+        return {recorder_->currentBudgetedBytes() + context_->currentBudgetedBytes(),
+                recorder_->currentPurgeableBytes() + context_->currentPurgeableBytes()};
+    }
+
+    std::uint64_t idle_trim_count() const override {
+        return idle_trim_.trims();
+    }
+
 private:
     // Graphite finished-with-stats callback. Fires on the thread pumping GPU
     // completion (render thread, via Context::submit) once the GPU finishes
@@ -630,6 +674,7 @@ private:
     bool gpu_elapsed_supported_ = false;  ///< Set once in init() from supportedGpuStats().
     GpuFramesInFlight frames_in_flight_;
     GpuRenderTimeTracker gpu_render_tracker_;  ///< Latest sample; written by on_gpu_stats().
+    GpuIdleTrimSchedule idle_trim_{trim_clock_now()};
 
     std::unique_ptr<skgpu::graphite::Context> context_;
     std::unique_ptr<skgpu::graphite::Recorder> recorder_;
@@ -803,6 +848,7 @@ std::unique_ptr<SkiaSurface> SkiaSurface::create(GpuSurface&, const Config&) {
 }
 void SkiaSurface::set_insert_outcome_hook_for_testing(InsertOutcomeHook) {}
 void SkiaSurface::set_async_readback_for_testing(bool) {}
+void SkiaSurface::set_trim_clock_for_testing(TrimClockHook) {}
 }
 
 #endif
