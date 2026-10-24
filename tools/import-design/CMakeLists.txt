@@ -34,6 +34,7 @@ add_executable(pulp-import-design
     pulp_import_design.cpp
     annotated_capture.cpp
     import_design_cli_help.cpp
+    import_document_refusals.cpp
     browser_import_cli.cpp
     browser_import_session.cpp
     browser_html_import.cpp
