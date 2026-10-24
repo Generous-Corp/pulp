@@ -3432,7 +3432,16 @@ match:
   `[pulp:warn] design-import:` line. "Unknown" means `kind_from_type` does not
   recognize the type and it is not a vector kind. The warning fires even when
   the node's audio role or name still resolves it. Duplicates are found by a
-  document-order walk of `stable_anchor_id`.
+  document-order walk of `stable_anchor_id` (`find_duplicate_anchors`).
+- **`pulp-import-design` refuses a repeated anchor; the resolver only warns.**
+  Every binder, tweak and lock addresses a node by its anchor, and the baked
+  C++ binder binds only on exactly one match, so a repeat silently loses its
+  binding. The CLI exits 2 before writing anything and names each repeat and
+  the node that keeps the anchor. The materializer keeps warning so an
+  already-built IR still renders. Under the `adapter` strategy a node with no
+  source id falls back to a content hash, and that fallback needs the same
+  per-signature sibling index as `content_hash` (counted only over id-less
+  siblings), or every id-less sibling of one shape gets one anchor.
 - **A successful decode does not prove an image is intact.** Skia's PNG
   decoder fills the rows of a truncated file with transparent pixels and
   returns `kSuccess`, and the node paints blank. `canvas::probe_image_file`

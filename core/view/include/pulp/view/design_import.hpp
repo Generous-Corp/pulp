@@ -123,6 +123,22 @@ struct UnrenderableFrameSet {
 // without a word. An empty result means every captured state will render.
 std::vector<UnrenderableFrameSet> find_unrenderable_alternate_frames(const IRNode& root);
 
+// A node whose stable_anchor_id an earlier node already carries.
+struct DuplicateAnchor {
+    std::string anchor;
+    std::string path;       ///< `$/children[i]/...` of the repeat
+    std::string node_name;  ///< the repeat's name, or "<unnamed>"
+    std::string first_path; ///< the earlier node that keeps the anchor
+    std::string first_node_name;
+};
+
+// Every node, in document order over `children`, that repeats an earlier node's
+// stable_anchor_id. Bindings, tweaks and lock-to-source address a node by that
+// anchor, so a repeat is unreachable: a generated binder that requires one match
+// binds neither. Alternate frames are not walked; a captured state deliberately
+// shares its control's identity across states.
+std::vector<DuplicateAnchor> find_duplicate_anchors(const IRNode& root);
+
 struct NativeMaterializeOptions {
     bool apply_token_theme = true;
     bool preview_mode = false;

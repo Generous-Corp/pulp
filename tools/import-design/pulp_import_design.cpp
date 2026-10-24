@@ -23,6 +23,7 @@
 #include "browser_capture_limits.hpp"
 #include "node_runtime.hpp"
 #include "import_design_cli_help.hpp"
+#include "import_document_refusals.hpp"
 #include "render_artifact_path.hpp"
 #include "sprite_skins.hpp"
 #include "zip_entry_policy.hpp"
@@ -3176,31 +3177,10 @@ int main(int argc, char* argv[]) {
     // --import-report / --fail-on-unresolved channel carry it.
     apply_swap_target_verification(ir.root);
 
-    // Captured states nobody can render are a hard error, not a diagnostic. Only
-    // a faithful_svg node lowers alternate_frames to DesignFrameView::add_frame,
-    // so on any other node the extra states are dropped and the import "succeeds"
-    // with a single frame — the user asked for N states and silently got one.
-    // Refusing here is what keeps that from shipping as a working command.
-    if (const auto dropped = find_unrenderable_alternate_frames(ir.root); !dropped.empty()) {
-        std::size_t total = 0;
-        for (const auto& d : dropped) total += d.alternates;
-        std::cerr << "Error: " << total << " captured state"
-                  << (total == 1 ? "" : "s") << " cannot be rendered and would be "
-                     "dropped:\n";
-        for (const auto& d : dropped)
-            std::cerr << "       - " << d.node_name << ": " << d.alternates
-                      << " alternate frame" << (d.alternates == 1 ? "" : "s")
-                      << " — " << d.reason << "\n";
-        std::cerr << "       Multi-state capture needs a faithful-vector export. The Figma "
-                     "REST lane produces one:\n"
-                     "         python3 tools/import-design/figma_rest_export.py --file-key "
-                     "<KEY> --node <A> --out a.pulp.json --faithful-vector\n"
-                     "         python3 tools/import-design/figma_rest_export.py --file-key "
-                     "<KEY> --node <B> --out b.pulp.json --faithful-vector\n"
-                     "         pulp import-design --from figma-plugin --file a.pulp.json "
-                     "--file b.pulp.json ...\n";
+    // Captured states nobody can render and repeated anchors refuse the import
+    // before anything is written (import_document_refusals.hpp).
+    if (pulp::import_design::refuse_unimportable_document(ir.root, std::cerr))
         return 2;
-    }
     const auto import_report = collect_import_report(ir.root);
     if (!import_report.controls.empty())
         std::cerr << import_report_to_text(import_report);

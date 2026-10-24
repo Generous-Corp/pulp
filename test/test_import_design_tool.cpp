@@ -3510,6 +3510,72 @@ TEST_CASE("captured states that cannot render fail loudly instead of dropping",
     CHECK_FALSE(fs::exists(out));
 }
 
+namespace {
+
+// Two knobs in one figma-plugin frame, with the Figma node ids given.
+std::string two_knob_envelope(const std::string& first_id, const std::string& second_id) {
+    const auto knob = [](const std::string& id, const std::string& name,
+                         const std::string& binding) {
+        return R"({"type": "frame", "id": ")" + id + R"(", "name": ")" + name +
+               R"(", "audio_widget": "knob", "attributes": {"binding": ")" + binding +
+               R"("}, "style": {"width": 80, "height": 80}})";
+    };
+    return R"({"format_version": "2026.05-figma-plugin-v1", "root": {"type": "frame", )"
+           R"("id": "1:1", "name": "Panel", "style": {"width": 200, "height": 100}, )"
+           R"("children": [)" +
+           knob(first_id, "Cutoff", "filter.cutoff_hz") + ", " +
+           knob(second_id, "Drive", "filter.drive") + "]}}";
+}
+
+} // namespace
+
+TEST_CASE("a repeated stable anchor fails the import and names both nodes",
+          "[cli][import-design][tool][identity]") {
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+    TempDir tmp("pulp-duplicate-anchor");
+
+    SECTION("two nodes with one Figma id are refused before anything is written") {
+        write_text(tmp.path / "dup.pulp.json", two_knob_envelope("1:2", "1:2"));
+        for (const char* emit : {"js", "ir-json", "cpp", "swiftui"}) {
+            INFO("--emit " << emit);
+            const auto out = tmp.path / (std::string("out-") + emit);
+            std::vector<std::string> args = {
+                "--from", "figma-plugin", "--file",   (tmp.path / "dup.pulp.json").string(),
+                "--emit", emit,           "--output", out.string()};
+            if (std::string(emit) != "js") {
+                args.push_back("--mode");
+                args.push_back("baked");
+            }
+            auto r = run_import_design(args, 60000);
+            INFO("stderr: " << r.stderr_output);
+            REQUIRE_FALSE(r.timed_out);
+            CHECK(r.exit_code == 2);
+            CHECK(r.stderr_output.find("1 node repeats an earlier node's stable anchor") !=
+                  std::string::npos);
+            CHECK(r.stderr_output.find("'Drive' at $/children[1] has anchor "
+                                       "'figma-plugin:1:2', already used by 'Cutoff' at "
+                                       "$/children[0]") != std::string::npos);
+            CHECK_FALSE(fs::exists(out));
+        }
+    }
+
+    SECTION("the same panel with distinct ids imports") {
+        write_text(tmp.path / "ok.pulp.json", two_knob_envelope("1:2", "1:3"));
+        const auto out = tmp.path / "ok.cpp";
+        auto r = run_import_design({"--from", "figma-plugin", "--file",
+                                    (tmp.path / "ok.pulp.json").string(), "--mode", "baked",
+                                    "--emit", "cpp", "--output", out.string()},
+                                   60000);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        CHECK(r.exit_code == 0);
+        CHECK(r.stderr_output.find("stable anchor") == std::string::npos);
+        CHECK(fs::exists(out));
+    }
+}
+
 TEST_CASE("repeated --frame on a source that resolves one frame is rejected",
           "[cli][import-design][tool][multi-state]") {
     if (!binary_exists()) {
