@@ -1047,7 +1047,7 @@ static bool parse_ir_audio_widget(IRNode& node, const choc::value::ValueView& ob
     return explicit_audio_widget;
 }
 
-IRNode parse_ir_node(const choc::value::ValueView& obj) {
+IRNode parse_ir_node(const choc::value::ValueView& obj, const IRParseOptions& options) {
     IRNode node;
     node.type = get_string(obj, "type", "frame");
     node.name = get_string(obj, "name");
@@ -1485,7 +1485,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     if (obj.hasObjectMember("children") && obj["children"].isArray()) {
         auto children = obj["children"];
         for (uint32_t i = 0; i < children.size(); ++i)
-            node.children.push_back(parse_ir_node(children[static_cast<int>(i)]));
+            node.children.push_back(parse_ir_node(children[static_cast<int>(i)], options));
     }
 
     // Alternate frames (multi-state capture). Array ORDER is the frame index a
@@ -1496,7 +1496,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         for (uint32_t i = 0; i < frames.size(); ++i) {
             const auto f = frames[static_cast<int>(i)];
             if (!f.isObject()) continue;
-            node.alternate_frames.push_back(parse_ir_node(f));
+            node.alternate_frames.push_back(parse_ir_node(f, options));
         }
         if (!node.alternate_frames.empty()) break;
     }
@@ -1507,7 +1507,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // (design_ir_normalize.cpp). Runs after children and alternate frames
     // are parsed so every rule sees final child geometry; children were
     // normalized during their own parse_ir_node recursion.
-    normalize_design_ir(node);
+    normalize_design_ir(node, options);
 
     // Tail post-passes, extracted into named functions.
     detect_node_audio_widget(node, explicit_audio_widget);
@@ -2432,7 +2432,7 @@ DesignIR parse_design_ir_json(const std::string& json) {
         if (ir.source_version.empty()) ir.source_version = get_string(parsed, "sourceVersion");
         ir.imported_at = get_string(parsed, "imported_at");
         if (ir.imported_at.empty()) ir.imported_at = get_string(parsed, "importedAt");
-        ir.root = parse_ir_node(parsed["root"]);
+        ir.root = parse_ir_node(parsed["root"], ir_parse_options_for(ir));
         if (parsed.hasObjectMember("tokens"))
             ir.tokens = parse_ir_tokens(parsed["tokens"]);
         if (parsed.hasObjectMember("assetManifest"))
