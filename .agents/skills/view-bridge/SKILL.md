@@ -2501,9 +2501,11 @@ case so the degradation is visible rather than mysterious.
 
 `pulp_add_plugin(UI_SCRIPT)` no longer ships a plug-in that reads `ui.js` from
 the developer's absolute source path at every editor open. The script's bytes,
-the `theme.json` beside it, and the asset files beside it (an extension
-allowlist in `PulpUiAssets.cmake`; dot-directories, `node_modules` and nested
-build trees are skipped) are encoded by `encode_binary_data.py` into one
+the `theme.json` beside it, and the asset files beside it (images, fonts,
+`.json` sidecars and shaders: the allowlist in `PulpUiAssets.cmake`;
+dot-directories, `node_modules` and nested build trees are skipped, and a
+script whose directory holds a `CMakeLists.txt` is refused so a project root
+never ships its own files) are encoded by `encode_binary_data.py` into one
 `pulp_ui_embed_<hash>` static library per distinct (script, theme, files) set,
 and a generated header returns them as the embedded half of a
 `pulp::format::EditorAssets`. The per-target registration unit

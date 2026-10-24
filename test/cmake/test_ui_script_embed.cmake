@@ -88,8 +88,9 @@ file(WRITE "${_pdir}/ui/theme.json"
     "{\"colors\":{\"bg.primary\":\"${_theme_marker}\"}}\n")
 # A file beside the script, in a subdirectory: embedded under its relative name.
 file(WRITE "${_pdir}/ui/assets/logo.svg" "<svg><!-- ${_asset_marker} --></svg>\n")
-# Files the embed must leave out: a source map, and a nested build tree.
+# Files the embed must leave out: a source map, prose, and a nested build tree.
 file(WRITE "${_pdir}/ui/main.js.map" "{\"version\":3}\n")
+file(WRITE "${_pdir}/ui/README.md" "readme-marker-4b2d\n")
 file(MAKE_DIRECTORY "${_pdir}/ui/out")
 file(WRITE "${_pdir}/ui/out/CMakeCache.txt" "x\n")
 file(WRITE "${_pdir}/ui/out/stale.json" "{\"stale\":true}\n")
@@ -210,8 +211,9 @@ endif()
 if(NOT _release_out MATCHES "file=assets/logo\\.svg size=${_asset_size}")
     list(APPEND _failures "release: the sibling file is not registered under its script-relative name; stdout was: ${_release_out}")
 endif()
-if(_release_out MATCHES "main\\.js\\.map" OR _release_out MATCHES "stale\\.json")
-    list(APPEND _failures "release: a source map or a nested build tree's file was embedded; stdout was: ${_release_out}")
+if(_release_out MATCHES "main\\.js\\.map" OR _release_out MATCHES "stale\\.json"
+   OR _release_out MATCHES "README\\.md")
+    list(APPEND _failures "release: a source map, prose file or nested build tree's file was embedded; stdout was: ${_release_out}")
 endif()
 if(NOT _release_out MATCHES "dev_path=none")
     list(APPEND _failures "release: the on-disk script path is registered in a non-dev build: ${_release_out}")
@@ -262,6 +264,31 @@ if(NOT _dev_has_path)
 endif()
 if(NOT _dev_has_roots)
     list(APPEND _failures "dev: the control failed -- the asset root '${_assets_abs}' is not in a build that records it")
+endif()
+
+# Refusal: a script in a directory that holds a CMakeLists.txt (a project
+# root) would embed the project's own files into every format binary.
+set(_root_pdir "${PULP_UI_SCRIPT_EMBED_TEST_DIR}/project-root-script")
+file(MAKE_DIRECTORY "${_root_pdir}")
+file(WRITE "${_root_pdir}/ui.js" "createLabel('root', 'x', '');\n")
+file(WRITE "${_root_pdir}/main.cpp" "int main() { return 0; }\n")
+file(WRITE "${_root_pdir}/CMakeLists.txt" [[
+cmake_minimum_required(VERSION 3.24)
+project(PulpUiScriptRootFixture CXX)
+include("${PULP_UI_ASSETS_MODULE}")
+add_executable(fixture main.cpp)
+target_include_directories(fixture PRIVATE "${PULP_FORMAT_INCLUDE}")
+_pulp_apply_ui_script_definition(fixture "${CMAKE_CURRENT_SOURCE_DIR}/ui.js")
+]])
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -S "${_root_pdir}" -B "${PULP_UI_SCRIPT_EMBED_TEST_DIR}/build-root"
+            "-DPULP_UI_ASSETS_MODULE=${_ui_assets_module}"
+            "-DPULP_FORMAT_INCLUDE=${_format_include}"
+    RESULT_VARIABLE _root_rv OUTPUT_VARIABLE _root_out ERROR_VARIABLE _root_err)
+if(_root_rv EQUAL 0)
+    list(APPEND _failures "root-script: a UI_SCRIPT beside a CMakeLists.txt configured instead of being refused")
+elseif(NOT "${_root_out}${_root_err}" MATCHES "holds a CMakeLists.txt")
+    list(APPEND _failures "root-script: the configure failed for another reason than the refusal:\n${_root_out}\n${_root_err}")
 endif()
 
 if(_failures)

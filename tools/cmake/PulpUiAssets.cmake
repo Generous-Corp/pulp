@@ -44,14 +44,16 @@ function(_pulp_ui_script_dev_path_enabled out_var)
 endfunction()
 
 # File types embedded from the directory beside UI_SCRIPT (and from a kit's
-# declared asset directories): what a scripted editor fetches, draws, or
-# registers relative to itself. Anything else beside the script is left out.
+# declared asset directories): the images, fonts, data sidecars and shaders a
+# scripted editor fetches, draws, or registers relative to itself. Source,
+# markup and prose beside the script are left out; a UI_SCRIPT must sit in its
+# own directory (one holding a CMakeLists.txt is refused), so a project's own
+# files are never swept into every format binary.
 set(_PULP_UI_EMBED_ASSET_EXTENSIONS
     png jpg jpeg gif webp bmp ico svg
     ttf otf woff woff2
-    json txt csv md
-    wgsl glsl sksl frag vert
-    js mjs css html)
+    json
+    wgsl glsl sksl frag vert)
 # Embedding more than this many bytes beside one script is worth a look.
 set(_PULP_UI_EMBED_SIZE_WARNING_BYTES 16777216)
 
@@ -62,6 +64,14 @@ set(_PULP_UI_EMBED_SIZE_WARNING_BYTES 16777216)
 # dependency, so a file added later re-runs CMake on the next build.
 function(_pulp_ui_embed_sibling_files out_var script_path theme_path)
     get_filename_component(_dir "${script_path}" DIRECTORY)
+    if(EXISTS "${_dir}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "UI_SCRIPT ${script_path}: the script sits in a directory that holds a "
+            "CMakeLists.txt. Every image, font and data file beside the script is "
+            "embedded into every format target, so a project directory would ship its "
+            "own files inside the plug-in. Move the script into its own directory "
+            "(for example ui/) and point UI_SCRIPT at it.")
+    endif()
     _pulp_ui_embed_files_under(_pairs "${_dir}" "${script_path};${theme_path}")
     set(${out_var} "${_pairs}" PARENT_SCOPE)
 endfunction()
