@@ -339,7 +339,6 @@ public:
     void trim_gpu_resources(TrimLevel level) override {
         if (!context_ || lost_ || canvas_)
             return;
-        PULP_TRACE_SCOPE_NAMED("gpu", "gpu_trim");
         context_->checkAsyncWorkCompletion();
         if (level.frees_everything())
             context_->freeGpuResources();

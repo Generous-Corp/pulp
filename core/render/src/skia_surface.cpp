@@ -617,7 +617,6 @@ public:
     void trim_gpu_resources(TrimLevel level) override {
         if (!recorder_ || !context_ || canvas_)
             return;
-        PULP_TRACE_SCOPE_NAMED("gpu", "gpu_trim");
         // Retire finished recordings first: until their callbacks run, the
         // textures they drew are still referenced and cannot be purged.
         context_->checkAsyncWorkCompletion();
