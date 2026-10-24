@@ -2756,7 +2756,7 @@ int main(int argc, char* argv[]) {
          .materialized_canvas_composition = cli.materialized_canvas_composition,
          .require_canvas_ink = cli.require_canvas_ink,
          .validate = validate,
-         .capture_materialized_document = artifact_emit == ArtifactEmit::materialized_runtime},
+         .materialized_runtime_emit = artifact_emit == ArtifactEmit::materialized_runtime},
         content);
     if (const auto* failure =
             std::get_if<pulp::import_design::BrowserImportFailure>(

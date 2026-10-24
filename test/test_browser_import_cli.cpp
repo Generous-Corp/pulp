@@ -140,6 +140,45 @@ TEST_CASE("browser CLI adapter tags non-browser input as not applicable",
     CHECK(std::holds_alternative<id::BrowserImportNotApplicable>(result));
 }
 
+TEST_CASE("browser CLI reads the materialized document only for the imports that publish it",
+          "[import-design][browser-capture][cli-adapter]") {
+    struct Case {
+        bool materialized_runtime_emit;
+        bool materialized_canvas_composition;
+        bool captured;
+    };
+    // Plain --emit ir-json keeps the skipped read; the runtime emit and the
+    // JSX/Claude --materialized-canvas-composition lane both need the sidecar.
+    for (const auto& expected : {Case{false, false, false}, Case{true, false, true},
+                                 Case{false, true, true}, Case{true, true, true}}) {
+        TempTree tree;
+        auto request = request_for(tree);
+        request.materialized_runtime_emit = expected.materialized_runtime_emit;
+        request.materialized_canvas_composition = expected.materialized_canvas_composition;
+
+        std::optional<bool> captured;
+        id::internal::BrowserImportCliOperations operations;
+        operations.import_html = [&](const id::BrowserHtmlImportRequest& capture_request,
+                                     std::string_view) {
+            captured = capture_request.capture_materialized_document;
+            return id::BrowserHtmlImportResult{};
+        };
+        operations.validate_capture = [](const pulp::view::DesignIR&,
+                                         const id::BrowserCaptureValidationOptions&) {
+            return id::BrowserCaptureValidationResult{};
+        };
+        operations.localize_assets = [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            return true;
+        };
+
+        id::internal::run_browser_import_cli_with_operations(request, "<html>", operations);
+        INFO("runtime emit " << expected.materialized_runtime_emit << ", canvas composition "
+                             << expected.materialized_canvas_composition);
+        REQUIRE(captured.has_value());
+        CHECK(*captured == expected.captured);
+    }
+}
+
 TEST_CASE("required canvas ink rejects non-browser dispatch",
           "[import-design][browser-capture][cli-adapter]") {
     TempTree tree;
