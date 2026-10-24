@@ -146,6 +146,36 @@ declare theirs). Every comparison reads PNGs, so the commands check for Pillow
 once before running and name `tools/ci/install_visual_python_deps.sh` when it is
 missing.
 
+The browser and candidate lanes are two separate Chromium captures, and each
+session numbers backend nodes in its own order. Nodes are therefore paired
+across the lanes by the capture's DOM-path anchor (`stable_anchor_id`, for
+example `capture:html[0]/body[0]/div#root[0]`), which both lanes derive from
+the page's structure. A backend node ID is only meaningful inside the lane that
+produced it. An anchor present on both sides that disagrees is a non-match,
+whatever the text or tag says.
+
+### Fixtures that are not lab-runnable on their own
+
+Not every HTML file under `test/fixtures/` can be captured by itself. These ten
+fail at capture when they are passed to `compare` or `pulp-import-design` as
+they stand (Chrome 156, 2026-10-24), so a corpus run over the whole tree
+reports them as capture failures, not as importer results:
+
+| Fixture | Capture verdict | Why |
+|---|---|---|
+| `agent-panels/kelvin/panel.html` | `capture-source-unresolved` | links `styles.css`, which is not in the directory (404) |
+| `agent-panels/lattice/panel.html` | `capture-source-unresolved` | links `styles.css`, which is not in the directory (404) |
+| `agent-panels/magneto/panel.html` | `capture-source-unresolved` | links `styles.css`, which is not in the directory (404) |
+| `agent-panels/polystrike/panel.html` | `capture-negative-overflow` | content still begins at x = -37 px at a pinned 1280 px width |
+| `browser-capture-text-fallback-first/panel.html` | `capture-source-unresolved` | loads `FunnelDisplay-VariableFont_wght.ttf` and `Inter-Regular.ttf`, which are not committed beside it (404); its test reads the committed capture instead |
+| `browser-capture-text-stale-face/panel.html` | `capture-source-unresolved` | the same two font files (404); the committed capture is the test input |
+| `browser-capture-text-wrap/panel.html` | `capture-source-unresolved` | the same two font files (404); the committed capture is the test input |
+| `import-differential/16-svg-invalid.html` | `capture-source-unresolved` | its `<path d="M10 10 L">` is malformed on purpose; it belongs to the canvas/SVG manifest, not the browser-capture corpus |
+| `imports/claude/vite-assets.html` | `capture-source-unresolved` | renders no meaningful visible design without the Vite bundle it was exported from |
+| `imports/stitch/2025.04/code.html` | `capture-source-unresolved` | needs `https://cdn.tailwindcss.com`, which the capture does not fetch (`tailwind is not defined`) |
+
+The other 37, including the three holdouts, capture.
+
 The benchmark preserves the caller's `--cache-state` declaration on every
 run; it does not infer `cold` or `warm` from run order. The `first_invocation`
 and `repeat_runs` fields describe sequence position only. The legacy `cold`
