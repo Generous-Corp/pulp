@@ -832,6 +832,12 @@ knowing before you touch that file:
   now passes `IRParseOptions::measured_geometry` when the IR's source adapter
   is `browser-capture`, and a geometry rule that only makes up for how a
   design tool draws must check it. Fixture `20-flex-gap-knob` covers the snap.
+  Separator promotion, rounded-corner inheritance and name-based audio-widget
+  detection skip a capture too: a scaled hairline is really 0.3px wide, a
+  child's radius is its own, and a `div.dial` the capture did not bind is not
+  a knob (it became a live Knob with hit regions). Connector spanning needs a
+  row-direction node, which the capture never writes. Fixture
+  `21-design-tool-heuristics` covers them.
 
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
   evidence. The differential matcher must join captured elements by

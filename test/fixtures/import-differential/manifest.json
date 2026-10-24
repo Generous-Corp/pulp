@@ -24,6 +24,7 @@
     {"id":"fresh-plugin-panel","source":"17-fresh-plugin-panel.html","shape":"self-contained-html","from":"claude","split":"fresh-plugin","viewport":{"width":480,"height":320},"browser_interactions":"17-fresh-plugin-panel.interactions.json","expected_blockers":[]},
     {"id":"gradient-border","source":"19-gradient-border.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":400,"height":180},"expected_blockers":[]},
     {"id":"flex-gap-knob","source":"20-flex-gap-knob.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":960,"height":680},"expected_blockers":[]},
+    {"id":"design-tool-heuristics","source":"21-design-tool-heuristics.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","viewport":{"width":800,"height":520},"expected_blockers":[],"expected_gaps":[{"id":"scaled-bordered-box-clamped","lab_signal":"geometry gate registered_max_abs_delta 1.69 CSS px on #h-scaled (Chromium 0.3125 px wide, native 2 px)","effect":"the capture drops transform and places the box by its scaled paint box, so native lays out a 0.3125 px box with two 1 px borders and clamps it to the 2 px the borders need"}]},
     {
       "id": "spectr-standalone",
       "source": "holdout/spectr-standalone.html",
