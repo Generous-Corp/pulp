@@ -2164,10 +2164,11 @@ Guard each entry with `if(TARGET …)` (the importer target exists only with
 `experimental/pulp-rs/src/cmd/orchestrate.rs`) adds `-DPULP_DEV_BUILD=ON` on
 a fresh configure or when the cache never recorded the option, and keeps a
 recorded value; `create_standalone_configure_command` passes it outright.
-That is what compiles the on-disk `ui.js` hot-reload path into a developer
-build. `pulp ship sign|package` refuse a dev build dir through
-`ship_dev_build_guard.hpp` (`--allow-dev-build` overrides). Keep the two
-`configure_default_args` and their tests
+That is what records the on-disk `ui.js` hot-reload path in a developer
+build. `pulp ship sign|package|release` on a dev build dir configure and build
+`build-ship/` with the option off and ship from there
+(`ship_dev_build_guard.hpp`; `--allow-dev-build` ships `build/` as it is).
+Keep the two `configure_default_args` and their tests
 (`test/test_cli_configure_defaults.cpp`, the Rust unit + parity tests) in
 step when changing either.
 

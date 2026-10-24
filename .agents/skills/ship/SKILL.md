@@ -250,19 +250,25 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
-## PULP_DEV_BUILD ship guard
+## PULP_DEV_BUILD: ship builds `build-ship/`
 
-`sign` and `package` (and so `release`) **refuse** a build dir whose
-`CMakeCache.txt` records `PULP_DEV_BUILD=ON`: that build compiles the on-disk
-`UI_SCRIPT` path, theme path and asset roots into the artifact so a
-hot-reloading editor reads the developer's source tree. The `pulp` CLI turns
-the option on for every developer-loop configure, so a plain `pulp build` dir
-is a dev build. The fix is `cmake -B build -DPULP_DEV_BUILD=OFF` then a
-rebuild (`pulp build` keeps a recorded value); `--allow-dev-build` overrides
-deliberately. The reader lives in `tools/cli/ship_dev_build_guard.hpp`
-(unit-tested in `test/test_ship_dev_build_guard.cpp`).
+A build dir whose `CMakeCache.txt` records `PULP_DEV_BUILD=ON` also records
+the on-disk `UI_SCRIPT` path, theme path and asset roots so a hot-reloading
+editor reads the developer's source tree. The `pulp` CLI turns the option on
+for every developer-loop configure, so a plain `pulp build` dir is a dev
+build. `pulp ship` neither ships nor refuses it: `sign`, `package` and
+`release` configure `<root>/build-ship` from the dev cache
+(`ship_build_configure_args()` carries the generator, build type, SDK
+location and feature switches, drops the test tree and sets
+`PULP_DEV_BUILD=OFF`), build it through the governed build lease, and ship
+from there; `check`, `notarize` and `share` read `build-ship/` once it exists
+(and say so), and `notarize`/`share` point at `pulp ship package` when it does
+not. `--allow-dev-build` ships `build/` as it is and prints a warning. The
+helpers live in `tools/cli/ship_dev_build_guard.hpp` (unit-tested in
+`test/test_ship_dev_build_guard.cpp`; the CLI path in
+`test/test_cli_ship_shellout.cpp` `[dev-build]`).
 `tools/scripts/build_combined_installer.sh` takes finished artifacts, not a
-build dir, and does not configure, so it carries no such check.
+build dir, and does not configure, so it carries no such step.
 
 ## Development-SDK ship guard
 

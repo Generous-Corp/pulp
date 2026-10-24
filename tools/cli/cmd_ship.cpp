@@ -6,6 +6,7 @@
 #include "notary_env.hpp"
 #include "ship_dev_build_guard.hpp"
 #include "ship_tracing_guard.hpp"
+#include "tartci_lease.hpp"
 #include "inspector_container_report.hpp"
 #include "inspector_shipping_report.hpp"
 #include "json_writer.hpp"
@@ -103,8 +104,8 @@ static int print_ship_help() {
     std::cout << "             --version 1.0.0\n";
     std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";
     std::cout << "             --allow-tracing  (override the guard that refuses a PULP_TRACING=ON build)\n";
-    std::cout << "             --allow-dev-build  (override the guard that refuses a "
-                 "PULP_DEV_BUILD=ON build; sign honors it too)\n";
+    std::cout << "             --allow-dev-build  (ship a PULP_DEV_BUILD=ON build dir as it is "
+                 "instead of building build-ship/; sign honors it too)\n";
     std::cout << "             --ship-inspector  (acknowledge an exactly declared inspector endpoint)\n";
     std::cout << "             --ship-inspector-runtime-eval  (separate unsafe-eval acknowledgement)\n";
     std::cout << "             --json  (emit inspector capability evidence)\n";
@@ -225,27 +226,50 @@ static int enforce_no_tracing(const std::vector<fs::path>& roots,
     return 0;
 }
 
-// Ship-time PULP_DEV_BUILD guard. Refuses to sign/package an artifact from a
-// build dir configured with PULP_DEV_BUILD=ON: that build compiles the on-disk
-// UI_SCRIPT (and theme / asset-root) paths in for the hot-reload loop, so the
-// artifact would name, and read from, the developer's source tree. Returns 0
-// when the build dir is not a dev build or `allow_dev_build` overrides.
+// A dev build dir (PULP_DEV_BUILD=ON) records the on-disk UI_SCRIPT, theme and
+// asset-root paths for the hot-reload loop, so its artifacts would name, and
+// read from, the developer's source tree. cmd_ship() redirects such a project
+// to build-ship/ before reaching sign/package; this is only reached with the
+// dev dir when --allow-dev-build asked for it, and says so.
 static int enforce_no_dev_build(const fs::path& build_dir, bool allow_dev_build) {
     if (!pulp::cli::build_dir_is_dev_build(build_dir))
         return 0;
     if (allow_dev_build) {
         std::cerr << "⚠︎  pulp ship: " << build_dir.string()
-                  << " was configured with PULP_DEV_BUILD=ON — proceeding because "
-                     "--allow-dev-build was passed.\n";
+                  << " was configured with PULP_DEV_BUILD=ON — shipping it as it is because "
+                     "--allow-dev-build was passed. Its editor can read the on-disk ui.js path.\n";
         return 0;
     }
-    std::cerr << "Error: refusing to ship a build configured with PULP_DEV_BUILD=ON.\n"
-              << "  Build dir: " << build_dir.string() << "\n"
-              << "  A dev build compiles the on-disk ui.js hot-reload path (and the\n"
-              << "  theme / asset-root source paths) into the artifact. Reconfigure\n"
-              << "  with `cmake -B " << build_dir.string() << " -DPULP_DEV_BUILD=OFF`,\n"
-              << "  rebuild, and re-run; or pass --allow-dev-build to override deliberately.\n";
+    std::cerr << "Error: " << build_dir.string()
+              << " is a dev build (PULP_DEV_BUILD=ON); ship from "
+              << pulp::cli::ship_build_dir(build_dir.parent_path()).string()
+              << " or pass --allow-dev-build.\n";
     return 1;
+}
+
+// Configure (once) and build the shippable sibling of a dev build dir:
+// <root>/build-ship, taken from the dev cache's generator, build type, SDK and
+// feature switches with PULP_DEV_BUILD=OFF. The build goes through the same
+// host lease, QoS, watchdog and build-dir lock as `pulp build`.
+static int ensure_ship_build(const fs::path& root, const fs::path& dev_build_dir,
+                             const fs::path& ship_dir) {
+    std::cout << "pulp ship: " << dev_build_dir.filename().string()
+              << "/ is a dev build (PULP_DEV_BUILD=ON records the on-disk ui.js hot-reload "
+                 "path).\n"
+              << "           Building the shippable build in " << ship_dir.string()
+              << " (PULP_DEV_BUILD=OFF) and shipping from there; "
+                 "--allow-dev-build ships the dev build as it is.\n";
+    if (!fs::exists(ship_dir / "CMakeCache.txt")) {
+        const auto cache = pulp::cli::read_cmake_cache(dev_build_dir);
+        std::string configure = "cmake -S " + shell_quote(root.string()) + " -B " +
+                                shell_quote(ship_dir.string());
+        for (const auto& arg : pulp::cli::ship_build_configure_args(cache.value_or("")))
+            configure += " " + shell_quote(arg);
+        if (int rc = run_with_spinner(configure, "Configuring (shippable)"); rc != 0) return rc;
+    }
+    return run_governed_cmake_build(root, ship_dir, {}, "pulp-ship-build",
+                                    GovernedBuildOutput::Spinner, "Building (shippable)",
+                                    "pulp ship: ");
 }
 
 static int enforce_no_vellum_d15(const std::vector<fs::path>& artifacts) {
@@ -2585,6 +2609,41 @@ int cmd_ship(const std::vector<std::string>& args) {
         !fs::exists(build_dir / "CMakeCache.txt")) {
         std::cerr << "Build directory not found. Run `pulp build` first.\n";
         return 1;
+    }
+
+    // A dev build dir records the developer's on-disk ui.js path; a shipped
+    // artifact comes from a build without it. Ship from build-ship/ instead of
+    // refusing: the artifact-producing subcommands configure and build it from
+    // the dev cache with PULP_DEV_BUILD=OFF, the others read it once it exists.
+    // --allow-dev-build keeps the dev dir (sign/package then say so).
+    const bool allow_dev_build =
+        std::find(args.begin(), args.end(), "--allow-dev-build") != args.end();
+    const bool reads_native_build =
+        sub != "swap-pack" && sub != "auv3-xcodeproj" && sub != "appcast" && !android_check;
+    if (reads_native_build && !allow_dev_build && pulp::cli::build_dir_is_dev_build(build_dir)) {
+        const auto ship_dir = pulp::cli::ship_build_dir(root);
+        if (sub == "sign" || sub == "package" || sub == "release") {
+            if (int rc = ensure_ship_build(root, build_dir, ship_dir); rc != 0) return rc;
+            build_dir = ship_dir;
+        } else if (fs::exists(ship_dir / "CMakeCache.txt")) {
+            std::cout << "pulp ship " << sub << ": " << build_dir.filename().string()
+                      << "/ is a dev build (PULP_DEV_BUILD=ON); reading "
+                      << ship_dir.filename().string() << "/\n";
+            build_dir = ship_dir;
+        } else if (sub == "check") {
+            std::cout << "pulp ship check: " << build_dir.filename().string()
+                      << "/ is a dev build (PULP_DEV_BUILD=ON); `pulp ship sign` and "
+                         "`pulp ship package` build and ship " << ship_dir.filename().string()
+                      << "/ instead (not built yet)\n";
+        } else {
+            std::cerr << "pulp ship " << sub << ": " << build_dir.string()
+                      << " is a dev build (PULP_DEV_BUILD=ON) and " << ship_dir.string()
+                      << " has not been built yet.\n"
+                      << "  Run `pulp ship package` (or `pulp ship sign`) first: it configures "
+                         "and builds the shippable build there. Pass --allow-dev-build to read "
+                         "the dev build instead.\n";
+            return 1;
+        }
     }
 
     if (sub == "package" || sub == "notarize" || sub == "release" || sub == "share") {
