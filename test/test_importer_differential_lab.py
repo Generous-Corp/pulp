@@ -2508,7 +2508,8 @@ class FormControlBoundaryTests(unittest.TestCase):
         snapshot = self.form_snapshot()
         rows = form_controls(LAB.browser_nodes(snapshot), snapshot)
         status = {row["browser_node"]: row["status"] for row in rows}
-        self.assertEqual(status[1], "ua-default-form-chrome")
+        # A themed range is the theme's, and the lowering reskins it.
+        self.assertEqual(status[1], "ua-theme-skinned")
         self.assertEqual(status[2], "author-styled")
         # appearance:none does not reach a range's thumb.
         self.assertEqual(status[3], "ua-shadow-form-part")
@@ -2516,7 +2517,7 @@ class FormControlBoundaryTests(unittest.TestCase):
         # Both buttons compute `appearance: auto`. Author box styling drops
         # Chromium's theme, so only the unstyled one is the theme's.
         self.assertEqual(status[8], "author-styled")
-        self.assertEqual(status[9], "ua-default-form-chrome")
+        self.assertEqual(status[9], "ua-theme-skinned")
 
         # A capture without verdicts cannot say who painted an `auto`
         # control, and does not guess either way.
@@ -2529,6 +2530,75 @@ class FormControlBoundaryTests(unittest.TestCase):
         from importer_differential.form_controls import control_status
         self.assertEqual(control_status("button", "", {}),
                          "appearance-unrecorded")
+
+    def test_only_themed_controls_without_a_native_skin_are_a_boundary(
+            self) -> None:
+        from importer_differential.form_controls import control_status
+
+        auto = {"appearance": "auto"}
+
+        def status(tag: str, input_type: str = "", theme: str = "native") -> str:
+            return control_status(tag, input_type, auto, theme, True)
+
+        for tag, input_type in (("button", ""), ("input", "range"),
+                                ("input", "checkbox"), ("input", "radio"),
+                                ("input", "button"), ("input", "submit"),
+                                ("input", "reset")):
+            self.assertEqual(status(tag, input_type), "ua-theme-skinned",
+                             (tag, input_type))
+        # The theme still paints these and the lowering has no skin for them.
+        for tag, input_type in (("select", ""), ("textarea", ""),
+                                ("meter", ""), ("progress", ""),
+                                ("input", "text"), ("input", "date"),
+                                ("input", "color"), ("input", "file"),
+                                ("input", "image")):
+            self.assertEqual(status(tag, input_type), "ua-default-form-chrome",
+                             (tag, input_type))
+        # Only the native verdict is reskinned: an author-styled button is the
+        # author's, and a styled select's arrow is still the UA's.
+        self.assertEqual(status("button", "", "author"), "author-styled")
+        self.assertEqual(status("select", "", "author-arrow"),
+                         "ua-shadow-form-part")
+
+    def test_skinned_types_are_the_ones_the_capture_records_state_for(
+            self) -> None:
+        from importer_differential import form_controls as fc
+
+        cpp = InputTypeTableTests.CPP_CONTROLS.read_text(encoding="utf-8")
+        start = cpp.index("bool record_ua_control_state(")
+        body = cpp[start:cpp.index("\n}\n", start)]
+        tags = set(re.findall(r'tag == "([^"]+)"', body)) - {"input"}
+        types = set(re.findall(r'type == "([^"]+)"', body))
+        types |= set(re.findall(r'type != "([^"]+)"', body))
+        self.assertEqual(tags, set(fc.THEME_SKINNED_TAGS))
+        self.assertEqual(types, set(fc.THEME_SKINNED_INPUT_TYPES))
+
+    @requires_pillow
+    def test_a_skinned_control_keeps_its_share_but_is_no_boundary(self) -> None:
+        from importer_differential.form_controls import (
+            attribute_residual, support_boundaries)
+
+        controls = [
+            {"tag": "button", "type": None, "appearance": "auto",
+             "status": "ua-theme-skinned", "bounds": [10, 10, 20, 10]},
+            {"tag": "select", "type": None, "appearance": "auto",
+             "status": "ua-default-form-chrome", "bounds": [60, 10, 20, 10]},
+        ]
+        reference = Image.new("RGBA", (100, 40), (240, 240, 240, 255))
+        for x in range(6, 24):
+            for y in range(6, 14):
+                reference.putpixel((x, y), (0, 0, 255, 255))
+        attribution = attribute_residual(
+            controls, reference, Image.new("RGBA", (100, 40), (240, 240, 240, 255)),
+            (5.0, 5.0), 1.0)
+        # The skinned button still owns its error, and that error is the
+        # importer's: no boundary claims it.
+        self.assertEqual(attribution["controls"][0]["foreground_error_share"], 1.0)
+        self.assertEqual(attribution["boundary_foreground_error_share"], 0.0)
+        self.assertEqual([b["boundary"] for b in support_boundaries(attribution)],
+                         ["ua-default-form-chrome"])
+        self.assertEqual(support_boundaries(
+            {"controls": attribution["controls"][:1]}), [])
 
     @requires_pillow
     def test_residual_is_attributed_to_the_control_that_owns_it(self) -> None:

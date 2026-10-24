@@ -270,6 +270,15 @@ value (or the UA's `Submit` / `Reset` default) the `#control-value` label child.
 An author-styled button or button input keeps its captured paint and stays a
 frame.
 
+The differential lab knows which themed controls the lowering reskins
+(`THEME_SKINNED_TAGS` / `THEME_SKINNED_INPUT_TYPES` in
+`tools/import-validation/importer_differential/form_controls.py`, kept equal to
+what `record_ua_control_state` records by a test). Those report
+`ua-theme-skinned`, whose residual counts against the importer; every other
+themed control (a select's arrow, text fields, meter, progress, the picker
+types) stays the `ua-default-form-chrome` support boundary. Add a control to
+both when you give it a native skin.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
