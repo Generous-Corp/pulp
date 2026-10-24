@@ -75,8 +75,9 @@ int main(int argc, char** argv) {
         generated.header.find(options.binding_function_name + "(") != std::string::npos;
     std::string entry = "#include \"" + stem + ".hpp\"\n\n";
     entry += "namespace " + options.namespace_name + " {\n\n";
-    entry += "std::unique_ptr<pulp::view::View> conformance_build() { return " +
-             options.function_name + "(); }\n\n";
+    entry += "std::unique_ptr<pulp::view::View> conformance_build("
+             "const std::filesystem::path& assets) {\n    return " +
+             options.function_name + "(assets);\n}\n\n";
     entry += "void conformance_bind(pulp::view::View& root, "
              "pulp::view::NativeImportBindingContext& ctx) {\n";
     entry += has_binder ? "    " + options.binding_function_name + "(root, ctx);\n"
