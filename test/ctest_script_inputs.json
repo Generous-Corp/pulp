@@ -531,9 +531,7 @@
   },
   "pulp-test-cli-import-detect": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_cli_import_detect.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [
     "compat.json",
     "test/fixtures/imports"
@@ -1746,9 +1744,7 @@
   },
   "pulp-test-group-script-view": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_threejs_resources.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -2168,9 +2164,7 @@
   },
   "pulp-test-reload-library": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_reload_library.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -2371,9 +2365,7 @@
   },
   "pulp-test-validation-contract": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_validation_contract.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [
     "docs/contracts/phase1-reality-snapshot.yaml",
     "docs/contracts/validation-report-v1.schema.json"
