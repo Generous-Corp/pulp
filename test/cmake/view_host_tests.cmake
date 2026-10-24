@@ -794,6 +794,10 @@ if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET p
     set_tests_properties(pulp-view-audio-symbol-floor
         pulp-view-audio-symbol-floor-negative-contract
         PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+    # The negative contract reads the floor's registered command back from
+    # ctest, so the flags it checks are the ones that actually run.
+    set_tests_properties(pulp-view-audio-symbol-floor-negative-contract
+        PROPERTIES ENVIRONMENT "PULP_CTEST_BUILD_DIR=${CMAKE_BINARY_DIR}")
 endif()
 
 # The platform plug-in editor hosts, the frame pipeline and the PluginViewHost

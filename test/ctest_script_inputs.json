@@ -3388,6 +3388,7 @@
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
     "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py",
     "tools/scripts/test_archive_symbol_closure_check.py"
    ],
    "kind": "python"
@@ -7817,7 +7818,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7825,7 +7827,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7833,7 +7836,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7952,7 +7956,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -8038,7 +8043,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -8086,7 +8092,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
