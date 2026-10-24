@@ -33,9 +33,21 @@ function Join-WindowsArguments([string[]]$Arguments) {
 function Read-HostStatus([string]$Path, [string]$Token) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
   $s = @{}
-  foreach ($line in Get-Content -LiteralPath $Path) {
-    $parts = $line -split '=', 2
-    if ($parts.Count -eq 2) { $s[$parts[0]] = $parts[1] }
+  try {
+    # The Lua writer replaces the status file atomically, so a reader can pass
+    # Test-Path just before the old file is removed. Treat that narrow window
+    # as "not published yet"; turning it into a harness failure kills REAPER
+    # while the host is still delivering the valid automation receipt.
+    foreach ($line in Get-Content -LiteralPath $Path) {
+      $parts = $line -split '=', 2
+      if ($parts.Count -eq 2) { $s[$parts[0]] = $parts[1] }
+    }
+  } catch [System.Management.Automation.ItemNotFoundException] {
+    return $null
+  } catch [System.UnauthorizedAccessException] {
+    return $null
+  } catch [System.IO.IOException] {
+    return $null
   }
   if ($s.token -ne $Token) { throw 'Stale or foreign host status token' }
   return $s
@@ -59,9 +71,101 @@ function Assert-ModuleBinding([string]$LoadedPath, [string]$LoadedHash, $Manifes
   if ($entries.Count -ne 1 -or $entries[0].sha256 -ine $LoadedHash) { throw 'Loaded module does not match exact staged manifest' }
   if ([IO.Path]::GetExtension($LoadedPath) -notin @('.vst3','.clap')) { throw 'Loaded module is not a plugin PE' }
 }
+function Invoke-BoundedExternal([string]$FilePath, [string[]]$ArgumentList = @(), [ValidateRange(1,60)][int]$TimeoutSec = 15, [string]$TimeoutError = 'EXTERNAL_PROBE_TIMEOUT') {
+  $psi = New-Object Diagnostics.ProcessStartInfo
+  $psi.FileName = $FilePath
+  $psi.Arguments = Join-WindowsArguments $ArgumentList
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $child = New-Object Diagnostics.Process
+  $child.StartInfo = $psi
+  $started = $false
+  try {
+    $started = $child.Start()
+    if (-not $started) { throw 'EXTERNAL_PROBE_START_FAILED' }
+    # Begin draining both redirected pipes before waiting. Toolhelp emits one
+    # path per module; waiting for process exit first can fill a Windows pipe
+    # buffer and deadlock the helper before it can return its module list.
+    $stdoutTask = $child.StandardOutput.ReadToEndAsync()
+    $stderrTask = $child.StandardError.ReadToEndAsync()
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    while (-not $child.WaitForExit(100)) {
+      if ([DateTime]::UtcNow -ge $deadline) {
+        try { $child.Kill() } catch {}
+        try { $child.WaitForExit(1000) } catch {}
+        throw $TimeoutError
+      }
+    }
+    # A process can exit while a descendant still owns an inherited pipe
+    # handle. Keep the output-drain wait inside the same deadline instead of
+    # allowing GetResult() to turn that condition into an unbounded wait.
+    $remainingMs = [Math]::Max(0, [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+    if (-not $stdoutTask.Wait($remainingMs)) {
+      throw $TimeoutError
+    }
+    $remainingMs = [Math]::Max(0, [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+    if (-not $stderrTask.Wait($remainingMs)) {
+      throw $TimeoutError
+    }
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
+    [pscustomobject]@{exit_code=$child.ExitCode;stdout=$stdout;stderr=$stderr}
+  } finally {
+    if ($started) {
+      try {
+        if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit(1000) | Out-Null }
+      } catch {}
+    }
+    $child.Dispose()
+  }
+}
+function Get-BoundModulePaths([int]$TargetPid, [ValidateRange(1,60)][int]$TimeoutSec = 15, [string]$TargetAbi = 'unknown') {
+  # Process.Modules can block indefinitely while a GPU plugin is inside its
+  # editor startup path. Keep the potentially blocked call in an independently
+  # killable process; PowerShell jobs can hang during Stop-Job/Remove-Job and
+  # leave the REAPER owner orphaned before its receipt is written.
+  # Toolhelp32 (CreateToolhelp32Snapshot + Module32FirstW/NextW) avoids the
+  # cross-bitness Process.Modules hang observed in ARM64EC REAPER. The child
+  # retries ERROR_BAD_LENGTH (ErrorBadLength) at most three times and rejects
+  # more than MaxModules entries.
+  # Keep the probe in the independently killable child so snapshot calls are bounded too.
+  $toolhelpSource = 'dXNpbmcgU3lzdGVtOwp1c2luZyBTeXN0ZW0uQ29sbGVjdGlvbnMuR2VuZXJpYzsKdXNpbmcgU3lzdGVtLkNvbXBvbmVudE1vZGVsOwp1c2luZyBTeXN0ZW0uUnVudGltZS5JbnRlcm9wU2VydmljZXM7CnB1YmxpYyBzdGF0aWMgY2xhc3MgUHVscFRvb2xoZWxwTW9kdWxlUHJvYmUgewogICAgcHJpdmF0ZSBjb25zdCB1aW50IFNuYXBNb2R1bGUgPSAweDAwMDAwMDA4OwogICAgcHJpdmF0ZSBjb25zdCB1aW50IFNuYXBNb2R1bGUzMiA9IDB4MDAwMDAwMTA7CiAgICBwcml2YXRlIGNvbnN0IGludCBFcnJvck5vTW9yZUZpbGVzID0gMTg7CiAgICBwcml2YXRlIGNvbnN0IGludCBFcnJvckJhZExlbmd0aCA9IDI0OwogICAgcHJpdmF0ZSBjb25zdCBpbnQgTWF4TW9kdWxlcyA9IDQwOTY7CiAgICBbU3RydWN0TGF5b3V0KExheW91dEtpbmQuU2VxdWVudGlhbCwgQ2hhclNldCA9IENoYXJTZXQuVW5pY29kZSldCiAgICBwcml2YXRlIHN0cnVjdCBNb2R1bGVFbnRyeSB7CiAgICAgICAgcHVibGljIHVpbnQgU2l6ZTsKICAgICAgICBwdWJsaWMgdWludCBNb2R1bGVJZDsKICAgICAgICBwdWJsaWMgdWludCBQcm9jZXNzSWQ7CiAgICAgICAgcHVibGljIHVpbnQgR2xvYmFsVXNlQ291bnQ7CiAgICAgICAgcHVibGljIHVpbnQgUHJvY2Vzc1VzZUNvdW50OwogICAgICAgIHB1YmxpYyBJbnRQdHIgQmFzZUFkZHJlc3M7CiAgICAgICAgcHVibGljIHVpbnQgQmFzZVNpemU7CiAgICAgICAgcHVibGljIEludFB0ciBNb2R1bGVIYW5kbGU7CiAgICAgICAgW01hcnNoYWxBcyhVbm1hbmFnZWRUeXBlLkJ5VmFsVFN0ciwgU2l6ZUNvbnN0ID0gMjU2KV0gcHVibGljIHN0cmluZyBNb2R1bGVOYW1lOwogICAgICAgIFtNYXJzaGFsQXMoVW5tYW5hZ2VkVHlwZS5CeVZhbFRTdHIsIFNpemVDb25zdCA9IDI2MCldIHB1YmxpYyBzdHJpbmcgRXhlUGF0aDsKICAgIH0KICAgIFtEbGxJbXBvcnQoImtlcm5lbDMyLmRsbCIsIFNldExhc3RFcnJvciA9IHRydWUpXQogICAgcHJpdmF0ZSBzdGF0aWMgZXh0ZXJuIEludFB0ciBDcmVhdGVUb29saGVscDMyU25hcHNob3QodWludCBmbGFncywgdWludCBwcm9jZXNzSWQpOwogICAgW0RsbEltcG9ydCgia2VybmVsMzIuZGxsIiwgU2V0TGFzdEVycm9yID0gdHJ1ZSwgQ2hhclNldCA9IENoYXJTZXQuVW5pY29kZSldCiAgICBwcml2YXRlIHN0YXRpYyBleHRlcm4gYm9vbCBNb2R1bGUzMkZpcnN0VyhJbnRQdHIgc25hcHNob3QsIHJlZiBNb2R1bGVFbnRyeSBlbnRyeSk7CiAgICBbRGxsSW1wb3J0KCJrZXJuZWwzMi5kbGwiLCBTZXRMYXN0RXJyb3IgPSB0cnVlLCBDaGFyU2V0ID0gQ2hhclNldC5Vbmljb2RlKV0KICAgIHByaXZhdGUgc3RhdGljIGV4dGVybiBib29sIE1vZHVsZTMyTmV4dFcoSW50UHRyIHNuYXBzaG90LCByZWYgTW9kdWxlRW50cnkgZW50cnkpOwogICAgW0RsbEltcG9ydCgia2VybmVsMzIuZGxsIiwgU2V0TGFzdEVycm9yID0gdHJ1ZSldCiAgICBwcml2YXRlIHN0YXRpYyBleHRlcm4gYm9vbCBDbG9zZUhhbmRsZShJbnRQdHIgaGFuZGxlKTsKICAgIHB1YmxpYyBzdGF0aWMgc3RyaW5nW10gUGF0aHMoaW50IHByb2Nlc3NJZCwgdWludCBzbmFwc2hvdEZsYWdzKSB7CiAgICAgICAgSW50UHRyIHNuYXBzaG90ID0gSW50UHRyLlplcm87CiAgICAgICAgaW50IHNuYXBzaG90RXJyb3IgPSAwOwogICAgICAgIGZvciAoaW50IGF0dGVtcHQgPSAwOyBhdHRlbXB0IDwgMzsgYXR0ZW1wdCsrKSB7CiAgICAgICAgICAgIHNuYXBzaG90ID0gQ3JlYXRlVG9vbGhlbHAzMlNuYXBzaG90KHNuYXBzaG90RmxhZ3MsIHVuY2hlY2tlZCgodWludClwcm9jZXNzSWQpKTsKICAgICAgICAgICAgaWYgKHNuYXBzaG90ICE9IEludFB0ci5aZXJvICYmIHNuYXBzaG90LlRvSW50NjQoKSAhPSAtMSkgYnJlYWs7CiAgICAgICAgICAgIHNuYXBzaG90RXJyb3IgPSBNYXJzaGFsLkdldExhc3RXaW4zMkVycm9yKCk7CiAgICAgICAgICAgIGlmIChzbmFwc2hvdEVycm9yICE9IEVycm9yQmFkTGVuZ3RoIHx8IGF0dGVtcHQgPT0gMikgdGhyb3cgbmV3IFdpbjMyRXhjZXB0aW9uKHNuYXBzaG90RXJyb3IsICJNT0RVTEVfU05BUFNIT1RfRkFJTEVEIik7CiAgICAgICAgICAgIFN5c3RlbS5UaHJlYWRpbmcuVGhyZWFkLlNsZWVwKDI1KTsKICAgICAgICB9CiAgICAgICAgdHJ5IHsKICAgICAgICAgICAgdmFyIGVudHJ5ID0gbmV3IE1vZHVsZUVudHJ5IHsgU2l6ZSA9ICh1aW50KU1hcnNoYWwuU2l6ZU9mKHR5cGVvZihNb2R1bGVFbnRyeSkpIH07CiAgICAgICAgICAgIGlmICghTW9kdWxlMzJGaXJzdFcoc25hcHNob3QsIHJlZiBlbnRyeSkpIHRocm93IG5ldyBXaW4zMkV4Y2VwdGlvbihNYXJzaGFsLkdldExhc3RXaW4zMkVycm9yKCksICJNb2R1bGUzMkZpcnN0VyIpOwogICAgICAgICAgICB2YXIgcGF0aHMgPSBuZXcgTGlzdDxzdHJpbmc+KCk7CiAgICAgICAgICAgIGRvIHsKICAgICAgICAgICAgICAgIGlmICghU3RyaW5nLklzTnVsbE9yRW1wdHkoZW50cnkuRXhlUGF0aCkpIHsKICAgICAgICAgICAgICAgICAgICBpZiAocGF0aHMuQ291bnQgPj0gTWF4TW9kdWxlcykgdGhyb3cgbmV3IEludmFsaWRPcGVyYXRpb25FeGNlcHRpb24oIk1PRFVMRV9DT1VOVF9MSU1JVCIpOwogICAgICAgICAgICAgICAgICAgIHBhdGhzLkFkZChlbnRyeS5FeGVQYXRoKTsKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIGVudHJ5ID0gbmV3IE1vZHVsZUVudHJ5IHsgU2l6ZSA9ICh1aW50KU1hcnNoYWwuU2l6ZU9mKHR5cGVvZihNb2R1bGVFbnRyeSkpIH07CiAgICAgICAgICAgIH0gd2hpbGUgKE1vZHVsZTMyTmV4dFcoc25hcHNob3QsIHJlZiBlbnRyeSkpOwogICAgICAgICAgICBpbnQgZXJyb3IgPSBNYXJzaGFsLkdldExhc3RXaW4zMkVycm9yKCk7CiAgICAgICAgICAgIGlmIChlcnJvciAhPSBFcnJvck5vTW9yZUZpbGVzKSB0aHJvdyBuZXcgV2luMzJFeGNlcHRpb24oZXJyb3IsICJNb2R1bGUzMk5leHRXIik7CiAgICAgICAgICAgIHJldHVybiBwYXRocy5Ub0FycmF5KCk7CiAgICAgICAgfSBmaW5hbGx5IHsgQ2xvc2VIYW5kbGUoc25hcHNob3QpOyB9CiAgICB9Cn0='
+  # ARM64EC is x64 COFF/CHPE, not WOW64. Asking for SNAPMODULE32 while
+  # snapshotting that target can hang on the native ARM host. Use the normal
+  # module view for known x64/ARM64EC/ARM64X targets; retain both views only
+  # for unknown or explicitly 32-bit callers.
+  $snapshotFlags = if ($TargetAbi -in @('x64','arm64ec','arm64x')) { 0x8 } else { 0x18 }
+  $probe = '$code=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("' + $toolhelpSource + '"));Add-Type -TypeDefinition $code -ErrorAction Stop;[PulpToolhelpModuleProbe]::Paths(' + $TargetPid + ',' + $snapshotFlags + ')'
+  $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probe))
+  $powershell = Join-Path $PSHOME 'powershell.exe'
+  if (-not (Test-Path -LiteralPath $powershell -PathType Leaf)) {
+    $command = @(Get-Command pwsh.exe,pwsh -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($command.Count -ne 1) { throw 'POWERSHELL_PROBE_UNAVAILABLE' }
+    $powershell = if ($command[0].Source) { $command[0].Source } else { $command[0].Path }
+  }
+  $result = Invoke-BoundedExternal $powershell @('-NoProfile','-NonInteractive','-EncodedCommand',$encoded) $TimeoutSec 'MODULE_ENUMERATION_TIMEOUT'
+  if ($result.exit_code -ne 0) {
+    $detail = $result.stderr.Trim()
+    if ($detail.Length -gt 512) { $detail = $detail.Substring(0,512) }
+    throw ('MODULE_ENUMERATION_FAILED: ' + $detail)
+  }
+  return @($result.stdout -split "`r?`n" | Where-Object { $_ })
+}
 function Assert-OwnedIdentity($Process, [string]$StartedUtc) {
   $Process.Refresh()
   if ($Process.HasExited -or $Process.StartTime.ToUniversalTime().ToString('o') -ne $StartedUtc) { throw 'Owned process identity changed' }
+}
+function Get-InteractiveDesktopContext {
+  $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+  $explorer = @(Get-Process -Name explorer -ErrorAction SilentlyContinue |
+    Where-Object { $_.SessionId -eq $sessionId })
+  if ($explorer.Count -eq 0) { throw 'INTERACTIVE_SESSION_ABSENT' }
+  [ordered]@{
+    session_id = $sessionId
+    explorer_pids = @($explorer | ForEach-Object { [int]$_.Id })
+  }
 }
 
 function Copy-PrivateProfile([string]$Source, [string]$Destination, [string]$EvidenceRoot) {
@@ -70,10 +174,23 @@ function Copy-PrivateProfile([string]$Source, [string]$Destination, [string]$Evi
   if ($private.StartsWith($export, [StringComparison]::OrdinalIgnoreCase) -or $private -eq $export.TrimEnd([IO.Path]::DirectorySeparatorChar)) { throw 'Private profile cannot be inside exported evidence' }
   if ([IO.Path]::GetFullPath($Source) -eq $private) { throw 'Private profile cannot replace source profile' }
   New-Item -ItemType Directory -Path $private | Out-Null
-  foreach ($name in @('reaper.ini','reaper-license.rk')) {
-    $path = Join-Path $Source $name
-    if (Test-Path -LiteralPath $path -PathType Leaf) { Copy-Item -LiteralPath $path -Destination (Join-Path $private $name) }
+  # `-cfgfile` selects the alternate REAPER resource directory, not just an
+  # isolated INI. Copy the non-secret profile so startup scripts and scan
+  # caches resolve beside the selected reaper.ini rather than falling back to
+  # the user's profile. Cache files are deliberately removed: a stale entry
+  # can make REAPER load an old Spectr backup before the staged exact module.
+  Get-ChildItem -LiteralPath $Source -Force | Where-Object {
+    $_.Name -ne 'reaper-license.rk'
+  } | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $private $_.Name) -Recurse -Force
   }
+  $license = Join-Path $Source 'reaper-license.rk'
+  if (Test-Path -LiteralPath $license -PathType Leaf) {
+    Copy-Item -LiteralPath $license -Destination (Join-Path $private 'reaper-license.rk')
+  }
+  Get-ChildItem -LiteralPath $private -File | Where-Object {
+    $_.Name -match '^reaper-(vstplugins|clap).*\.ini$'
+  } | Remove-Item -Force
 }
 function Assert-EditorWindow([long]$Hwnd, [bool]$Exists, [bool]$Visible, [bool]$Owned) {
   if ($Hwnd -eq 0 -or -not $Exists) { throw 'Floating editor HWND absent' }
@@ -156,6 +273,53 @@ function Get-PeIdentity([string]$Path) {
   } finally {$b.Dispose();$f.Dispose()}
 }
 
+function Test-WindowsPluginAbiCompatible([string]$HostAbi, [string]$PluginAbi) {
+  switch ($HostAbi) {
+    'x64' { return $PluginAbi -eq 'x64' }
+    'arm64' { return $PluginAbi -eq 'arm64' }
+    { $_ -in @('arm64ec','arm64x') } { return $PluginAbi -in @('arm64ec','arm64x') }
+    default { return $false }
+  }
+}
+
+function Select-PluginPeCandidate([string]$PluginPath, [string]$Format, [string]$HostAbi) {
+  $plugin = (Resolve-Path -LiteralPath $PluginPath -ErrorAction Stop).Path
+  if (Test-Path -LiteralPath $plugin -PathType Leaf) {
+    $candidates = @([pscustomobject]@{FullName=$plugin;Name=[IO.Path]::GetFileName($plugin)})
+  } else {
+    $bundleName = [IO.Path]::GetFileNameWithoutExtension($plugin)
+    $expectedName = $bundleName + '.' + $Format
+    $all = @(Get-ChildItem -LiteralPath $plugin -File -Recurse |
+      Where-Object {
+        $_.Extension -ieq ('.' + $Format) -or
+        ($Format -eq 'vst3' -and $_.Extension -ieq '.dll')
+      } | Sort-Object FullName)
+    # A VST3 bundle normally contains <bundle-name>.vst3. Prefer that exact
+    # payload name, but keep a generic extension fallback for valid bundles
+    # whose producer chose a different inner filename. Dependencies are only
+    # considered when no format-named payload exists.
+    $named = @($all | Where-Object { $_.Name -ieq $expectedName })
+    $candidates = if ($named.Count -gt 0) { $named } else { $all }
+  }
+  $compatible = @()
+  foreach ($candidate in $candidates) {
+    try {
+      $pe = Get-PeIdentity $candidate.FullName
+      if (Test-WindowsPluginAbiCompatible $HostAbi $pe.execution_abi) {
+        $compatible += [pscustomobject]@{path=$candidate.FullName;pe=$pe}
+      }
+    } catch {
+      # A sidecar/dependency that is not a PE is not a plugin payload candidate.
+    }
+  }
+  if ($compatible.Count -eq 1) { return $compatible[0] }
+  if ($compatible.Count -eq 0) {
+    if ($candidates.Count -eq 0) { throw "PLUGIN_PE_PAYLOAD_MISSING: bundle=$plugin" }
+    throw "PLUGIN_ABI_MISMATCH: host=$HostAbi bundle=$plugin"
+  }
+  throw "Ambiguous plugin PE payload: host=$HostAbi bundle=$plugin candidates=$($compatible.Count)"
+}
+
 # REAPER recognizes these literal default roots. Expanded absolute equivalents
 # make it append the defaults again, after the staged root, changing precedence.
 function Get-ReaperVstScanPath([string]$StagedRoot) {
@@ -165,4 +329,19 @@ function Write-ReaperIni([string]$Path,[string[]]$Lines) {
   # Windows PowerShell 5.1 Set-Content -Encoding utf8 emits a BOM. Preserve the
   # no-BOM INI form read by the seeded REAPER profile on the actual guest.
   [IO.File]::WriteAllLines($Path,$Lines,(New-Object Text.UTF8Encoding($false)))
+}
+function Assert-ReaperSeedProfile([string]$SeedProfile) {
+  $ini=Join-Path $SeedProfile 'reaper.ini'
+  if(-not(Test-Path -LiteralPath $ini -PathType Leaf)){throw 'REAPER_SEED_PROFILE_INCOMPLETE: reaper.ini is missing'}
+  $text=[IO.File]::ReadAllText($ini)
+  if(-not($text -match '(?m)^\[REAPER\]\s*$' -and $text -match '(?m)^\[audioconfig\]\s*$')){
+    throw 'REAPER_SEED_PROFILE_INCOMPLETE: initialized reaper.ini must contain [REAPER] and [audioconfig] sections'
+  }
+}
+function Write-Utf8NoBom([string]$Path,[string]$Text) {
+  [IO.File]::WriteAllText($Path,$Text,[Text.UTF8Encoding]::new($false))
+}
+function Test-HalfOpenWindowRectContainsPoint([int[]]$Rect,[int]$X,[int]$Y) {
+  if($null -eq $Rect -or $Rect.Count -ne 4){return $false}
+  return $X -ge $Rect[0] -and $X -lt $Rect[2] -and $Y -ge $Rect[1] -and $Y -lt $Rect[3]
 }

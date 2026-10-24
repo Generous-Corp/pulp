@@ -16,7 +16,8 @@ param(
   [ValidateRange(1,60)][int]$AutomationSec = 8,
   [ValidateRange(5,300)][int]$TimeoutSec = 60,
   [int]$ContextX = -1,
-  [int]$ContextY = -1
+  [int]$ContextY = -1,
+  [switch]$ProbeBeforeEditor
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windows_editor_common.ps1')
@@ -27,7 +28,7 @@ New-Item -ItemType Directory -Path $run | Out-Null
 $receipt = [ordered]@{schema=2;token=$token;verdict='INCONCLUSIVE';scope='host insertion/editor/optional host parameter readback';started_utc=[DateTime]::UtcNow.ToString('o');error=$null;cleanup_errors=@()}
 $owned = New-Object 'System.Collections.Generic.List[object]'
 $priorEnv = @{}
-$envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION') | ForEach-Object {'PULP_DAW_SMOKE_'+$_}
+$envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION','PROBE_GATE') | ForEach-Object {'PULP_DAW_SMOKE_'+$_}
 foreach($name in $envNames){$priorEnv[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 $exitCode=3
 $privateProfile=$null
@@ -39,18 +40,24 @@ function Stop-Owned($Entry) {
 function Start-Owned([string[]]$Arguments,[string]$Label) {
   $command=Join-WindowsArguments $Arguments
   $p=Start-Process -FilePath $script:reaper -ArgumentList $command -WorkingDirectory $run -RedirectStandardOutput (Join-Path $run ($Label+'.stdout.txt')) -RedirectStandardError (Join-Path $run ($Label+'.stderr.txt')) -PassThru
-  $entry=@{process=$p;started=$p.StartTime.ToUniversalTime().ToString('o');command=$command}
+  if ($p.SessionId -ne [int]$receipt.session.session_id) { throw 'Owned REAPER process entered a different Windows session' }
+  $entry=@{process=$p;started=$p.StartTime.ToUniversalTime().ToString('o');command=$command;session_id=[int]$p.SessionId;path=$script:reaper}
   $owned.Add($entry); return $entry
 }
 try {
   if(-not(Test-Path -LiteralPath $ReaperExe -PathType Leaf)){throw "REAPER executable missing: $ReaperExe"}
   $script:reaper=(Resolve-Path -LiteralPath $ReaperExe).Path
+  $receipt.session=Get-InteractiveDesktopContext
   $hostPe=Get-PeIdentity $reaper; $keys=Get-ReaperScanKeys $hostPe.execution_abi
   $receipt.host=@{path=$reaper;pe=$hostPe;sha256=(Get-FileHash -LiteralPath $reaper -Algorithm SHA256).Hash}
-  if(-not(Test-Path -LiteralPath (Join-Path $SeedProfile 'reaper.ini') -PathType Leaf)){throw 'SeedProfile must contain an initialized reaper.ini'}
+  Assert-ReaperSeedProfile $SeedProfile
   if(-not(Test-Path -LiteralPath $PluginPath)){throw "Plugin missing: $PluginPath"}
   $plugin=(Resolve-Path -LiteralPath $PluginPath).Path
   if([IO.Path]::GetExtension($plugin) -ine ('.'+$Format)){throw 'Plugin format/path mismatch'}
+  $pluginCandidate=Select-PluginPeCandidate $plugin $Format $hostPe.execution_abi
+  $pluginBinary=$pluginCandidate.path
+  $pluginPe=$pluginCandidate.pe
+  $receipt.plugin_pe=@{path=$pluginBinary;pe=$pluginPe;sha256=(Get-FileHash -LiteralPath $pluginBinary -Algorithm SHA256).Hash}
   $privateProfile=Join-Path ([IO.Path]::GetTempPath()) ('pulp-reaper-profile-'+$token)
   $portable=$privateProfile;$scan=Join-Path $run 'scan'
   New-Item -ItemType Directory -Path $scan | Out-Null
@@ -90,6 +97,12 @@ try {
   $env:PULP_DAW_SMOKE_STATUS=$status;$env:PULP_DAW_SMOKE_TOKEN=$token
   $env:PULP_DAW_SMOKE_PROJECT=Join-Path $run 'host-state.rpp'
   $env:PULP_DAW_SMOKE_PARAM_INDEX="$ParamIndex";$env:PULP_DAW_SMOKE_DURATION="$AutomationSec"
+  $probeGate=Join-Path $run 'module-probe-release'
+  if($ProbeBeforeEditor){
+    $env:PULP_DAW_SMOKE_PROBE_GATE=$probeGate
+  } else {
+    Remove-Item Env:PULP_DAW_SMOKE_PROBE_GATE -ErrorAction SilentlyContinue
+  }
   $warm=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash') 'warm'
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$cacheMatch=$false
   while([DateTime]::UtcNow -lt $deadline){
@@ -98,18 +111,53 @@ try {
     if($cacheText -match [regex]::Escape([IO.Path]::GetFileName($staged))){$cacheMatch=$true;break}
     Start-Sleep -Milliseconds 250
   }
-  Stop-Owned $warm
   if(-not $cacheMatch){throw 'Scan cache did not acquire staged basename'}
+  Stop-Owned $warm
+  # A complete copied REAPER profile is required here. A minimal profile can
+  # stall before startup-script dispatch; with the private resource directory
+  # and its stale scan caches removed, the documented positional Lua form
+  # executes in the same owned host process that will load the staged module.
+  # REAPER 7.82 accepts the startup Lua file as the final positional
+  # argument. Keep this form compatible with the installed x64 and ARM hosts.
   $proc=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash',$lua) 'scripted'
-  $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command}
+  $receipt.process=@{pid=$proc.process.Id;started_utc=$proc.started;arguments=$proc.command;session_id=$proc.session_id}
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$hostStatus=$null
   while([DateTime]::UtcNow -lt $deadline){
     Assert-OwnedIdentity $proc.process $proc.started
     $hostStatus=Read-HostStatus $status $token
-    if($hostStatus -and ($hostStatus.fx_shown -eq '1' -or $hostStatus.error)){break}
+    $inserted = $ProbeBeforeEditor -and $hostStatus -and $hostStatus.fx_inserted -eq '1'
+    if($hostStatus -and (($ProbeBeforeEditor -and $inserted) -or (-not $ProbeBeforeEditor -and $hostStatus.fx_shown -eq '1') -or $hostStatus.error)){break}
     Start-Sleep -Milliseconds 100
   }
   if(-not $hostStatus -or $hostStatus.error){throw "Missing/failed insertion handshake: $($hostStatus.error)"}
+  # Bind the loaded PE as soon as insertion is observed. The editor can enter
+  # a GPU startup path after this handshake; do not postpone identity proof
+  # until the terminal status wait has completed.
+  $modulePaths=@(Get-BoundModulePaths $proc.process.Id 15 $hostPe.execution_abi)
+  Assert-OwnedIdentity $proc.process $proc.started
+  $modules=@($modulePaths | ForEach-Object { [pscustomobject]@{FileName=$_} } |
+    Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
+  $bound=@()
+  foreach($module in $modules){
+    $hash=(Get-FileHash -LiteralPath $module.FileName -Algorithm SHA256).Hash
+    Assert-ModuleBinding $module.FileName $hash $manifest
+    $pluginPe=Get-PeIdentity $module.FileName
+    if($pluginPe.execution_abi -eq 'unknown'){throw 'Loaded plugin ABI metadata is unavailable'}
+    $bound+=@{path=$module.FileName;sha256=$hash;pe=$pluginPe}
+  }
+  if($bound.Count -ne 1){throw 'Expected exactly one manifest-bound loaded plugin PE'}
+  $receipt.loaded_plugin=$bound[0]
+  if($ProbeBeforeEditor){
+    Write-Utf8NoBom $probeGate 'verified'
+    $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    do {
+      Assert-OwnedIdentity $proc.process $proc.started
+      $hostStatus=Read-HostStatus $status $token
+      if($hostStatus -and ($hostStatus.fx_shown -eq '1' -or $hostStatus.error)){break}
+      Start-Sleep -Milliseconds 100
+    } while([DateTime]::UtcNow -lt $deadline)
+    if(-not $hostStatus -or $hostStatus.error -or $hostStatus.fx_shown -ne '1'){throw 'Editor did not appear after exact module binding'}
+  }
   # Start the action deadline after observing insertion, independently of launch.
   $deadline=[DateTime]::UtcNow.AddSeconds($AutomationSec+$TimeoutSec)
   $terminal=if($ParamIndex -ge 0){'AUTOMATION_DONE'}else{'EDITOR_READY'}
@@ -121,17 +169,6 @@ try {
   }
   Assert-TerminalStatus $hostStatus $ParamIndex
   $receipt.host_status=$hostStatus
-  $modules=@($proc.process.Modules | Where-Object {[IO.Path]::GetExtension($_.FileName) -ieq ('.'+$Format)})
-  $bound=@()
-  foreach($module in $modules){
-    $hash=(Get-FileHash -LiteralPath $module.FileName -Algorithm SHA256).Hash
-    Assert-ModuleBinding $module.FileName $hash $manifest
-    $pluginPe=Get-PeIdentity $module.FileName
-    if($pluginPe.execution_abi -eq 'unknown'){throw 'Loaded plugin ABI metadata is unavailable'}
-    $bound+=@{path=$module.FileName;sha256=$hash;pe=$pluginPe}
-  }
-  if($bound.Count -ne 1){throw 'Expected exactly one manifest-bound loaded plugin PE'}
-  $receipt.loaded_plugin=$bound[0]
   Add-Type -AssemblyName System.Drawing
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type @'
@@ -139,6 +176,10 @@ using System;
 using System.Runtime.InteropServices;
 public static class OwnedWindow {
  [StructLayout(LayoutKind.Sequential)] public struct Point {public int X,Y;public Point(int x,int y){X=x;Y=y;}}
+ [StructLayout(LayoutKind.Sequential)] public struct Rect {public int Left,Top,Right,Bottom;}
+ [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect rect);
+ public static int[] WindowRect(IntPtr h){Rect r; if(!GetWindowRect(h,out r)) return null; return new int[]{r.Left,r.Top,r.Right,r.Bottom};}
+ public static bool ContainsHalfOpen(Rect r,int x,int y){return x>=r.Left&&x<r.Right&&y>=r.Top&&y<r.Bottom;}
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int command);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
@@ -156,16 +197,19 @@ public static class OwnedWindow {
   return false;
  }
  public static bool IsOwned(IntPtr h,uint pid){uint p;GetWindowThreadProcessId(h,out p);return p==pid;}
- public static void GuardPoint(IntPtr editor,uint pid,int x,int y){var w=WindowFromPoint(new Point(x,y));if(!IsOwned(w,pid)||!Belongs(editor,w))throw new Exception("Point is outside bound editor");}
+ public static void GuardPoint(IntPtr editor,uint pid,int x,int y){Rect rect;if(!GetWindowRect(editor,out rect)||!ContainsHalfOpen(rect,x,y))throw new Exception("Point is outside bound editor");var w=WindowFromPoint(new Point(x,y));if(!IsOwned(w,pid)||!Belongs(editor,w))throw new Exception("Point is outside bound editor");}
 }
 '@
   $editor=[IntPtr]([long]$hostStatus.editor_hwnd)
+  $editorRect=[OwnedWindow]::WindowRect($editor)
+  if($null -eq $editorRect -or $editorRect.Count -ne 4 -or $editorRect[2] -le $editorRect[0] -or $editorRect[3] -le $editorRect[1]){throw 'Bound editor rectangle unavailable'}
+  $receipt.editor_rect=[ordered]@{left=$editorRect[0];top=$editorRect[1];right=$editorRect[2];bottom=$editorRect[3]}
   function Guard-EditorOwner([long]$Hwnd) {
     Assert-OwnedIdentity $proc.process $proc.started
-    if($Hwnd -ne $editor.ToInt64() -or $proc.process.Path -ine $reaper){throw 'Bound editor/host identity changed'}
-    $current=@($proc.process.Modules | Where-Object {$_.FileName -ieq $receipt.loaded_plugin.path})
-    if($current.Count -ne 1){throw 'Bound plugin module disappeared'}
-    Assert-ModuleBinding $current[0].FileName (Get-FileHash -LiteralPath $current[0].FileName -Algorithm SHA256).Hash $manifest
+    if ($proc.process.SessionId -ne [int]$receipt.session.session_id) { throw 'Bound REAPER process left the interactive session' }
+    if($Hwnd -ne $editor.ToInt64() -or $proc.path -ine $reaper){throw 'Bound editor/host identity changed'}
+    if(-not(Test-Path -LiteralPath $receipt.loaded_plugin.path -PathType Leaf)){throw 'Bound plugin module disappeared'}
+    Assert-ModuleBinding $receipt.loaded_plugin.path (Get-FileHash -LiteralPath $receipt.loaded_plugin.path -Algorithm SHA256).Hash $manifest
     Assert-EditorWindow $Hwnd ([OwnedWindow]::IsWindow($editor)) ([OwnedWindow]::IsWindowVisible($editor)) ([OwnedWindow]::IsOwned($editor,[uint32]$proc.process.Id))
   }
   $receipt.editor_activation=[ordered]@{editor_hwnd=$editor.ToInt64()}
@@ -174,6 +218,12 @@ public static class OwnedWindow {
     $foreground=[OwnedWindow]::GetForegroundWindow()
     [uint32]$foregroundPid=0
     [OwnedWindow]::GetWindowThreadProcessId($foreground,[ref]$foregroundPid)|Out-Null
+    if ($foregroundPid -ne 0) {
+      try {
+        $foregroundSession=[Diagnostics.Process]::GetProcessById([int]$foregroundPid).SessionId
+        $receipt.editor_activation.foreground_session_id=$foregroundSession
+      } catch { $receipt.editor_activation.foreground_session_id=$null }
+    }
     $receipt.editor_activation.foreground_hwnd=$foreground.ToInt64()
     $receipt.editor_activation.foreground_pid=$foregroundPid
     [OwnedWindow]::Belongs([IntPtr]$Hwnd,$foreground)
@@ -196,6 +246,7 @@ public static class OwnedWindow {
   Capture 'editor-before-context.png'
   $receipt.editor_hwnd=$editor.ToInt64();$receipt.foreground_hwnd=[OwnedWindow]::GetForegroundWindow().ToInt64()
   if($ContextX -ge 0 -and $ContextY -ge 0){
+    $receipt.context_point=[ordered]@{x=$ContextX;y=$ContextY}
     Guard-Editor
     [OwnedWindow]::GuardPoint($editor,[uint32]$proc.process.Id,$ContextX,$ContextY)
     if(-not[OwnedWindow]::SetCursorPos($ContextX,$ContextY)){throw 'Pointer positioning failed'}
@@ -204,6 +255,11 @@ public static class OwnedWindow {
     Guard-Editor
     [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
   }
+  $secondModulePaths=@(Get-BoundModulePaths $proc.process.Id 15 $hostPe.execution_abi)
+  Assert-OwnedIdentity $proc.process $proc.started
+  $secondMatches=@($secondModulePaths | Where-Object { $_ -ieq $receipt.loaded_plugin.path })
+  if($secondMatches.Count -ne 1){throw 'Bound plugin module disappeared or duplicated'}
+  Assert-ModuleBinding $receipt.loaded_plugin.path (Get-FileHash -LiteralPath $receipt.loaded_plugin.path -Algorithm SHA256).Hash $manifest
   $receipt.verdict='PASS';$receipt.product_ui_acceptance='NOT_EVALUATED';$receipt.live_audio='NOT_EVALUATED';$exitCode=0
 } catch {$receipt.error=$_.Exception.Message;Write-Warning $receipt.error} finally {
   foreach($entry in $owned){try{Stop-Owned $entry}catch{$receipt.cleanup_errors+= $_.Exception.Message;$exitCode=3;$receipt.verdict='INCONCLUSIVE'}}
@@ -212,7 +268,7 @@ public static class OwnedWindow {
   }
   foreach($name in $envNames){[Environment]::SetEnvironmentVariable($name,$priorEnv[$name],'Process')}
   $receipt.finished_utc=[DateTime]::UtcNow.ToString('o')
-  $receipt | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $run 'receipt.json') -Encoding utf8
+  Write-Utf8NoBom (Join-Path $run 'receipt.json') ($receipt | ConvertTo-Json -Depth 12)
 }
 Write-Output "$($receipt.verdict) evidence=$run"
 exit $exitCode
