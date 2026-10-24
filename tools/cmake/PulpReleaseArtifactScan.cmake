@@ -5,7 +5,9 @@
 # release_artifact_forbidden.json. Each marker names the GATES (build
 # conditions: an option that is OFF, a profile that is stripped) under which it
 # is forbidden and the KIND of evidence it is looked for in:
-#   symbol      a substring of the demangled `nm -C` symbol table
+#   symbol      a substring of the demangled DEFINED symbol table
+#               (`nm -C --defined-only`; an undefined `U` reference to a
+#               type is not evidence the implementation was linked)
 #   string      a substring of the file's printable runs (file(STRINGS))
 #   dependency  a substring of the loader table (otool -L / readelf -d / dumpbin)
 # A registration site passes the gates that hold for the artifact it scans; the
@@ -48,8 +50,12 @@ set(PULP_RELEASE_ARTIFACT_FORBIDDEN_LIST_DEFAULT
 # pattern containing one could match across two runs, and a space would end
 # the run it sits in.
 set(PULP_RELEASE_ARTIFACT_STRING_PATTERN_REGEX "^[!-:<-~]+$")
+# A symbol pattern is identifiers joined by `::`; a trailing `::` names a
+# class's members (`pulp::view::ScriptEngine::`), which matches only where a
+# member is DEFINED, never a type name mentioned in another function's
+# parameter list.
 set(PULP_RELEASE_ARTIFACT_SYMBOL_PATTERN_REGEX
-    "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$")
+    "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*(::)?$")
 set(PULP_RELEASE_ARTIFACT_DEPENDENCY_PATTERN_REGEX "^[A-Za-z0-9._+-]+$")
 set(PULP_RELEASE_ARTIFACT_KINDS symbol string dependency)
 
@@ -237,7 +243,7 @@ function(pulp_release_artifact_probe)
         else()
             find_program(PULP_RELEASE_ARTIFACT_NM NAMES nm llvm-nm)
             if(PULP_RELEASE_ARTIFACT_NM)
-                execute_process(COMMAND "${PULP_RELEASE_ARTIFACT_NM}" -C "${_p_ARTIFACT}"
+                execute_process(COMMAND "${PULP_RELEASE_ARTIFACT_NM}" -C --defined-only "${_p_ARTIFACT}"
                     OUTPUT_VARIABLE _symbols RESULT_VARIABLE _nm_rc ERROR_VARIABLE _nm_err)
                 if(NOT _nm_rc EQUAL 0)
                     message(FATAL_ERROR "release-artifact scan: nm failed on ${_p_ARTIFACT}: ${_nm_err}")
@@ -245,6 +251,16 @@ function(pulp_release_artifact_probe)
                 set(_have_symbols TRUE)
             else()
                 message(WARNING "release-artifact scan: nm not found; symbol markers unchecked for ${_p_ARTIFACT}")
+                set(_have_symbols FALSE)
+            endif()
+        endif()
+        # A stripped binary keeps at most the Mach-O header symbol, so a table
+        # with fewer than two defined entries proves nothing; those markers are
+        # UNCHECKED and the string backstop every gate carries does the work.
+        if(_have_symbols)
+            string(REGEX MATCHALL "(^|\n)[0-9a-fA-F]+ [A-Za-z] [^\n]" _defined_lines "${_symbols}")
+            list(LENGTH _defined_lines _defined_count)
+            if(_defined_count LESS 2)
                 set(_have_symbols FALSE)
             endif()
         endif()
@@ -361,6 +377,15 @@ function(pulp_release_artifact_forbid)
         _pulp_release_artifact_format_records("${_unchecked}" _text)
         set(_note "; UNCHECKED (no evidence source):\n${_text}")
     endif()
+    # Nothing checked is not a pass: without nm, or on a stripped binary with
+    # no string marker selected, the verdict would rest on no evidence at all.
+    if(_checked EQUAL 0)
+        _pulp_release_artifact_format_records("${_unchecked}" _text)
+        message(FATAL_ERROR
+            "${_f_LABEL}: no marker could be checked in\n  ${_fa_ARTIFACT}\n"
+            "  gates: ${_fa_GATES} ${_fa_IDS}\n${_text}\n"
+            "A scan with no evidence source is not a pass; install nm, or scan an unstripped artifact.")
+    endif()
     message(STATUS
         "${_f_LABEL}: ${_checked} forbidden marker(s) absent (gates: ${_fa_GATES} ${_fa_IDS}): ${_fa_ARTIFACT}${_note}")
 endfunction()
@@ -388,10 +413,17 @@ function(pulp_release_artifact_require)
         "${_r_LABEL}: ${_n} marker(s) present as expected (gates: ${_ra_GATES} ${_ra_IDS}): ${_ra_ARTIFACT}")
 endfunction()
 
-# Which gates hold for the artifacts of the current configure. Only gates whose
-# governing variable is defined contribute, so a tree that predates a gate's
-# option scans nothing it cannot know. `control-stripped` is per-artifact
-# (the control-shipping manifest decides) and never derived here.
+# Which gates hold for the artifacts of the current configure. Each gate keys
+# on the variable that actually governs it, read as a CMake variable of the
+# same name: PULP_ENABLE_JS and PULP_TRACING (options), PULP_RELOAD_DEV_WATCHER
+# and PULP_BRIDGE_EXEC_ENABLED (the compile definitions, when a configure sets
+# them tree-wide), with PULP_DEV_BUILD / PULP_DEV_BRIDGE_EXEC as the
+# profile-level fallbacks where tools/cmake/PulpProfiles.cmake defines them.
+# An explicit definition wins over its fallback, so -DPULP_RELOAD_DEV_WATCHER=1
+# under a release profile does not forbid the watcher it just enabled. Only
+# gates whose governing variable is defined contribute, so a tree that
+# predates a gate's option scans nothing it cannot know. `control-stripped`
+# is per-artifact (the control-shipping manifest decides) and never derived.
 function(pulp_release_artifact_active_gates out_var)
     set(_gates "")
     if(DEFINED PULP_ENABLE_JS AND NOT PULP_ENABLE_JS)
@@ -400,10 +432,21 @@ function(pulp_release_artifact_active_gates out_var)
     if(DEFINED PULP_TRACING AND NOT PULP_TRACING)
         list(APPEND _gates tracing-off)
     endif()
-    if(DEFINED PULP_DEV_BUILD AND NOT PULP_DEV_BUILD)
-        list(APPEND _gates dev-env-off reload-ship)
+    if(DEFINED PULP_RELOAD_DEV_WATCHER)
+        if(NOT PULP_RELOAD_DEV_WATCHER)
+            list(APPEND _gates reload-ship)
+        endif()
+    elseif(DEFINED PULP_DEV_BUILD AND NOT PULP_DEV_BUILD)
+        list(APPEND _gates reload-ship)
     endif()
-    if(DEFINED PULP_DEV_BRIDGE_EXEC AND NOT PULP_DEV_BRIDGE_EXEC)
+    if(DEFINED PULP_DEV_BUILD AND NOT PULP_DEV_BUILD)
+        list(APPEND _gates dev-env-off)
+    endif()
+    if(DEFINED PULP_BRIDGE_EXEC_ENABLED)
+        if(NOT PULP_BRIDGE_EXEC_ENABLED)
+            list(APPEND _gates bridge-exec-off)
+        endif()
+    elseif(DEFINED PULP_DEV_BRIDGE_EXEC AND NOT PULP_DEV_BRIDGE_EXEC)
         list(APPEND _gates bridge-exec-off)
     endif()
     set(${out_var} "${_gates}" PARENT_SCOPE)
@@ -439,7 +482,10 @@ function(pulp_release_artifact_write_fixture out_path)
         if(NOT _pattern MATCHES "${PULP_RELEASE_ARTIFACT_SYMBOL_PATTERN_REGEX}")
             message(FATAL_ERROR "release-artifact fixture: symbol pattern is not emittable: '${_pattern}'")
         endif()
-        string(REPLACE "::" ";" _parts "${_pattern}")
+        # `a::b::C::` names C's members: emit a member of C, whose demangled
+        # name `a::b::C::pulp_pra_member` contains the pattern.
+        string(REGEX REPLACE "::$" "" _pattern_path "${_pattern}")
+        string(REPLACE "::" ";" _parts "${_pattern_path}")
         list(POP_BACK _parts _leaf)
         if(_parts)
             # a::b::Leaf -> namespace a { namespace b { struct Leaf { static int m; }; } }
@@ -452,7 +498,7 @@ function(pulp_release_artifact_write_fixture out_path)
             string(APPEND _src "${_open}struct ${_leaf} { PULP_PRA_USED static int pulp_pra_member; }; "
                 "int ${_leaf}::pulp_pra_member = ${_n}; ${_close}\n")
         else()
-            string(APPEND _src "extern \"C\" PULP_PRA_USED int ${_pattern}_pulp_pra_${_n} = ${_n};\n")
+            string(APPEND _src "extern \"C\" PULP_PRA_USED int ${_pattern_path}_pulp_pra_${_n} = ${_n};\n")
         endif()
         math(EXPR _n "${_n} + 1")
     endforeach()

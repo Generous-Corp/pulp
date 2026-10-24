@@ -25,6 +25,8 @@ add_test(NAME release-artifact-forbidden-list-selftest
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/release_artifact_list_selftest.cmake)
+set_tests_properties(release-artifact-forbidden-list-selftest PROPERTIES
+    LABELS "cmake;control;ship" TIMEOUT 60)
 
 set(_pulp_pra_fixture_src "${CMAKE_CURRENT_BINARY_DIR}/release_artifact_forbidden_fixture.cpp")
 pulp_release_artifact_write_fixture("${_pulp_pra_fixture_src}")
@@ -40,6 +42,8 @@ add_test(NAME release-artifact-scan-negative-control
         -DFORBIDDEN_BIN=$<TARGET_FILE:pulp-release-artifact-forbidden-fixture>
         -DCLEAN_BIN=$<TARGET_FILE:pulp-release-artifact-clean-fixture>
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/release_artifact_negative_control.cmake)
+set_tests_properties(release-artifact-scan-negative-control PROPERTIES
+    LABELS "cmake;control;ship" TIMEOUT 120)
 
 # Class scans. The gates come from the configure (PULP_TRACING, PULP_ENABLE_JS,
 # and the dev-profile / bridge-exec options where the tree defines them);
@@ -62,6 +66,7 @@ function(_pulp_release_artifact_class_scan class target)
             "-DLABEL=release-artifact scan [${class}]"
             -P ${CMAKE_SOURCE_DIR}/tools/cmake/PulpReleaseArtifactScan.cmake)
     set_tests_properties(release-artifact-scan-${class}-${target} PROPERTIES
+        LABELS "cmake;control;ship" TIMEOUT 120
         REQUIRED_FILES $<TARGET_FILE:${target}>)
 endfunction()
 if(_pulp_pra_gates)
@@ -110,6 +115,8 @@ if(_pulp_pra_gates)
                 "-DGATES=${_gates}"
                 "-DLABEL=release-artifact scan [sdk-library]"
                 -P ${CMAKE_SOURCE_DIR}/tools/cmake/PulpReleaseArtifactScan.cmake)
+        set_tests_properties(release-artifact-scan-sdk-libraries PROPERTIES
+            LABELS "cmake;control;ship" TIMEOUT 300)
     endfunction()
     cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
         CALL _pulp_release_artifact_register_class_scans)

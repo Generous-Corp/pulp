@@ -87,7 +87,6 @@ endif()
 # 4. Script entry point: the `cmake -P` form the ctest wrappers run must exit
 # non-zero on the forbidden fixture and name every marker id, and exit zero on
 # the clean one.
-string(REPLACE ";" "\;" _gates_arg "${_all_gates}")
 execute_process(COMMAND "${CMAKE_COMMAND}" "-DBIN=${FORBIDDEN_BIN}" "-DGATES=${_all_gates}"
     -P "${_scanner}" RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
 if(_rc EQUAL 0)
@@ -112,6 +111,76 @@ if(_rc EQUAL 0)
     message(FATAL_ERROR "negative control: require mode accepted the clean fixture")
 endif()
 
+# 5. No evidence is not a pass. With nm unreachable every symbol marker is
+# unchecked; a symbol-only selection must then fail rather than report
+# "0 absent", and a selection that still has a string marker must pass on
+# the clean fixture (the strings were really read) and fail on the forbidden
+# one (they were really found).
+pulp_release_artifact_select(OUT_IDS _symbol_only_ids OUT_PATTERNS _unused KIND symbol GATES tracing-off)
+list(GET _symbol_only_ids 0 _one_symbol_id)
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env "PATH=/nonexistent"
+    "${CMAKE_COMMAND}" "-DBIN=${CLEAN_BIN}" "-DIDS=${_one_symbol_id}"
+    -P "${_scanner}" RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+if(_rc EQUAL 0)
+    message(FATAL_ERROR "negative control: with nm unreachable a symbol-only scan passed with nothing checked:\n${_out}${_err}")
+endif()
+string(FIND "${_err}" "no marker could be checked" _idx)
+if(_idx EQUAL -1)
+    message(FATAL_ERROR "negative control: the no-evidence failure did not say so:\n${_out}${_err}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env "PATH=/nonexistent"
+    "${CMAKE_COMMAND}" "-DBIN=${CLEAN_BIN}" "-DGATES=tracing-off"
+    -P "${_scanner}" RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+if(NOT _rc EQUAL 0)
+    message(FATAL_ERROR "negative control: with nm unreachable the string backstop should still clear the clean fixture:\n${_out}${_err}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env "PATH=/nonexistent"
+    "${CMAKE_COMMAND}" "-DBIN=${FORBIDDEN_BIN}" "-DGATES=tracing-off"
+    -P "${_scanner}" RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+if(_rc EQUAL 0)
+    message(FATAL_ERROR "negative control: with nm unreachable the string backstop missed the forbidden fixture")
+endif()
+
+# 6. A stripped forbidden fixture has no symbol table; every gate's string
+# backstop must still flag it, and the stripped clean fixture must pass
+# (symbols unchecked, strings checked).
+find_program(_strip NAMES strip llvm-strip)
+if(_strip)
+    set(_stripped_forbidden "${CMAKE_CURRENT_BINARY_DIR}/release_artifact_forbidden_fixture.stripped")
+    set(_stripped_clean "${CMAKE_CURRENT_BINARY_DIR}/release_artifact_clean_fixture.stripped")
+    file(COPY_FILE "${FORBIDDEN_BIN}" "${_stripped_forbidden}")
+    file(COPY_FILE "${CLEAN_BIN}" "${_stripped_clean}")
+    execute_process(COMMAND "${_strip}" "${_stripped_forbidden}" RESULT_VARIABLE _rc1)
+    execute_process(COMMAND "${_strip}" "${_stripped_clean}" RESULT_VARIABLE _rc2)
+    if(NOT _rc1 EQUAL 0 OR NOT _rc2 EQUAL 0)
+        message(FATAL_ERROR "negative control: strip failed on the fixtures")
+    endif()
+    foreach(_gate IN LISTS _all_gates)
+        execute_process(COMMAND "${CMAKE_COMMAND}" "-DBIN=${_stripped_forbidden}" "-DGATES=${_gate}"
+            -P "${_scanner}" RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+        if(_rc EQUAL 0)
+            message(FATAL_ERROR "negative control: gate '${_gate}' passed the STRIPPED forbidden fixture; its string backstop is not doing its job")
+        endif()
+        string(FIND "${_err}" "(string)" _idx)
+        if(_idx EQUAL -1)
+            message(FATAL_ERROR "negative control: gate '${_gate}' failed the stripped fixture without a string hit:\n${_err}")
+        endif()
+    endforeach()
+    execute_process(COMMAND "${CMAKE_COMMAND}" "-DBIN=${_stripped_clean}" "-DGATES=${_all_gates}"
+        -P "${_scanner}" RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "negative control: the stripped clean fixture was rejected:\n${_out}${_err}")
+    endif()
+    string(FIND "${_out}" "UNCHECKED" _idx)
+    if(_idx EQUAL -1)
+        message(FATAL_ERROR "negative control: the stripped clean fixture did not report its symbol markers UNCHECKED:\n${_out}")
+    endif()
+    set(_strip_note ", stripped fixtures flagged by string backstops")
+else()
+    message(WARNING "negative control: strip not found; the stripped-fixture case was not exercised")
+    set(_strip_note ", strip unavailable")
+endif()
+
 message(STATUS
-    "release-artifact negative control OK: ${_n_sym} symbol + ${_n_str} string markers flagged in the "
+    "release-artifact negative control OK${_strip_note}: ${_n_sym} symbol + ${_n_str} string markers flagged in the "
     "forbidden fixture, ${_n_dep} dependency markers flagged in synthetic loader tables, clean fixture passes")

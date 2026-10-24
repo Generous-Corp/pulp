@@ -59,6 +59,27 @@ foreach(_gate IN LISTS PULP_RELEASE_ARTIFACT_GATE_IDS)
     if(NOT _gate IN_LIST _used_gates)
         message(FATAL_ERROR "gate '${_gate}' is declared but no marker uses it")
     endif()
+    # A stripped binary has no symbol table, so a gate with only symbol
+    # markers would be unchecked there; every gate needs a string backstop.
+    pulp_release_artifact_select(OUT_IDS _gate_strings OUT_PATTERNS _gate_string_patterns
+        KIND string GATES ${_gate})
+    if(NOT _gate_strings)
+        message(FATAL_ERROR "gate '${_gate}' has no string marker; a stripped binary would pass it unchecked")
+    endif()
+endforeach()
+
+# check_control_shipping_artifact.cmake extracts printable runs of at least 14
+# bytes (its _pulp_marker_min_length) and refuses a shorter marker at scan
+# time; hold the list to the same floor so a short entry fails here, not on
+# the first control-shipping artifact that links.
+pulp_release_artifact_select(OUT_IDS _control_ids OUT_PATTERNS _control_patterns
+    KIND string GATES control-stripped)
+foreach(_pattern IN LISTS _control_patterns)
+    string(LENGTH "${_pattern}" _len)
+    if(_len LESS 14)
+        message(FATAL_ERROR
+            "control-stripped string marker '${_pattern}' is ${_len} bytes; the control-shipping scanner's run floor is 14")
+    endif()
 endforeach()
 
 # Every pattern must be expressible by the negative-control fixture generator,
