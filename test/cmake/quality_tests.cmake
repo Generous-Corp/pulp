@@ -1061,6 +1061,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME base-poison-detector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_base_poison_detector.py")
     set_tests_properties(base-poison-detector-selftest PROPERTIES TIMEOUT 120)
+    # Merge-queue circuit breaker: the PULP_QUEUE_BREAKER state, which groups
+    # it fails pre-VM, the trusted queue-unblock override, fail-open on
+    # unreadable input, and the classify/notify wiring in build.yml.
+    add_test(NAME queue-breaker-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_queue_breaker.py")
+    set_tests_properties(queue-breaker-selftest PROPERTIES TIMEOUT 60)
 
     # ODR macro-gated-header guard. A macro-gated inline/template function in a
     # header, plus a TU that redefines that macro, is an ODR violation a Release
