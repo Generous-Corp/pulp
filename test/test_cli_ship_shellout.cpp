@@ -2203,9 +2203,10 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
-TEST_CASE_METHOD(ShipShelloutFixture,
-                 "pulp ship sign --path on a dev build signs the named artifact without building build-ship",
-                 "[cli][shellout][ship][dev-build]") {
+TEST_CASE_METHOD(
+    ShipShelloutFixture,
+    "pulp ship sign --path on a dev build signs the named artifact without building build-ship",
+    "[cli][shellout][ship][dev-build]") {
     if (!binary_exists()) {
         SKIP("pulp binary not built");
     }
@@ -2214,7 +2215,8 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     // The artifact is explicit, so the dev build dir is never a reason to
     // configure and build a second tree; the missing path is reported as such.
-    auto r = run_pulp_in(root, {"ship", "sign", "--path", (root / "does-not-exist.app").string()});
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "Developer ID Application: Fake",
+                                "--path", (root / "does-not-exist.app").string()});
     REQUIRE_FALSE(r.timed_out);
     const auto combined = r.stdout_output + r.stderr_output;
     INFO(combined);
@@ -2292,4 +2294,3 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE_FALSE(fs::exists(root / "artifacts"));
     fs::remove_all(root);
 }
-

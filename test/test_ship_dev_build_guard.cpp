@@ -192,4 +192,3 @@ TEST_CASE("the shippable build is refused when it lacks a plug-in artifact the d
     REQUIRE(pulp::cli::plugin_artifact_set_mismatch({}, ship_set).empty());
     fs::remove_all(root);
 }
-

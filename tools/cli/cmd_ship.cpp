@@ -428,9 +428,13 @@ static int ship_sign(const std::vector<std::string>& args,
             rc != 0) {
             return rc;
         }
-        // The same for a dev build: its editor reads the source tree.
-        if (int rc = enforce_no_dev_build(build_dir, allow_dev_build); rc != 0) {
-            return rc;
+        // The same for a dev build: its editor reads the source tree. An
+        // explicit --path names an artifact built elsewhere, so the build dir
+        // being a dev build says nothing about what is signed.
+        if (sign_path.empty()) {
+            if (int rc = enforce_no_dev_build(build_dir, allow_dev_build); rc != 0) {
+                return rc;
+            }
         }
 
         if (target == "android") {
@@ -2662,6 +2666,9 @@ int cmd_ship(const std::vector<std::string>& args) {
             if (int rc = ensure_ship_build(root, build_dir, ship_dir); rc != 0)
                 return rc;
             build_dir = ship_dir;
+        } else if (signs_explicit_path && !fs::exists(ship_dir / "CMakeCache.txt")) {
+            // The named artifact is signed as given; the dev build dir only
+            // supplies build metadata (entitlements), and nothing is built.
         } else if (fs::exists(ship_dir / "CMakeCache.txt")) {
             std::cout << "pulp ship " << sub << ": " << build_dir.filename().string()
                       << "/ is a dev build (PULP_DEV_BUILD=ON); reading "
