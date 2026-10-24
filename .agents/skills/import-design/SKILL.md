@@ -868,8 +868,11 @@ knowing before you touch that file:
   `flatten_to_paint_order`) and comparing bytes.
 
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
-  evidence. The differential matcher must join captured elements by
-  `backendNodeId` when both sides provide one and fail closed on a mismatch;
+  evidence. The differential matcher must join captured elements by their
+  capture anchor (`stable_anchor_id`, which `capture_anchors` derives from the
+  browser snapshot the way the importer does) and fail closed on a mismatch.
+  Never join the two lanes by `backendNodeId`: they are two Chromium sessions,
+  and Spectr's `div#root` came back 31 in one and 30 in the other;
   otherwise a same-text fallback can hide a wrong DOM identity. Native
   synthetic roots, `html`/`body` wrappers, and explicit text children are
   representation nodes and must be reported separately from browser element
