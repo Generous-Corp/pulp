@@ -2930,6 +2930,7 @@
   "pulp-test-sdk-distribution-guard",
   "pulp-test-sdl3-surface",
   "pulp-test-settings-sections",
+  "pulp-test-ship-dev-build-guard",
   "pulp-test-ship-tracing-guard",
   "pulp-test-signal-additive-bank",
   "pulp-test-signal-analysis-frontends",
