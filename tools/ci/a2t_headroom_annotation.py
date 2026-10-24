@@ -22,7 +22,9 @@ It never fails the step: the test is the gate, this is the advance notice.
 
 An annotation on a job nobody opens is easy to miss, and main once reached the
 75% guard with the early warning printed and unread. So the push-to-main run
-also keeps ONE tracking issue, found by a hidden marker: opened or updated while
+also keeps ONE tracking issue, found by a hidden marker on an issue the
+workflow's own bot opened (a person's issue quoting the marker is never
+touched): opened or updated while
 the count is at or past the early-warning share (headroom below 20% of the
 guard's budget), carrying the count, the limit and the re-pin instruction, and
 closed once a re-pin brings it back under. A measurement that could not be read
@@ -41,6 +43,8 @@ from pathlib import Path
 from typing import Callable
 
 TITLE = "a2t-scope-history-headroom"
+# The identity behind the workflow's GITHUB_TOKEN, which opens the issue.
+BOT_LOGIN = "github-actions[bot]"
 EARLY_WARNING_RATIO = 0.60
 REPIN = ("re-pin A2T_SCOPE_HISTORY_BASE on protected main, retaining about 25% of the "
          "window; never raise A2T_SCOPE_HISTORY_LIMIT (decisions contract row 22)")
@@ -109,7 +113,8 @@ def reconcile_issue(measurement: dict, repo: str, api: GhApi = gh_api) -> str:
     found = api(["--method", "GET", "/search/issues", "-f",
                  f'q=repo:{repo} is:issue in:title "{TITLE}"'], None) or {}
     mine = [i for i in (found.get("items") or [])
-            if ISSUE_MARKER in (i.get("body") or "")]
+            if ISSUE_MARKER in (i.get("body") or "")
+            and (i.get("user") or {}).get("login") == BOT_LOGIN]
     # One issue: an open one wins over closed duplicates, then the newest. Any
     # OTHER open issue carrying the marker is a duplicate, closed in favour of it.
     mine.sort(key=lambda i: (i.get("state") == "open", i.get("number", 0)), reverse=True)
