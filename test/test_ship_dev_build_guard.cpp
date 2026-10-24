@@ -8,8 +8,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -60,53 +62,134 @@ TEST_CASE("every CMake truthy spelling counts as on", "[ship][dev-build]") {
         REQUIRE_FALSE(pulp::cli::cmake_cache_flag_on(off));
 }
 
-TEST_CASE("the shippable configure mirrors the dev cache with PULP_DEV_BUILD=OFF",
+TEST_CASE("the shippable initial cache carries every configured entry except the dev-only switches",
           "[ship][dev-build]") {
-    using pulp::cli::ship_build_configure_args;
-    SECTION("an SDK consumer's cache: generator, build type, SDK location, switches") {
-        const std::string cache = "CMAKE_GENERATOR:INTERNAL=Ninja\n"
-                                  "CMAKE_BUILD_TYPE:STRING=Release\n"
-                                  "CMAKE_PREFIX_PATH:PATH=/opt/pulp-sdk\n"
-                                  "Pulp_DIR:PATH=/opt/pulp-sdk/lib/cmake/Pulp\n"
-                                  "PULP_JS_ENGINE:STRING=quickjs\n"
-                                  "PULP_MACOS_ARCH:STRING=universal\n"
-                                  "PULP_DEV_BUILD:BOOL=ON\n"
-                                  "UNRELATED:STRING=x\n";
-        const std::vector<std::string> expected{"-G",
-                                                "Ninja",
-                                                "-DCMAKE_BUILD_TYPE=Release",
-                                                "-DCMAKE_PREFIX_PATH=/opt/pulp-sdk",
-                                                "-DPulp_DIR=/opt/pulp-sdk/lib/cmake/Pulp",
-                                                "-DPULP_JS_ENGINE=quickjs",
-                                                "-DPULP_MACOS_ARCH=universal",
-                                                "-DPULP_DEV_BUILD=OFF"};
-        REQUIRE(ship_build_configure_args(cache) == expected);
+    using pulp::cli::ship_build_initial_cache;
+    const std::string cache = "# This is the CMakeCache file.\n"
+                              "// Build type\n"
+                              "CMAKE_BUILD_TYPE:STRING=Release\n"
+                              "CMAKE_CXX_COMPILER:FILEPATH=/opt/llvm/bin/clang++\n"
+                              "CMAKE_OSX_SYSROOT:PATH=/Applications/Xcode.app/SDKs/MacOSX.sdk\n"
+                              "CMAKE_PREFIX_PATH:PATH=/opt/pulp-sdk\n"
+                              "PULP_ENABLE_AAX:BOOL=ON\n"
+                              "PULP_AAX_SDK_DIR:PATH=/Users/dev/aax_sdk\n"
+                              "PULP_ENABLE_ARA:BOOL=ON\n"
+                              "PULP_ENABLE_GPU:BOOL=ON\n"
+                              "PULP_PROFILE:STRING=forge-dev\n"
+                              "PULP_BUILD_TESTS:BOOL=ON\n"
+                              "PULP_DEV_BUILD:BOOL=ON\n"
+                              "PULP_DEV_BRIDGE_EXEC:BOOL=ON\n"
+                              "PULP_ENABLE_AUDIO_PROBES:BOOL=ON\n"
+                              "SOME_FLAG:UNINITIALIZED=1\n"
+                              "CMAKE_GENERATOR:INTERNAL=Ninja\n"
+                              "CMAKE_CACHEFILE_DIR:INTERNAL=/proj/build\n"
+                              "CMAKE_HOME_DIRECTORY:INTERNAL=/proj\n"
+                              "PULP_HAS_SKIA:INTERNAL=TRUE\n"
+                              "CMAKE_PLATFORM_INFO_INITIALIZED:STATIC=1\n";
+    const auto script = ship_build_initial_cache(cache);
+    auto has = [&](const std::string& line) { return script.find(line) != std::string::npos; };
+    // Everything the developer configured comes along, verbatim.
+    CHECK(has("set(PULP_ENABLE_ARA [==[ON]==] CACHE BOOL"));
+    CHECK(has("set(PULP_ENABLE_AAX [==[ON]==] CACHE BOOL"));
+    CHECK(has("set(PULP_AAX_SDK_DIR [==[/Users/dev/aax_sdk]==] CACHE PATH"));
+    CHECK(has("set(CMAKE_CXX_COMPILER [==[/opt/llvm/bin/clang++]==] CACHE FILEPATH"));
+    CHECK(has("set(CMAKE_OSX_SYSROOT [==[/Applications/Xcode.app/SDKs/MacOSX.sdk]==] CACHE PATH"));
+    CHECK(has("set(PULP_ENABLE_GPU [==[ON]==] CACHE BOOL"));
+    CHECK(has("set(CMAKE_BUILD_TYPE [==[Release]==] CACHE STRING"));
+    CHECK(has("set(SOME_FLAG [==[1]==] CACHE STRING"));
+    // The profile is forced to release; the dev-only switches are dropped and
+    // the two that define the shippable build are set OFF.
+    CHECK(has("set(PULP_PROFILE [==[release]==] CACHE STRING"));
+    CHECK_FALSE(has("forge-dev"));
+    CHECK(has("set(PULP_BUILD_TESTS OFF CACHE BOOL"));
+    CHECK(has("set(PULP_DEV_BUILD OFF CACHE BOOL"));
+    CHECK_FALSE(has("PULP_DEV_BUILD [==["));
+    CHECK_FALSE(has("PULP_DEV_BRIDGE_EXEC"));
+    CHECK_FALSE(has("PULP_ENABLE_AUDIO_PROBES"));
+    // Internal and static bookkeeping never crosses over.
+    CHECK_FALSE(has("CMAKE_GENERATOR"));
+    CHECK_FALSE(has("CMAKE_CACHEFILE_DIR"));
+    CHECK_FALSE(has("CMAKE_HOME_DIRECTORY"));
+    CHECK_FALSE(has("PULP_HAS_SKIA"));
+    CHECK_FALSE(has("CMAKE_PLATFORM_INFO_INITIALIZED"));
+
+    SECTION("a cache without a build type pins Release") {
+        const auto bare = ship_build_initial_cache("CMAKE_GENERATOR:INTERNAL=Xcode\n");
+        CHECK(bare.find("set(CMAKE_BUILD_TYPE [==[Release]==] CACHE STRING") != std::string::npos);
+        CHECK(bare.find("set(PULP_DEV_BUILD OFF CACHE BOOL") != std::string::npos);
     }
-    SECTION("a source checkout's cache drops the test tree") {
-        const std::string cache = "CMAKE_GENERATOR:INTERNAL=Ninja\n"
-                                  "CMAKE_BUILD_TYPE:STRING=Release\n"
-                                  "PULP_BUILD_TESTS:BOOL=ON\n"
-                                  "PULP_BUILD_EXAMPLES:BOOL=OFF\n"
-                                  "PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\n"
-                                  "PULP_DEV_BUILD:BOOL=ON\n";
-        const std::vector<std::string> expected{"-G",
-                                                "Ninja",
-                                                "-DCMAKE_BUILD_TYPE=Release",
-                                                "-DPULP_BUILD_EXAMPLES=OFF",
-                                                "-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON",
-                                                "-DPULP_BUILD_TESTS=OFF",
-                                                "-DPULP_DEV_BUILD=OFF"};
-        REQUIRE(ship_build_configure_args(cache) == expected);
-    }
-    SECTION("an empty or build-type-less cache still pins Release and OFF") {
-        REQUIRE(ship_build_configure_args("") ==
-                std::vector<std::string>{"-DCMAKE_BUILD_TYPE=Release", "-DPULP_DEV_BUILD=OFF"});
-        REQUIRE(ship_build_configure_args(
-                    "CMAKE_GENERATOR:INTERNAL=Xcode\nCMAKE_BUILD_TYPE:STRING=\n") ==
-                std::vector<std::string>{"-G", "Xcode", "-DCMAKE_BUILD_TYPE=Release",
-                                         "-DPULP_DEV_BUILD=OFF"});
+    SECTION("the configure arguments are the generator and the initial cache") {
+        REQUIRE(pulp::cli::ship_build_configure_args(cache, "/proj/build-ship/init.cmake") ==
+                std::vector<std::string>{"-G", "Ninja", "-C", "/proj/build-ship/init.cmake"});
+        REQUIRE(pulp::cli::ship_build_configure_args("", "/x/init.cmake") ==
+                std::vector<std::string>{"-C", "/x/init.cmake"});
     }
     SECTION("the ship build dir sits beside build/") {
         REQUIRE(pulp::cli::ship_build_dir("/proj") == fs::path("/proj") / "build-ship");
     }
 }
+
+TEST_CASE("the shippable build reconfigures when its cache is missing, incomplete or stale",
+          "[ship][dev-build]") {
+    using pulp::cli::ship_build_needs_configure;
+    const auto root = unique_dir("needs-configure");
+    const auto dev = root / "build";
+    const auto ship = root / "build-ship";
+    fs::create_directories(dev);
+    fs::create_directories(ship);
+    write_cache(dev, "CMAKE_GENERATOR:INTERNAL=Ninja\nPULP_DEV_BUILD:BOOL=ON\n");
+    const std::string carried = "set(X [==[1]==] CACHE BOOL \"\")\n";
+
+    SECTION("no ship cache") {
+        REQUIRE(ship_build_needs_configure(dev, ship, carried));
+    }
+    SECTION("a cache a failed configure left behind has no generator") {
+        write_cache(ship, "CMAKE_BUILD_TYPE:STRING=Release\n");
+        REQUIRE_FALSE(pulp::cli::ship_build_is_configured(ship));
+        REQUIRE(ship_build_needs_configure(dev, ship, carried));
+    }
+    SECTION("a completed configure with the same carried entries is current") {
+        write_cache(ship, "CMAKE_GENERATOR:INTERNAL=Ninja\nPULP_DEV_BUILD:BOOL=OFF\n");
+        std::ofstream(pulp::cli::ship_initial_cache_path(ship), std::ios::binary) << carried;
+        // The ship cache must be at least as new as the dev cache.
+        fs::last_write_time(ship / "CMakeCache.txt",
+                            fs::last_write_time(dev / "CMakeCache.txt") + std::chrono::seconds(2));
+        REQUIRE_FALSE(ship_build_needs_configure(dev, ship, carried));
+        SECTION("until the carried entries differ") {
+            REQUIRE(ship_build_needs_configure(dev, ship,
+                                               carried + "set(Y [==[2]==] CACHE BOOL \"\")\n"));
+        }
+        SECTION("or the dev cache is newer") {
+            fs::last_write_time(dev / "CMakeCache.txt",
+                                fs::last_write_time(ship / "CMakeCache.txt") +
+                                    std::chrono::seconds(2));
+            REQUIRE(ship_build_needs_configure(dev, ship, carried));
+        }
+    }
+    fs::remove_all(root);
+}
+
+TEST_CASE("the shippable build is refused when it lacks a plug-in artifact the dev build has",
+          "[ship][dev-build]") {
+    const auto root = unique_dir("artifact-set");
+    const auto dev = root / "build";
+    const auto ship = root / "build-ship";
+    for (const char* rel :
+         {"build/VST3/Synth.vst3", "build/AAX/Synth.aaxplugin", "build/CLAP/Synth.clap",
+          "build/Standalone/Synth.app", "build-ship/VST3/Synth.vst3", "build-ship/CLAP/Synth.clap",
+          "build-ship/Standalone/Synth.app", "build-ship/LV2/Synth.lv2"})
+        fs::create_directories(root / rel);
+    const auto dev_set = pulp::cli::plugin_artifact_set(dev);
+    const auto ship_set = pulp::cli::plugin_artifact_set(ship);
+    REQUIRE(dev_set == std::set<std::string>{"AAX/Synth.aaxplugin", "CLAP/Synth.clap",
+                                             "Standalone/Synth.app", "VST3/Synth.vst3"});
+    const auto mismatch = pulp::cli::plugin_artifact_set_mismatch(dev_set, ship_set);
+    REQUIRE(mismatch.find("AAX/Synth.aaxplugin") != std::string::npos);
+    REQUIRE(mismatch.find("LV2") == std::string::npos);
+    // Extra artifacts in build-ship are not a mismatch; the dev build may have
+    // been built for a subset of targets.
+    REQUIRE(pulp::cli::plugin_artifact_set_mismatch(ship_set, ship_set).empty());
+    REQUIRE(pulp::cli::plugin_artifact_set_mismatch({}, ship_set).empty());
+    fs::remove_all(root);
+}
+

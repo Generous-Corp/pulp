@@ -247,10 +247,14 @@ static int enforce_no_dev_build(const fs::path& build_dir, bool allow_dev_build)
     return 1;
 }
 
-// Configure (once) and build the shippable sibling of a dev build dir:
-// <root>/build-ship, taken from the dev cache's generator, build type, SDK and
-// feature switches with PULP_DEV_BUILD=OFF. The build goes through the same
-// host lease, QoS, watchdog and build-dir lock as `pulp build`.
+// Configure (when needed) and build the shippable sibling of a dev build dir:
+// <root>/build-ship, carrying every entry of the dev cache except the dev-only
+// switches through an initial-cache script, with PULP_DEV_BUILD=OFF. The
+// configure re-runs when the dev cache changed or the carried entries differ;
+// the build goes through the same host lease, QoS, watchdog and build-dir lock
+// as `pulp build`. Refuses when build-ship lacks a plug-in artifact the dev
+// build has, so a format that fell out of the configure is never shipped
+// without anyone noticing.
 static int ensure_ship_build(const fs::path& root, const fs::path& dev_build_dir,
                              const fs::path& ship_dir) {
     std::cout << "pulp ship: " << dev_build_dir.filename().string()
@@ -259,18 +263,44 @@ static int ensure_ship_build(const fs::path& root, const fs::path& dev_build_dir
               << "           Building the shippable build in " << ship_dir.string()
               << " (PULP_DEV_BUILD=OFF) and shipping from there; "
                  "--allow-dev-build ships the dev build as it is.\n";
-    if (!fs::exists(ship_dir / "CMakeCache.txt")) {
-        const auto cache = pulp::cli::read_cmake_cache(dev_build_dir);
+    const auto dev_cache = pulp::cli::read_cmake_cache(dev_build_dir).value_or("");
+    const auto initial_cache = pulp::cli::ship_build_initial_cache(dev_cache);
+    if (pulp::cli::ship_build_needs_configure(dev_build_dir, ship_dir, initial_cache)) {
+        std::error_code ec;
+        fs::create_directories(ship_dir, ec);
+        const auto initial_cache_path = pulp::cli::ship_initial_cache_path(ship_dir);
+        {
+            std::ofstream out(initial_cache_path, std::ios::binary | std::ios::trunc);
+            if (!out) {
+                std::cerr << "pulp ship: cannot write " << initial_cache_path.string() << "\n";
+                return 1;
+            }
+            out << initial_cache;
+        }
         std::string configure =
             "cmake -S " + shell_quote(root.string()) + " -B " + shell_quote(ship_dir.string());
-        for (const auto& arg : pulp::cli::ship_build_configure_args(cache.value_or("")))
+        for (const auto& arg : pulp::cli::ship_build_configure_args(dev_cache, initial_cache_path))
             configure += " " + shell_quote(arg);
         if (int rc = run_with_spinner(configure, "Configuring (shippable)"); rc != 0)
             return rc;
     }
-    return run_governed_cmake_build(root, ship_dir, {}, "pulp-ship-build",
-                                    GovernedBuildOutput::Spinner, "Building (shippable)",
-                                    "pulp ship: ");
+    if (int rc = run_governed_cmake_build(root, ship_dir, {}, "pulp-ship-build",
+                                          GovernedBuildOutput::Spinner, "Building (shippable)",
+                                          "pulp ship: ");
+        rc != 0)
+        return rc;
+    const auto mismatch = pulp::cli::plugin_artifact_set_mismatch(
+        pulp::cli::plugin_artifact_set(dev_build_dir), pulp::cli::plugin_artifact_set(ship_dir));
+    if (!mismatch.empty()) {
+        std::cerr << "Error: refusing to ship from " << ship_dir.string() << ": " << mismatch
+                  << ".\n"
+                  << "  The dev build's configuration did not carry over completely; compare "
+                  << dev_build_dir.string() << "/CMakeCache.txt with "
+                  << pulp::cli::ship_initial_cache_path(ship_dir).string()
+                  << ", or pass --allow-dev-build to ship the dev build as it is.\n";
+        return 1;
+    }
+    return 0;
 }
 
 static int enforce_no_vellum_d15(const std::vector<fs::path>& artifacts) {

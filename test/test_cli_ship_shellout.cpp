@@ -2145,6 +2145,7 @@ fs::path make_dev_build_project(std::string_view name) {
     {
         std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
         cache << "CMAKE_BUILD_TYPE:STRING=Release\n"
+              << "PULP_ENABLE_ARA:BOOL=ON\n"
               << "PULP_DEV_BUILD:BOOL=ON\n";
     }
     return root;
@@ -2172,9 +2173,11 @@ TEST_CASE_METHOD(
     // The shippable build was configured from the dev cache with the option off.
     REQUIRE(fs::exists(root / "build-ship" / "CMakeCache.txt"));
     const auto ship_cache = read_text_file(root / "build-ship" / "CMakeCache.txt");
-    REQUIRE(contains(ship_cache, "PULP_DEV_BUILD:"));
+    REQUIRE(contains(ship_cache, "PULP_DEV_BUILD:BOOL=OFF"));
     REQUIRE_FALSE(contains(ship_cache, "PULP_DEV_BUILD:BOOL=ON"));
-    REQUIRE_FALSE(contains(ship_cache, "PULP_DEV_BUILD:UNINITIALIZED=ON"));
+    // Every other switch the developer configured came along.
+    REQUIRE(contains(ship_cache, "PULP_ENABLE_ARA:BOOL=ON"));
+    REQUIRE(fs::exists(root / "build-ship" / "pulp-ship-initial-cache.cmake"));
     // Packaging then ran against build-ship, which holds no plug-ins.
     REQUIRE(r.exit_code != 0);
     REQUIRE(contains(combined, "build-ship"));
@@ -2245,3 +2248,27 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE(contains(combined, "pulp ship package"));
     fs::remove_all(root);
 }
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package refuses a shippable build that lacks a dev-build artifact",
+                 "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-artifact-set");
+    ScopedEnvVar leases("PULP_TARTCI_LEASES", "0");
+    // The dev build holds an AAX bundle the fresh build-ship (no languages, no
+    // targets) can never produce.
+    fs::create_directories(root / "build" / "AAX" / "Fake.aaxplugin");
+
+    auto r = run_pulp_in(root, {"ship", "package"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "refusing to ship from"));
+    REQUIRE(contains(combined, "AAX/Fake.aaxplugin"));
+    REQUIRE_FALSE(fs::exists(root / "artifacts"));
+    fs::remove_all(root);
+}
+
