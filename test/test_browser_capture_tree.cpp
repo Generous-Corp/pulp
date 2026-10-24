@@ -4313,6 +4313,88 @@ TEST_CASE("form controls draw the string their own state holds",
     CHECK(unresolved == 1);
 }
 
+TEST_CASE("theme-painted ranges, checkboxes and radios record the state the theme paints",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=range] (themed,
+    // disabled, accented), 4 INPUT[type=checkbox] (themed, checked by state
+    // only), 5 INPUT[type=radio name=mode] (themed, checked), 6
+    // INPUT[type=range] whose author styling dropped the theme.
+    //
+    // Row order: display, appearance, accent-color, color-scheme,
+    // background-color.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3,3]",
+        .node_types = "[9,1,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2,2]",
+        .attributes = "[[],[],[],[4,5,6,7,8,9,10,11,12,13],[4,14],[4,15,16,17],[4,5]]",
+        .layout_nodes = "[1,2,3,4,5,6]",
+        .styles = "[[18,19,19,21,26],[18,19,19,21,26],[22,19,20,21,25],[22,19,19,24,25],"
+                  "[22,19,19,21,25],[22,19,19,21,25]]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[10.59375,10.5,129,16],"
+                  "[10,40,13,13],[30,40,13,13],[10,70,129,16]]",
+        .paint_orders = "[0,1,2,3,4,5]",
+        .computed_names =
+            R"(["display","appearance","accent-color","color-scheme","background-color"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","range","min","0","max","1",)J"
+                   R"J("step","0.001","disabled","","checkbox","radio","name","mode","block",)J"
+                   R"J("auto","rgb(71, 180, 235)","normal","inline-block","0.25","dark",)J"
+                   R"J("rgb(255, 255, 255)","rgba(0, 0, 0, 0)")J",
+        .extra_nodes = R"(,"inputValue":{"index":[3],"value":[23]})"
+                       R"(,"inputChecked":{"index":[4,5]})",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"native"},)"
+                     R"({"node_index":5,"theme":"native"},)"
+                     R"({"node_index":6,"theme":"author"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "form-control-theme-state");
+    const auto by_control = [&](const std::string& control) {
+        return find_node(lowered.root,
+                         [&](const IRNode& n) { return attribute(n, "ua_control") == control; });
+    };
+
+    const auto* range = by_control("range");
+    REQUIRE(range != nullptr);
+    CHECK(attribute(*range, "ua_min") == "0");
+    CHECK(attribute(*range, "ua_max") == "1");
+    CHECK(attribute(*range, "ua_step") == "0.001");
+    // The live value, from control state rather than the `value` attribute.
+    CHECK(attribute(*range, "ua_value") == "0.25");
+    CHECK(attribute(*range, "ua_disabled") == "1");
+    CHECK(attribute(*range, "ua_accent") == "rgb(71, 180, 235)");
+    CHECK(attribute(*range, "ua_color_scheme") == "normal");
+    CHECK_FALSE(range->attributes.contains("ua_checked"));
+
+    const auto* checkbox = by_control("checkbox");
+    REQUIRE(checkbox != nullptr);
+    // Checked by `inputChecked` alone: no `checked` attribute was authored.
+    CHECK(attribute(*checkbox, "ua_checked") == "1");
+    CHECK(attribute(*checkbox, "ua_color_scheme") == "dark");
+    // `auto` is the theme's own accent, so nothing is recorded for it.
+    CHECK_FALSE(checkbox->attributes.contains("ua_accent"));
+    CHECK_FALSE(checkbox->attributes.contains("ua_disabled"));
+
+    const auto* radio = by_control("radio");
+    REQUIRE(radio != nullptr);
+    CHECK(attribute(*radio, "ua_checked") == "1");
+    CHECK(attribute(*radio, "ua_radio_group") == "mode");
+
+    // The white background a range or checkbox reports is the user-agent
+    // default the theme replaces, so a theme-painted control carries none.
+    CHECK_FALSE(range->style.background_color.has_value());
+    CHECK_FALSE(checkbox->style.background_color.has_value());
+
+    // The author-styled range is painted from CSS: no theme state at all, and
+    // its computed background is kept.
+    const int recorded = count_nodes(
+        lowered.root, [](const IRNode& n) { return n.attributes.contains("ua_control"); });
+    CHECK(recorded == 3);
+    const auto* styled = find_node(
+        lowered.root, [](const IRNode& n) { return attribute(n, "native_theme") == "author"; });
+    REQUIRE(styled != nullptr);
+    CHECK(styled->style.background_color.value_or("") == "rgb(255, 255, 255)");
+}
+
 namespace {
 
 /// True when `needle` appears in any text run, name, or attribute value of the
@@ -4463,4 +4545,148 @@ TEST_CASE("a control masked by -webkit-text-security never draws its value",
     CHECK(find_by_text(lowered.root, "visible-value") != nullptr);
     CHECK(lowered.counts.control_value_text == 1);
     CHECK_FALSE(tree_mentions(lowered.root, "hunter2"));
+}
+
+namespace {
+
+/// A panel of plain `div`s for the compositing-group cases: `display`,
+/// `opacity`, `overflow`, `transform` and `background-color` per row.
+///
+/// Strings: 0 #document  1 HTML  2 BODY  3 DIV  4 block  5 "1"  6 "0.5"
+///          7 none  8 visible  9 rgb(200, 200, 200)  10 rgba(0, 0, 0, 0)
+///          11 matrix(2, 0, 0, 2, 0, 0)
+constexpr std::string_view kGroupProperties =
+    R"(["display","opacity","overflow","transform","background-color"])";
+constexpr std::string_view kGroupStrings =
+    R"J("#document","HTML","BODY","DIV","block","1","0.5","none","visible",)J"
+    R"J("rgb(200, 200, 200)","rgba(0, 0, 0, 0)","matrix(2, 0, 0, 2, 0, 0)")J";
+constexpr std::string_view kPlainRow = "[4,5,8,7,10]";
+constexpr std::string_view kFilledRow = "[4,5,8,7,9]";
+constexpr std::string_view kGroupRow = "[4,6,8,7,10]";
+constexpr std::string_view kTransformedGroupRow = "[4,6,8,11,10]";
+
+/// Six nodes: #document, HTML, BODY, then three `div`s whose parents, rows,
+/// boxes and paint ranks the case supplies.
+SnapshotSpec group_spec(std::string parents, std::string_view row3, std::string_view row4,
+                        std::string_view row5, std::string box3, std::string box4, std::string box5,
+                        std::string paint_orders) {
+    const auto plain = std::string(kPlainRow);
+    return SnapshotSpec{
+        .node_names = "[0,1,2,3,3,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = std::move(parents),
+        .attributes = "[[],[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4,5]",
+        .styles = "[" + plain + "," + plain + "," + plain + "," + std::string(row3) + "," +
+                  std::string(row4) + "," + std::string(row5) + "]",
+        .bounds =
+            "[[0,0,200,100],[0,0,200,100],[0,0,200,100]," + box3 + "," + box4 + "," + box5 + "]",
+        .paint_orders = std::move(paint_orders),
+        .computed_names = std::string(kGroupProperties),
+        .strings = std::string(kGroupStrings),
+    };
+}
+
+const IRNode* translucent_node(const IRNode& root) {
+    return find_node(
+        root, [](const IRNode& node) { return node.style.opacity && *node.style.opacity < 1.0f; });
+}
+
+} // namespace
+
+TEST_CASE("a flattened panel keeps a translucent group's descendants inside it",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    // div.group{opacity:.5} holding one filled child, beside a filled sibling.
+    // Hung off the root, the child would paint at full strength next to an
+    // empty translucent box; the browser composites the two as one layer.
+    const auto lowered = lower_snapshot(
+        group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow, "[10,10,100,60]",
+                   "[20,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+        "group-opacity-nested", {}, /*flatten_to_paint_order=*/true);
+
+    CHECK(lowered.counts.isolating_groups_nested == 1);
+    CHECK(lowered.counts.isolating_groups_refused == 0);
+    CHECK(lowered.counts.max_depth == 2);
+    const auto* group = translucent_node(lowered.root);
+    REQUIRE(group != nullptr);
+    CHECK(*group->style.opacity == Catch::Approx(0.5f));
+    REQUIRE(group->children.size() == 1);
+    const auto& child = group->children[0];
+    CHECK(attribute(child, "paint_order") == "3");
+    // Re-expressed against the group, and carrying no alpha of its own: the
+    // group's layer applies it once.
+    CHECK(*child.style.left == Catch::Approx(10.0f));
+    CHECK(*child.style.top == Catch::Approx(10.0f));
+    CHECK_FALSE(child.style.opacity.has_value());
+    // Everything else stays a root child, in paint order.
+    for (const auto& top : lowered.root.children)
+        if (&top != group)
+            CHECK(top.children.empty());
+    CHECK(std::any_of(lowered.root.children.begin(), lowered.root.children.end(),
+                      [](const IRNode& node) { return attribute(node, "paint_order") == "4"; }));
+}
+
+TEST_CASE("a translucent group inside a translucent group nests twice",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    const auto lowered = lower_snapshot(group_spec("[-1,0,1,2,3,4]", kGroupRow, kGroupRow,
+                                                   kFilledRow, "[10,10,100,60]", "[15,15,80,40]",
+                                                   "[20,20,40,20]", "[0,1,1,2,3,4]"),
+                                        "group-opacity-twice", {}, /*flatten_to_paint_order=*/true);
+
+    CHECK(lowered.counts.isolating_groups_nested == 2);
+    CHECK(lowered.counts.max_depth == 3);
+    const auto* outer = translucent_node(lowered.root);
+    REQUIRE(outer != nullptr);
+    REQUIRE(outer->children.size() == 1);
+    const auto& inner = outer->children[0];
+    REQUIRE(inner.style.opacity);
+    CHECK(*inner.style.opacity == Catch::Approx(0.5f));
+    REQUIRE(inner.children.size() == 1);
+    CHECK_FALSE(inner.children[0].style.opacity.has_value());
+    CHECK(*inner.children[0].style.left == Catch::Approx(5.0f));
+}
+
+TEST_CASE("a translucent group that cannot be nested exactly stays flat and says why",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    const auto refused = [](const SnapshotSpec& spec, const std::string& name) {
+        const auto lowered = lower_snapshot(spec, name, {}, /*flatten_to_paint_order=*/true);
+        CHECK(lowered.counts.isolating_groups_nested == 0);
+        CHECK(lowered.counts.isolating_groups_refused == 1);
+        CHECK(lowered.counts.max_depth == 1);
+        const auto* group = translucent_node(lowered.root);
+        REQUIRE(group != nullptr);
+        CHECK(group->children.empty());
+        return attribute(*group, "isolating_group_refused");
+    };
+    SECTION("a descendant reaching past the group's box") {
+        // The group's layer is the size of its box, so nesting would cut the
+        // child where it overhangs.
+        CHECK(
+            refused(group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow, "[10,10,60,60]",
+                               "[50,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+                    "group-opacity-overhang") == "descendant-ink-outside-group");
+    }
+    SECTION("an outside node painting between the group and its descendant") {
+        CHECK(
+            refused(group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow,
+                               "[10,10,100,60]", "[20,20,40,20]", "[30,30,40,40]", "[0,1,1,2,4,3]"),
+                    "group-opacity-interleaved") == "interleaved-paint-order");
+    }
+}
+
+TEST_CASE("a scaled translucent group still nests, at its scaled page box",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    // An axis-preserving transform reaches the IR only through the boxes,
+    // which are already Chrome's post-transform page boxes, so nesting adds no
+    // second transform and the group stays exact.
+    const auto lowered = lower_snapshot(
+        group_spec("[-1,0,1,2,3,2]", kTransformedGroupRow, kFilledRow, kFilledRow, "[10,10,100,60]",
+                   "[20,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+        "group-opacity-scaled", {}, /*flatten_to_paint_order=*/true);
+    CHECK(lowered.counts.isolating_groups_nested == 1);
+    const auto* group = translucent_node(lowered.root);
+    REQUIRE(group != nullptr);
+    CHECK_FALSE(group->style.transform.has_value());
+    REQUIRE(group->children.size() == 1);
+    CHECK(*group->children[0].style.left == Catch::Approx(10.0f));
 }

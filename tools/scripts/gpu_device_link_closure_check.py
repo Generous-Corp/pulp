@@ -36,6 +36,7 @@ API_HEADERS = frozenset({
     "pulp/render/gpu_surface.hpp",
     "pulp/render/gpu_compute.hpp",
     "pulp/render/gpu_diagnostics.hpp",
+    "pulp/render/gpu_proc_installer.hpp",
     "pulp/render/gpu_startup_report.hpp",
     "pulp/render/gpu_render_time.hpp",
     "pulp/render/bench/perf_counters.hpp",

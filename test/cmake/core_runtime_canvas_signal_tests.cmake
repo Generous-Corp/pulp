@@ -294,6 +294,15 @@ pulp_add_test_suite(pulp-test-svg GROUP pulp-test-group-core-canvas
 pulp_add_test_suite(pulp-test-vector-scene GROUP pulp-test-group-core-canvas
     LIBRARIES pulp::canvas)
 
+# Coverage-guided lane over SVG ingest (nanosvg plus the scene lowering). Off
+# by default; the libFuzzer runtime probe lives in timeline_tests.cmake.
+if(PULP_ENABLE_FUZZING)
+    pulp_add_libfuzzer_target(pulp-fuzz-svg
+        SOURCES fuzz/svg_fuzz_target.cpp
+        LIBRARIES pulp::canvas
+        CORPUS "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fuzz/svg")
+endif()
+
 # Canvas image placement: affine transform, preserve-aspect fit, tiled fill.
 pulp_add_test_suite(pulp-test-canvas-image-fit GROUP pulp-test-group-core-canvas
     LIBRARIES pulp::canvas)
