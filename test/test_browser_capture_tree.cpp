@@ -4395,6 +4395,66 @@ TEST_CASE("theme-painted ranges, checkboxes and radios record the state the them
     CHECK(styled->style.background_color.value_or("") == "rgb(255, 255, 255)");
 }
 
+TEST_CASE("theme-painted buttons record their scheme and lose the UA box paint",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 BUTTON (themed, disabled), 4
+    // BUTTON (themed, dark scheme), 5 BUTTON whose author background dropped
+    // the theme.
+    //
+    // Row order: display, appearance, color-scheme, background-color,
+    // border-top-width, border-top-style.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2]",
+        .attributes = "[[],[],[],[4,5],[],[]]",
+        .layout_nodes = "[1,2,3,4,5]",
+        .styles = "[[6,7,8,12,15,16],[6,7,8,12,15,16],[9,7,8,11,14,17],[9,7,10,11,14,17],"
+                  "[9,7,8,13,14,17]]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[10,10,80,24],[10,40,80,24],[10,70,80,24]]",
+        .paint_orders = "[0,1,2,3,4]",
+        .computed_names = R"(["display","appearance","color-scheme","background-color",)"
+                          R"("border-top-width","border-top-style"])",
+        .strings = R"J("#document","HTML","BODY","BUTTON","disabled","","block","auto",)J"
+                   R"J("normal","inline-block","dark","rgb(239, 239, 239)","rgba(0, 0, 0, 0)",)J"
+                   R"J("rgb(200, 0, 0)","2px","0px","none","outset")J",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"native"},)"
+                     R"({"node_index":5,"theme":"author"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "form-control-theme-button");
+    std::vector<const IRNode*> buttons;
+    const std::function<void(const IRNode&)> collect = [&](const IRNode& node) {
+        if (attribute(node, "source_tag") == "button")
+            buttons.push_back(&node);
+        for (const auto& child : node.children)
+            collect(child);
+    };
+    collect(lowered.root);
+    REQUIRE(buttons.size() == 3);
+
+    CHECK(attribute(*buttons[0], "ua_control") == "button");
+    CHECK(attribute(*buttons[0], "ua_disabled") == "1");
+    CHECK(attribute(*buttons[0], "ua_color_scheme") == "normal");
+    CHECK(attribute(*buttons[1], "ua_control") == "button");
+    CHECK(attribute(*buttons[1], "ua_color_scheme") == "dark");
+    CHECK_FALSE(buttons[1]->attributes.contains("ua_disabled"));
+    // The grey fill and 2px outset border are the UA stylesheet's, which the
+    // theme paints over; a theme-painted button carries neither.
+    for (const auto* themed : {buttons[0], buttons[1]}) {
+        CHECK_FALSE(themed->style.background_color.has_value());
+        CHECK_FALSE(themed->style.border_top_width.has_value());
+    }
+
+    // The author-styled button is painted from CSS: no theme state, and its
+    // own background and border are kept.
+    CHECK(attribute(*buttons[2], "native_theme") == "author");
+    CHECK_FALSE(buttons[2]->attributes.contains("ua_control"));
+    CHECK(buttons[2]->style.background_color.value_or("") == "rgb(200, 0, 0)");
+    CHECK(buttons[2]->style.border_top_width.value_or(0.0f) == Catch::Approx(2.0f));
+}
+
 namespace {
 
 /// True when `needle` appears in any text run, name, or attribute value of the
