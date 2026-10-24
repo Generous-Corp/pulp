@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261024-importer-button-lowering-main-20261024-watch",
+  "created_at": "2026-10-24T23:44:07Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Imported theme-painted push buttons (native_theme verdict native on a <button> or button-type <input>) lower onto the ButtonSurface skin from capture-recorded colour scheme and disabled state, with their UA-default box paint dropped; the differential lab scores a control lowered onto a Chromium skin (native-theme-skin) instead of excluding it as the ua-default-form-chrome support boundary, and records P3 passing on the frozen 20261020 manifest. Chromium stays the only oracle and Skia/Dawn the renderer; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-browser-capture-tree",
+    "ctest --test-dir build -R pulp-test-design-import-form-controls",
+    "python3 test/test_importer_differential_lab.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
