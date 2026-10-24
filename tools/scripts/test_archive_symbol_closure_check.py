@@ -110,6 +110,24 @@ class ArchiveSymbolClosureCheckTest(unittest.TestCase):
         state = STATE + "    _inline_shared U\n    libstate.a[inline.o]:\n    _inline_shared W 0 0\n"
         self.assertEqual(self.run_gate(state, "--forbidden-defines", "any"), 0)
 
+    def test_weak_rtti_contamination_is_opt_in(self) -> None:
+        content = self.nm.archive("libcontent.a", CONTENT + "    __ZTIN7content8RegistryE S 0 0\n")
+        core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n__ZTIN7content8RegistryE W 0 0\n")
+        nm = self.nm.write()
+        argv = ["--nm", nm, "--forbidden", str(content), "--forbidden-defines", "any",
+                "--no-control", "--check", f"core={core}"]
+        self.assertEqual(gate.main(argv), 0)
+        self.assertEqual(gate.main([*argv, "--weak-rtti-contamination"]), 1)
+
+    def test_rtti_names_in_both_manglings(self) -> None:
+        listing = ("a.a[x.o]: __ZTIN3foo3BarE W 0 0\n"
+                   "a.a[x.o]: _ZTVN3foo3BarE V 0 0\n"
+                   "a.a[x.o]: _ZTSN3foo3BarE W 0 0\n"
+                   "a.a[x.o]: _ZN3foo3Bar3bazEv W 0 0\n"
+                   "a.a[x.o]: __ZTIN3foo3QuxE T 0 0\n")
+        self.assertEqual(gate.weak_rtti(listing),
+                         {"__ZTIN3foo3BarE", "_ZTVN3foo3BarE", "_ZTSN3foo3BarE"})
+
     def test_check_mode_uses_the_chosen_rule(self) -> None:
         content = self.nm.archive("libcontent.a", CONTENT)
         core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n_inline_shared U\n")

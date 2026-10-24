@@ -51,6 +51,7 @@ target_sources(pulp-view-core PRIVATE
     src/widget_schema.cpp
     src/knob_sprite_paint.cpp
     src/slider_core.cpp
+    src/widgets/form_controls.cpp
     src/widgets/label.cpp
     src/widgets/visualizers.cpp
     src/inspector_facts.cpp

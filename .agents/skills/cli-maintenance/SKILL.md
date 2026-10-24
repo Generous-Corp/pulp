@@ -2629,6 +2629,20 @@ Gotchas:
   same PR.** Both live at HEAD; drift between them is the whole reason
   the header exists.
 
+## Release floors reach C++ through a generated header
+
+`tools/scripts/release_product_matrix.json` is the single home of release
+floors such as `checksum_manifest_floor`. C++ consumers (`cmd_upgrade.cpp`,
+`cli_sdk.cpp`) never spell the number: `tools/cmake/PulpReleaseMatrix.cmake`
+reads it and `release_floors_gen.h.in` is configured into
+`${CMAKE_BINARY_DIR}/tools/cli/release_floors_gen.h`, next to
+`pulp_version_gen.h`. Any target that compiles one of those sources outside
+`pulp-cli` must configure that header too; `cli_tests.cmake` does it for
+`pulp-test-cli-support-objects`, which compiles `cli_sdk.cpp`. The
+`SingleOwnerReleasePublication` tests in
+`test_release_workflow_test_step.py` fail if a CLI source carries its own
+copy of the floor literal.
+
 ## `pulp version --json`
 
 The Rust user-facing `pulp` binary supports `pulp version --json` for a

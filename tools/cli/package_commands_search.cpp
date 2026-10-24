@@ -226,17 +226,22 @@ int cmd_search(const std::vector<std::string>& args) {
         std::cout << "Usage: pulp search <query> [options]\n\n"
                   << "Search the package registry by name, description, tags, or category.\n\n"
                   << "Options:\n"
-                  << "  --refresh      Force refresh the remote registry cache\n"
-                  << "  --format json  Output as JSON\n";
+                  << "  --refresh                  Force refresh the remote registry cache\n"
+                  << "  --allow-unsigned-registry  Use a remote registry whose signature is "
+                     "missing or invalid (prints a WARNING)\n"
+                  << "  --format json              Output as JSON\n";
         return 0;
     }
 
     bool refresh = false;
+    RegistryTrustPolicy trust;
     std::string query;
     bool json_output = false;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--refresh") {
             refresh = true;
+        } else if (args[i] == "--allow-unsigned-registry") {
+            trust.allow_unsigned = true;
         } else if (args[i] == "--format") {
             if (missing_option_value(args, i)) {
                 print_fail("--format requires a value");
@@ -267,6 +272,7 @@ int cmd_search(const std::vector<std::string>& args) {
     auto reg_path = root.empty() ? fs::path{} : find_registry_path(root);
 
     RegistryLoadResult result;
+    std::string remote_warning;
     if (!reg_path.empty()) {
         result = load_registry(reg_path);
     }
@@ -274,17 +280,19 @@ int cmd_search(const std::vector<std::string>& args) {
     // If local failed or empty, try remote
     if (result.registry.packages.empty()) {
         auto cache_dir = default_cache_dir();
-        if (refresh) {
-            result = refresh_remote_registry(default_remote_registry_url(), cache_dir);
-        } else {
-            result = load_remote_registry(default_remote_registry_url(), cache_dir);
-        }
+        auto remote =
+            refresh ? refresh_remote_registry(default_remote_registry_url(), cache_dir, trust)
+                    : load_remote_registry(default_remote_registry_url(), cache_dir, 24, trust);
+        remote_warning = remote.warning;
+        result = remote;
     }
 
     if (!result.error.empty() && result.registry.packages.empty()) {
         print_fail(result.error);
         return 1;
     }
+    if (!remote_warning.empty())
+        std::cerr << "WARNING: " << remote_warning << "\n";
 
     auto& reg = result.registry;
 

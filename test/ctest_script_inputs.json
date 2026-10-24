@@ -137,6 +137,7 @@
     "tools/cli/package_commands_search.cpp",
     "tools/cli/package_commands_util.cpp",
     "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp",
     "tools/cli/project_bump.cpp",
     "tools/cli/projects_registry.cpp",
     "tools/cli/pulp_cli.cpp",
@@ -397,7 +398,8 @@
     "tools/cli/kit_manifest_validation.cpp",
     "tools/cli/kit_policy.cpp",
     "tools/cli/kit_profile_verification.cpp",
-    "tools/cli/package_registry.cpp"
+    "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp"
    ],
    "spawning_sources": [
     "tools/cli/kit_profile_verification.cpp",
@@ -416,6 +418,7 @@
     "fixtures/packages/gain-dsp-kit",
     "fixtures/packages/simple-plugin-template",
     "tools/packages/registry.json",
+    "tools/templates/effect",
     "tools/templates/gain",
     "tools/templates/standalone"
    ],
@@ -665,7 +668,8 @@
     "tools/cli/kit_manifest_validation.cpp",
     "tools/cli/kit_policy.cpp",
     "tools/cli/kit_profile_verification.cpp",
-    "tools/cli/package_registry.cpp"
+    "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp"
    ],
    "spawning_sources": [
     "test/test_cli_kit_commands.cpp",
@@ -734,7 +738,8 @@
    "sources": [
     "test/test_cli_package_analyzer_descriptors.cpp",
     "tools/cli/package_analyzer_descriptors.cpp",
-    "tools/cli/package_registry.cpp"
+    "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp"
    ],
    "spawning_sources": [
     "tools/cli/package_registry.cpp"
@@ -761,6 +766,7 @@
     "tools/cli/package_commands_search.cpp",
     "tools/cli/package_commands_util.cpp",
     "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp",
     "tools/cli/tool_registry.cpp"
    ],
    "spawning_sources": [
@@ -808,6 +814,7 @@
     "tools/cli/local_sdk_profile.cpp",
     "tools/cli/migration_runtime.cpp",
     "tools/cli/package_registry.cpp",
+    "tools/cli/package_registry_trust.cpp",
     "tools/cli/project_bump.cpp",
     "tools/cli/projects_registry.cpp",
     "tools/cli/shell_quote.cpp",
@@ -1073,6 +1080,7 @@
     "test/test_cli_upgrade_install.cpp"
    ],
    "inputs": [
+    "tools/cli/cli_sdk.cpp",
     "tools/cli/cmd_upgrade.cpp",
     "tools/import-design/browser_capture",
     "tools/import-design/jsx-runtime/materialized_binding_contract.mjs"
@@ -2439,6 +2447,7 @@
   "pulp-fake-screenshot-tool",
   "pulp-fixture-runner",
   "pulp-generate-control-protocol-fuzz-corpus",
+  "pulp-generate-plugin-state-fuzz-corpus",
   "pulp-gpu-host-mapped-pointer-probe",
   "pulp-gpu-roofline-harness",
   "pulp-gpu-wavenet-scaling-bench",
@@ -2551,6 +2560,7 @@
   "pulp-test-cli-project-bump-all",
   "pulp-test-cli-project-command",
   "pulp-test-cli-projects-registry",
+  "pulp-test-cli-release-checksum",
   "pulp-test-cli-run-options",
   "pulp-test-cli-sdk-tarball-filename",
   "pulp-test-cli-shell-quote",
@@ -4163,6 +4173,14 @@
     "docs/status/dsp-capabilities.json",
     "tools/scripts/dsp_capability_registry.py",
     "tools/scripts/test_dsp_capability_registry.py"
+   ],
+   "kind": "python"
+  },
+  "cli-package-registry-signing-helper": {
+   "entry": "tools/scripts/test_sign_package_registry.py",
+   "inputs": [
+    "tools/scripts/sign_package_registry.py",
+    "tools/scripts/test_sign_package_registry.py"
    ],
    "kind": "python"
   },
@@ -7234,6 +7252,14 @@
    ],
    "kind": "python"
   },
+  "nm-symbols-selftest": {
+   "entry": "tools/scripts/test_nm_symbols.py",
+   "inputs": [
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/test_nm_symbols.py"
+   ],
+   "kind": "python"
+  },
   "object-deps-selftest": {
    "entry": "tools/ci/test_object_deps.py",
    "inputs": [
@@ -8333,6 +8359,15 @@
     "tools/scripts/script_argv.py",
     "tools/scripts/test_prepush_cannot_measure.py",
     "tools/scripts/test_queue_batch_attribute.py"
+   ],
+   "kind": "python"
+  },
+  "queue-breaker-selftest": {
+   "entry": "tools/ci/test_queue_breaker.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/queue_breaker.py",
+    "tools/ci/test_queue_breaker.py"
    ],
    "kind": "python"
   },
@@ -10351,6 +10386,7 @@
     "core/host/src/signal_graph_diagnostics.cpp",
     "core/host/src/signal_graph_executor_routing.cpp",
     "core/host/src/signal_graph_live_swap.cpp",
+    "core/host/src/signal_graph_mailbox.cpp",
     "core/host/src/signal_graph_prepare.cpp",
     "core/host/src/signal_graph_prepared_topology_edit.cpp",
     "core/host/src/signal_graph_reference_walk.cpp",
@@ -11181,6 +11217,7 @@
     "core/host/src/signal_graph_diagnostics.cpp",
     "core/host/src/signal_graph_executor_routing.cpp",
     "core/host/src/signal_graph_live_swap.cpp",
+    "core/host/src/signal_graph_mailbox.cpp",
     "core/host/src/signal_graph_prepare.cpp",
     "core/host/src/signal_graph_prepared_topology_edit.cpp",
     "core/host/src/signal_graph_reference_walk.cpp",

@@ -24,6 +24,7 @@
 
 #include "design_import_internal.hpp"
 #include "design_import_native_common.hpp"
+#include "design_import_svg_stroke.hpp"
 #include "design_ir_helpers.hpp"
 
 #include <algorithm>
@@ -2091,12 +2092,11 @@ static bool emit_js_svg_path_node(const NativeEmit& e) {
         ss << ind << "setSvgStrokeWidth('" << id << "', " << sw->second << ");\n";
     else if (node.style.border_color && !node.style.border_color->empty() &&
              node.style.border_width && *node.style.border_width > 0.0f)
-        // Paired with the stroke color above: a stroke emitted without
-        // its weight paints at the widget's default, so a 1px rim
-        // arrives at the wrong thickness — visible, but wrong, which is
-        // harder to spot than missing.
+        // Paired with the stroke color above: a stroke without its weight paints at
+        // the default, so a 1px rim arrives visibly wrong, which is harder to spot.
         ss << ind << "setSvgStrokeWidth('" << id << "', "
            << *node.style.border_width << ");\n";
+    emit_svg_stroke_style_js(ss, ind, id, node);
     const float vw = node.style.width.value_or(0.0f);
     const float vh = node.style.height.value_or(0.0f);
     if (vw > 0.0f) ss << ind << "setFlex('" << id << "', 'width', " << vw << ");\n";

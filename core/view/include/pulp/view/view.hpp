@@ -114,10 +114,14 @@ public:
 
     // ── Child management ─────────────────────────────────────────────────
 
-    void add_child(std::unique_ptr<View> child);
+    /// Attaches `child` and returns nullptr. A child that is this view itself
+    /// or one of its ancestors is refused and handed back, so a caller that
+    /// cached the raw pointer can drop it instead of dangling.
+    std::unique_ptr<View> add_child(std::unique_ptr<View> child);
     // Transactional variant used by structural adapters that must recover the
     // owned child if an attach hook rejects it. On throw, `child` is restored.
-    void add_child_transactional(std::unique_ptr<View>& child);
+    // Returns false, with `child` untouched, when the child is refused.
+    bool add_child_transactional(std::unique_ptr<View>& child);
     /// Detaches `child` and returns its ownership, or `nullptr` when `child` is
     /// no longer this parent's child under the same instance id. A null result
     /// always means "not ours anymore" — never "moved for you".
