@@ -118,6 +118,22 @@ JSON (`lineBoxes` / `lineBoxBasis`) is read and written in
 `design_ir_json_primitives.hpp`; add a basis field there, not in
 `design_ir_json.cpp`, which is a frozen hotspot.
 
+### A captured page's own fonts ride the IR as `fontFamilyAssets`
+
+A bundle that serves its fonts from Blob URLs (Claude standalone exports) has
+every `@font-face` rule and the font bytes in the capture's
+`materialized-document.json`. `attach_captured_font_faces`
+(`tools/import-design/browser_capture_fonts.cpp`) writes each font once into
+the capture directory, adds it to the asset manifest under its
+`pulp-materialized-asset-<sha256>` id, and adds one `font_family_assets` entry
+per rule in page order, with `weight`/`weightMax`, `fontStyle` and
+`unicodeRange`. Without them, native text is shaped with whatever
+same-named face the host has. For JetBrains Mono that is the bundled static
+Regular, so 600 is synthesized and a captured basis naming the variable
+instance (`JetBrainsMono-Regular_wght2580000`) is rejected. A plain HTML page
+whose `@font-face` uses `url(...)` is not carried yet. The capture only
+packages Blob-backed faces.
+
 ### Imported text looks heavier than Chromium: check font smoothing first
 
 Pulp's default glyph raster on macOS is Chromium's `-webkit-font-smoothing:
