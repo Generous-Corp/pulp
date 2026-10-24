@@ -3224,6 +3224,86 @@ TEST_CASE("tiny Stepper grid matches baked widget and binding descriptor and com
 #endif
 }
 
+namespace {
+
+// Records the route of every widget the binder reached.
+class RouteRecordingContext final : public NativeImportBindingContext {
+  public:
+    void bind_knob(Knob&, const NativeImportBindingDescriptor& descriptor) override {
+        routes.emplace_back(descriptor.route_id);
+    }
+    void bind_fader(Fader&, const NativeImportBindingDescriptor& descriptor) override {
+        routes.emplace_back(descriptor.route_id);
+    }
+    void bind_level_display(View&, LevelDisplay&,
+                            const NativeImportMeterBindingDescriptor& descriptor) override {
+        routes.emplace_back(descriptor.route_id);
+    }
+    std::vector<std::string> routes;
+};
+
+std::size_t occurrences(const std::string& haystack, const std::string& needle) {
+    std::size_t count = 0;
+    for (auto at = haystack.find(needle); at != std::string::npos;
+         at = haystack.find(needle, at + needle.size()))
+        ++count;
+    return count;
+}
+
+} // namespace
+
+TEST_CASE("the figma-plugin fidelity scene binds every control in both native lanes",
+          "[view][import][native-materializer][binding][identity]") {
+    // The scene's three controls carry no Figma node ids, so their anchors come
+    // from the adapter's content-hash fallback. They used to share one anchor,
+    // and both binders, which require exactly one view per anchor, bound none.
+    std::ifstream in(fs::path(PULP_REPO_ROOT) / "test/fixtures/import-fidelity/scene.pulp.json",
+                     std::ios::binary);
+    REQUIRE(in.good());
+    const std::string json((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto ir = parse_figma_plugin_json(json);
+    REQUIRE(ir.root.children.size() == 3);
+    CHECK(find_duplicate_anchors(ir.root).empty());
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    RouteRecordingContext binding;
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, binding, {.diagnostics_out = &diagnostics});
+    for (const auto& d : diagnostics) {
+        INFO(d.code << " at " << d.path << ": " << d.message);
+        CHECK(d.code != "native-binding-duplicate-anchor");
+    }
+    CHECK(binding.routes == std::vector<std::string>{"figma-plugin:filter.cutoff_hz",
+                                                     "figma-plugin:param.master_level",
+                                                     "figma-plugin:meter.out_l"});
+
+    // The baked binder looks each route up with find_imported_view_by_anchor
+    // and binds only on exactly one match, so each anchor must be set once.
+    const auto generated = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    for (const auto& control : ir.root.children) {
+        REQUIRE(control.stable_anchor_id.has_value());
+        INFO("anchor " << *control.stable_anchor_id);
+        CHECK(occurrences(generated.source,
+                          "set_anchor_id(\"" + *control.stable_anchor_id + "\")") == 1);
+        CHECK(occurrences(generated.source, "find_imported_view_by_anchor(root, \"" +
+                                                *control.stable_anchor_id + "\"") == 1);
+    }
+
+#if defined(_WIN32)
+    SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
+#else
+    TempDir tmp("pulp-fidelity-scene-binding-cpp");
+    write_text(tmp.path / "imported_ui.hpp", generated.header);
+    write_text(tmp.path / "imported_ui.cpp", generated.source);
+    std::string compile_diagnostics;
+    const bool compiled = compile_generated_source(
+        tmp.path / "imported_ui.cpp", tmp.path / "imported_ui.o", &compile_diagnostics);
+    INFO(compile_diagnostics);
+    CHECK(compiled);
+#endif
+}
+
 TEST_CASE("compiled generated C++ binding helper binds and fails closed at runtime",
           "[view][import][native-materializer][binding][cpp-codegen]") {
     auto root = pulp::test::generated_binding_runtime::build_generated_binding_runtime_ui();

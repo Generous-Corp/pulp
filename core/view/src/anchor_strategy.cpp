@@ -147,6 +147,21 @@ std::string content_hash_signature_key(const IRNode& node) {
 // strategies. The alternate-frame walker uses this to add a reserved namespace
 // without copying the full IRNode (which can include an entire descendant
 // subtree and asset metadata).
+bool has_adapter_identity(const IRNode& node, std::string_view adapter_name) {
+    return node.source_node_id && !node.source_node_id->empty() && !adapter_name.empty();
+}
+
+// Whether `node`'s anchor is a content hash: always under content_hash, and
+// under adapter for a node the adapter gave no native id. The second case
+// needs the same sibling discriminator as the first, or every id-less sibling
+// with the same tag, role and text hashes to one anchor.
+bool anchors_by_content(const IRNode& node, AnchorStrategy strategy,
+                        std::string_view adapter_name) {
+    if (strategy == AnchorStrategy::content_hash)
+        return true;
+    return strategy == AnchorStrategy::adapter && !has_adapter_identity(node, adapter_name);
+}
+
 std::string compute_anchor_id_with_type(const IRNode& node, std::string_view parent_anchor,
                                         std::size_t sibling_tag_index_for_path, std::size_t depth,
                                         std::size_t sig_index_for_content_hash,
@@ -156,7 +171,7 @@ std::string compute_anchor_id_with_type(const IRNode& node, std::string_view par
         // Caller must populate source_node_id before invoking the adapter
         // strategy. If they didn't, fall back to content-hash so we always
         // produce an anchor and keep the import pipeline alive.
-        if (node.source_node_id && !node.source_node_id->empty() && !adapter_name.empty()) {
+        if (has_adapter_identity(node, adapter_name)) {
             std::string out;
             out.reserve(adapter_name.size() + 1 + node.source_node_id->size());
             out.append(adapter_name);
@@ -241,13 +256,15 @@ void walk(IRNode& node, std::string_view parent_anchor, std::size_t parent_child
     std::string child_parent_anchor =
         (strategy == AnchorStrategy::path) ? *node.stable_anchor_id : std::string{};
 
-    // For content-hash, count duplicate-signature siblings so each
-    // duplicate gets a distinct sig_index discriminator.
+    // For every child anchored by content hash, count duplicate-signature
+    // siblings so each duplicate gets a distinct sig_index discriminator. Under
+    // the adapter strategy only the id-less children are counted, so adding or
+    // removing a sibling that has a native id cannot renumber them.
     std::unordered_map<std::string, std::size_t> sig_counts;
     for (std::size_t i = 0; i < node.children.size(); ++i) {
         IRNode& c = node.children[i];
         std::size_t child_sig_index = 0;
-        if (strategy == AnchorStrategy::content_hash) {
+        if (anchors_by_content(c, strategy, adapter_name)) {
             auto key = content_hash_signature_key(c);
             auto& n = sig_counts[key];
             child_sig_index = n;

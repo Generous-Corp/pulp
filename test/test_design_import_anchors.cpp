@@ -387,6 +387,80 @@ TEST_CASE("adapter strategy falls back to content-hash for nodes without IDs",
     REQUIRE(root.children[0].stable_anchor_id->find("figma:") == std::string::npos);
 }
 
+TEST_CASE("adapter fallback discriminates id-less siblings with one signature",
+          "[view][import][anchors]") {
+    // A figma-plugin export without node ids: three widget frames with no text
+    // share {tag, role, text}. The fallback hashes them by content, so each
+    // needs its own sibling index exactly as under content_hash; with one index
+    // for all three they shared one anchor and none of them could be bound.
+    IRNode root = make_node("frame");
+    for (int i = 0; i < 3; ++i)
+        root.children.push_back(make_node("frame"));
+
+    assign_anchors(root, AnchorStrategy::adapter, "figma-plugin");
+
+    std::unordered_set<std::string> seen;
+    for (const auto& c : root.children) {
+        REQUIRE(c.stable_anchor_id.has_value());
+        CHECK(seen.insert(*c.stable_anchor_id).second);
+    }
+    CHECK(seen.size() == 3);
+    // The first keeps the anchor it always had, so existing tweaks on a single
+    // id-less node still resolve.
+    CHECK(root.children[0].stable_anchor_id ==
+          compute_anchor_id(make_node("frame"), {}, 0, 1, 0, AnchorStrategy::content_hash, {}));
+}
+
+TEST_CASE("adapter fallback indexes ignore siblings that carry a source id",
+          "[view][import][anchors]") {
+    IRNode without_id_sibling = make_node("frame");
+    without_id_sibling.children.push_back(make_node("frame"));
+    without_id_sibling.children.push_back(make_node("frame"));
+
+    IRNode with_id_sibling = make_node("frame");
+    with_id_sibling.children.push_back(make_node("frame"));
+    with_id_sibling.children.push_back(make_node("frame", {}, {}, "7:7"));
+    with_id_sibling.children.push_back(make_node("frame"));
+
+    assign_anchors(without_id_sibling, AnchorStrategy::adapter, "figma-plugin");
+    assign_anchors(with_id_sibling, AnchorStrategy::adapter, "figma-plugin");
+
+    CHECK(with_id_sibling.children[1].stable_anchor_id == "figma-plugin:7:7");
+    CHECK(with_id_sibling.children[0].stable_anchor_id ==
+          without_id_sibling.children[0].stable_anchor_id);
+    CHECK(with_id_sibling.children[2].stable_anchor_id ==
+          without_id_sibling.children[1].stable_anchor_id);
+}
+
+TEST_CASE("find_duplicate_anchors names each repeat and the node that keeps the anchor",
+          "[view][import][anchors]") {
+    IRNode root = make_node("frame");
+    root.stable_anchor_id = "root";
+    for (const char* name : {"Knob A", "Fader", "Knob B"}) {
+        IRNode n = make_node("frame");
+        n.name = name;
+        n.stable_anchor_id = std::string(name) == "Fader" ? "fader" : "knob";
+        root.children.push_back(std::move(n));
+    }
+    root.children[1].children.push_back(make_node("frame"));
+    root.children[1].children[0].stable_anchor_id = "knob";
+
+    const auto duplicates = find_duplicate_anchors(root);
+    REQUIRE(duplicates.size() == 2);
+    CHECK(duplicates[0].anchor == "knob");
+    CHECK(duplicates[0].path == "$/children[1]/children[0]");
+    CHECK(duplicates[0].node_name == "<unnamed>");
+    CHECK(duplicates[0].first_path == "$/children[0]");
+    CHECK(duplicates[0].first_node_name == "Knob A");
+    CHECK(duplicates[1].path == "$/children[2]");
+    CHECK(duplicates[1].node_name == "Knob B");
+    CHECK(duplicates[1].first_path == "$/children[0]");
+
+    root.children[2].stable_anchor_id = "knob-b";
+    root.children[1].children[0].stable_anchor_id = "knob-inner";
+    CHECK(find_duplicate_anchors(root).empty());
+}
+
 // ── pre-existing anchor preservation ────────────────────────────────────
 
 TEST_CASE("assign_anchors preserves pre-existing stable_anchor_id values",
