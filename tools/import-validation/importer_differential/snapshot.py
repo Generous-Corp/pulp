@@ -184,10 +184,91 @@ class DomSnapshot:
         return self.raw.get("documentCanvas")
 
 
+_CSS_WHITESPACE = " \t\n\r\f"
+_SEGMENT_ESCAPES = {"\\": "\\\\", "/": "\\/", "[": "\\[", "]": "\\]",
+                    '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
+def capture_anchors(snapshot: DomSnapshot | dict[str, Any]) -> list[str]:
+    """Each node's capture anchor, as the importer spells `stable_anchor_id`.
+
+    A port of `anchor_path` in tools/import-design/browser_capture_tree.cpp:
+    `tag#id`, else `tag.first-class`, else `tag`, with `#text` for text, each
+    segment escaped and suffixed by `[key=<data-pulp-key>]` when that key is
+    unique among its siblings, otherwise by its ordinal among same-signature,
+    unkeyed siblings in document order. The path is derived from the
+    document's structure, so two captures of one page spell it the same way
+    whatever backend node ids each session handed out. A node with no
+    signature (the document, a doctype, a comment) gets an empty anchor.
+    """
+    snap = DomSnapshot.coerce(snapshot)
+    count = len(snap.parents)
+
+    def escape(text: str) -> str:
+        return "".join(_SEGMENT_ESCAPES.get(c, c) for c in text)
+
+    def describe(index: int) -> str:
+        node_type = snap.node_type(index)
+        if node_type == 3:
+            return "#text"
+        if node_type != 1:
+            return ""
+        name = snap.tag(index)
+        if not name:
+            return ""
+        attrs = snap.attributes(index)
+        if attrs.get("id"):
+            return f"{name}#{attrs['id']}"
+        classes = attrs.get("class", "")
+        first = classes.strip(_CSS_WHITESPACE)
+        for space in _CSS_WHITESPACE:
+            first = first.split(space, 1)[0]
+        return f"{name}.{first}" if first else name
+
+    def declared_key(index: int) -> str:
+        return snap.attributes(index).get("data-pulp-key", "") if snap.node_type(index) == 1 else ""
+
+    declared: dict[tuple[int, str], int] = {}
+    for index in range(count):
+        key = declared_key(index)
+        if key:
+            declared[(snap.parent(index), key)] = declared.get((snap.parent(index), key), 0) + 1
+    keys = [""] * count
+    ordinals = [0] * count
+    seen: dict[tuple[int, str], int] = {}
+    for index in range(count):
+        parent = snap.parent(index)
+        key = declared_key(index)
+        if key and declared[(parent, key)] == 1:
+            keys[index] = key
+            continue
+        group = (parent, describe(index))
+        ordinals[index] = seen.get(group, 0)
+        seen[group] = ordinals[index] + 1
+
+    anchors: list[str] = []
+    for index in range(count):
+        if not describe(index):
+            anchors.append("")
+            continue
+        segments: list[str] = []
+        cursor, steps = index, 0
+        while 0 <= cursor < count and steps < count:
+            signature = describe(cursor)
+            if signature:
+                suffix = (f"[key={escape(keys[cursor])}]" if keys[cursor]
+                          else f"[{ordinals[cursor]}]")
+                segments.append(escape(signature) + suffix)
+            cursor, steps = snap.parent(cursor), steps + 1
+        anchors.append("capture:" + "/".join(reversed(segments)))
+    return anchors
+
+
 def browser_nodes(snapshot: DomSnapshot | dict[str, Any]) -> list[BrowserNode]:
     snap = DomSnapshot.coerce(snapshot)
     if not snap.has_document:
         return []
+    anchors = capture_anchors(snap)
     children: dict[int, list[int]] = {}
     for index, parent in enumerate(snap.parents):
         children.setdefault(parent, []).append(index)
@@ -257,6 +338,7 @@ def browser_nodes(snapshot: DomSnapshot | dict[str, Any]) -> list[BrowserNode]:
             bounds=bounds,
             styles=styles,
             backend_node_id=snap.backend_node_id(index),
+            anchor=anchors[index] or None,
             svg_viewport=svg_viewport_of(index) if tag != "svg" else None,
         ))
     return result
