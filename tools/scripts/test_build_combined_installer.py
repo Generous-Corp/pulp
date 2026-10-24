@@ -287,6 +287,7 @@ class CombinedInstallerTest(unittest.TestCase):
             wraptool_argv_capture = tmp / "wraptool-argv.txt"
             strip_argv_capture = tmp / "strip-argv.txt"
             symbol_order_capture = tmp / "symbol-order.txt"
+            pkg_components_capture = tmp / "pkgbuild-components.txt"
             output = tmp / "out"
             wraptool_path = tmp / "pace" / "wraptool"
             if wraptool != "absent":
@@ -343,11 +344,13 @@ class CombinedInstallerTest(unittest.TestCase):
                 "pkgbuild",
                 'printf "BEGIN\\n" >> "$CAPTURE_PKG_ARGV"\n'
                 'printf "%s\\n" "$@" >> "$CAPTURE_PKG_ARGV"\n'
-                'last=""\nanalyze=0\ncomponent_plist=""\nwant_component_plist=0\n'
+                'last=""\nanalyze=0\ncomponent_plist=""\nwant_component_plist=0\nwant_component=0\n'
                 'for arg in "$@"; do\n'
                 '  if [[ "$want_component_plist" == 1 ]]; then component_plist="$arg"; want_component_plist=0; fi\n'
+                '  if [[ "$want_component" == 1 ]]; then printf "%s\\n" "$arg" >> "$CAPTURE_PKG_COMPONENTS"; want_component=0; fi\n'
                 '  [[ "$arg" == "--analyze" ]] && analyze=1\n'
                 '  [[ "$arg" == "--component-plist" ]] && want_component_plist=1\n'
+                '  [[ "$arg" == "--component" ]] && want_component=1\n'
                 '  last="$arg"\n'
                 'done\n'
                 'if [[ "$analyze" == 1 ]]; then\n'
@@ -400,7 +403,9 @@ class CombinedInstallerTest(unittest.TestCase):
                 'mkdir -p "$(dirname "$last")"\n: > "$last"\n',
             )
             # A small pkgutil stand-in that materializes the component payload
-            # the real productbuild/pkgutil path produces.  pkgbuild puts a
+            # the real productbuild/pkgutil path produces, from the bundles the
+            # pkgbuild stand-in was handed (the stripped staged copies when the
+            # installer strips).  pkgbuild puts a
             # component bundle directly under Payload; the install location
             # is PackageInfo metadata, not a directory in the payload.
             self._write_tool(
@@ -409,7 +414,12 @@ class CombinedInstallerTest(unittest.TestCase):
                 '[[ "${1:-}" == "--expand-full" ]] || exit 2\n'
                 'archive="$2"; expanded="$3"; [[ ! -e "$expanded" ]] || { echo "destination already exists" >&2; exit 1; }; mkdir -p "$expanded"\n'
                 'idx=0\n'
-                'IFS=: read -r -a roots <<< "${PAYLOAD_BUNDLE_ROOTS:-}"\n'
+                'roots=()\n'
+                'if [[ -s "${CAPTURE_PKG_COMPONENTS:-}" ]]; then\n'
+                '  while IFS= read -r root; do roots+=("$root"); done < "$CAPTURE_PKG_COMPONENTS"\n'
+                'else\n'
+                '  IFS=: read -r -a roots <<< "${PAYLOAD_BUNDLE_ROOTS:-}"\n'
+                'fi\n'
                 'for root in "${roots[@]}"; do\n'
                 '  [[ -n "$root" ]] || continue\n'
                 '  bundle="$(basename "$root")"\n'
@@ -605,6 +615,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 "CAPTURE_WRAPTOOL_ARGV": str(wraptool_argv_capture),
                 "CAPTURE_STRIP_ARGV": str(strip_argv_capture),
                 "CAPTURE_SYMBOL_ORDER": str(symbol_order_capture),
+                "CAPTURE_PKG_COMPONENTS": str(pkg_components_capture),
             }
             Path(env["PULP_SIGN_KEYCHAIN"]).touch()
             Path(env["PULP_SIGN_P12"]).touch()
