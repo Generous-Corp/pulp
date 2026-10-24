@@ -94,8 +94,10 @@ SHA-256, Chromium CDP identity, initial/resolved/document viewport dimensions,
 matching device scale factor and reference viewport, plus, when the capture
 recorded one, a contained materialized-document sidecar whose SHA-256,
 schema/version, HTML field, and asset count agree with the envelope. Only
-`--emit materialized-runtime` captures that sidecar; every other emit passes
-`--omit-materialized-document` and the envelope carries no materialized fields. A stale, hand-edited, mismatched, or
+`--emit materialized-runtime` and `--materialized-canvas-composition` capture
+that sidecar (`browser_import_captures_materialized_document`); every other
+import passes `--omit-materialized-document` and the envelope carries no
+materialized fields. A stale, hand-edited, mismatched, or
 path-escaping envelope fails closed with the
 `browser-capture-provenance-invalid` diagnostic. Keep the envelope and sidecar
 from the same capture directory; do not copy one from an older browser run or

@@ -51,10 +51,8 @@ struct BrowserImportCliRequest {
     /// explicit --validate request to additionally publish convenience render
     /// and diff files beside the primary output.
     bool validate = false;
-    /// The executable document is the input of `--emit materialized-runtime`
-    /// and nothing else; every other emit leaves it uncaptured rather than
-    /// serializing, hashing and publishing megabytes nobody reads.
-    bool capture_materialized_document = true;
+    /// `--emit materialized-runtime`, whose input is the executable document.
+    bool materialized_runtime_emit = false;
 };
 
 /// Reject browser-specific CLI options before a non-browser command path can
@@ -63,6 +61,15 @@ std::optional<int> validate_browser_import_cli_options(
     bool fit_authored_frame, bool render_size_explicit, bool has_browser_interactions, bool offline,
     bool export_tokens, bool detect_only, bool native_panel_lowering,
     bool materialized_canvas_composition, bool require_canvas_ink = false);
+
+/// Whether the capture reads the executable materialized document out of the
+/// page. `--emit materialized-runtime` consumes it, and
+/// `--materialized-canvas-composition` publishes it as
+/// materialized-document.json for the runtime transform and state-atlas
+/// entries. Every other import leaves it uncaptured rather than serializing,
+/// hashing and publishing megabytes nobody reads.
+bool browser_import_captures_materialized_document(bool materialized_runtime_emit,
+                                                   bool materialized_canvas_composition);
 
 /// Reject an explicit source that cannot enter browser-backed HTML import.
 std::optional<int> validate_fit_authored_frame_source_cli(

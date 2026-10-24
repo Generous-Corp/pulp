@@ -1795,9 +1795,14 @@ async function runCapture(options) {
 
     progress.enterPhase("same-frame-capture");
     await interactionNavigationGuard?.assertUnchanged();
-    // Only the materialized-runtime emit consumes the executable document.
-    // Skipping the read leaves the page untouched: the install script still
-    // runs, and the read only copies the globals it filled.
+    // The executable document is read only for the imports that publish it
+    // (--emit materialized-runtime and --materialized-canvas-composition; see
+    // browser_import_captures_materialized_document). Skipping the read leaves
+    // the page untouched: the install script still runs, and the read only
+    // copies the globals it filled. It does change two things: virtual time
+    // pauses sooner after the settle, because nothing runs between here and
+    // the freeze below, and the read's own blob-asset failures (too many
+    // blobs, a blob it could not capture, more than 64 MiB) cannot fire.
     const materializedDocument =
       options.flags.has("--omit-materialized-document")
         ? null

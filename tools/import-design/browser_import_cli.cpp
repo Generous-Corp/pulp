@@ -712,7 +712,8 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .native_panel_lowering = request.native_panel_lowering,
          .materialized_canvas_composition = request.materialized_canvas_composition,
          .require_canvas_ink = request.require_canvas_ink,
-         .capture_materialized_document = request.capture_materialized_document},
+         .capture_materialized_document = browser_import_captures_materialized_document(
+             request.materialized_runtime_emit, request.materialized_canvas_composition)},
         content);
 
     BrowserLaneClock clock;
