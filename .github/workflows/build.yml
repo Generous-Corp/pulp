@@ -1301,7 +1301,7 @@ jobs:
   # base branch, without persisted credentials.
   queue-breaker-notify:
     needs: classify
-    if: ${{ always() && github.event_name == 'merge_group' && needs.classify.outputs.queue_breaker_blocked_prs != '' }}
+    if: ${{ !inputs.local_proof && !cancelled() && github.event_name == 'merge_group' && needs.classify.outputs.queue_breaker_blocked_prs != '' }}
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 5
     continue-on-error: true
