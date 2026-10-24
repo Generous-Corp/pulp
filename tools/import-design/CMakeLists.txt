@@ -192,6 +192,12 @@ endif()
 install(TARGETS pulp-import-design
     RUNTIME DESTINATION bin
     BUNDLE DESTINATION bin)
+# Keep the PDF-compatible Illustrator conversion helper available in SDK
+# installs alongside the compiled importer.  It remains an explicit boundary:
+# Poppler is discovered at runtime and the helper records its own provenance.
+install(PROGRAMS
+    "${CMAKE_CURRENT_SOURCE_DIR}/illustrator_to_svg.py"
+    DESTINATION bin/import-design)
 install(FILES ${_pulp_browser_capture_runtime_files}
     DESTINATION bin/browser_capture-v1)
 install(FILES
