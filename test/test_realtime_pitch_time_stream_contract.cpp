@@ -58,6 +58,12 @@ RetainedChargeOracle exact_owned_store_charge(
 #else
     const std::uint64_t platform_split_buffers = 0;
 #endif
+    // The portable real transform keeps a real_bins()-long complex scratch in
+    // each of the engine's two FFTs for the split-spectrum path.
+    const std::uint64_t split_spectrum_scratch =
+        detail::fft_real_split_needs_scratch<float>(fft_size)
+            ? 2u * store_bytes<std::complex<float>>(bins)
+            : 0u;
 
     const std::array base_stores{
         store_bytes<float>(engine->input_ring_elements),
@@ -69,6 +75,7 @@ RetainedChargeOracle exact_owned_store_charge(
         store_bytes<std::complex<float>*>(channels),
         store_bytes<std::complex<double>>(fft_size / 2u), // engine twiddles
         platform_split_buffers,
+        split_spectrum_scratch,
         result.platform_fft_setups,
         store_bytes<float>(prepared.stretch_ring_elements),
         store_bytes<float>(prepared.drain_elements),
