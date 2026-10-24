@@ -14,7 +14,9 @@ if(SKIP_IF_FRESH_STAMP AND EXISTS "${SKIP_IF_FRESH_STAMP}"
     set(_pulp_scan_stamp_fresh TRUE)
     foreach(_pulp_scan_input IN ITEMS
             "${ARTIFACT}" "${MANIFEST}" "${SHIPPING_MANIFEST}"
-            "${CMAKE_CURRENT_LIST_FILE}")
+            "${CMAKE_CURRENT_LIST_FILE}"
+            "${CMAKE_CURRENT_LIST_DIR}/PulpReleaseArtifactScan.cmake"
+            "${CMAKE_CURRENT_LIST_DIR}/release_artifact_forbidden.json")
         if("${_pulp_scan_input}" IS_NEWER_THAN "${SKIP_IF_FRESH_STAMP}")
             set(_pulp_scan_stamp_fresh FALSE)
         endif()
@@ -22,6 +24,25 @@ if(SKIP_IF_FRESH_STAMP AND EXISTS "${SKIP_IF_FRESH_STAMP}"
     if(_pulp_scan_stamp_fresh)
         return()
     endif()
+endif()
+
+# The forbidden strings, symbols and loader dependencies of a
+# production-stripped artifact are the `control-stripped` gate of the shared
+# release-artifact list, read through the scanner module installed beside this
+# file. Both are stamp inputs above, so a policy change rescans.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpReleaseArtifactScan.cmake")
+pulp_release_artifact_load("${CMAKE_CURRENT_LIST_DIR}/release_artifact_forbidden.json")
+pulp_release_artifact_select(OUT_IDS _pulp_forbidden_string_ids
+    OUT_PATTERNS _pulp_forbidden_strings KIND string GATES control-stripped)
+pulp_release_artifact_select(OUT_IDS _pulp_forbidden_symbol_ids
+    OUT_PATTERNS _pulp_forbidden_symbols KIND symbol GATES control-stripped)
+pulp_release_artifact_select(OUT_IDS _pulp_forbidden_dependency_ids
+    OUT_PATTERNS _pulp_forbidden_dependencies KIND dependency GATES control-stripped)
+if(NOT _pulp_forbidden_strings OR NOT _pulp_forbidden_symbols
+   OR NOT _pulp_forbidden_dependencies)
+    message(FATAL_ERROR
+        "control shipping scan: the control-stripped gate of release_artifact_forbidden.json "
+        "must name at least one string, one symbol and one dependency marker")
 endif()
 
 # Every marker this scanner looks for is printable ASCII without whitespace
@@ -332,33 +353,22 @@ endif()
 
 set(_closure_binary_count 0)
 if(_profile STREQUAL "production-stripped")
-    foreach(_forbidden_marker IN ITEMS
-            PULP_INSPECT_SHIPPING_MANIFEST_V1
-            PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1
-            PULP_REMOTE_VIEW_PARAMETER_AUTHORITY_V1
-            PULP_INSPECT_CAPABILITY_
-            view.param_set)
+    foreach(_forbidden_marker IN LISTS _pulp_forbidden_strings)
         _pulp_forbid_marker("${_forbidden_marker}"
             "production-stripped artifact contains forbidden control string")
     endforeach()
-    # Match canonical control implementation namespaces. Generic names such as
-    # ControlService or RemoteView are valid names for ordinary plugin code and
-    # are not evidence that a control implementation leaked into the artifact.
-    foreach(_forbidden_symbol IN ITEMS
-            "pulp::inspect::ControlBroker"
-            "pulp::inspect::ControlService"
-            "pulp::inspect::ControlEndpoint"
-            "pulp::inspect::RuntimeEvaluator")
+    # The symbol markers are canonical control implementation namespaces.
+    # Generic names such as ControlService or RemoteView are valid names for
+    # ordinary plugin code and are not evidence that a control implementation
+    # leaked into the artifact.
+    foreach(_forbidden_symbol IN LISTS _pulp_forbidden_symbols)
         string(FIND "${_symbol_output}" "${_forbidden_symbol}" _symbol_position)
         if(_symbol_position GREATER_EQUAL 0)
             message(FATAL_ERROR
                 "production-stripped artifact contains forbidden control symbol: ${_forbidden_symbol}")
         endif()
     endforeach()
-    foreach(_forbidden_dependency IN ITEMS
-            pulp-inspect-control pulp-inspect-client pulp-inspect-runtime
-            pulp-inspect-runtime-eval pulp-inspect-standalone-runtime
-            pulp-control-broker)
+    foreach(_forbidden_dependency IN LISTS _pulp_forbidden_dependencies)
         string(FIND "${_dependency_output}" "${_forbidden_dependency}" _dependency_position)
         if(_dependency_position GREATER_EQUAL 0)
             message(FATAL_ERROR
@@ -399,12 +409,7 @@ if(_profile STREQUAL "production-stripped")
         endif()
         math(EXPR _closure_binary_count "${_closure_binary_count} + 1")
         _pulp_read_binary_strings("${_closure_candidate}" _closure_binary)
-        foreach(_forbidden_marker IN ITEMS
-                PULP_INSPECT_SHIPPING_MANIFEST_V1
-                PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1
-                PULP_REMOTE_VIEW_PARAMETER_AUTHORITY_V1
-                PULP_INSPECT_CAPABILITY_
-                view.param_set)
+        foreach(_forbidden_marker IN LISTS _pulp_forbidden_strings)
             _pulp_binary_contains(_closure_binary "${_forbidden_marker}"
                 _closure_marker_found)
             if(_closure_marker_found)
@@ -424,11 +429,7 @@ if(_profile STREQUAL "production-stripped")
         # Fully stripped libraries can have no printable symbols; their
         # implementation-owned markers above remain fail-closed evidence.
         if(_closure_symbol_result EQUAL 0)
-            foreach(_forbidden_symbol IN ITEMS
-                    "pulp::inspect::ControlBroker"
-                    "pulp::inspect::ControlService"
-                    "pulp::inspect::ControlEndpoint"
-                    "pulp::inspect::RuntimeEvaluator")
+            foreach(_forbidden_symbol IN LISTS _pulp_forbidden_symbols)
                 string(FIND "${_closure_symbols}" "${_forbidden_symbol}"
                     _closure_symbol_position)
                 if(_closure_symbol_position GREATER_EQUAL 0)

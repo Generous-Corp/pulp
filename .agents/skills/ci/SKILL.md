@@ -2945,6 +2945,28 @@ dependencies", which normally takes 0.3 min). Bound a setup step that can only
 hang on the network with a step `timeout-minutes` well above its measured max,
 so the VM is freed in minutes instead of hours.
 
+## Gate: release-artifact scan (`tools/cmake/PulpReleaseArtifactScan.cmake`)
+
+One list, `tools/cmake/release_artifact_forbidden.json`, names every byte
+pattern a release artifact must not contain, keyed by the build condition
+(`gate`) that forbids it: `js-off`, `tracing-off`, `reload-ship`,
+`bridge-exec-off`, `dev-env-off`, `control-stripped`. `AssertNoJsSymbols`,
+`AssertNoTracingSymbols`, `reload_ship_symbol_check` and
+`check_control_shipping_artifact` are wrappers over it, and the required gate
+runs `release-artifact-forbidden-list-selftest`,
+`release-artifact-scan-negative-control` (a generated fixture carrying every
+marker must be flagged; a clean one must pass) and the per-class scans over
+the SDK libraries, the C++ CLI and the fixture plug-in/standalone. A red
+`release-artifact-scan-*` names the marker id, kind and pattern; the reason it
+is forbidden is the entry's `reason` in the JSON. Add a marker by adding an
+entry; the selftest rejects an unknown gate, a duplicate pattern or an
+unused gate, and the negative control fails if the scanner cannot see it.
+The `ship` skill has the full model. The ctest registrations live in
+`test/cmake/release_artifact_tests.cmake` (included from
+`cmake_smoke_tests.cmake`); the class scans register through
+`cmake_language(DEFER)` because `PULP_SDK_TARGETS` and the CLI target are
+defined after `test/`.
+
 ## Gate: framework-neutrality (`tools/scripts/framework_neutrality_check.py`)
 
 Hard-fails a PR when Pulp's own source names another UI framework — in a

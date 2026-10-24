@@ -250,6 +250,47 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
+## Release-artifact forbidden-marker list
+
+Every "a shipped binary must not contain X" check reads ONE list:
+`tools/cmake/release_artifact_forbidden.json`, applied by
+`tools/cmake/PulpReleaseArtifactScan.cmake`. Each marker names a `kind`
+(`symbol` in the demangled `nm -C` table, `string` in the file's printable
+runs, `dependency` in the loader table) and the `gates` under which it is
+forbidden — a gate is a build condition: `js-off` (PULP_ENABLE_JS=OFF),
+`tracing-off` (PULP_TRACING=OFF), `reload-ship` (PULP_RELOAD_DEV_WATCHER=0),
+`bridge-exec-off` (PULP_BRIDGE_EXEC_ENABLED=0), `dev-env-off` (PULP_DEV_BUILD=0)
+and `control-stripped` (the production-stripped control profile). A
+registration site passes the gates that hold for the artifact it scans; the
+CLI, for instance, legitimately carries the control broker and the dev env
+hooks, so `control-stripped` and `dev-env-off` are never applied to it.
+
+The older scanners are thin wrappers over the same list and keep their names
+and ctest registrations: `AssertNoJsSymbols.cmake`, `AssertNoTracingSymbols.cmake`,
+`test/cmake/reload_ship_symbol_check.cmake` (`pulp-reload-ship-symbol-absence`)
+and `check_control_shipping_artifact.cmake`, which is installed into the SDK
+beside the list and the module (`lib/cmake/Pulp/`) and counts both as stamp
+inputs, so editing the list rescans every control-shipping artifact.
+
+**Adding a marker is one JSON entry.** Two ctests then hold it:
+`release-artifact-forbidden-list-selftest` (shape, unique id and pattern, every
+gate documented and used, pattern emittable) and
+`release-artifact-scan-negative-control`, which builds a fixture generated
+from the list carrying every symbol and string marker and asserts the scanner
+flags each one (dependency markers against synthetic otool/readelf/dumpbin
+lines), and that a clean fixture passes. A gate that selects no marker is a
+hard error in every wrapper, not a vacuous pass. The per-class scans
+(`release-artifact-scan-sdk-libraries`, `-cli-pulp-cli`,
+`-plugin-bundle-…`, `-standalone-…`) apply the gates the configure derives
+(`pulp_release_artifact_active_gates`) to every installed SDK library, the
+C++ CLI and the fixture plug-in built through `pulp_add_plugin`.
+
+Not on the list, deliberately: `pulp ship`'s own tracing sentinel
+(`PULP_TRACING_COMPILED_IN__DO_NOT_SHIP`, previous section). The CLI contains
+that byte-string as its search needle, so a `string` marker for it would flag
+the CLI itself; the sentinel stays the ship command's check. Wiring
+`pulp ship check` to read this list for the notarized bytes is still open.
+
 ## Development-SDK ship guard
 
 `package`, `notarize`, `release`, and `share` **refuse** a project configured
