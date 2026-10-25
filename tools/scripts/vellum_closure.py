@@ -911,6 +911,10 @@ BUILD_TIMESTAMP_PLACEHOLDER = "<build-timestamp>"
 
 PRELUDE_SOURCE = "@build/core/view/web_compat_preludes_gen.cpp"
 PRELUDE_HEADER = "@build/core/view/web_compat_preludes_gen.hpp"
+# The generated header around its per-prelude declarations; must match the
+# _pulp_prelude_decls strings in core/view/cmake/PulpViewJsPreludes.cmake.
+PRELUDE_HEADER_HEAD = "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n#include <cstddef>\n#include <string>\n\nnamespace pulp::view::preludes {\n\n// One JS prelude, stored as a zlib (RFC 1950) stream of its source text.\nstruct EmbeddedPrelude {\n    const char* file_name;\n    const unsigned char* deflated;\n    std::size_t deflated_size;\n    std::size_t source_size;\n    const char* sha256;\n};\n\n// Inflates the source text of a prelude on each call. Throws\n// std::runtime_error unless the stream inflates to exactly source_size bytes.\nstd::string source(const EmbeddedPrelude& prelude);\n\n"
+PRELUDE_HEADER_TAIL = '\n// Every prelude, in the order the file list declares them.\nextern const EmbeddedPrelude* const kAll[];\nextern const std::size_t kAllCount;\n\n}  // namespace pulp::view::preludes\n'
 
 
 def prelude_inputs(source: Path) -> list[Path] | None:
@@ -1106,13 +1110,13 @@ def prelude_inputs(source: Path) -> list[Path] | None:
         ["PULP_JS_EMBEDDED_HEADER", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp"],
         ["PULP_JS_EMBEDDED_SOURCE", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.cpp"],
         ["Python3", "REQUIRED", "COMPONENTS", "Interpreter"],
-        ["_pulp_prelude_decls", '"#pragma once\\n// Auto-generated from the JS prelude file list — do not edit\\n\\nnamespace pulp::view::preludes {\\n\\n"'],
+        ["_pulp_prelude_decls", '"#pragma once\\n// Auto-generated from the JS prelude file list — do not edit\\n\\n#include <cstddef>\\n#include <string>\\n\\nnamespace pulp::view::preludes {\\n\\n// One JS prelude, stored as a zlib (RFC 1950) stream of its source text.\\nstruct EmbeddedPrelude {\\n    const char* file_name;\\n    const unsigned char* deflated;\\n    std::size_t deflated_size;\\n    std::size_t source_size;\\n    const char* sha256;\\n};\\n\\n// Inflates the source text of a prelude on each call. Throws\\n// std::runtime_error unless the stream inflates to exactly source_size bytes.\\nstd::string source(const EmbeddedPrelude& prelude);\\n\\n"'],
         ["_prelude", "${PULP_JS_PRELUDES}"],
         ["_prelude_stem", '"${_prelude}"', "NAME_WE"],
         ["REPLACE", '"-"', '"_"', "_prelude_var", '"${_prelude_stem}"'],
-        ["APPEND", "_pulp_prelude_decls", '"extern const char* const ${_prelude_var};\\n"'],
+        ["APPEND", "_pulp_prelude_decls", '"extern const EmbeddedPrelude ${_prelude_var};\\n"'],
         [],
-        ["APPEND", "_pulp_prelude_decls", '"\\n}  // namespace pulp::view::preludes\\n"'],
+        ["APPEND", "_pulp_prelude_decls", '"\\n// Every prelude, in the order the file list declares them.\\nextern const EmbeddedPrelude* const kAll[];\\nextern const std::size_t kAllCount;\\n\\n}  // namespace pulp::view::preludes\\n"'],
         ["_pulp_existing_decls", '""'],
         ["EXISTS", '"${PULP_JS_EMBEDDED_HEADER}"'],
         ["READ", '"${PULP_JS_EMBEDDED_HEADER}"', "_pulp_existing_decls"],
@@ -1179,10 +1183,9 @@ def generated_digest(rel: str, path: Path, source: Path) -> dict | None:
             return None
         if rel == PRELUDE_HEADER:
             names = [input_path.stem.replace("-", "_") for input_path in inputs]
-            text = "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n"
-            text += "namespace pulp::view::preludes {\n\n"
-            text += "".join(f"extern const char* const {name};\n" for name in names)
-            text += "\n}  // namespace pulp::view::preludes\n"
+            text = PRELUDE_HEADER_HEAD
+            text += "".join(f"extern const EmbeddedPrelude {name};\n" for name in names)
+            text += PRELUDE_HEADER_TAIL
             return {"sha256": _text_sha256(text)}
         import tempfile
         with tempfile.TemporaryDirectory(prefix="pulp-preludes-") as td:

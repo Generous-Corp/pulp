@@ -834,3 +834,44 @@ TEST_CASE("gzip_decompress rejects an invalid concatenated member header",
 
     REQUIRE_FALSE(gzip_decompress(concat.data(), concat.size()).has_value());
 }
+
+TEST_CASE("zlib_decompress_exact inflates only to the recorded size", "[runtime][zip]") {
+    std::string text;
+    for (int i = 0; i < 4000; ++i)
+        text += "globalThis.v" + std::to_string(i % 37) + " = 1;\n";
+    const auto* bytes = reinterpret_cast<const uint8_t*>(text.data());
+    auto z = zlib_compress(bytes, text.size(), 9);
+    REQUIRE(z.has_value());
+    REQUIRE(z->size() < text.size() / 4);
+
+    SECTION("exact size round-trips byte for byte") {
+        auto out = zlib_decompress_exact(z->data(), z->size(), text.size());
+        REQUIRE(out.has_value());
+        CHECK(*out == text);
+    }
+    SECTION("a recorded size one byte short or long is rejected") {
+        CHECK_FALSE(zlib_decompress_exact(z->data(), z->size(), text.size() - 1).has_value());
+        CHECK_FALSE(zlib_decompress_exact(z->data(), z->size(), text.size() + 1).has_value());
+    }
+    SECTION("trailing bytes after the stream are rejected") {
+        auto padded = *z;
+        padded.push_back(0);
+        CHECK_FALSE(zlib_decompress_exact(padded.data(), padded.size(), text.size()).has_value());
+    }
+    SECTION("a corrupted Adler-32 trailer is rejected") {
+        auto bad = *z;
+        bad.back() ^= 0x01;
+        CHECK_FALSE(zlib_decompress_exact(bad.data(), bad.size(), text.size()).has_value());
+    }
+    SECTION("raw deflate and gzip wrappers are not zlib streams") {
+        auto raw = deflate_compress(bytes, text.size(), 9);
+        auto gz = gzip_compress(bytes, text.size(), 9);
+        REQUIRE(raw.has_value());
+        REQUIRE(gz.has_value());
+        CHECK_FALSE(zlib_decompress_exact(raw->data(), raw->size(), text.size()).has_value());
+        CHECK_FALSE(zlib_decompress_exact(gz->data(), gz->size(), text.size()).has_value());
+    }
+    SECTION("empty input is rejected") {
+        CHECK_FALSE(zlib_decompress_exact(nullptr, 0, 0).has_value());
+    }
+}

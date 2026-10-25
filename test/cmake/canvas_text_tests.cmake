@@ -230,6 +230,16 @@ if(PULP_HAS_SKIA)
         ${PULP_ROOT_DIR}/core/canvas/src)
 endif()
 
+# Native builds must not pull Skia's Ganesh backend into pulp-canvas; see the
+# script for why one unguarded call keeps all of it alive.
+if(PULP_HAS_SKIA AND NOT EMSCRIPTEN AND CMAKE_NM AND NOT MSVC)
+    add_test(NAME pulp-canvas-native-no-ganesh
+        COMMAND "${CMAKE_COMMAND}"
+            "-DNM=${CMAKE_NM}"
+            "-DARCHIVE=$<TARGET_FILE:pulp-canvas>"
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_canvas_no_ganesh_refs.cmake")
+endif()
+
 if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # Two live-GPU groups, split by compile line: the pulp::canvas + pulp::render
     # suites, and the ones that also drive a pulp::view tree.
