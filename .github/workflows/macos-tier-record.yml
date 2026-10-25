@@ -1,0 +1,117 @@
+name: macOS test tier record
+
+# Publishes the tier record Shipyard's queue-arm-guard reads for the tiered
+# required check `macos` (Shipyard docs/ghapp-guards.md, "A tiered required
+# check must prove its full lane"). The record is a check run named
+# `shipyard-test-tier/macos` on the head, created by `github-actions` through
+# the Checks API, whose output.summary is one JSON object bound to the exact
+# workflow run and attempt whose job is the `macos` check:
+#
+#   {"schema":"shipyard-test-tier/v1","check":"macos","tier":"deferred",
+#    "run_id":123,"run_attempt":1,"label":"macos-ci",
+#    "full_suite_runs_in":"merge_group"}
+#
+# The guard ignores tier annotations, because any step, including the code
+# under test, can print one. This job decides the tier from facts that code
+# cannot write: the step conclusions the runner recorded for that `macos` job
+# (read through the jobs API). A `Build` step that ran is the full lane, `fast`
+# or, with `Test (non-Windows)` run too, `full`. A skipped `Build` is the
+# contract lane, `deferred`. A skip-safe or fail-closed bootstrap job's green
+# is `not-required`. A job it cannot read or place publishes no record, and no
+# record is a refusal at the guard.
+#
+# workflow_run runs this definition from the default branch and checks out
+# nothing, so no pull request code runs here and only this job holds
+# `checks: write`. Same-repository runs only: a fork's head gets no record, so
+# the guard refuses to arm it (outside contributions land through an in-repo
+# branch). It publishes whether or not PULP_MACOS_PR_GATING is on. With gating
+# off every pull request takes the full lane and its record says so, so the
+# guard can be switched on (`tiered_required_checks`) without stranding heads.
+
+on:
+  workflow_run:
+    workflows: ["Build and Test"]
+    types: [completed]
+
+permissions:
+  actions: read
+  checks: write
+
+concurrency:
+  group: macos-tier-record-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  tier-record:
+    name: Publish the macos tier record
+    # Same-repository pull-request and dispatch runs; the script checks again.
+    if: >-
+      (github.event.workflow_run.event == 'pull_request'
+       || github.event.workflow_run.event == 'workflow_dispatch')
+      && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Publish shipyard-test-tier/macos
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          if [ "$HEAD_REPO" != "$repo" ]; then
+            echo "run $RUN_ID is from $HEAD_REPO, not $repo; only same-repository runs get a record"
+            exit 0
+          fi
+          # The jobs of exactly this attempt, every page, as one array.
+          jobs_json=$(gh api --paginate "repos/$repo/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs?per_page=100" \
+            | jq -s '[.[].jobs[]]')
+          macos=$(jq -c '[.[] | select(.name == "macos")]' <<< "$jobs_json")
+          count=$(jq 'length' <<< "$macos")
+          if [ "$count" -eq 0 ]; then
+            echo "run $RUN_ID attempt $RUN_ATTEMPT has no macos job; no record"
+            exit 0
+          fi
+          if [ "$count" -ne 1 ]; then
+            echo "::error title=no tier record::run $RUN_ID attempt $RUN_ATTEMPT has $count jobs named macos, so none can be bound; no record, which the guard refuses"
+            exit 1
+          fi
+          job=$(jq -c '.[0]' <<< "$macos")
+          if [ "$(jq -r '.head_sha' <<< "$job")" != "$HEAD_SHA" ]; then
+            echo "::error title=no tier record::the macos job of run $RUN_ID is not for $HEAD_SHA; no record, which the guard refuses"
+            exit 1
+          fi
+          # A step's conclusion as the runner recorded it, or `absent`.
+          step() {
+            jq -r --arg name "$1" \
+              '[.steps[]? | select(.name == $name) | .conclusion // "none"] | if length == 0 then "absent" else .[0] end' \
+              <<< "$job"
+          }
+          ran() { [ "$1" = success ] || [ "$1" = failure ]; }
+          bootstrap=$(step "macOS PR/dispatch bootstrap (required when native leg is absent)")
+          build=$(step "Build")
+          full_suite=$(step "Test (non-Windows)")
+          if [ "$bootstrap" != absent ]; then
+            # The bootstrap claims `macos` when no native build is needed, and
+            # fails it closed when routing or classification failed.
+            if [ "$bootstrap" = success ]; then tier=not-required; else tier=deferred; fi
+          elif [ "$build" = absent ]; then
+            echo "::error title=no tier record::the macos job of run $RUN_ID has neither a Build step nor the bootstrap step, so its lane cannot be read; no record, which the guard refuses"
+            exit 1
+          elif ran "$build"; then
+            if ran "$full_suite"; then tier=full; else tier=fast; fi
+          else
+            tier=deferred
+          fi
+          summary=$(jq -cn --arg tier "$tier" --argjson run "$RUN_ID" --argjson attempt "$RUN_ATTEMPT" \
+            '{schema:"shipyard-test-tier/v1",check:"macos",tier:$tier,run_id:$run,
+              run_attempt:$attempt,label:"macos-ci",full_suite_runs_in:"merge_group"}')
+          gh api --method POST "repos/$repo/check-runs" \
+            -f name=shipyard-test-tier/macos \
+            -f head_sha="$HEAD_SHA" \
+            -f status=completed -f conclusion=neutral \
+            -f "output[title]=$tier" -f "output[summary]=$summary" >/dev/null
+          echo "published shipyard-test-tier/macos on $HEAD_SHA: $summary (Build=$build, Test (non-Windows)=$full_suite, bootstrap=$bootstrap)"

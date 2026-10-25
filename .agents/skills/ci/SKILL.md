@@ -436,6 +436,12 @@ macOS.
   with a workflow's `GITHUB_TOKEN` starts no workflow run.
 - **`gate_suite_executed.py` reads both lanes as `tier-only`.** Use the
   `deferred` annotation, or the skipped `Build` step, to tell them apart.
+- **Shipyard's arm guard reads the tier record, not annotations.**
+  `macos-tier-record.yml` publishes a `shipyard-test-tier/macos` check run
+  per completed same-repository Build and Test run. It is bound to that run
+  and attempt, and decided from the `macos` job's step conclusions (`Build`
+  skipped means `deferred`). A head with no record, or a `deferred` one,
+  cannot be armed once `tiered_required_checks` is set.
 
 ## Diff-scoped gates on merge_group use the entry's own base
 

@@ -3775,6 +3775,40 @@ test suite` (and still merges onto the tip of `main`) also runs the full suite
 there and issues an exact-tree receipt, as before (see "Only a ready-to-land PR
 head issues a receipt" in the CI skill).
 
+### The tier record the arm guard reads
+
+Shipyard's queue-arm-guard does not read `shipyard-test-tier` annotations, since
+any step, including the code under test, can print one. It reads a *tier
+record* instead (Shipyard `docs/ghapp-guards.md`, "A tiered required check must
+prove its full lane"). That record is a check run named
+`shipyard-test-tier/macos` on the head, created by `github-actions`, whose
+summary is `{"schema":"shipyard-test-tier/v1","check":"macos","tier":...,
+"run_id":...,"run_attempt":...,"label":"macos-ci","full_suite_runs_in":"merge_group"}`.
+The guard refuses a head with no record bound to its `macos` job's run and
+attempt, or with a `deferred` one.
+
+`.github/workflows/macos-tier-record.yml` publishes it.
+It runs on `workflow_run` when a Build and Test run completes, from main, with
+no checkout. It handles same-repository `pull_request` and `workflow_dispatch`
+runs only, and it is the only job holding `checks: write`. It decides the tier
+from the step conclusions the runner recorded for that attempt's `macos` job,
+not from anything the job printed:
+
+| `macos` job | Tier |
+|---|---|
+| `Build` ran, `Test (non-Windows)` ran | `full` |
+| `Build` ran | `fast` (full lane) |
+| `Build` skipped (the contract lane) | `deferred` |
+| bootstrap step succeeded (skip-safe) | `not-required` |
+| bootstrap step failed closed | `deferred` |
+
+A run with no `macos` job, two of them, a job for another head, or neither
+step publishes no record, and the guard refuses that head. So do fork heads,
+which land through an in-repository branch. The record is published whether
+or not `PULP_MACOS_PR_GATING` is on. With gating off every head takes the full
+lane, so turning on `tiered_required_checks` in `.shipyard/config.toml`
+strands nothing. That key is the flip-day change and is not set yet.
+
 ### Why the contract lane's `macos` check is green
 
 `macos` is a required context and the contract lane's job is the one named
