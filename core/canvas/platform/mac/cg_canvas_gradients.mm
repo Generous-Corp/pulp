@@ -25,6 +25,19 @@
 
 namespace pulp::canvas {
 
+// CoreGraphics blends gradient stops only in the gradient's own colour space,
+// so a CSS interpolation space (`in oklab`) is honoured by resampling: each
+// segment gains interior stops taken from the reference curve, so CG's sRGB
+// blend only has to bridge 1/32 of a segment at a time. The default space
+// keeps the caller's stops untouched.
+static void store_stops(const Color* colors, const float* positions, int count,
+                        GradientInterpolation method, std::vector<Color>& out_colors,
+                        std::vector<float>& out_positions) {
+    constexpr int kSamplesPerSegment = 32;
+    resample_gradient_stops(colors, positions, count, method, kSamplesPerSegment, out_colors,
+                            out_positions);
+}
+
 // SkiaCanvas stores a gradient shader and applies it as the fill paint on
 // fill_current_path / fill_rect. CoreGraphics doesn't have a "set fill
 // shader" call — gradient draws go through CGContextDrawLinearGradient /
@@ -45,8 +58,7 @@ void CoreGraphicsCanvas::set_fill_gradient_linear(float x0, float y0,
     gradient_kind_ = GradientKind::linear;
     gradient_is_radial_ = false;
     grad_x0_ = x0; grad_y0_ = y0; grad_x1_ = x1; grad_y1_ = y1;
-    grad_colors_.assign(colors, colors + count);
-    grad_positions_.assign(positions, positions + count);
+    store_stops(colors, positions, count, gradient_interpolation(), grad_colors_, grad_positions_);
 }
 
 void CoreGraphicsCanvas::set_fill_gradient_radial(float cx, float cy,
@@ -67,8 +79,7 @@ void CoreGraphicsCanvas::set_fill_gradient_radial(float cx, float cy,
     grad_x0_ = cx; grad_y0_ = cy; grad_x1_ = cx; grad_y1_ = cy;
     grad_radius_inner_ = 0.0f;
     grad_radius_ = radius;
-    grad_colors_.assign(colors, colors + count);
-    grad_positions_.assign(positions, positions + count);
+    store_stops(colors, positions, count, gradient_interpolation(), grad_colors_, grad_positions_);
 }
 
 // True two-circle radial gradient. CGContextDrawRadialGradient accepts
@@ -92,8 +103,7 @@ void CoreGraphicsCanvas::set_fill_gradient_radial_two_circles(
     grad_x1_ = x1; grad_y1_ = y1;
     grad_radius_inner_ = r0;
     grad_radius_ = r1;
-    grad_colors_.assign(colors, colors + count);
-    grad_positions_.assign(positions, positions + count);
+    store_stops(colors, positions, count, gradient_interpolation(), grad_colors_, grad_positions_);
 }
 
 // Canvas2D ctx.createConicGradient on the CG backend. CoreGraphics has no
@@ -120,8 +130,7 @@ void CoreGraphicsCanvas::set_fill_gradient_conic(float cx, float cy,
     // was already unused for a conic; this file's convention is to repurpose
     // the linear slots rather than grow the gradient state.
     grad_x1_ = start_angle; grad_y1_ = 1.0f;
-    grad_colors_.assign(colors, colors + count);
-    grad_positions_.assign(positions, positions + count);
+    store_stops(colors, positions, count, gradient_interpolation(), grad_colors_, grad_positions_);
     // The bitmap is generated lazily inside fill_with_active_paint() once
     // we know the destination clip rect. Drop any cached image from a
     // previous conic that may not match the upcoming clip.
@@ -164,8 +173,8 @@ void CoreGraphicsCanvas::set_stroke_gradient_linear(float x0, float y0,
     stroke_gradient_kind_ = GradientKind::linear;
     stroke_grad_x0_ = x0; stroke_grad_y0_ = y0;
     stroke_grad_x1_ = x1; stroke_grad_y1_ = y1;
-    stroke_grad_colors_.assign(colors, colors + count);
-    stroke_grad_positions_.assign(positions, positions + count);
+    store_stops(colors, positions, count, gradient_interpolation(), stroke_grad_colors_,
+                stroke_grad_positions_);
 }
 
 void CoreGraphicsCanvas::set_stroke_gradient_radial(float cx, float cy,
@@ -180,8 +189,8 @@ void CoreGraphicsCanvas::set_stroke_gradient_radial(float cx, float cy,
     stroke_grad_x1_ = cx; stroke_grad_y1_ = cy;
     stroke_grad_radius_inner_ = 0.0f;
     stroke_grad_radius_ = radius;
-    stroke_grad_colors_.assign(colors, colors + count);
-    stroke_grad_positions_.assign(positions, positions + count);
+    store_stops(colors, positions, count, gradient_interpolation(), stroke_grad_colors_,
+                stroke_grad_positions_);
 }
 
 void CoreGraphicsCanvas::set_stroke_gradient_radial_two_circles(
@@ -195,8 +204,8 @@ void CoreGraphicsCanvas::set_stroke_gradient_radial_two_circles(
     stroke_grad_x1_ = x1; stroke_grad_y1_ = y1;
     stroke_grad_radius_inner_ = r0;
     stroke_grad_radius_ = r1;
-    stroke_grad_colors_.assign(colors, colors + count);
-    stroke_grad_positions_.assign(positions, positions + count);
+    store_stops(colors, positions, count, gradient_interpolation(), stroke_grad_colors_,
+                stroke_grad_positions_);
 }
 
 void CoreGraphicsCanvas::set_stroke_gradient_conic(float cx, float cy,
@@ -209,8 +218,8 @@ void CoreGraphicsCanvas::set_stroke_gradient_conic(float cx, float cy,
     stroke_gradient_kind_ = GradientKind::conic_image;
     stroke_grad_x0_ = cx; stroke_grad_y0_ = cy;
     stroke_grad_x1_ = start_angle; stroke_grad_y1_ = 0;
-    stroke_grad_colors_.assign(colors, colors + count);
-    stroke_grad_positions_.assign(positions, positions + count);
+    store_stops(colors, positions, count, gradient_interpolation(), stroke_grad_colors_,
+                stroke_grad_positions_);
 }
 
 void CoreGraphicsCanvas::clear_stroke_gradient() {

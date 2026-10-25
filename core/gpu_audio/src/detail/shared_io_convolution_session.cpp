@@ -443,11 +443,15 @@ SharedIoConvolutionSession::consume_output(const Callback& callback, std::span<f
 }
 
 void SharedIoConvolutionSession::fail_closed() noexcept {
+    fail_closed(pipeline_.first_undelivered());
+}
+
+void SharedIoConvolutionSession::fail_closed(std::uint64_t sequence) noexcept {
     failed_ = true;
     // This atomic bridge gate keeps subsequent callbacks CPU-only. The service
     // thread may still drain an already-held ingress lease, but no new GPU
     // ingress is admitted after an unprovable completion disposition.
-    pipeline_.request_recovery(SharedIoRecoveryReason::ProviderFailure);
+    pipeline_.request_recovery(SharedIoRecoveryReason::ProviderFailure, sequence);
 }
 
 bool SharedIoConvolutionSession::pack_input(const SharedIoConvolutionPipeline::Lease& ingress,
@@ -490,13 +494,16 @@ std::optional<std::uint64_t> SharedIoConvolutionSession::callback_deadline_ns(
     return callback_start_ns + budget_ns;
 }
 
-bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
-                                                   ServiceResult& result) noexcept {
+bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns, ServiceResult& result,
+                                                   std::uint64_t service_deadline_ns) noexcept {
     if (!prepared_)
         return false;
-    plan_.drain(now_ns); // plan drain polls the one owned provider first.
+    // The plan drain services the one owned provider first, bounded by the
+    // deadline (zero: a nonblocking poll).
+    plan_.drain_until(now_ns, service_deadline_ns);
     if (provider_->device_lost())
-        pipeline_.request_recovery(SharedIoRecoveryReason::ProviderLost);
+        pipeline_.request_recovery(SharedIoRecoveryReason::ProviderLost,
+                                   pipeline_.first_undelivered());
     while (const auto completion = plan_.pop_completion()) {
         ++result.completions;
         const auto& token = completion->token.slot;
@@ -517,7 +524,7 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
             if (recorded)
                 ++result.terminal_records;
             if (!discarded || (!recorded && !pipeline_.fenced())) {
-                fail_closed();
+                fail_closed(stamp.sequence);
                 return false;
             }
             continue;
@@ -531,7 +538,7 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
             if (recorded)
                 ++result.terminal_records;
             if (!discarded || (!recorded && !pipeline_.fenced())) {
-                fail_closed();
+                fail_closed(stamp.sequence);
                 return false;
             }
             continue;
@@ -545,7 +552,7 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
                            SharedIoFallbackReason::Teardown);
             if (pipeline_.record_terminal(stamp, SharedIoConvolutionPipeline::Terminal::Failed, {}))
                 ++result.terminal_records;
-            fail_closed();
+            fail_closed(stamp.sequence);
             return false;
         }
         auto accepted_terminal = SharedIoConvolutionPipeline::Terminal::Failed;
@@ -564,7 +571,7 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
         if (recorded)
             ++result.terminal_records;
         else if (!pipeline_.fenced()) {
-            fail_closed();
+            fail_closed(stamp.sequence);
             return false;
         }
     }
@@ -616,7 +623,7 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
             ++result.dropped_ingress;
             if (!pipeline_.record_terminal(stamp, SharedIoConvolutionPipeline::Terminal::Failed,
                                            {})) {
-                fail_closed();
+                fail_closed(stamp.sequence);
                 return false;
             }
             ++result.terminal_records;
@@ -625,7 +632,7 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
         }
 
         const auto deadline_ns = *deadline;
-        const auto submit = SharedIoComputePlan::SubmitToken{input->token, deadline_ns};
+        const auto submit = SharedIoComputePlan::SubmitToken::admit(input->token, deadline_ns);
         trace_admit(input->token);
         trace_stage(input->token, SharedIoTraceStage::EncodeBegin);
         if (!pack_input(*pending_ingress_, *input)) {
@@ -649,7 +656,7 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
                     ++result.terminal_records;
                 pipeline_.drain_terminals();
             }
-            fail_closed();
+            fail_closed(stamp.sequence);
             return false;
         }
         trace_stage(input->token, SharedIoTraceStage::EncodeEnd);
@@ -683,7 +690,7 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
             if (recorded)
                 ++result.terminal_records;
             if (!recorded && !pipeline_.fenced()) {
-                fail_closed();
+                fail_closed(submit.slot.stream_sequence);
                 return false;
             }
             pipeline_.drain_terminals();
@@ -711,7 +718,17 @@ SharedIoConvolutionSession::service(std::uint64_t now_ns) noexcept {
     }
     // Deterministic fakes may retire synchronously; one second drain turns
     // those exact terminals into pipeline records without another callback.
-    (void)drain_completions(now_ns, result);
+    // Only this drain waits: the first must not delay submitting new ingress.
+    // The budget starts now, after the submit, on the steady clock the plan
+    // uses for a bounded drain. An idle provider (nothing in flight) returns
+    // from the wait at once.
+    const auto wait_ns = config_.completion_service_wait_ns;
+    const auto submitted_ns = wait_ns == 0 ? 0 : trace_now_ns();
+    const auto deadline_ns =
+        wait_ns == 0 || submitted_ns > std::numeric_limits<std::uint64_t>::max() - wait_ns
+            ? 0
+            : submitted_ns + wait_ns;
+    (void)drain_completions(now_ns, result, deadline_ns);
     drain_trace_to_retention();
     result.fenced = fenced();
     return result;
@@ -748,7 +765,7 @@ bool SharedIoConvolutionSession::drain_quiescent() noexcept {
 
 bool SharedIoConvolutionSession::fence_for_offline() noexcept {
     offline_fenced_ = true;
-    request_recovery(SharedIoRecoveryReason::OfflineFence);
+    request_recovery(SharedIoRecoveryReason::OfflineFence, pipeline_.first_undelivered());
     return drain_quiescent();
 }
 
@@ -761,7 +778,8 @@ bool SharedIoConvolutionSession::fence_and_reprime() noexcept {
     if (!drain_quiescent())
         return false;
     if (provider_->device_lost()) {
-        pipeline_.request_recovery(SharedIoRecoveryReason::ProviderLost);
+        pipeline_.request_recovery(SharedIoRecoveryReason::ProviderLost,
+                                   pipeline_.first_undelivered());
         return false;
     }
     if (!provider_->can_resume_after_drain()) {

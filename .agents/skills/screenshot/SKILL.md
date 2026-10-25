@@ -396,6 +396,28 @@ or compositor/back-buffer capture.
 (offscreen GPU, headless), and the standalone
 `PulpTempoSampler … --screenshot=OUT.png` (live host lifecycle and capture).
 
+## Imported text: pass the panel's text raster policy
+
+Glyph contrast and gamma are properties of the surface, not the font.
+`render_to_png`, `render_to_file`, `render_to_rgba` and `render_to_png_gpu` take
+a trailing `canvas::TextRasterPolicy`, and it defaults to `legacy` (Skia's
+defaults, which is Chromium's `-webkit-font-smoothing: auto`).
+
+An imported panel whose text is `antialiased` paints about 21% more ink on a
+`legacy` capture than in the Chromium capture it is scored against, and the pixel
+diff reads that as a text defect when it is a capture-settings mismatch.
+`select_text_raster_policy()` over the panel's text nodes picks `chromium` for
+it, but the policy is only half the fix: Chromium's `antialiased` weight needs
+the `chromium` surface AND hinting none on the text. Until per-node hinting lands,
+the painter keeps its slight hinting, and a `chromium` capture comes out about 2%
+HEAVIER than `legacy` (`test_text_raster_policy.cpp`, "a chromium surface changes
+how text rasterizes"), not lighter. Do not pass the policy expecting the 21% gap
+to close yet, and do not read a 2% text-ink shift between the two policies as a
+regression.
+
+The CoreGraphics backend and a registered provider ignore the policy. A
+fidelity capture has to use `skia` or `gpu`.
+
 ## Gotchas
 
 - **`render_to_rgba` is Skia-only, and without Skia it returns an EMPTY buffer

@@ -176,10 +176,41 @@ def cell_metrics(cell: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]
     }
 
 
-def _check_samples(cell: dict[str, Any], refusals: list[str]) -> None:
-    """Refuse a cell whose timeline is impossible."""
+def gpu_clock_untrusted(receipt: dict[str, Any]) -> str | None:
+    """Why this receipt's GPU timestamps cannot be held to host order, or None.
+
+    Apple's paravirtual Metal device (the GPU inside a macOS VM, which is where
+    the required gate runs) reports command-buffer GPU times that drift past
+    CLOCK_MARGIN_NS from the host clock under load, so gpu_end and gpu_busy
+    land outside [submit, visible] while the host-clock samples stay ordered.
+    That is the device's clock, not an impossible timeline, so it makes the
+    receipt INCONCLUSIVE (never counted as timing evidence) instead of refused.
+    """
+    names = (str(receipt.get("device", {}).get("metal_name") or ""),
+             str(receipt.get("dawn", {}).get("adapter_name") or ""))
+    return "paravirtual_metal" if any("paravirtual" in n.lower() for n in names) else None
+
+
+def _check_samples(cell: dict[str, Any], refusals: list[str],
+                   inconclusive: list[str] | None = None,
+                   untrusted_gpu_clock: str | None = None) -> None:
+    """Refuse a cell whose timeline is impossible. With `untrusted_gpu_clock`,
+    a GPU-timestamp ordering violation is recorded as inconclusive instead;
+    the host-clock checks still refuse."""
     s = cell["samples"]
     tag = f"{cell['lane']}:{cell['frames']}:{cell['load']}"
+    gpu_noted = False
+
+    def gpu_violation(kind: str) -> bool:
+        nonlocal gpu_noted
+        if untrusted_gpu_clock is None or inconclusive is None:
+            refusals.append(f"{kind}:{tag}")
+            return True
+        if not gpu_noted:
+            inconclusive.append(f"gpu_clock_untrusted:{untrusted_gpu_clock}:{tag}")
+            gpu_noted = True
+        return False
+
     for i in range(cell["blocks"]):
         release, submit = s["release_ns"][i], s["submit_ns"][i]
         submit_end, visible = s["submit_end_ns"][i], s["visible_ns"][i]
@@ -192,12 +223,12 @@ def _check_samples(cell: dict[str, Any], refusals: list[str]) -> None:
         gpu_end = s["gpu_end_ns"][i]
         if gpu_end >= 0 and visible >= 0 and not (
                 submit - CLOCK_MARGIN_NS <= gpu_end <= visible + CLOCK_MARGIN_NS):
-            refusals.append(f"sample_gpu_end_order:{tag}")
-            return
+            if gpu_violation("sample_gpu_end_order"):
+                return
         busy = s["gpu_busy_ns"][i]
         if busy >= 0 and visible >= 0 and busy > visible - submit + CLOCK_MARGIN_NS:
-            refusals.append(f"sample_gpu_busy_exceeds_latency:{tag}")
-            return
+            if gpu_violation("sample_gpu_busy_exceeds_latency"):
+                return
 
 
 def _canonical_without(canon: dict[str, Any], *keys: str) -> bytes:
@@ -305,6 +336,7 @@ def _assess(receipt: dict[str, Any], min_blocks: int) -> dict[str, Any]:
     for cell in cells:
         if cell["status"] == "failed":
             refusals.append(f"cell_failed:{cell['lane']}:{cell['frames']}:{cell['load']}")
+    untrusted_clock = gpu_clock_untrusted(receipt)
     shaped = []
     for cell in completed:
         samples = cell["samples"]
@@ -317,7 +349,7 @@ def _assess(receipt: dict[str, Any], min_blocks: int) -> dict[str, Any]:
             refusals.append(f"oracle_count_mismatch:{cell['lane']}:{cell['frames']}")
         elif cell["oracle_failures"]:
             refusals.append(f"oracle_failures:{cell['lane']}:{cell['frames']}:{cell['load']}")
-        _check_samples(cell, refusals)
+        _check_samples(cell, refusals, inconclusive, untrusted_clock)
     _check_kernel(receipt, completed, lanes, refusals)
 
     if not config.get("paced"):

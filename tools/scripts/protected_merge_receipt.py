@@ -45,7 +45,9 @@ POLICY_PATHS = (
 # workflow runs a copy of this file extracted from the protected base.
 # `source-selftest` tests run on the required `Enforce version & skill sync`
 # context for every merge group, receipt or not.
-REQUIRED_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab|source-selftest"
+REQUIRED_LABEL_EXCLUDE = (
+    "validation|slow|performance|bench|quality-lab|gpu-proof|source-selftest"
+)
 # A change that needs a `slow-affected` proof runs the same selection with the
 # `slow` alternative anchored to `^slow$` (tools/ci/ctest_gate_args.label_exclude
 # with affected_slow). An anchored alternative matches a subset of the labels

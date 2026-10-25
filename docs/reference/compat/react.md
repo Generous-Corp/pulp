@@ -67,6 +67,31 @@ widget gets the author's latest value back, so `visible={false}` or
 early. Bridge calls made outside `@pulp/react` (a web-compat `el.style`
 write, or captured import metadata) are not routed through that rule.
 
+## Controlled value controls
+
+A `Knob`, `Fader`, slider, `Stepper`, `Toggle` or `Checkbox` with a `value`
+(or, for the two switches, `checked`) prop is controlled, as a React DOM input
+is: after an edit it shows the committed prop, not the value the user moved it
+to. The native widget moves itself before it reports the edit, so the renderer
+records the payload of every `change`, `toggle` or `input` event on a
+controlled widget, and when the outermost native dispatch's batch has
+committed it compares the committed prop with that payload. A handler that
+accepts or clamps the edit commits a new prop, which reaches the widget through
+`setValue` as usual, and nothing more is written. A handler that rejects it
+(no `setState`, or a `setState` to the value already held) commits nothing, and
+the renderer writes the committed prop back with `setValue`, once. That write
+dispatches no change event, so a handler is never re-entered.
+
+`defaultValue`, and a control with no `value` or `checked` at all, stay
+uncontrolled and keep the user's edit. A widget bound to a parameter with
+`bindWidgetToParam` is never restored: the binding re-asserts the store value
+on the next frame. Text editors are not covered; their `value` does not reach
+the widget through `setValue`.
+
+The hook is `__pulpAfterDiscreteDispatch__`, which `__dispatch__` calls after
+the outermost dispatch returns. A vendored runtime older than revision 6 of
+`runtime-fingerprint.json` does not install it.
+
 ## Hit-test-only props
 
 `hitSlop` is applied by `prop-applier-paint.ts` and reaches

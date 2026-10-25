@@ -84,6 +84,22 @@
     endif()
     catch_discover_tests(pulp-test-skia-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # The glyph preblend every Skia surface is created with: selection rule,
+    # props, and that retained layers, screenshots and GPU surfaces carry it.
+    # The raster cases run everywhere; the GPU cases skip without an adapter.
+    add_executable(pulp-test-text-raster-policy test_text_raster_policy.cpp)
+    target_link_libraries(pulp-test-text-raster-policy PRIVATE
+        pulp::render pulp::view Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-text-raster-policy PRIVATE
+        PULP_TEST_JETBRAINS_TTF="${CMAKE_SOURCE_DIR}/external/fonts/JetBrainsMono-Regular.ttf")
+    if(PULP_HAS_SKIA)
+        target_compile_definitions(pulp-test-text-raster-policy PRIVATE PULP_HAS_SKIA=1)
+        target_include_directories(pulp-test-text-raster-policy PRIVATE ${SKIA_INCLUDE_DIRS})
+    endif()
+    pulp_test_data(pulp-test-text-raster-policy NO_DEFINE
+        PATHS external/fonts/JetBrainsMono-Regular.ttf)
+    catch_discover_tests(pulp-test-text-raster-policy ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
     # HeadlessSurface CI wrapper: one-call offscreen Dawn/Skia helper
     # for golden-test fixtures. Compiles on every
     # build; runtime cases gate on PULP_HAS_SKIA && __APPLE__ at the
@@ -238,6 +254,7 @@
             PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}"
             PULP_GPU_AUDIO_BUILD_TYPE="$<CONFIG>")
         if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+            pulp_gpu_proof_begin()
             find_package(Python3 REQUIRED COMPONENTS Interpreter)
             set_property(TARGET pulp-gpu-host-mapped-pointer-probe APPEND PROPERTY
                 LINK_DEPENDS
@@ -294,6 +311,7 @@
             set_tests_properties(pulp-gpu-audio-provider-identity PROPERTIES
                 FIXTURES_SETUP pulp_gpu_audio_provider_identity
                 TIMEOUT 60)
+            pulp_gpu_proof_end()
         endif()
         add_test(NAME pulp-gpu-host-mapped-pointer-probe
             COMMAND pulp-gpu-host-mapped-pointer-probe)
@@ -335,19 +353,12 @@
                 SKIP_RETURN_CODE 77
                 TIMEOUT 20)
         if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
-            set_tests_properties(
-                pulp-gpu-host-mapped-pointer-probe
-                pulp-gpu-host-mapped-pointer-oracle-negative-control
-                pulp-gpu-host-mapped-pointer-feature-gate-negative-control
-                pulp-gpu-host-mapped-pointer-write-buffer-counter-negative-control
-                pulp-gpu-host-mapped-pointer-copy-buffer-counter-negative-control
-                pulp-gpu-host-mapped-pointer-map-async-counter-negative-control
-                PROPERTIES FIXTURES_REQUIRED pulp_gpu_audio_provider_identity)
-            if(_pulp_gpu_audio_target_is_arm64)
-                set_tests_properties(
-                    pulp-gpu-host-mapped-pointer-provider-negative-control
-                    PROPERTIES FIXTURES_REQUIRED pulp_gpu_audio_provider_identity)
-            endif()
+            pulp_gpu_proof_begin()
+            # The host-mapped pointer tests above are ordinary gate tests, not
+            # gpu-proof: they check the linked Dawn revision themselves at run
+            # time and never read the bound identity receipt. Requiring the
+            # identity fixture here would make ctest pull that gpu-proof setup
+            # into every selection that runs them, including the gate.
 
             add_executable(pulp-gpu-dawn-shared-io-provider-probe
                 test_gpu_dawn_shared_io_provider_probe.cpp)
@@ -735,8 +746,8 @@
             # Bounded private one-stream WaveNet qualification. This probe is
             # admitted only after exact provider identity and exercises the
             # resident causal plan, imported audio-slot accounting, CPU oracle,
-            # late-result rejection, explicit reprime, and immutable receipt
-            # digest. It has no installed/public provider or generic runtime
+            # late-result rejection, explicit reprime, immutable receipt
+            # digest, and admission-time loss and refusal on the stamped node. It has no installed/public provider or generic runtime
             # surface; unavailable physical Dawn remains a typed skip (77).
             add_executable(pulp-gpu-dawn-wavenet-qualification
                 test_gpu_dawn_wavenet_qualification.cpp)
@@ -758,6 +769,19 @@
             endif()
             add_dependencies(pulp-gpu-dawn-wavenet-qualification
                 pulp-gpu-dawn-shared-io-provider-probe)
+            # Real-Dawn campaign for the WaveNet node's watchdog window: per-block
+            # silence in callback blocks and wall time behind the production
+            # session and transport worker, true-hang detection latency, and
+            # which cause latches first at each capacity. A measurement tool,
+            # not a ctest.
+            add_executable(pulp-gpu-dawn-wavenet-watchdog-campaign
+                test_gpu_dawn_wavenet_watchdog_campaign.mm)
+            target_link_libraries(pulp-gpu-dawn-wavenet-watchdog-campaign PRIVATE
+                pulp::gpu-audio "-framework Foundation")
+            target_include_directories(pulp-gpu-dawn-wavenet-watchdog-campaign PRIVATE
+                ../core/gpu_audio/src)
+            target_compile_definitions(pulp-gpu-dawn-wavenet-watchdog-campaign PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
             # Bind this qualification executable to the exact provider inputs
             # just as the shared-I/O probe is bound. A passing runtime result
             # is not sufficient when the executable could have been relinked
@@ -960,6 +984,7 @@
                         TIMEOUT 180)
                 endif()
             endif()
+            pulp_gpu_proof_end()
         endif()
 
         unset(_pulp_gpu_audio_asset_sha256)

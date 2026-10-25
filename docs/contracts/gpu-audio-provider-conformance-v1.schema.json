@@ -256,7 +256,8 @@
               "drain_after_loss",
               "stale_generation_replay",
               "differential_cpu_reference",
-              "differential_provider_pair"
+              "differential_provider_pair",
+              "completion_notifier"
             ]
           },
           "verdict": {

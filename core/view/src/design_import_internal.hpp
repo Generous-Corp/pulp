@@ -130,9 +130,10 @@ bool is_asset_reference_key(std::string_view key);
 
 // How a DesignIR node tree is read back.
 struct IRParseOptions {
-    // The node geometry was measured from a rendered page (the browser
-    // capture), so it is already what the source paints. Rules that move
-    // nodes to make up for how a design tool draws do not run.
+    // The node tree was measured from a rendered page (the browser capture),
+    // so its geometry and paint are already what the source draws and its
+    // controls are the ones the capture bound. Rules that make up for how a
+    // design tool draws or names layers do not run.
     bool measured_geometry = false;
 };
 
@@ -176,6 +177,11 @@ const char* interactive_kind_id(InteractiveElementKind k);
 // `lineBoxBasis`); defined in design_ir_json_text.cpp.
 void parse_ir_text_line_layout(IRNode& node, const choc::value::ValueView& obj);
 void write_ir_text_line_layout(std::ostringstream& out, bool& first, const IRNode& node);
+
+// The document's shipped fonts (`fontFamilyAssets`); defined in
+// design_ir_json_fonts.cpp.
+void parse_ir_font_family_assets(DesignIR& ir, const choc::value::ValueView& root);
+void write_ir_font_family_assets(std::ostringstream& out, bool& first, const DesignIR& ir);
 
 // Parse the DesignIR token table; defined in design_ir_json.cpp.
 IRTokens parse_ir_tokens(const choc::value::ValueView& obj);

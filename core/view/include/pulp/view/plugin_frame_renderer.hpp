@@ -261,10 +261,13 @@ EditorSurfaces create_editor_surfaces(void* native_handle,
 /// path guaranteed to exist — the headless capture that proves a non-black
 /// frame with no GPU at all — so a divergence between the two copies would
 /// have meant the proof differed from the thing it proves.
-std::vector<std::uint8_t> raster_plugin_scene_rgba(View& root,
-                                                   const FrameGeometry& geometry,
-                                                   std::uint32_t* out_w,
-                                                   std::uint32_t* out_h);
+///
+/// `text_raster` is the glyph preblend the raster surface is created with, the
+/// same choice `SkiaSurface::set_text_raster_policy()` makes for the GPU path.
+std::vector<std::uint8_t>
+raster_plugin_scene_rgba(View& root, const FrameGeometry& geometry, std::uint32_t* out_w,
+                         std::uint32_t* out_h,
+                         canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy);
 
 /// Encode tightly packed RGBA8888 pixels as a PNG byte stream. Empty on
 /// failure or on empty input.

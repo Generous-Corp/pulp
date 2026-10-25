@@ -343,9 +343,12 @@ hand-added `vX.Y.Z.md`): it writes
 `docs/migrations/unreleased/<topic>.md` with only `breaking` and `summary`, and
 the version-at-land bump that assigns the SDK version folds it into
 `v<assigned>.md` with the canonical `applies_if`
-(`tools/scripts/fold_migration_notes.py`). A note sitting in `unreleased/` is
-not shown by `pulp upgrade --notes` until that fold; confirm after release that
-`v<assigned>.md` exists and that `git merge-base --is-ancestor <merge> vX.Y.Z`
+(`tools/scripts/fold_migration_notes.py`). A change merged while a bump PR
+waited ships in the release tagged on that bump's merge, so the next fold keys
+its note to that earlier release (the earliest `vX.Y.Z` tag containing the
+commit that added the note), appending to its `vX.Y.Z.md`. A note sitting in
+`unreleased/` is not shown by `pulp upgrade --notes` until that fold; confirm
+after release that `v<assigned>.md` exists and that `git merge-base --is-ancestor <merge> vX.Y.Z`
 is true against that tag and false against the previous one.
 
 ## Common breaking-change patterns
@@ -422,6 +425,26 @@ installer where the host builds its UI:
 ```bash
 grep -rn "script_inspector()" --include=*.cpp --include=*.hpp --include=*.mm .
 ```
+
+### A link default narrows (code a build used to carry must now be declared)
+
+**Pattern.** A default changes what a target links, so a capability the binary
+carried silently is gone unless the project declares it. Nothing fails to
+compile or link; the symptom is at run time. For example, macOS plug-ins now
+link the lite editor stack (no Skia, Dawn or Tint) unless they declare
+`UI_SCRIPT`, `GPU_UI` or `FULL_EDITOR`. A C++ editor whose view sets
+`requires_gpu_host()` then opens on the CoreGraphics host, logs one
+`[plugin-gpu-host] ... lite editor stack` warning, and draws its GPU-only
+content blank.
+
+**What to do.** Find the code that needs the dropped capability and declare it
+in the build, then open the editor once and confirm the warning is gone:
+
+```bash
+grep -rn "set_requires_gpu_host(true)\|requires_gpu_host() const override" --include=*.cpp --include=*.hpp --include=*.mm .
+```
+
+Add `GPU_UI` to each matching plug-in's `pulp_add_plugin(...)`.
 
 ### CMake macro renames
 

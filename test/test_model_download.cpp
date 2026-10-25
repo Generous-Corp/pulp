@@ -137,7 +137,7 @@ TEST_CASE("model downloader: cancel keeps the partial for resume", "[runtime][mo
     LocalServer server(root / "serve");
 
     const fs::path dest = root / "out" / "fixture.bin";
-    DownloadRequest req{.url = server.url("/fixture.bin"), .dest = dest};
+    DownloadRequest req{.url = server.url("/fixture.bin"), .dest = dest, .allow_unverified = true};
 
     std::atomic<int> chunks{0};
     auto res = download_file(req, [&](const DownloadProgress&) {
@@ -171,7 +171,8 @@ TEST_CASE("model downloader: http error status is reported and not written into 
 
     const fs::path dest = root / "out" / "fixture.bin";
     DownloadRequest req{.url = "http://127.0.0.1:" + std::to_string(port) + "/missing.bin",
-                        .dest = dest};
+                        .dest = dest,
+                        .allow_unverified = true};
     auto res = download_file(req);
     REQUIRE_FALSE(res.ok);
     REQUIRE(res.error.find("http status 404") != std::string::npos);
@@ -212,7 +213,8 @@ TEST_CASE("model downloader: a stale oversized partial fails closed instead of r
 
     LocalServer server(root / "serve");
     const fs::path dest = root / "out" / "fixture.bin";
-    DownloadRequest req{.url = server.url("/fixture.bin"), .dest = dest, .resume = true};
+    DownloadRequest req{
+        .url = server.url("/fixture.bin"), .dest = dest, .resume = true, .allow_unverified = true};
     auto res = download_file(req);
     INFO("error: " << res.error);
     REQUIRE_FALSE(res.ok);
@@ -348,7 +350,7 @@ TEST_CASE("model store: install_model reports no-length progress as indeterminat
             progress.push_back(p);
             return true;
         },
-        /*cancel=*/nullptr, /*headers=*/{}, root / "home");
+        /*cancel=*/nullptr, /*headers=*/{}, root / "home", /*allow_unverified=*/true);
 
     INFO("install error: " << inst.error);
     REQUIRE(inst.ok);
@@ -465,7 +467,7 @@ TEST_CASE("model store: install_model rejects a bundle whose assets collide on f
     };
 
     auto inst = install_model(model, "magenta", /*on_progress=*/{}, /*cancel=*/nullptr,
-                              /*headers=*/{}, home);
+                              /*headers=*/{}, home, /*allow_unverified=*/true);
     REQUIRE_FALSE(inst.ok);
     REQUIRE(inst.error.find("same file") != std::string::npos);
 
@@ -481,6 +483,102 @@ TEST_CASE("model store: install_model rejects a bundle whose assets collide on f
 // with an unresponsive Cancel, because the cancel/progress callback only runs
 // once body streaming starts. download_connect_timeout_seconds() is the pure
 // policy the downloader applies; pin it so the connect can never be unbounded.
+TEST_CASE("model downloader: a redirect may not downgrade https to http",
+          "[runtime][model][download]") {
+    // A Location that drops the scheme would hand the remainder of the transfer to
+    // anyone on the path, so an https origin refuses it outright.
+    const auto downgraded = resolve_redirect("https://a", "/x", "http://b/y");
+    REQUIRE_FALSE(downgraded.ok);
+    REQUIRE(downgraded.error.find("downgrade") != std::string::npos);
+
+    // Upgrading is fine, as is staying on https.
+    const auto upgraded = resolve_redirect("http://a", "/x", "https://b/y");
+    REQUIRE(upgraded.ok);
+    REQUIRE(upgraded.scheme_host_port == "https://b");
+    REQUIRE(upgraded.path == "/y");
+    const auto same = resolve_redirect("https://a", "/x", "https://b:8443/y");
+    REQUIRE(same.ok);
+    REQUIRE(same.scheme_host_port == "https://b:8443");
+
+    // Host-absolute and path-relative Locations keep the current origin, so they
+    // can never change scheme.
+    const auto host_abs = resolve_redirect("https://a", "/dir/x", "/other");
+    REQUIRE(host_abs.ok);
+    REQUIRE(host_abs.scheme_host_port == "https://a");
+    REQUIRE(host_abs.path == "/other");
+    const auto relative = resolve_redirect("https://a", "/dir/x", "y");
+    REQUIRE(relative.ok);
+    REQUIRE(relative.path == "/dir/y");
+}
+
+TEST_CASE("model downloader: an empty expected digest is refused unless the caller opts in",
+          "[runtime][model][download]") {
+    const fs::path root = fs::temp_directory_path() / "pulp-mm-unverified";
+    fs::remove_all(root);
+    fs::create_directories(root / "serve");
+    const std::string body = make_fixture(root / "serve" / "fixture.bin", 20'000);
+    const std::string sha = sha256_hex(body);
+
+    LocalServer server(root / "serve");
+    const fs::path dest = root / "out" / "fixture.bin";
+    fs::path part = dest;
+    part += ".part";
+
+    // Default: no digest means nothing can vouch for the bytes, so the request is
+    // refused before any network or disk activity.
+    DownloadRequest refused{.url = server.url("/fixture.bin"), .dest = dest};
+    auto res = download_file(refused);
+    REQUIRE_FALSE(res.ok);
+    REQUIRE(res.unverified);
+    REQUIRE(res.error.find("unverified") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(dest));
+    REQUIRE_FALSE(fs::exists(part));
+    REQUIRE_FALSE(fs::exists(root / "out")); // not even the destination directory
+
+    // Positive control: the explicit opt-in fetches the file and reports it as
+    // unverified, with the digest it computed as the only record of what arrived.
+    DownloadRequest accepted{
+        .url = server.url("/fixture.bin"), .dest = dest, .allow_unverified = true};
+    res = download_file(accepted);
+    INFO("error: " << res.error);
+    REQUIRE(res.ok);
+    REQUIRE(res.unverified);
+    REQUIRE(res.sha256 == sha);
+    REQUIRE(fs::exists(dest));
+
+    server.stop();
+    fs::remove_all(root);
+}
+
+TEST_CASE("model store: install_model refuses a digest-less registry entry by default",
+          "[runtime][model][download]") {
+    const fs::path root = fs::temp_directory_path() / "pulp-mm-install-unverified";
+    fs::remove_all(root);
+    fs::create_directories(root / "serve");
+    make_fixture(root / "serve" / "weights.bin", 4'000);
+
+    LocalServer server(root / "serve");
+    const fs::path home = root / "home";
+
+    ModelEntry model{.model_id = "nodigest", .display_name = "No Digest", .backend = "mlx"};
+    model.download_url = server.url("/weights.bin"); // sha256 left empty on purpose
+
+    auto refused = install_model(model, "magenta", /*on_progress=*/{}, /*cancel=*/nullptr,
+                                 /*headers=*/{}, home);
+    REQUIRE_FALSE(refused.ok);
+    REQUIRE(refused.error.find("unverified") != std::string::npos);
+    REQUIRE_FALSE(read_installed_model("magenta", "nodigest", home).metadata_found);
+
+    auto accepted = install_model(model, "magenta", /*on_progress=*/{}, /*cancel=*/nullptr,
+                                  /*headers=*/{}, home, /*allow_unverified=*/true);
+    INFO("install error: " << accepted.error);
+    REQUIRE(accepted.ok);
+    REQUIRE(read_installed_model("magenta", "nodigest", home).loadable());
+
+    server.stop();
+    fs::remove_all(root);
+}
+
 TEST_CASE("model downloader: connect timeout is always bounded",
           "[runtime][model][download][timeout]") {
     using pulp::runtime::download_connect_timeout_seconds;

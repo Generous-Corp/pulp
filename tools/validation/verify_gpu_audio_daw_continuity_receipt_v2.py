@@ -23,6 +23,15 @@ stimulus and impulse response, never read from the receipt. On top of v1:
   fallback_misaligned, fallback_stale) must FAIL from the fault sample on, and
   gpu_off must be INCONCLUSIVE on the shared-I/O path precondition; an
   offline-fault row is never GPU-continuity evidence;
+* a template host's AX snapshot must show the track unarmed, input monitoring
+  off and its input the host's no-input label, or the receipt is invalid;
+* where both the plug-in capture and the host's realtime render deviate, the
+  host render must sit exactly the plug-in's declared PDC earlier at both ends
+  of the deviation, or the row is INCONCLUSIVE;
+* a planted negative on a host that was not quiet is still proved
+  (`quiet_host_exempt`, re-derived here) when the deviation has the planted
+  defect's own onset and span, the host render matches at both ends and the
+  fallback took over at the issued block; `--require-quiet-host` refuses it;
 * the code under test is named by commit.
 
 `receipt_sha256` is an unkeyed digest of the receipt body: it detects
@@ -83,8 +92,10 @@ REQUIRED_ARTIFACTS = ("stimulus.wav", "ir.f32", "events.jsonl", "capture.bin", "
 # receipt says (an AX snapshot of the insert slot, or REAPER's log).
 LIVE_ARTIFACTS = ("host_evidence.json",)
 RECOMPUTED = ("fault", "pdc_samples", "plugin_identity", "binding", "plugin_process", "capture",
-              "calling_pattern", "delivery", "controls", "offline_path", "nulls", "health",
-              "host_alive", "verdict", "verdict_reasons", "planted_negative", "negative_proved")
+              "calling_pattern", "delivery", "controls", "offline_path", "nulls", "host_offset",
+              "health",
+              "host_alive", "verdict", "verdict_reasons", "planted_negative", "negative_proved",
+              "quiet_host_exempt")
 FULL_OUTCOMES = ("pass", "control_passed", "negative_proved")
 
 ReceiptError = v1.ReceiptError
@@ -173,6 +184,13 @@ def verify(receipt: dict[str, Any], run_dir: Path, *, allow_dry_run: bool = Fals
         _require(evidence.get("host_pid") == host.get("pid") and
                  evidence.get("host_executable") == host.get("executable"),
                  "host_evidence.json names a different host process")
+        # A template host's snapshot records the track; REAPER's harness
+        # inserts on a fresh, unarmed track and records none. Either way the
+        # M6 whole-run input check below still has the last word.
+        track = evidence.get("track")
+        if host["id"] in hosts.TEMPLATE_HOSTS or track is not None:
+            problem = hosts.track_state_problem(track, host["id"])
+            _require(not problem, f"host_evidence.json: {problem}")
 
     analysis = receipt.get("analysis") or {}
     tolerance = analysis.get("tolerance")

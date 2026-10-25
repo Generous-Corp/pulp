@@ -19,7 +19,9 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -60,10 +62,12 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
              start: int = START, claim_pid: int | None = None,
              responsible_path: str | None = None, template: str = "playback",
              internal: bool = False, quiet: bool = True, applied_time: bool = True,
-             loss_reported: bool = True) -> dict:
+             loss_reported: bool = True, shaped: bool = False) -> dict:
     """Synthesize one run directory and its v2 receipt. `internal` marks the
     run input=internal and makes every played captured input sample the
-    plug-in's internal stimulus (outputs are left as synthesized)."""
+    plug-in's internal stimulus (outputs are left as synthesized). `shaped`
+    synthesizes the planted negative's own audio shape (misaligned, stale)
+    rather than a dropout."""
     synth_fault = fault
     if planted is None and kind == "planted_negative":
         planted = "no_fallback"
@@ -73,7 +77,7 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
         gfc.synthesize_run(run, fault=synth_fault, fault_sample=FAULT, frames=FRAMES,
                            break_fallback=break_fallback, nonce=NONCE, pid=plugin_pid,
                            tail=POST, window_post=POST,
-                           planted=planted if (break_fallback or planted == "gpu_off")
+                           planted=planted if (shaped or break_fallback or planted == "gpu_off")
                            else None)
     def edit(events):
         out = [{"event": "host_process", "pid": plugin_pid, "ppid": 1,
@@ -132,12 +136,16 @@ def make_run(run: Path, *, kind: str = "fault", fault: str = "force_loss_before"
 GARAGEBAND = "/Applications/GarageBand.app/Contents/MacOS/GarageBand"
 
 
+UNARMED = {"input": "No Input", "record_armed": False, "input_monitoring": False}
+
+
 def write_host_evidence(run: Path, host_id: str = "logic", plugin: str = NAME,
-                        pid: int = HOST_PID) -> None:
-    (run / "host_evidence.json").write_text(json.dumps(
-        {"plugins": [plugin], "host_pid": pid,
-         "host_executable": GARAGEBAND if host_id == "garageband" else LOGIC}) + "\n",
-        encoding="utf-8")
+                        pid: int = HOST_PID, track: dict | None = UNARMED) -> None:
+    doc = {"plugins": [plugin], "host_pid": pid,
+           "host_executable": GARAGEBAND if host_id == "garageband" else LOGIC}
+    if track is not None:
+        doc["track"] = track
+    (run / "host_evidence.json").write_text(json.dumps(doc) + "\n", encoding="utf-8")
 
 
 def write_realtime_from(source: Path, target: Path) -> None:
@@ -204,10 +212,11 @@ def receipt_for(run: Path, *, kind: str, fault: str, mode: str, host_id: str = "
     return receipt
 
 
-def rewrite_capture(run: Path, *, inputs=None, outputs=None) -> None:
+def rewrite_capture(run: Path, *, inputs=None, outputs=None, counters=None) -> None:
     """Rewrite capture.bin record by record, keeping every record's header
     (position, flags, entry time, delivery counters); `inputs`/`outputs` map
-    (position, value) -> value for the played samples."""
+    (position, value) -> value for the played samples, and `counters` maps
+    (position, (gpu, fallback, silence, priming)) -> counters."""
     cap = gfc.read_capture(run / "capture.bin")
     blocks = []
     for rec in cap.records:
@@ -225,8 +234,8 @@ def rewrite_capture(run: Path, *, inputs=None, outputs=None) -> None:
         blocks.append({"position": pos if pos >= 0 else None, "flags": flags,
                        "inputs": edit(cap.inputs, inputs), "outputs": edit(cap.outputs, outputs),
                        "host_time_ns": rec["host_time_ns"],
-                       "counters": (rec["gpu"], rec["fallback"], rec["silence"],
-                                    rec["priming"])})
+                       "counters": (counters or (lambda p, c: c))(
+                           pos, (rec["gpu"], rec["fallback"], rec["silence"], rec["priming"]))})
     gfc.write_capture(run / "capture.bin", cap.sample_rate, blocks)
 
 
@@ -298,6 +307,8 @@ class V2Receipt(unittest.TestCase):
                                 mode="auhostingservice_arrow")
 
     def test_staged_timestamped_wavenet_rows_are_excluded_until_10736_is_in(self):
+        # The fixture's code_under_test ("b" * 40) is no commit at all, so
+        # whether #10736 is in it cannot be shown: excluded.
         run, receipt = self._defect_run("wavenet-staged-ts", node="wavenet", storage="staged",
                                         timestamps=True)
         self.assertEqual(self.verify(receipt, run), ("inconclusive", "inconclusive"))
@@ -332,6 +343,23 @@ class V2Receipt(unittest.TestCase):
         run, receipt = self._defect_run("real-prepared-wavenet",
                                         **{k: bad[k] for k in ("node", "storage", "timestamps")})
         self.assertEqual(self.verify(receipt, run), ("inconclusive", "inconclusive"))
+
+    def test_the_10736_fix_is_judged_by_real_ancestry(self):
+        fix = hosts.KNOWN_DEFECTS[0]["fixed_by"]
+        self.assertEqual(fix, "590bee7a5232a07484c170a9a0690208ec241c1b")  # #10736 on main
+        pre = "9c566f733766d82a4ab6f5b7046aa1cf6b6ad101"  # #10736's first parent
+        local = dict(os.environ, GIT_NO_LAZY_FETCH="1")
+        have = all(subprocess.run(["git", "-C", str(HERE), "cat-file", "-e", f"{c}^{{commit}}"],
+                                  capture_output=True, env=local).returncode == 0
+                   for c in (fix, pre))
+        if not have:
+            self.skipTest("this checkout lacks the #10736 commits (shallow clone)")
+        bad = [{"event": "prepared", "node": "wavenet", "storage": "staged", "timestamps": True}]
+        # The fix itself (and so anything descending from it) is not excluded.
+        self.assertEqual(hosts.known_defect(bad, {"commit": fix}, hosts.git_is_ancestor), "")
+        # The commit just before it still is.
+        self.assertTrue(hosts.known_defect(bad, {"commit": pre}, hosts.git_is_ancestor)
+                        .startswith("excluded: #10736"))
 
     def test_other_configurations_are_not_excluded(self):
         for fields in ({}, dict(node="wavenet", storage="shared", timestamps=True),
@@ -541,6 +569,56 @@ class V2Receipt(unittest.TestCase):
         self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], FAULT)
         self.assertEqual(self.main(run), V2.EXIT_OK)
 
+    def test_the_host_render_sits_exactly_the_declared_pdc_from_the_capture(self):
+        run = self.run_dir("offset")
+        receipt = make_run(run, kind="planted_negative", break_fallback=True)
+        self.assertEqual(receipt["host_offset"], {"status": "matched",
+                                                  "observed": receipt["pdc_samples"],
+                                                  "declared": receipt["pdc_samples"]})
+
+    def test_a_host_render_offset_from_the_declared_pdc_is_not_proved(self):
+        # One quantum late in the host's render: the host compensated a
+        # latency other than the one the plug-in declared, so its render is
+        # not the timeline the plug-in capture is compared on.
+        run = self.run_dir("offset-late")
+        make_run(run, kind="planted_negative", break_fallback=True)
+        _, channels = gfc.read_wav(run / "realtime.wav")
+        gfc.write_wav_f32(run / "realtime.wav", [[0.0] * 512 + list(ch[:-512])
+                                                 for ch in channels])
+        receipt = receipt_for(run, kind="planted_negative", fault="force_loss_before",
+                              mode="auhostingservice_arrow")
+        self.assertEqual(receipt["host_offset"]["status"], "mismatch")
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+        self.assertTrue(any("not the declared PDC" in r for r in receipt["verdict_reasons"]))
+
+    def test_a_host_render_whose_deviation_ends_elsewhere_is_not_proved(self):
+        # Right offset where the corruption starts, a quantum more where it
+        # ends: the host's timeline slipped during the run.
+        run = self.run_dir("offset-drift")
+        receipt = make_run(run, kind="planted_negative", break_fallback=True)
+        last = receipt["nulls"]["host_realtime"]["last_deviating_sample"]
+        _, channels = gfc.read_wav(run / "realtime.wav")
+        channels = [list(ch) for ch in channels]
+        channels[0][last + 512] += 0.5
+        gfc.write_wav_f32(run / "realtime.wav", channels)
+        receipt = receipt_for(run, kind="planted_negative", fault="force_loss_before",
+                              mode="auhostingservice_arrow")
+        self.assertEqual(receipt["host_offset"]["status"], "mismatch")
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
+    def test_a_row_without_two_deviations_has_no_measurable_offset(self):
+        run = self.run_dir("offset-none")
+        receipt = make_run(run)
+        self.assertEqual(receipt["host_offset"]["status"], "unmeasurable")
+        self.assertEqual(self.verify(receipt, run), ("pass", "pass"))
+
+    def test_the_offset_is_recomputed_not_read(self):
+        run = self.run_dir("offset-forged")
+        receipt = make_run(run, kind="planted_negative", break_fallback=True)
+        receipt["host_offset"] = dict(receipt["host_offset"], observed=0)
+        with self.assertRaisesRegex(V2.ReceiptError, "host_offset does not re-derive"):
+            V2.verify(resign(receipt), run)
+
     def test_every_audio_planted_negative_is_proved(self):
         # Dropout, one-quantum misalignment and a stale fallback: continuous
         # but wrong audio must FAIL from the fault sample on.
@@ -563,7 +641,10 @@ class V2Receipt(unittest.TestCase):
         receipt = receipt_for(run, kind="planted_negative", fault="force_loss_before",
                               mode="auhostingservice_arrow")
         self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"], FAULT - 500)
-        self.assertEqual(len(receipt["verdict_reasons"]), 1)
+        # The plug-in null alone, plus the host render now disagreeing with the
+        # capture by more than the PDC: nothing else stands between it and proof.
+        self.assertEqual(len(receipt["verdict_reasons"]), 2)
+        self.assertIn("not the declared PDC", receipt["verdict_reasons"][1])
         self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
 
     def test_a_planted_negative_one_sample_early_is_not_proved(self):
@@ -613,6 +694,254 @@ class V2Receipt(unittest.TestCase):
         receipt = make_run(run, kind="planted_negative", break_fallback=False)
         self.assertEqual(self.verify(receipt, run)[1], "negative_not_proved")
         self.assertEqual(self.main(run), V2.EXIT_NOT_OK)
+
+    # ── Planted negatives on a host that was not quiet (Fable, Q1) ─────
+
+    # synthesize_run's quantum (= its callback block) and the callback after
+    # the one holding FAULT, where the plug-in issues the fault and arms the
+    # defect (synthesize_run itself stamps FAULT + block, which is no callback).
+    QUANTUM, ISSUED = 128, (FAULT // 128 + 1) * 128
+
+    def plugin_shaped(self, name: str, planted: str, *, shift: int = 0,
+                      applied_late: bool = False, onset: int | None = None) -> Path:
+        """A planted negative on a busy host, with the deviation where the
+        plug-in's construction puts it: issued + one quantum for a dropout or
+        misalignment, issued + PDC for a withheld quantum. synthesize_run
+        starts every shape at the fault sample, so the output before the onset
+        (and the host render before onset - PDC) is put back to clean audio.
+        `applied_late` moves the provider fault, and the fallback taking over,
+        one quantum after the issued block."""
+        clean = self.run_dir(f"{name}-clean")
+        make_run(clean, quiet=False)
+        cap = gfc.read_capture(clean / "capture.bin")
+        clean_out = {rec["position"] + i: cap.outputs[0][rec["stream"] + i]
+                     for rec in cap.records if rec["position"] >= 0
+                     for i in range(rec["frames"])}
+        run = self.run_dir(name)
+        receipt = make_run(run, kind="planted_negative", planted=planted, shaped=True,
+                           quiet=False)
+        pdc = receipt["pdc_samples"]
+        applied = self.ISSUED + (self.QUANTUM if applied_late else 0)
+        if onset is None:
+            onset = {"no_fallback": applied + self.QUANTUM,
+                     "fallback_misaligned": self.ISSUED + self.QUANTUM,
+                     "fallback_stale": self.ISSUED + pdc}[planted] + shift
+
+        def late(pos, c):
+            # The issued block is still GPU-served; every later count shifts.
+            gpu, fallback, silence, priming = c
+            return ((gpu + 1, fallback - 1, silence, priming)
+                    if pos >= self.ISSUED and fallback > 0 else c)
+
+        rewrite_capture(run, outputs=lambda pos, v: clean_out.get(pos, v) if pos < onset else v,
+                        counters=late if applied_late else None)
+        own = gfc.read_capture(run / "capture.bin")
+        stamp = next(rec["host_time_ns"] for rec in own.records if rec["position"] == applied)
+        _rewrite_events(run, lambda ev: [
+            dict(e, project_sample=applied, host_time_ns=stamp)
+            if e["event"] == "provider_fault_applied" else
+            dict(e, issued_project_sample=self.ISSUED) if e["event"] == "fault_fired" else e
+            for e in ev])
+        _, clean_rt = gfc.read_wav(clean / "realtime.wav")
+        _, planted_rt = gfc.read_wav(run / "realtime.wav")
+        gfc.write_wav_f32(run / "realtime.wav", [
+            [c if i + pdc < onset else p for i, (c, p) in enumerate(zip(cc, pc))]
+            for cc, pc in zip(clean_rt, planted_rt)])
+        return run
+
+    def receipt_of(self, run: Path) -> dict:
+        return receipt_for(run, kind="planted_negative", fault="force_loss_before",
+                           mode="auhostingservice_arrow")
+
+    def edit_both(self, run: Path, pdc: int, fn) -> None:
+        """Apply fn(position, value) to the capture and, PDC earlier, the host
+        render, so the host render stays at the declared offset."""
+        rewrite_capture(run, outputs=fn)
+        _, rt = gfc.read_wav(run / "realtime.wav")
+        gfc.write_wav_f32(run / "realtime.wav", [[fn(i + pdc, v) for i, v in enumerate(ch)]
+                                                 for ch in rt])
+
+    def test_m1_a_shaped_negative_on_a_busy_host_is_proved(self):
+        for planted in gfc.PLANTED:
+            with self.subTest(planted=planted):
+                run = self.plugin_shaped(f"busy-{planted}", planted)
+                receipt = self.receipt_of(run)
+                self.assertIs(receipt["host_quiet"], False)
+                self.assertTrue(any(r.startswith(hosts.HOST_NOT_QUIET)
+                                    for r in receipt["verdict_reasons"]))
+                self.assertEqual(receipt["host_offset"]["status"], "matched")
+                self.assertEqual(self.verify(receipt, run), ("fail", "negative_proved"))
+                self.assertIs(receipt["quiet_host_exempt"], True)
+
+    def test_each_exemption_condition_is_required(self):
+        # Rules 2, 5 and 6 one at a time on an otherwise exempt run.
+        run = self.plugin_shaped("busy-parts", "no_fallback")
+        receipt = self.receipt_of(run)
+        events = gfc.load_events(run / "events.jsonl")
+        capture = gfc.read_capture(run / "capture.bin")
+
+        def problem(offset=None, reason=None, fault=None, **delivery):
+            base = {"fault": fault or receipt["fault"], "pdc_samples": receipt["pdc_samples"],
+                    "plugin_identity": receipt["plugin_identity"],
+                    "nulls": receipt["nulls"], "delivery": dict(receipt["delivery"], **delivery)}
+            return hosts.exemption_problem(
+                run, "no_fallback", base, events, offset or receipt["host_offset"],
+                reason or receipt["verdict_reasons"][0],
+                render_frames=FRAMES + POST, capture=capture, listed=None)
+
+        self.assertEqual(problem(), "")
+        self.assertIn("not the plug-in null", problem(reason="host realtime render null failed"))
+        self.assertIn("unmeasurable", problem(offset={"status": "unmeasurable"}))
+        self.assertIn("did not take over", problem(met=False))
+        self.assertIn("did not take over", problem(
+            first_fallback_project_sample=receipt["delivery"]["first_fallback_project_sample"]
+            + self.QUANTUM))
+        # Applied two quanta after the issued block, with the fallback taking
+        # over right there: the takeover matches, the timing does not.
+        late = next(rec for rec in capture.records
+                    if rec["position"] >= self.ISSUED + 2 * self.QUANTUM)
+        applied = dict(receipt["fault"]["provider_fault_applied"],
+                       host_time_ns=late["host_time_ns"])
+        self.assertEqual(gfc.applied_project_sample(capture, applied), late["position"])
+        self.assertIn("not the issued block", problem(
+            fault=dict(receipt["fault"], provider_fault_applied=applied),
+            first_fallback_project_sample=late["position"]))
+
+    def test_m10_a_dropout_starts_where_the_fallback_served(self):
+        # The fault applied one quantum after the issued block: the dropout
+        # zeroes the first fallback-served quantum, so it starts at applied +
+        # quantum. issued + quantum is where a misalignment would start.
+        run = self.plugin_shaped("busy-applied-late", "no_fallback", applied_late=True)
+        receipt = self.receipt_of(run)
+        self.assertEqual(receipt["delivery"]["first_fallback_project_sample"],
+                         self.ISSUED + self.QUANTUM)
+        self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"],
+                         self.ISSUED + 2 * self.QUANTUM)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_proved"))
+        run = self.plugin_shaped("busy-applied-late-early", "no_fallback", applied_late=True,
+                                 onset=self.ISSUED + self.QUANTUM)
+        receipt = self.receipt_of(run)
+        self.assertEqual(receipt["nulls"]["plugin"]["first_deviating_sample"],
+                         self.ISSUED + self.QUANTUM)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
+    def test_m2_an_onset_two_quanta_late_is_not_proved(self):
+        run = self.plugin_shaped("busy-late", "no_fallback", shift=2 * self.QUANTUM)
+        receipt = self.receipt_of(run)
+        self.assertEqual(receipt["host_offset"]["status"], "matched")
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+        self.assertIs(receipt["quiet_host_exempt"], False)
+
+    def test_m11_the_onset_tolerance_is_half_a_quantum(self):
+        half = self.QUANTUM // 2
+        run = self.plugin_shaped("busy-half", "no_fallback", shift=half)
+        self.assertEqual(self.verify(self.receipt_of(run), run), ("fail", "negative_proved"))
+        run = self.plugin_shaped("busy-half-plus", "no_fallback", shift=half + 1)
+        self.assertEqual(self.verify(self.receipt_of(run), run), ("fail", "negative_not_proved"))
+
+    def test_m12_the_owning_prepares_quantum_bounds_the_onset(self):
+        # A host that prepared once with a larger quantum before the prepare
+        # that owns the audio (Logic re-prepares). The onset tolerance is the
+        # owning prepare's half quantum, not the first prepare's.
+        def stale_first(run):
+            def edit(ev):
+                owning = next(e for e in ev if e["event"] == "prepared")
+                stale = dict(owning, quantum=8 * self.QUANTUM, prepare_index=0)
+                return [stale] + ev
+            _rewrite_events(run, edit)
+
+        run = self.plugin_shaped("busy-reprepared", "no_fallback")
+        stale_first(run)
+        receipt = self.receipt_of(run)
+        self.assertEqual(receipt["plugin_identity"]["quantum"], self.QUANTUM)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_proved"))
+        run = self.plugin_shaped("busy-reprepared-late", "no_fallback", shift=2 * self.QUANTUM)
+        stale_first(run)
+        self.assertEqual(self.verify(self.receipt_of(run), run), ("fail", "negative_not_proved"))
+
+    def test_m3_a_span_that_is_not_the_defects_is_not_proved(self):
+        # A dropout that stops mid-window, and a withheld quantum whose
+        # deviation lasts three quanta past the impulse response.
+        run = self.plugin_shaped("busy-short", "no_fallback")
+        pdc = gfc.first_event(gfc.load_events(run / "events.jsonl"), "prepared")["pdc_samples"]
+        clean = self.root / "busy-short-clean"
+        cap = gfc.read_capture(clean / "capture.bin")
+        clean_out = {rec["position"] + i: cap.outputs[0][rec["stream"] + i]
+                     for rec in cap.records if rec["position"] >= 0
+                     for i in range(rec["frames"])}
+        self.edit_both(run, pdc, lambda pos, v: clean_out.get(pos, v) if pos >= 6000 else v)
+        receipt = self.receipt_of(run)
+        self.assertEqual(receipt["host_offset"]["status"], "matched")
+        self.assertLess(receipt["nulls"]["plugin"]["last_deviating_sample"], 7000)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
+        run = self.plugin_shaped("busy-long", "fallback_stale")
+        taps = len(gfc.read_f32(run / "ir.f32"))
+        first = self.ISSUED + pdc
+        late = first + 2 * self.QUANTUM + taps + 3 * self.QUANTUM
+        self.edit_both(run, pdc, lambda pos, v: v + 0.5 if pos == late else v)
+        receipt = self.receipt_of(run)
+        self.assertEqual(receipt["nulls"]["plugin"]["last_deviating_sample"], late)
+        self.assertEqual(receipt["host_offset"]["status"], "matched")
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
+    def test_m4_a_host_render_matched_at_one_end_only_is_not_proved(self):
+        run = self.plugin_shaped("busy-one-end", "no_fallback")
+        receipt = self.receipt_of(run)
+        last = receipt["nulls"]["host_realtime"]["last_deviating_sample"]
+        _, rt = gfc.read_wav(run / "realtime.wav")
+        rt = [list(ch) for ch in rt]
+        rt[0][last + 512] += 0.5
+        gfc.write_wav_f32(run / "realtime.wav", rt)
+        receipt = self.receipt_of(run)
+        self.assertEqual(receipt["host_offset"]["status"], "mismatch")
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+
+    def test_m5_a_busy_host_does_not_excuse_another_precondition(self):
+        run = self.plugin_shaped("busy-overflow", "no_fallback")
+        _rewrite_events(run, lambda ev: ev + [{"event": "capture_overflow", "dropped": 1}])
+        receipt = self.receipt_of(run)
+        self.assertEqual(self.verify(receipt, run)[1], "negative_not_proved")
+        self.assertIs(receipt["quiet_host_exempt"], False)
+
+    def test_m6_m7_positive_and_fault_rows_keep_the_quiet_host_rule(self):
+        run = self.run_dir("busy-positive")
+        receipt = make_run(run, kind="positive_control", fault=hosts.POSITIVE_CONTROL,
+                           quiet=False)
+        self.assertEqual(self.verify(receipt, run), ("inconclusive", "control_inconclusive"))
+        run = self.run_dir("busy-fault")
+        receipt = make_run(run, quiet=False)
+        self.assertEqual(self.verify(receipt, run), ("inconclusive", "inconclusive"))
+        self.assertIs(receipt["quiet_host_exempt"], False)
+
+    def test_m8_the_exemption_is_rederived_and_strict_consumers_refuse_it(self):
+        # A busy-host negative without the defect's onset claims the
+        # exemption anyway: the verifier does not take its word for it.
+        run = self.run_dir("busy-forged")
+        receipt = make_run(run, kind="planted_negative", break_fallback=True, quiet=False)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_not_proved"))
+        forged = dict(receipt, negative_proved=True, quiet_host_exempt=True,
+                      column_outcome="negative_proved")
+        with self.assertRaisesRegex(V2.ReceiptError, "does not re-derive"):
+            V2.verify(resign(forged), run)
+        run = self.plugin_shaped("busy-strict", "no_fallback")
+        receipt = self.receipt_of(run)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_proved"))
+        with self.assertRaisesRegex(V2.ReceiptError, "quiet host required"):
+            V2.verify(receipt, run, require_quiet_host=True)
+
+    def test_m9_gpu_off_on_a_busy_host(self):
+        run = self.run_dir("busy-gpu-off")
+        receipt = make_run(run, kind="planted_negative", planted="gpu_off",
+                           fault=hosts.POSITIVE_CONTROL, quiet=False)
+        self.assertEqual(self.verify(receipt, run), ("inconclusive", "negative_proved"))
+        self.assertIs(receipt["quiet_host_exempt"], True)
+        run = self.run_dir("busy-gpu-off-paired")
+        receipt = make_run(run, kind="planted_negative", planted="gpu_off",
+                           fault="force_loss_after", quiet=False)
+        self.assertEqual(self.verify(receipt, run)[1], "negative_not_proved")
+        self.assertTrue(any("with fault 'force_loss_after'" in r
+                            for r in receipt["verdict_reasons"]))
 
     def test_gpu_off_is_proved_by_an_inconclusive_on_the_path(self):
         run = self.run_dir("gpu-off")
@@ -788,6 +1117,37 @@ class V2Receipt(unittest.TestCase):
                     run / "host_evidence.json")
                 with self.assertRaisesRegex(V2.ReceiptError, needle):
                     V2.verify(resign(copy.deepcopy(receipt)), run)
+
+    def test_a_template_host_track_must_be_unreachable_by_input(self):
+        # Logic will not arm a No Input track, so a live row plays an unarmed
+        # one; an armed track, monitoring on or a real input is refused, as is
+        # a snapshot that recorded no track at all.
+        run = self.run_dir("track")
+        receipt = make_run(run)
+        for track, needle in (
+                (dict(UNARMED, record_armed=True, input="Input 1"), "record-armed"),
+                (dict(UNARMED, record_armed=True), "record-armed"),
+                (dict(UNARMED, input_monitoring=True), "input monitoring was on"),
+                (dict(UNARMED, input="Input 1"), "track input was 'Input 1'"),
+                (dict(UNARMED, input="No input"), "track input was 'No input'"),
+                (None, "no track state")):
+            with self.subTest(needle=needle, track=track):
+                write_host_evidence(run, track=track)
+                receipt["artifacts"]["host_evidence.json"] = gfc.sha256_file(
+                    run / "host_evidence.json")
+                with self.assertRaisesRegex(V2.ReceiptError, needle):
+                    V2.verify(resign(copy.deepcopy(receipt)), run)
+        write_host_evidence(run)
+        receipt["artifacts"]["host_evidence.json"] = gfc.sha256_file(run / "host_evidence.json")
+        self.assertEqual(V2.verify(resign(receipt), run), ("pass", "pass"))
+
+    def test_each_host_names_no_input_its_own_way(self):
+        for host_id, label in (("logic", "No Input"), ("bitwig", "No input"),
+                               ("garageband", "none"), ("reaper", "none")):
+            with self.subTest(host_id):
+                self.assertEqual(hosts.track_state_problem(dict(UNARMED, input=label), host_id),
+                                 "")
+        self.assertIn("not one of", hosts.track_state_problem(UNARMED, "bitwig"))
 
     def test_a_live_receipt_needs_the_live_window_floor(self):
         run = self.run_dir("floor")

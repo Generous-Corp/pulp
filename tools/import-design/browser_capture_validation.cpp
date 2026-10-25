@@ -484,6 +484,7 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
     // same manifest-resolution step as generated native exports, otherwise a
     // perfectly captured canvas arrives as an empty ImageView and the parity
     // gate scores a black frame instead of the artifact it claims to validate.
+    BrowserLaneClock clock;
     auto render_ir = ir;
     pulp::view::enrich_imported_image_asset_metadata(
         render_ir, render_ir.asset_manifest);
@@ -493,6 +494,7 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
         result.error = "could not materialize browser capture DesignIR";
         return result;
     }
+    clock.lap("materialize");
     auto rendered = pulp::view::render_to_png(
         *root, static_cast<std::uint32_t>(options.width),
         static_cast<std::uint32_t>(options.height), 2.0f, options.backend);
@@ -510,6 +512,7 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
         return result;
     if (!write_bytes_atomically(options.rendered, rendered, result.error))
         return result;
+    clock.lap("render");
 
     // Read the reference once and REGISTER it against the render before any
     // pixel is compared. The capture is deliberately larger than the design --
@@ -604,6 +607,7 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
         }
         if (!write_bytes_atomically(options.diff, diff, result.error))
             return result;
+        clock.lap("diff");
     }
 
     if (!refusal.empty()) {
@@ -613,6 +617,7 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
         result.valid = true;
         result.scored = false;
         result.registration_reason = std::move(refusal);
+        result.stages = clock.take_stages();
         return result;
     }
 
@@ -632,6 +637,8 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
     result.passes = comparison.passes(gate);
     result.scored = true;
     result.valid = true;
+    clock.lap("compare");
+    result.stages = clock.take_stages();
     return result;
 }
 

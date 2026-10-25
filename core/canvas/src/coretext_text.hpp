@@ -55,6 +55,10 @@ struct CoreTextFaceMetrics {
 CoreTextFaceMetrics coretext_face_metrics(std::string_view family_stack, float size, int weight,
                                           int slant);
 
+/// The PostScript name of the face coretext_create_font() resolves, the
+/// face the CoreGraphics canvas paints; empty if CoreText reports none.
+std::string coretext_face_postscript_name(std::string_view family_stack, int weight, int slant);
+
 /// Typographic advance of `text` laid out as one CTLine in that font.
 float coretext_advance(std::string_view text, std::string_view family_stack, float size, int weight,
                        int slant, const std::vector<Canvas::FontFeature>& features = {});

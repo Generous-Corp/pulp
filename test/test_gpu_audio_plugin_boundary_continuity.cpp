@@ -3,7 +3,7 @@
 //
 // Fake provider, in-process; not DAW and not render-loss evidence.
 //
-// The transport and execution-controller suites prove the fallback contract one
+// The transport and stamped-bridge suites prove the fallback contract one
 // callback at a time. This file checks it at the plug-in boundary, under
 // host-style call sequences: activate/deactivate with a new sample rate or
 // block size, ragged host callbacks, adapter-owned bypass, and state save/load
@@ -120,6 +120,7 @@ struct FaultPlan {
     bool reject_submissions = false;
     bool hang = false; // accepted work never completes
     bool lost = false; // lost(); submissions refused, pending work fails
+    std::uint32_t reacquired_channels = 0;
     bool sequence_gap_seen = false;
     std::uint64_t submissions = 0;
 };
@@ -133,7 +134,9 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
         for (auto& slot : slots_)
             slot.data.assign(quantum, 0.0f);
     }
-    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
+    bool submit(std::span<const float> input,
+                const detail::SharedIoSubmissionTicket& ticket) noexcept override {
+        const auto sequence = ticket.sequence;
         if (plan_.reject_submissions || plan_.lost)
             return false;
         auto slot =
@@ -147,13 +150,15 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
         for (std::size_t i = 0; i < input.size(); ++i)
             slot->data[i] = fir_.step(input[i]);
         slot->sequence = sequence;
+        slot->ticket = ticket;
         slot->active = true;
         ++plan_.submissions;
         return true;
     }
     void service(std::uint64_t) noexcept override {}
     void service_until(std::uint64_t, std::uint64_t) noexcept override {}
-    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
+    std::optional<detail::WaveNetChannelCompletion>
+    receive(std::span<float> output) noexcept override {
         if (plan_.hang && !plan_.lost)
             return {};
         auto slot =
@@ -162,10 +167,13 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
             return {};
         slot->active = false;
         if (plan_.fail_completions || plan_.lost)
-            return GpuWaveNetBlockResult{slot->sequence, GpuWaveNetBlockStatus::ProviderFailed,
-                                         false};
+            return detail::WaveNetChannelCompletion{
+                GpuWaveNetBlockResult{slot->sequence, GpuWaveNetBlockStatus::ProviderFailed, false},
+                slot->ticket};
         std::copy_n(slot->data.begin(), output.size(), output.begin());
-        return GpuWaveNetBlockResult{slot->sequence, GpuWaveNetBlockStatus::GpuDelivered, false};
+        return detail::WaveNetChannelCompletion{
+            GpuWaveNetBlockResult{slot->sequence, GpuWaveNetBlockStatus::GpuDelivered, false},
+            slot->ticket};
     }
     bool release() noexcept override {
         return true;
@@ -178,6 +186,7 @@ class FirChannel final : public detail::WaveNetRealtimeChannel {
     struct Slot {
         std::vector<float> data;
         std::uint64_t sequence = 0;
+        detail::SharedIoSubmissionTicket ticket{};
         bool active = false;
     };
     FaultPlan& plan_;
@@ -245,6 +254,7 @@ class ShadowFirNode final : public GpuWaveNetRealtimeNode {
 struct FixtureOptions {
     MissPolicy miss_policy = MissPolicy::CpuFallback;
     std::uint32_t shadow_delay_blocks = kLeadBlocks;
+    GpuAudioRecoveryPolicy recovery = GpuAudioRecoveryPolicy::Manual;
 };
 FixtureOptions g_options;
 
@@ -304,13 +314,28 @@ class GpuFirEffect final : public format::Processor {
             .capacity = kLeadBlocks + 3,
             .max_inflight = 1,
             .miss_policy = g_options.miss_policy,
-            .supports_cpu_fallback = g_options.miss_policy == MissPolicy::CpuFallback};
+            .supports_cpu_fallback = g_options.miss_policy == MissPolicy::CpuFallback,
+            // Faults are simulated in a short run: keep the ring-sized window.
+            .watchdog_blocks = kLeadBlocks + 2};
         node_ = std::make_unique<ShadowFirNode>(config, quantum_, g_options.shadow_delay_blocks);
         std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
         for (std::uint32_t ch = 0; ch < kChannels; ++ch)
             providers.push_back(std::make_unique<FirChannel>(plan_, quantum_));
+        // A re-acquired provider runs on a healthy device: the replacement
+        // channel clears the injected fault.
+        detail::WaveNetRealtimeTestAccess::set_channel_factory(
+            *node_,
+            [](void* context) noexcept -> std::unique_ptr<detail::WaveNetRealtimeChannel> {
+                auto& self = *static_cast<GpuFirEffect*>(context);
+                self.plan_.fail_completions = self.plan_.reject_submissions = false;
+                self.plan_.lost = self.plan_.hang = false;
+                ++self.plan_.reacquired_channels;
+                return std::make_unique<FirChannel>(self.plan_, self.quantum_);
+            },
+            this);
         engine_ready_ = detail::WaveNetRealtimeTestAccess::prepare(*node_, std::move(providers)) &&
-                        transport_.prepare(node_.get(), {});
+                        transport_.prepare(node_.get(), {.recovery_policy = g_options.recovery,
+                                                         .reacquire_backoff_ns = 0});
 
         for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
             staged_in_[ch].assign(quantum_, 0.0f);
@@ -1047,4 +1072,43 @@ TEST_CASE("GPU-audio plug-in nulls through HeadlessHost across loss and re-prepa
     const auto null = analysis::assert_null_near(actual, expected);
     INFO(null.message);
     CHECK(null.passed);
+}
+
+TEST_CASE("GPU-audio plug-in returns to the GPU after a provider fault with AutoReacquire",
+          "[gpu_audio][plugin-boundary-continuity][clap][reacquire]") {
+    const auto fault = GENERATE(Fault::FailCompletions, Fault::RejectSubmissions,
+                                Fault::ProviderLost, Fault::LoseDevice, Fault::HangProvider);
+    CAPTURE(static_cast<int>(fault));
+    OptionsScope scope({.recovery = GpuAudioRecoveryPolicy::AutoReacquire});
+    ClapSession gpu(&make_gpu_effect), cpu(&make_cpu_effect);
+    for (auto* s : {&gpu, &cpu}) {
+        s->activate(48000.0, 64);
+        s->render(16 * 64, {64, 21, 43});
+    }
+    const auto before = delivery(gpu);
+    REQUIRE(before.gpu_blocks > 0);
+    for (auto* s : {&gpu, &cpu}) {
+        s->inject(fault);
+        s->render(32 * 64, {64, 21, 43, 1});
+    }
+    const auto after = delivery(gpu);
+    CHECK(after.cpu_fallback_blocks > 0);
+    CHECK(after.silence_blocks == 0);
+    CHECK(after.invalid_blocks == 0);
+    // The re-acquired provider delivers again.
+    CHECK_FALSE(gpu.gpu()->node()->fenced());
+    for (auto* s : {&gpu, &cpu})
+        s->render(8 * 64, {64});
+    CHECK(delivery(gpu).gpu_blocks > after.gpu_blocks);
+    CHECK(gpu.gpu()->plan().reacquired_channels == kChannels);
+    const auto status = gpu.gpu()->transport().status_snapshot();
+    INFO("validate_gpu_audio_status error "
+         << static_cast<int>(validate_gpu_audio_status(status).error));
+    CHECK(validate_gpu_audio_status(status).accepted());
+    CHECK(status.reacquire_successes == 1);
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::ProviderReacquired);
+    CHECK(status.last_reacquire_to_gpu_ns > 0);
+    CHECK_FALSE(gpu.gpu()->plan().sequence_gap_seen);
+    CHECK(gpu.callback_allocations() == 0);
+    require_null(gpu, cpu);
 }
