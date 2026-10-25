@@ -53,6 +53,7 @@ bool SharedIoConvolutionExecutor::fence_and_reprime(std::uint64_t epoch,
     }
     epoch_ = epoch;
     next_ = first_sequence;
+    fenced_at_ = kEmpty;
     std::fill(entries_.begin(), entries_.end(), Entry{});
     std::fill(carry_.begin(), carry_.end(), 0);
     for (std::uint32_t i = 0; i < c_.capacity; ++i)
@@ -105,11 +106,13 @@ std::size_t SharedIoConvolutionExecutor::collect() noexcept {
         ++next_;
         ++count;
         if (terminal != Terminal::Success) {
+            fenced_at_ = sequence;
             fenced_.store(true, std::memory_order_release);
             break;
         }
         const auto slot = sequence % c_.capacity;
         if (ready_state_[slot].load(std::memory_order_acquire) != kEmpty) {
+            fenced_at_ = sequence;
             fenced_.store(true, std::memory_order_release);
             break;
         }

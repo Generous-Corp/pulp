@@ -260,6 +260,7 @@ class CombinedInstallerTest(unittest.TestCase):
         scripted_plugins: set[tuple[str, str]] | None = None,
         architectures: str | None = None,
         d15_fixture: str | None = None,
+        dev_shared_fixture: str | None = None,
         expect_success: bool = True,
         analyze_omits_relocatable: bool = False,
         embed_framework_in: str | None = None,
@@ -526,6 +527,23 @@ class CombinedInstallerTest(unittest.TestCase):
                         bundle.symlink_to(real_bundle, target_is_directory=True)
                     else:
                         raise AssertionError(f"unknown D15 fixture: {d15_fixture}")
+                if dev_shared_fixture and not plugin_bundles:
+                    if dev_shared_fixture == "module":
+                        # A dev-shared module names the runtime in a load command.
+                        executable.write_bytes(
+                            b"\xcf\xfa\xed\xfe fixture LC_LOAD_DYLIB "
+                            b"@rpath/libpulp-dev-shared-ui.1.11.0.dylib\0"
+                        )
+                    elif dev_shared_fixture == "runtime":
+                        frameworks = bundle / "Contents" / "Frameworks"
+                        frameworks.mkdir(parents=True)
+                        (frameworks / "libpulp-dev-shared-ui.1.11.0.dylib").write_bytes(
+                            b"\xcf\xfa\xed\xfe fixture LC_ID_DYLIB "
+                            b"@rpath/libpulp-dev-shared-ui.1.11.0.dylib\0"
+                        )
+                    else:
+                        raise AssertionError(
+                            f"unknown dev-shared fixture: {dev_shared_fixture}")
                 # The build writes control evidence to Contents/Resources;
                 # legacy_evidence models a bundle from an SDK that wrote it
                 # beside the binary.
@@ -724,6 +742,18 @@ class CombinedInstallerTest(unittest.TestCase):
                     expect_success=False,
                 )
                 self.assertIn("development-only Vellum D15", output)
+
+    def test_dev_shared_build_is_rejected_before_signing(self) -> None:
+        for fixture in ("module", "runtime"):
+            with self.subTest(fixture=fixture):
+                output, _ = self._run_installer(
+                    [("FastGain", "vst3")],
+                    dev_shared_fixture=fixture,
+                    expect_success=False,
+                )
+                # expect_success=False also asserts that no signing tool ran.
+                self.assertIn("development-only dev-shared build", output)
+                self.assertIn("FastGain", output)
 
     def test_control_evidence_beside_the_binary_is_refused_before_signing(self) -> None:
         output, _ = self._run_installer(

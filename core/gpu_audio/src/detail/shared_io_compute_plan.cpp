@@ -145,8 +145,10 @@ SharedIoComputePlan::acquire_input(std::uint64_t sequence, std::uint64_t deadlin
         return std::nullopt;
     }
     const auto predicted_ns = estimate.ready ? estimate.conservative_ns : 0;
-    pending_[lease->token.slot] = {SubmitToken{lease->token, deadline_ns, 0, now_ns, predicted_ns},
-                                   true};
+    auto admitted = SubmitToken::admit(lease->token, deadline_ns);
+    admitted.worker_ns = now_ns;
+    admitted.predicted_ns = predicted_ns;
+    pending_[lease->token.slot] = {admitted, true};
     if (lifecycle_receipts_.size() < kLifecycleReceiptCapacity) {
         LifecycleReceipt receipt;
         receipt.generation = lease->token.preparation_epoch;
@@ -173,6 +175,12 @@ SharedIoComputePlan::acquire_input(std::uint64_t sequence, std::uint64_t deadlin
 bool SharedIoComputePlan::submit(const SubmitToken& token) noexcept {
     if (token.slot.slot >= pending_.size() || !pending_[token.slot.slot].active ||
         !(pending_[token.slot.slot].token.slot == token.slot))
+        return false;
+    // The plan recorded the admission ticket when it granted the slot; a caller
+    // that carries one must carry that same ticket.
+    const auto& admitted = pending_[token.slot.slot].token.ticket;
+    if (!admitted.admits(token.slot.preparation_epoch, token.slot.stream_sequence) ||
+        (token.ticket.accepted() && !(token.ticket == admitted)))
         return false;
     if (!arena_.publish_written({token.slot})) {
         // The lease was granted by this plan but could not be published. Drop
@@ -354,10 +362,13 @@ SharedIoComputePlan::receipt_for(const SharedIoSlotLedger::SlotToken& token) noe
 
 std::optional<SharedIoArena::OutputLease>
 SharedIoComputePlan::acquire_output(const Completion& completion) noexcept {
-    if (completion.status != SharedIoArena::CompletionStatus::RetiredSuccess)
+    if (completion.status != SharedIoArena::CompletionStatus::RetiredSuccess ||
+        !completion.token.ticket.accepted())
         return std::nullopt;
-    auto lease = arena_.acquire_output(completion.token.slot.preparation_epoch,
-                                       completion.token.slot.stream_sequence);
+    // The admission ticket, not the slot's current identity, names the
+    // generation and sequence this completion may deliver.
+    auto lease =
+        arena_.acquire_output(completion.token.ticket.generation, completion.token.ticket.sequence);
     if (lease)
         if (auto* receipt = receipt_for(completion.token.slot))
             receipt->output_acquired = true;

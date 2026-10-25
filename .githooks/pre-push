@@ -334,6 +334,21 @@ EOF
           _prepush_extra
 fi
 
+# The push sends HEAD's commit, but several gates below read files from the
+# working tree (docs-noise lint, format_changed, the conflict-marker check,
+# compat aggregate, source contracts, single-backend guard, negative-capability
+# check). An uncommitted edit to a tracked file can therefore make those gates
+# judge content the push does not send, in either direction. The text-encoding
+# lint reads the pushed commit itself; the others are named here so a dirty
+# tree is never a silent pass.
+_prepush_dirty="$(git diff --name-only --ignore-submodules HEAD 2>/dev/null | head -n 20)"
+if [ -n "$_prepush_dirty" ]; then
+    echo "⚠ pre-push: tracked files differ from the pushed commit; working-tree gates read" >&2
+    echo "  these uncommitted versions, not what is pushed. Commit or stash them for an exact check:" >&2
+    printf '%s\n' "$_prepush_dirty" | sed 's/^/    /' >&2
+fi
+unset _prepush_dirty
+
 # Refresh the base only when the normal gates are enabled. The merge-tree
 # script-state check honors the same explicit base as the remaining gates and
 # receives the exact pushed source object captured above.
@@ -801,9 +816,12 @@ fi
 
 # Text I/O without encoding= beyond the committed baseline. CI's
 # `Enforce version & skill sync` runs the same lint; this is the local copy,
-# about a second, so a missing encoding="utf-8" fails here first.
+# about a second, so a missing encoding="utf-8" fails here first. It reads the
+# pushed commit's blobs, not the working tree: a file fixed but not committed
+# would otherwise pass a commit that still carries the bad call.
 if [ -f "$TEXT_ENCODING_LINT" ]; then
-    run_gate_captured "$PYTHON" "$TEXT_ENCODING_LINT" --root "$ROOT" --base "$BASE"
+    run_gate_captured "$PYTHON" "$TEXT_ENCODING_LINT" --root "$ROOT" --base "$BASE" \
+        --head "${_prepush_pushed_head_sha:-HEAD}"
     gate_rc=$?; case $gate_rc in
         0) ;;
         1) echo "[pre-push] text-encoding lint: pass encoding=\"utf-8\" to the calls listed above; never raise the baseline." >&2; fail=1 ;;

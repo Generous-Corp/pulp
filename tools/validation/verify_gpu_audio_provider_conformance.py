@@ -43,7 +43,7 @@ REQUIRED_SCENARIOS = (
 # The kit's one program; a receipt for any other program is not this kit's.
 PROGRAM = {"name": "affine-1.75x+0.25", "scale": 1.75, "bias": 0.25, "tolerance": 1.0e-5}
 SKIP_EXIT = 77
-OPTIONAL_SCENARIOS = ("differential_provider_pair",)
+OPTIONAL_SCENARIOS = ("differential_provider_pair", "completion_notifier")
 DIFFERENTIAL_SCENARIOS = ("differential_cpu_reference", "differential_provider_pair")
 VERDICTS = ("passed", "failed", "skipped")
 IDENTITY_FIELDS = {
@@ -170,6 +170,9 @@ def _verify_counters(name: str, row: dict[str, Any], program: dict[str, Any]) ->
     elif name == "differential_cpu_reference":
         need(submissions == program["blocks"] and success == submissions and failure == 0,
              "every program block must retire successfully")
+    elif name == "completion_notifier":
+        need(failure == 0 and rejected == 0 and success == submissions,
+             "notified work must retire successfully exactly once")
     elif name == "differential_provider_pair":
         need(submissions == 2 * program["blocks"] and success == submissions,
              "both providers must run every program block")

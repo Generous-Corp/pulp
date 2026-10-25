@@ -90,9 +90,13 @@ void reset_registry_for_testing() {
     g_factory = nullptr;
 }
 
+bool embeds_editor_script(const EditorAssets& assets) noexcept {
+    return assets.script != nullptr && assets.script_size > 0;
+}
+
 bool declares_editor_assets(const EditorAssets& assets) noexcept {
     return non_empty(assets.script_path) || non_empty(assets.theme_path) ||
-           non_empty(assets.asset_roots);
+           non_empty(assets.asset_roots) || embeds_editor_script(assets);
 }
 
 void register_editor_assets(const EditorAssets& assets) noexcept {

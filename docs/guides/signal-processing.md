@@ -541,7 +541,7 @@ for (int i = 0; i < num_samples; ++i)
 | `process(float)` | Filter one sample. |
 | `process(float*, int)` | Filter buffer in-place. |
 | `process_reference(...)` | Same, with exact `std::tanh` stages (one sample or a buffer). |
-| `process_realtime_efficient(...)` | Same, with the cheaper `FastMath::tanh_minimax` (one sample or a buffer). |
+| `process_realtime_efficient(...)` | Same, with the cheaper `FastMath::tanh_minimax_recursive` (one sample or a buffer). |
 | `reset()` | Clear all stage states. |
 
 Each stage saturates for analog-style nonlinearity. The feedback path creates resonance: `resonance * 4.0 * (stage[3] - input * 0.5)`.
@@ -551,9 +551,11 @@ The saturator is a `LadderSaturation` choice. The default, `accurate`, is
 multiply-add) and about 2.4x its throughput, keeping the filter's output within
 -124 dBFS of the exact-tanh ladder for input up to 0 dBFS (-102 dBFS at
 +20 dBFS drive). `exact` is `std::tanh`; `realtime_efficient` is
-`FastMath::tanh_minimax`, within 3.8e-6 of `std::tanh` and slope-matched where
-it clamps at |x| = 7, so heavy overdrive keeps its character (the Lambert
-`FastMath::tanh` it replaces stepped by 6.7e-4 at |x| = 4).
+`FastMath::tanh_minimax_recursive`, the `tanh_minimax` fit evaluated in
+Estrin form: within 3.8e-6 of `std::tanh` and slope-matched where it clamps at
+|x| = 7, so heavy overdrive keeps its character. The Estrin form's shorter
+dependency chain keeps it the cheapest choice inside a polyphonic voice loop,
+where the Horner form could run 2.6x slower than `accurate`.
 Select the build default with `PULP_SIGNAL_LADDER_SATURATION` = 0 (exact),
 1 (accurate) or 2 (realtime_efficient), or call `process_reference()` /
 `process_realtime_efficient()` per call.
@@ -1152,7 +1154,7 @@ os.process_block(input, output, num_samples, [&](float s) {
 | `set_factor(Factor)` | `Factor::x2`, `Factor::x4`, `Factor::x8`, or `Factor::x16`. |
 | `set_sample_rate(float)` | Set base sample rate. Configures anti-aliasing filters. |
 | `set_kind(Kind)` | Select the minimum-phase polyphase IIR lane (the default), the linear-phase FIR lane, or the legacy Biquad lane. |
-| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB prototype, flat to 80% of Nyquist) or `pristine` (140 dB prototype, flat to 90% of Nyquist). Polyphase lane: `standard` (94.8 dB from 0.58 Fs, flat to 0.42 Fs) or `pristine` (146 dB from 0.55 Fs, flat to 0.45 Fs). No effect on the Biquad lane. |
+| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB prototype, flat to 80% of Nyquist) or `pristine` (140 dB prototype, flat to 90% of Nyquist). Polyphase lane: `standard` (114.6 dB) or `pristine` (153.2 dB), both from 0.515 Fs and flat to 0.485 Fs. No effect on the Biquad lane. |
 | `latency()` | Return host-rounded and exact base-rate latency plus whether the delay is constant. |
 | `latency_samples()` | Return the integer base-rate delay for `Processor::latency_samples()`. |
 | `process(float, callback)` | Upsample, process via callback, downsample. |

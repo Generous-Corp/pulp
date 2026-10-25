@@ -8,6 +8,7 @@ add_library(pulp-browser-capture-backend STATIC
     browser_capture_provenance.cpp
     browser_discovery.cpp
     browser_capture_diagnostics.cpp
+    browser_probe_cache.cpp
     node_runtime.cpp)
 add_library(pulp::browser-capture-backend ALIAS
     pulp-browser-capture-backend)
@@ -38,6 +39,7 @@ add_executable(pulp-import-design
     browser_import_cli.cpp
     browser_import_session.cpp
     browser_html_import.cpp
+    browser_capture_fonts.cpp
     browser_capture_workspace.cpp
     browser_capture_ir.cpp
     browser_capture_styles.cpp

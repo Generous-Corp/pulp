@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261022-spectr-footprint-20261022",
+  "kind": "change",
+  "created_at": "2026-10-22T10:48:36Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "SkiaCanvas::begin_layer compiles its Ganesh offscreen-surface call only under PULP_CANVAS_GANESH (SK_GANESH, the WebGL browser host), as the image-upload and backend-identity paths already do. Native builds never set the Ganesh context, so Graphite and raster layer output is unchanged; the native link no longer keeps Skia's Ganesh backend (about 1 MB). No API or authority boundary moves; this is a Pulp link-footprint fix.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-canvas-native-no-ganesh",
+    "ctest --test-dir build -R pulp-test-retained-layer-store"
+  ],
+  "disposition": "pulp-only"
+}

@@ -98,13 +98,15 @@ GpuSpectralMaskSession::create_impl(const Config& c, bool per_hop_gains) noexcep
             return result;
         }
         const auto identity = provider.provider->adapter_identity();
-        impl->report.dawn_revision = provider.provider->dawn_revision();
+        impl->report.provider_revision = provider.provider->provider_identity().provider_revision;
+        impl->report.dawn_revision = impl->report.provider_revision;
         impl->report.configured_revision_verified =
             std::string_view(PULP_GPU_AUDIO_EXPECTED_DAWN_SHA).size() != 0;
         impl->report.adapter_name = identity.name;
         impl->report.vendor_id = identity.vendor_id;
         impl->report.device_id = identity.device_id;
-        impl->report.authenticated_shared_metal = true;
+        impl->report.authenticated_shared_provider = true;
+        impl->report.authenticated_shared_metal = impl->report.authenticated_shared_provider;
         impl->n = c.fft_size;
         impl->h = c.hop;
         impl->channels = c.channels;
@@ -201,7 +203,7 @@ bool GpuSpectralMaskSession::submit_impl(std::span<const float> input, std::uint
                     gains.data(), gains.size_bytes());
         impl_->report.cpu_input_bytes += gains.size_bytes();
     }
-    const detail::SharedIoProgramSession::SubmitToken token{lease->token, deadline};
+    const auto token = detail::SharedIoProgramSession::SubmitToken::admit(lease->token, deadline);
     if (!impl_->session.submit(token)) {
         (void)impl_->session.cancel(token);
         return false;

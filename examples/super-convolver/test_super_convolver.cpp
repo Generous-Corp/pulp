@@ -1015,14 +1015,17 @@ TEST_CASE("SuperConvolver loads an IR file as the base impulse response",
 
     REQUIRE(proc.ir_path() == path);
 
-    // serialize/deserialize round-trip: a fresh processor restores the path.
+    // serialize/deserialize round-trip: a fresh processor restores the path. The
+    // WAV lives in the temp dir, so that is the root a restored path may sit in.
     const auto blob = proc.serialize_plugin_state();
     SuperConvolverProcessor proc2;
     pulp::state::StateStore store2;
     proc2.set_state_store(&store2);
     proc2.define_parameters(store2);
+    proc2.set_ir_restore_root(std::filesystem::temp_directory_path());
     REQUIRE(proc2.deserialize_plugin_state(blob));
-    REQUIRE(proc2.ir_path() == path);
+    // The restore adopts the resolved path (the temp dir is a symlink on macOS).
+    REQUIRE(proc2.ir_path() == std::filesystem::weakly_canonical(path).string());
 
     // Render an impulse and confirm the convolution is the loaded IR.
     DirectDriver d(proc, BLOCK, SR);
@@ -1119,11 +1122,14 @@ TEST_CASE("SuperConvolver IR state blob is versioned and reads legacy raw paths"
     REQUIRE(blob[5] == 3);   // IrStateKind::Path
     REQUIRE(std::string(blob.begin() + 6, blob.end()) == path);
 
-    // A fresh processor restores the path from the versioned blob.
+    // A fresh processor restores the path from the versioned blob. Every
+    // restoring processor below is rooted at the path's directory: this test
+    // is about the blob format, not about where a path is allowed to point.
     SuperConvolverProcessor proc2;
     pulp::state::StateStore store2;
     proc2.set_state_store(&store2);
     proc2.define_parameters(store2);
+    proc2.set_ir_restore_root("/some/where");
     REQUIRE(proc2.deserialize_plugin_state(blob));
     REQUIRE(proc2.ir_path() == path);
 
@@ -1134,6 +1140,7 @@ TEST_CASE("SuperConvolver IR state blob is versioned and reads legacy raw paths"
     pulp::state::StateStore store3;
     proc3.set_state_store(&store3);
     proc3.define_parameters(store3);
+    proc3.set_ir_restore_root("/some/where");
     REQUIRE(proc3.deserialize_plugin_state(legacy));
     REQUIRE(proc3.ir_path() == path);
 
@@ -1146,6 +1153,7 @@ TEST_CASE("SuperConvolver IR state blob is versioned and reads legacy raw paths"
     pulp::state::StateStore store_v1;
     proc_v1.set_state_store(&store_v1);
     proc_v1.define_parameters(store_v1);
+    proc_v1.set_ir_restore_root("/some/where");
     REQUIRE(proc_v1.deserialize_plugin_state(v1));
     REQUIRE(proc_v1.ir_path() == path);
 
@@ -1156,6 +1164,100 @@ TEST_CASE("SuperConvolver IR state blob is versioned and reads legacy raw paths"
     proc4.define_parameters(store4);
     REQUIRE(proc4.deserialize_plugin_state(std::span<const std::uint8_t>{}));
     REQUIRE(proc4.ir_path().empty());
+}
+
+// A session blob is written by whoever saved it, so the path it names is
+// untrusted: a restored path is honoured only inside the restore root. Outside
+// it the IR is dropped (synthetic fallback) and nothing is read.
+TEST_CASE("SuperConvolver refuses a restored IR path outside its restore root",
+          "[superconvolver][loadir][state-confinement]") {
+    constexpr double SR = 48000.0;
+    const auto root = std::filesystem::temp_directory_path();
+
+    auto v2_path_blob = [](const std::string& path) {
+        std::vector<std::uint8_t> blob{'S', 'C', 'v', '2', 2, 3}; // kind 3 = Path
+        blob.insert(blob.end(), path.begin(), path.end());
+        return blob;
+    };
+    auto make_proc = [&](SuperConvolverProcessor& proc, pulp::state::StateStore& store) {
+        proc.set_state_store(&store);
+        proc.define_parameters(store);
+        proc.set_ir_restore_root(root);
+        store.set_value(kEngine, 0.0f);
+    };
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = SR;
+    ctx.max_buffer_size = 512;
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+
+    // Every blob vintage that can carry a path is refused the same way.
+    const std::string outside = "/etc/passwd";
+    std::vector<std::vector<std::uint8_t>> hostile = {
+        v2_path_blob(outside),
+        std::vector<std::uint8_t>(outside.begin(), outside.end()), // legacy raw path
+    };
+    std::vector<std::uint8_t> v1{'S', 'C', 'v', '1', 1};
+    v1.insert(v1.end(), outside.begin(), outside.end());
+    hostile.push_back(v1);
+    for (const auto& blob : hostile) {
+        SuperConvolverProcessor proc;
+        pulp::state::StateStore store;
+        make_proc(proc, store);
+        REQUIRE(proc.deserialize_plugin_state(blob)); // the load itself still succeeds
+        REQUIRE(proc.ir_path().empty());              // the path was never adopted
+        proc.prepare(ctx);                            // a synchronous rebuild at prepare
+        REQUIRE(proc.source_decode_count() == 0);     // decoded nothing: no file was read
+        proc.release();
+    }
+
+    // A relative path cannot climb out of the root either.
+    {
+        SuperConvolverProcessor proc;
+        pulp::state::StateStore store;
+        make_proc(proc, store);
+        REQUIRE(proc.deserialize_plugin_state(v2_path_blob("../../../../etc/passwd")));
+        REQUIRE(proc.ir_path().empty());
+    }
+
+    // Positive control: a real IR inside the root restores and is decoded.
+    pulp::audio::AudioFileData data;
+    data.sample_rate = static_cast<std::uint32_t>(SR);
+    data.channels = {std::vector<float>(480, 0.0f)};
+    data.channels[0][0] = 1.0f;
+    const std::string inside = (root / "sc_confine_test.wav").string();
+    REQUIRE(pulp::audio::write_wav_file(inside, data, pulp::audio::WavBitDepth::Float32));
+    {
+        SuperConvolverProcessor proc;
+        pulp::state::StateStore store;
+        make_proc(proc, store);
+        REQUIRE(proc.deserialize_plugin_state(v2_path_blob(inside)));
+        REQUIRE(proc.ir_path() == std::filesystem::weakly_canonical(inside).string());
+        proc.prepare(ctx);
+        REQUIRE(proc.source_decode_count() == 1);
+        proc.release();
+    }
+    std::filesystem::remove(inside);
+
+    // A relative restored path is read from the root, not from the host's
+    // working directory: the blob names "sc_confine_rel/ir.wav", the file sits
+    // under the root, and the process cwd (the build dir) has no such file.
+    const auto rel_dir = root / "sc_confine_rel";
+    std::filesystem::create_directories(rel_dir);
+    const std::string rel_inside = (rel_dir / "ir.wav").string();
+    REQUIRE(pulp::audio::write_wav_file(rel_inside, data, pulp::audio::WavBitDepth::Float32));
+    REQUIRE_FALSE(std::filesystem::exists("sc_confine_rel/ir.wav"));
+    {
+        SuperConvolverProcessor proc;
+        pulp::state::StateStore store;
+        make_proc(proc, store);
+        REQUIRE(proc.deserialize_plugin_state(v2_path_blob("sc_confine_rel/ir.wav")));
+        REQUIRE(proc.ir_path() == std::filesystem::weakly_canonical(rel_inside).string());
+        proc.prepare(ctx);
+        REQUIRE(proc.source_decode_count() == 1); // decoded the file under the root
+        proc.release();
+    }
+    std::filesystem::remove_all(rel_dir);
 }
 
 // load_ir_path() forces a reload even when the chosen path equals the current

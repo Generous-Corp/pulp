@@ -96,11 +96,14 @@ struct InstallModelResult {
 /// resumable, sha256-verified), then write the install metadata so read_installed_model/
 /// activate_model see it. `on_progress` returning false (or a cancelled token) aborts and
 /// keeps the partial for a later resume. Auth headers (e.g. HuggingFace token) optional.
-InstallModelResult install_model(const ModelEntry& model, std::string_view subsystem,
-                                 const std::function<bool(const struct DownloadProgress&)>& on_progress = {},
-                                 const CancellationToken* cancel = nullptr,
-                                 const std::vector<std::pair<std::string, std::string>>& headers = {},
-                                 const std::filesystem::path& pulp_home_override = {});
+/// An asset whose registry entry carries no sha256 is refused unless `allow_unverified`
+/// is set; a CLI or UI surfaces that as an explicit `--unverified` style opt-in.
+InstallModelResult
+install_model(const ModelEntry& model, std::string_view subsystem,
+              const std::function<bool(const struct DownloadProgress&)>& on_progress = {},
+              const CancellationToken* cancel = nullptr,
+              const std::vector<std::pair<std::string, std::string>>& headers = {},
+              const std::filesystem::path& pulp_home_override = {}, bool allow_unverified = false);
 
 /// Delete an installed model's files + metadata. Clears the active selection if it pointed
 /// here. Returns false (with `error` set) on a filesystem error or invalid input, and false

@@ -11,7 +11,17 @@
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
 #include <pulp/canvas/text_shaper.hpp>
-#if !defined(PULP_HAS_TEXT_SHAPING) && defined(__APPLE__)
+// PULP_LITE_EDITOR builds this file a second time, into the pulp-editor-lite
+// objects that a plug-in without a GPU editor links ahead of the library.
+// It changes function bodies only; every declaration stays as the headers
+// give it, so the two builds agree on every type.
+#if defined(PULP_HAS_TEXT_SHAPING) && !(defined(PULP_LITE_EDITOR) && PULP_LITE_EDITOR)
+#define PULP_TEXT_SHAPER_SKIA 1
+#else
+#define PULP_TEXT_SHAPER_SKIA 0
+#endif
+
+#if !PULP_TEXT_SHAPER_SKIA && defined(__APPLE__)
 #include "coretext_text.hpp"
 #endif
 #include <algorithm>
@@ -20,7 +30,7 @@
 #include <sstream>
 #include <numeric>
 
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
 #include "font_tables.hpp"
 // SkParagraph headers — available when Skia is built with text shaping
 #include "modules/skparagraph/include/ParagraphBuilder.h"
@@ -532,7 +542,7 @@ float PreparedText::total_width() const {
 struct TextShaper::Impl {
     bool has_real_shaping = false;
 
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
     static FontSlant font_slant_from_int(int slant) {
         if (slant == 2) return FontSlant::Oblique;
         if (slant == 1) return FontSlant::Italic;
@@ -635,7 +645,7 @@ struct TextShaper::Impl {
     std::uint64_t metrics_cached_generation = 0;
     std::mutex metrics_mutex;
 
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
     // Typeface resolution routes through FontResolver. Comma-list parsing
     // happens once inside the resolver; the registered → bundled →
     // platform cascade is shared with skia_canvas. Returns null when
@@ -693,7 +703,7 @@ struct TextShaper::Impl {
         box.typographic_descent = box.descent;
         box.real = false;
 
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
         SkFont font;
         sk_sp<SkTypeface> tf = resolve_typeface(font_family, font_weight, font_slant);
         if (tf) font.setTypeface(std::move(tf));
@@ -783,7 +793,7 @@ struct TextShaper::Impl {
                                  float font_size, int font_weight,
                                  int font_slant) {
         LineBox box;
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
         auto ctx = TextFontContext::shared();
         auto collection = ctx->font_collection();
         if (!collection || text.empty()) return box;
@@ -813,34 +823,16 @@ struct TextShaper::Impl {
         paragraph->layout(SK_ScalarInfinity);
         std::vector<skia::textlayout::LineMetrics> lines;
         paragraph->getLineMetrics(lines);
-        float previous_cumulative_height = 0.0f;
+        std::vector<ParagraphLineExtent> extents;
+        extents.reserve(lines.size());
         for (const auto& line : lines) {
-            const float ascent = static_cast<float>(line.fAscent);
-            const float descent = static_cast<float>(line.fDescent);
-            // This SkParagraph API reports fHeight cumulatively through the
-            // current line. Convert it to this line's height before deriving
-            // leading, or each hard-newline line would include all preceding
-            // line heights and multiline labels would grow quadratically.
-            const float cumulative_height = static_cast<float>(line.fHeight);
-            const float line_height = cumulative_height - previous_cumulative_height;
-            if (std::isfinite(cumulative_height) &&
-                cumulative_height >= previous_cumulative_height) {
-                previous_cumulative_height = cumulative_height;
-            }
-            const float metric_limit = std::max(1.0f, font_size) * 10.0f;
-            if (!std::isfinite(ascent) || !std::isfinite(descent) ||
-                !std::isfinite(line_height) || ascent < 0.0f ||
-                descent < 0.0f || ascent > metric_limit ||
-                descent > metric_limit || line_height <= 0.0f ||
-                line_height > metric_limit) {
-                continue;
-            }
-            box.ascent = std::max(box.ascent, ascent);
-            box.descent = std::max(box.descent, descent);
-            box.leading = std::max(
-                box.leading,
-                std::max(0.0f, line_height - ascent - descent));
+            extents.push_back({static_cast<float>(line.fAscent), static_cast<float>(line.fDescent),
+                               static_cast<float>(line.fHeight)});
         }
+        const auto measured = paragraph_text_extents(extents, font_size);
+        box.ascent = measured.ascent;
+        box.descent = measured.descent;
+        box.leading = measured.leading;
         box.line_height = box.ascent + box.descent + box.leading;
         box.real = box.line_height > 0.0f;
 #else
@@ -880,7 +872,7 @@ struct TextShaper::Impl {
         float width = 0;
         bool styled_measurement = false;
 
-#ifdef PULP_HAS_TEXT_SHAPING
+#if PULP_TEXT_SHAPER_SKIA
         // Measure through the same fallback-aware SkParagraph path used by
         // SkiaCanvas paint. Besides honoring slant, tracking, and OpenType
         // features, this keeps plain and styled CJK/emoji runs on the same
@@ -1269,6 +1261,28 @@ void TextShaper::clear_cache() {
 
 bool TextShaper::uses_real_shaping() const {
     return impl_->has_real_shaping;
+}
+
+ParagraphTextExtents paragraph_text_extents(const std::vector<ParagraphLineExtent>& lines,
+                                            float font_size) {
+    ParagraphTextExtents extents;
+    const float metric_limit = std::max(1.0f, font_size) * 10.0f;
+    for (const auto& line : lines) {
+        if (!std::isfinite(line.ascent) || !std::isfinite(line.descent) ||
+            !std::isfinite(line.height) || line.ascent < 0.0f || line.descent < 0.0f ||
+            line.ascent > metric_limit || line.descent > metric_limit || line.height <= 0.0f ||
+            line.height > metric_limit) {
+            continue;
+        }
+        extents.ascent = std::max(extents.ascent, line.ascent);
+        extents.descent = std::max(extents.descent, line.descent);
+        extents.leading =
+            std::max(extents.leading, std::max(0.0f, line.height - line.ascent - line.descent));
+        extents.real = true;
+    }
+    if (extents.line_height() <= 0.0f)
+        extents.real = false;
+    return extents;
 }
 
 TextShaper& global_text_shaper() {
