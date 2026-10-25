@@ -18,6 +18,7 @@
 #include <pulp/signal/windowing.hpp>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 using namespace pulp::signal;
@@ -553,6 +554,31 @@ TEST_CASE("WaveShaper processes buffers in-place", "[signal][waveshaper][issue-6
     REQUIRE_THAT(buffer[1], WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(buffer[2], WithinAbs(0.75f, 1e-6f));
     REQUIRE_THAT(buffer[3], WithinAbs(1.0f, 1e-6f));
+}
+
+TEST_CASE("WaveShaper buffer path matches the sample path bit for bit", "[signal][waveshaper]") {
+    const WaveShaper::Curve curves[] = {
+        WaveShaper::Curve::soft_clip, WaveShaper::Curve::hard_clip,
+        WaveShaper::Curve::tanh_clip, WaveShaper::Curve::fold,
+        WaveShaper::Curve::sine_fold, static_cast<WaveShaper::Curve>(99)};
+    constexpr int kSamples = 257;
+    for (const auto curve : curves) {
+        for (const float drive : {0.5f, 1.0f, 3.7f}) {
+            WaveShaper shaper;
+            shaper.set_curve(curve);
+            shaper.set_drive(drive);
+            float buffer[kSamples];
+            float expected[kSamples];
+            for (int i = 0; i < kSamples; ++i) {
+                buffer[i] = -6.0f + 12.0f * static_cast<float>(i) / (kSamples - 1);
+                expected[i] = shaper.process(buffer[i]);
+            }
+            shaper.process(buffer, kSamples);
+            INFO("curve " << static_cast<int>(curve) << " drive " << drive);
+            for (int i = 0; i < kSamples; ++i)
+                REQUIRE(std::memcmp(&buffer[i], &expected[i], sizeof(float)) == 0);
+        }
+    }
 }
 
 TEST_CASE("WaveShaper invalid curve falls back to driven input",
