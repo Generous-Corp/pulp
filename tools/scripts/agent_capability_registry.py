@@ -811,7 +811,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:d15ee5596c20887770bc8f6025d0db955b0ba25048afa6f943e669dcd85120f5",
+        "fingerprint": "sha256:a54dd50892cb083ce38612f01f8d7938d200949a5e772bfed212b8979352d3e3",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
