@@ -2514,6 +2514,39 @@ TEST_CASE("WaveNet re-acquire does not carry a hang classification into the new 
     CHECK(checked_status(h.node).provider_state != GpuAudioProviderState::Unavailable);
 }
 
+TEST_CASE("WaveNet re-acquire clears the hang classification before the new epoch admits",
+          "[gpu_audio][wavenet][realtime][hang][reacquire]") {
+    // Epoch 1: the ring saturates behind a hung provider, reported as the hang.
+    Harness h(Tweak{.lead = 1, .capacity = 8, .watchdog_blocks = 16});
+    ChannelFactory factory{.control = &h.controls[1]};
+    factory.install(h.node);
+    for (int block = 0; block < 4; ++block) {
+        h.callback(float(block));
+        h.service();
+    }
+    h.controls[0].hang = true;
+    for (int round = 0; round < 16; ++round) {
+        h.callback(float(h.sequence));
+        h.service();
+        if (h.node.recovery_reason() != GpuAudioRecoveryReason::None)
+            break;
+    }
+    REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderUnresponsive);
+    const auto hung = h.node.recovery_sequence();
+
+    // Epoch 2 is requested, then the worker stalls: the callback fills the
+    // ring before any new-epoch block is admitted and latches the saturation.
+    REQUIRE(h.path.reprepare(h.path.context, 1'000'000'000));
+    for (int block = 0; block < 32; ++block) {
+        h.callback(float(h.sequence));
+        if (h.node.recovery_reason() != GpuAudioRecoveryReason::None)
+            break;
+    }
+    REQUIRE(h.node.recovery_reason() != GpuAudioRecoveryReason::None);
+    CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::InputSaturated);
+    CHECK(h.node.recovery_sequence() > hung);
+}
+
 TEST_CASE("WaveNet re-acquire that delivers again clears the stuck-late state",
           "[gpu_audio][wavenet][realtime][reacquire][status]") {
     Harness h;
