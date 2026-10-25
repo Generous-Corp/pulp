@@ -293,6 +293,7 @@ def _check_auval_list(args: argparse.Namespace) -> CheckResult:
             stderr=subprocess.STDOUT,
             check=False,
             timeout=args.auval_timeout,
+            encoding="utf-8",
         )
     except subprocess.TimeoutExpired as exc:
         partial = exc.output.decode(errors="replace") if isinstance(exc.output, bytes) else (exc.output or "")
@@ -340,7 +341,7 @@ def _run_probe(command: list[str], *, timeout: float | None = None) -> subproces
     limit = HOST_PROBE_TIMEOUT if timeout is None else timeout
     try:
         return subprocess.run(command, text=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, check=False, timeout=limit)
+                              stderr=subprocess.STDOUT, check=False, timeout=limit, encoding="utf-8")
     except subprocess.TimeoutExpired as exc:
         partial = exc.output.decode(errors="replace") if isinstance(exc.output, bytes) else (exc.output or "")
         return subprocess.CompletedProcess(command, 124, f"timed out after {limit:g}s\n{partial}")
@@ -518,6 +519,7 @@ def _run_auval(args: argparse.Namespace) -> list[CheckResult]:
                 stderr=subprocess.STDOUT,
                 check=False,
                 timeout=args.auval_timeout,
+            encoding="utf-8",
             )
         except subprocess.TimeoutExpired:
             results.append(CheckResult(
