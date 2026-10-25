@@ -4335,7 +4335,7 @@ blur what is under it. `View::push_effect_layers` skips the backdrop layer
 at opacity 0 and ends the chain in `opacity()` below 1. An ancestor's
 opacity layer is the backdrop root, as in Chrome. Chrome's numbers come from
 `tools/import-validation/chrome_backdrop_opacity_oracle.py` over fixture
-`21-backdrop-opacity`, and `pulp-test-css-backdrop-opacity` holds Skia to them.
+`22-backdrop-opacity`, and `pulp-test-css-backdrop-opacity` holds Skia to them.
 
 ### Step 1: Identify source and input
 

@@ -2,7 +2,7 @@
 """Read how Chromium composites backdrop-filter under opacity.
 
 This is where the expected pixels in test/test_css_backdrop_opacity.cpp come
-from. The fixture, test/fixtures/import-differential/21-backdrop-opacity.html,
+from. The fixture, test/fixtures/import-differential/22-backdrop-opacity.html,
 lays five `backdrop-filter: blur(8px)` boxes over 1px gridlines: own opacity
 0, 0.5 and 1, then a box at full opacity inside a group at opacity 0.5 and one
 inside a group at opacity 0. A gridline pixel and a gap pixel under each box
@@ -34,7 +34,7 @@ except ImportError:
 CHROME = os.environ.get(
     "PULP_CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 FIXTURE = (Path(__file__).resolve().parents[2]
-           / "test/fixtures/import-differential/21-backdrop-opacity.html")
+           / "test/fixtures/import-differential/22-backdrop-opacity.html")
 
 W, H = 512, 160
 ROW = 80

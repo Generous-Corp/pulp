@@ -1,6 +1,6 @@
 // CSS backdrop-filter under opacity, judged against Chrome's own render.
 //
-// The document below is test/fixtures/import-differential/21-backdrop-opacity.html
+// The document below is test/fixtures/import-differential/22-backdrop-opacity.html
 // as DesignIR, built into native Views the way the importer does: five
 // `backdrop-filter: blur(8px)` boxes over 1px gridlines. Every expected pixel
 // was read off Chromium's render of that file by
