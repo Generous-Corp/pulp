@@ -105,6 +105,18 @@ NOMATCH=$( ( cd "$TMP/nomatch" && "$UNDER_TEST" \
   ) >/dev/null 2>&1; echo $? )
 check "a break that changes nothing is INCONCLUSIVE" 2 "$NOMATCH"
 
+# A break that does not compile never produced a broken binary, so no test ran
+# against it. That is not evidence the test covers the change.
+make_project "$TMP/nocompile" meaningful
+NOCOMPILE=$( ( cd "$TMP/nocompile" && "$UNDER_TEST" \
+    --file value.cpp \
+    --break "perl -pi -e 's/return 42;/return not_declared;/'" \
+    --build-dir build --target fixture_test --test ./build/fixture_test --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "a break that does not compile is INCONCLUSIVE" 2 "$NOCOMPILE"
+check "the tree is restored after a break that does not compile" "" \
+    "$(cd "$TMP/nocompile" && git status --porcelain -- value.cpp)"
+
 # ── The --no-build lane, for a test whose subject is interpreted ────────────
 #
 # A Node/Python/shell test has no object or binary between the edited source and
