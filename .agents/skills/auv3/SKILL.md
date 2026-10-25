@@ -666,10 +666,12 @@ You MUST:
    vendor-signed prebuilt dylib you cannot re-sign, or an ad-hoc
    (`codesign -s -`) dev build whose components carry no Team ID. The
    old unconditional trio let any signed-by-anyone dylib load into the
-   extension. Gotcha: `pulp ship sign` refuses a `v8`/`jsc` build whose
-   entitlements grant no `allow-jit` (it reads `PULP_JS_ENGINE` from the
-   build's `CMakeCache.txt`), because such a bundle signs fine and then
-   aborts the instant the editor starts the engine.
+   extension. Gotcha: `pulp ship sign` / `ship share` refuse to sign an
+   app or appex of a `v8`/`jsc` build whose entitlements grant no
+   `allow-jit` (they read `PULP_JS_ENGINE` from the build's
+   `CMakeCache.txt`), because such a bundle signs fine and then fails the
+   instant the editor starts the engine. Plug-in bundles are exempt; they
+   run under the host's entitlements.
 4. **Sign the container .app** with the rendered
    `build/AUv3/<target>_AUv3Host.entitlements` (same per-engine policy;
    the host opens the AU UI in-process so it needs `allow-jit` exactly

@@ -250,36 +250,91 @@ static std::string configured_js_engine(const fs::path& build_dir) {
     return {};
 }
 
-// A V8 or JavaScriptCore build maps executable memory at run time; under the
-// hardened runtime that needs com.apple.security.cs.allow-jit, and a bundle
-// signed without it loads, then fails the moment its editor starts the engine.
-// The default ship entitlements grant no JIT, so refuse to sign a JIT-engine
-// build with an entitlements file that lacks it rather than produce a signed
-// artifact that is broken in every host. Returns 0 when the engine is an
-// interpreter, the build directory is not configured, or the grant is present.
-static int enforce_jit_entitlement(const fs::path& build_dir, const fs::path& entitlements) {
-    const auto engine = configured_js_engine(build_dir);
-    if (engine != "v8" && engine != "jsc")
-        return 0;
+// Whether `plist` sets `key` to <true/>: the key's next element, skipping
+// whitespace and comments, must be <true/>.
+static bool plist_grants(const std::string& plist, std::string_view key) {
+    const std::string tag = "<key>" + std::string(key) + "</key>";
+    auto pos = plist.find(tag);
+    if (pos == std::string::npos)
+        return false;
+    pos += tag.size();
+    while (pos < plist.size()) {
+        if (std::isspace(static_cast<unsigned char>(plist[pos]))) {
+            ++pos;
+        } else if (plist.compare(pos, 4, "<!--") == 0) {
+            const auto close = plist.find("-->", pos + 4);
+            if (close == std::string::npos)
+                return false;
+            pos = close + 3;
+        } else {
+            return plist.compare(pos, 7, "<true/>") == 0 || plist.compare(pos, 8, "<true />") == 0;
+        }
+    }
+    return false;
+}
+
+// Whether `artifact` runs as its own process. A plug-in bundle (.vst3,
+// .component, .clap, .aaxplugin) is loaded into its host, and the host
+// process's entitlements, not the plug-in's, decide whether JIT pages may be
+// mapped; an app, an app extension or a bare executable carries its own.
+static bool runs_as_own_process(const fs::path& artifact) {
+    const auto ext = artifact.extension().string();
+    return ext == ".app" || ext == ".appex" || ext.empty();
+}
+
+// Hardened-runtime JIT policy for the entitlements `ship` is about to apply.
+//
+// com.apple.security.cs.allow-jit is the one approved JIT entitlement (V8 and
+// JavaScriptCore map JIT pages with MAP_JIT, which it covers). A plist that
+// asks for executable memory any other way (allow-unsigned-executable-memory,
+// disable-executable-page-protection) without allow-jit is refused for every
+// artifact and engine.
+//
+// For a V8 or JavaScriptCore build (PULP_JS_ENGINE in the build's CMakeCache),
+// an artifact that runs as its own process must grant allow-jit, or it signs
+// cleanly and then fails when the engine starts. Plug-in bundles are exempt:
+// they run under their host's entitlements, so the default ship entitlements,
+// which grant no JIT, are correct for them. Returns 0 when the policy holds.
+static int enforce_jit_entitlement(const fs::path& build_dir, const fs::path& entitlements,
+                                   const std::vector<fs::path>& artifacts) {
     std::string plist;
     {
         std::ifstream in(entitlements);
         plist.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
     }
-    const auto key = plist.find("<key>com.apple.security.cs.allow-jit</key>");
-    const bool granted = key != std::string::npos &&
-                         plist.find("<true/>", key) != std::string::npos &&
-                         plist.find("<true/>", key) < plist.find("<key>", key + 1);
-    if (granted)
+    const bool allow_jit = plist_grants(plist, "com.apple.security.cs.allow-jit");
+    if (!allow_jit) {
+        for (const auto* unapproved :
+             {"com.apple.security.cs.allow-unsigned-executable-memory",
+              "com.apple.security.cs.disable-executable-page-protection"}) {
+            if (!plist_grants(plist, unapproved))
+                continue;
+            std::cerr << "Error: refusing to sign with " << unapproved << ".\n"
+                      << "  Entitlements: " << entitlements.string() << "\n"
+                      << "  The approved JIT entitlement is com.apple.security.cs.allow-jit\n"
+                      << "  (MAP_JIT); grant that instead, and only where a JIT engine runs.\n";
+            return 1;
+        }
+    }
+
+    const auto engine = configured_js_engine(build_dir);
+    if (allow_jit || (engine != "v8" && engine != "jsc"))
         return 0;
-    std::cerr << "Error: refusing to sign a PULP_JS_ENGINE=" << engine
-              << " build without the allow-jit entitlement.\n"
-              << "  Entitlements: " << entitlements.string() << "\n"
-              << "  " << engine << " maps JIT pages with MAP_JIT, which the hardened runtime\n"
-              << "  permits only under com.apple.security.cs.allow-jit; without it the\n"
-              << "  signed editor aborts when the engine starts. Pass --entitlements with\n"
-              << "  a plist that grants allow-jit (the AUv3 templates emit it per engine).\n";
-    return 1;
+    for (const auto& artifact : artifacts) {
+        if (!runs_as_own_process(artifact))
+            continue;
+        std::cerr << "Error: refusing to sign a PULP_JS_ENGINE=" << engine
+                  << " app without the allow-jit entitlement.\n"
+                  << "  Artifact: " << artifact.string() << "\n"
+                  << "  Entitlements: " << entitlements.string() << "\n"
+                  << "  " << engine << " maps JIT pages with MAP_JIT, which the hardened runtime\n"
+                  << "  permits only under com.apple.security.cs.allow-jit. Pass --entitlements\n"
+                  << "  with a plist that grants allow-jit (the AUv3 templates emit it per\n"
+                  << "  engine). Plug-in bundles run under their host's entitlements and\n"
+                  << "  need no JIT grant of their own.\n";
+        return 1;
+    }
+    return 0;
 }
 
 static int enforce_no_vellum_d15(const std::vector<fs::path>& artifacts) {
@@ -404,11 +459,6 @@ static int ship_sign(const std::vector<std::string>& args,
             rc != 0) {
             return rc;
         }
-        if (target != "android") {
-            if (int rc = enforce_jit_entitlement(build_dir, fs::path(entitlements)); rc != 0)
-                return rc;
-        }
-
         if (target == "android") {
             keystore_path = ship_config(keystore_path, "", "signing.android", "keystore");
             key_alias = ship_config(key_alias, "", "signing.android", "key_alias");
@@ -501,6 +551,13 @@ static int ship_sign(const std::vector<std::string>& args,
             }
             if (int rc = enforce_no_vellum_d15({fs::path(sign_path)}); rc != 0)
                 return rc;
+            const bool is_disk_image = (ext == ".dmg");
+            if (!is_disk_image) {
+                if (int rc = enforce_jit_entitlement(build_dir, fs::path(entitlements),
+                                                     {fs::path(sign_path)});
+                    rc != 0)
+                    return rc;
+            }
 #ifdef __APPLE__
             if (!run_signing_preflight(root)) return 1;
 #endif
@@ -508,7 +565,6 @@ static int ship_sign(const std::vector<std::string>& args,
             // notarization. Entitlements only apply to executables, so we
             // only attach them for app/plugin bundles, never a `.dmg`.
             std::cout << "Signing " << fs::path(sign_path).filename().string() << "...\n";
-            const bool is_disk_image = (ext == ".dmg");
             bool ok = pulp::ship::codesign(
                 sign_path, identity, is_disk_image ? "" : entitlements);
             if (!ok) {
@@ -535,6 +591,8 @@ static int ship_sign(const std::vector<std::string>& args,
             return 1;
         }
         if (int rc = enforce_no_vellum_d15(bundles); rc != 0)
+            return rc;
+        if (int rc = enforce_jit_entitlement(build_dir, fs::path(entitlements), bundles); rc != 0)
             return rc;
 
 #ifdef __APPLE__
@@ -2371,6 +2429,12 @@ static int ship_share(const std::vector<std::string>& args,
         if (entitlements.empty()) {
             auto def = default_entitlements(root);
             if (fs::exists(def)) entitlements = def.string();
+        }
+        if (ext == ".app") {
+            if (int rc =
+                    enforce_jit_entitlement(build_dir, fs::path(entitlements), {fs::path(input)});
+                rc != 0)
+                return rc;
         }
 
         auto artifacts = output_dir.empty() ? (root / "artifacts")
