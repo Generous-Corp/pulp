@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 
+#include "support/unique_temp_dir.hpp"
+
 #define main pulp_design_import_benchmark_main_for_test
 #include "../tools/import-design/design_import_benchmark.cpp"
 
@@ -1195,25 +1197,37 @@ TEST_CASE("design-import benchmark Skia lane counts scene-cache records and repl
     CHECK(phase.resources.paragraph_builds.frames_after_first_with_work == 0);
 }
 
-TEST_CASE("design-import benchmark IR-bound lane draws manifest images away from their directory",
-          "[design-import][benchmark]") {
-    std::string error;
-    auto target = make_frame_target("skia-raster", 32, 32, error);
-    if (!target)
-        SKIP("skia-raster target unavailable: " + error);
-    // An importer writes asset paths relative to the DesignIR's own directory.
-    const auto dir = std::filesystem::temp_directory_path() / "pulp-bench-ir-assets";
-    std::filesystem::remove_all(dir);
-    std::filesystem::create_directories(dir / "assets");
+namespace {
+
+// Restores the working directory however the scope is left.
+struct CurrentPathGuard {
+    std::filesystem::path previous = std::filesystem::current_path();
+    explicit CurrentPathGuard(const std::filesystem::path& next) {
+        std::filesystem::current_path(next);
+    }
+    ~CurrentPathGuard() {
+        std::error_code ec;
+        std::filesystem::current_path(previous, ec);
+    }
+    CurrentPathGuard(const CurrentPathGuard&) = delete;
+    CurrentPathGuard& operator=(const CurrentPathGuard&) = delete;
+};
+
+void write_pixel_png(const std::filesystem::path& path) {
     static constexpr std::uint8_t kPng[] = {
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
         0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
         0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
         0x9c, 0x63, 0x78, 0xd0, 0x66, 0xf3, 0x1f, 0x00, 0x06, 0x8e, 0x02, 0xa2, 0x86, 0xc6,
         0xaa, 0xc4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
-    std::ofstream(dir / "assets" / "pixel.png", std::ios::binary)
-        .write(reinterpret_cast<const char*>(kPng), sizeof(kPng));
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path, std::ios::binary).write(reinterpret_cast<const char*>(kPng), sizeof(kPng));
+}
 
+// A DesignIR with one text slot and one image whose manifest names
+// `local_path`, written as design.ir.json in `dir`.
+std::filesystem::path write_image_ir(const std::filesystem::path& dir,
+                                     const std::string& local_path) {
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.stable_anchor_id = "root";
@@ -1236,29 +1250,77 @@ TEST_CASE("design-import benchmark IR-bound lane draws manifest images away from
     ir.root.children.push_back(image);
     IRAssetRef asset;
     asset.asset_id = "image:pixel";
-    asset.local_path = "assets/pixel.png";
+    asset.local_path = local_path;
     ir.asset_manifest.assets.push_back(asset);
     const auto path = dir / "design.ir.json";
     std::ofstream(path) << serialize_design_ir(ir);
+    return path;
+}
 
-    // Run from a directory that holds no assets/ folder, as the bench does
-    // when it is not started beside the DesignIR.
-    const auto previous = std::filesystem::current_path();
-    std::filesystem::current_path(std::filesystem::temp_directory_path());
-    Config config = lane_config("baked-native");
-    config.ir_path = path;
-    auto fixture = make_fixture(config);
-    std::filesystem::current_path(previous);
+// Image-cache work over three frames of the IR-bound lane, materialized from
+// `cwd`.
+PhaseMetrics image_phase(const std::filesystem::path& ir_path, const std::filesystem::path& cwd,
+                         FrameTarget& target) {
+    std::unique_ptr<BenchmarkFixture> fixture;
+    {
+        CurrentPathGuard guard(cwd);
+        Config config = lane_config("baked-native");
+        config.ir_path = ir_path;
+        fixture = make_fixture(config);
+    }
     REQUIRE(fixture != nullptr);
     PhaseOptions options;
-    options.target = target.get();
-    const auto phase = run_phase(*fixture, 0, 3, 60, false, 0, options);
+    options.target = &target;
+    return run_phase(*fixture, 0, 3, 60, false, 0, options);
+}
+
+} // namespace
+
+TEST_CASE("design-import benchmark IR-bound lane draws manifest images away from their directory",
+          "[design-import][benchmark]") {
+    std::string error;
+    auto target = make_frame_target("skia-raster", 32, 32, error);
+    if (!target)
+        SKIP("skia-raster target unavailable: " + error);
+    // An importer writes asset paths relative to the DesignIR's own directory.
+    const auto dir = pulp::test::make_unique_temp_dir("pulp-bench-ir-assets");
+    write_pixel_png(dir / "assets" / "pixel.png");
+    const auto path = write_image_ir(dir, "assets/pixel.png");
+    // Run from a directory that holds no assets/ folder, as the bench does
+    // when it is not started beside the DesignIR.
+    const auto phase = image_phase(path, std::filesystem::temp_directory_path(), *target);
     // The image is decoded and cached on the first frame and drawn from the
     // cache after it; an unresolved path would read zero on every count.
     CHECK(phase.resources.image_cache_builds.total == 1);
     CHECK(phase.resources.image_cache_hits.total >= 2);
     CHECK(phase.resources.image_cache_builds.frames_after_first_with_work == 0);
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("design-import benchmark IR-bound lane refuses assets outside the IR's directory",
+          "[design-import][benchmark]") {
+    std::string error;
+    auto target = make_frame_target("skia-raster", 32, 32, error);
+    if (!target)
+        SKIP("skia-raster target unavailable: " + error);
+    // With the DesignIR's directory as the asset base, the materializer's
+    // containment applies: a manifest path that climbs out of it, or names
+    // an absolute file elsewhere, is refused even though the file exists and
+    // a working-directory lookup would have found it.
+    const auto root = pulp::test::make_unique_temp_dir("pulp-bench-ir-escape");
+    write_pixel_png(root / "outside" / "pixel.png");
+    const auto dir = root / "document";
+    std::filesystem::create_directories(dir);
+    for (const std::string local :
+         {std::string{"../outside/pixel.png"}, (root / "outside" / "pixel.png").string()}) {
+        INFO("local_path: " << local);
+        const auto path = write_image_ir(dir, local);
+        const auto phase = image_phase(path, dir, *target);
+        CHECK(phase.resources.image_cache_builds.total == 0);
+        CHECK(phase.resources.image_cache_hits.total == 0);
+        CHECK(phase.resources.image_decodes.total == 0);
+    }
+    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("design-import benchmark Graphite lane counts GPU uploads",
