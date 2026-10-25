@@ -12,6 +12,7 @@
 #include <pulp/canvas/canvas.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -72,5 +73,15 @@ struct ResourceSample {
     std::uint64_t image_cache_builds = 0;
 };
 ResourceSample sample_resources();
+
+// Turns the canvas's laid-out paragraph cache on or off for the process, so a
+// run can measure the uncached text path. A build without Skia shapes no
+// paragraphs, so there the switch has nothing to do.
+void set_paragraph_cache_enabled(bool enabled);
+
+// Calls @p observer with the text of every paragraph the canvas shapes, so a
+// frame's shaping can be checked against the text its update wrote. An empty
+// function removes it.
+void set_paragraph_build_observer(std::function<void(std::string_view)> observer);
 
 } // namespace pulp::design_import_bench
