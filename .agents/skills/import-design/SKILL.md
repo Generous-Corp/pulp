@@ -193,6 +193,13 @@ fractional layout box; that is the 1 device px the Spectr slider was off by.
 `indeterminate` and a `disabled` inherited from a `<fieldset>` are not in the
 DOMSnapshot, so they are not recorded.
 
+A native-verdict `<button>` records `ua_control=button`, `ua_color_scheme` and
+`ua_disabled`, loses the UA stylesheet's grey background and 2px outset border,
+and becomes a `ButtonSurface` (Chromium's push-button paint) in place of the
+frame, with its text and icons kept as children. An author-styled button keeps
+its captured paint and stays a frame. `<input type=button|submit|reset>` is not
+lowered this way yet.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
@@ -1152,9 +1159,13 @@ materializer. Baked C++ alone still flattens — honest partial.
 **`textAlignVertical` is design authority; the tall-slot heuristic is only a
 fallback.** All three producers emit `style.vertical_align`
 (top/middle/bottom; kiwi omits the `.fig` TOP default so it only appears when
-set). Codegen honors it verbatim in both JS arms — including an explicit
-`top`, which SUPPRESSES the old slot-taller-than-font centering guess (that
-heuristic now fires only when the source never says). Expect imports to MOVE
+set). Codegen honors it verbatim in both JS arms, and the native materializer
+and baked C++ lane share the same rule (`imported_vertical_align()` in
+`design_ir_helpers.hpp`), including an explicit `top`, which SUPPRESSES the
+old slot-taller-than-font centering guess (that heuristic now fires only when
+the source never says). A browser capture records `middle` for a control's
+`#control-value` text; before the native lane read it, a button input's label
+painted top-aligned, 1.41 CSS px below Chromium's. Expect imports to MOVE
 text vs pre-emission renders where designs author TOP in a reserved slot —
 that movement is fidelity, not a regression (layout dumps stay byte-identical;
 vertical align is paint, not geometry). Auto-resize / truncation / max-lines /
@@ -4541,6 +4552,25 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   timers/intervals/rAFs are cancelled, the schedulers are stubbed, CSS animation
   and transition are disabled, and `captureStableScreenshot` requires a
   byte-identical trailing run as the observable proof of stillness.
+- **Web Animations and video are frozen before the frame is read.** The
+  motion stylesheet and scheduler stubs cannot reach `element.animate()` or a
+  playing `<video>`; both run on the document clock. `freezeMotion`
+  (`settle.mjs`) runs before every page-settle sample (`waitForStable`'s
+  `beforeSample`), because a Web Animation that moves a box would otherwise
+  keep the layout from ever settling, even one a late timer or font load
+  starts mid-settle, and once more after every settle and before the
+  materialized document and the screenshot horizon. Each pass
+  settles only what an earlier one did not, or what the page restarted, and
+  counts each animation and video once: a finite Web Animation is `finish()`ed (its
+  resting frame), an infinite or unresolved one is paused at `currentTime 0`,
+  and a video is paused and rewound to its first frame unless it still shows
+  its poster. CSS animations and transitions stay on the stylesheet path, and
+  scroll- or view-driven animations are left to the fixed scroll position. An
+  animated GIF, APNG or WebP runs on the decoder's clock, so it is left alone
+  and listed in `provenance.motion.volatile_sources` (classified from its own
+  bytes by `animatedImageKind`, in the last pass only), next to the per-kind
+  counts. A page that
+  throws inside the freeze fails with `capture-motion-freeze-failed`.
 - **Browser discovery has a version FLOOR and no ceiling.**
   `kMinimumChromiumMajor = 109` (`browser_capture_backend.hpp`) is the only
   version comparison in the probe — nothing rejects a browser for being too

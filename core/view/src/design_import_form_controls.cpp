@@ -44,8 +44,16 @@ std::optional<NativeWidgetKind> ua_form_control_kind(const IRNode& node) {
     const auto state = ua_form_control_state(node);
     if (!state)
         return std::nullopt;
-    return state->control == UaFormControlState::Control::range ? NativeWidgetKind::range_slider
-                                                                : NativeWidgetKind::checkbox;
+    switch (state->control) {
+    case UaFormControlState::Control::range:
+        return NativeWidgetKind::range_slider;
+    case UaFormControlState::Control::button:
+        return NativeWidgetKind::button_surface;
+    case UaFormControlState::Control::checkbox:
+    case UaFormControlState::Control::radio:
+        break;
+    }
+    return NativeWidgetKind::checkbox;
 }
 
 std::optional<UaFormControlState> ua_form_control_state(const IRNode& node) {
@@ -59,12 +67,16 @@ std::optional<UaFormControlState> ua_form_control_state(const IRNode& node) {
         state.control = UaFormControlState::Control::checkbox;
     else if (control == "radio")
         state.control = UaFormControlState::Control::radio;
+    else if (control == "button")
+        state.control = UaFormControlState::Control::button;
     else
         return std::nullopt;
     state.scheme = scheme_of(node);
+    state.disabled = attr(node, "ua_disabled").has_value();
+    if (state.control == UaFormControlState::Control::button)
+        return state;
     if (const auto accent = attr(node, "ua_accent"); accent && css_color_syntax_supported(*accent))
         state.accent = *accent;
-    state.disabled = attr(node, "ua_disabled").has_value();
     if (state.control == UaFormControlState::Control::range) {
         // HTML's defaults: min 0, max 100, step 1, and `step="any"` for none.
         state.min = html_number(node, "ua_min").value_or(0.0f);
@@ -118,7 +130,8 @@ std::unique_ptr<RangeSlider> make_ua_range_slider(const IRNode& node) {
 
 void apply_ua_checkbox(Checkbox& checkbox, const IRNode& node) {
     const auto state = ua_form_control_state(node);
-    if (!state || state->control == UaFormControlState::Control::range)
+    if (!state || state->control == UaFormControlState::Control::range ||
+        state->control == UaFormControlState::Control::button)
         return;
     checkbox.set_skin(UaSkin::chromium_refresh);
     checkbox.set_color_scheme(state->scheme);
@@ -131,6 +144,17 @@ void apply_ua_checkbox(Checkbox& checkbox, const IRNode& node) {
     checkbox.set_checked(state->checked);
     if (state->disabled)
         checkbox.set_enabled(false);
+}
+
+std::unique_ptr<ButtonSurface> make_ua_button_surface(const IRNode& node) {
+    auto surface = std::make_unique<ButtonSurface>();
+    const auto state = ua_form_control_state(node);
+    if (!state || state->control != UaFormControlState::Control::button)
+        return surface;
+    surface->set_color_scheme(state->scheme);
+    if (state->disabled)
+        surface->set_enabled(false);
+    return surface;
 }
 
 } // namespace pulp::view
