@@ -960,6 +960,9 @@ with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as log:
 text = " ".join(args)
 for key, answer in fixture.items():
     if key in text:
+        if answer == "!FAIL":
+            sys.stderr.write("HTTP 502: Bad Gateway\\n")
+            sys.exit(1)
         sys.stdout.write(answer)
         break
 """
@@ -1199,22 +1202,33 @@ class MacosArmRefusalTest(unittest.TestCase):
         self.assertNotIn("actions/checkout", json.dumps(self.workflow))
         self.assertEqual(self.job["if"], "vars.PULP_MACOS_PR_GATING == 'true'")
 
+    URL = "https://github.com/Generous-Corp/pulp/actions/runs/{run}/job/{check}"
+
     def _run(self, latest: str, tier: str = "",
-             run_repos: dict[str, str] | None = None) -> list[list[str]]:
-        # `latest` is the check runs newest first, `<id> <status> <conclusion>`
-        # per line; each belongs to workflow run 1<id> unless it names one.
-        lines = []
+             run_repos: dict[str, str] | None = None, annotations: str | None = None,
+             listing: str | None = None) -> list[list[str]]:
+        # `latest` is the check runs newest first, `<id> <status> <conclusion>
+        # [<run id> | <details url>]` per line; a bare line belongs to run
+        # 1<id>. `listing`, `annotations` or a run_repos value of "!FAIL" makes
+        # that read fail.
+        lines, runs = [], {}
         for line in latest.splitlines():
-            fields = line.split()
-            lines.append(" ".join(fields if len(fields) == 4 else fields + ["1" + fields[0]]))
-        runs = {fields.split()[3]: "Generous-Corp/pulp" for fields in lines}
+            check, status, conclusion, *rest = line.split()
+            where = rest[0] if rest else "1" + check
+            url = where if "/" in where else self.URL.format(run=where, check=check)
+            if "/" not in where:
+                runs[where] = "Generous-Corp/pulp"
+            lines.append(f"{check} {status} {conclusion} {url}")
         runs.update(run_repos or {})
+        if annotations is None:
+            annotations = ('{"schema":"shipyard-test-tier/v1","tier":"%s"}\n' % tier) if tier else ""
         fixture = {
-            "/annotations": ('{"schema":"shipyard-test-tier/v1","tier":"%s"}\n' % tier) if tier else "",
+            "/annotations": annotations,
             "mutation(": "",
             "/comments": "",
-            **{f"actions/runs/{run} ": f"{head_repo}\n" for run, head_repo in runs.items()},
-            "commits/": "".join(line + "\n" for line in lines),
+            **{f"actions/runs/{run} ": (answer if answer == "!FAIL" else f"{answer}\n")
+               for run, answer in runs.items()},
+            "commits/": listing if listing is not None else "".join(line + "\n" for line in lines),
         }
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir = Path(tmp) / "bin"
@@ -1242,6 +1256,10 @@ class MacosArmRefusalTest(unittest.TestCase):
         commented = any("issues/7/comments" in call for call in text)
         assert disarmed == commented, text  # a refusal always says why
         return disarmed
+
+    @staticmethod
+    def _comment(calls: list[list[str]]) -> str:
+        return next(" ".join(call) for call in calls if "issues/7/comments" in " ".join(call))
 
     def test_an_arm_with_no_macos_check_yet_is_refused(self) -> None:
         self.assertTrue(self._refused(self._run("")))
@@ -1271,6 +1289,38 @@ class MacosArmRefusalTest(unittest.TestCase):
         self.assertTrue(self._refused(self._run("9 completed success 900\n", tier="full",
                                                 run_repos={"900": "someone/pulp"})))
 
+    def test_a_newest_check_run_from_elsewhere_is_refused_not_passed_over(self) -> None:
+        # An older same-repository success must not decide for it.
+        calls = self._run("9 completed success https://example.com/x/actions/runs/900/job/9\n"
+                          "5 completed success\n", tier="full")
+        self.assertTrue(self._refused(calls))
+        self.assertIn("could not verify", self._comment(calls))
+        self.assertFalse(any("check-runs/5/annotations" in " ".join(c) for c in calls))
+
+    def test_a_check_run_with_no_readable_run_id_is_refused(self) -> None:
+        bad = "https://github.com/Generous-Corp/pulp/actions/runs/abc/job/9"
+        calls = self._run(f"9 completed success {bad}\n5 completed success\n", tier="full")
+        self.assertTrue(self._refused(calls))
+        self.assertIn("could not verify", self._comment(calls))
+
+    def test_a_failed_run_lookup_is_refused(self) -> None:
+        for answer in ("!FAIL", ""):
+            with self.subTest(answer=answer):
+                calls = self._run("9 completed success 900\n5 completed success\n", tier="full",
+                                  run_repos={"900": answer})
+                self.assertTrue(self._refused(calls))
+                self.assertIn("could not verify", self._comment(calls))
+
+    def test_a_failed_check_run_listing_is_refused(self) -> None:
+        calls = self._run("", listing="!FAIL")
+        self.assertTrue(self._refused(calls))
+        self.assertIn("could not verify", self._comment(calls))
+
+    def test_unreadable_annotations_are_refused(self) -> None:
+        calls = self._run("5 completed success\n", annotations="!FAIL")
+        self.assertTrue(self._refused(calls))
+        self.assertIn("could not verify", self._comment(calls))
+
     def test_a_success_without_an_allowed_tier_is_refused(self) -> None:
         # Only an explicit `full`, `fast` or `not-required` tier passes.
         self.assertTrue(self._refused(self._run("5 completed success\n")))
@@ -1278,8 +1328,11 @@ class MacosArmRefusalTest(unittest.TestCase):
 
     def test_it_reads_only_this_repositorys_actions_check_runs(self) -> None:
         run = self.step["run"]
-        self.assertIn('.app.slug == \\"github-actions\\"', run)
-        self.assertIn('startswith(\\"$GITHUB_SERVER_URL/$repo/actions/runs/\\")', run)
+        self.assertIn('select(.app.slug == "github-actions")', run)
+        self.assertIn('runs_prefix="$GITHUB_SERVER_URL/$repo/actions/runs/"', run)
+        # No errexit: a failed read must still reach the disable.
+        self.assertIn("set -uo pipefail", run)
+        self.assertNotIn("set -e", run)
 
     def test_its_comment_says_what_it_checked(self) -> None:
         # It checks the macos run, not approval, and says only that.

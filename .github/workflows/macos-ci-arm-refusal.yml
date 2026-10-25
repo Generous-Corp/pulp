@@ -47,46 +47,67 @@ jobs:
           PR_NODE_ID: ${{ github.event.pull_request.node_id }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          set -euo pipefail
+          # Fails closed: every read that fails, and every check run it cannot
+          # place, becomes a refusal. The only check run passed over is one
+          # proven to be for a head in another repository; it never falls back
+          # to an older run on uncertainty. So no errexit: a failed read must
+          # still reach the disable below.
+          set -uo pipefail
           repo="$GITHUB_REPOSITORY"
-          # This repository's GitHub Actions `macos` check runs on this head,
-          # newest first, each with the workflow run it belongs to.
-          candidates=$(gh api "repos/$repo/commits/$HEAD_SHA/check-runs?check_name=macos&filter=latest&per_page=100" \
-            --jq "[.check_runs[] | select(.app.slug == \"github-actions\" and (.details_url | startswith(\"$GITHUB_SERVER_URL/$repo/actions/runs/\")))] | sort_by(.id) | reverse | .[] | \"\\(.id) \\(.status) \\(.conclusion) \\(.details_url | split(\"/actions/runs/\")[1] | split(\"/\")[0])\"")
-          # The newest one whose workflow run's head is in this repository. A
-          # run for a head in another repository is ignored, never trusted.
-          latest=""
-          while read -r candidate_check candidate_status candidate_conclusion run_id; do
-            [ -n "${candidate_check:-}" ] || continue
-            head_repo=$(gh api "repos/$repo/actions/runs/$run_id" --jq '.head_repository.full_name')
-            if [ "$head_repo" = "$repo" ]; then
-              latest="$candidate_check $candidate_status $candidate_conclusion"
-              break
-            fi
-            echo "ignoring macos check run $candidate_check: its run $run_id is for a head in $head_repo"
-          done <<< "$candidates"
+          runs_prefix="$GITHUB_SERVER_URL/$repo/actions/runs/"
           reason=""
-          if [ -z "$latest" ]; then
-            reason="no macos check has run on it yet"
+          check_run=""
+          # GitHub Actions' `macos` check runs on this head, newest first.
+          if ! candidates=$(gh api "repos/$repo/commits/$HEAD_SHA/check-runs?check_name=macos&filter=latest&per_page=100" \
+              --jq '[.check_runs[] | select(.app.slug == "github-actions")] | sort_by(.id) | reverse | .[] | "\(.id) \(.status) \(.conclusion) \(.details_url)"'); then
+            reason="could not verify its macos check: the head's check runs could not be read"
           else
-            read -r check_run status conclusion <<< "$latest"
-            if [ "$status" != completed ]; then
+            while read -r candidate status_ conclusion_ url; do
+              [ -n "${candidate:-}" ] || continue
+              if [[ "$url" != "$runs_prefix"* ]]; then
+                reason="could not verify its macos check: check run $candidate is not from this repository's workflows ($url)"
+                break
+              fi
+              run_id="${url#"$runs_prefix"}"
+              run_id="${run_id%%/*}"
+              if ! [[ "$run_id" =~ ^[0-9]+$ ]]; then
+                reason="could not verify its macos check: check run $candidate has no readable workflow run id"
+                break
+              fi
+              if ! head_repo=$(gh api "repos/$repo/actions/runs/$run_id" --jq '.head_repository.full_name // ""') \
+                  || [ -z "$head_repo" ]; then
+                reason="could not verify its macos check: workflow run $run_id could not be read"
+                break
+              fi
+              if [ "$head_repo" != "$repo" ]; then
+                echo "passing over macos check run $candidate: its run $run_id is for a head in $head_repo"
+                continue
+              fi
+              check_run="$candidate"
+              status="$status_"
+              conclusion="$conclusion_"
+              break
+            done <<< "$candidates"
+          fi
+          if [ -z "$reason" ]; then
+            if [ -z "$check_run" ]; then
+              reason="no macos check has run on it yet"
+            elif [ "$status" != completed ]; then
               reason="its macos check is still $status"
             elif [ "$conclusion" != success ]; then
               reason="its macos check concluded $conclusion"
-            else
-              tiers=$(gh api --paginate "repos/$repo/check-runs/$check_run/annotations?per_page=100" \
-                --jq '.[] | select(.title == "shipyard-test-tier") | .message')
-              # Only an explicit tier passes: `full` (the full suite, as a
-              # dispatch runs it), `fast` (the full lane on a pull request) or
-              # `not-required` (skip-safe). `deferred`, a missing tier or any
-              # other is refused.
-              if [[ "$tiers" == *'"tier":"deferred"'* ]]; then
-                reason="its macos check is the contract lane (tier deferred), which builds nothing"
-              elif [[ "$tiers" != *'"tier":"full"'* && "$tiers" != *'"tier":"fast"'* \
-                  && "$tiers" != *'"tier":"not-required"'* ]]; then
-                reason="its macos check carries no full, full-lane or skip-safe tier"
-              fi
+            elif ! tiers=$(gh api --paginate "repos/$repo/check-runs/$check_run/annotations?per_page=100" \
+                --jq '.[] | select(.title == "shipyard-test-tier") | .message'); then
+              reason="could not verify its macos check: the annotations of check run $check_run could not be read"
+            # Only an explicit tier passes: `full` (the full suite, as a
+            # dispatch runs it), `fast` (the full lane on a pull request) or
+            # `not-required` (skip-safe). `deferred`, a missing tier or any
+            # other is refused.
+            elif [[ "$tiers" == *'"tier":"deferred"'* ]]; then
+              reason="its macos check is the contract lane (tier deferred), which builds nothing"
+            elif [[ "$tiers" != *'"tier":"full"'* && "$tiers" != *'"tier":"fast"'* \
+                && "$tiers" != *'"tier":"not-required"'* ]]; then
+              reason="its macos check carries no full, full-lane or skip-safe tier"
             fi
           fi
           if [ -z "$reason" ]; then
@@ -94,10 +115,21 @@ jobs:
             exit 0
           fi
           # shellcheck disable=SC2016  # $id is a GraphQL variable
-          gh api graphql \
-            -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }' \
-            -f id="$PR_NODE_ID" >/dev/null
+          if ! gh api graphql \
+              -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }' \
+              -f id="$PR_NODE_ID" >/dev/null; then
+            echo "::error title=auto-merge not disabled::#$PR_NUMBER at $HEAD_SHA should be disarmed ($reason) but the mutation failed; disable auto-merge by hand"
+            exit 1
+          fi
           echo "disabled auto-merge on #$PR_NUMBER at $HEAD_SHA: $reason"
-          gh api --method POST "repos/$repo/issues/$PR_NUMBER/comments" -f body="Auto-merge disabled: this head has no completed full macOS run yet ($reason).
+          if [[ "$reason" == "could not verify"* ]]; then
+            summary="Auto-merge disabled: $reason, so this head is not known to have a completed full macOS run."
+          else
+            summary="Auto-merge disabled: this head has no completed full macOS run yet ($reason)."
+          fi
+          if ! gh api --method POST "repos/$repo/issues/$PR_NUMBER/comments" -f body="$summary
 
-          Arm it again once this head's \`macos\` check is a completed full-lane success (docs/guides/local-ci.md, \"macOS on a pull request waits for approval\")." >/dev/null
+          Arm it again once this head's \`macos\` check is a completed full-lane success (docs/guides/local-ci.md, \"macOS on a pull request waits for approval\")." >/dev/null; then
+            echo "::warning title=refusal comment not posted::auto-merge on #$PR_NUMBER was disabled ($reason), but the comment saying why failed"
+            exit 1
+          fi

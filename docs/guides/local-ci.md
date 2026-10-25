@@ -3748,9 +3748,11 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
      run from this repository's Actions workflows, whose workflow run is for a
      head in this repository, is a completed success with an explicit `full`
      (a dispatch's full suite), `fast` (full lane) or `not-required`
-     (skip-safe) tier. Its
-     comment says what it found about the macos run; it does not judge
-     approval.
+     (skip-safe) tier. It fails closed: a read that fails, or a check run
+     it cannot place, is a refusal ("could not verify …"). Only a check run
+     proven to be for a head in another repository is passed over, and it
+     never falls back to an older run on uncertainty. Its comment says what it
+     found about the macos run; it does not judge approval.
   2. At the contract lane's conclusion: its `macos` job's last step, `Refuse a
      head armed before approval (contract lane)`, fails when this exact head is
      armed for auto-merge or already in the merge queue (read over GraphQL
