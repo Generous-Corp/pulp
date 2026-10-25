@@ -179,3 +179,39 @@ TEST_CASE("only ad hoc and Apple Development identities sign a dev-shared build"
     REQUIRE_FALSE(pulp::cli::is_local_signing_identity("Apple Development"));
     REQUIRE_FALSE(pulp::cli::is_local_signing_identity("Mac Developers Inc: Release"));
 }
+
+TEST_CASE("a container's expanded size is read from zipinfo and PackageInfo",
+          "[cli][sdk][ship][dev-shared]") {
+    using pulp::cli::pkg_payload_install_bytes;
+    using pulp::cli::zipinfo_uncompressed_bytes;
+    REQUIRE(zipinfo_uncompressed_bytes(
+                "3 files, 1048576 bytes uncompressed, 2048 bytes compressed:  99.8%\n") ==
+            1048576u);
+    REQUIRE(zipinfo_uncompressed_bytes("1 file, 0 bytes uncompressed, 0 bytes compressed:  0.0%") ==
+            0u);
+    REQUIRE_FALSE(zipinfo_uncompressed_bytes("Empty zipfile.\n").has_value());
+    REQUIRE_FALSE(zipinfo_uncompressed_bytes("").has_value());
+
+    REQUIRE(pkg_payload_install_bytes(
+                R"(<pkg-info identifier="com.x"><payload numberOfFiles="3" installKBytes="4096"/>)"
+                R"(</pkg-info>)") == 4096u * 1024);
+    // The attribute is read from the payload element, not from elsewhere.
+    REQUIRE_FALSE(pkg_payload_install_bytes(R"(<pkg-info installKBytes="9"><scripts/></pkg-info>)")
+                      .has_value());
+    REQUIRE_FALSE(
+        pkg_payload_install_bytes(R"(<payload numberOfFiles="1"/><bundle installKBytes="9"/>)")
+            .has_value());
+    REQUIRE_FALSE(pkg_payload_install_bytes(R"(<payload installKBytes=""/>)").has_value());
+}
+
+TEST_CASE("a container is only extracted when it fits with room to spare",
+          "[cli][sdk][ship][dev-shared]") {
+    constexpr std::uintmax_t mib = 1024 * 1024;
+    REQUIRE(pulp::cli::container_space_refusal(10 * mib, 1024 * mib).empty());
+    REQUIRE(pulp::cli::container_space_refusal(0, 256 * mib).empty());
+    // Fits, but would leave less than the reserve.
+    const auto tight = pulp::cli::container_space_refusal(800 * mib, 1000 * mib);
+    REQUIRE(tight.find("838860800 bytes") != std::string::npos);
+    REQUIRE(tight.find("1048576000 bytes free") != std::string::npos);
+    REQUIRE_FALSE(pulp::cli::container_space_refusal(2000 * mib, 1000 * mib).empty());
+}

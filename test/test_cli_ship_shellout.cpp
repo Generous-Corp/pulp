@@ -21,7 +21,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -2688,6 +2690,139 @@ TEST_CASE_METHOD(ShipShelloutFixture, "a container's symlinks are not followed o
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
+                 "an encrypted dmg is refused at once rather than waiting for a passphrase",
+                 "[cli][shellout][ship][notarize][dev-shared][hdiutil]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-encrypted-dmg", true);
+    const auto stage = root / "encrypted-stage";
+    stage_container_payload(stage, false);
+    const auto dmg = root / "Locked.dmg";
+    auto made = ChildProcess::run(
+        "/bin/sh",
+        {"-c",
+         "printf 'pulp-test-passphrase' | /usr/bin/hdiutil create -quiet -ov -encryption AES-128 "
+         "-stdinpass -srcfolder \"$0\" \"$1\"",
+         stage.string(), dmg.string()},
+        ProcessOptions{});
+    INFO(made.stdout_output << made.stderr_output);
+    REQUIRE(made.exit_code == 0);
+
+    // stdin stays open and silent, as in a terminal nobody answers: a tool
+    // that reads its passphrase from it waits until the timeout.
+    ProcessOptions opts;
+    opts.timeout_ms = 60000;
+    opts.working_directory = root.string();
+    std::vector<std::string> args = {"-c",
+                                     "exec \"$@\" < <(exec sleep 90 >/dev/null 2>&1)",
+                                     "notarize",
+                                     pulp_binary().string(),
+                                     "ship",
+                                     "notarize",
+                                     "--dry-run",
+                                     "--path",
+                                     dmg.string(),
+                                     "--api-key",
+                                     "/path/AuthKey_FAKE.p8",
+                                     "--api-key-id",
+                                     "FAKEKEYID",
+                                     "--api-issuer",
+                                     "fake-issuer"};
+    const auto started = std::chrono::steady_clock::now();
+    auto r = ChildProcess::run("/bin/bash", args, opts);
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(std::chrono::steady_clock::now() - started < std::chrono::seconds(30));
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output, "hdiutil attach failed"));
+    REQUIRE(contains(r.stderr_output, "encrypted image"));
+    REQUIRE(contains(r.stderr_output, "licence agreement (SLA)"));
+    REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "notarytool submit"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "a signal during a dmg scan detaches the image and removes the temp dir",
+                 "[cli][shellout][ship][notarize][dev-shared][hdiutil]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-dmg-signal", true);
+    const auto stage = root / "signal-stage";
+    stage_container_payload(stage, false);
+    // A zip of 30000 empty files, inside the image: ditto takes seconds to
+    // create them, so it is still running in the scan's second level, with
+    // the image mounted, when the signal arrives and for a while after.
+    const auto filler = root / "filler";
+    for (int dir = 0; dir < 30; ++dir) {
+        const auto sub = filler / std::to_string(dir);
+        fs::create_directories(sub);
+        for (int file = 0; file < 1000; ++file)
+            std::ofstream(sub / (std::to_string(file) + ".txt"));
+    }
+    zip_item(filler, stage / "Filler.zip");
+    fs::remove_all(filler);
+    const auto image = root / "Busy.dmg";
+    auto made = ChildProcess::run("/usr/bin/hdiutil",
+                                  {"create", "-quiet", "-ov", "-format", "UDZO", "-srcfolder",
+                                   stage.string(), image.string()},
+                                  ProcessOptions{});
+    INFO(made.stdout_output << made.stderr_output);
+    REQUIRE(made.exit_code == 0);
+
+    const auto scans = fs::temp_directory_path() / "pulp-ship-container-scan";
+    const auto list_scans = [&] {
+        std::vector<fs::path> found;
+        std::error_code ec;
+        for (fs::directory_iterator it(scans, ec), end; !ec && it != end; it.increment(ec))
+            found.push_back(it->path());
+        return found;
+    };
+    const auto before = list_scans();
+
+    ChildProcess scan;
+    ProcessOptions opts;
+    opts.timeout_ms = 120000;
+    opts.working_directory = root.string();
+    REQUIRE(scan.start(pulp_binary().string(),
+                       {"ship", "notarize", "--dry-run", "--path", image.string(), "--api-key",
+                        "/path/AuthKey_FAKE.p8", "--api-key-id", "FAKEKEYID", "--api-issuer",
+                        "fake-issuer"},
+                       opts));
+    // Signal as soon as the nested zip starts extracting: the image is
+    // mounted at level1/contents and ditto is writing level2/contents.
+    fs::path scan_root;
+    bool extracting = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (!extracting && scan.is_running() && std::chrono::steady_clock::now() < deadline) {
+        if (scan_root.empty()) {
+            for (const auto& candidate : list_scans())
+                if (std::find(before.begin(), before.end(), candidate) == before.end())
+                    scan_root = candidate;
+            continue;
+        }
+        std::error_code ec;
+        extracting = fs::exists(scan_root / "level2" / "contents", ec);
+    }
+    REQUIRE(extracting);
+    REQUIRE(::kill(scan.process_id(), SIGTERM) == 0);
+    auto r = scan.wait(); // unbounded-wait: allow wait() kills the child at opts.timeout_ms
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "notarytool submit"));
+
+    // Nothing the scan started is left running.
+    auto orphans = ChildProcess::run("/usr/bin/pgrep", {"-f", scan_root.filename().string()},
+                                     ProcessOptions{});
+    INFO("still running: " << orphans.stdout_output);
+    REQUIRE(orphans.exit_code == 1);
+    auto mounted = ChildProcess::run("/sbin/mount", {}, ProcessOptions{});
+    REQUIRE_FALSE(contains(mounted.stdout_output, scan_root.filename().string()));
+    REQUIRE_FALSE(fs::exists(scan_root));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
                  "a container that cannot be opened is refused, and share scans its input",
                  "[cli][shellout][ship][share][dev-shared]") {
     if (!binary_exists()) {
@@ -2700,7 +2835,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     INFO(r.stdout_output << r.stderr_output);
     REQUIRE(r.exit_code == 1);
     REQUIRE(contains(r.stderr_output, "cannot check"));
-    REQUIRE(contains(r.stderr_output, "ditto -x -k failed"));
+    REQUIRE(contains(r.stderr_output, "zipinfo cannot read its size"));
     REQUIRE(contains(r.stderr_output, "fails closed"));
 
     const auto pkg = make_container(root, "pkg", true);

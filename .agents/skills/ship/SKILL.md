@@ -361,6 +361,26 @@ a dev-shared build may be signed for local loading, never distributed.
   recognized by content (zip header, xar header, UDIF `koly` trailer) or
   extension and opened in turn, up to 3 levels; a deeper one is refused, as is
   a container that does not open (fail closed).
+- Every container tool runs with stdin from `/dev/null`, and `hdiutil attach`
+  takes `-stdinpass`. Without that, `std::system` hands the tools the
+  terminal, and an encrypted image or one with a licence agreement (SLA)
+  waits for an answer, so `notarize` hangs instead of refusing. Fixture for
+  an encrypted image: `printf pw | hdiutil create -encryption AES-128
+  -stdinpass -srcfolder <dir> <out>.dmg`. A test of the hang has to keep the
+  child's stdin open and silent (`exec "$@" < <(exec sleep 90)` under bash):
+  with stdin at EOF the old code failed fast and looked fixed.
+- Before extracting, the scan reads the expanded size (`zipinfo -t` for a
+  zip; the `installKBytes` of each `PackageInfo` from a shallow
+  `pkgutil --expand` for a pkg) and refuses unless it fits on the temp volume
+  with 256 MiB to spare. A disk image is mounted, not copied, so it is not
+  sized.
+- The tools are forked and exec'd directly (`run_ship_tool`), not through
+  `std::system`, so the scan knows the running child's pid. SIGINT, SIGTERM
+  and SIGHUP during a scan kill that child, detach the registered mountpoints
+  and remove the scan's temp root from the signal handler (fork/execv only,
+  paths in fixed buffers), then re-raise. Killing the child first matters: an
+  orphaned `ditto` keeps writing into the directory the handler removed. Best effort: SIGKILL leaves the
+  mount, which `hdiutil info` lists under `pulp-ship-container-scan`.
 
 There is no override flag. Tests: the `[dev-shared]` cases in
 `test/test_sdk_distribution_guard.cpp` and `test/test_cli_ship_shellout.cpp`:

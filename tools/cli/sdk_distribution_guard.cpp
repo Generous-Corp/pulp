@@ -134,6 +134,50 @@ bool is_local_signing_identity(std::string_view identity) {
            identity.rfind("Mac Developer:", 0) == 0;
 }
 
+std::optional<std::uintmax_t> zipinfo_uncompressed_bytes(std::string_view zipinfo_totals) {
+    const std::string_view marker = " bytes uncompressed";
+    const auto at = zipinfo_totals.find(marker);
+    if (at == std::string_view::npos)
+        return std::nullopt;
+    std::size_t start = at;
+    while (start > 0 && zipinfo_totals[start - 1] >= '0' && zipinfo_totals[start - 1] <= '9')
+        --start;
+    if (start == at)
+        return std::nullopt;
+    std::uintmax_t value = 0;
+    for (std::size_t i = start; i < at; ++i)
+        value = value * 10 + static_cast<std::uintmax_t>(zipinfo_totals[i] - '0');
+    return value;
+}
+
+std::optional<std::uintmax_t> pkg_payload_install_bytes(std::string_view package_info) {
+    const auto payload = package_info.find("<payload");
+    if (payload == std::string_view::npos)
+        return std::nullopt;
+    const std::string_view attr = "installKBytes=\"";
+    const auto at = package_info.find(attr, payload);
+    const auto tag_end = package_info.find('>', payload);
+    if (at == std::string_view::npos || (tag_end != std::string_view::npos && at > tag_end))
+        return std::nullopt;
+    std::uintmax_t kbytes = 0;
+    std::size_t i = at + attr.size();
+    if (i >= package_info.size() || package_info[i] < '0' || package_info[i] > '9')
+        return std::nullopt;
+    for (; i < package_info.size() && package_info[i] >= '0' && package_info[i] <= '9'; ++i)
+        kbytes = kbytes * 10 + static_cast<std::uintmax_t>(package_info[i] - '0');
+    return kbytes * 1024;
+}
+
+std::string container_space_refusal(std::uintmax_t needed, std::uintmax_t available) {
+    // Room for the scan's own bookkeeping and for whatever else is writing
+    // to the temp volume meanwhile.
+    constexpr std::uintmax_t kMargin = 256ull * 1024 * 1024;
+    if (needed <= available && available - needed >= kMargin)
+        return {};
+    return "it expands to " + std::to_string(needed) + " bytes and the temp volume has " +
+           std::to_string(available) + " bytes free (256 MiB is kept in reserve)";
+}
+
 bool dev_shared_build_allows_distribution(const std::filesystem::path& build_dir,
                                           std::string& error) {
     std::ifstream cache(build_dir / "CMakeCache.txt");

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -30,5 +32,15 @@ std::filesystem::path dev_shared_artifact_offender(const std::filesystem::path& 
 // Apple Development certificates. A dev-shared build may be signed with these
 // so a local host loads it; it may never be packaged, notarized or shared.
 bool is_local_signing_identity(std::string_view identity);
+
+// The uncompressed total `zipinfo -t` reports ("N files, X bytes uncompressed,
+// ..."), or nullopt when the text does not carry one.
+std::optional<std::uintmax_t> zipinfo_uncompressed_bytes(std::string_view zipinfo_totals);
+// The bytes a flat package's payload expands to, from the installKBytes of
+// the <payload> element in one PackageInfo document; nullopt when absent.
+std::optional<std::uintmax_t> pkg_payload_install_bytes(std::string_view package_info);
+// Empty when `needed` bytes fit in `available` with a fixed safety margin;
+// otherwise the reason the container is not extracted.
+std::string container_space_refusal(std::uintmax_t needed, std::uintmax_t available);
 
 } // namespace pulp::cli

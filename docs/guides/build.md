@@ -100,7 +100,11 @@ It is a development-only link mode, by design:
   - An artifact that is, or names, the shared runtime (a bundle copied out of a
     dev-shared tree, a hand-made `.pkg` input) is refused with the same command.
     `notarize` and `share` open a `.zip`, flat `.pkg` or `.dmg` built by another
-    tool and scan what is inside; one that does not open is refused.
+    tool and scan what is inside; one that does not open is refused. That
+    includes an encrypted disk image or one with a licence agreement (SLA):
+    the scan never answers a prompt, so it refuses them rather than waiting.
+    A container whose declared size would not fit on the temp volume is
+    refused before it is extracted.
     `tools/scripts/build_combined_installer.sh` refuses such inputs before any
     signing tool runs.
 - **What stays static.** The format adapters (`libpulp-format*`,
