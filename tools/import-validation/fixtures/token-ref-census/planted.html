@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+:root { --accent: #c4622a; --line: #333333; --pad: 8px; }
+body { margin: 0; font: 14px sans-serif; color: #000; }
+div { width: 120px; height: 24px; margin: 4px; }
+#ref { background-color: var(--accent); }
+#coincidental { background-color: #c4622a; }
+#fallback { background-color: var(--missing, #123456); }
+#shorthand { border: 2px solid var(--line); }
+#derived { background-color: color-mix(in srgb, var(--accent) 50%, white); }
+#scope { --accent: #00ff00; height: 40px; }
+#scoped { background-color: var(--accent); }
+#inherit { color: var(--line); height: auto; }
+#literal { background-color: #abcdef; }
+#padref { padding-left: var(--pad); background-color: #abcdef; }
+#padlit { padding-left: 8px; background-color: #abcdef; }
+</style></head><body>
+<div id="ref"></div>
+<div id="coincidental"></div>
+<div id="fallback"></div>
+<div id="shorthand"></div>
+<div id="derived"></div>
+<div id="scope"><div id="scoped"></div></div>
+<div id="inherit"><span>inherits its colour</span></div>
+<div id="literal"></div>
+<div id="padref"></div>
+<div id="padlit"></div>
+</body></html>
