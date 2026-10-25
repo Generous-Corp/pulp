@@ -108,7 +108,8 @@ export function shorthandComponent(shorthand, text, property, isColour) {
     if (parts.length < 1 || parts.length > 4 || parts.some((p) => p === "/")) return null;
     return only(parts[BOX_INDEX[parts.length][index]]);
   };
-  if (/^border(-(top|right|bottom|left))?$/.test(shorthand) || shorthand === "outline") {
+  if (/^border(-(top|right|bottom|left))?$/.test(shorthand) || shorthand === "outline" ||
+      shorthand === "background") {
     if (!property.endsWith("-color")) return null;
     // width, style and colour in any order: the colour is the one var() whose
     // value is a colour, and there must be exactly one.
@@ -128,6 +129,26 @@ export function shorthandComponent(shorthand, text, property, isColour) {
   return null;
 }
 
+// The longhands each shorthand sets, for when CDP does not list them: a
+// shorthand whose value is pending var() substitution arrives with no
+// longhandProperties at all (`style="border-radius: var(--r)"`).
+const LONGHANDS = {
+  "border-radius": CORNERS.map((c) => `border-${c}-radius`),
+  padding: SIDES.map((s) => `padding-${s}`),
+  gap: ["row-gap", "column-gap"],
+  "border-color": SIDES.map((s) => `border-${s}-color`),
+  border: SIDES.map((s) => `border-${s}-color`),
+  ...Object.fromEntries(SIDES.map((s) => [`border-${s}`, [`border-${s}-color`]])),
+  outline: ["outline-color"],
+  background: ["background-color"],
+};
+
+function setsLonghand(p, property) {
+  if (Array.isArray(p.longhandProperties) && p.longhandProperties.length)
+    return p.longhandProperties.some((l) => l.name === property);
+  return (LONGHANDS[p.name] ?? []).includes(property);
+}
+
 /// The winning declaration of `property` in one style block, in source order
 /// (later wins unless an earlier one is !important and the later is not).
 function winningIn(style, property) {
@@ -141,8 +162,7 @@ function winningIn(style, property) {
       // substitution, arrives empty; the shorthand itself carries the text.
       if (!p.value) continue;
       text = p.value;
-    } else if (Array.isArray(p.longhandProperties) &&
-               p.longhandProperties.some((l) => l.name === property)) {
+    } else if (setsLonghand(p, property)) {
       // The shorthand's own text is what the author wrote; with var() in it
       // the longhands are pending substitution and say nothing.
       text = p.value;

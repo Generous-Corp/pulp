@@ -46,6 +46,11 @@ test("the cascade's winner is the last block that declares it, unless an earlier
   // User-agent rules are not author declarations.
   assert.equal(winningDeclaration({ matchedCSSRules: [
     { rule: { origin: "user-agent", style: block("var(--ua)") } }] }, "color"), null);
+  // A shorthand pending var() substitution arrives with no longhand list.
+  const inline = { inlineStyle: { cssProperties: [{ name: "border-radius", value: "var(--r)" }] } };
+  const corner = winningDeclaration(inline, "border-bottom-left-radius");
+  assert.equal(corner.text, "var(--r)");
+  assert.equal(corner.fromShorthand, "border-radius");
 });
 
 test("a shorthand gives a longhand a reference only through that longhand's own component", () => {
@@ -68,6 +73,9 @@ test("a shorthand gives a longhand a reference only through that longhand's own 
                                   "border-top-left-radius", colour), null);
   assert.equal(shorthandComponent("gap", "var(--g) 4px", "row-gap", colour), "--g");
   assert.equal(shorthandComponent("padding", "calc(var(--s) * 2)", "padding-left", colour), null);
+  assert.equal(shorthandComponent("background", "var(--line)", "background-color", colour), "--line");
+  assert.equal(shorthandComponent("background", "url(x.png) var(--line)", "background-color",
+                                  colour), "--line");
 });
 
 const browser = process.env.PULP_DESIGN_BROWSER;
@@ -82,9 +90,12 @@ test("the planted panel classifies every case, with no reference from coincident
     const report = JSON.parse(await readFile(out, "utf8")).panels["planted.html"];
     const colour = report.counts.colour;
     assert.equal(colour.ref, 1);            // #ref
+    // #inlineradius: an inline `background: var(--line)` and four corners from
+    // an inline `border-radius: var(--pad)`, which CDP lists unexpanded.
+    assert.equal(colour["shorthand-ref"], 5);
+    assert.equal(report.counts.radius["shorthand-ref"], 4);
     assert.equal(colour.coincidental, 1);   // #coincidental, equal to --accent, not a ref
     assert.equal(colour.fallback, 1);       // #fallback
-    assert.equal(colour["shorthand-ref"], 4); // #shorthand: border colour on four sides
     assert.equal(colour.derived, 1);        // #derived
     assert.equal(colour["scoped-ref"], 1);  // #scoped under #scope
     assert.equal(colour["inherited-ref"], 1); // the span inside #inherit
