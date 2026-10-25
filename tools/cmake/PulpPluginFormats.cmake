@@ -71,6 +71,32 @@ function(_pulp_bundle_pkginfo_file out_var declaration)
     set(${out_var} "${_path}" PARENT_SCOPE)
 endfunction()
 
+# Writes Contents/PkgInfo into the bundle of `module_target`, which lives at
+# `bundle_dir`. A static module copies it after every link. A dev-shared module
+# (PULP_DEV_SHARED_UI) gets it from a separate build edge that reruns only when
+# the bundle lacks the file, so its relink costs only the link.
+function(_pulp_bundle_write_pkginfo module_target pkginfo bundle_dir)
+    get_filename_component(_bundle_name "${bundle_dir}" NAME)
+    get_target_property(_dev_shared ${module_target} PULP_DEV_SHARED_UI)
+    if(_dev_shared)
+        set(_output "${bundle_dir}/Contents/PkgInfo")
+        add_custom_command(OUTPUT "${_output}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${bundle_dir}/Contents"
+            COMMAND ${CMAKE_COMMAND} -E copy "${pkginfo}" "${_output}"
+            DEPENDS "${pkginfo}"
+            COMMENT "Writing PkgInfo into ${_bundle_name} bundle"
+            VERBATIM)
+        add_custom_target(${module_target}_PkgInfo DEPENDS "${_output}")
+        add_dependencies(${module_target} ${module_target}_PkgInfo)
+    else()
+        add_custom_command(TARGET ${module_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy "${pkginfo}"
+                "$<TARGET_BUNDLE_DIR:${module_target}>/Contents/PkgInfo"
+            COMMENT "Writing PkgInfo into ${_bundle_name} bundle"
+            VERBATIM)
+    endif()
+endfunction()
+
 # An editor-less plug-in (pulp_add_plugin NO_EDITOR) links only the audio side
 # of the format layer. It stages no GPU runtime because it links none; the
 # staging assertion is satisfied explicitly so a missing call on an ordinary
@@ -143,6 +169,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         )
         target_compile_definitions(${target}_VST3 PRIVATE PULP_VST3_GUI=1)
         _pulp_apply_view_mac_objc_suffix(${target}_VST3)
+        _pulp_dev_shared_ui_attach(${target} ${target}_VST3 _pulp_dev_shared)
         _pulp_apply_ui_script_definition(${target}_VST3 "${PULP_${target}_UI_SCRIPT}")
     endif()
     _pulp_apply_macho_exports(${target}_VST3 "${target}_VST3"
@@ -203,12 +230,8 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     # Write PkgInfo so Finder treats the .vst3 as an opaque bundle (not a folder)
     if(APPLE)
         _pulp_bundle_pkginfo_file(_pkginfo "BNDL????")
-        add_custom_command(TARGET ${target}_VST3 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy "${_pkginfo}"
-                "$<TARGET_BUNDLE_DIR:${target}_VST3>/Contents/PkgInfo"
-            COMMENT "Writing PkgInfo into ${name}.vst3 bundle"
-            VERBATIM
-        )
+        _pulp_bundle_write_pkginfo(${target}_VST3 "${_pkginfo}"
+            "${CMAKE_BINARY_DIR}/VST3/${name}.vst3")
     endif()
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_VST3)
 
@@ -334,6 +357,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         )
         target_compile_definitions(${target}_CLAP PRIVATE PULP_CLAP_GUI=1)
         _pulp_apply_view_mac_objc_suffix(${target}_CLAP)
+        _pulp_dev_shared_ui_attach(${target} ${target}_CLAP _pulp_dev_shared)
         _pulp_apply_ui_script_definition(${target}_CLAP "${PULP_${target}_UI_SCRIPT}")
     endif()
     _pulp_apply_macho_exports(${target}_CLAP "${target}_CLAP"
@@ -390,12 +414,8 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         # reads as a folder can be browsed into and dragged apart in Finder,
         # and never renders a bundle icon.
         _pulp_bundle_pkginfo_file(_pkginfo "BNDL????")
-        add_custom_command(TARGET ${target}_CLAP POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy "${_pkginfo}"
-                "$<TARGET_BUNDLE_DIR:${target}_CLAP>/Contents/PkgInfo"
-            COMMENT "Writing PkgInfo into ${name}.clap bundle"
-            VERBATIM
-        )
+        _pulp_bundle_write_pkginfo(${target}_CLAP "${_pkginfo}"
+            "${CMAKE_BINARY_DIR}/CLAP/${name}.clap")
     endif()
 
     # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
@@ -658,6 +678,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
             "-framework CoreAudio"
             "-framework Cocoa"
         )
+        _pulp_dev_shared_ui_attach(${target} ${target}_AU _pulp_dev_shared)
     endif()
     # Per-plugin-unique Cocoa view factory class name. ObjC class names are
     # process-global, so two Pulp AU components in one host would otherwise
@@ -743,12 +764,8 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
 
     # Write PkgInfo so Finder treats the .component as an opaque bundle (not a folder)
     _pulp_bundle_pkginfo_file(_pkginfo "BNDL????")
-    add_custom_command(TARGET ${target}_AU POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy "${_pkginfo}"
-            "$<TARGET_BUNDLE_DIR:${target}_AU>/Contents/PkgInfo"
-        COMMENT "Writing PkgInfo into ${name}.component bundle"
-        VERBATIM
-    )
+    _pulp_bundle_write_pkginfo(${target}_AU "${_pkginfo}"
+        "${CMAKE_BINARY_DIR}/AU/${name}.component")
 
     # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
     # Skia's icudtl.dat on Windows. Unguarded on purpose —
@@ -767,7 +784,11 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     # The strict post-build check proves every @rpath dependency also resolves
     # inside the bundle, so an external cache path can never be the only route.
     target_link_options(${target}_AU PRIVATE "LINKER:-rpath,@loader_path")
-    pulp_validate_bundle_relocatable(${target}_AU)
+    # A dev-shared AU loads its Pulp code from the build tree by design and the
+    # ship commands refuse it, so only a statically linked AU is checked.
+    if(NOT _pulp_dev_shared)
+        pulp_validate_bundle_relocatable(${target}_AU)
+    endif()
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AU)
     _pulp_attach_control_shipping(${target} ${target}_AU AUv2)
 endfunction()

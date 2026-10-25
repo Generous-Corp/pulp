@@ -1,0 +1,15 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-render-gpu-trim-watch",
+  "slices": [
+    "render-assets-and-backends"
+  ],
+  "vellum_obligation": "Carry the GPU surface trim entry (an idle-time level run from the frame end on a throttle, an everything level, and budgeted/purgeable byte reporting) into Vellum's render backend when the corresponding Pulp target adopts Vellum.",
+  "evidence": [
+    ".github/vellum-expansion-watch-events/20261023-render-gpu-trim-watch.json",
+    "ctest --test-dir build -R 'GpuIdleTrimSchedule is due once per interval'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim frees textures unused for two seconds and keeps the drawn one'",
+    "ctest --test-dir build -R 'SkiaSurface idle trim runs once per second of frames'",
+    "ctest --test-dir build -R 'SkiaSurface trim everything returns released image textures to the device'"
+  ]
+}

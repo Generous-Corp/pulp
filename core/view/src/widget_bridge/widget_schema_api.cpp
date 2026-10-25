@@ -86,7 +86,7 @@ void BridgeRegistrars::register_widget_schema_api(WidgetBridge& self) {
             return {};
         const auto& dir = detail::cached_private_dir(self.private_store_dirs_,
                                                      detail::PrivateStoreKind::StylePresets,
-                                                     self.script_base_dir_);
+                                                     self.storage_identity());
         if (dir.empty())
             return {};
         return dir / (safe_name + ".json");

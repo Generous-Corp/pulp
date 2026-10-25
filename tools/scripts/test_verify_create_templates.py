@@ -287,7 +287,7 @@ class TestCatch2Fetch(unittest.TestCase):
         "FetchContent_Declare(Catch2\n"
         "    URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.7.1.tar.gz\n"
         "    URL_HASH SHA256=" + "c" * 64 + "\n"
-        "    FIND_PACKAGE_ARGS 3 CONFIG\n"
+        "    FIND_PACKAGE_ARGS 3.7.1 CONFIG\n"
         ")\n"
         "FetchContent_MakeAvailable(Catch2)\n"
         "if(catch2_SOURCE_DIR)\n"
@@ -325,8 +325,17 @@ class TestCatch2Fetch(unittest.TestCase):
         self.assertTrue(any("URL_HASH" in f for f in self._check(text)))
 
     def test_missing_find_package_args_is_flagged(self) -> None:
-        text = self.GOOD.replace("    FIND_PACKAGE_ARGS 3 CONFIG\n", "")
+        text = self.GOOD.replace("    FIND_PACKAGE_ARGS 3.7.1 CONFIG\n", "")
         self.assertTrue(any("FIND_PACKAGE_ARGS" in f for f in self._check(text)))
+
+    def test_bare_major_find_package_version_is_flagged(self) -> None:
+        # "3" would accept an installed Catch2 older than the pinned 3.7.1.
+        text = self.GOOD.replace("FIND_PACKAGE_ARGS 3.7.1 CONFIG", "FIND_PACKAGE_ARGS 3 CONFIG")
+        self.assertTrue(any("pinned version 3.7.1" in f for f in self._check(text)))
+
+    def test_find_package_version_must_match_the_archive(self) -> None:
+        text = self.GOOD.replace("FIND_PACKAGE_ARGS 3.7.1 CONFIG", "FIND_PACKAGE_ARGS 3.6.0 CONFIG")
+        self.assertTrue(any("pinned version 3.7.1" in f for f in self._check(text)))
 
     def test_unguarded_extras_path_is_flagged(self) -> None:
         text = self.GOOD.replace(

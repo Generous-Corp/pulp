@@ -68,18 +68,19 @@ inline bool create_owner_only_dir(const std::filesystem::path& dir) {
 // <kind> and <namespace> levels owner-only. The shared "Pulp" root is also
 // home to content packs and imported assets, so it is created with default
 // permissions and never re-permissioned here. The namespace is a short hash
-// of the bridge's script base dir; a bridge without one shares a single
+// of the bridge's storage identity (its script base dir, or the identity an
+// embedded editor's host names); a bridge without one shares a single
 // "shared" namespace. Returns an empty path when no per-user root is known,
 // so callers fail closed rather than fall back to a shared location.
 inline std::filesystem::path resolve_private_dir(PrivateStoreKind kind,
-                                                 const std::filesystem::path& script_base_dir) {
+                                                 const std::string& storage_identity) {
     const auto root = platform_settings_root();
     if (root.empty())
         return {};
 
     std::string ns = "shared";
-    if (!script_base_dir.empty())
-        ns = pulp::runtime::sha256_hex(script_base_dir.generic_string()).substr(0, 16);
+    if (!storage_identity.empty())
+        ns = pulp::runtime::sha256_hex(storage_identity).substr(0, 16);
 
     std::error_code ec;
     const auto pulp_dir = root / "Pulp";
@@ -96,20 +97,20 @@ inline std::filesystem::path resolve_private_dir(PrivateStoreKind kind,
 }
 
 // The bridge-cached directory for `kind`, resolved on first use and again
-// only when the script base dir has changed since. `Cache` is the bridge's
+// only when the storage identity has changed since. `Cache` is the bridge's
 // private PrivateStoreDirs, reached through the registrars' friend access.
 template <class Cache>
 const std::filesystem::path& cached_private_dir(Cache& cache, PrivateStoreKind kind,
-                                                const std::filesystem::path& script_base_dir) {
-    if (cache.base_dir != script_base_dir) {
-        cache.base_dir = script_base_dir;
+                                                const std::string& storage_identity) {
+    if (cache.identity != storage_identity) {
+        cache.identity = storage_identity;
         cache.widget_storage.reset();
         cache.style_presets.reset();
     }
     auto& slot =
         kind == PrivateStoreKind::WidgetStorage ? cache.widget_storage : cache.style_presets;
     if (!slot)
-        slot = resolve_private_dir(kind, script_base_dir);
+        slot = resolve_private_dir(kind, storage_identity);
     return *slot;
 }
 

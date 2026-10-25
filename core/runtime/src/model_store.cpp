@@ -328,7 +328,7 @@ InstallModelResult install_model(const ModelEntry& model, std::string_view subsy
                                  const std::function<bool(const DownloadProgress&)>& on_progress,
                                  const CancellationToken* cancel,
                                  const std::vector<std::pair<std::string, std::string>>& headers,
-                                 const fs::path& pulp_home_override) {
+                                 const fs::path& pulp_home_override, bool allow_unverified) {
     InstallModelResult r;
     const auto home = resolve_pulp_home(pulp_home_override);
     if (home.empty()) {
@@ -360,7 +360,8 @@ InstallModelResult install_model(const ModelEntry& model, std::string_view subsy
                 return r;
             }
             // Carry the per-asset sha256 so download_file verifies each bundled asset
-            // (matches the single-asset path below); empty means "no pin, skip verify".
+            // (matches the single-asset path below); empty means the download is
+            // refused unless the caller allowed an unverified install.
             items.push_back({u, a.role.empty() ? "asset" : a.role, a.sha256});
         }
     } else {
@@ -406,6 +407,7 @@ InstallModelResult install_model(const ModelEntry& model, std::string_view subsy
         req.url = it.url;
         req.dest = dest;
         req.expected_sha256 = it.sha;
+        req.allow_unverified = allow_unverified;
         req.resume = true;
         for (const auto& h : headers) req.headers.push_back(HttpHeader{h.first, h.second});
 

@@ -1147,7 +1147,7 @@ nonadjacent islands followed by exact total mute through `find_package(Pulp)`.
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Bias | `bias.hpp` | Shift a signal's DC offset — useful for asymmetric waveshaping |
-| Fast Math | `fast_math.hpp` | Scalar DSP math helpers; approximations are explicitly labeled, while `exp2` follows standard float edge semantics and exact representable integer powers under the ambient FP mode (audio-callback FTZ/FZ may flush subnormals). `FastMath::tanh_accurate` is a branch-free rational tanh within 3.0e-7 of `std::tanh` (3.6e-7 without fused multiply-add) for every float input; `log10_accurate`, `exp10_accurate`, `gain_to_db_accurate` and `db_to_gain_accurate` are branch-free decibel conversions within a few ulps of libm |
+| Fast Math | `fast_math.hpp` | Scalar DSP math helpers; approximations are explicitly labeled, while `exp2` follows standard float edge semantics and exact representable integer powers under the ambient FP mode (audio-callback FTZ/FZ may flush subnormals). `FastMath::tanh_accurate` is a branch-free rational tanh within 3.0e-7 of `std::tanh` (3.6e-7 without fused multiply-add) over the inputs its tests scan; `log10_accurate`, `exp10_accurate`, `gain_to_db_accurate` and `db_to_gain_accurate` are branch-free decibel conversions within a few ulps of libm |
 | Interpolator | `interpolator.hpp` | Lagrange and Hermite interpolation for fractional-sample delay and resampling |
 | Log Ramped Value | `log_ramped_value.hpp` | Logarithmic smoothing for perceptually linear parameter transitions |
 | Lookup Table | `lookup_table.hpp` | Pre-computed function table for fast repeated evaluation of expensive functions |

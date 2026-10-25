@@ -820,9 +820,11 @@ class MacosApprovalGateTest(unittest.TestCase):
         cls.triggers = cls.workflow.get("on", cls.workflow.get(True, {}))
         cls.steps = _build_steps()
 
-    def test_labeled_joins_the_default_pull_request_types(self) -> None:
+    def test_a_label_event_starts_no_run(self) -> None:
+        # A label event's run is a newer check suite with no `macos` check run,
+        # and it shadows the head's required `macos` context for the merge queue.
         self.assertEqual(self.triggers["pull_request"]["types"],
-                         ["opened", "synchronize", "reopened", "labeled"])
+                         ["opened", "synchronize", "reopened"])
         # merge_group and push keep every event; nothing about them is labelled.
         self.assertIsNone(self.triggers["merge_group"])
         self.assertEqual(self.triggers["push"], {"branches": ["main"]})
