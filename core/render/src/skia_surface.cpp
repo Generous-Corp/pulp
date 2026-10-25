@@ -491,8 +491,11 @@ public:
             }
         }
 
-        pixel_width = static_cast<uint32_t>(std::max(1, static_cast<int>(width_ * scale_)));
-        pixel_height = static_cast<uint32_t>(std::max(1, static_cast<int>(height_ * scale_)));
+        // The surface's own size, not logical × scale: the presentable texture
+        // is the swapchain's, which a host may size from the platform's
+        // physical client rect (one pixel more than 667 × 1.5 at 1.5x).
+        pixel_width = static_cast<uint32_t>(std::max(1, source->width()));
+        pixel_height = static_cast<uint32_t>(std::max(1, source->height()));
 
         auto info = SkImageInfo::Make(static_cast<int>(pixel_width),
                                       static_cast<int>(pixel_height),
