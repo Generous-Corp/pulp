@@ -369,9 +369,18 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     // widget's own opacity/filter layer so background, border, and children
     // composite over the frosted backdrop. Paired with the matching restore()
     // in pop_effect_layers.
+    //
+    // CSS opacity covers the element's whole rendering, the backdrop-filter
+    // result included. Chrome draws the filtered backdrop at the element's
+    // opacity and then the element over it at that opacity
+    // (tools/import-validation/chrome_backdrop_opacity_oracle.py), so at
+    // opacity 0 the layer is not opened at all, and below 1 the chain ends in
+    // an opacity() step. An ancestor below opacity 1 needs nothing here: its
+    // own layer is open beneath this one, which makes it the backdrop's root,
+    // as it is in Chrome.
     const auto& backdrop_chain = backdrop_filter_chain();
     bool needs_backdrop_layer =
-        !backdrop_chain.empty() || backdrop_blur() > 0.0f;
+        opacity_ > 0.0f && (!backdrop_chain.empty() || backdrop_blur() > 0.0f);
     if (needs_backdrop_layer) {
         if (!canvas.supports(canvas::CanvasCapability::backdrop_filter)) {
             warn_capability_fallback_once(
@@ -379,14 +388,15 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                 "canvas backend has no backdrop-filter blur; backdrop-filter "
                 "renders as an unblurred tint");
         }
-        if (backdrop_chain.empty()) {
+        if (backdrop_chain.empty() && opacity_ >= 1.0f) {
             canvas.save_backdrop_filter(0, 0, bounds_.width, bounds_.height,
                                         backdrop_blur());
         } else {
             // A list beyond a bare blur — `saturate()`, `invert()`, a pair of
-            // them. A backend without the chain keeps whatever blur the list
-            // carries and drops the colour half, so the frosting survives but
-            // the tint does not; say so rather than let it pass as faithful.
+            // them — or any backdrop under opacity below 1. A backend without
+            // the chain keeps whatever blur the list carries and drops the
+            // rest, so the frosting survives but the tint and the fade do not;
+            // say so rather than let it pass as faithful.
             if (!canvas.supports(
                     canvas::CanvasCapability::backdrop_filter_chain)) {
                 warn_capability_fallback_once(
@@ -394,7 +404,19 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                     "canvas backend does not honor backdrop-filter color ops; "
                     "backdrop-filter collapses to its blur");
             }
-            const auto chain = to_canvas_filter_chain(backdrop_chain);
+            auto chain = to_canvas_filter_chain(backdrop_chain);
+            if (backdrop_chain.empty()) {
+                canvas::Canvas::FilterChainEntry blur{};
+                blur.kind = canvas::Canvas::FilterChainEntry::Kind::blur;
+                blur.amount = backdrop_blur();
+                chain.push_back(blur);
+            }
+            if (opacity_ < 1.0f) {
+                canvas::Canvas::FilterChainEntry fade{};
+                fade.kind = canvas::Canvas::FilterChainEntry::Kind::opacity;
+                fade.amount = opacity_;
+                chain.push_back(fade);
+            }
             canvas.save_backdrop_filter_chain(0, 0, bounds_.width,
                                               bounds_.height, chain.data(),
                                               static_cast<int>(chain.size()));
