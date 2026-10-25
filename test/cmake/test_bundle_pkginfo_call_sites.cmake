@@ -51,8 +51,25 @@ foreach(_site IN LISTS _expected_sites)
     set(_needle
         "$<TARGET_BUNDLE_DIR:${_target_expr}>/Contents/PkgInfo")
     string(FIND "${_content}" "${_needle}" _found)
-    if(_found EQUAL -1)
+    # A helper may write it on the target's behalf; the helper itself is
+    # checked below.
+    string(FIND "${_content}" "_pulp_bundle_write_pkginfo(${_target_expr} " _delegated)
+    if(_found EQUAL -1 AND _delegated EQUAL -1)
         list(APPEND _failures "${_rel_path}: nothing writes ${_needle}")
+    endif()
+endforeach()
+
+# _pulp_bundle_write_pkginfo() writes PkgInfo after every link of a static
+# module and from its own edge for a dev-shared one; both paths must exist.
+file(READ "${PULP_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake" _formats)
+foreach(_helper_needle IN ITEMS
+        "function(_pulp_bundle_write_pkginfo "
+        "$<TARGET_BUNDLE_DIR:\${module_target}>/Contents/PkgInfo"
+        "set(_output \"\${bundle_dir}/Contents/PkgInfo\")")
+    string(FIND "${_formats}" "${_helper_needle}" _found)
+    if(_found EQUAL -1)
+        list(APPEND _failures
+            "tools/cmake/PulpPluginFormats.cmake: _pulp_bundle_write_pkginfo lacks ${_helper_needle}")
     endif()
 endforeach()
 

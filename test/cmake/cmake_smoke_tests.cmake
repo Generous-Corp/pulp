@@ -157,6 +157,17 @@ set_tests_properties(cmake-plugin-dead-strip-switch PROPERTIES
     LABELS "cmake;plugin;packaging"
     # Three throwaway configures, each paying C compiler detection.
     TIMEOUT 180)
+# PULP_DEV_SHARED_UI: a module links its adapter statically and the Pulp
+# libraries through the shared runtime dylib, loads, and runs; the option-off
+# control links statically. Also covers the link helper's refusals.
+add_test(NAME cmake-dev-shared-ui
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_DEV_SHARED_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/dev-shared-ui
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_dev_shared_ui.cmake)
+set_tests_properties(cmake-dev-shared-ui PROPERTIES
+    LABELS "cmake;plugin;packaging"
+    # Three throwaway configure + build passes of five C files each.
+    TIMEOUT 180)
 set_tests_properties(cmake-standalone-document-types PROPERTIES
     LABELS "cmake;app;standalone;plist"
     # Runs in ~1.5s warm; the budget covers three throwaway project configures
