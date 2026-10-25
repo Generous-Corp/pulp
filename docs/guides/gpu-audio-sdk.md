@@ -478,7 +478,9 @@ Perfetto work without deriving the result from a loose collection of events.
 For host diagnostics, `capability_report()` returns an allocation-free snapshot
 of the selected path. `path` distinguishes the ordinary staged worker from the
 experimental shared-memory path, while `provider` is `Dawn` only when the exact
-shared Dawn path is active and is otherwise `Unknown`. The snapshot carries
+shared Dawn path is active and is otherwise `Unknown`. A `GpuNeuralRealtimeNode`
+running without a GPU backend (a CPU-only family, or WaveNet whose provider
+could not be prepared) reports `Cpu` for both `path` and `provider`. The snapshot carries
 `prepared_latency_blocks` for the transport's fixed output/PDC delay. It carries
 `prepared_lead_blocks` only when an authenticated concrete provider establishes
 an algorithmic lead; generic staged nodes report zero there. It also carries the
@@ -806,7 +808,10 @@ prepared. A provider that keeps completing, but too late for every block, latche
 no recovery cause, yet the substitute carries the stream. So `Ready` on the `Gpu`
 engine also requires the GPU to have delivered at least half of the last 32
 callback blocks (once at least 8 were counted; priming blocks are not counted).
-Below that the status reads `Degraded`, with `recovery_reason` `None`, and returns
+Below that the status reads `Degraded`, with `recovery_reason` `None`. It also
+reads `Degraded` as soon as at least one block was counted and the GPU delivered
+none of them, as during a first preparation's or a re-acquired epoch's warmup.
+It returns
 to `Ready` once the GPU carries half the window again; a re-acquire starts a
 new window. The own statuses of `GpuWaveNetRealtimeNode`,
 `GpuNeuralRealtimeNode` and the shared `GpuConvolver` path apply the same rule. `epoch`,
@@ -854,8 +859,7 @@ least healthy lane, and `report().lanes[i].status` carries each lane.
 
 Check a quiescent snapshot with `validate_gpu_audio_status()`. The
 [reliability page](gpu-audio-macos-reliability.md#reading-health) lists which
-node produces each recovery reason today, and which values are reserved with no
-producer yet.
+node produces each recovery reason today.
 
 ### Re-acquire a lost provider while audio keeps playing
 
@@ -870,7 +874,7 @@ config.run_worker_thread = true;
 config.recovery_policy = GpuAudioRecoveryPolicy::AutoReacquire;
 config.reacquire_release_budget_ns = 250'000'000; // per release of the old provider
 config.reacquire_max_attempts = 3;                // then stay on the fallback
-config.reacquire_backoff_ns = 100'000'000;        // 100 ms, 500 ms, 2.5 s
+config.reacquire_backoff_ns = 100'000'000;        // waits of 100 ms, then 500 ms
 transport.prepare(&node, config);
 ```
 
@@ -888,6 +892,16 @@ provider can deliver, and counts `reacquire_attempts`, `reacquire_successes`
 and `last_reacquire_to_gpu_ns` (from the worker first seeing the fence to the
 first GPU-delivered block). Today only `GpuWaveNetRealtimeNode` re-acquires; other
 nodes stay fenced.
+
+The first attempt runs as soon as the worker sees the outage. Every attempt,
+successful or not, arms a wait before the next one: `reacquire_backoff_ns` after
+the first, and five times the previous wait after each later one. The count
+resets only once GPU audio resumes, so an epoch that fails before delivering
+still counts toward `reacquire_max_attempts`. With the defaults, the three attempts run at once, at
+least 100 ms later, and at least 500 ms after that. The 2.5 s wait the third
+attempt arms is never used, because no fourth attempt follows. If GPU audio has
+not resumed by then, the node stays on its fallback until the host prepares it
+again.
 
 To keep providers warm across a node's own `release()` and `prepare()`, give
 the node a host-owned `GpuAudioProviderPool`

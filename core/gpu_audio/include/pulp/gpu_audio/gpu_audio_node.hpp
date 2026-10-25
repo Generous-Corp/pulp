@@ -122,10 +122,13 @@ public:
                                 uint32_t /*n*/) noexcept {}
 
     /// RT-safe fallback. MUST NOT allocate, lock, or block — it runs on the
-    /// audio thread for the CpuFallback miss policy (hence noexcept). Default
-    /// copies input to output (dry) so a node without a real fallback still
-    /// degrades safely. When paired with prime_fallback(), this emits the
-    /// latency-aligned block the continuously-fed fallback has already computed.
+    /// audio thread for the CpuFallback miss policy (hence noexcept). The
+    /// default copies the current dry input to the output. The transport's
+    /// output is delayed by latency_blocks, so that dry block breaks the
+    /// timeline; it is not a safe fallback. A CpuFallback node should override
+    /// this with a primed, latency-aligned fallback, or declare Silence. When
+    /// paired with prime_fallback(), this emits the latency-aligned block the
+    /// continuously-fed fallback has already computed.
     virtual void process_cpu_fallback(const audio::BufferView<const float>& input,
                                       audio::BufferView<float>& output,
                                       uint32_t n) noexcept {

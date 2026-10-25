@@ -79,12 +79,15 @@ class GpuAudioTransport {
         /// time has its device destroyed and stays owned (quarantined) until a
         /// later release completes it.
         std::uint64_t reacquire_release_budget_ns = 250'000'000;
-        /// Attempts per outage. After the last failed attempt the transport
-        /// stays on the CPU fallback until the host prepares it again.
+        /// Attempts per outage. If GPU audio has not resumed after the last
+        /// attempt, the transport stays on the CPU fallback until the host
+        /// prepares it again.
         std::uint32_t reacquire_max_attempts = 3;
-        /// Wait after the first failed attempt; each further failure waits
-        /// five times longer (100 ms, 500 ms, 2.5 s by default). The first
-        /// attempt is immediate.
+        /// The first attempt is immediate. Every attempt, successful or not,
+        /// arms a wait before the next: this value after the first, five times
+        /// the previous wait after each later one. With the defaults only the
+        /// 100 ms and 500 ms waits occur; the count resets once GPU audio
+        /// resumes.
         std::uint64_t reacquire_backoff_ns = 100'000'000;
     };
 

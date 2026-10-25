@@ -21,7 +21,8 @@ enum class GpuAudioEngine : std::uint8_t {
 
 /// Lifecycle state suitable for UI, trace, and host diagnostics. This is a
 /// provider state, not a real-time guarantee. Ready means an authenticated
-/// execution provider is active. Degraded means the transport is prepared but
+/// execution provider is active, or a CPU-only neural node runs its CPU model
+/// as requested (provider Cpu). Degraded means the transport is prepared but
 /// its provider or execution engine cannot be established. Scheduling and
 /// deadline behavior are reported by the counters and timings below.
 enum class GpuAudioProviderState : std::uint8_t {
@@ -31,9 +32,11 @@ enum class GpuAudioProviderState : std::uint8_t {
     Unavailable = 3,
 };
 
-/// First latched reason that a stamped shared-I/O node entered recovery.
-/// `None` means that no recovery has been requested. This is diagnostic state;
-/// it does not itself promise that the next callback will use the GPU.
+/// First latched reason that a node entered recovery. Stamped shared-I/O nodes
+/// latch it; so do the staged GpuConvolver (ProviderFailure, ProviderLost,
+/// SustainedDeadlineMisses) and GpuMultiConvolver (ProviderLost). `None` means
+/// that no recovery has been requested. This is diagnostic state; it does not
+/// itself promise that the next callback will use the GPU.
 enum class GpuAudioRecoveryReason : std::uint8_t {
     None = 0,
     SequenceGap = 1,
