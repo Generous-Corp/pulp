@@ -21,13 +21,25 @@ That host paints text through CoreText; the lite stack also measures through
 CoreText, and it answers `resolved_face_identity()` with the face CoreText
 paints, so a design-imported panel still reuses the line breaks its capture
 recorded. Measured against the full stack: PulpGain, Pulp Delay and
-PulpDesignSynth are pixel-identical, and PulpDesignArp differs in one 21x16 px
-numeric box. Text that is measured rather than captured can still sit up to 1
-logical pixel differently for a few system families at non-400 weights, because
-the full build measures those through Skia, which can resolve a different face
-than CoreText paints ("Helvetica Neue" 600 at 12 px: ascent 13.92 and width
-116.7 in Skia, 13.69 and 120.0 for the painted face). The lite placement
-matches the glyphs drawn.
+PulpDesignSynth are pixel-identical. PulpDesignArp differs in one 9 px label,
+a bold "07", whose glyphs are identical but sit 0.5 logical px lower in lite.
+
+That label and any text like it can differ by up to 1 logical pixel, because
+the face it asks for is not one Pulp bundles, and Skia and CoreText fall back
+to different faces for it. The capture resolved "JetBrains Mono" at weight 700
+to JetBrainsMono-Bold. Pulp bundles only JetBrains Mono Regular. Skia skips the
+Regular face for a bold request and falls through the stack to Menlo-Bold
+(ascent 9.47, descent 3.55, leading 0.12 at 9 px); CoreText resolves the
+bundled JetBrains Mono (ascent 10.08, descent 3.60, no leading). The
+CoreGraphics host paints with CoreText in both builds, so the full build places
+JetBrains Mono glyphs using Menlo-Bold's metrics, while lite measures the face
+it paints. Advances agree (5.40 px per digit in both), so widths and line
+breaks do not change, only the baseline. Neither stack's face matches the
+capture's JetBrainsMono-Bold, so neither reuses that label's captured breaks.
+The same holds for system families at non-400 weights ("Helvetica Neue" 600 at
+12 px: ascent 13.92 and width 116.7 in Skia, 13.69 and 120.0 for the painted
+face). To get identical placement in both builds, bundle or register
+(`register_font`) the exact faces a design uses.
 
 Two kinds of plug-in need the full stack and must now say so:
 

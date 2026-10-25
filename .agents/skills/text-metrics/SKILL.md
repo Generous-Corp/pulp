@@ -177,8 +177,14 @@ answers that through CoreText (`coretext_face_postscript_name`), the face it
 paints. When the lite answer was empty, every captured label re-broke with its
 own measurement and the design panels moved by whole labels (0.31% and 0.47%
 of pixels on PulpDesignSynth and PulpDesignArp); with the answer they match the
-full build (0 pixels, and one 21x16 px numeric box). So a lite-vs-full diff on
-a design panel is a regression to chase, not the face difference above.
+full build: 0 pixels on PulpDesignSynth, and on PulpDesignArp a bold 9 px "07"
+whose identical glyphs sit 1 capture px lower. That label asks for
+JetBrainsMono-Bold, which Pulp does not bundle; Skia falls back to Menlo-Bold
+and CoreText to the bundled Regular, so the full build places CoreText-painted
+glyphs with Menlo's metrics. A lite-vs-full diff on a design panel is a
+regression to chase unless the differing text resolves to a face Pulp does not
+bundle: check `resolved_face_identity()` on each stack against the capture's
+`lineBoxBasis.resolvedFace` before concluding either.
 `pulp-test-face-identity-full` and `-lite` hold the bundled faces' identities
 equal across the two stacks. Text measured without a capture can still differ
 by up to 1 logical px for the system families listed above.

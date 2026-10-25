@@ -388,8 +388,11 @@ identity through CoreText. Text measured without a capture can differ by up to
 1 logical pixel for a few system families at non-400 weights: the lite build
 measures with CoreText, the face it paints, while the full build measures with
 Skia, which can resolve a different face ("Helvetica Neue" 600 at 12 px: ascent
-13.92 and width 116.7 in Skia, 13.69 and 120.0 for the painted face). AutoUi,
-Inter and design-imported panels render the same in both builds.
+13.92 and width 116.7 in Skia, 13.69 and 120.0 for the painted face), and for
+a face a design asks for that Pulp does not bundle, where Skia and CoreText fall
+back to different faces (a bold JetBrains Mono: Menlo-Bold in Skia, the bundled
+Regular in CoreText). AutoUi, Inter and design-imported panels whose faces are
+bundled render the same in both builds.
 
 A plug-in without a custom editor that does not need Pulp's generated parameter
 editor should use `NO_EDITOR`: it links none of the view, canvas, Skia, Dawn or
