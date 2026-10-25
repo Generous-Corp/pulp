@@ -140,9 +140,13 @@ class InteractionReplayTests(unittest.TestCase):
             "native")
         # The program names views with bridge ids; the observer keys them by
         # anchor so the layout joins the capture the way the native tree's does.
-        ids = {node["id"] for node in
-               json.loads((js / "layout.json").read_text(encoding="utf-8"))["nodes"]}
-        self.assertTrue({"cutoff-knob", "level-fader"} <= ids, ids)
+        layout_ids = lambda out: {node["id"] for node in json.loads(
+            (out / "layout.json").read_text(encoding="utf-8"))["nodes"]}
+        native_ids, js_ids = layout_ids(native), layout_ids(js)
+        self.assertTrue({"cutoff-knob", "level-fader"} <= js_ids, js_ids)
+        # And the tree is the program's: it holds every anchored view the
+        # native tree has plus the label stacks only the ui.js program builds.
+        self.assertTrue(native_ids < js_ids, (native_ids, js_ids))
         strip = lambda log: [(e["anchor"], e["kind"], e["value"]) for e in log["initial_state"]]
         self.assertEqual(strip(load_log(js)), strip(load_log(native)))
 
