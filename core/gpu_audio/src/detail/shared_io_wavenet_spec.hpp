@@ -40,6 +40,13 @@ constexpr std::uint32_t wavenet_causal_pad(std::uint32_t kernel, std::uint32_t d
                : static_cast<std::uint32_t>((static_cast<std::uint64_t>(kernel) - 1u) * dilation);
 }
 
+// Largest causal reach plus one block a WaveNet layer may carry: the GPU keeps
+// each layer's history in a power-of-two ring of at least `reach + block`
+// columns, so this bounds every ring at 2^20 columns (about 22 s at 48 kHz,
+// three orders of magnitude past any published capture). A spec beyond it is
+// rejected before anything is allocated.
+inline constexpr std::uint64_t kWavenetMaxRingColumns = std::uint64_t{1} << 20;
+
 enum class WavenetSpecError : std::uint8_t {
     None,
     InvalidShape,
@@ -95,7 +102,7 @@ constexpr WavenetSpecValidation validate_wavenet_spec(const WavenetProgramSpec& 
             if (dilation == 0)
                 return {WavenetSpecError::InvalidDilation};
             const auto reach = static_cast<std::uint64_t>(layer.kernel - 1u) * dilation;
-            if (reach > std::numeric_limits<std::uint32_t>::max() - spec.block_size)
+            if (reach + spec.block_size > kWavenetMaxRingColumns)
                 return {WavenetSpecError::HistoryOverflow};
             required += z * layer.channels * layer.kernel + z + z * layer.condition_size +
                         static_cast<std::uint64_t>(layer.channels) * layer.channels +

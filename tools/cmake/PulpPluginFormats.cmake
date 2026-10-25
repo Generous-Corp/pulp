@@ -25,6 +25,33 @@ if(APPLE AND NOT COMMAND pulp_make_bundle_relocatable)
     include("${CMAKE_CURRENT_LIST_DIR}/PulpBundleRelocatable.cmake")
 endif()
 
+# Plug-in modules are loaded by hosts through a handful of exported entry
+# points, so everything a module does not reach from them is dead weight in the
+# shipped binary. On Apple, optimized builds link with -dead_strip. The linker
+# keeps everything reachable from an exported symbol, every static initializer
+# (and what it reaches, so self-registering factories survive), Objective-C
+# class and category metadata, and anything marked __attribute__((used)). Code
+# reached ONLY by a runtime name lookup the linker cannot see -- dlsym() of a
+# symbol that is not exported, or an Objective-C class looked up by name whose
+# object file nothing references -- must be exported or marked used.
+#
+# Opt out for every plug-in with -DPULP_DEAD_STRIP_PLUGINS=OFF, or for one
+# module by setting its PULP_DEAD_STRIP target property to OFF after
+# pulp_add_plugin(), e.g.
+#   set_target_properties(MyPlugin_VST3 PROPERTIES PULP_DEAD_STRIP OFF)
+if(NOT DEFINED PULP_DEAD_STRIP_PLUGINS)
+    set(PULP_DEAD_STRIP_PLUGINS ON CACHE BOOL
+        "Link Apple plug-in modules with -dead_strip in non-Debug configurations")
+endif()
+function(_pulp_plugin_module_link_hygiene module_target)
+    if(APPLE)
+        set_target_properties(${module_target} PROPERTIES
+            PULP_DEAD_STRIP "${PULP_DEAD_STRIP_PLUGINS}")
+        target_link_options(${module_target} PRIVATE
+            "$<$<AND:$<NOT:$<CONFIG:Debug>>,$<BOOL:$<TARGET_PROPERTY:${module_target},PULP_DEAD_STRIP>>>:LINKER:-dead_strip>")
+    endif()
+endfunction()
+
 # Post-build commands in this file run through the shell of whatever generator
 # is in use, and a bundle path carries the user's PLUGIN_NAME verbatim — spaces,
 # parentheses, apostrophes and all ("Spectr Freeze (dev)"). Every such command
@@ -100,6 +127,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp
         ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/moduleinit.cpp
     )
+    _pulp_plugin_module_link_hygiene(${target}_VST3)
     if(PULP_${target}_NO_EDITOR)
         target_link_libraries(${target}_VST3 PRIVATE
             ${target}_Core
@@ -121,6 +149,10 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         "_bundleEntry"
         "_bundleExit"
         "_GetPluginFactory")
+    _pulp_apply_elf_exports(${target}_VST3 "${target}_VST3"
+        "GetPluginFactory"
+        "ModuleEntry"
+        "ModuleExit")
     target_include_directories(${target}_VST3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     # VST3 bundle structure
@@ -284,6 +316,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         ${PULP_${target}_CORE_OBJECTS}
         ${clap_entry}
     )
+    _pulp_plugin_module_link_hygiene(${target}_CLAP)
     if(PULP_${target}_NO_EDITOR)
         # The view-free adapter: PULP_CLAP_GUI stays undefined here and in it.
         target_link_libraries(${target}_CLAP PRIVATE
@@ -305,6 +338,8 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     endif()
     _pulp_apply_macho_exports(${target}_CLAP "${target}_CLAP"
         "_clap_entry")
+    _pulp_apply_elf_exports(${target}_CLAP "${target}_CLAP"
+        "clap_entry")
     target_include_directories(${target}_CLAP PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     set_target_properties(${target}_CLAP PROPERTIES
@@ -394,6 +429,7 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         ${PULP_${target}_CORE_OBJECTS}
         ${lv2_entry}
     )
+    _pulp_plugin_module_link_hygiene(${target}_LV2)
     if(PULP_${target}_NO_EDITOR)
         target_link_libraries(${target}_LV2 PRIVATE
             ${target}_Core
@@ -409,6 +445,11 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         )
     endif()
     target_include_directories(${target}_LV2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    # lv2_descriptor is the host entry point; pulp-lv2-ttlgen dlopens the
+    # module and calls pulp_lv2_write_bundle_ttl to describe it.
+    _pulp_apply_elf_exports(${target}_LV2 "${target}_LV2"
+        "lv2_descriptor"
+        "pulp_lv2_write_bundle_ttl")
 
     # LV2 bundles: <name>.lv2/ directory containing the .so and .ttl files
     set_target_properties(${target}_LV2 PROPERTIES
@@ -491,6 +532,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
         ${_PULP_FORMAT_SOURCE_DIR}/aax_midi_node.cpp
         $<TARGET_OBJECTS:pulp-aax-export>
     )
+    _pulp_plugin_module_link_hygiene(${target}_AAX)
     if(APPLE AND NOT headless)
         target_sources(${target}_AAX PRIVATE
             ${_PULP_FORMAT_SOURCE_DIR}/aax_native_view_mac.mm)
@@ -507,6 +549,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
     target_link_libraries(${target}_AAX PRIVATE ${target}_Core)
     if(NOT headless)
         target_link_libraries(${target}_AAX PRIVATE ${PULP_${target}_VIEW_TARGET})
+        _pulp_apply_ui_script_definition(${target}_AAX "${PULP_${target}_UI_SCRIPT}")
     endif()
     target_include_directories(${target}_AAX PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(${target}_AAX PRIVATE
@@ -589,6 +632,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
             ${PULP_${target}_CORE_OBJECTS}
             ${au_entry}
         )
+        _pulp_plugin_module_link_hygiene(${target}_AU)
         target_link_libraries(${target}_AU PRIVATE
             ${target}_Core
             ${_PULP_FORMAT_CORE_TARGET}
@@ -603,6 +647,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
             ${au_entry}
             ${_PULP_FORMAT_SOURCE_DIR}/au_v2_cocoa_view.mm
         )
+        _pulp_plugin_module_link_hygiene(${target}_AU)
         target_link_libraries(${target}_AU PRIVATE
             ${target}_Core
             ${_PULP_FORMAT_TARGET}

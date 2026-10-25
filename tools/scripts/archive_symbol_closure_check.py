@@ -26,39 +26,66 @@ import subprocess
 import sys
 from pathlib import Path
 
-# POSIX nm type letters for symbols a member DEFINES with external linkage. Weak
-# definitions (W/V) are left out: an inline function emitted in both archives
-# is not a dependency of one on the other.
-DEFINED_TYPES = set("TDBRSCG")
-# GNU/LLVM nm use lowercase `w`/`v` for weak undefined references. They are
-# still relocations that may resolve from a forbidden archive, so dropping
-# them makes the closure gate accept a real dependency.
-UNDEFINED_TYPES = set("Uwv")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import nm_symbols  # noqa: E402
+import rtti_ownership  # noqa: E402
+
+# What "defined" means for --forbidden, chosen per gate. A dependency gate uses
+# strong definitions only: an inline function emitted in both archives is not a
+# dependency of one on the other. A contamination floor (--forbidden-defines
+# any) also counts weak ones (W/V), because a class's typeinfo or vtable is
+# often weak and still belongs to the archive that owns the class. Weak
+# undefined references (w/v) always count as references.
+DEFINED = {"strong": nm_symbols.defined_strong, "any": nm_symbols.defined_any}
 
 
-def read_symbols(nm: str, archive: Path) -> tuple[set[str], set[str]]:
-    """(undefined, defined) external symbol names in `archive`."""
+def nm_listing(nm: str, archive: Path) -> str:
     proc = subprocess.run([nm, "-g", "-P", str(archive)], capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         raise RuntimeError(f"{nm} failed on {archive}: {proc.stderr.strip()}")
-    undefined: set[str] = set()
-    defined: set[str] = set()
-    for line in proc.stdout.splitlines():
-        fields = line.split()
-        # Member headers ("lib.a[x.o]:") and blank lines carry no type field.
-        if len(fields) >= 3 and len(fields[2]) == 1 and ":" in fields[0]:
-            name, kind = fields[1], fields[2]
-        elif len(fields) >= 2 and len(fields[1]) == 1:
-            name, kind = fields[0], fields[1]
-        else:
-            continue
-        if kind in UNDEFINED_TYPES:
-            undefined.add(name)
-        elif kind in DEFINED_TYPES:
-            defined.add(name)
+    return proc.stdout
+
+
+def split_symbols(listing: str, rule: str = "strong") -> tuple[set[str], set[str]]:
+    """(undefined, defined) external symbol names in a listing under `rule`."""
+    defined = DEFINED[rule](listing)
     # A symbol one member references and another member defines is internal.
-    return undefined - defined, defined
+    return nm_symbols.undefined(listing) - defined, defined
+
+
+def read_symbols(nm: str, archive: Path, rule: str = "strong") -> tuple[set[str], set[str]]:
+    """(undefined, defined) external symbol names in `archive` under `rule`."""
+    return split_symbols(nm_listing(nm, archive), rule)
+
+
+def darwin_listing(nm: str, archive: Path) -> str | None:
+    """`nm -g -m` output when the nm supports it (Mach-O weakness lives there)."""
+    proc = subprocess.run([nm, "-g", "-m", str(archive)], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def read_strength(nm: str, archive: Path, listing: str) -> tuple[set[str], set[str]]:
+    """(strong, weak-only) definitions, from `nm -m` on Mach-O and W/V on ELF."""
+    return nm_symbols.strength(listing, darwin_listing(nm, archive))
+
+
+def copied_rtti(nm: str, forbidden: list[Path], checks: dict[str, str],
+                cxxfilt: str | None) -> dict[str, list[str]]:
+    """Per checked library, its weak-only RTTI copies of a forbidden archive's classes."""
+    forbidden_strong: set[str] = set()
+    for archive in forbidden:
+        forbidden_strong |= read_strength(nm, archive, nm_listing(nm, archive))[0]
+    weak_by_lib = {}
+    for name, archive_name in checks.items():
+        archive = Path(archive_name)
+        _, weak = read_strength(nm, archive, nm_listing(nm, archive))
+        weak_by_lib[name] = {symbol for symbol in weak if rtti_ownership.RTTI_MANGLED.match(symbol)}
+    names = rtti_ownership.demangle(forbidden_strong.union(*weak_by_lib.values()), cxxfilt)
+    owned = rtti_ownership.owned_classes(forbidden_strong, names)
+    return {name: sorted(rtti_ownership.copied_rtti(weak, owned, names).values())
+            for name, weak in weak_by_lib.items()}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -70,6 +97,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="append", default=[], metavar="NAME=ARCHIVE")
     parser.add_argument("--debt", action="append", default=[], metavar="NAME=REASON")
     parser.add_argument("--no-control", action="store_true", help="allow a pure forbidden-archive floor")
+    parser.add_argument("--forbidden-defines", choices=sorted(DEFINED), default="strong",
+                        help="what counts as a forbidden archive's definition: strong only (a "
+                             "dependency gate) or any, weak included (a contamination floor)")
+    parser.add_argument("--weak-rtti-contamination", action="store_true",
+                        help="with --check: a checked library's own weak typeinfo, typeinfo name, "
+                             "vtable, VTT or construction vtable for a class a forbidden archive "
+                             "owns (strongly defines a non-RTTI member of) is a finding too")
+    parser.add_argument("--cxxfilt", help="demangler for --weak-rtti-contamination "
+                                          "(default: c++filt or llvm-cxxfilt on PATH)")
     args = parser.parse_args(argv)
     if args.check:
         checks = dict(item.split("=", 1) for item in args.check)
@@ -78,14 +114,18 @@ def main(argv: list[str] | None = None) -> int:
             print("archive-symbol-closure: INCONCLUSIVE: need --forbidden", file=sys.stderr)
             return 2
         try:
-            forbidden_defs = set().union(*(read_symbols(args.nm, archive)[1] for archive in args.forbidden))
+            rule = args.forbidden_defines
+            forbidden_defs = set().union(*(read_symbols(args.nm, archive, rule)[1] for archive in args.forbidden))
             if not forbidden_defs:
                 print("archive-symbol-closure: INCONCLUSIVE: forbidden archive defines no symbols", file=sys.stderr)
                 return 2
             failed = False
+            copies = (copied_rtti(args.nm, args.forbidden, checks, args.cxxfilt)
+                      if args.weak_rtti_contamination else {})
             for name, archive_name in checks.items():
-                undefined, _ = read_symbols(args.nm, Path(archive_name))
-                hits = sorted(undefined & forbidden_defs)
+                undefined, _ = read_symbols(args.nm, Path(archive_name), rule)
+                hits = sorted(undefined & forbidden_defs) + [
+                    f"weak copy: {symbol}" for symbol in copies.get(name, [])]
                 if name in debts:
                     if hits:
                         print(f"archive-symbol-closure: {name}: {len(hits)} reference(s), allowed as debt: {debts[name]}")
@@ -99,20 +139,21 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     print(f"archive-symbol-closure: {name}: clean")
             return 1 if failed else 0
-        except (OSError, RuntimeError) as exc:
+        except (OSError, RuntimeError, rtti_ownership.DemangleError) as exc:
             print(f"archive-symbol-closure: INCONCLUSIVE: {exc}", file=sys.stderr)
             return 2
     if not args.forbidden or (not args.control and not args.no_control):
         print("archive-symbol-closure: INCONCLUSIVE: need at least one --forbidden and one --control archive", file=sys.stderr)
         return 2
     try:
-        undefined, _ = read_symbols(args.nm, args.subject)
+        rule = args.forbidden_defines
+        undefined, _ = read_symbols(args.nm, args.subject, rule)
         controlled = 0
         for archive in args.control:
             controlled += len(undefined & read_symbols(args.nm, archive)[1])
         violations: dict[Path, list[str]] = {}
         for archive in args.forbidden:
-            hit = sorted(undefined & read_symbols(args.nm, archive)[1])
+            hit = sorted(undefined & read_symbols(args.nm, archive, rule)[1])
             if hit:
                 violations[archive] = hit
     except (OSError, RuntimeError) as exc:

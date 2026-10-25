@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-gpu-wavenet-history-bound-20261022-watch",
+  "created_at": "2026-10-23T01:32:57Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "GPU audio compute input validation only: GpuCompute and the shared-I/O WaveNet spec now bound each layer's causal reach (2^20 samples) and size history rings in 64-bit arithmetic with a device binding-size check, so untrusted model files cannot stall or exhaust preparation. No kernel output changes; no design-import, Chromium, rendering, or packaging authority moves; no UI paint path changes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-gpu-compute",
+    "ctest --test-dir build -R pulp-test-gpu-shared-io-wavenet-spec",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -1,5 +1,6 @@
 // widget_bridge/border_box_api.cpp - border-box style registrations for WidgetBridge.
 
+#include <pulp/view/border_style.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
 #include "css_color.hpp"
@@ -100,24 +101,13 @@ void BridgeRegistrars::register_widget_border_box_api(WidgetBridge& self) {
 
     // setBorderStyle(id, "solid"|"dashed"|"dotted"|...) maps the CSS
     // border-style keyword to View::BorderStyle.
-    // Skia paint installs the dashed / dotted SkDashPathEffect at stroke
-    // time; double / groove / ridge / inset / outset currently degrade to
-    // solid. none / hidden short-circuit the stroke entirely.
+    // An unknown keyword falls back to solid.
     register_bridge_function(api, "setBorderStyle", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = args.get<std::string>(1, "solid");
         auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
-        if (s == "dashed")        v->set_border_style(View::BorderStyle::dashed);
-        else if (s == "dotted")   v->set_border_style(View::BorderStyle::dotted);
-        else if (s == "double")   v->set_border_style(View::BorderStyle::double_);
-        else if (s == "groove")   v->set_border_style(View::BorderStyle::groove);
-        else if (s == "ridge")    v->set_border_style(View::BorderStyle::ridge);
-        else if (s == "inset")    v->set_border_style(View::BorderStyle::inset);
-        else if (s == "outset")   v->set_border_style(View::BorderStyle::outset);
-        else if (s == "none")     v->set_border_style(View::BorderStyle::none);
-        else if (s == "hidden")   v->set_border_style(View::BorderStyle::hidden);
-        else                      v->set_border_style(View::BorderStyle::solid);
+        v->set_border_style(border_style_from_css(s).value_or(View::BorderStyle::solid));
         return choc::value::Value();
     });
     // A ToggleButton paints its own background, border and text from its own

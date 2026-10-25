@@ -75,7 +75,11 @@ static void snap_absolute_siblings_under_shadow(IRNode& node) {
     }
 }
 
-void normalize_design_ir(IRNode& node) {
+IRParseOptions ir_parse_options_for(const DesignIR& ir) {
+    return {.measured_geometry = ir.source_adapter == "browser-capture"};
+}
+
+void normalize_design_ir(IRNode& node, const IRParseOptions& options) {
     // ── Separator promotion ─────────────────────────────────────────────
     // Figma stores 1-pixel vertical lines (column separators, etc.) as a
     // VECTOR node with effectively-zero width or height plus a 1px stroke.
@@ -160,8 +164,11 @@ void normalize_design_ir(IRNode& node) {
         }
     }
 
-    // Shadow-driven sibling snap.
-    snap_absolute_siblings_under_shadow(node);
+    // Shadow-driven sibling snap. A browser capture's gap under a shadow is
+    // the gap Chromium laid out, and it paints the shadow under the sibling
+    // just as Pulp does, so there is nothing to close.
+    if (!options.measured_geometry)
+        snap_absolute_siblings_under_shadow(node);
 
     // ── Connector-line spanning rule ────────────────────────────────────
     // Pattern: a flex row whose FIRST child is a horizontal hairline (height

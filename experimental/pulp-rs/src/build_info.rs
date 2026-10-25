@@ -10,6 +10,13 @@ pub fn baked_cli_version() -> &'static str {
     option_env!("PULP_RS_BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
+/// The Pulp SDK version `CMake` baked into this binary, or `None` for a direct
+/// `cargo build`, whose [`baked_cli_version`] is only the crate's own version.
+#[must_use]
+pub const fn baked_sdk_version() -> Option<&'static str> {
+    option_env!("PULP_RS_BUILD_VERSION")
+}
+
 /// First SDK release whose Darwin CLI archive contains the health-only
 /// control broker. The build script reads this from the authoritative release
 /// product matrix, so transition logic cannot drift from release packaging.

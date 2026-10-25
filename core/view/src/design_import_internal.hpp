@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <choc/text/choc_JSON.h>
+#include <sstream>
 
 #include <pulp/view/design_import.hpp>
 
@@ -127,8 +128,20 @@ AudioWidgetType audio_widget_from_id(const std::string& id);
 // True when `key` names an asset-reference field; defined in design_ir_json.cpp.
 bool is_asset_reference_key(std::string_view key);
 
+// How a DesignIR node tree is read back.
+struct IRParseOptions {
+    // The node geometry was measured from a rendered page (the browser
+    // capture), so it is already what the source paints. Rules that move
+    // nodes to make up for how a design tool draws do not run.
+    bool measured_geometry = false;
+};
+
+// The parse options a DesignIR's provenance calls for: measured geometry for
+// the browser capture. Defined in design_ir_normalize.cpp.
+IRParseOptions ir_parse_options_for(const DesignIR& ir);
+
 // Parse a single DesignIR node tree; defined in design_ir_json.cpp.
-IRNode parse_ir_node(const choc::value::ValueView& obj);
+IRNode parse_ir_node(const choc::value::ValueView& obj, const IRParseOptions& options = {});
 
 // Heuristic geometry rewrites on a parsed node (separator promotion,
 // rounded-corner inheritance, shadow-driven sibling snap, connector-line
@@ -136,7 +149,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj);
 // per node after that node's children are parsed. Reads and writes only the
 // IR tree — never the source JSON — so the rules are unit-testable in
 // isolation.
-void normalize_design_ir(IRNode& node);
+void normalize_design_ir(IRNode& node, const IRParseOptions& options = {});
 
 // True when `kw` (CSS lowercase-hyphen spelling) is in the supported-blend
 // table every lane shares; defined in design_ir_json.cpp.
@@ -158,6 +171,16 @@ std::string json_escape(std::string_view text);
 // a recognition concern slated to move to the recognition module; this
 // declaration keeps the report pass decoupled in the meantime.)
 const char* interactive_kind_id(InteractiveElementKind k);
+
+// A text node's captured line boxes and their basis (`lineBoxes` /
+// `lineBoxBasis`); defined in design_ir_json_text.cpp.
+void parse_ir_text_line_layout(IRNode& node, const choc::value::ValueView& obj);
+void write_ir_text_line_layout(std::ostringstream& out, bool& first, const IRNode& node);
+
+// The document's shipped fonts (`fontFamilyAssets`); defined in
+// design_ir_json_fonts.cpp.
+void parse_ir_font_family_assets(DesignIR& ir, const choc::value::ValueView& root);
+void write_ir_font_family_assets(std::ostringstream& out, bool& first, const DesignIR& ir);
 
 // Parse the DesignIR token table; defined in design_ir_json.cpp.
 IRTokens parse_ir_tokens(const choc::value::ValueView& obj);

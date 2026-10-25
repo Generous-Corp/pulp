@@ -167,3 +167,23 @@ TEST_CASE("SpectralLab live engine switch stays finite at fixed latency",
     REQUIRE(all_finite(back_out));
     REQUIRE(proc.latency_samples() == latency0);
 }
+
+// The GPU engine's PDC share comes from the node's declared lead, not a copy of
+// it: the reported latency must equal re-block FIFO + frame latency + the
+// node's latency_blocks worth of internal blocks.
+TEST_CASE("SpectralLab reports the GPU node's declared latency", "[spectral][gpu][spectrallab]") {
+    if (!gpu_available())
+        SKIP("no GPU device");
+    state::StateStore store;
+    SpectralLabProcessor proc;
+    setup(proc, store, /*engine=*/0, /*layers=*/4);
+
+    const GpuSpectralCloudNode node(
+        kSpectralChannels, static_cast<std::uint32_t>(SpectralLabProcessor::kInternalBlock),
+        static_cast<std::uint32_t>(SR), 4, nullptr);
+    const auto lead = node.descriptor().latency_blocks;
+    REQUIRE(lead > 0u);
+    const auto expected = SpectralLabProcessor::kInternalBlock + kSpectralFft +
+                          static_cast<std::size_t>(lead) * SpectralLabProcessor::kInternalBlock;
+    REQUIRE(proc.latency_samples() == static_cast<int>(expected));
+}

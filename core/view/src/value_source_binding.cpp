@@ -1,6 +1,7 @@
 #include <pulp/view/value_source_binding.hpp>
 
 #include <algorithm>
+#include <cstring>
 
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/view.hpp>
@@ -88,8 +89,16 @@ void MeterSourceBinding::set_active(bool active) {
 bool MeterSourceBinding::tick(void* context, float dt) {
     auto* self = static_cast<MeterSourceBinding*>(context);
     if (!self->source_) return false; // unbound → auto-unsubscribe
-    self->frame_ = self->source_->read();
-    self->binding_.owner().on_meter_frame(self->frame_, dt);
+    const MeterFrame next = self->source_->read();
+    // A live binding keeps the clock ticking but does not by itself make the
+    // host composite, so a snapshot that changed what paint() would read asks
+    // for the frame here. An unchanged one asks for nothing: silence is free.
+    const bool changed = std::memcmp(&next, &self->frame_, sizeof(MeterFrame)) != 0;
+    self->frame_ = next;
+    View& owner = self->binding_.owner();
+    owner.on_meter_frame(self->frame_, dt);
+    if (changed)
+        owner.on_meter_snapshot_changed();
     return true;
 }
 
@@ -113,8 +122,14 @@ void ScalarSourceBinding::set_active(bool active) {
 bool ScalarSourceBinding::tick(void* context, float dt) {
     auto* self = static_cast<ScalarSourceBinding*>(context);
     if (!self->source_) return false; // unbound → auto-unsubscribe
-    self->value_ = self->source_->read();
+    const float next = self->source_->read();
+    // Same contract as the meter binding: repaint only when paint() would
+    // read something new.
+    const bool changed = std::memcmp(&next, &self->value_, sizeof(float)) != 0;
+    self->value_ = next;
     (void)dt;
+    if (changed)
+        self->binding_.owner().request_repaint();
     return true;
 }
 

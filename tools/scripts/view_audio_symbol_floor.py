@@ -9,7 +9,19 @@ consumer that links view-core without view-audio.
 
 This gate reads the archives themselves. For each checked library it lists the
 undefined symbols of every object and fails on any that pulp-view-audio
-defines, naming the object and the demangled symbol. A library may carry a
+defines, naming the object and the demangled symbol. "Defines" includes weak
+definitions (W/V): Meter's typeinfo is often weak, and a library that needs it
+needs pulp-view-audio. The reading and the verdict are
+archive_symbol_closure_check.py's, run with --forbidden-defines any and
+--weak-rtti-contamination. A checked library's own weak definition of an
+inline function view-audio also emits resolves its reference and is not
+flagged, but its own weak copy of the RTTI (typeinfo, typeinfo name, vtable,
+VTT, construction vtable) of a class view-audio owns is: it means the library
+was compiled against that class's definition. View-audio owns a class when it
+strongly defines a non-RTTI member of it; std:: and closure types are never
+flagged (see rtti_ownership.py). Weakness is read from `nm -m` on Mach-O,
+where Apple's -P letters never say W/V, and from the letters on ELF. A library
+may carry a
 named debt (--debt LIB=REASON) while a known edge is being removed; a debt that
 no longer matches anything is itself a failure, so a fixed edge cannot leave a
 stale exemption behind.
@@ -22,49 +34,9 @@ from __future__ import annotations
 
 import argparse
 import pathlib
-import re
 import shutil
 import subprocess
 import sys
-
-LINE_RE = re.compile(r"^(?P<archive>.*?)\[(?P<object>[^\]]+)\]: (?P<symbol>\S+) (?P<type>\S)")
-
-
-def nm_listing(nm: str, archive: pathlib.Path) -> str:
-    proc = subprocess.run([nm, "-A", "-P", "-g", str(archive)], capture_output=True,
-                          text=True, encoding="utf-8", errors="replace", check=False)
-    if proc.returncode != 0:
-        raise RuntimeError(f"{nm} failed on {archive}: {proc.stderr.strip()}")
-    return proc.stdout
-
-
-def parse(listing: str) -> tuple[set[str], list[tuple[str, str]]]:
-    """(defined symbols, [(object, undefined symbol)]) from `nm -A -P -g` text."""
-    defined: set[str] = set()
-    undefined: list[tuple[str, str]] = []
-    for line in listing.splitlines():
-        m = LINE_RE.match(line)
-        if not m:
-            continue
-        if m["type"] == "U":
-            undefined.append((m["object"], m["symbol"]))
-        elif m["type"] not in ("w", "v"):
-            defined.add(m["symbol"])
-    return defined, undefined
-
-
-def offenders(audio_defined: set[str], undefined: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    return sorted({(obj, sym) for obj, sym in undefined if sym in audio_defined})
-
-
-def demangle(symbols: list[str]) -> list[str]:
-    tool = shutil.which("c++filt") or shutil.which("llvm-cxxfilt")
-    if not tool or not symbols:
-        return symbols
-    proc = subprocess.run([tool], input="\n".join(symbols), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", check=False)
-    out = proc.stdout.splitlines()
-    return out if proc.returncode == 0 and len(out) == len(symbols) else symbols
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -82,7 +54,8 @@ def main(argv: list[str] | None = None) -> int:
         print("view-audio-symbol-floor: no --check library given", file=sys.stderr)
         return 2
     checker = pathlib.Path(__file__).with_name("archive_symbol_closure_check.py")
-    command = [sys.executable, str(checker), "--nm", args.nm, "--forbidden", str(args.audio), "--no-control"]
+    command = [sys.executable, str(checker), "--nm", args.nm, "--forbidden", str(args.audio),
+               "--forbidden-defines", "any", "--weak-rtti-contamination", "--no-control"]
     for item in args.check:
         command.extend(["--check", item])
     for item in args.debt:

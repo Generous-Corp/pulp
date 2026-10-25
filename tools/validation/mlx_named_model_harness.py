@@ -533,7 +533,11 @@ def main() -> int:
         "workers": [asdict(r) for r in sorted(results, key=lambda r: r.worker)],
         "alive_workers": alive,
         "timeout_contract": "cooperative cancellation; live native workers fail closed",
-        "cpu_shadow": "private Python mirror of NamTcnArtifactAdapter arithmetic",
+        # The mirror follows NamTcnArtifact's per-sample reference (exact
+        # tanh). The adapter itself runs the SIMD block engine, which nulls
+        # against that reference within 1e-6 on the named fixture
+        # (test_neural_cpu_simd.cpp), well inside the 1e-5 compare above.
+        "cpu_shadow": "private Python mirror of NamTcnArtifact reference arithmetic",
         "selected_provider": "mlx" if status == "ok" else "unavailable",
         "fallback_contract": "cpu_control_available; Pulp transport fallback not exercised",
         "phase3_gate": "not_claimed: private harness has no Pulp transport or callback",

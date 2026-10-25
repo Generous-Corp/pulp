@@ -5,6 +5,7 @@ add_executable(pulp-test-cli-package-analyzer-descriptors
     test_cli_package_analyzer_descriptors.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_analyzer_descriptors.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry_trust.cpp
 )
 target_include_directories(pulp-test-cli-package-analyzer-descriptors PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -13,6 +14,7 @@ pulp_test_data(pulp-test-cli-package-analyzer-descriptors PATHS tools/packages/r
 target_link_libraries(pulp-test-cli-package-analyzer-descriptors PRIVATE
     pulp::audio
     pulp::platform
+    pulp::runtime
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-package-analyzer-descriptors)
 

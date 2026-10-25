@@ -374,6 +374,29 @@ if(NOT IOS AND NOT ANDROID)
     add_dependencies(pulp-test-isolated-scanner
         pulp-scan-worker
         pulp-isolated-scanner-crash-helper)
+    if(PULP_HAS_CLAP)
+        # Two bundles from one source (fixtures/scan_probe_clap.cpp): the
+        # probe marks the file PULP_TEST_DLOPEN_MARKER names when it is
+        # loaded and lists one descriptor; the other aborts in
+        # clap_entry.init. Flat `.clap` files, so every platform's scanner
+        # and loader open them the same way.
+        add_library(pulp-test-fixture-clap-probe MODULE fixtures/scan_probe_clap.cpp)
+        target_link_libraries(pulp-test-fixture-clap-probe PRIVATE clap)
+        set_target_properties(pulp-test-fixture-clap-probe PROPERTIES
+            OUTPUT_NAME "PulpScanProbe" PREFIX "" SUFFIX ".clap")
+        add_library(pulp-test-fixture-clap-abort MODULE fixtures/scan_probe_clap.cpp)
+        target_link_libraries(pulp-test-fixture-clap-abort PRIVATE clap)
+        target_compile_definitions(pulp-test-fixture-clap-abort PRIVATE
+            PULP_SCAN_FIXTURE_ABORT_ON_INIT=1)
+        set_target_properties(pulp-test-fixture-clap-abort PROPERTIES
+            OUTPUT_NAME "PulpScanAbort" PREFIX "" SUFFIX ".clap")
+        target_compile_definitions(pulp-test-isolated-scanner PRIVATE
+            PULP_SCAN_FIXTURE_PROBE_CLAP="$<TARGET_FILE:pulp-test-fixture-clap-probe>"
+            PULP_SCAN_FIXTURE_ABORT_CLAP="$<TARGET_FILE:pulp-test-fixture-clap-abort>")
+        add_dependencies(pulp-test-isolated-scanner
+            pulp-test-fixture-clap-probe
+            pulp-test-fixture-clap-abort)
+    endif()
     catch_discover_tests(pulp-test-isolated-scanner)
 endif()
 # Hosted editor API
@@ -609,12 +632,13 @@ pulp_add_test_suite(pulp-test-editor-open-stages
 # umbrellas carry the host-free audio widgets but never the host-linked graph
 # editor, and the audio widgets never reach pulp::host. The source lint excludes
 # core/view/audio, whose targets own the audio-dependent headers.
-if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio)
+if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio AND TARGET pulp-view-platform)
     set(_pulp_view_boundary_args)
     foreach(_pulp_view_boundary_pair
             "pulp-view-core;PULP_VIEW_CORE_LINKS"
             "pulp-view;PULP_VIEW_LINKS"
             "pulp-view-native;PULP_VIEW_NATIVE_LINKS"
+            "pulp-view-platform;PULP_VIEW_PLATFORM_LINKS"
             "pulp-view-audio;PULP_VIEW_AUDIO_LINKS")
         list(GET _pulp_view_boundary_pair 0 _pulp_view_boundary_target)
         list(GET _pulp_view_boundary_pair 1 _pulp_view_boundary_var)
@@ -663,8 +687,9 @@ if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio)
 endif()
 
 # The include half of the same boundary: no core/view source outside
-# core/view/audio may reach an audio, signal, host, midi or format header, or an
-# audio widget's header, in any spelling (angle, quoted, #import, relative).
+# core/view/audio may reach an audio, signal, host, midi, format, timebase,
+# graph, playback, content or sample-bank header, or an audio widget's header,
+# in any spelling (angle, quoted, #import, relative).
 # The self-test plants each spelling and must turn red.
 add_test(NAME pulp-view-core-include-boundary
     COMMAND ${Python3_EXECUTABLE}
@@ -757,7 +782,8 @@ if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET p
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/archive_symbol_closure_check.py"
             --nm "${CMAKE_NM}"
-            --forbidden "$<TARGET_FILE:pulp-view-audio>" --no-control
+            --forbidden "$<TARGET_FILE:pulp-view-audio>" --forbidden-defines any
+            --weak-rtti-contamination --no-control
             --check "view-core=$<TARGET_FILE:pulp-view-core>"
             --check "view-script=$<TARGET_FILE:pulp-view-script>"
             --check "design-import=$<TARGET_FILE:pulp-design-import>"
@@ -768,6 +794,10 @@ if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET p
     set_tests_properties(pulp-view-audio-symbol-floor
         pulp-view-audio-symbol-floor-negative-contract
         PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+    # The negative contract reads the floor's registered command back from
+    # ctest, so the flags it checks are the ones that actually run.
+    set_tests_properties(pulp-view-audio-symbol-floor-negative-contract
+        PROPERTIES ENVIRONMENT "PULP_CTEST_BUILD_DIR=${CMAKE_BINARY_DIR}")
 endif()
 
 # The platform plug-in editor hosts, the frame pipeline and the PluginViewHost

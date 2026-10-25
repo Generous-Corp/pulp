@@ -105,6 +105,11 @@ void safe_dispatch_eval(const std::shared_ptr<BridgeCallbackState>& alive,
                         const char* context);
 void safe_dispatch_eval(ScriptEngine& engine, const std::string& js, const char* context);
 
+// The JS half of event dispatch: __dispatch__, __dispatchCallbackOnly__ and
+// the propagation and batching helpers they share. WidgetBridge evaluates it
+// as part of its preamble; every dispatch_event() call lands in it.
+std::string dispatch_prelude_js();
+
 // Dispatch a DOM-style event into the JS bridge, i.e.
 // `__dispatch__(<id>, '<event_name>', <payload_expr>)`. The target `id` is
 // ALWAYS routed through js_string_literal, so an id containing a quote or

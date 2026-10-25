@@ -143,9 +143,20 @@ if(PULP_ENABLE_FUZZING)
     target_link_libraries(pulp-fuzz-control-protocol PRIVATE
         pulp::inspect-protocol)
     target_compile_options(pulp-fuzz-control-protocol PRIVATE
-        -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+        -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
     target_link_options(pulp-fuzz-control-protocol PRIVATE
-        -fsanitize=fuzzer,address)
+        -fsanitize=${PULP_FUZZ_SANITIZERS})
+
+    # A scripted UI document (ui.js) evaluated through the widget bridge in a
+    # QuickJS realm with no effectful capabilities granted. The smoke keeps a
+    # low iteration count: each input builds a fresh realm, so one run costs
+    # milliseconds rather than microseconds.
+    pulp_add_libfuzzer_target(pulp-fuzz-ui-script
+        SOURCES fuzz/ui_script_fuzz_target.cpp
+        LIBRARIES pulp::view pulp::format
+        CORPUS "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fuzz/ui-script"
+        RUNS 200
+        MAX_LEN 16384)
 endif()
 
 # One executable for the pulp::inspect-control suites that spawn no fixture and
@@ -832,6 +843,9 @@ if(TARGET pulp-render)
     list(APPEND _pulp_widget_bridge_test_libs pulp::render)
 endif()
 pulp_add_test_suite(pulp-test-widget-bridge GROUP pulp-test-group-view-widgets LIBRARIES ${_pulp_widget_bridge_test_libs})
+# Named chart-shader presets: pure source generation plus raster renders.
+pulp_add_test_suite(pulp-test-chart-shader-presets GROUP pulp-test-group-view-widgets
+    LIBRARIES ${_pulp_widget_bridge_test_libs})
 # The late GPU/lifetime and stderr-diagnostic cases use the same private support
 # but compile as a second translation unit, keeping the original bridge suite
 # behavior and Catch2 names while limiting per-file rebuild cost.
@@ -1024,12 +1038,23 @@ pulp_add_test_suite(pulp-test-widget-bridge-yoga-border GROUP pulp-test-group-vi
 # 3,000-line target.
 pulp_add_test_suite(pulp-test-widget-bridge-css-misc GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
+# Captured browser line layout installed through setCapturedLineBoxes,
+# including the measured line metrics a capture records.
+pulp_add_test_suite(pulp-test-widget-bridge-captured-lines GROUP pulp-test-group-view-widgets LIBRARIES pulp::view pulp::state)
+
 # Autonomous Spectr regression suite. Composes the six
 # [contract] invariants from
 # test_widget_bridge.cpp into a Spectr-shaped mini-scenario so a future
 # change that keeps each unit-level invariant passing but breaks their
 # *interaction* still fails first.
 pulp_add_test_suite(pulp-test-spectr-regression GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
+
+# Widget bridge — removal resets. resetStyleProperty restores a widget's
+# starting layout slots, and a style toggled on and off by @pulp/react's
+# recorded reset calls renders exactly like one never styled.
+pulp_add_test_suite(pulp-test-widget-bridge-style-reset GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
+pulp_test_data(pulp-test-widget-bridge-style-reset
+    PATHS packages/pulp-react/test/fixtures/style-reset-toggle.json)
 
 # Typography inheritance for the CSS-style cascade
 pulp_add_test_suite(pulp-test-typography-inheritance GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)

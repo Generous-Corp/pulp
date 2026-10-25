@@ -285,6 +285,8 @@ retain those fields in the PR/landing evidence.
   and `tools/deps/manifest.json`, and re-check that
   `tools/cmake/scripts/icu_data_subset.py` still rewrites the new archive
   (`icu-data-subset-deterministic`, `pulp-test-icu-data-breaks`).
+- **A `pulp_register_fetchcontent_source(... REF <sha>)` pin is enforced at configure.** `pulp_materialize_mutable_fetchcontent_source` fails closed when the shared-cache git checkout's HEAD is not the registered commit, so a `GIT_TAG` must be the same full SHA (CHOC is the first consumer). The cache directory name is only a key, not proof of the commit. Symbolic refs and tarball sources skip the check. Selftest: `tools/scripts/test_setup_source_cache.sh`.
+- **QuickJS has its own manifest row** even though it rides inside CHOC's `choc_javascript_QuickJS.h`; its version is the embedded `CONFIG_VERSION`. Bumping CHOC must update that row.
 - A V8 bump can break choc's V8 bridge without any Pulp change: the release-path
   cube capture is the canary, and the m153 to m157 move tripped it. V8 15.4
   (commit `3186b30e34b4`) runs the `v8::Array::Iterate` callback inside its own
@@ -315,7 +317,10 @@ retain those fields in the PR/landing evidence.
   `resolve_release_runners.py --apply-class-label pulp-release-pr-gate` after a
   sparse checkout. With `PULP_RELEASE_CLASS_TOKENS` unset the selector is
   verbatim; set, a self-hosted selector gains `pulp-release-pr-gate`, so a gate
-  run that never starts may be an unserved class, not a toolchain failure.
+  run that never starts may be an unserved class, not a toolchain failure. A
+  fork pull request ignores these variables and runs its darwin-arm64 leg on
+  hosted `macos-15` (`--fork-pr-gate-route`), so a fork PR's macOS timing is
+  not evidence about the self-hosted gate.
 - A Skia milestone name alone does not select a V8 revision. Resolve through Chromium's
   milestone branch, preserve its raw Skia SHA, and separately prove the release's
   validated `built_skia`/`built_dawn` pair equals Pulp's active provider.

@@ -42,6 +42,12 @@ namespace pulp::signal {
 //   * `linear_phase_fir` — Kaiser-windowed FIR with a transition that ends at
 //     the base-rate Nyquist. `Quality::standard` is a 96 dB design flat to
 //     80% of Nyquist; `Quality::pristine` uses a 140 dB prototype flat to 90%.
+//     Pristine is a deliberately stricter tier than the ~86-90 dB equiripple
+//     half-band designs common elsewhere: its x2 stage is 385 taps (192
+//     samples of latency), so it costs more than such a design and should be
+//     compared with one only at a matched rejection. Standard is the tier to
+//     compare against those designs on cost. Each branch filters a whole
+//     chunk at a time (`detail::LinearPhaseOversamplingBlockStage2x`).
 //
 // A half-band IIR's transition is symmetric about base Nyquist, so content
 // in (0.5, 0.58) Fs (standard) folds onto (0.42, 0.5) Fs with only partial
@@ -311,8 +317,7 @@ template <typename SampleType = float> class OversamplerT {
             iir_stages_[s].upsample(input, output, n);
             return;
         }
-        for (std::size_t i = 0; i < n; ++i)
-            fir_stages_[s].upsample(input[i], output[2 * i], output[2 * i + 1]);
+        fir_stages_[s].upsample(input, output, n);
     }
 
     void downsample_stage(int stage, const SampleType* input, SampleType* output, std::size_t n) {
@@ -321,8 +326,7 @@ template <typename SampleType = float> class OversamplerT {
             iir_stages_[s].downsample(input, output, n);
             return;
         }
-        for (std::size_t i = 0; i < n; ++i)
-            output[i] = fir_stages_[s].downsample(input[2 * i], input[2 * i + 1]);
+        fir_stages_[s].downsample(input, output, n);
     }
 
     // The biquad lane stays sample by sample. Each biquad is one serial
@@ -436,7 +440,7 @@ template <typename SampleType = float> class OversamplerT {
     }
 
     // ── linear_phase_fir lane ──────────────────────────────────────────
-    std::array<detail::LinearPhaseOversamplingStage2x<SampleType>, kMaxStages> fir_stages_;
+    std::array<detail::LinearPhaseOversamplingBlockStage2x<SampleType>, kMaxStages> fir_stages_;
 };
 
 using Oversampler = OversamplerT<float>;

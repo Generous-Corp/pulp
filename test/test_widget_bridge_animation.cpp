@@ -3,6 +3,7 @@
 // (Element.animate(...) / KeyframeEffect), motion provenance, and the
 // pulp-motion-bench harness output.
 
+#include "../core/view/src/widget_bridge/bridge_dispatch.hpp"
 #include "support/unique_temp_dir.hpp"
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -763,6 +764,124 @@ TEST_CASE("WidgetBridge frame and timer callbacks run unbatched without a hook",
 
     CHECK(engine.evaluate("raf_ran").getWithDefault<int>(-1) == 1);
     CHECK(engine.evaluate("timer_ran").getWithDefault<int>(-1) == 1);
+}
+
+// A stand-in for React's batchedUpdates that counts how many batches opened
+// and how deep inside one each listener ran. A native event whose handlers
+// make several state updates must run them inside exactly one batch.
+static constexpr const char* kCountingBatchHook = R"(
+    var batch_depth = 0;
+    var batches = 0;
+    globalThis.__pulpBatchUpdates__ = function (fn, arg) {
+        batch_depth += 1; batches += 1;
+        try { return fn(arg); } finally { batch_depth -= 1; }
+    };
+)";
+
+TEST_CASE("WidgetBridge runs a native widget event inside one UI batch",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var seen = [];
+        on('w1', 'click', function () {
+            seen.push(batch_depth + '/' + __pulpDispatchDepth__);
+            if (seen.length === 1) __dispatch__('w1', 'click', {});
+        });
+    )");
+
+    dispatch_event(engine, "w1", "click", "{}");
+
+    // The handler ran inside the hook, and the dispatch it made from inside
+    // itself joined that batch (dispatch depth 2) instead of opening another.
+    CHECK(engine.evaluate("seen.join(',')").toString() == "1/1,1/2");
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpDispatchDepth__").getWithDefault<int>(-1) == 0);
+}
+
+TEST_CASE("WidgetBridge keeps the propagation level a batched handler returns",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var runs = 0;
+        on('w1', 'pointerdown', function () {
+            runs += 1;
+            return { __pulpEventPropagation: 1 };
+        });
+    )");
+
+    // stopPropagation's level comes back out of the batch.
+    CHECK(engine.evaluate("__dispatchCallbackOnly__('w1', 'pointerdown', {})")
+              .getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 1);
+
+    // Through the C++ entry the level is remembered against the dispatch
+    // token, so a second delivery of the same native event reports it without
+    // running the handler again.
+    const auto alive = std::make_shared<BridgeCallbackState>(nullptr);
+    dispatch_callback_only(alive, &engine, "w1", "pointerdown", "{__pulpDispatchToken: 7}");
+    CHECK(engine.evaluate("runs").getWithDefault<int>(-1) == 2);
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 2);
+    CHECK(engine
+              .evaluate("__dispatchCallbackOnly__('w1', 'pointerdown', "
+                        "{__pulpDispatchToken: 7})")
+              .getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("runs").getWithDefault<int>(-1) == 2);
+}
+
+TEST_CASE("WidgetBridge fans window and document listeners out inside the event batch",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var fanout = [];
+        window.addEventListener('keydown', function () {
+            fanout.push('window:' + batch_depth + '/' + __pulpDispatchDepth__);
+        });
+        document.addEventListener('mousedown', function () {
+            fanout.push('document:' + batch_depth + '/' + __pulpDispatchDepth__);
+        });
+    )");
+
+    dispatch_event(engine, "__global__", "keydown", "{}");
+    dispatch_event(engine, "document", "mousedown", "{}");
+
+    CHECK(engine.evaluate("fanout.join(',')").toString() == "window:1/1,document:1/1");
+    CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 2);
+}
+
+TEST_CASE("WidgetBridge native widget events run unbatched without a hook",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var clicks = 0;
+        on('w1', 'click', function () { clicks += 1; });
+    )");
+    dispatch_event(engine, "w1", "click", "{}");
+
+    CHECK(engine.evaluate("clicks").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("__pulpDispatchDepth__").getWithDefault<int>(-1) == 0);
 }
 
 TEST_CASE("WidgetBridge poll_async_results alone does NOT fire setTimeout (regression guard)",

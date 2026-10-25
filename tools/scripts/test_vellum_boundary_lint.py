@@ -94,6 +94,26 @@ def main() -> int:
             print("require negative control did not fail closed", file=sys.stderr)
             print(require.stdout, require.stderr, file=sys.stderr)
             return 1
+        # The per-OS platform backends and the audio widgets' sources are as
+        # private as core/view/src; the audio widgets' installed headers are not.
+        write(root / "core/view/audio/include/pulp/view/meter.hpp", "// public\n")
+        for planted, target in (
+                ("tools/import-design/planted-platform.cpp", "core/view/platform/mac/window_host_mac_internal.hpp"),
+                ("packages/pulp-react/planted-audio-src.ts", "../../core/view/audio/src/visualizers.js"),
+                ("tools/ui-build/public-audio-header.cpp", "core/view/audio/include/pulp/view/meter.hpp")):
+            write(root / planted, f'#include "{target}"\n' if planted.endswith(".cpp")
+                  else f'import {{ meter }} from "{target}";\n')
+        trees = run(root)
+        expected = ("private core/view include 'core/view/platform/mac/window_host_mac_internal.hpp'",
+                    "private core/view include 'core/view/audio/src/visualizers.js'")
+        if trees.returncode == 0 or not all(e in trees.stderr for e in expected):
+            print("platform/audio-src negative control did not fail closed", file=sys.stderr)
+            print(trees.stdout, trees.stderr, file=sys.stderr)
+            return 1
+        if "core/view/audio/include" in trees.stderr:
+            print("public audio-widget header was flagged as private", file=sys.stderr)
+            print(trees.stderr, file=sys.stderr)
+            return 1
         # Reverse-boundary controls must resolve the include relative to the
         # source file and must cover Objective-C++ platform sources as well as
         # C/C++ files. This traversal lands in tools/import-design despite its

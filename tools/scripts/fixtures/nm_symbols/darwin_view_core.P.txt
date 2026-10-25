@@ -1,0 +1,9 @@
+libpulp-view-core.a[channel_strip_view.cpp.o]: __ZTIN4pulp4view16ChannelStripViewE S 940 0
+libpulp-view-core.a[channel_strip_view.cpp.o]: __ZTSN4pulp4view16ChannelStripViewE S 958 0
+libpulp-view-core.a[channel_strip_view.cpp.o]: __ZTVN4pulp4view16ChannelStripViewE S 798 0
+libpulp-view-core.a[widgets.cpp.o]: __ZTINSt3__110__function6__funcIZN4pulp4view10SliderCore12notify_valueENS3_6NotifyEEUlvE_FvvEEE S 23200 0
+libpulp-view-core.a[widgets.cpp.o]: __ZTINSt3__112format_errorE S 232b8 0
+libpulp-view-core.a[widgets.cpp.o]: __ZTSNSt3__110__function6__funcIZN4pulp4view10SliderCore12notify_valueENS3_6NotifyEEUlvE_FvvEEE S 1e93c 0
+libpulp-view-core.a[widgets.cpp.o]: __ZTSNSt3__112format_errorE S 1ea84 0
+libpulp-view-core.a[widgets.cpp.o]: __ZTVNSt3__110__function6__funcIZN4pulp4view10SliderCore12notify_valueENS3_6NotifyEEUlvE_FvvEEE S 231a8 0
+libpulp-view-core.a[widgets.cpp.o]: __ZTVNSt3__112format_errorE S 232d0 0

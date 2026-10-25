@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-ux-w2-bench-resource-counters-watch",
+  "created_at": "2026-10-23T02:37:33Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "The design-import benchmark gains a stage lap clock, null-safe RSS and phys_footprint readings, load and thermal confounders, a settled-cycle memory slope, real Skia raster and Graphite lanes, per-frame resource counters with a steady-state zero gate, a live lane over importer DesignIR and its materialized runtime bundle, and an ABAB comparison driver that judges the speed-win criterion. The Skia canvas and the view subtree scene cache count decodes, uploads, paragraph builds and scene records and replays, and the DesignIR observer reports them per phase under counter schema v2, which the importer lab's work-counter gate reads. These are measurement-only changes: no import, Chromium capture, materialization, rendering, packaging or source-authority boundary moves.",
+  "tests": [
+    "ctest --test-dir build -R 'design-import benchmark Skia lane counts per-frame resource work'",
+    "ctest --test-dir build -R 'design-import benchmark cycle slope sees a planted per-cycle leak'",
+    "ctest --test-dir build -R 'design-import benchmark lap clock attributes a planted update sleep to update only'",
+    "ctest --test-dir build -R 'design-import benchmark live lane mounts a materialized bundle and fails closed'",
+    "ctest --test-dir build -R 'design-import benchmark marks a planted contended run confounded'",
+    "ctest --test-dir build -R 'design-import benchmark steady-state gate fails a planted per-frame decode'",
+    "python3 test/test_importer_differential_lab.py",
+    "python3 tools/scripts/test_design_import_benchmark.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

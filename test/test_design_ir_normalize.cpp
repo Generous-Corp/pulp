@@ -3,9 +3,12 @@
 // pass extracted from parse_ir_node. Each rule is exercised directly on a
 // hand-built IRNode — no JSON parse involved — which is exactly what the
 // extraction bought: the rewrites were previously inline in the parser and
-// untestable in isolation.
+// untestable in isolation. One case goes through parse_design_ir_json, to
+// check the parser hands the rules the options the IR's source calls for.
 
 #include "../core/view/src/design_import_internal.hpp"
+
+#include <pulp/view/design_ir_io.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -140,6 +143,64 @@ TEST_CASE("shadow snap leaves a gap beyond the shadow reach alone",
 
     CHECK_THAT(*parent.children[1].style.top,
                Catch::Matchers::WithinAbs(70.0, 1e-4));
+}
+
+TEST_CASE("shadow snap leaves measured geometry alone", "[design-ir-normalize]") {
+    // A knob column: a dial with a 0 8px 16px drop shadow and its label 10px
+    // below, where Chromium put it. The gap is inside the shadow's reach, so
+    // the Figma rule would lift the label 2px.
+    IRNode parent;
+
+    IRNode dial;
+    dial.style.position = "absolute";
+    dial.style.top = 0.0f;
+    dial.style.height = 66.0f;
+    IRBoxShadow sh;
+    sh.offset_y = 8.0f;
+    sh.blur = 16.0f;
+    dial.style.box_shadow.push_back(sh);
+
+    IRNode label;
+    label.style.position = "absolute";
+    label.style.top = 76.0f;
+    label.style.height = 16.0f;
+
+    parent.children = {dial, label};
+    IRNode figma = parent;
+    normalize_design_ir(figma);
+    CHECK_THAT(*figma.children[1].style.top, Catch::Matchers::WithinAbs(74.0, 1e-4));
+
+    IRParseOptions measured;
+    measured.measured_geometry = true;
+    normalize_design_ir(parent, measured);
+    CHECK_THAT(*parent.children[1].style.top, Catch::Matchers::WithinAbs(76.0, 1e-4));
+}
+
+TEST_CASE("a browser capture's gap under a drop shadow survives parsing", "[design-ir-normalize]") {
+    // Chromium laid the label out 10px under the dial, inside the dial's
+    // shadow reach. Reading the capture back must keep that gap, while a
+    // design-tool IR with the same geometry still gets its gap closed.
+    const std::string capture = R"json({"version": 1, "source": "html",
+      "sourceAdapter": "browser-capture",
+      "root": {"type": "frame", "name": "Knob", "children": [
+        {"type": "frame", "name": "Dial",
+         "style": {"position": "absolute", "top": 0, "height": 66,
+                   "boxShadow": "0 8px 16px rgba(0, 0, 0, 0.5)"}},
+        {"type": "text", "name": "Label", "content": "RES",
+         "style": {"position": "absolute", "top": 76, "height": 16}}]}})json";
+    std::string design = capture;
+    const std::string adapter = "browser-capture";
+    design.replace(design.find(adapter), adapter.size(), "figma");
+
+    const auto captured = parse_design_ir_json(capture);
+    REQUIRE(captured.root.children.size() == 2);
+    REQUIRE(captured.root.children[1].style.top.has_value());
+    CHECK(*captured.root.children[1].style.top == 76.0f);
+
+    const auto designed = parse_design_ir_json(design);
+    REQUIRE(designed.root.children.size() == 2);
+    REQUIRE(designed.root.children[1].style.top.has_value());
+    CHECK(*designed.root.children[1].style.top == 74.0f);
 }
 
 TEST_CASE("connector hairline spans the row and centers vertically",

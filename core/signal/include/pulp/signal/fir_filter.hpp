@@ -86,18 +86,33 @@ public:
 
     /// Process a buffer of samples in-place.
     void process(SampleType* data, int num_samples) {
+        process(data, data, num_samples);
+    }
+
+    /// Process a buffer into a separate output buffer without an intermediate
+    /// copy. Both buffers must contain `num_samples` elements and may alias
+    /// exactly; partial overlap is not supported. Each input slice is copied
+    /// into the history before its outputs are written, so exact aliasing is
+    /// the in-place case. With no coefficients the filter passes input
+    /// through, as the per-sample overload does.
+    void process(const SampleType* input, SampleType* output, int num_samples) {
         const std::size_t taps = coefficients_.size();
-        if (taps == 0 || num_samples <= 0)
+        if (num_samples <= 0)
             return;
+        if (taps == 0) {
+            if (input != output)
+                std::copy_n(input, num_samples, output);
+            return;
+        }
         const auto total = static_cast<std::size_t>(num_samples);
         std::size_t done = 0;
         while (done < total) {
             if (head_ == history_.size())
                 compact();
             const std::size_t count = std::min(history_.size() - head_, total - done);
-            std::copy_n(data + done, count, history_.data() + head_);
-            pulp::simd::correlate(history_.data() + head_ + 1 - taps, reversed_.data(), data + done,
-                                  count, taps);
+            std::copy_n(input + done, count, history_.data() + head_);
+            pulp::simd::correlate(history_.data() + head_ + 1 - taps, reversed_.data(),
+                                  output + done, count, taps);
             head_ += count;
             done += count;
         }

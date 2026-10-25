@@ -20,15 +20,31 @@ there. This reads it and prints one annotation on the gate job:
 
 It never fails the step: the test is the gate, this is the advance notice.
 
+An annotation on a job nobody opens is easy to miss, and main once reached the
+75% guard with the early warning printed and unread. So the push-to-main run
+also keeps ONE tracking issue, found by a hidden marker on an issue the
+workflow's own bot opened (a person's issue quoting the marker is never
+touched): opened or updated while
+the count is at or past the early-warning share (headroom below 20% of the
+guard's budget), carrying the count, the limit and the re-pin instruction, and
+closed once a re-pin brings it back under. A measurement that could not be read
+never opens or closes the issue.
+
     a2t_headroom_annotation.py <measurement.json>
+    a2t_headroom_annotation.py --reconcile-issue --repo <owner/name> <measurement.json>
 """
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
 
 TITLE = "a2t-scope-history-headroom"
+# The identity behind the workflow's GITHUB_TOKEN, which opens the issue.
+BOT_LOGIN = "github-actions[bot]"
 EARLY_WARNING_RATIO = 0.60
 REPIN = ("re-pin A2T_SCOPE_HISTORY_BASE on protected main, retaining about 25% of the "
          "window; never raise A2T_SCOPE_HISTORY_LIMIT (decisions contract row 22)")
@@ -56,11 +72,91 @@ def annotation(measurement: dict) -> str:
     return f"::notice title={TITLE}::{summary}."
 
 
+ISSUE_MARKER = "<!-- a2t-scope-history-headroom-tracking -->"
+
+# Runs `gh api <args>` (with optional stdin) and returns the parsed JSON reply.
+GhApi = Callable[[list[str], "str | None"], object]
+
+
+def gh_api(args: list[str], stdin: str | None = None) -> object:
+    proc = subprocess.run(["gh", "api", *args], input=stdin, capture_output=True,
+                          text=True, encoding="utf-8", timeout=60, env=os.environ.copy())
+    if proc.returncode != 0:
+        raise RuntimeError(f"gh api {' '.join(args[:3])} failed: {proc.stderr.strip()[:300]}")
+    return json.loads(proc.stdout) if proc.stdout.strip() else None
+
+
+def issue_title(count: int, limit: int) -> str:
+    return (f"{TITLE}: {count}/{limit} scope-touching revisions; "
+            "re-pin A2T_SCOPE_HISTORY_BASE")
+
+
+def issue_body(measurement: dict) -> str:
+    count, limit, budget = (int(measurement[k]) for k in ("count", "limit", "budget"))
+    return (f"The A2T scope-history window holds **{count}** scope-touching revisions of a "
+            f"**{limit}** limit ({count / limit:.0%}). `gpu-trace-overhead-acceptance-selftest` "
+            f"fails every gate run once the count passes **{budget}**, "
+            f"{max(budget - count, 0)} revisions from now.\n\n"
+            f"Fix: {REPIN}. Pick the commit with the selftest's own counting "
+            "(`_a2t_scope_touching_revision_ids` in "
+            "`tools/scripts/gpu_trace_overhead_acceptance.py`) and do not move "
+            "`A2T_SCOPE_BASE`.\n\n"
+            "The push-to-main Build and Test run keeps this issue and closes it once a "
+            "re-pin brings the count back under the early-warning share.\n\n"
+            f"{ISSUE_MARKER}\n")
+
+
+def reconcile_issue(measurement: dict, repo: str, api: GhApi = gh_api) -> str:
+    """Open/update or close the one tracking issue; returns the action taken."""
+    count, limit, budget = (int(measurement[k]) for k in ("count", "limit", "budget"))
+    firing = classify(count, limit, budget) != "ok"
+    found = api(["--method", "GET", "/search/issues", "-f",
+                 f'q=repo:{repo} is:issue in:title "{TITLE}"'], None) or {}
+    mine = [i for i in (found.get("items") or [])
+            if ISSUE_MARKER in (i.get("body") or "")
+            and (i.get("user") or {}).get("login") == BOT_LOGIN]
+    # One issue: an open one wins over closed duplicates, then the newest. Any
+    # OTHER open issue carrying the marker is a duplicate, closed in favour of it.
+    mine.sort(key=lambda i: (i.get("state") == "open", i.get("number", 0)), reverse=True)
+    issue = mine[0] if mine else None
+    for duplicate in mine[1:]:
+        if duplicate.get("state") != "open":
+            continue
+        api(["-X", "POST", f"/repos/{repo}/issues/{duplicate['number']}/comments", "-f",
+             f"body=Duplicate of #{issue['number']}, which tracks A2T headroom. Closing."], None)
+        api(["-X", "PATCH", f"/repos/{repo}/issues/{duplicate['number']}",
+             "-f", "state=closed", "-f", "state_reason=not_planned"], None)
+    if firing:
+        fields = {"title": issue_title(count, limit), "body": issue_body(measurement)}
+        if issue is None:
+            api(["-X", "POST", f"/repos/{repo}/issues", "--input", "-"], json.dumps(fields))
+            return "opened"
+        api(["-X", "PATCH", f"/repos/{repo}/issues/{issue['number']}", "--input", "-"],
+            json.dumps({**fields, "state": "open"}))
+        return f"updated #{issue['number']}"
+    if issue is not None and issue.get("state") == "open":
+        api(["-X", "POST", f"/repos/{repo}/issues/{issue['number']}/comments", "-f",
+             f"body=Headroom recovered: {count} of {limit} ({count / limit:.0%}). Closing."], None)
+        api(["-X", "PATCH", f"/repos/{repo}/issues/{issue['number']}",
+             "-f", "state=closed", "-f", "state_reason=completed"], None)
+        return f"closed #{issue['number']}"
+    return "none"
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
+    args = list(argv[1:])
+    repo = None
+    reconcile = "--reconcile-issue" in args
+    if reconcile:
+        args.remove("--reconcile-issue")
+        if "--repo" in args:
+            i = args.index("--repo")
+            repo = args[i + 1] if i + 1 < len(args) else None
+            del args[i:i + 2]
+    if len(args) != 1 or (reconcile and not repo):
         print(__doc__.strip().splitlines()[-1].strip(), file=sys.stderr)
         return 0
-    path = Path(argv[1])
+    path = Path(args[0])
     try:
         measurement = json.loads(path.read_text(encoding="utf-8"))
         line = annotation(measurement)
@@ -69,6 +165,11 @@ def main(argv: list[str]) -> int:
               f"({type(error).__name__}: {error}); the window can fill without notice.")
         return 0
     print(line)
+    if reconcile:
+        try:
+            print(f"a2t headroom tracking issue: {reconcile_issue(measurement, repo)}")
+        except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as error:
+            print(f"::warning title={TITLE}::could not reconcile the tracking issue: {error}")
     return 0
 
 

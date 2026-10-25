@@ -129,6 +129,28 @@ companion gates; screenshots alone do not prove audio or performance.
   - A fault delivered by the request file (`in_process_file`) is not control-op
     evidence.
   - `--dry-run` needs no REAPER.
+- **Real-host gpu-fault matrix (WP-K)**: the same plug-in in Logic and
+  GarageBand (AU, including out-of-process AUHostingService), Bitwig and
+  REAPER. Driven step by step by `real_host_smoke.py`, not by `reaper_smoke.py`.
+  - Order: `preflight`, `install-au`, `snapshot-prefs`, `stage`, `launch`,
+    `await-claim`, `realtime-begin`/`realtime-end`, `collect`, then `revert`.
+    `preflight` refuses a running DAW, a locked console (`IOConsoleLocked`), an
+    active rendezvous or an unreverted run. `revert` refuses while the host
+    process is alive.
+  - A sandboxed AU gets no env vars from the harness and cannot read
+    `~/Library/Containers`, so `stage` writes the rendezvous at
+    `~/Library/Application Support/Pulp/gpu-fault-continuity/active.json`
+    (nonce, expiry of at most 1 h, `O_EXCL`). The plug-in claims it and emits a
+    `host_process` event; the driver deletes it after checking the nonce.
+  - Projects come only from `real_host_templates.json` (No Input, monitoring
+    OFF, fingerprinted). Never open or save a user project; use throwaway
+    copies in a temp dir.
+  - Only `tools/validation/verify_gpu_audio_daw_continuity_receipt_v2.py`
+    accepts a real-host receipt (built by `gpu_fault_hosts.py`). It needs all
+    six binding conjuncts: an unbound run is INCONCLUSIVE and a wrong DAW is
+    FAIL. GarageBand is capped at `pass_plugin_capture_only`, and rows matching
+    `KNOWN_DEFECTS` are excluded unless the fix is an ancestor of the code
+    under test.
 - All modes share the same REAPER lifecycle (`ReaperSession`): fresh portable
   dir, temp scan path, pre-warm scan, scripted insert+float, guaranteed teardown.
   They differ only in what they SEED, the TRIGGER they fire once the FX is shown,

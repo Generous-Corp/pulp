@@ -61,11 +61,17 @@
 /// documented single-ended-triode character.
 ///
 /// **A stated antialiasing policy** (series law 4). The default is first-order
-/// antiderivative antialiasing, which costs zero latency — the one-sample
-/// history is state, not delay. `oversample_2x` keeps the house half-band path
-/// available for chains that must stay phase-coherent with another
-/// oversampled stage; it reports its latency exactly rather than estimating.
-/// `off` exists only for tests and the CPU floor.
+/// antiderivative antialiasing: on the linear part of the curve it is the
+/// two-tap average `(x[n] + x[n−1]) / 2`, so it delays by half a sample and
+/// rolls off the top octave (`adaa_linear_magnitude()`); the integer
+/// `latency_samples()` rounds that half sample down to 0 and
+/// `group_delay_samples()` reports it exactly. `adaa2` (second order) suppresses
+/// aliases further for one more `F2` evaluation, at one whole sample of delay
+/// — reported, and matched on the dry path — and a steeper top-octave
+/// roll-off. `oversample_2x` keeps the house half-band path available for
+/// chains that must stay phase-coherent with another oversampled stage; it
+/// reports its latency exactly rather than estimating. `off` exists only for
+/// tests and the CPU floor.
 ///
 /// **Tone bracketing that actually cancels.** Pre-emphasis boosts above a
 /// corner so high content hits the knee hotter and generates proportionally
@@ -136,9 +142,10 @@ enum class SaturatorShape : std::uint8_t {
 
 /// How a `SaturatorT` keeps the harmonics it generates from folding back.
 enum class SaturatorAliasPolicy : std::uint8_t {
-    adaa,          ///< First-order antiderivative antialiasing. Zero latency.
+    adaa,          ///< First-order antiderivative antialiasing. Half a sample of delay.
     oversample_2x, ///< House linear-phase half-band pair. Latency reported exactly.
     off,           ///< Raw per-sample evaluation. Tests and the CPU floor only.
+    adaa2,         ///< Second-order antiderivative antialiasing. One sample of delay.
 };
 
 namespace detail {
@@ -210,9 +217,187 @@ struct SaturatorShapeMath {
         }
         return 0.5 * u * u;
     }
+
+    /// `F2(u) = ∫F1(u)du`, the second antiderivative second-order ADAA takes
+    /// divided differences of. Linear terms are arbitrary for the same reason
+    /// `F1`'s constant is, but every branch here is ODD (the integral of an
+    /// even `F1` from 0), so the asymptotic quadratic terms carry the right
+    /// sign on both sides of the origin.
+    ///
+    /// Second-order ADAA divides rounding error in `F2` by the square of the
+    /// sample spacing, so absolute accuracy near the origin matters as much as
+    /// relative accuracy far from it: each branch is arranged to avoid
+    /// subtracting two large terms when the result is small.
+    static double second_antiderivative(SaturatorShape shape, double u) {
+        switch (shape) {
+        case SaturatorShape::tanh_soft:
+            return tanh_second_antiderivative(u);
+        case SaturatorShape::atan_soft:
+            return 0.5 * (u * u - 1.0) * std::atan(u) - 0.5 * u * std::log1p(u * u) + 0.5 * u;
+        case SaturatorShape::cubic_soft: {
+            const double a = std::abs(u);
+            if (a < 1.0)
+                return u * u * u / 6.0 - u * u * u * u * u / 60.0;
+            // Odd continuation of the clipped branch: integrating
+            // F1 = (2/3)(a − 1) + 5/12 outward from F2(1) = 3/20.
+            const double r = a - 1.0;
+            return std::copysign(r * r / 3.0 + (5.0 / 12.0) * r + 3.0 / 20.0, u);
+        }
+        case SaturatorShape::sinh_arc: {
+            const double root = std::sqrt(1.0 + u * u);
+            return 0.25 * (2.0 * u * u - 1.0) * std::asinh(u) - 0.75 * u * root;
+        }
+        }
+        return u * u * u / 6.0;
+    }
+
+    /// `∫₀ᵘ ln cosh v dv`. With `a = |u|`, `ln cosh v = v − ln 2 + ln(1 + e^(−2v))`
+    /// integrates to
+    ///
+    /// ```
+    /// a²/2 − a·ln 2 + ½·Li₂(−e^(−2a)) + π²/24
+    /// ```
+    ///
+    /// and the dilogarithm on `[−1, 0)` maps through Landen's identity
+    /// `Li₂(z) = −Li₂(z/(z−1)) − ½ln²(1−z)` onto `Li₂(w)` with
+    /// `w = 1/(1+e^(2a)) ∈ (0, ½]`. For that argument `−ln(1−w)` is exactly
+    /// `s = ln(1 + e^(−2a)) ∈ (0, ln 2]` — the same term `F1` already needs —
+    /// and `Li₂(w) = Σ Bₙ sⁿ⁺¹/(n+1)!` converges to double precision within
+    /// ten Bernoulli terms there (Abramowitz & Stegun 27.7; Maximon, Proc. R.
+    /// Soc. A 459, 2003). One `exp`, one `log1p`, one short odd polynomial.
+    static double tanh_second_antiderivative(double u) {
+        const double a = std::abs(u);
+        const double s = std::log1p(std::exp(-2.0 * a));
+        const double s2 = s * s;
+        // Li₂(w) = s − s²/4 + s³·P(s²), P from B₂ … B₁₆.
+        const double odd =
+            1.0 / 36.0 +
+            s2 * (-1.0 / 3600.0 +
+                  s2 * (1.0 / 211680.0 + s2 * (-1.0 / 10886400.0 +
+                                               s2 * (1.0 / 526901760.0 +
+                                                     s2 * (-4.0647616451442256e-11 +
+                                                           s2 * (8.921691020456452e-13 +
+                                                                 s2 * -1.9939295860721074e-14))))));
+        const double li2_w = s - 0.25 * s2 + s * s2 * odd;
+        constexpr double kLn2 = 0.69314718055994530942;
+        constexpr double kPiSquaredOver24 = 0.41123351671205660911;
+        const double magnitude =
+            0.5 * a * a - kLn2 * a - 0.5 * li2_w - 0.25 * s2 + kPiSquaredOver24;
+        return std::copysign(magnitude, u);
+    }
 };
 
 }  // namespace detail
+
+/// The linear-path magnitude response of `order`-th-order antiderivative
+/// antialiasing (1 or 2) at `cycles_per_sample` (0 … 0.5).
+///
+/// On a signal small enough to stay on the linear part of the curve, ADAA
+/// reduces to a short moving average of the input: `(x[n] + x[n−1]) / 2` for
+/// first order and `(x[n] + x[n−1] + x[n−2]) / 3` for second (the divided
+/// differences of `u²/2` and `u³/6`). Their magnitudes are `|cos(πf)|` and
+/// `|1 + 2cos(2πf)| / 3`: −0.7 dB / −1.9 dB at 0.125, −3.0 dB / −9.5 dB at
+/// 0.25, and a null at Nyquist (first order) or at a third of the rate
+/// (second). That top-octave droop is part of what ADAA costs at the base
+/// rate and is reported, not hidden; running ADAA inside an oversampler is
+/// what moves it out of the audio band.
+inline double adaa_linear_magnitude(int order, double cycles_per_sample) noexcept {
+    constexpr double kPi = 3.14159265358979323846;
+    if (order <= 0)
+        return 1.0;
+    if (order == 1)
+        return std::abs(std::cos(kPi * cycles_per_sample));
+    return std::abs(1.0 + 2.0 * std::cos(2.0 * kPi * cycles_per_sample)) / 3.0;
+}
+
+/// Second-order antiderivative antialiasing over one shape, in the curve's own
+/// argument domain (Bilbao, Esqueda, Parker & Välimäki, IEEE SPL 24(7), 2017).
+///
+/// The output is twice the second divided difference of `F2` over the last
+/// three arguments; on the linear part of a curve that is the mean of the
+/// three samples. Because a divided difference is symmetric in its points,
+/// the three arguments are taken in
+/// sorted order: the denominator is then the full spread of the three, never
+/// the gap between two points that happen to be close, which is what makes a
+/// signal turning around (x[n] ≈ x[n−2]) a non-event rather than the
+/// ill-conditioned special case it is in the textbook arrangement.
+///
+/// Near-degenerate spacings fall back to series forms that are accurate to the
+/// order the fallback threshold leaves: a close pair uses the midpoint rule
+/// with its second-order correction, a near-constant triple uses the curve at
+/// the triple's mean (the limit of the divided difference, and exact on the
+/// linear part). The threshold scales with `|u|` because `F2` grows
+/// as `u²`, so the rounding error the division amplifies stays bounded
+/// (~1e-8 absolute) at every drive.
+///
+/// The three-point stencil is symmetric about the middle sample, so the
+/// output is delayed by exactly one sample. Scalar state only; `step()` never allocates.
+class SaturatorAdaa2 {
+  public:
+    /// Relative spacing below which a divided difference is replaced by its
+    /// series limit. [design parameter] default 1e-4, range 1e-6 .. 1e-3.
+    static constexpr double kTolerance = 1e-4;
+
+    /// Seeds the two-sample history: `previous` is the last argument consumed,
+    /// `before` the one ahead of it. A parameter change that remaps the
+    /// argument domain re-seeds from the same input history, so the stencil
+    /// never mixes arguments taken under two different settings.
+    void reset(SaturatorShape shape, double previous, double before) {
+        u_[0] = previous;
+        u_[1] = before;
+        f2_[0] = detail::SaturatorShapeMath::second_antiderivative(shape, previous);
+        f2_[1] = detail::SaturatorShapeMath::second_antiderivative(shape, before);
+    }
+
+    /// Consumes the newest argument and returns the antialiased curve value
+    /// centred one sample back.
+    double step(SaturatorShape shape, double u) {
+        const double f2 = detail::SaturatorShapeMath::second_antiderivative(shape, u);
+        // Sort (u, u_[0], u_[1]) with their F2 values.
+        double p[3] = {u, u_[0], u_[1]};
+        double q[3] = {f2, f2_[0], f2_[1]};
+        u_[1] = u_[0];
+        f2_[1] = f2_[0];
+        u_[0] = u;
+        f2_[0] = f2;
+        if (p[0] > p[1])
+            swap_pair(p, q, 0, 1);
+        if (p[1] > p[2])
+            swap_pair(p, q, 1, 2);
+        if (p[0] > p[1])
+            swap_pair(p, q, 0, 1);
+
+        const double spread = p[2] - p[0];
+        const double scale = std::max(1.0, std::max(std::abs(p[0]), std::abs(p[2])));
+        const double tolerance = kTolerance * scale;
+        if (spread <= tolerance)
+            return detail::SaturatorShapeMath::f(shape, (p[0] + p[1] + p[2]) / 3.0);
+        const double upper = first_difference(shape, p[2], p[1], q[2], q[1], tolerance);
+        const double lower = first_difference(shape, p[1], p[0], q[1], q[0], tolerance);
+        return 2.0 * (upper - lower) / spread;
+    }
+
+  private:
+    static void swap_pair(double* p, double* q, int i, int j) {
+        std::swap(p[i], p[j]);
+        std::swap(q[i], q[j]);
+    }
+
+    /// `(F2(hi) − F2(lo)) / (hi − lo)` for `hi ≥ lo`, or its midpoint expansion
+    /// `F1(m) + δ²·f'(m)/24` when the pair is too close to divide.
+    static double first_difference(SaturatorShape shape, double hi, double lo, double f2_hi,
+                                   double f2_lo, double tolerance) {
+        const double delta = hi - lo;
+        if (delta > tolerance)
+            return (f2_hi - f2_lo) / delta;
+        const double mid = 0.5 * (hi + lo);
+        return detail::SaturatorShapeMath::antiderivative(shape, mid) +
+               delta * delta * detail::SaturatorShapeMath::df(shape, mid) / 24.0;
+    }
+
+    double u_[2] = {0.0, 0.0};
+    double f2_[2] = {0.0, 0.0};
+};
 
 /// The memoryless saturation stage.
 template <typename SampleType = float>
@@ -294,7 +479,8 @@ public:
         // The dry path must be delayed to match the wet path, or the dry/wet
         // mix becomes a comb filter the moment `oversample_2x` is selected.
         // Sized for the worst case so switching policy never allocates.
-        dry_delay_.assign(static_cast<std::size_t>(oversample_latency_) + 1, SampleType{0});
+        dry_delay_.assign(static_cast<std::size_t>(std::max(oversample_latency_, 1)) + 1,
+                          SampleType{0});
 
         update_tone();
         reset();
@@ -368,17 +554,46 @@ public:
         output_trim_ = units::db_to_linear(std::clamp(db, -kOutputTrimDbMax, kOutputTrimDbMax));
     }
 
-    /// Reported exactly, never estimated (series law 5). Zero for `adaa` and
-    /// `off` — ADAA's one-sample history is state, not delay, exactly as a
-    /// one-pole's `z⁻¹` term is. The `oversample_2x` value is the composed
-    /// oversampler's own reported latency.
+    /// The integer delay the host should compensate, matched on the dry path.
+    /// One sample for `adaa2`, whose three-point stencil is centred one sample
+    /// back; the composed oversampler's own reported latency for
+    /// `oversample_2x`; zero for `off`, and zero for `adaa`, whose half sample
+    /// is below what an integer delay can express (`group_delay_samples()`).
     int latency_samples() const noexcept {
-        return alias_policy_ == AliasPolicy::oversample_2x ? oversample_latency_ : 0;
+        switch (alias_policy_) {
+        case AliasPolicy::oversample_2x:
+            return oversample_latency_;
+        case AliasPolicy::adaa2:
+            return 1;
+        case AliasPolicy::adaa:
+        case AliasPolicy::off:
+            return 0;
+        }
+        return 0;
+    }
+
+    /// The wet path's exact delay on the linear part of the curve, in samples:
+    /// 0.5 for `adaa` (its two-tap average), 1 for `adaa2`, the oversampler's
+    /// exact figure for `oversample_2x`, 0 for `off`.
+    double group_delay_samples() const noexcept {
+        switch (alias_policy_) {
+        case AliasPolicy::oversample_2x:
+            return oversampler_.latency().exact_input_samples;
+        case AliasPolicy::adaa2:
+            return 1.0;
+        case AliasPolicy::adaa:
+            return 0.5;
+        case AliasPolicy::off:
+            return 0.0;
+        }
+        return 0.0;
     }
 
     /// Never allocates; a zero-initialised instance is already in this state.
     void reset() {
         adaa_previous_ = 0.0;
+        adaa2_history_[0] = adaa2_history_[1] = 0.0;
+        reseed_adaa();
         pre_filter_.reset();
         de_filter_.reset();
         oversampler_.reset();
@@ -406,6 +621,9 @@ public:
                 break;
             case AliasPolicy::adaa:
                 wet = shaped_adaa(x);
+                break;
+            case AliasPolicy::adaa2:
+                wet = shaped_adaa2(x);
                 break;
             case AliasPolicy::oversample_2x:
                 wet = oversampler_.process(static_cast<SampleType>(x), [this](SampleType s) {
@@ -447,6 +665,8 @@ public:
 private:
     void recover_audio_fault() noexcept {
         adaa_previous_ = 0.0;
+        adaa2_history_[0] = adaa2_history_[1] = 0.0;
+        reseed_adaa();
         pre_filter_.reset();
         de_filter_.reset();
         oversampler_.reset();
@@ -466,17 +686,40 @@ private:
                inv_drive_sq_slope_;
     }
 
-    /// First-order antiderivative antialiasing. Zero latency: the one-sample
-    /// history is state, not delay.
+    /// First-order antiderivative antialiasing: half a sample of delay on the
+    /// linear part of the curve (`group_delay_samples()`).
     double shaped_adaa(double x) {
         const double previous = adaa_previous_;
+        const double previous_antiderivative = adaa_previous_antiderivative_;
+        const double current_antiderivative = antiderivative(x);
         adaa_previous_ = x;
+        adaa_previous_antiderivative_ = current_antiderivative;
         const double delta = x - previous;
         if (std::abs(delta) > kAdaaEpsilon)
-            return (antiderivative(x) - antiderivative(previous)) / delta;
+            return (current_antiderivative - previous_antiderivative) / delta;
         // The difference quotient is numerically meaningless here; the limit it
         // is approximating is the curve evaluated at the midpoint.
         return shaped(0.5 * (x + previous));
+    }
+
+    /// Second-order ADAA, run in the curve's argument domain and normalised
+    /// exactly as `shaped()` is: a divided difference of an affine argument is
+    /// the divided difference in that argument, and the bias offset and slope
+    /// normaliser are affine in the result.
+    double shaped_adaa2(double x) {
+        adaa2_history_[1] = adaa2_history_[0];
+        adaa2_history_[0] = x;
+        const double v = adaa2_.step(shape_, drive_ * x + bias_);
+        return (v - bias_offset_) * inv_drive_slope_;
+    }
+
+    /// Rebuilds both ADAA paths' cached antiderivatives from the input history
+    /// under the current shape, drive and bias, so one antiderivative per
+    /// sample suffices and a parameter change never mixes two settings.
+    void reseed_adaa() {
+        adaa_previous_antiderivative_ = antiderivative(adaa_previous_);
+        adaa2_.reset(shape_, drive_ * adaa2_history_[0] + bias_,
+                     drive_ * adaa2_history_[1] + bias_);
     }
 
     /// Reads the dry sample aligned with the wet path's latency, then writes
@@ -515,6 +758,7 @@ private:
         // largest gain the biased, slope-normalised curve can present is
         // f'(0)/f'(b) = 1/f'(b). Drive cancels out of the ratio.
         max_gain_ = 1.0 / safe_slope;
+        reseed_adaa();
     }
 
     void update_tone() {
@@ -562,6 +806,9 @@ private:
     double max_gain_ = 1.0;
 
     double adaa_previous_ = 0.0;
+    double adaa_previous_antiderivative_ = 0.0;
+    double adaa2_history_[2] = {0.0, 0.0};
+    SaturatorAdaa2 adaa2_{};
     BiquadT<SampleType> pre_filter_{};
     BiquadT<SampleType> de_filter_{};
     OversamplerT<SampleType> oversampler_{};
