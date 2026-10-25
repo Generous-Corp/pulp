@@ -113,6 +113,10 @@ On Windows, start the complete private profile with
 stall before startup-script dispatch; the harness copies the non-secret profile
 and removes stale scan caches before launching. Neither `-portable` nor
 `-script` is supported.
+When `PULP_TRACE_PATH` is set, the harness clears it for the warm REAPER scan
+and restores it for the scripted editor run. The scan can instantiate the
+plugin and close a trace before the measured run begins; keeping that probe out
+of the destination makes the resulting capture belong to the scripted run.
 Compare the same assigned modulation with mouse still versus band drawing, and
 settings mouse-still versus scrolling. Buffer input QPC/UTC timing records and
 capture screenshots/state outside the measured windows. Verify received event

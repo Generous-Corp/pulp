@@ -31,6 +31,8 @@ $envNames = @('FX','STATUS','TOKEN','PROJECT','PARAM_INDEX','DURATION') | ForEac
 foreach($name in $envNames){$priorEnv[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 $exitCode=3
 $privateProfile=$null
+$priorTracePath=Get-ProcessTracePath
+$tracePathRestored=$false
 function Stop-Owned($Entry) {
   if ($Entry.process.HasExited) { return }
   Assert-OwnedIdentity $Entry.process $Entry.started
@@ -92,6 +94,13 @@ try {
   $env:PULP_DAW_SMOKE_STATUS=$status;$env:PULP_DAW_SMOKE_TOKEN=$token
   $env:PULP_DAW_SMOKE_PROJECT=Join-Path $run 'host-state.rpp'
   $env:PULP_DAW_SMOKE_PARAM_INDEX="$ParamIndex";$env:PULP_DAW_SMOKE_DURATION="$AutomationSec"
+  # The warm scan is only a cache/readiness probe.  Do not let it inherit the
+  # product trace destination: REAPER may load the plugin during scanning and
+  # close the trace before the measured startup script runs, leaving a tiny
+  # metadata-only capture.  Restore the caller's value immediately after the
+  # probe so the scripted editor run owns the complete trace.
+  Set-ProcessTracePath $null
+  $receipt.trace_environment=[ordered]@{warm_scan='cleared';scripted='pending'}
   $warm=Start-Owned @('-newinst','-cfgfile',$ini,'-new','-nosplash') 'warm'
   $deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSec);$cacheMatch=$false
   while([DateTime]::UtcNow -lt $deadline){
@@ -102,6 +111,9 @@ try {
   }
   if(-not $cacheMatch){throw 'Scan cache did not acquire staged basename'}
   Stop-Owned $warm
+  Set-ProcessTracePath $priorTracePath
+  $tracePathRestored=$true
+  $receipt.trace_environment.scripted=if($null -eq $priorTracePath){'cleared'}else{'restored'}
   # A complete copied REAPER profile is required here. A minimal profile can
   # stall before startup-script dispatch; with the private resource directory
   # and its stale scan caches removed, the documented positional Lua form
@@ -225,6 +237,10 @@ public static class OwnedWindow {
     try{Remove-Item -LiteralPath $privateProfile -Recurse -Force}catch{$receipt.cleanup_errors+='Private profile cleanup failed';$exitCode=3;$receipt.verdict='INCONCLUSIVE'}
   }
   foreach($name in $envNames){[Environment]::SetEnvironmentVariable($name,$priorEnv[$name],'Process')}
+  # Restore tracing even when the warm scan or cache wait failed.  This keeps a
+  # caller-owned capture usable and prevents a failed probe from contaminating
+  # the next run.
+  if(-not $tracePathRestored){Set-ProcessTracePath $priorTracePath}
   $receipt.finished_utc=[DateTime]::UtcNow.ToString('o')
   $receipt | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $run 'receipt.json') -Encoding utf8
 }
