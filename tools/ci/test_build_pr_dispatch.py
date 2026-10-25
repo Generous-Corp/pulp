@@ -65,6 +65,25 @@ def bash(script: str, env: dict[str, str]) -> tuple[subprocess.CompletedProcess,
         return proc, outputs
 
 
+def merge_repo(tmp: Path) -> dict[str, str]:
+    """A repository whose HEAD merges `topic` onto a `main` that moved."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(tmp), *args], check=True, capture_output=True,
+                              text=True, encoding="utf-8",
+                              env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                                   "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}).stdout.strip()
+    git("init", "-q", "-b", "main")
+    git("commit", "-q", "--allow-empty", "-m", "base")
+    git("checkout", "-q", "-b", "topic")
+    git("commit", "-q", "--allow-empty", "-m", "head")
+    head = git("rev-parse", "HEAD")
+    git("checkout", "-q", "main")
+    git("commit", "-q", "--allow-empty", "-m", "main moved")
+    base = git("rev-parse", "HEAD")
+    git("merge", "-q", "--no-ff", "-m", "merge", "topic")
+    return {"head": head, "base": base, "merge": git("rev-parse", "HEAD")}
+
+
 class InputAndCheckoutTest(unittest.TestCase):
     def test_the_input_is_an_optional_string(self) -> None:
         triggers = workflow().get("on", workflow().get(True, {}))
@@ -111,26 +130,9 @@ class VerifyMergeRefTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.script = steps("build")["Verify the tested merge ref"]["run"]
 
-    def _repo(self, tmp: Path) -> dict[str, str]:
-        def git(*args: str) -> str:
-            return subprocess.run(["git", "-C", str(tmp), *args], check=True, capture_output=True,
-                                  text=True, encoding="utf-8",
-                                  env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                                       "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}).stdout.strip()
-        git("init", "-q", "-b", "main")
-        git("commit", "-q", "--allow-empty", "-m", "base")
-        git("checkout", "-q", "-b", "topic")
-        git("commit", "-q", "--allow-empty", "-m", "head")
-        head = git("rev-parse", "HEAD")
-        git("checkout", "-q", "main")
-        git("commit", "-q", "--allow-empty", "-m", "main moved")
-        base = git("rev-parse", "HEAD")
-        git("merge", "-q", "--no-ff", "-m", "merge", "topic")
-        return {"head": head, "base": base, "merge": git("rev-parse", "HEAD")}
-
     def test_a_merge_of_this_head_is_recorded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            shas = self._repo(Path(tmp))
+            shas = merge_repo(Path(tmp))
             proc, outputs = bash(self.script, {"GITHUB_SHA": shas["head"],
                                                "TESTED_REF": "refs/pull/7/merge", "PWD_OVERRIDE": tmp})
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
@@ -140,12 +142,55 @@ class VerifyMergeRefTest(unittest.TestCase):
 
     def test_a_merge_of_another_head_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            shas = self._repo(Path(tmp))
+            shas = merge_repo(Path(tmp))
             proc, outputs = bash(self.script, {"GITHUB_SHA": "f" * 40,
                                                "TESTED_REF": "refs/pull/7/merge", "PWD_OVERRIDE": tmp})
         self.assertEqual(proc.returncode, 1)
         self.assertIn("does not merge this run's head", proc.stdout)
         self.assertNotIn("tested_sha", outputs)
+
+
+class ClassifyBaseTest(unittest.TestCase):
+    """classify diffs a PR dispatch's merge ref against its merged base."""
+
+    START = 'if [ "$EVENT_NAME" = workflow_dispatch ] && [ -n "${DISPATCH_PR_NUMBER:-}" ]; then'
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        step = next(s for s in workflow()["jobs"]["classify"]["steps"] if s.get("id") == "classify")
+        cls.env = step["env"]
+        lines = step["run"].splitlines()
+        start = next(i for i, line in enumerate(lines) if line.strip() == cls.START)
+        end = next(i for i in range(start, len(lines)) if lines[i].strip() == "fi")
+        cls.snippet = "\n".join(lines[start:end + 1])
+
+    def _base(self, clone: Path, event: str, pr_number: str, base: str = "origin/main") -> str:
+        script = f"set -euo pipefail\nbase={base}\n{self.snippet}\necho \"BASE=$base\""
+        proc, _ = bash(script, {"EVENT_NAME": event, "DISPATCH_PR_NUMBER": pr_number,
+                                "PWD_OVERRIDE": str(clone)})
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        return next(line for line in proc.stdout.splitlines() if line.startswith("BASE="))[5:]
+
+    def test_the_merged_base_from_a_depth_one_merge_ref(self) -> None:
+        self.assertEqual(self.env["DISPATCH_PR_NUMBER"], "${{ inputs.pr_number }}")
+        with tempfile.TemporaryDirectory() as tmp:
+            source, clone = Path(tmp) / "source", Path(tmp) / "clone"
+            source.mkdir()
+            shas = merge_repo(source)
+            subprocess.run(["git", "clone", "-q", "--depth", "1", f"file://{source}", str(clone)],
+                           check=True, capture_output=True)
+            self.assertEqual(self._base(clone, "workflow_dispatch", "7"), shas["base"])
+            # Not a PR dispatch: the resolver's base stands.
+            self.assertEqual(self._base(clone, "workflow_dispatch", ""), "origin/main")
+            self.assertEqual(self._base(clone, "pull_request", "7"), "origin/main")
+
+    def test_a_tree_with_no_parent_leaves_no_sha(self) -> None:
+        # Fails toward the native build: the caller requests it for a non-sha.
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            subprocess.run(["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t",
+                            "commit", "-q", "--allow-empty", "-m", "root"], check=True)
+            self.assertEqual(self._base(Path(tmp), "workflow_dispatch", "7"), "")
 
 
 class BindingTest(unittest.TestCase):

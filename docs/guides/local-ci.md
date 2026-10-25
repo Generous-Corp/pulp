@@ -3867,8 +3867,8 @@ With `pr_number` set, the run does the following:
   commit) and the `merged_base` (its first parent) are step outputs of `Verify
   the tested merge ref` and appear in the job summary. The next step is named
   `Tested <ref> at <sha> onto <base>`, so a reader of the jobs API sees them
-  without reading logs. The merged base is also the capability base, like a
-  pull request's pinned base.
+  without reading logs. The merged base is also the capability base and the
+  base classify diffs against, as a pull request's pinned `base.sha` is.
 - **Routes Linux as a pull_request run does**, to GitHub-hosted Linux. The
   operator Linux selectors are ignored on this path.
 

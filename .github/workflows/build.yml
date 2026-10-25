@@ -1209,6 +1209,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_HEAD_SHA: ${{ github.sha }}
           EVENT_PATH: ${{ github.event_path }}
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
           # Default OFF. `1` lets the protected-base bump verifier accept the
           # synthesized refs/pull/N/merge checkout once it proves the merge's
           # parents are exactly [base.sha, head.sha] and its tree is the head's.
@@ -1236,6 +1237,16 @@ jobs:
             a2t_receipt_verification_required=true
           fi
           base="$("$ci_python" tools/scripts/resolve_classify_base.py)"
+          # A `pr_number` dispatch checked out refs/pull/<n>/merge: diff it
+          # against that merge's own base, its first parent, as a pull request
+          # diffs its pinned base.sha. The commit object names its parents even
+          # at depth 1. Anything but a sha leaves the native build required.
+          if [ "$EVENT_NAME" = workflow_dispatch ] && [ -n "${DISPATCH_PR_NUMBER:-}" ]; then
+            merge_commit=$(git cat-file -p HEAD 2>/dev/null) || merge_commit=""
+            base=$(sed -n 's/^parent \([0-9a-f]\{40\}\)$/\1/p' <<< "$merge_commit")
+            base="${base%%$'\n'*}"
+            echo "classify: pr_number dispatch; diffing refs/pull/$DISPATCH_PR_NUMBER/merge against its merged base ${base:-<none>}"
+          fi
           native_build_required=true
           ios_compile_required=true
           agent_capability_installed_sdk_required=true
