@@ -491,3 +491,40 @@ TEST_CASE("WidgetBridge setFontSmoothing and setTextRasterPolicy reach the label
     CHECK(smooth->font_smoothing() == FontSmoothing::auto_smoothing);
     CHECK(bridge.text_raster_policy() == TextRasterPolicy::legacy);
 }
+
+TEST_CASE("a chromium text raster request reaches every ancestor, now and on attach",
+          "[view][typography][text-raster]") {
+    View root;
+    auto parent = std::make_unique<View>();
+    auto* parent_ptr = parent.get();
+    root.add_child(std::move(parent));
+    auto leaf = std::make_unique<View>();
+    auto* leaf_ptr = leaf.get();
+    parent_ptr->add_child(std::move(leaf));
+
+    // A legacy request changes nothing.
+    leaf_ptr->request_text_raster_policy(TextRasterPolicy::legacy);
+    CHECK(root.text_raster_policy() == TextRasterPolicy::legacy);
+    leaf_ptr->request_text_raster_policy(TextRasterPolicy::chromium);
+    CHECK(parent_ptr->text_raster_policy() == TextRasterPolicy::chromium);
+    CHECK(root.text_raster_policy() == TextRasterPolicy::chromium);
+
+    // A subtree that asked before it was attached passes it up on attach.
+    View host;
+    auto imported = std::make_unique<View>();
+    imported->request_text_raster_policy(TextRasterPolicy::chromium);
+    REQUIRE(host.text_raster_policy() == TextRasterPolicy::legacy);
+    host.add_child(std::move(imported));
+    CHECK(host.text_raster_policy() == TextRasterPolicy::chromium);
+}
+
+TEST_CASE("WidgetBridge setTextRasterPolicy requests the policy on its root view",
+          "[view][typography][bridge][text-raster]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("setTextRasterPolicy('chromium');");
+    CHECK(root.text_raster_policy() == TextRasterPolicy::chromium);
+}

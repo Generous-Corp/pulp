@@ -2714,6 +2714,12 @@ private:
         last_submission_observed_.store(false, std::memory_order_relaxed);
 
         if (!gpu_surface_ || !skia_surface_) return false;
+        // A changed text raster policy recreates the surface's targets, so the
+        // frame repaints everything, as after a DPI change.
+        if (skia_surface_->text_raster_policy() != root_.text_raster_policy()) {
+            skia_surface_->set_text_raster_policy(root_.text_raster_policy());
+            tracker_.invalidate_all();
+        }
 
         // Emit the per-frame dirty-rect decision the host would use for
         // clipping. The actual paint path is unchanged; this is a wiring

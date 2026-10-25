@@ -1213,3 +1213,13 @@ If you need to change the mapping, change it in `window_host.hpp` beside the
 forward transform it inverts, and let `pulp-test-design-viewport-inverse`
 (round-trip: the point paint places at X is the point input recovers from a
 touch at X) tell you whether the pair still agree.
+
+## The window and AUv3 hosts follow the tree's text raster policy
+
+`IOSWindowHost` and the AUv3 plugin view host call `apply_text_raster_policy`
+(`core/view/src/text_raster_host_internal.hpp`) at the top of `render_frame`: the Skia
+surface takes the root view's `text_raster_policy()` and the frame repaints in
+full when it changes. An imported UI with `-webkit-font-smoothing: antialiased`
+text requests `chromium` on its root. A host that builds its own SkiaSurface
+must set the root's `text_raster_policy()` on it the same way, or that text
+paints about a fifth too heavy.

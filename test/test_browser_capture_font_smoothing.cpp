@@ -126,6 +126,8 @@ TEST_CASE("antialiased text is painted unhinted on a chromium surface",
     CHECK(smooth->font_smoothing() == FontSmoothing::antialiased);
     CHECK(plain->font_smoothing() == FontSmoothing::auto_smoothing);
     CHECK(pulp::view::design_ir_text_raster_policy(ir) == TextRasterPolicy::chromium);
+    // The materialized root asks its host for the matching surface.
+    CHECK(root->text_raster_policy() == TextRasterPolicy::chromium);
 
     // A document whose text is all `auto` keeps Skia's default preblend.
     find_text(ir.root, "Antialiased")->attributes.erase("font_smoothing");

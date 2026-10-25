@@ -130,6 +130,13 @@ PluginFrameRenderer::Frame PluginFrameRenderer::render(
 
     if (request.idle) request.idle();
 
+    // The tree's text raster policy (View::text_raster_policy). Changing it
+    // recreates the surface's targets, so this frame repaints everything.
+    if (skia.text_raster_policy() != request.root->text_raster_policy()) {
+        skia.set_text_raster_policy(request.root->text_raster_policy());
+        damage.mark_full();
+    }
+
     // Swapchain acquire, instrumented because it is the one part of the frame
     // that BLOCKS: under a Fifo (vsync) present mode GetCurrentTexture() waits
     // for the next refresh. Without this span a trace shows a frame whose

@@ -1,4 +1,5 @@
 #include <pulp/view/plugin_view_host.hpp>
+#include "../../src/text_raster_host_internal.hpp"
 
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -2885,6 +2886,7 @@ private:
                       uint32_t* capture_width = nullptr,
                       uint32_t* capture_height = nullptr) {
         if (!gpu_surface_ || !skia_surface_) return false;
+        apply_text_raster_policy(*skia_surface_, root_);
         commit_layer_geometry_before_present();
         if (!gpu_surface_->begin_frame()) return false;
 

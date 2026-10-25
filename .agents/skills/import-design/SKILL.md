@@ -148,8 +148,13 @@ The import now carries the property. The capture records
 those text nodes, and the materialized Label paints them unhinted
 (`Canvas::set_font_smoothing`). The surface preblend is the host's job:
 `design_ir_text_raster_policy(ir)` returns `chromium` when any captured text is
-antialiased, and the observer creates its surfaces with it. A host or emitter
-that renders imported text on a `legacy` surface still paints it heavy.
+antialiased, and the observer creates its surfaces with it. Both the bridge's
+`setTextRasterPolicy` and `build_native_view_tree` request it on their root view
+(`View::request_text_raster_policy`, which propagates to every ancestor and
+survives being attached later). The editor and window hosts, and
+`PluginFrameRenderer`, apply the root's policy at the start of each frame and
+repaint in full when it changes. A renderer that skips this paints antialiased
+text heavy.
 Generated ui.js carries both: `setFontSmoothing(id, 'antialiased')` per
 antialiased node and `setTextRasterPolicy('chromium')` once per document, read
 back by the host through `WidgetBridge::text_raster_policy()` (pulp-screenshot

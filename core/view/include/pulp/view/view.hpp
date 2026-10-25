@@ -118,6 +118,17 @@ public:
     /// or one of its ancestors is refused and handed back, so a caller that
     /// cached the raw pointer can drop it instead of dangling.
     std::unique_ptr<View> add_child(std::unique_ptr<View> child);
+
+    /// The glyph preblend a surface showing this tree is created with
+    /// (pulp/canvas/text_raster_policy.hpp); hosts read it from their root
+    /// each frame. A `chromium` request reaches every ancestor, now and when
+    /// this view is later added to a parent, and is never withdrawn: on a
+    /// chromium surface auto text paints about 2% heavy, while antialiased
+    /// text on a legacy one paints about a fifth heavy.
+    void request_text_raster_policy(canvas::TextRasterPolicy policy);
+    canvas::TextRasterPolicy text_raster_policy() const noexcept {
+        return text_raster_policy_;
+    }
     // Transactional variant used by structural adapters that must recover the
     // owned child if an attach hook rejects it. On throw, `child` is restored.
     // Returns false, with `child` untouched, when the child is refused.
@@ -2979,6 +2990,7 @@ private:
     std::unique_ptr<View> retired_head_;
     std::unique_ptr<View> retired_next_;
     View* parent_ = nullptr;
+    canvas::TextRasterPolicy text_raster_policy_ = canvas::TextRasterPolicy::legacy;
     std::vector<std::unique_ptr<View>> children_;
     std::string id_;
     // Design-import anchor identity. Empty for views not constructed from an

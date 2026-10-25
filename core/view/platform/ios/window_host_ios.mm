@@ -2,6 +2,7 @@
 // Mirrors window_host_mac.mm but uses UIKit instead of AppKit.
 
 #include <pulp/view/window_host.hpp>
+#include "../../src/text_raster_host_internal.hpp"
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
@@ -782,6 +783,7 @@ private:
 
     void render_frame() {
         if (!gpu_surface_ || !skia_surface_) return;
+        apply_text_raster_policy(*skia_surface_, root_);
         if (!gpu_surface_->begin_frame()) return;
 
         auto* canvas = skia_surface_->begin_frame();

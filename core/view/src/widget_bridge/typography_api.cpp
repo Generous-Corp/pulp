@@ -109,17 +109,19 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
-    // The document's text raster policy, "chromium" or "legacy"; the host
-    // reads it back through WidgetBridge::text_raster_policy().
-    register_bridge_function(api, "setTextRasterPolicy",
-                             [&self](choc::javascript::ArgumentList args) {
-                                 const auto value = args.get<std::string>(0, "");
-                                 if (value == "chromium")
-                                     self.text_raster_policy_ = canvas::TextRasterPolicy::chromium;
-                                 else if (value == "legacy")
-                                     self.text_raster_policy_ = canvas::TextRasterPolicy::legacy;
-                                 return choc::value::Value();
-                             });
+    // The document's text raster policy, "chromium" or "legacy". It is kept
+    // on the bridge and requested on its root view, where hosts read it.
+    register_bridge_function(
+        api, "setTextRasterPolicy", [&self](choc::javascript::ArgumentList args) {
+            const auto value = args.get<std::string>(0, "");
+            if (value == "chromium") {
+                self.text_raster_policy_ = canvas::TextRasterPolicy::chromium;
+                self.root_.request_text_raster_policy(canvas::TextRasterPolicy::chromium);
+            } else if (value == "legacy") {
+                self.text_raster_policy_ = canvas::TextRasterPolicy::legacy;
+            }
+            return choc::value::Value();
+        });
 
     register_bridge_function(api, "setLineHeight", [&self, finite_float](choc::javascript::ArgumentList args) {
         auto* v = self.widget(args.get<std::string>(0, ""));

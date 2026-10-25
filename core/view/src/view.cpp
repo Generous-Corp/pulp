@@ -847,6 +847,13 @@ void View::publish_structure_change() noexcept {
     invalidate_subtree_caches_up();
 }
 
+void View::request_text_raster_policy(canvas::TextRasterPolicy policy) {
+    if (policy != canvas::TextRasterPolicy::chromium)
+        return;
+    for (View* v = this; v; v = v->parent_)
+        v->text_raster_policy_ = policy;
+}
+
 std::unique_ptr<View> View::add_child(std::unique_ptr<View> child) {
     if (add_child_transactional(child))
         return nullptr;
@@ -875,6 +882,8 @@ bool View::add_child_transactional(std::unique_ptr<View>& child) {
     set_subtree_detaching(*child, false);
     child->parent_ = this;
     children_.push_back(std::move(child));
+    if (inserted->text_raster_policy_ == canvas::TextRasterPolicy::chromium)
+        request_text_raster_policy(canvas::TextRasterPolicy::chromium);
     // If a frame-clock walk is in flight on this tree, stamp the whole incoming
     // subtree as already-visited for the current pass. Without this the walk's
     // restart scan would pick the new nodes up immediately, so a hook that

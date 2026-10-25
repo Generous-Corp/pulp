@@ -1473,3 +1473,11 @@ symbol` in the `Build WebCLAP module` step of the required
 (keep it free of view-layer dependencies; the editor prewarm is a no-op here
 because no view scheduler is installed). There is no local wasm toolchain on
 the Macs by default, so this gate is usually first seen in CI.
+
+## The browser host follows the tree's text raster policy
+
+`window_host_web.cpp` applies the root view's `text_raster_policy()` to its
+WebGL2 SkiaSurface (`apply_text_raster_policy`, `core/view/src/text_raster_host_internal.hpp`)
+before each frame. An imported UI with antialiased text requests `chromium`
+through `setTextRasterPolicy` or the native materializer. The Ganesh surface
+recreates its targets on a change and the frame repaints in full.

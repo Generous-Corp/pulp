@@ -932,7 +932,8 @@ private:
     // dims. Empty on failure.
     std::vector<uint8_t> raster_render(uint32_t* out_w, uint32_t* out_h) {
         if (idle_callback_) idle_callback_();
-        return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h);
+        return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h,
+                                        root_.text_raster_policy());
     }
 
     // Live CPU present: raster the scene, convert RGBA -> the X visual's pixel

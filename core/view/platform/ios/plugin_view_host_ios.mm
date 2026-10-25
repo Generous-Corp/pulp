@@ -2,6 +2,7 @@
 // Mirrors plugin_view_host_mac.mm but uses UIKit instead of AppKit.
 
 #include <pulp/view/plugin_view_host.hpp>
+#include "../../src/text_raster_host_internal.hpp"
 
 #if TARGET_OS_IOS
 
@@ -1294,6 +1295,7 @@ private:
 
     void render_frame() {
         if (!gpu_surface_ || !skia_surface_) return;
+        apply_text_raster_policy(*skia_surface_, root_);
         if (!gpu_surface_->begin_frame()) return;
 
         auto* cv = skia_surface_->begin_frame();

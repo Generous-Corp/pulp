@@ -8,6 +8,7 @@
 // WebKitGTK sources).
 
 #include <pulp/view/window_host.hpp>
+#include "../../src/text_raster_host_internal.hpp"
 
 #if defined(__EMSCRIPTEN__)
 
@@ -329,6 +330,7 @@ private:
         // repaints — the animation keeps flowing, one frame per tick, never nested.
         if (rendering_) { reentrant_dirty_ = true; return false; }
         rendering_ = true;
+        apply_text_raster_policy(*skia_, root_);
         auto* canvas = skia_->begin_frame();
         if (!canvas) { rendering_ = false; return false; }
         paint_scene(*canvas);

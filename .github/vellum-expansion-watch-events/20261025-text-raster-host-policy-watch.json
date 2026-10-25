@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-text-raster-host-policy-watch",
+  "created_at": "2026-10-25T03:03:46Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "A view tree carries its text raster policy: View::request_text_raster_policy propagates a chromium request to every ancestor and on later attach; build_native_view_tree and the WidgetBridge setTextRasterPolicy request it on their roots; the macOS, iOS and web window and editor hosts and PluginFrameRenderer apply it to their SkiaSurface through the existing #10942 set_text_raster_policy at the start of each frame, repainting in full on a change, and the Windows and Linux CPU raster path passes it to raster_plugin_scene_rgba. Pulp-owned paths only; no Vellum-transferred slice, render backend, capture or IR format, Chromium, packaging or framework authority moves.",
+  "tests": [
+    "build/test/pulp-test-group-view-widgets \"[text-raster]\"",
+    "build/test/pulp-test-browser-capture-import \"[font-smoothing]\"",
+    "build/test/pulp-test-plugin-frame-renderer \"[text-raster]\"",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -3137,6 +3137,7 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
         root->set_subpixel_layout(true);
         // Captured text snaps its baselines to this frame's grid.
         root->set_captured_frame_root(true);
+        root->request_text_raster_policy(design_ir_text_raster_policy(ir));
         if (options.diagnostics_out != nullptr) {
             options.diagnostics_out->insert(options.diagnostics_out->end(),
                                             materialize_diagnostics.begin(),

@@ -115,6 +115,15 @@ public:
         return true;
     }
     bool is_available() const override { return true; }
+    pulp::canvas::TextRasterPolicy policy = pulp::canvas::TextRasterPolicy::legacy;
+    int policy_sets = 0;
+    void set_text_raster_policy(pulp::canvas::TextRasterPolicy p) override {
+        policy = p;
+        ++policy_sets;
+    }
+    pulp::canvas::TextRasterPolicy text_raster_policy() const override {
+        return policy;
+    }
     skgpu::graphite::Context* graphite_context() const override { return nullptr; }
     double gpu_render_time_ms() const override { return 0.0; }
     bool gpu_render_timing_available() const override { return false; }
@@ -172,6 +181,31 @@ TEST_CASE("a presented frame retires its damage",
     REQUIRE_FALSE(frame.should_recreate_surface);
     REQUIRE_FALSE(f.damage.is_full());
     REQUIRE_FALSE(f.damage.has_bounds());
+}
+
+TEST_CASE("the surface takes the tree's text raster policy and repaints in full",
+          "[plugin-frame-renderer][text-raster]") {
+    Fixture f;
+    auto child = std::make_unique<View>();
+    child->request_text_raster_policy(pulp::canvas::TextRasterPolicy::chromium);
+    f.root.add_child(std::move(child));
+    REQUIRE(f.root.text_raster_policy() == pulp::canvas::TextRasterPolicy::chromium);
+
+    // A failed wrap restores the damage the frame began with, so it shows
+    // whether the policy change made that frame a full repaint.
+    f.arm_bounded_damage();
+    f.skia.begin_returns_canvas = false;
+    f.skia.begin_outcome = FrameOutcome::recreate;
+    f.renderer.render(f.gpu, f.skia, f.damage, f.request());
+    CHECK(f.skia.policy == pulp::canvas::TextRasterPolicy::chromium);
+    CHECK(f.skia.policy_sets == 1);
+    CHECK(f.damage.is_full());
+
+    // Unchanged on the next frame: no second set, damage stays bounded.
+    f.arm_bounded_damage();
+    f.renderer.render(f.gpu, f.skia, f.damage, f.request());
+    CHECK(f.skia.policy_sets == 1);
+    CHECK(f.damage.has_bounds());
 }
 
 TEST_CASE("an offscreen frame is a success, not a fallback",
