@@ -2465,6 +2465,55 @@ TEST_CASE("WaveNet re-acquire replaces a lost provider in a new epoch on the sam
         1);
 }
 
+TEST_CASE("WaveNet re-acquire does not carry a hang classification into the new epoch",
+          "[gpu_audio][wavenet][realtime][hang][reacquire]") {
+    // Epoch 1: the ring saturates behind a hung provider, reported as the hang.
+    Harness h(Tweak{.lead = 1, .capacity = 8, .watchdog_blocks = 16});
+    ChannelFactory factory{.control = &h.controls[1]};
+    factory.install(h.node);
+    for (int block = 0; block < 4; ++block) {
+        h.callback(float(block));
+        h.service();
+    }
+    h.controls[0].hang = true;
+    for (int round = 0; round < 16; ++round) {
+        h.callback(float(h.sequence));
+        h.service();
+        if (h.node.recovery_reason() != GpuAudioRecoveryReason::None)
+            break;
+    }
+    REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderUnresponsive);
+    const auto hung = h.node.recovery_sequence();
+
+    // Epoch 2: the replacement completes every block, only slower than the
+    // callback, so its ring saturates from a backlog: saturation, not a hang.
+    REQUIRE(h.path.reprepare(h.path.context, 1'000'000'000));
+    for (int block = 0; block < 4; ++block) {
+        h.callback(float(h.sequence));
+        h.service();
+        h.service();
+    }
+    REQUIRE(checked_status(h.node).epoch == 2);
+    REQUIRE(h.node.recovery_reason() == GpuAudioRecoveryReason::None);
+    // Stop at the first latch of either kind: a stale hang flag would project
+    // this saturation as ProviderUnresponsive.
+    bool latched = false;
+    for (int round = 0; round < 64 && !latched; ++round) {
+        h.callback(float(h.sequence));
+        h.callback(float(h.sequence));
+        latched = h.node.recovery_reason() != GpuAudioRecoveryReason::None;
+        h.controls[1].hang = latched;
+        h.service();
+        h.controls[1].hang = false;
+    }
+    REQUIRE(latched);
+    for (int pump = 0; pump < 4; ++pump)
+        h.service();
+    CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::InputSaturated);
+    CHECK(h.node.recovery_sequence() > hung);
+    CHECK(checked_status(h.node).provider_state != GpuAudioProviderState::Unavailable);
+}
+
 TEST_CASE("WaveNet re-acquire that delivers again clears the stuck-late state",
           "[gpu_audio][wavenet][realtime][reacquire][status]") {
     Harness h;

@@ -1134,6 +1134,12 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
             s.next_input = input->stamp().sequence;
             s.warmup_until = s.next_input + s.warmup_blocks;
             s.reacquired_sequence.store(s.warmup_until, std::memory_order_release);
+            // The callback has adopted the new epoch, so the old epoch's latch is
+            // gone; its hang classification must not project a later saturation.
+            s.saturation_classified = false;
+            s.saturated_unresponsive.store(false, std::memory_order_release);
+            s.unresponsive_sequence.store(std::numeric_limits<std::uint64_t>::max(),
+                                          std::memory_order_release);
         }
         auto& pending = s.pending_ring[(s.pending_head + s.pending_count) % s.pending_ring.size()];
         pending.reset();
