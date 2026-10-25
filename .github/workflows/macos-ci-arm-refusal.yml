@@ -45,7 +45,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_NODE_ID: ${{ github.event.pull_request.node_id }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           # Fails closed: every read that fails, and every check run it cannot
           # place, becomes a refusal. The only check run passed over is one
@@ -57,9 +57,31 @@ jobs:
           runs_prefix="$GITHUB_SERVER_URL/$repo/actions/runs/"
           reason=""
           check_run=""
-          # GitHub Actions' `macos` check runs on this head, newest first.
-          if ! candidates=$(gh api "repos/$repo/commits/$HEAD_SHA/check-runs?check_name=macos&filter=latest&per_page=100" \
-              --jq '[.check_runs[] | select(.app.slug == "github-actions")] | sort_by(.id) | reverse | .[] | "\(.id) \(.status) \(.conclusion) \(.details_url)"'); then
+          # Judge the head that would merge: the pull request's current head,
+          # read live, not the event's, which a push may already have replaced.
+          # A push also disarms through macos-ci-label-reset.yml; judging the
+          # live head keeps an arm on a stale event from being read against the
+          # wrong commit.
+          # shellcheck disable=SC2016  # $owner, $name and $number are GraphQL variables
+          if ! HEAD_SHA=$(gh api graphql \
+              -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { headRefOid } } }' \
+              -f owner="${repo%%/*}" -f name="${repo#*/}" -F number="$PR_NUMBER" \
+              --jq '.data.repository.pullRequest.headRefOid // ""') \
+              || ! [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$EVENT_HEAD_SHA"
+            reason="could not verify its macos check: the pull request's current head could not be read"
+          elif [ "$HEAD_SHA" != "$EVENT_HEAD_SHA" ]; then
+            echo "#$PR_NUMBER moved from $EVENT_HEAD_SHA to $HEAD_SHA since it was armed; judging the current head"
+          fi
+          # GitHub Actions' `macos` check runs on that head, newest first. Every
+          # page is read and the result sorted here, so a head with more than
+          # one page of check runs is judged on all of them.
+          if [ -n "$reason" ]; then
+            :
+          elif ! candidates=$(set -o pipefail
+              gh api --paginate "repos/$repo/commits/$HEAD_SHA/check-runs?check_name=macos&filter=latest&per_page=100" \
+                --jq '.check_runs[] | select(.app.slug == "github-actions") | "\(.id) \(.status) \(.conclusion) \(.details_url)"' \
+                | sort -k1,1nr); then
             reason="could not verify its macos check: the head's check runs could not be read"
           else
             while read -r candidate status_ conclusion_ url; do

@@ -3751,8 +3751,11 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
      (skip-safe) tier. It fails closed: a read that fails, or a check run
      it cannot place, is a refusal ("could not verify …"). Only a check run
      proven to be for a head in another repository is passed over, and it
-     never falls back to an older run on uncertainty. Its comment says what it
-     found about the macos run; it does not judge approval.
+     never falls back to an older run on uncertainty. It judges the pull
+     request's current head, read live, not the event's (an arm event can
+     arrive after a push); an unreadable current head is a refusal. It reads
+     every page of the head's check runs and sorts them itself. Its comment
+     says what it found about the macos run; it does not judge approval.
   2. At the contract lane's conclusion: its `macos` job's last step, `Refuse a
      head armed before approval (contract lane)`, fails when this exact head is
      armed for auto-merge or already in the merge queue (read over GraphQL
