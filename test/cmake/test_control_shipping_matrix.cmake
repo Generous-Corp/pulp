@@ -402,20 +402,22 @@ if(_dependency_reason LESS 0)
 endif()
 
 # A Windows plug-in bundle carries its DLLs as PE images inside the bundle
-# (`Contents/x86_64-win/`). The closure scan must recognise a PE by its "MZ"
-# header and refuse one that carries a forbidden control string. The control
-# copy, identical but for the marker, proves the bundle itself scans clean, so
-# the refusal is about the DLL's content.
+# (`Contents/x64/` in an AAX bundle). The closure scan must recognise a PE by
+# its "MZ" header and refuse one that carries a forbidden control string. The
+# control copy, identical but for the marker, proves the bundle itself scans
+# clean, so the refusal is about the DLL's content. The fixture is not a
+# `.vst3`: the vst3-bundle-layout test checks every `*.vst3` in the build tree,
+# and this half-built bundle would fail it.
 function(scan_windows_bundle case_name dll_text out_result out_output)
-    set(_bundle "${FIXTURE_DIR}/${case_name}/Leaky.vst3")
+    set(_bundle "${FIXTURE_DIR}/${case_name}/Leaky.aaxplugin")
     file(REMOVE_RECURSE "${FIXTURE_DIR}/${case_name}")
-    file(MAKE_DIRECTORY "${_bundle}/Contents/MacOS" "${_bundle}/Contents/x86_64-win")
+    file(MAKE_DIRECTORY "${_bundle}/Contents/MacOS" "${_bundle}/Contents/x64")
     set(_bundle_artifact
         "${_bundle}/Contents/MacOS/ProductionStandalone${_matrix_executable_suffix}")
     file(COPY_FILE
         "${_matrix_runtime_dir}/ProductionStandalone${_matrix_executable_suffix}"
         "${_bundle_artifact}")
-    file(WRITE "${_bundle}/Contents/x86_64-win/helper.dll" "${dll_text}")
+    file(WRITE "${_bundle}/Contents/x64/helper.dll" "${dll_text}")
     execute_process(COMMAND "${CMAKE_COMMAND}"
         "-DARTIFACT=${_bundle_artifact}"
         "-DMANIFEST=${_matrix_build}/pulp-inspector-manifests/ProductionStandalone.json"
