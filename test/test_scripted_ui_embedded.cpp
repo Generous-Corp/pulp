@@ -225,6 +225,10 @@ TEST_CASE("an embedded session resolves the files embedded beside its script",
             createLabel('traversal', traversal.ok ? 'leaked' : String(traversal.status), '');
             var missing = __loadAssetSync__('assets/nope.json');
             createLabel('missing', missing.ok ? 'leaked' : String(missing.status), '');
+            var rooted = __loadAssetSync__('/assets/data.json');
+            createLabel('rooted', rooted.ok ? 'leaked' : String(rooted.status), '');
+            var fileUrl = __loadAssetSync__('file://assets/data.json');
+            createLabel('file-url', fileUrl.ok ? 'leaked' : String(fileUrl.status), '');
             createLabel('font', loadFont('fonts/Face.ttf') ? 'present' : 'absent', '');
             createLabel('nofont', loadFont('fonts/Other.ttf') ? 'present' : 'absent', '');
             createImage('knob', '');
@@ -242,6 +246,10 @@ TEST_CASE("an embedded session resolves the files embedded beside its script",
     REQUIRE(label_text(session, "dotted") == "ok");
     REQUIRE(label_text(session, "traversal") == "404");
     REQUIRE(label_text(session, "missing") == "404");
+    // An absolute or file:// spelling is judged by the filesystem rule, which
+    // refuses it here; the embedded table never answers for it.
+    REQUIRE(label_text(session, "rooted") == "403");
+    REQUIRE(label_text(session, "file-url") == "403");
     REQUIRE(label_text(session, "font") == "present");
     REQUIRE(label_text(session, "nofont") == "absent");
 
