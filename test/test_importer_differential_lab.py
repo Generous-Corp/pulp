@@ -1075,8 +1075,11 @@ class DifferentialLabTests(unittest.TestCase):
             self.assertTrue(report["comparison"]["viewport_dpr_audit"]["ok"])
             binding.assert_called_once()
             self.assertEqual(binding.call_args.kwargs["expected_interaction_plan_sha256"], plan_sha256)
-            self.assertEqual(image_binding.call_count, 2)
+            # Each lane's screenshot, then the candidate lane's retained copy
+            # that the visual lens scores.
+            self.assertEqual(image_binding.call_count, 3)
             image_binding.assert_any_call(capture, evidence / "browser.png")
+            image_binding.assert_any_call(capture, root / "out/candidate/browser.png")
             self.assertEqual(snapshot_binding.call_count, 2)
             self.assertEqual(report["integrity"]["browser_snapshot_binding"]["status"], "legacy-unbound")
             # Verify declared bytes on compare_one's real path, before rendering.
