@@ -3745,8 +3745,10 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
   layers.**
   1. At the arm itself: `macos-ci-arm-refusal.yml` fires on
      `auto_merge_enabled` and disarms unless the head's latest `macos` check
-     run from this repository's Actions workflows is a completed success with
-     an explicit `fast` (full lane) or `not-required` (skip-safe) tier. Its
+     run from this repository's Actions workflows, whose workflow run is for a
+     head in this repository, is a completed success with an explicit `full`
+     (a dispatch's full suite), `fast` (full lane) or `not-required`
+     (skip-safe) tier. Its
      comment says what it found about the macos run; it does not judge
      approval.
   2. At the contract lane's conclusion: its `macos` job's last step, `Refuse a
@@ -3788,7 +3790,7 @@ already run the fast PR-caused checks. Approval is not arming:
 2. The sweep arms only once the head's latest `macos` check run is a
    completed full-lane `success`: its `shipyard-test-tier` annotation is not
    `deferred`. An arm made earlier (absent, running, failed, `deferred`, or no
-   `fast`/`not-required` tier) is refused the moment it is made:
+   `full`/`fast`/`not-required` tier) is refused the moment it is made:
    `macos-ci-arm-refusal.yml`
    (`pull_request_target` on `auto_merge_enabled`, no checkout, gated on the
    variable) disables auto-merge and comments with the reason.

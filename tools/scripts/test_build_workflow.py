@@ -1195,16 +1195,26 @@ class MacosArmRefusalTest(unittest.TestCase):
         self.assertEqual(list(triggers), ["pull_request_target"])
         self.assertEqual(triggers["pull_request_target"]["types"], ["auto_merge_enabled"])
         self.assertEqual(self.workflow["permissions"],
-                         {"checks": "read", "pull-requests": "write"})
+                         {"actions": "read", "checks": "read", "pull-requests": "write"})
         self.assertNotIn("actions/checkout", json.dumps(self.workflow))
         self.assertEqual(self.job["if"], "vars.PULP_MACOS_PR_GATING == 'true'")
 
-    def _run(self, latest: str, tier: str = "") -> list[list[str]]:
+    def _run(self, latest: str, tier: str = "",
+             run_repos: dict[str, str] | None = None) -> list[list[str]]:
+        # `latest` is the check runs newest first, `<id> <status> <conclusion>`
+        # per line; each belongs to workflow run 1<id> unless it names one.
+        lines = []
+        for line in latest.splitlines():
+            fields = line.split()
+            lines.append(" ".join(fields if len(fields) == 4 else fields + ["1" + fields[0]]))
+        runs = {fields.split()[3]: "Generous-Corp/pulp" for fields in lines}
+        runs.update(run_repos or {})
         fixture = {
             "/annotations": ('{"schema":"shipyard-test-tier/v1","tier":"%s"}\n' % tier) if tier else "",
             "mutation(": "",
             "/comments": "",
-            "commits/": latest,
+            **{f"actions/runs/{run} ": f"{head_repo}\n" for run, head_repo in runs.items()},
+            "commits/": "".join(line + "\n" for line in lines),
         }
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir = Path(tmp) / "bin"
@@ -1245,8 +1255,24 @@ class MacosArmRefusalTest(unittest.TestCase):
     def test_an_arm_on_a_deferred_green_is_refused(self) -> None:
         self.assertTrue(self._refused(self._run("5 completed success\n", tier="deferred")))
 
+    def test_a_dispatch_runs_full_suite_success_stays_armed(self) -> None:
+        # A workflow_dispatch run skips pr-fast and emits only tier `full`.
+        self.assertFalse(self._refused(self._run("5 completed success\n", tier="full")))
+
+    def test_a_newer_run_for_a_head_in_another_repository_is_ignored(self) -> None:
+        # Ignored, not trusted: the older same-repository run decides.
+        newest_fork = "9 completed success 900\n5 completed success 500\n"
+        fork = {"900": "someone/pulp", "500": "Generous-Corp/pulp"}
+        calls = self._run(newest_fork, tier="full", run_repos=fork)
+        self.assertFalse(self._refused(calls))
+        self.assertTrue(any("check-runs/5/annotations" in " ".join(c) for c in calls))
+        self.assertFalse(any("check-runs/9/annotations" in " ".join(c) for c in calls))
+        # And with only the other repository's run, nothing counts: refused.
+        self.assertTrue(self._refused(self._run("9 completed success 900\n", tier="full",
+                                                run_repos={"900": "someone/pulp"})))
+
     def test_a_success_without_an_allowed_tier_is_refused(self) -> None:
-        # Only an explicit `fast` or `not-required` tier passes.
+        # Only an explicit `full`, `fast` or `not-required` tier passes.
         self.assertTrue(self._refused(self._run("5 completed success\n")))
         self.assertTrue(self._refused(self._run("5 completed success\n", tier="receipt-reused")))
 

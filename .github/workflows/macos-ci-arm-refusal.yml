@@ -7,11 +7,12 @@ name: macOS CI arm refusal
 # (arm-on-open, or while the full lane is still running) would let native
 # auto-merge enqueue the head on the wrong green. This refuses such an arm the
 # moment it is made: when auto-merge is enabled, it reads the head's latest
-# `macos` check run from this repository's own Actions workflows, and leaves the
-# arm alone only on a completed success with an explicit full-lane (`fast`) or
-# skip-safe (`not-required`) tier. Otherwise (absent, still running, failed,
-# `deferred`, or no such tier) it disables auto-merge and says what it found on
-# the pull request. It checks the macos run only; approval is the arm side's.
+# `macos` check run from this repository's own Actions workflows whose run is
+# for a head in this repository, and leaves the arm alone only on a completed
+# success with an explicit `full`, `fast` (full lane) or `not-required`
+# (skip-safe) tier. Otherwise (absent, still running, failed, `deferred`, or no
+# such tier) it disables auto-merge and says what it found on the pull
+# request. It checks the macos run only; approval is the arm side's.
 #
 # The contract lane's last step (build.yml) and macos-ci-deferred-disarm.yml
 # stay behind this as later layers. pull_request_target runs this definition
@@ -24,6 +25,7 @@ on:
     types: [auto_merge_enabled]
 
 permissions:
+  actions: read
   checks: read
   pull-requests: write
 
@@ -47,10 +49,22 @@ jobs:
         run: |
           set -euo pipefail
           repo="$GITHUB_REPOSITORY"
-          # The newest `macos` check run this repository's own Actions workflows
-          # posted on this head.
-          latest=$(gh api "repos/$repo/commits/$HEAD_SHA/check-runs?check_name=macos&filter=latest&per_page=100" \
-            --jq "[.check_runs[] | select(.app.slug == \"github-actions\" and (.details_url | startswith(\"$GITHUB_SERVER_URL/$repo/actions/runs/\")))] | sort_by(.id) | last | select(. != null) | \"\\(.id) \\(.status) \\(.conclusion)\"")
+          # This repository's GitHub Actions `macos` check runs on this head,
+          # newest first, each with the workflow run it belongs to.
+          candidates=$(gh api "repos/$repo/commits/$HEAD_SHA/check-runs?check_name=macos&filter=latest&per_page=100" \
+            --jq "[.check_runs[] | select(.app.slug == \"github-actions\" and (.details_url | startswith(\"$GITHUB_SERVER_URL/$repo/actions/runs/\")))] | sort_by(.id) | reverse | .[] | \"\\(.id) \\(.status) \\(.conclusion) \\(.details_url | split(\"/actions/runs/\")[1] | split(\"/\")[0])\"")
+          # The newest one whose workflow run's head is in this repository. A
+          # run for a head in another repository is ignored, never trusted.
+          latest=""
+          while read -r candidate_check candidate_status candidate_conclusion run_id; do
+            [ -n "${candidate_check:-}" ] || continue
+            head_repo=$(gh api "repos/$repo/actions/runs/$run_id" --jq '.head_repository.full_name')
+            if [ "$head_repo" = "$repo" ]; then
+              latest="$candidate_check $candidate_status $candidate_conclusion"
+              break
+            fi
+            echo "ignoring macos check run $candidate_check: its run $run_id is for a head in $head_repo"
+          done <<< "$candidates"
           reason=""
           if [ -z "$latest" ]; then
             reason="no macos check has run on it yet"
@@ -63,12 +77,15 @@ jobs:
             else
               tiers=$(gh api --paginate "repos/$repo/check-runs/$check_run/annotations?per_page=100" \
                 --jq '.[] | select(.title == "shipyard-test-tier") | .message')
-              # Only an explicit full-lane (`fast`) or skip-safe (`not-required`)
-              # tier passes; `deferred`, a missing tier or any other is refused.
+              # Only an explicit tier passes: `full` (the full suite, as a
+              # dispatch runs it), `fast` (the full lane on a pull request) or
+              # `not-required` (skip-safe). `deferred`, a missing tier or any
+              # other is refused.
               if [[ "$tiers" == *'"tier":"deferred"'* ]]; then
                 reason="its macos check is the contract lane (tier deferred), which builds nothing"
-              elif [[ "$tiers" != *'"tier":"fast"'* && "$tiers" != *'"tier":"not-required"'* ]]; then
-                reason="its macos check carries no full-lane or skip-safe tier"
+              elif [[ "$tiers" != *'"tier":"full"'* && "$tiers" != *'"tier":"fast"'* \
+                  && "$tiers" != *'"tier":"not-required"'* ]]; then
+                reason="its macos check carries no full, full-lane or skip-safe tier"
               fi
             fi
           fi
