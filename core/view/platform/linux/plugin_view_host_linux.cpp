@@ -208,6 +208,13 @@ public:
         if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
         if (skia_surface_) skia_surface_->resize(width, height, scale_);
 #endif
+        // repaint() drains X events before it paints, so this call can
+        // re-enter. Our own XResizeWindow's ConfigureNotify may already be
+        // queued; it matches size_ and does nothing. A host resize queued
+        // ahead of it is applied by that drain instead, and its resize
+        // callback may call set_size() again from inside this one. The nested
+        // call finishes (window, surfaces, paint) before this one paints, and
+        // both paint size_, so the last size set wins.
         repaint();
     }
 

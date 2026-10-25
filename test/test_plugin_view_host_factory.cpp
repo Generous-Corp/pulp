@@ -296,8 +296,7 @@ TEST_CASE("X11 plugin host follows a resize the host applied to its window",
           "[view][plugin-view-host][resize][linux]") {
     Display* daw = XOpenDisplay(nullptr);
     if (!daw) {
-        WARN("no X display (run under xvfb-run) — ConfigureNotify check skipped");
-        return;
+        SKIP("no X display (run under xvfb-run): ConfigureNotify check skipped");
     }
     pulp::view::View root;
     pulp::view::register_platform_plugin_view_host();

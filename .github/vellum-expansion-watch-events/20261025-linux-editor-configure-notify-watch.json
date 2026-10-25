@@ -15,5 +15,6 @@
     "vellum-expansion-watch"
   ],
   "disposition": "watch-only-no-authority",
-  "authority_effect": "none"
+  "authority_effect": "none",
+  "vellum_inherits": false
 }
