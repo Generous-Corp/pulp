@@ -6,12 +6,14 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
+    "design-ir-contract",
     "design-output-and-packaging",
     "design-source-ingest",
     "visual-proof-harness"
   ],
   "rationale": "Adds a test-only emitter conformance gate (four committed DesignIR fixtures built through the native materializer, the ui.js bridge program, the baked C++ exporter generated at build time by a test tool, and the SwiftUI exporter, compared against an allowlist of known gaps) and a development-only ui.js lane for the differential lab: pulp-design-ir-observe --emitter js renders the candidate IR through the program generate_pulp_js() emits, and the lab passes the option through and records it. No shipped importer, emitter or renderer behavior changes; Chromium stays the only oracle and Skia/Dawn the renderer, so no design-import, Chromium, rendering, or packaging authority moves.",
   "tests": [
+    "python3 test/test_design_ir_observe_interactions.py --observer build/tools/import-design/pulp-design-ir-observe",
     "python3 test/test_importer_differential_lab.py",
     "ctest --test-dir build -R pulp-test-design-emitter-conformance",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
