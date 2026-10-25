@@ -86,6 +86,16 @@ class ClosurePolicyTests(unittest.TestCase):
                 self.assertTrue(product_symbol.search(f"pulp::{name}::thing"))
                 self.assertTrue(product_symbol.search(f"pulp-{name.replace('_', '-')}"))
 
+    def test_the_policy_names_exactly_the_retained_subsystems(self):
+        # Pinned so dropping a row from vellum_policy.json, which would unforbid
+        # that subsystem in every boundary check at once, fails here.
+        import vellum_policy
+        self.assertEqual(vellum_policy.POLICY, REPO_ROOT / "tools/scripts/vellum_policy.json")
+        self.assertEqual(vellum_policy.names(), (
+            "audio", "content", "format", "gpu_audio", "graph", "host", "midi",
+            "music", "playback", "sample_bank_manifest", "signal", "timebase",
+        ))
+
     def test_policy_loader_rejects_malformed_tables(self):
         import vellum_policy
         cases = [

@@ -24,7 +24,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-POLICY = Path(__file__).with_name("vellum_policy.json")
+POLICY = Path(__file__).resolve().parents[2] / "tools/scripts/vellum_policy.json"
 SCHEMA = "pulp.vellum.policy.v1"
 _NAME_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 

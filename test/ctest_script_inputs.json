@@ -4690,6 +4690,7 @@
     "core/view/src/reload_exports.cpp",
     "tools/scripts/design_unit_boundary_check.py",
     "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.json",
     "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
@@ -4711,6 +4712,7 @@
     "tools/scripts/design_unit_boundary_check.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/test_design_unit_boundary_check.py",
+    "tools/scripts/vellum_policy.json",
     "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
@@ -5104,6 +5106,7 @@
     "core/view/src/reload_exports.cpp",
     "tools/scripts/foundation_include_lint.py",
     "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.json",
     "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
@@ -8112,6 +8115,7 @@
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/reload_exports.cpp",
     "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.json",
     "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
@@ -8125,6 +8129,7 @@
     "core/view/include/pulp/view/view.hpp",
     "core/view/src/view.cpp",
     "tools/scripts/test_include_boundary.py",
+    "tools/scripts/vellum_policy.json",
     "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
@@ -8174,6 +8179,7 @@
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
     "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
@@ -8213,6 +8219,7 @@
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
     "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
@@ -8243,6 +8250,7 @@
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
     "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
@@ -8283,6 +8291,7 @@
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_closure_allowlist.json",
     "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
     "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
@@ -8366,6 +8375,7 @@
     "core/view/src/reload_exports.cpp",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
     "tools/scripts/vellum_policy.py",
     "tools/scripts/vellum_view_core_pulp_kept_check.py"
    ],
