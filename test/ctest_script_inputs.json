@@ -2702,7 +2702,7 @@
   "pulp-test-gesture-threading",
   "pulp-test-golden",
   "pulp-test-golden-effect",
-  "pulp-test-gpu-audio-execution-controller",
+  "pulp-test-gpu-audio-capability-validation",
   "pulp-test-gpu-audio-plugin-boundary-continuity",
   "pulp-test-gpu-audio-trace",
   "pulp-test-gpu-audio-transport",
@@ -5315,6 +5315,20 @@
    "entry": "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py",
    "inputs": [
     "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-header-vocabulary-guard": {
+   "entry": "tools/scripts/gpu_audio_header_vocabulary_guard.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_header_vocabulary_guard.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-header-vocabulary-guard-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_header_vocabulary_guard.py",
+   "inputs": [
+    "tools/scripts/test_gpu_audio_header_vocabulary_guard.py"
    ],
    "kind": "python"
   },

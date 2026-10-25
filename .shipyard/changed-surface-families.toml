@@ -723,6 +723,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-b5ca1a17d0e7"
+paths = ["tools/scripts/gpu_audio_header_vocabulary_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-header-vocabulary-guard",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-e7c8a37a549c"
 paths = ["tools/scripts/gpu_fault_hooks_release_gate.py"]
 tests = [
@@ -3201,6 +3235,40 @@ tests = [
   "clean-worktree-planning-selftest",
   "gate-common-selftest",
   "gpu-audio-comparator-v2-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-8fcea5f2df63"
+paths = ["tools/scripts/test_gpu_audio_header_vocabulary_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-header-vocabulary-guard-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7349,6 +7417,7 @@ paths = [
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/generate_sample_region_compat_inputs.py",
   "tools/scripts/github_app_jwt.py",
+  "tools/scripts/gpu_audio_header_vocabulary_guard.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/gpu_fault_hooks_release_gate.py",
@@ -7528,6 +7597,7 @@ paths = [
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",
   "tools/scripts/test_gpu_audio_comparator_v2.py",
+  "tools/scripts/test_gpu_audio_header_vocabulary_guard.py",
   "tools/scripts/test_gpu_audio_p2_campaign.py",
   "tools/scripts/test_gpu_audio_p2_host_preflight.py",
   "tools/scripts/test_gpu_audio_p4_evidence.py",
@@ -7804,6 +7874,8 @@ tests = [
   "forced-restore-lint-selftest",
   "foundation-include-lint",
   "foundation-include-lint-negative-contract",
+  "gpu-audio-header-vocabulary-guard",
+  "gpu-audio-header-vocabulary-guard-selftest",
   "gpu-probe-acceptance-verifier-selftest",
   "gpu-probe-historical-v1-acceptance",
   "gpu-probe-terminal-recorder-selftest",
@@ -7923,6 +7995,7 @@ paths = [
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/generate_sample_region_compat_inputs.py",
   "tools/scripts/github_app_jwt.py",
+  "tools/scripts/gpu_audio_header_vocabulary_guard.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/gpu_fault_hooks_release_gate.py",
@@ -8102,6 +8175,7 @@ paths = [
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",
   "tools/scripts/test_gpu_audio_comparator_v2.py",
+  "tools/scripts/test_gpu_audio_header_vocabulary_guard.py",
   "tools/scripts/test_gpu_audio_p2_campaign.py",
   "tools/scripts/test_gpu_audio_p2_host_preflight.py",
   "tools/scripts/test_gpu_audio_p4_evidence.py",

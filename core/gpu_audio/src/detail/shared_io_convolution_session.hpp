@@ -57,6 +57,11 @@ class SharedIoConvolutionSession {
         bool authenticated_calibration = false;
         std::uint64_t calibration_max_age_ns = 0;
         std::string calibration_source_revision;
+        // Bounded wait, in ns, for completions already in flight after a
+        // service step submits. The provider may block for up to this long
+        // (TimedWaitAny) instead of returning at once; zero keeps service
+        // nonblocking. The budget starts after the submit, on steady_clock.
+        std::uint64_t completion_service_wait_ns = 0;
     };
 
     struct ProviderPair {
@@ -157,6 +162,11 @@ class SharedIoConvolutionSession {
     bool prepared() const noexcept {
         return prepared_;
     }
+    // Host only, while no service call runs. False when the provider has no
+    // completion event source.
+    bool set_completion_notifier(SharedIoCompletionNotifier notifier) noexcept {
+        return prepared_ && plan_.set_completion_notifier(notifier);
+    }
     bool fenced() const noexcept {
         return failed_ || pipeline_.fenced();
     }
@@ -252,7 +262,8 @@ class SharedIoConvolutionSession {
     std::optional<std::uint64_t>
     callback_deadline_ns(const SharedIoConvolutionPipeline::Lease&) const noexcept;
     void fail_closed() noexcept;
-    bool drain_completions(std::uint64_t now_ns, ServiceResult&) noexcept;
+    bool drain_completions(std::uint64_t now_ns, ServiceResult&,
+                           std::uint64_t service_deadline_ns = 0) noexcept;
     bool submit_available(ServiceResult&) noexcept;
     bool discard_all_completions() noexcept;
     bool drain_quiescent() noexcept;

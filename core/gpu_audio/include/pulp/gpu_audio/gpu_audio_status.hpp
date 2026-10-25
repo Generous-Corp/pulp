@@ -75,7 +75,7 @@ enum class GpuAudioShadowMode : std::uint8_t {
 /// preserve the distinction between GPU production and CPU fallback.  In
 /// particular, `missed_blocks` is not a synonym for `fallback_blocks`.
 struct GpuAudioStatus {
-    static constexpr std::uint32_t kSchemaVersion = 3;
+    static constexpr std::uint32_t kSchemaVersion = 4;
     /// Number of `GpuAudioTerminalDisposition` values counted by
     /// `terminal_counts`.
     static constexpr std::uint32_t kTerminalDispositionCount = 8;
@@ -102,6 +102,12 @@ struct GpuAudioStatus {
     double avg_block_us = 0.0;
     // Appended after the v1 fields so positional aggregate initialization of
     // the installed status prefix remains source-compatible.
+    /// The first cause latched in the current delivery epoch. A successful
+    /// automatic re-acquire opens a new epoch, so the cause that fenced the old
+    /// one is replaced by the informational `ProviderReacquired`, with
+    /// `recovery_sequence` set to the first block the new provider can
+    /// deliver. The replaced cause remains in the trace (a Recovery record for
+    /// the epoch change) and in the reacquire_* counters below.
     GpuAudioRecoveryReason recovery_reason = GpuAudioRecoveryReason::None;
     std::uint64_t recovery_sequence = UINT64_MAX;
     // Schema v3, appended after the v2 fields for the same reason.
@@ -128,6 +134,14 @@ struct GpuAudioStatus {
     /// The shadow runs a different model from the GPU path, so its output is
     /// a substitute rather than a bit-identical fallback.
     bool shadow_model_differs = false;
+    // Schema v4: automatic re-acquire (GpuAudioRecoveryPolicy::AutoReacquire).
+    /// Provider replacements the transport attempted after a fence.
+    std::uint64_t reacquire_attempts = 0;
+    /// Attempts that opened a new delivery epoch on a new provider.
+    std::uint64_t reacquire_successes = 0;
+    /// Nanoseconds from the transport first observing the fence to the first
+    /// GPU-delivered block of the epoch that replaced it; zero until measured.
+    std::uint64_t last_reacquire_to_gpu_ns = 0;
 };
 
 } // namespace pulp::gpu_audio
