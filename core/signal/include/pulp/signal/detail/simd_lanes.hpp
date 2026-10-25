@@ -28,7 +28,218 @@
 
 namespace pulp::signal::detail::lanes {
 
-#if defined(__GNUC__) || defined(__clang__)
+// The plain-struct lanes, compiled on every compiler: the implementation a
+// compiler without the vector extension uses, and the reference the vector
+// path is tested against (both must compute the same values).
+namespace portable {
+
+struct F4 {
+    float v[4];
+};
+struct M4 {
+    bool v[4];
+};
+struct D2 {
+    double v[2];
+};
+
+inline F4 load(const float* p) {
+    return {{p[0], p[1], p[2], p[3]}};
+}
+inline void store(float* p, F4 a) {
+    std::memcpy(p, a.v, sizeof a.v);
+}
+inline D2 load(const double* p) {
+    return {{p[0], p[1]}};
+}
+inline void store(double* p, D2 a) {
+    std::memcpy(p, a.v, sizeof a.v);
+}
+inline F4 splat(float x) {
+    return {{x, x, x, x}};
+}
+inline D2 splat(double x) {
+    return {{x, x}};
+}
+inline F4 make(float a, float b, float c, float d) {
+    return {{a, b, c, d}};
+}
+inline float lane(F4 v, int i) {
+    return v.v[i];
+}
+inline double lane(D2 v, int i) {
+    return v.v[i];
+}
+inline D2 make(double a, double b) {
+    return {{a, b}};
+}
+inline M4 both(M4 a, M4 b) {
+    return {{a.v[0] && b.v[0], a.v[1] && b.v[1], a.v[2] && b.v[2], a.v[3] && b.v[3]}};
+}
+inline F4 operator-(F4 a) {
+    return {{-a.v[0], -a.v[1], -a.v[2], -a.v[3]}};
+}
+inline bool all(M4 m) {
+    return m.v[0] && m.v[1] && m.v[2] && m.v[3];
+}
+
+#define PULP_FDN_LANES_OP(T, N, op)                                                                \
+    inline T operator op(T a, T b) {                                                               \
+        T r;                                                                                       \
+        for (int i = 0; i < N; ++i)                                                                \
+            r.v[i] = a.v[i] op b.v[i];                                                             \
+        return r;                                                                                  \
+    }                                                                                              \
+    inline T& operator op## = (T & a, T b) {                                                       \
+        return a = a op b;                                                                         \
+    }
+PULP_FDN_LANES_OP(F4, 4, +)
+PULP_FDN_LANES_OP(F4, 4, -)
+PULP_FDN_LANES_OP(F4, 4, *)
+PULP_FDN_LANES_OP(F4, 4, /)
+PULP_FDN_LANES_OP(D2, 2, +)
+PULP_FDN_LANES_OP(D2, 2, -)
+PULP_FDN_LANES_OP(D2, 2, *)
+#undef PULP_FDN_LANES_OP
+
+inline F4 select(M4 m, F4 a, F4 b) {
+    F4 r;
+    for (int i = 0; i < 4; ++i)
+        r.v[i] = m.v[i] ? a.v[i] : b.v[i];
+    return r;
+}
+inline M4 less(F4 a, F4 b) {
+    M4 r;
+    for (int i = 0; i < 4; ++i)
+        r.v[i] = a.v[i] < b.v[i];
+    return r;
+}
+inline M4 less_equal(F4 a, F4 b) {
+    M4 r;
+    for (int i = 0; i < 4; ++i)
+        r.v[i] = a.v[i] <= b.v[i];
+    return r;
+}
+inline M4 greater(F4 a, F4 b) {
+    return less(b, a);
+}
+// Clears the sign bit, as the vector form does, so -0 and a negative NaN
+// come out with the same bits on both paths.
+inline F4 abs(F4 a) {
+    F4 r;
+    for (int i = 0; i < 4; ++i) {
+        std::uint32_t bits;
+        std::memcpy(&bits, &a.v[i], sizeof bits);
+        bits &= 0x7fffffffu;
+        std::memcpy(&r.v[i], &bits, sizeof bits);
+    }
+    return r;
+}
+inline D2 load_widen2(const float* p) {
+    return {{static_cast<double>(p[0]), static_cast<double>(p[1])}};
+}
+inline void store_narrow2(float* p, D2 v) {
+    p[0] = static_cast<float>(v.v[0]);
+    p[1] = static_cast<float>(v.v[1]);
+}
+inline D2 widen_low(F4 a) {
+    return {{a.v[0], a.v[1]}};
+}
+inline D2 widen_high(F4 a) {
+    return {{a.v[2], a.v[3]}};
+}
+inline F4 narrow(D2 lo, D2 hi) {
+    return {{static_cast<float>(lo.v[0]), static_cast<float>(lo.v[1]), static_cast<float>(hi.v[0]),
+             static_cast<float>(hi.v[1])}};
+}
+struct I2 {
+    std::int64_t v[2];
+};
+struct M2 {
+    bool v[2];
+};
+inline double lane_d(D2 v, int i) {
+    return v.v[i];
+}
+inline std::int64_t lane(I2 v, int i) {
+    return v.v[i];
+}
+inline I2 splat_i(std::int64_t x) {
+    return {{x, x}};
+}
+inline I2 to_int(D2 v) {
+    return {{static_cast<std::int64_t>(v.v[0]), static_cast<std::int64_t>(v.v[1])}};
+}
+inline D2 to_double(I2 v) {
+    return {{static_cast<double>(v.v[0]), static_cast<double>(v.v[1])}};
+}
+inline D2 select(M2 m, D2 a, D2 b) {
+    return {{m.v[0] ? a.v[0] : b.v[0], m.v[1] ? a.v[1] : b.v[1]}};
+}
+inline M2 less(D2 a, D2 b) {
+    return {{a.v[0] < b.v[0], a.v[1] < b.v[1]}};
+}
+inline M2 greater(D2 a, D2 b) {
+    return {{a.v[0] > b.v[0], a.v[1] > b.v[1]}};
+}
+inline I2 operator-(I2 a, I2 b) {
+    return {{a.v[0] - b.v[0], a.v[1] - b.v[1]}};
+}
+inline I2 operator&(I2 a, I2 b) {
+    return {{a.v[0] & b.v[0], a.v[1] & b.v[1]}};
+}
+inline void transpose(F4& a, F4& b, F4& c, F4& d) {
+    const F4 r[4] = {a, b, c, d};
+    a = {{r[0].v[0], r[1].v[0], r[2].v[0], r[3].v[0]}};
+    b = {{r[0].v[1], r[1].v[1], r[2].v[1], r[3].v[1]}};
+    c = {{r[0].v[2], r[1].v[2], r[2].v[2], r[3].v[2]}};
+    d = {{r[0].v[3], r[1].v[3], r[2].v[3], r[3].v[3]}};
+}
+inline F4 swap_pairs(F4 a) {
+    return {{a.v[1], a.v[0], a.v[3], a.v[2]}};
+}
+inline F4 swap_halves(F4 a) {
+    return {{a.v[2], a.v[3], a.v[0], a.v[1]}};
+}
+inline F4 even_odd(F4 s, F4 d) {
+    return {{s.v[0], d.v[0], s.v[2], d.v[2]}};
+}
+inline F4 low_low(F4 s, F4 d) {
+    return {{s.v[0], s.v[1], d.v[0], d.v[1]}};
+}
+
+inline F4 min(F4 a, F4 b) {
+    return select(less(b, a), b, a);
+}
+inline F4 max(F4 a, F4 b) {
+    return select(greater(b, a), b, a);
+}
+inline D2 clamp(D2 x, D2 lo, D2 hi) {
+    return select(greater(x, hi), hi, select(less(x, lo), lo, x));
+}
+inline F4 clamp(F4 x, F4 lo, F4 hi) {
+    return min(max(x, lo), hi);
+}
+
+// A mask from a per-lane flag.
+inline M4 mask_of(bool a, bool b, bool c, bool d) {
+    return {{a, b, c, d}};
+}
+
+// In-register 4-point Hadamard (unnormalized) on each vector.
+inline F4 hadamard4(F4 v) {
+    const F4 p = swap_pairs(v);
+    v = even_odd(v + p, v - p);
+    const F4 h = swap_halves(v);
+    return low_low(v + h, v - h);
+}
+
+} // namespace portable
+
+// PULP_SIMD_LANES_PORTABLE selects the plain-struct lanes on GCC and Clang too,
+// so the kernels' fallback can be built and tested where the extension exists.
+// A program must define it in every translation unit or in none.
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(PULP_SIMD_LANES_PORTABLE)
 
 using F4 = float __attribute__((vector_size(16)));
 using M4 = std::int32_t __attribute__((vector_size(16)));
@@ -202,179 +413,6 @@ inline F4 low_low(F4 sum, F4 diff) {
 }
 #endif
 
-#else
-
-struct F4 {
-    float v[4];
-};
-struct M4 {
-    bool v[4];
-};
-struct D2 {
-    double v[2];
-};
-
-inline F4 load(const float* p) {
-    return {{p[0], p[1], p[2], p[3]}};
-}
-inline void store(float* p, F4 a) {
-    std::memcpy(p, a.v, sizeof a.v);
-}
-inline D2 load(const double* p) {
-    return {{p[0], p[1]}};
-}
-inline void store(double* p, D2 a) {
-    std::memcpy(p, a.v, sizeof a.v);
-}
-inline F4 splat(float x) {
-    return {{x, x, x, x}};
-}
-inline D2 splat(double x) {
-    return {{x, x}};
-}
-inline F4 make(float a, float b, float c, float d) {
-    return {{a, b, c, d}};
-}
-inline float lane(F4 v, int i) {
-    return v.v[i];
-}
-inline double lane(D2 v, int i) {
-    return v.v[i];
-}
-inline D2 make(double a, double b) {
-    return {{a, b}};
-}
-inline M4 both(M4 a, M4 b) {
-    return {{a.v[0] && b.v[0], a.v[1] && b.v[1], a.v[2] && b.v[2], a.v[3] && b.v[3]}};
-}
-inline F4 operator-(F4 a) {
-    return {{-a.v[0], -a.v[1], -a.v[2], -a.v[3]}};
-}
-inline bool all(M4 m) {
-    return m.v[0] && m.v[1] && m.v[2] && m.v[3];
-}
-
-#define PULP_FDN_LANES_OP(T, N, op)                                                                \
-    inline T operator op(T a, T b) {                                                               \
-        T r;                                                                                       \
-        for (int i = 0; i < N; ++i)                                                                \
-            r.v[i] = a.v[i] op b.v[i];                                                             \
-        return r;                                                                                  \
-    }                                                                                              \
-    inline T& operator op## = (T & a, T b) {                                                       \
-        return a = a op b;                                                                         \
-    }
-PULP_FDN_LANES_OP(F4, 4, +)
-PULP_FDN_LANES_OP(F4, 4, -)
-PULP_FDN_LANES_OP(F4, 4, *)
-PULP_FDN_LANES_OP(F4, 4, /)
-PULP_FDN_LANES_OP(D2, 2, +)
-PULP_FDN_LANES_OP(D2, 2, -)
-PULP_FDN_LANES_OP(D2, 2, *)
-#undef PULP_FDN_LANES_OP
-
-inline F4 select(M4 m, F4 a, F4 b) {
-    F4 r;
-    for (int i = 0; i < 4; ++i)
-        r.v[i] = m.v[i] ? a.v[i] : b.v[i];
-    return r;
-}
-inline M4 less(F4 a, F4 b) {
-    M4 r;
-    for (int i = 0; i < 4; ++i)
-        r.v[i] = a.v[i] < b.v[i];
-    return r;
-}
-inline M4 less_equal(F4 a, F4 b) {
-    M4 r;
-    for (int i = 0; i < 4; ++i)
-        r.v[i] = a.v[i] <= b.v[i];
-    return r;
-}
-inline M4 greater(F4 a, F4 b) {
-    return less(b, a);
-}
-inline F4 abs(F4 a) {
-    F4 r;
-    for (int i = 0; i < 4; ++i)
-        r.v[i] = a.v[i] < 0.0f ? -a.v[i] : a.v[i];
-    return r;
-}
-inline D2 load_widen2(const float* p) {
-    return {{static_cast<double>(p[0]), static_cast<double>(p[1])}};
-}
-inline void store_narrow2(float* p, D2 v) {
-    p[0] = static_cast<float>(v.v[0]);
-    p[1] = static_cast<float>(v.v[1]);
-}
-inline D2 widen_low(F4 a) {
-    return {{a.v[0], a.v[1]}};
-}
-inline D2 widen_high(F4 a) {
-    return {{a.v[2], a.v[3]}};
-}
-inline F4 narrow(D2 lo, D2 hi) {
-    return {{static_cast<float>(lo.v[0]), static_cast<float>(lo.v[1]), static_cast<float>(hi.v[0]),
-             static_cast<float>(hi.v[1])}};
-}
-struct I2 {
-    std::int64_t v[2];
-};
-struct M2 {
-    bool v[2];
-};
-inline double lane_d(D2 v, int i) {
-    return v.v[i];
-}
-inline std::int64_t lane(I2 v, int i) {
-    return v.v[i];
-}
-inline I2 splat_i(std::int64_t x) {
-    return {{x, x}};
-}
-inline I2 to_int(D2 v) {
-    return {{static_cast<std::int64_t>(v.v[0]), static_cast<std::int64_t>(v.v[1])}};
-}
-inline D2 to_double(I2 v) {
-    return {{static_cast<double>(v.v[0]), static_cast<double>(v.v[1])}};
-}
-inline D2 select(M2 m, D2 a, D2 b) {
-    return {{m.v[0] ? a.v[0] : b.v[0], m.v[1] ? a.v[1] : b.v[1]}};
-}
-inline M2 less(D2 a, D2 b) {
-    return {{a.v[0] < b.v[0], a.v[1] < b.v[1]}};
-}
-inline M2 greater(D2 a, D2 b) {
-    return {{a.v[0] > b.v[0], a.v[1] > b.v[1]}};
-}
-inline I2 operator-(I2 a, I2 b) {
-    return {{a.v[0] - b.v[0], a.v[1] - b.v[1]}};
-}
-inline I2 operator&(I2 a, I2 b) {
-    return {{a.v[0] & b.v[0], a.v[1] & b.v[1]}};
-}
-inline void transpose(F4& a, F4& b, F4& c, F4& d) {
-    const F4 r[4] = {a, b, c, d};
-    a = {{r[0].v[0], r[1].v[0], r[2].v[0], r[3].v[0]}};
-    b = {{r[0].v[1], r[1].v[1], r[2].v[1], r[3].v[1]}};
-    c = {{r[0].v[2], r[1].v[2], r[2].v[2], r[3].v[2]}};
-    d = {{r[0].v[3], r[1].v[3], r[2].v[3], r[3].v[3]}};
-}
-inline F4 swap_pairs(F4 a) {
-    return {{a.v[1], a.v[0], a.v[3], a.v[2]}};
-}
-inline F4 swap_halves(F4 a) {
-    return {{a.v[2], a.v[3], a.v[0], a.v[1]}};
-}
-inline F4 even_odd(F4 s, F4 d) {
-    return {{s.v[0], d.v[0], s.v[2], d.v[2]}};
-}
-inline F4 low_low(F4 s, F4 d) {
-    return {{s.v[0], s.v[1], d.v[0], d.v[1]}};
-}
-
-#endif
-
 inline F4 min(F4 a, F4 b) {
     return select(less(b, a), b, a);
 }
@@ -390,11 +428,7 @@ inline F4 clamp(F4 x, F4 lo, F4 hi) {
 
 // A mask from a per-lane flag.
 inline M4 mask_of(bool a, bool b, bool c, bool d) {
-#if defined(__GNUC__) || defined(__clang__)
     return M4{a ? -1 : 0, b ? -1 : 0, c ? -1 : 0, d ? -1 : 0};
-#else
-    return {{a, b, c, d}};
-#endif
 }
 
 // In-register 4-point Hadamard (unnormalized) on each vector.
@@ -404,5 +438,11 @@ inline F4 hadamard4(F4 v) {
     const F4 h = swap_halves(v);
     return low_low(v + h, v - h);
 }
+
+#else
+
+using namespace portable;
+
+#endif
 
 } // namespace pulp::signal::detail::lanes

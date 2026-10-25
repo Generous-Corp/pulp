@@ -115,7 +115,10 @@ class GpuNeuralEffect final : public format::Processor {
                                               .model = build.model,
                                               .channels = kChannels,
                                               .lead_blocks = kLeadBlocks,
-                                              .capacity = kLeadBlocks + 3});
+                                              .capacity = kLeadBlocks + 3,
+                                              // Faults are simulated in a short
+                                              // run: keep the ring-sized window.
+                                              .watchdog_blocks = kLeadBlocks + 2});
             engine_ready_ = node_->prepare() && transport_.prepare(node_.get(), {});
         }
         for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
@@ -261,7 +264,14 @@ std::unique_ptr<format::Processor> make_cpu_effect() {
     return std::make_unique<CpuNeuralEffect>();
 }
 
-enum class Fault { StarveWorker, FeedWorker, FailCompletions, ProviderLost };
+enum class Fault {
+    StarveWorker,    // the transport worker stops pumping
+    FeedWorker,      // the worker is pumped again
+    FailCompletions, // the provider reports failed completions
+    ProviderLost,    // a loss latched directly on the node
+    LoseDevice,      // the provider's device goes away (loss query + failures)
+    HangProvider,    // the provider stops completing while the worker runs
+};
 
 /// Drives one plug-in through the real CLAP adapter the way a host would.
 class ClapSession {
@@ -369,6 +379,12 @@ class ClapSession {
             detail::NeuralRealtimeTestAccess::request_recovery(
                 *fx->node(), detail::SharedIoRecoveryReason::ProviderLost);
             break;
+        case Fault::LoseDevice:
+            fx->plan().lost = true;
+            break;
+        case Fault::HangProvider:
+            fx->plan().starve = true;
+            break;
         }
     }
 
@@ -472,7 +488,8 @@ TEST_CASE("neural plug-in nulls against the CPU reference for every hosted famil
 
 TEST_CASE("neural plug-in output stays continuous across simulated provider faults",
           "[gpu_audio][neural][plugin-boundary-continuity][clap]") {
-    const auto fault = GENERATE(Fault::FailCompletions, Fault::ProviderLost, Fault::StarveWorker);
+    const auto fault = GENERATE(Fault::FailCompletions, Fault::ProviderLost, Fault::StarveWorker,
+                                Fault::LoseDevice, Fault::HangProvider);
     CAPTURE(static_cast<int>(fault));
     OptionsScope scope({.family = NeuralFamily::WaveNet, .gpu_backend = true});
     ClapSession gpu(&make_gpu_effect), cpu(&make_cpu_effect);
@@ -496,5 +513,18 @@ TEST_CASE("neural plug-in output stays continuous across simulated provider faul
     CHECK_FALSE(gpu.gpu()->plan().sequence_gap_seen);
     CHECK(gpu.callback_allocations() == 0);
     require_valid_status(gpu);
+    // The node names the fault, and a lost or hung provider is Unavailable.
+    const auto* node = gpu.gpu()->node();
+    const auto own = node->status_snapshot();
+    const auto hosted = gpu.gpu()->transport().status_snapshot();
+    if (fault == Fault::LoseDevice || fault == Fault::HangProvider) {
+        const auto expected = fault == Fault::LoseDevice
+                                  ? GpuAudioRecoveryReason::ProviderLost
+                                  : GpuAudioRecoveryReason::ProviderUnresponsive;
+        CHECK(node->recovery_reason() == expected);
+        CHECK(hosted.recovery_reason == expected);
+        CHECK(own.provider_state == GpuAudioProviderState::Unavailable);
+        CHECK(hosted.provider_state == GpuAudioProviderState::Unavailable);
+    }
     require_null(gpu, cpu);
 }

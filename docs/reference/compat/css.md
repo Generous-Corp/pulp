@@ -265,7 +265,10 @@ mapping, evidence, and caveat text.
     form (center / `from <angle>` / stops) and `View::paint` dispatches
     to the canvas radial / sweep shader (Skia `SkGradientShader::
     MakeRadial` / `MakeSweep`; CoreGraphics native radial + software
-    conic). Radial extent keywords (`closest-side` / `closest-corner` /
+    conic). A `<color-interpolation-method>` (`in oklab`, `in oklch
+    longer hue`) is honoured in every prefix position: Skia blends in that
+    space natively and CoreGraphics resamples the curve into sRGB stops;
+    unknown spaces are refused, as Chrome refuses them. Radial extent keywords (`closest-side` / `closest-corner` /
     `farthest-side` / `farthest-corner`) map to an approximate radius
     fraction of `max(w,h)`; exact per-keyword geometry (needs w/h +
     center) and explicit `px` radii are not yet sized precisely.

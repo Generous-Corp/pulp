@@ -160,6 +160,15 @@ FOCUSED: building 3/1708 targets affected by your diff - run 'pulp build --all' 
 
 A fresh source-checkout configure leaves the example projects off (`-DPULP_BUILD_EXAMPLES=OFF`) and pins Ninja + Release, like `pulp build`. When the prototype lives under `examples/`, pass `pulp loop --examples` so the first configure (or a reconfigure of a tree that has examples off) includes it. An existing tree an older CLI left on Makefiles, Debug, or examples ON is migrated on the first `pulp loop`: its cache moves to `build/.pulp-pre-migration/`, one `Reconfiguring … (was: …)` line prints, and the tree configures fresh (a one-time full rebuild). A prototype under `examples/` must therefore pass `--examples` on every run, or the migration turns examples back off; `PULP_KEEP_BUILD_CONFIG=1` keeps a tree as it is.
 
+In an SDK project on macOS, `pulp loop` (like `pulp dev`) links plug-ins against
+the development-only shared Pulp runtime (`PULP_DEV_SHARED_UI=ON`): each VST3,
+CLAP, AU or Standalone module is about a megabyte, so a one-file edit relinks in
+a fraction of the static time. Those bundles load only from this build tree and
+`pulp ship` refuses them, so run `pulp build` (it switches the dir back to static
+links, a relink only) before handing a build to anyone. `--no-dev-shared` keeps
+static links for a session, for example in a sandboxed host that will not load
+code from outside the bundle. The source checkout keeps static links.
+
 `--no-watch` flips state and exits without entering the watch loop — this is what tests use, and it's also useful when you want the marker but plan to drive builds yourself.
 
 ## Step 4 — Local prototype via ar-swap

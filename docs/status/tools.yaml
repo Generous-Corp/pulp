@@ -792,6 +792,18 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: chrome-backdrop-opacity-oracle
+  path: tools/import-validation/chrome_backdrop_opacity_oracle.py
+  category: visual-compare
+  use_when: Get Chrome's own composite of backdrop-filter under element and ancestor opacity.
+  invocation: python3 tools/import-validation/chrome_backdrop_opacity_oracle.py --help
+  inputs: test/fixtures/import-differential/22-backdrop-opacity.html.
+  outputs: A gridline and a gap pixel under each frosted box, as the C++ initializers test_css_backdrop_opacity.cpp asserts.
+  caveat: Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation,
+    which is the target here but is not the CSS spec.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: diff-against-reference
   path: tools/import-validation/diff_against_reference.py
   category: visual-compare
@@ -1061,6 +1073,10 @@ tools:
   skill: import-design
   docs: guides/importing-designs.md
 exclude:
+- path: tools/audio/fdn_reference/generate.sh
+  reason: Test-fixture generator. It records the FDN reverb's reference envelopes from a released
+    engine for test_fdn_reverb_block_engine.cpp; it is rerun only when that table is deliberately
+    re-recorded, not a tool an agent reaches for.
 - path: tools/import-design/jsx-runtime/materialized_source_emitter.mjs
   reason: Internal source-emitter implementation launched by pulp-import-design's --emit materialized-runtime; agents should invoke pulp import-design so browser capture, IDs, and packaging contracts stay together.
 - path: tools/import-design/browser_capture/browser_process.mjs

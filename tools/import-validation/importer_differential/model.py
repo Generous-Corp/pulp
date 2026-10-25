@@ -29,6 +29,9 @@ class BrowserNode:
     bounds: tuple[float, float, float, float] | None
     styles: dict[str, str]
     backend_node_id: int | None = None
+    # The capture's DOM-path anchor for this element, derived from the
+    # snapshot the way the importer derives `stable_anchor_id`.
+    anchor: str | None = None
     # For a shape inside an inline `<svg>`: the outermost `<svg>` box, which
     # is the coordinate frame (viewBox mapping) its geometry is drawn in.
     svg_viewport: tuple[float, float, float, float] | None = None

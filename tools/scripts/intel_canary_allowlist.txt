@@ -31,6 +31,11 @@ tools/cmake/FindV8.cmake :: set(_v8_key "mac-arm64")
 tools/cmake/FindV8.cmake :: MATCHES "ARM64|aarch64"
 tools/cmake/FindV8.cmake :: MATCHES "aarch64|arm64"
 
+# The source-install stamp renames whatever architecture the target names
+# (x86_64 -> x64 in the branch above it, aarch64 -> arm64 here); it selects
+# nothing.
+tools/cmake/PulpStampSourceInstall.cmake.in :: elseif(_arch MATCHES "^(aarch64|arm64)$")
+
 # PulpWgpuUniversal fabricates the fat dylib by iterating BOTH slices.
 tools/cmake/PulpWgpuUniversal.cmake :: foreach(_slice aarch64 x86_64)
 

@@ -5,11 +5,13 @@
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 #include <pulp/gpu_audio/gpu_audio_status.hpp>
 
+#include "shared_io_completion_notifier.hpp"
 #include "shared_io_provider_identity.hpp"
 
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <memory>
 
 namespace pulp::gpu_audio::detail {
 
@@ -45,11 +47,43 @@ struct RealtimeGpuHealth {
     bool device_lost = false;
     // Indexed by GpuAudioTerminalDisposition.
     std::array<std::uint64_t, GpuAudioStatus::kTerminalDispositionCount> terminal_counts{};
+    // The node's CPU shadow, with the meaning of GpuAudioStatus's shadow_*
+    // fields. Nodes without a shadow leave them at their defaults.
+    GpuAudioShadowMode shadow_mode = GpuAudioShadowMode::None;
+    float shadow_inline_cost_pct = 0.0f;
+    std::uint64_t shadow_delivered_blocks = 0;
+    std::uint64_t shadow_late_blocks = 0;
+    std::uint64_t shadow_double_miss_blocks = 0;
+    bool shadow_model_differs = false;
+    // Provider facts with the meaning of the GpuAudioStatus fields of the same
+    // names. Nodes that do not report them leave the defaults.
+    bool gpu_kernel_available = false;
+    GpuAudioCompletionMode completion_mode = GpuAudioCompletionMode::Unknown;
+    bool timestamps_available = false;
+    std::uint64_t last_delivery_ns = 0;
+    // The miss substitute in effect now, when it differs from what the
+    // descriptor declared (a neural node under ShadowPolicy::None declares
+    // CpuFallback so the transport keeps calling it, but a miss is silent).
+    // Without `reports_fallback` the transport keeps the declared policy.
+    bool reports_fallback = false;
+    MissPolicy fallback_policy = MissPolicy::Silence;
+    bool fallback_available = false;
 };
 // Returns false when no coherent read could be taken.
 using RealtimeGpuHealthFn = bool (*)(const void*, RealtimeGpuHealth&) noexcept;
-// Non-RT: release and re-prepare the provider, opening a new epoch.
-using RealtimeGpuReprepareFn = bool (*)(void*) noexcept;
+// Serialized non-RT worker, callback running: replace a fenced node's provider
+// and open a new epoch the callback adopts at its next block. The old provider
+// releases within `budget_ns` or is quarantined. False leaves the node fenced.
+using RealtimeGpuReprepareFn = bool (*)(void*, std::uint64_t budget_ns) noexcept;
+// Brackets each offline run. `true` comes on the offline render thread before
+// the run's first block, with the callback idle; `false` comes on the audio
+// thread at the first realtime callback after the run, before that callback
+// touches the node, so it must not allocate, lock or wait.
+using RealtimeGpuOfflineRenderFn = void (*)(void*, bool offline) noexcept;
+// Host only, while no service step runs: route the node's provider completion
+// events to `notifier`, or clear with {}. False when the provider has no event
+// source; the transport then relies on its timed poll.
+using RealtimeGpuNotifierFn = bool (*)(void*, SharedIoCompletionNotifier) noexcept;
 
 struct RealtimeGpuNodePath {
     void* context = nullptr;
@@ -61,9 +95,13 @@ struct RealtimeGpuNodePath {
     // across transport release, reconstruction and reprepare.
     RealtimeGpuSequenceFn next_sequence = nullptr;
     // Optional; not part of active(). `health` is populated for the WaveNet
-    // realtime node and the shared GpuConvolver path; `reprepare` is unused.
+    // realtime node and the shared GpuConvolver path; `reprepare` for the
+    // WaveNet realtime node; `offline_render` for the neural realtime node.
     RealtimeGpuHealthFn health = nullptr;
     RealtimeGpuReprepareFn reprepare = nullptr;
+    RealtimeGpuOfflineRenderFn offline_render = nullptr;
+    // Optional, not part of active(): provider completion events.
+    RealtimeGpuNotifierFn set_completion_notifier = nullptr;
 
     bool active() const noexcept {
         return context != nullptr && process != nullptr && service != nullptr && fence != nullptr &&
@@ -71,6 +109,26 @@ struct RealtimeGpuNodePath {
     }
 };
 
+using RealtimeGpuIdentityFn = SharedIoProviderIdentity (*)(const void*) noexcept;
+
+// What a node tells the transport about its realtime path. Filled by
+// GpuAudioNode::bind_realtime_path(), so the transport never names node types.
+class WorkerPipelineLink;
+
+struct RealtimeGpuNodeBinding {
+    // Active only once the node is ready to run on the realtime path.
+    RealtimeGpuNodePath path;
+    // The node cannot fall back to the untyped staged worker path.
+    bool requires_realtime_path = false;
+    // Non-RT: the identity reported by the provider the node prepared.
+    const void* identity_context = nullptr;
+    RealtimeGpuIdentityFn identity = nullptr;
+    // Control thread, no worker running: the transport's worker-pipelining
+    // opt-in (see worker_pipeline_hosting.hpp). Null for a node without one.
+    std::shared_ptr<WorkerPipelineLink> pipeline;
+};
+
+RealtimeGpuNodeBinding realtime_gpu_node_binding(GpuAudioNode* node) noexcept;
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
 // Concrete SDK nodes that cannot fall back to the untyped legacy FIFO.
 bool requires_realtime_gpu_path(GpuAudioNode* node) noexcept;
