@@ -452,6 +452,9 @@ uniform float featherCurve;
 uniform float featherMode;
 // Device pixels per local canvas unit, from Canvas::backing_scale().
 uniform float pixelScale;
+// The canvas's local-to-device linear map (scaleX, skewY, skewX, scaleY), so
+// the chart's direction fields can be reported in device orientation.
+uniform float4 pulpScreenFrame;
 uniform float leaf0; uniform float leaf1; uniform float leaf2; uniform float leaf3;
 uniform float leaf4; uniform float leaf5; uniform float leaf6; uniform float leaf7;
 uniform float leaf8; uniform float leaf9; uniform float leaf10; uniform float leaf11;
@@ -598,6 +601,15 @@ half4 main(float2 coord) {
     // px is one device pixel measured in the same units as d, so an author
     // writing `2.0 * g.px` gets two device pixels at any backing scale.
     PulpChart g = pulpChartAt(p, 1.0 / max(pixelScale, 0.0001));
+    // tan is reported in device orientation, so a shader lighting along the
+    // normal sees the same light whichever way the canvas is rotated. A
+    // mirroring map flips the normal's side, so cross flips with it and the
+    // offset cross * (tan.y, -tan.x) stays where it was.
+    float2 screenTan = float2(pulpScreenFrame.x * g.tan.x + pulpScreenFrame.z * g.tan.y,
+                              pulpScreenFrame.y * g.tan.x + pulpScreenFrame.w * g.tan.y);
+    if (length(screenTan) > 0.0) g.tan = normalize(screenTan);
+    if (pulpScreenFrame.x * pulpScreenFrame.w - pulpScreenFrame.z * pulpScreenFrame.y < 0.0)
+        g.cross = -g.cross;
     half4 shaded = shade(g);
     if (featherSigma > 0.0) {
         float feather = pulpFeather(g, featherSigma,
@@ -695,8 +707,13 @@ bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
     builder.uniform("featherSigma") = style.feather_sigma;
     builder.uniform("featherCurve") = static_cast<float>(style.feather_curve);
     builder.uniform("featherMode") = static_cast<float>(style.feather_mode);
-    // Ignored by the geometry composer, which declares no pixelScale.
+    // Ignored by the geometry composer, which declares neither.
     builder.uniform("pixelScale") = backing_scale();
+    {
+        const SkMatrix m = canvas_->getTotalMatrix();
+        builder.uniform("pulpScreenFrame") =
+            SkV4{m.getScaleX(), m.getSkewY(), m.getSkewX(), m.getScaleY()};
+    }
     for (const auto& named : options.named_uniforms) {
         if (!effect->findUniform(named.name.c_str()) || named.count < 1 || named.count > 4) continue;
         auto slot = builder.uniform(named.name.c_str());

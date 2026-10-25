@@ -1819,7 +1819,7 @@ too, and the gate names the over-claimed family.
 
 **The authoritative check stays in CI, from a trusted root.**
 `.github/workflows/vellum-trusted-gate.yml` runs the checker from a trusted root
-rather than the pull request's copy, and `.github/CODEOWNERS` locks the events
+rather than the pull request's copy, and `.github/CODEOWNERS` lists the events
 directory, the checker and its test. A local refusal does not weaken that: it
 can only stop a push the required checks would also refuse, and it never
 accepts anything on CI's behalf. The real risk of a local copy is a FALSE red,
@@ -4752,6 +4752,16 @@ Same idea applies to the self-hosted golden images: bake with the flags CI actua
 uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
+
+- **A path-filtered workflow that runs a Python test must also list the
+  modules that test imports.** `workflow-lint.yml` ran
+  `test_view_audio_archive_manifest.py` only when that test or
+  `view_audio_archive_manifest.py` changed, not when `nm_symbols.py`, which
+  both import, changed. A reader change in `nm_symbols.py` went green on its
+  PR and turned Workflow lint red on `main` at the next push that matched the
+  filter, so every later PR inherited the red. When a workflow step runs a
+  test, add the test's local imports to both its `pull_request` and `push`
+  path lists.
 
 - **Node 20's npm 10 cannot resolve some packages fresh; a lockless `npm
   install` job reds permanently while passing on a dev machine.** npm 10
