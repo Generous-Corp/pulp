@@ -369,6 +369,17 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         **extra: str,
     ) -> list[str]:
         """Run the real resolver for one event and return its matrix leg keys."""
+        return [leg["key"] for leg in self._matrix(event_name, run_windows=run_windows, **extra)]
+
+    def _macos_lanes(self, event_name: str, **extra: str) -> list[str]:
+        return [leg.get("lane", "") for leg in self._matrix(event_name, **extra)
+                if leg["key"] == "macos"]
+
+    def _matrix(
+        self, event_name: str, *, run_windows: bool = True,
+        **extra: str,
+    ) -> list[dict]:
+        """Run the real resolver for one event and return its matrix legs."""
         env = {
             k: v
             for k, v in os.environ.items()
@@ -418,7 +429,7 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
             for line in output.read_text(encoding="utf-8").splitlines():
                 if line.startswith("matrix_json="):
                     matrix = json.loads(line.split("=", 1)[1])
-                    return [leg["key"] for leg in matrix["include"]]
+                    return matrix["include"]
         raise AssertionError("resolver emitted no matrix_json")
 
     def test_pull_request_matrix_drops_windows_but_keeps_macos_and_linux(self) -> None:
@@ -430,18 +441,21 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
-    def test_unapproved_pull_request_defers_only_macos(self) -> None:
-        """A PR head without `macos-ci` takes no macOS VM; Linux still runs."""
-        keys = self._matrix_keys("pull_request", MACOS_PR_DEFERRED="true")
-        self.assertNotIn("macos", keys)
-        self.assertIn("linux", keys, "control: the resolver ran and built a matrix")
-        self.assertIn("macos", self._matrix_keys("pull_request", MACOS_PR_DEFERRED="false"))
+    def test_unapproved_pull_request_runs_only_the_macos_contract_lane(self) -> None:
+        """A PR head without `macos-ci` keeps a macOS leg, but configure-only."""
+        lanes = self._macos_lanes("pull_request", MACOS_PR_DEFERRED="true")
+        self.assertEqual(lanes, ["contract"])
+        self.assertIn("linux", self._matrix_keys("pull_request", MACOS_PR_DEFERRED="true"))
+        self.assertEqual(self._macos_lanes("pull_request", MACOS_PR_DEFERRED="false"), ["full"])
+        # A missing variable keeps the full lane.
+        self.assertEqual(self._macos_lanes("pull_request"), ["full"])
 
     def test_deferral_never_reaches_merge_group_or_dispatch(self) -> None:
-        """The merge queue and the escape hatch always run macOS."""
+        """The merge queue and the escape hatch always run the full macOS lane."""
         for event in ("merge_group", "workflow_dispatch"):
             with self.subTest(event=event):
-                self.assertIn("macos", self._matrix_keys(event, MACOS_PR_DEFERRED="true"))
+                self.assertEqual(
+                    self._macos_lanes(event, MACOS_PR_DEFERRED="true"), ["full"])
 
     def test_merge_group_matrix_keeps_macos_and_local_eligible_linux(self) -> None:
         """Advisory hosted legs must not sit in the path every merge takes.

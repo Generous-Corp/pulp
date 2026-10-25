@@ -777,24 +777,42 @@ class ArtifactUploadResilienceTest(unittest.TestCase):
 
 
 class MacosApprovalGateTest(unittest.TestCase):
-    """A pull request's macOS leg waits for `macos-ci`; other labels do nothing.
+    """An unapproved PR head's macOS leg runs only its contract lane.
 
-    Most pull-request heads never merge, and their macOS runs were the largest
-    share of the eight-VM fleet. The leg is omitted until the fleet's arm sweep
-    applies `macos-ci` to an approved head, the `macos` alias reports the
-    deferral, and the merge group still runs macOS.
+    Most pull-request heads never merge, and their full macOS runs were the
+    largest share of the eight-VM fleet. Without `macos-ci` the leg configures,
+    runs the pr-fast and pr-guard tiers (the PR-caused failures that otherwise
+    eject merge-group batches) and stops; the build and the tests it feeds wait
+    for the label the arm sweep applies to an approved head. Any other label
+    starts a run that does nothing.
     """
 
     NOOP = {"github.event_name": "pull_request", "github.event.action": "labeled",
             "github.event.label.name": "queue-unblock"}
-    APPROVED = {"github.event_name": "pull_request", "github.event.action": "labeled",
-                "github.event.label.name": "macos-ci"}
+    CONTRACT = {"github.event_name": "pull_request", "runner.os": "macOS",
+                "matrix.key": "macos", "matrix.lane": "contract",
+                "runner.environment": "self-hosted",
+                "needs.classify.outputs.agent_capability_installed_sdk_required": "true",
+                "success()": True, "failure()": False}
+    # Steps that need the build, or are the expensive tests it feeds.
+    BUILD_FED = (
+        "Build",
+        "Decide pull-request test suite",
+        "Test what this pull request reaches (pull request head)",
+        "Test (non-Windows)",
+        "Observe GPU adapter contract (self-hosted macOS)",
+        "Test installed SDK capability contract (affected changes)",
+        "Install and publish exact GPU-audio SDK (macOS ARM64)",
+        "Upload exact GPU-audio SDK (macOS ARM64)",
+        "Record per-test results for reuse replay (macOS)",
+    )
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.workflow = _workflow()
         cls.jobs = cls.workflow["jobs"]
         cls.triggers = cls.workflow.get("on", cls.workflow.get(True, {}))
+        cls.steps = _build_steps()
 
     def test_labeled_joins_the_default_pull_request_types(self) -> None:
         self.assertEqual(self.triggers["pull_request"]["types"],
@@ -843,28 +861,39 @@ class MacosApprovalGateTest(unittest.TestCase):
         self.assertIn("github.event_name == 'pull_request'", env)
         self.assertIn("github.event.action == 'synchronize'", env)
         self.assertIn("!contains(github.event.pull_request.labels.*.name, 'macos-ci')", env)
-        self.assertIn("macos_deferred", self.jobs["resolve-provider"]["outputs"])
 
-    def test_the_alias_owns_macos_on_a_deferred_head_only(self) -> None:
-        job = self.jobs["macos"]
-        native = {**self.APPROVED, "needs.resolve-provider.result": "success",
-                  "needs.classify.result": "success",
-                  "needs.classify.outputs.native_build_required": "true"}
-        deferred = {**native, "needs.resolve-provider.outputs.macos_deferred": "true"}
-        ran = {**native, "needs.resolve-provider.outputs.macos_deferred": "false"}
-        self.assertTrue(_evaluate_if(job["if"], deferred))
-        self.assertEqual(_evaluate(job["name"], deferred), "macos")
-        # The native leg owns `macos` when it runs; the alias must not collide.
-        self.assertFalse(_evaluate_if(job["if"], ran))
-        self.assertEqual(_evaluate(job["name"], ran), "macos-pr-unused")
+    def test_the_contract_lane_skips_the_build_and_what_it_feeds(self) -> None:
+        for name in self.BUILD_FED:
+            with self.subTest(step=name):
+                condition = self.steps[name].get("if")
+                self.assertFalse(_evaluate_if(condition, self.CONTRACT))
+        # Control: the full lane still builds on the same event.
+        self.assertTrue(_evaluate_if(self.steps["Build"]["if"],
+                                     {**self.CONTRACT, "matrix.lane": "full"}))
 
-    def test_the_deferred_alias_is_green_and_says_so(self) -> None:
-        body = self.jobs["macos"]["steps"][0]["run"]
-        deferred = body.index('needs.resolve-provider.outputs.macos_deferred }}" = "true"')
-        # Untrusted dependencies still fail closed before the deferral.
-        self.assertLess(body.index("failing macos gate closed"), deferred)
+    def test_the_contract_lane_still_configures_and_runs_both_cheap_tiers(self) -> None:
+        for name in ("Configure", "Test fast deterministic tier (pull request head)",
+                     "Test merge-queue ejection guards (pull request head)"):
+            with self.subTest(step=name):
+                self.assertTrue(_evaluate_if(self.steps[name].get("if", True), self.CONTRACT))
+        # The guard tier is macOS-only, so Linux keeps its current shape.
+        self.assertFalse(_evaluate_if(
+            self.steps["Test merge-queue ejection guards (pull request head)"]["if"],
+            {**self.CONTRACT, "runner.os": "Linux", "matrix.key": "linux"}))
+
+    def test_the_contract_lanes_green_is_marked_deferred(self) -> None:
+        body = self.steps["Test fast deterministic tier (pull request head)"]["run"]
+        self.assertIn('label_exclude="${label_exclude}|^needs-build$"', body)
         self.assertIn('"tier":"deferred"', body)
-        self.assertIn("exit 0", body[deferred:body.index("Skip-safe PR/dispatch")])
+        self.assertIn('"tier":"fast"', body, "control: the full lane keeps its own tier")
+        self.assertEqual(
+            self.steps["Test fast deterministic tier (pull request head)"]["env"]["PULP_MACOS_LANE"],
+            "${{ matrix.lane }}")
+
+    def test_the_bootstrap_alias_never_claims_a_deferral(self) -> None:
+        # The native leg owns `macos` on every native PR head; a second
+        # `macos` from the bootstrap would collide with it.
+        self.assertNotIn("deferred", json.dumps(self.jobs["macos"]))
 
     def test_the_label_reset_runs_from_main_and_checks_out_nothing(self) -> None:
         reset = yaml.safe_load((Path(__file__).parents[2]
@@ -876,6 +905,7 @@ class MacosApprovalGateTest(unittest.TestCase):
         text = json.dumps(reset)
         self.assertNotIn("actions/checkout", text)
         self.assertIn("labels/macos-ci", text)
+
 
 if __name__ == "__main__":
     unittest.main()

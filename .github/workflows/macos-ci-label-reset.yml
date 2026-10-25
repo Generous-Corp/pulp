@@ -1,6 +1,6 @@
 name: macOS CI label reset
 
-# `macos-ci` approves one pull-request head for a macOS run in build.yml (see
+# `macos-ci` approves one pull-request head for build.yml's full macOS lane (see
 # "macOS on a pull request waits for approval" in docs/guides/local-ci.md). A
 # push makes a new head that nobody has approved, so this removes the label
 # again. build.yml already ignores the label on `synchronize`; removing it keeps
