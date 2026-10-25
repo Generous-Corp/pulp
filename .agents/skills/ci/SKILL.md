@@ -437,11 +437,14 @@ macOS.
 - **`gate_suite_executed.py` reads both lanes as `tier-only`.** Use the
   `deferred` annotation, or the skipped `Build` step, to tell them apart.
 - **Shipyard's arm guard reads the tier record, not annotations.**
-  `macos-tier-record.yml` publishes a `shipyard-test-tier/macos` check run
-  per completed same-repository Build and Test run. It is bound to that run
-  and attempt, and decided from the `macos` job's step conclusions (`Build`
-  skipped means `deferred`). A head with no record, or a `deferred` one,
-  cannot be armed once `tiered_required_checks` is set.
+  `macos-tier-record.yml` publishes a `shipyard-test-tier/macos` check run per
+  completed same-repository Build and Test run, bound to that run and attempt.
+  It is created with a dedicated App's token from the main-only `tier-record`
+  environment, never GITHUB_TOKEN. The tier is the more conservative of the
+  fleet App's `macos-ci` label at run creation and the `macos` job's step
+  conclusions (`Build` skipped means `deferred`). A head with no counted
+  record, or a `deferred` one, cannot be armed once `tiered_required_checks`
+  is set.
 
 ## Diff-scoped gates on merge_group use the entry's own base
 

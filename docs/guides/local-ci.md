@@ -3781,38 +3781,70 @@ Shipyard's queue-arm-guard does not read `shipyard-test-tier` annotations, since
 any step, including the code under test, can print one. It reads a *tier
 record* instead (Shipyard `docs/ghapp-guards.md`, "A tiered required check must
 prove its full lane"). That record is a check run named
-`shipyard-test-tier/macos` on the head, created by `github-actions`, whose
-summary is `{"schema":"shipyard-test-tier/v1","check":"macos","tier":...,
-"run_id":...,"run_attempt":...,"label":"macos-ci","full_suite_runs_in":"merge_group"}`.
-The guard refuses a head with no record bound to its `macos` job's run and
-attempt, or with a `deferred` one.
+`shipyard-test-tier/macos` on the head, whose summary is
+`{"schema":"shipyard-test-tier/v1","check":"macos","tier":...,"run_id":...,"run_attempt":...,"label":"macos-ci","full_suite_runs_in":"merge_group"}`.
+The guard counts only records created by the App named in `[queue]
+tier_record_app`, never `github-actions`: any job holding `checks: write`
+could rewrite those. It refuses a head with no counted record bound to its
+`macos` job's run and attempt, or with a `deferred` one.
 
-`.github/workflows/macos-tier-record.yml` publishes it.
-It runs on `workflow_run` when a Build and Test run completes, from main, with
-no checkout. It handles same-repository `pull_request` and `workflow_dispatch`
-runs only. No job that runs pull request code may hold `checks: write`,
-because one that did could rewrite the record from `deferred` to `full`.
-`build.yml` grants `checks: read` explicitly in its workflow-level block, and
-`tools/ci/test_macos_tier_record.py` fails on any job in any workflow that
-could write checks, unless it is a listed job that checks out nothing or only
-`main`. It decides the tier
-from the step conclusions the runner recorded for that attempt's `macos` job,
-not from anything the job printed:
+`.github/workflows/macos-tier-record.yml` publishes the record:
 
-| `macos` job | Tier |
-|---|---|
-| `Build` ran, `Test (non-Windows)` ran | `full` |
-| `Build` ran | `fast` (full lane) |
-| `Build` skipped (the contract lane) | `deferred` |
-| bootstrap step succeeded (skip-safe) | `not-required` |
-| bootstrap step failed closed | `deferred` |
+- **Trigger:** `workflow_run` when a Build and Test run completes. It runs from
+  main, with no checkout, for same-repository `pull_request` and
+  `workflow_dispatch` runs only.
+- **Token:** its own `GITHUB_TOKEN` only reads. The record is created with a
+  token for a dedicated App, minted in the job from `TIER_RECORD_APP_ID` and
+  `TIER_RECORD_APP_KEY`. Those are secrets of the `tier-record` GitHub
+  Environment, whose deployment-branch policy allows `main` only. A
+  workflow_run job runs on the default branch and qualifies. A job on a pull
+  request branch is refused them, as repository secrets would not be. Only
+  this job references the environment or those secrets; a test checks that.
+  With the secrets absent the job fails visibly and publishes nothing.
+- **Tier:** the more conservative of two signals, since neither proves enough
+  alone. A pull request's own build.yml decides its step names, so steps alone
+  cannot grant a full tier, and the label alone does not show the suite ran.
+  1. **Label.** The fleet App's `macos-ci` was on the pull request when the run
+     was created: the label's last add or remove before the run's
+     `created_at`, from the issue's events. If it was absent, applied by
+     anyone else, or the head has no single same-repository pull request, the
+     tier is `deferred`.
+  2. **Steps.** The conclusions the runner recorded for that attempt's
+     `macos` job:
 
-A run with no `macos` job, two of them, a job for another head, or neither
-step publishes no record, and the guard refuses that head. So do fork heads,
-which land through an in-repository branch. The record is published whether
-or not `PULP_MACOS_PR_GATING` is on. With gating off every head takes the full
-lane, so turning on `tiered_required_checks` in `.shipyard/config.toml`
-strands nothing. That key is the flip-day change and is not set yet.
+     | `macos` job | Tier |
+     |---|---|
+     | `Build` ran, `Test (non-Windows)` ran | `full` |
+     | `Build` ran | `fast` (full lane) |
+     | `Build` skipped (the contract lane) | `deferred` |
+     | bootstrap step succeeded (skip-safe) | `not-required` |
+     | bootstrap step failed closed | `deferred` |
+
+A run with no `macos` job, two of them, a job for another head, neither
+step, or an unreadable listing publishes no record, and the guard refuses
+that head. So do fork heads, which land through an in-repository branch.
+
+Because the label signal applies to every head, a head without the fleet
+App's `macos-ci` is `deferred` even on the full lane, and even when
+`PULP_MACOS_PR_GATING` is off. Turn on `tiered_required_checks` only after
+the App exists, the arm sweep labels every approved head (skip-safe and
+dispatch-validated ones included), and gating is on. That key and `[queue]
+tier_record_app` are the last change, and neither is set yet.
+
+**Trust boundary.** A same-repository pull request runs its own build.yml, so
+it can rename steps, or add a step that grants itself `checks: write`. The
+tests that pin step names and checks writers are in the same pull request and
+can be edited too, so they stop only an honest mistake. That is the trust
+level of every required context here (see "Required checks trust the pull
+request's own workflow YAML"). Three things stand behind it:
+- the label signal, which no pull request controls;
+- the guard counting only the dedicated App's records;
+- the merge group's full macOS suite.
+
+The repository's default workflow token permission is `read`. That covers
+only jobs that declare no permissions; a pull request can still declare
+`checks: write` explicitly. #931 refuses tiers whose job log shows `Checks:
+write`.
 
 ### Why the contract lane's `macos` check is green
 

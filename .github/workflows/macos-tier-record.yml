@@ -3,30 +3,42 @@ name: macOS test tier record
 # Publishes the tier record Shipyard's queue-arm-guard reads for the tiered
 # required check `macos` (Shipyard docs/ghapp-guards.md, "A tiered required
 # check must prove its full lane"). The record is a check run named
-# `shipyard-test-tier/macos` on the head, created by `github-actions` through
-# the Checks API, whose output.summary is one JSON object bound to the exact
-# workflow run and attempt whose job is the `macos` check:
+# `shipyard-test-tier/macos` on the head, whose output.summary is one JSON
+# object bound to the exact workflow run and attempt whose job is the `macos`
+# check:
 #
 #   {"schema":"shipyard-test-tier/v1","check":"macos","tier":"deferred",
 #    "run_id":123,"run_attempt":1,"label":"macos-ci",
 #    "full_suite_runs_in":"merge_group"}
 #
-# The guard ignores tier annotations, because any step, including the code
-# under test, can print one. This job decides the tier from facts that code
-# cannot write: the step conclusions the runner recorded for that `macos` job
-# (read through the jobs API). A `Build` step that ran is the full lane, `fast`
-# or, with `Test (non-Windows)` run too, `full`. A skipped `Build` is the
-# contract lane, `deferred`. A skip-safe or fail-closed bootstrap job's green
-# is `not-required`. A job it cannot read or place publishes no record, and no
-# record is a refusal at the guard.
+# Who may write it. The guard counts only records created by the App named in
+# `[queue] tier_record_app`, never `github-actions`: any job holding
+# `checks: write` could rewrite a github-actions record. So the record is
+# created with a token for a dedicated App, minted here. Its ID and key live in
+# the `tier-record` GitHub Environment, which allows deployments from `main`
+# only. A workflow_run job runs on the default branch, so it qualifies, and a
+# job on a pull request branch is refused the secrets. Nothing else references
+# that environment (tools/ci/test_macos_tier_record.py). With the secrets
+# absent, the job fails visibly.
 #
-# workflow_run runs this definition from the default branch and checks out
-# nothing, so no pull request code runs here and only this job holds
-# `checks: write`. Same-repository runs only: a fork's head gets no record, so
-# the guard refuses to arm it (outside contributions land through an in-repo
-# branch). It publishes whether or not PULP_MACOS_PR_GATING is on. With gating
-# off every pull request takes the full lane and its record says so, so the
-# guard can be switched on (`tiered_required_checks`) without stranding heads.
+# The tier is the more conservative of two signals, because neither proves
+# enough alone. A pull request's own build.yml decides its step names, so steps
+# alone cannot grant `full`; the label alone does not show that the suite ran.
+#
+# 1. The label: the fleet App's `macos-ci` on the pull request when the run was
+#    created (the label's last add or remove before the run's created_at, read
+#    from the issue's events). Absent, or applied by anyone else: `deferred`.
+# 2. The steps the runner recorded for that attempt's `macos` job (jobs API),
+#    never annotations, which any step can print. `Build` ran gives `fast`, or
+#    `full` when `Test (non-Windows)` ran too. `Build` skipped (the contract
+#    lane) gives `deferred`. A succeeded skip-safe bootstrap gives
+#    `not-required`; one that failed closed gives `deferred`.
+#
+# A run it cannot place publishes no record, and no record is a refusal at the
+# guard. workflow_run runs this definition from the default branch and checks
+# out nothing, so no pull request code runs here. Same-repository runs only:
+# a fork's head gets no record, so the guard refuses to arm it (outside
+# contributions land through an in-repository branch).
 
 on:
   workflow_run:
@@ -35,7 +47,8 @@ on:
 
 permissions:
   actions: read
-  checks: write
+  issues: read
+  pull-requests: read
 
 concurrency:
   group: macos-tier-record-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
@@ -51,21 +64,40 @@ jobs:
       && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Main-only deployment-branch policy: the App's ID and key are released to
+    # this job and to no job on a pull request branch.
+    environment: tier-record
     steps:
-      - name: Publish shipyard-test-tier/macos
+      - name: Require the tier-record App's secrets
+        env:
+          APP_ID: ${{ secrets.TIER_RECORD_APP_ID }}
+          HAS_KEY: ${{ secrets.TIER_RECORD_APP_KEY != '' }}
+        run: |
+          if [ -z "$APP_ID" ] || [ "$HAS_KEY" != true ]; then
+            echo "::error title=no tier record::TIER_RECORD_APP_ID and TIER_RECORD_APP_KEY must be secrets of the tier-record environment (main only); no record was published, so the arm guard refuses this head"
+            exit 1
+          fi
+
+      - name: Decide the tier
+        id: tier
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_CREATED_AT: ${{ github.event.workflow_run.created_at }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          RUN_PRS: ${{ join(github.event.workflow_run.pull_requests.*.number, ' ') }}
         run: |
           set -euo pipefail
           repo="$GITHUB_REPOSITORY"
+          app="shipyard-local[bot]"
           if [ "$HEAD_REPO" != "$repo" ]; then
             echo "run $RUN_ID is from $HEAD_REPO, not $repo; only same-repository runs get a record"
             exit 0
           fi
+
+          # --- signal 2: the steps the runner recorded ----------------------
           # The jobs of exactly this attempt, every page, as one array.
           jobs_json=$(gh api --paginate "repos/$repo/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs?per_page=100" \
             | jq -s '[.[].jobs[]]')
@@ -97,21 +129,81 @@ jobs:
           if [ "$bootstrap" != absent ]; then
             # The bootstrap claims `macos` when no native build is needed, and
             # fails it closed when routing or classification failed.
-            if [ "$bootstrap" = success ]; then tier=not-required; else tier=deferred; fi
+            if [ "$bootstrap" = success ]; then steps_tier=not-required; else steps_tier=deferred; fi
           elif [ "$build" = absent ]; then
             echo "::error title=no tier record::the macos job of run $RUN_ID has neither a Build step nor the bootstrap step, so its lane cannot be read; no record, which the guard refuses"
             exit 1
           elif ran "$build"; then
-            if ran "$full_suite"; then tier=full; else tier=fast; fi
+            if ran "$full_suite"; then steps_tier=full; else steps_tier=fast; fi
           else
-            tier=deferred
+            steps_tier=deferred
           fi
+
+          # --- signal 1: the fleet App's label when the run was created ------
+          # The same-repository open pull request whose head is this commit.
+          prs="$RUN_PRS"
+          if [ -z "$prs" ]; then
+            prs=$(gh api "repos/$repo/commits/$HEAD_SHA/pulls" \
+              | jq -r --arg sha "$HEAD_SHA" --arg repo "$repo" \
+                '[.[] | select(.state == "open" and .head.sha == $sha and .head.repo.full_name == $repo) | .number] | join(" ")')
+          fi
+          read -r -a pr_list <<< "$prs"
+          label="absent"
+          if [ "${#pr_list[@]}" -ne 1 ]; then
+            label="unplaced (${#pr_list[@]} pull requests at this head)"
+          else
+            pr="${pr_list[0]}"
+            # The last add or remove of the label before the run was created.
+            last=$(gh api --paginate "repos/$repo/issues/$pr/events?per_page=100" \
+              | jq -s -r --arg before "$RUN_CREATED_AT" \
+                '[.[][] | select((.event == "labeled" or .event == "unlabeled")
+                                  and .label.name == "macos-ci" and .created_at < $before)]
+                 | sort_by(.created_at) | last // {} | "\(.event // "none") \(.actor.login // "none")"')
+            read -r last_event last_actor <<< "$last"
+            if [ "$last_event" = labeled ] && [ "$last_actor" = "$app" ]; then
+              label=present
+            elif [ "$last_event" = labeled ]; then
+              label="applied by $last_actor, not $app"
+            fi
+          fi
+
+          # --- the more conservative of the two ------------------------------
+          if [ "$label" != present ]; then tier=deferred; else tier="$steps_tier"; fi
           summary=$(jq -cn --arg tier "$tier" --argjson run "$RUN_ID" --argjson attempt "$RUN_ATTEMPT" \
             '{schema:"shipyard-test-tier/v1",check:"macos",tier:$tier,run_id:$run,
               run_attempt:$attempt,label:"macos-ci",full_suite_runs_in:"merge_group"}')
-          gh api --method POST "repos/$repo/check-runs" \
+          echo "tier $tier for $HEAD_SHA: steps say $steps_tier (Build=$build, Test (non-Windows)=$full_suite, bootstrap=$bootstrap); fleet-App macos-ci at run creation: $label"
+          {
+            echo "publish=true"
+            echo "tier=$tier"
+            echo "summary=$summary"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mint the tier-record App token
+        id: app-token
+        if: steps.tier.outputs.publish == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          app-id: ${{ secrets.TIER_RECORD_APP_ID }}
+          private-key: ${{ secrets.TIER_RECORD_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: write
+
+      - name: Publish shipyard-test-tier/macos
+        if: steps.tier.outputs.publish == 'true'
+        env:
+          # The App's token, never GITHUB_TOKEN: the guard counts only
+          # records the tier-record App created.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          TIER: ${{ steps.tier.outputs.tier }}
+          SUMMARY: ${{ steps.tier.outputs.summary }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" \
             -f name=shipyard-test-tier/macos \
             -f head_sha="$HEAD_SHA" \
             -f status=completed -f conclusion=neutral \
-            -f "output[title]=$tier" -f "output[summary]=$summary" >/dev/null
-          echo "published shipyard-test-tier/macos on $HEAD_SHA: $summary (Build=$build, Test (non-Windows)=$full_suite, bootstrap=$bootstrap)"
+            -f "output[title]=$TIER" -f "output[summary]=$SUMMARY" >/dev/null
+          echo "published shipyard-test-tier/macos on $HEAD_SHA: $SUMMARY"

@@ -102,10 +102,11 @@ concurrency:
 
 # Every job here that has no block of its own runs with exactly these, and
 # they include `checks: read` explicitly: a job that runs pull request code
-# must never hold `checks: write`, or it could rewrite the head's
-# `shipyard-test-tier/macos` record (macos-tier-record.yml, which runs no pull
-# request code, is the only writer). tools/ci/test_macos_tier_record.py fails
-# on any job, here or in another workflow, that could.
+# must never hold `checks: write`. The arm guard already ignores check runs
+# github-actions creates (the tier record comes from a dedicated App,
+# macos-tier-record.yml), so this is defence in depth.
+# tools/ci/test_macos_tier_record.py fails on any job, here or in another
+# workflow, that could write checks.
 permissions:
   actions: read
   contents: read
