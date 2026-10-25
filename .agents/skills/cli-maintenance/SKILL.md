@@ -425,6 +425,17 @@ do the same, or it will run a floor grant at default QoS and take CPU the host
 never agreed to give. A grant larger than the request, or one without a
 `lease_size_cores`, is released and treated as the original denial.
 
+### The browser-capture runtime file list is duplicated across both CLIs
+
+`tools/cli/upgrade_install.hpp` (`browser_capture_runtime_files`) and the Rust
+`experimental/pulp-rs/src/install_import_design.rs`
+(`BROWSER_CAPTURE_RUNTIME_FILES`) each pin the browser-capture modules an
+upgrade installs, and their tests compare against
+`tools/import-design/browser_capture/runtime_manifest.txt`. A module added to
+the manifest alone passes a source build and fails both upgrade tests; the
+release `common_cli_members` in `tools/scripts/release_product_matrix.json`
+needs it too. Update all four together.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source
@@ -605,6 +616,30 @@ Ed25519-signed artifact atomically. `pulp bake verify <artifact> --trust <file>`
 performs signature/trust and bounded-parse checks only; it never executes Custom
 code or restores state. `--no-mint` is the non-interactive guard that refuses an
 absent signing key instead of silently creating a new identity.
+
+`pulp bake` never loads a plugin: `cmd_bake.cpp` passes
+`GraphLoadOptions::load_plugins = false`, because the lowerability check
+refuses hosted Plugin nodes anyway and loading one first would run whatever
+library the graph file names, for nothing. There is deliberately no
+`--allow-path` flag on bake (it could never produce a successful bake), and
+`pulp host <path>` needs none either, since its positional path *is* the
+operator's explicit choice. `pulp scan --in-process` is the only way CLAP
+entry points run in the scanning process: by default `PluginScanner::scan`
+runs each `.clap` in a `pulp-scan-worker` child, found beside the executable
+(an installed SDK's `bin/`, or `tools/scan-worker/` in a build tree) or via
+`PULP_SCAN_WORKER`, and when no worker exists CLAP is **skipped**, not scanned
+in-process; `cmd_scan` reads `scan_report()` and prints the "pass
+`--in-process`" guidance to stderr. Both behaviours are `pulp-cpp`-side; the
+Rust front end forwards `bake` arguments untouched, while its own `scan` is
+filesystem-only and never reaches the worker.
+
+`tools/cli` is configured only when `PULP_ENABLE_GPU` is ON (root
+`CMakeLists.txt`), so a GPU-off worktree has no `pulp-cli` target at all and
+`cmake --build build --target pulp-cli` fails with "unknown target". To
+compile-check a CLI edit there, run the compiler with `-fsyntax-only` using
+the `FLAGS`/`DEFINES`/`INCLUDES` of a sibling target that links `pulp::host`
+(for example `pulp-scan-worker`'s rule in `build/build.ninja`) plus
+`-Itools/cli`; the real link still happens on the GPU-enabled `macos` gate.
 
 Stateful Custom records persist the graph's authored/staged
 `custom_state_blob`, not a live instance's `save_state()` result. This is a
@@ -951,6 +986,23 @@ for the delegated branches. The same split bites status output: a `pulp status`
 line added only to the Rust fallback never reaches installed users, because
 installed status delegates to `pulp-cpp status`.
 
+### A standalone `pulp build` configure needs the SDK prefix
+
+The C++ `cmd_build` always passed `-DCMAKE_PREFIX_PATH=<resolved SDK>` for a
+standalone project; the Rust `pulp build` did not, so `pulp create --no-build`
+then `pulp build` (or any fresh build dir) let `find_package(Pulp)` take
+whatever Pulp package was first on CMake's search path. With `~/.pulp/bin` on
+`PATH`, that was the stale `~/.pulp/lib/cmake/Pulp` left by an old install,
+which failed the version check. `experimental/pulp-rs/src/standalone_sdk.rs`
+now finds an installed SDK in the same order as the C++
+`resolve_standalone_sdk(materialize=false)` (`sdk_path`, the `sdk_checkout`
+local build, `~/.pulp/sdk/<version>`, `latest` = newest installed), and when
+none is on disk the build is delegated to `pulp-cpp`, which can download one.
+Keep the two lookups in step. Only a fresh or migrated cache needs the prefix:
+CMake keeps the cached value across reconfigures. The orchestrate unit-test
+fixture `standalone_project` names an `sdk_path` so its configures stay
+in-process; the shell-out cases are in `tests/orchestrate_parity_test.rs`.
+
 ### Configure defaults live in two parsers — change both
 
 A fresh `pulp build` configure (and the `cmd_build` bootstrap that `pulp dev` /
@@ -1204,11 +1256,23 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
   installer by unpacking its `Distribution` (`xar -xf … Distribution`) and
   checking for `<options customize="allow">` + one `<line choice>` per format —
   a flat `Bom/Payload/PackageInfo` archive is a bare `pkgbuild` with NO Customize.
+- `pulp ship package` (macOS) exits 1 when any installer fails or nothing was
+  packaged. It used to print `FAILED to create combined installer` / `Created
+  0 .pkg` and exit 0, so `release` went on to notarize nothing and a script saw
+  success. Every `FAILED` branch bumps `failed_count`; a new packaging branch
+  must do the same.
+- `pulp ship` resolves its root with `resolve_active_project_root()`, so it runs
+  in an SDK consumer project (`pulp.toml`, no `core/`) as well as the checkout.
+  Anything it takes from Pulp itself goes through `ship_support_file()`: the
+  checkout path first, then the selected SDK's `share/pulp/ship/` (installed by
+  `PulpInstallRules.cmake`, asserted by `test_pulp_install_layout.cmake`). A
+  new checkout-relative path in `cmd_ship.cpp` (scripts, templates) needs the
+  same treatment, or `ship` breaks for every consumer project again.
 - A subcommand that must work BEFORE a build exists (e.g. `pulp ship doctor`,
   which makes signing non-interactive) has to be dispatched *above*
   `cmd_ship`'s `build/CMakeCache.txt` guard — that early-return fires first and
   would otherwise reject it with "Build directory not found." Put such handlers
-  right after `find_project_root()`.
+  right after the root resolution.
 - `pulp ship doctor` shells out to `tools/scripts/ensure_signing_ready.sh` (the
   canonical logic + its own `test_ensure_signing_ready.sh`); the C++ side is a
   thin pass-through, and macOS `ship sign` invokes it as a **mandatory quiet
@@ -2565,6 +2629,20 @@ Gotchas:
   same PR.** Both live at HEAD; drift between them is the whole reason
   the header exists.
 
+## Release floors reach C++ through a generated header
+
+`tools/scripts/release_product_matrix.json` is the single home of release
+floors such as `checksum_manifest_floor`. C++ consumers (`cmd_upgrade.cpp`,
+`cli_sdk.cpp`) never spell the number: `tools/cmake/PulpReleaseMatrix.cmake`
+reads it and `release_floors_gen.h.in` is configured into
+`${CMAKE_BINARY_DIR}/tools/cli/release_floors_gen.h`, next to
+`pulp_version_gen.h`. Any target that compiles one of those sources outside
+`pulp-cli` must configure that header too; `cli_tests.cmake` does it for
+`pulp-test-cli-support-objects`, which compiles `cli_sdk.cpp`. The
+`SingleOwnerReleasePublication` tests in
+`test_release_workflow_test_step.py` fail if a CLI source carries its own
+copy of the floor literal.
+
 ## `pulp version --json`
 
 The Rust user-facing `pulp` binary supports `pulp version --json` for a
@@ -3123,7 +3201,15 @@ Key layout:
   `breaking` (bool), `applies_if` (expression string), `summary`.
   `docs/migrations/README.md` is the schema reference; the codegen
   skips it. Only write a note when a reasonable pro developer needs
-  to change code / config / habits — not every PR.
+  to change code / config / habits — not every PR. A PR never writes
+  this file itself: it writes `docs/migrations/unreleased/<topic>.md`
+  (`breaking` + `summary` only), and the version-at-land bump that
+  assigns the SDK version folds it into `v<assigned>.md`
+  (`tools/scripts/fold_migration_notes.py`). A guessed `vX.Y.Z.md`
+  goes stale whenever another release lands first.
+- **`docs/migrations/unreleased/*.md`** — validated by the codegen
+  (refused if it sets `version` or `applies_if`) but not embedded,
+  because no released CLI can be upgraded to it yet.
 - **`tools/scripts/build_migration_index.py`** — standalone Python
   codegen. Parses the TOML frontmatter, escapes the Markdown body for
   a C++ string literal, sorts entries by parsed semver, and writes
@@ -3279,6 +3365,10 @@ Gotchas:
     - `validate-build.sh` keeps Debug — that's the validator's job (catches debug-only assertion failures).
     - `cli_common.cpp`'s SDK install path already used Release.
   Follow-up scope (not done yet): `pulp build --debug` / `--release` that force a reconfigure of an existing `build/` directory.
+- Standalone `pulp create` passes `-G Ninja` when `configure_ninja_available()`
+  and the build dir has no `CMakeCache.txt`, matching `pulp build`'s fresh
+  configure; before that it silently got Makefiles unless `CMAKE_GENERATOR` was
+  set in the caller's shell.
 - Standalone `pulp create` configure/test shell commands live in
   `tools/cli/create_build_commands.{hpp,cpp}` so path quoting is tested without
   running a full scaffold build. Keep every path-bearing command argument
@@ -3928,3 +4018,16 @@ after a successful delegated Shipyard arm/ship path, and deliberately skips
 `--no-arm`. Keep this hook after arming so advisory workflow dispatches bind to
 the approved head; direct `shipyard pr` remains an interim gap until Shipyard
 provides a native arm hook.
+
+## `pulp ship package` ships stripped copies; its shell-out tests need the test cwd
+
+`pulp ship package` stages a copy of each AU/VST3/CLAP bundle outside the
+build tree, writes a dSYM of the unstripped executable to
+`artifacts/symbols/`, strips local symbols from the copy's main executable and
+re-signs it (`tools/cli/ship_bundle_strip.cpp`); the build output is never
+modified. A new
+package option that edits a bundle must work on that staged copy, before the
+copy is signed, never on the build output. `test_cli_ship_shellout.cpp` finds
+the CLI relative to its working directory (`../tools/cli/pulp-cpp`), so run the
+binary from `build/test` (ctest does). From the repo root every ship case
+SKIPs and the run still exits 0, which looks like a pass.

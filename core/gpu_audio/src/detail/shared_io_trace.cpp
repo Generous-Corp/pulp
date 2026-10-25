@@ -363,12 +363,25 @@ void emit_shared_io_unresolved_ownership(const SharedIoTraceOwnership& ownership
         observer->ownership(observer->context, ownership);
 }
 
+// .agents/skills/trace-sql/pulp_gpu_audio_blocks.sql classifies the emitted
+// telemetry_error by these numeric values.
+static_assert(static_cast<unsigned>(SharedIoTelemetryError::None) == 0);
+static_assert(static_cast<unsigned>(SharedIoTelemetryError::TelemetryValidationDeferred) == 13);
+static_assert(static_cast<unsigned>(SharedIoTelemetryError::CompletionTimingInvalid) == 14);
+
 SharedIoTraceDrainResult
 drain_shared_io_trace(SharedIoTraceRecorder& recorder,
                       [[maybe_unused]] const SharedIoTelemetrySnapshot& telemetry,
-                      std::uint32_t budget, const SharedIoTraceDrainObserver* observer) noexcept {
+                      std::uint32_t budget, const SharedIoTraceDrainObserver* observer,
+                      bool telemetry_quiescent) noexcept {
     SharedIoTraceDrainResult result;
     result.tracing_compiled = runtime::kTracingEnabled;
+    const auto telemetry_validation =
+        telemetry_quiescent
+            ? validate_shared_io_telemetry(telemetry)
+            : SharedIoTelemetryValidation{SharedIoTelemetryError::TelemetryValidationDeferred};
+    result.telemetry_valid = telemetry_validation.accepted();
+    result.telemetry_error = telemetry_validation.error;
     result.recording_enabled = recorder.enabled();
     if (!valid_shared_io_trace_drain_observer(observer)) {
         result.observer_valid = false;
@@ -423,7 +436,9 @@ drain_shared_io_trace(SharedIoTraceRecorder& recorder,
         "admissions_dropped", stats.admissions_dropped, "admissions_drained",
         stats.admissions_drained, "attempted", stats.attempted, "sampled_out", stats.sampled_out,
         "invalid", stats.invalid, "enqueued", stats.enqueued, "dropped", stats.dropped, "drained",
-        stats.drained, "callback_blocks", telemetry.callback_blocks, "submitted_blocks",
+        stats.drained, "telemetry_valid", telemetry_validation.accepted(), "telemetry_error",
+        static_cast<unsigned>(telemetry_validation.error), "callback_blocks",
+        telemetry.callback_blocks, "admitted_blocks", telemetry.admitted_blocks, "submitted_blocks",
         telemetry.submitted_blocks, "deadline_misses", telemetry.deadline_misses, "fallback_blocks",
         telemetry.fallback_blocks, "late_completions", telemetry.late_completions, "resync_drops",
         telemetry.resync_drops, "input_drops", telemetry.input_drops, "payload_bytes_copied",

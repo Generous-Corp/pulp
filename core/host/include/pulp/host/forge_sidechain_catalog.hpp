@@ -5,6 +5,7 @@
 // Port 0 is the audible signal and port 1 is the external detector/key. The
 // implementation is the shipped Compressor::process_with_sidechain path.
 
+#include <pulp/host/detail/forge_compressor_ballistics.hpp>
 #include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/custom_node_type.hpp>
 #include <pulp/host/graph_types.hpp>
@@ -27,6 +28,7 @@ inline constexpr state::ParamID kReleaseMs = 4;
 inline constexpr state::ParamID kKneeDb = 5;
 inline constexpr state::ParamID kMakeupDb = 6;
 inline constexpr state::ParamID kKeyHpfHz = 7;
+inline constexpr state::ParamID kBallistics = 8;
 
 struct Instance {
     signal::Compressor compressor;
@@ -56,6 +58,8 @@ inline CustomNodeType make_sidechain_compressor_node() {
     t.baked_params.push_back({kKneeDb, 0.0f, 24.0f, 6.0f});
     t.baked_params.push_back({kMakeupDb, -24.0f, 12.0f, 0.0f});
     t.baked_params.push_back({kKeyHpfHz, 0.0f, 2000.0f, 0.0f});
+    // ballistics: 0 branching (default, as before the control existed), 1 decoupled.
+    t.baked_params.push_back({kBallistics, 0.0f, 1.0f, 0.0f});
 
     t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
                                         const audio::BufferView<const float>& in, int n,
@@ -73,16 +77,27 @@ inline CustomNodeType make_sidechain_compressor_node() {
         cp.knee_db = params.value_at(kKneeDb, 0);
         cp.makeup_db = params.value_at(kMakeupDb, 0);
         s->compressor.set_params(cp);
+        s->compressor.set_ballistics(
+            forge_compressor::ballistics_for(params.value_at(kBallistics, 0)));
         const float key_hpf_hz = params.value_at(kKeyHpfHz, 0);
         if (key_hpf_hz != s->key_hpf_hz) {
             s->key_hpf_hz = key_hpf_hz;
             s->compressor.set_sidechain_hpf_hz(key_hpf_hz);
         }
 
-        for (int k = 0; k < n; ++k) {
-            output[static_cast<std::size_t>(k)] = s->compressor.process_with_sidechain(
-                main_input[static_cast<std::size_t>(k)], key[static_cast<std::size_t>(k)]);
+        // Every control above is block-rate, so the block runs through the
+        // compressor's buffer path. That path writes the output in place, so a
+        // key that shares the output buffer falls back to the per-sample path.
+        if (output == key) {
+            for (int k = 0; k < n; ++k) {
+                output[static_cast<std::size_t>(k)] = s->compressor.process_with_sidechain(
+                    main_input[static_cast<std::size_t>(k)], key[static_cast<std::size_t>(k)]);
+            }
+            return;
         }
+        if (output != main_input)
+            std::copy_n(main_input, n, output);
+        s->compressor.process_with_sidechain(output, key, n);
     };
     return t;
 }
@@ -96,26 +111,22 @@ inline ForgeNodeDescriptor descriptor() {
         {{"default", kTypeId}},
         {
             {"threshold_db", kThresholdDb, "Threshold", "dB",
-             "Key-signal level above which gain reduction begins.",
+             "Key-signal level above which gain reduction begins.", ForgeParamKind::continuous,
+             ForgeParamCurve::linear},
+            {"ratio", kRatio, "Ratio", ":1", "Gain-reduction ratio above threshold.",
+             ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+            {"attack_ms", kAttackMs, "Attack", "ms", "Time for compression to engage.",
+             ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+            {"release_ms", kReleaseMs, "Release", "ms", "Time for compression to recover.",
+             ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+            {"knee_db", kKneeDb, "Knee", "dB", "Width of the soft-knee transition.",
              ForgeParamKind::continuous, ForgeParamCurve::linear},
-            {"ratio", kRatio, "Ratio", ":1",
-             "Gain-reduction ratio above threshold.", ForgeParamKind::continuous,
-             ForgeParamCurve::logarithmic},
-            {"attack_ms", kAttackMs, "Attack", "ms",
-             "Time for compression to engage.", ForgeParamKind::continuous,
-             ForgeParamCurve::logarithmic},
-            {"release_ms", kReleaseMs, "Release", "ms",
-             "Time for compression to recover.", ForgeParamKind::continuous,
-             ForgeParamCurve::logarithmic},
-            {"knee_db", kKneeDb, "Knee", "dB",
-             "Width of the soft-knee transition.", ForgeParamKind::continuous,
-             ForgeParamCurve::linear},
-            {"makeup_db", kMakeupDb, "Makeup", "dB",
-             "Output gain applied after compression.", ForgeParamKind::continuous,
-             ForgeParamCurve::linear},
+            {"makeup_db", kMakeupDb, "Makeup", "dB", "Output gain applied after compression.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
             {"key_hpf_hz", kKeyHpfHz, "Key HPF", "Hz",
              "High-pass cutoff that reduces low-frequency key sensitivity; zero disables it.",
              ForgeParamKind::continuous, ForgeParamCurve::linear},
+            forge_compressor::ballistics_descriptor(kBallistics),
         },
     };
 }

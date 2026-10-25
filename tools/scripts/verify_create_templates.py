@@ -30,6 +30,9 @@ This script is the structural guard:
      requestAnimationFrame or repeating-timer callback). New projects copy
      these files verbatim, so a slow pattern here is a slow pattern in every
      scaffolded plugin.
+  4. Every standalone CMakeLists template takes an installed Catch2 3 when
+     CMake finds one and otherwise downloads the hash-pinned release archive
+     (`check_catch2_fetch`), since that fetch is paid on every first configure.
 
 It does NOT build anything. It does NOT need the CLI binary. It runs
 in seconds on every supported platform (Linux x86_64, Linux arm64,
@@ -119,6 +122,13 @@ REQUIRED_FILES_BY_TYPE = {
 
 _VAR_PATTERN = re.compile(r"\{\{([A-Z_][A-Z0-9_]*)\}\}")
 _LOAD_SCRIPT = re.compile(r"\bload_script\s*\(")
+# Audio-thread idioms a scaffolded processor must not demonstrate: a hashed
+# parameter lookup per read, a std::span rebuilt per sample, and a meter
+# reduction written as one serial add chain.
+_GET_VALUE = re.compile(r"\bget_value\s*\(")
+_SPAN_SUBSCRIPT = re.compile(r"\.channel\s*\([^()]*\)\s*\[")
+_DECLARE_METER = re.compile(r"\bdeclare_meter\s*\(")
+_MEASURE_PEAK_RMS = re.compile(r"\bmeasure_peak_rms\s*\(")
 _SCRIPT_SUFFIXES = (".js", ".jsx", ".mjs", ".ts", ".tsx", ".html")
 _SOURCE_SUFFIXES = _SCRIPT_SUFFIXES + (".cpp", ".hpp", ".h", ".mm", ".m", ".in")
 
@@ -127,6 +137,26 @@ def _logical_suffix(path: Path) -> str:
     """`main.js.template` is a `.js` file once materialized."""
     name = path.name[:-len(".template")] if path.name.endswith(".template") else path.name
     return Path(name).suffix
+
+
+def _check_processor_idioms(type_name: str, rel: Path, code: str) -> list[str]:
+    """Flag slow audio-thread idioms in a processor template."""
+    failures: list[str] = []
+    for m in _GET_VALUE.finditer(code):
+        failures.append(
+            f"[{type_name}] {rel}:{line_of(code, m.start())}: calls get_value "
+            "-- resolve a StateStore::param_reader() in prepare() and read "
+            "it in process()")
+    for m in _SPAN_SUBSCRIPT.finditer(code):
+        failures.append(
+            f"[{type_name}] {rel}:{line_of(code, m.start())}: subscripts "
+            "channel(ch)[i] -- take channel_ptr(ch) once outside the sample "
+            "loop")
+    if _DECLARE_METER.search(code) and not _MEASURE_PEAK_RMS.search(code):
+        failures.append(
+            f"[{type_name}] {rel}: declares a meter but does not measure it "
+            "with buffer_ops::measure_peak_rms")
+    return failures
 
 
 def check_realtime_patterns(type_name: str, dir_path: Path) -> list[str]:
@@ -149,6 +179,8 @@ def check_realtime_patterns(type_name: str, dir_path: Path) -> list[str]:
                 "WidgetBridge::dispatch_native_message or bind a value "
                 "channel with bindMeter (view-bridge skill, \"Realtime "
                 "scripted editors\")")
+        if path.name.startswith("processor"):
+            failures.extend(_check_processor_idioms(type_name, rel, code))
         if suffix in _SCRIPT_SUFFIXES:
             for finding in check_realtime(text):
                 failures.append(
@@ -216,6 +248,38 @@ def check_template_dir(type_name: str, dir_path: Path) -> list[str]:
     return failures
 
 
+_CATCH2_DECLARE = re.compile(r"FetchContent_Declare\(\s*Catch2\b(?P<body>[^)]*)\)", re.S)
+
+
+def check_catch2_fetch(type_name: str, dir_path: Path) -> list[str]:
+    """Every generated project builds its tests against Catch2, so how a
+    template fetches it is paid on every first configure. A template must
+    take an installed Catch2 3 when CMake finds one (FIND_PACKAGE_ARGS) and
+    otherwise download the release archive pinned by hash, not git-clone the
+    whole history. `catch2_SOURCE_DIR` is empty when the installed package is
+    used, so the template must not append `extras/` unconditionally."""
+    failures: list[str] = []
+    for template_file in sorted(dir_path.rglob("CMakeLists.txt.template")):
+        text = template_file.read_text(encoding="utf-8")
+        rel = template_file.relative_to(dir_path)
+        for m in _CATCH2_DECLARE.finditer(text):
+            body = m.group("body")
+            if "GIT_REPOSITORY" in body:
+                failures.append(f"[{type_name}] {rel}: Catch2 is fetched with git; "
+                                "use the release archive URL with URL_HASH")
+            if not re.search(r"\bURL_HASH\s+SHA256=[0-9a-f]{64}\b", body):
+                failures.append(f"[{type_name}] {rel}: Catch2 download is not pinned "
+                                "by URL_HASH SHA256=<64 hex>")
+            if not re.search(r"\bFIND_PACKAGE_ARGS\b", body):
+                failures.append(f"[{type_name}] {rel}: Catch2 declare lacks FIND_PACKAGE_ARGS, "
+                                "so an installed Catch2 is never used")
+            if ("${catch2_SOURCE_DIR}" in text
+                    and not re.search(r"\bif\(\s*catch2_SOURCE_DIR\s*\)", text)):
+                failures.append(f"[{type_name}] {rel}: appends ${{catch2_SOURCE_DIR}}/extras "
+                                "unconditionally; guard it with if(catch2_SOURCE_DIR)")
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Structural smoke for pulp create templates",
@@ -265,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
     for type_dir in type_dirs:
         all_failures.extend(check_template_dir(type_dir.name, type_dir))
         all_failures.extend(check_realtime_patterns(type_dir.name, type_dir))
+        all_failures.extend(check_catch2_fetch(type_dir.name, type_dir))
 
     if all_failures:
         for line in all_failures:

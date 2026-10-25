@@ -1,27 +1,32 @@
+# Patterns are listed without owners on purpose: GitHub treats an ownerless
+# pattern as unowned, so no review is auto-requested. Code-owner review is not
+# a required rule (.github/rulesets/), and agents review and merge these PRs.
+# Activation (docs/contracts/vellum-activation-readiness.md) restores an owner.
+
 # Vellum authority controls and durable outbox
-/.github/CODEOWNERS @danielraffel
-/.github/workflows/ @danielraffel
-/.github/vellum-ownership.json @danielraffel
-/.github/vellum-change-events/ @danielraffel
-/.github/vellum-expansion-watch/ @danielraffel
-/.github/vellum-expansion-watch-events/ @danielraffel
-/tools/scripts/vellum_freeze_check.py @danielraffel
-/tools/scripts/test_vellum_freeze_check.py @danielraffel
-/tools/scripts/vellum_expansion_watch_check.py @danielraffel
-/tools/scripts/test_vellum_expansion_watch_check.py @danielraffel
-/tools/scripts/generate_vellum_* @danielraffel
-/tools/scripts/test_generate_vellum_* @danielraffel
-/tools/scripts/pulp_tooling_disposition.py @danielraffel
-/tools/scripts/test_pulp_tooling_disposition.py @danielraffel
-/docs/contracts/vellum-* @danielraffel
-/docs/status/pulp-tooling-disposition.json @danielraffel
+/.github/CODEOWNERS
+/.github/workflows/
+/.github/vellum-ownership.json
+/.github/vellum-change-events/
+/.github/vellum-expansion-watch/
+/.github/vellum-expansion-watch-events/
+/tools/scripts/vellum_freeze_check.py
+/tools/scripts/test_vellum_freeze_check.py
+/tools/scripts/vellum_expansion_watch_check.py
+/tools/scripts/test_vellum_expansion_watch_check.py
+/tools/scripts/generate_vellum_*
+/tools/scripts/test_generate_vellum_*
+/tools/scripts/pulp_tooling_disposition.py
+/tools/scripts/test_pulp_tooling_disposition.py
+/docs/contracts/vellum-*
+/docs/status/pulp-tooling-disposition.json
 
 # Candidate legacy slices. These reviews are operationally required before
 # authority activates; the machine-readable map decides which paths are frozen.
-/core/canvas/ @danielraffel
-/core/render/ @danielraffel
-/core/view/include/pulp/view/ @danielraffel
-/core/view/platform/mac/ @danielraffel
-/core/view/src/ @danielraffel
-/packages/pulp-import-ir/ @danielraffel
-/tools/figma-plugin/schema/ @danielraffel
+/core/canvas/
+/core/render/
+/core/view/include/pulp/view/
+/core/view/platform/mac/
+/core/view/src/
+/packages/pulp-import-ir/
+/tools/figma-plugin/schema/

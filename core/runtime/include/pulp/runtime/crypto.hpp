@@ -46,6 +46,11 @@ inline std::string hex_encode(const std::vector<uint8_t>& bytes) {
 // ── Hashing ─────────────────────────────────────────────────────────────
 
 /// Compute SHA-256 hash. Returns 32-byte digest.
+///
+/// On arm64 targets with the ARMv8 SHA-2 extension (every Apple silicon Mac
+/// and iOS device) the blocks run through the SHA256H/SHA256H2 instructions,
+/// about ten times faster than the portable rounds; every other target,
+/// x86_64 included, uses the portable rounds. Both produce identical digests.
 std::vector<uint8_t> sha256(const uint8_t* data, size_t size);
 std::vector<uint8_t> sha256(std::string_view data);
 

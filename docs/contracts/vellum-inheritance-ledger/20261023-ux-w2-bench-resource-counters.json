@@ -1,0 +1,13 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261023-ux-w2-bench-resource-counters",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "The canvas kernel must expose relaxed-atomic resource counters for image decodes, GPU uploads and paragraph builds so a benchmark can gate on zero steady-state resource work; every encoded-image decode site and every GPU upload path must count through one helper next to the Skia call, so a new site cannot be added uncounted.",
+  "evidence": [
+    ".github/vellum-change-events/20261023-ux-w2-bench-resource-counters.json",
+    "pulp-test-design-import-benchmark-contracts [benchmark]",
+    "pulp-test-design-import-benchmark-contracts [gpu]"
+  ]
+}

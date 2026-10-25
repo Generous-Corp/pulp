@@ -96,9 +96,12 @@ inline bool in_non_editor_parameter_write() noexcept {
 ///  1. **Provenance is explicit.** A change is reported only when it happened
 ///     on the editor thread and outside any host/processor write scope. An open
 ///     gesture is no longer taken as evidence of who wrote the value.
-///  2. **One snapshot per reported edit.** The normalized value is read once
-///     and handed to every callback for that edit, so a concurrent write cannot
-///     split one logical change across two different values.
+///  2. **One snapshot per reported edit.** An edit is reported with the value
+///     the editor wrote, taken from the write itself, never re-read from the
+///     store: a host automation write landing between the edit and the report
+///     would otherwise be reported to the host as the user's edit. The same
+///     snapshot is handed to every callback for that edit, so a concurrent
+///     write cannot split one logical change across two different values.
 ///  3. **One place that closes a gesture.** The final value report and the
 ///     end-of-gesture notification are emitted together, in that order, so a
 ///     host that latches on end records where the control actually landed.
@@ -115,8 +118,10 @@ public:
     struct Callbacks {
         /// Host gesture open (VST3 beginEdit, CLAP GestureBegin).
         std::function<void(state::ParamID)> begin;
-        /// Report a value. `normalized` is the single snapshot for this edit.
-        std::function<void(state::ParamID, float normalized)> value;
+        /// Report a value. `normalized` and `plain` are the same single
+        /// snapshot for this edit; `plain` lets a format map it to the host's
+        /// normalized domain in its own precision.
+        std::function<void(state::ParamID, float normalized, float plain)> value;
         /// Host gesture close (VST3 endEdit, CLAP GestureEnd).
         std::function<void(state::ParamID)> end;
     };
@@ -139,7 +144,8 @@ public:
 private:
     void on_begin(state::ParamID id);
     void on_end(state::ParamID id);
-    void on_value(state::ParamID id);
+    void on_value(state::ParamID id, float plain);
+    void report(state::ParamID id, float plain);
 
     state::StateStore& store_;
     Callbacks callbacks_;

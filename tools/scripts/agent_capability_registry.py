@@ -9,6 +9,9 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    "pulp/audio/impulse_response.hpp": "Pulp::audio",
+    "pulp/audio/format_registry.hpp": "Pulp::audio",
+    "pulp/audio/audio_file.hpp": "Pulp::audio",
     "pulp/signal/parametric_eq.hpp": "Pulp::signal",
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
     "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
@@ -168,6 +171,41 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/audio/impulse_response.hpp",
+        "fingerprint": "sha256:740702d0bf9e54f8584de49999cfcf91c7c9b71c84c355b46a6a686e283bbe69",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Impulse-response loading is host infrastructure consumed by the "
+            "convolution and offline-render capabilities; it is not an independently "
+            "selected generator-facing capability in the installed contract."
+        ),
+    },
+    {
+        "include": "pulp/audio/format_registry.hpp",
+        "fingerprint": "sha256:caedada7e925bc78317407961d313052ce4e92c14ec12ca51477e567823ac128",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Audio file decoding (FormatRegistry::read with DecodeLimits) is host "
+            "infrastructure that sample, impulse-response and offline-render "
+            "capabilities consume; it is not an independently selected "
+            "generator-facing capability in the installed contract."
+        ),
+    },
+    {
+        "include": "pulp/audio/audio_file.hpp",
+        "fingerprint": "sha256:6a97b20f7bb9a869f33f6cc52367cc2f9629660a9cb1341b284bfdf3479ee990",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Whole-file audio decoding (read_audio_file with an admission "
+            "predicate over the opened reader) is host infrastructure consumed "
+            "by sample, impulse-response and offline-render capabilities; it "
+            "is not an independently selected generator-facing capability."
+        ),
+    },
+    {
         "include": "pulp/signal/loudness_compensation.hpp",
         "fingerprint": "sha256:cc25f7959641998fdaf14ccc04b3485fdee98191cd8ba01e606a4248dc4d0546",
         "disposition": "infrastructure",
@@ -238,7 +276,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/spectral_frame_engine.hpp",
-        "fingerprint": "sha256:0ecaccef2ad745c8509a74447eb12b07d9fd061743d850bfe563497d77264d05",
+        "fingerprint": "sha256:79757445451e61f1e9d043abe9fc566b89a07df381c76f4b1d3cae525eeb5d49",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -306,6 +344,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         "rationale": (
             "Lock-free SPSC sample transport and overrun accounting used by realtime "
             "capture paths; it is bounded infrastructure rather than a generator DSP claim."
+        ),
+    },
+    {
+        "include": "pulp/audio/buffer_ops.hpp",
+        "fingerprint": "sha256:3fbb9aafb8571d0423a6b4aeb7998d7fa0137d87f6772a2f6c52615cf8d17bc3",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Allocation-free buffer helpers a processor uses inside process(): gain, copy, "
+            "mix, a one-pass peak/RMS meter, in-place-aware per-sample mapping, and a "
+            "constant channel-count dispatch. Authoring infrastructure rather than a "
+            "generator DSP claim."
         ),
     },
     {
@@ -396,7 +446,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             ),
         }
         for include, fingerprint in [
-            ("pulp/signal/compressor.hpp", "sha256:9bf4c81430a11eedaae9e69b19dd8c5ce9fd5c50191e111fe86c3cada3e73fb3"),
+            ("pulp/signal/compressor.hpp", "sha256:164c6d838338eecd2e144ca78eb1b3f35edda19e5eda84352dadde24ce2dd5bb"),
             ("pulp/signal/diode_bridge_compressor.hpp", "sha256:2384a18231c9cfcff6b8823613050334776113aac5e6c7de76f6f3cd44e942a3"),
             ("pulp/signal/feedforward_compressor.hpp", "sha256:afcd1e63df356725f2256c0b449900c894e1120f016ac511512cc94b11263524"),
             ("pulp/signal/fet_compressor.hpp", "sha256:45e9524c1ca8d7a5e5a3c7e18c997710e0d5a13b05a5c3c2717f7640c5dd03ee"),
@@ -448,7 +498,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     ],
     {
         "include": "pulp/signal/fft.hpp",
-        "fingerprint": "sha256:cf26ffef2f59dcc9e06e9bd578b48ae214f34f893f9cedc61e18fab9151c50ab",
+        "fingerprint": "sha256:2794461c6ba9fb79a274f86182439f40b0b003454c5c323f853b730ee7ad6083",
         "disposition": "capability_support",
         "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
         "rationale": (
@@ -748,7 +798,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/stft.hpp",
-        "fingerprint": "sha256:0b42a15443f679c5eb3c7f92940403f4886ff7286a62dfaa2b1e50645758ae27",
+        "fingerprint": "sha256:1e8bf8737a90a4fc8b7330af7c4b1c9d39f5db95ad24803544369801ccc181ad",
         "disposition": "capability_support",
         "capability_keys": [
             "signal.bounded-sample-history",
@@ -761,7 +811,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:0819835609a2b5287293638d869edac03e2e9d916d90ca98bb77e5b94289e9be",
+        "fingerprint": "sha256:d15ee5596c20887770bc8f6025d0db955b0ba25048afa6f943e669dcd85120f5",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -772,7 +822,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/ladder_filter.hpp",
-        "fingerprint": "sha256:1c586ff41aceec5c574002dbb5d9ae8b7d4a052c5e605a5fd27988fc7d7a7399",
+        "fingerprint": "sha256:399f80b1a8d01250ac1cbad10b0c511dc5cf465e1d48a85b9489828f8908a16a",
         "disposition": "capability_support",
         "capability_keys": ["signal.drum-tom-voice"],
         "rationale": (
@@ -792,7 +842,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:938e359bcd792fb4b8d4205d94ec5ab2db6684ec99ea1f927a417539cb09c55b",
+        "fingerprint": "sha256:57ae1a537b1ef14942fee81b63a99e5f5f6bed816e1d4fa11f1d7e76a7a1c73d",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
@@ -822,7 +872,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/scoped_flush_denormals.hpp",
-        "fingerprint": "sha256:c394e664d37399ccc736a32dda40b6bae5b2883c8fc5a76f45f8b6d6361c1482",
+        "fingerprint": "sha256:c9d2a472c1f096bc19969299925b933c21976d66a0e6492fa306ca309bc942ad",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -844,7 +894,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:429d4f7631c77db36e446bb91359d053059dd767f123d9e45dffd96efa4105e5",
+        "fingerprint": "sha256:6d6c680ae9ce6f82cc796d8fcaab3d61d25f9c9eaea26318e698c0b85df0440d",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1304,8 +1354,152 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/classic_reverb.hpp",
+        "fingerprint": "sha256:260a528f11d3641e227e4cd301f91103d51a7aaeb40bdbf9994a5c4b58878fac",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "The classic comb-and-allpass reverb tier, driven by the same fdn::Param set as "
+            "the FDN engine. A processor primitive driven from the owner's own process(); "
+            "it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/detail/simd_lanes.hpp",
+        "fingerprint": "sha256:a03dec563cc1eb560335d4968e1d238dd80134ed1a501d713275b438404d09cb",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Four-lane float and two-lane double vector helpers for the reverb and meter "
+            "block kernels. Internal numeric support with no agent-facing surface."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/config.hpp",
+        "fingerprint": "sha256:a63cebacd0da5920556092f5e802fc863add06d8ff951ec78fe00eb2721770ce",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/config). It is reached "
+            "only through FdnReverb and makes no installed agent capability claim of its "
+            "own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/diffusion.hpp",
+        "fingerprint": "sha256:f13e994a57fde15e7042439506fdd9ab226d35f53369f93ea3117637bf754e01",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/diffusion). It is "
+            "reached only through FdnReverb and makes no installed agent capability claim "
+            "of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/frac_delay.hpp",
+        "fingerprint": "sha256:282c25e49387c19a1a278dac2fa72c1af65a24a19ef427b7a514092741a06836",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/frac_delay). It is "
+            "reached only through FdnReverb and makes no installed agent capability claim "
+            "of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/interp.hpp",
+        "fingerprint": "sha256:2ef007b4975090651752065daf26b48972d3743a121e4984b653b16b1cdab9dd",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/interp). It is reached "
+            "only through FdnReverb and makes no installed agent capability claim of its "
+            "own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/loop_eq.hpp",
+        "fingerprint": "sha256:553d65de8f48182b8d4362d8c974824dd4ade3d0cf9b5605283992c8bae0affc",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/loop_eq). It is reached "
+            "only through FdnReverb and makes no installed agent capability claim of its "
+            "own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/modulation.hpp",
+        "fingerprint": "sha256:906f603c217334ecf34d63eaa76b971a75b4e774b280e54d552e7d3388e3ff36",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/modulation). It is "
+            "reached only through FdnReverb and makes no installed agent capability claim "
+            "of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/multirate.hpp",
+        "fingerprint": "sha256:41420dc60ad30c20c5417c35adbc2cffff712cf5e5256b375a1a34de8dddafe6",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/multirate). It is "
+            "reached only through FdnReverb and makes no installed agent capability claim "
+            "of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/stages.hpp",
+        "fingerprint": "sha256:d397bfcef37a288a29648ad2bd95010c4f995b135693c23cb5da36b3ab7ed9b1",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/stages). It is reached "
+            "only through FdnReverb and makes no installed agent capability claim of its "
+            "own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn/tank.hpp",
+        "fingerprint": "sha256:baa049a48e5171b5e467376568be1e52b73bf72816a47f2096bdf4fe8ac45216",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Internal building block of the FDN reverb engine (fdn/tank). It is reached "
+            "only through FdnReverb and makes no installed agent capability claim of its "
+            "own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fdn_reverb.hpp",
+        "fingerprint": "sha256:c980772afae85436de3904079bfe8cfb3cd328f4c33b03531ce075f974797df5",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "The multirate sixteen-line FDN reverb engine and its block-processing entry "
+            "points. A processor primitive driven from the owner's own process(); the Forge "
+            "FDN reverb catalog exposes it to products, and it makes no installed agent "
+            "capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/denormal.hpp",
+        "fingerprint": "sha256:a8a9433f0bd463d455260b3b1470571ce1f139722b4cb8acfe42f0e142ed56f4",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Denormal handling helpers: flush-to-zero scopes, value snapping, and the shared "
+            "snap-chunk length recursive filters use to bound subnormal decay within a block. "
+            "Internal numeric hygiene that processors call from their own process(); it makes "
+            "no installed agent capability claim of its own."
+        ),
+    },
+    {
         "include": "pulp/signal/convolver.hpp",
-        "fingerprint": "sha256:7b6f5cc6d4bd8a3c71c07149958db256d08aa0f264544df0abfa07eb3a4b5825",
+        "fingerprint": "sha256:f2324d75e7b1fde411c4907b5f2b5f4f4a2849e4877a7b45cf9bd368d6da7564",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1318,7 +1512,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fir_filter.hpp",
-        "fingerprint": "sha256:1f3e4bda478177961e284380af65de670de421902e114be6ef55820dead438b7",
+        "fingerprint": "sha256:6f7610684f4b26bb9cd9cf258ec7131f6ecd9bf69fce36e4fa43caf22a1876df",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1329,8 +1523,21 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/fixed_ir_convolver.hpp",
+        "fingerprint": "sha256:64382ea1f17038c0f2bcd960eb17a02c8f8cd97ce5680481ef7fe16e0109cb84",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Fixed-IR convolution that runs FirFilterT or PartitionedConvolverT, chosen "
+            "once at prepare time by a pure policy. A bounded DSP primitive a processor "
+            "drives from its own process() at a fixed block size, documented beside the "
+            "partitioned convolver in the signal guide; it makes no installed agent "
+            "capability claim of its own."
+        ),
+    },
+    {
         "include": "pulp/signal/oversampling_fir.hpp",
-        "fingerprint": "sha256:b9834233787912af899e21571b08517b4c60135e4a61f5be6e04391ac2e4831a",
+        "fingerprint": "sha256:1d4c96fd0658021605e48294feba1fc8765266c8b1bd7bed6bf2fcc2fabe79c5",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1379,7 +1586,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/convolver_messages.hpp",
-        "fingerprint": "sha256:2d4d3361cfa9099d4cd549fc250de196c1053c9c5448fa15b540089433e74e29",
+        "fingerprint": "sha256:13c0cdc65296220448802702ad25141e704d9d0c9d780f6575e222e1e6fa78ce",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1401,6 +1608,88 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "a processor drives from its own process() at a fixed block size, documented "
             "with the convolution engines in the signal guide; it makes no installed agent "
             "capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/halfband_iir.hpp",
+        "fingerprint": "sha256:53cdf36221de5bc046af7a9627809126410cea863daeab56d66eb7757e31aa0d",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Closed-form elliptic half-band allpass designs, their pure response, group-delay "
+            "and stopband evaluators, and the polyphase stage kernels OversamplerT cascades. "
+            "Filter-design infrastructure behind the oversampler rather than an advertised "
+            "generator surface; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/oversampling.hpp",
+        "fingerprint": "sha256:9a716ddcb90581edd9a8f7214a02a604933bd6e355d46d88749c031908bd6568",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Block-processing up/downsampler that runs a caller's nonlinearity at 2x-16x with "
+            "minimum-phase IIR, linear-phase FIR or legacy biquad anti-aliasing and truthful "
+            "latency reporting. A bounded DSP primitive a processor drives from its own "
+            "process(), documented in the signal guide; it makes no installed agent "
+            "capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/processor_duplicator.hpp",
+        "fingerprint": "sha256:33de816a4f93227ff63d3e78e95cb43c3a40731a113548622a98e4653f177298",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Runs one mono processor instance per channel and dispatches to a processor's "
+            "block path when it has one. Composition infrastructure for multichannel use of "
+            "existing DSP rather than a generator surface; it makes no installed agent "
+            "capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/svf.hpp",
+        "fingerprint": "sha256:50341bc965475434473aaca48a378ca56c4c19d757922fd1b2ae23406a5ebb66",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Trapezoidal state-variable filter with lowpass/highpass/bandpass/notch modes, a "
+            "pure design() for its coefficients, and a register-resident block path. A "
+            "bounded DSP primitive documented in the signal guide; it makes no installed "
+            "agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/tpt_filter.hpp",
+        "fingerprint": "sha256:2e70a37436a0e624d192e38cd15dbf71c936230d21577b35271251d97b04b69c",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "First-order topology-preserving-transform lowpass/highpass/allpass with "
+            "per-sample and block paths. A bounded DSP primitive documented in the signal "
+            "guide; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/ladder_bank.hpp",
+        "fingerprint": "sha256:4b69722977f1fc7c92ae2aff3d0864b5c264bdc49d4fa86fc9d5bdc51a4c44e9",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Runs N ladder-filter voices in lockstep structure-of-arrays lanes, each voice "
+            "bit-identical to LadderFilter. A voice-processing primitive for polyphonic "
+            "processors; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/svf_bank.hpp",
+        "fingerprint": "sha256:feedf8dd0862d2fe70a0640b2f3c4cccb684ff045052f713d11fc31f527ea5d2",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Runs N state-variable-filter voices in lockstep structure-of-arrays lanes with a "
+            "per-voice mode, each voice bit-identical to Svf. A voice-processing primitive for "
+            "polyphonic processors; it makes no installed agent capability claim of its own."
         ),
     },
 ]

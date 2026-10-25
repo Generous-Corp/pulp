@@ -24,23 +24,57 @@ if(SKIP_IF_FRESH_STAMP AND EXISTS "${SKIP_IF_FRESH_STAMP}"
     endif()
 endif()
 
-file(READ "${ARTIFACT}" _binary HEX)
+# Every marker this scanner looks for is printable ASCII without whitespace
+# and at least this many bytes long. A contiguous byte sequence like that always
+# lies inside one printable run of the binary, so searching the binary's
+# printable runs is the same as searching its raw bytes, and it avoids
+# hex-encoding the whole image: on a 40 MB plug-in, `file(READ ... HEX)` plus
+# hex-space searches cost several seconds on every link. The length floor is
+# the shortest marker ("view.param_set"); _pulp_binary_contains refuses any
+# marker that breaks either property, so the equivalence cannot erode
+# silently when a marker is added.
+set(_pulp_marker_min_length 14)
+
+function(_pulp_read_binary_strings path out_var)
+    file(STRINGS "${path}" _strings LENGTH_MINIMUM ${_pulp_marker_min_length})
+    set(${out_var} "${_strings}" PARENT_SCOPE)
+endfunction()
+
+# `strings_var` names the variable holding a _pulp_read_binary_strings result;
+# passing the name avoids copying the string table on every lookup.
+function(_pulp_binary_contains strings_var marker out_var)
+    string(LENGTH "${marker}" _marker_length)
+    # `;` is excluded because the runs are joined into a CMake list with `;`,
+    # so a marker containing one could match across two runs.
+    if(_marker_length LESS _pulp_marker_min_length
+       OR NOT marker MATCHES "^[!-:<-~]+$")
+        message(FATAL_ERROR
+            "control shipping marker must be printable ASCII without spaces or "
+            "semicolons and at least ${_pulp_marker_min_length} bytes: ${marker}")
+    endif()
+    string(FIND "${${strings_var}}" "${marker}" _marker_position)
+    if(_marker_position GREATER_EQUAL 0)
+        set(${out_var} TRUE PARENT_SCOPE)
+    else()
+        set(${out_var} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+
+_pulp_read_binary_strings("${ARTIFACT}" _binary)
 file(READ "${MANIFEST}" _manifest)
 file(READ "${SHIPPING_MANIFEST}" _shipping_manifest)
 file(SIZE "${ARTIFACT}" _artifact_size)
 
-function(_pulp_require_hex_marker marker reason)
-    string(HEX "${marker}" _marker_hex)
-    string(FIND "${_binary}" "${_marker_hex}" _marker_position)
-    if(_marker_position LESS 0)
+function(_pulp_require_marker marker reason)
+    _pulp_binary_contains(_binary "${marker}" _marker_found)
+    if(NOT _marker_found)
         message(FATAL_ERROR "${reason}: ${marker}")
     endif()
 endfunction()
 
-function(_pulp_forbid_hex_marker marker reason)
-    string(HEX "${marker}" _marker_hex)
-    string(FIND "${_binary}" "${_marker_hex}" _marker_position)
-    if(_marker_position GREATER_EQUAL 0)
+function(_pulp_forbid_marker marker reason)
+    _pulp_binary_contains(_binary "${marker}" _marker_found)
+    if(_marker_found)
         message(FATAL_ERROR "${reason}: ${marker}")
     endif()
 endfunction()
@@ -134,15 +168,15 @@ string(MAKE_C_IDENTIFIER "${_format}" _format_identifier)
 string(TOUPPER "${_format_identifier}" _format_identifier)
 string(MAKE_C_IDENTIFIER "${_platform}" _platform_identifier)
 string(TOUPPER "${_platform_identifier}" _platform_identifier)
-_pulp_require_hex_marker("PULP_CONTROL_PROFILE_${_profile_identifier}_V1"
+_pulp_require_marker("PULP_CONTROL_PROFILE_${_profile_identifier}_V1"
     "declared control profile marker is absent")
-_pulp_require_hex_marker("PULP_CONTROL_MANIFEST_SHA256_${_control_digest}_V1"
+_pulp_require_marker("PULP_CONTROL_MANIFEST_SHA256_${_control_digest}_V1"
     "control manifest digest marker is absent or stale")
-_pulp_require_hex_marker("PULP_CONTROL_SHIPPING_SHA256_${_shipping_digest}_V1"
+_pulp_require_marker("PULP_CONTROL_SHIPPING_SHA256_${_shipping_digest}_V1"
     "shipping manifest digest marker is absent or stale")
-_pulp_require_hex_marker("PULP_CONTROL_ARTIFACT_FORMAT_${_format_identifier}_V1"
+_pulp_require_marker("PULP_CONTROL_ARTIFACT_FORMAT_${_format_identifier}_V1"
     "artifact format marker is absent")
-_pulp_require_hex_marker("PULP_CONTROL_ARTIFACT_PLATFORM_${_platform_identifier}_V1"
+_pulp_require_marker("PULP_CONTROL_ARTIFACT_PLATFORM_${_platform_identifier}_V1"
     "artifact platform marker is absent")
 
 string(REGEX MATCH
@@ -159,7 +193,7 @@ foreach(_architecture_token IN LISTS _architecture_tokens)
     list(APPEND _architectures "${_architecture}")
     string(MAKE_C_IDENTIFIER "${_architecture}" _architecture_identifier)
     string(TOUPPER "${_architecture_identifier}" _architecture_identifier)
-    _pulp_require_hex_marker("PULP_CONTROL_ARTIFACT_ARCH_${_architecture_identifier}_V1"
+    _pulp_require_marker("PULP_CONTROL_ARTIFACT_ARCH_${_architecture_identifier}_V1"
         "artifact architecture marker is absent")
 endforeach()
 
@@ -325,7 +359,7 @@ if(_profile STREQUAL "production-stripped")
             PULP_REMOTE_VIEW_PARAMETER_AUTHORITY_V1
             PULP_INSPECT_CAPABILITY_
             view.param_set)
-        _pulp_forbid_hex_marker("${_forbidden_marker}"
+        _pulp_forbid_marker("${_forbidden_marker}"
             "production-stripped artifact contains forbidden control string")
     endforeach()
     # Match canonical control implementation namespaces. Generic names such as
@@ -385,17 +419,16 @@ if(_profile STREQUAL "production-stripped")
             continue()
         endif()
         math(EXPR _closure_binary_count "${_closure_binary_count} + 1")
-        file(READ "${_closure_candidate}" _closure_binary HEX)
+        _pulp_read_binary_strings("${_closure_candidate}" _closure_binary)
         foreach(_forbidden_marker IN ITEMS
                 PULP_INSPECT_SHIPPING_MANIFEST_V1
                 PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1
                 PULP_REMOTE_VIEW_PARAMETER_AUTHORITY_V1
                 PULP_INSPECT_CAPABILITY_
                 view.param_set)
-            string(HEX "${_forbidden_marker}" _closure_marker_hex)
-            string(FIND "${_closure_binary}" "${_closure_marker_hex}"
-                _closure_marker_position)
-            if(_closure_marker_position GREATER_EQUAL 0)
+            _pulp_binary_contains(_closure_binary "${_forbidden_marker}"
+                _closure_marker_found)
+            if(_closure_marker_found)
                 message(FATAL_ERROR
                     "production-stripped artifact contains forbidden control string in packaged dependency ${_closure_name}: ${_forbidden_marker}")
             endif()
@@ -427,7 +460,7 @@ if(_profile STREQUAL "production-stripped")
         endif()
     endforeach()
 else()
-    _pulp_require_hex_marker("PULP_INSPECT_SHIPPING_MANIFEST_V1"
+    _pulp_require_marker("PULP_INSPECT_SHIPPING_MANIFEST_V1"
         "control-enabled profile has no retained endpoint marker")
     set(_capability_contracts
         dev.pulp.instance/read@1
@@ -473,9 +506,9 @@ else()
         list(GET _capability_contracts ${_capability_index} _capability_contract)
         list(GET _capability_markers ${_capability_index} _capability_marker)
         string(FIND "${_manifest}" "\"${_capability_contract}\"" _declared_position)
-        string(HEX "PULP_INSPECT_CAPABILITY_${_capability_marker}_V1" _marker_hex)
-        string(FIND "${_binary}" "${_marker_hex}" _binary_position)
-        if(_declared_position GREATER_EQUAL 0 AND _binary_position LESS 0)
+        _pulp_binary_contains(_binary
+            "PULP_INSPECT_CAPABILITY_${_capability_marker}_V1" _binary_found)
+        if(_declared_position GREATER_EQUAL 0 AND NOT _binary_found)
             message(FATAL_ERROR
                 "declared capability marker is absent: ${_capability_contract}")
         elseif(_declared_position GREATER_EQUAL 0)
@@ -488,12 +521,12 @@ else()
 endif()
 
 string(FIND "${_manifest}" "\"unsafe_runtime_eval_acknowledged\": true" _eval_declared)
-string(HEX "PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1" _eval_hex)
-string(FIND "${_binary}" "${_eval_hex}" _eval_binary)
-if(_eval_declared GREATER_EQUAL 0 AND _eval_binary LESS 0)
+_pulp_binary_contains(_binary
+    "PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1" _eval_binary)
+if(_eval_declared GREATER_EQUAL 0 AND NOT _eval_binary)
     message(FATAL_ERROR
         "runtime.eval acknowledgement is present but high-risk component marker is absent")
-elseif(_eval_declared LESS 0 AND _eval_binary GREATER_EQUAL 0)
+elseif(_eval_declared LESS 0 AND _eval_binary)
     message(FATAL_ERROR
         "high-risk runtime.eval component is present without its separate acknowledgement")
 endif()

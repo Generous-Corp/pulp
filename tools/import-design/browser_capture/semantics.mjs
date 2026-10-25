@@ -86,6 +86,27 @@ export const COMPUTED_STYLES = [
   "content",
   "cursor",
   "pointer-events",
+  // Form controls. A control whose used `appearance` is anything but `none` is
+  // painted by Chromium's native theme, and its computed fills and borders do
+  // not describe those pixels: an unstyled range reports a white background it
+  // never draws, and an unstyled button reports a 2px outset black border drawn
+  // as a thin rounded grey one. `appearance` is what separates a control the
+  // computed style can reproduce from one it cannot. `accent-color` and
+  // `color-scheme` are the author inputs the native theme honours (the latter
+  // picks its light or dark palette). Padding places the text a control draws
+  // from its value rather than from a DOM text node.
+  "appearance",
+  "accent-color",
+  "color-scheme",
+  "padding-top",
+  "padding-right",
+  "padding-bottom",
+  "padding-left",
+  // Masked text. Chromium paints a run under `-webkit-text-security` other
+  // than `none` as one mask glyph per character, on any element, while the
+  // snapshot still carries the clear string. Without this property a control
+  // masked by CSS rather than by `type=password` would be drawn in clear.
+  "-webkit-text-security",
   // SVG paint. An inline `<svg>` icon carries its colour three different ways —
   // a presentation attribute, a stylesheet rule, or `currentColor` inherited
   // from the box around it — and only the browser knows which one won. Reading
@@ -103,6 +124,12 @@ export const COMPUTED_STYLES = [
   // rendered solid is a wrong picture, so its presence sends the subtree to the
   // element fallback instead.
   "stroke-dasharray",
+  // The shape of the stroke: Chromium's computed value is the only one that
+  // sees a cap, join or limit set from a stylesheet rather than inline.
+  "stroke-linecap",
+  "stroke-linejoin",
+  "stroke-miterlimit",
+  "stroke-dashoffset",
 ];
 
 export function semanticExpression(snapshotClickableIndexes = []) {
@@ -122,6 +149,34 @@ export function semanticExpression(snapshotClickableIndexes = []) {
     ['switch', 'toggle'],
     ['textbox', 'text_input']
   ]);
+  // Chromium paints text under -webkit-text-security (a password field's UA
+  // style included) as one mask glyph per character. A name read from the
+  // DOM masks the same characters instead of reporting the clear string.
+  const maskGlyphs = { disc: '\u2022', circle: '\u25E6', square: '\u25A0' };
+  const maskGlyph = element => {
+    if (!element) return null;
+    const security = getComputedStyle(element).webkitTextSecurity;
+    return security && security !== 'none' ?
+      (maskGlyphs[security] || '\u2022') : null;
+  };
+  const nameText = element => {
+    const parts = [];
+    let masked = false;
+    const visit = (node, glyph) => {
+      for (const child of node.childNodes || []) {
+        if (child.nodeType === 3) {
+          if (glyph) masked = true;
+          const data = String(child.data || '');
+          parts.push(glyph ? glyph.repeat(data.length) : data);
+        } else if (child.nodeType === 1) {
+          visit(child, maskGlyph(child));
+        }
+      }
+    };
+    visit(element, maskGlyph(element));
+    return masked ? parts.join('') :
+      (element.innerText || element.textContent || '');
+  };
   const nativeKind = element => {
     const tag = element.tagName.toLowerCase();
     const type = (element.getAttribute('type') || '').toLowerCase();
@@ -912,7 +967,7 @@ export function semanticExpression(snapshotClickableIndexes = []) {
     }
     const name = element.getAttribute('aria-label') ||
       element.getAttribute('title') ||
-      (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim()
+      nameText(element).replace(/\\s+/g, ' ').trim()
         .slice(0, 200);
     // A component class is as declarative as an ARIA role -- the author named
     // the control -- so it scores alongside one rather than falling to the

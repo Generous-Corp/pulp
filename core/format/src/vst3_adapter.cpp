@@ -3,6 +3,7 @@
 // Parameters are registered with the VST3 parameter system and synced
 // with the Pulp StateStore during processing
 
+#include <pulp/runtime/trace.hpp>
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
@@ -564,7 +565,7 @@ tresult PLUGIN_API PulpVst3Processor::getParamStringByValue(
     const auto* info = store_.info(static_cast<state::ParamID>(tag));
     if (info) {
         const float plain =
-            info->range.denormalize(static_cast<float>(valueNormalized));
+            state::value_from_host_normalized(*info, static_cast<double>(valueNormalized));
         const std::string text = format_parameter_text(*info, plain);
         if (text.empty()) return kResultFalse;
         // fromAscii matches the rest of this adapter's String128 handling
@@ -656,6 +657,7 @@ void PulpVst3Processor::note_id_map_clear() {
 }
 
 tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_initialize");
     auto result = SingleComponentEffect::initialize(context);
     if (result != kResultOk) return result;
 
@@ -668,10 +670,9 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     if (context) {
         FUnknownPtr<IHostApplication> host_app(context);
         if (host_app) {
-            runtime::log_info(
-                "VST3: IHostApplication present; publishing ARA factory "
-                "under kVst3AraFactoryContextKey='{}'",
-                pulp::format::kVst3AraFactoryContextKey);
+            runtime::log_debug("VST3: IHostApplication present; publishing ARA factory "
+                               "under kVst3AraFactoryContextKey='{}'",
+                               pulp::format::kVst3AraFactoryContextKey);
             // Surface our factory. When non-null (PULP_HAS_ARA build) this
             // is what an ARA-aware host receives via its setHostContext
             // negotiation — the string key matches Celemony's convention.
@@ -684,6 +685,8 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // Create the Pulp processor
     processor_ = factory_();
     if (!processor_) return kInternalError;
+    sample_accurate_params_ = processor_->wants_sample_accurate_parameters();
+    param_events_monitor_.arm(!sample_accurate_params_, &param_events_);
 
     // Resolve host accommodations once. Cross-host defenses such as
     // clamp_latency_to_nonneg apply regardless of the detected DAW;
@@ -735,16 +738,20 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // and snapshots the normalized value ONCE per reported edit, so
     // performEdit and setParamNormalized can no longer disagree.
     edit_bridge_ = std::make_unique<HostParameterEditBridge>(
-        store_,
-        HostParameterEditBridge::Callbacks{
-            [this](state::ParamID id) { beginEdit(static_cast<ParamID>(id)); },
-            [this](state::ParamID id, float normalized) {
-                performEdit(static_cast<ParamID>(id),
-                            static_cast<ParamValue>(normalized));
-                setParamNormalized(static_cast<ParamID>(id),
-                                   static_cast<ParamValue>(normalized));
-            },
-            [this](state::ParamID id) { endEdit(static_cast<ParamID>(id)); }});
+        store_, HostParameterEditBridge::Callbacks{
+                    [this](state::ParamID id) { beginEdit(static_cast<ParamID>(id)); },
+                    [this](state::ParamID id, float normalized, float plain) {
+                        // Report the edited value (the bridge's snapshot, never a
+                        // re-read of the store) in double precision so the host
+                        // writes back exactly what the editor set; a
+                        // float-normalized 0 dB comes back 1.4e-6 dB off.
+                        ParamValue host_value = static_cast<ParamValue>(normalized);
+                        if (const auto* info = store_.info(id))
+                            host_value = state::host_normalized_from_value(*info, plain);
+                        performEdit(static_cast<ParamID>(id), host_value);
+                        setParamNormalized(static_cast<ParamID>(id), host_value);
+                    },
+                    [this](state::ParamID id) { endEdit(static_cast<ParamID>(id)); }});
 
     // Add audio buses from descriptor (supports multi-bus: main, sidechain, aux).
     // PluginDescriptor carries channel counts rather than speaker positions, so
@@ -873,8 +880,8 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
         Steinberg::UString(pinfo.title, 128).fromAscii(param.name.c_str());
         Steinberg::UString(pinfo.units, 128).fromAscii(param.unit.c_str());
         pinfo.stepCount = step_count;
-        pinfo.defaultNormalizedValue = static_cast<ParamValue>(
-            param.range.normalize(param.range.default_value));
+        pinfo.defaultNormalizedValue =
+            state::host_normalized_from_value(param, param.range.default_value);
         pinfo.flags = flags;
         pinfo.unitId = param_groups_->find(param.group_id)
             ? static_cast<Steinberg::Vst::UnitID>(param.group_id)
@@ -940,8 +947,8 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
         }
     }
 
-    runtime::log_info("VST3: initialized '{}' with {} parameters",
-                      desc.name, store_.param_count());
+    runtime::log_debug("VST3: initialized '{}' with {} parameters", desc.name,
+                       store_.param_count());
 
     // Opt this plugin instance into the process-wide MainThreadDispatcher
     // backend. On macOS this installs or refcounts a Cocoa backend
@@ -961,6 +968,8 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
 }
 
 tresult PLUGIN_API PulpVst3Processor::terminate() {
+    if (processor_)
+        param_events_monitor_.report(*processor_);
     // Invalidate the liveness token FIRST so any main-thread lambda still
     // queued on the host run loop (a one-shot drain or a paced poll tick)
     // becomes a no-op and cannot dereference this instance after it is freed.
@@ -981,6 +990,7 @@ tresult PLUGIN_API PulpVst3Processor::terminate() {
 }
 
 IPlugView* PLUGIN_API PulpVst3Processor::createView(FIDString name) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_create_view");
     // VST3 hosts call createView("editor") to get the plugin's GUI
     if (name && strcmp(name, ViewType::kEditor) == 0) {
 #ifdef PULP_VST3_GUI
@@ -1001,6 +1011,9 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
     SpeakerArrangement* inputs, int32 numIns,
     SpeakerArrangement* outputs, int32 numOuts)
 {
+    // Any outcome below may rewrite bus arrangements; process() reads the SDK
+    // buses directly until setActive()/setupProcessing() recaches them.
+    bus_channel_cache_valid_.store(false, std::memory_order_relaxed);
     // VST3 hosts call this when the project's channel layout changes
     // (e.g. loading a stereo project over a mono plugin slot) and
     // expect the plug-in to either accept the request and apply it
@@ -1153,8 +1166,7 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
 
     silence_unsupported_active_ = false;
     apply_arrangements();
-    runtime::log_info(
-        "VST3 setBusArrangements: accepted {} in / {} out buses", numIns, numOuts);
+    runtime::log_debug("VST3 setBusArrangements: accepted {} in / {} out buses", numIns, numOuts);
     return kResultTrue;
 }
 
@@ -1165,7 +1177,9 @@ tresult PLUGIN_API PulpVst3Processor::canProcessSampleSize(int32 symbolicSampleS
 }
 
 tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_setup_processing");
     if (!processor_) return kInternalError;
+    refresh_bus_channel_cache();
 
     // Native arrangements prepare the processor at the accepted main-bus
     // widths. The silence accommodation is deliberately different: it accepts
@@ -1358,6 +1372,13 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     // timbre), so size the buffer at the same worst-case event ceiling as the
     // MIDI buffers and pin it to realtime-capacity mode. Reset the noteId map
     // and tracker so a fresh activation starts with no stale per-note state.
+    // Scratch for the parameter-event counting sort: one slot per event and
+    // one count per sample offset in the largest block.
+    param_sort_scratch_.resize(state::ParameterEventQueue::kCapacity);
+    param_writes_.clear();
+    param_writes_.reserve(std::max<std::size_t>(store_.all_params().size(), 1));
+    param_offset_counts_.resize(
+        ctx.max_buffer_size > 0 ? static_cast<std::size_t>(ctx.max_buffer_size) : 1u);
     mpe_.reserve(kMaxEventsPerBlock);
     mpe_.reset();
     note_id_map_clear();
@@ -1490,6 +1511,11 @@ void PulpVst3Processor::schedule_restart_poll_tick() {
 }
 
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
+    PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_set_active");
+    if (!state && processor_)
+        param_events_monitor_.report(*processor_);
+    if (state)
+        refresh_bus_channel_cache();
     if (state && processor_ && has_prepared_context_) {
         processor_->prepare(prepared_context_);
         processor_->prepare_f64_fallback_scratch(prepared_context_, prepared_layout_);
@@ -1510,6 +1536,8 @@ tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
     // host re-reads latency and tail when it activates again anyway.
     // Start/stop the paced poll so a mid-stream change while active is
     // delivered without an incidental host query.
+    if (state && has_prepared_context_)
+        warm_render_path();
     if (state)
         schedule_host_notifications(InlineFallback::forbidden);
     if (poll_active_) {
@@ -1546,8 +1574,27 @@ uint32 PLUGIN_API PulpVst3Processor::getTailSamples() {
     return static_cast<uint32>(tail);
 }
 
+void PulpVst3Processor::queue_param_write(state::ParamID id, float value) {
+    // Capacity is one slot per parameter (setupProcessing()); a host that
+    // repeats a parameter's queue past that is written through now. Without
+    // the reservation (no setupProcessing() yet) each value is written alone
+    // rather than growing the vector on the audio thread.
+    if (param_writes_.capacity() == 0) {
+        store_.set_value_rt(id, value);
+        return;
+    }
+    if (param_writes_.size() == param_writes_.capacity()) {
+        store_.set_values_rt(param_writes_);
+        param_writes_.clear();
+    }
+    param_writes_.push_back({id, value});
+}
+
 void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
     param_events_.clear();
+    // Each automated parameter's value is collected here and written to the
+    // store as one batch after the queues are read.
+    param_writes_.clear();
 
     // Reset the reused per-block MIDI buffers up front. They are cleared here
     // (not just before the event loop below) because MIDI controllers arrive
@@ -1640,33 +1687,67 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
                         }
                         continue;
                     }
+                    // A processor that reads sample-accurate automation gets
+                    // every point in the queue; any other gets only the
+                    // block's last value. Either way the store, block-rate
+                    // state, is written once: per point it cost a revisioned
+                    // atomic write plus a listener notification each time.
+                    const auto param_id = static_cast<state::ParamID>(id);
+                    const auto* info = store_.info(param_id);
+                    const auto plain = [info](ParamValue value) {
+                        return info ? state::value_from_host_normalized(*info, value)
+                                    : static_cast<float>(value);
+                    };
+                    if (!sample_accurate_params_) {
+                        ParamValue value;
+                        int32 offset;
+                        if (point_count > 0 &&
+                            queue->getPoint(point_count - 1, offset, value) == kResultTrue)
+                            queue_param_write(param_id, plain(value));
+                        continue;
+                    }
+                    bool any_point = false;
+                    float last_value = 0.0f;
                     for (int32 point = 0; point < point_count; ++point) {
                         ParamValue value;
                         int32 offset;
                         if (queue->getPoint(point, offset, value) != kResultTrue) {
                             continue;
                         }
-                        const auto param_id = static_cast<state::ParamID>(id);
                         // VST3 hands normalized 0-1 values; the DSP cursor and
-                        // the store both want the plain (denormalized) value.
-                        // Denormalize once here so the shared dual-write pushes
-                        // the same plain value to the sample-accurate queue and
-                        // to the RT-safe store path (set_value_rt): identical to
-                        // the prior push + set_normalized_rt pair, which
-                        // denormalized the same value through the same range.
-                        float plain_value = static_cast<float>(value);
-                        if (const auto* info = store_.info(param_id)) {
-                            plain_value = info->range.denormalize(plain_value);
-                        }
-                        boundary::apply_param_value(
-                            param_events_, store_, param_id,
-                            static_cast<int32_t>(offset), plain_value);
+                        // the store both want the plain value. A continuous
+                        // parameter keeps the host's exact value, as it does in
+                        // the plain-value formats.
+                        last_value = plain(value);
+                        param_events_.push(state::ParameterEvent{
+                            param_id, static_cast<int32_t>(offset), last_value});
+                        any_point = true;
                     }
+                    if (any_point)
+                        queue_param_write(param_id, last_value);
                 }
             }
         }
     }
-    param_events_.sort();
+    store_.set_values_rt(param_writes_);
+    param_writes_.clear();
+    if (sample_accurate_params_)
+        param_events_.sort(param_sort_scratch_, param_offset_counts_);
+}
+
+void PulpVst3Processor::refresh_bus_channel_cache() {
+    const auto fill = [](const BusList& buses, std::array<int, kCachedBusCount>& out) {
+        const std::size_t count = std::min<std::size_t>(buses.size(), kCachedBusCount);
+        for (std::size_t b = 0; b < count; ++b) {
+            auto* bus = FCast<AudioBus>(buses.at(static_cast<int32>(b)));
+            out[b] =
+                bus ? static_cast<int>(SpeakerArr::getChannelCount(bus->getArrangement())) : -1;
+        }
+        return count;
+    };
+    cached_in_bus_count_ = fill(audioInputs, expected_in_channels_);
+    cached_out_bus_count_ = fill(audioOutputs, expected_out_channels_);
+    bus_channel_cache_valid_.store(true, std::memory_order_relaxed);
 }
 
 bool PulpVst3Processor::process_validate_layout(
@@ -1694,12 +1775,10 @@ bool PulpVst3Processor::process_validate_layout(
                        : 0);
         }
     };
-    const auto host_bus_is_valid = [&](const AudioBusBuffers& host_bus, AudioBus* declared_bus,
+    const auto host_bus_is_valid = [&](const AudioBusBuffers& host_bus, int expected_channels,
                                        bool allow_mono_stereo_compat, bool input_bus) {
-        if (!declared_bus)
+        if (expected_channels < 0)
             return false;
-        const int expected_channels = static_cast<int>(
-            SpeakerArr::getChannelCount(declared_bus->getArrangement()));
         // A declared audio bus with zero host channels is not a usable
         // ProcessData layout.  Accept zero only for a genuinely channel-less
         // optional bus; otherwise reject before wiring zero-channel views into
@@ -1767,9 +1846,21 @@ bool PulpVst3Processor::process_validate_layout(
         data.numOutputs != static_cast<int32>(audioOutputs.size()) ||
         (data.numInputs > 0 && !data.inputs) ||
         (data.numOutputs > 0 && !data.outputs);
+    // Expected widths come from the cache refreshed whenever the arrangement is
+    // negotiated; a bus past the cache (or a stale cache) asks the SDK bus.
+    const auto expected_width = [&](bool input, int32 b) -> int {
+        const auto& cache = input ? expected_in_channels_ : expected_out_channels_;
+        const std::size_t count = input ? cached_in_bus_count_ : cached_out_bus_count_;
+        if (bus_channel_cache_valid_.load(std::memory_order_relaxed) &&
+            static_cast<std::size_t>(b) < count)
+            return cache[static_cast<std::size_t>(b)];
+        auto* declared = FCast<AudioBus>((input ? audioInputs : audioOutputs).at(b));
+        return declared ? static_cast<int>(SpeakerArr::getChannelCount(declared->getArrangement()))
+                        : -1;
+    };
     if (!malformed_layout) {
         for (int32 b = 0; b < data.numInputs; ++b) {
-            if (!host_bus_is_valid(data.inputs[b], FCast<AudioBus>(audioInputs.at(b)),
+            if (!host_bus_is_valid(data.inputs[b], expected_width(true, b),
                                    b == 0 && data.numInputs == 1, true)) {
                 malformed_layout = true;
                 break;
@@ -1778,7 +1869,7 @@ bool PulpVst3Processor::process_validate_layout(
     }
     if (!malformed_layout) {
         for (int32 b = 0; b < data.numOutputs; ++b) {
-            if (!host_bus_is_valid(data.outputs[b], FCast<AudioBus>(audioOutputs.at(b)),
+            if (!host_bus_is_valid(data.outputs[b], expected_width(false, b),
                                    b == 0 && data.numOutputs == 1, false)) {
                 malformed_layout = true;
                 break;
@@ -2060,7 +2151,8 @@ bool PulpVst3Processor::process_maybe_bypass(
         // host raised this block must settle even though we short-circuited
         // before process(), or a panic/reset raised while bypassed would fire
         // late on the next non-bypassed block.
-        store_.reset_triggers_rt();
+        if (!warming_render_path_)
+            store_.reset_triggers_rt();
         return true;
     }
     return false;
@@ -2219,7 +2311,16 @@ void PulpVst3Processor::process_decode_input_events(ProcessData& data) {
 
 void PulpVst3Processor::process_publish_output_params(
     ProcessData& data, std::span<const state::ParamInfo> all_params) {
+    // Nothing to publish unless the processor emitted explicit events or some
+    // store write landed across process(); the snapshot diff below could only
+    // find changes in the second case.
+    if (output_param_events_.empty() && store_.state_generation() == pre_process_generation_)
+        return;
+    // The store moved, so the snapshot no longer matches the live values.
+    snapshot_state_.valid = false;
     if (data.outputParameterChanges) {
+        output_param_has_event_.assign(all_params.size(), 0);
+        output_param_queue_cache_.assign(all_params.size(), nullptr);
         // (1) Sample-accurate explicit output events. Global-sort by offset so a
         // parameter's multiple points land in ascending order in its VST3 queue
         // (VST3 requires per-queue ascending sample offsets).
@@ -2240,8 +2341,9 @@ void PulpVst3Processor::process_publish_output_params(
             }
             if (queue) {
                 int32 pt_index = 0;
-                float normalized = all_params[idx].range.normalize(ev.value);
-                queue->addPoint(offset, static_cast<ParamValue>(normalized), pt_index);
+                const ParamValue normalized =
+                    state::host_normalized_from_value(all_params[idx], ev.value);
+                queue->addPoint(offset, normalized, pt_index);
             }
             output_param_has_event_[idx] = 1;
         }
@@ -2251,7 +2353,8 @@ void PulpVst3Processor::process_publish_output_params(
                 // Keep the VST3 parameter system synced to the final value even
                 // though we reported the sample-accurate points above.
                 setParamNormalized(static_cast<ParamID>(all_params[i].id),
-                                   static_cast<ParamValue>(store_.get_normalized(all_params[i].id)));
+                                   state::host_normalized_from_value(
+                                       all_params[i], store_.get_value(all_params[i].id)));
                 continue;
             }
             float current = store_.get_value(all_params[i].id);
@@ -2261,12 +2364,12 @@ void PulpVst3Processor::process_publish_output_params(
                     static_cast<ParamID>(all_params[i].id), index);
                 if (queue) {
                     int32 pt_index = 0;
-                    float normalized = store_.get_normalized(all_params[i].id);
-                    queue->addPoint(0, static_cast<ParamValue>(normalized), pt_index);
+                    queue->addPoint(0, state::host_normalized_from_value(all_params[i], current),
+                                    pt_index);
                 }
                 // Sync to VST3 parameter system too
                 setParamNormalized(static_cast<ParamID>(all_params[i].id),
-                                   static_cast<ParamValue>(store_.get_normalized(all_params[i].id)));
+                                   state::host_normalized_from_value(all_params[i], current));
             }
         }
     }
@@ -2448,7 +2551,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // output buses beyond the declared/pre-sized set are zero-filled (above)
     // but not routed — the same safe fallback as before.
     static constexpr std::size_t kMaxOutputBuses = BusBufferSet::kMaxBuses;
-    std::array<ProcessBusBufferView<float>, kMaxOutputBuses> output_buses{};
+    auto& output_buses = rt_output_buses_;
     output_buses[0] = {
         .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
                  proc_out, false, data.numOutputs > 0},
@@ -2529,25 +2632,30 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         output64_ptrs_.data(), proc_out, num_samples);
     audio::BufferView<const double> sidechain64_view(
         sidechain64_ptrs_.data(), sc_channels, num_samples);
-    std::array<ProcessBusBufferView<const double>, 2> input64_buses{{
-        {
-            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
-                     proc_in, false, data.numInputs > 0},
+    // The f64 bus views only feed process_f64(); fill them only for a block
+    // that will run natively in f64.
+    auto& input64_buses = rt_input64_buses_;
+    auto& output64_buses = rt_output64_buses_;
+    if (native_f64) {
+        input64_buses[0] = {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, proc_in, false,
+                     data.numInputs > 0},
             .buffer = input64_view,
-        },
-        {
-            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain,
-                     sc_channels, true, sc_channels > 0},
+        };
+        input64_buses[1] = {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain, sc_channels, true,
+                     sc_channels > 0},
             .buffer = sidechain64_view,
-        },
-    }};
-    std::array<ProcessBusBufferView<double>, kMaxOutputBuses> output64_buses{};
-    output64_buses[0] = {
-        .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
-                 proc_out, false, data.numOutputs > 0},
-        .buffer = output64_view,
-    };
-    for (std::size_t b = 1; b < routed_output_buses; ++b) {
+        };
+        output64_buses[0] = {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, proc_out, false,
+                     data.numOutputs > 0},
+            .buffer = output64_view,
+        };
+    }
+    // The f64 aux views only feed process_f64(); the float and boundary paths
+    // never read them.
+    for (std::size_t b = 1; native_f64 && b < routed_output_buses; ++b) {
         if (b >= static_cast<std::size_t>(data.numOutputs)) break;
         auto& bus = data.outputs[b];
         auto& ptrs = aux_output64_ptrs_[b - 1];
@@ -2616,9 +2724,12 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // Snapshot parameter values before processing so we can detect
     // plugin-side changes and report them to the host for automation recording
     auto all_params = store_.all_params();
-    boundary::snapshot_param_values(store_, all_params, param_snapshot_);
-    output_param_has_event_.assign(all_params.size(), 0);
-    output_param_queue_cache_.assign(all_params.size(), nullptr);
+    // Refresh the pre-process snapshot only when some store write landed since
+    // it was taken. A refresh that overlapped a concurrent writer is not
+    // trusted, so the next block takes it again.
+    pre_process_generation_ = store_.state_generation();
+    boundary::refresh_param_snapshot(store_, all_params, param_snapshot_, snapshot_state_,
+                                     pre_process_generation_);
     processor_->set_param_events(&param_events_);
     output_param_events_.clear();
     processor_->set_output_param_events(&output_param_events_);
@@ -2647,7 +2758,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // negotiated layouts retain their existing paths.
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        if (native_f64) {
+        if (warming_render_path_) {
+            // Warm-up block: the Processor never runs, so nothing it owns moves.
+        } else if (native_f64) {
             processor_->process_f64(process_buffers64, midi_in_, midi_out_, ctx);
         } else {
             processor_->process(process_buffers, midi_in_, midi_out_, ctx);
@@ -2694,6 +2807,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             }
         }
     }
+    if (warming_render_path_)
+        return kResultOk;
+
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. Done before the
     // output-change scan below so the host records the auto-reset as automation.
@@ -2711,6 +2827,51 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     return kResultOk;
 }
 
+void PulpVst3Processor::warm_render_path() {
+    if (!processor_ || max_block_size_ <= 0 || processSetup.symbolicSampleSize != kSample32)
+        return;
+    const int frames = std::min(max_block_size_, 64);
+    std::vector<std::vector<float>> storage;
+    std::vector<std::vector<float*>> pointers;
+    // Reserved up front so the pointers handed to the host buffers stay valid.
+    storage.reserve(64);
+    pointers.reserve(64);
+    auto make_buses = [&](BusList& buses, std::vector<AudioBusBuffers>& out) {
+        out.assign(buses.size(), AudioBusBuffers{});
+        for (std::size_t b = 0; b < buses.size(); ++b) {
+            auto* bus = FCast<AudioBus>(buses.at(static_cast<int32>(b)));
+            int channels =
+                bus ? static_cast<int>(SpeakerArr::getChannelCount(bus->getArrangement())) : 0;
+            if (storage.size() + static_cast<std::size_t>(channels) > storage.capacity() ||
+                pointers.size() == pointers.capacity())
+                channels = 0;
+            auto& ptrs = pointers.emplace_back();
+            for (int ch = 0; ch < channels; ++ch)
+                ptrs.push_back(storage.emplace_back(static_cast<std::size_t>(frames), 0.0f).data());
+            out[b].numChannels = channels;
+            out[b].channelBuffers32 = channels > 0 ? ptrs.data() : nullptr;
+        }
+    };
+    std::vector<AudioBusBuffers> inputs, outputs;
+    make_buses(audioInputs, inputs);
+    make_buses(audioOutputs, outputs);
+    ProcessData data{};
+    data.processMode = processSetup.processMode;
+    data.symbolicSampleSize = kSample32;
+    data.numSamples = frames;
+    data.numInputs = static_cast<int32>(inputs.size());
+    data.numOutputs = static_cast<int32>(outputs.size());
+    data.inputs = inputs.empty() ? nullptr : inputs.data();
+    data.outputs = outputs.empty() ? nullptr : outputs.data();
+    const auto playhead = playhead_prev_;
+    warming_render_path_ = true;
+    process(data);
+    warming_render_path_ = false;
+    // The warm-up is not a block the Processor saw: the first host block must
+    // still diff its transport against "no previous block".
+    playhead_prev_ = playhead;
+}
+
 tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id, ParamValue value) {
     const auto result = SingleComponentEffect::setParamNormalized(id, value);
     if (result != kResultOk)
@@ -2725,7 +2886,14 @@ tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id, ParamValue 
         // The same guard setState() uses: a host-originated write must not be
         // echoed back at the host as editor automation.
         const ScopedHostParameterWrite host_write;
-        store_.set_normalized(static_cast<state::ParamID>(id), static_cast<float>(value));
+        const auto param_id = static_cast<state::ParamID>(id);
+        // An echo of the store's own value (the editor reporting an edit) maps
+        // back to it exactly; skip the write rather than replace it with the
+        // double round trip, which can differ from it in the last bit.
+        if (const auto* info = store_.info(param_id);
+            info && state::host_normalized_from_value(*info, store_.get_value(param_id)) != value)
+            store_.set_value(param_id,
+                             state::value_from_host_normalized(*info, static_cast<double>(value)));
     }
     return result;
 }
@@ -2768,11 +2936,13 @@ tresult PLUGIN_API PulpVst3Processor::setState(IBStream* stream) {
             return kResultFalse;
     }
 
-    // Sync restored values back to VST3 parameter system
+    // Sync the VST3 parameter objects to the restored values. Only the
+    // objects: the store already holds the restored values, and writing them
+    // back through a normalized round trip could change their last bit.
     for (const auto& param : store_.all_params()) {
-        float normalized = store_.get_normalized(param.id);
-        setParamNormalized(static_cast<ParamID>(param.id),
-                           static_cast<ParamValue>(normalized));
+        SingleComponentEffect::setParamNormalized(
+            static_cast<ParamID>(param.id),
+            state::host_normalized_from_value(param, store_.get_value(param.id)));
     }
     return kResultOk;
 }

@@ -64,7 +64,8 @@ safe.
 
 A listening impression is a pointer to where to measure, not a verdict. See
 the `audio-harness` skill for the lanes and the window-floor traps (Hann cannot
-see −100 dBc; the default `OversamplerT` kind has ~7 dB alias rejection).
+see −100 dBc; the `fir_biquad` `OversamplerT` kind has ~7 dB alias rejection,
+so name the kind in every measurement).
 
 ### Realtime GPU audio
 

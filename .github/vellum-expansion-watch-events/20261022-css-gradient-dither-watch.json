@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-css-gradient-dither-watch",
+  "created_at": "2026-10-22T20:11:13Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record that gradient fill and stroke paints in core/canvas are now dithered (SkPaint::setDither) to match Chromium's dithered CSS gradients, with image patterns left undithered. The change is a paint-flag decision inside the canvas kernel, recorded as a pulp-only change event 20261022-css-gradient-dither which carries the Vellum inheritance obligation; this watch record itself transfers nothing. Geometry, colour stops, shader construction, DesignIR, capture semantics, thresholds and packaging are unchanged; every existing pixel test of gradients passes unchanged. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "CSS linear gradient background is dithered on Graphite",
+    "CSS linear gradient background is dithered on the Skia raster backend",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": false
+}

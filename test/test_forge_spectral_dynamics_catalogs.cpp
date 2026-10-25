@@ -3,12 +3,15 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/host/baked_graph_processor.hpp>
+#include <pulp/host/forge_lofi_catalog.hpp>
 #include <pulp/host/forge_multiband_catalog.hpp>
 #include <pulp/host/forge_sidechain_catalog.hpp>
 #include <pulp/host/forge_synthesis_catalog.hpp>
 #include <pulp/host/forge_wavetable_catalog.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <pulp/signal/compressor.hpp>
+#include <pulp/signal/linkwitz_riley.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -117,6 +120,70 @@ class FixedParamView final : public pulp::host::BakedParamView {
     std::vector<std::pair<pulp::state::ParamID, float>> values_;
 };
 
+// Runs a node's baked callback directly over `frames` samples in blocks of
+// irregular length. `alias_port` < 0 gives the node its own output buffer;
+// otherwise the output buffer IS that input port's buffer, as an executor that
+// reuses buffers in place would hand it.
+std::vector<float> run_callback(const pulp::host::CustomNodeType& type,
+                                const FixedParamView& params,
+                                std::vector<std::vector<float>> inputs, int alias_port = -1) {
+    void* instance = type.create();
+    REQUIRE(instance != nullptr);
+    type.prepare(instance, kSampleRate, 1024);
+    const std::size_t frames = inputs.front().size();
+    std::vector<float> own_output(frames, 0.0f);
+    float* output_base =
+        alias_port < 0 ? own_output.data() : inputs[static_cast<std::size_t>(alias_port)].data();
+    constexpr int kBlockSizes[] = {1, 300, 64, 513, 7, 1024, 255};
+    std::size_t offset = 0;
+    for (std::size_t b = 0; offset < frames; ++b) {
+        const int n = static_cast<int>(std::min<std::size_t>(
+            static_cast<std::size_t>(kBlockSizes[b % std::size(kBlockSizes)]), frames - offset));
+        std::vector<const float*> input_ptrs;
+        for (auto& channel : inputs)
+            input_ptrs.push_back(channel.data() + offset);
+        float* output_ptr = output_base + offset;
+        pulp::audio::BufferView<const float> input_view(
+            input_ptrs.data(), static_cast<std::uint32_t>(input_ptrs.size()),
+            static_cast<std::uint32_t>(n));
+        pulp::audio::BufferView<float> output_view(&output_ptr, 1, static_cast<std::uint32_t>(n));
+        type.process_instance_baked_param(instance, output_view, input_view, n, params);
+        offset += static_cast<std::size_t>(n);
+    }
+    type.destroy(instance);
+    return alias_port < 0 ? own_output : inputs[static_cast<std::size_t>(alias_port)];
+}
+
+// A gated two-tone burst: loud enough to drive every compressor here well into
+// gain reduction, with silent gaps so attack and release both run.
+std::vector<float> burst_signal(std::size_t frames) {
+    std::vector<float> result(frames);
+    for (std::size_t i = 0; i < frames; ++i) {
+        const double t = static_cast<double>(i) / kSampleRate;
+        const bool on = (i / 2000) % 2 == 0;
+        result[i] = on ? static_cast<float>(0.6 * std::sin(2.0 * std::numbers::pi * 150.0 * t) +
+                                            0.3 * std::sin(2.0 * std::numbers::pi * 5000.0 * t))
+                       : 0.0f;
+    }
+    return result;
+}
+
+// The node and the reference must agree bit for bit: the node only routes
+// samples, so any difference is a routing bug, not rounding.
+void require_matches(const std::vector<float>& actual, const std::vector<float>& expected) {
+    REQUIRE(actual.size() == expected.size());
+    std::size_t mismatches = 0;
+    std::size_t first = actual.size();
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        if (actual[i] != expected[i]) {
+            ++mismatches;
+            first = std::min(first, i);
+        }
+    }
+    INFO("mismatched samples = " << mismatches << ", first at " << first);
+    CHECK(mismatches == 0);
+}
+
 } // namespace
 
 TEST_CASE("Forge spectral and compound-dynamics packs declare their real port shapes",
@@ -213,4 +280,239 @@ TEST_CASE("Forge sidechain HPF preserves detector state across blocks",
     // cutoff every block would reset the filter, manufacture a new transient,
     // and keep the compressor falsely ducking forever.
     CHECK(energy(output) > energy(main) * 0.9f);
+}
+
+TEST_CASE("Forge compressor nodes render what their compressor renders, at any block size",
+          "[host][forge][catalog][dynamics]") {
+    constexpr std::size_t kSamples = 9000;
+    const auto program = burst_signal(kSamples);
+
+    SECTION("lo-fi compressor") {
+        namespace lofi = pulp::host::forge_lofi;
+        const auto type = lofi::make_compressor_node();
+        FixedParamView params(type);
+        params.set(lofi::kCompThresholdDb, -30.0f);
+        params.set(lofi::kCompRatio, 8.0f);
+        params.set(lofi::kCompAttackMs, 1.0f);
+        params.set(lofi::kCompReleaseMs, 40.0f);
+
+        pulp::signal::Compressor reference;
+        reference.set_sample_rate(static_cast<float>(kSampleRate));
+        pulp::signal::Compressor::Params cp;
+        cp.threshold_db = -30.0f;
+        cp.ratio = 8.0f;
+        cp.attack_ms = 1.0f;
+        cp.release_ms = 40.0f;
+        cp.knee_db = 6.0f;
+        cp.makeup_db = 0.0f;
+        reference.set_params(cp);
+        std::vector<float> expected(kSamples);
+        for (std::size_t i = 0; i < kSamples; ++i)
+            expected[i] = reference.process(program[i]);
+        REQUIRE(energy(expected) < energy(program) * 0.5f);
+
+        require_matches(run_callback(type, params, {program}), expected);
+        require_matches(run_callback(type, params, {program}, 0), expected);
+    }
+
+    SECTION("sidechain compressor") {
+        namespace sc = pulp::host::sidechain;
+        const auto type = sc::make_sidechain_compressor_node();
+        FixedParamView params(type);
+        params.set(sc::kThresholdDb, -30.0f);
+        params.set(sc::kRatio, 8.0f);
+        params.set(sc::kAttackMs, 1.0f);
+        params.set(sc::kReleaseMs, 40.0f);
+        params.set(sc::kKneeDb, 3.0f);
+        params.set(sc::kMakeupDb, 2.0f);
+        params.set(sc::kKeyHpfHz, 0.0f);
+        std::vector<float> main_signal(kSamples);
+        for (std::size_t i = 0; i < kSamples; ++i)
+            main_signal[i] =
+                0.5f * std::sin(static_cast<float>(2.0 * std::numbers::pi * 440.0 *
+                                                   static_cast<double>(i) / kSampleRate));
+
+        pulp::signal::Compressor reference;
+        reference.set_sample_rate(static_cast<float>(kSampleRate));
+        pulp::signal::Compressor::Params cp;
+        cp.threshold_db = -30.0f;
+        cp.ratio = 8.0f;
+        cp.attack_ms = 1.0f;
+        cp.release_ms = 40.0f;
+        cp.knee_db = 3.0f;
+        cp.makeup_db = 2.0f;
+        reference.set_params(cp);
+        std::vector<float> expected(kSamples);
+        for (std::size_t i = 0; i < kSamples; ++i)
+            expected[i] = reference.process_with_sidechain(main_signal[i], program[i]);
+
+        require_matches(run_callback(type, params, {main_signal, program}), expected);
+        require_matches(run_callback(type, params, {main_signal, program}, sc::kSignalPort),
+                        expected);
+        // The key's own buffer receives the output: the key must still be read
+        // as the key, not overwritten by the main signal before detection.
+        require_matches(run_callback(type, params, {main_signal, program}, sc::kKeyPort), expected);
+    }
+
+    SECTION("multiband compressor") {
+        namespace mb = pulp::host::multiband;
+        const auto type = mb::make_multiband_compressor_node();
+        FixedParamView params(type);
+        params.set(mb::kCrossoverHz, 1000.0f);
+        params.set(mb::kLowThresholdDb, -30.0f);
+        params.set(mb::kLowRatio, 6.0f);
+        params.set(mb::kHighThresholdDb, -24.0f);
+        params.set(mb::kHighRatio, 3.0f);
+        params.set(mb::kAttackMs, 2.0f);
+        params.set(mb::kReleaseMs, 60.0f);
+        params.set(mb::kLowMakeupDb, 1.5f);
+        params.set(mb::kHighMakeupDb, -1.0f);
+
+        pulp::signal::LinkwitzRiley crossover;
+        crossover.set_frequency(1000.0f, static_cast<float>(kSampleRate));
+        pulp::signal::Compressor low;
+        pulp::signal::Compressor high;
+        low.set_sample_rate(static_cast<float>(kSampleRate));
+        high.set_sample_rate(static_cast<float>(kSampleRate));
+        low.set_params(mb::detail::compressor_params(-30.0f, 6.0f, 2.0f, 60.0f, 1.5f));
+        high.set_params(mb::detail::compressor_params(-24.0f, 3.0f, 2.0f, 60.0f, -1.0f));
+        std::vector<float> expected(kSamples);
+        for (std::size_t i = 0; i < kSamples; ++i) {
+            const auto split = crossover.process(program[i]);
+            expected[i] = low.process(split.low) + high.process(split.high);
+        }
+
+        require_matches(run_callback(type, params, {program}), expected);
+        require_matches(run_callback(type, params, {program}, 0), expected);
+    }
+}
+
+TEST_CASE("Forge compressor nodes default to branching and select decoupled ballistics",
+          "[host][forge][catalog][dynamics]") {
+    // The ballistics control defaults to branching, so a patch saved before
+    // the control existed renders exactly as before; 1 selects the decoupled
+    // form, which must equal the compressor run with set_ballistics(decoupled)
+    // and must audibly differ from the default on this program.
+    using Ballistics = pulp::signal::CompressorBallistics;
+    constexpr std::size_t kSamples = 9000;
+    const auto program = burst_signal(kSamples);
+    auto differs = [](const std::vector<float>& a, const std::vector<float>& b) {
+        std::size_t count = 0;
+        for (std::size_t i = 0; i < a.size(); ++i)
+            count += a[i] != b[i];
+        return count;
+    };
+
+    SECTION("lo-fi compressor") {
+        namespace lofi = pulp::host::forge_lofi;
+        const auto type = lofi::make_compressor_node();
+        auto render = [&](float value, Ballistics expected_form) {
+            FixedParamView params(type);
+            params.set(lofi::kCompThresholdDb, -30.0f);
+            params.set(lofi::kCompRatio, 8.0f);
+            params.set(lofi::kCompAttackMs, 1.0f);
+            params.set(lofi::kCompReleaseMs, 40.0f);
+            if (value >= 0.0f)
+                params.set(lofi::kCompBallistics, value);
+            pulp::signal::Compressor reference;
+            reference.set_sample_rate(static_cast<float>(kSampleRate));
+            pulp::signal::Compressor::Params cp;
+            cp.threshold_db = -30.0f;
+            cp.ratio = 8.0f;
+            cp.attack_ms = 1.0f;
+            cp.release_ms = 40.0f;
+            cp.knee_db = 6.0f;
+            cp.makeup_db = 0.0f;
+            reference.set_params(cp);
+            reference.set_ballistics(expected_form);
+            std::vector<float> expected(kSamples);
+            for (std::size_t i = 0; i < kSamples; ++i)
+                expected[i] = reference.process(program[i]);
+            const auto actual = run_callback(type, params, {program});
+            require_matches(actual, expected);
+            return actual;
+        };
+        const auto by_default = render(-1.0f, Ballistics::branching);
+        const auto branching = render(0.0f, Ballistics::branching);
+        const auto decoupled = render(1.0f, Ballistics::decoupled);
+        CHECK(differs(by_default, branching) == 0);
+        CHECK(differs(branching, decoupled) > 0);
+    }
+
+    SECTION("sidechain compressor") {
+        namespace sc = pulp::host::sidechain;
+        const auto type = sc::make_sidechain_compressor_node();
+        std::vector<float> main_signal(kSamples);
+        for (std::size_t i = 0; i < kSamples; ++i)
+            main_signal[i] =
+                0.5f * std::sin(static_cast<float>(2.0 * std::numbers::pi * 440.0 *
+                                                   static_cast<double>(i) / kSampleRate));
+        auto render = [&](float value, Ballistics expected_form) {
+            FixedParamView params(type);
+            params.set(sc::kThresholdDb, -30.0f);
+            params.set(sc::kRatio, 8.0f);
+            params.set(sc::kAttackMs, 1.0f);
+            params.set(sc::kReleaseMs, 40.0f);
+            if (value >= 0.0f)
+                params.set(sc::kBallistics, value);
+            pulp::signal::Compressor reference;
+            reference.set_sample_rate(static_cast<float>(kSampleRate));
+            pulp::signal::Compressor::Params cp;
+            cp.threshold_db = -30.0f;
+            cp.ratio = 8.0f;
+            cp.attack_ms = 1.0f;
+            cp.release_ms = 40.0f;
+            cp.knee_db = 6.0f;
+            cp.makeup_db = 0.0f;
+            reference.set_params(cp);
+            reference.set_ballistics(expected_form);
+            std::vector<float> expected(kSamples);
+            for (std::size_t i = 0; i < kSamples; ++i)
+                expected[i] = reference.process_with_sidechain(main_signal[i], program[i]);
+            const auto actual = run_callback(type, params, {main_signal, program});
+            require_matches(actual, expected);
+            return actual;
+        };
+        const auto by_default = render(-1.0f, Ballistics::branching);
+        const auto decoupled = render(1.0f, Ballistics::decoupled);
+        CHECK(differs(by_default, decoupled) > 0);
+    }
+
+    SECTION("multiband compressor") {
+        namespace mb = pulp::host::multiband;
+        const auto type = mb::make_multiband_compressor_node();
+        auto render = [&](float value, Ballistics expected_form) {
+            FixedParamView params(type);
+            params.set(mb::kCrossoverHz, 1000.0f);
+            params.set(mb::kLowThresholdDb, -30.0f);
+            params.set(mb::kLowRatio, 6.0f);
+            params.set(mb::kHighThresholdDb, -24.0f);
+            params.set(mb::kHighRatio, 3.0f);
+            params.set(mb::kAttackMs, 2.0f);
+            params.set(mb::kReleaseMs, 60.0f);
+            if (value >= 0.0f)
+                params.set(mb::kBallistics, value);
+            pulp::signal::LinkwitzRiley crossover;
+            crossover.set_frequency(1000.0f, static_cast<float>(kSampleRate));
+            pulp::signal::Compressor low;
+            pulp::signal::Compressor high;
+            low.set_sample_rate(static_cast<float>(kSampleRate));
+            high.set_sample_rate(static_cast<float>(kSampleRate));
+            low.set_params(mb::detail::compressor_params(-30.0f, 6.0f, 2.0f, 60.0f, 0.0f));
+            high.set_params(mb::detail::compressor_params(-24.0f, 3.0f, 2.0f, 60.0f, 0.0f));
+            low.set_ballistics(expected_form);
+            high.set_ballistics(expected_form);
+            std::vector<float> expected(kSamples);
+            for (std::size_t i = 0; i < kSamples; ++i) {
+                const auto split = crossover.process(program[i]);
+                expected[i] = low.process(split.low) + high.process(split.high);
+            }
+            const auto actual = run_callback(type, params, {program});
+            require_matches(actual, expected);
+            return actual;
+        };
+        const auto by_default = render(-1.0f, Ballistics::branching);
+        const auto decoupled = render(1.0f, Ballistics::decoupled);
+        CHECK(differs(by_default, decoupled) > 0);
+    }
 }

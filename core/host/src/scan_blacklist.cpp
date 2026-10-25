@@ -1,7 +1,10 @@
 #include <pulp/host/scan_blacklist.hpp>
 
-#include <chrono>
+#include "bundle_file_stamp.hpp"
+
 #include <cctype>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -13,24 +16,10 @@ namespace fs = std::filesystem;
 
 namespace {
 
-struct FileStamp {
-    int64_t mtime = 0;
-    int64_t size = 0;
-    bool ok = false;
-};
+using FileStamp = detail::BundleFileStamp;
 
 FileStamp stamp_of(const std::string& path) {
-    FileStamp out;
-    std::error_code ec;
-    if (!fs::exists(path, ec) || ec) return out;
-    auto mtime = fs::last_write_time(path, ec);
-    if (ec) return out;
-    out.mtime = std::chrono::duration_cast<std::chrono::seconds>(
-        mtime.time_since_epoch()).count();
-    out.size = static_cast<int64_t>(fs::file_size(path, ec));
-    if (ec) return out;
-    out.ok = true;
-    return out;
+    return detail::bundle_file_stamp(path);
 }
 
 // Replace `|` and newlines in a stored field with percent-escapes so

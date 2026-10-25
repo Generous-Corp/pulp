@@ -20,6 +20,11 @@
     <string>@PLUGIN_VERSION@</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <!-- The editor's CADisplayLink runs in this extension process, which reads
+         the key from its own bundle. Without it iOS caps the link at 60 Hz on
+         ProMotion iPhones. Top level, not inside NSExtension. -->
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionAttributes</key>

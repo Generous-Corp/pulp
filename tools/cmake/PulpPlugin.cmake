@@ -296,6 +296,12 @@ function(pulp_add_plugin target)
     # For compiled processors, create OBJECT library.
     if(PLUGIN_SOURCES)
         add_library(${target}_Core OBJECT ${PLUGIN_SOURCES})
+        # These objects are linked into shared modules (CLAP, VST3, LV2), so they
+        # must be position-independent. The Pulp tree sets
+        # CMAKE_POSITION_INDEPENDENT_CODE globally, but an SDK consumer project
+        # usually does not, and GNU ld then refuses the link ("recompile with
+        # -fPIC"); Apple's linker accepts it, so only Linux shows the failure.
+        set_target_properties(${target}_Core PROPERTIES POSITION_INDEPENDENT_CODE ON)
         target_link_libraries(${target}_Core PUBLIC ${_pulp_core_format_target})
         target_include_directories(${target}_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
         set(_PULP_CORE_OBJECTS "${PULP_${target}_CORE_OBJECTS}")
@@ -581,6 +587,8 @@ function(pulp_add_plugin_bundle target)
     # mirroring pulp_add_plugin.
     if(BUNDLE_SOURCES)
         add_library(${target}_Core OBJECT ${BUNDLE_SOURCES})
+        # Linked into shared modules; see pulp_add_plugin's Core library.
+        set_target_properties(${target}_Core PROPERTIES POSITION_INDEPENDENT_CODE ON)
         target_link_libraries(${target}_Core PUBLIC ${_PULP_FORMAT_TARGET})
         target_include_directories(${target}_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
         target_compile_definitions(${target}_Core PRIVATE

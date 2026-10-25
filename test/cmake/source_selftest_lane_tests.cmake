@@ -51,6 +51,9 @@ add_test(NAME toolchain-mise_profile-selftest
 add_test(NAME toolchain-check_env-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/toolchain/test_check_env.py")
+add_test(NAME toolchain-host_sync-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/toolchain/test_host_sync.py")
 add_test(NAME toolchain-update-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/toolchain/test_update.py")
@@ -78,6 +81,18 @@ add_test(NAME vst3-bundle-layout-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/cmake/scripts/test_check_vst3_bundle_layout.py")
 set_tests_properties(vst3-bundle-layout-selftest PROPERTIES TIMEOUT 120)
+
+# Plug-in footprint tooling: the ICU data trimmer FindSkia runs at configure
+# time and the budget checker the footprint ctests run. Both suites use
+# synthetic inputs only.
+add_test(NAME icu-data-subset-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/cmake/scripts/test_icu_data_subset.py")
+set_tests_properties(icu-data-subset-selftest PROPERTIES TIMEOUT 60)
+add_test(NAME plugin-footprint-check-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_plugin_footprint_check.py")
+set_tests_properties(plugin-footprint-check-selftest PROPERTIES TIMEOUT 60)
 
 # Merge-gate evidence validation is source-only and must be registered in the
 # CTest inventory that carries the source-selftest label.

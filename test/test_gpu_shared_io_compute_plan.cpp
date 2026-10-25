@@ -2,6 +2,7 @@
 #include "detail/shared_io_program_session.hpp"
 #include "detail/shared_io_transport_bridge.hpp"
 #include "detail/shared_spectral_result.hpp"
+#include "harness/fake_shared_io_provider.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,185 +16,36 @@
 using namespace pulp::gpu_audio::detail;
 
 namespace {
-struct FakeLifecycleState {
-    bool program_released = false;
-    bool provider_destroyed = false;
-    std::uint64_t retired = 0;
-};
-
-class FakeProvider final : public SharedIoArenaProvider {
-    struct Slot {
-        std::byte* input;
-        std::byte* output;
-        std::uint32_t index = 0;
-        std::uint64_t generation = 1;
-        bool retired = false;
-    };
-
+// The plan tests' provider doubles input at submission and retires it at
+// once, unless terminals are deferred to the next successful drain.
+class FakeProvider final : public pulp::test::FakeSharedIoProvider {
   public:
-    SharedIoProviderIdentity provider_identity() const noexcept override {
-        SharedIoProviderIdentity identity;
-        identity.authenticated = authenticated_identity;
-        identity.provider_revision = authenticated_identity ? "fake-provider-v1" : "";
-        identity.adapter_name = authenticated_identity ? "fake-adapter" : "";
-        identity.adapter_backend = authenticated_identity ? "fake-backend" : "";
-        identity.adapter_vendor_id = 1;
-        identity.adapter_device_id = 1;
-        identity.native_runtime_authenticated = authenticated_identity;
-        identity.native_runtime_name = authenticated_identity ? "fake-native" : "";
-        identity.native_runtime_backend = authenticated_identity ? "fake-backend" : "";
-        return identity;
-    }
-    ~FakeProvider() override {
-        lifecycle_state->provider_destroyed = true;
-    }
-    bool post_terminal(SlotToken token, std::shared_ptr<SharedIoTerminalInbox> inbox,
-                       CompletionStatus terminal) noexcept {
-        if (defer_terminals) {
-            pending_terminals.push_back({token, std::move(inbox), terminal});
-            return true;
-        }
-        if (inbox->push(token, terminal) != SharedIoTerminalInbox::PushResult::Accepted)
-            return false;
-        ++lifecycle_state->retired;
-        return true;
-    }
-    bool create_slot(std::uint32_t index, std::size_t in, std::size_t out,
-                     SlotResources& resources) noexcept override {
-        auto* slot = new (std::nothrow)
-            Slot{new (std::nothrow) std::byte[in], new (std::nothrow) std::byte[out], index};
-        if (!slot || !slot->input || !slot->output) {
-            if (slot) {
-                delete[] slot->input;
-                delete[] slot->output;
-                delete slot;
-            }
-            return false;
-        }
-        resources.input = slot->input;
-        resources.input_size = in;
-        resources.output = slot->output;
-        resources.output_size = out;
-        resources.opaque = slot;
-        slots_.push_back(slot);
-        resources.input_lifecycle = {
-            .allocated = !invalid_lifecycle, .import_attempted = true, .import_succeeded = true};
-        resources.output_lifecycle = resources.input_lifecycle;
-        resources.storage_kind = storage_kind;
-        if (storage_kind == StorageKind::Staged) {
-            resources.input_lifecycle.import_attempted = false;
-            resources.input_lifecycle.import_succeeded = false;
-            resources.output_lifecycle = resources.input_lifecycle;
-        }
-        return true;
-    }
-    void retire_slot(SlotResources& resources) noexcept override {
-        if (require_program_release && !program_released)
-            retired_before_program_release = true;
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        if (slot) {
-            slot->retired = true;
-            ++slot->generation;
-        }
-        resources.input_lifecycle.dispose_observed = true;
-        resources.output_lifecycle.dispose_observed = true;
-    }
-    void destroy_slot(SlotResources& resources) noexcept override {
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        if (!slot)
-            return;
-        delete[] slot->input;
-        delete[] slot->output;
-        std::erase(slots_, slot);
-        delete slot;
-        resources.input_lifecycle.host_freed = true;
-        resources.output_lifecycle.host_freed = true;
-        resources.opaque = nullptr;
-    }
-    bool acquire_slot_buffers(const SlotResources& resources,
-                              SlotBufferHandle& handle) const noexcept override {
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        if (!slot || slot->retired)
-            return false;
-        handle = {};
-        handle.provider = this;
-        handle.device = this;
-        handle.input_buffer = slot->input;
-        handle.output_buffer = slot->output;
-        handle.slot = slot->index;
-        handle.generation = slot->generation;
-        handle.lifetime = lifetime_;
-        return true;
-    }
-    bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override {
-        if (handle.provider != this || handle.device != this || handle.lifetime.expired())
-            return false;
-        for (const auto* slot : slots_) {
-            if (!slot->retired && handle.input_buffer == slot->input &&
-                handle.output_buffer == slot->output && handle.generation == slot->generation)
-                return true;
-        }
-        return false;
+    FakeProvider() {
+        transform = Transform::Affine;
+        scale = 2.0f;
+        transform_at_submit = true;
+        complete_in_submit = true;
+        drain_completes = true;
     }
 
-    bool submit(const SlotResources& resources, SlotToken token,
-                std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept override {
-        if (!accept_submissions)
-            return false;
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        const auto count = resources.input_size / sizeof(float);
-        auto* in = reinterpret_cast<const float*>(slot->input);
-        auto* out = reinterpret_cast<float*>(slot->output);
-        for (std::size_t i = 0; i < count && i < resources.output_size / sizeof(float); ++i)
-            out[i] = in[i] * 2.0f;
-        return post_terminal(token, std::move(inbox), terminal_status);
+    SharedIoProviderIdentity provider_identity() const noexcept override {
+        return authenticated_identity ? authenticated_fake_identity() : identity;
     }
-    void poll() noexcept override {}
+
     bool drain() noexcept override {
-        if (!allow_drain)
-            return false;
-        defer_terminals = false;
-        for (auto& pending : pending_terminals) {
-            if (!post_terminal(pending.token, std::move(pending.inbox), pending.status))
-                return false;
-        }
-        pending_terminals.clear();
-        return true;
+        if (allow_drain)
+            defer_terminals = false;
+        return FakeSharedIoProvider::drain();
     }
-    void cleanup_abandoned_for_test() noexcept {
-        while (!slots_.empty()) {
-            SlotResources resources;
-            resources.opaque = slots_.back();
-            retire_slot(resources);
-            destroy_slot(resources);
-        }
-    }
-    struct PendingTerminal {
-        SlotToken token;
-        std::shared_ptr<SharedIoTerminalInbox> inbox;
-        CompletionStatus status;
-    };
-    std::vector<PendingTerminal> pending_terminals;
-    bool defer_terminals = false, allow_drain = true;
-    bool invalid_lifecycle = false;
-    StorageKind storage_kind = StorageKind::ImportedHostPointer;
-    bool accept_submissions = true;
+
     bool authenticated_identity = false;
-    bool require_program_release = false;
-    bool program_released = false;
-    bool program_destroyed = false;
-    bool retired_before_program_release = false;
-    CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
-    std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
-    std::shared_ptr<FakeLifecycleState> lifecycle_state = std::make_shared<FakeLifecycleState>();
-    std::vector<Slot*> slots_;
 };
 
 class FakePreparedProgram final : public SharedIoPreparedProgram {
   public:
     explicit FakePreparedProgram(FakeProvider& expected) : expected_(expected) {}
     ~FakePreparedProgram() override {
-        expected_.program_destroyed = true;
+        expected_.lifecycle_state->program_destroyed = true;
     }
 
     bool prepare(SharedIoArenaProvider& provider,
@@ -213,13 +65,13 @@ class FakePreparedProgram final : public SharedIoPreparedProgram {
         auto* output = reinterpret_cast<float*>(resources.output);
         for (std::size_t index = 0; index < values; ++index)
             output[index] = input[index] * 3.0f;
-        return expected_.post_terminal(token, std::move(inbox), expected_.terminal_status);
+        return expected_.submit_program(resources, token, std::move(inbox),
+                                        /*apply_transform=*/false);
     }
 
     bool release() noexcept override {
         if (!allow_release)
             return false;
-        expected_.program_released = true;
         expected_.lifecycle_state->program_released = true;
         prepared = false;
         return true;
@@ -834,12 +686,12 @@ TEST_CASE("shared IO prepared program retains generic lifecycle and releases bef
 
     CHECK_FALSE(plan.release());
     CHECK(plan.prepared());
-    CHECK_FALSE(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK_FALSE(provider.lifecycle_state->program_released);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
     control->allow_release = true;
     REQUIRE(plan.release());
-    CHECK(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK(provider.lifecycle_state->program_released);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
 }
 
 TEST_CASE("shared IO prepared program keeps failed preparation alive until cleanup succeeds",
@@ -854,13 +706,13 @@ TEST_CASE("shared IO prepared program keeps failed preparation alive until clean
                              {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16},
                              std::move(program)));
     CHECK(plan.prepared());
-    CHECK_FALSE(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK_FALSE(provider.lifecycle_state->program_released);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
 
     control->allow_release = true;
     REQUIRE(plan.release());
-    CHECK(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK(provider.lifecycle_state->program_released);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
 }
 
 TEST_CASE("shared IO destructor quarantines a program when release cannot prove safety",
@@ -879,10 +731,10 @@ TEST_CASE("shared IO destructor quarantines a program when release cannot prove 
         // transaction instead of destroying the program or retiring its slots.
     }
     REQUIRE(control != nullptr);
-    CHECK_FALSE(provider.program_released);
-    CHECK_FALSE(provider.program_destroyed);
-    CHECK_FALSE(provider.retired_before_program_release);
-    REQUIRE(provider.slots_.size() == 1);
+    CHECK_FALSE(provider.lifecycle_state->program_released);
+    CHECK_FALSE(provider.lifecycle_state->program_destroyed);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
+    REQUIRE(provider.live_slot_count() == 1);
 
     // Test-only reclamation after observing the quarantine. Production has no
     // recovery claim once an owner is destructed with an unproven barrier.
@@ -890,9 +742,9 @@ TEST_CASE("shared IO destructor quarantines a program when release cannot prove 
     REQUIRE(control->release());
     delete control;
     provider.cleanup_abandoned_for_test();
-    CHECK(provider.program_destroyed);
-    CHECK(provider.slots_.empty());
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK(provider.lifecycle_state->program_destroyed);
+    CHECK(provider.live_slot_count() == 0);
+    CHECK_FALSE(provider.lifecycle_state->retired_before_program_release);
 }
 
 TEST_CASE("shared IO bridge never leapfrogs a delayed head", "[gpu_audio][shared_io][p2]") {

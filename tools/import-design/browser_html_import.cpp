@@ -1,6 +1,7 @@
 #include "browser_html_import.hpp"
 
 #include "browser_capture_backend.hpp"
+#include "browser_capture_fonts.hpp"
 #include "browser_capture_ir.hpp"
 #include "browser_capture_provenance.hpp"
 #include "browser_capture_workspace.hpp"
@@ -9,6 +10,10 @@
 #include "html_intake.hpp"
 #include "html_project_stager.hpp"
 
+#include <pulp/view/design_sources.hpp>
+
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 
@@ -237,6 +242,24 @@ BrowserHtmlImportResult import_browser_html(
     if (!sprite_error.empty()) {
         return BrowserHtmlFailure{
             3, std::move(sprite_error), shape, std::move(workspaces)};
+    }
+    // The page's own @font-face faces, so native text is shaped with the
+    // fonts Chromium drew the capture with rather than same-named host faces.
+    if (const auto& sidecar = captured.capture.artifacts->materialized_document) {
+        std::ifstream in(*sidecar, std::ios::binary);
+        const std::string json{std::istreambuf_iterator<char>(in),
+                               std::istreambuf_iterator<char>()};
+        const auto materialized = pulp::view::parse_materialized_browser_document(json);
+        if (!materialized) {
+            return BrowserHtmlFailure{
+                3, "captured materialized document could not be decoded: " + sidecar->string(),
+                shape, std::move(workspaces)};
+        }
+        std::string font_error;
+        if (!attach_captured_font_faces(*lowered.design_ir, *materialized,
+                                        capture_directory / "fonts", font_error)) {
+            return BrowserHtmlFailure{3, std::move(font_error), shape, std::move(workspaces)};
+        }
     }
     return BrowserHtmlCaptured{shape,
                                std::move(*lowered.design_ir),

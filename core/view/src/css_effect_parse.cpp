@@ -140,6 +140,23 @@ std::optional<canvas::Canvas::BlendMode> css_blend_mode(const std::string& keywo
                               : std::optional<BlendMode>(it->second);
 }
 
+bool css_keyword_is_none(std::string_view value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
+        value.remove_prefix(1);
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
+        value.remove_suffix(1);
+    if (value.empty())
+        return true;
+    constexpr std::string_view kNone = "none";
+    if (value.size() != kNone.size())
+        return false;
+    for (std::size_t i = 0; i < kNone.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(value[i])) != kNone[i])
+            return false;
+    }
+    return true;
+}
+
 std::optional<float> css_transform_rotation(const std::string& transform) {
     if (transform.empty()) return std::nullopt;
     constexpr std::string_view kRotate = "rotate(";

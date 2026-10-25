@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -638,6 +639,59 @@ class LicenseVerificationTests(unittest.TestCase):
             [("Catch2", ["inclusion condition", "warranty disclaimer"])],
         )
 
+    def test_unicode_license_is_not_judged_as_truncated_mit(self) -> None:
+        """ICU's notice pairs Unicode-3.0, which grants "to deal in the Data
+        Files or Software" on the condition the notice appear "with all
+        copies", with the older X-style ICU license. Judged by that second
+        block's MIT-like grant, the verbatim entry read as missing MIT's
+        inclusion condition."""
+        self._write_notice(
+            "## ICU\n\nUNICODE LICENSE V3\n\nPermission is hereby granted, "
+            "free of charge, to any person obtaining a copy of data files and "
+            'any associated documentation (the "Data Files") or software and '
+            'any associated documentation (the "Software") to deal in the\n'
+            "Data Files or Software without restriction, ... provided that "
+            "either (a)\nthis copyright and permission notice appear with all "
+            "copies of the Data\nFiles or Software, or (b) ...\n\n"
+            'THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT '
+            "WARRANTY OF ANY KIND.\n\n"
+            # ICU's NOTICE also carries the ICU 1.8.1-57.1 license, an X-style
+            # grant whose condition reads "appear in all copies", which MIT's
+            # inclusion phrase does not match.
+            "ICU License - ICU 1.8.1 to ICU 57.1\n\nPermission is hereby "
+            "granted, free of charge, ... to deal in the Software without "
+            "restriction, ... provided that the above copyright notice(s) and "
+            "this permission notice appear in all copies of the Software ...\n\n"
+            'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.\n'
+        )
+        self.assertEqual(audit.find_notice_truncations(), [])
+
+    def test_truncated_unicode_license_is_flagged(self) -> None:
+        self._write_notice(
+            "## ICU\n\nPermission is hereby granted, free of charge, ... to "
+            "deal in the Data Files or Software without restriction, ...\n"
+        )
+        self.assertEqual(
+            audit.find_notice_truncations(),
+            [("ICU", ["inclusion condition", "warranty disclaimer"])],
+        )
+
+    def test_truncated_mit_beside_a_unicode_entry_is_still_flagged(self) -> None:
+        """Adding the Unicode family must not let a genuinely truncated MIT
+        entry through."""
+        self._write_notice(
+            "## ICU\n\n... to deal in the Data Files or Software without "
+            "restriction ... this copyright and permission notice appear with "
+            'all copies ...\n\nTHE DATA FILES AND SOFTWARE ARE PROVIDED "AS '
+            'IS".\n\n'
+            "## dep\n\nPermission is hereby granted, free of charge, ..., to "
+            "deal in the Software without restriction, ...\n\n"
+            'THE SOFTWARE IS PROVIDED "AS IS".\n'
+        )
+        self.assertEqual(
+            audit.find_notice_truncations(), [("dep", ["inclusion condition"])]
+        )
+
     def test_non_mit_notice_entries_are_left_alone(self) -> None:
         """BSD/Apache/zlib/public-domain entries have no MIT grant line and
         must not be judged against MIT's structure."""
@@ -879,8 +933,10 @@ class LicenseVerificationTests(unittest.TestCase):
             d for d in audit.load_manifest() if d["name"] == "VST3 SDK"
         )
         self.assertEqual(dep["license"], "MIT")
-        self.assertEqual(dep["version"], "v3.8.0_build_66")
-        self.assertEqual(dep["upstream"]["ref"], "v3.8.0_build_66")
+        self.assertEqual(dep["upstream"]["ref"], dep["version"])
+        match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)_build_\d+", dep["version"])
+        self.assertIsNotNone(match, dep["version"])
+        self.assertGreaterEqual(tuple(int(part) for part in match.groups()), (3, 8, 0))
 
     def test_license_files_deduplicated_on_case_insensitive_filesystems(self) -> None:
         """macOS resolves LICENSE.txt and license.txt to one file, which

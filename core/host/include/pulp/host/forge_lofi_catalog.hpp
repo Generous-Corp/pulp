@@ -121,6 +121,7 @@ inline constexpr state::ParamID kCompThresholdDb   = 1;  // "Threshold"
 inline constexpr state::ParamID kCompRatio         = 2;  // "Ratio"
 inline constexpr state::ParamID kCompAttackMs      = 3;  // "Attack"
 inline constexpr state::ParamID kCompReleaseMs     = 4;  // "Release"
+inline constexpr state::ParamID kCompBallistics = 5;     // "Ballistics" (0 branching, 1 decoupled)
 inline constexpr state::ParamID kGateThresholdDb   = 1;  // "Threshold"
 inline constexpr state::ParamID kGateAttackMs      = 2;  // "Attack"
 inline constexpr state::ParamID kGateHoldMs        = 3;  // "Hold"
@@ -335,7 +336,7 @@ CustomNodeType make_reverb_node();
 // node, so a makeup knob here would be clutter.
 //
 // RT-safe: prepare() sets the sample rate (lookahead stays 0, so no allocation);
-// process() only copies the Params struct and runs the scalar per-sample path.
+// process() only copies the Params struct and runs the compressor's buffer path.
 struct CompressorInstance {
     signal::Compressor comp;
 };

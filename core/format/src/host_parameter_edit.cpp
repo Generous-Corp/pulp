@@ -24,9 +24,8 @@ HostParameterEditBridge::HostParameterEditBridge(state::StateStore& store,
     // RT-safety: the guards below return before touching any callback unless
     // the write came from the editor thread, so the audio thread's path through
     // here is a thread-id compare and two thread_local reads.
-    listener_ = store_.add_listener(
-        [this](state::ParamID id, float) { on_value(id); },
-        state::ListenerThread::Audio);
+    listener_ = store_.add_listener([this](state::ParamID id, float value) { on_value(id, value); },
+                                    state::ListenerThread::Audio);
 }
 
 HostParameterEditBridge::~HostParameterEditBridge() {
@@ -47,14 +46,20 @@ void HostParameterEditBridge::on_begin(state::ParamID id) {
     if (callbacks_.begin) callbacks_.begin(id);
 }
 
-void HostParameterEditBridge::on_value(state::ParamID id) {
+void HostParameterEditBridge::on_value(state::ParamID id, float plain) {
     if (!would_report()) return;
     if (!callbacks_.value) return;
-    // ONE snapshot, handed to every consumer of this edit. The old code read
-    // get_normalized() twice — once for performEdit and once for
-    // setParamNormalized — so a write landing between them reported one logical
-    // change as two different values.
-    callbacks_.value(id, store_.get_normalized(id));
+    // The value this write stored, not a re-read: another listener on this
+    // write may already have run a host automation write, and the store would
+    // then hold the host's value rather than the user's.
+    report(id, plain);
+}
+
+void HostParameterEditBridge::report(state::ParamID id, float plain) {
+    // ONE snapshot, handed to every consumer of this edit, so performEdit and
+    // setParamNormalized cannot carry two different values for one change.
+    const auto* info = store_.info(id);
+    callbacks_.value(id, info ? info->range.normalize(plain) : plain, plain);
 }
 
 void HostParameterEditBridge::on_end(state::ParamID id) {
@@ -69,7 +74,8 @@ void HostParameterEditBridge::on_end(state::ParamID id) {
     // on end records where the control actually landed. Emitting both from one
     // place is what stops the two halves from drifting: the adapter used to
     // have a near-copy of this sequence in its end-gesture callback.
-    if (callbacks_.value) callbacks_.value(id, store_.get_normalized(id));
+    if (callbacks_.value)
+        report(id, store_.get_value(id));
     if (callbacks_.end) callbacks_.end(id);
 }
 

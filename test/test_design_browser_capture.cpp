@@ -145,3 +145,23 @@ TEST_CASE("browser capture wire contract rejects unknown or incomplete render mo
                 "faithful_capture node requires capture_asset_id");
     }
 }
+
+TEST_CASE("DesignIR JSON keeps Chromium's sub-pixel layout on large boxes",
+          "[view][import][ir-v1]") {
+    // Chromium lays out in 1/64 px. A stream's default six significant digits
+    // wrote 1006.703125 as 1006.7, so the panel no longer matched its capture.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 1280.015625f;
+    ir.root.style.height = 1006.703125f;
+    ir.root.style.opacity = 0.1f;
+    const auto json = serialize_design_ir(ir);
+    REQUIRE(json.find("\"height\":1006.7,") == std::string::npos);
+    REQUIRE(json.find("\"height\":1006.7031") != std::string::npos);
+    REQUIRE(json.find("\"width\":1280.0156") != std::string::npos);
+    // Shortest text that reads back as the same float, not a padded expansion.
+    REQUIRE(json.find("\"opacity\":0.1") != std::string::npos);
+    const auto parsed = parse_design_ir_json(json);
+    REQUIRE(parsed.root.style.width == ir.root.style.width);
+    REQUIRE(parsed.root.style.height == ir.root.style.height);
+}

@@ -58,6 +58,33 @@ upgrading into a Rust release: it must copy the archive's sibling
 payloads, including `pulp-cpp`, before replacing the running `pulp`
 binary.
 
+## Release archives are verified against `SHA256SUMS` before extraction
+
+Both upgrade paths (Rust `install.rs`, which the shipped `pulp` runs, and
+C++ `cmd_upgrade.cpp` for pre-cutover CLIs) and `pulp sdk install`
+(`cli_sdk.cpp`) fetch the release's `SHA256SUMS` beside the archive and
+refuse to run `tar` unless the archive's digest equals its manifest entry
+(exact basename match, no substring). Expect `Verified SHA-256: <digest>`
+on success. Refusals name the expected and observed digests, or say the
+manifest had no entry / could not be fetched.
+
+- The floor is `checksum_manifest_floor` in
+  `tools/scripts/release_product_matrix.json`, the only place it is written:
+  C++ gets it through `tools/cmake/PulpReleaseMatrix.cmake` into the generated
+  `release_floors_gen.h`; Rust embeds the matrix with `include_str!`. At or
+  above the floor a missing manifest is refused; below it the archive
+  installs with a `WARNING: ... was NOT verified` line. The manifest is
+  verified whenever it is present (it has shipped since v0.619.0); the floor
+  governs only absence: 0.663.1 is the first release whose publish step
+  guaranteed the manifest (`--exact-required`), so from there a missing one
+  is a refusal rather than a warning. Releases 0.653.0 and 0.654.0 shipped
+  without a manifest and still install with the warning.
+- A refusal on a current release is not a reason to pass anything: nothing
+  bypasses the check. Re-download, or check the release page's asset digests.
+- The verifier is header-only (`tools/cli/release_checksum.hpp`) and covered by
+  `pulp-test-cli-release-checksum`; the Rust twin lives in
+  `install/tests.rs`. Keep their messages and rules identical when editing one.
+
 Darwin releases at or above the control-broker floor also carry sibling
 `pulp-control-broker`. The running CLI verifies the staged broker before any
 binary replacement, retains the prior broker until the health-only LaunchAgent
@@ -302,6 +329,24 @@ whole grammar, but a note in `docs/migrations/` may only carry the canonical
 index generator refuses anything else, because an extra `||` arm can show a
 note for an unrelated upgrade while still passing a probe of the boundary
 hops.
+
+**`X` must be the version whose tag first contains the change, not the
+version on `main` when the note was written.** Pulp bumps the version at
+land, so a note authored against the current `CMakeLists.txt` version names a
+release that is already tagged. Its `cli_version_from < X` then excludes every
+user already on `X` or later who is upgrading into the real release, and the
+note is never shown, while the index generator, which only checks that the
+file name matches the `version` field, stays green. Guessing the next version
+instead goes stale whenever another release lands first, and two PRs guessing
+the same one collide on `vX.Y.Z.md`. So a PR never picks `X` (`tools/scripts/migration_note_guard.py` refuses a
+hand-added `vX.Y.Z.md`): it writes
+`docs/migrations/unreleased/<topic>.md` with only `breaking` and `summary`, and
+the version-at-land bump that assigns the SDK version folds it into
+`v<assigned>.md` with the canonical `applies_if`
+(`tools/scripts/fold_migration_notes.py`). A note sitting in `unreleased/` is
+not shown by `pulp upgrade --notes` until that fold; confirm after release that
+`v<assigned>.md` exists and that `git merge-base --is-ancestor <merge> vX.Y.Z`
+is true against that tag and false against the previous one.
 
 ## Common breaking-change patterns
 

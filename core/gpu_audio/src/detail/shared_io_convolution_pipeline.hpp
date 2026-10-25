@@ -58,6 +58,15 @@ class SharedIoConvolutionPipeline {
     SharedIoRecoveryReason recovery_reason() const noexcept {
         return bridge_.recovery_reason();
     }
+    std::uint64_t recovery_sequence() const noexcept {
+        return bridge_.recovery_sequence();
+    }
+    std::uint64_t delivery_epoch() const noexcept {
+        return bridge_.delivery_epoch();
+    }
+    std::uint64_t epoch_first_sequence() const noexcept {
+        return bridge_.epoch_first_sequence();
+    }
     bool complete_callback_delivery(const Callback& callback, SharedIoDeliveryDisposition actual,
                                     std::uint64_t callback_end_ns = 0,
                                     std::uint64_t result_visible_ns = 0) noexcept {

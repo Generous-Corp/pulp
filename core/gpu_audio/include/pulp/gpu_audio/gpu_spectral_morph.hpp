@@ -15,15 +15,21 @@ namespace pulp::gpu_audio {
 /// synthesis. t=0 → A, t=1 → B. Built on the GPU spectral toolkit; not
 /// real-time-safe (blocks on readback) — for the worker / offline use.
 class GpuSpectralMorph {
-public:
+  public:
     /// `shared_device` (optional) reuses an existing GpuCompute so this morph
     /// and a sibling spectral primitive don't each spin up a device; must be
-    /// initialized and outlive the morph. null = create + own a device.
+    /// initialized and outlive the morph. null = create + own a device. The
+    /// device generation is recorded here; capture and render refuse once the
+    /// device is lost or re-initialized (see GpuStft::prepare).
     bool prepare(uint32_t fft_size,
                  signal::WindowFunction::Type window = signal::WindowFunction::Type::hann,
                  render::GpuCompute* shared_device = nullptr);
 
     bool gpu_available() const { return stft_.gpu_available(); }
+    /// False once the prepared device is lost or its generation changed.
+    bool device_usable() const {
+        return stft_.device_usable();
+    }
     uint32_t fft_size() const { return stft_.fft_size(); }
     bool ready() const { return has_a_ && has_b_; }
 

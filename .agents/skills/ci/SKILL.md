@@ -69,6 +69,12 @@ on a real PR. Do them in order.
      One edit can owe BOTH events. A committed event whose rationale is still
      the `<REPLACE: ...>` placeholder also fails here, because CI accepts it.
 
+   - **node ABI virtual order** (`node_abi_gate.py`) — the append-only check
+     covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
+     surface. New GPU-audio virtual hooks belong at the end of that class;
+     inserting one in the middle shifts existing slots even though the SDK
+     remains source-rebuild oriented.
+
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
    on its own for just the Vellum verdict.
@@ -594,6 +600,42 @@ cascade: attribute it with `queue_batch_attribute.py`, and check whether the
 landing batch that produced main's current tree reused a receipt (three steps,
 green, ran nothing) — if it did, main's tree has never been tested.
 
+### Main is red: set the merge-queue circuit breaker while the fix lands
+
+When a test fails on main itself, every group the queue forms inherits it and
+burns a gate VM. The agent opening the fix sets the breaker with one call
+(writing a repository variable needs repo admin, or an App token with
+Variables write):
+
+```bash
+until=$(date -u -v+3H +%Y-%m-%dT%H:%M:%SZ)   # GNU: date -u -d '+3 hours' ...
+ghapp api -X POST repos/Generous-Corp/pulp/actions/variables -f name=PULP_QUEUE_BREAKER \
+  -f value="{\"test\":\"<ctest name>\",\"fix_pr\":<fix-pr>,\"until\":\"$until\"}"
+# lift early, or after the fix lands if you set no fix_pr:
+ghapp api -X DELETE repos/Generous-Corp/pulp/actions/variables/PULP_QUEUE_BREAKER
+```
+
+While it is live, classify fails every merge group (`queue-breaker` error
+annotation, plus a comment on each pull request) that carries neither the fix
+nor a `queue-unblock` label. Gotchas:
+- Only reviewers and team-lead apply `queue-unblock`, and it counts only when
+  the fleet App or a repo admin/maintainer applied it last. The name is exact
+  and case-sensitive; tartci's queue tier reads the same string, so tell the
+  tartci owner before renaming it.
+- Set `fix_pr` to the base health detector's `candidate_fix_pr` (`shipyard
+  base-health --repo Generous-Corp/pulp`, or the `base-poison-signal`
+  artifact) when it names one, so the fix Shipyard would jump is the one the
+  breaker admits; a different `fix_pr` leaves the jumped fix blocked.
+- An `until` more than 3 h ahead is IGNORED, not clamped. Re-set it to extend.
+- The breaker lifts by itself once `fix_pr` merges; with no `fix_pr` it holds
+  until `until` or the delete.
+- It fails open: a malformed value or an unreadable group proceeds with a
+  notice. Read the classify log, not the absence of an error, to confirm it is
+  live. `PULP_QUEUE_BREAKER_CONTROL` (same JSON) is judged report-only on every
+  pull_request classify run, the positive control that the variable arrives.
+- Shipyard's steward does not yet know about it and may re-arm ejected pull
+  requests; each re-arm costs a classify run, not a VM.
+
 ### Main is red: land the fix first by jumping it to the head of the queue
 
 When `base_poison_detector.py` says `poisoned`, or the same failing test name
@@ -617,6 +659,17 @@ title or body names the failing test or the change being reverted. If no fix PR
 exists, open the revert or the one-line fix and jump that. Record the PR, the
 failing test, and how long main was red. Jumping anything else, or switching on
 an automatic jump, is a maintainer decision.
+
+`poisoned` also comes from main's PUSH run: when its Linux leg executed ctest
+on main's tip and failed a test the batch streak shares (proof
+`main-push-linux-failure+batch-streak`). That catches a test that passed when
+its commit landed and fails on main afterwards, which the merge group on the
+tip cannot see; a receipt-reuse green on that merge group used to leave such a
+night `suspected`. `[base_health] auto_jump = "dry-run"` in
+`.shipyard/config.toml` makes `shipyard base-health --act` record "would jump
+PR #n" (host-local `<state>/base-health/jump-decisions.jsonl`) and nothing
+else. Advice needs a decisive `candidate_fix_pr`, so a poisoned base with no
+named fix records nothing; jump by hand as above.
 
 **The pre-approval is narrow.** `GHAPP_ALLOW_QUEUE_REMOVAL=1` is pre-approved
 only to dequeue the fix PR itself so it can be re-enqueued at the front, and only
@@ -868,10 +921,29 @@ CMake-4-only script fails only there).
 ### A Rust step that fails with "toolchain ... is not installed" is the image, not the PR
 
 The `build.yml` build legs set `RUSTUP_AUTO_INSTALL=0`, so a rustup proxy
-never downloads the toolchain `rust-toolchain.toml` names mid-build. If a cargo
-step fails naming a missing toolchain, the runner image or the resolve step
-lacks it: fix the golden (install the manifest's Rust by name), never by
-re-enabling auto-install in the workflow.
+never downloads the toolchain `rust-toolchain.toml` names mid-build.
+`rust-toolchain.toml` is generated from `tools/toolchain/manifest.toml` and
+names an exact Rust (rustup toolchain `1.97.1`, not `stable`, even when
+`stable` is the same release), so a golden that only has `stable` lacks it. The
+"Provide the pinned Rust toolchain" step (`tools/ci/provide_pinned_rust.sh
+--fallback-to-default`) installs it before configure; a `::warning
+title=toolchain::could not install the pinned Rust` means that download failed
+and the job built with the runner default (`RUSTUP_TOOLCHAIN`). Fix the golden
+(install the manifest's Rust by name, as `tools/ci/mise-golden-layer.sh`
+does), never by re-enabling auto-install in the workflow or deleting the step.
+The step logs `rust: branch=present|stable-alias|install|fallback` and writes
+a JSON receipt plus a step summary line. Gate VMs cannot download Rust at all
+(their egress proxy refuses `static.rust-lang.org`: "tunnel error:
+unsuccessful"), and self-hosted legs never fall back, so a gate VM whose image
+has neither the pin by name nor an identical `stable` FAILS the step: rebake
+the golden, do not add a fallback (contract row 29). Only GitHub-hosted legs
+may fall back, loudly and with an uploaded receipt. `rustup toolchain link` cannot alias an official
+release name, which is why an identical `stable` is selected with
+`RUSTUP_TOOLCHAIN=stable` instead.
+
+`.githooks/post-checkout` trusts a new worktree's own `.mise.toml` (null old
+sha and branch flag 1 only) and never fails the checkout. Do not widen it to a
+parent directory or add `trusted_config_paths` roots (contract row 28).
 
 ## Android minimum-API allocation check
 
@@ -1144,7 +1216,17 @@ registration → `wide-non-native-selftest`; any source-selftest lane entry
 script → the `source-selftest-lane-*` contract; a GPU-audio provider-identity
 producer — `core/gpu_audio/CMakeLists.txt`, `PulpGpuAudioProvider*.cmake`, the
 identity script, the deps manifest — → the `pulp-gpu-*` provider probes, whose
-compiled-in Dawn identity no source edge reaches). Direct edges are added even when
+compiled-in Dawn identity no source edge reaches; any file under
+`experimental/pulp-rs/` except its top-level `README.md`/`UPSTREAM_SYNC.md`,
+plus the out-of-crate files it compiles in (`PULP_RS_EXTERNAL_INPUTS`:
+`include_str!`/`include_bytes!` targets and `build.rs` `rerun-if-changed`
+inputs, kept honest by a test that scans the crate) and the hand-listed files
+its tests open at run time (`PULP_RS_TEST_TIME_INPUTS`, the stated coverage
+boundary) → every `pulp-rust-*` test,
+because cargo, not a CMake target, builds that crate, so the projection never
+reaches it and a Rust failure otherwise surfaces only in the merge group; it is
+a required family, so a leg that stops registering those tests fails the step).
+A test is tied to a target when any path its command names is that target's artifact or a bundle directory (`.clap`, `.vst3`, `.app`, ...) holding it, including the value of `-D<VAR>=`, `--flag=` or `NAME=` assignments and `|`/`;` lists (`changed_surface_inventory.command_path_refs`): exact-argument matching alone missed every CMake-script test that takes its binary as `-DCLI=`, so they ran only in the merge group. Direct edges are added even when
 the projection is too wide or the diff is docs-only: tests whose declared inputs
 (`test/ctest_script_inputs.json`) the diff touches, script tests the gates.sh
 rules select, the tests running a program whose own source changed, and the
@@ -1245,6 +1327,19 @@ publishes no `shipyard-receipt-decision` annotation, only a
 near-instant bootstrap. The job writes decision notes for `macos` and `linux`
 in file-name order, so the log prints `linux` first; `shipyard landing` shows
 both.
+
+### Lints `Enforce version & skill sync` runs that pre-push also runs
+
+`text_encoding_lint.py --base` and `migration_note_guard.py --base` run in the
+pre-push hook and `gates.sh` as well as in this job, and
+`script_inputs_precheck.py --base` runs there as a build-free stand-in for the
+`script-test-inputs-drift` ctest: a new script-driven `add_test()` must have a
+`test/ctest_script_inputs.json` entry. It cannot see a stale entry (a script
+that gained an import) or a computed test name; those still need the
+configured check. Three PRs on 2026-10-22
+went red here on the encoding lint after the local gates reported clean,
+because only CI ran it. A new lint in this job that needs no build belongs in
+the hook too.
 
 ### `Enforce version & skill sync` compares against the merge-base
 
@@ -1716,7 +1811,7 @@ too, and the gate names the over-claimed family.
 
 **The authoritative check stays in CI, from a trusted root.**
 `.github/workflows/vellum-trusted-gate.yml` runs the checker from a trusted root
-rather than the pull request's copy, and `.github/CODEOWNERS` locks the events
+rather than the pull request's copy, and `.github/CODEOWNERS` lists the events
 directory, the checker and its test. A local refusal does not weaken that: it
 can only stop a push the required checks would also refuse, and it never
 accepts anything on CI's behalf. The real risk of a local copy is a FALSE red,
@@ -1919,7 +2014,11 @@ turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
 Before regenerating `test/ctest_script_inputs.json` or
 `.shipyard/changed-surface-families.toml`, run that same locked install and
 reconfigure from the gate profile so both materialized-runtime tests remain
-registered.
+registered. `script_test_inputs.py --write` refuses (exit 2, list unchanged)
+when it would delete a checked-in test or executable your configure does not
+produce, such as the generated-name "Pulp UI Script Fixture" executable. Fix
+the configure; pass `--allow-delete` only when the registration really was
+removed.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
@@ -2190,6 +2289,69 @@ a second time) means a new unconditional `FetchContent_Declare` was added
 without a registration and a `setup.sh` priming call.
 `test_setup_source_cache.sh` fails on that drift, and on any `setup.sh` curl
 that lacks `--retry-all-errors`.
+
+### Per-commit `pulp-view-audio` archives are immutable release assets
+
+`view-audio-archive.yml` runs only when dispatched on `main` and builds only
+the commit it runs on, so the commit a consumer re-pins to is whichever `main`
+commit was dispatched. It publishes
+`libpulp-view-audio.a`, its manifest, symbol floor, floor-gate verdict,
+`SHA256SUMS` and the Sigstore bundle as an immutable prerelease tagged
+`artifact/pulp-view-audio/<sha>`. Things that look optional are not:
+
+- **There is no commit input, on purpose.** An input naming the commit to
+  check out made CodeQL's cache-poisoning query fire on the build job (a
+  default-branch job running a checked-out tree that an input chose), and
+  validating the input in an earlier job did not change that. Building
+  `github.sha` removes the input, so an archive exists only for `main` commits
+  someone dispatched it on. It has no push trigger on purpose: a prerelease per
+  `main` push would also crowd SDK versions out of `pulp sdk`'s release list.
+- **The build job must never touch the Actions cache.** It runs this commit's
+  `setup.sh` and build in a job whose actions can write the default branch's
+  cache scope. A contract test fails on any `actions/cache`, `setup-*` action
+  or cache input in that job.
+- **`ZERO_AR_DATE=1` is load-bearing.** Apple `ar`/`ranlib` stamp member and
+  symbol-table times. The workflow's `rebuild` field records a second clean
+  configure and build of the same checkout into a separate build directory on
+  the same runner (`kind: separate-build-dir`); without the variable that
+  second archive differs. It says nothing about another runner image.
+- **The floor and the dependency gate count weak symbols differently, on
+  purpose.** Both read `nm` through `tools/scripts/nm_symbols.py`. The floor
+  is a contamination check and uses `defined_any()` (every type but U/w/v, so
+  weak `W`/`V`, GNU unique `u` and indirect `i` all count): a class's typeinfo
+  or vtable is often weak and is still the archive's. The closure gate uses
+  `defined_strong()`, because two archives emitting the same inline function
+  do not depend on each other.
+- **A consumer must check the ref and the manifest, not just the signature.**
+  `view_audio_archive_manifest.py verify-release --dir <assets> --source-sha
+  <sha> --repository Generous-Corp/pulp` is the whole check in one command, and
+  the publish job runs it on the staged draft before publishing. It runs `gh
+  attestation verify` on all five attested files with `--bundle` (the only
+  reason it works without a token), `--source-ref refs/heads/main` (the only
+  thing that rejects a modified copy of the workflow dispatched from a branch)
+  and `--source-digest <sha>`, then `verify` with the floor, the gate output,
+  `--require-gate-pass` and `--require-identical-rebuild`, which carry what the
+  signature alone does not.
+- **Build and publish are separate jobs.** The build job has `contents: read`
+  and no token or OIDC grant, so nothing `setup.sh` fetches can sign; the
+  publish job re-verifies the uploaded bytes before attesting them. A failing
+  floor gate, or a rebuild that is not byte-identical, stops in the build job
+  before any tag exists.
+- **The tag must stay outside `v*`, and is therefore unprotected.** `v*` is the
+  protected release-tag ruleset and the trigger for `release-cli.yml` /
+  `sign-and-release.yml`; a tag such as `view-audio-...` would match that glob.
+  Because `artifact/*` has no ruleset, the publish job refuses an existing tag
+  or draft that does not point at the commit (or a draft with unexpected
+  assets), creates the tag itself, verifies the staged draft (tag, exact
+  assets, attestation of what was downloaded back) and only then flips
+  `--draft=false`; `immutable: true` can only be checked after that flip. A
+  run that finds the commit already published verifies that release instead
+  of trusting it. Keep the release a prerelease with `--latest=false` so
+  `/releases/latest` and `pulp upgrade` never see it.
+- **Never delete one of these releases.** A published immutable release burns
+  its tag name forever; the workflow refuses to rebuild a commit that already
+  has one, because a second build on a newer runner image is different bytes.
+  Downstream identity is the attested manifest, not a rebuild.
 
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
@@ -2794,6 +2956,15 @@ partial clone, so a local walk there can miscount. Do not re-pin the GPU
 handoff ledger in the PR; the version bot regenerates it. A missing annotation
 on a job that ran the suite means the measurement broke, not that there is
 room.
+
+The same warning also exists as an issue. Each push to main runs the advisory
+`a2t-headroom-issue` job (`a2t_headroom_annotation.py --reconcile-issue`, fed
+by the Linux leg's `a2t-scope-headroom` artifact). It keeps ONE open issue
+titled `a2t-scope-history-headroom: <count>/<limit> ...` from the 60% mark, and
+closes it on the first push after a re-pin. When that issue is open, the re-pin
+is due: do it then. Do not wait for the guard to go red. The job finds its issue by a
+hidden marker. Closing the issue by hand does nothing useful, because the next
+push reopens it while the count stays high.
 
 ## The flake-exoneration shadow annotation exonerates nothing
 
@@ -4454,6 +4625,17 @@ Need Windows on a specific branch before the nightly:
 ghapp workflow run build.yml --ref <branch>
 ```
 
+A `build.yml` dispatch always includes the macOS leg, so it also spends a macOS
+gate VM. When only Windows matters, dispatch the nightly with `windows_only=true`
+instead. To prove a self-hosted Windows runner (the Mac Pro Windows x64 slot), also
+pass `windows_runner_selector_json` with that slot's labels. The schedule has no
+inputs, so the nightly stays on `windows-latest`. A run with either input set skips
+`tracking-issues`, so a red result on a new runner never files or closes the main
+tracking issue. Read where the job actually ran from the job's `runner_name`.
+The selector passes through `tools/scripts/windows_runner_selector.py` first, which
+refuses macOS, Linux, gate-pool and preamble labels. A dispatch with either input set
+runs in its own concurrency group, so it never displaces a pending nightly.
+
 **Before "fixing" this by putting Windows back on merge_group**, note the trade was
 explicit: up to ~24 h of latency on a Windows regression, bought with merge-queue
 capacity. Revisit only if Windows parity becomes an active workstream rather than a
@@ -4562,6 +4744,27 @@ Same idea applies to the self-hosted golden images: bake with the flags CI actua
 uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
+
+- **A path-filtered workflow that runs a Python test must also list the
+  modules that test imports.** `workflow-lint.yml` ran
+  `test_view_audio_archive_manifest.py` only when that test or
+  `view_audio_archive_manifest.py` changed, not when `nm_symbols.py`, which
+  both import, changed. A reader change in `nm_symbols.py` went green on its
+  PR and turned Workflow lint red on `main` at the next push that matched the
+  filter, so every later PR inherited the red. When a workflow step runs a
+  test, add the test's local imports to both its `pull_request` and `push`
+  path lists.
+
+- **Node 20's npm 10 cannot resolve some packages fresh; a lockless `npm
+  install` job reds permanently while passing on a dev machine.** npm 10
+  crashes in `#loadPeerSet` with "Cannot read properties of null (reading
+  'edgesOut')" on vitest 4's optional peer set (jsdom -> canvas); the npm 11
+  on a dev Mac resolves it fine. `@pulp/import-ir` failed this way on every
+  nightly for a week. Give the package a lockfile and use `npm ci`. Generate
+  that lockfile with npm 10 (`npx -y npm@10 install --legacy-peer-deps`):
+  npm 11.19 wrote vitest's nested `@esbuild/*` platform entries without
+  `optional`, so `npm ci` then refused with `notsup` on every other CPU.
+  Reproduce with `npx -y npm@10 ci` before pushing.
 
 - **An hourly-or-faster cron here fires about once every five hours.** GitHub
   delays `schedule` events under load and drops the backlog; daily crons still
@@ -4678,11 +4881,14 @@ bisectable.
 - **Parallel source coverage needs both an LLVM merge pool and a tolerant final merge.** `LLVM_PROFILE_FILE=...%Nm...` must use a pool at least as large as bounded CTest parallelism; plain `%m` is a one-file pool and parallel Linux exits have corrupted its header. In `scripts/run_coverage.sh`, never add `%p`: one profile per test process put tens of thousands of shards on disk at once and filled the hosted Linux runner's root volume mid-suite (75 GB free to 6 GB in about eleven minutes); `%8m` bounds the count at binaries x 8. The pool is keyed by `%m` (module signature), so binaries never share one; `run_coverage.sh` fails a full run closed when the pools cover fewer than half its test binaries, the signature of profiles colliding and being dropped. `tools/scripts/local_diff_cover.sh` keeps `%p-%m`: it has no module-count guard, and an earlier `%Nm` pool there left 7 files for hundreds of binaries. A killed/timed-out test can still truncate one pooled shard, so both hosted and local/SSH scripts merge with `llvm-profdata --failure-mode=all` but fail closed when invalid shards exceed both 25 files and 5% of the pool. Do not revert either half to a single `%m` file or default `failure-mode=any`: one bad shard then blackholes every otherwise-valid report.
 - **Native Linux apt dependencies have one owner.** Workflows that compile native Pulp use `.github/actions/install-linux-build-deps`, backed by `tools/ci/install_linux_build_deps.py` and capability profiles in `tools/ci/linux_build_deps.json`. Toolchains and lane-specific utilities are explicit `extra-packages`; do not add a workflow-named profile. `linux_build_deps_workflows.json` enumerates adopters and intentional direct-apt exclusions, and `test_install_linux_build_deps.py` fails workflow-lint when a new apt workflow is unclassified or an adopter copies canonical packages. Add a shared native dependency to the manifest once; add a one-lane tool at that lane's action call.
 - **`control-shipping-native.yml` proves real installed-SDK artifacts.** Its
-  path-scoped, advisory four-leg matrix builds production-stripped plug-ins on
-  macOS universal, Linux x64/arm64, and Windows x64, then preserves and
-  consolidates canonical scanner evidence. AAX proof is allowed only on a
-  protected-`main` push with the external SDK secret; PRs must report it as
-  unavailable rather than weakening the native matrix. Keep
+  path-scoped, advisory five-leg matrix builds production-stripped plug-ins on
+  macOS universal, Linux x64/arm64, and Windows x64/arm64, then preserves and
+  consolidates canonical scanner evidence. The Windows ARM leg uses the
+  `windows-11-arm` runner and `-A ARM64`; its scanner architecture is
+  `arm64-win`. This is installed-SDK format/architecture evidence with GPU
+  disabled, not Spectr Skia/Dawn, DAW, audio, or Perfetto acceptance. AAX proof
+  is allowed only on a protected-`main` push with the external SDK secret; PRs
+  must report it as unavailable rather than weakening the native matrix. Keep
   `test_control_shipping_native_workflow.py` and
   `test_verify_control_shipping_native_evidence.py` wired into
   `workflow-lint.yml` when changing this contract.
@@ -5042,9 +5248,10 @@ bisectable.
   gitlink), and NUL-bearing/UTF-16 text is skipped as binary. The upstream fix
   for the whole class — the merge tool refusing to commit a conflicted result —
   is tracked in Shipyard #372; this guard is the consumer-side backstop.
-- **Thread-safe-assertions guard (`thread_assert_check.py`).** Catch2 3.7.1's
-  assertion macros are NOT thread-safe (thread-safe assertions are opt-in only
-  from Catch2 3.9.0), so a `REQUIRE`/`CHECK`/`FAIL`/`SUCCEED` inside a
+- **Thread-safe-assertions guard (`thread_assert_check.py`).** Catch2's
+  assertion macros are NOT thread-safe in Pulp's build (thread-safe assertions
+  need the build-time opt-in `CATCH_CONFIG_THREAD_SAFE_ASSERTIONS`, which Pulp
+  leaves off), so a `REQUIRE`/`CHECK`/`FAIL`/`SUCCEED` inside a
   `std::thread` / `std::jthread` / `std::async` lambda in `test/` is undefined
   behavior: it corrupts Catch's per-run assertion counters + section state. Bare
   metal tolerated it, but the move of the required macOS gate onto Tart VMs made
@@ -5216,9 +5423,11 @@ bisectable.
   `runner.sh`, `ccache:` and `configure-checks:`), and PR gate VMs run PR code
   with the same mounts. The FetchContent seed is mounted read-only, but host
   jobs write it. A release that read any of these could link an object or
-  source a PR planted. The configure-check cache is the sharpest of them:
-  `PulpConfigureCheckCache.cmake` `include()`s its files (SDL3 always calls it
-  on Apple), so a planted file runs CMake inside the release configure. Every
+  source a PR planted. The configure-check cache matters too:
+  `PulpConfigureCheckCache.cmake` replays its files (SDL3 always calls it on
+  Apple). It parses them strictly and ignores, with a STATUS line, any file
+  holding a line its writer would not emit, so a planted file cannot run
+  CMake, but a well-formed one still feeds check answers into the configure. Every
   job that signs, notarizes, attests or deploys and also compiles sets
   job-level `CCACHE_DISABLE: "1"` and runs "Isolate the build from shared
   caches" before its first build step. That step uses a fresh `RUNNER_TEMP`
@@ -5900,9 +6109,12 @@ golden its "Ensure a working Rust toolchain on PATH" step exhausts every probe
 release leg — while the bare-metal studios stay green because they have rustup
 from operator setup. That step now **bootstraps rustup as a last resort**
 (`curl … | sh -s -- -y --profile minimal --default-toolchain stable
---no-modify-path`, then front-loads `rustfmt`+`clippy` per
-`rust-toolchain.toml`), so the lane is self-sufficient on any runner; the pin is
-`stable`, so no reproducibility drift vs the studios. Before flipping
+--no-modify-path`), and the next step, `tools/ci/provide_pinned_rust.sh`,
+installs the exact Rust the generated `rust-toolchain.toml` names with its
+components and the `x86_64-apple-darwin` std, so the lane is self-sufficient on
+any runner and builds with the same compiler as every other lane. Never
+`rustup target add` / `component add` at the repo root: that changes the
+DEFAULT toolchain, not the pinned one cargo uses inside the crate. Before flipping
 `PULP_RELEASE_MACOS_RUNS_ON_JSON` to a VM label, either that fallback must be in
 place **or** the golden must bake rustup — otherwise the darwin publish leg
 fails and the whole release never publishes (the `release` job `needs` the full
@@ -5952,7 +6164,11 @@ down this list before touching build code:
    `PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON` and the exclusive
    `pulp-release-pr-gate` label; its legacy fallback to the tagged-release
    selector is migration-only and must remain until the separate selector has
-   been deployed and proven. The TartCI release supervisor scans tagged-release
+   been deployed and proven. A fork pull request never reaches that chain:
+   `resolve_release_runners.py --fork-pr-gate-route` gives it GitHub-hosted
+   `["macos-15"]` and reads no repo variable, because every self-hosted pool
+   on the chain (the `pulp-release-pr-gate` VMs included) shares caches with
+   trusted builds; this is build.yml's fork rule. The TartCI release supervisor scans tagged-release
    demand before PR-gate demand, registers a runner with only the selected
    class label, and force-refreshes higher-priority demand immediately before
    minting a lower-priority runner. GitHub remains FIFO within each class. Do
@@ -6100,6 +6316,23 @@ All three aliases now resolve their runner through `PULP_PREAMBLE_RUNS_ON_JSON`
 an advisory lane can no longer strand a PR by being starved. Do not "simplify"
 one back to `ubuntu-latest` —
 `tools/scripts/test_windows_runner_policy.py` fails if you do.
+
+### GitHub-hosted Windows is opt-in on a push or a build.yml dispatch
+
+A plain `build.yml` dispatch or a push to `main` used to start the
+`Windows (x64) [github-hosted]` leg (and a dispatch the three `windows-latest`
+compile gates), so agents kept landing on hosted Windows without asking for it.
+Now none runs unless the dispatch sets `allow_hosted_windows=true` or a
+self-hosted `windows_runner_selector_json`, or the repository sets
+`PULP_ALLOW_HOSTED_WINDOWS=1`. `android.yml`'s windows row runs only on the
+nightly schedule unless that variable is set (pull requests, merge groups,
+pushes and dispatches leave it out). When adding a job that can run on a `windows-*` label in a
+push-triggered workflow, put `vars.PULP_ALLOW_HOSTED_WINDOWS == '1'` in its
+`if:` (or route it through a resolver and list it in
+`COMPUTED_WINDOWS_ROUTING`): `HostedWindowsOptInTests` in
+`tools/scripts/test_windows_runner_policy.py` scans every workflow and fails
+otherwise. `windows-cli-compile.yml` is the one listed exception, because
+`auto-release.yml`'s pre-tag check reads its push verdict.
 
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
@@ -8865,7 +9098,7 @@ If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them
 
 `ci/visual-harness.Dockerfile` and `.github/workflows/visual-harness.yml`
 provide the deterministic visual-harness smoke environment. The Docker image
-downloads the pinned Skia `chrome/m153` Linux release asset (from the
+downloads the pinned Skia `chrome/m157` Linux release asset (from the
 `danielraffel/skia-builder` fork — adds iOS/visionOS/mac-x86_64 slices the
 upstream `olilarkin/skia-builder` omits), verifies its SHA-256, installs the
 bundled Pulp fonts into fontconfig, and installs `skia-python==144.0.post2`
@@ -8915,6 +9148,14 @@ exported symbols. After the pin lands, each active Mac build host
 must populate its own immutable SHA-addressed generation through the fetcher
 and prove the second fetch is a no-download hit; do not rsync one runner's
 checkout cache to another.
+
+The required `macos` job builds QuickJS only, so V8-specific behaviour (choc's
+V8 value bridge, the sealed provider's API contracts) is exercised only by the
+darwin-arm64 leg of `release-path-pr-gate.yml`: the provider-identity and cube
+capture step, then "Run [js_engine] suite against the sealed V8", which builds
+just `pulp-test-group-script-view` with `PULP_JS_ENGINE=v8` and fails if the V8
+identity case skipped. That leg is advisory, not a required check, so read it
+on any V8 or choc change before landing.
 
 The `macOS local smoke` job resolves `runs-on` from
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` first and falls back to hosted `macos-15` only
@@ -9895,7 +10136,7 @@ version files and changelog are correctly edited. Let `shipyard pr` create
 the bump commit when possible; if you need to repair it manually, use the
 canonical subject `chore: bump versions`.
 
-**Release-workflow VST3 pin:** `sign-and-release.yml` must clone the same Steinberg tag pinned everywhere else in the repo: `v3.8.0_build_66`. The shorthand `v3.8.0` does not exist upstream and will make tag-time macOS release jobs fail before configure/build even start.
+**Release-workflow VST3 pin:** `sign-and-release.yml` must clone the same Steinberg tag pinned everywhere else in the repo: `v3.8.1_build_84`. The shorthand `v3.8.0` does not exist upstream and will make tag-time macOS release jobs fail before configure/build even start.
 
 **Release-workflow ctest must skip the `validation` label (#720):** the `Test` step in `sign-and-release.yml` MUST pass `-LE validation` to ctest. Without it, the suite includes the `auval-Pulp*` tests that copy a fresh `.component` to `~/Library/Audio/Plug-Ins/Components/` and immediately call `auval`. Hosted GitHub macOS runners' `AudioComponentRegistrar` does not pick up the new bundle reliably, so auval returns `Cannot get Component's Name strings / Error -50`, the Test step exits non-zero, and the entire sign / notarize / publish pipeline silently fails. This was the failure mode of the 30+ consecutive sign-and-release runs preceding v0.41.0. The validation gates are owned by `validate.yml` on PR; do not duplicate them into the release workflow. `tools/scripts/test_release_workflow_test_step.py` (wired into `workflow-lint.yml`) is the regression test that prevents reintroduction.
 
@@ -10736,6 +10977,21 @@ Key facts:
   version projection. Any missing script, API/signature error, nested/unknown
   topology, writer drift, extra byte, or ambiguous association retains the full
   native path. The verifier's own PR therefore cannot approve itself.
+- **The bump fast path mostly refused in merge groups, and nothing said why.**
+  On 2026-10-22 only 2 of 13 bump merge groups took it; the rest ran the full
+  `macos` gate (about 9 gate-hours a day). Main had usually moved more than one
+  queue entry past the bump's parent, so `classify` resolved no trusted base and
+  never asked the verifier. `classify` now leaves a `bump-fast-path` notice on
+  every bump run (`taken` or `refused: <reason>`), and
+  `tools/scripts/bump_fastpath_report.py` (weekly in `bump-fastpath-weekly.yml`)
+  counts them. Read that count before changing the verifier, so a fix targets
+  the refusal that actually happens.
+- **Advisory workflows skip the bump.** `coverage.yml`,
+  `control-shipping-native.yml`, `examples-validation.yml` and
+  `intel-portability.yml` AND `github.head_ref != 'release/version-bump'` into
+  every job's `if:`, so bump PRs no longer start hosted Windows, macOS, Linux and
+  coverage runs. A new job in one of them needs the same guard;
+  `test_bump_fastpath.py` fails without it.
 - **PR-event bump runs never fast-path unless `PULP_BUMP_FASTPATH_PR_MERGE_REF=1`.**
   `GITHUB_SHA` on a `pull_request` run is the synthesized `refs/pull/N/merge`
   commit, and a freshly opened bump PR's payload has a null/stale
@@ -11600,6 +11856,60 @@ cases/sec, so the whole PR budget is well under a second and the nightly budget 
 almost for free. Budget the build, not the iterations, and keep `timeout-minutes` on both jobs
 plus `-max_total_time` on libFuzzer.
 
+### Adding a libFuzzer target
+
+Register it under `if(PULP_ENABLE_FUZZING)` in the owning `test/cmake/*_tests.cmake` manifest
+through `pulp_add_libfuzzer_target()` (`tools/cmake/PulpTestSuite.cmake`): it adds the
+executable with the fuzzer+ASan flags and a `<name>-smoke` ctest (labels `fuzz;libfuzzer`) that
+runs a fixed, seeded number of mutations over a seed corpus. The smoke gets a scratch directory
+*first* and the seeds second — libFuzzer writes every new interesting input into the first
+corpus directory it is given, so a checked-in corpus named first is grown by every test run.
+Checked-in seeds live under `test/fixtures/fuzz/<target>/`; a seed that has to be produced by
+the code under test (the plugin-state envelope) comes from a small generator executable that is
+built unconditionally and run as a `FIXTURES_SETUP` ctest only in a fuzzing build. The only
+toolchain probe is the one in `timeline_tests.cmake`; it fails the whole configure, so a target
+registered in a manifest included earlier needs no probe of its own.
+
+Then add the target to **both** lists in `timeline-fuzz.yml`'s `libfuzzer` job — the
+`--target` build list and the `Fuzz` step — and raise `timeout-minutes` if the summed
+`-max_total_time` budget would otherwise exceed it. The `Smoke every libFuzzer target` step
+(`ctest -L libfuzzer`) catches a target whose seeds no longer load before the long budget starts.
+Keep it off the per-PR path: the required gate never configures with `PULP_ENABLE_FUZZING`, and
+the libfuzzer job skips `pull_request`.
+
+**Prove the target before trusting it.** A fuzz target that compiles and runs green has proven
+nothing about reaching the parser. Plant a crash — an `abort()` on a magic byte sequence in the
+parser's entry, e.g. `if (size >= 4 && memcmp(data, "FUZZ", 4) == 0) abort();` — build, run the
+target over its seeds with a short `-max_total_time`, and confirm libFuzzer reports
+`deadly signal` with a `crash-*` reproducer that begins with the magic bytes. Then remove the
+plant. Plant it in the parser's own entry, not in the fuzz target: a plant in
+`LLVMFuzzerTestOneInput` proves only that libFuzzer runs.
+
+On macOS the local recipe is a separate build directory. Two host facts shape
+it. The sysroot must be passed explicitly: CMake leaves `CMAKE_OSX_SYSROOT`
+empty for a non-Apple clang, and the Homebrew libc++ then fails on
+`<pthread.h>` / `<sched.h>` in the very first dependency scan rather than
+anywhere near the fuzz target. And `PULP_FUZZ_SANITIZERS=fuzzer` drops ASan:
+Homebrew `llvm@21`'s ASan runtime deadlocks before `main` on macOS 26
+(`AsanInitFromRtl` → `get_dyld_hdr` → `_Block_copy` → malloc re-enters
+`AsanInitFromRtl` and spins on its init lock), so every ASan binary it
+produces, a one-line `int main` included, sits at 70% CPU forever with a
+2 MB RSS. Apple's clang has a working ASan but no libFuzzer. A target that
+"hangs" at startup on this host is that deadlock, not a slow parser:
+`sample <pid>` shows `StaticSpinMutex::LockSlow` under `__asan::AsanInitFromRtl`.
+The Linux nightly keeps the default `fuzzer,address`.
+
+```sh
+cmake -S . -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm@21/bin/clang \
+  -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm@21/bin/clang++ \
+  -DCMAKE_OSX_SYSROOT="$(xcrun --show-sdk-path)" \
+  -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF \
+  -DPULP_ENABLE_FUZZING=ON -DPULP_FUZZ_SANITIZERS=fuzzer
+tools/ci/governed-build.sh cmake --build build-fuzz --target pulp-fuzz-svg
+ctest --test-dir build-fuzz -L libfuzzer --output-on-failure
+```
+
 ## A new `core/` module needs three separate registrations, revealed one at a time
 
 Landing a new subsystem under `core/` is not one edit. Four places have to agree,
@@ -12364,6 +12674,11 @@ Fix a hit with the other quote character, or bind the expression to a local
 first.
 
 ## Hosted macOS advisory cadence
+
+The TSan workflow's focused SignalGraph selector must retain exact-name entries
+for mailbox and retirement-reader race cases when those cases are extracted or
+renamed. Validate the selected names with `ctest -N` before changing the regex;
+do not broaden the selector to the entire graph suite.
 
 Coverage, Intel portability, SCENE3D, example validation, and the control-shipping
 native matrix are scheduled nightly and dispatched on an approved PR head. The

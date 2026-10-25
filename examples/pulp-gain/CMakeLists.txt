@@ -31,6 +31,31 @@ pulp_add_plugin(PulpGain
     AAX_NATIVE_CODE "PGan"
 )
 
+# PulpGain built without an editor: the UI-less reference for footprint.
+add_subdirectory(headless)
+
+# ── Footprint ─────────────────────────────────────────────────────────────
+# PulpGain carries the default editor, so it links the full view, canvas,
+# Skia/Dawn and JavaScript stack. This holds the size that stack costs per
+# format (mapped segments, excluding the symbol table) and the trimmed ICU
+# data (tools/scripts/plugin_footprint_budget.json, profile "editor").
+if(APPLE AND Python3_EXECUTABLE AND PULP_HAS_SKIA AND PULP_ICU_DATA_SUBSET)
+    set(_pulp_gain_footprint_binaries "")
+    foreach(_fmt VST3 CLAP AU)
+        if(TARGET PulpGain_${_fmt})
+            list(APPEND _pulp_gain_footprint_binaries "$<TARGET_FILE:PulpGain_${_fmt}>")
+        endif()
+    endforeach()
+    add_test(NAME plugin-footprint-PulpGain
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/plugin_footprint_check.py"
+            --profile editor ${_pulp_gain_footprint_binaries})
+    set_tests_properties(plugin-footprint-PulpGain PROPERTIES
+        LABELS "packaging;footprint"
+        TIMEOUT 60
+        SKIP_RETURN_CODE 77)
+endif()
+
 # ── Validation Tests ──────────────────────────────────────────────────────
 
 # CLAP dlopen test
@@ -98,4 +123,33 @@ if(APPLE AND NOT PULP_IOS)
     set_tests_properties(bundle-build-info-PulpGain PROPERTIES
         LABELS "packaging;ship"
         TIMEOUT 60)
+endif()
+
+# Plug-in modules ship dead-stripped on Apple so code no entry point reaches
+# does not land in the binary.
+if(APPLE)
+    foreach(_fmt VST3 AU CLAP)
+        if(TARGET PulpGain_${_fmt})
+            add_test(NAME plugin-module-dead-strip-PulpGain-${_fmt}
+                COMMAND ${CMAKE_COMMAND}
+                    "-DOPTIONS=$<TARGET_PROPERTY:PulpGain_${_fmt},LINK_OPTIONS>"
+                    "-DCONFIG=$<CONFIG>"
+                    -DMODULE=PulpGain_${_fmt}
+                    -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_dead_strip.cmake)
+            set_tests_properties(plugin-module-dead-strip-PulpGain-${_fmt} PROPERTIES
+                LABELS "packaging"
+                TIMEOUT 30)
+            # PulpGain's editor is AutoUi, so its module must not carry the
+            # script runtime.
+            add_test(NAME plugin-module-no-script-runtime-PulpGain-${_fmt}
+                COMMAND ${CMAKE_COMMAND}
+                    "-DBINARY=$<TARGET_FILE:PulpGain_${_fmt}>"
+                    "-DCONFIG=$<CONFIG>"
+                    -DMODULE=PulpGain_${_fmt}
+                    -P ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_no_script_runtime.cmake)
+            set_tests_properties(plugin-module-no-script-runtime-PulpGain-${_fmt} PROPERTIES
+                LABELS "packaging"
+                TIMEOUT 60)
+        endif()
+    endforeach()
 endif()

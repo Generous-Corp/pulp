@@ -4,6 +4,7 @@
 #include "detail/shared_io_host_scheduling.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
+#include "harness/fake_shared_io_provider.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include "support/physical_qualification_outcome.hpp"
 
@@ -67,140 +68,18 @@ SharedIoTraceConfig config(std::uint32_t stride = 4) {
     return value;
 }
 
-class ProductTraceProvider final : public SharedIoArenaProvider {
-    struct Slot {
-        std::uint32_t index = 0;
-        std::vector<std::byte> input;
-        std::vector<std::byte> output;
-        bool retired = false;
-    };
-    struct Pending {
-        SlotToken token;
-        std::shared_ptr<SharedIoTerminalInbox> inbox;
-    };
+using ProductTraceProvider = pulp::test::FakeSharedIoProvider;
 
-  public:
-    bool create_slot(std::uint32_t index, std::size_t input_bytes, std::size_t output_bytes,
-                     SlotResources& resources) noexcept override {
-        try {
-            auto slot = std::make_unique<Slot>();
-            slot->index = index;
-            slot->input.resize(input_bytes);
-            slot->output.resize(output_bytes);
-            resources.input = slot->input.data();
-            resources.input_size = input_bytes;
-            resources.output = slot->output.data();
-            resources.output_size = output_bytes;
-            resources.opaque = slot.get();
-            resources.input_lifecycle = {
-                .allocated = true, .import_attempted = true, .import_succeeded = true};
-            resources.output_lifecycle = resources.input_lifecycle;
-            slots_.push_back(std::move(slot));
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    void retire_slot(SlotResources& resources) noexcept override {
-        if (auto* slot = static_cast<Slot*>(resources.opaque))
-            slot->retired = true;
-        resources.input_lifecycle.dispose_observed = true;
-        resources.output_lifecycle.dispose_observed = true;
-    }
-
-    void destroy_slot(SlotResources& resources) noexcept override {
-        auto* slot = static_cast<Slot*>(resources.opaque);
-        std::erase_if(slots_, [slot](const auto& candidate) { return candidate.get() == slot; });
-        resources.input_lifecycle.host_freed = true;
-        resources.output_lifecycle.host_freed = true;
-        resources.opaque = nullptr;
-    }
-
-    bool acquire_slot_buffers(const SlotResources& resources,
-                              SlotBufferHandle& handle) const noexcept override {
-        const auto* slot = static_cast<const Slot*>(resources.opaque);
-        if (!slot || slot->retired)
-            return false;
-        handle = {.provider = this,
-                  .device = this,
-                  .input_buffer = slot->input.data(),
-                  .output_buffer = slot->output.data(),
-                  .slot = slot->index,
-                  .generation = 1,
-                  .lifetime = lifetime_};
-        return true;
-    }
-
-    bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override {
-        return handle.provider == this && handle.device == this && !handle.lifetime.expired() &&
-               std::any_of(slots_.begin(), slots_.end(), [&](const auto& slot) {
-                   return !slot->retired && handle.slot == slot->index &&
-                          handle.input_buffer == slot->input.data() &&
-                          handle.output_buffer == slot->output.data();
-               });
-    }
-
-    bool submit(const SlotResources& resources, SlotToken token,
-                std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept override {
-        return submit_program(resources, token, std::move(inbox));
-    }
-
-    bool can_resume_after_drain() const noexcept override {
-        return true;
-    }
-    void poll() noexcept override {}
-
-    bool drain() noexcept override {
-        if (!allow_drain)
-            return false;
-        complete_all();
-        return pending_.empty();
-    }
-
-    bool submit_program(const SlotResources& resources, SlotToken token,
-                        std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept {
-        ++submits;
-        if (!accept_submissions)
-            return false;
-        const auto bytes = std::min(resources.input_size, resources.output_size);
-        std::memcpy(resources.output, resources.input, bytes);
-        pending_.push_back({token, std::move(inbox)});
-        return true;
-    }
-
-    void complete_sequence(std::uint64_t sequence) noexcept {
-        const auto found =
-            std::find_if(pending_.begin(), pending_.end(), [sequence](const auto& item) {
-                return item.token.stream_sequence == sequence;
-            });
-        if (found == pending_.end())
-            return;
-        const auto pushed = found->inbox->push(found->token, terminal_status);
-        if (pushed == SharedIoTerminalInbox::PushResult::Accepted)
-            pending_.erase(found);
-    }
-
-    void complete_all() noexcept {
-        for (auto cursor = pending_.begin(); cursor != pending_.end();) {
-            const auto pushed = cursor->inbox->push(cursor->token, terminal_status);
-            if (pushed == SharedIoTerminalInbox::PushResult::Accepted)
-                cursor = pending_.erase(cursor);
-            else
-                ++cursor;
-        }
-    }
-
-    bool accept_submissions = true;
-    bool allow_drain = true;
-    CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
-    std::uint32_t submits = 0;
-
-  private:
-    std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
-    std::vector<std::unique_ptr<Slot>> slots_;
-    std::vector<Pending> pending_;
-};
+// Copies input to output at submission; each terminal is published only when
+// the test completes its sequence, and drain() retires what is left.
+std::unique_ptr<ProductTraceProvider> make_product_trace_provider() {
+    auto provider = std::make_unique<ProductTraceProvider>();
+    provider->transform = ProductTraceProvider::Transform::Affine;
+    provider->transform_at_submit = true;
+    provider->drain_completes = true;
+    provider->resume_supported = true;
+    return provider;
+}
 
 class ProductTraceProgram final : public SharedIoPreparedProgram {
   public:
@@ -243,7 +122,7 @@ struct ProductTraceFixture {
         trace.retention_capacity = retention_capacity;
         trace.enabled = true;
 
-        auto owner = std::make_unique<ProductTraceProvider>();
+        auto owner = make_product_trace_provider();
         provider = owner.get();
         auto program = std::make_unique<ProductTraceProgram>(*provider);
         REQUIRE(session.prepare(
@@ -1188,10 +1067,65 @@ TEST_CASE("diagnostic overflow never refuses physical session submissions", "[gp
         fixture.provider->complete_sequence(sequence);
         REQUIRE(fixture.session.service(0).completions == 1);
     }
-    REQUIRE(fixture.provider->submits == submissions);
+    REQUIRE(fixture.provider->lifecycle_state->submits == submissions);
     REQUIRE(fixture.session.trace_stats().dropped > 0);
     REQUIRE(fixture.session.trace_stats().admissions_dropped > 0);
     REQUIRE(fixture.session.trace_stats().invalid == 0);
+}
+
+TEST_CASE("observer-backed session release validates the closing telemetry receipt",
+          "[gpu_audio][trace][observer][telemetry]") {
+    ProductTraceFixture fixture;
+    fixture.prepare();
+    SessionObserverSink sink;
+    const SharedIoTraceDrainObserver observer{.context = &sink,
+                                              .record = &SessionObserverSink::record,
+                                              .admission = &SessionObserverSink::admission};
+    REQUIRE(fixture.session.set_trace_observer(&observer));
+    drive_two_deliveries(fixture);
+    // Negative control: a drain while producers may still run defers.
+    const auto live = fixture.session.drain_trace();
+    CHECK_FALSE(live.telemetry_valid);
+    CHECK(live.telemetry_error == SharedIoTelemetryError::TelemetryValidationDeferred);
+
+    REQUIRE(fixture.session.release());
+    const auto closed = fixture.session.last_close_trace_drain();
+    CHECK(closed.recording_enabled);
+    CHECK(closed.telemetry_valid);
+    CHECK(closed.telemetry_error == SharedIoTelemetryError::None);
+}
+
+TEST_CASE("session close without an observer drains every row into the closed census",
+          "[gpu_audio][trace][telemetry]") {
+    ProductTraceFixture fixture;
+    fixture.prepare();
+    drive_two_deliveries(fixture);
+    REQUIRE(fixture.session.release());
+    REQUIRE_FALSE(fixture.session.last_closed_trace_retention_overflow());
+    const auto closed = fixture.session.last_close_trace_drain();
+    CHECK(closed.telemetry_valid);
+    CHECK(closed.telemetry_error == SharedIoTelemetryError::None);
+    const auto admissions = fixture.session.take_last_closed_trace_admissions();
+    const auto records = fixture.session.take_last_closed_trace_records();
+    REQUIRE(admissions.size() == 2);
+    REQUIRE(records.size() == 6);
+    for (std::uint64_t sequence = 0; sequence < 2; ++sequence) {
+        for (const auto kind : {Kind::Terminal, Kind::Eligible, Kind::Delivery}) {
+            CHECK(std::count_if(records.begin(), records.end(), [&](const auto& r) {
+                      return r.kind == kind && r.sequence == sequence &&
+                             (kind != Kind::Terminal || r.admission_identity_matched);
+                  }) == 1);
+        }
+    }
+
+    // A one-row retention bound keeps a bounded prefix and reports the loss.
+    ProductTraceFixture bounded;
+    bounded.prepare(1);
+    drive_two_deliveries(bounded);
+    REQUIRE(bounded.session.release());
+    CHECK(bounded.session.last_closed_trace_retention_overflow());
+    CHECK(bounded.session.take_last_closed_trace_records().size() == 1);
+    CHECK(bounded.session.take_last_closed_trace_admissions().size() == 1);
 }
 
 TEST_CASE("trial retention drains fixed queues without dropping a long census",
@@ -1327,6 +1261,12 @@ TEST_CASE("GPU audio trace persists authoritative positive and planted invalid c
             event.sequence = 0;
             recorder.publish_callback(event);
             drain_shared_io_trace(recorder, {}, 256);
+            // Planted impossible quiescent counters: more retirements than
+            // submissions must surface as an invalid_telemetry issue.
+            SharedIoTelemetrySnapshot forged;
+            forged.retired_failure = 1;
+            REQUIRE(drain_shared_io_trace(recorder, forged, 0, nullptr, true).telemetry_error ==
+                    SharedIoTelemetryError::RetirementsExceedSubmissions);
             for (std::uint64_t sequence = 1000;
                  sequence < 1000 + SharedIoTraceRecorder::capacity + 44; ++sequence) {
                 terminal = record(sequence);
@@ -1340,6 +1280,32 @@ TEST_CASE("GPU audio trace persists authoritative positive and planted invalid c
         REQUIRE(stopped.ok);
         REQUIRE(stopped.trace_bytes > 0);
     }
+}
+
+TEST_CASE("trace drain marks impossible telemetry receipts invalid",
+          "[gpu_audio][trace][telemetry][negative]") {
+    SharedIoTraceRecorder recorder(config());
+    // Positive control: a coherent quiescent snapshot validates through the
+    // same drain, so the rejection below is caused by the forged counters.
+    SharedIoTelemetrySnapshot coherent;
+    coherent.admitted_blocks = 1;
+    coherent.submitted_blocks = 1;
+    coherent.retired_failure = 1;
+    const auto accepted = drain_shared_io_trace(recorder, coherent, 0, nullptr, true);
+    CHECK(accepted.telemetry_valid);
+    CHECK(accepted.telemetry_error == SharedIoTelemetryError::None);
+
+    SharedIoTelemetrySnapshot forged;
+    forged.submitted_blocks = 0;
+    forged.retired_failure = 1;
+
+    const auto result = drain_shared_io_trace(recorder, forged, 0, nullptr, true);
+    CHECK_FALSE(result.telemetry_valid);
+    CHECK(result.telemetry_error == SharedIoTelemetryError::RetirementsExceedSubmissions);
+
+    const auto live = drain_shared_io_trace(recorder, forged, 0);
+    CHECK_FALSE(live.telemetry_valid);
+    CHECK(live.telemetry_error == SharedIoTelemetryError::TelemetryValidationDeferred);
 }
 
 TEST_CASE("session trace producers preserve identities across callback and service threads",

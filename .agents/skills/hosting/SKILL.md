@@ -1775,14 +1775,126 @@ manufacturer, name, version, last_path) plus a base64 state blob from
 
 Two-pass deserialize: instantiate every node (mapping old → new
 NodeId), then walk connections and replay `connect / connect_midi /
-connect_feedback / connect_automation`. Plugin re-resolution is
-scanner-identity-first; missing plugins surface in
-`LoadResult::missing_plugins` and the corresponding nodes are still
-created with null slots so connection ids stay stable. `GraphNode`
-gained a `plugin_info` member that survives a failed slot load so
-re-saving an unresolved-plugin node preserves its identity.
+connect_feedback / connect_automation`. Missing plugins surface in
+`LoadResult::missing_plugins` (as `FORMAT:unique_id (reason)`) and the
+corresponding nodes are still created with null slots so connection ids stay
+stable. `GraphNode` has a `plugin_info` member that survives a failed slot
+load so re-saving an unresolved-plugin node preserves its identity.
+
+### Plugin nodes resolve against known roots — `last_path` is a hint
+
+The file names each plugin node's `last_path`. `from_json` never loads that
+path as given: a graph from anywhere could otherwise `dlopen` any library on
+the machine (CLAP/VST3/LV2 loaders open whatever path they are handed). The
+rule, in order, per `GraphLoadOptions`:
+
+1. **Audio Units** keep the component-registry lookup by identity; the path
+   is never opened.
+2. `load_plugins = false` keeps every plugin node an unresolved placeholder
+   with its identity and opens nothing. `pulp bake` sets it: baking refuses
+   Plugin nodes anyway, so loading one would run code for nothing.
+3. If `last_path` exists and its real path (symlinks resolved, both sides
+   canonical, `runtime::is_within_directory`) lies inside a **known root** —
+   `PluginScanner::default_paths(format)` unless
+   `include_default_plugin_roots = false`, plus `plugin_roots` — it is
+   loaded, unless `blacklist` records it. After the load the slot's
+   `info().unique_id` must equal the node's; a bundle that now holds some
+   other plugin is refused with the two ids in the reason. (The CLAP and LV2
+   loaders report the descriptor that actually loaded, not the requested id,
+   so this check can see a swap.)
+4. Otherwise, **only if `scan_mode` says so**, the known roots are enumerated
+   (once per format per load, through `PluginScanner::scan_report` against
+   the caller's own `blacklist` object, so crash and timeout verdicts land
+   where the caller persists them, and through the caller's `scan_cache`, so
+   an unchanged bundle is never handed to a worker twice) and a bundle with
+   the same `(format, unique_id)` is loaded from its own path. Hand in a
+   `HostScanCache` whenever a graph may be loaded more than once: without
+   one a stale `last_path` costs one worker per installed bundle on every
+   load. With a cache and no worker, cached bundles still resolve. `GraphPluginScanMode::none` is the default and
+   enumerates nothing: a scan runs every installed CLAP's entry point, and
+   the default `from_json` call sits inside hosts, tests and the required CI
+   gate. `isolated_only` scans through the worker and reports the node
+   missing when no worker exists. `allow_in_process` additionally runs CLAP
+   entry points in this process when no worker exists; only a tool that
+   already runs plugin code in-process by design should pick it.
+5. Otherwise the node is listed in `missing_plugins` with the reason and is
+   not loaded — unless `allow_unrooted_plugin_paths` is set, which loads
+   `last_path` as given and logs a warning. No shipped CLI flag sets it; it
+   exists for a `pulp host`-style caller whose operator named the path.
+
+A caller that stages its own plugin folder registers it in `plugin_roots`
+rather than opting out: the opt-out trusts every path in the file. Tests and
+hermetic tools set `include_default_plugin_roots = false` so a load never
+touches the machine's installed collection. The resolution cases live in
+`test/test_graph_plugin_resolution.cpp`; the probe fixture
+(`test/fixtures/scan_probe_clap.cpp`) writes a marker file when it is loaded,
+which is how a test tells "refused" from "opened and failed", and the
+"default options never enumerate" case is the one that keeps the default
+honest.
 
 ## Crash-isolated scanning — and the un-isolated LOAD
+
+`PluginScanner::scan` enumerates each CLAP bundle in a disposable
+`pulp-scan-worker` child by default: `scan_directory` hands every `.clap` to
+`IsolatedPluginScanner`, consumes `ScanResult::descriptors` (every descriptor
+the bundle lists, with the same `PluginInfo` fields an in-process scan fills),
+and on `Crash`/`Timeout` records the bundle in `ScanOptions::blacklist` so the
+next scan never opens it. VST3 and LV2 scans read metadata only and stay
+in-process; AU goes through the component registry. The pieces:
+
+- **Worker discovery** — `find_scan_worker()`: `ScanOptions::scan_worker_path`,
+  then `PULP_SCAN_WORKER`, then `pulp-scan-worker` beside the running
+  executable or under `bin/` / `tools/scan-worker/`, walking up to four
+  parents (installed SDK, build tree, `build/test/` binaries) but stopping
+  at an `.app` bundle and at the first directory that holds `bin/`, so
+  `/Applications` siblings and other install prefixes are never candidates.
+  A candidate that is group- or world-writable is refused with a warning:
+  whoever can write it runs code in every scan. An explicit or environment
+  path that does not exist or does not qualify resolves to nothing.
+- **No worker means no CLAP enumeration, not in-process enumeration.**
+  `scan_report()` returns `clap_skipped_no_worker` plus an `error` naming
+  the fix; `scan()` logs it and returns what the other formats found. The
+  default `from_json` call and `pulp scan` both land in processes that must
+  not run plugin code they did not ask for (a DAW hosting the plugin, the
+  required CI gate), so there is no fallback. `pulp scan` prints the
+  guidance to pass `--in-process`.
+- **In-process on purpose** — `ScanOptions::in_process_clap`
+  (`pulp scan --in-process`) is the only way CLAP entry points run in the
+  scanning process. The worker itself scans this way through
+  `PluginScanner::scan_bundle(path, format)`, which enumerates exactly one
+  bundle: scanning the bundle's whole directory in the worker would let a
+  crashing neighbour take the worker down and get the innocent bundle
+  blacklisted for it.
+- **Worker output** — one flat JSON object per descriptor per line, parsed
+  with `choc::json` in `isolated_scanner.cpp`. The worker `dup`s its stdout
+  and points fd 1 at stderr *before* any plugin code runs, then writes the
+  descriptors to the saved descriptor, so a plugin that prints from
+  `clap_entry.init` (the probe fixture does) cannot land inside the
+  protocol. Output past the capture cap, or a line that does not parse, is
+  `ScanStatus::ProtocolError`: a worker/transport fault that the scanner
+  logs and does **not** blacklist, unlike `Crash`/`Timeout`. Adding a
+  `PluginInfo` field means emitting it in `scan_worker_main.cpp` *and*
+  reading it in `parse_descriptor_line`, or the isolated and in-process
+  results diverge; `test_isolated_scanner.cpp` compares the two field by
+  field.
+- **Scan cache** — `ScanOptions::scan_cache` (`HostScanCache`) is consulted
+  before any CLAP bundle goes to a worker and fed with the result when the
+  bundle enumerates to exactly one descriptor (the cache holds one
+  `PluginInfo` per path, so multi-plugin bundles are always re-enumerated).
+  Without a worker, cached bundles are still listed; only uncached ones are
+  skipped and `clap_skipped_no_worker` still reports it.
+- **File stamps for bundle directories** — `ScanBlacklist` and `HostScanCache`
+  both key an entry by the bundle's mtime/size. A macOS bundle is a
+  directory, whose own mtime and size never move when the binary inside is
+  rebuilt, so both stamp through `core/host/src/bundle_file_stamp.hpp`,
+  which picks the largest regular file under the bundle (the executable).
+  Before that, a directory blacklist entry could never expire and a
+  directory cache entry could never hit.
+- **Blacklist ownership** — the blacklist a caller passes is the one that
+  receives crash entries. `examples/plugin-host-demo` scans against a
+  *snapshot* copy of its persistent blacklist (to keep the UI thread off the
+  live map), so crash entries recorded during a background rescan live only
+  in that copy until the host merges them back.
 
 Isolation covers **discovery**. `PluginSlot::load()` is in-process, and a
 plug-in can fault inside its own factory or `initialize()` — before `load()`
@@ -2054,7 +2166,7 @@ it with the index, so adding an unindexed pack or retaining an entry for a
 removed pack fails closed. Downstream consumers should derive their Pulp catalog
 header set from this index instead of maintaining another manual list.
 
-Three things bite when adding a pack:
+These bite when adding a pack:
 
 - **A control signal is an ordinary audio port.** The convention across every
   pack is a unipolar `[0, 1]` signal on a normal port — a source declares
@@ -2080,6 +2192,23 @@ Three things bite when adding a pack:
   `#include`, the name in the list, **and** `N`. Forgetting `N` is a compile error,
   so it fails closed; it is only worth knowing so the error reads as expected rather
   than mysterious.
+
+- **A node that reads its controls once per block should call the DSP class's
+  buffer overload, not loop over its per-sample one.** The graph is only as fast as
+  the node body: a `signal::*` class can gain a vectorized block path and a baked
+  graph sees none of it if the node still calls `process(sample)` per sample. The
+  compressor nodes (lo-fi, sidechain, multiband) were in exactly that state, running
+  at the per-sample cost while direct `Compressor::process(buffer, n)` users got
+  roughly 2.5x. Copy into the output and process in place; a multi-band split
+  writes each band into stack scratch in fixed-size chunks so the node never
+  allocates and never depends on the prepared block size. Two things to keep:
+  a node whose output buffer can alias a SECOND input (a sidechain key) must not
+  copy the main input over it before detection; and a node that retunes per sample
+  (the lo-fi SVF nodes take `value_at(id, k)` every sample for sample-accurate
+  sweeps) cannot take a block path at all, because `BakedParamView` cannot report
+  that a control held still for the block. Pin a block-path node to its DSP class
+  driven directly, over irregular block sizes and with the output aliasing each
+  input (`test_forge_spectral_dynamics_catalogs.cpp`).
 
 **A CV pack works in VOLTS, and that is a deliberate exception to the `[0,1]`
 convention above.** `forge_eurorack_utility_catalog.hpp` holds the modular

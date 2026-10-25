@@ -1,0 +1,16 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-css-gradient-dither",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "vellum_obligation": "When the Pulp canvas target adopts Vellum, dither every fill and stroke paint whose shader is a gradient (linear, radial, elliptical radial, two-point conical, sweep/conic, including repeating forms) on both the raster and Graphite backends, and leave image-pattern shaders undithered, so a shallow CSS gradient renders as Chromium's row noise rather than flat bands.",
+  "evidence": [
+    ".github/vellum-change-events/20261022-css-gradient-dither.json",
+    "CSS linear gradient background is dithered on Graphite",
+    "CSS linear gradient background is dithered on the Skia raster backend",
+    "Gradient dither measure separates dithered from banded Skia output",
+    "pulp-planning research/2026-10-22-gradient-dither-oracle.md (Chrome oracle capture and banding metric)",
+    "set_paint_shader leaves image shaders undithered"
+  ]
+}

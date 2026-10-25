@@ -711,6 +711,141 @@ ghapp api repos/Generous-Corp/pulp/actions/runners \
 Its 2 GB fits beside one build slot and the 10 GB Windows VM, but a second
 build slot does not, so check `macpro-governor.sh status` before enabling one.
 
+### The Windows x64 slot
+
+macpro also runs one Windows x64 runner. It owns a single VM and resets it to a
+golden snapshot before and after every job, instead of cloning: a Windows guest
+with the MSVC toolchain is a 130 GB disk set, so a clone per job would exhaust
+the thin pool. Nothing a job writes reaches the next job, and a job cannot change
+the golden.
+
+| | |
+|---|---|
+| Unit | `pulp-windows-ephemeral-pool@1.service` |
+| Supervisor | `tools/ci/proxmox-ephemeral-runner-windows.sh` → `/usr/local/sbin/pulp-windows-ephemeral-runner.sh` |
+| Profile | `/etc/pulp/windows-runner-1.env`: `PULP_WINDOWS_VMID=300`, `PULP_WINDOWS_GOLDEN_SNAPSHOT=<name>` |
+| VM | VMID 300, 4 cores, 9216 MB, Windows Server 2022 evaluation, LAN DHCP |
+| Labels | `["self-hosted","Windows","X64","pulp-build-windows-x64","pulp-host-macpro"]` |
+| Routing | `PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON`, dispatch only; distinct from the ARM64 QEMU `PULP_LOCAL_WINDOWS_*` lanes |
+
+Each invocation:
+
+1. Waits while any registration named `pulp-win-ephemeral-<vmid>-*` is busy
+   (exit 75), and deregisters idle leftovers through the same fence as the Linux
+   supervisor.
+2. Stops the VM and rolls it back to the golden snapshot.
+3. Asks `macpro-governor.sh can-start <vmid>` for admission. A refusal waits about
+   five minutes, then exits 75.
+4. Boots the VM, reads its address from the QEMU guest agent, and connects over
+   SSH as an administrator. The guest's host key is pinned under the alias
+   `pulp-windows-vm-<vmid>` in `/var/lib/pulp/windows-runner/known_hosts`.
+5. Mints a repository-scoped JIT configuration with the existing runner
+   credential, writes it into the guest over stdin, and runs one job.
+6. Fences the registration and rolls back again.
+
+The VM belongs to the slot. Anything else that stops it (`qm shutdown 300` from
+another tool or session) kills the running job. The supervisor watches the VM
+while a job runs. When it stops without the supervisor stopping it, the
+supervisor ends the job wait at once, then fences and resets as usual. It
+reports what stopped the VM in three places:
+
+- the journal line `VM 300 stopped externally during the job: ...`;
+- syslog, tag `pulp-windows-runner`;
+- one line per event in `/var/lib/pulp/windows-runner/external-stops.log`.
+
+Each report names the Proxmox stop task with its user and time, and every
+address that opened a root SSH session in the two minutes before it:
+
+```sh
+ssh macpro tail /var/lib/pulp/windows-runner/external-stops.log
+```
+
+It registers at repository scope, like the generic Linux pool, so it serves only
+workflows that name its labels. Labels reserved for automatic PR routing
+(`pulp-auto-*`, `pulp-pr-safe-*`) are refused.
+
+Memory is sized so the slot fits beside both Linux build slots and the preamble
+slot: 8192 + 8192 + 2048 + 9216 MB is within the governor's 27968 MB, so a cycling
+Linux slot is always re-admitted. Do not raise the VM's memory without rechecking
+`macpro-governor.sh status`.
+
+#### What the golden snapshot carries
+
+- the toolchain (VS Build Tools, CMake, Ninja, Git with bash, Python with a
+  `python3` alias, LLVM `clang++`, which `setup.sh` probes for a C++20 compiler);
+- the x64 Actions runner at `B:\actions-runner`, on the second disk, which
+  Defender excludes;
+- `root@macpro`'s key in `C:\ProgramData\ssh\administrators_authorized_keys`;
+- every root-folder scheduled task disabled, and Windows Update set to
+  `NoAutoUpdate`, so the image cannot change itself during a job;
+- long paths enabled, for Windows and for Git.
+
+`qm rollback` reverts every disk of the VM, the 30 GB `B:` disk included: a marker
+file written to both `C:` and `B:` before a rollback was gone from both after it.
+Recheck that if a disk is ever added outside `local-lvm`, because a disk on
+storage without snapshots would carry state from one job to the next.
+
+#### What the golden removed from the earlier interactive VM
+
+VM 300 was used interactively before it became a CI slot. Its state at that point
+is the snapshot `pre-ci-dedicate-20261022`. To recover anything below without
+disturbing the CI slot, make a full clone from that snapshot
+(`qm clone 300 <new-vmid> --snapname pre-ci-dedicate-20261022 --full`, after
+checking thin-pool room with `macpro-governor.sh status`). The golden changed
+only this:
+
+- **Scheduled tasks disabled (none deleted):** `CaptureCurrent`, `ci-setup`,
+  `CodexIntelAudio20261018`, `DialogOnce`, `DismissCleanX64UI20261015`,
+  `DismissReaperModalX6420261015`, `DismissReaperModalX6420261015b`, `Enum4104`,
+  `Enum5512`, `EnumOnce`, `GuiProbe`, `GuiProbe2`, `GuiTest`, `IntelEnumNow`,
+  `IntelTest`, `LuaProbe`, `MicrosoftEdgeUpdateTaskMachineCore`,
+  `MicrosoftEdgeUpdateTaskMachineUA`, `OpenActionsX6420261015`,
+  `OpenCurrentProject`, `pulp-build`, `PulpCloseDialogs`, `PulpReaperInteractive`,
+  `PulpSourceRefreshWeekly`, `PulpSpectrX64Smoke`, `PulpTsconTemp`,
+  `PulpVS18UpdateWeekly`, `PulpVSUpdateWeekly`, `ScreenshotOnce`,
+  `SpectrCurrentNormalOnce`, `SpectrCurrentProjectOnce`, `SpectrCurrentUIOnce`,
+  `SpectrCurrentX64Diagnose20261017`, `SpectrCurrentX64Exact20261017`,
+  `SpectrCurrentX64Exact20261017b`, `SpectrCurrentX64PackageSmoke`, `SpectrEnum`,
+  `SpectrIntelLive`, `SpectrIntelLiveD0`, `SpectrIntelShot`,
+  `SpectrNormalScanEditorX6420261015`, `SpectrReaperCurrentProject`,
+  `SpectrReaperInteractive`, `SpectrReaperWetProject`,
+  `SpectrRunLua2X6420261015`, `SpectrRunLua3X6420261015`,
+  `SpectrRunLuaX6420261015`, `SpectrTaskProbe`, `SpectrX64CreateDry20261015`,
+  `SpectrX64CreateWet20261015`, `SpectrX64DummyRender20261015`,
+  `SpectrX64EmptyRender20261015`, `SpectrX64OfflineRender20261015`,
+  `SpectrX64RenderDismiss20261015`, `SpectrX64RenderPid20261015`,
+  `SpectrX64SmokeInteractive`.
+- **Deleted from `C:`:** `C:\pulp-probe` (an earlier build trial, 19 GB).
+- **Deleted from `B:` (`PulpBuildCache`), every top-level entry:** the Pulp
+  FetchContent caches (`pulp-fetchcontent`, `pulp-fc-cache-20261015`), the Pulp
+  and Spectr build, package, install-backup, REAPER and diagnostic trees dated
+  2026-10-13 to 2026-10-17, `vst3sdk`, `skia-m153-x64-20261015`, `receipts`,
+  `temp`, and the loose `.cmd`/`.ps1`/`.log`/`.zip`/`.patch`/`.bundle`/`.dmp`
+  files beside them.
+- **Kept:** every user account, including `ci` and `pulp-rdp`, and their profiles;
+  `C:\ci-setup`; the Spectr trees on `C:`; the installed toolchains.
+
+#### Refreshing the golden
+
+Because nothing updates itself, the golden goes stale on purpose. To refresh it:
+
+```sh
+ssh macpro systemctl stop pulp-windows-ephemeral-pool@1    # waits for a running job
+ssh macpro 'qm rollback 300 <current-golden> && /usr/local/sbin/macpro-governor.sh can-start 300 && qm start 300'
+# Update in the guest over SSH: VS installer update, runner version, tools.
+# Verify: cl, clang++, cmake, ninja, python3, bash and git all answer, and
+# B:\actions-runner\bin\Runner.Listener.exe --version prints the new version.
+ssh macpro 'qm shutdown 300 && qm snapshot 300 ci-runner-golden-<YYYYMMDD> --description "<what changed>"'
+# Point the slot at it, then restart.
+ssh macpro "sed -i 's/^PULP_WINDOWS_GOLDEN_SNAPSHOT=.*/PULP_WINDOWS_GOLDEN_SNAPSHOT=ci-runner-golden-<YYYYMMDD>/' /etc/pulp/windows-runner-1.env"
+ssh macpro systemctl start pulp-windows-ephemeral-pool@1
+```
+
+Use a new dated name every time and keep the previous snapshot until a job has
+run green on the new one; rolling back to it is the recovery. The evaluation
+license expires 180 days after installation (`slmgr /dlv` shows the time left),
+so install a fresh evaluation into a new golden before then.
+
 ## Windows runs nightly, not per merge
 
 Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
@@ -730,6 +865,27 @@ Need Windows on a specific change before the nightly? Dispatch it:
 ```sh
 ghapp workflow run build.yml --ref <branch>
 ```
+
+A `build.yml` dispatch always includes the macOS leg, so it also takes a macOS gate
+VM. To run only the full Windows suite, dispatch the nightly instead. Its Windows
+job takes an optional runner selector, which is how the Mac Pro Windows x64 slot is
+proven without touching the gate hosts:
+
+```sh
+ghapp workflow run cross-platform-check.yml --ref <branch> -f windows_only=true \
+  -f windows_runner_selector_json='["self-hosted","Windows","X64","pulp-build-windows-x64","pulp-host-macpro"]'
+```
+
+The schedule passes no inputs, so the nightly stays on `windows-latest`. A run with
+either input set never opens or closes the per-platform tracking issues, because
+it did not measure the nightly's configuration.
+
+A small `Resolve Windows runner` job checks the selector before any runner is
+chosen. It runs `tools/scripts/windows_runner_selector.py`, which refuses anything
+that is not a Windows selector, such as macOS or Linux labels, the gate pool, or
+the preamble slot, so a pasted selector cannot put a Windows build on a gate VM.
+Such a dispatch also gets its own concurrency group per run, so a long proof on
+`main` never holds back a pending nightly.
 
 This is a deliberate trade: up to ~24 h of latency on a Windows regression, in
 exchange for merge-queue capacity and spend. Revisit if Windows parity becomes an
@@ -2050,7 +2206,40 @@ expected versions (exit 3), becomes a warning annotation, never a failed step.
 The build legs also set `RUSTUP_AUTO_INSTALL=0`: a rustup proxy would
 otherwise download, mid-build, whatever toolchain `rust-toolchain.toml` names
 when the runner lacks it. With it off, a missing toolchain fails the cargo step
-by name, and the image or the resolve step has to provide it.
+by name, and the image or the resolve step has to provide it. The
+"Provide the pinned Rust toolchain" step is that resolve step:
+`tools/ci/provide_pinned_rust.sh --fallback-to-default` runs before configure
+and logs which branch it took as `rust: branch=<name>`:
+
+- `present`: the image has the exact Rust the generated
+  `experimental/pulp-rs/rust-toolchain.toml` names, with its components and
+  targets. Nothing to do; the steady state once the golden bakes the pin by
+  name.
+- `stable-alias`: the image's `stable` is that same release with every pinned
+  part, so the job selects it by name (`RUSTUP_TOOLCHAIN=stable`) with no
+  download. rustup refuses to `toolchain link` an official release name, so
+  this is how an identical `stable` stands in for it.
+- `install`: rustup downloads the pin, before the build, with three spaced
+  retries.
+- `fallback`: the download failed on a GitHub-hosted leg. The step warns,
+  naming both versions, writes a step summary line, uploads its receipt as the
+  `rust-toolchain-fallback-<leg>` artifact, and sets `RUSTUP_TOOLCHAIN=stable`
+  (or the runner default) for the rest of the job.
+
+Every branch writes a JSON receipt (`$RUNNER_TEMP/pulp-rust-toolchain.json`:
+pinned, branch, toolchain, rustc, reason, attempts) and the step outputs
+`branch` and `receipt`. The fallback is refused, and the step fails, on a
+self-hosted leg (the required gate's VMs) and on a pull request that changes
+`experimental/pulp-rs`. The gate VMs reach the network through a proxy that
+refuses `static.rust-lang.org`, so they can never download the pin: their
+images must carry it by name (`present`) or as an identical `stable`
+(`stable-alias`), and a gate log showing `install` means the golden drifted.
+When tartci bakes the pin by name into the live golden, the next change
+removes `--fallback-to-default` from `build.yml` and every leg fails closed
+(decisions contract row 29). A cargo without rustup (Homebrew Rust) ignores
+`rust-toolchain.toml`; the step warns and receipts it as `no-rustup`. The
+release lanes (`release-cli.yml`, `release-path-pr-gate.yml`) run the same
+script without the fallback.
 
 ## Build-time Node dependencies are installed before the build, never inside it
 
@@ -2514,8 +2703,10 @@ last 60 push runs were cancelled with zero jobs started, and the Linux/Windows
 cache-save steps ran at most once per stuck window. With the leg omitted, a push
 run finishes on hosted runners and the caches publish on every merge.
 
-`a2t-protected-event`, the one other push-only job, runs on GitHub-hosted
-`macos-15` for the same reason: its verifier needs only macOS, git and python3.
+`a2t-protected-event`, a push-only job, runs on GitHub-hosted `macos-15` for the
+same reason: its verifier needs only macOS, git and python3. `a2t-headroom-issue`,
+the other push-only job, runs on `ubuntu-latest`; it only reads an artifact and
+calls the GitHub API.
 `tools/scripts/test_fork_pr_runner_routing.py` (run by `workflow-lint.yml`,
 which installs PyYAML) walks every `build.yml` job reachable on push and fails
 if any routes to a runner that is not a GitHub-hosted label or a hosted lane
@@ -2596,6 +2787,31 @@ its reason names the tip. The signal says which source it used and carries
 `main_head_sha`. Batches are judged the same way, newest head first, so a batch
 counts toward the streak when any required context failed on it.
 
+**main's push run is evidence too.** A push to main runs the Linux leg of
+`Build and Test` on main's exact commit (no macOS leg, and none of the other
+required contexts). When that leg's test step ran and it failed a test that the
+batch streak also shares, the verdict is `poisoned` with proof
+`main-push-linux-failure+batch-streak`, even when the merge group that landed
+the commit was green. That is the shape of a test that passes when its commit
+lands and fails on main afterwards: on 2026-10-23 main's tip `5489bbad` landed
+through a green merge group, its push run then failed
+`gpu-trace-overhead-acceptance-selftest` on Linux, and eleven consecutive
+batches failed the same test on macOS, while the detector read `healthy`.
+The failing names come from the leg's `ctest-logs-linux` artifact. The streak
+keeps a Linux-only failure out (the batches run macOS, so a test only Linux
+fails is never in their shared set), a leg that ran no test step is not
+evidence, and a green push run is never read as health. The signal carries
+`main_push_run_id`, `main_push_execution` and `main_push_failing_tests`.
+`tools/ci/fixtures/base_poison_2026-10-23.json` replays that night.
+
+**Shipyard reads the signal.** `.shipyard/config.toml` sets
+`[base_health] auto_jump = "dry-run"`: `shipyard base-health --act` records
+"would jump PR #n" once per poisoned episode that names a `candidate_fix_pr`,
+in `<state>/base-health/jump-decisions.jsonl` on the host that runs it, and
+changes nothing. `on` (dequeue the fix and re-enqueue its head with
+`jump: true`) stays off until it checks a trusted approval on the head it
+enqueues and survives a failed re-enqueue.
+
 Failing test names come from wherever the failing context records them: for
 `macos`, the `ctest-logs-macos` **artifact**
 (`Testing/Temporary/LastTestsFailed.log`); for a context that uploads no
@@ -2616,7 +2832,8 @@ and a `base-poison-signal` artifact. Fields: `status`, `proof`,
 `main_failing_contexts`, `main_contexts` (one `{context, state, conclusion,
 source, run_id, tests}` per required context), `batch_streak`,
 `batch_streak_tests`, `batch_streak_contexts`, `batch_streak_heads`,
-`batch_streak_runs`, `candidate_fix_pr`, `likely_culprits`,
+`batch_streak_runs`, `main_push_run_id`, `main_push_execution`,
+`main_push_failing_tests`, `candidate_fix_pr`, `likely_culprits`,
 `required_contexts_source`, `reason`. Fields are only ever added under
 `base-poison-signal/v1`; Shipyard's reader keys on `schema`, `status` and
 `safe_to_pause_queue`.
@@ -2635,7 +2852,7 @@ was judged, and `macos-only-fallback` when branch protection could not be read
 | `healthy` | every required context passed on main's tree and `macos` ran the suite | false |
 | `unproven` | a required context is still running, missing, or `macos` ran nothing — main's health is unmeasured | false |
 | `suspected` | a streak, or a main failure not shared by a streak (or naming no test) | false |
-| `poisoned` | a required context failed a test on main that a streak of consecutive executed batches also failed | **true** |
+| `poisoned` | a required context, or the executed Linux leg of main's push run, failed a test on main that a streak of consecutive executed batches also failed | **true** |
 
 `safe_to_pause_queue` is the only field a consumer should act on. It is true for
 `poisoned` and for nothing else.
@@ -2770,6 +2987,27 @@ fork PRs, non-bump branches, stale bases, force-push races, and merge commits
 with extra content all keep the full path. The variable is read by the
 workflow, never by PR content; a base verifier that predates the flag rejects
 it and the run keeps the full path.
+
+Every run on the release bot's bump reports the outcome as a `bump-fast-path`
+notice on the `classify` job, and in its step summary: `taken`, or `refused:`
+followed by the reason. The reason is the verifier's own line (`verifier: ...`),
+`shape: no trusted verifier base` when the group or pull-request base resolves
+no trusted base (for example, main moved more than one queue entry past the
+bump's parent, a case the verifier is never asked about), or `the protected
+base has no verifier`. Only the bump is reported; other runs print nothing.
+`tools/scripts/bump_fastpath_report.py` counts the notices
+(`--days 7` by default), and `.github/workflows/bump-fastpath-weekly.yml` runs
+it every Monday into its job summary. A run from before the notice existed
+counts as `unreported`, never as taken.
+
+The four advisory workflows that `pull_request: auto_merge_enabled` starts
+(`coverage.yml`, `control-shipping-native.yml`, `examples-validation.yml`,
+`intel-portability.yml`) skip every job on `release/version-bump`: the bump's
+tree is main's plus version files, which they already ran on, and none of
+their contexts is required. Each job's condition is
+`github.head_ref != 'release/version-bump' && (<its own condition>)`, so every
+other pull request, schedule and dispatch runs exactly as before. This also
+keeps bump pull requests off GitHub-hosted Windows runners.
 
 The current provenance boundary is GitHub's valid SSH-signature record plus the
 `danielraffel` signer/account and exact release-bot author/committer identity.
@@ -3310,6 +3548,18 @@ measurement is missing after the suite ran. The fix is always the re-pin in
 decisions contract row 22: move only `A2T_SCOPE_HISTORY_BASE` on protected
 main, never the limit.
 
+An annotation is easy to miss, and main once reached the 75% failure with the
+warning printed and unread. So every push to main also keeps one tracking
+issue. The Linux leg uploads the measurement as the `a2t-scope-headroom`
+artifact, and the advisory `a2t-headroom-issue` job runs
+`tools/ci/a2t_headroom_annotation.py --reconcile-issue`. From the same 60% mark
+(headroom below 20% of the guard's budget), it opens the issue, or updates it in
+place. The title carries the check name, the count and limit, and the re-pin,
+and the body the full instruction. The job closes the issue on the first push
+after a re-pin brings the count back under. The issue is found by a hidden
+marker, so a hand-written issue with the same title is never touched, and a
+missing measurement never opens or closes it.
+
 ## A2T evidence receipts get a nonterminal required-job attestation
 
 When a pull-request head targeting `Generous-Corp/pulp` `main` adds or modifies the exact tracked
@@ -3481,6 +3731,30 @@ fetch of the base branch) fails the group with an error naming the pull request
 or group, the error and the fix (re-run the classify job, or re-queue). A
 stalled queue is the deliberate lesser harm. Only a base branch that does not
 carry the check yet passes, with a notice.
+
+After the HOLD check, the classify job runs the merge-queue circuit breaker,
+the protected base branch's copy of `tools/ci/queue_breaker.py check-group`.
+While the `PULP_QUEUE_BREAKER` repository variable holds
+`{"test": "<ctest name>", "fix_pr": <N>, "until": "<UTC ISO-8601>"}`, it fails
+every merge group that carries neither `fix_pr` nor a `queue-unblock` label
+last applied by the fleet App or a repository admin or maintainer, before any
+VM, through the same classify-fails-`macos`-closed path as the HOLD check. It
+fails the group rather than skipping it: a skipped required job reads as
+green, which would merge untested code. The breaker is inactive when the
+variable is unset, once `until` passes, once `fix_pr` has merged, and when
+`until` is more than three hours ahead (ignored, so a forgotten variable cannot
+hold the queue for long); deleting the variable lifts it at once. Anything it
+cannot read lets the group proceed, since the breaker only saves VMs. Up to two
+groups may already be past classify when the variable is set; they run and
+fail as before. The separate `queue-breaker-notify` job, which checks out only
+the protected base branch and holds the only `pull-requests: write` token,
+comments the reason on each blocked pull request once per breaker state. On
+pull_request events classify judges `PULP_QUEUE_BREAKER_CONTROL` the same way
+but report-only, against the pull request itself, so a run log proves the
+variable reaches the check. Shipyard's steward must not re-arm pull requests
+the breaker ejects while it is open; until it honours the breaker, a re-armed
+pull request costs a classify run, not a VM. Tests:
+`tools/ci/test_queue_breaker.py` (ctest `queue-breaker-selftest`).
 
 Who may sign the fleet App's approvals is set in `.shipyard/config.toml`:
 `[auto_merge] reviewer_signers = ["pulp-review", "infra-review2"]`. Every
@@ -5645,7 +5919,7 @@ These are the same inputs already documented above; they are listed
 here for completeness alongside the repo-variable knobs.
 
 For a trusted Linux-only Mac Pro proof during hosted saturation, disable the
-otherwise-default hosted Windows leg explicitly:
+Windows leg explicitly:
 
 ```bash
 gh workflow run build.yml --ref <trusted-branch> \
@@ -5654,7 +5928,29 @@ gh workflow run build.yml --ref <trusted-branch> \
 ```
 
 This switch affects only `workflow_dispatch`; automatic events keep their
-documented matrix policy, and ordinary manual dispatches still include Windows.
+documented matrix policy.
+
+GitHub-hosted Windows is opt-in. A `build.yml` dispatch or a push to `main`
+schedules no hosted Windows job (the `Windows (x64)` leg and the three
+`windows-latest` compile gates) unless one of these is set:
+
+- `-f allow_hosted_windows=true` on the dispatch;
+- `-f windows_runner_selector_json=...` naming a self-hosted runner (a list
+  with `"self-hosted"`), which runs the leg there, not on a hosted image;
+- the repository variable `PULP_ALLOW_HOSTED_WINDOWS=1`, which also lets a push
+  run it.
+
+`resolve-provider` prints `resolve-provider: Windows leg omitted: GitHub-hosted
+Windows is opt-in ...` when it leaves the leg out, and the advisory `windows`
+alias then passes with that line. `android.yml` leaves its `windows-latest`
+row out on every event but the nightly schedule unless
+`PULP_ALLOW_HOSTED_WINDOWS=1`; no required context reads it. `windows-cli-compile.yml` is the one
+listed exception: its push verdict on `main` is the release backstop
+`auto-release.yml`'s pre-tag check reads. Schedules and pull requests keep
+their documented Windows policy. `tools/scripts/test_windows_runner_policy.py`
+(`HostedWindowsOptInTests`) scans every workflow and fails on a job that can
+start a hosted `windows-*` runner on a push, or a `build.yml` dispatch, without
+`vars.PULP_ALLOW_HOSTED_WINDOWS == '1'` in its condition.
 
 ### Reverting
 

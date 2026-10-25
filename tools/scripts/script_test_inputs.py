@@ -90,8 +90,22 @@ REPO_PREFIXES = ("tools/", "test/", "hooks/", ".githooks/", ".github/", "docs/",
                  "core/", "examples/", "templates/", "inspect/", "experimental/", "cmake/", "external/")
 LITERAL_RE = re.compile(r"""["'](?P<p>(?:%s)[A-Za-z0-9_./@+-]+)["']""" % "|".join(re.escape(p) for p in REPO_PREFIXES))
 NODE_IMPORT_RE = re.compile(r"""(?:from\s+|import\s*\(?\s*|require\s*\(\s*)["'](?P<s>\.{1,2}/[^"']+)["']""")
+# Node test files `node --test` may list after the first one.
+NODE_SOURCE_SUFFIXES = (".mjs", ".js", ".cjs")
 SHELL_SOURCE_LINE_RE = re.compile(r"""^\s*(?:source|\.)\s+(?P<rest>.+)$""")
 SHELL_TAIL_RE = re.compile(r"""(?P<f>[A-Za-z0-9_./-]+\.(?:sh|bash))["']?\s*$""")
+# A shell script usually names repository files through a directory variable
+# it derived from its own location (`REPO_ROOT="$(cd "$(dirname
+# "${BASH_SOURCE[0]}")/../.." && pwd)"`), never as a bare quoted literal, so
+# `"$REPO_ROOT/setup.sh"` must resolve through the variable. Only variables
+# bound to a directory the script's own location (or git) determines resolve;
+# a temp or fixture directory stays opaque.
+SHELL_ASSIGN_RE = re.compile(r"""^\s*(?:(?:export|local|readonly|declare)\s+(?:-[A-Za-z]+\s+)*)?(?P<var>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.+?)\s*$""")
+SHELL_SELF_DIR = r"""\$\(\s*dirname\s+["']?(?:\$\{BASH_SOURCE\[0\]\}|\$\{BASH_SOURCE\}|\$BASH_SOURCE|\$0|\$\{0\})["']?\s*\)"""
+SHELL_VAR_REF = r"""\$(?:\{(?P<b>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<v>[A-Za-z_][A-Za-z0-9_]*))"""
+SHELL_DIR_EXPR_RE = re.compile(r"""^(?:(?P<self>%s)|%s|(?P<git>\$\(\s*git\s+(?:-C\s+\S+\s+)?rev-parse\s+--show-toplevel\s*\)))(?P<rel>/[A-Za-z0-9_./-]*)?$""" % (SHELL_SELF_DIR, SHELL_VAR_REF))
+SHELL_CD_PWD_RE = re.compile(r"""^\$\(\s*cd\s+(?P<expr>.+?)\s*&&\s*pwd(?:\s+-P)?\s*\)$""")
+SHELL_VAR_PATH_RE = re.compile(SHELL_VAR_REF + r"""(?P<rel>/[A-Za-z0-9_./@+-]+)""")
 
 
 def _rel(path: Path, root: Path) -> str | None:
@@ -329,6 +343,7 @@ class Walker:
         self._in_repo_memo: dict[Path, bool] = {}
         self._imports_memo: dict[Path, list[tuple] | None] = {}
         self._literals_memo: dict[Path, list[Path]] = {}
+        self._shell_var_memo: dict[Path, list[Path]] = {}
 
     # -- resolution helpers -------------------------------------------------
     def _in_repo(self, p: Path) -> bool:
@@ -448,6 +463,63 @@ class Walker:
                     self.walk_shell(cand, seen)
                     break
         self.literal_paths(entry, seen)
+        if entry not in self._shell_var_memo:
+            self._shell_var_memo[entry] = self._shell_var_paths(entry, text)
+        seen.update(self._shell_var_memo[entry])
+
+    def _shell_dir(self, expr: str, entry: Path, dirs: dict[str, Path]) -> Path | None:
+        """The directory a shell expression names, when the script's own
+        location, git, or an already-resolved variable determines it."""
+        expr = expr.strip()
+        if len(expr) >= 2 and expr[0] == expr[-1] and expr[0] in "\"'":
+            expr = expr[1:-1]
+        m = SHELL_CD_PWD_RE.match(expr)
+        if m:
+            return self._shell_dir(m.group("expr"), entry, dirs)
+        m = SHELL_DIR_EXPR_RE.match(expr)
+        if not m:
+            return None
+        if m.group("self"):
+            base = entry.parent
+        elif m.group("git"):
+            base = self.root
+        else:
+            base = dirs.get(m.group("b") or m.group("v") or "")
+            if base is None:
+                return None
+        rel = (m.group("rel") or "").strip("/")
+        out = Path(os.path.normpath(base / rel)) if rel else base
+        return out if _rel(out, self.root) is not None else None
+
+    def _shell_var_paths(self, entry: Path, text: str) -> list[Path]:
+        # Bindings are read in source order, so a read resolves against the
+        # binding in force on its line.
+        dirs: dict[str, Path] = {}
+        found: list[Path] = []
+        for line in text.splitlines():
+            for m in SHELL_VAR_PATH_RE.finditer(line):
+                base = dirs.get(m.group("b") or m.group("v") or "")
+                if base is None:
+                    continue
+                cand = Path(os.path.normpath(base / m.group("rel").strip("/")))
+                rel = _rel(cand, self.root)
+                if rel is None or rel in (".", ""):
+                    continue
+                if rel.startswith("docs/") and not rel.startswith("docs/status/"):
+                    continue
+                if cand.exists():
+                    found.append(cand)
+            m = SHELL_ASSIGN_RE.match(line)
+            if not m:
+                continue
+            d = self._shell_dir(m.group("value"), entry, dirs)
+            if d is not None and d.is_dir():
+                dirs[m.group("var")] = d
+            else:
+                # Reassigning to something unresolvable (a temp dir) unbinds
+                # the name rather than keeping the old directory.
+                dirs.pop(m.group("var"), None)
+        return found
 
     def literal_paths(self, entry: Path, seen: set[Path]) -> None:
         if entry not in self._literals_memo:
@@ -579,6 +651,11 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
     for a in args:
         for cand in (Path(a), wd / a):
             if cand.is_absolute() and w._in_repo(cand):
+                # `node --test a.mjs b.mjs ...` runs every listed file, so each
+                # one's imports are inputs, not only the first file's. Walk
+                # before adding: walk_node skips a file already in `seen`.
+                if kind == "node" and cand.suffix in NODE_SOURCE_SUFFIXES and cand.is_file():
+                    w.walk_node(cand, seen)
                 seen.add(cand)
     if tracked is None:
         tracked = tracked_paths(root)
@@ -701,9 +778,11 @@ def _read_json(path: Path) -> dict | None:
 
 def source_signals(root: Path, rel: str, defines: list[str]) -> list[str]:
     """The data-read signals a source's text carries: the fixed ones plus the
-    names of its executable's definitions that point into the checkout."""
+    names of its executable's definitions that point into the checkout. A
+    mention inside a comment is not a read."""
     try:
-        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        text = strip_c_comments((root / rel).read_text(encoding="utf-8", errors="replace"),
+                                keep_strings=True)
     except OSError:
         return []
     hits = [sig for sig in DATA_SIGNALS if sig in text]
@@ -1157,6 +1236,18 @@ def carry_unconfigured_entries(current: dict, checked_in: dict, inventory: dict,
     return sorted(set(carried))
 
 
+def entries_write_would_delete(current: dict, checked_in: dict) -> list[str]:
+    """Checked-in test and executable names absent from what --write would
+    write, after unconfigured entries were carried. Main's list holds every
+    gate-shaped configuration's entries, so a name missing here is either a
+    registration that was removed or one this configure simply cannot see; the
+    two look identical from here, so --write refuses unless told."""
+    gone = set((checked_in.get("tests") or {})) - set(current.get("tests") or {})
+    if "executables" in current:
+        gone |= set((checked_in.get("executables") or {})) - set(current["executables"])
+    return sorted(gone)
+
+
 def load_inventory(build_dir: str | None, inventory_json: str | None) -> dict | None:
     try:
         if inventory_json:
@@ -1313,6 +1404,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--base", default=None, help="diff-scope --check to changes since this ref "
                     "(default: PULP_SCRIPT_INPUTS_BASE, origin/$GITHUB_BASE_REF, or HEAD^1 in a merge group)")
     ap.add_argument("--full", action="store_true", help="--check every entry, ignoring any base")
+    ap.add_argument("--allow-delete", action="store_true",
+                    help="let --write remove checked-in entries this configure does not produce "
+                         "(only when their registration was really removed)")
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
@@ -1370,6 +1464,18 @@ def main(argv: list[str]) -> int:
         except (OSError, json.JSONDecodeError):
             previous = {}
         carried = carry_unconfigured_entries(current, previous, inventory, root, build_dir)
+        dropped = entries_write_would_delete(current, previous)
+        if dropped and not a.allow_delete:
+            print("script-test-inputs: refusing to write: it would delete "
+                  f"{len(dropped)} checked-in entr{'y' if len(dropped) == 1 else 'ies'} this configure "
+                  "does not produce: " + ", ".join(dropped) + ". A configure that cannot see an "
+                  "entry (an option off, a fixture it does not build) must not remove it; "
+                  f"file={DEFAULT_LIST}; cause_class=UNSEEN_ENTRY_DELETION; "
+                  "fix=regenerate from the gate's configure, or pass --allow-delete if the "
+                  "registration was really removed; safe_to_auto_apply=no; "
+                  "verify=`git diff --stat test/ctest_script_inputs.json` shows no removed entry",
+                  file=sys.stderr)
+            return 2
         list_path.parent.mkdir(parents=True, exist_ok=True)
         list_path.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         print(f"script-test-inputs: wrote {len(current['tests'])} declared tests "

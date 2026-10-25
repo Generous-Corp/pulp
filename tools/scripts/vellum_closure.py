@@ -906,6 +906,253 @@ def receipt_path_violations(document: dict) -> list[str]:
 
 BUILD_TIMESTAMP_PLACEHOLDER = "<build-timestamp>"
 
+PRELUDE_SOURCE = "@build/core/view/web_compat_preludes_gen.cpp"
+PRELUDE_HEADER = "@build/core/view/web_compat_preludes_gen.hpp"
+
+
+def prelude_inputs(source: Path) -> list[Path] | None:
+    """Return the ordered JS inputs declared by the prelude producer."""
+    producer = source / "core/view/cmake/PulpViewJsPreludes.cmake"
+    encoder = source / "core/view/js/embed_js.py"
+    if not producer.is_file() or not encoder.is_file():
+        return None
+    try:
+        with producer.open("r", encoding="utf-8", newline="") as handle:
+            text = handle.read()
+    except (OSError, UnicodeError):
+        return None
+    cmake_ws = " \t\r\n"
+    # Comments are the only tolerated variation.  Parse balanced CMake
+    # invocations after removing comments, then compare the complete command
+    # recipe.  Marker searches are insufficient: they accept duplicate
+    # APPENDs, changed NAME_WE/NAME, extra outputs, or a commented producer.
+    # Strip comments in one lexical pass.  Bracket comments are recognized
+    # only outside quoted arguments, so ``#`` and ``#[=[...]=]`` in a quoted
+    # CMake string remain data.  An unterminated quote or bracket comment is
+    # malformed input and must fail closed.
+    def strip_comments(value: str) -> str | None:
+        output: list[str] = []
+        index = 0
+        quote = False
+        escaped = False
+        while index < len(value):
+            char = value[index]
+            if quote:
+                output.append(char)
+                index += 1
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    quote = False
+                continue
+            if char == '"':
+                quote = True
+                output.append(char)
+                index += 1
+                continue
+            bracket_argument = re.match(r"\[(=*)\[", value[index:])
+            if bracket_argument:
+                closing = "]" + bracket_argument.group(1) + "]"
+                content_start = index + bracket_argument.end()
+                content_end = value.find(closing, content_start)
+                if content_end < 0:
+                    return None
+                end = content_end + len(closing)
+                output.append(value[index:end])
+                index = end
+                continue
+            if char == '#':
+                bracket = re.match(r"#\[(=*)\[", value[index:])
+                if bracket:
+                    closing = "]" + bracket.group(1) + "]"
+                    content_start = index + bracket.end()
+                    content_end = value.find(closing, content_start)
+                    if content_end < 0:
+                        return None
+                    index = content_end + len(closing)
+                    # Keep bracket comments opaque.  CMake does not permit a
+                    # command to follow a closing ')' until a real newline;
+                    # replacing this comment with '\n' would manufacture one.
+                    output.append("\x00")
+                    continue
+                newline = value.find("\n", index)
+                if newline < 0:
+                    break
+                output.append("\n")
+                index = newline + 1
+                continue
+            output.append(char)
+            index += 1
+        if quote or escaped:
+            return None
+        return "".join(output)
+
+    uncommented = strip_comments(text)
+    if uncommented is None:
+        return None
+
+    def commands(value: str) -> list[tuple[str, list[str]]] | None:
+        found: list[tuple[str, list[str]]] = []
+        cursor = 0
+        while cursor < len(value):
+            match = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)[ \t\r]*\(", value[cursor:])
+            if match is None:
+                break
+            gap = value[cursor:cursor + match.start()]
+            if found and ("\n" not in gap):
+                return None
+            if any(char not in cmake_ws for char in gap):
+                return None
+            name = match.group(1).lower()
+            start = cursor + match.end()
+            depth = 1
+            index = start
+            quote = False
+            escaped = False
+            while index < len(value) and depth:
+                char = value[index]
+                if quote:
+                    if escaped:
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif char == '"':
+                        quote = False
+                elif char == '"':
+                    quote = True
+                elif char == '(':
+                    depth += 1
+                elif char == ')':
+                    depth -= 1
+                index += 1
+            if depth:
+                return None
+            body = value[start:index - 1]
+            tokens: list[str] = []
+            token_index = 0
+            while token_index < len(body):
+                while token_index < len(body) and body[token_index] in cmake_ws:
+                    token_index += 1
+                if token_index == len(body):
+                    break
+                token_start = token_index
+                if body[token_index] == '"':
+                    token_index += 1
+                    escaped = False
+                    while token_index < len(body):
+                        char = body[token_index]
+                        token_index += 1
+                        if escaped:
+                            escaped = False
+                        elif char == "\\":
+                            escaped = True
+                        elif char == '"':
+                            break
+                else:
+                    while token_index < len(body) and body[token_index] not in cmake_ws:
+                        token_index += 1
+                tokens.append(body[token_start:token_index])
+            found.append((name, tokens))
+            cursor = index
+        if any(char not in cmake_ws for char in value[cursor:]):
+            return None
+        return found
+
+    parsed = commands(uncommented)
+    declarations = list(re.finditer(
+        r"\bset\s*\(\s*PULP_JS_PRELUDES\b(?P<body>.*?)\n\s*\)",
+        uncommented,
+        re.S | re.I,
+    ))
+    set_count = len(re.findall(
+        r"\bset\s*\(\s*PULP_JS_PRELUDES\b",
+        uncommented,
+        re.I,
+    ))
+    list_mutation = re.search(
+        r"\blist\s*\([^)]*\bPULP_JS_PRELUDES\b",
+        uncommented,
+        re.S | re.I,
+    )
+    unset_mutation = re.search(
+        r"\bunset\s*\(\s*PULP_JS_PRELUDES\b",
+        uncommented,
+        re.I,
+    )
+    if len(declarations) != 1 or set_count != 1 or list_mutation or unset_mutation:
+        return None
+    expected_names = [
+        "set", "set", "set", "find_package", "set", "foreach",
+        "get_filename_component", "string", "string", "endforeach", "string",
+        "set", "if", "file", "endif", "if", "file", "endif",
+        "add_custom_command", "target_sources",
+    ]
+    if parsed is None or [name for name, _ in parsed] != expected_names:
+        return None
+    # A stray CMake command keyword outside the parsed invocation (for
+    # example, ``COMMAND echo ...`` appended after the recipe) would otherwise
+    # be invisible to the balanced command scanner.
+    if len(re.findall(r"(?i)\bCOMMAND\b", uncommented)) != 1:
+        return None
+
+    expected_preludes = ["PULP_JS_PRELUDES"]
+    expected_commands = [
+        expected_preludes,
+        ["PULP_JS_EMBEDDED_HEADER", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp"],
+        ["PULP_JS_EMBEDDED_SOURCE", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.cpp"],
+        ["Python3", "REQUIRED", "COMPONENTS", "Interpreter"],
+        ["_pulp_prelude_decls", '"#pragma once\\n// Auto-generated from the JS prelude file list — do not edit\\n\\nnamespace pulp::view::preludes {\\n\\n"'],
+        ["_prelude", "${PULP_JS_PRELUDES}"],
+        ["_prelude_stem", '"${_prelude}"', "NAME_WE"],
+        ["REPLACE", '"-"', '"_"', "_prelude_var", '"${_prelude_stem}"'],
+        ["APPEND", "_pulp_prelude_decls", '"extern const char* const ${_prelude_var};\\n"'],
+        [],
+        ["APPEND", "_pulp_prelude_decls", '"\\n}  // namespace pulp::view::preludes\\n"'],
+        ["_pulp_existing_decls", '""'],
+        ["EXISTS", '"${PULP_JS_EMBEDDED_HEADER}"'],
+        ["READ", '"${PULP_JS_EMBEDDED_HEADER}"', "_pulp_existing_decls"],
+        [],
+        ["NOT", '"${_pulp_existing_decls}"', "STREQUAL", '"${_pulp_prelude_decls}"'],
+        ["WRITE", '"${PULP_JS_EMBEDDED_HEADER}"', '"${_pulp_prelude_decls}"'],
+        [],
+        ["OUTPUT", "${PULP_JS_EMBEDDED_SOURCE}", "COMMAND", "${Python3_EXECUTABLE}", "${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.py", "${PULP_JS_EMBEDDED_SOURCE}", "${PULP_JS_PRELUDES}", "DEPENDS", "${PULP_JS_PRELUDES}", "${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.py", "COMMENT", '"Embedding JS preludes into C++ source (UTF-8-safe Python chunker)"', "VERBATIM"],
+        ["pulp-view-script", "PRIVATE", "${PULP_JS_EMBEDDED_SOURCE}"],
+    ]
+    if parsed is None or len(parsed) != len(expected_commands):
+        return None
+    for index, ((actual_name, actual), expected) in enumerate(zip(parsed, expected_commands)):
+        if index == 0:
+            if actual_name != "set" or not actual or actual[0] != "PULP_JS_PRELUDES":
+                return None
+            expected_preludes = actual
+            continue
+        if actual != expected:
+            return None
+    tokens = parsed[0][1][1:]
+    prefix = "${CMAKE_CURRENT_SOURCE_DIR}/"
+    paths: list[Path] = []
+    for token in tokens:
+        if not token.startswith(prefix + "js/"):
+            return None
+        token = token.removeprefix(prefix)
+        rel = Path(token)
+        if rel.is_absolute() or ".." in rel.parts:
+            return None
+        path = source / "core/view" / rel
+        if not path.is_file():
+            return None
+        paths.append(path)
+    if len({path.relative_to(source / "core/view") for path in paths}) != len(paths):
+        return None
+    return paths or None
+
+
+def mirrorable_generated_source(rel: str) -> bool:
+    """Allow only the generated prelude TU as a target source."""
+    return rel == PRELUDE_SOURCE
+
 
 def generated_digest(rel: str, path: Path, source: Path) -> dict | None:
     """A generated input's digest that does not depend on when or whether it was built.
@@ -923,6 +1170,28 @@ def generated_digest(rel: str, path: Path, source: Path) -> dict | None:
         if stamp and stamp.group(1):
             text = text.replace(stamp.group(1), BUILD_TIMESTAMP_PLACEHOLDER)
         return {"sha256": _text_sha256(text), "normalization": {"build_timestamp": BUILD_TIMESTAMP_PLACEHOLDER}}
+    if rel in {PRELUDE_HEADER, PRELUDE_SOURCE}:
+        inputs = prelude_inputs(source)
+        if inputs is None:
+            return None
+        if rel == PRELUDE_HEADER:
+            names = [input_path.stem.replace("-", "_") for input_path in inputs]
+            text = "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n"
+            text += "namespace pulp::view::preludes {\n\n"
+            text += "".join(f"extern const char* const {name};\n" for name in names)
+            text += "\n}  // namespace pulp::view::preludes\n"
+            return {"sha256": _text_sha256(text)}
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="pulp-preludes-") as td:
+            output = Path(td) / "web_compat_preludes_gen.cpp"
+            completed = subprocess.run(
+                [sys.executable, str(source / "core/view/js/embed_js.py"), str(output), *map(str, inputs)],
+                capture_output=True,
+                check=False,
+            )
+            if completed.returncode or not output.is_file():
+                return None
+            return {"sha256": sha256(output)}
     data = re.fullmatch(r"@build/core/canvas/(?P<target>pulp-bundled-[A-Za-z0-9-]+?)_data_(?P<var>[A-Za-z0-9_]+)\.cpp", rel)
     if not data:
         return None
@@ -1184,6 +1453,32 @@ def mirror_edge_table(path: Path = MIRROR_EDGE_TABLE) -> dict:
     }
 
 
+CLOSURE_SCHEMA = "pulp.vellum.closure.v1"
+
+
+def closure_source_root(data: dict) -> Path | None:
+    """The checkout a closure's ``files`` are relative to, or None.
+
+    ``"."`` names this checkout. Anything else must be an existing directory;
+    a scan rooted at a missing one would read nothing and pass.
+    """
+    source = data.get("source_root")
+    if source == ".":
+        return Path(__file__).resolve().parents[2]
+    if not isinstance(source, str) or not source or not Path(source).is_dir():
+        return None
+    return Path(source)
+
+
+def closure_shape_violations(data: dict) -> list[str]:
+    violations: list[str] = []
+    if data.get("schema") != CLOSURE_SCHEMA:
+        violations.append(f"closure schema must be {CLOSURE_SCHEMA}, not {data.get('schema')!r}")
+    if closure_source_root(data) is None:
+        violations.append(f"closure source_root is not an existing directory: {data.get('source_root')!r}")
+    return violations
+
+
 def closure_mention_violations(data: dict, table: dict | None = None) -> list[str]:
     """Every file a closure carries is free of forbidden mirror edges.
 
@@ -1193,11 +1488,10 @@ def closure_mention_violations(data: dict, table: dict | None = None) -> list[st
     ride along unchecked. The patterns are the ones Vellum's extraction scan
     applies to the mirror.
     """
-    source = data.get("source_root")
-    if not source:
-        return []
+    root = closure_source_root(data)
+    if root is None:
+        return [f"closure source_root is not an existing directory: {data.get('source_root')!r}"]
     table = table or mirror_edge_table()
-    root = Path(__file__).resolve().parents[2] if source == "." else Path(source)
     violations: list[str] = []
     for rel in data.get("files", []):
         for name, pattern in table["path"].items():
@@ -1227,18 +1521,19 @@ def closure_mention_violations(data: dict, table: dict | None = None) -> list[st
 
 def cmake_reference_violations(data: dict, allowlist: list[dict] | None, used: set[str]) -> list[str]:
     """No CMake file in a closure may reference a forbidden Pulp target."""
-    source = data.get("source_root")
-    if not source:
+    root = closure_source_root(data)
+    if root is None:
         return []
-    root = Path(__file__).resolve().parents[2] if source == "." else Path(source)
     violations: list[str] = []
     for path in data.get("files", []):
-        if not (path.endswith(".cmake") or Path(path).name == "CMakeLists.txt"):
+        if path.startswith("@build/") or not (path.endswith(".cmake") or Path(path).name == "CMakeLists.txt"):
             continue
-        full = root / path
-        if not full.is_file():
+        try:
+            text = (root / path).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            violations.append(f"unreadable closure file {path}: {exc}")
             continue
-        for line_no, line in enumerate(full.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        for line_no, line in enumerate(text.splitlines(), 1):
             code = line.split("#", 1)[0]
             for match in FORBIDDEN_CMAKE_TARGET.finditer(code):
                 key = f"{path}:{match.group(0)}"
@@ -1325,7 +1620,7 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
             if dep_name:
                 links.add(dep_name)
                 deps.append(dep_name)
-        selected.append({"name": name, "type": data.get("type"), "sources": sorted(rel for rel in (norm_path(str(p), source, build) for p in target_files) if not rel.startswith(("@build/", "/"))), "include_dirs": sorted(set(includes)), "compile_definitions": sorted(set(defines)), "link_targets": sorted(set(deps)), "external_link_inputs": external_links})
+        selected.append({"name": name, "type": data.get("type"), "sources": sorted(rel for rel in (norm_path(str(p), source, build) for p in target_files) if (not rel.startswith(("@build/", "/")) or mirrorable_generated_source(rel))), "include_dirs": sorted(set(includes)), "compile_definitions": sorted(set(defines)), "link_targets": sorted(set(deps)), "external_link_inputs": external_links})
     public, declared = unit_public_headers(targets, names, source, unit_header_manifests(build))
     for entry in selected:
         if entry["name"] in declared:
@@ -1352,6 +1647,20 @@ def target_manifest(source: Path, build: Path, names: list[str]) -> dict:
                 normalized.append(norm_path(str(candidate), source, build))
                 all_files.add(candidate.resolve())
     if "pulp-view-script" in selected_names:
+        # The prelude generator consumes tracked JavaScript inputs directly.
+        # They are not reported by CMake's file API, so add the exact ordered
+        # list declared by PulpViewJsPreludes.cmake to the closure.  Without
+        # these source files a Vellum export carries only the generated C++
+        # and header and cannot reproduce the prelude bytes.
+        prelude_paths = prelude_inputs(source)
+        if prelude_paths is None:
+            raise SystemExit(
+                "pulp-view-script prelude producer could not be parsed: "
+                "core/view/cmake/PulpViewJsPreludes.cmake"
+            )
+        for input_path in prelude_paths:
+            all_files.add(input_path.resolve())
+            normalized.append(norm_path(str(input_path), source, build))
         for suffix in ("web_compat_preludes_gen.hpp", "web_compat_preludes_gen.cpp"):
             candidate = build / "core/view" / suffix
             if candidate.is_file():
@@ -1692,18 +2001,15 @@ def policy_include_forbidden(name: str) -> bool:
     return bool(FORBIDDEN_INCLUDE.match(name))
 
 
-def symbol_closure(undefined: Iterable[str], allowed: Iterable[str] = ()) -> list[str]:
-    allowed_set = set(allowed)
-    return sorted(symbol for symbol in undefined if symbol not in allowed_set and re.search(r"(?:audio|signal|host|midi|music|format|content|ContentRegistry)", symbol, re.I))
-
-
 def load_allowlist(path: Path) -> list[dict]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema") != "pulp.vellum.closure.allowlist.v1":
         raise SystemExit(f"invalid closure allowlist schema: {path}")
+    # An empty list is the debt-free state; a missing or non-list field is a
+    # malformed file, not an empty allowlist.
     entries = payload.get("entries")
-    if not isinstance(entries, list) or not entries:
-        raise SystemExit("closure allowlist must contain entries")
+    if not isinstance(entries, list):
+        raise SystemExit("closure allowlist entries must be a list")
     seen: set[str] = set()
     for entry in entries:
         if not isinstance(entry, dict) or not {"id", "owner", "debt_id", "kind", "match"} <= set(entry):
@@ -1794,8 +2100,10 @@ def cmd_gate(args: argparse.Namespace) -> int:
         # An entry scoped to platforms matches only a manifest from one of them.
         allowlist = None if full_allowlist is None else [
             entry for entry in full_allowlist if entry.get("platforms") is None or (system and system in entry["platforms"])]
-        violations: list[str] = []
-        if data.get("schema") == "pulp.vellum.closure.v1" and data.get("targets") and not args.unit_manifest:
+        violations: list[str] = closure_shape_violations(data)
+        root = closure_source_root(data)
+        # A closure that names its build tree came from a CMake configure.
+        if data.get("targets") and data.get("build_dir") and not args.unit_manifest:
             violations.append("a CMake closure is gated against the D3 units: pass --unit-manifest")
         violations.extend(external_input_violations(data))
         violations.extend(receipt_path_violations(data))
@@ -1819,9 +2127,10 @@ def cmd_gate(args: argparse.Namespace) -> int:
                     allowed = allowed or allowlist_match(allowlist, "target", link, used_allowlist)
                 if policy_target_forbidden(link) and not allowed:
                     violations.append(f"forbidden link {target['name']} -> {link}")
-        for symbol in data.get("undefined_symbols", []):
-            if symbol_closure([symbol]):
-                violations.append(f"forbidden undefined symbol {symbol}")
+        if "undefined_symbols" in data:
+            # This gate reads CMake edges and source text, never object files;
+            # symbol closure is archive_symbol_closure_check.py's job.
+            violations.append("undefined_symbols is not graded by the closure gate; check archives with archive_symbol_closure_check.py")
         for path in data.get("files", []):
             if path.startswith("@build/"):
                 continue
@@ -1832,21 +2141,27 @@ def cmd_gate(args: argparse.Namespace) -> int:
                 if not allowed_root:
                     violations.append(f"forbidden closure root {path}")
                 continue
-            full = Path(data["source_root"]) / path
-            if full.suffix.lower() in TEXT_EXTS and full.is_file():
-                for line_no, _delimiter, include_name in include_edges(full):
-                    if policy_include_forbidden(include_name):
-                        # A path exemption is only valid for the explicitly named edge. Never let
-                        # one legacy file exemption accept every forbidden include in that file.
-                        allowed = any(
-                            path == allowed_path and include_name == allowed_include
-                            for allowed_path, allowed_include in getattr(args, "allow_include_edge", [])
-                        )
-                        allowed = allowed or any(path.startswith(prefix) for prefix in args.allow_include_prefix)
-                        if allowlist:
-                            allowed = allowed or allowlist_match(allowlist, "include", f"{path}:{include_name}", used_allowlist)
-                        if not allowed:
-                            violations.append(f"forbidden include {path}:{line_no}: {include_name}")
+            if root is None or Path(path).suffix.lower() not in TEXT_EXTS:
+                continue
+            try:
+                edges = include_edges(root / path)
+            except OSError as exc:
+                violations.append(f"unreadable closure file {path}: {exc}")
+                continue
+            for line_no, _delimiter, include_name in edges:
+                if policy_include_forbidden(include_name):
+                    # A path exemption is only valid for the explicitly named edge. Never let
+                    # one legacy file exemption accept every forbidden include in that file.
+                    allowed = any(
+                        path == allowed_path and include_name == allowed_include
+                        for allowed_path, allowed_include in getattr(args, "allow_include_edge", [])
+                    )
+                    allowed = allowed or any(path.startswith(prefix) for prefix in args.allow_include_prefix)
+                    if allowlist:
+                        allowed = allowed or allowlist_match(allowlist, "include", f"{path}:{include_name}", used_allowlist)
+                    if not allowed:
+                        violations.append(f"forbidden include {path}:{line_no}: {include_name}")
+        violations = list(dict.fromkeys(violations))
         status = "PASS" if not violations else ("REPORT-ONLY" if args.report_only else "FAIL")
         print(f"{name}: {status}")
         for violation in violations:
@@ -1864,7 +2179,13 @@ def cmd_gate(args: argparse.Namespace) -> int:
     return 1 if failed and not args.report_only else 0
 
 
-def git_blob_rows(repo: Path, commit: str, paths: Iterable[str]) -> list[dict]:
+def git_blob_rows(repo: Path, commit: str, paths: Iterable[str], strict: bool = True) -> list[dict]:
+    """(path, mode, blob) for each path tracked as a file at ``commit``.
+
+    With ``strict`` a path that is not a tracked file there is an error: an
+    export that silently dropped it would ship a receipt missing a file its
+    closure lists. ``strict=False`` leaves the absence for the caller to report.
+    """
     rows: list[dict] = []
     for path in paths:
         if path.startswith("@build/"):
@@ -1872,12 +2193,126 @@ def git_blob_rows(repo: Path, commit: str, paths: Iterable[str]) -> list[dict]:
         try:
             row = run("git", "-C", str(repo), "ls-tree", commit, "--", path)
         except subprocess.CalledProcessError:
-            continue
+            row = ""
+        kind = ""
         if row:
             mode, kind, blob, name = row.split("\t", 1)[0].split(" ") + [row.split("\t", 1)[1]]
             if kind == "blob":
                 rows.append({"path": name, "mode": mode, "blob": blob})
+        if strict and kind != "blob":
+            raise SystemExit(f"closure file is not a tracked file at {commit}: {path}")
     return rows
+
+
+PRUNED_SHA = "0" * 40
+
+
+def read_commit_map(data: bytes) -> list[tuple[str, str]]:
+    """(old, new) rows of a git-filter-repo commit map, header excluded."""
+    rows: list[tuple[str, str]] = []
+    for line in data.decode("ascii", errors="replace").splitlines():
+        fields = line.split()
+        if len(fields) == 2 and all(FULL_SHA_RE.fullmatch(field) for field in fields):
+            rows.append((fields[0], fields[1]))
+    return rows
+
+
+def export_commit_map(commit_map_src: Path, pulp_sha: str, mirror_sha: str) -> bytes:
+    """The commit map git-filter-repo wrote, which must map the exported commit.
+
+    The row is evidence from the rewrite itself; a map without it cannot be
+    repaired by writing the row in, because nothing would then attest it.
+    """
+    if not commit_map_src.is_file():
+        raise SystemExit(f"git-filter-repo wrote no commit map: {commit_map_src}")
+    data = commit_map_src.read_bytes()
+    if f"{pulp_sha} {mirror_sha}".encode() not in data.splitlines():
+        raise SystemExit(f"git-filter-repo commit map does not map {pulp_sha} to {mirror_sha}")
+    return data
+
+
+EXPORT_SOURCE_REF = "refs/heads/export-source"
+
+
+def read_ref_map(data: bytes) -> list[tuple[str, str, str]]:
+    """(old, new, ref) rows of a git-filter-repo ref map, header excluded."""
+    rows: list[tuple[str, str, str]] = []
+    for line in data.decode("ascii", errors="replace").splitlines():
+        fields = line.split()
+        if len(fields) == 3 and FULL_SHA_RE.fullmatch(fields[0]) and FULL_SHA_RE.fullmatch(fields[1]):
+            rows.append((fields[0], fields[1], fields[2]))
+    return rows
+
+
+def export_source_mapping(filter_repo_dir: Path, pulp_sha: str, mirror_sha: str,
+                          repo: Path, paths: Iterable[str]) -> tuple[bytes, bytes | None, dict | None]:
+    """The commit map git-filter-repo wrote, plus the ref map and proof for a pruned source.
+
+    Normally the commit map carries ``pulp_sha mirror_sha``; the result is then
+    ``(commit map, None, None)`` and the receipt is exactly as before. When the
+    exported commit changes no exported path, git-filter-repo prunes it
+    (``pulp_sha 0000...``) and the export ref lands on the rewrite of its
+    nearest ancestor that does. That ancestor is taken from the commit map's
+    own row for ``mirror_sha``, and is accepted only if it is a strict ancestor
+    of ``pulp_sha`` and every exported path is identical in both. The rewrite's
+    own ref map must record ``pulp_sha mirror_sha refs/heads/export-source``:
+    together the two maps attest the export. A row is never written in:
+    nothing would attest it.
+    """
+    commit_map_src = filter_repo_dir / "commit-map"
+    if not commit_map_src.is_file():
+        raise SystemExit(f"git-filter-repo wrote no commit map: {commit_map_src}")
+    data = commit_map_src.read_bytes()
+    rows = read_commit_map(data)
+    if (pulp_sha, PRUNED_SHA) not in rows:
+        return export_commit_map(commit_map_src, pulp_sha, mirror_sha), None, None
+    ref_map_src = filter_repo_dir / "ref-map"
+    if not ref_map_src.is_file():
+        raise SystemExit(f"git-filter-repo pruned {pulp_sha} and wrote no ref map: {ref_map_src}")
+    ref_map = ref_map_src.read_bytes()
+    ref_row = (pulp_sha, mirror_sha, EXPORT_SOURCE_REF)
+    if ref_row not in read_ref_map(ref_map):
+        raise SystemExit(f"git-filter-repo ref map does not move {EXPORT_SOURCE_REF} from {pulp_sha} to {mirror_sha}")
+    sources = sorted({old for old, new in rows if new == mirror_sha})
+    if len(sources) != 1:
+        raise SystemExit(f"git-filter-repo pruned {pulp_sha}, and its map names {len(sources)} source commit(s) "
+                         f"for mirror commit {mirror_sha}, not exactly one")
+    source = sources[0]
+    paths = sorted(set(paths))
+    if not paths:
+        raise SystemExit(f"git-filter-repo pruned {pulp_sha}; there are no exported paths to compare")
+    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if source == pulp_sha or subprocess.run(
+            ["git", "-C", str(repo), "merge-base", "--is-ancestor", source, pulp_sha], **quiet).returncode != 0:
+        raise SystemExit(f"mirror source commit {source} is not an ancestor of pruned export commit {pulp_sha}")
+    if subprocess.run(["git", "--literal-pathspecs", "-C", str(repo), "diff", "--quiet", source, pulp_sha, "--", *paths], **quiet).returncode != 0:
+        raise SystemExit(f"exported paths differ between mirror source commit {source} and pruned export commit {pulp_sha}")
+    source_rows = git_blob_rows(repo, source, paths)
+    if source_rows != git_blob_rows(repo, pulp_sha, paths):
+        raise SystemExit(f"exported blobs differ between mirror source commit {source} and pruned export commit {pulp_sha}")
+    listing = "".join(f"{row['path']} {row['mode']} {row['blob']}\n" for row in source_rows).encode()
+    return data, ref_map, {
+        "sha": source,
+        "proof": {
+            "commit_map_rows": [f"{pulp_sha} {PRUNED_SHA}", f"{source} {mirror_sha}"],
+            "ref_map_row": " ".join(ref_row),
+            "source_is_ancestor": True,
+            "exported_paths_equal": True,
+            "exported_path_count": len(source_rows),
+            "exported_blobs_sha256": hashlib.sha256(listing).hexdigest(),
+        },
+    }
+
+
+def claim_export_paths(paths: Iterable[Path]) -> None:
+    """Refuse to overwrite an earlier export that shares this export id.
+
+    The id is the day plus the Pulp SHA, a form Vellum's verifier requires, so
+    a second export of one SHA on one day would replace the first's receipt.
+    """
+    existing = [str(path) for path in paths if path.exists()]
+    if existing:
+        raise SystemExit("an export with this id already exists; use another --landing: " + ", ".join(existing))
 
 
 def export_owned_file_violations(manifests: list[dict], unit_names: list[str], units: Path | None = None) -> list[str]:
@@ -2001,6 +2436,8 @@ def cmd_export(args: argparse.Namespace) -> int:
     if not filter_repo:
         raise SystemExit("git-filter-repo is required for export; refusing fallback projection")
     paths = sorted({p for manifest in manifests for p in manifest["files"] if not p.startswith("@build/")})
+    rows = git_blob_rows(repo, args.pulp_sha, paths)
+    by_path = {row["path"]: row["blob"] for row in rows}
     subprocess.run(["git", "clone", "--no-local", str(repo), str(out)], check=True, stdout=subprocess.DEVNULL)
     mirror_root = args.mirror_root.strip("/")
     if not mirror_root or mirror_root.startswith("@"):
@@ -2019,12 +2456,16 @@ def cmd_export(args: argparse.Namespace) -> int:
     run("git", "-C", str(out), "checkout", "--detach", "export-source")
     mirror_sha = run("git", "-C", str(out), "rev-parse", "refs/heads/export-source")
     mirror_tree = run("git", "-C", str(out), "rev-parse", f"{mirror_sha}:mirror")
-    rows = git_blob_rows(repo, args.pulp_sha, paths)
-    by_path = {row["path"]: row["blob"] for row in rows}
     export_id = f"{datetime.now(timezone.utc):%Y%m%d}-{args.pulp_sha[:12]}"
     landing = Path(args.landing).resolve() if args.landing else out.parent / f"vellum-export-{export_id}"
     closure_dir = landing / "provenance" / "mirror" / "closures" / export_id
-    closure_dir.mkdir(parents=True, exist_ok=True)
+    commit_map_path = landing / "provenance" / "mirror" / "commit-maps" / f"{export_id}.txt"
+    receipt_path = landing / "provenance" / "mirror" / "receipts" / f"{export_id}.json"
+    ref_map_path = landing / "provenance" / "mirror" / "ref-maps" / f"{export_id}.txt"
+    commit_map_bytes, ref_map_bytes, mirror_source = export_source_mapping(
+        out / ".git" / "filter-repo", args.pulp_sha, mirror_sha, repo, paths)
+    claim_export_paths([closure_dir, commit_map_path, receipt_path] + ([ref_map_path] if mirror_source else []))
+    closure_dir.mkdir(parents=True)
     units = []
     for index, manifest in enumerate(manifests):
         unit_name = args.unit_name[index] if index < len(args.unit_name) else Path(args.manifest[index]).stem
@@ -2035,14 +2476,11 @@ def cmd_export(args: argparse.Namespace) -> int:
         units.append({"name": unit_name, "closure_manifest": f"provenance/mirror/closures/{export_id}/{unit_name}.json", "closure_sha256": sha256(closure_path), "oracle_class": "identity",
                       "configure": {"identity": configure.get("identity"), "options_sha256": configure.get("options_sha256"), "label": configure.get("label", "")}})
     files = sorted(({"mirror_path": f"{mirror_root}/{rename_map.get(path, path)}", "pulp_path": path, "mode": next(row["mode"] for row in rows if row["path"] == path), "blob": by_path[path]} for path in paths if path in by_path), key=lambda row: row["mirror_path"])
-    commit_map_src = out / ".git" / "filter-repo" / "commit-map"
-    commit_map_path = landing / "provenance" / "mirror" / "commit-maps" / f"{export_id}.txt"
     commit_map_path.parent.mkdir(parents=True, exist_ok=True)
-    commit_map_bytes = commit_map_src.read_bytes() if commit_map_src.is_file() else b""
-    required_map_row = f"{args.pulp_sha} {mirror_sha}\n".encode()
-    if required_map_row not in commit_map_bytes:
-        commit_map_bytes += required_map_row
     commit_map_path.write_bytes(commit_map_bytes)
+    if mirror_source is not None:
+        ref_map_path.parent.mkdir(parents=True, exist_ok=True)
+        ref_map_path.write_bytes(ref_map_bytes)
     tool_rows = git_blob_rows(repo, args.pulp_sha, ["tools/scripts/vellum_closure.py"])
     receipt_rel = f"provenance/mirror/receipts/{export_id}.json"
     generated_inputs = []
@@ -2083,12 +2521,21 @@ def cmd_export(args: argparse.Namespace) -> int:
         "tool": {"path": "tools/scripts/vellum_closure.py", "pulp_blob": tool_rows[0]["blob"] if tool_rows else ""},
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if mirror_source is not None:
+        # pulp_sha stays the commit that was asked for (R); the mirror commit is
+        # the rewrite of mirror_source.sha (A), which the proof shows equal to R
+        # on every exported path. Absent for an unpruned export, so its receipt
+        # keeps exactly the keys it always had.
+        receipt["mirror_source"] = {
+            "sha": mirror_source["sha"],
+            "ref_map": {"path": f"provenance/mirror/ref-maps/{export_id}.txt", "sha256": sha256(ref_map_path)},
+            "proof": mirror_source["proof"],
+        }
     path_violations = receipt_path_violations(receipt)
     if path_violations:
         raise SystemExit("receipt contains host paths: " + "; ".join(path_violations))
     if args.dry_run:
         receipt["dry_run"] = True
-    receipt_path = landing / "provenance" / "mirror" / "receipts" / f"{export_id}.json"
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
     receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"export_receipt={receipt_path} mirror_sha={mirror_sha} blobs={len(files)}")
@@ -2139,7 +2586,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         print(f"identity=FAIL\n  mirror HEAD {head} != receipt mirror commit {recorded_head}")
         return 1
     expected = {row["mirror_path"]: row["blob"] for row in receipt["files"]}
-    actual = {row["path"]: row["blob"] for row in git_blob_rows(repo, head, expected)}
+    actual = {row["path"]: row["blob"] for row in git_blob_rows(repo, head, expected, strict=False)}
     bad = [path for path, blob in expected.items() if actual.get(path) != blob]
     if bad:
         print("identity=FAIL")
@@ -2161,8 +2608,8 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.add_argument("--unit"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
     p = sub.add_parser("js-manifest"); p.add_argument("--source-root", required=True); p.add_argument("--unit", default="design-import"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_js_manifest)
-    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=False)
-    p = sub.add_parser("report"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-path", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=True)
+    p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=False)
+    p = sub.add_parser("report"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=True)
     p = sub.add_parser("export"); p.add_argument("--repo", required=True); p.add_argument("--manifest", action="append", required=True); p.add_argument("--unit-name", action="append", default=[]); p.add_argument("--pulp-sha", required=True); p.add_argument("--output", required=True); p.add_argument("--landing"); p.add_argument("--mirror-root", default="mirror"); p.add_argument("--mirror-ref", default="refs/heads/mirror/pulp-framework"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--rename-map", type=json.loads, default=None); p.add_argument("--cpu-only-unit", action="append", default=[]); p.set_defaults(func=cmd_export)
     p = sub.add_parser("mentions"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--unit-manifest", required=True); p.add_argument("--unit", action="append", required=True); p.set_defaults(func=cmd_mentions)
     p = sub.add_parser("export-check"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--unit-manifest", required=True); p.add_argument("--unit", action="append", required=True); p.set_defaults(func=cmd_export_check)

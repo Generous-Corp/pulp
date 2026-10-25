@@ -24,8 +24,8 @@ PROVISION = ROOT / "tools/ci/tart-provision.sh"
 FAKE_MISE = """#!/bin/sh
 case "$1" in
   --version) echo "${{FAKE_MISE_VERSION:-{version}}} macos-arm64 (2026-10-13)";;
-  install) echo "install $*" >> "$HOME/mise-calls"; [ -n "${{FAKE_MISE_FAIL:-}}" ] && exit 1; exit 0;;
-  ls) echo '{{"cmake": [{{"version": "4.3.3"}}]}}';;
+  install) echo "install $* locked=${{MISE_LOCKED:-}} auto_install=${{MISE_AUTO_INSTALL:-}}" >> "$HOME/mise-calls"; [ -n "${{FAKE_MISE_FAIL:-}}" ] && exit 1; exit 0;;
+  ls) echo "ls locked=${{MISE_LOCKED:-}} auto_install=${{MISE_AUTO_INSTALL:-}}" >> "$HOME/mise-calls"; echo '{{"cmake": [{{"version": "4.3.3"}}]}}';;
 esac
 """
 FAKE_RUSTUP = """#!/bin/sh
@@ -98,8 +98,20 @@ class LayerTests(unittest.TestCase):
     def run_layer(self, manifest: Path, **extra: str) -> subprocess.CompletedProcess:
         env = dict(os.environ, HOME=str(self.host), MISE_LAYER_GUEST="local",
                    MISE_LAYER_GUEST_HOME=str(self.guest), **extra)
+        # The layer must set these itself; inheriting them would hide a removal.
+        for key in ("MISE_LOCKED", "MISE_AUTO_INSTALL"):
+            if key not in extra:
+                env.pop(key, None)
         return subprocess.run(["bash", str(LAYER), str(manifest), "10.0.0.1", str(self.receipt)],
                               env=env, capture_output=True, text=True, encoding="utf-8", check=False)
+
+    def test_every_guest_mise_call_is_locked_with_auto_install_off(self) -> None:
+        out = self.run_layer(self.manifest())
+        self.assertEqual(0, out.returncode, out.stderr)
+        calls = (self.guest / "mise-calls").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(["install", "ls"], [line.split()[0] for line in calls])  # control: both ran
+        for line in calls:
+            self.assertTrue(line.endswith("locked=1 auto_install=0"), line)
 
     def test_installs_the_locked_toolchain_and_rust_by_name_and_reports(self) -> None:
         out = self.run_layer(self.manifest())

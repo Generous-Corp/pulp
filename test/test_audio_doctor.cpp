@@ -695,16 +695,13 @@ TEST_CASE("Doctor: half-band filter group delay at its own rate",
 
     CHECK(curve.defined_at(9600.0));
 
-    // Above the half-band's Fs/4 cutoff (24 kHz at the 2x rate) the design
-    // attenuates, but only moderately — this is the documented "Tier-2"
-    // trade-off, ~-40 dB at 40 kHz. That is still well ABOVE the -60 dB gate,
-    // so these bins stay defined and their group delay is a real measurement.
-    // The gate is a signal-present test, not a passband test: a filter with a
-    // shallow stopband is measurable there, and this analyzer says so rather
-    // than discarding data it does have.
-    CHECK(curve.magnitude_db_rel_peak_at(40000.0) < -20.0);
-    CHECK(curve.defined_at(40000.0));
-    CHECK(std::isfinite(curve.group_delay_samples_at(40000.0)));
+    // 40 kHz sits in the half-band's stopband (from 0.29 of the 2x rate,
+    // 27.8 kHz here), where the default design attenuates by at least 94.8 dB.
+    // That is far below the analyzer's -60 dB signal-present gate, so the bin
+    // must be reported undefined rather than handed back as a group delay
+    // computed from rounding noise.
+    CHECK(curve.magnitude_db_rel_peak_at(40000.0) < -90.0);
+    CHECK_FALSE(curve.defined_at(40000.0));
 }
 
 TEST_CASE("Doctor: THD discriminates clean vs clipped sine", "[audio][doctor]") {

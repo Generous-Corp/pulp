@@ -3342,3 +3342,189 @@ TEST_CASE("StateStore quantizes explicitly typed parameters on every write path"
     store.set_value(2, 0.6f);
     REQUIRE_THAT(store.get_value(2), WithinAbs(0.6, 0.0001));
 }
+
+TEST_CASE("A host-normalized write keeps continuous values exact and snaps discrete ones",
+          "[state][param-kind][host]") {
+    // Continuous with a UI step: a host sees it as continuous, so the value it
+    // sends is the value stored, exactly as a plain-value host would store it.
+    auto gain = make_param_info(1, "Gain", "dB", {-60.0f, 24.0f, 0.0f, 0.1f});
+    const float target = -19.963f;
+    const float normalized = gain.range.normalize(target);
+    REQUIRE_THAT(value_from_host_normalized(gain, normalized), WithinAbs(target, 1e-4));
+    // The UI path still quantizes to the step.
+    REQUIRE_THAT(gain.range.denormalize(normalized), WithinAbs(-20.0, 1e-4));
+
+    auto steps = make_param_info(2, "Steps", "", {0.0f, 8.0f, 0.0f, 1.0f});
+    steps.kind = ParamKind::Integer;
+    REQUIRE_THAT(value_from_host_normalized(steps, steps.range.normalize(3.4f)),
+                 WithinAbs(3.0, 1e-6));
+}
+
+TEST_CASE("ParamReader reads the live base value without an ID lookup", "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 7, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});
+    store.add_parameter({.id = 9, .name = "Mix", .range = {0.0f, 1.0f, 0.25f}});
+
+    const auto gain = store.param_reader(7);
+    const auto mix = store.param_reader(9);
+    REQUIRE(gain.valid());
+    REQUIRE(mix.valid());
+    REQUIRE(gain.get() == 1.0f);
+    REQUIRE(mix.get() == 0.25f);
+
+    store.set_value(7, 0.5f);
+    store.set_value(9, 0.75f);
+    REQUIRE(gain.get() == 0.5f);
+    REQUIRE(gain.get() == store.get_value(7));
+    REQUIRE(mix.get() == 0.75f);
+}
+
+TEST_CASE("ParamReader for an unknown ID or default handle reads zero", "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});
+
+    const auto unknown = store.param_reader(42);
+    REQUIRE_FALSE(unknown.valid());
+    REQUIRE(unknown.get() == store.get_value(42));
+    REQUIRE(unknown.get() == 0.0f);
+
+    const pulp::state::ParamReader unbound;
+    REQUIRE_FALSE(unbound.valid());
+    REQUIRE(unbound.get() == 0.0f);
+}
+
+TEST_CASE("ParamReader survives later parameter registration", "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "First", .range = {0.0f, 10.0f, 3.0f}});
+    const auto first = store.param_reader(1);
+
+    // Grow the value table well past any initial capacity so it reallocates.
+    for (pulp::state::ParamID id = 2; id < 300; ++id)
+        store.add_parameter({.id = id, .name = "P", .range = {0.0f, 1.0f, 0.0f}});
+
+    store.set_value(1, 6.0f);
+    REQUIRE(first.get() == 6.0f);
+    const auto last = store.param_reader(299);
+    store.set_value(299, 0.5f);
+    REQUIRE(last.get() == 0.5f);
+}
+
+TEST_CASE("ParamReader::get does not allocate", "[state][param-reader][rt-safety]") {
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 2.0f, 1.0f}});
+    const auto gain = store.param_reader(1);
+    float sum = 0.0f;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int i = 0; i < 64; ++i)
+            sum += gain.get();
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(sum == 64.0f);
+}
+
+TEST_CASE("ParamReader reads the base value, not the modulated value", "[state][param-reader]") {
+    StateStore store;
+    store.add_parameter({.id = 3, .name = "Cutoff", .range = {0.0f, 1.0f, 0.25f}});
+    const auto cutoff = store.param_reader(3);
+    store.set_mod_offset(3, 0.5f);
+    REQUIRE(store.get_modulated(3) == 0.75f);
+    REQUIRE(cutoff.get() == 0.25f);
+    REQUIRE(cutoff.get() == store.get_value(3));
+}
+
+TEST_CASE("StateStore lookups agree for dense, sparse, and mixed parameter IDs",
+          "[state][store][lookup]") {
+    // Small IDs resolve through the direct index table; registering an ID past
+    // its limit switches every lookup to the hash map. Both paths must read and
+    // write the same parameter, and an unknown ID must stay inert either way.
+    auto check = [](std::initializer_list<pulp::state::ParamID> ids) {
+        pulp::state::StateStore store;
+        float v = 0.1f;
+        for (auto id : ids) {
+            store.add_parameter(
+                {.id = id, .name = "p" + std::to_string(id), .range = {0.0f, 1.0f, v, 0.0f}});
+            v += 0.1f;
+        }
+        float expected = 0.1f;
+        for (auto id : ids) {
+            REQUIRE_THAT(store.get_value(id), Catch::Matchers::WithinAbs(expected, 1e-6));
+            store.set_value(id, expected + 0.05f);
+            REQUIRE_THAT(store.get_value(id), Catch::Matchers::WithinAbs(expected + 0.05f, 1e-6));
+            REQUIRE_THAT(store.get_normalized(id),
+                         Catch::Matchers::WithinAbs(expected + 0.05f, 1e-6));
+            store.set_value_rt(id, expected);
+            REQUIRE_THAT(store.get_modulated(id), Catch::Matchers::WithinAbs(expected, 1e-6));
+            expected += 0.1f;
+        }
+        REQUIRE(store.get_value(7) == 0.0f);
+        REQUIRE(store.get_value(0x7FFF'0000u) == 0.0f);
+        store.set_value(7, 0.9f); // unknown: ignored, no crash
+        REQUIRE(store.get_value(7) == 0.0f);
+    };
+    check({1, 2, 3});
+    check({3, 1, 2});
+    check({0x4741'4E31u, 0x4741'4E32u}); // four-char-code style IDs
+    check({1, 0x4741'4E31u, 2});         // dense, then sparse, then dense again
+    check({40000, 5});
+}
+
+TEST_CASE("StateStore::set_values_rt writes a batch as one store write", "[state][store][rt]") {
+    pulp::state::StateStore store;
+    for (pulp::state::ParamID id : {1u, 2u, 3u, 0x7042'7970u})
+        store.add_parameter(
+            {.id = id, .name = "p" + std::to_string(id), .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    std::vector<std::pair<pulp::state::ParamID, float>> seen;
+    auto listener = store.add_listener(
+        [&](pulp::state::ParamID id, float value) { seen.emplace_back(id, value); },
+        pulp::state::ListenerThread::Audio);
+
+    const auto before = store.state_generation();
+    const std::array<pulp::state::StateStore::ParamWrite, 5> writes{
+        {{3, 0.3f}, {0x7042'7970u, 1.0f}, {1, 2.0f}, {99, 0.5f}, {3, 0.9f}}};
+    store.set_values_rt(writes);
+
+    // Every known parameter written and clamped, in batch order, notified
+    // once per applied write; the unknown ID is skipped and a repeated ID
+    // ends at its last value, as consecutive set_value_rt() calls would.
+    REQUIRE(store.state_generation() == before + 4);
+    REQUIRE_THAT(store.get_value(3), WithinAbs(0.9, 1e-6));
+    REQUIRE_THAT(store.get_value(0x7042'7970u), WithinAbs(1.0, 1e-6));
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 1e-6));
+    REQUIRE_THAT(store.get_value(2), WithinAbs(0.0, 1e-6));
+    REQUIRE(seen == std::vector<std::pair<pulp::state::ParamID, float>>{
+                        {3, 0.3f}, {0x7042'7970u, 1.0f}, {1, 1.0f}, {3, 0.9f}});
+
+    // An empty batch writes nothing and does not move the generation.
+    store.set_values_rt({});
+    REQUIRE(store.state_generation() == before + 4);
+    listener.reset();
+}
+
+TEST_CASE("StateStore::set_values_rt lets the last write to a parameter win",
+          "[state][store][rt]") {
+    pulp::state::StateStore store;
+    for (pulp::state::ParamID id : {1u, 2u})
+        store.add_parameter(
+            {.id = id, .name = "p" + std::to_string(id), .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+
+    // A host that sends two values for one parameter in a block ends at the
+    // second.
+    const std::array<pulp::state::StateStore::ParamWrite, 2> repeated{{{1, 0.2f}, {1, 0.8f}}};
+    store.set_values_rt(repeated);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.8, 1e-6));
+
+    // An Audio listener on A that writes B mid-batch does not swallow the
+    // host's later write to B.
+    auto listener = store.add_listener(
+        [&](pulp::state::ParamID id, float) {
+            if (id == 1)
+                store.set_value_rt(2, 0.1f);
+        },
+        pulp::state::ListenerThread::Audio);
+    const std::array<pulp::state::StateStore::ParamWrite, 2> chained{{{1, 1.0f}, {2, 0.9f}}};
+    store.set_values_rt(chained);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 1e-6));
+    REQUIRE_THAT(store.get_value(2), WithinAbs(0.9, 1e-6));
+    listener.reset();
+}

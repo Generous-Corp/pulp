@@ -96,6 +96,7 @@ createCol	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createModal	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createPanel	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 setFlex	layout	function	core/view/src/widget_bridge/layout_api.cpp
+resetStyleProperty	layout	function	core/view/src/widget_bridge/style_reset_api.cpp
 __domAppend	dom	function	core/view/src/widget_bridge/dom_api.cpp
 __domRemove	dom	function	core/view/src/widget_bridge/dom_api.cpp
 layout	layout	function	core/view/src/widget_bridge/layout_api.cpp
@@ -185,6 +186,7 @@ setSvgFillGradient	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:Svg
 setSvgFillRule	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.fillRule
 setSvgStroke	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.stroke
 setSvgStrokeGradient	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.strokeGradient
+setSvgStrokeStyle	svg	function	core/view/src/widget_bridge/svg_api.cpp	internal
 setSvgStrokeWidth	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.strokeWidth
 createSvgRect	svg	function	core/view/src/widget_bridge/svg_api.cpp	factory:SvgRect
 setSvgRect	svg	function	core/view/src/widget_bridge/svg_api.cpp	geometry:SvgRect.x,y,width,height
@@ -273,6 +275,7 @@ setLineClamp	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setBackgroundRepeat	css_style	function	core/view/src/widget_bridge/style_storage_api.cpp
 setPosition	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setSubpixelLayout	layout	function	core/view/src/widget_bridge/layout_api.cpp
+setCapturedFrameRoot	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setTop	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setRight	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setBottom	layout	function	core/view/src/widget_bridge/layout_api.cpp
@@ -339,6 +342,8 @@ drawPath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 compileShader	shader	function	core/view/src/widget_bridge/shader_api.cpp
 setWidgetShader	shader	function	core/view/src/widget_bridge/shader_api.cpp	prop:Knob.shader|prop:Fader.shader|prop:Toggle.shader
 setWidgetShaderChart	shader	function	core/view/src/widget_bridge/shader_api.cpp
+setWidgetShaderChartPreset	shader	function	core/view/src/widget_bridge/shader_api.cpp
+getShaderChartPreset	shader	function	core/view/src/widget_bridge/shader_api.cpp
 setWidgetShaderUniforms	shader	function	core/view/src/widget_bridge/shader_api.cpp
 getWidgetShaderUniforms	shader	function	core/view/src/widget_bridge/shader_api.cpp
 setWidgetShaderReach	shader	function	core/view/src/widget_bridge/shader_api.cpp

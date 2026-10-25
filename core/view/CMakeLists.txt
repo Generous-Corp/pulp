@@ -38,18 +38,17 @@ add_library(pulp::view-tooling ALIAS pulp-view-tooling)
 
 add_library(pulp-view src/placeholder.cpp)
 add_library(pulp::view ALIAS pulp-view)
-add_library(pulp-view-native src/placeholder.cpp src/web_view_backend.cpp)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PulpViewPlatform.cmake")
+add_library(pulp-view-native src/placeholder.cpp)
 add_library(pulp::view-native ALIAS pulp-view-native)
-target_compile_definitions(pulp-view-native PUBLIC PULP_BUILD_WEBVIEW=0)
+target_link_libraries(pulp-view-native PUBLIC pulp::view-platform)
 if(PULP_ENABLE_JS)
     target_link_libraries(pulp-view PUBLIC pulp::view-script)
-    target_link_libraries(pulp-view-native PUBLIC pulp::view-script)
 else()
     # Native-only: link the JS-free core directly and keep view-script defined
     # (so its still-evaluated config blocks below never dangle) but out of the
     # default build and every binary, so no JS engine is compiled or shipped.
     target_link_libraries(pulp-view PUBLIC pulp::view-core)
-    target_link_libraries(pulp-view-native PUBLIC pulp::view-core)
     set_target_properties(pulp-view-script PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
     # Authoritative native-only guard. The binary nm-check (AssertNoJsSymbols.cmake)
@@ -68,8 +67,8 @@ else()
 endif()
 # The pulp::view umbrella carries the Pulp-kept layer. It may depend on the
 # scripted runtime; the extracted view targets (view-core, view-script,
-# design-import, and view-native, which D3 maps to view-platform) never link
-# it. Native plugins reach it through pulp::format-view.
+# design-import and view-platform) never link it. Native plugins reach it
+# through pulp::format-view.
 target_link_libraries(pulp-view PUBLIC pulp::view-tooling)
 # The umbrellas carry the audio widgets on both paths, so a JS-free consumer of
 # pulp::view keeps Meter/WaveformView/SpectrumView without naming view-audio.
@@ -92,7 +91,7 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 # belong to the core/view targets declared above.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PulpViewJsPreludes.cmake")
 
-foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view-tooling pulp-view pulp-view-native)
+foreach(_pulp_view_target pulp-view-core pulp-view-script pulp-view-tooling pulp-view pulp-view-platform pulp-view-native)
     target_include_directories(${_pulp_view_target}
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -225,14 +224,14 @@ endif()
 # runtime probe (LoadLibrary / dlopen) can run before the answer is
 # returned.
 if(WIN32)
-    target_sources(pulp-view-native PRIVATE platform/win/webview2_backend.cpp)
+    target_sources(pulp-view-platform PRIVATE platform/win/webview2_backend.cpp)
     if(PULP_BUILD_WEBVIEW)
         target_sources(pulp-view-webview PRIVATE platform/win/webview2_backend.cpp)
     else()
         target_sources(pulp-view PRIVATE platform/win/webview2_backend.cpp)
     endif()
 elseif(UNIX AND NOT APPLE AND NOT ANDROID)
-    target_sources(pulp-view-native PRIVATE platform/linux/webkitgtk_backend.cpp)
+    target_sources(pulp-view-platform PRIVATE platform/linux/webkitgtk_backend.cpp)
     if(PULP_BUILD_WEBVIEW)
         target_sources(pulp-view-webview PRIVATE platform/linux/webkitgtk_backend.cpp)
     else()

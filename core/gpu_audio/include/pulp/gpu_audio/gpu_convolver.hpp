@@ -8,7 +8,9 @@
 #include <vector>
 
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/gpu_audio/gpu_audio_status.hpp>
 #include <pulp/signal/convolver.hpp>
+#include <pulp/signal/fixed_ir_convolver.hpp>
 
 namespace pulp::render {
 class GpuCompute;
@@ -28,10 +30,26 @@ struct GpuConvolverTraceConfig {
     std::uint32_t success_stride = 1;
 };
 
+/// Circuit breaker for the staged GPU readback. After `trip_after_misses`
+/// consecutive blocks whose GPU result is missing, the worker stops submitting
+/// and runs the CPU convolution for every block, probing the GPU once every
+/// `probe_interval_blocks`. A probe that lands on time puts the GPU on
+/// probation; `recover_after_hits` consecutive on-time results return the node
+/// to GPU output, and any miss on probation trips it again. All three must be
+/// non-zero. Configure before prepare().
+struct GpuConvolverStagedBreaker {
+    std::uint32_t trip_after_misses = 8;
+    std::uint32_t probe_interval_blocks = 32;
+    std::uint32_t recover_after_hits = 4;
+};
+
 class GpuConvolver;
 
 namespace detail {
 struct RealtimeGpuNodePath;
+struct RealtimeGpuHealth;
+struct GpuConvolverTestAccess;
+bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept;
 struct SharedIoProviderIdentity;
 SharedIoProviderIdentity realtime_gpu_provider_identity(GpuAudioNode*) noexcept;
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
@@ -50,41 +68,70 @@ std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 /// with a fixed impulse response, computed on the GPU via render::GpuCompute on
 /// the transport's non-RT worker.
 ///
-/// Each block issues ONE `GpuCompute::convolve_batch` — forward FFT, complex
+/// Each block issues ONE batched GPU convolution — forward FFT, complex
 /// multiply by the resident IR spectrum, and inverse FFT for every channel,
 /// fused into a single submit with a single readback. The per-call GPU
 /// round-trip (~0.5 ms of map latency) is therefore paid once per block rather
 /// than once per channel.
 ///
+/// Staged readback (Auto / StagedOnly). The worker never waits on the GPU: it
+/// submits block N with `GpuCompute::convolve_batch_async` and returns, and the
+/// result counts only if it has landed by the time block N is due,
+/// latency_blocks - 1 calls later (descriptor().worker_pipeline_blocks; 1 at
+/// the default lead of 2). That pipeline sits inside the reported latency, so
+/// total latency and PDC are unchanged. A late result is discarded.
+/// Every block's input lands in exactly one place: the GPU overlap-add carry
+/// when its result is on time, otherwise the worker's zero-latency CPU
+/// convolution. The output is the carry plus whatever the CPU convolution still
+/// owes, so a late, failed, non-finite or device-lost block is the exact
+/// continuation, never silence. The CPU convolution runs only for a missed
+/// block and the IR-length tail after it; a GPU hit costs none. A run of
+/// misses trips the breaker (GpuConvolverStagedBreaker): the worker stops
+/// submitting, runs on the CPU, and probes the GPU periodically until it is on
+/// time again. A node prepared with a one-block lead cannot pipeline and waits,
+/// bounded, inside the block instead.
+///
+/// Lifetime: while a GpuAudioTransport hosts a pipelining GpuConvolver
+/// (descriptor().worker_pipeline_blocks > 0), the transport's release() opts
+/// the node back out of pipelining, so the node must outlive that call (or the
+/// transport must be released first). A non-pipelining node is never touched
+/// by release().
+///
 /// CPU fallback (MissPolicy::CpuFallback). The fallback is a zero-latency
-/// `signal::PartitionedConvolver` per channel that the transport keeps
-/// CONTINUOUSLY fed via prime_fallback() — one cheap partitioned block per audio
-/// block, every block, not only on misses. Feeding it only on misses (the old
-/// behavior) left its overlap-add history full of gaps, so a substituted block
-/// was NOT a correct continuation of the convolution (its IR tail energy from the
-/// preceding audio was missing) — an audible discontinuity, not merely lower
-/// precision. Because the priming path is zero-latency but the transport reports
-/// `latency_blocks` of PDC for the GPU pipeline, the fallback's output is pushed
+/// `signal::FixedIrConvolver` per channel that the transport keeps
+/// CONTINUOUSLY fed via prime_fallback() — one direct-FIR or partitioned block
+/// each audio block, not only on misses. A fallback fed only on misses would
+/// have gaps in its history, so a substituted block would not continue the
+/// convolution (its IR tail energy from the preceding audio would be missing):
+/// an audible discontinuity, not merely lower precision. Because the priming
+/// path is zero-latency but the transport reports `latency_blocks` of PDC for
+/// the GPU pipeline, the fallback's output is pushed
 /// through a matching `latency_blocks`-deep delay so a miss substitute equals the
 /// wet block the worker ring would have returned (input(t-L) convolved) — the
 /// seam is sample-aligned, never a dry glitch and never a block early/late.
 ///
-/// It still blocks on the GPU readback, which is why `process_block` runs on the
-/// transport's non-RT worker and never on the audio thread. Live use at small
-/// block sizes should still prefer the CPU fallback: a partitioned CPU
+/// `process_block` still waits (bounded) on the GPU readback, which is why it
+/// runs on the transport's non-RT worker and never on the audio thread. Live use
+/// at small block sizes should still prefer the CPU fallback: a prepared CPU
 /// convolution costs microseconds, and no amount of batching beats a map
 /// round-trip for a single stereo pair.
 class GpuConvolver : public GpuAudioNode {
   public:
     /// Host-thread selection for the provider used during the next prepare().
-    /// Auto preserves staged/CPU execution even when shared support is compiled.
-    /// SharedRequired explicitly opts into the authenticated shared Dawn path.
-    /// Selection is immutable while prepared and never changes from the audio
-    /// callback.
+    /// Auto preserves staged/CPU execution even when shared support is compiled,
+    /// using the deadline-bounded staged readback described above. StagedOnly
+    /// is the same staged path, named explicitly. SharedRequired explicitly opts
+    /// into the authenticated shared Dawn path. StagedBlocking keeps the earlier
+    /// unbounded `GpuCompute::convolve_batch` readback for callers that depend
+    /// on its timing; it still fills failed or device-lost blocks from the CPU
+    /// continuation. StagedBlocking is a transition escape hatch and is planned
+    /// for removal in the next minor release. Selection is immutable while
+    /// prepared and never changes from the audio callback.
     enum class ProviderPolicy : std::uint8_t {
         Auto,
         StagedOnly,
         SharedRequired,
+        StagedBlocking,
     };
 
     /// Default worker/round-trip latency, in host blocks. A constructed node may
@@ -116,6 +163,11 @@ class GpuConvolver : public GpuAudioNode {
     /// remains the sole live queue consumer; final close drains any remainder.
     bool configure_trace(const GpuConvolverTraceConfig& config) noexcept;
 
+    /// Set the staged-path circuit breaker for the next prepare(). Returns false
+    /// while prepared or for a zero field.
+    bool configure_staged_breaker(const GpuConvolverStagedBreaker& config) noexcept;
+    GpuConvolverStagedBreaker staged_breaker() const noexcept;
+
     GpuAudioNodeDescriptor descriptor() const override;
     bool prepare() override;
 
@@ -145,8 +197,8 @@ class GpuConvolver : public GpuAudioNode {
             }
             const float* x = input.channel_ptr(ch);
             // Guard the fallback against a non-finite input block too: without it
-            // a single NaN would poison the partitioned convolver's own overlap
-            // state (and the delay ring) for the whole IR tail, not just one block.
+            // a single NaN would poison the convolver's own history (and the
+            // delay ring) for the whole IR tail, not just one block.
             bool finite = true;
             for (uint32_t i = 0; i < n; ++i) {
                 if (!std::isfinite(x[i])) {
@@ -190,6 +242,22 @@ class GpuConvolver : public GpuAudioNode {
         return fft_size_;
     }
 
+    /// Allocation-free provider-neutral lifecycle projection, safe to call
+    /// from a host or UI thread while a transport runs this node (not
+    /// concurrently with prepare()). The authenticated shared path reports
+    /// the health its transport last sampled after a service step: a fenced
+    /// session is `Degraded`, a lost provider is `Unavailable`, each with the
+    /// first latched recovery reason. The staged path reports what it can
+    /// prove: provider and engine are `Unknown` while the staged GpuCompute
+    /// device is live, the engine is `Cpu` when no device initialized, and a
+    /// lost device is `Unavailable` with `ProviderLost`.
+    GpuAudioStatus status_snapshot() const noexcept override;
+    /// First latched recovery cause, or None. Same snapshot as status_snapshot().
+    GpuAudioRecoveryReason recovery_reason() const noexcept;
+    /// True before preparation, or once GPU delivery was fenced or its
+    /// provider lost. A diagnostic snapshot, not a promise about the next block.
+    bool fenced() const noexcept;
+
   protected:
     /// Allocate + load the CPU fallback machinery (both the RT miss fallback and
     /// the no-GPU worker fallback) and the latency-alignment delay ring. Shared
@@ -211,14 +279,15 @@ class GpuConvolver : public GpuAudioNode {
     }
 
     /// No-GPU worker path: run the (continuously-fed) worker fallback for every
-    /// prepared channel into `output`, zeroing anything else. Zero-latency
-    /// partitioned convolution, so it matches the GPU path's algorithmic timing.
+    /// prepared channel into `output`, zeroing anything else. Both selected
+    /// engines are zero-latency, so the fallback matches the GPU path's
+    /// algorithmic timing.
     ///
     /// This is the SOLE audio path when the device fails to init (the `!gpu_`
     /// branch of process_block) and in the no-render build, so it carries the same
     /// non-finite-input guard as prime_fallback(): a single NaN/Inf would otherwise
-    /// smear across every FFT bin and poison worker_fallback_'s overlap state for
-    /// the whole IR tail (~num_partitions blocks). On a poisoned block we reset the
+    /// poison worker_fallback_'s history for the whole IR tail (the IR length,
+    /// plus one block on the FFT engine). On a poisoned block we reset the
     /// convolver and emit silence for that channel; it self-heals on the next
     /// finite block instead of dying for the tail.
     void render_worker_fallback(const audio::BufferView<const float>& input,
@@ -260,8 +329,42 @@ class GpuConvolver : public GpuAudioNode {
                                             std::uint64_t callback_end_ns,
                                             std::uint64_t result_visible_ns) noexcept;
     static std::uint64_t next_realtime_shared_io_sequence(void*) noexcept;
+    // Serialized non-RT (transport worker or quiescent host). Also republishes
+    // the sample for status_snapshot() readers on other threads.
+    static bool realtime_shared_io_health(const void* self, detail::RealtimeGpuHealth&) noexcept;
+    // Host-thread safe: the staged GpuCompute loss query is atomic.
+    GpuAudioRecoveryReason staged_recovery_reason() const noexcept;
     bool has_realtime_shared_io() const noexcept;
     detail::SharedIoProviderIdentity provider_identity_for_diagnostics() const noexcept;
+
+    struct StagedReadbackState;
+    // One-block-lead fallback: submit the packed block and wait, bounded, for
+    // its completion into `dest`. True only for a Success readback.
+    bool wait_staged_readback(StagedReadbackState& staged, float* dest);
+    // Pipelined path: submit the packed block into slot `slot_index` without
+    // waiting; it is judged when due, pipeline_blocks calls later.
+    void submit_staged_readback(StagedReadbackState& staged, std::size_t slot_index);
+    // Choose the staged pipeline depth from the prepared device and policy and
+    // size its slots. Called at the end of prepare(); a test that swaps in a
+    // scripted device calls it again before the node is attached.
+    void configure_staged_pipeline();
+    // Pipeline depth the current hosting, device and policy call for.
+    std::uint32_t staged_pipeline_depth() const noexcept;
+    void latch_staged_recovery(GpuAudioRecoveryReason reason) noexcept;
+    void update_staged_breaker(StagedReadbackState& staged, bool on_time) noexcept;
+    // Blocks for which the staged worker ran its CPU convolution since
+    // prepare() (a missed block or the tail after one). Diagnostic.
+    std::uint64_t staged_cpu_blocks() const noexcept;
+    // Blocks whose GPU result was used, and breaker trips, since prepare().
+    // Diagnostic; worker-thread values, read when the worker is quiescent.
+    std::uint64_t staged_gpu_blocks() const noexcept;
+    std::uint64_t staged_breaker_trips() const noexcept;
+    // First cause latched by the staged worker since prepare(): ProviderLost
+    // (device loss; replaces any other cause), SustainedDeadlineMisses (the
+    // breaker tripped on a run of late results), ProviderFailure (failed map or
+    // non-finite readback), else None. A single late block latches nothing.
+    // Any thread; the public status accessor reads it.
+    GpuAudioRecoveryReason staged_latched_reason() const noexcept;
 
     friend detail::RealtimeGpuNodePath detail::realtime_gpu_node_path(GpuAudioNode*) noexcept;
     friend detail::SharedIoProviderIdentity
@@ -275,6 +378,8 @@ class GpuConvolver : public GpuAudioNode {
     friend bool detail::drain_gpu_convolver_trial_admissions(
         GpuConvolver&, std::vector<detail::SharedIoTraceAdmission>&) noexcept;
     friend std::uint64_t detail::gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
+    friend struct detail::GpuConvolverTestAccess;
+    friend bool detail::set_worker_pipeline_hosting(GpuAudioNode*, bool) noexcept;
 
     struct SharedIoState;
 
@@ -316,8 +421,8 @@ class GpuConvolver : public GpuAudioNode {
     std::vector<float> time_;   // 2*fft_size inverse result (one readback)
 
     // Continuously-fed zero-latency CPU fallbacks.
-    std::vector<signal::PartitionedConvolver> fallback_;        // RT miss fallback
-    std::vector<signal::PartitionedConvolver> worker_fallback_; // no-GPU worker path
+    std::vector<signal::FixedIrConvolver> fallback_;        // RT miss fallback
+    std::vector<signal::FixedIrConvolver> worker_fallback_; // no-GPU worker path
 
     // Latency-alignment delay for the RT miss fallback. `fb_delay_` is a
     // `fallback_delay_blocks_`-deep circular buffer of block-sized, per-channel
@@ -328,6 +433,11 @@ class GpuConvolver : public GpuAudioNode {
     std::vector<float> fb_out_;   // [channels][block]
 
     bool prepared_ = false;
+
+    // Staged worker state: breaker settings, the pipelined readback slots, the
+    // CPU convolution's owed tail and the latched recovery cause. Allocated by
+    // the constructor so settings made before prepare() have a home.
+    std::unique_ptr<StagedReadbackState> staged_readback_;
 };
 
 } // namespace pulp::gpu_audio

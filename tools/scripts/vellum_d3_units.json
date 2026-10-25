@@ -49,7 +49,7 @@
     }},
     {"name": "design-import", "targets": ["pulp-design-import"]},
     {"name": "view-script", "targets": ["pulp-view-script"]},
-    {"name": "view-platform", "targets": ["pulp-view-native"]},
+    {"name": "view-platform", "targets": ["pulp-view-platform"]},
     {"name": "ui-js-packages", "targets": ["pulp-jsx-runtime-materialized-contract", "pulp-jsx-runtime-materialized-emitter"]}
   ]
 }
