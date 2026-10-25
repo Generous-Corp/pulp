@@ -106,6 +106,14 @@ to CSS pixels (`snapshotToCssPixels`); without that the native lowering drew
 every panel at twice its size. The snapshot's offset, client and scroll
 rects and `DOM.getBoxModel` were already CSS pixels.
 
+**Testing a capture change against a built importer:** `pulp-import-design`
+runs the capture runtime staged beside its own binary
+(`<build>/tools/import-design/browser_capture-v1/capture.mjs`) ahead of
+`PULP_BROWSER_CAPTURE_SCRIPT`, so pointing that variable at an edited
+`capture.mjs` silently runs the staged copy instead. Rebuild to restage it, or
+copy the importer next to a runtime holding the edit, and check that the
+captures actually differ before reading any score.
+
 ### Browser capture provenance is an import boundary
 
 The native importer validates `capture.json` before lowering the browser tree
