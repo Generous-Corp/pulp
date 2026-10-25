@@ -47,15 +47,25 @@ on:
         required: false
         default: ""
         type: string
+      mise_candidate:
+        description: "Run the main-only M1 pinned-mise candidate lane (pilot label required)"
+        required: false
+        default: false
+        type: boolean
       local_proof:
         description: "Run only the bounded protected-main Pulp repository-isolation proof"
         required: false
         default: false
         type: boolean
       run_windows:
-        description: "Include the hosted Windows leg; disable for a trusted Linux-only Mac Pro dispatch"
+        description: "Include the Windows leg when it has a permitted runner (a local windows_runner_selector_json, or allow_hosted_windows); disable for a trusted Linux-only Mac Pro dispatch"
         required: false
         default: true
+        type: boolean
+      allow_hosted_windows:
+        description: "Allow GitHub-hosted Windows runners for this dispatch. Off by default: without it, or a local windows_runner_selector_json, no hosted Windows job runs"
+        required: false
+        default: false
         type: boolean
 
 # Cancel superseded runs when a new commit lands on the same PR.
@@ -141,6 +151,8 @@ jobs:
       linux_configured_selector_json: ${{ steps.resolve.outputs.linux_configured_selector_json }}
       linux_event_authorized_selector_json: ${{ steps.resolve.outputs.linux_event_authorized_selector_json }}
       macos_runs_on_json: ${{ steps.resolve.outputs.macos_runs_on_json }}
+      windows_leg: ${{ steps.resolve.outputs.windows_leg }}
+      hosted_windows_allowed: ${{ steps.resolve.outputs.hosted_windows_allowed }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -173,6 +185,10 @@ jobs:
           # only for explicit one-off experiments.
           WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
           WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
+          # GitHub-hosted Windows is opt-in: a dispatch input, or the repository
+          # variable PULP_ALLOW_HOSTED_WINDOWS=1 (which also covers a push).
+          WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS: ${{ inputs.allow_hosted_windows }}
+          ALLOW_HOSTED_WINDOWS_VAR: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
           CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
           AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
@@ -194,6 +210,8 @@ jobs:
           #    operator's "macOS local runner: primary required gate"
           #    policy when local is idle.
           WORKFLOW_DISPATCH_MACOS_SELECTOR: ${{ inputs.macos_runner_selector_json || '' }}
+          WORKFLOW_DISPATCH_MISE_CANDIDATE: ${{ inputs.mise_candidate }}
+          WORKFLOW_DISPATCH_LOCAL_PROOF: ${{ inputs.local_proof }}
           LOCAL_MACOS_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '' }}
           # Empty for anything that is not a pull request; for a PR it is the
           # head's owner/repo, which is how the block below detects a fork.
@@ -243,6 +261,7 @@ jobs:
 
           REQUESTED = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
           EVENT_NAME = (os.environ.get("GITHUB_EVENT_NAME") or "").strip()
+          REF = (os.environ.get("GITHUB_REF") or "").strip()
           WORKFLOW_REF = (os.environ.get("WORKFLOW_REF") or "").strip()
           # A pull request whose head lives in another repository. Empty
           # PR_HEAD_REPO means this is not a pull request at all.
@@ -464,6 +483,52 @@ jobs:
           workflow_dispatch_selector = (
               os.environ.get("WORKFLOW_DISPATCH_MACOS_SELECTOR") or ""
           ).strip()
+          mise_candidate = (
+              os.environ.get("WORKFLOW_DISPATCH_MISE_CANDIDATE", "").lower()
+              == "true"
+          )
+          local_proof = (
+              os.environ.get("WORKFLOW_DISPATCH_LOCAL_PROOF", "").lower()
+              == "true"
+          )
+          if mise_candidate:
+              if EVENT_NAME != "workflow_dispatch" or REF != "refs/heads/main":
+                  raise SystemExit(
+                      "resolve-provider: mise_candidate is main-only workflow_dispatch"
+                  )
+              if local_proof:
+                  raise SystemExit(
+                      "resolve-provider: mise_candidate cannot combine with local_proof"
+                  )
+              if workflow_dispatch_selector:
+                  try:
+                      candidate_selector = json.loads(workflow_dispatch_selector)
+                  except (json.JSONDecodeError, TypeError):
+                      candidate_selector = None
+                  required_candidate_labels = {
+                      "self-hosted", "macOS", "ARM64", "pulp-build-vm-mise",
+                      "pulp-build-pr-head",
+                  }
+                  if not isinstance(candidate_selector, list) or not required_candidate_labels.issubset(candidate_selector):
+                      raise SystemExit(
+                          "resolve-provider: mise_candidate requires the "
+                          "pulp-build-vm-mise selector"
+                      )
+                  if "pulp-build-merge-group" in candidate_selector:
+                      raise SystemExit(
+                          "resolve-provider: mise_candidate cannot use the merge-group label"
+                      )
+              else:
+                  workflow_dispatch_selector = json.dumps(
+                      [
+                          "self-hosted",
+                          "macOS",
+                          "ARM64",
+                          "pulp-build-vm-mise",
+                          "pulp-build-pr-head",
+                      ],
+                      separators=(",", ":"),
+                  )
           overflow_macos_selector = (
               os.environ.get("OVERFLOW_MACOS_RUNS_ON_JSON") or ""
           ).strip()
@@ -805,23 +870,56 @@ jobs:
               or os.environ.get("WORKFLOW_DISPATCH_RUN_WINDOWS", "").lower()
               != "false"
           )
-          if (
-              EVENT_NAME not in ("pull_request", "merge_group")
-              and dispatch_runs_windows
+          # GitHub-hosted Windows is opt-in on a push or a dispatch: agents
+          # kept landing on it by default. A selector naming a self-hosted
+          # runner is not hosted; a bare label or a list without
+          # "self-hosted" is.
+          def windows_selector_is_hosted(selector_json):
+              try:
+                  selector = json.loads(selector_json)
+              except (TypeError, ValueError):
+                  return True
+              labels = selector if isinstance(selector, list) else [selector]
+              return "self-hosted" not in [str(label) for label in labels]
+
+          hosted_windows_allowed = (
+              os.environ.get("ALLOW_HOSTED_WINDOWS_VAR", "").strip() == "1"
+              or (
+                  EVENT_NAME == "workflow_dispatch"
+                  and os.environ.get(
+                      "WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS", ""
+                  ).lower() == "true"
+              )
+          )
+          windows_leg = "included"
+          if EVENT_NAME in ("pull_request", "merge_group"):
+              windows_leg = "omitted: pull request or merge group"
+          elif not dispatch_runs_windows:
+              windows_leg = "omitted: run_windows=false"
+          elif (
+              windows_selector_is_hosted(windows_runs_on)
+              and not hosted_windows_allowed
           ):
+              windows_leg = (
+                  "omitted: GitHub-hosted Windows is opt-in "
+                  "(set allow_hosted_windows, a local windows_runner_selector_json, "
+                  "or PULP_ALLOW_HOSTED_WINDOWS=1)"
+              )
+          print(f"resolve-provider: Windows leg {windows_leg}", file=sys.stderr)
+          if windows_leg == "included":
               include.append({
                   "key": "windows",
                   "name": "Windows (x64)",
                   "runs_on_json": windows_runs_on,
                   "provider": windows_provider,
               })
-          elif EVENT_NAME == "workflow_dispatch":
+          elif EVENT_NAME == "workflow_dispatch" and not dispatch_runs_windows:
               print(
                   "resolve-provider: trusted Linux-only workflow_dispatch — "
                   "Windows leg omitted by operator request",
                   file=sys.stderr,
               )
-          else:
+          elif EVENT_NAME in ("pull_request", "merge_group"):
               print(
                   "resolve-provider: pull_request event — Windows leg omitted "
                   "(gated in the merge queue; keeps hosted concurrency free for "
@@ -843,6 +941,11 @@ jobs:
               handle.write(f"provider={REQUESTED}\n")
               handle.write(f"matrix_json={json.dumps(matrix)}\n")
               handle.write(f"macos_runs_on_json={macos_runs_on}\n")
+              handle.write(f"windows_leg={windows_leg}\n")
+              handle.write(
+                  "hosted_windows_allowed="
+                  f"{'true' if hosted_windows_allowed else 'false'}\n"
+              )
               handle.write(f"linux_route_reason={linux_route_reason}\n")
               handle.write(
                   "linux_configured_selector_json="
@@ -877,6 +980,8 @@ jobs:
       a2t_receipt_verification_required: ${{ steps.classify.outputs.verify }}
       a2t_receipt_attestation_required: ${{ steps.classify.outputs.issue }}
       a2t_evidence_head: ${{ steps.classify.outputs.head }}
+      queue_breaker_blocked_prs: ${{ steps.queue_breaker.outputs.blocked_prs }}
+      queue_breaker_reason: ${{ steps.queue_breaker.outputs.reason }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -921,6 +1026,47 @@ jobs:
           GH_TOKEN="${{ github.token }}" python3 "$hold_check" \
             --repo "$GITHUB_REPOSITORY" \
             --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+      # The merge-queue circuit breaker (tools/ci/queue_breaker.py). While the
+      # PULP_QUEUE_BREAKER repository variable names a test failing on main,
+      # fail every merge group that carries neither its fix nor a trusted
+      # `queue-unblock` label, before any VM: a failed classify fails `macos`
+      # closed. It never skips a group (skipped reads as green). Like the HOLD
+      # check it runs the protected base branch's copy, and it fails open: a
+      # variable or group it cannot read lets the group proceed. On a pull
+      # request, PULP_QUEUE_BREAKER_CONTROL is judged report-only against the
+      # pull request itself, the positive control that the variable reaches here.
+      - name: Merge-queue circuit breaker
+        id: queue_breaker
+        if: ${{ github.event_name == 'merge_group' || github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.event.merge_group.base_ref || format('refs/heads/{0}', github.event.pull_request.base.ref) }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          QUEUE_BREAKER: ${{ github.event_name == 'merge_group' && vars.PULP_QUEUE_BREAKER || vars.PULP_QUEUE_BREAKER_CONTROL }}
+        run: |
+          set -uo pipefail
+          title="queue-breaker"
+          if [ -z "$QUEUE_BREAKER" ]; then
+            echo "queue breaker: unset; proceeding"
+            exit 0
+          fi
+          if ! git fetch --no-tags --depth=1 origin "$BASE_REF" 2>/dev/null ||
+             ! git cat-file -e "FETCH_HEAD:tools/ci/queue_breaker.py" 2>/dev/null; then
+            echo "::warning title=$title::queue breaker: no protected copy on $BASE_REF; proceeding (fails open)"
+            exit 0
+          fi
+          breaker=$(mktemp)
+          trap 'rm -f "$breaker"' EXIT
+          git show "FETCH_HEAD:tools/ci/queue_breaker.py" >"$breaker"
+          if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            GH_TOKEN="${{ github.token }}" python3 "$breaker" check-group \
+              --repo "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT" \
+              --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+          else
+            GH_TOKEN="${{ github.token }}" python3 "$breaker" check-group \
+              --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --report-only
+          fi
       - id: classify
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
         # a push diffs the tip it moved away from. `origin/main` is correct for
@@ -1016,7 +1162,8 @@ jobs:
             # group tree as cumulative base + the generated projection.
             if [ "$native_build_required" = true ]; then
               trusted_bump_check=$(mktemp)
-              trap 'rm -f "$trusted_bump_check"' EXIT
+              bump_check_err=$(mktemp)
+              trap 'rm -f "$trusted_bump_check" "$bump_check_err"' EXIT
               trusted_verifier_base=
               if [ "$EVENT_NAME" = pull_request ] \
                   && [ "$base" = "$PR_BASE_SHA" ]; then
@@ -1090,18 +1237,51 @@ jobs:
                   && [ "${BUMP_FASTPATH_PR_MERGE_REF:-}" = 1 ]; then
                 accept_pr_merge_ref=--accept-pr-merge-ref
               fi
-              if [[ "$trusted_verifier_base" =~ ^[0-9a-f]{40}$ ]] \
-                  && git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py" \
-                  >"$trusted_bump_check" 2>/dev/null \
-                  && GH_TOKEN="${{ github.token }}" "$ci_python" "$trusted_bump_check" \
+              # Why the fast path was not taken, reported (never decided) below.
+              bump_refusal=
+              if [[ ! "$trusted_verifier_base" =~ ^[0-9a-f]{40}$ ]]; then
+                bump_refusal="shape: no trusted verifier base (a pull request on a moved base, or a group base that is neither the candidate's parent nor one queue entry past it)"
+              elif ! git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py" \
+                  >"$trusted_bump_check" 2>/dev/null; then
+                bump_refusal="the protected base has no verifier"
+              elif GH_TOKEN="${{ github.token }}" "$ci_python" "$trusted_bump_check" \
                     --repo . \
                     --event-name "$EVENT_NAME" \
                     --event-path "$EVENT_PATH" \
                     --base "$base" \
                     --head "$EVENT_HEAD_SHA" \
-                    ${accept_pr_merge_ref:+"$accept_pr_merge_ref"}; then
+                    ${accept_pr_merge_ref:+"$accept_pr_merge_ref"} 2>"$bump_check_err"; then
                 native_build_required=false
                 echo "Exact generated version bump: native build matrix skipped."
+              else
+                bump_refusal=$(sed -n 's/^generated-version-bump: full validation (\(.*\))$/\1/p' \
+                  "$bump_check_err" | tail -n 1)
+                bump_refusal="verifier: ${bump_refusal:-exited without a reason}"
+              fi
+              [ ! -s "$bump_check_err" ] || cat "$bump_check_err" >&2
+              # Report the outcome for the release bot's bump only, as a
+              # `bump-fast-path` notice that tools/scripts/bump_fastpath_report.py
+              # counts. Recognizing the bump here is for the report alone; the
+              # verifier above is what decides.
+              bump_candidate=
+              if [ "$EVENT_NAME" = pull_request ] \
+                  && [ "${GITHUB_HEAD_REF:-}" = release/version-bump ]; then
+                bump_candidate="$EVENT_HEAD_SHA"
+              elif [ "$EVENT_NAME" = merge_group ] && [ -n "${candidate:-}" ] \
+                  && [ "$(git log -1 --format=%s "$candidate" 2>/dev/null || true)" \
+                    = "chore: bump versions" ]; then
+                bump_candidate="$candidate"
+              fi
+              if [ -n "$bump_candidate" ]; then
+                if [ "$native_build_required" = false ]; then
+                  bump_outcome=taken
+                else
+                  bump_outcome="refused: $bump_refusal"
+                fi
+                bump_outcome=$(printf '%s' "$bump_outcome" | tr -d '\r' | tr '\n' ' ' | cut -c1-300)
+                printf '::notice title=bump-fast-path::%s\n' "${bump_outcome//%/%25}"
+                printf 'bump fast path (%s, %s): %s\n' "$EVENT_NAME" "${bump_candidate:0:12}" \
+                  "$bump_outcome" >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
               fi
             fi
           else
@@ -1114,6 +1294,36 @@ jobs:
             echo "ios_compile_required=$ios_compile_required"
             echo "agent_capability_installed_sdk_required=$agent_capability_installed_sdk_required"
           } >> "$GITHUB_OUTPUT"
+
+  # Tells each pull request in a group the circuit breaker failed why, once
+  # per breaker state. A job of its own so the comment-writing token never
+  # shares a job with a queue entry's code: it checks out only the protected
+  # base branch, without persisted credentials.
+  queue-breaker-notify:
+    needs: classify
+    if: ${{ !inputs.local_proof && !cancelled() && github.event_name == 'merge_group' && needs.classify.outputs.queue_breaker_blocked_prs != '' }}
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.merge_group.base_ref }}
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+      - name: Comment on the blocked pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUEUE_BREAKER: ${{ vars.PULP_QUEUE_BREAKER }}
+          BLOCKED_PRS: ${{ needs.classify.outputs.queue_breaker_blocked_prs }}
+          REASON: ${{ needs.classify.outputs.queue_breaker_reason }}
+        run: |
+          python3 tools/ci/queue_breaker.py notify --repo "$GITHUB_REPOSITORY" \
+            --prs "$BLOCKED_PRS" --reason "$REASON"
 
   protected-receipt-reuse:
     if: ${{ github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true') }}
@@ -1472,7 +1682,8 @@ jobs:
             git fetch --no-tags --depth=1 origin \
               "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
           else
-            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+            git fetch --no-tags --depth=1 origin \
+              "+main:refs/remotes/origin/main"
           fi
 
       - name: Hydrate bounded GPU provenance commits
@@ -1631,6 +1842,64 @@ jobs:
             ${{ runner.os }}-${{ matrix.key || 'build' }}-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-
             ${{ runner.os }}-${{ matrix.key || 'build' }}-ccache-
 
+      - name: Activate pinned mise candidate toolchain
+        if: >-
+          runner.os == 'macOS'
+          && github.event_name == 'workflow_dispatch'
+          && github.ref == 'refs/heads/main'
+          && inputs.mise_candidate == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${RUNNER_ARCH:-}" = "ARM64" || {
+            echo "::error::mise candidate requires an ARM64 runner (RUNNER_ARCH=${RUNNER_ARCH:-unset})"
+            exit 1
+          }
+          mise="$HOME/.local/opt/mise-2026.10.17/bin/mise"
+          test -x "$mise" || { echo "::error::mise candidate binary is missing: $mise"; exit 1; }
+          expected_mise_version="2026.10.17"
+          expected_mise_sha="284869e5b5f57211377f026309910bea91ef65b3a71b934295fa8bd712436dfc"
+          actual_mise_sha="$(shasum -a 256 "$mise" | awk '{print $1}')"
+          test "$actual_mise_sha" = "$expected_mise_sha" || {
+            echo "::error::mise candidate sha256 mismatch: $actual_mise_sha"; exit 1;
+          }
+          actual_mise_version="$("$mise" --version | awk 'NR == 1 {print $1}')"
+          test "$actual_mise_version" = "$expected_mise_version" || {
+            echo "::error::mise candidate version mismatch: $actual_mise_version"; exit 1;
+          }
+          cd "$GITHUB_WORKSPACE"
+          export MISE_ENV=toolchain
+          export MISE_TRUSTED_CONFIG_PATHS="$GITHUB_WORKSPACE"
+          export MISE_DISABLE_UPDATE_WARNING=1
+          # Environment settings apply whether or not mise trusts the checkout,
+          # so no step can resolve or install a tool mid-build.
+          export MISE_LOCKED=1
+          export MISE_AUTO_INSTALL=0
+          "$mise" exec -- "$mise" --version
+          # shellcheck disable=SC2016
+          tool_path="$("$mise" exec -- sh -c 'printf "%s" "$PATH"')"
+          {
+            echo "MISE_ENV=toolchain"
+            echo "MISE_TRUSTED_CONFIG_PATHS=$GITHUB_WORKSPACE"
+            echo "MISE_DISABLE_UPDATE_WARNING=1"
+            echo "MISE_LOCKED=1"
+            echo "MISE_AUTO_INSTALL=0"
+            echo "PATH=$HOME/.local/opt/mise-2026.10.17/bin:$HOME/.cargo/bin:$tool_path"
+          } >> "$GITHUB_ENV"
+          echo "mise candidate active: $tool_path"
+
+      - name: Enforce pinned mise candidate toolchain
+        if: >-
+          runner.os == 'macOS'
+          && github.event_name == 'workflow_dispatch'
+          && github.ref == 'refs/heads/main'
+          && inputs.mise_candidate == true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/toolchain/check_env.py --require-tools --format github
+
       # 0.3 min p50 / 1.1 min max on gate VMs, <= 3.5 min on hosted Linux. A
       # hang here otherwise holds a self-hosted gate VM until the host's
       # 2-hour job timeout instead of failing in minutes.
@@ -1686,6 +1955,29 @@ jobs:
           fi
           [ -x "$chrome" ] || { echo "Chrome executable missing after verified extraction" >&2; exit 1; }
           echo "PULP_DESIGN_BROWSER=$chrome" >> "$GITHUB_ENV"
+
+      # experimental/pulp-rs/rust-toolchain.toml (generated from
+      # tools/toolchain/manifest.toml) names an exact Rust, and RUSTUP_AUTO_INSTALL=0
+      # keeps cargo from fetching it mid-build. This provides it before the build:
+      # offline when the image has it by name or its stable is the same release,
+      # otherwise a download. Self-hosted legs (the required gate) fail closed;
+      # only GitHub-hosted legs may fall back, with a warning, a step summary line
+      # and the receipt uploaded below. Once tartci bakes the pin by name into the
+      # live golden, --fallback-to-default goes too (decisions contract row 29).
+      - name: Provide the pinned Rust toolchain
+        id: pinned-rust
+        timeout-minutes: 10
+        shell: bash
+        run: bash tools/ci/provide_pinned_rust.sh --fallback-to-default
+
+      - name: Upload the Rust fallback receipt
+        if: steps.pinned-rust.outputs.branch == 'fallback'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-toolchain-fallback-${{ matrix.key || runner.os }}
+          path: ${{ steps.pinned-rust.outputs.receipt }}
+          retention-days: 30
 
       - name: Fetch pulp-rs crates
         shell: bash
@@ -2128,26 +2420,16 @@ jobs:
           # -j itself — CMAKE_BUILD_PARALLEL_LEVEL from the wrapper governs,
           # which is why no --parallel flag belongs on the governed command.
           #
-          # Windows keeps a literal, and that is not an oversight. The governor
-          # exists to divide a SHARED host; the Windows leg is a GitHub-hosted
-          # ephemeral 4-core runner that shares with nobody, so a literal that
-          # matches a fixed runner shape is already correct there. It is also
-          # the one leg this PR cannot prove: `windows` is excluded from the
-          # `pull_request` and `merge_group` matrices (see the matrix builder
-          # above), so it runs only on push/nightly/dispatch — and no workflow
-          # runs this wrapper under MSYS bash today, where a checked-out .sh
-          # does not carry a filesystem exec bit. Do not fold these branches
-          # together without first proving that path on a dispatch run.
-          if [ "${RUNNER_OS}" = "Windows" ]; then
-            cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4
-          else
-            # Bound rebuilt-test selection to this PR head's build. Warm
-            # self-hosted Ninja logs retain previous branches' outputs.
-            if [ -n "${PULP_BUILD_DIR:-}" ]; then
-              date +%s.%N > "$PULP_BUILD_DIR/.pulp-build-start"
-            fi
-            tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release
+          # Bound rebuilt-test selection to this PR head's build. Warm
+          # self-hosted Ninja logs retain previous branches' outputs.
+          if [ -n "${PULP_BUILD_DIR:-}" ]; then
+            date +%s.%N > "$PULP_BUILD_DIR/.pulp-build-start"
           fi
+          # The wrapper is invoked under bash so this stays valid for the
+          # Windows leg as well as the POSIX runners. It owns the worker share
+          # on every runner; its POSIX build-directory lock applies where the
+          # runner's path model supports it (Git Bash/MSYS skips that lock).
+          tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
           rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
 
@@ -2489,6 +2771,21 @@ jobs:
         continue-on-error: true
         shell: bash
         run: python3 tools/ci/a2t_headroom_annotation.py "$RUNNER_TEMP/a2t-scope-headroom.json"
+
+      # On a push to main, hand the same measurement to a2t-headroom-issue
+      # below, which keeps the one tracking issue. Only the Linux leg runs the
+      # full suite on a push, and only it uploads, so the artifact name is unique.
+      - name: Upload A2T scope-history headroom
+        if: >-
+          always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+          && runner.os == 'Linux' && steps.ctest.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: a2t-scope-headroom
+          path: ${{ runner.temp }}/a2t-scope-headroom.json
+          if-no-files-found: warn
+          retention-days: 7
 
       # SHADOW instruments for the merge group, one step (tools/ci/
       # merge_group_shadows.py): binary identity vs the PR head's receipt,
@@ -3079,6 +3376,7 @@ jobs:
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
       && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
+      && (inputs.allow_hosted_windows == true || vars.PULP_ALLOW_HOSTED_WINDOWS == '1')
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
@@ -3102,7 +3400,7 @@ jobs:
         shell: pwsh
 
       - name: Build
-        run: cmake --build build --config Release
+        run: bash tools/ci/governed-build.sh cmake --build build --config Release
         shell: pwsh
 
       - name: Verify installed SDK keeps WebView symbols
@@ -3157,6 +3455,7 @@ jobs:
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
       && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
+      && (inputs.allow_hosted_windows == true || vars.PULP_ALLOW_HOSTED_WINDOWS == '1')
     runs-on: windows-latest
     name: Windows MIDI Services SDK compile-gate (advisory)
     continue-on-error: true
@@ -3193,7 +3492,7 @@ jobs:
       # is the whole point of this gate. Avoids paying for the full tree.
       - name: Build pulp-midi (compile-verify the WinRT MIDI 2.0 backend)
         shell: pwsh
-        run: cmake --build build-midi2 --config Release --target pulp-midi
+        run: bash tools/ci/governed-build.sh cmake --build build-midi2 --config Release --target pulp-midi
 
   # ── Windows BLE MIDI compile-gate (advisory) ─────────────────────────────
   #
@@ -3222,6 +3521,7 @@ jobs:
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
       && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
+      && (inputs.allow_hosted_windows == true || vars.PULP_ALLOW_HOSTED_WINDOWS == '1')
     runs-on: windows-latest
     name: Windows BLE compile-gate (advisory)
     continue-on-error: true
@@ -3248,7 +3548,7 @@ jobs:
       # point of this gate. Avoids paying for the full tree.
       - name: Build pulp-midi (compile-verify the WinRT BLE backend)
         shell: pwsh
-        run: cmake --build build-ble --config Release --target pulp-midi
+        run: bash tools/ci/governed-build.sh cmake --build build-ble --config Release --target pulp-midi
 
   # ── Stable-name status aliases for advisory platforms ─────────────────────
   # Stable required `macos` context. Native PR and merge-group builds publish
@@ -3504,7 +3804,7 @@ jobs:
           exit 1
 
   windows:
-    needs: [build, windows-msvc-release-gate, classify]
+    needs: [build, windows-msvc-release-gate, classify, resolve-provider]
     # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
     # alias, and for a sharper reason than symmetry: an alias job pinned to the
     # shared hosted pool can be starved of a runner indefinitely. Because it is
@@ -3522,6 +3822,8 @@ jobs:
       - name: Windows leg outcome (advisory)
         env:
           GH_TOKEN: ${{ github.token }}
+          WINDOWS_LEG: ${{ needs.resolve-provider.outputs.windows_leg }}
+          HOSTED_WINDOWS_ALLOWED: ${{ needs.resolve-provider.outputs.hosted_windows_allowed }}
         run: |
           set -euo pipefail
           classify_result="${{ needs.classify.result }}"
@@ -3541,9 +3843,20 @@ jobs:
             echo "Trusted Linux-only dispatch — Windows omitted by operator request; windows alias ✓"
             exit 0
           fi
+          case "$WINDOWS_LEG" in
+            "omitted: GitHub-hosted Windows is opt-in"*)
+              echo "$WINDOWS_LEG — windows alias ✓ (nothing ran)"
+              exit 0
+              ;;
+          esac
           conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
             --jq '.jobs[] | select(.name | startswith("Windows (x64)")) | .conclusion' | head -1)
           msvc_ok="${{ needs.windows-msvc-release-gate.result }}"
+          # The MSVC gate runs only on GitHub-hosted windows-latest; without the
+          # hosted opt-in it is skipped by design, not failed.
+          if [ "$msvc_ok" = "skipped" ] && [ "$HOSTED_WINDOWS_ALLOWED" != "true" ]; then
+            msvc_ok=success
+          fi
           echo "Windows matrix leg: ${conclusion:-unknown}"
           echo "Windows MSVC release-path: $msvc_ok"
           if [ "$conclusion" = "success" ] && [ "$msvc_ok" = "success" ]; then
@@ -3554,18 +3867,61 @@ jobs:
           echo "Windows leg ${conclusion:-not found} or MSVC=$msvc_ok — failing windows alias (advisory only; not required)"
           exit 1
 
-  # Names the cause of each failed job in this run as a `ci.cause/v1` record,
-  # printed as a `::notice title=ci-cause::` annotation. A job's own log can be
-  # downloaded only once it has finished, so this job reads the failed jobs'
-  # finished logs and runs the pinned, checksum-verified
-  # `shipyard cause extract` over each (tools/ci/ci_cause_notices.sh). It is
-  # advisory: it never gates the run, and none of its failures fail it.
-  ci-cause:
-    name: ci-cause (advisory)
-    needs: [build, macos, macos-merge-group, linux, windows]
+  # The A2T early warning as an issue, not only an annotation: on each push to
+  # main, open or update ONE tracking issue while the scope-history window is at
+  # or past the early-warning share, and close it once a re-pin brings it back
+  # under (tools/ci/a2t_headroom_annotation.py --reconcile-issue). Advisory: a
+  # missing measurement or an API failure warns and never fails the run.
+  a2t-headroom-issue:
+    name: a2t-headroom-issue (advisory)
+    needs: [build]
     if: >-
       (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
       && !cancelled()
+      && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/a2t_headroom_annotation.py
+          sparse-checkout-cone-mode: false
+      - name: Download A2T scope-history headroom
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: a2t-scope-headroom
+          path: ${{ runner.temp }}/a2t
+      - name: Reconcile the A2T headroom tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 tools/ci/a2t_headroom_annotation.py --reconcile-issue
+          --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/a2t/a2t-scope-headroom.json"
+
+  # Names the cause of each failed job in this run as a `ci.cause/v1` record,
+  # printed as a `::notice title=ci-cause::` annotation. A job's own log can be
+  # downloaded only once it has finished, so this job reads the failed jobs'
+  # finished logs and runs `shipyard cause extract` over each
+  # (tools/ci/ci_cause_notices.sh), on the release tools/shipyard.toml pins,
+  # verified against tools/toolchain/shipyard.sha256. It is advisory: it never
+  # gates the run, and none of its failures fail it.
+  ci-cause:
+    name: ci-cause (advisory)
+    needs: [build, macos, macos-merge-group, linux, windows]
+    # Use GitHub's native post-failure hook as well as the explicit dependency
+    # result check. The latter documents exactly whose logs this job reads.
+    if: >-
+      (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
+      && !cancelled()
+      && failure()
       && contains(needs.*.result, 'failure')
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     continue-on-error: true
@@ -3576,6 +3932,8 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             tools/ci/ci_cause_notices.sh
+            tools/shipyard.toml
+            tools/toolchain/shipyard.sha256
           sparse-checkout-cone-mode: false
       - name: Name the cause of each failed job
         env:

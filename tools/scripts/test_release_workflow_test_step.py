@@ -810,6 +810,45 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
             self.text,
         )
 
+    def _run_resolve_step(self, **env: str) -> dict[str, str]:
+        step = next(s for s in yaml.safe_load(self.text)["jobs"]["resolve-macos-runner"]["steps"]
+                    if s.get("id") == "resolve")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            out.touch()
+            base = {k: v for k, v in os.environ.items()
+                    if k in ("PATH", "HOME", "LANG", "TMPDIR")}
+            base.update({"GITHUB_OUTPUT": str(out), "GITHUB_REPOSITORY": "Generous-Corp/pulp"})
+            base.update(env)
+            subprocess.run(["bash", "-c", step["run"]], cwd=REPO_ROOT, env=base,
+                           check=True, capture_output=True, text=True, encoding="utf-8")
+            return dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
+
+    def test_fork_pr_never_reaches_a_self_hosted_selector(self) -> None:
+        persistent = '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]'
+        isolated = '["self-hosted","macOS","ARM64","pulp-release-pr-gate"]'
+        chain = {"RELEASE_JSON": persistent, "LOCAL_JSON": persistent,
+                 "NAMESPACE_JSON": '"nscloud-macos"'}
+
+        # Fork: hosted macos-15 whatever the variables say, the self-hosted
+        # PR-gate selector included, and with every variable unset.
+        for extra in ({"PR_GATE_JSON": isolated}, {}):
+            for head in ("someone/pulp", ""):
+                with self.subTest(extra=extra, head=head):
+                    out = self._run_resolve_step(GITHUB_EVENT_NAME="pull_request",
+                                                 PR_HEAD_REPO=head, **chain, **extra)
+                    self.assertEqual(json.loads(out["runs_on_json"]), ["macos-15"])
+        out = self._run_resolve_step(GITHUB_EVENT_NAME="pull_request", PR_HEAD_REPO="someone/pulp")
+        self.assertEqual(json.loads(out["runs_on_json"]), ["macos-15"])
+        # Same-repo PR and queue batch: the chain is unchanged.
+        for event, head in (("pull_request", "Generous-Corp/pulp"), ("merge_group", "")):
+            with self.subTest(event=event):
+                out = self._run_resolve_step(GITHUB_EVENT_NAME=event, PR_HEAD_REPO=head, **chain)
+                self.assertEqual(out["runs_on_json"], persistent)
+                out = self._run_resolve_step(GITHUB_EVENT_NAME=event, PR_HEAD_REPO=head,
+                                             PR_GATE_JSON=isolated, **chain)
+                self.assertEqual(out["runs_on_json"], isolated)
+
     def test_checkout_does_not_require_git_lfs(self) -> None:
         self.assertIn("lfs: false", self.text)
         self.assertNotIn("lfs: true", self.text)
@@ -821,11 +860,34 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
         self.assertIn("matrix.platform == 'darwin-arm64' || matrix.platform == 'linux-x64'", self.text)
 
     def test_release_path_builds_bind_to_the_verified_checkout_provider(self) -> None:
+        configures = self.text.count("cmake -S . -B")
+        self.assertGreaterEqual(configures, 3)
         self.assertEqual(
             self.text.count('-DSKIA_DIR="$PWD/external/skia-build"'),
-            2,
-            "both release-path configure calls must consume the provider that "
+            configures,
+            "every release-path configure call must consume the provider that "
             "the preceding receipt/capability step verified",
+        )
+
+    def test_darwin_leg_runs_js_engine_suite_against_sealed_v8(self) -> None:
+        workflow = yaml.safe_load(self.text)
+        steps = [
+            step for step in workflow["jobs"]["release-build"]["steps"]
+            if step.get("name") == "Run [js_engine] suite against the sealed V8"
+        ]
+        self.assertEqual(len(steps), 1)
+        step = steps[0]
+        self.assertEqual(step.get("if"), "matrix.platform == 'darwin-arm64'")
+        run = step["run"]
+        self.assertIn("-DPULP_JS_ENGINE=v8", run)
+        self.assertIn("-DPULP_BUILD_TESTS=ON", run)
+        self.assertIn("--target pulp-test-group-script-view", run)
+        self.assertIn('"$carrier" "[js_engine]"', run)
+        self.assertIn("grep -qi \"skipped\"", run)
+        names = [s.get("name") for s in workflow["jobs"]["release-build"]["steps"]]
+        self.assertLess(
+            names.index("Fetch sealed V8 provider (mixed-provider gate)"),
+            names.index("Run [js_engine] suite against the sealed V8"),
         )
 
     def test_darwin_leg_requires_mixed_provider_render_proof(self) -> None:
@@ -1571,6 +1633,64 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertLess(self.text.index(verify), self.text.index(publish))
         self.assertLess(self.text.index(upload), self.text.index(publish))
 
+    def test_checksum_manifest_covers_every_product_matrix_asset(self) -> None:
+        """SHA256SUMS is generated with --exact-required over the asset list
+        derived from the product matrix, so every archive a consumer can
+        download is covered and a missing or extra one aborts the publish."""
+        finalizer = next(
+            step
+            for step in self.workflow["jobs"]["release"]["steps"]
+            if step.get("name") == "Verify assets, generate SHA256SUMS, publish"
+        )
+        run_block = finalizer["run"]
+        self.assertIn("required_assets=(appcast.xml)", run_block)
+        self.assertIn("release_asset_names(ProductMatrix.load(", run_block)
+        self.assertIn('--required-name "${asset}"', run_block)
+        generate = run_block.index("release_checksum_manifest.py generate")
+        self.assertIn("--exact-required", run_block[generate:])
+
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
+        from release_artifact_contents import ProductMatrix, release_asset_names
+
+        matrix = ProductMatrix.load(REPO_ROOT / "tools/scripts/release_product_matrix.json")
+        names = release_asset_names(matrix)
+        self.assertEqual(len(names), 2 * len(matrix.active_platforms))
+        self.assertEqual(len(set(names)), len(names))
+        for platform in matrix.active_platforms:
+            self.assertTrue(any(name.startswith(f"pulp-{platform}.") for name in names), platform)
+            self.assertIn(f"pulp-sdk-{platform}.tar.gz", names)
+
+    def test_checksum_manifest_floor_is_written_once_in_the_product_matrix(self) -> None:
+        """The CLI download paths refuse a release at or above this floor
+        when it carries no SHA256SUMS. Both CLIs read it from the matrix, so
+        no source file may carry its own copy of the number."""
+        matrix = json.loads(
+            (REPO_ROOT / "tools/scripts/release_product_matrix.json").read_text(encoding="utf-8")
+        )
+        floor = matrix["checksum_manifest_floor"]
+        self.assertRegex(floor, r"^\d+\.\d+\.\d+$")
+
+        cli_cmake = (REPO_ROOT / "tools/cli/CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn(
+            "pulp_release_matrix_floor(PULP_RELEASE_CHECKSUM_MANIFEST_FLOOR checksum_manifest_floor)",
+            cli_cmake,
+        )
+        rust = (REPO_ROOT / "experimental/pulp-rs/src/install.rs").read_text(encoding="utf-8")
+        self.assertIn('include_str!("../../../tools/scripts/release_product_matrix.json")', rust)
+        self.assertIn('"checksum_manifest_floor"', rust)
+
+        consumers = [
+            REPO_ROOT / "experimental/pulp-rs/src/install.rs",
+            *sorted((REPO_ROOT / "tools/cli").glob("*.cpp")),
+            *sorted((REPO_ROOT / "tools/cli").glob("*.hpp")),
+        ]
+        for path in consumers:
+            self.assertNotIn(
+                f'"{floor}"',
+                path.read_text(encoding="utf-8"),
+                f"{path.relative_to(REPO_ROOT)} carries its own copy of the floor",
+            )
+
     def test_release_finalizer_uses_authoritative_provenance_floors(self) -> None:
         steps = self.workflow["jobs"]["release"]["steps"]
         finalizer = next(
@@ -1801,16 +1921,16 @@ class NightlyIsTheRealIntelGate(unittest.TestCase):
         self.assertIn('[ "$auval" = "pass" ]', self.text)
 
     def test_universal_capability_proof_precedes_build(self) -> None:
-        proof = self.text.index("Verify both universal Skia m153 capability slices")
+        proof = self.text.index("Verify both universal Skia capability slices")
         configure = self.text.index("Configure (universal arm64;x86_64)")
         self.assertLess(proof, configure)
         self.assertIn("--platform darwin-universal", self.text[proof:configure])
-        self.assertIn("--result skia-m153-universal-capabilities.json", self.text[proof:configure])
+        self.assertIn("--result skia-universal-capabilities.json", self.text[proof:configure])
 
     def test_nightly_result_counts_universal_capabilities(self) -> None:
         self.assertIn("steps.capabilities.outputs.status", self.text)
         self.assertIn('[ "$capabilities" = "pass" ]', self.text)
-        self.assertIn("skia-m153-universal-capabilities.json", self.text)
+        self.assertIn("skia-universal-capabilities.json", self.text)
 
     def test_nightly_watchdog_reports_capability_failure_surface(self) -> None:
         self.assertIn(
@@ -1820,9 +1940,9 @@ class NightlyIsTheRealIntelGate(unittest.TestCase):
             "B_CAPABILITIES: ${{ needs.universal-crosscheck.outputs.capabilities }}",
             self.text,
         )
-        self.assertIn("Skia m153 universal capabilities", self.text)
+        self.assertIn("Skia universal capabilities", self.text)
         self.assertIn("capability-step log first", self.text)
-        self.assertIn("skia-m153-universal-capabilities.json", self.text)
+        self.assertIn("skia-universal-capabilities.json", self.text)
 
 
 class EveryLegIsIndividuallyRoutable(unittest.TestCase):

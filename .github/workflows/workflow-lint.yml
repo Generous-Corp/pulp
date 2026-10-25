@@ -26,6 +26,10 @@ on:
       - 'tools/ci/release_package_cli.sh'
       - 'tools/ci/release_path_changed.py'
       - 'tools/scripts/action_pin_lint.py'
+      - 'tools/scripts/view_audio_archive_manifest.py'
+      # The manifest and its tests read listings through this reader.
+      - 'tools/scripts/nm_symbols.py'
+      - 'tools/scripts/test_view_audio_archive_manifest.py'
       - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'
       - 'tools/scripts/schedule_backstop_check.py'
@@ -43,6 +47,8 @@ on:
       - 'tools/scripts/test_windows_runner_policy.py'
       - 'tools/scripts/test_codeql_workflow_concurrency.py'
       - 'tools/scripts/test_cross_platform_check_concurrency.py'
+      - 'tools/scripts/windows_runner_selector.py'
+      - 'tools/scripts/test_windows_runner_selector.py'
       - 'tools/scripts/windows_cli_compile_scope.py'
       - 'tools/scripts/test_windows_cli_compile_scope.py'
       - 'tools/scripts/windows_cli_release_precheck.py'
@@ -159,6 +165,10 @@ on:
       - 'tools/ci/release_package_cli.sh'
       - 'tools/ci/release_path_changed.py'
       - 'tools/scripts/action_pin_lint.py'
+      - 'tools/scripts/view_audio_archive_manifest.py'
+      # The manifest and its tests read listings through this reader.
+      - 'tools/scripts/nm_symbols.py'
+      - 'tools/scripts/test_view_audio_archive_manifest.py'
       - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'
       - 'tools/scripts/schedule_backstop_check.py'
@@ -176,6 +186,8 @@ on:
       - 'tools/scripts/test_windows_runner_policy.py'
       - 'tools/scripts/test_codeql_workflow_concurrency.py'
       - 'tools/scripts/test_cross_platform_check_concurrency.py'
+      - 'tools/scripts/windows_runner_selector.py'
+      - 'tools/scripts/test_windows_runner_selector.py'
       - 'tools/scripts/windows_cli_compile_scope.py'
       - 'tools/scripts/test_windows_cli_compile_scope.py'
       - 'tools/scripts/windows_cli_release_precheck.py'
@@ -382,6 +394,13 @@ jobs:
           python3 tools/scripts/test_coverage_surface_contract.py
           python3 tools/scripts/test_generated_version_bump_check.py
 
+      - name: View-audio archive producer contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'pyyaml>=6'
+          python3 tools/scripts/test_view_audio_archive_manifest.py
+
       - name: Android pre-merge probe contract
         # `android-build` is push/schedule only, so `android-run-fixtures` is
         # the only Android job a PR runs. Keep its API-floor compile probe and
@@ -521,6 +540,8 @@ jobs:
           # Proof-branch dispatches run per ref; only main touches the
           # cross-platform tracking issues.
           python3 tools/scripts/test_cross_platform_check_concurrency.py
+          # A dispatch-routed Windows job never lands on a macOS or Linux pool.
+          python3 tools/scripts/test_windows_runner_selector.py
           # Pulp #47 — guard the linux-arm64 Skia manifest entry against
           # silent regressions (parallel to the linux-x64 / mac-arm64
           # entries enforced by tests/test_skia_determinism.py).

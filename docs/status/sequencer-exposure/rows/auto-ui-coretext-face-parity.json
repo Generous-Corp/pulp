@@ -1,0 +1,41 @@
+{
+  "id": "auto-ui-coretext-face-parity",
+  "title": "AutoUi CoreGraphics-vs-Skia face parity test remains sequencer-visible",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "f41a2c18-7c40-4c48-b3aa-3d462d682b4c",
+  "owned_paths": [
+    "test/test_auto_ui.cpp",
+    "docs/status/sequencer-exposure/rows/auto-ui-coretext-face-parity.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/test_auto_ui.cpp",
+      "needles": [
+        "AutoUi text paints the same face on the CoreGraphics canvas and Skia"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This row covers a view test that compares two renders; it changes no installed SDK surface."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The AutoUi editor test is unrelated to sequenced timeline editing."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation or timeline authority changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No live product control or capability is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "A rendering test does not advertise an agent capability."
+    }
+  }
+}

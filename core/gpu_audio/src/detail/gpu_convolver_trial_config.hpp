@@ -25,6 +25,8 @@ enum class GpuConvolverTrialLoad : std::uint8_t {
     Overload,
 };
 
+struct SharedIoTraceDrainObserver;
+
 // Host-observed machine state; this never implies GPU execution or success.
 enum class GpuConvolverThermalState : std::uint8_t { Unavailable, Nominal, Warm, Throttled };
 
@@ -162,6 +164,10 @@ inline bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& co
 // until the paired P4 provider contract is complete. It is consumed exactly
 // once by GpuConvolver::prepare() and is never read by the callback.
 struct GpuConvolverTrialConfig {
+    // Private campaign-only sink. It is called by the serialized diagnostic
+    // drain and must remain alive through release(); ordinary runtime callers
+    // leave it null.
+    const SharedIoTraceDrainObserver* observer = nullptr;
     SharedIoRequest requested_path = SharedIoRequest::Auto;
     // Preparation generation stamped into staged terminal records. Shared-I/O
     // records receive their generation from the prepared arena; keeping this

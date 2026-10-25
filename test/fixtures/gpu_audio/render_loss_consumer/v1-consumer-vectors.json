@@ -1,0 +1,989 @@
+{
+  "schema": "pulp.gpu-audio.render-loss-consumer-v1-vectors",
+  "provenance": "Transcribed from the Pulp/Vellum render-owner loss handoff package (2026-10-21); Vellum revision 96a12fdf19fbed814c44d73266d808136baacb60.",
+  "fixture_identity": {
+    "provider_id": "fixture.fake-backend",
+    "provider_version": "fixture.fake-backend.v1",
+    "owner_id": "fixture.render-owner-A",
+    "replacement_owner_id": "fixture.render-owner-B",
+    "resource_manifest_schema_version": "fixture.resource-manifest.v1"
+  },
+  "cases": [
+    {
+      "id": "positive.recoverable.replay-success.before-submit",
+      "class": "positive",
+      "injection_point": "before_submit",
+      "input_trace": [
+        {
+          "op": "inject_device_loss",
+          "when": "before_submit"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "fence_gpu_admission"
+        },
+        {
+          "op": "replay_from_immutable_manifest"
+        },
+        {
+          "op": "publish_replay_result",
+          "event_seq": 2,
+          "render_generation": 8,
+          "surface_epoch": 4,
+          "replay": "succeeded",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "replay_result"
+        },
+        {
+          "op": "resume_gpu_admission"
+        }
+      ],
+      "expected": {
+        "disposition": "recoverable",
+        "replay": "succeeded",
+        "admission": "reopened_only_after_replay",
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 2,
+          "closed": false
+        },
+        "audio_progress": "monotonic"
+      }
+    },
+    {
+      "id": "positive.recoverable.replay-success.between-submit-and-completion-registration",
+      "class": "positive",
+      "injection_point": "between_submit_and_completion_registration",
+      "input_trace": [
+        {
+          "op": "submit_frame",
+          "submission_id": "fixture-submission-1"
+        },
+        {
+          "op": "inject_device_loss",
+          "when": "between_submit_and_completion_registration"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "fence_gpu_admission"
+        },
+        {
+          "op": "register_completion_callback",
+          "expected": "suppressed_or_drained_without_retirement"
+        },
+        {
+          "op": "replay_from_immutable_manifest"
+        },
+        {
+          "op": "publish_replay_result",
+          "event_seq": 2,
+          "render_generation": 8,
+          "surface_epoch": 4,
+          "replay": "succeeded",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "replay_result"
+        },
+        {
+          "op": "resume_gpu_admission"
+        }
+      ],
+      "expected": {
+        "disposition": "recoverable",
+        "replay": "succeeded",
+        "admission": "reopened_only_after_replay",
+        "stale_completion_retired": false,
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 2,
+          "closed": false
+        }
+      }
+    },
+    {
+      "id": "positive.recoverable.replay-success.after-completion-registration",
+      "class": "positive",
+      "injection_point": "after_completion_registration",
+      "input_trace": [
+        {
+          "op": "submit_frame",
+          "submission_id": "fixture-submission-1"
+        },
+        {
+          "op": "register_completion_callback",
+          "callback_id": "fixture-callback-1"
+        },
+        {
+          "op": "inject_device_loss",
+          "when": "after_completion_registration"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "fence_gpu_admission"
+        },
+        {
+          "op": "reach_quiescent"
+        },
+        {
+          "op": "replay_from_immutable_manifest"
+        },
+        {
+          "op": "publish_replay_result",
+          "event_seq": 2,
+          "render_generation": 8,
+          "surface_epoch": 4,
+          "replay": "succeeded",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "replay_result"
+        },
+        {
+          "op": "resume_gpu_admission"
+        }
+      ],
+      "expected": {
+        "disposition": "recoverable",
+        "replay": "succeeded",
+        "admission": "reopened_only_after_replay",
+        "callback_ordering": "loss_before_replay_before_resume",
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 2,
+          "closed": false
+        }
+      }
+    },
+    {
+      "id": "positive.terminal.owner-teardown",
+      "class": "positive",
+      "injection_point": "after_completion_registration",
+      "input_trace": [
+        {
+          "op": "inject_device_loss",
+          "when": "after_completion_registration"
+        },
+        {
+          "op": "reach_quiescent"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "replay": "not_attempted",
+          "terminal": {
+            "kind": "owner_teardown",
+            "quiescent": true,
+            "callbacks_suppressed": true,
+            "replay": "not_attempted"
+          },
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "teardown_owner"
+        },
+        {
+          "op": "suppress_callbacks"
+        }
+      ],
+      "expected": {
+        "disposition": "terminal",
+        "replay": "not_attempted",
+        "callbacks_suppressed": true,
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 1,
+          "closed": true
+        },
+        "admission": "permanently_closed"
+      }
+    },
+    {
+      "id": "positive.duplicate-loss-idempotent",
+      "class": "positive",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        }
+      ],
+      "expected": {
+        "first_event": "accepted",
+        "duplicate_event": "ignored_idempotently",
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 1,
+          "closed": false
+        }
+      }
+    },
+    {
+      "id": "positive.recoverable.replay-failure",
+      "class": "positive",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "fence_gpu_admission"
+        },
+        {
+          "op": "replay_from_immutable_manifest"
+        },
+        {
+          "op": "publish_replay_result",
+          "event_seq": 2,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "replay": "failed",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "replay_result",
+          "terminal": {
+            "kind": "replay_failed",
+            "quiescent": true,
+            "callbacks_suppressed": true,
+            "replay": "failed"
+          }
+        }
+      ],
+      "expected": {
+        "disposition": "terminal",
+        "replay": "failed",
+        "callbacks_suppressed": true,
+        "admission": "permanently_closed",
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 2,
+          "closed": true
+        }
+      }
+    },
+    {
+      "id": "positive.terminal.provider-refused",
+      "class": "positive",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss",
+          "terminal": {
+            "kind": "provider_refused",
+            "quiescent": true,
+            "callbacks_suppressed": true,
+            "replay": "not_attempted"
+          }
+        }
+      ],
+      "expected": {
+        "disposition": "terminal",
+        "replay": "not_attempted",
+        "callbacks_suppressed": true,
+        "admission": "permanently_closed",
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 1,
+          "closed": true
+        }
+      }
+    },
+    {
+      "id": "positive.owner-handoff.replaces-closed-cursor",
+      "class": "positive",
+      "input_trace": [
+        {
+          "op": "close_cursor",
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A"
+        },
+        {
+          "op": "owner_handoff",
+          "contract_version": 1,
+          "from_provider_id": "fixture.fake-backend",
+          "from_provider_version": "fixture.fake-backend.v1",
+          "from_owner_id": "fixture.render-owner-A",
+          "to_provider_id": "fixture.fake-backend",
+          "to_provider_version": "fixture.fake-backend.v1",
+          "to_owner_id": "fixture.render-owner-B"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 8,
+          "surface_epoch": 4,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-B",
+          "event_kind": "loss"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 8,
+          "surface_epoch": 4,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        }
+      ],
+      "expected": {
+        "handoff": "accepted_atomically",
+        "new_owner_event": "accepted",
+        "old_owner_event": "rejected",
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-B",
+          "last_event_seq": 1,
+          "closed": false
+        },
+        "admission": "fenced_on_new_owner_loss"
+      }
+    },
+    {
+      "id": "positive.terminal.software-provider-refused",
+      "class": "positive",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.software-provider",
+          "provider_version": "fixture.software-provider.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss",
+          "reason": "software_provider_refused",
+          "terminal": {
+            "kind": "provider_refused",
+            "quiescent": true,
+            "callbacks_suppressed": true,
+            "replay": "not_attempted"
+          }
+        }
+      ],
+      "expected": {
+        "disposition": "terminal",
+        "replay": "not_attempted",
+        "callbacks_suppressed": true,
+        "admission": "permanently_closed",
+        "cursor": {
+          "provider_id": "fixture.software-provider",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 1,
+          "closed": true
+        }
+      }
+    },
+    {
+      "id": "negative.stale-render-generation",
+      "class": "negative",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 2,
+          "render_generation": 6,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        }
+      ],
+      "expected": {
+        "rejected_event": 2,
+        "reason": "stale_generation",
+        "cursor_unchanged": true,
+        "admission": "remains_fenced",
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 1,
+          "closed": false
+        },
+        "disposition": "rejected"
+      }
+    },
+    {
+      "id": "negative.stale-surface-epoch",
+      "class": "negative",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 2,
+          "render_generation": 7,
+          "surface_epoch": 2,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        }
+      ],
+      "expected": {
+        "rejected_event": 2,
+        "reason": "stale_surface_epoch",
+        "cursor_unchanged": true,
+        "admission": "remains_fenced",
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 1,
+          "closed": false
+        },
+        "disposition": "rejected"
+      }
+    },
+    {
+      "id": "negative.owner-reuse-after-handoff",
+      "class": "negative",
+      "input_trace": [
+        {
+          "op": "close_cursor",
+          "owner_id": "fixture.render-owner-A"
+        },
+        {
+          "op": "publish_loss_event",
+          "owner_id": "fixture.render-owner-A",
+          "event_seq": 1,
+          "render_generation": 8,
+          "surface_epoch": 4,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "event_kind": "loss"
+        }
+      ],
+      "expected": {
+        "rejected_event": 1,
+        "reason": "owner_reuse_without_explicit_handoff",
+        "cursor_closed": true,
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 0,
+          "closed": true
+        },
+        "disposition": "rejected"
+      }
+    },
+    {
+      "id": "negative.sequence-gap",
+      "class": "negative",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 3,
+          "render_generation": 8,
+          "surface_epoch": 4,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "succeeded",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        }
+      ],
+      "expected": {
+        "rejected_event": 2,
+        "reason": "sequence_gap",
+        "cursor_closed_or_resync_required": true,
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 1,
+          "closed": true
+        },
+        "disposition": "rejected"
+      }
+    },
+    {
+      "id": "negative.sequence-conflict",
+      "class": "negative",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "payload_digest": "D1",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 99,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "payload_digest": "D2",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        }
+      ],
+      "expected": {
+        "rejected_event": 2,
+        "reason": "conflicting_payload_for_sequence",
+        "cursor_closed_or_resync_required": true,
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 1,
+          "closed": true
+        },
+        "disposition": "rejected"
+      }
+    },
+    {
+      "id": "negative.terminal-before-quiescent",
+      "class": "negative",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "terminal",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "terminal": {
+            "quiescent": false,
+            "callbacks_suppressed": false
+          },
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        }
+      ],
+      "expected": {
+        "rejected_event": 1,
+        "reason": "terminal_requires_quiescent_and_callbacks_suppressed",
+        "cursor_unchanged": true,
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 0,
+          "closed": false
+        },
+        "disposition": "rejected"
+      }
+    },
+    {
+      "id": "negative.callback-after-teardown",
+      "class": "negative",
+      "input_trace": [
+        {
+          "op": "reach_quiescent"
+        },
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "terminal",
+          "quiescence": "quiescent",
+          "replay": "not_attempted",
+          "terminal": {
+            "quiescent": true,
+            "callbacks_suppressed": true
+          },
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "teardown_owner"
+        },
+        {
+          "op": "invoke_completion_callback",
+          "callback_id": "fixture-callback-late"
+        }
+      ],
+      "expected": {
+        "rejected_event": 3,
+        "reason": "callback_after_teardown",
+        "callback_invoked": false,
+        "cursor_closed": true,
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 1,
+          "closed": true
+        },
+        "disposition": "rejected"
+      }
+    },
+    {
+      "id": "negative.resource-manifest-mutation",
+      "class": "negative",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss",
+          "manifest": "M1"
+        },
+        {
+          "op": "mutate_resource_manifest",
+          "from_manifest": "M1",
+          "to_manifest": "M2"
+        },
+        {
+          "op": "publish_replay_result",
+          "event_seq": 2,
+          "render_generation": 8,
+          "surface_epoch": 4,
+          "replay": "succeeded",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "replay_result",
+          "manifest": "M2"
+        }
+      ],
+      "expected": {
+        "rejected_event": 2,
+        "reason": "resource_manifest_digest_changed",
+        "replay_accepted": false,
+        "admission": "remains_fenced",
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 1,
+          "closed": false
+        },
+        "disposition": "rejected"
+      }
+    },
+    {
+      "id": "negative.false-replay-success",
+      "class": "negative",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "publish_replay_result",
+          "event_seq": 2,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "replay": "succeeded",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "replay_result"
+        }
+      ],
+      "expected": {
+        "rejected_event": 2,
+        "reason": "replay_success_requires_new_generation_and_surface_epoch",
+        "replay_accepted": false,
+        "admission": "remains_fenced",
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 1,
+          "closed": false
+        },
+        "disposition": "rejected"
+      }
+    },
+    {
+      "id": "negative.stale-completion",
+      "class": "negative",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "loss"
+        },
+        {
+          "op": "publish_replay_result",
+          "event_seq": 2,
+          "render_generation": 8,
+          "surface_epoch": 4,
+          "replay": "succeeded",
+          "contract_version": 1,
+          "provider_id": "fixture.fake-backend",
+          "provider_version": "fixture.fake-backend.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_kind": "replay_result"
+        },
+        {
+          "op": "invoke_completion_callback",
+          "generation": 7,
+          "surface_epoch": 3,
+          "callback_id": "fixture-callback-old-generation"
+        },
+        {
+          "op": "retire_completion",
+          "generation": 7,
+          "surface_epoch": 3
+        }
+      ],
+      "expected": {
+        "rejected_event": 3,
+        "reason": "completion_from_lost_generation",
+        "callback_invoked": false,
+        "retirement_accepted": false,
+        "cursor": {
+          "last_event_seq": 2,
+          "closed": false
+        },
+        "disposition": "rejected"
+      }
+    },
+    {
+      "id": "negative.wrong-provider",
+      "class": "negative",
+      "input_trace": [
+        {
+          "op": "publish_loss_event",
+          "provider_id": "fixture.other-provider",
+          "provider_version": "fixture.other-provider.v1",
+          "owner_id": "fixture.render-owner-A",
+          "event_seq": 1,
+          "render_generation": 7,
+          "surface_epoch": 3,
+          "disposition": "recoverable",
+          "quiescence": "draining",
+          "replay": "not_attempted",
+          "contract_version": 1,
+          "event_kind": "loss"
+        }
+      ],
+      "expected": {
+        "rejected_event": 1,
+        "reason": "unexpected_provider_identity",
+        "cursor_unchanged": true,
+        "cursor": {
+          "provider_id": "fixture.fake-backend",
+          "owner_id": "fixture.render-owner-A",
+          "last_event_seq": 0,
+          "closed": false
+        },
+        "disposition": "rejected"
+      }
+    }
+  ]
+}

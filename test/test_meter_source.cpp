@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <thread>
 
@@ -50,6 +51,33 @@ TEST_CASE("MeterSource publishes the latest frame", "[view][meter-source]") {
 
     src.publish(stereo(0.1f, 0.9f));  // latest wins
     CHECK(src.read().peak[0] == Catch::Approx(0.9f));
+}
+
+TEST_CASE("MeterSource publish copies every field and advances the publish counter by one",
+          "[view][meter-source]") {
+    MeterSource src;
+    const auto before = src.publish_seq();
+    MeterFrame frame;
+    frame.channels = MeterFrame::kMaxChannels;
+    for (int ch = 0; ch < MeterFrame::kMaxChannels; ++ch) {
+        frame.rms[ch] = 0.01f * static_cast<float>(ch + 1);
+        frame.peak[ch] = 0.1f * static_cast<float>(ch + 1);
+    }
+    for (int i = 1; i <= 5; ++i) {
+        frame.peak[0] = static_cast<float>(i);
+        src.publish(frame);
+        REQUIRE(src.publish_seq() == before + static_cast<std::uint32_t>(i));
+    }
+    const MeterFrame got = src.read();
+    REQUIRE(got.channels == MeterFrame::kMaxChannels);
+    REQUIRE(got.peak[0] == 5.0f);
+    for (int ch = 1; ch < MeterFrame::kMaxChannels; ++ch) {
+        REQUIRE(got.rms[ch] == frame.rms[ch]);
+        REQUIRE(got.peak[ch] == frame.peak[ch]);
+    }
+    REQUIRE(got.rms[0] == frame.rms[0]);
+    // Reading does not count as a publish.
+    REQUIRE(src.publish_seq() == before + 5u);
 }
 
 TEST_CASE("ScalarSource publishes the latest value", "[view][meter-source]") {
@@ -442,6 +470,81 @@ TEST_CASE("a View subclass reads a published scalar from paint()",
     CHECK_FALSE(p->has_scalar_source());
     CHECK_FALSE(clock.has_active_subscribers());
     CHECK(p->scalar_value() == Catch::Approx(0.0f));
+
+    root->set_frame_clock(nullptr);
+}
+
+TEST_CASE("a source-bound View subclass asks for a repaint only when its snapshot changes",
+          "[view][meter-source][idle-gate]") {
+    // A live binding keeps the clock ticking, but the hosts composite only what
+    // was dirtied. A plain View that paints from meter_frame()/scalar_value()
+    // must therefore be dirtied by the binding when the reading changes, and
+    // must cost nothing while it does not.
+    RepaintCountingHost host;
+    FrameClock clock;
+    auto root = std::make_unique<View>();
+    root->set_window_host(&host);
+    root->set_frame_clock(&clock);
+    auto panel = std::make_unique<MeterPanel>();
+    MeterPanel* p = panel.get();
+    root->add_child(std::move(panel));
+
+    auto src = std::make_shared<MeterSource>();
+    auto scalar = std::make_shared<ScalarSource>();
+    p->set_meter_source(src, 0);
+    p->set_scalar_source(scalar);
+    const int base = host.repaints;
+
+    src->publish(stereo(0.25f, 0.75f));
+    clock.tick(0.016f);
+    CHECK(host.repaints == base + 1);
+
+    // The same reading again, frame after frame: no further repaints.
+    for (int i = 0; i < 60; ++i)
+        clock.tick(0.016f);
+    CHECK(host.repaints == base + 1);
+
+    scalar->publish(0.5f);
+    clock.tick(0.016f);
+    CHECK(host.repaints == base + 2);
+    for (int i = 0; i < 60; ++i)
+        clock.tick(0.016f);
+    CHECK(host.repaints == base + 2);
+
+    src->publish(stereo(0.1f, 0.2f));
+    scalar->publish(0.25f);
+    clock.tick(0.016f);
+    CHECK(host.repaints >= base + 3);
+
+    root->set_frame_clock(nullptr);
+}
+
+TEST_CASE("a source-bound Meter leaves its invalidation to its ballistics",
+          "[view][meter-source][idle-gate]") {
+    // Meter overrides on_meter_snapshot_changed: a changed snapshot whose level
+    // the ballistics hold (a reading below the held display) must not repaint.
+    RepaintCountingHost host;
+    FrameClock clock;
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 200, 100});
+    root->set_window_host(&host);
+    auto meter = std::make_unique<Meter>();
+    Meter* m = meter.get();
+    m->set_bounds({10, 10, 20, 80});
+    root->add_child(std::move(meter));
+    auto src = std::make_shared<MeterSource>();
+    m->set_source(src, 0);
+    root->set_frame_clock(&clock);
+
+    src->publish(stereo(0.0f, 0.0f));
+    clock.tick(1.0f / 60.0f);
+    const int base = host.repaints;
+    // A changed snapshot whose channel the meter does not read (channel 1).
+    MeterFrame f = stereo(0.0f, 0.0f);
+    f.peak[1] = 0.9f;
+    src->publish(f);
+    clock.tick(1.0f / 60.0f);
+    CHECK(host.repaints == base);
 
     root->set_frame_clock(nullptr);
 }

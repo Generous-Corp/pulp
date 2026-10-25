@@ -23,6 +23,7 @@ struct TestKernel {
     bool fail_once = false;
     bool fail_release_once = false;
     std::size_t prepare_calls = 0;
+    std::size_t quiesce_calls = 0;
     std::size_t release_calls = 0;
 };
 
@@ -49,7 +50,8 @@ void process(void* opaque, const float* input, float* output, std::uint32_t fram
 void reset(void* opaque) noexcept {
     static_cast<TestKernel*>(opaque)->previous = 0.0f;
 }
-bool quiesce(void*) noexcept {
+bool quiesce(void* opaque) noexcept {
+    ++static_cast<TestKernel*>(opaque)->quiesce_calls;
     return true;
 }
 bool release(void* opaque) noexcept {
@@ -257,6 +259,53 @@ TEST_CASE("NAM/TCN adapter keeps live state when release fails and retries",
     CHECK(state.release_calls == 2);
 }
 
+TEST_CASE("NAM/TCN adapter only quiesces a prepared kernel",
+          "[gpu_audio][neural][nam][lifecycle]") {
+    TestKernel state;
+    NamTcnStreamingAdapter model(spec(), {.state = &state,
+                                          .prepare = prepare,
+                                          .process = process,
+                                          .reset = reset,
+                                          .quiesce = quiesce,
+                                          .release = release});
+    CHECK_FALSE(model.quiesce());
+    CHECK(state.quiesce_calls == 0);
+
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "fixture.nam",
+                                                 .artifact_hash = "fixture-hash",
+                                                 .max_frames = 2};
+    REQUIRE(model.prepare(context));
+    REQUIRE(model.quiesce());
+    CHECK(state.quiesce_calls == 1);
+    REQUIRE(model.release());
+    CHECK_FALSE(model.quiesce());
+    CHECK(state.quiesce_calls == 1);
+}
+
+TEST_CASE("NAM/TCN adapter quiesces pending cleanup after failed release",
+          "[gpu_audio][neural][nam][lifecycle]") {
+    TestKernel state{.fail_once = true, .fail_release_once = true};
+    NamTcnStreamingAdapter model(spec(), {.state = &state,
+                                          .prepare = prepare,
+                                          .process = process,
+                                          .reset = reset,
+                                          .quiesce = quiesce,
+                                          .release = release});
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "fixture.nam",
+                                                 .artifact_hash = "fixture-hash",
+                                                 .max_frames = 2};
+    CHECK_FALSE(model.prepare(context));
+    CHECK(state.release_calls == 1);
+    REQUIRE(model.quiesce());
+    CHECK(state.quiesce_calls == 1);
+    REQUIRE(model.release());
+    CHECK(state.release_calls == 2);
+    CHECK_FALSE(model.quiesce());
+    CHECK(state.quiesce_calls == 1);
+}
+
 TEST_CASE("NAM/TCN adapter rejects aliasing and partial overlap without advancing state",
           "[gpu_audio][neural][nam][validation]") {
     TestKernel state;
@@ -447,6 +496,23 @@ TEST_CASE("serialized NAM artifact has full deterministic CPU-oracle parity",
     for (std::size_t i = 0; i < replay.size(); ++i)
         max_abs_error = std::max(max_abs_error, std::abs(replay[i] - expected[i]));
     CHECK(max_abs_error <= 1.0e-6f);
+
+    // The adapter runs the SIMD block engine (bounded rational tanh), so the
+    // 1e-6 margin above is held against the libm per-sample reference too,
+    // rather than only against the stored vector.
+    NamTcnArtifact reference;
+    REQUIRE(reference.load(fixture_path()));
+    REQUIRE(reference.cpu_kernel() == NamCpuKernel::Reference);
+    std::array<float, 128> reference_out{};
+    reference.process(input.data(), reference_out.data(), 128);
+    float simd_vs_reference = 0.0f, reference_vs_expected = 0.0f;
+    for (std::size_t i = 0; i < replay.size(); ++i) {
+        simd_vs_reference = std::max(simd_vs_reference, std::abs(replay[i] - reference_out[i]));
+        reference_vs_expected =
+            std::max(reference_vs_expected, std::abs(reference_out[i] - expected[i]));
+    }
+    CHECK(simd_vs_reference <= 1.0e-6f);
+    CHECK(reference_vs_expected <= 1.0e-6f);
     REQUIRE(model.quiesce());
     REQUIRE(model.release());
 }
@@ -662,4 +728,22 @@ TEST_CASE("serialized NAM adapter rejects each runtime shape mismatch",
                                 .artifact_hash = state_bytes_spec.weights_hash,
                                 .max_frames = 128};
     CHECK_FALSE(state_bytes_model.prepare(state_bytes_context));
+}
+
+TEST_CASE("serialized NAM adapter rejects an artifact hash mismatch before loading",
+          "[gpu_audio][neural][nam][validation]") {
+    const auto spec_value = artifact_spec();
+    NamTcnArtifactAdapter model(spec_value, fixture_path());
+    auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                           .artifact_id = "example.nam",
+                                           .artifact_hash = "sha256:wrong",
+                                           .max_frames = 128};
+    CHECK_FALSE(model.prepare(context));
+
+    // A rejected metadata transaction must leave the adapter retryable. The
+    // matching hash is accepted and the live model can then be released.
+    context.artifact_hash = spec_value.weights_hash;
+    REQUIRE(model.prepare(context));
+    REQUIRE(model.quiesce());
+    REQUIRE(model.release());
 }

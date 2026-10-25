@@ -48,7 +48,7 @@ list(APPEND PULP_SDK_TARGETS
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
-    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-tooling pulp-view-native pulp-view
+    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-tooling pulp-view-platform pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
@@ -521,6 +521,17 @@ install(PROGRAMS
     "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/generated/cli-walkthrough.sh"
     DESTINATION "share/pulp/capability-control")
 
+# `pulp ship` in an SDK consumer project has no source checkout to take these
+# from: the unattended-signing preflight that `ship sign` and `ship doctor` run,
+# and the default codesign entitlements. The CLI resolves them from the
+# project's selected SDK under share/pulp/ship.
+install(PROGRAMS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/ensure_signing_ready.sh"
+    DESTINATION "share/pulp/ship")
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/ship/templates/entitlements.plist"
+    DESTINATION "share/pulp/ship")
+
 # Stable machine-readable GPU health contracts. Installed CLI and MCP
 # consumers need the exact versioned shapes selected by their SDK, not a
 # floating documentation URL or an inferred response.
@@ -750,6 +761,79 @@ if(_pulp_source_install_status STREQUAL "")
 else()
     set(PULP_SOURCE_INSTALL_DIRTY true)
 endif()
+# A source-install SDK is intentionally non-distributable, but its target
+# architecture still matters: a native ARM64 archive must never be consumed
+# by an ARM64EC/ARM64X plugin just because both builds run on Windows ARM.
+# Record the actual target identity so PulpConfig.cmake can reject that mix
+# before any consumer target is created.
+if(WIN32)
+    # Keep this source-install marker self-contained: the installed-header
+    # parity checker intentionally permits only the two package-helper
+    # includes in this file.  Mirror the canonical target selection here so
+    # source installs record the actual generator/compiler ABI without adding
+    # another install-time include.
+    string(TOUPPER "${CMAKE_GENERATOR_PLATFORM}" _pulp_source_install_platform)
+    string(TOUPPER "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}" _pulp_source_install_compiler_arch)
+    if(_pulp_source_install_platform MATCHES "(^|,)ARM64EC(,|$)"
+       OR _pulp_source_install_compiler_arch STREQUAL "ARM64EC")
+        set(_pulp_source_install_arch "arm64ec-win")
+    elseif(_pulp_source_install_platform MATCHES "(^|,)ARM64X(,|$)"
+           OR _pulp_source_install_compiler_arch STREQUAL "ARM64X")
+        set(_pulp_source_install_arch "arm64x-win")
+    elseif(_pulp_source_install_platform MATCHES "(^|,)ARM64(,|$)"
+           OR _pulp_source_install_compiler_arch STREQUAL "ARM64")
+        set(_pulp_source_install_arch "arm64-win")
+    elseif(_pulp_source_install_platform MATCHES "(^|,)(X64|AMD64)(,|$)"
+           OR _pulp_source_install_compiler_arch MATCHES "^(X64|AMD64)$"
+           OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|x64)$")
+        set(_pulp_source_install_arch "x86_64-win")
+    else()
+        set(_pulp_source_install_arch "x86-win")
+    endif()
+    # PulpStampSourceInstall normalizes the architecture, so these stay the
+    # canonical Windows names (windows-arm64, windows-x64, ...).
+    set(PULP_SOURCE_INSTALL_OS "windows")
+    string(REGEX REPLACE "-win$" "" PULP_SOURCE_INSTALL_ARCH "${_pulp_source_install_arch}")
+    if(PULP_SOURCE_INSTALL_ARCH STREQUAL "x86")
+        # The unclassified fallback keeps its historical windows-x86-win name.
+        set(PULP_SOURCE_INSTALL_ARCH "x86-win")
+    endif()
+    unset(_pulp_source_install_arch)
+    unset(_pulp_source_install_platform)
+    unset(_pulp_source_install_compiler_arch)
+elseif(ANDROID)
+    # The ABI name (arm64-v8a, armeabi-v7a, x86, x86_64), never the processor.
+    set(PULP_SOURCE_INSTALL_OS "android")
+    set(PULP_SOURCE_INSTALL_ARCH "${CMAKE_ANDROID_ARCH_ABI}")
+    if(PULP_SOURCE_INSTALL_ARCH STREQUAL "")
+        set(PULP_SOURCE_INSTALL_ARCH "unknown")
+    endif()
+elseif(IOS OR PULP_IOS)
+    set(PULP_SOURCE_INSTALL_OS "ios")
+    if(CMAKE_OSX_ARCHITECTURES MATCHES "(^|;)x86_64(;|$)")
+        set(PULP_SOURCE_INSTALL_ARCH "x86_64")
+    else()
+        set(PULP_SOURCE_INSTALL_ARCH "arm64")
+    endif()
+elseif(APPLE)
+    # Every listed architecture; two distinct ones stamp darwin-universal.
+    set(PULP_SOURCE_INSTALL_OS "darwin")
+    set(PULP_SOURCE_INSTALL_ARCH "${CMAKE_OSX_ARCHITECTURES}")
+elseif(UNIX)
+    set(PULP_SOURCE_INSTALL_OS "linux")
+    set(PULP_SOURCE_INSTALL_ARCH "")
+else()
+    set(PULP_SOURCE_INSTALL_OS "unknown")
+    set(PULP_SOURCE_INSTALL_ARCH "")
+endif()
+# With no explicit target architecture, the target processor (then the
+# host's) is the architecture: a native Intel Mac or arm64 Linux box.
+if(PULP_SOURCE_INSTALL_ARCH STREQUAL "")
+    set(PULP_SOURCE_INSTALL_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+if(PULP_SOURCE_INSTALL_ARCH STREQUAL "")
+    set(PULP_SOURCE_INSTALL_ARCH "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+endif()
 configure_file("${PULP_ROOT_DIR}/tools/cmake/PulpStampSourceInstall.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake" @ONLY)
 install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake")
@@ -791,6 +875,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFindPluginval.cmake"
 
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUiAssets.cmake"
+    # Included by PulpUtils.cmake: pulp_add_js_bytecode().
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpJsBytecode.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstall.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpReload.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMidiTuning.cmake"
@@ -839,6 +925,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
     # Included by FindSkia.cmake relative to its own directory.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaDawnProvider.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaIcuData.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
     # Every plist template a format helper can reach must ship. PulpPluginFormats
@@ -881,8 +968,13 @@ install(FILES
 # so find_package(Pulp) consumers can use the function.
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/encode_binary_data.py"
+    # pulp_add_js_bytecode() builds its generator from this source against
+    # the installed Pulp libraries, so the bytecode matches the product's engine.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_js_bytecode_main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_portable_binary.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_bundle_relocatable.py"
+    # PulpSkiaIcuData.cmake resolves the ICU data trimmer next to itself.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/icu_data_subset.py"
     # G3 universal-build arch/signature gate. pulp_validate_bundle_architectures
     # (PulpBundleRelocatable.cmake) resolves this next to itself, so ship it in
     # lib/cmake/Pulp/scripts too — the authoritative copy lives at

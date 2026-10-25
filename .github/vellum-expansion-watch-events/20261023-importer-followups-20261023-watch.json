@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-importer-followups-20261023-watch",
+  "created_at": "2026-10-23T10:06:04Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Importer fidelity follow-ups inside Pulp's existing design-import lane: the capture records the UA canvas colour Chromium paints (new document_canvas.mjs, listed in every runtime install list), DesignIR carries background-origin through JSON, codegen and native lowering so a gradient tile is sized in its origin box, the differential lab counts geometry coverage over measurable reference boxes only, and the Swift parity ledger records its background-origin gap. Chromium stays the only oracle and Skia/Dawn the renderer; every field is additive and optional, so no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-browser-capture-gradient-border",
+    "ctest --test-dir build -R pulp-test-browser-capture-ir",
+    "ctest --test-dir build -R pulp-test-canvas-fonts",
+    "ctest --test-dir build -R pulp-test-design-import-native-materializer",
+    "ctest --test-dir build -R pulp-test-design-import-parity",
+    "python3 test/test_importer_differential_lab.py",
+    "node --test tools/import-design/browser_capture/capture_paint.integration.test.mjs",
+    "node --test tools/import-design/browser_capture/document_canvas.test.mjs",
+    "python3 tools/import-validation/test_diff_against_reference.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

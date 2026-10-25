@@ -17,18 +17,24 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "tools/import-design/browser_capture_controls.hpp"
 #include "tools/import-design/browser_capture_ir.hpp"
 #include "tools/import-design/browser_capture_tree.hpp"
 
 #include <pulp/view/design_ir_io.hpp>
+#include <pulp/view/design_update.hpp>
+
+#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -199,6 +205,14 @@ struct SnapshotSpec {
     /// supplies its own rather than appending to a table whose indices a
     /// hundred other cases already depend on.
     std::string strings;
+    /// Further `nodes` members, written verbatim after `attributes` with a
+    /// leading comma — the RareData columns (`nodeValue`, `inputValue`,
+    /// `optionSelected`) that only form-control cases need.
+    std::string extra_nodes;
+    /// Further top-level members, written verbatim after `documents` with a
+    /// leading comma — the capture's own sidecar fields such as
+    /// `formControlTheme`.
+    std::string extra_top;
 };
 
 /// The shared string table, in index order:
@@ -286,16 +300,12 @@ std::string build_snapshot(const SnapshotSpec& spec) {
                                   : spec.strings) +
             "],";
     json += R"("computedStyleNames":)" + spec.computed_names + ",";
-    json += R"("documents":[{"nodes":{"parentIndex":)" + spec.parents +
-            R"(,"nodeType":)" + spec.node_types +
-            R"(,"nodeName":)" + spec.node_names +
-            R"(,"backendNodeId":)" + spec.node_names +
-            R"(,"attributes":)" + spec.attributes + "}," +
-            R"("layout":{"nodeIndex":)" + spec.layout_nodes +
-            R"(,"styles":)" + spec.styles +
-            R"(,"bounds":)" + spec.bounds +
-            R"(,"paintOrders":)" + spec.paint_orders +
-            R"(,"text":)" + texts + "}}]}";
+    json += R"("documents":[{"nodes":{"parentIndex":)" + spec.parents + R"(,"nodeType":)" +
+            spec.node_types + R"(,"nodeName":)" + spec.node_names + R"(,"backendNodeId":)" +
+            spec.node_names + R"(,"attributes":)" + spec.attributes + spec.extra_nodes + "}," +
+            R"("layout":{"nodeIndex":)" + spec.layout_nodes + R"(,"styles":)" + spec.styles +
+            R"(,"bounds":)" + spec.bounds + R"(,"paintOrders":)" + spec.paint_orders +
+            R"(,"text":)" + texts + "}}]" + spec.extra_top + "}";
     return json;
 }
 
@@ -1337,6 +1347,171 @@ TEST_CASE("each refusal names the construct that caused it",
     CHECK(attribute(*vector_shapes.front(), "source_tag") == "rect");
 }
 
+// ── SVG stroke style and shape opacity ──────────────────────────────────────
+// test/fixtures/browser-capture-svg-stroke-style is a real Chromium capture of
+// the stroke constructs icon sets actually use. The first three icons are
+// Spectr's PEAK, SCULPT and PRESETS glyphs verbatim; the fourth is the Lucide
+// convention of declaring the stroke style once on the root `<svg>`.
+
+TEST_CASE("an svg stroke's cap, join and miter limit reach the IR",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // PEAK: ten 1.3-unit ticks. Butt caps cut every tick short by the
+    // half-disc a round cap adds at each end, which reads as a lighter icon.
+    const auto* peak =
+        vector_from(root, "M 3 20 L 3 14 M 7 20 L 7 10 M 11 20 L 11 6 M 15 20 L 15 12 "
+                          "M 19 20 L 19 8 M 1 14 L 5 14 M 5 10 L 9 10 M 9 6 L 13 6 "
+                          "M 13 12 L 17 12 M 17 8 L 21 8");
+    REQUIRE(peak != nullptr);
+    CHECK(attribute(*peak, "svg_stroke_linecap") == "round");
+    CHECK(attribute(*peak, "svg_stroke_linejoin") == "round");
+    // The limit only means something under a miter join.
+    CHECK(attribute(*peak, "svg_stroke_miterlimit").empty());
+
+    // SCULPT: one curve, round at both ends.
+    const auto* sculpt = vector_from(root, "M 2 14 Q 5 4 9 10 T 16 8 T 22 6");
+    REQUIRE(sculpt != nullptr);
+    CHECK(attribute(*sculpt, "svg_stroke_linecap") == "round");
+    CHECK(attribute(*sculpt, "svg_stroke_linejoin") == "round");
+
+    // Lucide: neither shape declares a cap or join; both inherit the root's.
+    for (const char* data :
+         {"M2 12 A10 10 0 0 1 22 12 A10 10 0 0 1 2 12 Z", "M12 6 L12 12 L16 14"}) {
+        const auto* shape = vector_from(root, data);
+        REQUIRE(shape != nullptr);
+        CHECK(attribute(*shape, "svg_stroke_linecap") == "round");
+        CHECK(attribute(*shape, "svg_stroke_linejoin") == "round");
+        CHECK(attribute(*shape, "svg_stroke_width") == "2");
+    }
+
+    // A miter join carries its limit, authored or not: SVG's initial value is
+    // 4 and a 2D canvas's is 10, so leaving it out changes which corners
+    // collapse to a bevel.
+    const auto* mitred = vector_from(root, "M2 20 L8 4 L14 20");
+    REQUIRE(mitred != nullptr);
+    CHECK(attribute(*mitred, "svg_stroke_linecap") == "butt");
+    CHECK(attribute(*mitred, "svg_stroke_linejoin") == "miter");
+    CHECK(attribute(*mitred, "svg_stroke_miterlimit") == "2");
+    // An inline `style` declaration is as authored as an attribute.
+    const auto* bevelled = vector_from(root, "M18 20 L24 4 L30 20");
+    REQUIRE(bevelled != nullptr);
+    CHECK(attribute(*bevelled, "svg_stroke_linejoin") == "bevel");
+    // A group's inline style is inherited like its attributes are.
+    const auto* squared = vector_from(root, "M4 12 L20 12");
+    REQUIRE(squared != nullptr);
+    CHECK(attribute(*squared, "svg_stroke_linecap") == "square");
+    CHECK(attribute(*squared, "svg_stroke_miterlimit") == "4");
+
+    // `pathLength` and `stroke-dashoffset` change nothing on a solid stroke,
+    // and are carried so a dash pattern drawn later measures against them.
+    const auto* measured = vector_from(root, "M 4 12 H 20");
+    REQUIRE(measured != nullptr);
+    CHECK(attribute(*measured, "svg_path_length") == "100");
+    CHECK(attribute(*measured, "svg_stroke_dashoffset") == "3");
+}
+
+TEST_CASE("an svg shape's own opacity folds into its one paint",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // PRESETS: three waves at 0.45, 0.7 and 1, stroked in an inherited
+    // `rgba(255, 255, 255, 0.85)`. The shape's opacity multiplies the alpha
+    // the colour already has rather than replacing it.
+    const std::pair<const char*, const char*> waves[] = {
+        {"M 2 13 Q 7 13 10 9 Q 13 5 17 5 Q 20 5 22 7", "rgba(255, 255, 255, 0.3825)"},
+        {"M 2 11 Q 6 11 9 7 Q 13 3 17 7 Q 20 10 22 10", "rgba(255, 255, 255, 0.595)"},
+        {"M 2 9 Q 5 4 9 10 Q 13 15 17 9 Q 20 5 22 6", "rgba(255, 255, 255, 0.85)"},
+    };
+    for (const auto& [data, stroke] : waves) {
+        const auto* wave = vector_from(root, data);
+        REQUIRE(wave != nullptr);
+        CHECK(attribute(*wave, "svg_stroke") == stroke);
+        CHECK(attribute(*wave, "svg_fill") == "none");
+        CHECK(attribute(*wave, "svg_stroke_linecap") == "round");
+    }
+
+    const auto* faded = vector_from(root, "M2 2 H11 V22 H2 Z");
+    REQUIRE(faded != nullptr);
+    CHECK(attribute(*faded, "svg_fill") == "rgba(143, 214, 148, 0.5)");
+    // `fill-opacity` over a colour that already has an alpha multiplies it.
+    const auto* translucent = vector_from(root, "M13 2 H22 V22 H13 Z");
+    REQUIRE(translucent != nullptr);
+    CHECK(attribute(*translucent, "svg_fill") == "rgba(240, 160, 75, 0.4)");
+}
+
+TEST_CASE("svg stroke constructs the lowering cannot draw refuse by name",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-stroke-style");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    CHECK(attribute(root, "native_svg_lowered") == "8");
+    CHECK(attribute(root, "native_svg_refused") == "2");
+
+    std::map<std::string, std::string> refusals; // reason → detail
+    const std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (attribute(child, "capture_fallback_element") == "svg") {
+                refusals[attribute(child, "capture_fallback_reason")] =
+                    attribute(child, "capture_fallback_detail");
+            }
+            walk(child);
+        }
+    };
+    walk(root);
+    // A fill and a stroke under one opacity composite as a layer; per-paint
+    // alpha would double-darken where the stroke overlaps the fill.
+    CHECK(refusals["svg-shape-opacity"] == "circle");
+    // A marker is a `<defs>` reference like a clip or a mask: the line drawn
+    // without it loses its arrowhead.
+    CHECK(refusals["svg-paint-reference"] == "line");
+    CHECK(refusals.size() == 2);
+}
+
+TEST_CASE("a captured stroke property outranks the authored attribute",
+          "[browser-capture][native-lowering][svg]") {
+    // A stylesheet rule can override `stroke-linecap="round"`, and only the
+    // browser has seen the stylesheet. When the capture collected the
+    // property, Chrome's value wins; when it did not, the attribute is the
+    // best evidence there is.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 svg, 4 path
+    // strings: 0 #document 1 HTML 2 BODY 3 svg 4 path 5 none
+    //   6 rgb(1, 2, 3) 7 butt 8 d 9 "M0 0 L10 10" 10 stroke-linecap 11 round
+    //   12 viewBox 13 "0 0 10 10"
+    SnapshotSpec spec{
+        .node_names = "[0,1,2,3,4]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,3]",
+        .attributes = "[[],[],[],[12,13],[8,9,10,11]]",
+        .layout_nodes = "[0,1,2,3,4]",
+        .styles = "[[5,5,7],[5,5,7],[5,5,7],[5,5,7],[5,6,7]]",
+        .bounds = "[[0,0,100,100],[0,0,100,100],[0,0,100,100],"
+                  "[10,10,20,20],[10,10,20,20]]",
+        .paint_orders = "[0,1,1,2,3]",
+        .computed_names = R"(["fill","stroke","stroke-linecap"])",
+        .strings = R"J("#document","HTML","BODY","svg","path","none",)J"
+                   R"J("rgb(1, 2, 3)","butt","d","M0 0 L10 10",)J"
+                   R"J("stroke-linecap","round","viewBox","0 0 10 10")J",
+    };
+    const auto captured = lower_snapshot(spec, "svg");
+    const auto captured_shapes = vector_nodes(captured.root);
+    REQUIRE(captured_shapes.size() == 1);
+    CHECK(attribute(*captured_shapes.front(), "svg_stroke") == "rgb(1, 2, 3)");
+    CHECK(attribute(*captured_shapes.front(), "svg_stroke_linecap") == "butt");
+
+    spec.computed_names = R"(["fill","stroke","cursor"])";
+    const auto authored = lower_snapshot(spec, "svg");
+    const auto authored_shapes = vector_nodes(authored.root);
+    REQUIRE(authored_shapes.size() == 1);
+    CHECK(attribute(*authored_shapes.front(), "svg_stroke_linecap") == "round");
+}
+
 TEST_CASE("a capture with no SVG paint says so out loud",
           "[browser-capture][native-lowering][svg]") {
     // The same six icons, byte-identical, with ONLY the seven SVG paint
@@ -1425,6 +1600,195 @@ TEST_CASE("a drawn icon's vector nodes sit under it and share its box",
 
     // The geometry is drawn, so it must not ALSO be counted as pooled away.
     CHECK(attribute(root, "native_svg_shapes") == "8");
+}
+
+TEST_CASE("a drawn icon's vector nodes carry their own Chromium identity",
+          "[browser-capture][native-lowering][svg]") {
+    // Every other lowered node carries the backend id of the DOM node it
+    // draws; a shape must too, or a consumer binding by identity finds the
+    // icon's `<svg>` and none of the geometry inside it.
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+    const auto index = CapturedStyleIndex::load(fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) /
+                                                "browser-capture-svg-icons" / "dom-snapshot.json");
+    REQUIRE(index);
+
+    const auto shapes = vector_nodes(root);
+    REQUIRE(shapes.size() == 8);
+    std::set<std::string> identities;
+    for (const auto* shape : shapes) {
+        const auto backend = attribute(*shape, "backend_node_id");
+        INFO(shape->stable_anchor_id.value_or(""));
+        REQUIRE_FALSE(backend.empty());
+        CHECK(identities.insert(backend).second);
+        const auto* icon = find_node(root, [shape](const IRNode& node) {
+            return std::any_of(node.children.begin(), node.children.end(),
+                               [shape](const IRNode& child) { return &child == shape; });
+        });
+        REQUIRE(icon != nullptr);
+        CHECK(attribute(*icon, "backend_node_id") != backend);
+        // The id names the very shape element the node draws: same tag, and
+        // a DOM child of the icon's own element.
+        int dom_node = -1;
+        for (int i = 0; i < index->node_count(); ++i)
+            if (index->backend_node_id_of(i) == std::stoi(backend))
+                dom_node = i;
+        REQUIRE(dom_node >= 0);
+        CHECK(index->tag_name(dom_node) == attribute(*shape, "source_tag"));
+        CHECK(index->backend_node_id_of(index->parent_of(dom_node)) ==
+              std::stoi(attribute(*icon, "backend_node_id")));
+    }
+}
+
+TEST_CASE("a captured canvas that paints in tree order keeps the panel nested",
+          "[browser-capture][native-lowering][paint-order]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV(url bg), 4 CANVAS
+    // The panel paints, then the canvas inside it: Chromium's list is the
+    // same order a nested tree draws, so flattening would buy no fidelity and
+    // would cost the panel its sections.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,6]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,3]",
+        .attributes = "[[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4]",
+        .styles = "[[11,14],[11,14],[11,14],[12,14],[11,14]]",
+        .bounds = "[[0,0,200,100],[0,0,200,100],[0,0,200,100],"
+                  "[0,0,200,100],[10,20,80,40]]",
+        .paint_orders = "[0,1,1,2,3]",
+    };
+    IRNode root;
+    const auto counts = lower_into(spec, "captured-canvas-in-order", root, {{6, "canvas:6"}});
+    REQUIRE(counts.overlapping_reorders == 0);
+
+    const auto path = write_snapshot(build_snapshot(spec), "captured-canvas-auto");
+    const auto index = CapturedStyleIndex::load(path);
+    fs::remove(path);
+    REQUIRE(index);
+    IRNode preferred;
+    const auto chosen = lower_painted_tree_preferring_hierarchy(*index, 0.0, 0.0, 0.0, preferred,
+                                                                {{6, "canvas:6"}});
+    CHECK(chosen.flattened_overlapping_reorders == 0);
+    CHECK(chosen.max_depth > 1);
+    const auto* panel = find_node(
+        preferred, [](const IRNode& node) { return attribute(node, "source_tag") == "div"; });
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->children.size() == 1);
+    CHECK(attribute(panel->children[0], "captured_element") == "canvas");
+    CHECK(attribute(panel->children[0], "asset_ref") == "canvas:6");
+}
+
+TEST_CASE("a captured canvas that interleaves with another subtree is flattened",
+          "[browser-capture][native-lowering][paint-order]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV(url bg), 4 CANVAS in 3,
+    //        5 DIV(url bg) beside 3, overlapping the canvas.
+    // Chromium paints the first panel, then the second panel, then the canvas
+    // nested in the first panel ON TOP of the second. A nested tree draws a
+    // subtree contiguously, so the second panel would cover the canvas; no
+    // hoist can fix it because the canvas already paints after its parent.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,6,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,3,2]",
+        .attributes = "[[],[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4,5]",
+        .styles = "[[11,14],[11,14],[11,14],[12,14],[11,14],[12,14]]",
+        .bounds = "[[0,0,200,100],[0,0,200,100],[0,0,200,100],"
+                  "[0,0,100,100],[10,20,150,40],[100,0,100,100]]",
+        .paint_orders = "[0,1,1,2,5,3]",
+    };
+    IRNode nested;
+    const auto audit = lower_into(spec, "captured-canvas-interleaved", nested, {{6, "canvas:6"}});
+    REQUIRE(audit.overlapping_reorders == 1);
+
+    const auto path = write_snapshot(build_snapshot(spec), "captured-canvas-interleaved-auto");
+    const auto index = CapturedStyleIndex::load(path);
+    fs::remove(path);
+    REQUIRE(index);
+    IRNode root;
+    const auto counts =
+        lower_painted_tree_preferring_hierarchy(*index, 0.0, 0.0, 0.0, root, {{6, "canvas:6"}});
+    CHECK(counts.flattened_overlapping_reorders == 1);
+    CHECK(counts.max_depth == 1);
+    int canvas_z = -1;
+    int later_panel_z = -1;
+    for (const auto& child : root.children) {
+        CHECK(child.children.empty());
+        REQUIRE(child.style.z_index);
+        if (attribute(child, "captured_element") == "canvas")
+            canvas_z = *child.style.z_index;
+        else if (attribute(child, "paint_order") == "3")
+            later_panel_z = *child.style.z_index;
+    }
+    REQUIRE(canvas_z >= 0);
+    REQUIRE(later_panel_z >= 0);
+    CHECK(later_panel_z < canvas_z);
+}
+
+TEST_CASE("a canvas captured as a viewport plane is placed rather than squeezed",
+          "[browser-capture][native-lowering][canvas]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 CANVAS (1px border, 2px padding)
+    // The capture holds the canvas as a 400x300 CSS px viewport plane with the
+    // bitmap at its page position. Drawn into the canvas box with `fill`, the
+    // whole page would shrink into it; the plane must instead sit at the page
+    // origin inside the canvas and be clipped to its content box.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3]",
+        .node_types = "[9,1,1,1]",
+        .parents = "[-1,0,1,2]",
+        .attributes = "[[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3]",
+        .styles = "[[4,5,5,5,5,5,5,5,5],[4,5,5,5,5,5,5,5,5],"
+                  "[4,5,5,5,5,5,5,5,5],[4,6,6,6,6,7,7,7,7]]",
+        .bounds = "[[0,0,400,300],[0,0,400,300],[0,0,400,300],"
+                  "[20,79.4375,106,66]]",
+        .paint_orders = "[0,1,1,2]",
+        .computed_names = R"(["display","border-left-width","border-top-width",)"
+                          R"("border-right-width","border-bottom-width","padding-left",)"
+                          R"("padding-top","padding-right","padding-bottom"])",
+        .strings = R"J("#document","HTML","BODY","CANVAS","block","0px","1px","2px")J",
+    };
+    const std::unordered_map<std::string, CapturedLayerExtent> layers{{"canvas:3", {400.0, 300.0}}};
+
+    IRNode root;
+    lower_into(spec, "canvas-plane", root, {{3, "canvas:3"}});
+    const auto* canvas = find_node(
+        root, [](const IRNode& node) { return attribute(node, "captured_element") == "canvas"; });
+    REQUIRE(canvas != nullptr);
+    // Element-sized behaviour without a plane extent: the picture is the box.
+    CHECK(canvas->type == "image");
+    CHECK(attribute(*canvas, "asset_ref") == "canvas:3");
+
+    const auto path = write_snapshot(build_snapshot(spec), "canvas-plane-layer");
+    const auto index = CapturedStyleIndex::load(path);
+    fs::remove(path);
+    REQUIRE(index);
+    IRNode placed_root;
+    lower_painted_tree(*index, 0.0, 0.0, 0.0, placed_root, {{3, "canvas:3"}}, false, layers);
+    const auto* box = find_node(placed_root, [](const IRNode& node) {
+        return attribute(node, "captured_element") == "canvas";
+    });
+    REQUIRE(box != nullptr);
+    CHECK(box->type == "frame");
+    CHECK(box->attributes.count("asset_ref") == 0);
+    REQUIRE(box->children.size() == 1);
+    const auto& plane = box->children[0];
+    CHECK(plane.type == "image");
+    CHECK(attribute(plane, "asset_ref") == "canvas:3");
+    CHECK(plane.stable_anchor_id.value_or("") == box->stable_anchor_id.value_or("") + "/layer[0]");
+    // The plane's page origin, expressed against the canvas padding box
+    // (border box origin plus the 1px border).
+    CHECK(*plane.style.left == Catch::Approx(-21.0));
+    CHECK(*plane.style.top == Catch::Approx(-80.4375));
+    CHECK(*plane.style.width == Catch::Approx(400.0));
+    CHECK(*plane.style.height == Catch::Approx(300.0));
+    // Clipped to the content box in page coordinates: border + padding in.
+    REQUIRE(plane.style.clip_rect);
+    CHECK(plane.style.clip_rect->x == Catch::Approx(23.0));
+    CHECK(plane.style.clip_rect->y == Catch::Approx(82.4375));
+    CHECK(plane.style.clip_rect->width == Catch::Approx(100.0));
+    CHECK(plane.style.clip_rect->height == Catch::Approx(60.0));
 }
 
 TEST_CASE("canvas and image elements classify away from native",
@@ -1869,6 +2233,266 @@ TEST_CASE("a hidden sibling does not move its neighbour's anchor",
           "capture:html[0]/body[0]/div.item[0]");
     CHECK(*shown_body->children[1].stable_anchor_id ==
           *survivor->stable_anchor_id);
+}
+
+namespace {
+
+/// A three-item list whose items carry the given attribute rows, in document
+/// order. Item k always lays out at the k-th row, so a reorder is expressed by
+/// permuting the attribute rows while the positions stay where they were.
+///
+/// strings: 0 #document 1 HTML 2 BODY 3 OL 4 LI 5 data-pulp-key
+///          6 drive 7 tone 8 mix 9 background-image 10 none 11 display
+///          12 block 13 data-pulp-id 14 item-drive 15 t"o/ne
+LoweredSnapshot lower_list(const std::string& item_attributes, const std::string& name) {
+    return lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,4,4,4]",
+            .node_types = "[9,1,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,3,3]",
+            .attributes = "[[],[],[],[]," + item_attributes + "]",
+            .layout_nodes = "[0,1,2,3,4,5,6]",
+            .styles = "[[10,12],[10,12],[10,12],[10,12],[10,12],[10,12],"
+                      "[10,12]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[0,0,200,60],[0,0,200,20],[0,20,200,20],"
+                      "[0,40,200,20]]",
+            .paint_orders = "[0,1,1,2,3,4,5]",
+            .strings = R"("#document","HTML","BODY","OL","LI","data-pulp-key",)"
+                       R"("drive","tone","mix","background-image","none",)"
+                       R"("display","block","data-pulp-id","item-drive","t\"o/ne")",
+        },
+        name);
+}
+
+/// The lowered list items, in the order they sit under the `<ol>`.
+std::vector<const IRNode*> list_items(const IRNode& root) {
+    const auto* list = find_named(root, "ol");
+    REQUIRE(list != nullptr);
+    std::vector<const IRNode*> items;
+    for (const auto& child : list->children)
+        items.push_back(&child);
+    return items;
+}
+
+std::string key_of(const IRNode& node) {
+    const auto found = node.attributes.find("pulp_key");
+    return found == node.attributes.end() ? std::string{} : found->second;
+}
+
+} // namespace
+
+TEST_CASE("a keyed list item keeps its anchor when the list is reordered",
+          "[browser-capture][native-lowering][anchor]") {
+    // An edit stored against "the Drive row" must still reach Drive after the
+    // list is reordered. A positional anchor names the first row, which after
+    // a reverse is Mix, so the edit lands on the wrong item and reports a
+    // clean apply. The author key is the identity a reorder preserves.
+    const auto before = lower_list("[5,6,13,14],[5,7],[5,8]", "keyed-before");
+    const auto after = lower_list("[5,8],[5,7],[5,6,13,14]", "keyed-after");
+    CHECK(before.counts.keyed_anchors == 3);
+    CHECK(after.counts.keyed_anchors == 3);
+    CHECK(before.counts.duplicate_keys.empty());
+
+    std::map<std::string, std::string> anchor_before;
+    std::map<std::string, float> top_before;
+    for (const auto* item : list_items(before.root)) {
+        anchor_before[key_of(*item)] = item->stable_anchor_id.value_or("");
+        top_before[key_of(*item)] = item->style.top.value_or(-1.0f);
+    }
+    CHECK(anchor_before.at("drive") == "capture:html[0]/body[0]/ol[0]/li[key=drive]");
+
+    const auto items_after = list_items(after.root);
+    REQUIRE(items_after.size() == 3);
+    for (const auto* item : items_after) {
+        const auto key = key_of(*item);
+        INFO("key " << key);
+        REQUIRE(anchor_before.count(key) == 1);
+        CHECK(item->stable_anchor_id.value_or("") == anchor_before.at(key));
+    }
+    // The anchor followed the node, not the slot: Drive moved from the first
+    // row to the last and its anchor came with it.
+    const auto* drive = items_after.back();
+    CHECK(key_of(*drive) == "drive");
+    CHECK(drive->style.top.value_or(-1.0f) != top_before.at("drive"));
+    // The page-wide source id travels with the node as well.
+    CHECK(drive->attributes.at("pulp_id") == "item-drive");
+}
+
+TEST_CASE("an unkeyed list keeps positional anchors",
+          "[browser-capture][native-lowering][anchor]") {
+    // Without a key there is no identity a reorder preserves, so the anchor
+    // stays with the position exactly as it did before keys were read.
+    const auto lowered = lower_list("[],[],[]", "unkeyed");
+    CHECK(lowered.counts.keyed_anchors == 0);
+    CHECK(lowered.counts.duplicate_keys.empty());
+    std::vector<std::string> got;
+    for (const auto* item : list_items(lowered.root)) {
+        CHECK(item->attributes.count("pulp_key") == 0);
+        got.push_back(item->stable_anchor_id.value_or(""));
+    }
+    CHECK(got == std::vector<std::string>{"capture:html[0]/body[0]/ol[0]/li[0]",
+                                          "capture:html[0]/body[0]/ol[0]/li[1]",
+                                          "capture:html[0]/body[0]/ol[0]/li[2]"});
+}
+
+TEST_CASE("a duplicated sibling key is reported and falls back to positions",
+          "[browser-capture][native-lowering][anchor]") {
+    // Two siblings cannot both own "tone". Picking one by document order
+    // would make the anchor positional again while still looking keyed, so
+    // both colliding siblings take ordinals and the collision is reported.
+    const auto lowered = lower_list("[5,6],[5,7],[5,7]", "duplicate-key");
+    CHECK(lowered.counts.keyed_anchors == 1);
+    CHECK(lowered.counts.duplicate_keys ==
+          std::vector<std::string>{"capture:html[0]/body[0]/ol[0] data-pulp-key=\"tone\""});
+    std::vector<std::string> got;
+    for (const auto* item : list_items(lowered.root))
+        got.push_back(item->stable_anchor_id.value_or(""));
+    // Ordinals count only the siblings without a usable key, so the unique
+    // key does not shift the colliding pair's numbering.
+    CHECK(got == std::vector<std::string>{"capture:html[0]/body[0]/ol[0]/li[key=drive]",
+                                          "capture:html[0]/body[0]/ol[0]/li[0]",
+                                          "capture:html[0]/body[0]/ol[0]/li[1]"});
+    // The collision does not erase what the author wrote.
+    CHECK(key_of(*list_items(lowered.root)[1]) == "tone");
+
+    // Every anchor is still unique, which is what bindings and the merge
+    // layer require of them.
+    const auto all = anchors(lowered.root);
+    CHECK(std::set<std::string>(all.begin(), all.end()).size() == all.size());
+}
+
+namespace {
+
+/// The `<ol>` children of a lowered list, as the update planner receives them.
+std::span<const IRNode> list_children(const LoweredSnapshot& lowered) {
+    const auto* list = find_named(lowered.root, "ol");
+    REQUIRE(list != nullptr);
+    return list->children;
+}
+
+/// The key order the keyed-list differential fixture declares, before and
+/// after its Reorder button runs.
+std::pair<std::vector<std::string>, std::vector<std::string>> keyed_fixture_orders() {
+    std::ifstream in(fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) / "import-differential" /
+                     "18-keyed-list-panel.identity.json");
+    REQUIRE(in.good());
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto identity = choc::json::parse(text);
+    const auto read = [&](const char* member) {
+        std::vector<std::string> keys;
+        const auto list = identity[member];
+        for (uint32_t i = 0; i < list.size(); ++i)
+            keys.emplace_back(list[i].getString());
+        return keys;
+    };
+    return {read("keys"), read("reordered_keys")};
+}
+
+/// `lower_list` attribute rows that declare `keys` in document order.
+std::string keyed_rows(const std::vector<std::string>& keys) {
+    // String-table indices of the keys `lower_list` knows how to spell.
+    const std::map<std::string, int> spelled{{"drive", 6}, {"tone", 7}, {"mix", 8}};
+    std::string rows;
+    for (const auto& key : keys) {
+        REQUIRE(spelled.count(key) == 1);
+        if (!rows.empty())
+            rows += ",";
+        rows += "[5," + std::to_string(spelled.at(key)) + "]";
+    }
+    return rows;
+}
+
+} // namespace
+
+TEST_CASE("a keyed list reorder plans moves, not rewrites",
+          "[browser-capture][native-lowering][anchor][update]") {
+    // Fixture 18's Reorder button reverses a keyed list. Planned over the two
+    // lowered child lists, every row must be found again by its anchor and
+    // moved: a rewrite (removed + inserted) would tear down Drive's view and
+    // rebuild it from scratch, and a retain-in-place would leave Mix's view
+    // showing Drive's content.
+    const auto [keys, reordered] = keyed_fixture_orders();
+    REQUIRE(keys.size() == 3);
+    REQUIRE(reordered == std::vector<std::string>(keys.rbegin(), keys.rend()));
+    const auto before = lower_list(keyed_rows(keys), "fixture-18-before");
+    const auto after = lower_list(keyed_rows(reordered), "fixture-18-after");
+
+    const auto old_children = list_children(before);
+    const auto new_children = list_children(after);
+    const auto plan = pulp::view::plan_design_child_updates(old_children, new_children);
+    REQUIRE(plan.keyed);
+    CHECK_FALSE(plan.ambiguous_keys);
+    // Reversing three rows keeps at most one in place, so two moves is the
+    // least work that reaches the new order; nothing is rebuilt.
+    CHECK(plan.work == pulp::view::DesignUpdateWorkCounters{1, 2, 0, 0});
+    for (const auto& update : plan.updates)
+        CHECK(update.key.find("/li[key=") != std::string::npos);
+
+    // Applying the plan to the old anchors reproduces the new order exactly.
+    std::vector<std::string> working;
+    for (const auto& child : old_children)
+        working.push_back(child.stable_anchor_id.value_or(""));
+    for (const auto& update : plan.updates) {
+        REQUIRE(update.kind != pulp::view::DesignUpdateKind::inserted);
+        REQUIRE(update.kind != pulp::view::DesignUpdateKind::removed);
+        const auto at = std::find(working.begin(), working.end(), update.key);
+        REQUIRE(at != working.end());
+        auto value = *at;
+        working.erase(at);
+        working.insert(working.begin() + static_cast<std::ptrdiff_t>(update.new_index),
+                       std::move(value));
+    }
+    std::vector<std::string> expected;
+    for (const auto& child : new_children)
+        expected.push_back(child.stable_anchor_id.value_or(""));
+    CHECK(working == expected);
+}
+
+TEST_CASE("an unkeyed list reorder plans rewrites, not moves",
+          "[browser-capture][native-lowering][anchor][update]") {
+    // Planted negative for the keyed case above: the same reorder with Drive
+    // marked only by `data-pulp-id`, which does not change the anchor. Every
+    // anchor is positional, so the planner cannot see that Drive moved. It
+    // reports no move at all; the slot Drive left and the slot it arrived in
+    // are both rebuilt, because their identity attributes differ.
+    const auto before = lower_list("[13,14],[],[]", "unkeyed-before");
+    const auto after = lower_list("[],[],[13,14]", "unkeyed-after");
+    const auto plan =
+        pulp::view::plan_design_child_updates(list_children(before), list_children(after));
+    REQUIRE(plan.keyed);
+    CHECK(plan.work.moved == 0);
+    CHECK(plan.work == pulp::view::DesignUpdateWorkCounters{1, 0, 2, 2});
+}
+
+TEST_CASE("a list mixing keyed and unkeyed siblings is reported",
+          "[browser-capture][native-lowering][anchor]") {
+    // Drive is keyed and its two neighbours are not, so they are numbered
+    // li[0] and li[1] over the unkeyed set. Before Drive had its key they were
+    // li[1] and li[2]: an edit stored on li[0] for Drive now resolves onto
+    // Tone, and that anchor still looks valid. The mix is reported so the
+    // moved edit is findable.
+    const auto mixed = lower_list("[5,6],[],[]", "mixed");
+    CHECK(mixed.counts.keyed_anchors == 1);
+    CHECK(mixed.counts.mixed_keyed_siblings ==
+          std::vector<std::string>{"capture:html[0]/body[0]/ol[0] li"});
+
+    // Controls: a fully keyed list and a fully unkeyed list carry no
+    // positional sibling beside a keyed one, so neither is reported.
+    CHECK(lower_list("[5,6],[5,7],[5,8]", "all-keyed").counts.mixed_keyed_siblings.empty());
+    CHECK(lower_list("[],[],[]", "unkeyed").counts.mixed_keyed_siblings.empty());
+}
+
+TEST_CASE("a duplicated sibling key is reported escaped",
+          "[browser-capture][native-lowering][anchor]") {
+    // The raw key is author text. Reported verbatim, a quote in it would end
+    // the quoted value early and the report would name a different key.
+    const auto lowered = lower_list("[5,15],[5,15],[5,8]", "escaped-duplicate");
+    // Built outside CHECK: MSVC's preprocessor misreads a raw string literal
+    // holding backslashes inside a macro argument (C2017).
+    const std::vector<std::string> expected{
+        R"(capture:html[0]/body[0]/ol[0] data-pulp-key="t\"o\/ne")"};
+    CHECK(lowered.counts.duplicate_keys == expected);
 }
 
 TEST_CASE("hiding a middle sibling misapplies no stored edit",
@@ -2588,6 +3212,105 @@ TEST_CASE("a rounded clipper cuts its children to the curve, not to a box",
     });
     REQUIRE(inset != nullptr);
     CHECK_FALSE(inset->style.clip_rect.has_value());
+}
+
+TEST_CASE("a clip lands on the snapped edges its clipper is painted on",
+          "[browser-capture][native-lowering][clip-model]") {
+    // A rounded `overflow: hidden` track at a half-pixel page offset, with a
+    // fill bar in its left corners. The track's own box paints on the snapped
+    // CSS edge (206.5 -> 207), and so does Chromium's clip; an unsnapped clip
+    // would put the bar's corners and last row one device row above its
+    // track.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV#track, 4 DIV#fill
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,3]",
+        .attributes = "[[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4]",
+        .styles = "[[50,52,11,11,55,55,55,55,55],"
+                  "[50,52,11,11,55,55,55,55,55],"
+                  "[50,52,11,11,55,55,55,55,55],"
+                  "[51,52,11,11,55,55,55,55,59],"
+                  "[50,52,11,11,55,55,55,55,55]]",
+        .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                  "[20.25,206.5,180,24],[20.25,206.5,115,24]]",
+        .paint_orders = "[0,1,1,2,3]",
+        .computed_names = std::string(kClipRadiusProperties),
+    };
+    const auto fill_of = [](const IRNode& root) {
+        return find_node(root, [](const IRNode& node) {
+            return node.style.width && *node.style.width == 115.0f;
+        });
+    };
+
+    const auto snapped = lower_snapshot(spec, "clip-snapped", {}, false, 2.0);
+    const auto* fill = fill_of(snapped.root);
+    REQUIRE(fill != nullptr);
+    REQUIRE(fill->style.clip_rect.has_value());
+    CHECK(fill->style.clip_rect->x == Catch::Approx(-0.25));
+    CHECK(fill->style.clip_rect->y == Catch::Approx(0.5));
+    CHECK(fill->style.clip_rect->width == Catch::Approx(180.0));
+    CHECK(fill->style.clip_rect->height == Catch::Approx(24.0));
+    CHECK(fill->style.clip_rect->radius_tl == 12.0f);
+    // Snapping moves the clip and the audit together: no clip is reported as
+    // over-applied or lost for the half pixel the snap trims.
+    CHECK(snapped.counts.clip_over_applied == 0);
+    CHECK(snapped.counts.clip_lost == 0);
+
+    // Control: without a device scale there is no paint grid to snap to, and
+    // the clip stays on the solved layout edges.
+    const auto unsnapped = lower_snapshot(spec, "clip-unsnapped");
+    const auto* raw = fill_of(unsnapped.root);
+    REQUIRE(raw != nullptr);
+    REQUIRE(raw->style.clip_rect.has_value());
+    CHECK(raw->style.clip_rect->x == Catch::Approx(0.0));
+    CHECK(raw->style.clip_rect->y == Catch::Approx(0.0));
+}
+
+TEST_CASE("a transformed clipper's clip stays off the grid its paint is not on",
+          "[browser-capture][native-lowering][clip-model]") {
+    // The snapped-clip case above with a 2x scale on the track. A transformed
+    // box's captured rect is post-transform, so its own box paint is not
+    // snapped; the clip it imposes must not be either, or the fill's corners
+    // land half a pixel away from the track they belong to.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV#track (scaled), 4 DIV#fill
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,3]",
+        .attributes = "[[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4]",
+        .styles = "[[50,52,11,11,55,55,55,55,55],"
+                  "[50,52,11,11,55,55,55,55,55],"
+                  "[50,52,11,11,55,55,55,55,55],"
+                  "[51,52,48,11,55,55,55,55,59],"
+                  "[50,52,11,11,55,55,55,55,55]]",
+        .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                  "[20.25,206.5,180,24],[20.25,206.5,115,24]]",
+        .paint_orders = "[0,1,1,2,3]",
+        .computed_names = std::string(kClipRadiusProperties),
+    };
+    const auto lowered = lower_snapshot(spec, "clip-transformed-clipper", {}, false, 2.0);
+    const auto* track = find_node(lowered.root, [](const IRNode& node) {
+        return node.style.width && *node.style.width == 180.0f;
+    });
+    const auto* fill = find_node(lowered.root, [](const IRNode& node) {
+        return node.style.width && *node.style.width == 115.0f;
+    });
+    REQUIRE(track != nullptr);
+    REQUIRE(fill != nullptr);
+    // The clipper's paint is not snapped...
+    CHECK(attribute(*track, "browser_box_paint_dpr").empty());
+    CHECK(attribute(*track, "browser_box_paint_rect_ineligible") == "transform");
+    // ...so neither is its clip: it sits on the solved layout edges.
+    REQUIRE(fill->style.clip_rect.has_value());
+    CHECK(fill->style.clip_rect->x == Catch::Approx(0.0));
+    CHECK(fill->style.clip_rect->y == Catch::Approx(0.0));
+    CHECK(fill->style.clip_rect->width == Catch::Approx(180.0));
+    CHECK(fill->style.clip_rect->height == Catch::Approx(24.0));
 }
 
 TEST_CASE("a clip that really does apply is carried, and a no-op one is not",
@@ -3478,4 +4201,492 @@ TEST_CASE("natively lowered IR is emitted for a real captured design",
     stream.close();
     REQUIRE(fs::is_regular_file(out));
     REQUIRE(fs::file_size(out) > 0);
+}
+
+// ── Form controls ───────────────────────────────────────────────────────────
+//
+// An `<input>`'s value and a closed `<select>`'s selected option are painted by
+// Chrome inside a user-agent shadow tree DOMSnapshot never serializes. The only
+// trace of either string is control state (`inputValue`, `optionSelected`), so
+// a lowering that reads DOM text alone draws every field empty.
+
+TEST_CASE("form controls draw the string their own state holds",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=text] (themed), 4 SELECT
+    // (appearance:none) holding 5 OPTION (selected) / 6 its text and 7 OPTION /
+    // 8 its text, 9 INPUT[type=checkbox] (themed), 10 SELECT (themed) holding
+    // 11 OPTION (selected) / 12 its text. Options have no layout row, exactly
+    // as Chrome reports them for a closed select.
+    //
+    // Row order: display, appearance, padding (top, right, bottom, left),
+    // border widths (top, right, bottom, left), font-size, color, text-align.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,4,5,6,5,6,3,4,5,6]",
+        .node_types = "[9,1,1,1,1,1,3,1,3,1,1,1,3]",
+        .parents = "[-1,0,1,2,2,4,5,4,7,2,2,10,11]",
+        .attributes = "[[],[],[],[7,8],[],[],[],[],[],[7,12],[],[],[]]",
+        .layout_nodes = "[1,2,3,4,9,10]",
+        .styles = "[[14,15,17,17,17,17,17,17,17,17,20,21,22],"
+                  "[14,15,17,17,17,17,17,17,17,17,20,21,22],"
+                  "[24,16,18,19,18,19,18,18,18,18,20,21,22],"
+                  "[24,15,17,19,17,19,18,18,18,18,20,21,22],"
+                  "[24,16,17,17,17,17,17,17,17,17,20,21,22],"
+                  "[24,16,17,19,17,19,18,18,18,18,20,21,22]]",
+        .bounds = "[[0,0,200,140],[0,0,200,140],[10,10,150,24],"
+                  "[10,40,150,24],[10,70,13,13],[10,90,150,24]]",
+        .paint_orders = "[0,1,2,3,4,5]",
+        .computed_names = R"(["display","appearance","padding-top","padding-right",)"
+                          R"("padding-bottom","padding-left","border-top-width",)"
+                          R"("border-right-width","border-bottom-width","border-left-width",)"
+                          R"("font-size","color","text-align"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","SELECT","OPTION","#text",)J"
+                   R"J("type","text","Patch 1","  Bank\n A ","Bank B","checkbox",)J"
+                   R"J("on","block","none","auto","0px","1px","6px","13px",)J"
+                   R"J("rgb(31, 41, 51)","start","Auto","inline-block")J",
+        .extra_nodes = R"(,"nodeValue":[-1,-1,-1,-1,-1,-1,10,-1,11,-1,-1,-1,23])"
+                       R"(,"inputValue":{"index":[3,9],"value":[9,13]})"
+                       R"(,"optionSelected":{"index":[5,11]})",
+        // The text field's author box styling dropped the theme; the checkbox
+        // is the theme's; the themed select has no verdict at all.
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"author"},)"
+                     R"({"node_index":4,"theme":"none"},)"
+                     R"({"node_index":9,"theme":"native"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "form-control-values");
+
+    std::vector<const IRNode*> values;
+    std::vector<const IRNode*> owners;
+    const std::function<void(const IRNode&)> collect = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (child.name == "#control-value") {
+                values.push_back(&child);
+                owners.push_back(&node);
+            }
+            collect(child);
+        }
+    };
+    collect(lowered.root);
+
+    // The text field (themed or not, its value sits in the content box) and
+    // the author-styled select. Not the checkbox, whose `on` is never drawn,
+    // and not the themed select, whose arrow room no computed length records.
+    REQUIRE(values.size() == 2);
+    CHECK(lowered.counts.control_value_text == 2);
+
+    CHECK(values[0]->type == "text");
+    CHECK(values[0]->text_content == "Patch 1");
+    CHECK(attribute(*owners[0], "source_tag") == "input");
+    // Placed in the content box: border 1px plus padding 1px/6px in from
+    // (10,10), inside a 150x24 border box. A child is offset from its parent's
+    // padding box, so only the padding shows in the offsets.
+    CHECK(values[0]->style.left.value_or(-1.0f) == Catch::Approx(6.0f));
+    CHECK(values[0]->style.top.value_or(-1.0f) == Catch::Approx(1.0f));
+    CHECK(values[0]->style.width.value_or(-1.0f) == Catch::Approx(136.0f));
+    CHECK(values[0]->style.height.value_or(-1.0f) == Catch::Approx(20.0f));
+    CHECK(values[0]->style.font_size.value_or(-1.0f) == Catch::Approx(13.0f));
+    CHECK(values[0]->style.color.value_or("") == "rgb(31, 41, 51)");
+    CHECK(values[0]->style.white_space.value_or("") == "nowrap");
+
+    // The selected option's label, whitespace collapsed as the closed select
+    // shows it — and never the unselected option's.
+    CHECK(values[1]->text_content == "Bank A");
+    CHECK(attribute(*owners[1], "source_tag") == "select");
+    CHECK(values[1]->style.left.value_or(-1.0f) == Catch::Approx(6.0f));
+    CHECK(values[1]->style.top.value_or(-1.0f) == Catch::Approx(0.0f));
+    CHECK(values[1]->style.height.value_or(-1.0f) == Catch::Approx(22.0f));
+
+    // Every control whose computed appearance is not `none` records it, but
+    // only the capture's verdict says whether the theme painted: an
+    // `appearance: auto` control with author box styling is painted from CSS.
+    const int auto_appearance = count_nodes(
+        lowered.root, [](const IRNode& n) { return attribute(n, "native_appearance") == "auto"; });
+    CHECK(auto_appearance == 3);
+    CHECK(lowered.counts.native_appearance_controls == 1);
+    CHECK(attribute(*owners[0], "native_theme") == "author");
+    const auto* checkbox = find_node(
+        lowered.root, [](const IRNode& n) { return attribute(n, "native_theme") == "native"; });
+    REQUIRE(checkbox != nullptr);
+    CHECK(attribute(*checkbox, "source_tag") == "input");
+    const int unresolved = count_nodes(
+        lowered.root, [](const IRNode& n) { return attribute(n, "native_theme") == "unresolved"; });
+    CHECK(unresolved == 1);
+}
+
+TEST_CASE("theme-painted ranges, checkboxes and radios record the state the theme paints",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=range] (themed,
+    // disabled, accented), 4 INPUT[type=checkbox] (themed, checked by state
+    // only), 5 INPUT[type=radio name=mode] (themed, checked), 6
+    // INPUT[type=range] whose author styling dropped the theme.
+    //
+    // Row order: display, appearance, accent-color, color-scheme,
+    // background-color.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3,3]",
+        .node_types = "[9,1,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2,2]",
+        .attributes = "[[],[],[],[4,5,6,7,8,9,10,11,12,13],[4,14],[4,15,16,17],[4,5]]",
+        .layout_nodes = "[1,2,3,4,5,6]",
+        .styles = "[[18,19,19,21,26],[18,19,19,21,26],[22,19,20,21,25],[22,19,19,24,25],"
+                  "[22,19,19,21,25],[22,19,19,21,25]]",
+        .bounds = "[[0,0,300,200],[0,0,300,200],[10.59375,10.5,129,16],"
+                  "[10,40,13,13],[30,40,13,13],[10,70,129,16]]",
+        .paint_orders = "[0,1,2,3,4,5]",
+        .computed_names =
+            R"(["display","appearance","accent-color","color-scheme","background-color"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","range","min","0","max","1",)J"
+                   R"J("step","0.001","disabled","","checkbox","radio","name","mode","block",)J"
+                   R"J("auto","rgb(71, 180, 235)","normal","inline-block","0.25","dark",)J"
+                   R"J("rgb(255, 255, 255)","rgba(0, 0, 0, 0)")J",
+        .extra_nodes = R"(,"inputValue":{"index":[3],"value":[23]})"
+                       R"(,"inputChecked":{"index":[4,5]})",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"native"},)"
+                     R"({"node_index":5,"theme":"native"},)"
+                     R"({"node_index":6,"theme":"author"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "form-control-theme-state");
+    const auto by_control = [&](const std::string& control) {
+        return find_node(lowered.root,
+                         [&](const IRNode& n) { return attribute(n, "ua_control") == control; });
+    };
+
+    const auto* range = by_control("range");
+    REQUIRE(range != nullptr);
+    CHECK(attribute(*range, "ua_min") == "0");
+    CHECK(attribute(*range, "ua_max") == "1");
+    CHECK(attribute(*range, "ua_step") == "0.001");
+    // The live value, from control state rather than the `value` attribute.
+    CHECK(attribute(*range, "ua_value") == "0.25");
+    CHECK(attribute(*range, "ua_disabled") == "1");
+    CHECK(attribute(*range, "ua_accent") == "rgb(71, 180, 235)");
+    CHECK(attribute(*range, "ua_color_scheme") == "normal");
+    CHECK_FALSE(range->attributes.contains("ua_checked"));
+
+    const auto* checkbox = by_control("checkbox");
+    REQUIRE(checkbox != nullptr);
+    // Checked by `inputChecked` alone: no `checked` attribute was authored.
+    CHECK(attribute(*checkbox, "ua_checked") == "1");
+    CHECK(attribute(*checkbox, "ua_color_scheme") == "dark");
+    // `auto` is the theme's own accent, so nothing is recorded for it.
+    CHECK_FALSE(checkbox->attributes.contains("ua_accent"));
+    CHECK_FALSE(checkbox->attributes.contains("ua_disabled"));
+
+    const auto* radio = by_control("radio");
+    REQUIRE(radio != nullptr);
+    CHECK(attribute(*radio, "ua_checked") == "1");
+    CHECK(attribute(*radio, "ua_radio_group") == "mode");
+
+    // The white background a range or checkbox reports is the user-agent
+    // default the theme replaces, so a theme-painted control carries none.
+    CHECK_FALSE(range->style.background_color.has_value());
+    CHECK_FALSE(checkbox->style.background_color.has_value());
+
+    // The author-styled range is painted from CSS: no theme state at all, and
+    // its computed background is kept.
+    const int recorded = count_nodes(
+        lowered.root, [](const IRNode& n) { return n.attributes.contains("ua_control"); });
+    CHECK(recorded == 3);
+    const auto* styled = find_node(
+        lowered.root, [](const IRNode& n) { return attribute(n, "native_theme") == "author"; });
+    REQUIRE(styled != nullptr);
+    CHECK(styled->style.background_color.value_or("") == "rgb(255, 255, 255)");
+}
+
+namespace {
+
+/// True when `needle` appears in any text run, name, or attribute value of the
+/// lowered tree.
+bool tree_mentions(const IRNode& node, const std::string& needle) {
+    if (node.text_content.find(needle) != std::string::npos)
+        return true;
+    if (node.name.find(needle) != std::string::npos)
+        return true;
+    for (const auto& [key, value] : node.attributes) {
+        if (value.find(needle) != std::string::npos)
+            return true;
+    }
+    for (const auto& child : node.children) {
+        if (tree_mentions(child, needle))
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
+TEST_CASE("an input's type is read as HTML reads it",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=Bogus],
+    // 4 INPUT[type=" password "], 5 INPUT[type=PASSWORD]. An unknown type is
+    // the Text state, the attribute is not trimmed, and it matches ASCII
+    // case-insensitively: Chromium paints the first two as text fields with
+    // their value in clear and masks the third.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2]",
+        .attributes = "[[],[],[],[4,5],[4,6],[4,7]]",
+        .layout_nodes = "[1,2,3,4,5]",
+        .styles = "[[11,17,13,13,13,13,13,13,13,13,16,18,19],"
+                  "[11,17,13,13,13,13,13,13,13,13,16,18,19],"
+                  "[11,12,14,15,14,15,14,14,14,14,16,18,19],"
+                  "[11,12,14,15,14,15,14,14,14,14,16,18,19],"
+                  "[11,12,14,15,14,15,14,14,14,14,16,18,19]]",
+        .bounds = "[[0,0,200,110],[0,0,200,110],[10,10,150,24],"
+                  "[10,40,150,24],[10,70,150,24]]",
+        .paint_orders = "[0,1,2,3,4]",
+        .computed_names = R"(["display","appearance","padding-top","padding-right",)"
+                          R"("padding-bottom","padding-left","border-top-width",)"
+                          R"("border-right-width","border-bottom-width","border-left-width",)"
+                          R"("font-size","color","text-align"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","Bogus"," password ",)J"
+                   R"J("PASSWORD","bogus-value","spaced-value","upper-secret",)J"
+                   R"J("block","auto","0px","1px","6px","13px","none",)J"
+                   R"J("rgb(31, 41, 51)","start")J",
+        .extra_nodes = R"(,"nodeValue":[-1,-1,-1,-1,-1,-1])"
+                       R"(,"inputValue":{"index":[3,4,5],"value":[8,9,10]})",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"native"},)"
+                     R"({"node_index":5,"theme":"native"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "input-type-normalisation");
+
+    CHECK(find_by_text(lowered.root, "bogus-value") != nullptr);
+    CHECK(find_by_text(lowered.root, "spaced-value") != nullptr);
+    CHECK(find_by_text(lowered.root, "upper-secret") == nullptr);
+    CHECK(lowered.counts.control_value_text == 2);
+
+    CHECK(detail::normalized_input_type("") == "text");
+    CHECK(detail::normalized_input_type("Bogus") == "text");
+    CHECK(detail::normalized_input_type("CheckBox") == "checkbox");
+    CHECK(detail::normalized_input_type(" password ") == "text");
+}
+
+TEST_CASE("a submit or reset button without a value draws the default label",
+          "[browser-capture][native-lowering][form-controls]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=submit],
+    // 4 INPUT[type=reset], 5 INPUT[type=submit value=""], 6 INPUT[type=button].
+    // Chrome labels the first two "Submit" and "Reset" in an en-US capture; an
+    // empty `value` and a plain button label nothing.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3,3,3]",
+        .node_types = "[9,1,1,1,1,1,1]",
+        .parents = "[-1,0,1,2,2,2,2]",
+        .attributes = "[[],[],[],[4,5],[4,6],[4,5,7,8],[4,9]]",
+        .layout_nodes = "[1,2,3,4,5,6]",
+        .styles = "[[10,16,12,12,12,12,12,12,12,12,15,17,18],"
+                  "[10,16,12,12,12,12,12,12,12,12,15,17,18],"
+                  "[10,11,13,14,13,14,13,13,13,13,15,17,18],"
+                  "[10,11,13,14,13,14,13,13,13,13,15,17,18],"
+                  "[10,11,13,14,13,14,13,13,13,13,15,17,18],"
+                  "[10,11,13,14,13,14,13,13,13,13,15,17,18]]",
+        .bounds = "[[0,0,200,140],[0,0,200,140],[10,10,150,24],"
+                  "[10,40,150,24],[10,70,150,24],[10,100,150,24]]",
+        .paint_orders = "[0,1,2,3,4,5]",
+        .computed_names = R"(["display","appearance","padding-top","padding-right",)"
+                          R"("padding-bottom","padding-left","border-top-width",)"
+                          R"("border-right-width","border-bottom-width","border-left-width",)"
+                          R"("font-size","color","text-align"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","submit","reset",)J"
+                   R"J("value","","button","block","auto","0px","1px","6px","13px",)J"
+                   R"J("none","rgb(31, 41, 51)","center")J",
+        .extra_nodes = R"(,"nodeValue":[-1,-1,-1,-1,-1,-1,-1])"
+                       R"(,"inputValue":{"index":[3,4,5,6],"value":[-1,-1,8,-1]})",
+    };
+    const auto lowered = lower_snapshot(spec, "default-button-labels");
+
+    CHECK(find_by_text(lowered.root, "Submit") != nullptr);
+    CHECK(find_by_text(lowered.root, "Reset") != nullptr);
+    CHECK(lowered.counts.control_value_text == 2);
+}
+
+TEST_CASE("a control masked by -webkit-text-security never draws its value",
+          "[browser-capture][native-lowering][form-controls][security]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 INPUT[type=text] under
+    // `-webkit-text-security: disc`, 4 INPUT[type=text] unmasked. Both are text
+    // fields Chrome lays out identically; only the mask differs.
+    //
+    // Row order: display, appearance, padding (top, right, bottom, left),
+    // border widths (top, right, bottom, left), font-size, color, text-align,
+    // -webkit-text-security.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3,3]",
+        .node_types = "[9,1,1,1,1]",
+        .parents = "[-1,0,1,2,2]",
+        .attributes = "[[],[],[],[4,5],[4,5]]",
+        .layout_nodes = "[1,2,3,4]",
+        .styles = "[[8,17,10,10,10,10,10,10,10,10,13,14,15,17],"
+                  "[8,17,10,10,10,10,10,10,10,10,13,14,15,17],"
+                  "[8,9,11,12,11,12,11,11,11,11,13,14,15,16],"
+                  "[8,9,11,12,11,12,11,11,11,11,13,14,15,17]]",
+        .bounds = "[[0,0,200,80],[0,0,200,80],[10,10,150,24],[10,40,150,24]]",
+        .paint_orders = "[0,1,2,3]",
+        .computed_names = R"(["display","appearance","padding-top","padding-right",)"
+                          R"("padding-bottom","padding-left","border-top-width",)"
+                          R"("border-right-width","border-bottom-width","border-left-width",)"
+                          R"("font-size","color","text-align","-webkit-text-security"])",
+        .strings = R"J("#document","HTML","BODY","INPUT","type","text","hunter2",)J"
+                   R"J("visible-value","block","auto","0px","1px","6px","13px",)J"
+                   R"J("rgb(31, 41, 51)","start","disc","none")J",
+        .extra_nodes = R"(,"nodeValue":[-1,-1,-1,-1,-1])"
+                       R"(,"inputValue":{"index":[3,4],"value":[6,7]})",
+        .extra_top = R"(,"formControlTheme":{"controls":[)"
+                     R"({"node_index":3,"theme":"native"},)"
+                     R"({"node_index":4,"theme":"native"}]})",
+    };
+    const auto lowered = lower_snapshot(spec, "masked-control-value");
+
+    // The unmasked twin is the positive control: the same lowering on the same
+    // shape does draw a value, so an absent secret is the mask's doing.
+    CHECK(find_by_text(lowered.root, "visible-value") != nullptr);
+    CHECK(lowered.counts.control_value_text == 1);
+    CHECK_FALSE(tree_mentions(lowered.root, "hunter2"));
+}
+
+namespace {
+
+/// A panel of plain `div`s for the compositing-group cases: `display`,
+/// `opacity`, `overflow`, `transform` and `background-color` per row.
+///
+/// Strings: 0 #document  1 HTML  2 BODY  3 DIV  4 block  5 "1"  6 "0.5"
+///          7 none  8 visible  9 rgb(200, 200, 200)  10 rgba(0, 0, 0, 0)
+///          11 matrix(2, 0, 0, 2, 0, 0)
+constexpr std::string_view kGroupProperties =
+    R"(["display","opacity","overflow","transform","background-color"])";
+constexpr std::string_view kGroupStrings =
+    R"J("#document","HTML","BODY","DIV","block","1","0.5","none","visible",)J"
+    R"J("rgb(200, 200, 200)","rgba(0, 0, 0, 0)","matrix(2, 0, 0, 2, 0, 0)")J";
+constexpr std::string_view kPlainRow = "[4,5,8,7,10]";
+constexpr std::string_view kFilledRow = "[4,5,8,7,9]";
+constexpr std::string_view kGroupRow = "[4,6,8,7,10]";
+constexpr std::string_view kTransformedGroupRow = "[4,6,8,11,10]";
+
+/// Six nodes: #document, HTML, BODY, then three `div`s whose parents, rows,
+/// boxes and paint ranks the case supplies.
+SnapshotSpec group_spec(std::string parents, std::string_view row3, std::string_view row4,
+                        std::string_view row5, std::string box3, std::string box4, std::string box5,
+                        std::string paint_orders) {
+    const auto plain = std::string(kPlainRow);
+    return SnapshotSpec{
+        .node_names = "[0,1,2,3,3,3]",
+        .node_types = "[9,1,1,1,1,1]",
+        .parents = std::move(parents),
+        .attributes = "[[],[],[],[],[],[]]",
+        .layout_nodes = "[0,1,2,3,4,5]",
+        .styles = "[" + plain + "," + plain + "," + plain + "," + std::string(row3) + "," +
+                  std::string(row4) + "," + std::string(row5) + "]",
+        .bounds =
+            "[[0,0,200,100],[0,0,200,100],[0,0,200,100]," + box3 + "," + box4 + "," + box5 + "]",
+        .paint_orders = std::move(paint_orders),
+        .computed_names = std::string(kGroupProperties),
+        .strings = std::string(kGroupStrings),
+    };
+}
+
+const IRNode* translucent_node(const IRNode& root) {
+    return find_node(
+        root, [](const IRNode& node) { return node.style.opacity && *node.style.opacity < 1.0f; });
+}
+
+} // namespace
+
+TEST_CASE("a flattened panel keeps a translucent group's descendants inside it",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    // div.group{opacity:.5} holding one filled child, beside a filled sibling.
+    // Hung off the root, the child would paint at full strength next to an
+    // empty translucent box; the browser composites the two as one layer.
+    const auto lowered = lower_snapshot(
+        group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow, "[10,10,100,60]",
+                   "[20,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+        "group-opacity-nested", {}, /*flatten_to_paint_order=*/true);
+
+    CHECK(lowered.counts.isolating_groups_nested == 1);
+    CHECK(lowered.counts.isolating_groups_refused == 0);
+    CHECK(lowered.counts.max_depth == 2);
+    const auto* group = translucent_node(lowered.root);
+    REQUIRE(group != nullptr);
+    CHECK(*group->style.opacity == Catch::Approx(0.5f));
+    REQUIRE(group->children.size() == 1);
+    const auto& child = group->children[0];
+    CHECK(attribute(child, "paint_order") == "3");
+    // Re-expressed against the group, and carrying no alpha of its own: the
+    // group's layer applies it once.
+    CHECK(*child.style.left == Catch::Approx(10.0f));
+    CHECK(*child.style.top == Catch::Approx(10.0f));
+    CHECK_FALSE(child.style.opacity.has_value());
+    // Everything else stays a root child, in paint order.
+    for (const auto& top : lowered.root.children)
+        if (&top != group)
+            CHECK(top.children.empty());
+    CHECK(std::any_of(lowered.root.children.begin(), lowered.root.children.end(),
+                      [](const IRNode& node) { return attribute(node, "paint_order") == "4"; }));
+}
+
+TEST_CASE("a translucent group inside a translucent group nests twice",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    const auto lowered = lower_snapshot(group_spec("[-1,0,1,2,3,4]", kGroupRow, kGroupRow,
+                                                   kFilledRow, "[10,10,100,60]", "[15,15,80,40]",
+                                                   "[20,20,40,20]", "[0,1,1,2,3,4]"),
+                                        "group-opacity-twice", {}, /*flatten_to_paint_order=*/true);
+
+    CHECK(lowered.counts.isolating_groups_nested == 2);
+    CHECK(lowered.counts.max_depth == 3);
+    const auto* outer = translucent_node(lowered.root);
+    REQUIRE(outer != nullptr);
+    REQUIRE(outer->children.size() == 1);
+    const auto& inner = outer->children[0];
+    REQUIRE(inner.style.opacity);
+    CHECK(*inner.style.opacity == Catch::Approx(0.5f));
+    REQUIRE(inner.children.size() == 1);
+    CHECK_FALSE(inner.children[0].style.opacity.has_value());
+    CHECK(*inner.children[0].style.left == Catch::Approx(5.0f));
+}
+
+TEST_CASE("a translucent group that cannot be nested exactly stays flat and says why",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    const auto refused = [](const SnapshotSpec& spec, const std::string& name) {
+        const auto lowered = lower_snapshot(spec, name, {}, /*flatten_to_paint_order=*/true);
+        CHECK(lowered.counts.isolating_groups_nested == 0);
+        CHECK(lowered.counts.isolating_groups_refused == 1);
+        CHECK(lowered.counts.max_depth == 1);
+        const auto* group = translucent_node(lowered.root);
+        REQUIRE(group != nullptr);
+        CHECK(group->children.empty());
+        return attribute(*group, "isolating_group_refused");
+    };
+    SECTION("a descendant reaching past the group's box") {
+        // The group's layer is the size of its box, so nesting would cut the
+        // child where it overhangs.
+        CHECK(
+            refused(group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow, "[10,10,60,60]",
+                               "[50,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+                    "group-opacity-overhang") == "descendant-ink-outside-group");
+    }
+    SECTION("an outside node painting between the group and its descendant") {
+        CHECK(
+            refused(group_spec("[-1,0,1,2,3,2]", kGroupRow, kFilledRow, kFilledRow,
+                               "[10,10,100,60]", "[20,20,40,20]", "[30,30,40,40]", "[0,1,1,2,4,3]"),
+                    "group-opacity-interleaved") == "interleaved-paint-order");
+    }
+}
+
+TEST_CASE("a scaled translucent group still nests, at its scaled page box",
+          "[browser-capture][native-lowering][paint-order][opacity]") {
+    // An axis-preserving transform reaches the IR only through the boxes,
+    // which are already Chrome's post-transform page boxes, so nesting adds no
+    // second transform and the group stays exact.
+    const auto lowered = lower_snapshot(
+        group_spec("[-1,0,1,2,3,2]", kTransformedGroupRow, kFilledRow, kFilledRow, "[10,10,100,60]",
+                   "[20,20,40,20]", "[150,10,40,40]", "[0,1,1,2,3,4]"),
+        "group-opacity-scaled", {}, /*flatten_to_paint_order=*/true);
+    CHECK(lowered.counts.isolating_groups_nested == 1);
+    const auto* group = translucent_node(lowered.root);
+    REQUIRE(group != nullptr);
+    CHECK_FALSE(group->style.transform.has_value());
+    REQUIRE(group->children.size() == 1);
+    CHECK(*group->children[0].style.left == Catch::Approx(10.0f));
 }

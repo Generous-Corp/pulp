@@ -1,3 +1,4 @@
+#include <cctype>
 #include <pulp/state/preset_manager.hpp>
 #include <pulp/runtime/system.hpp>
 #include <choc/text/choc_JSON.h>
@@ -13,6 +14,58 @@ namespace fs = std::filesystem;
 namespace pulp::state {
 
 namespace {
+
+// A preset name or folder is a single path component chosen in the UI. A
+// separator, a parent reference, an embedded NUL, or (on Windows) a drive
+// colon would resolve outside the presets directory.
+// Windows reserves device names (CON, NUL, COM1, ...) with or without an
+// extension; a preset so named cannot be written there, so refuse it everywhere.
+bool is_windows_device_name(std::string_view value) {
+    std::string stem(value.substr(0, value.find('.')));
+    for (char& c : stem)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL")
+        return true;
+    if (stem.size() == 4 && (stem.compare(0, 3, "COM") == 0 || stem.compare(0, 3, "LPT") == 0) &&
+        stem[3] >= '1' && stem[3] <= '9')
+        return true;
+    return false;
+}
+
+bool is_safe_path_component(std::string_view value) {
+    if (value.empty() || value == "." || value == ".." || is_windows_device_name(value))
+        return false;
+    for (char c : value) {
+        if (c == '/' || c == '\0')
+            return false;
+#ifdef _WIN32
+        // Backslash and the drive colon are separators only on Windows; a
+        // POSIX preset name may legitimately contain either.
+        if (c == '\\' || c == ':')
+            return false;
+#endif
+    }
+    return true;
+}
+
+// A folder may nest ("Keys/Analog"); each component must be safe and the
+// path must stay relative, so no leading separator or empty segment.
+bool is_safe_relative_folder(std::string_view folder) {
+    if (folder.empty())
+        return true;
+    if (folder.front() == '/' || folder.front() == '\\')
+        return false;
+    std::size_t start = 0;
+    while (start <= folder.size()) {
+        std::size_t end = folder.find('/', start);
+        if (end == std::string_view::npos)
+            end = folder.size();
+        if (!is_safe_path_component(folder.substr(start, end - start)))
+            return false;
+        start = end + 1;
+    }
+    return true;
+}
 
 bool has_only_trailing_space(const std::string& value, std::size_t pos) {
     return value.find_first_not_of(" \t\r\n", pos) == std::string::npos;
@@ -97,6 +150,9 @@ void PresetManager::ensure_user_dir() {
 // ── Save/Load ────────────────────────────────────────────────────────────
 
 bool PresetManager::save(const std::string& name, const std::string& folder) {
+    if (!is_safe_path_component(name) || !is_safe_relative_folder(folder)) {
+        return false;
+    }
     ensure_user_dir();
     if (user_dir_.empty()) return false;
 
@@ -250,7 +306,8 @@ bool PresetManager::delete_preset(const PresetInfo& preset) {
 }
 
 bool PresetManager::rename(const PresetInfo& preset, const std::string& new_name) {
-    if (preset.is_factory) return false;
+    if (preset.is_factory || !is_safe_path_component(new_name))
+        return false;
     auto new_path = preset.path.parent_path() / (new_name + ".json");
     std::error_code ec;
     fs::rename(preset.path, new_path, ec);

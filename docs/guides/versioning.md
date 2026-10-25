@@ -71,11 +71,18 @@ the self-tests for the compiler-asymmetry lints:
 | `win32_include_lint.py` | raw `<windows.h>` in an installed header — leaks the `min`/`max` macros, `C2589` on MSVC |
 | `safe_path_guard_lint.py` | an untrusted-path guard in `core/` or `tools/cli/` that trusts `is_absolute()`, which on Windows accepts `/x`, `\x` and `C:x`, instead of calling `pulp::runtime::is_safe_relative_path` |
 | `text_encoding_lint.py` | Python text I/O (`read_text`, `write_text`, `open`, `subprocess` with `text=True`) without `encoding=`, which decodes with cp1252 on Windows; the existing backlog is held by a per-file baseline (`text_encoding_baseline.json`) that can only go down |
+| `migration_note_guard.py` | a pull request adding `docs/migrations/vX.Y.Z.md` by hand. The release version is assigned after the change lands, so the note belongs in `docs/migrations/unreleased/<topic>.md`, which the version-at-land bump folds; only a bump commit (one with the `Version-Bump-Applied:` marker) may add a released note. Editing a released note is allowed |
+| `script_inputs_precheck.py` | a new `add_test(NAME <name> COMMAND ...)` that runs a Python, shell or Node script but has no entry in `test/ctest_script_inputs.json`. Build-free counterpart of CI's `script-test-inputs-drift`: it reads only the CMake text the range adds. A computed name or the old `add_test(<name> <cmd>)` form is reported as not checked, never passed; `# script-inputs: not-gated <reason>` on or above the call skips a deliberately ungated test. Stale entries (a script that gained an import) still need the configured check |
 | `python_floor_syntax_check.py` | a tracked `*.py` file that Python 3.12 parses but 3.11, the gates' floor, rejects: an f-string field that reuses the enclosing quote or holds a backslash (including a line continuation, or in a nested f-string's text), comment or (single-quoted) line break. CI runs 3.12, so only a 3.11 run (CMake's default on a stock Homebrew Mac) would see it |
 
 `gates.sh` runs `designated_initializer_lint.py` diff-scoped and
 `win32_include_lint.py` over `core/*/include` before a push, and
-`safe_path_guard_lint.py` over `core/` and `tools/cli/`. All are canaries,
+`safe_path_guard_lint.py` over `core/` and `tools/cli/`. `gates.sh` and the
+pre-push hook also run `text_encoding_lint.py --base`, the same invocation as
+CI's `Enforce version & skill sync`, so a missing `encoding="utf-8"` fails
+before the push rather than in CI, and `script_inputs_precheck.py --base`, which
+catches a new script-driven ctest with no `test/ctest_script_inputs.json` entry
+without the configured build `script-test-inputs-drift` needs. All are canaries,
 not substitutes for building on the target: they check what a regex can check
 without a compiler, which for designated initializers means duplicates but not
 declaration order.
@@ -270,6 +277,25 @@ and 40 s apart, so a PyPI blip does not fail this required context).
 Those are the macOS gate's repository scanners that read `tools/**` without
 naming files; they must run here because `build.yml`'s `classify` job may then
 skip the native matrix for a tooling-only change. Unset, the step is skipped.
+
+The planning-gitlink guard (`tools/scripts/planning_gitlink_guard.py`) checks
+that an authorized `planning` re-pin is an ancestor of pulp-planning `main`, by
+fetching that repository's commit history. This workflow has no credential for
+the private planning repository, so it passes `--ci-warn-only`: an ancestry it
+cannot verify becomes a `::warning` annotation and the step passes, while a pin
+it could fetch and found off `main` still fails. Pre-push and `gates.sh` run
+without the flag and fail closed on an unverifiable pin, using the developer's
+own access. Granting this workflow a read-only token for pulp-planning and
+dropping `--ci-warn-only` makes CI enforce the ancestry too.
+
+### The bump skips the advisory coverage run
+
+`coverage.yml` ANDs `github.head_ref != 'release/version-bump'` into every job's
+condition, so the release bot's bump pull request no longer starts a coverage
+run (about 2.5 h of hosted runners for a tree that is main's plus version
+files). No coverage context is required; every other pull request, schedule
+and dispatch runs as before. `tools/scripts/test_bump_fastpath.py` checks the
+guard on every job.
 
 ### Action-major pins in the gate workflows
 

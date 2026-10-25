@@ -33,6 +33,24 @@ Use `shaped(x)` to plot or test the selected memoryless transfer without running
 filter or oversampling state. `worst_case_gain()` and `latency_samples()` are the
 corresponding bounds for host integration.
 
+Choosing an alias policy:
+
+| Policy | Wet-path delay | Top-octave cost | When |
+|---|---|---|---|
+| `adaa` (default) | 0.5 sample | two-tap mean: −3.0 dB at a quarter of the rate | Low latency, moderate drive |
+| `adaa2` | 1 sample (reported, dry path matched) | three-tap mean: −9.5 dB at a quarter of the rate, null at a third | Content below about a quarter of the rate, where it measured 7–21 dB lower worst-case aliasing than `adaa` at +6 and +18 dB drive; above that its roll-off costs more than it saves |
+| `oversample_2x` | 64 samples (linear phase) | flat | Phase coherence with another linear-phase oversampled stage |
+| `off` | 0 | flat | Measurement and the CPU floor |
+
+`adaa_linear_magnitude(order, f)` returns the ADAA stencils' small-signal
+response so a plot or test can show the roll-off without rendering audio, and
+`group_delay_samples()` reports the half sample that the integer
+`latency_samples()` rounds away. For hard drive on wide-band material, an
+`OversamplerT` with `Kind::polyphase_iir` around a cheap curve such as
+`FastMath::tanh_minimax` reaches a lower alias floor than either ADAA order for
+less CPU on Apple Silicon; ADAA's advantages are its sub-sample latency and its
+linear phase.
+
 ## Circuit and system boundaries
 
 - `DiodeClipper` owns a shunt diode node with resistance and capacitance.

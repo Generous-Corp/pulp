@@ -164,6 +164,15 @@ class GpuWaveNetSession {
     /// caller can retry the provider's physical drain barrier.
     bool release() noexcept;
 
+    /// True once the provider has observed loss of its device. A lost session
+    /// never delivers again; its owner must release it and create a new one.
+    /// Serialized non-realtime diagnostic, like `service()`.
+    bool device_lost() const noexcept;
+
+    /// Blocks accepted by `submit_block()` whose result `receive()` has not yet
+    /// returned, whether delivered or failed.
+    std::uint64_t outstanding_blocks() const noexcept;
+
   private:
     struct Impl;
     explicit GpuWaveNetSession(std::unique_ptr<Impl> impl) noexcept;

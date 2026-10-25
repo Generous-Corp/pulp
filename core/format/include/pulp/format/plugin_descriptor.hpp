@@ -6,6 +6,7 @@
 // compiling unchanged; new code should include it directly.
 
 #include <cstdint>
+#include <pulp/format/bus_role.hpp>
 #include <string>
 #include <vector>
 
@@ -195,6 +196,9 @@ struct BusInfo {
     std::string name;
     int default_channels = 2;
     bool optional = false;  ///< true for sidechain buses that can be deactivated
+    /// Semantic role used by hosts and adapters when bus order is not enough.
+    /// Appended for source compatibility with existing three-field initializers.
+    BusRole role = BusRole::Main;
 };
 
 /// One complete host-selectable channel configuration. Entry indices match

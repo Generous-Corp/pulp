@@ -1430,7 +1430,7 @@ FETCHCONTENT_CACHE_ROOT="$(fetchcontent_cache_root)"
 info "Shared FetchContent source cache: $FETCHCONTENT_CACHE_ROOT"
 
 ensure_shared_git_source_with_retry "CHOC" "https://github.com/danielraffel/choc.git" \
-    "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60" "$(fetchcontent_cache_dir_name "choc" "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60")"
+    "b586f33d1c9e8bee98c2b420a5b20bf525c3c7be" "$(fetchcontent_cache_dir_name "choc" "b586f33d1c9e8bee98c2b420a5b20bf525c3c7be")"
 
 ensure_shared_git_source_with_retry "WebGPU-distribution" "https://github.com/eliemichel/WebGPU-distribution.git" \
     "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab" "$(fetchcontent_cache_dir_name "webgpu" "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab")"
@@ -1454,10 +1454,10 @@ if [ -n "$WGPU_RUNTIME_NAME" ]; then
 fi
 
 ensure_shared_git_source_with_retry "SDL3" "https://github.com/libsdl-org/SDL.git" \
-    "release-3.2.12" "$(fetchcontent_cache_dir_name "sdl3" "release-3.2.12")"
+    "release-3.4.18" "$(fetchcontent_cache_dir_name "sdl3" "release-3.4.18")"
 
 ensure_shared_git_source_with_retry "CLAP" "https://github.com/free-audio/clap.git" \
-    "1.2.9" "$(fetchcontent_cache_dir_name "clap" "1.2.9")"
+    "1.2.10" "$(fetchcontent_cache_dir_name "clap" "1.2.10")"
 
 ensure_shared_git_source_with_retry "LV2" "https://github.com/lv2/lv2.git" \
     "v1.18.10" "$(fetchcontent_cache_dir_name "lv2" "v1.18.10")"
@@ -1466,7 +1466,7 @@ ensure_shared_git_source_with_retry "Yoga" "https://github.com/facebook/yoga.git
     "v3.2.1" "$(fetchcontent_cache_dir_name "yoga" "v3.2.1")"
 
 ensure_shared_git_source_with_retry "Catch2" "https://github.com/catchorg/Catch2.git" \
-    "v3.7.1" "$(fetchcontent_cache_dir_name "catch2" "v3.7.1")"
+    "v3.16.1" "$(fetchcontent_cache_dir_name "catch2" "v3.16.1")"
 
 # three.js is by far the largest FetchContent source (~2.2 GB of history). Left
 # unseeded it clones per BUILD DIRECTORY, not per machine, so every worktree
@@ -1497,7 +1497,7 @@ ensure_shared_git_source_with_retry "three.js" "https://github.com/mrdoob/three.
 # Opt-in dependencies (draco, simdjson, fastgltf, MTS-ESP, tuning-library) are
 # left to configure: most builds never fetch them.
 ensure_shared_git_source_with_retry "Highway" "https://github.com/google/highway.git" \
-    "457c891775a7397bdb0376bb1031e6e027af1c48" "$(fetchcontent_cache_dir_name "highway" "1.2.0")"
+    "2607d3b5b0113992fe84d3848859eae13b3b52c1" "$(fetchcontent_cache_dir_name "highway" "1.4.0")"
 
 ensure_shared_git_source_with_retry "Mbed TLS" "https://github.com/Mbed-TLS/mbedtls.git" \
     "107ea89daaefb9867ea9121002fbbdf926780e98" "$(fetchcontent_cache_dir_name "mbedtls" "107ea89daaefb9867ea9121002fbbdf926780e98")"
@@ -1506,7 +1506,7 @@ ensure_shared_git_source_with_retry "SheenBidi" "https://github.com/Tehreer/Shee
     "c0aa79da5b5ff44bd2cbd9ce92963f81e4de6b1e" "$(fetchcontent_cache_dir_name "sheenbidi" "v3.0.0")"
 
 ensure_shared_git_source_with_retry "Brotli" "https://github.com/google/brotli.git" \
-    "028fb5a23661f123017c060daa546b55cf4bde29" "$(fetchcontent_cache_dir_name "brotli" "v1.2.0")" \
+    "db24a98aed38a16de78cc05ca15cdd8dc2a0d92d" "$(fetchcontent_cache_dir_name "brotli" "v1.2.1")" \
     "no-submodules"
 
 # woff2's own brotli submodule (and that submodule's libdivsufsort) is never
@@ -1516,14 +1516,14 @@ ensure_shared_git_source_with_retry "woff2" "https://github.com/google/woff2.git
     "no-submodules"
 
 ensure_shared_git_source_with_retry "yaml-cpp" "https://github.com/jbeder/yaml-cpp.git" \
-    "0.8.0" "$(fetchcontent_cache_dir_name "yaml-cpp" "0.8.0")"
+    "yaml-cpp-0.9.0" "$(fetchcontent_cache_dir_name "yaml-cpp" "yaml-cpp-0.9.0")"
 
 # VST3 SDK
 # MIT only from v3.8.0 onward. Every earlier tag (including v3.7.12) ships
 # pluginterfaces under "Steinberg VST3 License OR GPLv3", which Pulp may not
 # redistribute in its MIT-licensed SDK artifacts. Do not move this pin below
 # v3.8.0; assert_vst3_license_is_mit below fails the setup if it drifts.
-VST3_SDK_REF="v3.8.0_build_66"
+VST3_SDK_REF="v3.8.1_build_84"
 VST3_SHARED_DIR="$FETCHCONTENT_CACHE_ROOT/$(fetchcontent_cache_dir_name "vst3sdk" "$VST3_SDK_REF")"
 ensure_shared_git_source_with_retry "VST3 SDK" "https://github.com/steinbergmedia/vst3sdk.git" \
     "$VST3_SDK_REF" "$(fetchcontent_cache_dir_name "vst3sdk" "$VST3_SDK_REF")"

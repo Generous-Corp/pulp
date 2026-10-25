@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-ux-w2-e1-dispatch-batch-watch",
+  "created_at": "2026-10-23T01:51:11Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "WidgetBridge's JS prelude runs the handlers a native widget event reaches inside the existing __pulpRunHostCallback__ batching hook, so @pulp/react commits once per event, as it already does per frame and timer callback. Only the @pulp/react test that drives the shipped prelude changes under packages/pulp-react; the bundle and its runtime fingerprint are unchanged. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "cd packages/pulp-react && npm run build && npx vitest run test/batched-host-callbacks.test.ts",
+    "ctest --test-dir build -R 'WidgetBridge fans window and document listeners out inside the event batch'",
+    "ctest --test-dir build -R 'WidgetBridge keeps the propagation level a batched handler returns'",
+    "ctest --test-dir build -R 'WidgetBridge native widget events run unbatched without a hook'",
+    "ctest --test-dir build -R 'WidgetBridge runs a native widget event inside one UI batch'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

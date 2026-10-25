@@ -649,7 +649,7 @@ carries the leaked depth as a value rather than a count of incidents.
 
 ## Check the category is populated before trusting a zero
 
-`trace.hpp` declares ten categories and not all of them emit. A
+`trace.hpp` declares eleven categories and not all of them emit. A
 `WHERE category GLOB '<name>'` filter over one that emits from nowhere returns
 no rows — which looks identical to "that subsystem did no work".
 
@@ -657,7 +657,7 @@ Which categories are empty CHANGES as code is instrumented, so measure rather
 than trust a list:
 
 ```sh
-for c in dsp dsp.node render layout canvas text js gpu state io; do
+for c in dsp dsp.node render layout canvas text js gpu state io lifecycle; do
   printf '%-10s %s\n' "$c" \
     "$(git grep -oE "PULP_TRACE_[A-Z_]+\(\s*\"$c\"" origin/main -- core inspect | wc -l)"
 done
@@ -715,6 +715,13 @@ all block identities otherwise close. A failed release followed by a successful
 retry must not produce this final unresolved-ownership disclosure. Require the
 canonical validator's zero-loss checks as well as identity closure; aggregate
 counters or an empty trace cannot substitute for actual records.
+
+`gpu.audio.counters` carries `telemetry_valid` and `telemetry_error`. Live
+drains report `telemetry_error = 13` (validation deferred) because their
+counters can race the callback; only a quiescent release drain reports
+`0` with `telemetry_valid = 1`. Never read a deferred row as a validated
+receipt. Any other error value, or an inconsistent valid/error pair, raises
+an `invalid_telemetry` capture issue; captures without the fields stay compatible.
 
 See `docs/guides/gpu-audio-wavenet-trace.md` for the capture contract and current
 physical NAM measurement boundaries.

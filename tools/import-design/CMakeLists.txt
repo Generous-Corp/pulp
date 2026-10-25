@@ -32,13 +32,16 @@ target_link_libraries(pulp-import-design-cli-policy PUBLIC
 
 add_executable(pulp-import-design
     pulp_import_design.cpp
+    annotated_capture.cpp
     import_design_cli_help.cpp
     browser_import_cli.cpp
     browser_import_session.cpp
     browser_html_import.cpp
+    browser_capture_fonts.cpp
     browser_capture_workspace.cpp
     browser_capture_ir.cpp
     browser_capture_styles.cpp
+    browser_capture_controls.cpp
     browser_capture_tree.cpp
     browser_capture_validation.cpp
     browser_knob_sprites.cpp
@@ -199,8 +202,14 @@ install(FILES
     "${_pulp_materialized_ids_map}"
     DESTINATION bin/jsx-runtime)
 
+# The allocation probe replaces global operator new in this binary so every
+# lane's per-frame allocation count is measured the same way.
 add_executable(pulp-design-import-bench
-    design_import_benchmark.cpp)
+    design_import_benchmark.cpp
+    design_import_benchmark_ir.cpp
+    design_import_benchmark_measure.cpp
+    design_import_benchmark_targets.cpp
+    ${CMAKE_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
 target_include_directories(pulp-design-import-bench PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-design-import-bench PRIVATE
     pulp::view
@@ -212,7 +221,9 @@ target_link_libraries(pulp-design-import-bench PRIVATE
 # when measuring the candidate importer's native tree.
 add_executable(pulp-design-ir-observe
     design_ir_observe.cpp)
-target_include_directories(pulp-design-ir-observe PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(pulp-design-ir-observe PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/core/render/src)
 target_link_libraries(pulp-design-ir-observe PRIVATE
     pulp::view
     pulp::state

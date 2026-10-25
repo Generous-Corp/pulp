@@ -64,14 +64,22 @@ target_compile_definitions(pulp-test-cli-configure-defaults PRIVATE
 catch_discover_tests(pulp-test-cli-configure-defaults)
 
 # CLI create shell-out edge tests. These launch the built CLI but stay on
-# fail-fast paths that do not run doctor, configure, build, or network setup.
+# fail-fast paths that do not run doctor, build, or network setup. One case
+# configures a --ci project against a stub SDK, with Catch2 served from this
+# build's own source copy so the configure stays offline.
 add_executable(pulp-test-cli-create-shellout test_cli_create_shellout.cpp)
 target_link_libraries(pulp-test-cli-create-shellout PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULP_CMAKE_COMMAND="${CMAKE_COMMAND}"
+    PULP_EXPECTED_SDK_VERSION="${PROJECT_VERSION}")
+if(catch2_SOURCE_DIR)
+    target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
+        PULP_CATCH2_SOURCE_DIR="${catch2_SOURCE_DIR}")
+endif()
 catch_discover_tests(pulp-test-cli-create-shellout)
 # `pulp create` reads the package kits and the built-in gain template (and
 # checks for a standalone variant of it), and the dependency-kit case copies
@@ -80,10 +88,14 @@ pulp_test_data(pulp-test-cli-create-shellout NO_DEFINE PATHS
     fixtures/packages/simple-plugin-template
     fixtures/packages/gain-dsp-kit
     tools/templates/gain
+    tools/templates/effect
     tools/templates/standalone
     tools/packages/registry.json
     # The package dependency root is found by a packages.lock.json probe.
     ABSENT packages.lock.json)
+
+# Every `pulp create` plugin template, expanded and built with its own test.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/create_template_tests.cmake")
 
 # CLI import substrate tests — detection engine, JSON-over-stdio SPI runner,
 # install-hint path, and the vendor-agnostic source guard. Links the import
@@ -312,6 +324,7 @@ add_library(pulp-test-cli-support-objects OBJECT EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry_trust.cpp
 )
 target_include_directories(pulp-test-cli-support-objects PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -329,6 +342,12 @@ file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/tools/cli")
 configure_file(
     "${CMAKE_SOURCE_DIR}/tools/cli/pulp_version_gen.h.in"
     "${CMAKE_BINARY_DIR}/tools/cli/pulp_version_gen.h"
+    @ONLY)
+include("${CMAKE_SOURCE_DIR}/tools/cmake/PulpReleaseMatrix.cmake")
+pulp_release_matrix_floor(PULP_RELEASE_CHECKSUM_MANIFEST_FLOOR checksum_manifest_floor)
+configure_file(
+    "${CMAKE_SOURCE_DIR}/tools/cli/release_floors_gen.h.in"
+    "${CMAKE_BINARY_DIR}/tools/cli/release_floors_gen.h"
     @ONLY)
 target_include_directories(pulp-test-cli-shell-quote PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -433,6 +452,13 @@ endif()
 # for the non-destructive ship subcommand branches.
 add_executable(pulp-test-cli-ship-shellout test_cli_ship_shellout.cpp)
 target_link_libraries(pulp-test-cli-ship-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(APPLE)
+    # A real Mach-O module carrying a local symbol, for the ship-time strip case.
+    add_library(pulp-test-ship-strip-fixture MODULE fixtures/ship_strip/ship_strip_fixture.cpp)
+    add_dependencies(pulp-test-cli-ship-shellout pulp-test-ship-strip-fixture)
+    target_compile_definitions(pulp-test-cli-ship-shellout PRIVATE
+        PULP_SHIP_STRIP_FIXTURE="$<TARGET_FILE:pulp-test-ship-strip-fixture>")
+endif()
 # hdiutil attaches temporary disk images through a machine-wide service. Keep
 # the one real-image case parallel with ordinary CLI tests, but not with another
 # real-image creator: under ctest -j8 that collision has stretched a 17-second
@@ -500,12 +526,21 @@ catch_discover_tests(pulp-test-cli-upgrade-url)
 add_executable(pulp-test-cli-upgrade-install test_cli_upgrade_install.cpp)
 pulp_test_data(pulp-test-cli-upgrade-install NO_DEFINE
     PATHS tools/import-design/browser_capture tools/cli/cmd_upgrade.cpp
+          tools/cli/cli_sdk.cpp
           tools/import-design/jsx-runtime/materialized_binding_contract.mjs)
 target_include_directories(pulp-test-cli-upgrade-install PRIVATE ${CMAKE_SOURCE_DIR})
 target_compile_definitions(pulp-test-cli-upgrade-install PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 target_link_libraries(pulp-test-cli-upgrade-install PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-upgrade-install)
+
+# Release-archive checksum verifier shared by `pulp upgrade` and
+# `pulp sdk install`: SHA256SUMS lookup, floor comparison, and the
+# verify/refuse/legacy verdicts, all without a network.
+add_executable(pulp-test-cli-release-checksum test_cli_release_checksum.cpp)
+target_include_directories(pulp-test-cli-release-checksum PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-release-checksum PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-release-checksum)
 
 add_executable(pulp-test-cli-json-parser test_cli_json_parser.cpp)
 target_include_directories(pulp-test-cli-json-parser PRIVATE ${CMAKE_SOURCE_DIR})
@@ -637,6 +672,7 @@ add_executable(pulp-test-cli-package-commands
     ${CMAKE_SOURCE_DIR}/tools/cli/package_commands_search.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_commands_add.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry_trust.cpp
     # cmd_add routes `pulp add <importer>` through the importer install path.
     ${CMAKE_SOURCE_DIR}/tools/cli/tool_registry.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/importer_install.cpp
@@ -647,6 +683,7 @@ target_include_directories(pulp-test-cli-package-commands PRIVATE
     ${CMAKE_SOURCE_DIR}/tools/cli)
 target_link_libraries(pulp-test-cli-package-commands PRIVATE
     pulp::platform
+    pulp::runtime
     Catch2::Catch2WithMain)
 # The lock-integrity case reads the shipped verify script from the checkout;
 # this also defines PULP_SOURCE_DIR (tools/cmake/PulpTestData.cmake).

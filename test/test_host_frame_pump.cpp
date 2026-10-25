@@ -19,6 +19,8 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/gap_widgets.hpp>
+#include <pulp/view/audio_widgets.hpp>
+#include <pulp/view/value_source.hpp>
 
 #include <memory>
 #include <vector>
@@ -288,12 +290,15 @@ TEST_CASE("advance_widget_animations drives every View subclass via the virtual"
 // catch: the next real frame measures the WHOLE idle gap and hands it to
 // whatever animation just started.
 //
-// GatedHost mirrors those two callbacks exactly, including render_frame()'s
-// "needs_repaint_ = continuous_frames_ = (tree still animating?)" post-paint
-// step (window_host_mac.mm), so the gate closes on a static tree the same way.
+// GatedHost mirrors those two callbacks exactly, including the composite
+// decision after the advance (host_frame_composites) and render_frame()'s
+// post-paint re-arm: the gate stays open while anything wants clock ticks
+// (continuous_frames_), and the dirty flag re-arms only for a tree that paints
+// on its own (animating_frames_). So the gate closes on a static tree, and a
+// live subscriber that dirtied nothing ticks without compositing.
 namespace {
 
-struct GatedHost {
+struct GatedHost : PluginViewHost {
     explicit GatedHost(View* r) : root(r) {}
 
     View* root;
@@ -304,8 +309,24 @@ struct GatedHost {
     bool has_idle = false;       // true only for scripted/JS editors
     int vsyncs = 0;
     int skipped = 0;
-    int rendered = 0;
+    int rendered = 0;   // frames advanced (begin_host_frame said render)
+    int composited = 0; // frames painted and presented
     float last_dt = -1.0f;
+
+    // PluginViewHost: a View::request_repaint() lands here, exactly as on the
+    // real hosts (it is what sets needs_repaint_ / -setNeedsDisplay:).
+    NativeViewHandle native_handle() override {
+        return nullptr;
+    }
+    void attach_to_parent(NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override {
+        needs_repaint = true;
+    }
+    void set_size(uint32_t, uint32_t) override {}
+    Size get_size() const override {
+        return {0, 0};
+    }
 
     /// One vsync of the display link.
     void vsync(double t) {
@@ -317,16 +338,25 @@ struct GatedHost {
         }
         // Main thread.
         const auto tick = begin_host_frame(root, clock, pump, t, needs_repaint);
-        if (!tick.should_render) {
+        if (!tick.should_render && !needs_repaint) {
             continuous = false;
             return;
         }
-        advance_host_frame(root, clock, tick.dt);
+        if (tick.should_render)
+            advance_host_frame(root, clock, tick.dt);
         last_dt = tick.dt;
         ++rendered;
+        if (tick.animating)
+            needs_repaint = true;
+        if (!host_frame_composites(tick, needs_repaint)) {
+            continuous = tick.continuous;
+            return;
+        }
+        ++composited;
         // render_frame(): repaint, then re-arm from the tree's own liveness.
-        continuous = needs_continuous_frames(root) || clock.has_active_subscribers();
-        needs_repaint = continuous;
+        const bool animating = needs_continuous_frames(root);
+        continuous = animating || clock.has_active_subscribers();
+        needs_repaint = animating;
     }
 };
 
@@ -445,6 +475,104 @@ TEST_CASE("a scripted host is pumped every vsync and never skips",
     REQUIRE(host.rendered == 1);  // dispatched every vsync, painted only once
     REQUIRE_FALSE(host.pump.suspended());
     REQUIRE(host.pump.resumes() == 1);
+}
+
+// ── A live clock subscriber is a reason to tick, not to composite ────────────
+//
+// A source-bound Meter subscribes to the FrameClock for as long as it is bound,
+// so it can snapshot its source every frame. The hosts used to treat any live
+// subscriber as "keep painting", so an editor with one meter composited its
+// whole surface every vsync through silence — a static, silent meter editor
+// cost a full repaint 60-120 times a second. The meter already reports whether
+// anything moved (Meter::update invalidates only on a ballistics change); the
+// host must let that decide.
+namespace {
+
+MeterFrame mono_level(float level) {
+    MeterFrame f;
+    f.channels = 1;
+    f.peak[0] = level;
+    f.rms[0] = level * 0.7f;
+    return f;
+}
+
+} // namespace
+
+TEST_CASE("a silent source-bound meter keeps the clock ticking but composites nothing",
+          "[view][frame-pump][gated-host][idle-gate]") {
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    auto meter = std::make_unique<Meter>();
+    Meter* m = meter.get();
+    m->set_bounds({10, 10, 20, 80});
+    root.add_child(std::move(meter));
+    auto src = std::make_shared<MeterSource>();
+    m->set_source(src, 0);
+
+    GatedHost host(&root);
+    root.set_plugin_view_host(&host);
+    root.set_frame_clock(&host.clock);
+    REQUIRE(host.clock.has_active_subscribers());
+
+    src->publish(mono_level(0.0f));
+    double t = 0.0;
+    host.vsync(t); // first paint
+    REQUIRE(host.composited == 1);
+
+    // Two seconds of silence at 120 Hz: every vsync is dispatched and the clock
+    // advances (the meter keeps reading its source), but no frame composites.
+    const auto frames_before = host.clock.frame();
+    for (int i = 0; i < 240; ++i) {
+        t += k120;
+        host.vsync(t);
+    }
+    CHECK(host.skipped == 0);
+    CHECK(host.clock.frame() - frames_before == 240);
+    CHECK(host.composited == 1);
+
+    // A level arrives: the next frame composites, and keeps compositing while
+    // the ballistics move…
+    src->publish(mono_level(0.8f));
+    t += k120;
+    host.vsync(t);
+    CHECK(host.composited == 2);
+    src->publish(mono_level(0.0f));
+    for (int i = 0; i < 12; ++i) {
+        t += k120;
+        host.vsync(t);
+    }
+    CHECK(host.composited > 2);
+
+    // …and goes quiet again once they settle, still ticking.
+    for (int i = 0; i < 1200; ++i) {
+        t += k120;
+        host.vsync(t);
+    }
+    const int settled = host.composited;
+    for (int i = 0; i < 120; ++i) {
+        t += k120;
+        host.vsync(t);
+    }
+    CHECK(host.composited == settled);
+    CHECK(m->display_peak() == 0.0f);
+
+    root.set_frame_clock(nullptr);
+    root.set_plugin_view_host(nullptr);
+}
+
+TEST_CASE("an animating tree still composites every frame with no repaint request",
+          "[view][frame-pump][gated-host]") {
+    // The other half of the split: a tree that paints new pixels on its own
+    // (continuous repaint, a running widget or CSS animation) must keep
+    // compositing although nothing calls request_repaint.
+    AlwaysAnimatingView root;
+    GatedHost host(&root);
+    double t = 0.0;
+    for (int i = 0; i < 30; ++i) {
+        host.vsync(t);
+        t += k60;
+    }
+    CHECK(host.composited == 30);
 }
 
 // ── The Logic OOP present seam: a repaint requested from the activity pump ───

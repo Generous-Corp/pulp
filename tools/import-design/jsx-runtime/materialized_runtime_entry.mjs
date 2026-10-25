@@ -470,7 +470,16 @@ function applyMaterializedImportMetadata(metadata, scopeIds) {
   // This is generation evidence, not a screenshot at runtime: React remains
   // executable and newly-created dynamic nodes still flow through Yoga until
   // their captured state contributes an equivalent binding.
+  //
+  // getLayoutBoxMetrics lays out the whole root whenever a geometry or
+  // typography write has landed since the previous read, so the pass runs in
+  // phases: every layout-binding read, then every write, then one read per
+  // text target, then the captured line boxes. Alternating reads and writes
+  // per binding would lay the tree out once per binding instead of twice per
+  // pass. The layout-binding reads only consume borders and margins, which
+  // these writes do not change, so reading them up front is exact.
   if (typeof g.setPosition === 'function' && typeof g.setFlex === 'function') {
+    const layoutTargets = [];
     for (const binding of activeLayoutBindings) {
       const node = materializedNodeAtPath(binding, values, pathIndex);
       if (dynamicNodes.has(node)) continue;
@@ -483,19 +492,25 @@ function applyMaterializedImportMetadata(metadata, scopeIds) {
         ++diagnostics.layout_out_of_scope;
         continue;
       }
-      // Browser capture stores each child border box relative to its parent's
-      // border box. Yoga resolves absolute left/top from the parent's padding
-      // edge, so replaying the browser number verbatim adds the parent's
-      // border a second time (a 1 CSS-px / 2 Retina-px shift in compact rails
-      // and segmented controls). Translate coordinate spaces explicitly.
-      const parent = node.parentElement || node._parentElement;
-      const parentId = parent && (parent.__pulpId || parent.id);
-      const parentMetrics = parentId && typeof g.getLayoutBoxMetrics === 'function'
-        ? g.getLayoutBoxMetrics(String(parentId)) : null;
-      const targetMetrics = typeof g.getLayoutBoxMetrics === 'function'
-        ? g.getLayoutBoxMetrics(String(id)) : null;
+      layoutTargets.push({ binding, node, id });
+    }
+    // Browser capture stores each child border box relative to its parent's
+    // border box. Yoga resolves absolute left/top from the parent's padding
+    // edge, so replaying the browser number verbatim adds the parent's
+    // border a second time (a 1 CSS-px / 2 Retina-px shift in compact rails
+    // and segmented controls). Translate coordinate spaces explicitly.
+    if (typeof g.getLayoutBoxMetrics === 'function') {
+      for (const target of layoutTargets) {
+        const parent = target.node.parentElement || target.node._parentElement;
+        const parentId = parent && (parent.__pulpId || parent.id);
+        target.parentMetrics = parentId
+          ? g.getLayoutBoxMetrics(String(parentId)) : null;
+        target.targetMetrics = g.getLayoutBoxMetrics(String(target.id));
+      }
+    }
+    for (const { binding, node, id, parentMetrics, targetMetrics } of layoutTargets) {
       const insets = materializedAbsoluteInsets(
-        binding.box, parentMetrics, targetMetrics);
+        binding.box, parentMetrics || null, targetMetrics || null);
       const left = insets ? insets.left : binding.box.left;
       const top = insets ? insets.top : binding.box.top;
       g.setPosition(String(id), 'absolute');
@@ -571,6 +586,7 @@ function applyMaterializedImportMetadata(metadata, scopeIds) {
     ++diagnostics.paint_applied;
   }
   if (typeof g.setCapturedLineBoxes !== 'function') return applied;
+  const textTargets = [];
   for (const binding of activeTextBindings) {
     const optional = binding.runtime_optional === true;
     const node = materializedNodeAtPath(binding, values, pathIndex)
@@ -648,16 +664,27 @@ function applyMaterializedImportMetadata(metadata, scopeIds) {
         g.setLetterSpacing(String(id), requested.letter_spacing);
       }
     }
+    textTargets.push({ binding, node, id, anonymousTarget, optional });
+  }
+  // Generated text targets are measured only after every geometry and
+  // typography write above, so the first read lays the tree out once and the
+  // rest are served from it.
+  if (typeof g.getLayoutBoxMetrics === 'function') {
+    for (const target of textTargets) {
+      if (target.anonymousTarget || !target.node.__pulpTextTargetId) continue;
+      target.metrics = g.getLayoutBoxMetrics(String(target.id));
+      const ownerId = target.node.__pulpId || target.node.id;
+      target.ownerMetrics = ownerId
+        ? g.getLayoutBoxMetrics(String(ownerId)) : null;
+    }
+  }
+  for (const target of textTargets) {
+    const { binding, node, id, optional } = target;
     let targetBoxes = binding.boxes;
     let targetBasisWidth = binding.basis.width;
-    if (!anonymousTarget && node.__pulpTextTargetId &&
-        typeof g.getLayoutBoxMetrics === 'function') {
-      const metrics = g.getLayoutBoxMetrics(String(id));
-      const ownerId = node.__pulpId || node.id;
-      const ownerMetrics = ownerId
-        ? g.getLayoutBoxMetrics(String(ownerId)) : null;
+    if (target.metrics !== undefined) {
       const geometry = materializedTextTargetGeometry(
-        binding.basis.width, metrics, ownerMetrics);
+        binding.basis.width, target.metrics, target.ownerMetrics);
       if (geometry) {
         targetBoxes = binding.boxes.map(box => ({
           ...box,

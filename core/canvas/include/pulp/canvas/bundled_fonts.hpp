@@ -19,8 +19,9 @@
 // `canvas.set_font("JetBrains Mono", ...)` succeeds even on machines that
 // do not have JetBrains Mono installed system-wide.
 //
-// This header is only meaningful when `PULP_HAS_SKIA` is defined; without
-// Skia, bundled-font registration is a no-op.
+// On Apple platforms the same faces are also kept in a CoreText registry, which
+// the CoreGraphics canvas paints with and, without Skia, TextShaper measures
+// with. Elsewhere, without Skia, bundled-font registration is a no-op.
 
 #pragma once
 
@@ -48,9 +49,12 @@ namespace pulp::canvas {
 // and `setFontFamily(label, "My Family")` calls resolve to the supplied
 // face instead of silently falling back to the platform font manager.
 //
-// These entry points are available regardless of `PULP_HAS_SKIA`. Without
-// Skia they degrade to a no-op that returns `false`, which lets plugin
-// startup code call them unconditionally.
+// These entry points are available regardless of `PULP_HAS_SKIA`. On Apple
+// platforms every registration also reaches the CoreText registry; without
+// Skia that is the only registry, and `register_font` succeeds when CoreText
+// can read the bytes. On other platforms without Skia they degrade to a no-op
+// that returns `false`, which lets plugin startup code call them
+// unconditionally.
 
 /// Register a font from raw TTF/OTF bytes. The supplied buffer is copied
 /// into a long-lived `SkData` so the caller may free `data` immediately.
@@ -63,7 +67,8 @@ namespace pulp::canvas {
 /// Returns `true` if Skia parsed the bytes into a usable `SkTypeface` and
 /// the registration was stored; `false` if Skia rejected the bytes, no
 /// platform font manager was available, the family name was empty (and
-/// no override was supplied), or `PULP_HAS_SKIA` is not defined.
+/// no override was supplied), or `PULP_HAS_SKIA` is not defined (on Apple
+/// without Skia: whether CoreText could read the bytes).
 ///
 /// Calling `register_font` repeatedly for one family is safe: each distinct
 /// Skia typeface is retained so Regular/Bold/Italic faces can share the same

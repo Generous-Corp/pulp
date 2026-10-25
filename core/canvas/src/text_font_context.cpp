@@ -6,6 +6,8 @@
 
 #include <pulp/canvas/bundled_fonts.hpp>
 
+#include "system_ui_typeface.hpp"
+
 #include "include/core/SkData.h"
 #include "include/core/SkFontArguments.h"
 #include "include/core/SkFontMgr.h"
@@ -202,6 +204,12 @@ sk_sp<skia::textlayout::FontCollection> TextFontContext::font_collection() const
 
     auto collection = sk_make_sp<skia::textlayout::FontCollection>();
     collection->setAssetFontManager(provider);
+#if defined(__APPLE__)
+    // First in the collection's order: SkParagraph finds the system UI font by
+    // its private name, which the platform manager does not answer reliably.
+    if (platform_font_db_usable())
+        collection->setDynamicFontManager(detail::make_system_ui_font_manager(provider));
+#endif
 
     // Tell SkParagraph what default families to consult for emoji
     // codepoints. The list is searched in order; we put the emoji

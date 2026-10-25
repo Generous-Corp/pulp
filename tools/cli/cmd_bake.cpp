@@ -176,7 +176,12 @@ int bake_write(const std::vector<std::string>& args) {
     if (!json) { std::cerr << "pulp bake: cannot read '" << input << "'\n"; return 1; }
 
     pulp::host::SignalGraph graph;
-    const auto load = pulp::host::GraphSerializer::from_json(graph, *json);
+    // Baking refuses hosted Plugin nodes outright, so no plugin is loaded
+    // here: each stays an unresolved placeholder and the lowerability check
+    // names it, without running any library the file points at.
+    pulp::host::GraphLoadOptions load_options;
+    load_options.load_plugins = false;
+    const auto load = pulp::host::GraphSerializer::from_json(graph, *json, load_options);
     if (!load.ok) {
         std::cerr << "pulp bake: failed to load graph: " << load.error << "\n";
         return 1;

@@ -47,6 +47,8 @@ SELECT s.id AS slice_id, s.ts, s.name, s.dur, t.upid,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.enqueued') AS INT) AS enqueued,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.dropped') AS INT) AS dropped,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.drained') AS INT) AS drained,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.telemetry_valid') AS INT) AS telemetry_valid,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.telemetry_error') AS INT) AS telemetry_error,
   EXTRACT_ARG(s.arg_set_id, 'debug.gpu_terminal') AS gpu_terminal,
   EXTRACT_ARG(s.arg_set_id, 'debug.delivery') AS delivery,
   EXTRACT_ARG(s.arg_set_id, 'debug.outcome') AS outcome,
@@ -337,6 +339,15 @@ WHERE (t.batch_id IS NOT NULL AND d.batch_id IS NOT NULL AND t.batch_id != d.bat
    OR (s.claim_prediction = 1
        AND ((t.deadline_margin_ns IS NULL) != (d.deadline_margin_ns IS NULL)))
 GROUP BY t.upid, t.engine_id, t.generation
+UNION ALL
+-- telemetry_error is SharedIoTelemetryError: 0 = None (validated) and
+-- 13 = TelemetryValidationDeferred (a live drain that cannot claim one
+-- coherent snapshot). Any other value, including 14 = CompletionTimingInvalid,
+-- is a contract violation the producer detected. Captures from producers without the field report both as NULL.
+SELECT 'invalid_telemetry' AS issue, upid, engine_id, generation FROM pulp_gpu_audio_counters
+WHERE (telemetry_valid IS NULL) != (telemetry_error IS NULL)
+   OR (telemetry_error IS NOT NULL
+       AND (telemetry_error NOT IN (0, 13) OR telemetry_valid IS NOT (telemetry_error = 0)))
 UNION ALL
 SELECT 'queue_dropped' AS issue, upid, engine_id, generation FROM pulp_gpu_audio_counters WHERE dropped > 0
 UNION ALL

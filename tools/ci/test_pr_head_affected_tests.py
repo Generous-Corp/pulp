@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -39,14 +40,25 @@ NAMES = {
     "pulp-gpu-dawn-shared-io-provider-probe": set(), "pulp-gpu-compute-unrelated": set(),
     "cmake-ios-auv3-control-shipping": set(),
     "pulp-test-cli-migration-index": set(),
+    "pulp-rust-cli-cargo-tests": set(), "pulp-rust-cli-doc-tests": set(),
+    "pulp-rust-gpu-trace-analysis-unit": set(), "pulp-rust-stale-cli-guard": set(),
+    "TripleBuffer hammer: writer + reader for 500ms": set(),
+    "SeqLock hammer: 1 writer + 2 readers for 500ms": set(),
+    "SpscQueue hammer: producer + consumer for 500ms": set(),
+    "TripleBuffer<MeterFrame> never tears a frame under a 2-thread hammer": set(),
+    "TripleBuffer basic read/write": set(),
+    "buffer_ops::apply_gain scales every sample in a span": set(),
+    "buffer_ops SIMD-equivalence: clip matches scalar baseline": set(),
 }
 
 
 class SelectionTests(unittest.TestCase):
     def plan(self, paths: list[str], projected: step.inventory.Selection,
              *, scripts: list[str] = (), inputs: list[str] = (), own: list[str] = (),
-             rebuilt: list[str] = (), registered: list[str] = ()) -> dict:
+             rebuilt: list[str] = (), registered: list[str] = (),
+             cases: list[str] = ()) -> dict:
         with mock.patch.object(step, "project", return_value=projected) as project, \
+                mock.patch.object(step, "edited_case_tests", return_value=list(cases)), \
                 mock.patch.object(step, "script_reference_tests", return_value=list(scripts)), \
                 mock.patch.object(step, "script_input_tests", return_value=list(inputs)), \
                 mock.patch.object(step, "own_tests", return_value=list(own)), \
@@ -106,6 +118,74 @@ class SelectionTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = self.plan([path], selection("all", []))
                 self.assertIn("cmake-ios-auv3-control-shipping", plan["tests"])
+
+    def test_a_sync_primitive_header_runs_its_hammers_first(self) -> None:
+        for header in ("triple_buffer", "seqlock", "spsc_queue"):
+            with self.subTest(header=header):
+                plan = self.plan([f"core/runtime/include/pulp/runtime/{header}.hpp"],
+                                 selection("focused", ["unit-a", "TripleBuffer basic read/write"]))
+                hammers = sorted(n for n in NAMES if "hammer" in n)
+                self.assertEqual(sorted(plan["merge_only"]), hammers)
+                self.assertEqual(sorted(plan["tests"][:len(hammers)]), hammers)
+
+    def test_buffer_ops_runs_its_own_cases_first(self) -> None:
+        for path in ("core/audio/include/pulp/audio/buffer_ops.hpp",
+                     "core/audio/src/buffer_ops.cpp"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("focused", ["unit-a"]))
+                cases = sorted(n for n in NAMES if n.startswith("buffer_ops"))
+                self.assertEqual(sorted(plan["merge_only"]), cases)
+                self.assertEqual(plan["tests"][-1], "unit-a")
+
+    def test_control_other_runtime_and_audio_files_do_not_reach_them(self) -> None:
+        plan = self.plan(["core/runtime/include/pulp/runtime/simd.hpp",
+                          "core/audio/src/buffer.cpp"], selection("focused", ["unit-a"]))
+        self.assertEqual(plan["merge_only"], [])
+        self.assertEqual(plan["tests"], ["unit-a"])
+
+    PULP_RS_TESTS = ["pulp-rust-cli-cargo-tests", "pulp-rust-cli-doc-tests",
+                     "pulp-rust-gpu-trace-analysis-unit", "pulp-rust-stale-cli-guard"]
+
+    def test_a_pulp_rs_edit_runs_the_cargo_tests_first(self) -> None:
+        # The crate owns no CMake sources, so the projection selects nothing.
+        for path in ("experimental/pulp-rs/src/main.rs", "experimental/pulp-rs/Cargo.toml",
+                     "experimental/pulp-rs/tests/cli_smoke.rs",
+                     # Markdown fixtures that tests/phase6d_parity_test.rs reads.
+                     "experimental/pulp-rs/tests/fixtures/docs/mini_docs_tree/docs/reference/cli.md",
+                     *step.PULP_RS_EXTERNAL_INPUTS, *step.PULP_RS_TEST_TIME_INPUTS):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("focused", ["unit-a"]))
+                self.assertEqual(sorted(plan["merge_only"]), self.PULP_RS_TESTS)
+                count = len(self.PULP_RS_TESTS)
+                self.assertEqual(sorted(plan["tests"][:count]), self.PULP_RS_TESTS)
+                # A diff of skills or Markdown alone is never projected.
+                projected = [] if step.is_non_test_path(path) else ["unit-a"]
+                self.assertEqual(plan["tests"][count:], projected)
+
+    def test_the_pulp_rs_family_names_the_tests_the_crate_registers(self) -> None:
+        # Every ctest that runs cargo or a crate test script must match, so a
+        # new or renamed one cannot drop out silently. The crate's
+        # Python-driven checks of tools/scripts reach a PR head through their
+        # declared script inputs instead.
+        text = (REPO / "experimental/pulp-rs/CMakeLists.txt").read_text(encoding="utf-8")
+        blocks = [b.split(None, 1) for b in text.split("add_test(NAME")[1:]]
+        crate = [name for name, body in blocks
+                 if "CARGO_EXECUTABLE" in body.split("set_tests_properties")[0]
+                 or "CMAKE_CURRENT_SOURCE_DIR}/tests/" in body.split("set_tests_properties")[0]]
+        test_re = next(t for f, _, t in step.PATH_FAMILIES if f == "pulp-rs-cargo")
+        self.assertGreaterEqual(len(crate), 6)
+        self.assertEqual([n for n in crate if not test_re.search(n)], [])
+        self.assertTrue(set(self.PULP_RS_TESTS) <= set(crate))
+
+    def test_control_non_pulp_rs_paths_do_not_run_the_cargo_tests(self) -> None:
+        for path in ("tools/cli/src/main.cpp", "experimental/other/src/main.rs",
+                     "experimental/pulp-rs/README.md", "experimental/pulp-rs/UPSTREAM_SYNC.md",
+                     "docs/reference/pulp-rs/cli.rs", "tools/packages/other.json",
+                     ".agents/skills/trace-sql/other.sql"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("focused", ["unit-a"]))
+                self.assertNotIn("pulp-rust-cli-cargo-tests", plan["tests"])
+                self.assertNotIn("pulp-rs-cargo", plan["families"])
 
     def test_no_editor_fixture_reaches_its_artifact_probe(self) -> None:
         plan = self.plan(["test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake"],
@@ -203,6 +283,17 @@ class SelectionTests(unittest.TestCase):
                          own=["unit-a"], inputs=["sample-region-compat-baseline"])
         self.assertEqual(plan["tests"], ["sample-region-compat-baseline", "unit-a", "unit-b"])
 
+    def test_edited_cases_run_after_merge_only_checks_and_before_the_projection(self) -> None:
+        # A header edit can make the projection select thousands of tests; the
+        # cases the diff itself writes must not depend on the budget reaching
+        # them in projection order.
+        plan = self.plan(["core/x/a.hpp", "test/test_a.cpp"],
+                         selection("focused", ["unit-a", "other", "unit-b"]),
+                         inputs=["sample-region-compat-baseline"], cases=["unit-b"])
+        self.assertEqual(plan["tests"],
+                         ["sample-region-compat-baseline", "unit-b", "unit-a", "other"])
+        self.assertEqual(plan["edited_cases"], 1)
+
     def test_control_a_plan_without_merge_only_checks_keeps_its_order(self) -> None:
         plan = self.plan(["core/x/a.cpp"], selection("focused", ["unit-a"]), rebuilt=["unit-b"])
         self.assertEqual(plan["merge_only"], [])
@@ -241,6 +332,226 @@ if(_arm_only)
     add_test(NAME arm-control COMMAND pulp-probe --arm)
 endif()
 """
+
+
+class PulpRsEmbeddedInputTests(unittest.TestCase):
+    """Files the crate compiles in from outside experimental/pulp-rs.
+
+    include_str!/include_bytes! targets and the build script's
+    cargo:rerun-if-changed inputs become part of the binaries the cargo tests
+    run, so an edit to one must select them too.
+    """
+
+    CRATE = "experimental/pulp-rs"
+    MACRO = re.compile(r"\binclude_(?:str|bytes)!\s*\(")
+    LITERAL = re.compile(r"\binclude_(?:str|bytes)!\s*\(\s*\"([^\"]+)\"\s*[,)]")
+    # build.rs paths resolve against CARGO_MANIFEST_DIR, the crate root.
+    BUILD_SCRIPT = f"{CRATE}/build.rs"
+    RERUN = re.compile(r"cargo:rerun-if-changed=([^\"]*)\"")
+    JOIN = re.compile(r"\.join\(\s*\"([^\"]+)\"\s*\)")
+
+    def crate_sources(self) -> dict[str, str]:
+        root = REPO / self.CRATE
+        return {f.relative_to(REPO).as_posix(): f.read_text(encoding="utf-8")
+                for f in sorted(root.rglob("*.rs")) if "target" not in f.relative_to(root).parts}
+
+    def external_inputs(self, sources: dict[str, str]) -> set[str]:
+        found: set[str] = set()
+        for rel, text in sources.items():
+            # A computed path (concat!, env!) cannot be checked statically.
+            self.assertEqual(len(self.MACRO.findall(text)), len(self.LITERAL.findall(text)),
+                             f"{rel}: an include_str!/include_bytes! without a literal path")
+            literals = [os.path.join(os.path.dirname(rel), lit) for lit in self.LITERAL.findall(text)]
+            if rel == self.BUILD_SCRIPT:
+                literals += self.build_script_inputs(text)
+            for literal in literals:
+                path = os.path.normpath(literal)
+                if not path.startswith(self.CRATE + "/"):
+                    found.add(path.replace(os.sep, "/"))
+        return found
+
+    def build_script_inputs(self, text: str) -> list[str]:
+        """The crate-root-relative paths build.rs watches."""
+        reruns = self.RERUN.findall(text)
+        literal = [r for r in reruns if "{" not in r]
+        joined = self.JOIN.findall(text)
+        # An interpolated rerun-if-changed path must come from a .join("...")
+        # literal; anything else is computed and cannot be checked statically.
+        self.assertLessEqual(len(reruns) - len(literal), len(joined),
+                             "build.rs watches a path that is not a .join() literal")
+        return [os.path.join(self.CRATE, p) for p in literal + joined]
+
+    def test_the_build_script_matrix_is_found(self) -> None:
+        self.assertIn("tools/scripts/release_product_matrix.json",
+                      self.external_inputs(self.crate_sources()))
+
+    def test_every_external_embedded_file_selects_the_family(self) -> None:
+        found = self.external_inputs(self.crate_sources())
+        self.assertEqual(found, set(step.PULP_RS_EXTERNAL_INPUTS))
+        for path in found:
+            self.assertTrue((REPO / path).is_file(), path)
+            self.assertIn("pulp-rs-cargo", step.family_tests([path], ["pulp-rust-cli-cargo-tests"]))
+
+    def test_planted_new_embedded_file_is_detected(self) -> None:
+        # Negative control: a new embed outside the crate must not pass unseen.
+        sources = self.crate_sources()
+        sources[f"{self.CRATE}/src/planted.rs"] = (
+            'const X: &str = include_str!("../../../tools/scripts/planted.json");\n')
+        found = self.external_inputs(sources)
+        self.assertNotEqual(found, set(step.PULP_RS_EXTERNAL_INPUTS))
+        self.assertIn("tools/scripts/planted.json", found)
+        self.assertNotIn("pulp-rs-cargo", step.family_tests(["tools/scripts/planted.json"],
+                                                            ["pulp-rust-cli-cargo-tests"]))
+
+    def test_planted_new_build_script_input_is_detected(self) -> None:
+        # Negative control: a new file build.rs reads with std::fs and watches.
+        sources = self.crate_sources()
+        sources[self.BUILD_SCRIPT] += (
+            'fn planted(m: &std::path::Path) {\n'
+            '    let p = m.join("../../tools/scripts/planted_build.json");\n'
+            '    println!("cargo:rerun-if-changed={}", p.display());\n}\n')
+        found = self.external_inputs(sources)
+        self.assertIn("tools/scripts/planted_build.json", found)
+        self.assertNotEqual(found, set(step.PULP_RS_EXTERNAL_INPUTS))
+
+    def test_the_test_time_inputs_exist_and_select_the_family(self) -> None:
+        for path in step.PULP_RS_TEST_TIME_INPUTS:
+            with self.subTest(path=path):
+                self.assertTrue((REPO / path).is_file(), path)
+                self.assertIn("pulp-rs-cargo",
+                              step.family_tests([path], ["pulp-rust-cli-cargo-tests"]))
+
+
+class RequiredFamilyTests(unittest.TestCase):
+    """The required families against the real test sources, not a fixture."""
+
+    SOURCES = ("test/test_sync_race_hammer.cpp", "test/test_buffer_ops.cpp",
+               "test/test_meter_source.cpp")
+
+    def real_case_names(self, rename: tuple[str, str] | None = None) -> list[str]:
+        names = []
+        for rel in self.SOURCES:
+            text = (REPO / rel).read_text(encoding="utf-8")
+            if rename:
+                text = text.replace(*rename)
+            names.extend(name for _line, name in step.catch_case_names(text))
+        # The Rust CLI's tests are CMake add_test registrations, not Catch2 cases.
+        cmake = (REPO / "experimental/pulp-rs/CMakeLists.txt").read_text(encoding="utf-8")
+        if rename:
+            cmake = cmake.replace(*rename)
+        names.extend(re.findall(r"add_test\(NAME\s+(\S+)", cmake))
+        return names
+
+    def resolve(self, names: list[str]) -> dict[str, list[str]]:
+        paths = {"runtime-sync-hammers": "core/runtime/include/pulp/runtime/seqlock.hpp",
+                 "audio-buffer-ops": "core/audio/include/pulp/audio/buffer_ops.hpp",
+                 "pulp-rs-cargo": "experimental/pulp-rs/src/main.rs"}
+        out = {}
+        for family, path in paths.items():
+            out.update({k: v for k, v in step.family_tests([path], names).items()
+                        if k == family})
+        return out
+
+    def test_every_required_family_resolves_against_the_real_sources(self) -> None:
+        resolved = self.resolve(self.real_case_names())
+        self.assertEqual(set(resolved), set(step.REQUIRED_FAMILIES))
+        self.assertEqual(step.empty_required_families(resolved), [])
+        hammers = resolved["runtime-sync-hammers"]
+        for primitive in ("TripleBuffer", "SeqLock", "SpscQueue"):
+            self.assertTrue(any(h.startswith(primitive) for h in hammers), (primitive, hammers))
+        self.assertGreaterEqual(len(resolved["audio-buffer-ops"]), 1)
+        self.assertTrue({"pulp-rust-cli-cargo-tests", "pulp-rust-gpu-trace-analysis-unit",
+                         "pulp-rust-stale-cli-guard"} <= set(resolved["pulp-rs-cargo"]))
+
+    def test_planted_rename_of_the_pulp_rs_tests_is_detected(self) -> None:
+        resolved = self.resolve(self.real_case_names(rename=("pulp-rust-", "pulp-rs-")))
+        self.assertEqual(step.empty_required_families(resolved), ["pulp-rs-cargo"])
+
+    def test_planted_rename_of_the_hammers_is_detected(self) -> None:
+        # Negative control: rename every hammer case the way a refactor might.
+        resolved = self.resolve(self.real_case_names(rename=(" hammer", " stress run")))
+        self.assertEqual(resolved["runtime-sync-hammers"], [])
+        self.assertEqual(step.empty_required_families(resolved), ["runtime-sync-hammers"])
+
+    def test_planted_rename_of_the_buffer_ops_cases_is_detected(self) -> None:
+        resolved = self.resolve(self.real_case_names(rename=('"buffer_ops', '"bufferops')))
+        self.assertEqual(step.empty_required_families(resolved), ["audio-buffer-ops"])
+
+    def test_select_reports_an_empty_required_family(self) -> None:
+        names = {"unit-a": set()}
+        with mock.patch.object(step, "project", return_value=selection("focused", ["unit-a"])), \
+                mock.patch.object(step, "script_reference_tests", return_value=[]), \
+                mock.patch.object(step, "script_input_tests", return_value=[]), \
+                mock.patch.object(step, "own_tests", return_value=[]), \
+                mock.patch.object(step, "rebuilt_binary_tests", return_value=[]), \
+                mock.patch.object(step, "registration_tests", return_value=[]), \
+                mock.patch.object(step, "edited_case_tests", return_value=[]):
+            plan = step.select(Path("/b"), ["core/runtime/include/pulp/runtime/seqlock.hpp"],
+                               names)
+        self.assertEqual(plan["empty_required_families"], ["runtime-sync-hammers"])
+
+
+class EditedCaseTests(unittest.TestCase):
+    SOURCE = (
+        '#include <catch2/catch_test_macros.hpp>\n'   # 1
+        '\n'                                         # 2
+        'TEST_CASE("first case", "[x]") {\n'         # 3
+        '    REQUIRE(true);\n'                       # 4
+        '}\n'                                        # 5
+        '\n'                                         # 6
+        'TEST_CASE("second \\"quoted\\" case",\n'  # 7
+        '          "[x]") {\n'                       # 8
+        '    REQUIRE(1 == 1);\n'                     # 9
+        '}\n'                                        # 10
+        '\n'                                         # 11
+        'TEMPLATE_TEST_CASE("templated", "[x]", int, float) {\n'  # 12
+        '    REQUIRE(TestType{} == TestType{});\n'   # 13
+        '}\n'                                        # 14
+        '\n'                                         # 15
+        'TEST_CASE_METHOD(audio::Fixture, "fixture case", "[x]") {\n'  # 16
+        '    REQUIRE(ready());\n'                     # 17
+        '}\n'                                        # 18
+    )
+    # catch_discover_tests registers the unescaped literal, and each template
+    # instantiation as "name - Type".
+    NAMES = {"first case": set(), 'second "quoted" case': set(),
+             'gain: second "quoted" case': set(), "templated - int": set(),
+             "templated - float": set(), "fixture case": set(), "unrelated": set()}
+
+    def cases(self, rel: str, touched: set[int]) -> list[str]:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "test").mkdir()
+            (root / "test" / "test_x.cpp").write_text(self.SOURCE, encoding="utf-8")
+            return step.edited_case_tests([rel], self.NAMES, {rel: (touched, [])}, root)
+
+    def test_a_touched_line_selects_the_case_that_contains_it(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {9}),
+                         ['gain: second "quoted" case', 'second "quoted" case'])
+
+    def test_a_template_case_selects_every_instantiation(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {13}),
+                         ["templated - float", "templated - int"])
+
+    def test_a_namespaced_fixture_case_owns_its_own_lines(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {17}), ["fixture case"])
+
+    def test_a_touched_case_header_selects_that_case(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {3}), ["first case"])
+
+    def test_control_lines_before_the_first_case_select_nothing(self) -> None:
+        self.assertEqual(self.cases("test/test_x.cpp", {1, 2}), [])
+
+    def test_control_a_non_test_path_selects_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "core").mkdir()
+            (root / "core" / "x.cpp").write_text(self.SOURCE, encoding="utf-8")
+            self.assertEqual(step.edited_case_tests(
+                ["core/x.cpp"], self.NAMES, {"core/x.cpp": ({3, 9}, [])}, root), [])
+
+    def test_control_no_line_changes_selects_nothing(self) -> None:
+        self.assertEqual(step.edited_case_tests(["test/test_x.cpp"], self.NAMES, None), [])
 
 
 class RegistrationImpactTests(unittest.TestCase):
@@ -778,6 +1089,48 @@ class ExitCodeTests(unittest.TestCase):
                 contextlib.redirect_stdout(out):
             self.assertEqual(step.main(["--build-dir", "/nonexistent"]), 1)
         self.assertIn("SKIPPED, NOT RUN", out.getvalue())
+
+    def _main_plan(self, plan: dict, results: dict, *, dry_run: bool = False) -> int:
+        out = io.StringIO()
+        argv = ["--build-dir", "/nonexistent"] + (["--dry-run"] if dry_run else [])
+        with mock.patch.object(step, "diff_paths", return_value=["x.py"]), \
+                mock.patch.object(step, "inventory_tests", return_value={}), \
+                mock.patch.object(step, "select", return_value=plan), \
+                mock.patch.object(step, "run_budgeted", return_value=results), \
+                contextlib.redirect_stdout(out):
+            code = step.main(argv)
+        self.output = out.getvalue()
+        return code
+
+    def test_a_required_family_that_selects_nothing_fails_the_step(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r",
+                "families": {"runtime-sync-hammers": 0}, "tests": [], "merge_only": [],
+                "empty_required_families": ["runtime-sync-hammers"],
+                "required_family_tests": []}
+        results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+                   "excluded_or_absent": [], "seconds": 0.0}
+        self.assertEqual(self._main_plan(plan, results), 1)
+        self.assertIn("path family runtime-sync-hammers matched this diff but selected no test",
+                      self.output)
+        self.assertEqual(self._main_plan(plan, results, dry_run=True), 1)
+
+    def test_a_required_family_test_excluded_by_label_fails_the_step(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r",
+                "families": {"runtime-sync-hammers": 1}, "tests": ["hammer"],
+                "merge_only": ["hammer"], "empty_required_families": [],
+                "required_family_tests": ["hammer"]}
+        results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+                   "excluded_or_absent": ["hammer"], "seconds": 0.0}
+        self.assertEqual(self._main_plan(plan, results), 1)
+        self.assertIn('"required_family_excluded": 1', self.output)
+
+    def test_control_other_excluded_tests_stay_neutral(self) -> None:
+        plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
+                "tests": ["slow-one"], "merge_only": ["slow-one"],
+                "empty_required_families": [], "required_family_tests": []}
+        results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+                   "excluded_or_absent": ["slow-one"], "seconds": 0.0}
+        self.assertEqual(self._main_plan(plan, results), 0)
 
     def test_control_a_real_failure_still_fails_beside_ordinary_deferrals(self) -> None:
         self.assertEqual(self._main({"a": (False, "passes on base")}, skipped=["c"]), 1)

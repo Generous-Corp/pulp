@@ -1,4 +1,5 @@
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/scripted_ui_prewarm.hpp>
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/runtime/log.hpp>
@@ -16,6 +17,13 @@ namespace pulp::view {
 
 namespace {
 std::atomic<ScriptInspectorPortFactory> g_script_inspector_port_factory{nullptr};
+
+// Any binary that links session code can run a scripted editor, so it is the
+// one place that publishes the prewarm entry point to the editor glue.
+[[maybe_unused]] const bool g_prewarm_runner_installed = [] {
+    scripted_ui_prewarm_runner().store(&prewarm_scripted_ui, std::memory_order_release);
+    return true;
+}();
 } // namespace
 
 ScriptInspectorPort::~ScriptInspectorPort() = default;
@@ -38,8 +46,10 @@ LogCallback default_log_callback() {
     };
 }
 
-std::unique_ptr<ScriptEngine> make_engine(LogCallback callback = {}) {
+std::unique_ptr<ScriptEngine> make_engine(std::size_t memory_limit_bytes,
+                                          LogCallback callback = {}) {
     auto engine = std::make_unique<ScriptEngine>();
+    engine->set_memory_limit(memory_limit_bytes);
     engine->set_log_callback(callback ? std::move(callback) : default_log_callback());
     return engine;
 }
@@ -96,26 +106,24 @@ void load_script_before_deadline(WidgetBridge& bridge, ScriptEngine& engine,
 
 } // namespace
 
-ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, ScriptedUiOptions options)
-    : identity_(next_scripted_ui_identity.fetch_add(1, std::memory_order_relaxed) + 1)
-    , root_(root)
-    , store_(store)
-    , script_path_(std::move(options.script_path))
-    , theme_path_(options.theme_path.empty() ? script_path_.parent_path() / "theme.json"
-                                             : std::move(options.theme_path))
-    , asset_roots_(std::move(options.asset_roots))
-    , granted_capabilities_(options.granted_capabilities)
-    , hot_reload_enabled_(options.enable_hot_reload)
-    , theme_reload_enabled_(options.enable_theme_reload)
-    , runtime_import_enabled_(options.enable_runtime_import)
-    , value_channel_access_(
+ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store,
+                                     ScriptedUiOptions options)
+    : identity_(next_scripted_ui_identity.fetch_add(1, std::memory_order_relaxed) + 1), root_(root),
+      store_(store), script_path_(std::move(options.script_path)),
+      theme_path_(options.theme_path.empty() ? script_path_.parent_path() / "theme.json"
+                                             : std::move(options.theme_path)),
+      asset_roots_(std::move(options.asset_roots)),
+      granted_capabilities_(options.granted_capabilities),
+      hot_reload_enabled_(options.enable_hot_reload),
+      theme_reload_enabled_(options.enable_theme_reload),
+      runtime_import_enabled_(options.enable_runtime_import),
+      js_memory_limit_bytes_(options.js_memory_limit_bytes),
+      value_channel_access_(
           options.value_channel_access
               ? std::move(options.value_channel_access)
-              : ValueChannelAccess{
-                    [channels = options.value_channels](
-                        const ValueChannelVisitor& visitor) { visitor(channels); }})
-    , log_callback_(default_log_callback())
-{
+              : ValueChannelAccess{[channels = options.value_channels](
+                                       const ValueChannelVisitor& visitor) { visitor(channels); }}),
+      log_callback_(default_log_callback()) {
     if (const auto make_port = script_inspector_port_factory()) {
         inspector_port_ = make_port();
         if (inspector_port_)
@@ -246,23 +254,6 @@ void ScriptedUiSession::attach_gpu_surface(render::GpuSurface* gpu_surface) {
     }
     // Stashed in gpu_surface_ so that the next hot-reload rebuild_from_code
     // passes the same surface into the freshly-constructed WidgetBridge.
-}
-
-namespace {
-thread_local bool deferred_document_load_active = false;
-} // namespace
-
-ScopedDeferredDocumentLoad::ScopedDeferredDocumentLoad()
-    : previous_(deferred_document_load_active) {
-    deferred_document_load_active = true;
-}
-
-ScopedDeferredDocumentLoad::~ScopedDeferredDocumentLoad() {
-    deferred_document_load_active = previous_;
-}
-
-bool ScopedDeferredDocumentLoad::active() noexcept {
-    return deferred_document_load_active;
 }
 
 bool ScriptedUiSession::load(std::string* error) {
@@ -726,7 +717,7 @@ bool ScriptedUiSession::rebuild_from_code(
         if (needs_probe) {
             PULP_TRACE_SCOPE_NAMED("js", "scripted_ui_probe_realm");
             ++probe_realm_evaluations_;
-            auto probe_engine = make_engine();
+            auto probe_engine = make_engine(js_memory_limit_bytes_);
             install_native_message_handlers(*probe_engine, true);
             check_deadline();
             View probe_root;
@@ -806,7 +797,7 @@ bool ScriptedUiSession::rebuild_from_code(
 
         root_.set_theme(theme_for_reload);
         check_deadline();
-        next_engine = make_engine(engine_log_callback());
+        next_engine = make_engine(js_memory_limit_bytes_, engine_log_callback());
         install_native_message_handlers(*next_engine, false);
         check_deadline();
         next_bridge = std::make_unique<WidgetBridge>(

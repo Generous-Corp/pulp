@@ -1735,5 +1735,65 @@ class RefreshDerivedTest(unittest.TestCase):
         self.assertIn("history is truncated at the graft boundary", notice[0])
 
 
+class MigrationNoteFoldTest(unittest.TestCase):
+    """The bump that assigns the SDK version folds unreleased migration notes.
+
+    A pull request cannot know its version, so its note waits in
+    docs/migrations/unreleased/; the bump commit is the first place the
+    version exists, and it must carry the fold or the note never ships."""
+
+    NOTE = "docs/migrations/unreleased/knob-rename.md"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name).resolve()
+        self._cwd = os.getcwd()
+        self.r = RangeRepo(self.repo)
+        os.chdir(self.repo)
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        self._tmp.cleanup()
+
+    def _note(self, frontmatter: str) -> None:
+        self.r.write(self.NOTE, f"---\n{frontmatter}\n---\n\n## Migration steps\n- rename it\n")
+        self.r.commit("docs: add an unreleased note")
+
+    def _sdk_plan(self):
+        return [val.Assignment(surface="sdk", level="minor", current="1.2.3", assigned="1.3.0")]
+
+    def test_an_sdk_bump_folds_the_notes_into_its_commit(self):
+        self._note('breaking = true\nsummary = "Knob renamed"')
+        edited = val._write_plan(self.repo, CONFIG, self._sdk_plan())
+        self.assertIn("docs/migrations/v1.3.0.md", edited)
+        self.assertIn(self.NOTE, edited)
+        # The bump stages exactly `edited`; the deletion must be staged too, or
+        # main would carry the note twice.
+        _git(self.repo, "add", "--", *dict.fromkeys(edited), env=self.r.env)
+        _git(self.repo, "commit", "-q", "-m", "chore: bump versions", env=self.r.env)
+        self.assertEqual(_git(self.repo, "status", "--porcelain", "--", "docs"), "")
+        released = (self.repo / "docs/migrations/v1.3.0.md").read_text(encoding="utf-8")
+        self.assertIn('version = "1.3.0"', released)
+        self.assertIn("cli_version_from < 1.3.0 && cli_version_to >= 1.3.0", released)
+
+    def test_a_bump_without_the_sdk_leaves_the_notes_unreleased(self):
+        self._note('summary = "Knob renamed"')
+        plan = [val.Assignment(surface="plugin", level="patch", current="0.5.0", assigned="0.5.1")]
+        edited = val._write_plan(self.repo, CONFIG, plan)
+        self.assertNotIn(self.NOTE, edited)
+        self.assertTrue((self.repo / self.NOTE).exists())
+
+    def test_a_bad_note_does_not_stop_the_bump(self):
+        self._note('version = "9.9.9"\nsummary = "Knob renamed"')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            edited = val._write_plan(self.repo, CONFIG, self._sdk_plan())
+        self.assertIn("CMakeLists.txt", edited)
+        self.assertNotIn(self.NOTE, edited)
+        self.assertTrue((self.repo / self.NOTE).exists())
+        self.assertFalse((self.repo / "docs/migrations/v1.3.0.md").exists())
+        self.assertIn("could not fold", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

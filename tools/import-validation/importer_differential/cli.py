@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import platform
 import re
@@ -28,8 +27,30 @@ from .core import (
     source_files,
     write_json,
 )
+from .aggregate import percentile
 from .reports import format_corpus_summary, format_summary
+from .rescore import replay, rescore_corpus
 from tools.harness.differential.contract import normalize_report
+
+
+def viewport_size(value: str) -> dict[str, int]:
+    match = re.fullmatch(r"([1-9][0-9]*)x([1-9][0-9]*)", value)
+    if not match:
+        raise argparse.ArgumentTypeError("must be WIDTHxHEIGHT in CSS px, e.g. 1280x1127")
+    return {"width": int(match.group(1)), "height": int(match.group(2))}
+
+
+def pillow_missing() -> bool:
+    """Every comparison reads PNGs; say so once instead of failing each fixture."""
+    try:
+        import PIL.Image  # noqa: F401
+    except ImportError:
+        print("importer_differential_lab: Pillow is required to compare renders; "
+              "install the pinned visual dependencies with "
+              "`tools/ci/install_visual_python_deps.sh` (or `mise run visual-deps`)",
+              file=sys.stderr)
+        return True
+    return False
 
 
 def positive_int(value: str) -> int:
@@ -40,12 +61,15 @@ def positive_int(value: str) -> int:
 
 
 def command_compare(args: argparse.Namespace) -> int:
+    if pillow_missing():
+        return 2
     try:
         budgets = read_timing_budgets(getattr(args, "timing_budget", None))
         report = compare_one(
             args.importer.resolve(), args.observer.resolve(),
             args.file.resolve(), args.output.resolve(), args.timeout_seconds,
             args.from_source, args.browser.resolve() if args.browser else None,
+            fixture_metadata=viewport_metadata(args),
             cache_state=args.cache_state, timing_budgets_ms=budgets)
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
@@ -57,7 +81,13 @@ def command_compare(args: argparse.Namespace) -> int:
     return 1 if report["timing_budget"]["status"] == "fail" else 0
 
 
+def viewport_metadata(args: argparse.Namespace) -> dict[str, Any] | None:
+    return {"viewport": args.viewport} if getattr(args, "viewport", None) else None
+
+
 def command_corpus(args: argparse.Namespace) -> int:
+    if pillow_missing():
+        return 2
     if args.manifest:
         manifest_path = args.manifest.resolve()
         manifest = json.loads(manifest_path.read_text())
@@ -71,9 +101,10 @@ def command_corpus(args: argparse.Namespace) -> int:
         ]
     else:
         input_root = args.input.resolve()
+        # Exclusion is relative to the root, so `--input .../holdout` asks for it.
         fixtures = [
             (path.relative_to(input_root).as_posix(), path, None)
-            for path in source_files(input_root)]
+            for path in source_files(input_root, args.include_holdout)]
     if not fixtures:
         print("importer_differential_lab: corpus contains no supported sources",
               file=sys.stderr)
@@ -149,11 +180,6 @@ def command_corpus(args: argparse.Namespace) -> int:
     return 1 if failures or budget_failed else 0
 
 
-def percentile(values: list[int], fraction: float) -> int:
-    ordered = sorted(values)
-    return ordered[max(0, math.ceil(len(ordered) * fraction) - 1)]
-
-
 def sanitized_error(error: Exception, paths: list[Path]) -> str:
     text = str(error)
     for path in paths:
@@ -215,6 +241,8 @@ DETERMINISM_FIELDS = (
     "observer_sha256",
     "browser_capture_canonical_sha256",
     "native_capture_canonical_sha256",
+    "browser_snapshot_semantic_sha256",
+    "native_snapshot_semantic_sha256",
     "browser_screenshot_sha256",
     "native_render_sha256",
     "native_layout_sha256",
@@ -275,6 +303,8 @@ def determinism_receipt(reports: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def command_benchmark(args: argparse.Namespace) -> int:
+    if pillow_missing():
+        return 2
     output = args.output.resolve()
     reports = []
     try:
@@ -286,6 +316,7 @@ def command_benchmark(args: argparse.Namespace) -> int:
                 args.file.resolve(), output / "runs" / str(index + 1),
                 args.timeout_seconds, args.from_source,
                 args.browser.resolve() if args.browser else None,
+                fixture_metadata=viewport_metadata(args),
                 cache_state=args.cache_state,
                 timing_budgets_ms=budgets))
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
@@ -407,6 +438,8 @@ def build_parser() -> argparse.ArgumentParser:
     shared(compare)
     compare.add_argument("--file", type=Path, required=True)
     compare.add_argument("--output", type=Path, required=True)
+    compare.add_argument("--viewport", type=viewport_size,
+                         help="WIDTHxHEIGHT CSS px viewport (default 1280x800)")
     compare.set_defaults(func=command_compare)
 
     corpus = subparsers.add_parser("analyze-corpus")
@@ -416,6 +449,8 @@ def build_parser() -> argparse.ArgumentParser:
     inputs.add_argument("--manifest", type=Path)
     corpus.add_argument("--output", type=Path, required=True)
     corpus.add_argument("--fail-fast", action="store_true")
+    corpus.add_argument("--include-holdout", action="store_true",
+                        help="with --input, also score fixtures under holdout/ directories")
     corpus.set_defaults(func=command_corpus)
 
     benchmark = subparsers.add_parser("benchmark")
@@ -423,10 +458,41 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--file", type=Path, required=True)
     benchmark.add_argument("--output", type=Path, required=True)
     benchmark.add_argument("--runs", type=positive_int, default=5)
+    benchmark.add_argument("--viewport", type=viewport_size,
+                           help="WIDTHxHEIGHT CSS px viewport (default 1280x800)")
     benchmark.set_defaults(func=command_benchmark)
+
+    rescore = subparsers.add_parser(
+        "rescore", help="replay a finished corpus's artifacts through the scorer")
+    rescore.add_argument("--corpus", type=Path, required=True)
+    rescore.add_argument("--output", type=Path, required=True)
+    rescore.add_argument(
+        "--fixture-sources", type=Path,
+        default=_REPO_ROOT / "test" / "fixtures" / "import-differential",
+        help="directory holding the interaction plans fixtures name")
+    rescore.set_defaults(func=command_rescore)
     return parser
 
 
+def command_rescore(args: argparse.Namespace) -> int:
+    try:
+        receipt = rescore_corpus(
+            args.corpus.resolve(), args.output.resolve(),
+            args.fixture_sources.resolve())
+    except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"importer_differential_lab: {exc}", file=sys.stderr)
+        return 2
+    for name, row in receipt["fixtures"].items():
+        print(f"{row['report_sha256']}  {name}")
+    for name in receipt["skipped_without_report"]:
+        print(f"skipped (no stored report)  {name}")
+    return 0
+
+
 def main() -> int:
+    # The rescore replay stands in for the importer and observer processes, so
+    # it takes their argv verbatim instead of going through argparse.
+    if len(sys.argv) > 2 and sys.argv[1] == "replay-artifact":
+        return replay(sys.argv[2], sys.argv[3:])
     args = build_parser().parse_args()
     return args.func(args)

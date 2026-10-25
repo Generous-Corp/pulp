@@ -165,6 +165,54 @@ TEST_CASE("native codegen wraps multi-line text at its design width (issue-3192)
     REQUIRE(js.find("'width', 284") == std::string::npos);
 }
 
+TEST_CASE("codegen carries measured line metrics with captured line boxes",
+          "[view][import][browser-capture][text]") {
+    // Every lowering that installs captured line boxes also installs the
+    // capture's measured ascent and descent, so the JS and C++ lanes place
+    // the baseline from the same evidence the native materializer does. A
+    // basis without them installs none.
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = 300.0f;
+    ir.root.style.height = 100.0f;
+    IRNode measured;
+    measured.type = "text";
+    measured.name = "Measured";
+    measured.text_content = "Measured";
+    measured.style.width = 60.0f;
+    measured.style.height = 18.0f;
+    measured.style.font_size = 16.0f;
+    measured.style.font_family = "Times";
+    measured.text_line_boxes.push_back({0.0f, 0.0f, 60.0f, 18.0f, 0, 8});
+    measured.text_layout_basis = IRTextLayoutBasis{60.0f, "Times-Roman"};
+    measured.text_layout_basis->line_metrics = LineMetrics{14.0f, 4.0f};
+    ir.root.children.push_back(measured);
+    IRNode derived = measured;
+    derived.name = "Derived";
+    derived.text_layout_basis->line_metrics.reset();
+    ir.root.children.push_back(derived);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    const auto measured_call = js.find("setCapturedLineBoxes('Measured");
+    const auto derived_call = js.find("setCapturedLineBoxes('Derived");
+    REQUIRE(measured_call != std::string::npos);
+    REQUIRE(derived_call != std::string::npos);
+    const auto measured_end = js.find(";\n", measured_call);
+    const auto derived_end = js.find(";\n", derived_call);
+    CHECK(js.substr(measured_call, measured_end - measured_call).ends_with(", 14, 4)"));
+    const auto derived_text = js.substr(derived_call, derived_end - derived_call);
+    CHECK((derived_text.ends_with("true)") || derived_text.ends_with("false)")));
+
+    const auto cpp = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    CHECK(cpp.source.find("set_cached_line_metrics(") != std::string::npos);
+    CHECK(cpp.source.find("set_cached_line_metrics(") ==
+          cpp.source.rfind("set_cached_line_metrics("));
+}
+
 TEST_CASE("native codegen preserves the browser's captured line-breaking decision",
           "[view][import][browser-capture][text]") {
     if (pulp::canvas::resolved_face_identity("Inter", 400.0f).empty())
@@ -503,14 +551,13 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
             return command.type == pulp::canvas::DrawCommand::Type::fill_text;
         });
     REQUIRE(cached_text != cached_canvas.commands().end());
-    // CSS half-leading against the captured line box, using the same ink the
-    // baseline then descends by: (15 - (ascent + descent)) / 2 + ascent. Inter
-    // at 12px carries ~17.16px of ink, so a 15px box has NEGATIVE half-leading
-    // (~-1.08) and the glyphs overflow it evenly, which CSS permits. The
-    // earlier 11.7 encoded a rule of thumb -- 1.5 + 0.85 * 12 -- that measured
-    // the surplus against the em box while descending by a real face ascent,
-    // double-counting the gap between the two references.
-    CHECK(cached_text->f[1] == Catch::Approx(12.2139f).margin(0.01f));
+    // Chromium sizes a text run's rect as round(fAscent) + round(fDescent)
+    // (plus an ascent adjustment for some faces) and puts its baseline
+    // round(fDescent) above the rect's bottom. Inter at 12px has fDescent
+    // 0.2421875em = 2.906, so in this 15px box the baseline is 15 - 3 = 12.
+    // Descending from the top by the face's worst-case glyph extent (fTop,
+    // ~13.29) instead paints every captured line high.
+    CHECK(cached_text->f[1] == Catch::Approx(12.0f).margin(0.01f));
 
     live_single->set_text("01  SLOW");
     pulp::canvas::RecordingCanvas changed_text_canvas;

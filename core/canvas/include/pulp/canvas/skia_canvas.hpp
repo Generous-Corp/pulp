@@ -273,11 +273,21 @@ public:
     bool draw_image_from_static_data_rect(const uint8_t* data, size_t size, float sx, float sy,
                                           float sw, float sh, float dx, float dy, float dw,
                                           float dh) override;
+    // Content-keyed forms: decode + GPU-upload once per (key, backend) through
+    // ImageFileCache, under a NUL-prefixed key no filesystem path can alias.
+    bool draw_image_from_keyed_data(const std::string& content_key, const uint8_t* data,
+                                    size_t size, float x, float y, float w, float h) override;
+    bool draw_image_from_keyed_data_rect(const std::string& content_key, const uint8_t* data,
+                                         size_t size, float sx, float sy, float sw, float sh,
+                                         float dx, float dy, float dw, float dh) override;
     bool draw_image_from_file_rect(const std::string& path,
                                     float sx, float sy, float sw, float sh,
                                     float dx, float dy, float dw, float dh) override;
     bool measure_image_from_file(const std::string& path,
                                   float& out_width, float& out_height) override;
+    // Reads the header through SkCodec; no pixels are decoded.
+    bool measure_image_from_data(const uint8_t* data, size_t size, float& out_width,
+                                 float& out_height) override;
 
     // Skia-specific: draw an already-constructed SkImage (e.g. a GPU
     // surface snapshot or atlas texture) into the active rect. The
@@ -555,6 +565,11 @@ private:
     // backend identity). Returns null on read/decode failure. See
     // image_file_cache.hpp for the path-keyed (not content-keyed) semantics.
     sk_sp<SkImage> image_from_file_cached(const std::string& path) const;
+    // Decode + GPU-upload encoded bytes once per (content key, backend) through
+    // ImageFileCache. An empty key builds uncached. The cached image owns a
+    // copy of the bytes, so it outlives the caller's buffer.
+    sk_sp<SkImage> image_from_keyed_data_cached(const std::string& content_key, const uint8_t* data,
+                                                size_t size) const;
     // The backend identity token used as part of the cache key: the Graphite
     // recorder or the Ganesh context, or null for a CPU raster canvas.
     const void* image_cache_backend_key() const;

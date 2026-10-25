@@ -96,6 +96,7 @@ pub mod proc;
 pub mod project;
 pub mod registry;
 pub mod stale_cli;
+pub mod standalone_sdk;
 pub mod tool_registry;
 pub mod tool_version;
 pub mod update;

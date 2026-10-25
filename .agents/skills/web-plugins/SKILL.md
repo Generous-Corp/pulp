@@ -32,7 +32,7 @@ use `bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`; a relative
 The WebCLAP deploy (`wclap-cloudflare.yml`) publishes a site, and the GPU-audio
 proof runs on shared self-hosted Macs where PR jobs also run. Neither may build
 from anything an earlier job could have written. choc is fetched at an exact
-commit (`CHOC_COMMIT`, the `pulp-webview-dnd-poc1` tag's commit) into
+commit (`CHOC_COMMIT`, the `pulp-webview-dnd-poc2` tag's commit) into
 `RUNNER_TEMP`, and the step checks the checked-out HEAD equals it. The Skia wasm
 slice archive is checked against the manifest digest on every run (one left at
 `$HOME/.cache/pulp/skia-wasm/<sha256>.zip` is reused only after it passes, else
@@ -412,6 +412,16 @@ ceiling. If you write or vendor another JS runtime shim for a Pulp wasm module,
 only correct if the module is also linked with `ALLOW_MEMORY_GROWTH=0`, and none
 of them are.
 
+## Landmine: the web UI's canvas source list is hand-maintained
+
+`tools/cmake/PulpWebUi.cmake` lists the canvas sources it compiles into the
+wasm UI module (`_PULP_WEBUI_CANVAS_SOURCES`) by hand; it does not follow the
+native `pulp-canvas` target. A new file under `core/canvas/src/` that another
+canvas source calls (for example a table moved into its own `.cpp`) links
+natively and still fails every web UI module with `wasm-ld: undefined symbol`.
+Add the file to that list in the same change, and build one web UI target
+(the `WAMv2 + WebCLAP` lane builds `super-convolver-ui`) before pushing.
+
 ## Landmines that make a *rendering* build fail silently
 
 Both live in the `skia-gpu-build` skill's wasm section; know they exist:
@@ -422,6 +432,13 @@ Both live in the `skia-gpu-build` skill's wasm section; know they exist:
   fontmgr reporting 1 family / 1 face, so null-checks *and* family-count guards
   both pass while every string measures at **zero width**. Probe font usability
   by drawing a glyph (`unicharToGlyph('A') != 0`), never by counting families.
+- **A surface that skips `ImageFileCache::begin_frame(context)`** still draws
+  correctly, but its file images fall back to plain LRU under the path pool's
+  byte budget. An imported panel's full-frame chrome and canvas layers then
+  evict each other every frame, so each one is decoded and re-uploaded per
+  frame, which only shows up as frame time. The WebGL Ganesh surface makes
+  that call at the top of `begin_frame()`, keyed by the same `GrDirectContext`
+  it passes to `clear_backend()`. A new surface backend needs the same call.
 
 ### The core/view source list exists TWICE, and the web copy is the one that breaks
 
@@ -445,7 +462,10 @@ target already compiles, so nothing looks missing — but the definition is in a
 TU the web source list may not name, and wasm-ld reports it only when something
 calls it. `press_reach.cpp` defines `View::simulate_context_click` and is listed
 in both files for this reason. The rule: if the symbol is `View::something`,
-grep the web list before assuming `view.cpp` carries it.
+grep the web list before assuming `view.cpp` carries it. The same holds for a
+free function `view_paint.cpp` calls: `border_style.cpp` (the border band and
+shade math `View::paint_border` uses) and `text_line_metrics.cpp` (the captured
+baseline `Label` places) are listed in both.
 
 Same shape as the font list below: whenever a list is duplicated for the web
 target, the web copy is the one that silently rots.

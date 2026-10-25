@@ -210,6 +210,8 @@ public:
             return nullptr;
         }
 
+        // Images this frame draws are kept for it even past the byte budget.
+        canvas::ImageFileCache::instance().begin_frame(context_.get());
         frame_surface_.reset();
 
         GrGLFramebufferInfo fb_info{};

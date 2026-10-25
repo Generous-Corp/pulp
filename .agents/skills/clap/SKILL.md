@@ -386,6 +386,12 @@ into that pool on the realtime-limited process path and drops only when
 the sidecar count or per-payload capacity is exceeded. Keep the happy
 path and overflow case covered in `test_clap_midi_events.cpp`.
 
+The pool is reserved only for a direction that has a note port
+(`accepts_midi` in, `produces_midi` out). It is 128 separate 4 KiB
+vectors, and allocating it was most of `clap_activate()`'s cost for an
+effect with no MIDI. A test processor that copies SysEx through the
+adapter's buffers must declare the matching port, or every copy drops.
+
 If you add a new inbound/outbound MIDI path, cover the overflow case in
 `test_clap_midi_events.cpp`. If you add a test processor that
 captures/forwards sysex while behind the CLAP no-alloc guard, preallocate
@@ -862,6 +868,21 @@ The ARA companion factory is keyed on
 reserved `CLAP_EXT_*` strings. Don't rename it; other Pulp + ARA hosts
 already search for that exact key. Defined in `pulp/format/ara.hpp`.
 
+### Linux: export only `clap_entry`, or two Pulp CLAPs share one registry
+
+On Linux a plug-in image exports only its entry points: `_pulp_apply_elf_exports`
+(`tools/cmake/PulpInstall.cmake`) compiles the format target with
+`-fvisibility=hidden -fvisibility-inlines-hidden` and links it with a version
+script whose `local: *` localizes everything else, including the archives'
+symbols. Without it, every Pulp plug-in in a Linux host shared its inline
+variables and function-local statics with every other one: they are
+`STB_GNU_UNIQUE`, which glibc binds process-wide **even under `RTLD_LOCAL`**,
+so two different plug-ins' factories each listed both plug-ins. For CLAP the shared state was `clap_generic::g_clap_records` / `g_clap_index` and every
+`*_ext` table, so extension calls ran the other image's code.
+`linux-plugin-isolation-clap` (`test/fixtures/linux_plugin_isolation/`) loads
+two plug-ins together under both dlopen modes and in both orders; keep it green
+when adding an entry point that hosts `dlsym` (add it to the version-script list).
+
 ### `clap-validator` is optional — fallback is dlopen
 
 `pulp validate` (`tools/cli/cmd_validate.cpp`) runs
@@ -1106,6 +1127,21 @@ scan**, not an index — param counts are small and the scan is what both adapte
 already did. If it ever becomes hot, index it for both adapters at once; a
 one-sided optimization is how these two paths drifted before.
 
+## Idle blocks must stay O(1)
+
+`drain_outbound_release_debt()` returns immediately while
+`outbound_release_debt_pending` is false. Every writer of
+`outbound_note_release_debt` / `outbound_control_release_debt` /
+`outbound_panic_debt` must set that flag (`record_outbound_release_debt()`
+does); a white-box test that seeds the arrays directly must set it as well, or
+the drain never visits the seeded slot. Without the flag the drain walked all
+2160 slots per block, about 5.5 us of pure overhead for a gain plug-in.
+
+The parameter snapshot and the time-0 snapshot diff are gated on
+`StateStore::state_generation()` exactly as in the VST3 adapter: refreshed only
+when the generation moved since the last snapshot, diffed only when it moved
+across `process()`.
+
 ## The StateStore must outlive the Processor
 
 `Processor::state()` dereferences a pointer the host installs. A Processor may
@@ -1140,6 +1176,11 @@ atomics from `process()` instead.
   a non-finite parse. Keep the locale-independent fallback (`parse_double_c_locale`)
   for plain-numeric params. Test: `test/test_clap_entry.cpp`
   ("text_to_value routes through ParamInfo::from_string").
+- `params_text_to_value` must accept everything `params_value_to_text` shows.
+  An unlabeled Toggle or Enum (PulpGain's Bypass) is shown as "0"/"1", so the
+  shared parser accepts the number unless the parameter declares
+  `value_labels`. clap-validator's param-conversions test requires text
+  conversion for all parameters or none and fails the whole plug-in otherwise.
 - CLAP delivers `CLAP_EVENT_PARAM_GESTURE_BEGIN/END` on the process/flush path
   and calls `store.begin_gesture/end_gesture` directly. Those StateStore entry
   points are main-thread-only (they forward to host undo grouping). A background
@@ -1275,3 +1316,26 @@ editor, or nothing to prewarm, costs one virtual call. The editor itself does
 not change: an open that races the worker waits for the in-flight result
 instead of compiling again. Details: `view-bridge`, "What the host shows while
 it waits".
+
+## Parameter events reach the queue only on opt-in
+
+Sample-accurate automation is the default: `Processor::wants_sample_accurate_parameters()`
+(default true, asked once when the adapter creates the processor). Opted
+out (the override returns false), `CLAP_EVENT_PARAM_VALUE` events go to the store only and `param_events`
+stays empty: each parameter's latest value is kept in scratch sized in
+`clap_activate()` and written once after the events are read, as VST3 and AU
+v2 do. A gesture end (or begin) for a parameter writes its pending value
+first, so the gesture closes on what the host last sent. Writing per event cost
+a revisioned atomic store and a listener call each time: 6.5 us per block for
+32 automated parameters at B=512. Opted in, each event is queued with its
+`header.time` and written through as before. Test processors that depend on either mode should set the flag explicitly;
+`ObservingParamIngressProcessor` in `test_clap_midi_events.cpp` shows the
+pattern.
+
+Sample-accurate is the default, and block-rate the opt-out, because an opt-in
+default would silently zipper existing plug-ins: a processor that reads the
+queue would get an empty one and step its automation once per block, with
+nothing failing or warning. An opted-out processor that still reads
+`param_events()` is recorded on the audio thread (`Processor::param_events()`
+does one relaxed store) and logged once by `report_param_events_while_opted_out()`
+in `clap_deactivate()` and `clap_destroy()`.

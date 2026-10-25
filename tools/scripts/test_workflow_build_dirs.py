@@ -160,7 +160,8 @@ class WorkflowBuildDirTests(unittest.TestCase):
             git fetch --no-tags --depth=1 origin \\
               "+$PULP_CAPABILITY_PR_BASE_SHA:refs/remotes/origin/main"
           else
-            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+            git fetch --no-tags --depth=1 origin \\
+              "+main:refs/remotes/origin/main"
           fi"""
         self.assertIn(fetch_step, text)
         self.assertLess(text.index(fetch_step), text.index("- name: Test (non-Windows)"))
@@ -542,7 +543,7 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertRegex(
             text,
             r"pulp-fuzz-control-protocol[\s\S]*?"
-            r"-max_total_time=\$\{\{ inputs\.libfuzzer_seconds \|\| 900 \}\}",
+            r"-max_total_time=\$\{\{ inputs\.libfuzzer_seconds \|\| 600 \}\}",
         )
         self.assertIn("- 'inspect/include/pulp/inspect/control_protocol.hpp'", text)
         self.assertIn("- 'inspect/src/control_protocol*.cpp'", text)

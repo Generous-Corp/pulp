@@ -350,7 +350,7 @@ including the Intel `darwin-x64` CLI+SDK pair, which is now a REQUIRED leg
 | `pulp-sdk-linux-x64.tar.gz` | " |
 | `pulp-sdk-windows-arm64.tar.gz` | " |
 | `pulp-sdk-windows-x64.tar.gz` | " |
-| `SHA256SUMS` | SHA-256 manifest for every user-facing release asset above |
+| `SHA256SUMS` | SHA-256 manifest for every user-facing release asset above; `pulp upgrade` and `pulp sdk install` fetch it and refuse to extract an archive whose digest differs (see `checksum_manifest_floor` in `release_product_matrix.json`) |
 
 The table shows the FULL platform inventory. Which per-platform rows a given
 release actually carries is `release_product_matrix.json`'s

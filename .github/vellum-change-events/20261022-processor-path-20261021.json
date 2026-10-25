@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "20261022-processor-path-20261021",
+  "kind": "change",
+  "created_at": "2026-10-22T02:49:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "design-import-refactor: generic change landed in Pulp per owner decision 2026-10-04; Vellum inherits (see inheritance ledger); MeterSource::publish now fills the triple-buffer slot in place (one copy instead of two) and PublishCounter uses a relaxed load and store instead of an atomic read-modify-write, which is correct under the existing single-writer contract. The TripleBuffer contract is unchanged for consumers and is now documented explicitly. Pulp's retained UI kernel has not adopted a Vellum package. No design-import, Chromium, rendering, packaging, or source-authority boundary moves.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-buffer-ops",
+    "ctest --test-dir build -R pulp-test-meter-source",
+    "ctest --test-dir build -R pulp-test-state",
+    "ctest --test-dir build -R pulp-test-sync-primitives",
+    "python3 tools/scripts/test_verify_create_templates.py"
+  ],
+  "disposition": "pulp-only",
+  "vellum_inherits": true
+}

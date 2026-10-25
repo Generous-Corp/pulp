@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.vellum-inheritance-entry.v1",
+  "event_id": "20261022-render-checked-submit",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "vellum_obligation": "Any mid-frame flush before a readback must judge InsertStatus; a rejected recording makes the readback report failure, and wait_for_submitted_work must return the submit result.",
+  "evidence": [
+    ".github/vellum-change-events/20261022-render-checked-submit.json",
+    "ctest --test-dir build -R 'SkiaSurface readback fails when Graphite rejects the flushed recording'"
+  ]
+}

@@ -219,7 +219,6 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
     if (!snapshot.isObject()) return std::nullopt;
 
     CapturedStyleIndex index;
-    index.document_canvas_paint_ = detail::extract_document_canvas_paint(snapshot);
 
     // Without the request order the style rows cannot be read at all: entry N
     // is meaningless on its own. Refusing here is what keeps an older capture
@@ -291,6 +290,69 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
             pairs.push_back(json_int(entry[static_cast<int>(j)], -1));
     }
 
+    // Form-control state. Both are RareData columns: parallel `index` /
+    // `value` arrays for the inputs that carry a value, and a bare `index`
+    // list for the options that are selected.
+    const auto node_values = member(nodes, "nodeValue");
+    index.node_value_.assign(node_count, -1);
+    if (node_values.isArray()) {
+        for (uint32_t i = 0; i < node_count && i < node_values.size(); ++i)
+            index.node_value_[i] = json_int(node_values[static_cast<int>(i)], -1);
+    }
+    const auto input_values = member(nodes, "inputValue");
+    if (input_values.isObject()) {
+        const auto which = member(input_values, "index");
+        const auto values = member(input_values, "value");
+        if (which.isArray() && values.isArray()) {
+            for (uint32_t i = 0; i < which.size() && i < values.size(); ++i) {
+                const int node = json_int(which[static_cast<int>(i)], -1);
+                const int value = json_int(values[static_cast<int>(i)], -1);
+                if (node >= 0 && value >= 0)
+                    index.input_value_[node] = value;
+            }
+        }
+    }
+    const auto option_selected = member(nodes, "optionSelected");
+    if (option_selected.isObject()) {
+        const auto which = member(option_selected, "index");
+        if (which.isArray()) {
+            for (uint32_t i = 0; i < which.size(); ++i) {
+                const int node = json_int(which[static_cast<int>(i)], -1);
+                if (node >= 0)
+                    index.option_selected_.push_back(node);
+            }
+        }
+    }
+
+    const auto input_checked = member(nodes, "inputChecked");
+    if (input_checked.isObject()) {
+        const auto which = member(input_checked, "index");
+        if (which.isArray()) {
+            for (uint32_t i = 0; i < which.size(); ++i) {
+                const int node = json_int(which[static_cast<int>(i)], -1);
+                if (node >= 0)
+                    index.input_checked_.push_back(node);
+            }
+        }
+    }
+
+    // The capture's theme verdicts, written beside the snapshot's own arrays.
+    const auto theme = member(snapshot, "formControlTheme");
+    if (theme.isObject()) {
+        const auto controls = member(theme, "controls");
+        if (controls.isArray()) {
+            for (uint32_t i = 0; i < controls.size(); ++i) {
+                const auto control = controls[static_cast<int>(i)];
+                if (!control.isObject())
+                    continue;
+                const int node = json_int(member(control, "node_index"), -1);
+                const auto verdict = member(control, "theme");
+                if (node >= 0 && verdict.isString())
+                    index.control_theme_[node] = std::string(verdict.getString());
+            }
+        }
+    }
+
     const auto node_index = member(layout, "nodeIndex");
     const auto styles = member(layout, "styles");
     const auto bounds = member(layout, "bounds");
@@ -315,7 +377,6 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
         if (paint_orders.isArray() && i < paint_orders.size())
             index.layout_paint_order_[i] = json_int(paint_orders[at], -1);
         if (node < 0) continue;
-        index.node_to_layout_[node] = at;
         index.layout_to_node_[i] = node;
     }
 
@@ -344,6 +405,20 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
             box.height = entry[3].getWithDefault<double>(0.0);
             index.layout_bounds_[i] = box;
         }
+    }
+
+    for (size_t at = 0; at < index.layout_to_node_.size(); ++at) {
+        const int node = index.layout_to_node_[at];
+        if (node < 0)
+            continue;
+        const auto has_area = [&](size_t row) {
+            const auto& box = index.layout_bounds_[row];
+            return box.width > 0.0 && box.height > 0.0;
+        };
+        const auto [current, inserted] =
+            index.node_to_layout_.try_emplace(node, static_cast<int>(at));
+        if (!inserted && has_area(at) && !has_area(static_cast<size_t>(current->second)))
+            current->second = static_cast<int>(at);
     }
 
     // Text fragments. `includeDOMRects` is what makes Chrome emit these, and a
@@ -419,6 +494,21 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
                     const int layout_index =
                         json_int(member(run, "layout_index"), -1);
                     if (layout_index < 0) continue;
+                    const auto metrics = member(run, "line_metrics");
+                    if (metrics.isObject()) {
+                        const auto ascent = member(metrics, "ascent");
+                        const auto descent = member(metrics, "descent");
+                        auto numeric = [](const choc::value::ValueView& v) {
+                            return v.isInt32() || v.isInt64() || v.isFloat32() || v.isFloat64();
+                        };
+                        if (numeric(ascent) && numeric(descent)) {
+                            const pulp::view::LineMetrics m{
+                                static_cast<float>(ascent.getWithDefault<double>(0.0)),
+                                static_cast<float>(descent.getWithDefault<double>(0.0))};
+                            if (m.valid())
+                                index.layout_line_metrics_[layout_index] = m;
+                        }
+                    }
                     const auto resolved = member(run, "resolved");
                     if (!resolved.isArray() || resolved.size() == 0) continue;
                     // The face that shaped the MOST glyphs, not the first one
@@ -464,12 +554,23 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
     }
 
     if (index.style_rows_.empty()) return std::nullopt;
+    // The canvas proof classifies each layout row against the node's own row,
+    // so it runs once that table exists.
+    index.document_canvas_paint_ = detail::extract_document_canvas_paint(snapshot, index);
     return index;
 }
 
 std::string CapturedStyleIndex::resolved_face_for_layout(int layout_index) const {
     const auto it = layout_resolved_face_.find(layout_index);
     return it == layout_resolved_face_.end() ? std::string{} : it->second;
+}
+
+std::optional<pulp::view::LineMetrics>
+CapturedStyleIndex::line_metrics_for_layout(int layout_index) const {
+    const auto it = layout_line_metrics_.find(layout_index);
+    if (it == layout_line_metrics_.end())
+        return std::nullopt;
+    return it->second;
 }
 
 std::vector<CapturedTextBox> CapturedStyleIndex::text_boxes_for_layout(
@@ -567,7 +668,7 @@ std::vector<CapturedTextBox> coalesce_text_line_fragments(
     return lines;
 }
 
-std::optional<int> CapturedStyleIndex::layout_for_node(int node_index) const {
+std::optional<int> CapturedStyleIndex::own_layout_row(int node_index) const {
     const auto it = node_to_layout_.find(node_index);
     if (it == node_to_layout_.end()) return std::nullopt;
     return it->second;
@@ -593,7 +694,7 @@ std::optional<CapturedBox> CapturedStyleIndex::bounds_for(
     int backend_node_id) const {
     const auto node = backend_to_node_.find(backend_node_id);
     if (node == backend_to_node_.end()) return std::nullopt;
-    const auto layout = layout_for_node(node->second);
+    const auto layout = own_layout_row(node->second);
     if (!layout) return std::nullopt;
     return layout_bounds_[static_cast<size_t>(*layout)];
 }
@@ -601,6 +702,63 @@ std::optional<CapturedBox> CapturedStyleIndex::bounds_for(
 std::string CapturedStyleIndex::string_at(int index) const {
     if (index < 0 || index >= static_cast<int>(strings_.size())) return {};
     return strings_[static_cast<size_t>(index)];
+}
+
+std::string CapturedStyleIndex::control_theme(int node_index) const {
+    const auto found = control_theme_.find(node_index);
+    return found == control_theme_.end() ? std::string() : found->second;
+}
+
+bool CapturedStyleIndex::control_checked(int node_index) const {
+    return std::find(input_checked_.begin(), input_checked_.end(), node_index) !=
+           input_checked_.end();
+}
+
+std::string CapturedStyleIndex::control_value(int node_index) const {
+    if (const auto found = input_value_.find(node_index); found != input_value_.end())
+        return string_at(found->second);
+    if (tag_name(node_index) != "select")
+        return {};
+    // The first selected option that belongs to THIS select — directly, or
+    // through an `<optgroup>`. A nested select is not valid HTML, so the walk
+    // up from the option cannot pass through a different one.
+    for (const int option : option_selected_) {
+        bool owned = false;
+        for (int cursor = parent_of(option), steps = 0; cursor >= 0 && steps < node_count();
+             cursor = parent_of(cursor), ++steps) {
+            if (cursor == node_index) {
+                owned = true;
+                break;
+            }
+            if (tag_name(cursor) == "select")
+                break;
+        }
+        if (!owned)
+            continue;
+        // An option's label is its text content with whitespace collapsed, as
+        // the closed select displays it.
+        std::string label;
+        for (int child = 0; child < node_count(); ++child) {
+            if (parent_of(child) != option || node_type_of(child) != 3)
+                continue;
+            if (static_cast<size_t>(child) < node_value_.size())
+                label += string_at(node_value_[static_cast<size_t>(child)]);
+        }
+        std::string collapsed;
+        bool pending_space = false;
+        for (const char c : label) {
+            if (std::isspace(static_cast<unsigned char>(c))) {
+                pending_space = !collapsed.empty();
+                continue;
+            }
+            if (pending_space)
+                collapsed.push_back(' ');
+            pending_space = false;
+            collapsed.push_back(c);
+        }
+        return collapsed;
+    }
+    return {};
 }
 
 int CapturedStyleIndex::parent_of(int node_index) const {
@@ -621,7 +779,7 @@ CapturedStyleIndex::inherited_type_scale(int node_index) const {
     int cursor = parent_of(node_index);
     for (size_t steps = 0; steps < parent_index_.size() && cursor >= 0;
          ++steps, cursor = parent_of(cursor)) {
-        const auto layout = layout_for_node(cursor);
+        const auto layout = own_layout_row(cursor);
         if (!layout) continue;
         const auto styles = styles_for_layout(*layout);
         const auto it = styles.find("transform");
@@ -679,6 +837,18 @@ std::string CapturedStyleIndex::attribute(int node_index,
         if (string_at(pairs[i]) == name) return string_at(pairs[i + 1]);
     }
     return {};
+}
+
+bool CapturedStyleIndex::has_attribute(int node_index, std::string_view name) const {
+    if (node_index < 0 || node_index >= static_cast<int>(node_attributes_.size())) {
+        return false;
+    }
+    const auto& pairs = node_attributes_[static_cast<size_t>(node_index)];
+    for (size_t i = 0; i + 1 < pairs.size(); i += 2) {
+        if (string_at(pairs[i]) == name)
+            return true;
+    }
+    return false;
 }
 
 std::string CapturedStyleIndex::tag_name(int node_index) const {
@@ -785,7 +955,8 @@ std::map<std::string, std::string> CapturedStyleIndex::styles_for(
             break;
         }
     }
-    if (!chosen) chosen = layout_for_node(node->second);
+    if (!chosen)
+        chosen = own_layout_row(node->second);
     if (!chosen) return computed;
 
     const auto& row = style_rows_[static_cast<size_t>(*chosen)];
@@ -893,6 +1064,10 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
         set_string("background-size", style.background_size);
         set_string("background-position", style.background_position);
         set_string("background-repeat", style.background_repeat);
+        // Absent is the initial padding-box, so only another origin is kept.
+        if (const auto origin = lookup("background-origin");
+            !is_absent(origin) && origin != "padding-box")
+            style.background_origin = origin;
     }
 
     const auto opacity = lookup("opacity");

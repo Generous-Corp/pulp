@@ -1,13 +1,28 @@
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
 
+#include "detail/gpu_convolver_test_access.hpp"
+#include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
+#include "detail/worker_pipeline_hosting.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <utility>
 
 namespace pulp::gpu_audio {
+
+// Defined before the constructors, which make_unique the staged state.
+struct GpuConvolver::SharedIoState {};
+
+struct GpuConvolver::StagedReadbackState {
+    GpuConvolverStagedBreaker breaker{};
+    std::atomic<std::uint8_t> reason{0};
+    // Recorded like the render build; without a staged device the node never
+    // pipelines, so it changes nothing else.
+    bool transport_hosted = false;
+};
 
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
@@ -17,9 +32,61 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response, uint32_t latency_blocks)
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
-      latency_blocks_(latency_blocks), ir_(std::move(impulse_response)) {}
+      latency_blocks_(latency_blocks), ir_(std::move(impulse_response)),
+      staged_readback_(std::make_unique<StagedReadbackState>()) {}
 
-struct GpuConvolver::SharedIoState {};
+namespace detail {
+bool set_worker_pipeline_hosting(GpuAudioNode* node, bool hosted) noexcept {
+    auto* convolver = dynamic_cast<GpuConvolver*>(node);
+    if (convolver == nullptr || !convolver->staged_readback_)
+        return false;
+    convolver->staged_readback_->transport_hosted = hosted;
+    return true;
+}
+} // namespace detail
+
+std::uint64_t GpuConvolver::staged_cpu_blocks() const noexcept {
+    return 0;
+}
+
+std::uint64_t GpuConvolver::staged_gpu_blocks() const noexcept {
+    return 0;
+}
+
+std::uint64_t GpuConvolver::staged_breaker_trips() const noexcept {
+    return 0;
+}
+
+GpuAudioRecoveryReason GpuConvolver::staged_latched_reason() const noexcept {
+    return static_cast<GpuAudioRecoveryReason>(
+        staged_readback_->reason.load(std::memory_order_acquire));
+}
+
+bool GpuConvolver::configure_staged_breaker(const GpuConvolverStagedBreaker& config) noexcept {
+    if (prepared_ || config.trip_after_misses == 0 || config.probe_interval_blocks == 0 ||
+        config.recover_after_hits == 0)
+        return false;
+    staged_readback_->breaker = config;
+    return true;
+}
+
+GpuConvolverStagedBreaker GpuConvolver::staged_breaker() const noexcept {
+    return staged_readback_->breaker;
+}
+
+// No staged device exists in this build: the staged GPU path never runs, so
+// its helpers have nothing to do and nothing is ever latched.
+bool GpuConvolver::wait_staged_readback(StagedReadbackState&, float*) {
+    return false;
+}
+
+void GpuConvolver::submit_staged_readback(StagedReadbackState&, std::size_t) {}
+
+void GpuConvolver::configure_staged_pipeline() {}
+
+void GpuConvolver::latch_staged_recovery(GpuAudioRecoveryReason) noexcept {}
+
+void GpuConvolver::update_staged_breaker(StagedReadbackState&, bool) noexcept {}
 
 GpuConvolver::~GpuConvolver() = default;
 
@@ -69,17 +136,14 @@ bool GpuConvolver::prepare() {
     prepared_ = false;
     if (provider_policy_ == ProviderPolicy::SharedRequired)
         return false;
-    if (channels_ == 0 || block_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
+    if (channels_ == 0 || block_ == 0 || sample_rate_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
         latency_blocks_ > kMaxLatencyBlocks)
         return false;
 
-    // The fallback is a signal::PartitionedConvolver loaded at `block_`, and
-    // load_ir() rounds a non-power-of-two block UP to the next power of two for
-    // its radix-2 FFT. It would then be partitioned for a block size the
-    // transport never delivers, so every block would be a block-size violation.
-    // Here that is fatal rather than degrading: with no render backend the
-    // fallback is the ONLY audio path, so the node would emit nothing but
-    // silence. Refuse to prepare instead.
+    // The GPU transport and its prepared CPU fallback both require the exact
+    // host block size. Keep rejecting non-power-of-two blocks: the no-render
+    // path is the only audio path, so silently normalizing a callback size
+    // would turn every block into a fail-closed violation.
     if ((block_ & (block_ - 1u)) != 0u)
         return false;
 
@@ -106,6 +170,62 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
     render_worker_fallback(input, output, n);
 }
 
+// No staged device or shared session exists in this build, so nothing is ever
+// latched and no shared health sample is available.
+GpuAudioRecoveryReason GpuConvolver::staged_recovery_reason() const noexcept {
+    return GpuAudioRecoveryReason::None;
+}
+
+bool GpuConvolver::realtime_shared_io_health(const void*, detail::RealtimeGpuHealth&) noexcept {
+    return false;
+}
+
+render::GpuCompute*
+detail::GpuConvolverTestAccess::staged_compute(GpuConvolver& convolver) noexcept {
+    return convolver.gpu_.get(); // always null: no staged device in this build
+}
+
+void detail::GpuConvolverTestAccess::install_staged_compute(
+    GpuConvolver& convolver, std::unique_ptr<render::GpuCompute> compute) noexcept {
+    convolver.gpu_ = std::move(compute);
+}
+
+bool detail::GpuConvolverTestAccess::install_shared_io_session(
+    GpuConvolver&, std::unique_ptr<SharedIoConvolutionSession>&&) noexcept {
+    return false; // shared-I/O support is not compiled into this build
+}
+
+// No render backend: the worker always runs the exact CPU convolution. This is
+// the staged path's no-device case in the render build, so it reports the same
+// way: provider unknown, CPU engine, Degraded, no GPU kernel.
+GpuAudioStatus GpuConvolver::status_snapshot() const noexcept {
+    GpuAudioStatus status;
+    if (!prepared_) {
+        status.provider_state = GpuAudioProviderState::Uninitialized;
+        return status;
+    }
+    status.requested_engine =
+        provider_policy_ == ProviderPolicy::Auto ? GpuAudioEngine::Unknown : GpuAudioEngine::Gpu;
+    status.selected_engine = GpuAudioEngine::Cpu;
+    status.provider = GpuAudioProvider::Unknown;
+    status.provider_state = GpuAudioProviderState::Degraded;
+    status.fallback_policy = MissPolicy::CpuFallback;
+    status.fallback_available = cpu_fallback_prepared();
+    status.diagnostics_available = true;
+    status.sample_rate = sample_rate_;
+    status.block_size = block_;
+    status.latency_samples = latency_blocks_ * block_;
+    return status;
+}
+
+GpuAudioRecoveryReason GpuConvolver::recovery_reason() const noexcept {
+    return status_snapshot().recovery_reason;
+}
+
+bool GpuConvolver::fenced() const noexcept {
+    return status_snapshot().provider_state == GpuAudioProviderState::Uninitialized;
+}
+
 GpuMultiConvolver::GpuMultiConvolver(uint32_t block_size, uint32_t sample_rate,
                                      std::vector<std::vector<float>> irs)
     : block_(block_size), sample_rate_(sample_rate), irs_(std::move(irs)),
@@ -130,6 +250,23 @@ std::string GpuMultiConvolver::backend() const {
     return {};
 }
 
+bool GpuMultiConvolver::device_lost() const noexcept {
+    return false;
+}
+
+bool GpuMultiConvolver::prepare_on(std::unique_ptr<render::GpuCompute>) {
+    prepared_ = false;
+    gpu_.reset();
+    return false;
+}
+
+namespace detail {
+bool prepare_gpu_multi_convolver_with(GpuMultiConvolver&,
+                                      std::unique_ptr<render::GpuCompute>) noexcept {
+    return false;
+}
+} // namespace detail
+
 bool GpuMultiConvolver::prepare() {
     prepared_ = false;
     gpu_.reset();
@@ -148,6 +285,22 @@ void GpuMultiConvolver::process_block(const audio::BufferView<const float>&,
 void GpuMultiConvolver::process_cpu_fallback(const audio::BufferView<const float>&,
                                              audio::BufferView<float>& output, uint32_t) noexcept {
     output.clear();
+}
+
+// No render backend: prepare() always refuses, so the node never leaves the
+// uninitialized state and never delivers GPU audio.
+GpuAudioStatus GpuMultiConvolver::status_snapshot() const noexcept {
+    GpuAudioStatus status;
+    status.provider_state = GpuAudioProviderState::Uninitialized;
+    return status;
+}
+
+GpuAudioRecoveryReason GpuMultiConvolver::recovery_reason() const noexcept {
+    return status_snapshot().recovery_reason;
+}
+
+bool GpuMultiConvolver::fenced() const noexcept {
+    return true;
 }
 
 } // namespace pulp::gpu_audio

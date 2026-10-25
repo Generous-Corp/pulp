@@ -16,6 +16,7 @@
 #include <pulp/format/au_v2_midi_processor.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/registry.hpp>
+#include "../examples/pulp-gain/pulp_gain.hpp"
 
 #include <AudioToolbox/AudioUnit.h>
 #include <Foundation/Foundation.h>
@@ -665,6 +666,41 @@ TEST_CASE("AU v2 ParameterStringFromValue formats via to_string",
                                kCFStringEncodingUTF8));
     REQUIRE(std::string(buf) == "0.50");
     CFRelease(plain.outString);
+}
+
+TEST_CASE("AU v2 parses the text it shows for a toggle without labels",
+          "[au][au-v2][params][display]") {
+    // PulpGain's Bypass is a Toggle with no value labels, displayed as "0" or
+    // "1"; ParameterValueFromString must accept that text back.
+    const auto previous = pulp::format::registered_factory();
+    pulp::format::register_plugin(pulp::examples::create_pulp_gain);
+    struct RestoreFactory {
+        pulp::format::ProcessorFactory value;
+        ~RestoreFactory() {
+            pulp::format::register_plugin(value);
+        }
+    } restore{previous};
+    pulp::format::au::PulpAUEffect effect(nullptr);
+
+    for (const Float32 value : {0.0f, 1.0f}) {
+        Float32 in = value;
+        AudioUnitParameterStringFromValue sfv{};
+        sfv.inParamID = pulp::examples::kBypass;
+        sfv.inValue = &in;
+        REQUIRE(effect.GetProperty(kAudioUnitProperty_ParameterStringFromValue,
+                                   kAudioUnitScope_Global, 0, &sfv) == noErr);
+        REQUIRE(sfv.outString != nullptr);
+
+        AudioUnitParameterValueFromString vfs{};
+        vfs.inParamID = pulp::examples::kBypass;
+        vfs.inString = sfv.outString;
+        vfs.outValue = -1.0f;
+        const OSStatus parsed = effect.GetProperty(kAudioUnitProperty_ParameterValueFromString,
+                                                   kAudioUnitScope_Global, 0, &vfs);
+        CFRelease(sfv.outString);
+        REQUIRE(parsed == noErr);
+        REQUIRE(vfs.outValue == value);
+    }
 }
 
 TEST_CASE("AU v2 ParameterValueFromString parses via from_string",

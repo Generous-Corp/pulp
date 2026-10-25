@@ -11,6 +11,7 @@
 #include <pulp/canvas/skia_canvas.hpp>
 
 #include "skia_canvas_internal.hpp"
+#include "skia_gradient_compat.hpp"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkImage.h"
@@ -305,7 +306,7 @@ void SkiaCanvas::fill_path(const Path& path, FillRule rule) {
     // Mirror fill_current_path's paint construction: an active gradient shader
     // wins over the solid fill color.
     if (has_gradient_ && gradient_shader_) {
-        paint.setShader(gradient_shader_);
+        skia_gradient::set_paint_shader(paint, gradient_shader_);
     } else {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }
@@ -351,7 +352,8 @@ void SkiaCanvas::stroke_path(const Path& path, const StrokeStyle& style) {
         }
     }
 
-    if (stroke_shader_) paint.setShader(stroke_shader_);
+    if (stroke_shader_)
+        skia_gradient::set_paint_shader(paint, stroke_shader_);
     apply_shadow_filter(paint);
     apply_filter(paint);
 
@@ -473,7 +475,15 @@ Canvas::LayerHandle SkiaCanvas::end_layer() {
     if (open.layer.surface) {
         // Seal it. The snapshot is what OUTLIVES the frame — this is the step
         // a scoped save_layer/restore pair can never hand back to a caller.
-        open.layer.image = open.layer.surface->makeImageSnapshot();
+        // On Graphite the image shares the surface's texture rather than
+        // copying it; that is safe because the surface is released on the
+        // next line and nothing draws into it again. The image keeps the
+        // layer's device alive. A surface that is not textureable is copied.
+        // Ganesh and raster snapshots are already copy-on-write.
+        if (recorder_ != nullptr)
+            open.layer.image = SkSurfaces::AsImage(open.layer.surface);
+        if (!open.layer.image)
+            open.layer.image = open.layer.surface->makeImageSnapshot();
         open.layer.surface.reset();  // the surface's job is done; free it
     }
     if (!open.layer.image) return LayerHandle{};

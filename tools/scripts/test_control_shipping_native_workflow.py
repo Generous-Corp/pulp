@@ -21,9 +21,12 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
             "linux-x64",
             "linux-arm64",
             "windows-x64",
+            "windows-arm64",
             "ubuntu-24.04-arm",
             "windows-2022",
+            "windows-11-arm",
             "arm64;x86_64",
+            "'ARM64'",
         ):
             self.assertIn(value, self.workflow)
 
@@ -31,6 +34,18 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
             "- leg:", 1
         )[0]
         self.assertIn("report_architectures: 'x86_64-win'", windows_leg)
+
+        windows_arm_leg = self.workflow.split("- leg: windows-arm64", 1)[1].split(
+            "- leg:", 1
+        )[0]
+        self.assertIn("os: windows-11-arm", windows_arm_leg)
+        self.assertIn("cmake_architectures: 'ARM64'", windows_arm_leg)
+        self.assertIn("report_architectures: 'arm64-win'", windows_arm_leg)
+
+        self.assertGreaterEqual(
+            self.workflow.count('if [ -n "${{ matrix.cmake_architectures }}" ]'),
+            2,
+        )
 
     def test_installed_sdk_builds_real_format_targets(self) -> None:
         self.assertIn("tools/validation/sdk-smoke", self.workflow)

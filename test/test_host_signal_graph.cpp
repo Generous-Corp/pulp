@@ -3224,6 +3224,20 @@ TEST_CASE("SignalGraph ordinary failed live swap invalidates the published snaps
     REQUIRE(graph.prepare(48000.0, 8));
     REQUIRE(graph.set_node_gain(gain, 0.5f));
 
+    // Positive control: the prepared graph is live before the failed swap and
+    // applies the authored gain. This keeps the later silence checks tied to
+    // the ordinary refusal path rather than an accidentally unpublished setup.
+    std::array<float, 8> pre_swap_input{};
+    std::array<float, 8> pre_swap_output{};
+    pre_swap_input.fill(1.0f);
+    const float* pre_swap_input_ptrs[1] = {pre_swap_input.data()};
+    float* pre_swap_output_ptrs[1] = {pre_swap_output.data()};
+    pulp::audio::BufferView<const float> pre_swap_input_view(pre_swap_input_ptrs, 1, 8);
+    pulp::audio::BufferView<float> pre_swap_output_view(pre_swap_output_ptrs, 1, 8);
+    graph.process(pre_swap_output_view, pre_swap_input_view, 8);
+    for (const float sample : pre_swap_output)
+        CHECK(sample == 0.5f);
+
     // Feedback changes the execution state carried by a compiled snapshot, so
     // prepare_swap must reject the candidate. Ordinary refusals fail closed by
     // invalidating the published snapshot; only the documented MIDI-output

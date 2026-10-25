@@ -14,6 +14,11 @@ class WaveNetRealtimeChannel {
     virtual void service_until(std::uint64_t now_ns, std::uint64_t deadline_ns) noexcept = 0;
     virtual std::optional<GpuWaveNetBlockResult> receive(std::span<float>) noexcept = 0;
     virtual bool release() noexcept = 0;
+    // Serialized worker diagnostic: the provider's device is gone, so nothing
+    // submitted to this channel will complete successfully again.
+    virtual bool lost() const noexcept {
+        return false;
+    }
 };
 struct WaveNetRealtimeTestAccess {
     static void
@@ -24,6 +29,7 @@ struct WaveNetRealtimeTestAccess {
     static void observe_trace(GpuWaveNetRealtimeNode&, SharedIoTraceDrainObserver) noexcept;
     static SharedIoTraceStats trace_stats(const GpuWaveNetRealtimeNode&) noexcept;
     static SharedIoTelemetrySnapshot telemetry(const GpuWaveNetRealtimeNode&) noexcept;
+    static SharedIoTraceDrainResult last_trace_drain(const GpuWaveNetRealtimeNode&) noexcept;
     static SharedIoTraceRecord last_terminal(const GpuWaveNetRealtimeNode&) noexcept;
     static std::uint64_t trace_engine(const GpuWaveNetRealtimeNode&) noexcept;
     static bool prepare(GpuWaveNetRealtimeNode&,

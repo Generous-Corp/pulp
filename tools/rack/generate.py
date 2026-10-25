@@ -620,6 +620,118 @@ def _signal_platform_link_args() -> list[str]:
     return []
 
 
+SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+# The explicit, logged way to run the gate without sandbox-exec.
+UNSANDBOXED_GATE_OPT_OUT = "FORGE_UNSANDBOXED_GATE"
+
+# Variables the gate process keeps. Everything else in the generator's
+# environment -- API keys, tokens, the user's HOME -- is dropped.
+GATE_ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR")
+
+
+def _real_home() -> str:
+    """The account's home directory, whatever HOME says."""
+    import pwd
+    return os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+
+
+def _darwin_user_dir() -> str:
+    """The per-user Darwin directory (.../0), or "" where there is none.
+
+    confstr(_CS_DARWIN_USER_DIR) directly, what `getconf DARWIN_USER_DIR`
+    prints, without spawning anything while the gate is being set up.
+    """
+    if sys.platform != "darwin":
+        return ""
+    import ctypes
+    import ctypes.util
+    _CS_DARWIN_USER_DIR = 65536
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        buf = ctypes.create_string_buffer(1024)
+        if libc.confstr(_CS_DARWIN_USER_DIR, buf, len(buf)) == 0:
+            return ""
+    except OSError:
+        return ""
+    path = buf.value.decode("utf-8", "replace")
+    return os.path.realpath(path) if path else ""
+
+
+def _sbpl_string(path: str) -> str:
+    return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def gate_launch(exe: str, scratch: str):
+    """The argv and environment that run a behaviour-gate executable.
+
+    The gate links and RUNS model-written C++: static initialisers and
+    process() execute natively before anyone has looked at the code. So it
+    runs with a scrubbed environment (HOME is the scratch directory, no keys
+    or tokens), and on macOS under sandbox-exec with no network, no process
+    spawning, writes confined to the scratch directory, and reads under the
+    home directory, the per-user temp and Darwin directories, /private/tmp
+    and /Volumes allowed only where it must (scratch, the Rack SDK, this
+    toolchain), so injected code cannot read the person's files and print
+    them into the output that feeds the next prompt.
+
+    sandbox-exec is deprecated but present on every supported macOS. Where it
+    is missing the gate refuses (BehaviourGateUnavailable) unless
+    FORGE_UNSANDBOXED_GATE=1 opts out, which is logged.
+    DYLD_* is stripped when a protected binary like sandbox-exec is launched,
+    so the library path is set by /usr/bin/env inside the sandbox instead.
+    """
+    scratch = os.path.realpath(scratch)
+    env = {k: os.environ[k] for k in GATE_ENV_KEEP if k in os.environ}
+    env["HOME"] = scratch
+    if sys.platform != "darwin" or not os.path.exists(SANDBOX_EXEC):
+        # FAIL CLOSED. Model-written code does not run unfenced by accident;
+        # an operator who means it says so, and the run says it loudly.
+        if os.environ.get(UNSANDBOXED_GATE_OPT_OUT) != "1":
+            raise BehaviourGateUnavailable(
+                "the behavioural gate runs model-written code and needs "
+                f"{SANDBOX_EXEC} to fence it, which is not available here. "
+                f"Set {UNSANDBOXED_GATE_OPT_OUT}=1 to run it unsandboxed "
+                "anyway.")
+        print(f"  WARNING: {UNSANDBOXED_GATE_OPT_OUT}=1: the behaviour gate "
+              "runs model-written code UNSANDBOXED, with this user's file "
+              "and network access", file=sys.stderr)
+        env["DYLD_LIBRARY_PATH"] = SDK
+        return [exe], env
+    profile = "\n".join([
+        "(version 1)",
+        "(allow default)",
+        "(deny network*)",
+        "(deny process-fork)",
+        "(deny process-exec*)",
+        f"(allow process-exec (literal \"/usr/bin/env\") (literal {_sbpl_string(os.path.realpath(exe))}))",
+        "(deny file-write*)",
+        f"(allow file-write* (subpath {_sbpl_string(scratch)}) (literal \"/dev/null\") (literal \"/dev/stdout\") (literal \"/dev/stderr\") (literal \"/dev/tty\"))",
+        # Nothing under the person's home is readable except what the gate
+        # needs: its scratch directory, the Rack SDK and this toolchain (the
+        # pack lives inside it). The gate's output goes back into the next
+        # prompt, so a readable ~/.ssh or secrets store would be one print()
+        # away from the model. System locations stay readable for dyld.
+        f"(deny file-read* (subpath {_sbpl_string(_real_home())}))",
+        # The per-user temp directory and /private/tmp are not under home but
+        # hold other processes' files (Forge's own prompt files among them).
+        # The scratch directory lives there and is allowed back below.
+        f"(deny file-read* (subpath {_sbpl_string(os.path.realpath(tempfile.gettempdir()))}) (subpath \"/private/tmp\"))",
+        # The per-user Darwin directory (getconf DARWIN_USER_DIR, .../0) holds
+        # plain user-readable app state, private tokens among it. Its sibling
+        # cache directory (.../C) stays readable for system frameworks.
+        *([f"(deny file-read* (subpath {_sbpl_string(d)}))"]
+          if (d := _darwin_user_dir()) else []),
+        # Other volumes are the person's data too. The toolchain and SDK may
+        # live on one; they are allowed back below.
+        "(deny file-read* (subpath \"/Volumes\"))",
+        "(allow file-read* " + " ".join(
+            f"(subpath {_sbpl_string(p)})"
+            for p in (scratch, os.path.realpath(SDK), os.path.realpath(ROOT))) + ")",
+    ])
+    return ([SANDBOX_EXEC, "-p", profile, "/usr/bin/env",
+             "DYLD_LIBRARY_PATH=" + SDK, os.path.realpath(exe)], env)
+
+
 def preflight_behaviour_gate() -> None:
     """Prove the gate and Pulp's signal link contract before a model call."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -652,15 +764,17 @@ const char* forge_output_name(int) { return ""; }
              *_includes(), "-DARCH_MAC",
              os.path.join(SDK, "libRack.dylib"),
              *_signal_platform_link_args()],
-            capture_output=True, text=True)
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace")
         if result.returncode != 0:
             raise BehaviourGateUnavailable(
                 "the behavioural gate could not be built before generation:\n" +
                 result.stderr)
-        env = dict(os.environ, DYLD_LIBRARY_PATH=SDK)
+        argv, env = gate_launch(exe, tmp)
         try:
             result = subprocess.run(
-                [exe], capture_output=True, text=True, timeout=30, env=env)
+                argv, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=30, env=env)
         except subprocess.TimeoutExpired:
             raise BehaviourGateUnavailable(
                 "the behavioural gate preflight hung before generation") from None
@@ -808,9 +922,10 @@ const char* forge_output_name(int i) {{
 
         # libRack.dylib's install name is a bare filename, not @rpath-relative,
         # so a link-time rpath cannot resolve it -- the loader needs the search
-        # path at run time.
-        env = dict(os.environ, DYLD_LIBRARY_PATH=SDK)
-        r = subprocess.run([exe], capture_output=True, text=True,
+        # path at run time. gate_launch() supplies it, inside the sandbox.
+        argv, env = gate_launch(exe, tmp)
+        r = subprocess.run(argv, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace",
                            timeout=120, env=env)
         output = r.stdout + r.stderr
         if r.returncode != 0:

@@ -161,6 +161,9 @@ endif()
 # can be tested without launching Chromium.
 add_executable(pulp-test-browser-capture-import
     test_browser_capture_backdrop_filter.cpp
+    test_browser_capture_fonts.cpp
+    test_browser_capture_group_opacity.cpp
+    test_browser_capture_gradient_border.cpp
     test_browser_capture_ir.cpp
     test_browser_knob_sprites.cpp
     test_browser_capture_text_metrics.cpp
@@ -174,10 +177,12 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_ir.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_knob_sprites.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_styles.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_controls.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_tree.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_validation.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/svg_shape_lowering.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_html_import.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_fonts.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_workspace.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/claude_html_dependencies.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/html_project_stager.cpp
@@ -185,10 +190,13 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/sprite_skins.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/import_png_codec.cpp)
 pulp_test_data(pulp-test-browser-capture-import NO_DEFINE
-    SOURCES test_browser_capture_backdrop_filter.cpp test_browser_capture_ir.cpp
+    SOURCES test_browser_capture_backdrop_filter.cpp
+        test_browser_capture_group_opacity.cpp
+        test_browser_capture_gradient_border.cpp test_browser_capture_ir.cpp
         test_browser_capture_text_metrics.cpp test_browser_capture_tree.cpp
         test_browser_capture_svg_render.cpp
-    PATHS "test/fixtures/browser-capture-*")
+    PATHS "test/fixtures/browser-capture-*"
+        test/fixtures/import-differential/18-keyed-list-panel.identity.json)
 target_include_directories(pulp-test-browser-capture-import PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external/miniz)
@@ -203,7 +211,9 @@ target_include_directories(pulp-test-browser-capture-import PRIVATE
 # keeps the source HTML next to the capture so the document under test is
 # readable without replaying the browser. Two more cover the value forms a
 # stylesheet reaches paint through rather than the tree's shape: generated
-# `content` on ::before / ::after, and a non-blur `backdrop-filter` list.
+# `content` on ::before / ::after, a non-blur `backdrop-filter` list, and a
+# gradient under a translucent border, where `background-origin` decides which
+# end of the gradient the border row shows.
 target_compile_definitions(pulp-test-browser-capture-import PRIVATE
     PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/test/fixtures/browser-capture-computed-style"
     PULP_BROWSER_CAPTURE_FIXTURE_ROOT="${CMAKE_SOURCE_DIR}/test/fixtures"
@@ -513,6 +523,18 @@ if(Python3_Interpreter_FOUND AND PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
     set_tests_properties(import-design-ir-observe-malformed PROPERTIES
         LABELS "parser-import;import"
         TIMEOUT 120)
+endif()
+
+# The importer observer uses the narrow private render observer seam. Keep the
+# seam out of the installed SDK, along with provider headers and opaque handles.
+if(Python3_Interpreter_FOUND AND PROJECT_IS_TOP_LEVEL)
+    add_test(NAME import-design-ir-observe-provider-boundary
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_design_ir_observe_provider_boundary.py
+                --source ${CMAKE_SOURCE_DIR}/tools/import-design/design_ir_observe.cpp)
+    set_tests_properties(import-design-ir-observe-provider-boundary PROPERTIES
+        LABELS "parser-import;import;link-closure"
+        TIMEOUT 60)
 endif()
 
 # pulp-design-ir-observe --backend gpu / --render-receipt: a GPU request renders

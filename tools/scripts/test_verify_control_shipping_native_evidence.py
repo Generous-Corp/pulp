@@ -163,6 +163,7 @@ class NativeShippingEvidenceTest(unittest.TestCase):
             "linux-x64": ("linux", ["x86_64"]),
             "linux-arm64": ("linux", ["arm64"]),
             "windows-x64": ("windows", ["x86_64-win"]),
+            "windows-arm64": ("windows", ["arm64-win"]),
         }
         for leg, (platform, architectures) in identities.items():
             aax = {"status": "not-assessed", "proof": False}
@@ -214,6 +215,7 @@ class NativeShippingEvidenceTest(unittest.TestCase):
             "linux-x64": ("linux", ["x86_64"]),
             "linux-arm64": ("linux", ["arm64"]),
             "windows-x64": ("windows", ["x86_64-win"]),
+            "windows-arm64": ("windows", ["arm64-win"]),
         }
         for leg, (platform, architectures) in identities.items():
             value = {

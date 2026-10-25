@@ -10,10 +10,12 @@
 #include "json_writer.hpp"
 #include "mac_runtime_validators.hpp"
 #include "shell_redirect.hpp"
+#include "ship_bundle_strip.hpp"
 #include "xcode_developer_path.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -106,10 +108,16 @@ static int print_ship_help() {
     std::cout << "             --ship-inspector-runtime-eval  (separate unsafe-eval acknowledgement)\n";
     std::cout << "             --json  (emit inspector capability evidence)\n";
     std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (sign the .pkg)\n";
+    std::cout
+        << "             --identity \"Developer ID Application: ...\" [--entitlements <plist>]\n";
+    std::cout << "               (re-sign stripped plug-in copies; macOS)\n";
+    std::cout
+        << "             --keep-symbols  (ship plug-in bundles without stripping local symbols)\n";
     std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
     std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
     std::cout << "             --target macos --identity \"...\" --apple-id ... --team-id ...\n";
     std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (.pkg signing)\n";
+    std::cout << "             [--entitlements <plist>]  (sign and re-sign plug-ins with these)\n";
     std::cout << "             --pkg | --dmg   (notarizes the signed .pkg/.dmg it builds) (item 7.5)\n";
     std::cout << "             --ship-inspector [--ship-inspector-runtime-eval]  (package acknowledgements)\n";
     std::cout << "             --skip-sign | --skip-package | --skip-notarize      (CI flags)\n";
@@ -144,9 +152,31 @@ static int print_ship_help() {
     return 0;
 }
 
-// Path to the non-interactive-signing doctor script (tools/scripts).
+// A file the ship flow takes from Pulp itself. A source checkout has it at
+// `checkout_rel`; an SDK consumer project (pulp.toml, no core/) uses the copy
+// its selected SDK installs under share/pulp/ship. When neither exists, the
+// path returned is the one the caller should name in its error.
+static fs::path ship_support_file(const fs::path& root, const fs::path& checkout_rel,
+                                  const std::string& sdk_name) {
+    auto in_checkout = root / checkout_rel;
+    if (fs::exists(in_checkout) || fs::exists(root / "core") || !fs::exists(root / "pulp.toml")) {
+        return in_checkout;
+    }
+    auto sdk = resolve_standalone_sdk(root, /*materialize=*/false);
+    if (sdk.resolved_sdk_dir.empty())
+        return in_checkout;
+    return sdk.resolved_sdk_dir / "share" / "pulp" / "ship" / sdk_name;
+}
+
+// Path to the non-interactive-signing doctor script.
 static fs::path signing_doctor_script(const fs::path& root) {
-    return root / "tools" / "scripts" / "ensure_signing_ready.sh";
+    return ship_support_file(root, fs::path("tools") / "scripts" / "ensure_signing_ready.sh",
+                             "ensure_signing_ready.sh");
+}
+
+static fs::path default_entitlements(const fs::path& root) {
+    return ship_support_file(root, fs::path("ship") / "templates" / "entitlements.plist",
+                             "entitlements.plist");
 }
 
 // Fail-closed, quiet, idempotent preflight: materialize and prove the dedicated
@@ -289,7 +319,7 @@ static int ship_sign(const std::vector<std::string>& args,
     const std::string sub = "sign";
         std::string identity, target, keystore_path, key_alias, store_pass, key_pass;
         std::string sign_path;  // --path: sign one explicit desktop artifact (not .pkg)
-        std::string entitlements = (root / "ship" / "templates" / "entitlements.plist").string();
+        std::string entitlements = default_entitlements(root).string();
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--identity") {
@@ -547,6 +577,10 @@ static int ship_package_impl(const std::vector<std::string>& args,
 
         std::string version, target, keystore_path, key_alias, store_pass, key_pass, abi_arg;
         std::string installer_identity;  // Developer ID Installer (macOS .pkg signing)
+        // Developer ID Application identity and entitlements for re-signing the
+        // stripped copy of a bundle `pulp ship sign` already signed.
+        std::string identity, entitlements;
+        bool keep_symbols = false;
         std::string format;        // Linux: "appimage" selects the AppImage packager
         std::string binary_path;   // Linux AppImage: path to the standalone executable
         std::string icon_path;     // Linux AppImage: optional .png icon
@@ -589,6 +623,12 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 if (!take_ship_value(args, i, sub, args[i], abi_arg)) return 2;
             } else if (args[i] == "--installer-identity") {
                 if (!take_ship_value(args, i, sub, args[i], installer_identity)) return 2;
+            } else if (args[i] == "--identity") {
+                if (!take_ship_value(args, i, sub, args[i], identity))
+                    return 2;
+            } else if (args[i] == "--entitlements") {
+                if (!take_ship_value(args, i, sub, args[i], entitlements))
+                    return 2;
             } else if (args[i] == "--format") {
                 if (!take_ship_value(args, i, sub, args[i], format)) return 2;
             } else if (args[i] == "--binary") {
@@ -597,19 +637,23 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 if (!take_ship_value(args, i, sub, args[i], icon_path)) return 2;
             } else if (args[i] == "--product") {
                 if (!take_ship_value(args, i, sub, args[i], product_filter)) return 2;
-            }
-            else if (args[i] == "--apk-only") apk_only = true;
+            } else if (args[i] == "--apk-only")
+                apk_only = true;
             else if (args[i] == "--aab-only") aab_only = true;
             else if (args[i] == "--per-user") per_user = true;
             else if (args[i] == "--pkg") want_pkg = true;
             else if (args[i] == "--dmg") want_dmg = true;
             else if (args[i] == "--separate") want_separate = true;
+            else if (args[i] == "--keep-symbols")
+                keep_symbols = true;
             else if (args[i] == "--allow-tracing") allow_tracing = true;
             else if (args[i] == "--ship-inspector") ship_inspector = true;
             else if (args[i] == "--ship-inspector-runtime-eval")
                 ship_inspector_runtime_eval = true;
             else return unknown_ship_arg(sub, args[i]);
         }
+
+        (void)keep_symbols; // macOS plug-in packaging only
 
         // Refuse to package a PULP_TRACING=ON build unless explicitly allowed.
         if (int rc = enforce_no_tracing({build_dir, fs::path(binary_path)},
@@ -898,7 +942,7 @@ static int ship_package_impl(const std::vector<std::string>& args,
 #endif  // __linux__
 
 #if defined(__APPLE__)
-        int pkg_count = 0, dmg_count = 0;
+        int pkg_count = 0, dmg_count = 0, failed_count = 0;
 
         // Resolve the Developer ID Installer identity for flat-package
         // signing. Apple's installer-distribution flow requires the `.pkg`
@@ -908,6 +952,32 @@ static int ship_package_impl(const std::vector<std::string>& args,
         // then declines to notarize it rather than submitting garbage.
         installer_identity = ship_config(installer_identity, "PULP_INSTALLER_IDENTITY",
                                          "signing.apple", "installer_identity");
+
+        // Plug-in bundles ship as stripped, re-signed copies staged outside the
+        // build tree; see ship_bundle_strip.hpp. The staging tree is removed on
+        // every exit from this block.
+        pulp::cli::ShipStripOptions strip_options;
+        strip_options.identity =
+            ship_config(identity, "PULP_SIGN_IDENTITY", "signing.apple", "identity");
+        strip_options.entitlements = entitlements;
+        strip_options.symbols_dir = artifacts / "symbols";
+        bool preflight_passed = false;
+        strip_options.signing_preflight = [&] {
+            if (!preflight_passed)
+                preflight_passed = run_signing_preflight(root);
+            return preflight_passed;
+        };
+        const auto strip_staging =
+            fs::temp_directory_path() /
+            ("pulp-ship-strip-" +
+             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        struct RemoveTree {
+            fs::path path;
+            ~RemoveTree() {
+                std::error_code ec;
+                fs::remove_all(path, ec);
+            }
+        } strip_staging_cleanup{strip_staging};
 
 #ifdef __APPLE__
         // Components collected for the DEFAULT single, component-selectable
@@ -928,7 +998,10 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 std::cout << "Packaging " << name << " (Standalone .app → .dmg)...\n";
                 if (pulp::ship::create_dmg(app.string(), dmg_path.string(), name))
                     ++dmg_count;
-                else std::cerr << "  FAILED to create .dmg for " << name << "\n";
+                else {
+                    std::cerr << "  FAILED to create .dmg for " << name << "\n";
+                    ++failed_count;
+                }
             } else {
                 combined.push_back({app.string(), "/Applications", "Standalone App"});
             }
@@ -948,6 +1021,15 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 auto name = entry.path().stem().string();
                 if (!product_filter.empty() && name != product_filter) continue;
 
+                fs::path ship_path = entry.path();
+                if (!keep_symbols) {
+                    auto staged = pulp::cli::stage_stripped_bundle(entry.path(), strip_staging,
+                                                                   strip_options);
+                    if (!staged)
+                        return 1;
+                    ship_path = *staged;
+                }
+
 #ifdef __APPLE__
                 // Plugin bundle → .dmg ONLY when the user explicitly
                 // asked. Default + --pkg both produce .pkg.
@@ -956,12 +1038,12 @@ static int ship_package_impl(const std::vector<std::string>& args,
                     auto dmg_path = artifacts / dmg_name;
                     std::cout << "Packaging " << name << " (" << dir_name
                               << " → .dmg)...\n";
-                    if (pulp::ship::create_dmg(entry.path().string(),
-                                               dmg_path.string(),
+                    if (pulp::ship::create_dmg(ship_path.string(), dmg_path.string(),
                                                name + " " + dir_name)) {
                         ++dmg_count;
                     } else {
                         std::cerr << "  FAILED to create .dmg\n";
+                        ++failed_count;
                     }
                     continue;
                 }
@@ -977,22 +1059,25 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 if (!want_separate) {
                     // DEFAULT: collect as one toggleable choice in the combined,
                     // component-selectable installer built after this loop.
-                    combined.push_back({entry.path().string(), install_loc, title});
+                    combined.push_back({ship_path.string(), install_loc, title});
                     continue;
                 }
                 // --separate (legacy): one signed `.pkg` per format.
                 auto pkg_path = artifacts / (name + "-" + dir_name + "-" + version + ".pkg");
                 std::cout << "Packaging " << name << " (" << dir_name << " → .pkg"
                           << (installer_identity.empty() ? "" : ", signed") << ")...\n";
-                std::string cmd = "pkgbuild --component " + shell_quote(entry.path().string())
-                    + " --identifier " + shell_quote("com.pulp." + name + "." + format_lower)
-                    + " --version " + shell_quote(version)
-                    + " --install-location " + shell_quote(install_loc);
+                std::string cmd =
+                    "pkgbuild --component " + shell_quote(ship_path.string()) + " --identifier " +
+                    shell_quote("com.pulp." + name + "." + format_lower) + " --version " +
+                    shell_quote(version) + " --install-location " + shell_quote(install_loc);
                 if (!installer_identity.empty())
                     cmd += " --sign " + shell_quote(installer_identity);
                 cmd += " " + shell_quote(pkg_path.string()) + " 2>/dev/null";
                 if (run(cmd) == 0) ++pkg_count;
-                else std::cerr << "  FAILED\n";
+                else {
+                    std::cerr << "  FAILED\n";
+                    ++failed_count;
+                }
             }
         }
 
@@ -1006,10 +1091,26 @@ static int ship_package_impl(const std::vector<std::string>& args,
             if (pulp::ship::create_combined_pkg(combined, pkg_path.string(),
                     "com.pulp." + product_name, version, installer_identity))
                 ++pkg_count;
-            else std::cerr << "  FAILED to create combined installer\n";
+            else {
+                std::cerr << "  FAILED to create combined installer\n";
+                ++failed_count;
+            }
         }
         std::cout << "Created " << pkg_count << " .pkg and " << dmg_count
                   << " .dmg artifacts in " << artifacts.string() << "\n";
+        // An installer that failed, or a run that found nothing to package,
+        // is a failed `package`: `release` and scripts key off the exit code.
+        if (failed_count > 0) {
+            std::cerr << "Error: " << failed_count
+                      << " installer(s) failed to build; see the FAILED lines above.\n";
+            return 1;
+        }
+        if (pkg_count + dmg_count == 0) {
+            std::cerr << "Error: nothing to package: no plugin bundles or standalone apps "
+                         "were found under "
+                      << build_dir.string() << "\n";
+            return 1;
+        }
         return 0;
 #else
         std::cerr << "Error: `pulp ship package` has no packager for this "
@@ -1419,7 +1520,7 @@ static int ship_release(const std::vector<std::string>& args,
     const std::string sub = "release";
         std::string target = "macos";
         std::string identity, apple_id, team_id, password, version;
-        std::string api_key, api_key_id, api_issuer, installer_identity;
+        std::string api_key, api_key_id, api_issuer, installer_identity, entitlements;
         bool want_pkg = false, want_dmg = false;
         bool skip_sign = false, skip_package = false, skip_notarize = false;
         bool ship_inspector = false, ship_inspector_runtime_eval = false;
@@ -1431,6 +1532,9 @@ static int ship_release(const std::vector<std::string>& args,
                 if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
             } else if (args[i] == "--installer-identity") {
                 if (!take_ship_value(args, i, sub, args[i], installer_identity)) return 2;
+            } else if (args[i] == "--entitlements") {
+                if (!take_ship_value(args, i, sub, args[i], entitlements))
+                    return 2;
             } else if (args[i] == "--apple-id") {
                 if (!take_ship_value(args, i, sub, args[i], apple_id)) return 2;
             } else if (args[i] == "--team-id") {
@@ -1486,6 +1590,10 @@ static int ship_release(const std::vector<std::string>& args,
             if (!identity.empty()) {
                 sign_args.push_back("--identity");
                 sign_args.push_back(identity);
+            }
+            if (!entitlements.empty()) {
+                sign_args.push_back("--entitlements");
+                sign_args.push_back(entitlements);
             }
             int sign_rc = cmd_ship(sign_args);
             if (sign_rc != 0) {
@@ -1547,6 +1655,15 @@ static int ship_release(const std::vector<std::string>& args,
             if (!installer_identity.empty()) {
                 pkg_args.push_back("--installer-identity");
                 pkg_args.push_back(installer_identity);
+            }
+            // The Application identity re-signs each stripped plug-in copy.
+            if (!identity.empty()) {
+                pkg_args.push_back("--identity");
+                pkg_args.push_back(identity);
+            }
+            if (!entitlements.empty()) {
+                pkg_args.push_back("--entitlements");
+                pkg_args.push_back(entitlements);
             }
             int pkg_rc = cmd_ship(pkg_args);
             if (pkg_rc != 0) {
@@ -2196,7 +2313,7 @@ static int ship_share(const std::vector<std::string>& args,
         identity = ship_config(identity, "PULP_SIGN_IDENTITY",
                                "signing.apple", "identity");
         if (entitlements.empty()) {
-            auto def = root / "ship" / "templates" / "entitlements.plist";
+            auto def = default_entitlements(root);
             if (fs::exists(def)) entitlements = def.string();
         }
 
@@ -2463,10 +2580,12 @@ int cmd_ship(const std::vector<std::string>& args) {
     if (sub == "help" || sub == "--help" || sub == "-h")
         return print_ship_help();
 
-    auto root = find_project_root();
+    // A Pulp source checkout or an SDK consumer project (pulp.toml, no core/):
+    // both build into <root>/build, and ship_support_file() finds the signing
+    // script and entitlements in whichever one this is.
+    auto root = resolve_active_project_root(nullptr);
     // An appcast describes artifacts that already exist, so given an explicit
-    // --output it needs neither a Pulp source tree nor a build directory. That
-    // lets an SDK consumer (whose repo has no core/) publish its update feed.
+    // --output it needs neither a project nor a build directory.
     if (sub == "appcast" && root.empty() &&
         std::find(args.begin(), args.end(), "--output") != args.end())
         return ship_appcast(args, fs::current_path(), {});

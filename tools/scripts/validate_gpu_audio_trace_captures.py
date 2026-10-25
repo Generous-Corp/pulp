@@ -88,6 +88,14 @@ UNION ALL
 SELECT 'pulp_gpu_audio_validation:recovery_rows=' || COUNT(*)
   FROM pulp_gpu_audio_recoveries
 UNION ALL
+SELECT 'pulp_gpu_audio_validation:invalid_telemetry_issue_rows=' || COUNT(*)
+  FROM pulp_gpu_audio_capture_issues
+ WHERE issue = 'invalid_telemetry'
+UNION ALL
+SELECT 'pulp_gpu_audio_validation:validated_telemetry_rows=' || COUNT(*)
+  FROM pulp_gpu_audio_counters
+ WHERE telemetry_valid = 1 AND telemetry_error = 0
+UNION ALL
 SELECT 'pulp_gpu_audio_validation:capture_issue_rows=' || COUNT(*)
   FROM pulp_gpu_audio_capture_issues
 UNION ALL
@@ -122,6 +130,10 @@ SELECT 'pulp_gpu_audio_validation:unavailable_gpu_nonnull_rows=' || COUNT(*)
 """
     if kind == "negative":
         return """
+SELECT 'pulp_gpu_audio_validation:invalid_telemetry_issue_rows=' || COUNT(*)
+  FROM pulp_gpu_audio_capture_issues
+ WHERE issue = 'invalid_telemetry'
+UNION ALL
 SELECT 'pulp_gpu_audio_validation:queue_dropped_issue_rows=' || COUNT(*)
   FROM pulp_gpu_audio_capture_issues
  WHERE issue = 'queue_dropped'
@@ -201,6 +213,7 @@ def _query_metrics(
         required = {
             "session_rows", "block_rows", "admission_rows", "terminal_rows",
             "eligible_rows", "delivery_rows", "recovery_rows", "capture_issue_rows",
+            "invalid_telemetry_issue_rows", "validated_telemetry_rows",
             "full_lifecycle_issue_rows", "full_lifecycle_generation_rows",
             "lifecycle_violation_rows",
             "duplicate_terminal_rows", "duplicate_delivery_rows", "unavailable_gpu_null_rows",
@@ -209,7 +222,8 @@ def _query_metrics(
         }
     else:
         required = {
-            "queue_dropped_issue_rows", "full_lifecycle_issue_rows",
+            "queue_dropped_issue_rows", "invalid_telemetry_issue_rows",
+            "full_lifecycle_issue_rows",
             "lifecycle_violation_rows",
             "missing_gpu_terminal_rows", "missing_delivery_rows", "orphan_terminal_rows",
             "delivery_without_eligibility_rows",
@@ -287,6 +301,7 @@ def validate_captures(
             "delivery_rows": 2,
             "recovery_rows": 0,
             "capture_issue_rows": 0,
+            "invalid_telemetry_issue_rows": 0,
             "full_lifecycle_issue_rows": 0,
             "full_lifecycle_generation_rows": 1,
             "lifecycle_violation_rows": 0,
@@ -301,12 +316,16 @@ def validate_captures(
         },
         "positive",
     )
+    # The quiescent release drain must have validated, not merely deferred,
+    # the final counters; otherwise the zero issue count above proves nothing.
+    _expect_minimum(positive, {"validated_telemetry_rows": 1}, "positive")
 
     negative = _query_metrics(processor, definitions, negative_trace, kind="negative")
     _expect_minimum(
         negative,
         {
             "queue_dropped_issue_rows": 1,
+            "invalid_telemetry_issue_rows": 1,
             "full_lifecycle_issue_rows": 1,
             "lifecycle_violation_rows": 1,
             "missing_gpu_terminal_rows": 1,

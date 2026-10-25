@@ -80,6 +80,12 @@ std::optional<SocketEndpoint> parse_socket_endpoint(std::string_view text) {
     return ep;
 }
 
+// A socket server whose endpoint omits the host listens on loopback only.
+// Only the literal all-interfaces address reaches the network.
+std::string server_bind_host(const std::string& host) {
+    return host.empty() ? std::string{"127.0.0.1"} : host;
+}
+
 }  // namespace
 
 // ── Impl ────────────────────────────────────────────────────────────────
@@ -88,6 +94,7 @@ struct InterprocessConnection::Impl {
     IpcTransport transport = IpcTransport::NamedPipe;
     NamedPipe pipe;
     Socket socket;
+    std::string server_bind_address;
     std::timed_mutex write_mutex;
     std::shared_ptr<DisconnectLifecycle> lifecycle =
         std::make_shared<DisconnectLifecycle>();
@@ -271,21 +278,20 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
             }
         }
     } else {
-        // Single-client server: host may be omitted, in which case
-        // we bind on all interfaces.
+        // Single-client server: an omitted host listens on loopback only.
         auto endpoint = parse_socket_endpoint(name);
         if (!endpoint) {
             state_.store(IpcState::Error);
             return false;
         }
-        const std::string& host = endpoint->host.empty()
-                                      ? std::string{"0.0.0.0"}
-                                      : endpoint->host;
+        const std::string host = server_bind_host(endpoint->host);
         impl_->socket.create(SocketType::TCP);
         impl_->socket.set_write_timeout(
             std::chrono::milliseconds(
                 write_timeout_ms_.load(std::memory_order_relaxed)));
+        impl_->server_bind_address.clear();
         if (impl_->socket.bind(host, endpoint->port) && impl_->socket.listen(1)) {
+            impl_->server_bind_address = impl_->socket.local_address();
             auto client = impl_->socket.accept();
             if (client) {
                 impl_->socket = std::move(*client);
@@ -317,6 +323,10 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
         state_.compare_exchange_strong(expected, IpcState::Error);
     }
     return ok;
+}
+
+std::string InterprocessConnection::server_bind_address() const {
+    return impl_->server_bind_address;
 }
 
 bool InterprocessConnection::attach_inherited_local_socket(std::intptr_t handle) {
@@ -766,6 +776,12 @@ std::uint16_t InterprocessConnectionServer::bound_port() const {
     return server_impl_->listen_socket.local_port();
 }
 
+std::string InterprocessConnectionServer::bound_address() const {
+    if (!is_running() || server_impl_->transport != IpcTransport::Socket)
+        return {};
+    return server_impl_->listen_socket.local_address();
+}
+
 void InterprocessConnectionServer::set_max_message_bytes(std::size_t bytes) {
     max_message_bytes_.store(
         std::clamp<std::size_t>(
@@ -796,13 +812,10 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
     if (transport == IpcTransport::NamedPipe)
         return false;
     if (transport == IpcTransport::Socket) {
-        // Multi-client listener: host may be omitted, in which case
-        // we bind on all interfaces.
+        // Multi-client listener: an omitted host listens on loopback only.
         auto endpoint = parse_socket_endpoint(name);
         if (!endpoint) return false;
-        const std::string& host = endpoint->host.empty()
-                                      ? std::string{"0.0.0.0"}
-                                      : endpoint->host;
+        const std::string host = server_bind_host(endpoint->host);
         server_impl_->listen_socket.create(SocketType::TCP);
         if (!server_impl_->listen_socket.bind(host, endpoint->port)) return false;
         if (!server_impl_->listen_socket.listen(5)) return false;

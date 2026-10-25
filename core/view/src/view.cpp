@@ -101,8 +101,10 @@ std::uint64_t next_clock_walk_token() noexcept {
 
 View::View()
     : import_binding_instance_id_(next_import_binding_instance_id()),
-      import_binding_lifetime_token_(std::make_shared<const std::uint64_t>(
-          import_binding_instance_id_)) {}
+      import_binding_lifetime_token_(
+          std::make_shared<const std::uint64_t>(import_binding_instance_id_)) {
+    constructed_count_.fetch_add(1, std::memory_order_relaxed);
+}
 
 void ViewCapture::set(View* view) noexcept {
     view_ = view;
@@ -187,6 +189,7 @@ View::~View() {
     assert(dispatch_depth_ == 0 &&
            "View destroyed while one of its callbacks is executing; "
            "route ownership through View::retire()");
+    destroyed_count_.fetch_add(1, std::memory_order_relaxed);
     destroying_ = true;
     // Anything still parked on this root's retirement chain dies with it. Drain
     // iteratively so a long chain cannot recurse the stack through member
@@ -691,6 +694,8 @@ std::atomic<std::uint64_t> View::layout_generation_{1};
 std::atomic<std::uint64_t> View::layout_pass_count_{0};
 std::atomic<std::uint64_t> View::damage_request_count_{0};
 std::atomic<std::uint64_t> View::unmarked_paint_mutation_count_{0};
+std::atomic<std::uint64_t> View::constructed_count_{0};
+std::atomic<std::uint64_t> View::destroyed_count_{0};
 
 std::uint64_t View::tree_layout_generation() const noexcept {
     auto* root = this;
@@ -842,12 +847,21 @@ void View::publish_structure_change() noexcept {
     invalidate_subtree_caches_up();
 }
 
-void View::add_child(std::unique_ptr<View> child) {
-    add_child_transactional(child);
+std::unique_ptr<View> View::add_child(std::unique_ptr<View> child) {
+    if (add_child_transactional(child))
+        return nullptr;
+    return child;
 }
 
-void View::add_child_transactional(std::unique_ptr<View>& child) {
-    if (!child) return;
+bool View::add_child_transactional(std::unique_ptr<View>& child) {
+    if (!child)
+        return false;
+    // A view cannot become its own ancestor: linking one turns every walk to
+    // the root into an endless loop. The caller keeps the child and learns
+    // of the refusal from the result.
+    for (const View* ancestor = this; ancestor; ancestor = ancestor->parent_)
+        if (ancestor == child.get())
+            return false;
     auto* inserted = child.get();
     // Address alone cannot identify the child across a callback: a hook may
     // destroy it and the allocator may hand the same address to a replacement
@@ -895,7 +909,7 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
         inserted->set_host_actions(host_actions_);
         auto attached_it = std::find_if(children_.begin(), children_.end(), is_inserted);
         if (attached_it == children_.end())
-            return;
+            return true;
         {
             // on_attached() may remove and try to destroy the very child it is
             // running on. The lease keeps its storage alive until this scope
@@ -955,6 +969,7 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
     // paints at whatever rect it arrived with — the default zero rect for a
     // fresh view, its previous parent's slot when it is being reparented.
     note_layout_mutation();
+    return true;
 }
 
 bool View::move_child_to_index(View* child, size_t index) {

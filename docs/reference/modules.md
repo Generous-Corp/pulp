@@ -134,7 +134,7 @@ http_download("https://example.com/ir.wav", "/tmp/impulse.wav");
 
 ### Crypto — Hashing and encryption
 
-SHA-256, MD5, AES-256-CBC via Mbed TLS (Apache 2.0). Use for license validation, integrity checks, secure preset storage.
+SHA-256 (Pulp's own implementation: the ARMv8 SHA-2 instructions on arm64 targets that have them, portable rounds elsewhere, identical digests), plus MD5 and AES-256-CBC via Mbed TLS (Apache 2.0). Use for license validation, integrity checks, secure preset storage.
 
 ```cpp
 #include <pulp/runtime/crypto.hpp>
@@ -928,6 +928,32 @@ pass the input through, because a pass-through is audibly indistinguishable from
 a working convolution and would hide the bug. Assert
 `conv.block_size_violations() == 0` in your tests.
 
+When the IR is fixed for a whole preparation, `FixedIrConvolver` runs whichever
+engine is cheaper for that IR length and block size: a vectorized direct FIR or
+the same partitioned FFT. It chooses once in `load_ir()`, never on the audio
+thread, and keeps the same zero latency and fail-closed contract. The FFT
+engine still needs exactly `block_size()` frames per call; the direct engine
+takes any count up to `block_size()`, so a host with a non-power-of-two or
+varying callback works without re-blocking. It has no live IR swap; use `PartitionedConvolver` for that, and
+`ZeroLatencyConvolver` or `NonUniformPartitionedConvolver` for long IRs at small
+callbacks.
+
+```cpp
+#include <pulp/signal/fixed_ir_convolver.hpp>
+
+FixedIrConvolver fixed;
+fixed.load_ir(impulse_response.data(), ir_length, block_size);  // picks the engine
+fixed.process(input, output, fixed.block_size());
+// fixed.backend(): direct_fir, partitioned_fft, or none when no IR is loaded.
+```
+
+The choice comes from `FixedIrConvolver::choose_backend()`, a pure function
+measured in single precision on Apple Silicon Macs with the Accelerate backend;
+other targets, and `FixedIrConvolver64`, keep the FFT engine until they have
+their own measurements. Pass a
+`ConvolutionBackend` as the fourth `load_ir()` argument to pin an engine you
+have measured on your target.
+
 ### Available processors
 
 #### Filters
@@ -944,9 +970,11 @@ a working convolution and would hide the bug. Assert
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
 | [FIR Design](fir-design.md) | `fir_design.hpp` | Bounded weighted sampled-target Type I-IV linear-phase FIR design with rank, conditioning, and measured-error reporting, plus causal minimum-phase reconstruction |
 | [Analog VCF](../guides/analog-vcf.md) | `analog_vcf.hpp` / `ota_cascade_filter.hpp` | Four measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings over a shared zero-delay nonlinear four-pole cascade |
-| Ladder | `ladder_filter.hpp` | Four-pole nonlinear resonant ladder filter with saturation |
+| Ladder | `ladder_filter.hpp` | Four-pole nonlinear resonant ladder filter; the per-stage saturator is a `LadderSaturation` choice (`exact` `std::tanh`, default `accurate` `FastMath::tanh_accurate`, or `realtime_efficient` `FastMath::tanh_minimax`) |
+| Ladder Bank | `ladder_bank.hpp` | `LadderBankT<T, Voices>`: a fixed number of independent ladder voices advanced in lockstep as SIMD lanes (`process()` one sample, `process_voices()` a block; one sample rate for all voices), each bit-identical to a `LadderFilterT` with the default saturator |
 | Linkwitz-Riley | `linkwitz_riley.hpp` | Phase-aligned crossover filter for splitting audio into frequency bands |
 | State Variable (TPT) | `svf.hpp` / `tpt_filter.hpp` | Topology-preserving transform filter — simultaneous LP/HP/BP/notch outputs |
+| SVF Bank | `svf_bank.hpp` | `SvfBankT<T, Voices>`: a fixed number of independent SVF voices, each with its own mode, advanced in lockstep (`process()` one sample, `process_voices()` a block); each voice is bit-identical to `SvfT::process(sample)`. Coefficients come from the pure `SvfT::design()` |
 
 #### Effects
 
@@ -955,6 +983,7 @@ a working convolution and would hide the bug. Assert
 | Character Delay | `character_delay.hpp` | Wet-only stereo delay with clean, vintage-digital, tape, BBD, and diffusion feedback-loop characters — see the [dedicated guide](../guides/character-delay.md) |
 | Chorus | `chorus.hpp` | Modulated delay for stereo widening and detuning effects |
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
+| Fixed-IR Convolver | `fixed_ir_convolver.hpp` | Zero-latency fixed-IR convolution that picks direct FIR or partitioned FFT per IR length and block size |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
 | Diffusion Network | `diffusion_network.hpp` | Fixed-capacity wet-only true-stereo Schroeder cascade with transactional configuration, deterministic decorrelation, and an energy-preserving width matrix |
 | [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |
@@ -969,7 +998,8 @@ a working convolution and would hide the bug. Assert
 | Lo-Fi Chain | `lofi_chain.hpp` | Bit-depth reduction, sample-and-hold rate reduction, and dead-zone saturation; dither/noise shaping are opt-in so the legacy default remains exact |
 | Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |
 | Phaser | `phaser.hpp` | All-pass filter chain with LFO modulation for sweeping comb effects |
-| FDN Reverb | [`fdn_reverb.hpp`](../guides/fdn-reverb.md) | 16-line feedback delay network with a selectable internal tank sample rate (16-96 kHz), Jot decay law, granular shimmer, and a provably bounded loop gain; wet-only |
+| FDN Reverb | [`fdn_reverb.hpp`](../guides/fdn-reverb.md) | 16-line feedback delay network with a selectable internal tank sample rate (16-96 kHz), Jot decay law, granular shimmer, and a provably bounded loop gain; wet-only. Processes a 32-sample control period at a time with vectorized cross-line stages; `set_tier(fdn::Tier::classic)` swaps in the classic tier behind the same controls |
+| Classic Reverb | [`classic_reverb.hpp`](../guides/fdn-reverb.md#tiers) | Parallel lowpass-feedback combs into series allpasses at the host rate, driven by the FDN reverb's `fdn::Param` controls (decay as T60, size, predelay, high damping, diffusion, width); wet-only, zero latency, block-processed |
 | Reverb | `reverb.hpp` | Algorithmic stereo reverb with room size, damping, and width controls |
 | Transfer Curve | `transfer_curve.hpp` | Fixed-capacity arbitrary piecewise transfer curve using shared modulation shapes and transactional RT publication |
 | Waveshaper | `waveshaper.hpp` | Static nonlinear distortion with five built-in curve formulas |
@@ -994,7 +1024,7 @@ a working convolution and would hide the bug. Assert
 |-----------|--------|-------------|
 | ADSR | `adsr.hpp` | Attack-decay-sustain-release envelope generator for amplitude or filter modulation |
 | FFT | `fft.hpp` | Fast Fourier Transform — uses vDSP on Apple, fallback on other platforms |
-| Multi-Channel Meter | `multi_channel_meter.hpp` | Sample peak, RMS, stereo correlation, and channel-based BS.1770-5 K-weighted momentary plus gated integrated loudness; not true-peak, short-term, LRA, or a complete EBU Mode meter |
+| Multi-Channel Meter | `multi_channel_meter.hpp` | Sample peak, RMS, stereo correlation, and channel-based BS.1770-5 K-weighted momentary, gated integrated, EBU short-term, and loudness-range readings; not true-peak or a complete EBU Mode meter. Measures a block at a time with vector reductions; `MeterFeatures` leaves out correlation and loudness when nothing reads them |
 | Oscillator | `oscillator.hpp` | Legacy polyBLEP oscillator with sine, saw, square, triangle waveforms (float phase, integrated triangle) |
 | Oscillator suite (`osc/`) | `osc/va.hpp`, `osc/vco.hpp`, `osc/dco.hpp`, `osc/wt.hpp`, `osc/wt_lofi.hpp`, `osc/minblep.hpp` | Newer VA/VCO/DCO/wavetable family plus shared phase, polynomial BLEP/BLAMP, and fixed-capacity causal minBLEP primitives — see the [oscillators guide](../guides/oscillators.md) |
 | Velvet Noise Grid | `velvet_noise.hpp` | Coordinate-keyed jitter/sign draws for sparse velvet-noise tap grids; full and incremental builders produce identical draws |
@@ -1117,7 +1147,7 @@ nonadjacent islands followed by exact total mute through `find_package(Pulp)`.
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Bias | `bias.hpp` | Shift a signal's DC offset — useful for asymmetric waveshaping |
-| Fast Math | `fast_math.hpp` | Scalar DSP math helpers; approximations are explicitly labeled, while `exp2` follows standard float edge semantics and exact representable integer powers under the ambient FP mode (audio-callback FTZ/FZ may flush subnormals) |
+| Fast Math | `fast_math.hpp` | Scalar DSP math helpers; approximations are explicitly labeled, while `exp2` follows standard float edge semantics and exact representable integer powers under the ambient FP mode (audio-callback FTZ/FZ may flush subnormals). `FastMath::tanh_accurate` is a branch-free rational tanh within 3.0e-7 of `std::tanh` (3.6e-7 without fused multiply-add) for every float input; `log10_accurate`, `exp10_accurate`, `gain_to_db_accurate` and `db_to_gain_accurate` are branch-free decibel conversions within a few ulps of libm |
 | Interpolator | `interpolator.hpp` | Lagrange and Hermite interpolation for fractional-sample delay and resampling |
 | Log Ramped Value | `log_ramped_value.hpp` | Logarithmic smoothing for perceptually linear parameter transitions |
 | Lookup Table | `lookup_table.hpp` | Pre-computed function table for fast repeated evaluation of expensive functions |
@@ -2484,7 +2514,11 @@ runtime bridge, and (when `PULP_BUILD_WEBVIEW=ON`) the optional
 `ScriptedUiSession`, `WidgetBridge`, or `@pulp/react` but must not load a browser
 runtime should link `pulp::view-native`; `pulp_add_plugin(... NATIVE_UI)` selects
 that composition for every requested format and uses
-`pulp::standalone-native` for Standalone. Baked UI code that constructs `View`
+`pulp::standalone-native` for Standalone. `pulp::view-native` is a composition
+over `pulp::view-platform`, which holds the native scripted view stack and the
+WebView backend probe with no audio, MIDI or recognition-pack dependency; the
+`pulp::view-native` umbrella adds `pulp::view-audio` and
+`pulp::design-import-audio-pack`. Baked UI code that constructs `View`
 trees directly and does not evaluate JS can link `pulp::view-core`.
 
 `pulp::view-core` links no audio, signal or host target. The audio-dependent

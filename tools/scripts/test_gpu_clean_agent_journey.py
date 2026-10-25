@@ -1253,6 +1253,30 @@ class CleanAgentHarnessTests(unittest.TestCase):
                 {"payload": "x" * (journey.MAX_BUNDLE_STRING_BYTES + 1)}, [], "bundle"
             )
 
+    @unittest.skipUnless(os.name == "posix", "process-group bound is POSIX-only")
+    def test_bounded_commands_disable_the_cli_background_update_check(self) -> None:
+        # The fake CLI behaves like a stale update cache: unless the check is
+        # disabled it leaves a child running after it exits.
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw).resolve()
+            fake = root / "pulp"
+            fake.write_text(
+                f"#!{sys.executable}\n"
+                "import os, subprocess, sys\n"
+                "if 'PULP_UPDATE_CHECK_DISABLED' not in os.environ:\n"
+                "    subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(5)'])\n"
+                "print(os.environ.get('PULP_UPDATE_CHECK_DISABLED', ''))\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            env = {k: v for k, v in os.environ.items() if k != "PULP_UPDATE_CHECK_DISABLED"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                result = journey._run([str(fake)], 5.0)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout.strip(), "1")
+            explicit = journey._run([str(fake)], 5.0, env=env)
+            self.assertEqual(explicit.stdout.strip(), "1")
+
     def test_redacted_bundle_replaces_every_private_path(self) -> None:
         value = {"command": "/private/source/bin /private/case/file"}
         redacted, payload = journey._bounded_redacted_bytes(

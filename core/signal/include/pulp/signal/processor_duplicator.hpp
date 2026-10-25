@@ -17,6 +17,12 @@ namespace pulp::signal {
 ///   - process(float) -> float  (single-sample)
 ///   - reset()
 ///
+/// When P also provides an in-place block path `process(SampleType*, int)`,
+/// each channel is handed to it whole instead of being looped through the
+/// single-sample call, so a processor whose block path keeps its state in
+/// registers gets that benefit here too. P's block path must be equivalent to
+/// looping its single-sample path.
+///
 /// RT contract: `prepare()` resizes channel storage and is not audio-callback
 /// safe. `process()`, `process_channel()`, `for_each()`, and `reset()` allocate
 /// no memory after prepare when `P` follows the same contract.
@@ -46,9 +52,7 @@ public:
             if (channels[ch] == nullptr)
                 continue;
 
-            for (int i = 0; i < num_samples; ++i) {
-                channels[ch][i] = processors_[ch].process(channels[ch][i]);
-            }
+            process_buffer(processors_[ch], channels[ch], num_samples);
         }
     }
 
@@ -57,9 +61,7 @@ public:
         if (buffer == nullptr || num_samples <= 0 ||
             channel < 0 || channel >= static_cast<int>(processors_.size())) return;
 
-        for (int i = 0; i < num_samples; ++i) {
-            buffer[i] = processors_[channel].process(buffer[i]);
-        }
+        process_buffer(processors_[static_cast<std::size_t>(channel)], buffer, num_samples);
     }
 
     /// Access individual channel processor (e.g., to set parameters)
@@ -81,7 +83,16 @@ public:
 
     int num_channels() const { return static_cast<int>(processors_.size()); }
 
-private:
+  private:
+    static void process_buffer(P& processor, SampleType* buffer, int num_samples) {
+        if constexpr (requires { processor.process(buffer, num_samples); }) {
+            processor.process(buffer, num_samples);
+        } else {
+            for (int i = 0; i < num_samples; ++i)
+                buffer[i] = processor.process(buffer[i]);
+        }
+    }
+
     std::vector<P> processors_;
 };
 

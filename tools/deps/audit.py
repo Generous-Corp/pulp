@@ -88,9 +88,25 @@ LICENSE_FILE_NAMES = ("LICENSE", "LICENSE.txt", "LICENSE.md", "COPYING", "licens
 # structure is checked per family rather than with one set of markers.
 LICENSE_DISCLAIMER = "THE SOFTWARE IS PROVIDED"
 LICENSE_FAMILIES = (
-    # (family, phrase identifying it, phrase for its inclusion condition)
-    ("MIT", "to deal in the Software without restriction", "shall be included in all"),
-    ("BSL-1.0", "Boost Software License", "must be included in all copies"),
+    # (family, phrase identifying it, phrase for its inclusion condition,
+    #  phrase for its warranty disclaimer). Checked in order and the first
+    # match wins, so a license that shares MIT's grant wording must come
+    # before MIT. Unicode-3.0 (ICU's license) grants "to deal in the Data
+    # Files or Software" and conditions on the notice appearing "with all
+    # copies"; judged as MIT it read as truncated.
+    (
+        "Unicode-3.0",
+        "to deal in the Data Files or Software without restriction",
+        "this copyright and permission notice appear with all copies",
+        'DATA FILES AND SOFTWARE ARE PROVIDED "AS IS"',
+    ),
+    (
+        "MIT",
+        "to deal in the Software without restriction",
+        "shall be included in all",
+        LICENSE_DISCLAIMER,
+    ),
+    ("BSL-1.0", "Boost Software License", "must be included in all copies", LICENSE_DISCLAIMER),
 )
 
 # Match the spelled-out phrase, never a bare "GPL": v3.7.12's LICENSE.txt words
@@ -141,13 +157,13 @@ def find_notice_truncations() -> list[tuple[str, list[str]]]:
     problems: list[tuple[str, list[str]]] = []
     for name, raw_body in parse_notice_entries().items():
         body = flatten(raw_body)
-        for _family, identifier, condition in LICENSE_FAMILIES:
+        for _family, identifier, condition, disclaimer in LICENSE_FAMILIES:
             if identifier not in body:
                 continue
             missing = []
             if condition not in body:
                 missing.append("inclusion condition")
-            if LICENSE_DISCLAIMER not in body:
+            if disclaimer not in body:
                 missing.append("warranty disclaimer")
             if missing:
                 problems.append((name, missing))
@@ -1149,17 +1165,26 @@ def github_latest_release(repo: str) -> str | None:
     return tag if isinstance(tag, str) and tag else None
 
 
-def latest_semver_tag_from_refs(refs: Iterable[str]) -> str | None:
+def latest_semver_tag_from_refs(refs: Iterable[str], tag_pattern: str | None = None) -> str | None:
     """Pick the highest real release from `refs/tags/...` names.
 
     Split out from the network call so the selection rules — which are where
     every past misreport came from — can be tested against a literal ref list.
+
+    `tag_pattern` (the upstream's own release-tag regex) restricts the scan to
+    tags that fully match it. A repository that also tags sub-crates (jdx/mise
+    tags `mise-sigstore-v0.1.0` beside `v2026.10.12`) otherwise wins with the
+    sub-crate tag. A project whose own pattern is date-shaped declares that
+    shape, so the year-major filter below does not apply to it.
     """
+    pattern = re.compile(tag_pattern) if tag_pattern else None
     candidates: list[tuple[tuple[int, int, int], str]] = []
     for ref in refs:
         if not ref:
             continue
         tag = ref.removeprefix("refs/tags/")
+        if pattern is not None and not pattern.fullmatch(tag):
+            continue
         key = semver_key(tag)
         if key is None:
             continue
@@ -1169,7 +1194,7 @@ def latest_semver_tag_from_refs(refs: Iterable[str]) -> str | None:
         # is worse than reporting nothing, because it is a drift signal someone
         # might act on. No project ships a major version in the thousands, so a
         # year-shaped major is the honest discriminator.
-        if key[0] >= 1000:
+        if pattern is None and key[0] >= 1000:
             continue
         if PRERELEASE_RE.search(tag):
             continue
@@ -1180,10 +1205,11 @@ def latest_semver_tag_from_refs(refs: Iterable[str]) -> str | None:
     return candidates[-1][1]
 
 
-def latest_semver_tag(repo: str) -> str | None:
+def latest_semver_tag(repo: str, tag_pattern: str | None = None) -> str | None:
     output = run_git_ls_remote(repo, options=("--tags", "--refs"))
     return latest_semver_tag_from_refs(
-        line.split("\t", 1)[1] for line in output.splitlines() if "\t" in line
+        (line.split("\t", 1)[1] for line in output.splitlines() if "\t" in line),
+        tag_pattern,
     )
 
 
@@ -1204,12 +1230,26 @@ def upstream_status(dep: dict) -> str:
         ref = dep["upstream"]["ref"]
         output = run_git_ls_remote(repo, f"refs/tags/{ref}")
         exact = "present" if output else "missing"
+        tag_pattern = dep["upstream"].get("tag_pattern")
+        # A malformed pattern is this row's defect, not a reason to abort the
+        # audit of every other dependency.
+        if tag_pattern:
+            try:
+                re.compile(tag_pattern)
+            except re.error as invalid:
+                return f"{exact}; invalid tag_pattern: {invalid}"
         # Authoritative first, heuristic second — and say which one answered.
+        # A release outside the project's own tag pattern (a sub-crate's) is
+        # not this dependency's latest, so the filtered tags answer instead.
         try:
-            latest = github_latest_release(repo) or latest_semver_tag(repo)
+            released = github_latest_release(repo)
             caveat = ""
+            if released and tag_pattern and not re.fullmatch(tag_pattern, released):
+                caveat = f" (tag-order guess; releases API answer {released} is outside tag_pattern)"
+                released = None
+            latest = released or latest_semver_tag(repo, tag_pattern)
         except ReleaseLookupUnavailable as unavailable:
-            latest = latest_semver_tag(repo)
+            latest = latest_semver_tag(repo, tag_pattern)
             caveat = f" (tag-order guess; releases API unavailable: {unavailable})"
         if latest and latest != ref:
             return f"{exact}; latest={latest}{caveat}"
