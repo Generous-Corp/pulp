@@ -11,7 +11,7 @@
     "render-assets-and-backends",
     "visual-proof-harness"
   ],
-  "rationale": "Scripted-UI asset loading now refuses absolute paths without a Filesystem grant and caps file reads, AUv3 entitlement templates are emitted per JS engine, and runtime evaluation refuses realms with an explicit effectful grant. Refusals and template changes on existing design-output, ingest, render-asset and proof surfaces; no authority or output contract changes.",
+  "rationale": "Scripted-UI file paths now resolve only inside the script directory or reviewed asset roots unless the host opts in (the legacy all() grant holds Filesystem, so containment rather than the capability is what decides), bridge file reads are capped, AUv3 entitlement templates are emitted per JS engine, and runtime evaluation refuses realms with an explicit effectful grant. Refusals and template changes on existing design-output, ingest, render-asset and proof surfaces; no authority or output contract changes.",
   "tests": [
     "ctest --test-dir build -R pulp-test-asset-manager",
     "ctest --test-dir build -R pulp-test-cli-ship-shellout",

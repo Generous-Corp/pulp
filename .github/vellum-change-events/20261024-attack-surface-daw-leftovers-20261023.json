@@ -6,7 +6,7 @@
   "slices": [
     "retained-ui-kernel"
   ],
-  "rationale": "AssetManager::read_file_bytes gains a size cap and the asset resolver refuses absolute paths outside reviewed roots unless the realm holds the Filesystem capability. Pulp-side hardening of the retained UI kernel; Vellum has no framework commit for it yet and may adopt the same refusal independently.",
+  "rationale": "AssetManager::read_file_bytes gains a per-file ceiling that the bridge's path-taking APIs also apply, and file paths a script names resolve only to files inside the script directory or a reviewed asset root unless the host opts into unreviewed paths. The Filesystem capability gates the API group, but the legacy all() grant gives every realm Filesystem, so today the containment rule, not the capability, decides what opens. Pulp-side hardening of the retained UI kernel; Vellum has no framework commit for it yet and may adopt the same refusal independently.",
   "tests": [
     "Vellum freeze",
     "Vellum trusted freeze",
