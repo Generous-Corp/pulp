@@ -173,6 +173,18 @@ set_tests_properties(cmake-js-engine-selection PROPERTIES
     LABELS "cmake;view;js-engine"
     TIMEOUT 30)
 
+# A sealed V8 provider's manifest consumer_defines reach v8::v8, and a manifest
+# that cannot supply them fails configure. Each case configures a throwaway
+# LANGUAGES NONE project against the real FindV8.cmake and a fixture provider,
+# so no V8 download or compiler is needed.
+add_test(NAME cmake-v8-consumer-defines
+    COMMAND ${CMAKE_COMMAND}
+        "-DPULP_TEST_GENERATOR=${CMAKE_GENERATOR}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_v8_consumer_defines.cmake)
+set_tests_properties(cmake-v8-consumer-defines PROPERTIES
+    LABELS "cmake;view;js-engine"
+    TIMEOUT 120)
+
 # ARM64EC selects the scalar SIMD backend. The detection runs under `cmake -P`
 # against the real module, so every host checks the ARM64EC, ARM64 and x64
 # classifications without a Windows ARM64EC toolchain.
