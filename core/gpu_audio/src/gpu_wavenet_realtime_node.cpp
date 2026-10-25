@@ -1002,7 +1002,10 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     status.epoch = impl_->published_epoch.load(std::memory_order_acquire);
     status.reacquire_attempts = impl_->reacquire_attempts.load(std::memory_order_relaxed);
     status.reacquire_successes = impl_->reacquire_successes.load(std::memory_order_relaxed);
-    status.delivery_epoch_active = impl_->bridge->delivery_epoch() != 0;
+    // One read serves both the field and the fence term below: a callback
+    // adopting a re-acquired epoch between two reads would report Ready with
+    // no delivery epoch, which the validator rejects.
+    status.delivery_epoch_active = impl_->bridge && impl_->bridge->delivery_epoch() != 0;
     for (std::size_t i = 0; i < impl_->terminal_counts.size(); ++i)
         status.terminal_counts[i] = impl_->terminal_counts[i].load(std::memory_order_relaxed);
     switch (impl_->config.session.completion_policy) {
@@ -1025,8 +1028,8 @@ GpuAudioStatus GpuWaveNetRealtimeNode::status_snapshot() const noexcept {
     // it delivers; otherwise the prepared CPU shadow, or none when silent.
     const auto projection = detail::project_node_state(
         impl_->device_lost.load(std::memory_order_acquire), status.recovery_reason,
-        authenticated_provider() && !fenced(), status.fallback_policy, status.fallback_available,
-        impl_->recent.lagging());
+        authenticated_provider() && status.delivery_epoch_active, status.fallback_policy,
+        status.fallback_available, impl_->recent.lagging());
     status.provider_state = projection.provider_state;
     status.selected_engine = projection.selected_engine;
     return status;
@@ -1057,8 +1060,11 @@ bool GpuWaveNetRealtimeNode::bind_realtime_path(detail::RealtimeGpuNodeBinding& 
                         .health =
                             [](const void* self, detail::RealtimeGpuHealth& out) noexcept {
                                 const auto* node = static_cast<const GpuWaveNetRealtimeNode*>(self);
-                                out = detail::health_from_status(node->status_snapshot());
-                                out.fenced = out.fenced || node->fenced();
+                                // Fence from the snapshot's own epoch read, not a
+                                // second one that could see a later adoption.
+                                const auto status = node->status_snapshot();
+                                out = detail::health_from_status(status);
+                                out.fenced = out.fenced || !status.delivery_epoch_active;
                                 return true;
                             },
                         .reprepare = &GpuWaveNetRealtimeNode::reprepare,
