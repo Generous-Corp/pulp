@@ -260,9 +260,12 @@ retain those fields in the PR/landing evidence.
     tracked `VERSION.md` digest is not proof that those bytes came from that
     archive: without the exact fetcher-written asset stamp, re-download and
     verify before publication. Source fallbacks must likewise pin the builder
-    revision and fail before copying output unless the built Skia checkout HEAD
-    equals the manifest's immutable `skia_commit`; a milestone branch name alone
-    is never sufficient provenance.
+    revision, build the manifest's immutable `skia_commit` itself (skia-builder
+    `-revision`, or `fetch --depth 1 <sha>` + `checkout --detach`), and fail
+    before copying output unless the built Skia HEAD equals `skia_commit` and
+    the synced Dawn HEAD equals `built_dawn`. Never compare against or build a
+    milestone branch head: Chromium release branches keep moving after the pin,
+    so a branch-head check breaks every pinned release.
 15. Treat any provider release marked `release_immutable: false` as mutable until
     its publishing workflow is terminal. Record the exact publisher run and
     release `updated_at`, collect every asset ID/digest plus metadata and pair

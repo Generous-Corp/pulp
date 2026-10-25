@@ -1580,7 +1580,8 @@
    "data": "declared",
    "detected_sources": [
     "test/test_coretext_text.cpp",
-    "test/test_font_woff2.cpp"
+    "test/test_font_woff2.cpp",
+    "test/test_paragraph_cache.cpp"
    ],
    "inputs": [
     "external/fonts/Inter-Regular.ttf",
@@ -1591,7 +1592,8 @@
    "kind": "compiled",
    "sources": [
     "test/test_coretext_text.cpp",
-    "test/test_font_woff2.cpp"
+    "test/test_font_woff2.cpp",
+    "test/test_paragraph_cache.cpp"
    ],
    "undeclared_sources": []
   },
@@ -3663,6 +3665,14 @@
    "entry": "tools/scripts/test_ccache_pch_isolation.py",
    "inputs": [
     "tools/scripts/test_ccache_pch_isolation.py"
+   ],
+   "kind": "python"
+  },
+  "ccache-remote-storage-selftest": {
+   "entry": "tools/ci/test_ccache_remote_storage.py",
+   "inputs": [
+    "tools/ci/ccache_remote_storage.py",
+    "tools/ci/test_ccache_remote_storage.py"
    ],
    "kind": "python"
   },
@@ -7659,12 +7669,15 @@
     "tools/import-design/browser_capture/capture.integration.test.mjs",
     "tools/import-design/browser_capture/capture_frame_fitting.integration.test.mjs",
     "tools/import-design/browser_capture/capture_geometry.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_horizon.integration.test.mjs",
     "tools/import-design/browser_capture/capture_integration_support.mjs",
     "tools/import-design/browser_capture/capture_interaction_guards.integration.test.mjs",
     "tools/import-design/browser_capture/capture_interactions.integration.test.mjs",
     "tools/import-design/browser_capture/capture_paint.integration.test.mjs",
+    "tools/import-design/browser_capture/motion_freeze.integration.test.mjs",
     "tools/import-design/browser_capture/run_integration.mjs",
-    "tools/import-design/browser_capture/security.mjs"
+    "tools/import-design/browser_capture/security.mjs",
+    "tools/import-design/browser_capture/settle.mjs"
    ],
    "kind": "node"
   },

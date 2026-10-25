@@ -193,6 +193,13 @@ fractional layout box; that is the 1 device px the Spectr slider was off by.
 `indeterminate` and a `disabled` inherited from a `<fieldset>` are not in the
 DOMSnapshot, so they are not recorded.
 
+A native-verdict `<button>` records `ua_control=button`, `ua_color_scheme` and
+`ua_disabled`, loses the UA stylesheet's grey background and 2px outset border,
+and becomes a `ButtonSurface` (Chromium's push-button paint) in place of the
+frame, with its text and icons kept as children. An author-styled button keeps
+its captured paint and stays a frame. `<input type=button|submit|reset>` is not
+lowered this way yet.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
@@ -371,7 +378,11 @@ python3 tools/import-design/layout_parity.py --capture p.pulp-browser-capture --
 
 Three things that are not obvious. Parents come from the DOM, not the IR: a
 native panel is lowered FLAT under `browser:root`, so IR parents would cluster
-the whole page into one finding. The capture must be the IR's OWN capture:
+the whole page into one finding. The DOM parent is the nearest ancestor the
+import LOWERED, walking past wrappers it skipped (the importer drops empty,
+non-painting boxes); stopping at the direct DOM parent leaves such a node
+parentless and reports a moved container's children as misplaced too. The
+capture must be the IR's OWN capture:
 backend ids are small sequential integers, and a second capture of the same
 page joined all 105 of Spectr's ids cleanly — a wrong pairing looks right — so
 the tool compares the IR's recorded capture-image hashes and exits 2 on a
@@ -848,6 +859,17 @@ knowing before you touch that file:
   now passes `IRParseOptions::measured_geometry` when the IR's source adapter
   is `browser-capture`, and a geometry rule that only makes up for how a
   design tool draws must check it. Fixture `20-flex-gap-knob` covers the snap.
+
+  **Paint-order gotcha:** Chrome's paint order numbers a node by when its OWN
+  box paints, and an inkless wrapper still holds a number. Ordering siblings by
+  that number drew Spectr's full-panel `body::before` over every descendant of
+  the inkless `div#root` and flattened the whole panel. Siblings are ordered by
+  where their ink lands instead (an inkless node that takes no input and does
+  not clip, composite or transform moves to its subtree's first ink). The
+  reorder audit counts a pair only when both nodes paint or either takes input:
+  in a counted pair the SECOND node is drawn on top. Prove a change here by
+  rendering the same snapshot nested and flat (`lower_painted_tree` with
+  `flatten_to_paint_order`) and comparing bytes.
 
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
   evidence. The differential matcher must join captured elements by
@@ -2589,9 +2611,17 @@ Benchmark receipt (`pulp-design-import-benchmark-v2`) gotchas:
   shaping** — RecordingCanvas records commands and does none of that work.
   Resource claims need `--canvas=skia-raster` (or `skia-graphite` where a Dawn
   adapter exists); `--require-steady-state` exits 4 on a `blind` gate rather
-  than passing it. `paragraph_builds` is reported but never gated: SkiaCanvas
-  shapes every label on every paint until it has a paragraph cache, so a
-  gate on it would fail every text fixture today.
+  than passing it. Paragraph builds are gated by TEXT, not by count: a step
+  legitimately shapes the runs it wrote (the IR fixtures write fresh
+  `slot i frame N` strings every frame), so the gate reads
+  `paragraph_builds.unwritten`, the builds of any text the fixture's
+  `text_written_by_step(frame)` did not list. A count budget ("at most N
+  builds") is blind to a culled slot: the slot shapes nothing, and a static
+  label re-shaping every frame fits inside N. A new fixture that writes text
+  must list it, or the gate fails it.
+  `--paragraph-cache=off` is the uncached text path and the gate's planted
+  negative; compare cached vs uncached with `--baseline-arg` /
+  `--candidate-arg` on the same lane.
 - **`--lane=live --ir` (optionally `--bundle`) is the production JS path over
   importer output.** The runtime's `__pulpRuntimeSettle__` called from
   `engine.evaluate` only records a budget; `WidgetBridge::load_script` drains
@@ -4331,6 +4361,16 @@ resolver lane (`design_import_native_common.cpp`) diagnoses `filter` /
 `backdropFilter` as unsupported (it doesn't call the View setters), and
 cpp/swiftui codegen don't emit them.
 
+**Backdrop under opacity:** Chrome composites a backdrop-filter at the
+element's opacity. It draws the filtered backdrop at that opacity, then the
+element over it at that opacity, so an `opacity: 0` box with
+`backdrop-filter` shows nothing at all, and a hidden frosted toast must not
+blur what is under it. `View::push_effect_layers` skips the backdrop layer
+at opacity 0 and ends the chain in `opacity()` below 1. An ancestor's
+opacity layer is the backdrop root, as in Chrome. Chrome's numbers come from
+`tools/import-validation/chrome_backdrop_opacity_oracle.py` over fixture
+`22-backdrop-opacity`, and `pulp-test-css-backdrop-opacity` holds Skia to them.
+
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:
@@ -4545,6 +4585,25 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   timers/intervals/rAFs are cancelled, the schedulers are stubbed, CSS animation
   and transition are disabled, and `captureStableScreenshot` requires a
   byte-identical trailing run as the observable proof of stillness.
+- **Web Animations and video are frozen before the frame is read.** The
+  motion stylesheet and scheduler stubs cannot reach `element.animate()` or a
+  playing `<video>`; both run on the document clock. `freezeMotion`
+  (`settle.mjs`) runs before every page-settle sample (`waitForStable`'s
+  `beforeSample`), because a Web Animation that moves a box would otherwise
+  keep the layout from ever settling, even one a late timer or font load
+  starts mid-settle, and once more after every settle and before the
+  materialized document and the screenshot horizon. Each pass
+  settles only what an earlier one did not, or what the page restarted, and
+  counts each animation and video once: a finite Web Animation is `finish()`ed (its
+  resting frame), an infinite or unresolved one is paused at `currentTime 0`,
+  and a video is paused and rewound to its first frame unless it still shows
+  its poster. CSS animations and transitions stay on the stylesheet path, and
+  scroll- or view-driven animations are left to the fixed scroll position. An
+  animated GIF, APNG or WebP runs on the decoder's clock, so it is left alone
+  and listed in `provenance.motion.volatile_sources` (classified from its own
+  bytes by `animatedImageKind`, in the last pass only), next to the per-kind
+  counts. A page that
+  throws inside the freeze fails with `capture-motion-freeze-failed`.
 - **Browser discovery has a version FLOOR and no ceiling.**
   `kMinimumChromiumMajor = 109` (`browser_capture_backend.hpp`) is the only
   version comparison in the probe — nothing rejects a browser for being too
@@ -4616,9 +4675,13 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   full 32-frame horizon (an early A,A plateau must not hide a later B,B
   presentation) at ~50 ms per frame of headless software-compositing pacing,
   once per pixel artifact that differs from the accepted frame, plus settle,
-  launch and a ~1.5 s shutdown (the
-  custody anchor ignores SIGTERM by design, so the guardian waits out its grace
-  window before SIGKILL). It used to take ~12 s because every bounded teardown
+  launch and shutdown. Shutdown used to be a fixed ~1.5 s: the custody anchor
+  ignores SIGTERM by design, so the group never empties on its own and the
+  guardian waited out its whole grace window before SIGKILL even after
+  Chromium's processes had exited, about 200 ms in. The grace now ends once the
+  group's leader is its only member (`processGroupHasMembersBesidesLeader`,
+  `/bin/ps`); a helper that ignores SIGTERM still gets the full window, and an
+  unreadable or capped listing waits as before. It used to take ~12 s because every bounded teardown
   wait was `Promise.race([p, delay(ms)])`: the losing timer stayed armed and
   held the capture process open for the rest of a 6 s bound after cleanup had
   finished. Bound a wait with `waitAtMost` (`browser_process.mjs`), which clears
@@ -4631,6 +4694,17 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   horizons (64 frames); on a loaded gate VM those frames stretch to several
   hundred ms each, and the repeat alone ran the capture past its deadline in the
   same-frame-capture phase. A new hidden-paint plate goes through that helper.
+- **Only a horizon's decisive frames carry the caller's encoding.** The verdict
+  and the shipped bytes depend on the last `STABLE_RUN_FRAMES` (3) of
+  `SCREENSHOT_HORIZON_FRAMES` (32) frames alone, so the 29 before them are
+  taken as quality-1 JPEG with the caller's clip, `captureBeyondViewport` and
+  `fromSurface` untouched; they still wait for a fresh presentation each. Keep
+  the stable run equal to the decisive frame count, or a presentation frame
+  could extend the run that decides. A capture whose motion receipt lists an
+  animated image (`volatile_sources`) takes every frame in the caller's
+  encoding (`horizonPresentationEncoding`), because that image runs on the
+  decoder's wall clock and a faster horizon would move when the decisive
+  frames land; `provenance.motion.horizon_presentation_format` records which.
 - **Integration deadlines come from `capture_integration_support.mjs`.** Every
   capture in the `*.integration.test.mjs` files runs under
   `CAPTURE_DEADLINE_MS` (30 s), and each case's node:test timeout is

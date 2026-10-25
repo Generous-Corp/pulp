@@ -1,0 +1,78 @@
+name: macOS CI label reset
+
+# With PULP_MACOS_PR_GATING on, `macos-ci` approves one pull-request head for
+# build.yml's full macOS lane, and arming waits for that lane's success (see
+# "macOS on a pull request waits for approval" in docs/guides/local-ci.md). A
+# push makes a new head nobody has approved, whose macOS leg is the contract
+# lane, so this undoes both halves of the old approval:
+#
+# - It disables auto-merge. Otherwise an armed pull request would auto-merge
+#   on the new head's contract-lane green, which satisfies the required `macos`
+#   check without a build. (A pull request already in the merge queue leaves
+#   it on a push anyway.) Re-arming needs a fresh verdict, the label, and a
+#   full-lane success.
+# - It removes `macos-ci`. build.yml already ignores the label on
+#   `synchronize`; removing it keeps the label truthful and lets the arm sweep's
+#   next application fire a fresh `labeled` event, which re-adding a label that
+#   is still there would not.
+#
+# pull_request_target runs this definition from protected main and checks out
+# nothing, so a fork's pull request is reset too and no pull request code runs
+# with the write token. Changes made with GITHUB_TOKEN start no workflow, and
+# build.yml does not listen for `unlabeled` anyway. With the variable unset
+# nothing here runs, which is today's behaviour.
+
+on:
+  pull_request_target:
+    branches: [main, 'develop/**']
+    types: [synchronize]
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: macos-ci-label-reset-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    name: Disarm and unlabel the new head
+    if: vars.PULP_MACOS_PR_GATING == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Disable auto-merge
+        if: github.event.pull_request.auto_merge != null
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016  # $id is a GraphQL variable
+          gh api graphql \
+            -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }' \
+            -f id="$PR_NODE_ID" >/dev/null
+          echo "disabled auto-merge on #$PR_NUMBER: new head $HEAD_SHA needs a fresh verdict, macos-ci and a full-lane success before it is armed again"
+
+      - name: Remove the label
+        # Also after a failed disable: each half stands on its own.
+        if: ${{ !cancelled() && contains(github.event.pull_request.labels.*.name, 'macos-ci') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          # 404 means someone removed it first, which is the state we want.
+          if out=$(gh api --method DELETE \
+              "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/macos-ci" 2>&1); then
+            echo "removed macos-ci from #$PR_NUMBER: new head $HEAD_SHA needs approval before the full macOS lane"
+          elif printf '%s' "$out" | grep -q 'HTTP 404'; then
+            echo "macos-ci was already gone from #$PR_NUMBER"
+          else
+            printf '%s\n' "$out" >&2
+            echo "::warning title=macos-ci label not removed::#$PR_NUMBER still carries macos-ci on unapproved head $HEAD_SHA; the arm sweep must remove and re-apply it to start the full lane"
+            exit 1
+          fi

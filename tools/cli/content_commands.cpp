@@ -11,6 +11,7 @@
 
 #include <pulp/audio/sample_bank.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/state/content_install_limits.hpp>
 #include <pulp/runtime/safe_relative_path.hpp>
 
 #include "../../external/miniz/miniz.h"
@@ -324,10 +325,37 @@ RuntimeManifest load_runtime_manifest(const fs::path& path, std::string& error) 
     return manifest;
 }
 
-bool validate_archive_entries(const fs::path& archive, std::vector<std::string>& issues) {
+// Admit every entry's declared decompressed size against `limits` from the
+// central directory alone, naming the first entry that crosses a cap. Nothing
+// is inflated here, so a refused pack costs no heap and no disk.
+bool archive_fits_limits(mz_zip_archive& zip, const pulp::state::ContentInstallLimits& limits,
+                         std::string& error) {
+    pulp::state::ContentSizeBudget budget(limits);
+    const auto count = mz_zip_reader_get_num_files(&zip);
+    for (mz_uint i = 0; i < count; ++i) {
+        mz_zip_archive_file_stat stat{};
+        if (!mz_zip_reader_file_stat(&zip, i, &stat) || stat.m_is_directory)
+            continue;
+        error = budget.admit(stat.m_filename, stat.m_uncomp_size);
+        if (!error.empty())
+            return false;
+    }
+    return true;
+}
+
+bool validate_archive_entries(const fs::path& archive, std::vector<std::string>& issues,
+                              const pulp::state::ContentInstallLimits& limits) {
     mz_zip_archive zip{};
     if (!mz_zip_reader_init_file(&zip, archive.string().c_str(), 0)) {
         issues.push_back("archive-open: failed to open " + archive.string());
+        return false;
+    }
+    // The hash check below inflates every declared file onto the heap, so the
+    // size budget has to be settled before it runs.
+    std::string size_error;
+    if (!archive_fits_limits(zip, limits, size_error)) {
+        mz_zip_reader_end(&zip);
+        issues.push_back(size_error);
         return false;
     }
     bool ok = true;
@@ -475,12 +503,15 @@ bool copy_declared_content(const fs::path& source_root,
     return true;
 }
 
-bool extract_archive_content(const fs::path& archive,
-                             const fs::path& dest_root,
-                             std::string& error) {
+bool extract_archive_content(const fs::path& archive, const fs::path& dest_root, std::string& error,
+                             const pulp::state::ContentInstallLimits& limits) {
     mz_zip_archive zip{};
     if (!mz_zip_reader_init_file(&zip, archive.string().c_str(), 0)) {
         error = "Failed to open archive " + archive.string();
+        return false;
+    }
+    if (!archive_fits_limits(zip, limits, error)) {
+        mz_zip_reader_end(&zip);
         return false;
     }
     std::error_code ec;
@@ -573,17 +604,16 @@ bool write_index(const fs::path& data_root, std::size_t* entry_count = nullptr) 
     return write_text(content_root(data_root) / "index.json", out);
 }
 
-bool install_manifest_content(const ContentManifest& manifest,
-                              const fs::path& input,
-                              const fs::path& dest,
-                              std::string& error) {
+bool install_manifest_content(const ContentManifest& manifest, const fs::path& input,
+                              const fs::path& dest, std::string& error,
+                              const pulp::state::ContentInstallLimits& limits) {
     if (manifest.manifest_file) {
         error = "content install/update requires a content-pack directory or .pulpcontent archive, not a bare manifest file";
         return false;
     }
-    return manifest.archive
-        ? extract_archive_content(input, dest, error)
-        : copy_declared_content(manifest.directory_root, dest, manifest.exported_paths, error);
+    return manifest.archive ? extract_archive_content(input, dest, error, limits)
+                            : copy_declared_content(manifest.directory_root, dest,
+                                                    manifest.exported_paths, error);
 }
 
 std::string manifest_json(const ContentManifest& manifest) {
@@ -637,9 +667,9 @@ std::string install_policy_json(const ContentManifest& content,
     return out;
 }
 
-bool validate_content_manifest(const fs::path& input,
-                               ContentManifest& manifest,
-                               std::vector<std::string>& issues) {
+bool validate_content_manifest(const fs::path& input, ContentManifest& manifest,
+                               std::vector<std::string>& issues,
+                               const pulp::state::ContentInstallLimits& limits = {}) {
     std::string error;
     manifest = load_manifest(input, error);
     if (!error.empty()) {
@@ -660,11 +690,11 @@ bool validate_content_manifest(const fs::path& input,
         issues.push_back("invalid-kind: content commands require kind content-pack");
     }
     if (manifest.archive) {
-        ok = validate_archive_entries(input, issues) && ok;
+        ok = validate_archive_entries(input, issues, limits) && ok;
         if (ok) {
             const auto temp_root = temporary_extract_root();
             std::string extract_error;
-            if (!extract_archive_content(input, temp_root, extract_error)) {
+            if (!extract_archive_content(input, temp_root, extract_error, limits)) {
                 ok = false;
                 issues.push_back("archive-validate: " + extract_error);
             } else {
@@ -692,29 +722,67 @@ bool validate_content_manifest(const fs::path& input,
 }
 
 void print_usage() {
-    std::cout
-        << "pulp content — validate and install data-only content packs\n\n"
-        << "Usage:\n"
-        << "  pulp content validate <path> [--json]\n"
-        << "  pulp content preview <path> --plugin-runtime <manifest> [--plugin <plugin-id>] [--json]\n"
-        << "  pulp content install <path> --plugin <plugin-id> --yes [--root <dir>]\n"
-        << "  pulp content update <path> --plugin <plugin-id> --yes [--root <dir>]\n"
-        << "  pulp content list [--plugin <plugin-id>] [--json] [--root <dir>]\n"
-        << "  pulp content rescan [--json] [--root <dir>]\n"
-        << "  pulp content remove <package-id> --plugin <plugin-id> [--version <version>] --yes [--root <dir>]\n"
-        << "  pulp content reveal <package-id> --plugin <plugin-id> [--version <version>] [--root <dir>]\n\n"
-        << "Use content packs for presets, themes, samples, sample banks, and wavetables installed into a known plugin.\n"
-        << "They are not curated dependency packages and they do not transform projects.\n"
-        << "Content commands copy data only. Preview reads a trusted plugin runtime manifest to report compatibility and reload policy before install. Update uses an explicit local path and rolls back a replaced version on failure. Rescan rebuilds the metadata index only. They do not execute package code.\n";
+    std::cout << "pulp content — validate and install data-only content packs\n\n"
+              << "Usage:\n"
+              << "  pulp content validate <path> [--json] [--max-pack-bytes <n>]\n"
+              << "  pulp content preview <path> --plugin-runtime <manifest> [--plugin <plugin-id>] "
+                 "[--json]\n"
+              << "  pulp content install <path> --plugin <plugin-id> --yes [--root <dir>] "
+                 "[--max-pack-bytes <n>]\n"
+              << "  pulp content update <path> --plugin <plugin-id> --yes [--root <dir>] "
+                 "[--max-pack-bytes <n>]\n"
+              << "  pulp content list [--plugin <plugin-id>] [--json] [--root <dir>]\n"
+              << "  pulp content rescan [--json] [--root <dir>]\n"
+              << "  pulp content remove <package-id> --plugin <plugin-id> [--version <version>] "
+                 "--yes [--root <dir>]\n"
+              << "  pulp content reveal <package-id> --plugin <plugin-id> [--version <version>] "
+                 "[--root <dir>]\n\n"
+              << "Use content packs for presets, themes, samples, sample banks, and wavetables "
+                 "installed into a known plugin.\n"
+              << "They are not curated dependency packages and they do not transform projects.\n"
+              << "Content commands copy data only. Preview reads a trusted plugin runtime manifest "
+                 "to report compatibility and reload policy before install. Update uses an "
+                 "explicit local path and rolls back a replaced version on failure. Rescan "
+                 "rebuilds the metadata index only. They do not execute package code.\n"
+              << "An archive is refused before extraction when its declared decompressed size "
+                 "exceeds the pack cap (default 4 GiB total, 1 GiB per entry, 65536 entries); "
+                 "--max-pack-bytes lowers both byte caps to <n> and never raises them.\n";
+}
+
+// Parse a `--max-pack-bytes` value into limits: it lowers the total and the
+// per-entry cap to at most that number. It can only tighten the defaults, so the
+// documented caps stay the ceiling whatever a user passes.
+bool apply_max_pack_bytes(const std::string& text, pulp::state::ContentInstallLimits& limits) {
+    if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos)
+        return false;
+    std::uint64_t value = 0;
+    try {
+        value = std::stoull(text);
+    } catch (...) {
+        return false;
+    }
+    if (value == 0)
+        return false;
+    limits = pulp::state::clamp_content_install_bytes(limits, value);
+    return true;
 }
 
 int cmd_validate(const std::vector<std::string>& args) {
     bool json = false;
     std::string path;
+    pulp::state::ContentInstallLimits limits;
     for (std::size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--json") json = true;
-        else if (args[i] == "--help" || args[i] == "-h") { print_usage(); return 0; }
-        else if (!args[i].starts_with("-") && path.empty()) path = args[i];
+        else if (args[i] == "--max-pack-bytes") {
+            if (i + 1 >= args.size() || !apply_max_pack_bytes(args[++i], limits)) {
+                std::cerr << "Error: --max-pack-bytes requires a positive byte count\n";
+                return 2;
+            }
+        } else if (args[i] == "--help" || args[i] == "-h") {
+            print_usage();
+            return 0;
+        } else if (!args[i].starts_with("-") && path.empty())
+            path = args[i];
         else { std::cerr << "Error: unknown content validate argument: " << args[i] << "\n"; return 2; }
     }
     if (path.empty()) {
@@ -723,7 +791,7 @@ int cmd_validate(const std::vector<std::string>& args) {
     }
     ContentManifest manifest;
     std::vector<std::string> issues;
-    const bool ok = validate_content_manifest(path, manifest, issues);
+    const bool ok = validate_content_manifest(path, manifest, issues, limits);
     if (json) {
         std::cout << "{\"ok\":" << (ok ? "true" : "false")
                   << ",\"content\":" << manifest_json(manifest)
@@ -815,6 +883,7 @@ int cmd_install(const std::vector<std::string>& args) {
     std::string path;
     std::string plugin;
     fs::path data_root = default_data_root();
+    pulp::state::ContentInstallLimits limits;
     for (std::size_t i = 0; i < args.size(); ++i) {
         auto require_value = [&](const char* flag) -> bool {
             if (i + 1 >= args.size()) {
@@ -824,10 +893,26 @@ int cmd_install(const std::vector<std::string>& args) {
             return true;
         };
         if (args[i] == "--yes") yes = true;
-        else if (args[i] == "--plugin") { if (!require_value("--plugin")) return 2; plugin = args[++i]; }
-        else if (args[i] == "--root") { if (!require_value("--root")) return 2; data_root = args[++i]; }
-        else if (args[i] == "--help" || args[i] == "-h") { print_usage(); return 0; }
-        else if (!args[i].starts_with("-") && path.empty()) path = args[i];
+        else if (args[i] == "--plugin") {
+            if (!require_value("--plugin"))
+                return 2;
+            plugin = args[++i];
+        } else if (args[i] == "--root") {
+            if (!require_value("--root"))
+                return 2;
+            data_root = args[++i];
+        } else if (args[i] == "--max-pack-bytes") {
+            if (!require_value("--max-pack-bytes"))
+                return 2;
+            if (!apply_max_pack_bytes(args[++i], limits)) {
+                std::cerr << "Error: --max-pack-bytes requires a positive byte count\n";
+                return 2;
+            }
+        } else if (args[i] == "--help" || args[i] == "-h") {
+            print_usage();
+            return 0;
+        } else if (!args[i].starts_with("-") && path.empty())
+            path = args[i];
         else { std::cerr << "Error: unknown content install argument: " << args[i] << "\n"; return 2; }
     }
     if (path.empty() || plugin.empty()) {
@@ -841,7 +926,7 @@ int cmd_install(const std::vector<std::string>& args) {
     }
     ContentManifest manifest;
     std::vector<std::string> issues;
-    if (!validate_content_manifest(path, manifest, issues)) {
+    if (!validate_content_manifest(path, manifest, issues, limits)) {
         std::cerr << "Error: content pack invalid\n";
         for (const auto& issue : issues) std::cerr << "  - " << issue << "\n";
         return 1;
@@ -861,7 +946,7 @@ int cmd_install(const std::vector<std::string>& args) {
         return 1;
     }
     std::string error;
-    const bool copied = install_manifest_content(manifest, path, dest, error);
+    const bool copied = install_manifest_content(manifest, path, dest, error, limits);
     if (!copied) {
         fs::remove_all(dest, ec);
         std::cerr << "Error: " << error << "\n";
@@ -882,6 +967,7 @@ int cmd_update(const std::vector<std::string>& args) {
     std::string path;
     std::string plugin;
     fs::path data_root = default_data_root();
+    pulp::state::ContentInstallLimits limits;
     for (std::size_t i = 0; i < args.size(); ++i) {
         auto require_value = [&](const char* flag) -> bool {
             if (i + 1 >= args.size()) {
@@ -891,10 +977,26 @@ int cmd_update(const std::vector<std::string>& args) {
             return true;
         };
         if (args[i] == "--yes") yes = true;
-        else if (args[i] == "--plugin") { if (!require_value("--plugin")) return 2; plugin = args[++i]; }
-        else if (args[i] == "--root") { if (!require_value("--root")) return 2; data_root = args[++i]; }
-        else if (args[i] == "--help" || args[i] == "-h") { print_usage(); return 0; }
-        else if (!args[i].starts_with("-") && path.empty()) path = args[i];
+        else if (args[i] == "--plugin") {
+            if (!require_value("--plugin"))
+                return 2;
+            plugin = args[++i];
+        } else if (args[i] == "--root") {
+            if (!require_value("--root"))
+                return 2;
+            data_root = args[++i];
+        } else if (args[i] == "--max-pack-bytes") {
+            if (!require_value("--max-pack-bytes"))
+                return 2;
+            if (!apply_max_pack_bytes(args[++i], limits)) {
+                std::cerr << "Error: --max-pack-bytes requires a positive byte count\n";
+                return 2;
+            }
+        } else if (args[i] == "--help" || args[i] == "-h") {
+            print_usage();
+            return 0;
+        } else if (!args[i].starts_with("-") && path.empty())
+            path = args[i];
         else { std::cerr << "Error: unknown content update argument: " << args[i] << "\n"; return 2; }
     }
     if (path.empty() || plugin.empty()) {
@@ -908,7 +1010,7 @@ int cmd_update(const std::vector<std::string>& args) {
     }
     ContentManifest manifest;
     std::vector<std::string> issues;
-    if (!validate_content_manifest(path, manifest, issues)) {
+    if (!validate_content_manifest(path, manifest, issues, limits)) {
         std::cerr << "Error: content pack invalid\n";
         for (const auto& issue : issues) std::cerr << "  - " << issue << "\n";
         return 1;
@@ -965,7 +1067,7 @@ int cmd_update(const std::vector<std::string>& args) {
     };
 
     std::string error;
-    if (!install_manifest_content(manifest, path, dest, error)) {
+    if (!install_manifest_content(manifest, path, dest, error, limits)) {
         rollback();
         std::cerr << "Error: " << error;
         if (had_previous) std::cerr << " (rolled back previous content)";
