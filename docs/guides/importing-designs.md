@@ -74,6 +74,11 @@ pulp-screenshot --script editor-behavior.js --design-ir editor.ir.json \
   --settle-frames 64 --output editor-native.png
 ```
 
+`--materialized-canvas-composition` is what keeps
+`materialized-document.json` in the capture directory; an `--emit ir-json`
+import without it skips reading the document, so the transform above and any
+state-atlas entry that attaches a `materialized_document` need the flag.
+
 This is not a WebView or a hand-built visual approximation: native Skia draws
 the hash-verified Chromium frame, while transparent native CanvasWidget targets
 receive pointer input and retain the original materialized closures. The full

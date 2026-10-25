@@ -144,14 +144,9 @@ TEST_CASE("ReloadableShell background watcher swaps on an mtime change", "[reloa
     shell.prepare(ctx);
     REQUIRE(render_one(shell) == 0.5f);         // unity
 
-    // Let the watcher establish its baseline against the unity logic before we
-    // drop the new build in. The watcher's first poll (which records the baseline
-    // mtime without reloading) starts the moment prepare() launches it; if this
-    // install raced ahead of that first poll, the watcher would capture the NEW
-    // mtime as its baseline and never observe a change. A few poll intervals of
-    // settle makes the baseline deterministic. (In a real dev loop the recompile
-    // lands seconds after load, so this race is test-only.)
-    std::this_thread::sleep_for(ReloadableShell::kPollInterval * 3);
+    // No settle before the install: the watcher's baseline is seeded from the
+    // logic the shell loaded, so a build that lands before its first poll is
+    // still a change.
 
     // Developer recompiles: drop a 2x build at the watched path. The background
     // watcher (poll ~150ms) must pick it up and swap with no further calls.
@@ -168,6 +163,49 @@ TEST_CASE("ReloadableShell background watcher swaps on an mtime change", "[reloa
 
     shell.release();
     std::error_code ec; fs::remove(watched, ec);
+}
+
+TEST_CASE("ReloadableShell reloads a build that lands between load and prepare()",
+          "[reload][shell]") {
+    // The shell loads its initial logic at construction and starts watching in
+    // prepare(). A build installed in that gap must still be picked up: the
+    // watcher compares against the loaded version, not against whatever the
+    // file holds when it first polls.
+    const fs::path watched = fs::path(RELOAD_WATCH_DIR) / "pulp_shell_watched_gap.dylib";
+    install(RELOAD_LOGIC_UNITY, watched, /*tick=*/0);
+
+    ReloadableShell shell(watched.string());
+    state::StateStore store;
+    shell.define_parameters(store);
+    shell.set_state_store(&store);
+    store.set_value(1, 0.5f);
+
+    install(RELOAD_LOGIC_COMPATIBLE, watched, /*tick=*/1); // before prepare()
+
+    format::PrepareContext ctx;
+    ctx.sample_rate = 48000.0;
+    ctx.max_buffer_size = 64;
+    shell.prepare(ctx);
+    // The loaded (unity) logic is live until the watcher swaps; on a saturated
+    // host the swap can already have happened, so only check it if not.
+    if (shell.successful_reloads() == 0) {
+        const float first = render_one(shell);
+        if (shell.successful_reloads() == 0)
+            REQUIRE(first == 0.5f);
+    }
+
+    bool swapped = false;
+    for (int i = 0; i < 100 && !swapped; ++i) { // up to ~5s, generous
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (shell.successful_reloads() >= 1)
+            swapped = true;
+    }
+    REQUIRE(swapped);
+    REQUIRE(render_steady(shell) == 1.0f); // 2x * 0.5
+
+    shell.release();
+    std::error_code ec;
+    fs::remove(watched, ec);
 }
 
 TEST_CASE("ReloadableShell with no logic path runs as passthrough", "[reload][shell]") {

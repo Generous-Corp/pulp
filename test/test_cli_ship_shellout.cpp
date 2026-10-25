@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1171,6 +1172,150 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     fs::remove_all(root);
 }
+
+#if defined(PULP_SHIP_STRIP_FIXTURE)
+namespace {
+
+fs::path make_module_bundle(const fs::path& root, std::string_view format, std::string_view name,
+                            std::string_view ext) {
+    auto bundle = root / "build" / std::string(format) / (std::string(name) + std::string(ext));
+    fs::create_directories(bundle / "Contents" / "MacOS");
+    {
+        std::ofstream plist(bundle / "Contents" / "Info.plist");
+        plist << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+              << "<plist version=\"1.0\"><dict>"
+              << "<key>CFBundleExecutable</key><string>" << name << "</string>"
+              << "<key>CFBundleIdentifier</key><string>com.pulp.test." << name << "</string>"
+              << "<key>CFBundlePackageType</key><string>BNDL</string>"
+              << "<key>CFBundleVersion</key><string>1.0.0</string>"
+              << "</dict></plist>\n";
+    }
+    fs::copy_file(PULP_SHIP_STRIP_FIXTURE, bundle / "Contents" / "MacOS" / std::string(name),
+                  fs::copy_options::overwrite_existing);
+    return bundle;
+}
+
+// nm lists a local text symbol with a lower-case "t".
+bool has_local_fixture_symbol(const fs::path& binary) {
+    auto r = ChildProcess::run("/usr/bin/nm", {binary.string()}, ProcessOptions{});
+    std::istringstream lines(r.stdout_output);
+    for (std::string line; std::getline(lines, line);) {
+        if (contains(line, " t ") && contains(line, "pulp_ship_strip_fixture_local"))
+            return true;
+    }
+    return false;
+}
+
+fs::path packaged_binary(const fs::path& pkg, const fs::path& out, std::string_view name) {
+    auto r = ChildProcess::run("/usr/sbin/pkgutil", {"--expand-full", pkg.string(), out.string()},
+                               ProcessOptions{});
+    REQUIRE(r.exit_code == 0);
+    const auto suffix = fs::path("Contents") / "MacOS" / std::string(name);
+    for (const auto& entry : fs::recursive_directory_iterator(out)) {
+        const auto& p = entry.path();
+        if (p.filename() == std::string(name) && p.parent_path().filename() == "MacOS" &&
+            entry.is_regular_file())
+            return p;
+    }
+    FAIL("no packaged " << suffix.string() << " under " << out.string());
+    return {};
+}
+
+} // namespace
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package strips local symbols from the shipped copy only",
+                 "[cli][shellout][ship][package][strip]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("package-strip", true);
+    auto bundle = make_module_bundle(root, "CLAP", "StripMe", ".clap");
+    const auto build_binary = bundle / "Contents" / "MacOS" / "StripMe";
+    // Control: the fixture really carries the local symbol the case looks for.
+    REQUIRE(has_local_fixture_symbol(build_binary));
+    // codesign embeds entitlements only in an executable's signature, not in a
+    // loadable module's, so a second bundle carries a copy of an executable
+    // to tell whether re-signing the stripped copy keeps them.
+    auto entitled = make_module_bundle(root, "CLAP", "EntMe", ".clap");
+    const auto entitled_binary = entitled / "Contents" / "MacOS" / "EntMe";
+    fs::copy_file("/usr/bin/true", entitled_binary, fs::copy_options::overwrite_existing);
+    // Sign it with an entitlement, as `pulp ship sign` would.
+    const auto entitlements_plist = root / "fixture.entitlements";
+    {
+        std::ofstream ent(entitlements_plist);
+        ent << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+               "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+            << "<plist version=\"1.0\"><dict>"
+            << "<key>com.apple.security.cs.disable-library-validation</key><true/>"
+            << "</dict></plist>\n";
+    }
+    REQUIRE(ChildProcess::run("/usr/bin/codesign",
+                              {"--force", "--sign", "-", "--entitlements",
+                               entitlements_plist.string(), entitled.string()},
+                              ProcessOptions{})
+                .exit_code == 0);
+    auto entitlements_of = [](const fs::path& signed_bundle) {
+        auto e = ChildProcess::run("/usr/bin/codesign",
+                                   {"-d", "--entitlements", "-", "--xml", signed_bundle.string()},
+                                   ProcessOptions{});
+        REQUIRE(e.exit_code == 0);
+        return e.stdout_output;
+    };
+    const auto original_entitlements = entitlements_of(entitled);
+    REQUIRE(contains(original_entitlements, "disable-library-validation"));
+
+    auto r = run_pulp_in(root, {"ship", "package", "--version", "1.0.0", "--separate"});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output, "stripped local symbols from StripMe.clap"));
+
+    const auto pkg = root / "artifacts" / "StripMe-CLAP-1.0.0.pkg";
+    REQUIRE(fs::exists(pkg));
+    const auto shipped = packaged_binary(pkg, root / "expanded", "StripMe");
+    CHECK_FALSE(has_local_fixture_symbol(shipped));
+    // The build output keeps its symbols for debugging and nm-based checks.
+    CHECK(has_local_fixture_symbol(build_binary));
+    // A dSYM of the unstripped executable is written before stripping: it
+    // keeps the local symbol under the UUID the shipped binary carries, so a
+    // crash report from the shipped copy still symbolicates.
+    const auto dsym = root / "artifacts" / "symbols" / "CLAP" / "StripMe.clap.dSYM";
+    const auto dsym_binary = dsym / "Contents" / "Resources" / "DWARF" / "StripMe";
+    REQUIRE(fs::is_regular_file(dsym_binary));
+    CHECK(has_local_fixture_symbol(dsym_binary));
+    auto uuid_of = [](const fs::path& binary) {
+        auto u = ChildProcess::run("/usr/bin/xcrun", {"dwarfdump", "--uuid", binary.string()},
+                                   ProcessOptions{});
+        REQUIRE(u.exit_code == 0);
+        const auto at = u.stdout_output.find("UUID: ");
+        REQUIRE(at != std::string::npos);
+        return u.stdout_output.substr(at + 6, 36);
+    };
+    CHECK(uuid_of(dsym_binary) == uuid_of(shipped));
+    // Re-signing the stripped copy keeps the original's entitlements.
+    REQUIRE(contains(r.stdout_output, "stripped local symbols from EntMe.clap"));
+    const auto shipped_entitled = packaged_binary(root / "artifacts" / "EntMe-CLAP-1.0.0.pkg",
+                                                  root / "expanded-ent", "EntMe");
+    CHECK(entitlements_of(shipped_entitled.parent_path().parent_path().parent_path()) ==
+          original_entitlements);
+    // The stripped copy carries a valid (ad hoc) signature, so it still loads.
+    auto verify = ChildProcess::run(
+        "/usr/bin/codesign",
+        {"--verify", shipped.parent_path().parent_path().parent_path().string()}, ProcessOptions{});
+    CHECK(verify.exit_code == 0);
+
+    auto kept = run_pulp_in(
+        root, {"ship", "package", "--version", "1.0.1", "--separate", "--keep-symbols"});
+    REQUIRE(kept.exit_code == 0);
+    const auto kept_binary = packaged_binary(root / "artifacts" / "StripMe-CLAP-1.0.1.pkg",
+                                             root / "expanded-kept", "StripMe");
+    CHECK(has_local_fixture_symbol(kept_binary));
+
+    fs::remove_all(root);
+}
+#endif
 #elif defined(__linux__)
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package on Linux with no plugin bundles reports missing plugins",
@@ -2038,6 +2183,301 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 #endif
 
+// ── PULP_DEV_SHARED_UI: development-only shared runtime ───────────────────
+// A dev-shared module loads Pulp from libpulp-dev-shared-ui.<version>.dylib in
+// its build tree, so every distribution path refuses the configured cache and
+// any artifact that is or references the runtime.
+
+namespace {
+
+// Bytes of a module linked against the shared runtime: its load command names
+// the runtime's @rpath install name.
+void write_dev_shared_module(const fs::path& file) {
+    fs::create_directories(file.parent_path());
+    std::ofstream out(file, std::ios::binary);
+    out << "\xcf\xfa\xed\xfe" << "fixture LC_LOAD_DYLIB "
+        << "@rpath/libpulp-dev-shared-ui.1.11.0.dylib" << '\0';
+}
+
+} // namespace
+
+namespace {
+
+// The default entitlements `pulp ship sign` passes to codesign, so a real ad hoc
+// signature can be made inside a fake project.
+void write_default_entitlements(const fs::path& root) {
+    fs::create_directories(root / "ship" / "templates");
+    std::ofstream(root / "ship" / "templates" / "entitlements.plist")
+        << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+           "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+        << "<plist version=\"1.0\"><dict>"
+        << "<key>com.apple.security.cs.disable-library-validation</key><true/>"
+        << "</dict></plist>\n";
+}
+
+// A project whose build dir links plug-ins against the dev-shared runtime. It
+// configures with no languages, so the shippable configure `pulp ship` runs
+// for it is a sub-second CMake run.
+fs::path make_dev_shared_project(std::string_view name) {
+    auto root = make_fake_project(name, true);
+    {
+        std::ofstream cmake(root / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.22)\n"
+              << "project(FakeShipPlugin VERSION 2.3.4 LANGUAGES NONE)\n";
+    }
+    std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+    cache << "CMAKE_BUILD_TYPE:STRING=Release\nPULP_DEV_SHARED_UI:BOOL=ON\n";
+    return root;
+}
+
+} // namespace
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "a distribution step ships a dev-shared build from a static build-ship",
+                 "[cli][shellout][ship][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    ScopedEnvVar leases("PULP_TARTCI_LEASES", "0");
+    const std::vector<std::vector<std::string>> commands = {
+        {"ship", "package"},
+        // --allow-dev-build keeps a PULP_DEV_BUILD dir, never a dev-shared one.
+        {"ship", "package", "--allow-dev-build"},
+        {"ship", "release"},
+        {"ship", "sign", "--identity", "Developer ID Application: Fake"}};
+    for (const auto& command : commands) {
+        DYNAMIC_SECTION("pulp ship " << command[1] << " (" << command.size() << " args)") {
+            auto root = make_dev_shared_project("dev-shared-ship-" + command[1]);
+            auto r = run_pulp_in(root, command);
+            REQUIRE_FALSE(r.timed_out);
+            const auto combined = r.stdout_output + r.stderr_output;
+            INFO(combined);
+            REQUIRE(contains(combined, "development-only shared Pulp runtime"));
+            REQUIRE(contains(combined, "build-ship"));
+            const auto ship_cache = read_text_file(root / "build-ship" / "CMakeCache.txt");
+            REQUIRE(contains(ship_cache, "PULP_DEV_SHARED_UI:BOOL=OFF"));
+            REQUIRE_FALSE(contains(ship_cache, "PULP_DEV_SHARED_UI:BOOL=ON"));
+            // The dev build is left as it is: still dev-shared, not rebuilt.
+            REQUIRE(contains(read_text_file(root / "build" / "CMakeCache.txt"),
+                             "PULP_DEV_SHARED_UI:BOOL=ON"));
+            fs::remove_all(root);
+        }
+    }
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "notarize and share on a dev-shared build without build-ship ship nothing",
+                 "[cli][shellout][ship][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    for (const char* sub : {"notarize", "share"}) {
+        DYNAMIC_SECTION("pulp ship " << sub) {
+            auto root = make_dev_shared_project(std::string("dev-shared-unbuilt-") + sub);
+            auto r = run_pulp_in(root, {"ship", sub, "--allow-dev-build"});
+            REQUIRE_FALSE(r.timed_out);
+            REQUIRE(r.exit_code == 1);
+            INFO(r.stdout_output << r.stderr_output);
+            REQUIRE(contains(r.stderr_output, "PULP_DEV_SHARED_UI=ON"));
+            REQUIRE(contains(r.stderr_output, "Run `pulp ship package`"));
+            REQUIRE_FALSE(fs::exists(root / "build-ship"));
+            fs::remove_all(root);
+        }
+    }
+}
+
+#if defined(__APPLE__) && defined(PULP_SHIP_STRIP_FIXTURE)
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "a static build still signs and packages and its signature verifies",
+                 "[cli][shellout][ship][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("static-sign-package", true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_DEV_SHARED_UI:BOOL=OFF\nPULP_SDK_DISTRIBUTION_ELIGIBLE:INTERNAL=TRUE\n";
+    }
+    auto bundle = make_module_bundle(root, "VST3", "StaticGain", ".vst3");
+    write_default_entitlements(root);
+
+    auto signed_run = run_pulp_in(root, {"ship", "sign", "--identity", "-"});
+    INFO(signed_run.stdout_output << signed_run.stderr_output);
+    REQUIRE_FALSE(signed_run.timed_out);
+    REQUIRE(signed_run.exit_code == 0);
+    REQUIRE(contains(signed_run.stdout_output, "Signed 1 bundles."));
+    auto verify = ChildProcess::run("/usr/bin/codesign", {"--verify", "--strict", bundle.string()},
+                                    ProcessOptions{});
+    REQUIRE(verify.exit_code == 0);
+
+    auto packaged = run_pulp_in(root, {"ship", "package", "--version", "1.0.0", "--separate"});
+    INFO(packaged.stdout_output << packaged.stderr_output);
+    REQUIRE_FALSE(packaged.timed_out);
+    REQUIRE(packaged.exit_code == 0);
+    REQUIRE(fs::exists(root / "artifacts" / "StaticGain-VST3-1.0.0.pkg"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "a dev-shared build signs for local loading but is never distributed",
+                 "[cli][shellout][ship][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_shared_project("dev-shared-local-sign");
+    auto bundle = make_module_bundle(root, "CLAP", "FastGain", ".clap");
+    write_default_entitlements(root);
+    // The scan flags any file naming the runtime, as a linked module's load
+    // commands do; a sealed resource keeps the bundle signable here.
+    fs::create_directories(bundle / "Contents" / "Resources");
+    std::ofstream(bundle / "Contents" / "Resources" / "runtime.txt")
+        << "@rpath/libpulp-dev-shared-ui.1.11.0.dylib\n";
+    auto local = run_pulp_in(root, {"ship", "sign", "--identity", "-"});
+    INFO(local.stdout_output << local.stderr_output);
+    REQUIRE_FALSE(local.timed_out);
+    REQUIRE(local.exit_code == 0);
+    // Signed in place: no shippable build was made.
+    REQUIRE_FALSE(fs::exists(root / "build-ship"));
+    REQUIRE(ChildProcess::run("/usr/bin/codesign", {"--verify", "--strict", bundle.string()},
+                              ProcessOptions{})
+                .exit_code == 0);
+
+    auto path_sign =
+        run_pulp_in(root, {"ship", "sign", "--identity", "-", "--path", bundle.string()});
+    REQUIRE(path_sign.exit_code == 0);
+
+    // A distribution identity on the same bundle is refused with the one fix.
+    auto distribution =
+        run_pulp_in(root, {"ship", "sign", "--identity", "Developer ID Application: Fake", "--path",
+                           bundle.string()});
+    INFO(distribution.stdout_output << distribution.stderr_output);
+    REQUIRE(distribution.exit_code == 1);
+    REQUIRE(contains(distribution.stderr_output,
+                     "PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship sign --identity "
+                     "\"Developer ID Application: Fake\" --path"));
+    REQUIRE_FALSE(fs::exists(root / "artifacts"));
+    fs::remove_all(root);
+}
+#endif
+
+#ifdef __APPLE__
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign --path rejects a module linked against the dev-shared runtime",
+                 "[cli][shellout][ship][sign][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("sign-path-dev-shared", true);
+    auto bundle = root.parent_path() / (root.filename().string() + "-outside.vst3");
+    write_dev_shared_module(bundle / "Contents" / "MacOS" / "FastGain");
+
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "Developer ID Application: Fake",
+                                "--path", bundle.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only dev-shared build"));
+    REQUIRE(contains(combined, "FastGain"));
+    REQUIRE_FALSE(contains(combined, "Signing " + bundle.filename().string()));
+
+    fs::remove_all(bundle);
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign rejects a scanned bundle carrying the dev-shared runtime",
+                 "[cli][shellout][ship][sign][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("sign-scan-dev-shared", true);
+    auto bundle = make_fake_bundle(root, "CLAP", "FastGain.clap");
+    std::ofstream(bundle / "Contents" / "libpulp-dev-shared-ui.1.11.0.dylib") << "copied runtime\n";
+
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "Developer ID Application: Fake"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only dev-shared build"));
+    REQUIRE(contains(combined, "libpulp-dev-shared-ui.1.11.0.dylib"));
+    REQUIRE_FALSE(contains(combined, "Signing FastGain.clap"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package rejects a dev-shared module when the cache is off",
+                 "[cli][shellout][ship][package][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("package-dev-shared", true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_DEV_SHARED_UI:BOOL=OFF\n"
+              << "PULP_SDK_DISTRIBUTION_ELIGIBLE:INTERNAL=TRUE\n";
+    }
+    auto bundle = make_fake_bundle(root, "VST3", "FastGain.vst3");
+    write_dev_shared_module(bundle / "Contents" / "MacOS" / "FastGain");
+
+    auto r = run_pulp_in(root, {"ship", "package", "--product", "FastGain"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only dev-shared build"));
+    REQUIRE_FALSE(contains(combined, "Packaging FastGain"));
+    REQUIRE_FALSE(fs::exists(root / "artifacts" / "FastGain-2.3.4.pkg"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize rejects a dev-shared module before submitting",
+                 "[cli][shellout][ship][notarize][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("notarize-dev-shared", true);
+    auto package = root.parent_path() / (root.filename().string() + "-outside.pkg");
+    write_dev_shared_module(package / "Payload" / "FastGain.vst3" / "Contents" / "MacOS" /
+                            "FastGain");
+
+    auto r = run_pulp_in(root, {"ship", "notarize", "--path", package.string(), "--dry-run",
+                                "--api-key", "/path/AuthKey_FAKE.p8", "--api-key-id", "FAKEKEYID",
+                                "--api-issuer", "fake-issuer"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only dev-shared build"));
+    REQUIRE_FALSE(contains(combined, "notarytool submit"));
+
+    fs::remove_all(package);
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture, "pulp ship share rejects a dev-shared standalone app",
+                 "[cli][shellout][ship][share][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("share-dev-shared", true);
+    auto app = root.parent_path() / (root.filename().string() + "-outside.app");
+    make_fake_standalone_app(app, "FastGain");
+    write_dev_shared_module(app / "Contents" / "MacOS" / "FastGain");
+
+    auto r = run_pulp_in(root, {"ship", "share", app.string(), "--dry-run"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only dev-shared build"));
+    REQUIRE_FALSE(contains(combined, "share plan"));
+
+    fs::remove_all(app);
+    fs::remove_all(root);
+}
+#endif
+
 // ── Linux packaging CLI routing ──────────────────────────────────────────
 // Regression guard: `pulp ship package` on Linux must invoke the first-party
 // .deb/.tar.gz packagers (ship/platform/linux/package_linux.cpp), NOT fall
@@ -2123,4 +2563,174 @@ TEST_CASE("shellout timeout falls back to the default on unusable overrides",
         REQUIRE(pulp_test_cli::shellout_timeout_ms() ==
                 pulp_test_cli::kDefaultShelloutTimeoutMs);
     }
+}
+
+// ── PULP_DEV_BUILD: ship builds build-ship/ instead of refusing ──────────────
+//
+// A `pulp build` dir is a dev build (PULP_DEV_BUILD=ON records the on-disk
+// ui.js hot-reload path). `pulp ship` must neither ship it nor refuse it: the
+// artifact-producing subcommands configure and build <root>/build-ship with
+// PULP_DEV_BUILD=OFF and ship from there. The fake project configures with no
+// languages so the shippable configure is a sub-second CMake run.
+
+namespace {
+
+fs::path make_dev_build_project(std::string_view name) {
+    auto root = make_fake_project(name, true);
+    {
+        std::ofstream cmake(root / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.22)\n"
+              << "project(FakeShipPlugin VERSION 2.3.4 LANGUAGES NONE)\n";
+    }
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "CMAKE_BUILD_TYPE:STRING=Release\n"
+              << "PULP_ENABLE_ARA:BOOL=ON\n"
+              << "PULP_DEV_BUILD:BOOL=ON\n";
+    }
+    return root;
+}
+
+} // namespace
+
+TEST_CASE_METHOD(
+    ShipShelloutFixture,
+    "pulp ship package on a dev build configures and builds build-ship instead of refusing",
+    "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-package");
+    ScopedEnvVar leases("PULP_TARTCI_LEASES", "0");
+
+    auto r = run_pulp_in(root, {"ship", "package"});
+    REQUIRE_FALSE(r.timed_out);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "is a dev build"));
+    REQUIRE(contains(combined, "build-ship"));
+    REQUIRE_FALSE(contains(combined, "refusing"));
+    // The shippable build was configured from the dev cache with the option off.
+    REQUIRE(fs::exists(root / "build-ship" / "CMakeCache.txt"));
+    const auto ship_cache = read_text_file(root / "build-ship" / "CMakeCache.txt");
+    REQUIRE(contains(ship_cache, "PULP_DEV_BUILD:BOOL=OFF"));
+    REQUIRE_FALSE(contains(ship_cache, "PULP_DEV_BUILD:BOOL=ON"));
+    // Every other switch the developer configured came along.
+    REQUIRE(contains(ship_cache, "PULP_ENABLE_ARA:BOOL=ON"));
+    REQUIRE(fs::exists(root / "build-ship" / "pulp-ship-initial-cache.cmake"));
+    // Packaging then ran against build-ship, which holds no plug-ins.
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(contains(combined, "build-ship"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship --allow-dev-build ships the dev build dir and says so",
+                 "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-allowed");
+    ScopedEnvVar leases("PULP_TARTCI_LEASES", "0");
+
+    auto r = run_pulp_in(root, {"ship", "package", "--allow-dev-build"});
+    REQUIRE_FALSE(r.timed_out);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "--allow-dev-build was passed"));
+    REQUIRE_FALSE(contains(combined, "Building the shippable build"));
+    REQUIRE_FALSE(fs::exists(root / "build-ship"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(
+    ShipShelloutFixture,
+    "pulp ship sign --path on a dev build signs the named artifact without building build-ship",
+    "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-sign-path");
+    ScopedEnvVar leases("PULP_TARTCI_LEASES", "0");
+
+    // The artifact is explicit, so the dev build dir is never a reason to
+    // configure and build a second tree; the missing path is reported as such.
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "Developer ID Application: Fake",
+                                "--path", (root / "does-not-exist.app").string()});
+    REQUIRE_FALSE(r.timed_out);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "--path not found"));
+    REQUIRE_FALSE(contains(combined, "Building the shippable build"));
+    REQUIRE_FALSE(fs::exists(root / "build-ship"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship check names the shippable build dir a dev build will ship from",
+                 "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-check");
+
+    // Not built yet: check reads build/ and says what sign/package will do.
+    auto r = run_pulp_in(root, {"ship", "check"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "is a dev build"));
+    REQUIRE(contains(combined, "build-ship"));
+    REQUIRE(contains(combined, "not built yet"));
+
+    // Once build-ship exists, every read-only subcommand reads it.
+    fs::create_directories(root / "build-ship");
+    std::ofstream(root / "build-ship" / "CMakeCache.txt")
+        << "CMAKE_HOME_DIRECTORY:INTERNAL=" << root.string() << "\nPULP_DEV_BUILD:BOOL=OFF\n";
+    r = run_pulp_in(root, {"ship", "check"});
+    REQUIRE_FALSE(r.timed_out);
+    combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "reading build-ship/"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize on a dev build without build-ship points at package",
+                 "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-notarize");
+    auto r = run_pulp_in(root, {"ship", "notarize", "--dry-run"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "has not been built yet"));
+    REQUIRE(contains(combined, "pulp ship package"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package refuses a shippable build that lacks a dev-build artifact",
+                 "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-artifact-set");
+    ScopedEnvVar leases("PULP_TARTCI_LEASES", "0");
+    // The dev build holds an AAX bundle the fresh build-ship (no languages, no
+    // targets) can never produce.
+    fs::create_directories(root / "build" / "AAX" / "Fake.aaxplugin");
+
+    auto r = run_pulp_in(root, {"ship", "package"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "refusing to ship from"));
+    REQUIRE(contains(combined, "AAX/Fake.aaxplugin"));
+    REQUIRE_FALSE(fs::exists(root / "artifacts"));
+    fs::remove_all(root);
 }

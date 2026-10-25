@@ -24,8 +24,10 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -328,36 +330,69 @@ namespace {
 /// serves both the element layer (`filter`) and the backdrop layer
 /// (`backdrop-filter`) rather than each keeping its own copy. The switch has
 /// no `default:` so adding a kind to either enum surfaces here.
-std::vector<canvas::Canvas::FilterChainEntry> to_canvas_filter_chain(
-    const std::vector<View::FilterOp>& ops) {
+canvas::Canvas::FilterChainEntry to_canvas_filter_entry(const View::FilterOp& op) {
     using ViewK = View::FilterOp::Kind;
     using CanvK = canvas::Canvas::FilterChainEntry::Kind;
+    canvas::Canvas::FilterChainEntry e{};
+    switch (op.kind) {
+    case ViewK::blur:
+        e.kind = CanvK::blur;
+        break;
+    case ViewK::brightness:
+        e.kind = CanvK::brightness;
+        break;
+    case ViewK::contrast:
+        e.kind = CanvK::contrast;
+        break;
+    case ViewK::grayscale:
+        e.kind = CanvK::grayscale;
+        break;
+    case ViewK::hue_rotate:
+        e.kind = CanvK::hue_rotate;
+        break;
+    case ViewK::invert:
+        e.kind = CanvK::invert;
+        break;
+    case ViewK::opacity:
+        e.kind = CanvK::opacity;
+        break;
+    case ViewK::saturate:
+        e.kind = CanvK::saturate;
+        break;
+    case ViewK::sepia:
+        e.kind = CanvK::sepia;
+        break;
+    case ViewK::drop_shadow:
+        e.kind = CanvK::drop_shadow;
+        break;
+    }
+    e.amount = op.amount;
+    e.angle_deg = op.angle_deg;
+    e.ds_offset_x = op.ds_offset_x;
+    e.ds_offset_y = op.ds_offset_y;
+    e.ds_blur = op.ds_blur;
+    e.ds_color = op.ds_color;
+    return e;
+}
+
+std::vector<canvas::Canvas::FilterChainEntry>
+to_canvas_filter_chain(const std::vector<View::FilterOp>& ops) {
     std::vector<canvas::Canvas::FilterChainEntry> chain;
     chain.reserve(ops.size());
-    for (const auto& op : ops) {
-        canvas::Canvas::FilterChainEntry e{};
-        switch (op.kind) {
-            case ViewK::blur:        e.kind = CanvK::blur;        break;
-            case ViewK::brightness:  e.kind = CanvK::brightness;  break;
-            case ViewK::contrast:    e.kind = CanvK::contrast;    break;
-            case ViewK::grayscale:   e.kind = CanvK::grayscale;   break;
-            case ViewK::hue_rotate:  e.kind = CanvK::hue_rotate;  break;
-            case ViewK::invert:      e.kind = CanvK::invert;      break;
-            case ViewK::opacity:     e.kind = CanvK::opacity;     break;
-            case ViewK::saturate:    e.kind = CanvK::saturate;    break;
-            case ViewK::sepia:       e.kind = CanvK::sepia;       break;
-            case ViewK::drop_shadow: e.kind = CanvK::drop_shadow; break;
-        }
-        e.amount      = op.amount;
-        e.angle_deg   = op.angle_deg;
-        e.ds_offset_x = op.ds_offset_x;
-        e.ds_offset_y = op.ds_offset_y;
-        e.ds_blur     = op.ds_blur;
-        e.ds_color    = op.ds_color;
-        chain.push_back(e);
-    }
+    for (const auto& op : ops)
+        chain.push_back(to_canvas_filter_entry(op));
     return chain;
 }
+
+// Paint runs inside a ScopedNoAlloc region, so a backdrop list, plus the blur
+// and opacity steps push_effect_layers may append, is built on the stack. A
+// longer list, which no design emits, goes to the heap rather than losing
+// entries.
+constexpr std::size_t kInlineBackdropChain = 16;
+
+// Below one 8-bit level of coverage an element paints nothing, so its
+// backdrop is not drawn either.
+constexpr float kMinVisibleOpacity = 1.0f / 255.0f;
 
 }  // namespace
 
@@ -369,9 +404,18 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     // widget's own opacity/filter layer so background, border, and children
     // composite over the frosted backdrop. Paired with the matching restore()
     // in pop_effect_layers.
+    //
+    // CSS opacity covers the element's whole rendering, the backdrop-filter
+    // result included. Chrome draws the filtered backdrop at the element's
+    // opacity and then the element over it at that opacity
+    // (tools/import-validation/chrome_backdrop_opacity_oracle.py), so at
+    // opacity 0 the layer is not opened at all, and below 1 the chain ends in
+    // an opacity() step. An ancestor below opacity 1 needs nothing here: its
+    // own layer is open beneath this one, which makes it the backdrop's root,
+    // as it is in Chrome.
     const auto& backdrop_chain = backdrop_filter_chain();
     bool needs_backdrop_layer =
-        !backdrop_chain.empty() || backdrop_blur() > 0.0f;
+        opacity_ >= kMinVisibleOpacity && (!backdrop_chain.empty() || backdrop_blur() > 0.0f);
     if (needs_backdrop_layer) {
         if (!canvas.supports(canvas::CanvasCapability::backdrop_filter)) {
             warn_capability_fallback_once(
@@ -379,14 +423,15 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                 "canvas backend has no backdrop-filter blur; backdrop-filter "
                 "renders as an unblurred tint");
         }
-        if (backdrop_chain.empty()) {
+        if (backdrop_chain.empty() && opacity_ >= 1.0f) {
             canvas.save_backdrop_filter(0, 0, bounds_.width, bounds_.height,
                                         backdrop_blur());
         } else {
             // A list beyond a bare blur — `saturate()`, `invert()`, a pair of
-            // them. A backend without the chain keeps whatever blur the list
-            // carries and drops the colour half, so the frosting survives but
-            // the tint does not; say so rather than let it pass as faithful.
+            // them — or any backdrop under opacity below 1. A backend without
+            // the chain keeps whatever blur the list carries and drops the
+            // rest, so the frosting survives but the tint and the fade do not;
+            // say so rather than let it pass as faithful.
             if (!canvas.supports(
                     canvas::CanvasCapability::backdrop_filter_chain)) {
                 warn_capability_fallback_once(
@@ -394,10 +439,25 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                     "canvas backend does not honor backdrop-filter color ops; "
                     "backdrop-filter collapses to its blur");
             }
-            const auto chain = to_canvas_filter_chain(backdrop_chain);
-            canvas.save_backdrop_filter_chain(0, 0, bounds_.width,
-                                              bounds_.height, chain.data(),
-                                              static_cast<int>(chain.size()));
+            std::array<canvas::Canvas::FilterChainEntry, kInlineBackdropChain> inline_chain{};
+            std::vector<canvas::Canvas::FilterChainEntry> long_chain;
+            canvas::Canvas::FilterChainEntry* chain = inline_chain.data();
+            if (backdrop_chain.size() + 2 > inline_chain.size()) {
+                long_chain.resize(backdrop_chain.size() + 2);
+                chain = long_chain.data();
+            }
+            int count = 0;
+            for (const auto& op : backdrop_chain)
+                chain[count++] = to_canvas_filter_entry(op);
+            if (backdrop_chain.empty()) {
+                chain[count].kind = canvas::Canvas::FilterChainEntry::Kind::blur;
+                chain[count++].amount = backdrop_blur();
+            }
+            if (opacity_ < 1.0f) {
+                chain[count].kind = canvas::Canvas::FilterChainEntry::Kind::opacity;
+                chain[count++].amount = opacity_;
+            }
+            canvas.save_backdrop_filter_chain(0, 0, bounds_.width, bounds_.height, chain, count);
         }
     }
     state.backdrop_pushed = needs_backdrop_layer;
@@ -1194,53 +1254,53 @@ constexpr int kMaxTilesPerAxis = 512;
 
 }  // namespace
 
-void View::paint_background_and_border(canvas::Canvas& canvas) {
+Rect View::self_paint_bounds() const {
     // Browser lowering retains the capture-time browser-compatible paint rect
-    // for this box. Layout stays fractional; adjusting only this self-paint
-    // restores its snapped edges without moving descendants or hit bounds. A
-    // transformed node never receives this metadata, and an implausibly
-    // distant target is ignored rather than turning stale capture data into a
-    // visible jump.
-    bool captured_box_paint = false;
-    float paint_w = bounds_.width;
-    float paint_h = bounds_.height;
-    if (captured_box_paint_scale_ > 0.0f &&
-        std::isfinite(captured_box_paint_left_) &&
-        std::isfinite(captured_box_paint_top_) &&
-        std::isfinite(captured_box_paint_right_) &&
-        std::isfinite(captured_box_paint_bottom_)) {
-        float actual_x = bounds_.x, actual_y = bounds_.y;
-        for (const View* parent = parent_; parent != nullptr;
-             parent = parent->parent_) {
-            actual_x += parent->bounds_.x;
-            actual_y += parent->bounds_.y;
-        }
-        const float target_w = captured_box_paint_right_ - captured_box_paint_left_;
-        const float target_h = captured_box_paint_bottom_ - captured_box_paint_top_;
-        const float dx = captured_box_paint_left_ - actual_x;
-        const float dy = captured_box_paint_top_ - actual_y;
-        // CSS edges are snapped before DPR is applied, so a valid origin can
-        // move by half a CSS pixel at every DPR. Both independently snapped
-        // far edges can change the width or height by one CSS pixel.
-        constexpr float kOriginLimit = 0.501f;
-        constexpr float kExtentLimit = 1.001f;
-        const float width_delta = target_w - bounds_.width;
-        const float height_delta = target_h - bounds_.height;
-        if (bounds_.width > 0.0f && bounds_.height > 0.0f &&
-            target_w > 0.0f && target_h > 0.0f &&
-            std::fabs(dx) <= kOriginLimit && std::fabs(dy) <= kOriginLimit &&
-            std::fabs(width_delta) <= kExtentLimit &&
-            std::fabs(height_delta) <= kExtentLimit) {
-            canvas.save();
-            canvas.translate(dx, dy);
-            // This is outer paint geometry only. CSS percentage background
-            // sizes/positions, gradient vectors, border widths, and radii
-            // continue resolving from bounds_ below; only the final coverage
-            // rect and border outline use paint_w/paint_h.
-            paint_w = target_w;
-            paint_h = target_h;
-            captured_box_paint = true;
-        }
+    // for this box. Layout stays fractional; adjusting only self-paint restores
+    // its snapped edges without moving descendants or hit bounds. A transformed
+    // node never receives this metadata, and an implausibly distant target is
+    // ignored rather than turning stale capture data into a visible jump.
+    const Rect local = local_bounds();
+    if (!(captured_box_paint_scale_ > 0.0f) || !std::isfinite(captured_box_paint_left_) ||
+        !std::isfinite(captured_box_paint_top_) || !std::isfinite(captured_box_paint_right_) ||
+        !std::isfinite(captured_box_paint_bottom_))
+        return local;
+    float actual_x = bounds_.x, actual_y = bounds_.y;
+    for (const View* parent = parent_; parent != nullptr; parent = parent->parent_) {
+        actual_x += parent->bounds_.x;
+        actual_y += parent->bounds_.y;
+    }
+    const float target_w = captured_box_paint_right_ - captured_box_paint_left_;
+    const float target_h = captured_box_paint_bottom_ - captured_box_paint_top_;
+    const float dx = captured_box_paint_left_ - actual_x;
+    const float dy = captured_box_paint_top_ - actual_y;
+    // CSS edges are snapped before DPR is applied, so a valid origin can move
+    // by half a CSS pixel at every DPR. Both independently snapped far edges
+    // can change the width or height by one CSS pixel.
+    constexpr float kOriginLimit = 0.501f;
+    constexpr float kExtentLimit = 1.001f;
+    if (bounds_.width > 0.0f && bounds_.height > 0.0f && target_w > 0.0f && target_h > 0.0f &&
+        std::fabs(dx) <= kOriginLimit && std::fabs(dy) <= kOriginLimit &&
+        std::fabs(target_w - bounds_.width) <= kExtentLimit &&
+        std::fabs(target_h - bounds_.height) <= kExtentLimit)
+        return {dx, dy, target_w, target_h};
+    return local;
+}
+
+void View::paint_background_and_border(canvas::Canvas& canvas) {
+    const Rect snapped = self_paint_bounds();
+    const bool captured_box_paint = snapped.x != 0.0f || snapped.y != 0.0f ||
+                                    snapped.width != bounds_.width ||
+                                    snapped.height != bounds_.height;
+    // This is outer paint geometry only. CSS percentage background sizes and
+    // positions, gradient vectors, border widths, and radii continue resolving
+    // from bounds_ below; only the final coverage rect and border outline use
+    // paint_w/paint_h.
+    const float paint_w = snapped.width;
+    const float paint_h = snapped.height;
+    if (captured_box_paint) {
+        canvas.save();
+        canvas.translate(snapped.x, snapped.y);
     }
     // Per-corner border-radius: when any of the
     // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters
@@ -1488,6 +1548,12 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
         // floor every backend implements; a rounded box additionally clips to
         // its corner path, and a backend without a path clip no-ops that and
         // leaves the tiles square-cornered rather than spilling past the box.
+        // The interpolation space is canvas state the shader is built from, so
+        // it is set only around a layer that names one and leaves every other
+        // command stream untouched.
+        const bool custom_interpolation = layer->interpolation != canvas::GradientInterpolation{};
+        if (custom_interpolation)
+            canvas.set_gradient_interpolation(layer->interpolation);
         canvas.save();
         canvas.clip_rect(0, 0, paint_w, paint_h);
         if (use_per_corner) {
@@ -1519,6 +1585,8 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
             }
         }
         canvas.restore();
+        if (custom_interpolation)
+            canvas.set_gradient_interpolation({});
     }
 
     paint_border(canvas, paint_w, paint_h, use_per_corner, build_corner_path,

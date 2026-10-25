@@ -18,6 +18,7 @@
 
 #include <array>
 #include <limits>
+#include <thread>
 
 using namespace pulp::format;
 using Catch::Matchers::WithinAbs;
@@ -1633,4 +1634,131 @@ TEST_CASE("value_channels() defaults to null and costs the vtable nothing",
         CHECK(channels == &declared.set);
     });
     CHECK(visited_override);
+}
+
+TEST_CASE("Processor receives sample-accurate automation unless it opts out",
+          "[format][processor][params]") {
+    // The VST3, AU v2 and CLAP adapters read these once, at creation. The
+    // defaults keep every automation point and the AU v2 per-slice render, so
+    // a processor that overrides neither behaves as it always has.
+    PlainProcessor plain;
+    CHECK(plain.wants_sample_accurate_parameters());
+    CHECK(plain.wants_au_scheduled_parameter_slices());
+
+    struct BlockRate : PlainProcessor {
+        bool wants_sample_accurate_parameters() const override {
+            return false;
+        }
+    };
+    BlockRate block_rate;
+    const Processor& as_base = block_rate;
+    CHECK_FALSE(as_base.wants_sample_accurate_parameters());
+}
+
+TEST_CASE("Processor's layout matches the recorded ABI, tail padding included",
+          "[format][processor][abi]") {
+    // A plug-in built against an earlier header may place its own first
+    // members in Processor's tail padding, so Processor must not gain data
+    // members, even ones that fit there. The size matches the recorded
+    // sample-region-compat ABI fixture (expected/abi.txt) on Apple arm64, and
+    // the offset is where that layout puts a direct subclass's first byte.
+    struct LeadingBool final : Processor {
+        bool first = false;
+        PluginDescriptor descriptor() const override {
+            return {};
+        }
+        void define_parameters(pulp::state::StateStore&) override {}
+        void prepare(const PrepareContext&) override {}
+        void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                     pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                     const ProcessContext&) override {}
+    };
+    LeadingBool derived;
+    const auto first_offset =
+        reinterpret_cast<const char*>(&derived.first) -
+        reinterpret_cast<const char*>(static_cast<const Processor*>(&derived));
+#if defined(__APPLE__) && defined(__aarch64__)
+    CHECK(sizeof(Processor) == 4568);
+    CHECK(alignof(Processor) == 8);
+    CHECK(first_offset == 4564);
+#else
+    CHECK(first_offset > 0);
+#endif
+}
+
+TEST_CASE("An opted-out processor's param_events() read is recorded without allocating",
+          "[format][processor][params][rt-safety]") {
+    // The adapters arm the monitor with the queue they hand the processor;
+    // param_events() then marks the read on the audio thread. A fresh thread
+    // stands in for a host audio thread touching it for the first time.
+    PlainProcessor processor;
+    pulp::state::ParameterEventQueue queue;
+    processor.set_param_events(&queue);
+
+    ParamEventsOptOutMonitor monitor;
+    monitor.arm(true, &queue);
+    REQUIRE_FALSE(monitor.read_while_opted_out());
+
+    std::size_t allocations = 0;
+    const pulp::state::ParameterEventQueue* seen = nullptr;
+    std::thread([&] {
+        pulp::test::RtAllocationProbe probe;
+        seen = processor.param_events();
+        allocations = probe.allocation_count();
+    }).join();
+    CHECK(seen == &queue);
+    CHECK(allocations == 0);
+    CHECK(monitor.read_while_opted_out());
+    CHECK(monitor.report(processor));
+    CHECK_FALSE(monitor.report(processor));
+
+    // A processor whose adapter did not arm a monitor for its queue records
+    // nothing: another queue's read does not land on this monitor.
+    PlainProcessor other;
+    pulp::state::ParameterEventQueue other_queue;
+    other.set_param_events(&other_queue);
+    ParamEventsOptOutMonitor unarmed;
+    unarmed.arm(false, &other_queue);
+    (void)other.param_events();
+    CHECK_FALSE(unarmed.read_while_opted_out());
+}
+
+TEST_CASE("Arming one opted-out monitor keeps another monitor's recorded read",
+          "[format][processor][params][rt-safety]") {
+    // Two adapters whose queues hash to the same slot: the second arm probes
+    // the first's slot on its way to a free one, and must leave the first's
+    // record alone. Only the addresses matter to the table, so stand-ins from
+    // one buffer pick a colliding pair.
+    alignas(64) static std::array<unsigned char, 64 * 1024> addresses{};
+    const auto* first_queue =
+        reinterpret_cast<const pulp::state::ParameterEventQueue*>(addresses.data());
+    const auto home = pulp::format::detail::param_events_opt_out_home(first_queue);
+    const pulp::state::ParameterEventQueue* second_queue = nullptr;
+    for (std::size_t offset = 8; offset < addresses.size(); offset += 8) {
+        const auto* candidate =
+            reinterpret_cast<const pulp::state::ParameterEventQueue*>(addresses.data() + offset);
+        if (pulp::format::detail::param_events_opt_out_home(candidate) == home) {
+            second_queue = candidate;
+            break;
+        }
+    }
+    REQUIRE(second_queue != nullptr);
+
+    PlainProcessor first_processor;
+    first_processor.set_param_events(first_queue);
+    ParamEventsOptOutMonitor first;
+    first.arm(true, first_queue);
+    (void)first_processor.param_events();
+    REQUIRE(first.read_while_opted_out());
+
+    ParamEventsOptOutMonitor second;
+    second.arm(true, second_queue);
+    CHECK(first.read_while_opted_out());
+    CHECK_FALSE(second.read_while_opted_out());
+
+    // Each record still belongs to its own queue.
+    PlainProcessor second_processor;
+    second_processor.set_param_events(second_queue);
+    (void)second_processor.param_events();
+    CHECK(second.read_while_opted_out());
 }

@@ -4,6 +4,7 @@
 #include <pulp/view/chart_shader_presets.hpp>
 #include <pulp/view/css_gradient.hpp>
 #include <pulp/view/custom_shader_host.hpp>
+#include <pulp/view/widgets.hpp>
 #include "api_registry.hpp"
 
 #include <string>
@@ -457,7 +458,11 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         auto* v = self.widget(id);
         auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
         if (!host) return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
-        auto error = canvas::Canvas::compile_sdf_chart_sksl(canvas::Canvas::SDFShape::flat_arc, sksl);
+        const auto shape = widget_chart_shape(*v);
+        if (!shape)
+            return shader_result(
+                false, "Widget '" + id + "' draws no chart; charts are drawn on knobs and faders");
+        auto error = canvas::Canvas::compile_sdf_chart_sksl(*shape, sksl);
         if (!error.empty()) return shader_result(false, error);
         host->set_chart_shader(std::move(sksl));
         self.request_repaint();
@@ -747,8 +752,12 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
             auto preset = make_chart_shader_preset(args.get<std::string>(1, ""), options);
             if (!preset.error.empty())
                 return shader_result(false, preset.error);
-            auto error = canvas::Canvas::compile_sdf_chart_sksl(canvas::Canvas::SDFShape::flat_arc,
-                                                                preset.sksl);
+            const auto shape = widget_chart_shape(*v);
+            if (!shape)
+                return shader_result(false, "Widget '" + id +
+                                                "' draws no chart; charts are drawn on knobs and "
+                                                "faders");
+            auto error = canvas::Canvas::compile_sdf_chart_sksl(*shape, preset.sksl);
             if (!error.empty())
                 return shader_result(false, error);
             host->set_chart_shader(std::move(preset.sksl), preset.reach);

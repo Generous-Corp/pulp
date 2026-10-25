@@ -2,14 +2,18 @@
 #include "tools/import-design/browser_import_cli.hpp"
 #include "tools/import-design/browser_import_cli_internal.hpp"
 #include "tools/import-design/browser_import_session.hpp"
+#include "tools/import-design/browser_lane_timing.hpp"
 #include "tools/import-design/import_png_codec.hpp"
 #include "tools/import-design/sprite_skins.hpp"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -134,6 +138,45 @@ TEST_CASE("browser CLI adapter tags non-browser input as not applicable",
         id::internal::run_browser_import_cli_with_operations(
             request, "not html", operations);
     CHECK(std::holds_alternative<id::BrowserImportNotApplicable>(result));
+}
+
+TEST_CASE("browser CLI reads the materialized document only for the imports that publish it",
+          "[import-design][browser-capture][cli-adapter]") {
+    struct Case {
+        bool materialized_runtime_emit;
+        bool materialized_canvas_composition;
+        bool captured;
+    };
+    // Plain --emit ir-json keeps the skipped read; the runtime emit and the
+    // JSX/Claude --materialized-canvas-composition lane both need the sidecar.
+    for (const auto& expected : {Case{false, false, false}, Case{true, false, true},
+                                 Case{false, true, true}, Case{true, true, true}}) {
+        TempTree tree;
+        auto request = request_for(tree);
+        request.materialized_runtime_emit = expected.materialized_runtime_emit;
+        request.materialized_canvas_composition = expected.materialized_canvas_composition;
+
+        std::optional<bool> captured;
+        id::internal::BrowserImportCliOperations operations;
+        operations.import_html = [&](const id::BrowserHtmlImportRequest& capture_request,
+                                     std::string_view) {
+            captured = capture_request.capture_materialized_document;
+            return id::BrowserHtmlImportResult{};
+        };
+        operations.validate_capture = [](const pulp::view::DesignIR&,
+                                         const id::BrowserCaptureValidationOptions&) {
+            return id::BrowserCaptureValidationResult{};
+        };
+        operations.localize_assets = [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            return true;
+        };
+
+        id::internal::run_browser_import_cli_with_operations(request, "<html>", operations);
+        INFO("runtime emit " << expected.materialized_runtime_emit << ", canvas composition "
+                             << expected.materialized_canvas_composition);
+        REQUIRE(captured.has_value());
+        CHECK(*captured == expected.captured);
+    }
 }
 
 TEST_CASE("required canvas ink rejects non-browser dispatch",
@@ -637,6 +680,114 @@ TEST_CASE("browser CLI adapter stages proof and commits evidence once",
     REQUIRE(rerun_session.publish(diagnostics));
     CHECK(tree.read(request.output_file) == "rerun-primary");
     CHECK(tree.read(published_asset) == "localized-pixels");
+}
+
+TEST_CASE("browser CLI adapter attributes every lane stage in import-timings.json",
+          "[import-design][browser-capture][cli-adapter][timing]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.validate = true;
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html = [&](const id::BrowserHtmlImportRequest& capture_request,
+                                 std::string_view) {
+        auto result = captured_import(capture_request, tree);
+        auto& captured = std::get<id::BrowserHtmlCaptured>(result);
+        // The capture subprocess spent 1000ms; its script accounted for
+        // 900ms of it in two phases, one of them entered twice.
+        tree.write(captured.capture_directory / "capture.json", R"({
+              "provenance": {
+                "timings": {
+                  "schema": "pulp-browser-capture-timings-v1",
+                  "total_ms": 900,
+                  "phases": {"browser-launch": 300, "page-settle": 600},
+                  "steps": {"Page.captureScreenshot": {"count": 3, "ms": 120}}
+                }
+              }
+            })");
+        captured.timings = {{"html-staging", 20.0, {}},
+                            {"browser-discovery", 400.0, {}},
+                            {"browser-capture", 1000.0, {}},
+                            {"capture-lowering", 80.0, {}}};
+        return result;
+    };
+    operations.validate_capture = [&](const pulp::view::DesignIR&,
+                                      const id::BrowserCaptureValidationOptions& options) {
+        tree.write(options.rendered, "render");
+        tree.write(options.diff, "diff");
+        id::BrowserCaptureValidationResult result;
+        result.valid = true;
+        result.passes = true;
+        result.scored = true;
+        result.similarity = 1.0f;
+        result.total_pixels = 1;
+        result.stages = {{"render", 250.0, {}}, {"diff", 50.0, {}}};
+        return result;
+    };
+    operations.localize_assets = [](pulp::view::DesignIR&, const std::string&, std::string*) {
+        return true;
+    };
+
+    auto session = require_live_session(
+        id::internal::run_browser_import_cli_with_operations(request, "<html>", operations));
+    REQUIRE(session.take_capture_adoption());
+
+    const auto timings_path = tree.root / "transient-capture/import-timings.json";
+    REQUIRE(fs::exists(timings_path));
+    const auto document = choc::json::parse(tree.read(timings_path));
+    CHECK(document["schema"].toString() == "pulp-browser-import-timings-v1");
+
+    const auto stages = document["stages"];
+    std::vector<std::string> names;
+    double sum = 0.0;
+    for (uint32_t i = 0; i < stages.size(); ++i) {
+        names.push_back(stages[i]["name"].toString());
+        sum += stages[i]["ms"].get<double>();
+    }
+    CHECK(names == std::vector<std::string>{"html-staging", "browser-discovery", "browser-capture",
+                                            "capture-lowering", "publication-preflight",
+                                            "validation", "asset-localization"});
+    // Stages are contiguous laps, so they add up to the lane total exactly.
+    CHECK(sum == Catch::Approx(document["total_ms"].get<double>()).margin(0.5));
+
+    // The script's phases describe the capture stage, and the subprocess time
+    // they do not cover is named instead of disappearing.
+    const auto capture = stages[2]["parts"];
+    REQUIRE(capture.size() == 3);
+    CHECK(capture[0]["name"].toString() == "browser-launch");
+    CHECK(capture[0]["ms"].get<double>() == 300.0);
+    CHECK(capture[1]["name"].toString() == "page-settle");
+    CHECK(capture[1]["ms"].get<double>() == 600.0);
+    CHECK(capture[2]["name"].toString() == "process-overhead");
+    CHECK(capture[2]["ms"].get<double>() == 100.0);
+
+    const auto validation = stages[5]["parts"];
+    REQUIRE(validation.size() == 2);
+    CHECK(validation[0]["name"].toString() == "render");
+    CHECK(validation[1]["name"].toString() == "diff");
+
+    CHECK(document["capture_steps"]["Page.captureScreenshot"]["count"].get<int>() == 3);
+
+    // Published with the rest of the capture evidence.
+    std::ostringstream diagnostics;
+    REQUIRE(session.publish(diagnostics));
+    CHECK(fs::exists(request.output_file.parent_path() / "ui-browser-capture/import-timings.json"));
+}
+
+TEST_CASE("browser lane clock laps are contiguous", "[import-design][browser-capture][timing]") {
+    using Clock = id::BrowserLaneClock::Clock;
+    id::BrowserLaneClock clock;
+    const auto boundary = Clock::now() + std::chrono::milliseconds(30);
+    clock.lap("first", boundary);
+    // A boundary in the past cannot produce a negative stage.
+    clock.lap("second", boundary - std::chrono::milliseconds(10));
+    clock.lap("third", boundary + std::chrono::milliseconds(5));
+    const auto& stages = clock.stages();
+    REQUIRE(stages.size() == 3);
+    CHECK(stages[0].elapsed_ms >= 30.0);
+    CHECK(stages[1].elapsed_ms == 0.0);
+    CHECK(stages[2].elapsed_ms == Catch::Approx(5.0).margin(0.01));
+    CHECK(id::format_browser_lane_timing_line(stages).rfind("Browser lane timing: ", 0) == 0);
 }
 
 TEST_CASE("browser CLI adapter rejects unowned evidence before localization",

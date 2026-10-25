@@ -563,6 +563,10 @@ directly—the shared helpers contain exceptions.
 
 ## Gotchas
 
+### The host's timeline sample position is a double — round it, never truncate
+
+`CallHostTransportState` reports `outCurrentSampleInTimeLine` as a `Float64`, and some hosts send a value a hair below the true sample: REAPER reports `13823.9999` for sample `13824`. A `static_cast<int64_t>` truncates it, so `position_samples` steps back one sample and then jumps two on the next block. Convert through `pulp::format::detail::host_sample_position()` (`detail/host_sample_position.hpp`). It returns the nearest sample (`std::round`, independent of the rounding mode), or `nullopt` for a non-finite or out-of-range value; leave `TransportField::SamplePosition` unset in that case.
+
 ### DAW component cache — clear it after a `type` change
 
 Logic, MainStage, GarageBand, Studio One, Live, and every other AU host maintain a **host-side cache** of AU descriptors, keyed on subtype + manufacturer. When you change a plug-in from `aufx` to `aumf` (or vice versa) *without* also changing the subtype, hosts will keep the cached-old-type descriptor and behave as if the fix never shipped — you'll install a fresh `.component` and the host will still treat it as `aufx`. Symptoms: rebuilt plug-in appears in the correct MIDI-effect slot of the host UI only after a restart, or never appears at all.
@@ -1274,3 +1278,74 @@ it waits".
 ## SysEx core storage and representation
 
 SysEx7 test payloads must contain only seven-bit bytes. High-bit bytes belong in explicit malformed-packet tests; helper tests do not prove host runtime support.
+
+## Initialize() warms the render path without rendering
+
+`PulpAUEffect::Initialize()` ends with `warm_render_path()`: one
+`ProcessBufferLists` call over silent buffer lists shaped like the configured
+stream formats, so the validation and channel-pointer wiring code is paged in
+before the host's first real render. The warm-up flag returns **immediately
+after the wiring loops** (and before the reset in the invalid-buffer branch), so
+it never reaches the bypass copy, the MIDI/SysEx drains, the transport/host
+callbacks, `reset_triggers_rt()`, or `Processor::process()`. Anything added to
+`ProcessBufferLists` above that early return runs at Initialize time, so it must
+be side-effect-free too. `test_au_v2_effect.cpp` (`[activation]`) pins this: a
+trigger raised before `DoInitialize()` survives it, the Processor has run zero
+times, and the first real render runs it once and settles the trigger.
+
+## Scheduled automation renders once; slicing is a second opt-in
+
+Sample-accurate automation is the default and block-rate is the opt-out:
+`Processor::wants_sample_accurate_parameters()` (default true) and
+`wants_au_scheduled_parameter_slices()` (default true), both asked once when
+the adapter creates the processor. The defaults keep the per-slice render
+described below, which is what every processor got before the hooks existed.
+Opted out of either, `ProcessForScheduledParams` writes each owned parameter's
+end-of-buffer value (immediates in time order, a ramp's value at the buffer end) as one batch
+and renders the whole buffer in one `AUEffectBase::ProcessScheduledSlice(0,
+frames)` call, as VST3 and CLAP do. Opted out, `param_events()` is empty.
+Opted in, the events are sorted and every point goes to `param_events()` at
+its buffer offset: an immediate as a step, a ramp as a step to its value where
+it starts in this buffer plus a ramp (`ramp_duration_sample_frames`) to its
+value where it ends or the buffer ends. `scheduled_slice_active_` is set for
+that render so the render path keeps the queue. The `[parity]` cases in
+`test_au_v2_effect.cpp`, `test_vst3_plugin_state.cpp` and
+`test_clap_midi_events.cpp` drive the same steps through all three formats
+(`test/support/step_gain_fixture.hpp`) and require the same output to the bit,
+and a schedule one sample late must differ.
+
+Sample-accurate is the default, and block-rate the opt-out, because an opt-in
+default would silently zipper existing plug-ins: a processor that reads the
+queue would get an empty one and step its automation once per block, with
+nothing failing or warning. An opted-out processor that still reads
+`param_events()` is recorded on the audio thread (`Processor::param_events()`
+does one relaxed store) and logged once by `report_param_events_while_opted_out()`
+in `Cleanup()`.
+
+The per-slice render is the AU v2 default for the same reason: rendering a
+sample-accurate processor once per buffer changes the output of one that reads
+the store inside each slice, so render-once is the
+`wants_au_scheduled_parameter_slices()` opt-out for processors that read
+automation only through `param_events()`.
+
+The per-slice render described below runs for a sample-accurate processor
+that keeps `wants_au_scheduled_parameter_slices()` at its default of true: it
+may read the store inside each slice instead of `param_events()`. Tests that
+care which render they get must set both hooks explicitly; the shared
+step-gain fixture sets slices to false so all three formats render once.
+
+`AUBase::ProcessForScheduledParams` rescans the whole event list at every
+slice and rewrites every past event into the element map each time, and the
+old `ProcessScheduledSlice` did three more full passes of store writes per
+slice, so a render cost events x slices: 32 parameters with 16 events each in
+a 512-frame block took about 330 us. `PulpAUEffect` overrides it: one stable,
+allocation-free sort (`state::stable_sort_in_place`, so coincident events keep
+host order and the later one wins), break points found from a cursor, and each
+slice applies only the immediates that reach its start plus the ramps under
+way (indices kept in a list reserved in `Initialize()`; past 256 ramps it
+falls back to scanning). The store is settled to end-of-buffer values after
+the last slice only. A later immediate supersedes an earlier ramp on the same
+parameter. Parameters the store does not own still go through the element's
+`SetScheduledEvent`. `[au][automation]` in `test_au_v2_effect.cpp` covers
+dense interleaved events, coincident events, and ramp supersession. Each slice
+is still one full `ProcessBufferLists` and Processor call.

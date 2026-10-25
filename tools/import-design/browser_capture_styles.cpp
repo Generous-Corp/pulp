@@ -6,6 +6,7 @@
 #include <pulp/canvas/text_utf8.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <fstream>
@@ -159,6 +160,97 @@ choc::value::ValueView member(const choc::value::ValueView& object,
 
 std::vector<std::string> split_css_list(const std::string& value) {
     return split_top_level(value, ',');
+}
+
+bool has_scale_variant_paint(const pulp::view::IRStyle& style) {
+    const auto positive = [](const std::optional<float>& v) { return v && *v > 0.0f; };
+    return positive(style.border_top_width) || positive(style.border_right_width) ||
+           positive(style.border_bottom_width) || positive(style.border_left_width) ||
+           positive(style.border_top_left_radius) || positive(style.border_top_right_radius) ||
+           positive(style.border_bottom_right_radius) ||
+           positive(style.border_bottom_left_radius) || !style.box_shadow.empty();
+}
+
+PaintScaleResult apply_paint_scale(pulp::view::IRStyle& style, double sx, double sy) {
+    PaintScaleResult result;
+    constexpr double kFlat = 1e-6;
+    if (std::abs(sx - 1.0) <= kFlat && std::abs(sy - 1.0) <= kFlat)
+        return result;
+    const bool uniform = std::abs(sx - sy) <= kFlat;
+    std::vector<std::string> refused;
+    const auto scale = [&](std::optional<float>& field, double factor) {
+        if (!field || *field == 0.0f)
+            return;
+        field = static_cast<float>(*field * factor);
+        result.scaled = true;
+    };
+
+    scale(style.border_top_width, sy);
+    scale(style.border_bottom_width, sy);
+    scale(style.border_left_width, sx);
+    scale(style.border_right_width, sx);
+    // The uniform slots follow the sides, the way `apply_computed_styles`
+    // sets them: a width only when all four agree, and the shorthand only
+    // when there was one to restate.
+    const bool uniform_width = style.border_top_width && style.border_right_width &&
+                               style.border_bottom_width && style.border_left_width &&
+                               *style.border_top_width == *style.border_right_width &&
+                               *style.border_top_width == *style.border_bottom_width &&
+                               *style.border_top_width == *style.border_left_width;
+    if (uniform_width) {
+        style.border_width = style.border_top_width;
+        if (style.border && style.border_style && style.border_color) {
+            std::ostringstream shorthand;
+            shorthand << *style.border_width << "px " << *style.border_style << ' '
+                      << *style.border_color;
+            style.border = shorthand.str();
+        }
+    } else {
+        style.border_width.reset();
+        style.border.reset();
+    }
+
+    std::optional<float>* corners[] = {
+        &style.border_top_left_radius, &style.border_top_right_radius,
+        &style.border_bottom_right_radius, &style.border_bottom_left_radius};
+    bool rounded = false;
+    for (auto* corner : corners)
+        rounded = rounded || (*corner && **corner > 0.0f);
+    if (rounded) {
+        if (uniform) {
+            for (auto* corner : corners)
+                scale(*corner, sx);
+            scale(style.border_radius, sx);
+        } else {
+            // Two axes make every corner elliptical, which one radius per
+            // corner cannot carry.
+            refused.emplace_back("border-radius");
+        }
+    }
+
+    if (!style.box_shadow.empty()) {
+        bool soft = false;
+        for (const auto& layer : style.box_shadow)
+            soft = soft || layer.blur != 0.0f || layer.spread != 0.0f;
+        if (uniform || !soft) {
+            for (auto& layer : style.box_shadow) {
+                layer.offset_x = static_cast<float>(layer.offset_x * sx);
+                layer.offset_y = static_cast<float>(layer.offset_y * sy);
+                layer.blur = static_cast<float>(layer.blur * sx);
+                layer.spread = static_cast<float>(layer.spread * sx);
+                // The authored text would be written back verbatim and undo
+                // the scale.
+                layer.raw.clear();
+            }
+            result.scaled = true;
+        } else {
+            refused.emplace_back("box-shadow");
+        }
+    }
+
+    for (std::size_t i = 0; i < refused.size(); ++i)
+        result.refused += (i ? ", " : "") + refused[i];
+    return result;
 }
 
 std::vector<pulp::view::IRBoxShadow> parse_box_shadow(
@@ -320,6 +412,18 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load_bytes(std::string_vie
                 const int node = json_int(which[static_cast<int>(i)], -1);
                 if (node >= 0)
                     index.option_selected_.push_back(node);
+            }
+        }
+    }
+
+    const auto input_checked = member(nodes, "inputChecked");
+    if (input_checked.isObject()) {
+        const auto which = member(input_checked, "index");
+        if (which.isArray()) {
+            for (uint32_t i = 0; i < which.size(); ++i) {
+                const int node = json_int(which[static_cast<int>(i)], -1);
+                if (node >= 0)
+                    index.input_checked_.push_back(node);
             }
         }
     }
@@ -697,6 +801,11 @@ std::string CapturedStyleIndex::control_theme(int node_index) const {
     return found == control_theme_.end() ? std::string() : found->second;
 }
 
+bool CapturedStyleIndex::control_checked(int node_index) const {
+    return std::find(input_checked_.begin(), input_checked_.end(), node_index) !=
+           input_checked_.end();
+}
+
 std::string CapturedStyleIndex::control_value(int node_index) const {
     if (const auto found = input_value_.find(node_index); found != input_value_.end())
         return string_at(found->second);
@@ -752,6 +861,39 @@ int CapturedStyleIndex::parent_of(int node_index) const {
     return parent_index_[static_cast<size_t>(node_index)];
 }
 
+namespace {
+
+/// The six numbers of a computed `matrix(a, b, c, d, e, f)`, or nothing for
+/// any other spelling. Chrome serializes computed `transform` as a matrix, so
+/// anything else (`matrix3d` above all) is refused rather than guessed at.
+std::optional<std::array<double, 6>> computed_matrix(const std::string& value) {
+    if (value.rfind("matrix(", 0) != 0 || value.back() != ')')
+        return std::nullopt;
+    std::array<double, 6> n{};
+    std::size_t count = 0;
+    const std::string body = value.substr(7, value.size() - 8);
+    std::size_t start = 0;
+    while (start <= body.size()) {
+        const auto comma = body.find(',', start);
+        if (count == n.size())
+            return std::nullopt;
+        try {
+            n[count++] = std::stod(
+                body.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+        if (comma == std::string::npos)
+            break;
+        start = comma + 1;
+    }
+    if (count != n.size())
+        return std::nullopt;
+    return n;
+}
+
+} // namespace
+
 CapturedStyleIndex::InheritedTypeScale
 CapturedStyleIndex::inherited_type_scale(int node_index) const {
     InheritedTypeScale result;
@@ -769,40 +911,73 @@ CapturedStyleIndex::inherited_type_scale(int node_index) const {
         if (it == styles.end() || it->second.empty() || it->second == "none")
             continue;
 
-        // Chrome serializes computed `transform` as a matrix, so the six
-        // numbers are the whole answer — any other spelling (`matrix3d` above
-        // all) is refused rather than guessed at.
         const auto& value = it->second;
-        if (value.rfind("matrix(", 0) != 0 || value.back() != ')') {
+        const auto matrix = computed_matrix(value);
+        if (!matrix) {
             result.refused = value;
             return result;
         }
-        std::vector<double> n;
-        const std::string body = value.substr(7, value.size() - 8);
-        size_t start = 0;
-        while (start <= body.size()) {
-            const auto comma = body.find(',', start);
-            try {
-                n.push_back(std::stod(body.substr(
-                    start, comma == std::string::npos ? std::string::npos
-                                                      : comma - start)));
-            } catch (const std::exception&) {
-                result.refused = value;
-                return result;
-            }
-            if (comma == std::string::npos) break;
-            start = comma + 1;
-        }
+        const auto& n = *matrix;
         constexpr double kFlat = 1e-6;
         // b and c non-zero is a rotation or a skew; a != d is two axes; a
         // non-positive scale is a flip. A `font-size` is one positive scalar
         // and can express none of the three.
-        if (n.size() != 6 || std::abs(n[1]) > kFlat || std::abs(n[2]) > kFlat ||
-            std::abs(n[0] - n[3]) > kFlat || n[0] <= kFlat) {
+        if (std::abs(n[1]) > kFlat || std::abs(n[2]) > kFlat || std::abs(n[0] - n[3]) > kFlat ||
+            n[0] <= kFlat) {
             result.refused = value;
             return result;
         }
         result.scale *= n[0];
+    }
+    return result;
+}
+
+CapturedStyleIndex::InheritedPaintScale
+CapturedStyleIndex::inherited_paint_scale(int node_index) const {
+    InheritedPaintScale result;
+    constexpr double kFlat = 1e-6;
+    bool rotated = false;
+    bool non_uniform = false;
+    // The node's own transform scales its own border, so the walk starts at
+    // the node, not at its parent. Bounded like `inherited_type_scale`.
+    int cursor = node_index;
+    for (size_t steps = 0; steps < parent_index_.size() && cursor >= 0;
+         ++steps, cursor = parent_of(cursor)) {
+        const auto layout = own_layout_row(cursor);
+        if (!layout)
+            continue;
+        const auto styles = styles_for_layout(*layout);
+        const auto it = styles.find("transform");
+        if (it == styles.end() || it->second.empty() || it->second == "none")
+            continue;
+        const auto& value = it->second;
+        const auto matrix = computed_matrix(value);
+        if (!matrix) {
+            result.refused = value;
+            return result;
+        }
+        const double a = (*matrix)[0], b = (*matrix)[1];
+        const double c = (*matrix)[2], d = (*matrix)[3];
+        // Columns (a, b) and (c, d) are the images of the box's x and y axes.
+        // A negative determinant is a flip and non-orthogonal columns are a
+        // skew; neither leaves a side with one width.
+        if (a * d - b * c <= kFlat || std::abs(a * c + b * d) > kFlat) {
+            result.refused = value;
+            return result;
+        }
+        const double sx = std::hypot(a, b);
+        const double sy = std::hypot(c, d);
+        rotated = rotated || std::abs(b) > kFlat || std::abs(c) > kFlat;
+        non_uniform = non_uniform || std::abs(sx - sy) > kFlat;
+        // A rotation turns the axes a later factor applies to, so the two
+        // only multiply per axis when one of them is absent. The refusal
+        // names the transform at which the chain stopped reducing.
+        if (rotated && non_uniform) {
+            result.refused = value;
+            return result;
+        }
+        result.x *= sx;
+        result.y *= sy;
     }
     return result;
 }

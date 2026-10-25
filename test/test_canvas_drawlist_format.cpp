@@ -154,7 +154,7 @@ TEST_CASE("every command type has a distinct name", "[canvas][drawlist-format]")
     // other half: no two types may share a name, or a golden could not tell
     // them apart.
     std::vector<std::string> seen;
-    for (int i = 0; i <= static_cast<int>(DrawCommand::Type::draw_sksl); ++i) {
+    for (int i = 0; i <= static_cast<int>(DrawCommand::Type::set_gradient_interpolation); ++i) {
         const auto name = std::string(draw_command_name(static_cast<DrawCommand::Type>(i)));
         CHECK_FALSE(name.empty());
         CHECK(name != "unknown");

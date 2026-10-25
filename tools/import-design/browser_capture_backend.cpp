@@ -525,7 +525,7 @@ std::optional<fs::path> prepare_capture_output_directory(
         return std::nullopt;
     }
 
-    constexpr std::array<std::string_view, 12> kGeneratedArtifacts{
+    constexpr std::array<std::string_view, 13> kGeneratedArtifacts{
         "capture.json",
         "browser.png",
         "browser-static.png",
@@ -535,6 +535,7 @@ std::optional<fs::path> prepare_capture_output_directory(
         "tokens.json",
         "dom-snapshot.json",
         "platform-fonts.json",
+        "font-faces.json",
         "materialized-document.json",
         "interaction-report.json",
         "capture-error.json",
@@ -926,6 +927,8 @@ CaptureResult capture_document(
     args.push_back(request.pinned_width ? "--width" : "--initial-width");
     args.push_back(std::to_string(capture_width));
     if (request.fit_authored_frame) args.push_back("--fit-authored-frame");
+    if (!request.capture_materialized_document)
+        args.push_back("--omit-materialized-document");
     if (request.interaction_plan) {
         args.push_back("--interactions");
         args.push_back(request.interaction_plan->string());
@@ -1023,6 +1026,7 @@ DiscoverAndCaptureResult discover_and_capture(
     BrowserProbeFunction probe) {
     DiscoverAndCaptureResult result;
     result.discovery = discover_browser(discovery_options, std::move(probe));
+    result.discovered_at = std::chrono::steady_clock::now();
     if (!result.discovery.selected) {
         result.capture.diagnostic = result.discovery.diagnostic;
         return result;

@@ -35,10 +35,13 @@ const std::set<std::string> kExpectedAuthorityIds = {
 };
 constexpr const char* kExactLiveQuery =
     "pulp control status --instance <caller-supplied-exact-instance-id> --json";
+// The registry ships in every SDK, so these describe the private planning
+// authority without naming its repository or a file inside it.
 constexpr const char* kDspAdmissionOwner =
-    "danielraffel/pulp-planning:dsp-survey-claims/WORKER-PROMPT.md";
+    "planning: the DSP survey admission protocol in the maintainers' private planning repository";
 constexpr const char* kDspAdmissionQuery =
-    "read dsp-survey-claims/WORKER-PROMPT.md from current danielraffel/pulp-planning main";
+    "read the DSP survey admission protocol from the current main of the planning submodule's "
+    "repository";
 constexpr const char* kExpectedSchemaSha256 =
     "ff94b9c5ef5560f65d1cf83b96d0b6104edf1bed203e219689a6c398a48f8572";
 

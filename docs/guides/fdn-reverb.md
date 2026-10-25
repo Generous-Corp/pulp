@@ -138,9 +138,10 @@ machinery:
 | `damp_lo`, `mod`, `shimmer`, `drive`, `bloom`, `tank_rate` | Stored, no effect. |
 
 Expect the classic tier's density to be a classic reverb's: its echo-density
-curve reaches the Gaussian plateau later than the network's (around 200 ms
-against about 60–80 ms at the defaults), and with damping fully off it plateaus
-below it, because nothing in a comb smears each recirculation.
+curve reaches the Gaussian plateau later than the network's (within 250 ms at
+1.3 s decay, against about 60 ms for the network at its defaults), and without
+diffusion it reaches it at least 50 ms later or not at all, because nothing in a
+comb smears each recirculation.
 
 Under automation the classic tier smooths each continuous control through
 three one-pole stages at the 32-sample control rate, then moves the comb
@@ -225,9 +226,13 @@ sample.
 Precision follows the cost of being wrong: delay positions, modulation, the
 bridge filters, and the flux biquads stay double precision; the delay lines,
 diffusion, damping, and the matrix are single precision, as the ring buffers
-always were. The block engine reproduces the per-sample formulation's output to
-within float rounding (its null residual sits around -105 dB) and its envelope,
-T60, and mixing time exactly — see `test_fdn_reverb_block_engine.cpp`.
+always were. The block engine is not bit-identical to the per-sample
+formulation it replaced, but reproduces its impulse-response envelope (40 ms RMS
+windows) within 0.01 dB for every mode, with drive and with flutter, and on
+the three reference voicings its T60 within 0.5% and mixing time within one
+analysis hop — see
+`test_fdn_reverb_block_engine.cpp`, whose references
+`tools/audio/fdn_reference/generate.sh` records from v0.1004.0.
 
 Every per-sample expression is evaluated the same way whatever span it falls
 in, and recursive state is snapped and sanitized on fixed sample grids

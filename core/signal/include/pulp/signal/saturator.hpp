@@ -128,7 +128,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <vector>
+#include <array>
 
 namespace pulp::signal {
 
@@ -476,11 +476,12 @@ public:
         oversampler_.set_sample_rate(static_cast<SampleType>(sample_rate_));
         oversample_latency_ = oversampler_.latency_samples();
 
-        // The dry path must be delayed to match the wet path, or the dry/wet
-        // mix becomes a comb filter the moment `oversample_2x` is selected.
-        // Sized for the worst case so switching policy never allocates.
-        dry_delay_.assign(static_cast<std::size_t>(std::max(oversample_latency_, 1)) + 1,
-                          SampleType{0});
+        // The dry path is delayed to match the wet path (or the dry/wet mix
+        // becomes a comb filter) by a fixed-capacity ring, so an unprepared
+        // instance aligns adaa2's one sample too and switching policy never
+        // allocates.
+        oversample_latency_ =
+            std::min(oversample_latency_, static_cast<int>(kDryDelayCapacity) - 1);
 
         update_tone();
         reset();
@@ -541,7 +542,18 @@ public:
         update_tone();
     }
 
-    void set_alias_policy(AliasPolicy policy) { alias_policy_ = policy; }
+    /// Select the alias policy. Switching re-seeds both ADAA paths from the
+    /// two most recent inputs, so the first sample after a switch uses the
+    /// true input history rather than whatever the path saw when it last ran.
+    void set_alias_policy(AliasPolicy policy) {
+        if (policy == alias_policy_)
+            return;
+        alias_policy_ = policy;
+        adaa_previous_ = input_history_[0];
+        adaa2_history_[0] = input_history_[0];
+        adaa2_history_[1] = input_history_[1];
+        reseed_adaa();
+    }
     AliasPolicy alias_policy() const { return alias_policy_; }
 
     void set_mix(double wet01) {
@@ -593,11 +605,12 @@ public:
     void reset() {
         adaa_previous_ = 0.0;
         adaa2_history_[0] = adaa2_history_[1] = 0.0;
+        input_history_[0] = input_history_[1] = 0.0;
         reseed_adaa();
         pre_filter_.reset();
         de_filter_.reset();
         oversampler_.reset();
-        std::fill(dry_delay_.begin(), dry_delay_.end(), SampleType{0});
+        dry_delay_.fill(SampleType{0});
         dry_write_ = 0;
         dry_valid_ = 0;
     }
@@ -613,6 +626,8 @@ public:
 
         double x = static_cast<double>(input);
         if (tone_active_) x = pre_filter_.process(static_cast<SampleType>(x));
+        input_history_[1] = input_history_[0];
+        input_history_[0] = x;
 
         double wet = 0.0;
         switch (alias_policy_) {
@@ -666,6 +681,7 @@ private:
     void recover_audio_fault() noexcept {
         adaa_previous_ = 0.0;
         adaa2_history_[0] = adaa2_history_[1] = 0.0;
+        input_history_[0] = input_history_[1] = 0.0;
         reseed_adaa();
         pre_filter_.reset();
         de_filter_.reset();
@@ -726,7 +742,8 @@ private:
     /// the new one. A no-op ring when the active policy has zero latency.
     double delayed_dry(double input) {
         const int latency = latency_samples();
-        if (latency <= 0 || dry_delay_.empty()) return input;
+        if (latency <= 0)
+            return input;
         const std::size_t size = dry_delay_.size();
         const std::size_t read = (dry_write_ + size - static_cast<std::size_t>(latency)) % size;
         const double out = dry_valid_ >= static_cast<std::size_t>(latency)
@@ -808,12 +825,18 @@ private:
     double adaa_previous_ = 0.0;
     double adaa_previous_antiderivative_ = 0.0;
     double adaa2_history_[2] = {0.0, 0.0};
+    // The two most recent shaper inputs, whatever the policy; a policy switch
+    // seeds the ADAA paths from them.
+    double input_history_[2] = {0.0, 0.0};
     SaturatorAdaa2 adaa2_{};
     BiquadT<SampleType> pre_filter_{};
     BiquadT<SampleType> de_filter_{};
     OversamplerT<SampleType> oversampler_{};
     int oversample_latency_ = 0;
-    std::vector<SampleType> dry_delay_{};
+    // Holds the largest dry alignment any policy needs: the composed x2
+    // standard-quality oversampler's 64 samples.
+    static constexpr std::size_t kDryDelayCapacity = 128;
+    std::array<SampleType, kDryDelayCapacity> dry_delay_{};
     std::size_t dry_write_ = 0;
     std::size_t dry_valid_ = 0;
 };

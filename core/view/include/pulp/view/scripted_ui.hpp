@@ -2,6 +2,7 @@
 
 #include <pulp/state/store.hpp>
 #include <pulp/view/hot_reload.hpp>
+#include <pulp/view/scripted_editor_session.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/script_inspector_port.hpp>
 #include <pulp/view/theme.hpp>
@@ -46,6 +47,27 @@ struct ScriptedUiOptions {
     /// allowing a generated @pulp/react bundle to materialize a captured,
     /// executable browser document in this exact live realm.
     bool enable_runtime_import = false;
+    /// In-memory script source. When non-empty the session evaluates it and
+    /// `script_path` is only a label: nothing is read from disk, hot reload has
+    /// no file to watch, and relative asset lookups resolve against
+    /// `asset_roots` alone. The default editor fills this from the bytes
+    /// pulp_add_plugin(UI_SCRIPT) compiled into the plug-in.
+    std::string script_source;
+    /// Theme override JSON applied over the root theme when `theme_path` is
+    /// empty and `script_source` is in use.
+    std::string theme_source;
+    /// Diagnostic name for an in-memory script (`ui.js`); log lines and
+    /// `script_label()` use it where a path-backed session names its file.
+    std::string script_name;
+    /// Files compiled into the image beside an in-memory script. They stand
+    /// in for the script's directory: relative asset lookups
+    /// (`__loadAssetSync__`, `setImageSource`, sprite strips, fonts) resolve
+    /// here first, then in `asset_roots`.
+    std::vector<WidgetBridge::EmbeddedAsset> embedded_assets;
+    /// Identity of the session's persisted stores (widget storage, style
+    /// presets) when the script has no directory to be keyed by. The default
+    /// editor passes the plug-in's bundle id and script name.
+    std::string storage_identity;
     /// Heap ceiling for every realm this session creates, in bytes
     /// (0 = unlimited). Enforced by the QuickJS backend; see
     /// JsEngine::set_memory_limit.
@@ -72,27 +94,40 @@ struct ScriptedUiOptions {
 /// -- but warns once when that blocks the host. Standalone hosts and in-process
 /// harnesses never hold one, so their document is mounted when either returns.
 class ScopedDeferredDocumentLoad {
-public:
-    ScopedDeferredDocumentLoad();
-    ~ScopedDeferredDocumentLoad();
+  public:
+    ScopedDeferredDocumentLoad() noexcept : previous_(flag()) {
+        flag() = true;
+    }
+    ~ScopedDeferredDocumentLoad() {
+        flag() = previous_;
+    }
     ScopedDeferredDocumentLoad(const ScopedDeferredDocumentLoad&) = delete;
     ScopedDeferredDocumentLoad& operator=(const ScopedDeferredDocumentLoad&) = delete;
     /// Whether a guard is alive on this thread.
-    static bool active() noexcept;
+    static bool active() noexcept {
+        return flag();
+    }
 
-private:
+  private:
+    // Inline: hosts open every embedded editor inside a guard, including
+    // AutoUi editors, and an out-of-line guard would link the script runtime
+    // into each of those plug-ins.
+    static bool& flag() noexcept {
+        static thread_local bool active = false;
+        return active;
+    }
     bool previous_ = false;
 };
 
 // Manages a JS-driven widget tree, optional theme.json overrides, and
 // standalone hot reload semantics with widget value preservation.
-class ScriptedUiSession {
-public:
+class ScriptedUiSession : public ScriptedEditorSession {
+  public:
     using NativeMessageHandler =
         std::function<std::string(std::string_view envelope_json)>;
 
     ScriptedUiSession(View& root, state::StateStore& store, ScriptedUiOptions options);
-    ~ScriptedUiSession();
+    ~ScriptedUiSession() override;
 
     /// Tear down everything that borrows the root -- the realm, its engine and
     /// bridge, and the accessibility handles over them -- now, while the root
@@ -100,9 +135,11 @@ public:
     /// session borrows its root, so a root destroyed first must be preceded by
     /// this; ViewBridge::close() calls it for the processor's active session
     /// before it destroys the editor root. Idempotent; the destructor runs it.
-    void release_root() noexcept;
+    void release_root() noexcept override;
     /// True when `view` is this session's root.
-    bool borrows_root(const View& view) const noexcept { return &root_ == &view; }
+    bool borrows_root(const View& view) const noexcept override {
+        return &root_ == &view;
+    }
 
     ScriptedUiSession(const ScriptedUiSession&) = delete;
     ScriptedUiSession& operator=(const ScriptedUiSession&) = delete;
@@ -120,16 +157,18 @@ public:
     /// a processor that builds its own session in create_view() should too.
     bool load_deferrable(std::string* error = nullptr);
     /// True between a deferred load() and the poll() that evaluates it.
-    bool document_load_pending() const noexcept { return document_load_pending_; }
+    bool document_load_pending() const noexcept override {
+        return document_load_pending_;
+    }
 
     /// True while the mounted document still owes host frames to settle its
     /// commits (see WidgetBridge::pending_runtime_settle_rounds()). Each
     /// poll() serves one. A content-first editor open pumps these before its
     /// first frame so that frame is the settled document, not a partial one.
-    bool settling() const noexcept;
+    bool settling() const noexcept override;
     /// Evaluate a deferred document now (a harness that needs the mounted tree
     /// without pumping frames). Returns whether the document is loaded.
-    bool complete_pending_load(std::string* error = nullptr);
+    bool complete_pending_load(std::string* error = nullptr) override;
     /// Called when a load() -- immediate or deferred -- finishes, with whether
     /// the document mounted and the error when it did not. Set it before load().
     /// The place for work that needs the mounted realm: binding scripts,
@@ -149,7 +188,7 @@ public:
     /// itself: it is where an evaluated realm is discarded, so skipping it
     /// leaves evaluated timers and callbacks live in the realm they were
     /// created in.
-    bool poll(std::string* error = nullptr);
+    bool poll(std::string* error = nullptr) override;
 
     // Explicitly reload the current script in place: rebuilds the widget bridge
     // under the SAME root + GPU surface, preserving widget state, and probes the
@@ -160,6 +199,8 @@ public:
     // Repoint at a different script file and reload it (e.g. swap to another
     // design bundle's ui.js). Updates script_path()/theme_path(); same in-place,
     // last-good semantics as reload(). Does not re-arm the hot-reload watcher.
+    // An empty path returns a session built from `script_source` to that
+    // embedded source, which is how a swap transaction rolls it back.
     bool reload_from(std::filesystem::path script_path, std::string* error = nullptr);
 
     void set_repaint_callback(std::function<void()> cb);
@@ -168,7 +209,7 @@ public:
     /// by the session and re-applied to every realm a reload builds, so a hot
     /// reload never forgets it. Set it before load() and the first render
     /// already knows. See WidgetBridge::set_host_kind.
-    void set_host_kind(std::string kind);
+    void set_host_kind(std::string kind) override;
     const std::string& host_kind() const { return host_kind_; }
     /// The clock script timers and performance.now() read (see
     /// WidgetBridge::set_time_source). Kept by the session and applied to
@@ -278,12 +319,26 @@ public:
     // Stored so that a hot-reload-triggered bridge rebuild reattaches the
     // same surface to the new bridge. Pass `nullptr` to detach (called from
     // the host's teardown before the bridge is destroyed).
-    void attach_gpu_surface(render::GpuSurface* gpu_surface);
+    void attach_gpu_surface(render::GpuSurface* gpu_surface) override;
     render::GpuSurface* gpu_surface() const noexcept { return gpu_surface_; }
 
     const std::filesystem::path& script_path() const { return script_path_; }
     const std::filesystem::path& theme_path() const { return theme_path_; }
+    /// True when the document comes from `ScriptedUiOptions::script_source`
+    /// rather than a file on disk.
+    bool uses_embedded_source() const noexcept {
+        return script_path_.empty();
+    }
+    /// What log lines call this document: the script path, or the embedded
+    /// script's name.
+    std::string script_label() const;
     bool hot_reload_enabled() const { return hot_reload_enabled_; }
+    /// True once a loaded session owns a file watcher. Stays false for an
+    /// embedded source, which has no file to watch, even with
+    /// `enable_hot_reload`.
+    bool hot_reload_watching() const noexcept {
+        return reloader_ != nullptr;
+    }
     bool hot_reload_pending() const {
         return reloader_ && reloader_->has_pending_reload();
     }
@@ -299,6 +354,11 @@ private:
     state::StateStore& store_;
     std::filesystem::path script_path_;
     std::filesystem::path theme_path_;
+    std::string script_source_;
+    std::string theme_source_;
+    std::string script_name_;
+    std::vector<WidgetBridge::EmbeddedAsset> embedded_assets_;
+    std::string storage_identity_;
     std::string last_good_code_;
     std::filesystem::path last_good_script_path_;
     std::vector<std::filesystem::path> asset_roots_;
@@ -361,6 +421,9 @@ private:
     bool last_theme_exists_ = false;
     std::optional<std::filesystem::file_time_type> last_theme_write_time_;
 
+    /// The document source: the script file's bytes, or the embedded source.
+    /// Empty with `error` set when neither is available.
+    std::string current_script_code(std::string* error) const;
     bool rebuild_from_code(
         const std::string& code, const std::filesystem::path& source_path, bool preserve_state,
         std::string* error,

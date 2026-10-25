@@ -10,16 +10,20 @@ instrument cannot see into is inconclusive rather than passing.
 from __future__ import annotations
 
 import json
+import os
 import stat
 import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import archive_symbol_closure_check as gate  # noqa: E402
+import nm_symbols  # noqa: E402
+import rtti_ownership  # noqa: E402
 
 
 class StubNm:
@@ -111,22 +115,44 @@ class ArchiveSymbolClosureCheckTest(unittest.TestCase):
         self.assertEqual(self.run_gate(state, "--forbidden-defines", "any"), 0)
 
     def test_weak_rtti_contamination_is_opt_in(self) -> None:
-        content = self.nm.archive("libcontent.a", CONTENT + "    __ZTIN7content8RegistryE S 0 0\n")
-        core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n__ZTIN7content8RegistryE W 0 0\n")
+        # ELF letters: content owns Registry (a strong member); core carries
+        # a weak copy of Registry's typeinfo and references nothing.
+        content = self.nm.archive("libcontent.a", CONTENT
+                                  + "    _ZN7content8Registry4openEv T 0 0\n"
+                                  + "    _ZTIN7content8RegistryE V 0 0\n")
+        core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n_ZTIN7content8RegistryE V 0 0\n")
         nm = self.nm.write()
         argv = ["--nm", nm, "--forbidden", str(content), "--forbidden-defines", "any",
                 "--no-control", "--check", f"core={core}"]
         self.assertEqual(gate.main(argv), 0)
         self.assertEqual(gate.main([*argv, "--weak-rtti-contamination"]), 1)
 
-    def test_rtti_names_in_both_manglings(self) -> None:
-        listing = ("a.a[x.o]: __ZTIN3foo3BarE W 0 0\n"
-                   "a.a[x.o]: _ZTVN3foo3BarE V 0 0\n"
-                   "a.a[x.o]: _ZTSN3foo3BarE W 0 0\n"
-                   "a.a[x.o]: _ZN3foo3Bar3bazEv W 0 0\n"
-                   "a.a[x.o]: __ZTIN3foo3QuxE T 0 0\n")
-        self.assertEqual(gate.weak_rtti(listing),
-                         {"__ZTIN3foo3BarE", "_ZTVN3foo3BarE", "_ZTSN3foo3BarE"})
+    def test_a_missing_demangler_is_inconclusive(self) -> None:
+        content = self.nm.archive("libcontent.a", CONTENT + "    _ZN7content8Registry4openEv T 0 0\n")
+        core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n_ZTIN7content8RegistryE V 0 0\n")
+        nm = self.nm.write()
+        self.assertEqual(gate.main(["--nm", nm, "--forbidden", str(content), "--no-control",
+                                    "--check", f"core={core}", "--weak-rtti-contamination",
+                                    "--cxxfilt", str(Path(self._tmp.name) / "no-such-cxxfilt")]), 2)
+
+
+    def test_no_demangler_on_path_is_inconclusive(self) -> None:
+        # Without --cxxfilt the demangler comes from PATH; with neither
+        # c++filt nor llvm-cxxfilt there, the RTTI check cannot read
+        # ownership and must say so rather than pass.
+        content = self.nm.archive("libcontent.a", CONTENT + "    _ZN7content8Registry4openEv T 0 0\n")
+        core = self.nm.archive("libcore.a", "libcore.a[x.o]:\n_ZTIN7content8RegistryE V 0 0\n")
+        nm = self.nm.write()
+        empty = Path(self._tmp.name) / "empty-path"
+        empty.mkdir()
+        with mock.patch.dict(os.environ, {"PATH": str(empty)}):
+            with self.assertRaises(rtti_ownership.DemangleError):
+                rtti_ownership.demangle({"_ZTIN7content8RegistryE"})
+            self.assertEqual(gate.main(["--nm", nm, "--forbidden", str(content), "--no-control",
+                                        "--check", f"core={core}", "--weak-rtti-contamination"]), 2)
+        # Control: the same call with the demangler on PATH runs and finds the copy.
+        self.assertEqual(gate.main(["--nm", nm, "--forbidden", str(content), "--no-control",
+                                    "--check", f"core={core}", "--weak-rtti-contamination"]), 1)
 
     def test_check_mode_uses_the_chosen_rule(self) -> None:
         content = self.nm.archive("libcontent.a", CONTENT)
@@ -162,6 +188,114 @@ class ArchiveSymbolClosureCheckTest(unittest.TestCase):
         nm = self.nm.write()
         self.assertEqual(gate.main(["--nm", nm, "--subject", str(subject),
                                     "--control", str(runtime)]), 2)
+
+
+class RttiOwnershipTest(unittest.TestCase):
+    def test_rtti_family_includes_vtt_and_construction_vtables(self) -> None:
+        for name in ("__ZTIN3foo3BarE", "_ZTVN3foo3BarE", "_ZTSN3foo3BarE", "_ZTTN3foo3BarE",
+                     "__ZTCN3foo3BarE0_NS_4BaseE"):
+            self.assertTrue(rtti_ownership.RTTI_MANGLED.match(name), name)
+        self.assertFalse(rtti_ownership.RTTI_MANGLED.match("_ZN3foo3Bar3bazEv"))
+        self.assertEqual(rtti_ownership.rtti_class("VTT for foo::Bar"), "foo::Bar")
+        self.assertEqual(rtti_ownership.rtti_class("construction vtable for foo::Base-in-foo::Bar"), "foo::Bar")
+        self.assertEqual(rtti_ownership.rtti_class("typeinfo name for foo::Bar<int>"), "foo::Bar<int>")
+
+    def test_demangle_never_lets_the_tool_strip_an_underscore(self) -> None:
+        # A stand-in for the c++filt on GitHub-hosted macOS: it strips one
+        # leading underscore unless told -n, then demangles only "_Z" names.
+        with tempfile.TemporaryDirectory() as tmp:
+            tool = Path(tmp) / "c++filt"
+            tool.write_text(
+                f"#!{sys.executable}\n"
+                "import sys\n"
+                "strip = '-n' not in sys.argv[1:]\n"
+                "known = {'_ZTIN7content8RegistryE': 'typeinfo for content::Registry'}\n"
+                "for line in sys.stdin.read().splitlines():\n"
+                "    name = line[1:] if strip and line.startswith('_') else line\n"
+                "    print(known.get(name, line))\n",
+                encoding="utf-8")
+            tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+            names = rtti_ownership.demangle(
+                {"_ZTIN7content8RegistryE", "__ZTIN7content8RegistryE"}, str(tool))
+        # Both the ELF spelling and the Mach-O one (extra underscore) demangle.
+        self.assertEqual(set(names.values()), {"typeinfo for content::Registry"})
+
+    def test_member_owner_reads_the_enclosing_class(self) -> None:
+        cases = {
+            "pulp::view::Meter::set_level(float, float)": "pulp::view::Meter",
+            "non-virtual thunk to pulp::view::Meter::~Meter()": "pulp::view::Meter",
+            "guard variable for pulp::view::Meter::instance()::s": "pulp::view::Meter",
+            "virtual thunk to pulp::view::Meter::~Meter()": "pulp::view::Meter",
+            "covariant return thunk to pulp::view::Meter::clone() const": "pulp::view::Meter",
+            "reference temporary #0 for pulp::view::Meter::kDefault": "pulp::view::Meter",
+            "TLS init function for pulp::view::Meter::tls_state": "pulp::view::Meter",
+            "thread-local wrapper routine for pulp::view::Meter::tls_state": "pulp::view::Meter",
+            "void pulp::view::Grid<int>::fill<float>(float)": "pulp::view::Grid<int>",
+            "pulp::view::Meter::operator()(int) const": "pulp::view::Meter",
+            "pulp::view::Meter::kMaxLevel": "pulp::view::Meter",
+            "pulp::view::register_audio_widgets()": "pulp::view",
+            "main": None,
+        }
+        for demangled, owner in cases.items():
+            self.assertEqual(rtti_ownership.member_owner(demangled), owner, demangled)
+        self.assertIsNone(rtti_ownership.member_owner("vtable for pulp::view::Meter"))
+
+    def test_member_owner_reads_through_operator_names(self) -> None:
+        # The brackets and spaces in an operator's own name are neither
+        # nesting nor a return type.
+        owner = "pulp::view::Meter"
+        for op in ("operator>(pulp::view::Meter const&) const", "operator>>(int)",
+                   "operator<(pulp::view::Meter const&) const", "operator<<=(int)",
+                   "operator<=>(pulp::view::Meter const&) const", "operator->() const",
+                   "operator bool() const", "operator unsigned long() const",
+                   "operator new(unsigned long)", "operator delete[](void*)",
+                   "operator=(pulp::view::Meter&&)", "operator[](unsigned long)"):
+            with self.subTest(op):
+                self.assertEqual(rtti_ownership.member_owner(f"{owner}::{op}"), owner)
+        self.assertEqual(rtti_ownership.member_owner(
+            "pulp::view::Box<int>::operator<(pulp::view::Box<int> const&) const"),
+            "pulp::view::Box<int>")
+        # A member merely named like an operator keeps its own name.
+        self.assertEqual(rtti_ownership.member_owner(f"{owner}::operator_helper(int)"), owner)
+
+    def test_std_and_closures_are_never_flagged(self) -> None:
+        for cls in ("std::__1::__function::__func<pulp::view::Meter::bind()::'lambda'(), void ()>",
+                    "std::format_error", "pulp::view::Meter::bind()::'lambda'()",
+                    "pulp::view::Meter::bind()::{lambda()#1}", "pulp::view::$_0",
+                    "(anonymous namespace)::Helper"):
+            self.assertTrue(rtti_ownership.never_flagged(cls), cls)
+        self.assertFalse(rtti_ownership.never_flagged("pulp::view::Meter"))
+
+    def test_only_weak_only_rtti_of_owned_classes_is_copied(self) -> None:
+        names = {"S1": "pulp::view::Meter::set_level(float, float)",
+                 "_ZTVN4pulp4view5MeterE": "vtable for pulp::view::Meter",
+                 "_ZTVN4pulp4view4ViewE": "vtable for pulp::view::View",
+                 "_ZTVSt12format_error": "vtable for std::format_error"}
+        owned = rtti_ownership.owned_classes({"S1", "_ZTVN4pulp4view5MeterE"}, names)
+        self.assertEqual(owned, {"pulp::view::Meter"})
+        weak = {"_ZTVN4pulp4view5MeterE", "_ZTVN4pulp4view4ViewE", "_ZTVSt12format_error"}
+        self.assertEqual(rtti_ownership.copied_rtti(weak, owned, names),
+                         {"_ZTVN4pulp4view5MeterE": "vtable for pulp::view::Meter"})
+
+    def test_owned_std_or_closure_rtti_is_still_never_copied(self) -> None:
+        # Even where the forbidden archive strongly defines a member of a std
+        # class or a closure, a weak copy of that RTTI is shared, not copied.
+        names = {"S1": "std::format_error::what() const",
+                 "S2": "pulp::view::Meter::bind()::'lambda'()::operator()() const",
+                 "_ZTVSt12format_error": "vtable for std::format_error",
+                 "W2": "typeinfo for pulp::view::Meter::bind()::'lambda'()"}
+        owned = {"std::format_error", "pulp::view::Meter::bind()::'lambda'()"}
+        self.assertEqual(rtti_ownership.copied_rtti({"_ZTVSt12format_error", "W2"}, owned, names), {})
+
+    def test_a_symbol_also_defined_strongly_is_not_weak_only(self) -> None:
+        # The "- strong" qualifier: one member's strong definition wins over
+        # another member's weak copy, in both readings.
+        letters = "a.a[x.o]: _ZTVN3foo3BarE V 0 0\na.a[y.o]: _ZTVN3foo3BarE D 0 0\n"
+        self.assertEqual(nm_symbols.weak_defined(letters), set())
+        darwin = ("x.o:\n0000000000000010 (__DATA,__const) weak external automatically hidden __ZTVN3foo3BarE\n"
+                  "y.o:\n0000000000000020 (__DATA,__const) external __ZTVN3foo3BarE\n")
+        strong, weak = nm_symbols.strength("", darwin)
+        self.assertEqual((strong, weak), ({"__ZTVN3foo3BarE"}, set()))
 
 
 if __name__ == "__main__":

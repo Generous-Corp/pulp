@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import contextlib
+import hashlib
 import io
 import os
 import subprocess
 import unittest
 import unittest.mock
 import json
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -58,6 +60,57 @@ class ClosurePolicyTests(unittest.TestCase):
             "generated_inputs": [{"path": "@build/core/runtime/generated/build_info.hpp", "producer_paths": ["core/runtime/CMakeLists.txt"]}],
         }), [])
         self.assertTrue(receipt_path_violations({"files": [{"pulp_path": "/Users/agent/build/rogue.hpp"}]}))
+
+    def test_every_forbidden_form_derives_from_the_shared_policy(self):
+        import vellum_closure
+        import vellum_policy
+        names = vellum_policy.names()
+        self.assertTrue({"gpu_audio", "music"} <= set(names))
+        self.assertEqual(vellum_closure.FORBIDDEN_ROOTS, vellum_policy.roots())
+        for name in names:
+            stem = name.replace("_", "-")
+            with self.subTest(name=name):
+                self.assertTrue(vellum_closure.policy_target_forbidden(f"pulp-{stem}"))
+                self.assertTrue(vellum_closure.policy_target_forbidden(f"pulp::{stem}"))
+                self.assertTrue(vellum_closure.policy_include_forbidden(f"pulp/{name}/x.hpp"))
+                self.assertTrue(vellum_closure.FORBIDDEN_CMAKE_TARGET.search(f"target_link_libraries(x PUBLIC pulp::{stem})"))
+        for allowed in ("pulp-canvas", "pulp::view-core", "pulp-state", "SkiaLib", "absl_graphcycles_internal"):
+            self.assertFalse(vellum_closure.policy_target_forbidden(allowed), allowed)
+        self.assertFalse(vellum_closure.policy_include_forbidden("pulp/canvas/canvas.hpp"))
+        table = json.loads((REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8"))
+        product_include = re.compile(table["content_patterns"]["mirror-product-include"])
+        product_symbol = re.compile(table["content_patterns"]["mirror-product-symbol"])
+        for name in names:
+            with self.subTest(mirror=name):
+                self.assertTrue(product_include.search(f"#include <pulp/{name}/x.hpp>"))
+                self.assertTrue(product_symbol.search(f"pulp::{name}::thing"))
+                self.assertTrue(product_symbol.search(f"pulp-{name.replace('_', '-')}"))
+
+    def test_the_policy_names_exactly_the_retained_subsystems(self):
+        # Pinned so dropping a row from vellum_policy.json, which would unforbid
+        # that subsystem in every boundary check at once, fails here.
+        import vellum_policy
+        self.assertEqual(vellum_policy.POLICY, REPO_ROOT / "tools/scripts/vellum_policy.json")
+        self.assertEqual(vellum_policy.names(), (
+            "audio", "content", "format", "gpu_audio", "graph", "host", "midi",
+            "music", "playback", "sample_bank_manifest", "signal", "timebase",
+        ))
+
+    def test_policy_loader_rejects_malformed_tables(self):
+        import vellum_policy
+        cases = [
+            ({"schema": "other", "forbidden_subsystems": [{"name": "audio"}]}, "schema"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": []}, "non-empty"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "audio"}, {"name": "audio"}]}, "duplicate"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "Gpu-Audio"}]}, "invalid"),
+            ({"schema": vellum_policy.SCHEMA, "forbidden_subsystems": [{"name": "content", "include_dirs": "x"}]}, "include_dirs"),
+        ]
+        for payload, message in cases:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "policy.json"
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, message):
+                    vellum_policy.load(path)
 
     def test_edge_allowlist_keeps_audio_targets_distinct(self):
         self.assertEqual(edge_key("pulp-design-import", "pulp-audio"), "pulp-design-import->pulp-audio")
@@ -1342,11 +1395,12 @@ class GeneratedDigestTests(unittest.TestCase):
             )
             expected_cpp = hashlib.sha256(recipe_output.read_bytes()).hexdigest()
         names = [input_path.stem.replace("-", "_") for input_path in inputs]
+        from vellum_closure import PRELUDE_HEADER_HEAD, PRELUDE_HEADER_TAIL
+        self.assertIn("struct EmbeddedPrelude {", PRELUDE_HEADER_HEAD)
         expected_hpp_text = (
-            "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n"
-            "namespace pulp::view::preludes {\n\n"
-            + "".join(f"extern const char* const {name};\n" for name in names)
-            + "\n}  // namespace pulp::view::preludes\n"
+            PRELUDE_HEADER_HEAD
+            + "".join(f"extern const EmbeddedPrelude {name};\n" for name in names)
+            + PRELUDE_HEADER_TAIL
         )
         expected_hpp = hashlib.sha256(expected_hpp_text.encode("utf-8")).hexdigest()
         with tempfile.TemporaryDirectory() as td:
@@ -1438,14 +1492,14 @@ class GeneratedDigestTests(unittest.TestCase):
             self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
             producer.write_text("if(FALSE)\n" + original + "endif()\n", encoding="utf-8")
             self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
-            producer.write_text(original.replace("extern const char* const ${_prelude_var};", "extern const unsigned char* ${_prelude_var};"), encoding="utf-8")
+            producer.write_text(original.replace("extern const EmbeddedPrelude ${_prelude_var};", "extern const unsigned char* ${_prelude_var};"), encoding="utf-8")
             self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
             adversarial_mutations = (
                 ("NAME_WE -> NAME", original.replace("\"${_prelude}\" NAME_WE", "\"${_prelude}\" NAME", 1)),
                 ("duplicate APPEND", original.replace(
-                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")',
-                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")\n'
-                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")', 1)),
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")',
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")\n'
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")', 1)),
                 ("changed header prelude", original.replace("#pragma once\\n", "#pragma changed\\n", 1)),
                 ("extra custom output", original.replace(
                     "OUTPUT ${PULP_JS_EMBEDDED_SOURCE}",
@@ -1812,6 +1866,247 @@ class ExportIntegrityTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "an export with this id already exists"):
                 claim_export_paths([Path(td) / "closures" / "20261023-0123456789ab", receipt])
 
+
+HAS_FILTER_REPO = bool(shutil.which("git-filter-repo"))
+PRUNED = "0" * 40
+
+
+class PrunedSourceFixture(unittest.TestCase):
+    """A history where ``pruned`` changes no exported path, so the rewrite prunes it."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        self.repo = Path(self.td.name) / "repo"
+        self.repo.mkdir()
+        self.git("init", "-q")
+        (self.repo / "tools" / "scripts").mkdir(parents=True)  # spelled in parts: not a script input
+        self.base = self.commit({"a.txt": "a1\n", "b.txt": "b1\n", "tools/scripts/vellum_closure.py": "tool\n"})
+        self.source = self.commit({"a.txt": "a2\n"})
+        self.pruned = self.commit({"b.txt": "b2\n"})
+
+    def git(self, *args, repo=None):
+        return subprocess.run(["git", "-C", str(repo or self.repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                              check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
+
+    def commit(self, files, message=None):
+        for name, text in files.items():
+            (self.repo / name).write_text(text, encoding="utf-8")
+        self.git("add", *files)
+        self.git("commit", "-q", "-m", message or ",".join(files))
+        return self.git("rev-parse", "HEAD")
+
+    def mapped(self, commit):
+        """The maps git-filter-repo writes for this history, without running it; (dir, mirror commit).
+
+        Exporting only ``a.txt``, ``base`` and ``source`` each get a rewritten
+        commit and ``pruned`` maps to all-zero. The export ref lands on the
+        rewrite of the newest kept ancestor. Mirror ids are placeholders: the
+        refusal paths read them only as strings, and
+        ``test_synthetic_maps_match_a_real_rewrite`` holds the shape to a real
+        rewrite wherever git-filter-repo is installed.
+        """
+        history = [self.base, self.source, self.pruned]
+        upto = history[:history.index(commit) + 1]
+        kept = {self.base: "1" * 40, self.source: "2" * 40}
+        path = Path(self.td.name) / f"mapped-{commit[:8]}"
+        path.mkdir()
+        (path / "commit-map").write_text(
+            "old new\n" + "".join(f"{c} {kept.get(c, PRUNED)}\n" for c in upto), encoding="utf-8")
+        mirror = kept[[c for c in upto if c in kept][-1]]
+        (path / "ref-map").write_text(f"old new ref\n{commit} {mirror} refs/heads/export-source\n", encoding="utf-8")
+        return path, mirror
+
+    def rewrite(self, commit):
+        """Rewrite ``commit`` exactly as export does; (filter-repo dir, mirror commit)."""
+        out = Path(self.td.name) / f"out-{commit[:8]}"
+        subprocess.run(["git", "clone", "-q", "--no-local", str(self.repo), str(out)], check=True)
+        self.git("update-ref", "refs/heads/export-source", commit, repo=out)
+        self.git("checkout", "-q", "--detach", "export-source", repo=out)
+        subprocess.run(["git-filter-repo", "--force", "--path", "a.txt", "--path-rename", "a.txt:mirror/a.txt",
+                        "--refs", "export-source"], cwd=out, check=True, capture_output=True)
+        return out / ".git" / "filter-repo", self.git("rev-parse", "refs/heads/export-source", repo=out)
+
+    def forged(self, real_dir, commit_rows=None, ref_map=None):
+        """A filter-repo dir with a forged commit map and/or ref map; the real file where not forged."""
+        path = Path(self.td.name) / f"forged-{len(list(Path(self.td.name).glob('forged-*')))}"
+        path.mkdir()
+        (path / "commit-map").write_text("old new\n" + "".join(f"{o} {n}\n" for o, n in commit_rows), encoding="utf-8") \
+            if commit_rows is not None else shutil.copy(real_dir / "commit-map", path / "commit-map")
+        if ref_map is None:
+            shutil.copy(real_dir / "ref-map", path / "ref-map")
+        elif ref_map is not False:
+            (path / "ref-map").write_text(ref_map, encoding="utf-8")
+        return path
+
+
+class PrunedSourceRefusalTests(PrunedSourceFixture):
+    """The source check reads only the maps and the Pulp history, so it runs without git-filter-repo."""
+
+    def test_pruned_commit_is_accepted_with_its_proof(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.pruned)
+        data, ref_map, record = export_source_mapping(fr, self.pruned, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
+        self.assertNotIn(f"{self.pruned} {mirror_sha}", data.decode())  # no row is written in
+        self.assertEqual(ref_map, (fr / "ref-map").read_bytes())
+        self.assertEqual(record["sha"], self.source)
+        proof = record["proof"]
+        self.assertEqual(proof["ref_map_row"], f"{self.pruned} {mirror_sha} refs/heads/export-source")
+        self.assertEqual(proof["commit_map_rows"], [f"{self.pruned} {PRUNED}", f"{self.source} {mirror_sha}"])
+        self.assertTrue(proof["source_is_ancestor"] and proof["exported_paths_equal"])
+        self.assertEqual(proof["exported_path_count"], 1)
+        listing = f"a.txt 100644 {self.git('rev-parse', f'{self.source}:a.txt')}\n".encode()
+        self.assertEqual(proof["exported_blobs_sha256"], hashlib.sha256(listing).hexdigest())
+
+    def test_unpruned_commit_returns_the_map_with_no_record(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.source)
+        data, ref_map, record = export_source_mapping(fr, self.source, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
+        self.assertIsNone(ref_map)
+        self.assertIsNone(record)
+
+    def test_pruned_commit_whose_exported_content_differs_is_refused(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.pruned)
+        forged = self.forged(fr, [(self.base, mirror_sha), (self.pruned, "0" * 40)])
+        with self.assertRaisesRegex(SystemExit, "exported paths differ"):
+            export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+    def test_mirror_source_that_is_not_an_ancestor_is_refused(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.pruned)
+        self.git("checkout", "-q", "-b", "side", self.base)
+        side = self.commit({"a.txt": "a2\n"}, message="side")
+        self.assertNotEqual(side, self.source)
+        forged = self.forged(fr, [(side, mirror_sha), (self.pruned, "0" * 40)])
+        with self.assertRaisesRegex(SystemExit, "is not an ancestor"):
+            export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
+        forged = self.forged(fr, [(self.pruned, mirror_sha), (self.pruned, "0" * 40)])
+        with self.assertRaisesRegex(SystemExit, "is not an ancestor"):  # R itself is not a strict ancestor
+            export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+    def test_pruned_commit_needs_the_ref_map_row(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.pruned)
+        with self.assertRaisesRegex(SystemExit, "wrote no ref map"):
+            export_source_mapping(self.forged(fr, ref_map=False), self.pruned, mirror_sha, self.repo, ["a.txt"])
+        wrong = f"old new ref\n{self.source} {mirror_sha} refs/heads/export-source\n"
+        with self.assertRaisesRegex(SystemExit, "ref map does not move"):
+            export_source_mapping(self.forged(fr, ref_map=wrong), self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+    def test_pruned_commit_with_no_or_two_mirror_sources_is_refused(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.mapped(self.pruned)
+        for sources in ([], [self.source, self.base]):
+            forged = self.forged(fr, [*((row, mirror_sha) for row in sources), (self.pruned, "0" * 40)])
+            with self.assertRaisesRegex(SystemExit, "not exactly one"):
+                export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+
+
+    def test_exported_blobs_are_compared_even_when_git_diff_reports_equal(self):
+        import vellum_closure
+        fr, mirror_sha = self.mapped(self.pruned)
+        forged = self.forged(fr, [(self.base, mirror_sha), (self.pruned, PRUNED)])
+        real_run = subprocess.run
+
+        def diff_says_equal(cmd, *args, **kwargs):
+            if "diff" in cmd and "--quiet" in cmd:
+                return subprocess.CompletedProcess(cmd, 0)
+            return real_run(cmd, *args, **kwargs)
+
+        with unittest.mock.patch.object(vellum_closure.subprocess, "run", diff_says_equal), \
+                self.assertRaisesRegex(SystemExit, "exported blobs differ"):
+            vellum_closure.export_source_mapping(forged, self.pruned, mirror_sha, self.repo, ["a.txt"])
+
+
+@unittest.skipUnless(HAS_FILTER_REPO, "git-filter-repo is not installed")
+class PrunedSourceRewriteTests(PrunedSourceFixture):
+    """End-to-end paths that need a real rewrite."""
+
+    def test_synthetic_maps_match_a_real_rewrite(self):
+        for commit in (self.source, self.pruned):
+            fr, mirror_sha = self.rewrite(commit)
+            mapped, mapped_mirror = self.mapped(commit)
+            real_rows = [line.split() for line in (fr / "commit-map").read_text(encoding="utf-8").splitlines()]
+            fake_rows = [line.split() for line in (mapped / "commit-map").read_text(encoding="utf-8").splitlines()]
+            # filter-repo writes rows in no fixed order: compare which commits are kept or pruned
+            self.assertEqual(real_rows[0], fake_rows[0])
+            self.assertEqual(sorted((r[0], r[1] == PRUNED) for r in real_rows[1:]),
+                             sorted((r[0], r[1] == PRUNED) for r in fake_rows[1:]))
+            real_ref = (fr / "ref-map").read_text(encoding="utf-8").replace(mirror_sha, "<mirror>")
+            fake_ref = (mapped / "ref-map").read_text(encoding="utf-8").replace(mapped_mirror, "<mirror>")
+            self.assertIn(f"{commit} <mirror> refs/heads/export-source", real_ref)
+            self.assertIn(f"{commit} <mirror> refs/heads/export-source", fake_ref)
+            self.assertEqual(real_ref.splitlines()[0].split(), fake_ref.splitlines()[0].split())  # filter-repo pads its header
+
+    def test_unpruned_commit_maps_directly_with_no_record(self):
+        from vellum_closure import export_source_mapping
+        fr, mirror_sha = self.rewrite(self.source)
+        data, ref_map, record = export_source_mapping(fr, self.source, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
+        self.assertIsNone(ref_map)
+        self.assertIsNone(record)
+
+    def test_pruned_commit_exports_with_its_ref_map_and_equality_proof(self):
+        from vellum_closure import export_commit_map, export_source_mapping
+        fr, mirror_sha = self.rewrite(self.pruned)
+        self.assertIn(f"{self.pruned} {'0' * 40}", (fr / "commit-map").read_text(encoding="utf-8"))
+        with self.assertRaisesRegex(SystemExit, "does not map"):
+            export_commit_map(fr / "commit-map", self.pruned, mirror_sha)
+        data, ref_map, record = export_source_mapping(fr, self.pruned, mirror_sha, self.repo, ["a.txt"])
+        self.assertEqual(data, (fr / "commit-map").read_bytes())
+        self.assertNotIn(f"{self.pruned} {mirror_sha}", data.decode())
+        self.assertEqual(ref_map, (fr / "ref-map").read_bytes())  # filter-repo's own ref map, shipped as written
+        self.assertEqual(record["sha"], self.source)
+        proof = record["proof"]
+        self.assertEqual(proof["ref_map_row"], f"{self.pruned} {mirror_sha} refs/heads/export-source")
+        self.assertEqual(proof["commit_map_rows"], [f"{self.pruned} {'0' * 40}", f"{self.source} {mirror_sha}"])
+        self.assertTrue(proof["source_is_ancestor"] and proof["exported_paths_equal"])
+        self.assertEqual(proof["exported_path_count"], 1)
+
+    def export_landing(self, commit):
+        """Run cmd_export on ``commit``; (receipt, landing). The closure checks it applies are not under test."""
+        import vellum_closure
+        manifest = Path(self.td.name) / "unit.json"
+        manifest.write_text(json.dumps({"files": ["a.txt"]}), encoding="utf-8")
+        args = Namespace(repo=str(self.repo), manifest=[str(manifest)], unit_name=["unit"], pulp_sha=commit,
+                         output=str(Path(self.td.name) / f"export-{commit[:8]}"), landing=str(Path(self.td.name) / f"landing-{commit[:8]}"),
+                         mirror_root="mirror", mirror_ref="refs/heads/mirror/pulp-framework", dry_run=False,
+                         rename_map=None, cpu_only_unit=[])
+        with unittest.mock.patch.object(vellum_closure, "exportable_closure", lambda m, *_: dict(m)), \
+                unittest.mock.patch.object(vellum_closure, "export_owned_file_violations", lambda *_: []), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(vellum_closure.cmd_export(args), 0)
+        landing = Path(args.landing)
+        return json.loads(next((landing / "provenance/mirror/receipts").glob("*.json")).read_text(encoding="utf-8")), landing
+
+    # Vellum tools/provenance/verify_mirror_export.py RECEIPT_KEYS: an exact set.
+    VELLUM_RECEIPT_KEYS = {"schema", "export_id", "pulp_repository", "pulp_sha", "mirror_ref", "mirror_sha",
+                           "mirror_tree", "rename", "commit_map", "units", "files", "generated_inputs", "tool",
+                           "created_at"}
+
+    def test_unpruned_receipt_keeps_exactly_the_keys_vellum_checks(self):
+        receipt, landing = self.export_landing(self.source)
+        self.assertEqual(set(receipt), self.VELLUM_RECEIPT_KEYS)
+        self.assertFalse((landing / "provenance/mirror/ref-maps").exists())
+
+    def test_pruned_receipt_adds_one_mirror_source_field(self):
+        unpruned, _ = self.export_landing(self.source)
+        receipt, landing = self.export_landing(self.pruned)
+        self.assertEqual(set(receipt) - self.VELLUM_RECEIPT_KEYS, {"mirror_source"})
+        self.assertEqual(receipt["pulp_sha"], self.pruned)  # pulp_sha stays R
+        self.assertEqual(receipt["mirror_sha"], unpruned["mirror_sha"])
+        source = receipt["mirror_source"]
+        self.assertEqual(set(source), {"sha", "ref_map", "proof"})
+        self.assertEqual(source["sha"], self.source)
+        ref_map = landing / source["ref_map"]["path"]
+        self.assertEqual(source["ref_map"]["path"], f"provenance/mirror/ref-maps/{receipt['export_id']}.txt")
+        self.assertEqual(source["ref_map"]["sha256"], hashlib.sha256(ref_map.read_bytes()).hexdigest())
+        self.assertIn(f"{self.pruned} {receipt['mirror_sha']} refs/heads/export-source", ref_map.read_text(encoding="utf-8"))
+        self.assertEqual([row["blob"] for row in receipt["files"]], [self.git("rev-parse", f"{self.source}:a.txt")])
 
 class ClosureCtestWiringTests(unittest.TestCase):
     def test_manifest_readers_require_the_boundary_fixture(self):

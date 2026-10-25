@@ -75,7 +75,11 @@ static void snap_absolute_siblings_under_shadow(IRNode& node) {
     }
 }
 
-void normalize_design_ir(IRNode& node) {
+IRParseOptions ir_parse_options_for(const DesignIR& ir) {
+    return {.measured_geometry = ir.source_adapter == "browser-capture"};
+}
+
+void normalize_design_ir(IRNode& node, const IRParseOptions& options) {
     // ── Separator promotion ─────────────────────────────────────────────
     // Figma stores 1-pixel vertical lines (column separators, etc.) as a
     // VECTOR node with effectively-zero width or height plus a 1px stroke.
@@ -84,7 +88,9 @@ void normalize_design_ir(IRNode& node) {
     // Promote the stroke weight to the visible dimension and turn the
     // node into a colored rect (drop the empty PNG fill) so it actually
     // shows up. Trigger: width < 0.5 or height < 0.5 AND border_width >= 0.5.
-    {
+    // A browser capture's sub-half-pixel box is what Chromium painted (a
+    // scaled hairline keeps its computed border), so it is left as it is.
+    if (!options.measured_geometry) {
         constexpr float kDegenerateAxis = 0.5f;
         constexpr float kMinStrokeWeight = 0.5f;  // Figma "1px" strokes
                                                    // often come through at
@@ -138,8 +144,11 @@ void normalize_design_ir(IRNode& node) {
     // Propagate the parent's radius to any child that has position:abs
     // at (0,0) and matches the parent's size (or any axis matches and
     // the other is close), so the gradient/fill child also paints with
-    // rounded corners.
-    if (node.style.border_radius && *node.style.border_radius > 0.0f) {
+    // rounded corners. A browser capture records each child's own radius,
+    // and Chromium rounds a child only when the parent clips it, which the
+    // capture's clip carries; inheriting would round what Chromium squared.
+    if (!options.measured_geometry && node.style.border_radius &&
+        *node.style.border_radius > 0.0f) {
         float pr = *node.style.border_radius;
         float pw = node.style.width.value_or(0.0f);
         float ph = node.style.height.value_or(0.0f);
@@ -160,8 +169,11 @@ void normalize_design_ir(IRNode& node) {
         }
     }
 
-    // Shadow-driven sibling snap.
-    snap_absolute_siblings_under_shadow(node);
+    // Shadow-driven sibling snap. A browser capture's gap under a shadow is
+    // the gap Chromium laid out, and it paints the shadow under the sibling
+    // just as Pulp does, so there is nothing to close.
+    if (!options.measured_geometry)
+        snap_absolute_siblings_under_shadow(node);
 
     // ── Connector-line spanning rule ────────────────────────────────────
     // Pattern: a flex row whose FIRST child is a horizontal hairline (height

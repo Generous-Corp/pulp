@@ -51,6 +51,7 @@ target_sources(pulp-view-core PRIVATE
     src/widget_schema.cpp
     src/knob_sprite_paint.cpp
     src/slider_core.cpp
+    src/widgets/button_surface.cpp
     src/widgets/form_controls.cpp
     src/widgets/label.cpp
     src/widgets/visualizers.cpp
@@ -202,6 +203,7 @@ target_sources(pulp-view-script PRIVATE
     src/script_engine.cpp
     src/js_engine_recommend.cpp
     src/widget_bridge.cpp
+    src/js_prelude_source.cpp
     src/widget_bridge/value_channel_access.cpp
     src/widget_bridge/bridge_dispatch.cpp
     src/widget_bridge/css_color.cpp

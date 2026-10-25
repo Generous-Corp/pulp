@@ -233,6 +233,12 @@ pulp_add_test_suite(pulp-test-dirty-region-consumption GROUP pulp-test-group-vie
 pulp_add_test_suite(pulp-test-pending-damage GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
 
+# X11ResizeEcho: the Linux plug-in host drops a ConfigureNotify older than its
+# own last XResizeWindow, so a stale echo cannot revert the size. Serial
+# arithmetic only, so it runs on every platform.
+pulp_add_test_suite(pulp-test-x11-resize-echo GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+
 # PluginViewHost GPU-surface lifecycle notification: delayed creation (the
 # Windows attach-time ordering), detach, destruction, reattach, mid-session
 # recreation, and no-callback-after-unsubscribe. Deliberately does NOT link
@@ -633,24 +639,33 @@ pulp_add_test_suite(pulp-test-editor-open-stages
 # editor, and the audio widgets never reach pulp::host. The source lint excludes
 # core/view/audio, whose targets own the audio-dependent headers.
 if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio AND TARGET pulp-view-platform)
-    set(_pulp_view_boundary_args)
-    foreach(_pulp_view_boundary_pair
-            "pulp-view-core;PULP_VIEW_CORE_LINKS"
-            "pulp-view;PULP_VIEW_LINKS"
-            "pulp-view-native;PULP_VIEW_NATIVE_LINKS"
-            "pulp-view-platform;PULP_VIEW_PLATFORM_LINKS"
-            "pulp-view-audio;PULP_VIEW_AUDIO_LINKS")
-        list(GET _pulp_view_boundary_pair 0 _pulp_view_boundary_target)
-        list(GET _pulp_view_boundary_pair 1 _pulp_view_boundary_var)
-        get_target_property(_pulp_view_boundary_links
-            ${_pulp_view_boundary_target} LINK_LIBRARIES)
-        if(NOT _pulp_view_boundary_links)
-            set(_pulp_view_boundary_links "")
-        endif()
-        string(REPLACE ";" "|" _pulp_view_boundary_links "${_pulp_view_boundary_links}")
-        list(APPEND _pulp_view_boundary_args
-            "-D${_pulp_view_boundary_var}=${_pulp_view_boundary_links}")
-    endforeach()
+    # Each target's LINK_LIBRARIES, read after the whole configure has run so a
+    # link added by any later directory is seen. The file sets one variable per
+    # target, with the list joined by "|".
+    set(_pulp_view_boundary_links_file "${CMAKE_CURRENT_BINARY_DIR}/view-boundary-links.cmake")
+    function(_pulp_record_view_boundary_links output)
+        set(_content "")
+        foreach(_pair
+                "pulp-view-core;PULP_VIEW_CORE_LINKS"
+                "pulp-view;PULP_VIEW_LINKS"
+                "pulp-view-native;PULP_VIEW_NATIVE_LINKS"
+                "pulp-view-platform;PULP_VIEW_PLATFORM_LINKS"
+                "pulp-view-audio;PULP_VIEW_AUDIO_LINKS")
+            list(GET _pair 0 _target)
+            list(GET _pair 1 _var)
+            get_target_property(_links ${_target} LINK_LIBRARIES)
+            if(NOT _links)
+                set(_links "")
+            endif()
+            string(REPLACE ";" "|" _links "${_links}")
+            string(APPEND _content "set(${_var} [==[${_links}]==])\n")
+        endforeach()
+        file(WRITE "${output}" "${_content}")
+    endfunction()
+    cmake_language(EVAL CODE "
+        cmake_language(DEFER DIRECTORY [[${CMAKE_SOURCE_DIR}]]
+            CALL _pulp_record_view_boundary_links
+                [[${_pulp_view_boundary_links_file}]])")
     # pulp-view-audio's own INTERFACE_COMPILE_DEFINITIONS, read after the whole
     # configure has run so a definition added anywhere is seen. The only one it
     # may publish is the widgets.hpp compatibility gate; the design-import binder
@@ -680,10 +695,14 @@ if(TARGET pulp-view-core AND TARGET pulp-view AND TARGET pulp-view-audio AND TAR
     add_test(NAME pulp-view-core-audio-free
         COMMAND ${CMAKE_COMMAND}
             -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-            ${_pulp_view_boundary_args}
+            "-DPULP_VIEW_BOUNDARY_LINKS_FILE=${_pulp_view_boundary_links_file}"
+            "-DPULP_VELLUM_POLICY=${CMAKE_SOURCE_DIR}/tools/scripts/vellum_policy.json"
             "-DPULP_VIEW_AUDIO_INTERFACE_DEFINITIONS_FILE=${_pulp_view_audio_interface_definitions_file}"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_core_audio_free.cmake)
-    set_tests_properties(pulp-view-core-audio-free PROPERTIES LABELS "pr;view;gate")
+    # It reads the link and definition interfaces CMake records for these
+    # targets, not an artifact of them.
+    set_tests_properties(pulp-view-core-audio-free PROPERTIES LABELS "pr;view;gate"
+        PULP_SELECT_WITH_TARGETS "pulp-view-core;pulp-view-audio")
 endif()
 
 # The include half of the same boundary: no core/view source outside
@@ -735,8 +754,11 @@ if(TARGET pulp-view-audio AND TARGET pulp-view-core)
             "-DOSX_SYSROOT=${CMAKE_OSX_SYSROOT}"
             "-DOSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_audio_widgets_gate.cmake")
+    # FLAGS_FILE is generated from these targets' include and definition
+    # properties, so the test reads the targets, not an artifact of them.
     set_tests_properties(pulp-view-audio-widgets-gate PROPERTIES
-        LABELS "pr;view;gate" TIMEOUT 300)
+        LABELS "pr;view;gate" TIMEOUT 300
+        PULP_SELECT_WITH_TARGETS "${_widgets_gate_targets};pulp-view-audio")
 endif()
 
 # Explicit registration without the build-tree convenience shim: the support
@@ -794,6 +816,10 @@ if(NOT WIN32 AND TARGET pulp-view-audio AND TARGET pulp-view-script AND TARGET p
     set_tests_properties(pulp-view-audio-symbol-floor
         pulp-view-audio-symbol-floor-negative-contract
         PROPERTIES LABELS "pr;view;gate" TIMEOUT 60)
+    # The negative contract reads the floor's registered command back from
+    # ctest, so the flags it checks are the ones that actually run.
+    set_tests_properties(pulp-view-audio-symbol-floor-negative-contract
+        PROPERTIES ENVIRONMENT "PULP_CTEST_BUILD_DIR=${CMAKE_BINARY_DIR}")
 endif()
 
 # The platform plug-in editor hosts, the frame pipeline and the PluginViewHost

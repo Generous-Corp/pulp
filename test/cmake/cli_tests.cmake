@@ -452,6 +452,13 @@ endif()
 # for the non-destructive ship subcommand branches.
 add_executable(pulp-test-cli-ship-shellout test_cli_ship_shellout.cpp)
 target_link_libraries(pulp-test-cli-ship-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(APPLE)
+    # A real Mach-O module carrying a local symbol, for the ship-time strip case.
+    add_library(pulp-test-ship-strip-fixture MODULE fixtures/ship_strip/ship_strip_fixture.cpp)
+    add_dependencies(pulp-test-cli-ship-shellout pulp-test-ship-strip-fixture)
+    target_compile_definitions(pulp-test-cli-ship-shellout PRIVATE
+        PULP_SHIP_STRIP_FIXTURE="$<TARGET_FILE:pulp-test-ship-strip-fixture>")
+endif()
 # hdiutil attaches temporary disk images through a machine-wide service. Keep
 # the one real-image case parallel with ordinary CLI tests, but not with another
 # real-image creator: under ctest -j8 that collision has stretched a 17-second
@@ -469,6 +476,13 @@ endif()
 # unit-tested against fixtures since the default/coverage config cannot build a
 # real PULP_TRACING=ON binary. PULP_SOURCE_DIR lets the sync-guard case read the
 # runtime source to prove the sentinel bytes still match.
+# Ship-time PULP_DEV_BUILD guard: a header-only CMakeCache.txt reader
+# (ship_dev_build_guard.hpp) proven against fixture caches.
+add_executable(pulp-test-ship-dev-build-guard test_ship_dev_build_guard.cpp)
+target_include_directories(pulp-test-ship-dev-build-guard PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-ship-dev-build-guard PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ship-dev-build-guard)
+
 add_executable(pulp-test-ship-tracing-guard test_ship_tracing_guard.cpp)
 target_include_directories(pulp-test-ship-tracing-guard PRIVATE ${CMAKE_SOURCE_DIR})
 pulp_test_data(pulp-test-ship-tracing-guard PATHS core/runtime/src/trace.cpp)

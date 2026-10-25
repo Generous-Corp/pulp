@@ -437,7 +437,8 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/raw_this_async_check.py" --selftest)
 
     # Thread-safe assertions: fail on a Catch2 assertion macro invoked inside a
-    # worker-thread lambda. Catch2 3.7.1's macros aren't thread-safe; off-main
+    # worker-thread lambda. Catch2's macros aren't thread-safe without
+    # CATCH_CONFIG_THREAD_SAFE_ASSERTIONS, which Pulp leaves off; off-main
     # assertions are UB that bare metal tolerates but VM scheduler timing trips.
     add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
@@ -1008,6 +1009,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME ccache-job-delta-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_ccache_job_delta.py")
     set_tests_properties(ccache-job-delta-selftest PROPERTIES TIMEOUT 60)
+
+    # Which Windows jobs may store objects in a host's shared ccache: only code
+    # already on main writes, everything else reads, and an unset
+    # PULP_CCACHE_REMOTE_STORAGE writes nothing.
+    add_test(NAME ccache-remote-storage-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_ccache_remote_storage.py")
+    set_tests_properties(ccache-remote-storage-selftest PROPERTIES TIMEOUT 60)
 
     # Queue-cascade guards. A break that reaches main is amplified by the merge
     # queue: every batch inherits it, fails, ejects its innocent entries, and

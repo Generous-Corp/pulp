@@ -9,6 +9,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import hashlib
+import re
+import zlib
 from pathlib import Path
 
 
@@ -22,6 +25,29 @@ assert spec.loader is not None
 spec.loader.exec_module(embed_js)
 
 
+RECORD = re.compile(
+    r"static const unsigned char (?P<var>\w+)_deflated\[\] = \{\n(?P<body>.*?)\n\};\n"
+    r"const EmbeddedPrelude (?P=var)\{\"(?P<file>[^\"]+)\", (?P=var)_deflated, "
+    r"(?P<dsize>\d+), (?P<ssize>\d+), \"(?P<sha>[0-9a-f]{64})\"\};\n",
+    re.S,
+)
+
+
+def parse_records(text: str) -> list[dict]:
+    records = []
+    for m in RECORD.finditer(text):
+        values = [int(v) for v in m.group("body").replace("\n", "").split(",") if v.strip()]
+        records.append({
+            "var": m.group("var"),
+            "file_name": m.group("file"),
+            "deflated_size": int(m.group("dsize")),
+            "source_size": int(m.group("ssize")),
+            "sha256": m.group("sha"),
+            "bytes": bytes(values),
+        })
+    return records
+
+
 class EmbedJsTests(unittest.TestCase):
     def test_var_name_replaces_hyphens_only_in_stem(self) -> None:
         self.assertEqual(embed_js.var_name_for(Path("alpha-beta.js")), "alpha_beta")
@@ -29,81 +55,82 @@ class EmbedJsTests(unittest.TestCase):
         self.assertEqual(embed_js.var_name_for(Path("/tmp/nested/web-compat.js")), "web_compat")
         self.assertEqual(embed_js.var_name_for(Path("already_clean")), "already_clean")
 
-    def test_chunk_text_splits_and_keeps_empty_input_represented(self) -> None:
-        self.assertEqual(embed_js.chunk_text("abcdef", 2), ["ab", "cd", "ef"])
-        self.assertEqual(embed_js.chunk_text("abcde", 2), ["ab", "cd", "e"])
-        self.assertEqual(embed_js.chunk_text("emoji-π", 6), ["emoji-", "π"])
-        self.assertEqual(embed_js.chunk_text("same", 99), ["same"])
-        self.assertEqual(embed_js.chunk_text("", 4000), [""])
+    def test_compress_round_trips_through_zlib(self) -> None:
+        text = ("globalThis.label = 'π';\n" * 200).encode("utf-8")
+        deflated = embed_js.compress(text)
+        self.assertLess(len(deflated), len(text) // 4)
+        self.assertEqual(zlib.decompress(deflated), text)
+        self.assertEqual(deflated[:1], b"\x78")  # RFC 1950 header, not raw deflate or gzip
 
-    def test_chunk_text_respects_default_msvc_boundary(self) -> None:
-        self.assertEqual(len(embed_js.chunk_text("a" * (embed_js.CHUNK_SIZE - 1), embed_js.CHUNK_SIZE)), 1)
-        self.assertEqual(len(embed_js.chunk_text("a" * embed_js.CHUNK_SIZE, embed_js.CHUNK_SIZE)), 1)
-        self.assertEqual(len(embed_js.chunk_text("a" * (embed_js.CHUNK_SIZE + 1), embed_js.CHUNK_SIZE)), 2)
-        self.assertEqual(embed_js.chunk_text("a" * (embed_js.CHUNK_SIZE + 1), embed_js.CHUNK_SIZE)[1], "a")
-        self.assertEqual(embed_js.chunk_text("π" * (embed_js.CHUNK_SIZE + 1), embed_js.CHUNK_SIZE)[1], "π")
+    def test_byte_lines_cover_every_byte_and_empty_input(self) -> None:
+        data = bytes(range(45))
+        lines = embed_js.byte_lines(data)
+        self.assertEqual(len(lines), 3)
+        values = [int(v) for line in lines for v in line.strip().rstrip(",").split(",")]
+        self.assertEqual(values, list(data))
+        self.assertEqual(embed_js.byte_lines(b""), ["    0"])
 
-    def test_main_writes_cpp_translation_unit_with_chunking_and_empty_files(self) -> None:
+    def test_main_emits_compressed_prelude_records_that_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             output = root / "preludes.cpp"
-            first = root / "alpha-beta.js"
-            second = root / "empty.js"
-            first.write_text("a" * 4001, encoding="utf-8")
-            second.write_text("", encoding="utf-8")
+            alpha = root / "alpha-one.js"
+            empty = root / "empty.js"
+            alpha_text = "alpha('π');\n" * 50
+            alpha.write_text(alpha_text, encoding="utf-8")
+            empty.write_text("", encoding="utf-8")
 
-            result = embed_js.main(["embed_js.py", str(output), str(first), str(second)])
+            result = embed_js.main(["embed_js.py", str(output), str(alpha), str(empty)])
 
             self.assertEqual(result, 0)
             text = output.read_text(encoding="utf-8")
             self.assertTrue(text.startswith("// Auto-generated from JS prelude files"))
             self.assertIn('#include "web_compat_preludes_gen.hpp"\n\n', text)
             self.assertIn("namespace pulp::view::preludes {\n\n", text)
-            self.assertIn("const char* const alpha_beta =\n", text)
-            self.assertIn('R"__JS__(' + ("a" * 4000) + ')__JS__"\n', text)
-            self.assertIn('R"__JS__(a)__JS__"\n', text)
-            self.assertIn("const char* const empty =\n", text)
-            self.assertIn('R"__JS__()__JS__"\n;\n\n', text)
-            self.assertNotIn("static const char*", text)
+            self.assertNotIn("R\"__JS__(", text)
+            self.assertNotIn("alpha('", text)  # the source text itself is not embedded
+
+            records = parse_records(text)
+            self.assertEqual([r["var"] for r in records], ["alpha_one", "empty"])
+            raw = alpha_text.encode("utf-8")
+            alpha_rec = records[0]
+            self.assertEqual(alpha_rec["file_name"], "alpha-one.js")
+            self.assertEqual(alpha_rec["source_size"], len(raw))
+            self.assertEqual(alpha_rec["deflated_size"], len(alpha_rec["bytes"]))
+            self.assertEqual(zlib.decompress(alpha_rec["bytes"]), raw)
+            self.assertEqual(alpha_rec["sha256"], hashlib.sha256(raw).hexdigest())
+            self.assertEqual(zlib.decompress(records[1]["bytes"]), b"")
+            self.assertEqual(records[1]["source_size"], 0)
+
+            self.assertIn("const EmbeddedPrelude* const kAll[] = {\n    &alpha_one,\n    &empty,\n};\n", text)
+            self.assertIn("const std::size_t kAllCount = 2;\n", text)
             self.assertTrue(text.endswith("}  // namespace pulp::view::preludes\n"))
 
-    def test_main_preserves_input_order_and_utf8_text(self) -> None:
+    def test_main_preserves_input_order(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             output = root / "preludes.cpp"
             first = root / "first-file.js"
             second = root / "second-file.js"
-            first.write_text("globalThis.label = 'π';\n", encoding="utf-8")
-            second.write_text("globalThis.answer = 42;\n", encoding="utf-8")
+            first.write_text("globalThis.a = 1;\n", encoding="utf-8")
+            second.write_text("globalThis.b = 2;\n", encoding="utf-8")
 
-            result = embed_js.main(["embed_js.py", str(output), str(first), str(second)])
+            self.assertEqual(embed_js.main(["embed_js.py", str(output), str(first), str(second)]), 0)
 
-            text = output.read_text(encoding="utf-8")
-            self.assertEqual(result, 0)
-            self.assertLess(text.index("const char* const first_file"), text.index("const char* const second_file"))
-            self.assertIn("globalThis.label = 'π';\n", text)
-            self.assertIn("globalThis.answer = 42;\n", text)
-            self.assertEqual(text.count("R\"__JS__("), 2)
+            records = parse_records(output.read_text(encoding="utf-8"))
+            self.assertEqual([r["var"] for r in records], ["first_file", "second_file"])
 
-    def test_main_emits_one_definition_per_input(self) -> None:
+    def test_main_rejects_non_utf8_prelude(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            output = root / "preludes.cpp"
-            alpha = root / "alpha-one.js"
-            beta = root / "beta-two.js"
-            alpha.write_text("alpha();", encoding="utf-8")
-            beta.write_text("beta();", encoding="utf-8")
+            output = root / "out.cpp"
+            bad = root / "bad.js"
+            bad.write_bytes(b"\xff\xfe not utf-8")
 
-            result = embed_js.main(["embed_js.py", str(output), str(alpha), str(beta)])
+            with self.assertRaises(UnicodeDecodeError):
+                embed_js.main(["embed_js.py", str(output), str(bad)])
 
-            text = output.read_text(encoding="utf-8")
-            self.assertEqual(result, 0)
-            self.assertEqual(text.count("const char* const "), 2)
-            self.assertIn("const char* const alpha_one =\n", text)
-            self.assertIn("const char* const beta_two =\n", text)
-            self.assertEqual(text.count(";\n\n"), 2)
-            self.assertIn('R"__JS__(alpha();)__JS__"\n', text)
-            self.assertIn('R"__JS__(beta();)__JS__"\n', text)
+            self.assertFalse(output.exists())
 
     def test_main_does_not_create_output_for_usage_error(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -167,7 +194,7 @@ class EmbedJsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stderr, "")
             text = output.read_text(encoding="utf-8")
-            self.assertIn("const char* const entry =\n", text)
+            self.assertIn("const EmbeddedPrelude entry{\"entry.js\", entry_deflated, ", text)
             self.assertIn('#include "web_compat_preludes_gen.hpp"', text)
             self.assertIn("namespace pulp::view::preludes", text)
 
