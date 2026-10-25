@@ -157,6 +157,17 @@ set_tests_properties(cmake-plugin-dead-strip-switch PROPERTIES
     LABELS "cmake;plugin;packaging"
     # Three throwaway configures, each paying C compiler detection.
     TIMEOUT 180)
+# PULP_DEV_SHARED_UI: a module links its adapter statically and the Pulp
+# libraries through the shared runtime dylib, loads, and runs; the option-off
+# control links statically. Also covers the link helper's refusals.
+add_test(NAME cmake-dev-shared-ui
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_DEV_SHARED_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/dev-shared-ui
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_dev_shared_ui.cmake)
+set_tests_properties(cmake-dev-shared-ui PROPERTIES
+    LABELS "cmake;plugin;packaging"
+    # Three throwaway configure + build passes of five C files each.
+    TIMEOUT 180)
 set_tests_properties(cmake-standalone-document-types PROPERTIES
     LABELS "cmake;app;standalone;plist"
     # Runs in ~1.5s warm; the budget covers three throwaway project configures
@@ -252,6 +263,14 @@ add_test(NAME cmake-ios-auv3-control-shipping
 set_tests_properties(cmake-ios-auv3-control-shipping PROPERTIES
     LABELS "cmake;ios;auv3;control"
     TIMEOUT 30)
+# Toggling pulp_add_binary_data(COMPRESS) in an existing Makefile build dir
+# regenerates the embedded source without a clean reconfigure.
+add_test(NAME cmake-pulp-add-binary-data-compress-toggle
+    COMMAND ${CMAKE_COMMAND} -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_add_binary_data_compress_toggle.cmake)
+set_tests_properties(cmake-pulp-add-binary-data-compress-toggle PROPERTIES
+    LABELS "cmake;binary-data"
+    TIMEOUT 120)
 # pulp_add_binary_data Python encoder smoke — guards the fix
 # (legacy CMake hex loop was O(n²) and pinned cmake configure for 10–22
 # minutes on a 1 MB asset). Verifies the encoder's output ABI, mtime
@@ -1292,6 +1311,14 @@ add_test(NAME cmake-pulp-add-plugin-unknown-args
 set_tests_properties(cmake-pulp-add-plugin-unknown-args PROPERTIES
     LABELS "cmake;format" TIMEOUT 120)
 
+add_test(NAME cmake-pulp-add-plugin-editor-stack
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/pulp-add-plugin-editor-stack
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_add_plugin_editor_stack.cmake)
+set_tests_properties(cmake-pulp-add-plugin-editor-stack PROPERTIES
+    LABELS "cmake;format" TIMEOUT 120)
+
 add_test(NAME cmake-control-shipping-matrix
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
@@ -1299,6 +1326,56 @@ add_test(NAME cmake-control-shipping-matrix
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_shipping_matrix.cmake)
 set_tests_properties(cmake-control-shipping-matrix PROPERTIES
     LABELS "cmake;control;ship;matrix" TIMEOUT 180)
+
+# Every file under share/pulp is installed into each consumer's SDK, so none may
+# name a build host, a local path, a user or a private repository. This scans
+# the source copies of the Pulp-authored files installed there; vendored and
+# build-generated files (three.js, runtime pins, the capability handoff) are
+# covered by the same scan of the installed tree in cmake-pulp-install-layout.
+# The contracts the install rules name, not every file in docs/contracts.
+file(STRINGS "${CMAKE_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake" _pulp_installed_contract_lines
+    REGEX "docs/contracts/[A-Za-z0-9_.-]+[.]json")
+set(_pulp_share_contract_sources "")
+foreach(_line IN LISTS _pulp_installed_contract_lines)
+    string(REGEX MATCH "docs/contracts/[A-Za-z0-9_.-]+[.]json" _contract "${_line}")
+    list(APPEND _pulp_share_contract_sources "${CMAKE_SOURCE_DIR}/${_contract}")
+endforeach()
+list(REMOVE_DUPLICATES _pulp_share_contract_sources)
+file(GLOB _pulp_share_example_sources "${CMAKE_SOURCE_DIR}/examples/sample-region-allpass/*")
+set(_pulp_share_sources
+    ${_pulp_share_contract_sources}
+    ${_pulp_share_example_sources}
+    "${CMAKE_SOURCE_DIR}/docs/guides/gpu-validation-checklist.md"
+    "${CMAKE_SOURCE_DIR}/docs/reference/cli.md"
+    "${CMAKE_SOURCE_DIR}/docs/status/agent-capabilities.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/agent-capabilities.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/agent-capability-handoff.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/authority-navigation.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/authority-navigation.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/dsp-capabilities.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/dsp-capabilities.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/forge-catalog.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/forge-catalog.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.schema.json"
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.yaml"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/README.md"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/control-examples.json"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/generated/cli-walkthrough.sh"
+    "${CMAKE_SOURCE_DIR}/examples/capability-control/generated/mcp-tools.jsonl"
+    "${CMAKE_SOURCE_DIR}/ship/templates/entitlements.plist"
+    "${CMAKE_SOURCE_DIR}/tools/cmake/threejs-runtime-manifest.json"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/ensure_signing_ready.sh"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/gpu_health_contract.py"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/json_schema_lite.py"
+    "${CMAKE_SOURCE_DIR}/tools/scripts/verify_gpu_health_run_attestation.py")
+list(JOIN _pulp_share_sources "\n" _pulp_share_source_lines)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/pulp-share-sources.txt" "${_pulp_share_source_lines}\n")
+add_test(NAME cmake-share-files-no-host-identifiers
+    COMMAND ${CMAKE_COMMAND}
+        "-DSCAN_LIST=${CMAKE_CURRENT_BINARY_DIR}/pulp-share-sources.txt"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_no_host_identifiers.cmake)
+set_tests_properties(cmake-share-files-no-host-identifiers PROPERTIES
+    LABELS "cmake;ship" TIMEOUT 60)
 
 add_test(NAME cmake-control-shipping-fresh-stamp
     COMMAND ${CMAKE_COMMAND}

@@ -407,6 +407,28 @@ rebuild. Keep the two sides in step:
   `EXCLUDED_*` filter constants from the projection side: the bounded run's
   base comparison and the authoritative suite both read them.
 
+### The dev-shared link mode is chosen per command, in both CLIs
+
+`PULP_DEV_SHARED_UI` (see `docs/guides/build.md`) is a property of the build
+dir, but each command decides it: `pulp dev` / `pulp loop` want it on for an
+SDK project on macOS (`--no-dev-shared` opts out; the source checkout stays
+static because its tests inspect example and fixture modules as they ship), `pulp build` wants it off unless `--dev-shared`,
+and a non-empty `PULP_DEV_SHARED_UI` environment value overrides every command.
+A cache that disagrees is reconfigured with one `-DPULP_DEV_SHARED_UI=` flag;
+the option only changes link lines, so switching relinks and never recompiles.
+
+- The rule is `dev_shared_ui_wanted` + `dev_shared_ui_change` in
+  `tools/cli/configure_defaults.hpp` and the same-named functions in
+  `experimental/pulp-rs/src/cmd/orchestrate.rs`. Change both together.
+- `BuildPlan::ensure_configured` (dev/loop) reconfigures an existing dir in place
+  and passes `--dev-shared` to the `cmd_build` bootstrap; without that flag the
+  bootstrap would configure static links and the loop would reconfigure again.
+- `--dev-shared` must be consumed by both build parsers and forwarded by
+  `build_delegate_argv`, or it reaches `cmake --build` as an unknown flag.
+- Tests: the `[dev-shared]` cases in `test/test_cli_configure_defaults.cpp`
+  (pure rule plus `pulp-cpp build` shell-outs against a fake `cmake`) and the
+  `dev_shared` cases in `orchestrate::tests`.
+
 ### A tartci capacity denial retries for the agent floor; its QoS is mandatory
 
 `TartciAgentBuildLease::acquire` (`tools/cli/tartci_lease.cpp`) answers a
@@ -791,6 +813,15 @@ A source-only row reports
 `unavailable_in_installed_context`, and a standalone CLI-only release archive
 without that SDK registry reports the registry unavailable. Do not search a
 different checkout or SDK, or another installed SDK version.
+
+The registry is installed into every SDK (`share/pulp/authority-navigation.json`),
+so a row may describe a private authority but must not name the private
+repository or a file inside it. The `dsp-survey-admission` row says "the DSP
+survey admission protocol in the maintainers' private planning repository";
+the Python and C++ validators pin that exact text, `test_cli_shellout.cpp` pins
+the registry's SHA-256, and `cmake-share-files-no-host-identifiers` /
+`cmake-pulp-install-layout` fail on a private repo, host name, home path or user
+name anywhere under share/pulp (allowlist entries carry their reason).
 
 This is intentionally CLI-only in the parity baseline. It describes the
 separate offline MCP authority and the exact-instance live-control route; it
@@ -2184,6 +2215,28 @@ a stripped build uses `PULP_BUILD_TESTS=OFF`.
 - [ ] Search all skills: `grep -r "pulp <name>" .agents/skills/`
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
+
+## `pulp create` templates: a placeholder or file has four owners
+
+A `{{VAR}}` placeholder or a new template file must be known in four places,
+and missing any one fails somewhere different:
+
+- `tools/cli/cmd_create.cpp` (the substitution map and the file-rename map) and
+  `experimental/pulp-rs/src/cmd/create.rs` (the same two maps for the Rust
+  front end). Missing one scaffolds a project with a literal `{{VAR}}` in it.
+- `test/cmake/create_template_tests.cmake`, which expands the plugin templates
+  at configure time and compiles them as `pulp-test-create-template-*`. An
+  unknown placeholder fails the Pulp configure itself, with the name. A new
+  source file must also be compiled there, or the template's test fails to
+  link (the processor body moved into `processor.cpp.template` hit both).
+- `tools/scripts/verify_create_templates.py` (`KNOWN_TEMPLATE_VARS` and the
+  required-files list), which runs without a build.
+
+The effect and instrument templates keep `process()` in their own source,
+listed under `SOURCES`, and the generated test links `<target>_Core` rather
+than compiling that source again. An edit to the processor body then
+recompiles one object and relinks each format; when the body lived in the
+header, every format's entry TU and the test recompiled it.
 
 ## The macOS CLI force-load list names implementation archives, not modules
 

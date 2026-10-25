@@ -143,9 +143,17 @@ class WorkflowBuildDirTests(unittest.TestCase):
             'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"',
             text,
         )
-        # Control: the assembly line above is present, so a zero here is the
+        # The one addition is keyed on the runner, not the event: the arm64
+        # macOS gate compiles the GPU-audio proof targets on every event alike.
+        # Control: the assembly line above is present, so this count is the
         # absence of per-event divergence and not a missed search.
-        self.assertNotIn("cmake_args+=", text)
+        runner_gated = (
+            'if [ "${RUNNER_OS}" = "macOS" ] && [ "${RUNNER_ARCH}" = "ARM64" ]; then\n'
+            "            cmake_args+=(-DPULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON)\n"
+            "          fi"
+        )
+        self.assertIn(runner_gated, text)
+        self.assertEqual(text.count("cmake_args+="), 1)
 
     def test_build_workflow_fetches_event_pinned_capability_base(self) -> None:
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
@@ -192,7 +200,7 @@ class WorkflowBuildDirTests(unittest.TestCase):
             text,
         )
         self.assertIn(
-            '-LE "validation|slow|performance|bench|quality-lab"',
+            '-LE "validation|slow|performance|bench|quality-lab|gpu-proof"',
             text,
         )
         self.assertIn("--repeat until-pass:2", text)

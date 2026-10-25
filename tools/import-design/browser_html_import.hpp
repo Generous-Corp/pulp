@@ -1,5 +1,7 @@
 #pragma once
 
+#include "browser_lane_timing.hpp"
+
 #include <pulp/view/design_ir.hpp>
 
 #include <filesystem>
@@ -38,6 +40,10 @@ struct BrowserHtmlImportRequest {
     /// Fail validation when materialized canvas evidence is completely
     /// transparent. Only meaningful with materialized canvas composition.
     bool require_canvas_ink = false;
+    /// The executable document is the input of `--emit materialized-runtime`
+    /// and nothing else; every other emit leaves it uncaptured rather than
+    /// serializing, hashing and publishing megabytes nobody reads.
+    bool capture_materialized_document = true;
 };
 
 struct BrowserHtmlNotApplicable {};
@@ -66,6 +72,8 @@ struct BrowserHtmlCaptured {
     /// reason the CALLER can fix — carried out so the CLI prints it rather
     /// than leaving it in a node attribute nobody reads.
     std::vector<std::string> warnings;
+    /// Wall-clock stages from intake through lowering, in pipeline order.
+    std::vector<BrowserLaneStage> timings;
 };
 
 using BrowserHtmlImportResult = std::variant<

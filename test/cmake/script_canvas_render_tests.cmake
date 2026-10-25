@@ -182,12 +182,29 @@ if(PULP_HAS_SKIA AND NOT APPLE AND NOT ANDROID)
     if(_pulp_has_platform_pvh)
         add_executable(pulp-test-plugin-view-host-factory test_plugin_view_host_factory.cpp)
         target_link_libraries(pulp-test-plugin-view-host-factory PRIVATE pulp::view Catch2::Catch2WithMain)
+        set(_pulp_pvh_discovery_args)
         if(_pulp_pvh_x11)
             target_link_libraries(pulp-test-plugin-view-host-factory PRIVATE ${X11_LIBRARIES})
             target_include_directories(pulp-test-plugin-view-host-factory PRIVATE ${X11_INCLUDE_DIR})
             target_compile_definitions(pulp-test-plugin-view-host-factory PRIVATE PULP_TEST_HAS_X11=1)
+            # With xvfb-run available, every case runs on its own virtual
+            # display, so the X11 cases (XDND handshake, host-driven resize,
+            # stale resize echo) execute in CI instead of skipping, and a
+            # missing display FAILS them (PULP_TEST_REQUIRE_X11_DISPLAY).
+            # xvfb-run -a picks a free display number but races when several
+            # start at once, hence the lock. A case that waits on a grabbed
+            # server fails at the timeout instead of hanging the suite.
+            find_program(PULP_XVFB_RUN xvfb-run)
+            if(PULP_XVFB_RUN)
+                set_property(TARGET pulp-test-plugin-view-host-factory PROPERTY
+                    CROSSCOMPILING_EMULATOR "${PULP_XVFB_RUN};-a")
+                set(_pulp_pvh_discovery_args PROPERTIES
+                    RESOURCE_LOCK pulp_xvfb
+                    TIMEOUT 120
+                    ENVIRONMENT "PULP_TEST_REQUIRE_X11_DISPLAY=1")
+            endif()
         endif()
-        catch_discover_tests(pulp-test-plugin-view-host-factory)
+        catch_discover_tests(pulp-test-plugin-view-host-factory ${_pulp_pvh_discovery_args})
     endif()
 endif()
 

@@ -116,6 +116,11 @@ pub struct BuildArgs {
     /// `--examples` — configure a source checkout with
     /// `-DPULP_BUILD_EXAMPLES=ON`. A fresh dev configure leaves examples off.
     pub examples: bool,
+    /// `--dev-shared`: link plug-in modules against the development-only
+    /// shared Pulp runtime (`-DPULP_DEV_SHARED_UI=ON`). Without it a build
+    /// switches a dev-shared build dir back to static links, because `pulp
+    /// build` output is what the ship commands accept.
+    pub dev_shared: bool,
 }
 
 /// Parse `pulp-rs build` flags.
@@ -170,6 +175,7 @@ pub fn parse_build_args(args: &[String]) -> BuildArgs {
             "--check-identity" => out.check_identity = true,
             "--allow-identity-change" => out.allow_identity_change = true,
             "--examples" => out.examples = true,
+            "--dev-shared" => out.dev_shared = true,
             // Consumed by the stale-CLI and SDK-compatibility guards before
             // dispatch; it must not reach `cmake --build`.
             "--allow-unsupported-sdk" => {}
@@ -229,6 +235,9 @@ fn build_delegate_argv(args: &BuildArgs) -> Vec<String> {
         }
         if args.examples {
             synthesized.push("--examples".to_owned());
+        }
+        if args.dev_shared {
+            synthesized.push("--dev-shared".to_owned());
         }
         synthesized.extend(args.passthrough.clone());
         synthesized
@@ -558,10 +567,16 @@ fn build_with_dependency_policy<S: Spawner>(
         affected::ensure_query(&build_dir)?;
     }
 
+    let dev_shared_env = std::env::var(DEV_SHARED_UI_OPTION).ok();
+    let dev_shared_change = dev_shared_ui_change(
+        existing_cache.as_deref(),
+        dev_shared_ui_wanted(args.dev_shared, dev_shared_env.as_deref()),
+    );
     let mut needs_configure = migrated
         || !configured
         || (!proj.standalone && !proj.checkout_dependencies_enabled())
-        || examples_requested_but_off;
+        || examples_requested_but_off
+        || dev_shared_change.is_some();
     if focus && !needs_configure && !affected::reply_available(&build_dir) {
         writeln!(
             out,
@@ -631,6 +646,21 @@ fn build_with_dependency_policy<S: Spawner>(
         }
         if let Some(ref e) = args.js_engine {
             cfg = cfg.arg(format!("-DPULP_JS_ENGINE={e}"));
+        }
+        if let Some(on) = dev_shared_change {
+            cfg = cfg.arg(format!(
+                "-D{DEV_SHARED_UI_OPTION}={}",
+                if on { "ON" } else { "OFF" }
+            ));
+            if !on {
+                writeln!(
+                    out,
+                    "Switching {} back to static plug-in links ({DEV_SHARED_UI_OPTION}=OFF); \
+                     `pulp dev` and `pulp loop` turn it on",
+                    build_dir.display()
+                )
+                .map_err(io_err)?;
+            }
         }
         for arg in configure_default_args(&ConfigureDefaults {
             existing_cache: existing_cache.as_deref(),
@@ -825,6 +855,36 @@ pub fn configure_default_args(inputs: &ConfigureDefaults<'_>) -> Vec<String> {
 /// CMake option that compiles development-only paths (the on-disk ui.js
 /// hot-reload override) into a build; `pulp ship` refuses a build with it on.
 pub const DEV_BUILD_CACHE_NAME: &str = "PULP_DEV_BUILD";
+
+/// `CMake` option (and environment override) that links plug-in modules
+/// against the development-only shared Pulp runtime
+/// (`tools/cmake/PulpDevSharedUi.cmake`).
+pub const DEV_SHARED_UI_OPTION: &str = "PULP_DEV_SHARED_UI";
+
+/// Whether a command links plug-in modules against the development-only
+/// shared runtime. `command_default` is the command's own choice (`pulp
+/// build` wants it off unless `--dev-shared` is passed; `pulp dev` and `pulp
+/// loop` on macOS want it on). A non-empty `PULP_DEV_SHARED_UI` environment
+/// value overrides it. Mirrors `dev_shared_ui_wanted` in
+/// `tools/cli/configure_defaults.hpp`.
+#[must_use]
+pub fn dev_shared_ui_wanted(command_default: bool, env: Option<&str>) -> bool {
+    match env.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(value) => cache_flag_on(value),
+        None => command_default,
+    }
+}
+
+/// The `PULP_DEV_SHARED_UI` value a configure must set to get `wanted`, or
+/// `None` when the existing cache already holds it. A fresh build dir, or a
+/// cache without the entry, counts as off.
+#[must_use]
+pub fn dev_shared_ui_change(existing_cache: Option<&str>, wanted: bool) -> Option<bool> {
+    let cached = existing_cache
+        .and_then(|cache| cmake_cache_value(cache, DEV_SHARED_UI_OPTION))
+        .is_some_and(cache_flag_on);
+    (wanted != cached).then_some(wanted)
+}
 
 /// Opt-out that keeps an existing build dir's configuration as it is.
 pub const KEEP_BUILD_CONFIG_ENV: &str = "PULP_KEEP_BUILD_CONFIG";
@@ -3190,6 +3250,63 @@ mod tests {
         assert_eq!(cfg.program, "cmake");
         assert!(cfg.args.iter().any(|a| a == "-DPULP_BUILD_EXAMPLES=ON"), "{:?}", cfg.args);
         assert!(!cfg.args.iter().any(|a| a == "-G"), "{:?}", cfg.args);
+    }
+
+    #[test]
+    fn parse_build_args_captures_dev_shared() {
+        let a = parse_build_args(&["--dev-shared".to_owned()]);
+        assert!(a.dev_shared);
+        assert!(a.passthrough.is_empty(), "--dev-shared must not reach cmake --build");
+        assert!(build_delegate_argv(&a).iter().any(|x| x == "--dev-shared"));
+    }
+
+    #[test]
+    fn dev_shared_wanted_and_change_follow_the_cache() {
+        assert!(dev_shared_ui_wanted(true, None));
+        assert!(!dev_shared_ui_wanted(true, Some("0")));
+        assert!(dev_shared_ui_wanted(false, Some("ON")));
+        assert!(dev_shared_ui_wanted(true, Some(" ")), "an empty value is unset");
+        let on = "PULP_DEV_SHARED_UI:BOOL=ON\n";
+        let off = "PULP_DEV_SHARED_UI:BOOL=OFF\n";
+        assert_eq!(dev_shared_ui_change(None, false), None);
+        assert_eq!(dev_shared_ui_change(Some(off), false), None);
+        assert_eq!(dev_shared_ui_change(Some(""), false), None);
+        assert_eq!(dev_shared_ui_change(Some(on), false), Some(false));
+        assert_eq!(dev_shared_ui_change(None, true), Some(true));
+        assert_eq!(dev_shared_ui_change(Some(off), true), Some(true));
+        assert_eq!(dev_shared_ui_change(Some(on), true), None);
+    }
+
+    #[test]
+    fn build_switches_a_dev_shared_cache_back_to_static_links() {
+        let _env = EnvVarGuard::set_many(&[("PULP_DEV_SHARED_UI", None)]);
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        std::fs::create_dir_all(&proj.build_dir).unwrap();
+        let cache = proj.build_dir.join("CMakeCache.txt");
+        // Control: a static cache builds without configuring.
+        std::fs::write(&cache, "CMAKE_PREFIX_PATH:PATH=/sdk\nPULP_DEV_SHARED_UI:BOOL=OFF\n")
+            .unwrap();
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+        assert_eq!(spawner.calls.borrow().len(), 1);
+
+        std::fs::write(&cache, "CMAKE_PREFIX_PATH:PATH=/sdk\nPULP_DEV_SHARED_UI:BOOL=ON\n")
+            .unwrap();
+        let spawner = RecordingSpawner::with_codes(vec![0, 0]);
+        let mut out = Vec::new();
+        build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+        let calls = spawner.calls.borrow();
+        assert!(calls[0].args.iter().any(|a| a == "-DPULP_DEV_SHARED_UI=OFF"), "{:?}", calls[0].args);
+        assert!(String::from_utf8_lossy(&out).contains("back to static plug-in links"));
+
+        // `--dev-shared` keeps it on: no reconfigure.
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let args = BuildArgs { dev_shared: true, ..Default::default() };
+        build_with(&proj, &args, &spawner, &mut out).unwrap();
+        assert_eq!(spawner.calls.borrow().len(), 1);
     }
 
     #[test]

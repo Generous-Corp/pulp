@@ -1282,6 +1282,27 @@ TEST_CASE("capture requests one authored-frame fit without pinning width",
     CHECK_FALSE(contains_line(args, "--interactions"));
 }
 
+TEST_CASE("capture reads the materialized document only when asked to",
+          "[import-design][browser-capture]") {
+    TempTree tree("materialized-argv");
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    auto request = fixture_request(tree, script);
+    const auto kept = capture::capture_document(fixture_browser(), request);
+    INFO(kept.diagnostic.message);
+    REQUIRE(kept.ok());
+    CHECK_FALSE(contains_line(read_lines(fs::canonical(request.output_directory) / "argv.txt"),
+                              "--omit-materialized-document"));
+
+    request.output_directory = tree.root() / "omitted";
+    request.capture_materialized_document = false;
+    const auto omitted = capture::capture_document(fixture_browser(), request);
+    INFO(omitted.diagnostic.message);
+    REQUIRE(omitted.ok());
+    CHECK(contains_line(read_lines(fs::canonical(request.output_directory) / "argv.txt"),
+                        "--omit-materialized-document"));
+}
+
 TEST_CASE("capture preserves the runtime diagnostic code",
           "[import-design][browser-capture]") {
     TempTree tree("runtime-code");

@@ -1154,7 +1154,7 @@ os.process_block(input, output, num_samples, [&](float s) {
 | `set_factor(Factor)` | `Factor::x2`, `Factor::x4`, `Factor::x8`, or `Factor::x16`. |
 | `set_sample_rate(float)` | Set base sample rate. Configures anti-aliasing filters. |
 | `set_kind(Kind)` | Select the minimum-phase polyphase IIR lane (the default), the linear-phase FIR lane, or the legacy Biquad lane. |
-| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB prototype, flat to 80% of Nyquist) or `pristine` (140 dB prototype, flat to 90% of Nyquist). Polyphase lane: `standard` (94.8 dB from 0.58 Fs, flat to 0.42 Fs) or `pristine` (146 dB from 0.55 Fs, flat to 0.45 Fs). No effect on the Biquad lane. |
+| `set_quality(Quality)` | Linear-phase lane: `standard` (96 dB prototype, flat to 80% of Nyquist) or `pristine` (140 dB prototype, flat to 90% of Nyquist). Polyphase lane: `standard` (114.6 dB) or `pristine` (153.2 dB), both from 0.515 Fs and flat to 0.485 Fs. No effect on the Biquad lane. |
 | `latency()` | Return host-rounded and exact base-rate latency plus whether the delay is constant. |
 | `latency_samples()` | Return the integer base-rate delay for `Processor::latency_samples()`. |
 | `process(float, callback)` | Upsample, process via callback, downsample. |

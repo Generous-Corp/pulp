@@ -106,9 +106,10 @@ file(WRITE "${_pdir}/main.cpp" [[
 #include <cstring>
 
 namespace pulp::format {
-namespace { EditorAssets g_assets{}; }
+namespace { EditorAssets g_assets{}; bool g_builder = false; }
 void register_editor_assets(const EditorAssets& assets) noexcept { g_assets = assets; }
 EditorAssets registered_editor_assets() noexcept { return g_assets; }
+void install_scripted_editor_builder() noexcept { g_builder = true; }
 } // namespace pulp::format
 
 int main() {
@@ -123,6 +124,7 @@ int main() {
         std::printf("file=%s size=%zu\n", assets.files[i].name, assets.files[i].size);
     const bool has_path = assets.script_path != nullptr && assets.script_path[0] != '\0';
     std::printf("dev_path=%s\n", has_path ? assets.script_path : "none");
+    std::printf("builder=%s\n", pulp::format::g_builder ? "installed" : "none");
     const bool has_roots = assets.asset_roots != nullptr && assets.asset_roots[0] != '\0';
     std::printf("asset_roots=%s\n", has_roots ? assets.asset_roots : "none");
     return 0;
@@ -214,6 +216,11 @@ endif()
 if(_release_out MATCHES "main\\.js\\.map" OR _release_out MATCHES "stale\\.json"
    OR _release_out MATCHES "README\\.md")
     list(APPEND _failures "release: a source map, prose file or nested build tree's file was embedded; stdout was: ${_release_out}")
+endif()
+# An embedded script with no on-disk path still has to install the scripted
+# editor builder, or the editor would open AutoUi.
+if(NOT _release_out MATCHES "builder=installed")
+    list(APPEND _failures "release: the embedded editor did not install the scripted editor builder; stdout was: ${_release_out}")
 endif()
 if(NOT _release_out MATCHES "dev_path=none")
     list(APPEND _failures "release: the on-disk script path is registered in a non-dev build: ${_release_out}")

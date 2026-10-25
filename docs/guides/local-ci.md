@@ -52,6 +52,16 @@ Because the automatic Linux selector may use a clean Proxmox VM without a
 system Node installation, `build.yml` first provisions the exact Node
 `22.15.0` toolchain with `actions/setup-node@v7` and a lockfile-keyed npm cache;
 that version supplies the `zstdDecompressSync` API used by the `.fig` lane.
+
+The arm64 macOS legs of `build.yml` (required gate) and `build-macos.yml`
+(retarget) also configure `PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON`: they compile
+the GPU-audio hardware-evidence binaries but never run them, because their tests
+carry the `gpu-proof` label that every gate ctest selection excludes, as does
+Shipyard's macOS test stage (`.shipyard/config.toml`
+`[validation.default.overrides.macos]`, `--label-exclude`) and the
+changed-surface runner. A guard step fails the gate unless the configured
+`gpu-proof` tests equal `tools/ci/gpu_proof_tests.txt` and none of them is in the
+gate's own selection. Hardware receipts remain owner-run on a physical GPU.
 Source-only or offline
 configurations without that `node_modules/esbuild` installation still register
 the dependency-free suites, but they do not claim the canonicalization proof.
@@ -2086,6 +2096,24 @@ It is tiered:
   never asked to use them". `build.yml`'s `Build` step carried `--parallel 4`
   fleet-wide for this reason until it was replaced by the governor.
 
+  **An explicit `-j` under the wrapper is a ceiling, not an override.**
+  `tools/ci/governed-build.sh` reads a `-j N`, `-jN`, `--parallel N` or
+  `--parallel=N` on the build command (including a native-tool flag after
+  `--`) as a request, takes the lower of it and `PULP_BUILD_JOBS`, sizes the
+  lease to that, and rewrites the flag to the final share before running the
+  command. So `governed-build.sh cmake --build build -j4` runs at most four
+  jobs and reserves four cores, `-j64` under a 6-core lease runs six, and a
+  bare `--parallel` gets the governed count instead of going unbounded. The
+  log says so: `build command's own parallelism flag set to the governed share
+  -jN`. Before this, the command's own flag silently won in both directions: a
+  `-j4` reserved and logged a profile-sized lease, and a higher `-j` ran past
+  the lease. `PULP_BUILD_JOBS` remains the way to request a lower share without
+  touching the command. A `CMAKE_BUILD_PARALLEL_LEVEL` you export is a ceiling
+  in the same way: the lowest of it, the flag, and `PULP_BUILD_JOBS` sets the
+  share, and the wrapper then exports that final share under the same name.
+  (It used to overwrite the caller's value, so `CMAKE_BUILD_PARALLEL_LEVEL=4`
+  ran at the full lease.) A non-numeric or zero value is ignored.
+
   **A gate VM's `-j` is its lease.** tartci sizes each macOS gate clone from
   the lane's VM lease: `C` vCPUs and `(C-1) x 1536 x 4/3` MB of RAM, clamped to
   8 GiB and 16 GiB. That memory figure is the exact inverse of the Tier-0
@@ -3834,6 +3862,33 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
 
   Re-arming needs a fresh verdict for the new head, the label, and a
   full-lane success.
+- **A pull request armed before its checks ran is refused too, in three
+  layers.**
+  1. At the arm itself: `macos-ci-arm-refusal.yml` fires on
+     `auto_merge_enabled` and disarms unless the head's latest `macos` check
+     run from this repository's Actions workflows, whose workflow run is for a
+     head in this repository, is a completed success with an explicit `full`
+     (a dispatch's full suite), `fast` (full lane) or `not-required`
+     (skip-safe) tier. It fails closed: a read that fails, or a check run
+     it cannot place, is a refusal ("could not verify …"). Only a check run
+     proven to be for a head in another repository is passed over, and it
+     never falls back to an older run on uncertainty. Its comment says what it
+     found about the macos run; it does not judge approval.
+  2. At the contract lane's conclusion: its `macos` job's last step, `Refuse a
+     head armed before approval (contract lane)`, fails when this exact head is
+     armed for auto-merge or already in the merge queue (read over GraphQL
+     with the read-only token; REST `auto_merge` reads null for a queued pull
+     request): "armed before approval and a full macOS run: remove auto-merge,
+     get a trusted APPROVE; the fleet App applies macos-ci for the full lane".
+     An arm state it cannot read fails closed. Only the runner's post-steps
+     follow it.
+  3. After the run: `macos-ci-deferred-disarm.yml` (`workflow_run` on a
+     completed Build and Test run, no checkout, same-repository runs and pull
+     requests only) disables auto-merge on a pull request still armed at a
+     head whose `macos` is tier `deferred`, and dequeues it if it is already in
+     the merge queue.
+
+  All three are gated on the variable.
 - **Removing the label** starts nothing: `build.yml` does not listen for
   `unlabeled`, and a run already in flight finishes.
 - **Escape hatch.** Dispatch `build.yml` on the branch: `workflow_dispatch`
@@ -3913,10 +3968,13 @@ already run the fast PR-caused checks. Approval is not arming:
 1. The arm sweep sees the trusted APPROVE for the current head, applies
    `macos-ci` and dispatches `build.yml` on the branch with `pr_number` set
    (see below). The full lane runs.
-2. The sweep arms only once the head's latest `macos` check run is from the
-   full lane: its `shipyard-test-tier` annotation is not `deferred`. From then
-   on GitHub's required-check rule holds the auto-merge until that run
-   concludes `success`.
+2. The sweep arms only once the head's latest `macos` check run is a
+   completed full-lane `success`: its `shipyard-test-tier` annotation is not
+   `deferred`. An arm made earlier (absent, running, failed, `deferred`, or no
+   `full`/`fast`/`not-required` tier) is refused the moment it is made:
+   `macos-ci-arm-refusal.yml`
+   (`pull_request_target` on `auto_merge_enabled`, no checkout, gated on the
+   variable) disables auto-merge and comments with the reason.
 3. If the full lane fails, the pull request needs a fix. The fix is a new head,
    which disarms the pull request, drops the label and needs a new verdict, and
    the cycle repeats.

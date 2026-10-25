@@ -16,8 +16,13 @@ AssetManager::AssetManager() {
     // Android / headless it falls through to the bundled Noto Color
     // Emoji (when `PULP_BUNDLE_NOTO_COLOR_EMOJI=ON`). Idempotent — a
     // subsequent `pulp::canvas::register_emoji_fallback(...)` call from
-    // user code replaces the discovery result.
+    // user code replaces the discovery result. The lite editor build
+    // (PULP_LITE_EDITOR, see pulp-editor-lite) skips it: its text is measured
+    // and painted through CoreText, which falls back to the system emoji face
+    // on its own, so nothing there reads Skia's emoji fallback.
+#if !(defined(PULP_LITE_EDITOR) && PULP_LITE_EDITOR)
     pulp::canvas::register_best_available_emoji_fallback();
+#endif
 }
 AssetManager::~AssetManager() = default;
 

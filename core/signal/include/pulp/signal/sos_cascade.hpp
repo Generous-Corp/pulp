@@ -131,7 +131,8 @@ template <typename SampleType = float, std::size_t MaxSections = 16> class SosCa
     /// two channels in vector lanes (BiquadT::process_chain_stereo()). Each
     /// channel's output is bit-identical to that cascade's block process();
     /// the cascades may hold different coefficients. Cascades of different
-    /// lengths are processed one after the other.
+    /// lengths are processed one after the other, and one cascade passed as
+    /// both channels runs the left buffer and then the right through it.
     static void process_stereo(SosCascadeT& left, SosCascadeT& right, SampleType* left_buffer,
                                SampleType* right_buffer, std::size_t num_samples) noexcept {
         if (left.size_ == right.size_) {

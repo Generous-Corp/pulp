@@ -75,6 +75,17 @@ inline bool build_dir_is_dev_build(const std::filesystem::path& build_dir) {
     return value && cmake_cache_flag_on(*value);
 }
 
+// True when `build_dir` links plug-ins against the development-only shared
+// Pulp runtime (PULP_DEV_SHARED_UI=ON). Unlike a PULP_DEV_BUILD dir it can
+// never ship as it is, so --allow-dev-build does not keep it.
+inline bool build_dir_is_dev_shared(const std::filesystem::path& build_dir) {
+    const auto cache = read_cmake_cache(build_dir);
+    if (!cache)
+        return false;
+    const auto value = cmake_cache_value(*cache, kDevSharedUiOption);
+    return value && cmake_cache_flag_on(*value);
+}
+
 // One `NAME:TYPE=VALUE` line of a CMakeCache.txt.
 struct CmakeCacheEntry {
     std::string name;
@@ -111,12 +122,10 @@ inline std::vector<CmakeCacheEntry> cmake_cache_entries(std::string_view cache) 
 }
 
 // Dev-only switches the shippable configure must not inherit. They fall back
-// to their defaults, except the two set explicitly below.
+// to their defaults, except the three set explicitly below.
 inline constexpr std::string_view kShipBuildDroppedEntries[] = {
-    "PULP_BUILD_TESTS",
-    "PULP_DEV_BUILD",
-    "PULP_DEV_BRIDGE_EXEC",
-    "PULP_ENABLE_AUDIO_PROBES",
+    "PULP_BUILD_TESTS",   "PULP_DEV_BUILD",           "PULP_DEV_BRIDGE_EXEC",
+    "PULP_DEV_SHARED_UI", "PULP_ENABLE_AUDIO_PROBES",
 };
 
 // Entries that describe the dev build DIRECTORY rather than its configuration.
@@ -145,8 +154,8 @@ inline bool ship_build_carries_entry(const CmakeCacheEntry& entry) {
 // - every non-INTERNAL, non-STATIC entry the developer configured, verbatim
 //   (formats, SDK paths, compiler, sysroot, feature switches, build type);
 // - PULP_PROFILE forced to `release` when the dev build has that option;
-// - the dev-only switches dropped, with PULP_BUILD_TESTS and PULP_DEV_BUILD set
-//   OFF explicitly, which is the point;
+// - the dev-only switches dropped, with PULP_BUILD_TESTS, PULP_DEV_BUILD and
+//   PULP_DEV_SHARED_UI set OFF explicitly, which is the point;
 // - CMAKE_BUILD_TYPE pinned to Release when the dev build recorded none.
 // The generator is INTERNAL and cannot come from an initial cache; see
 // ship_build_configure_args(). Pure over the cache text so it can be tested
@@ -177,6 +186,8 @@ inline std::string ship_build_initial_cache(std::string_view dev_cache) {
     script += "set(PULP_BUILD_TESTS OFF CACHE BOOL \"a shipping build has no test tree\")\n";
     script += "set(" + std::string(kDevBuildCacheName) +
               " OFF CACHE BOOL \"the shippable build records no development-only paths\")\n";
+    script += "set(" + std::string(kDevSharedUiOption) +
+              " OFF CACHE BOOL \"the shippable build links plug-ins statically\")\n";
     return script;
 }
 

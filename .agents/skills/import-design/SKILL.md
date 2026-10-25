@@ -20,6 +20,12 @@ The rebuild control must replay the complete fixture state, including secondary
 meter state such as the `peak` value; matching only a primary value changes the
 rendered workload and invalidates retained-versus-rebuild comparisons.
 
+The benchmark's host probes also compile into the Android APK, where
+`__linux__` is defined but bionic declares `getloadavg` only from API 29
+(minSdk is 26). Guard a Linux-only libc call with
+`defined(__linux__) && !defined(__ANDROID__)`; `android-build` is skipped
+on most PRs, so the break first shows on `main`.
+
 To measure importer output rather than the built-in panel, pass
 `--ir=<design.ir.json>` (baked-native and baked-native-rebuild only; `live`
 and `baked-cpp` refuse it because neither can be built from a DesignIR) with
@@ -91,9 +97,15 @@ The native importer validates `capture.json` before lowering the browser tree
 or emitting a materialized runtime. Treat the capture envelope as a binding to
 one exact input and capture environment: it must carry the staged `editor.html`
 SHA-256, Chromium CDP identity, initial/resolved/document viewport dimensions,
-matching device scale factor and reference viewport, plus a contained
-materialized-document sidecar whose SHA-256, schema/version, HTML field, and
-asset count agree with the envelope. A stale, hand-edited, mismatched, or
+matching device scale factor and reference viewport, plus, when the capture
+recorded one, a contained materialized-document sidecar whose SHA-256,
+schema/version, HTML field, and asset count agree with the envelope. Only
+`--emit materialized-runtime` and `--materialized-canvas-composition` capture
+that sidecar (`browser_import_captures_materialized_document`). Every other
+import passes `--omit-materialized-document`, and the envelope then carries no
+materialized fields. The one exception is a document with Blob-URL
+`@font-face` rules: `capture.mjs` reads it anyway, because its
+`font_bindings` are the only record of those faces. A stale, hand-edited, mismatched, or
 path-escaping envelope fails closed with the
 `browser-capture-provenance-invalid` diagnostic. Keep the envelope and sidecar
 from the same capture directory; do not copy one from an older browser run or
@@ -106,6 +118,29 @@ PNG digest and physical dimensions, viewport DPR, and interaction plan, then
 records three agreeing source, importer, observer, font, capture, PNG, layout,
 and native render receipt digests. Short campaigns remain unverified, and the
 raw visual threshold is not relaxed by calibration or renderer disagreement.
+
+### Where a browser import spends its time
+
+Every browser-lane import prints `Browser lane timing:` and writes
+`import-timings.json` beside `capture.json`. Its stages are contiguous laps, so
+they sum to the lane's wall time; the capture script's own phases
+(`provenance.timings`, keyed by the progress tracker's phase names) nest under
+`browser-capture`, and `process-overhead` names the subprocess time outside
+them. `capture_steps` totals each CDP method and named unit; steps overlap and
+nest, so read them as attribution, not as a sum. On Spectr the dominant cost is
+the byte-stable screenshot horizon inside `same-frame-capture` (76
+`Page.captureScreenshot` calls, about 60% of the import, split between the
+accepted frame and the canvas-free chrome plate), followed by
+`browser-discovery`, which launches a separate Chromium for the CDP capability
+probe on every import. The chrome plate ships in the IR asset manifest, so
+skipping it is not output-neutral even for lanes that never draw it.
+
+Two identical imports never produce byte-identical DesignIR: `imported_at`,
+`settle_rounds` (how many settle polls a loaded host needed) and the
+content-addressed names of any asset that contains a live canvas all move.
+Strip exactly those before calling a change output-neutral, and keep a
+canvas-free asset's content hash (the chrome plate) as the pixel-level
+control: it is stable across runs, so a change that moves it changed pixels.
 
 ### HTML staging scans references from their literal starts
 
@@ -892,6 +927,12 @@ knowing before you touch that file:
   now passes `IRParseOptions::measured_geometry` when the IR's source adapter
   is `browser-capture`, and a geometry rule that only makes up for how a
   design tool draws must check it. Fixture `20-flex-gap-knob` covers the snap.
+  Separator promotion, rounded-corner inheritance and name-based audio-widget
+  detection skip a capture too: a scaled hairline is really 0.3px wide, a
+  child's radius is its own, and a `div.dial` the capture did not bind is not
+  a knob (it became a live Knob with hit regions). Connector spanning needs a
+  row-direction node, which the capture never writes. Fixture
+  `21-design-tool-heuristics` covers them.
 
   **Paint-order gotcha:** Chrome's paint order numbers a node by when its OWN
   box paints, and an inkless wrapper still holds a number. Ordering siblings by
@@ -904,9 +945,24 @@ knowing before you touch that file:
   rendering the same snapshot nested and flat (`lower_painted_tree` with
   `flatten_to_paint_order`) and comparing bytes.
 
+  **Transform gotcha:** the capture places a node by its post-transform paint
+  box and copies every other length from computed style, which is
+  pre-transform. `transform` itself is not written to the IR (only a recovered
+  lone rotation is). So anything drawn inside the box has to be brought into
+  the box's scale by hand: type through `inherited_type_scale` (uniform only),
+  and border widths, radii and shadows through `inherited_paint_scale` and
+  `apply_paint_scale` (per axis for borders and hard shadow offsets, uniform
+  only for radii and blur). A chain one factor per axis cannot express is
+  refused and counted (`native_nodes_paint_scale_refused`), never approximated.
+  A new length-bearing style field needs the same treatment, or it will draw at
+  its untransformed size inside a scaled box.
+
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
-  evidence. The differential matcher must join captured elements by
-  `backendNodeId` when both sides provide one and fail closed on a mismatch;
+  evidence. The differential matcher must join captured elements by their
+  capture anchor (`stable_anchor_id`, which `capture_anchors` derives from the
+  browser snapshot the way the importer does) and fail closed on a mismatch.
+  Never join the two lanes by `backendNodeId`: they are two Chromium sessions,
+  and Spectr's `div#root` came back 31 in one and 30 in the other;
   otherwise a same-text fallback can hide a wrong DOM identity. Native
   synthetic roots, `html`/`body` wrappers, and explicit text children are
   representation nodes and must be reported separately from browser element
@@ -2655,6 +2711,17 @@ Benchmark receipt (`pulp-design-import-benchmark-v2`) gotchas:
   `--paragraph-cache=off` is the uncached text path and the gate's planted
   negative; compare cached vs uncached with `--baseline-arg` /
   `--candidate-arg` on the same lane.
+- **`--ir` resolves manifest assets against the DesignIR's directory.** An
+  importer writes `local_path` relative to the DesignIR, and the IR-bound lanes
+  used to materialize without `asset_base_directory`, so they resolved those
+  paths against the process's working directory. Started anywhere but beside
+  the IR, the bench drew no images and its decode and image-cache counts read
+  zero: the steady-state gate was blind to images on imported panels. With
+  the real asset base the materializer's containment applies too: a manifest
+  path that climbs out of the IR's directory (`../x.png`) or names an absolute
+  file elsewhere is refused and drawn as a placeholder, even though the old
+  working-directory lookup used to load it. Keep a benchmarked IR's assets
+  beside it, as the importer writes them.
 - **`--lane=live --ir` (optionally `--bundle`) is the production JS path over
   importer output.** The runtime's `__pulpRuntimeSettle__` called from
   `engine.evaluate` only records a budget; `WidgetBridge::load_script` drains

@@ -9,6 +9,7 @@
 #include <pulp/view/auto_ui.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/value_channel_set.hpp>
+#include <atomic>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -162,80 +163,57 @@ inline EditorUiSource select_editor_ui_source(const EditorAssets& assets, bool e
     return source;
 }
 
+/// Builds the scripted editor from `source`, the document
+/// select_editor_ui_source() chose for `assets` (the caller has already
+/// checked it is available). Returns an instance whose root is null when the
+/// script failed to load; the failure is already logged and copied into
+/// `error`.
+using ScriptedEditorBuilder = EditorUiInstance (*)(const EditorAssets& assets,
+                                                   EditorUiSource source, state::StateStore& store,
+                                                   bool enable_hot_reload, std::string* error,
+                                                   view::ValueChannelAccess value_channel_access,
+                                                   std::string_view storage_identity);
+
+/// The scripted editor builder this binary links, or null.
+/// install_scripted_editor_builder() fills it. Editor glue that every plug-in
+/// links calls through this slot, so a binary whose editor never runs a script
+/// does not link the script runtime (QuickJS, the widget bridge, Skia's text
+/// and canvas code it draws through) just to be able to construct a session
+/// it never constructs.
+inline std::atomic<ScriptedEditorBuilder>& scripted_editor_builder_slot() noexcept {
+    static std::atomic<ScriptedEditorBuilder> builder{nullptr};
+    return builder;
+}
+
 /// Build the editor `assets` declares: a scripted UI when it names or embeds a
-/// script, AutoUi otherwise (or when the script fails to load).
-/// `value_channel_access` leases the hosting processor's current named value
-/// channels while scripted UI code resolves and snapshots them.
-/// `storage_identity` names the plug-in (its bundle id) so an embedded editor,
-/// which has no script directory to be keyed by, keeps stable persisted stores.
+/// script and the binary links the scripted editor builder, AutoUi otherwise
+/// (or when the script fails to load). `value_channel_access` leases the
+/// hosting processor's current named value channels while scripted UI code
+/// resolves and snapshots them. `storage_identity` names the plug-in (its
+/// bundle id) so an embedded editor, which has no script directory to be keyed
+/// by, keeps stable persisted stores.
 inline EditorUiInstance build_editor_ui_for_assets(const EditorAssets& assets,
                                                    state::StateStore& store, bool enable_hot_reload,
                                                    std::string* error,
                                                    view::ValueChannelAccess value_channel_access,
                                                    std::string_view storage_identity = {}) {
-    auto source = select_editor_ui_source(assets, enable_hot_reload);
-    if (source.available()) {
-        auto root = std::make_unique<view::View>();
-        root->set_theme(view::Theme::dark());
-        root->flex().direction = view::FlexDirection::column;
-        // The scripted UI paints through the Skia/Dawn pipeline; tag the
-        // root so adapters auto-select the GPU PluginViewHost. (Adapters
-        // also check ViewBridge::uses_script_ui(); this keeps the flag
-        // correct when the view is inspected outside a bridge.)
-        root->set_requires_gpu_host(true);
-
-        view::ScriptedUiOptions options;
-        const bool on_disk = !source.embedded();
-        options.script_path = source.script_path;
-        options.script_source = std::move(source.script_source);
-        options.theme_source = std::move(source.theme_source);
-        options.script_name = source.script_name;
-        options.embedded_assets = std::move(source.embedded_assets);
-        // The on-disk theme path belongs to the on-disk document; an embedded
-        // one carries its own override bytes.
-        const auto theme_path = on_disk ? configured_ui_theme_path(assets) : std::nullopt;
-        const bool has_configured_theme = theme_path.has_value();
-        if (theme_path) {
-            options.theme_path = *theme_path;
-        }
-        options.asset_roots = configured_ui_asset_roots(assets);
-        if (!on_disk) {
-            options.storage_identity = storage_identity.empty() ? "embedded/" + options.script_name
-                                                                : std::string(storage_identity) +
-                                                                      "/" + options.script_name;
-        }
-        options.enable_hot_reload = enable_hot_reload;
-        options.enable_theme_reload =
-            enable_hot_reload || has_configured_theme || !options.theme_source.empty();
-        options.value_channel_access = std::move(value_channel_access);
-        auto scripted_ui = std::make_unique<view::ScriptedUiSession>(*root, store, std::move(options));
-        // A deferred load (view::ScopedDeferredDocumentLoad) reports failure
-        // here, after open() has handed the host this root, so the AutoUi
-        // fallback goes INTO the root instead of replacing it.
-        if (view::ScopedDeferredDocumentLoad::active()) {
-            scripted_ui->set_document_loaded_callback(
-                [root_ptr = root.get(), &store,
-                 label = source.label()](bool loaded, const std::string& load_error) {
-                    if (loaded)
-                        return;
-                    runtime::log_error("Scripted editor UI failed to load from '{}': {}. "
-                                       "Falling back to AutoUi.",
-                                       label, load_error);
-                    if (auto fallback = view::AutoUi::build(store))
-                        root_ptr->add_child(std::move(fallback));
-                });
-        }
-
-        std::string load_error;
-        if (scripted_ui->load_deferrable(&load_error)) {
-            return {std::move(root), std::move(scripted_ui), true};
-        }
-
-        runtime::log_error(
-            "Scripted editor UI failed to load from '{}': {}. Falling back to AutoUi.",
-            source.label(), load_error);
-        if (error && error->empty()) {
-            *error = load_error;
+    // Selected once here: choosing it stats the on-disk script, and the
+    // builder evaluates exactly the document this check found.
+    if (auto source = select_editor_ui_source(assets, enable_hot_reload); source.available()) {
+        if (auto builder = scripted_editor_builder_slot().load(std::memory_order_acquire)) {
+            auto instance = builder(assets, std::move(source), store, enable_hot_reload, error,
+                                    std::move(value_channel_access), storage_identity);
+            if (instance.root)
+                return instance;
+        } else {
+            const std::string missing =
+                "this binary declares a scripted editor but does not link the script runtime; "
+                "declare UI_SCRIPT on the plug-in target or call "
+                "pulp::format::install_scripted_editor_builder()";
+            runtime::log_error("Scripted editor UI not built: {}. Falling back to AutoUi.",
+                               missing);
+            if (error && error->empty())
+                *error = missing;
         }
     }
 

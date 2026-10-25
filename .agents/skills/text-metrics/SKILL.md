@@ -177,6 +177,41 @@ returns is the face the captured-basis check will disagree with. When a weight
 looks wrong, ask the same question at 700 first: if 700 is exact and 600 is
 not, the family is missing the weight and the matcher is deciding.
 
+## The CoreGraphics host measures through the face CoreText paints
+
+The rule above has a second half that lives below the family name: the
+measuring backend must resolve the same *face* the painting backend draws.
+The CoreGraphics host paints text through CoreText. A lite editor (the macOS
+default; see the `view-bridge` skill's editor stack section) also measures
+through CoreText (`TextShaper`'s `PULP_TEXT_SHAPER_SKIA == 0` branch), so the
+line box comes from the glyphs actually drawn. That is a deliberate choice:
+measure equals paint.
+
+A full-stack build still measures through Skia's `SkFontMgr`, and for some
+families and weights Skia resolves a different face than CoreText paints:
+
+- "Helvetica Neue" 600 at 12 px: Skia ascent 13.92, width 116.7; the painted
+  face ascent 13.69, width 120.0.
+- JetBrains Mono at 9 px: Skia adds 0.12 px of leading the painted face lacks.
+
+Captured text is not affected: a Label reuses a capture's line breaks only
+when `resolved_face_identity()` matches the capture's face, and the lite stack
+answers that through CoreText (`coretext_face_postscript_name`), the face it
+paints. When the lite answer was empty, every captured label re-broke with its
+own measurement and the design panels moved by whole labels (0.31% and 0.47%
+of pixels on PulpDesignSynth and PulpDesignArp); with the answer they match the
+full build: 0 pixels on PulpDesignSynth, and on PulpDesignArp a bold 9 px "07"
+whose identical glyphs sit 1 capture px lower. That label asks for
+JetBrainsMono-Bold, which Pulp does not bundle; Skia falls back to Menlo-Bold
+and CoreText to the bundled Regular, so the full build places CoreText-painted
+glyphs with Menlo's metrics. A lite-vs-full diff on a design panel is a
+regression to chase unless the differing text resolves to a face Pulp does not
+bundle: check `resolved_face_identity()` on each stack against the capture's
+`lineBoxBasis.resolvedFace` before concluding either.
+`pulp-test-face-identity-full` and `-lite` hold the bundled faces' identities
+equal across the two stacks. Text measured without a capture can still differ
+by up to 1 logical px for the system families listed above.
+
 ## A Label with element children does not paint at its own origin
 
 A `Label` that carries both text and element children is a flex container whose

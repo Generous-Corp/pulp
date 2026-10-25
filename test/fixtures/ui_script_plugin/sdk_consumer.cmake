@@ -92,11 +92,14 @@ endif()
 # The consumer configured without PULP_DEV_BUILD, so its image carries the
 # embedded script and no on-disk path: the script's console marker proves the
 # scan reads the right bytes, and the absolute source path must be absent.
+# The image is named after PLUGIN_NAME (the CLAP target's OUTPUT_NAME), as the
+# bundle is, not after the CMake target, and that name contains spaces.
 file(GLOB_RECURSE _clap_images "${_clap_binaries}/*")
+get_filename_component(_clap_image_name "${_clap_binaries}" NAME_WLE)
 set(_clap_image "")
 foreach(_candidate IN LISTS _clap_images)
     get_filename_component(_name "${_candidate}" NAME)
-    if(_name STREQUAL "UiScriptSdkConsumer" OR _name MATCHES "\\.(so|dll|clap)$")
+    if(_name STREQUAL _clap_image_name OR _name MATCHES "\\.(so|dll|clap)$")
         set(_clap_image "${_candidate}")
     endif()
 endforeach()

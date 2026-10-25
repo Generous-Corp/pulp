@@ -251,6 +251,38 @@ TEST_CASE("migrating a slow build dir moves its cache and CMakeFiles aside",
     REQUIRE(fs::exists(build / "CMakeCache.txt"));
 }
 
+TEST_CASE("dev-shared wanted: the command default unless the environment overrides it",
+          "[cli][configure-defaults][dev-shared]") {
+    using pulp::cli::dev_shared_ui_wanted;
+    REQUIRE(dev_shared_ui_wanted(true, std::nullopt));
+    REQUIRE_FALSE(dev_shared_ui_wanted(false, std::nullopt));
+    REQUIRE_FALSE(dev_shared_ui_wanted(true, std::string("0")));
+    REQUIRE_FALSE(dev_shared_ui_wanted(true, std::string("OFF")));
+    REQUIRE(dev_shared_ui_wanted(false, std::string("on")));
+    // An empty value is unset, not off.
+    REQUIRE(dev_shared_ui_wanted(true, std::string(" ")));
+}
+
+TEST_CASE("dev-shared change: only a cache that disagrees is reconfigured",
+          "[cli][configure-defaults][dev-shared]") {
+    using pulp::cli::dev_shared_ui_change;
+    const std::optional<std::string> fresh;
+    const std::optional<std::string> on = std::string("PULP_DEV_SHARED_UI:BOOL=ON\n");
+    const std::optional<std::string> off = std::string("PULP_DEV_SHARED_UI:BOOL=OFF\n");
+    const std::optional<std::string> absent = std::string("CMAKE_BUILD_TYPE:STRING=Release\n");
+    // `pulp build` (wants off) leaves fresh, off, and option-less caches alone
+    // and switches a dev-shared cache back.
+    REQUIRE_FALSE(dev_shared_ui_change(fresh, false).has_value());
+    REQUIRE_FALSE(dev_shared_ui_change(off, false).has_value());
+    REQUIRE_FALSE(dev_shared_ui_change(absent, false).has_value());
+    REQUIRE(dev_shared_ui_change(on, false) == std::optional<bool>(false));
+    // `pulp dev` (wants on) turns it on everywhere it is not already on.
+    REQUIRE(dev_shared_ui_change(fresh, true) == std::optional<bool>(true));
+    REQUIRE(dev_shared_ui_change(off, true) == std::optional<bool>(true));
+    REQUIRE(dev_shared_ui_change(absent, true) == std::optional<bool>(true));
+    REQUIRE_FALSE(dev_shared_ui_change(on, true).has_value());
+}
+
 #if !defined(_WIN32)
 namespace {
 class ScopedEnv {
@@ -392,5 +424,61 @@ TEST_CASE("pulp-cpp build migrates a Makefiles Debug examples-on build dir",
     REQUIRE(fs::is_regular_file(checkout.root / "build" / pulp::cli::kPreMigrationDir /
                                 "CMakeCache.txt"));
     REQUIRE(checkout.last_stdout.find("Reconfiguring ") != std::string::npos);
+}
+namespace {
+const std::string kCompleteCheckoutCache =
+    "CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Release\n"
+    "PULP_BUILD_EXAMPLES:BOOL=OFF\nPULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\n"
+    "PULP_HAS_VST3:INTERNAL=ON\nPULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=OFF\n"
+    "PULP_CHECKOUT_DEPENDENCY_CONTRACT:INTERNAL=fixture-contract\n";
+
+void make_complete_checkout(FakeCheckout& checkout, const std::string& extra_cache) {
+    write_text(checkout.root / "tools/deps/shared-source-contract.txt", "fixture-contract\n");
+    fs::create_directories(checkout.root / "external/vst3sdk/pluginterfaces");
+    write_text(checkout.root / "build" / "CMakeCache.txt", kCompleteCheckoutCache + extra_cache);
+}
+} // namespace
+
+TEST_CASE("pulp-cpp build switches a dev-shared build dir back to static links",
+          "[cli][configure-defaults][shellout][dev-shared]") {
+    if (!fs::exists(cpp_cli()))
+        SKIP("pulp-cpp not built");
+    FakeCheckout checkout(/*with_ninja=*/true);
+    ScopedEnv d("PULP_DEV_SHARED_UI", nullptr);
+    // Control: a complete static cache goes straight to the build.
+    make_complete_checkout(checkout, "PULP_DEV_SHARED_UI:BOOL=OFF\n");
+    REQUIRE(checkout.configure_line({}).rfind("--build ", 0) == 0);
+    fs::remove(checkout.log);
+
+    make_complete_checkout(checkout, "PULP_DEV_SHARED_UI:BOOL=ON\n");
+    const auto line = checkout.configure_line({});
+    INFO(line);
+    REQUIRE(line.rfind("-B ", 0) == 0); // a configure, not a build
+    REQUIRE(line.find("-DPULP_DEV_SHARED_UI=OFF") != std::string::npos);
+    REQUIRE(checkout.last_stdout.find("back to static plug-in links") != std::string::npos);
+}
+
+TEST_CASE("pulp-cpp build --dev-shared turns the shared runtime on",
+          "[cli][configure-defaults][shellout][dev-shared]") {
+    if (!fs::exists(cpp_cli()))
+        SKIP("pulp-cpp not built");
+    FakeCheckout checkout(/*with_ninja=*/true);
+    ScopedEnv d("PULP_DEV_SHARED_UI", nullptr);
+    make_complete_checkout(checkout, "");
+    const auto line = checkout.configure_line({"--dev-shared"});
+    INFO(line);
+    REQUIRE(line.rfind("-B ", 0) == 0);
+    REQUIRE(line.find("-DPULP_DEV_SHARED_UI=ON") != std::string::npos);
+    REQUIRE(line.find("--dev-shared") == std::string::npos);
+}
+
+TEST_CASE("PULP_DEV_SHARED_UI=1 keeps a dev-shared build dir for pulp-cpp build",
+          "[cli][configure-defaults][shellout][dev-shared]") {
+    if (!fs::exists(cpp_cli()))
+        SKIP("pulp-cpp not built");
+    FakeCheckout checkout(/*with_ninja=*/true);
+    ScopedEnv d("PULP_DEV_SHARED_UI", "1");
+    make_complete_checkout(checkout, "PULP_DEV_SHARED_UI:BOOL=ON\n");
+    REQUIRE(checkout.configure_line({}).rfind("--build ", 0) == 0);
 }
 #endif

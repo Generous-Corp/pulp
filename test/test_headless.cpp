@@ -313,13 +313,17 @@ pulp::format::EditorAssets make_embedded(const char* name = "ui.js") {
     return assets;
 }
 
-// Leaves the process without a registered editor on exit, so the AutoUi
-// fallback case below measures the same binary unregistered.
+// Registers `assets` and installs the scripted editor builder the way a
+// UI_SCRIPT target's generated source does. Leaves the process without a
+// registered editor or builder on exit, so the AutoUi fallback case below
+// measures the same binary unregistered.
 struct ScopedEditorAssets {
     explicit ScopedEditorAssets(const pulp::format::EditorAssets& assets) {
         pulp::format::register_editor_assets(assets);
+        pulp::format::install_scripted_editor_builder();
     }
     ~ScopedEditorAssets() {
+        pulp::format::scripted_editor_builder_slot().store(nullptr);
         pulp::format::reset_editor_assets_for_testing();
     }
 };
@@ -437,6 +441,13 @@ TEST_CASE("build_editor_ui evaluates a registered embedded script without readin
 
 TEST_CASE("build_editor_ui_for_assets keys an embedded editor's stores by the plug-in",
           "[format][editor_ui][embedded]") {
+    // The builder a UI_SCRIPT target's generated source installs.
+    pulp::format::install_scripted_editor_builder();
+    struct ResetBuilder {
+        ~ResetBuilder() {
+            pulp::format::scripted_editor_builder_slot().store(nullptr);
+        }
+    } reset_builder;
     pulp::format::HeadlessHost host(create_test_gain);
     std::string error;
     auto ui = pulp::format::build_editor_ui_for_assets(make_embedded(), host.state(), false, &error,

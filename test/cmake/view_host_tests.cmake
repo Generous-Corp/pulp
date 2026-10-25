@@ -158,6 +158,34 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_window_host_first_frame_macos.mm
         LIBRARIES pulp::view "-framework AppKit")
 endif()
+
+# The lite editor stack's plug-in view host. The executable compiles the macOS
+# plug-in host sources itself with PULP_VIEW_LITE_HOST=1 and its own ObjC
+# suffix, exactly as a LITE_EDITOR plug-in's cluster does, so its objects stand
+# in for the library's: an editor that asks for the GPU host must get the
+# CoreGraphics host and one warning, and the GPU view class must be absent.
+if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+    set(_pulp_mac_view_dir ${CMAKE_SOURCE_DIR}/core/view/platform/mac)
+    pulp_add_test_suite(pulp-test-lite-editor-host-mac
+        SOURCES test_lite_editor_host_mac.mm
+            ${_pulp_mac_view_dir}/plugin_view_host_mac.mm
+            ${_pulp_mac_view_dir}/plugin_view_host_mac_text_input.mm
+            ${_pulp_mac_view_dir}/plugin_view_host_mac_drag.mm
+        LIBRARIES pulp::view "-framework AppKit"
+        COMPILE_DEFINITIONS PULP_VIEW_LITE_HOST=1 PULP_VIEW_OBJC_SUFFIX=_LiteHostTest)
+    unset(_pulp_mac_view_dir)
+    # The same face-identity table against the full and the lite text stack.
+    if(TARGET pulp-canvas-lite-objects)
+        pulp_add_test_suite(pulp-test-face-identity-full
+            SOURCES test_face_identity_stacks.cpp
+            LIBRARIES pulp::canvas
+            COMPILE_DEFINITIONS PULP_FACE_IDENTITY_LITE=0)
+        pulp_add_test_suite(pulp-test-face-identity-lite
+            SOURCES test_face_identity_stacks.cpp $<TARGET_OBJECTS:pulp-canvas-lite-objects>
+            LIBRARIES pulp::canvas
+            COMPILE_DEFINITIONS PULP_FACE_IDENTITY_LITE=1)
+    endif()
+endif()
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
 # consistently on non-Windows hosts so ctest output stays stable.
@@ -231,6 +259,12 @@ pulp_add_test_suite(pulp-test-dirty-region-consumption GROUP pulp-test-group-vie
 # logical state, and that lets a frame which never reached the screen keep its
 # damage for the retry.
 pulp_add_test_suite(pulp-test-pending-damage GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+
+# X11ResizeEcho: the Linux plug-in host drops a ConfigureNotify older than its
+# own last XResizeWindow, so a stale echo cannot revert the size. Serial
+# arithmetic only, so it runs on every platform.
+pulp_add_test_suite(pulp-test-x11-resize-echo GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
 
 # PluginViewHost GPU-surface lifecycle notification: delayed creation (the

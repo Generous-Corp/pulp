@@ -156,6 +156,18 @@ TEST_CASE("FastMath tanh_minimax holds its worst-case bound across the float ran
     REQUIRE(pade.first / minimax.first > 10.0);
     REQUIRE(minimax.second == 1.0f);
     REQUIRE(recursive.second == 1.0f);
+
+    // Every float around the worst case (|x| near 4.745), where the stride
+    // above lands only every hundredth value.
+    double local = 0.0;
+    for (float x = 4.6f; x < 4.9f; x = std::nextafter(x, 5.0f)) {
+        const float y = FastMath::tanh_minimax(x);
+        local =
+            std::max(local, std::abs(static_cast<double>(y) - std::tanh(static_cast<double>(x))));
+        REQUIRE(FastMath::tanh_minimax(-x) == -y);
+    }
+    INFO("worst error near |x| = 4.745: " << local);
+    REQUIRE(local < 3.8e-6);
 }
 
 TEST_CASE("FastMath tanh_minimax is odd, unit-slope, and seamless at its clamp",

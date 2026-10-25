@@ -265,6 +265,7 @@
     "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
+    "test/test_browser_capture_paint_scale.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
     "test/test_browser_capture_tree.cpp"
@@ -279,6 +280,7 @@
     "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
+    "test/test_browser_capture_paint_scale.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
     "test/test_browser_capture_tree.cpp"
@@ -1429,6 +1431,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-embed-compress": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_embed_compress.cpp"
+   ],
+   "inputs": [
+    "core/view/js/css-colors.js"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_embed_compress.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-fixture-runner-cli": {
    "data": "declared",
    "detected_sources": [
@@ -1462,6 +1478,18 @@
    "sources": [
     "test/test_forge_catalog_index.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-gpu-audio-transport": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_gpu_audio_transport.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-gpu-dpr-native-measurement": {
@@ -1939,6 +1967,20 @@
    "kind": "compiled",
    "sources": [
     "test/test_js_bytecode_embed.cpp"
+   ],
+   "undeclared_sources": []
+  },
+  "pulp-test-js-preludes": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_js_preludes.cpp"
+   ],
+   "inputs": [
+    "core/view/js/*.js"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_js_preludes.cpp"
    ],
    "undeclared_sources": []
   },
@@ -2671,10 +2713,14 @@
   "pulp-test-dspx07-projection",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
+  "pulp-test-embed-compress",
+  "pulp-test-face-identity-full",
+  "pulp-test-face-identity-lite",
   "pulp-test-faithful-port-toolkit",
   "pulp-test-fast-math-no-contract",
   "pulp-test-fdn-reverb",
   "pulp-test-fdn-reverb-catalog",
+  "pulp-test-fdn-reverb-portable-lanes",
   "pulp-test-fir-filter",
   "pulp-test-fixture-runner-cli",
   "pulp-test-foreign-framework-coexistence",
@@ -2702,7 +2748,7 @@
   "pulp-test-gesture-threading",
   "pulp-test-golden",
   "pulp-test-golden-effect",
-  "pulp-test-gpu-audio-execution-controller",
+  "pulp-test-gpu-audio-capability-validation",
   "pulp-test-gpu-audio-plugin-boundary-continuity",
   "pulp-test-gpu-audio-trace",
   "pulp-test-gpu-audio-transport",
@@ -2852,8 +2898,10 @@
   "pulp-test-ipc",
   "pulp-test-isolated-scanner",
   "pulp-test-js-bytecode-embed",
+  "pulp-test-js-preludes",
   "pulp-test-latency-contract",
   "pulp-test-lfo-sampling",
+  "pulp-test-lite-editor-host-mac",
   "pulp-test-live-dsp-telemetry",
   "pulp-test-live-dsp-telemetry-graph",
   "pulp-test-live-kernel-crossfade-null",
@@ -3026,6 +3074,7 @@
   "pulp-test-signal-zero-latency-convolver",
   "pulp-test-simd",
   "pulp-test-simd-header-fallback",
+  "pulp-test-simd-lanes-portable",
   "pulp-test-simd-parity",
   "pulp-test-simd-signal-link",
   "pulp-test-six-band-eq",
@@ -3936,6 +3985,7 @@
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
     "test/cmake/check_plugin_module_dead_strip.cmake",
+    "test/cmake/check_plugin_module_editor_stack.cmake",
     "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
@@ -5315,6 +5365,20 @@
    "entry": "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py",
    "inputs": [
     "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-header-vocabulary-guard": {
+   "entry": "tools/scripts/gpu_audio_header_vocabulary_guard.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_header_vocabulary_guard.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-header-vocabulary-guard-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_header_vocabulary_guard.py",
+   "inputs": [
+    "tools/scripts/test_gpu_audio_header_vocabulary_guard.py"
    ],
    "kind": "python"
   },
@@ -6926,6 +6990,7 @@
   "importer-differential-lab": {
    "entry": "test/test_importer_differential_lab.py",
    "inputs": [
+    "test/fixtures",
     "test/fixtures/browser-capture-layout-rows",
     "test/test_importer_differential_lab.py",
     "tools/import-design/browser_capture/form_control_theme.mjs",
@@ -10067,6 +10132,7 @@
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
     "test/cmake/check_plugin_module_dead_strip.cmake",
+    "test/cmake/check_plugin_module_editor_stack.cmake",
     "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",

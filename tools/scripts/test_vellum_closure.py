@@ -1395,11 +1395,12 @@ class GeneratedDigestTests(unittest.TestCase):
             )
             expected_cpp = hashlib.sha256(recipe_output.read_bytes()).hexdigest()
         names = [input_path.stem.replace("-", "_") for input_path in inputs]
+        from vellum_closure import PRELUDE_HEADER_HEAD, PRELUDE_HEADER_TAIL
+        self.assertIn("struct EmbeddedPrelude {", PRELUDE_HEADER_HEAD)
         expected_hpp_text = (
-            "#pragma once\n// Auto-generated from the JS prelude file list — do not edit\n\n"
-            "namespace pulp::view::preludes {\n\n"
-            + "".join(f"extern const char* const {name};\n" for name in names)
-            + "\n}  // namespace pulp::view::preludes\n"
+            PRELUDE_HEADER_HEAD
+            + "".join(f"extern const EmbeddedPrelude {name};\n" for name in names)
+            + PRELUDE_HEADER_TAIL
         )
         expected_hpp = hashlib.sha256(expected_hpp_text.encode("utf-8")).hexdigest()
         with tempfile.TemporaryDirectory() as td:
@@ -1491,14 +1492,14 @@ class GeneratedDigestTests(unittest.TestCase):
             self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
             producer.write_text("if(FALSE)\n" + original + "endif()\n", encoding="utf-8")
             self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
-            producer.write_text(original.replace("extern const char* const ${_prelude_var};", "extern const unsigned char* ${_prelude_var};"), encoding="utf-8")
+            producer.write_text(original.replace("extern const EmbeddedPrelude ${_prelude_var};", "extern const unsigned char* ${_prelude_var};"), encoding="utf-8")
             self.assertIsNone(generated_digest(self.PRELUDE_CPP, source / "out.cpp", source))
             adversarial_mutations = (
                 ("NAME_WE -> NAME", original.replace("\"${_prelude}\" NAME_WE", "\"${_prelude}\" NAME", 1)),
                 ("duplicate APPEND", original.replace(
-                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")',
-                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")\n'
-                    'string(APPEND _pulp_prelude_decls "extern const char* const ${_prelude_var};\\n")', 1)),
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")',
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")\n'
+                    'string(APPEND _pulp_prelude_decls "extern const EmbeddedPrelude ${_prelude_var};\\n")', 1)),
                 ("changed header prelude", original.replace("#pragma once\\n", "#pragma changed\\n", 1)),
                 ("extra custom output", original.replace(
                     "OUTPUT ${PULP_JS_EMBEDDED_SOURCE}",

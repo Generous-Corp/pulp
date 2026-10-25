@@ -2755,7 +2755,8 @@ int main(int argc, char* argv[]) {
          .native_panel_lowering = cli.native_panel_lowering,
          .materialized_canvas_composition = cli.materialized_canvas_composition,
          .require_canvas_ink = cli.require_canvas_ink,
-         .validate = validate},
+         .validate = validate,
+         .materialized_runtime_emit = artifact_emit == ArtifactEmit::materialized_runtime},
         content);
     if (const auto* failure =
             std::get_if<pulp::import_design::BrowserImportFailure>(
@@ -2765,8 +2766,7 @@ int main(int argc, char* argv[]) {
     auto browser_import_session =
         std::get<pulp::import_design::BrowserImportSession>(
             std::move(browser_import));
-    const auto import_preparation =
-        browser_import_session.preparation_policy();
+    const auto import_preparation = browser_import_session.preparation_policy();
     std::optional<DesignIR> browser_capture_ir;
     std::optional<fs::path> materialized_document;
     if (auto capture =

@@ -180,6 +180,21 @@ route the build through `tools/ci/governed-build.sh` without an explicit
 `--parallel` cap. The governor owns the worker share and build-directory lock;
 the emulator and fixture execution steps remain separate.
 
+`governed-build.sh` treats an explicit `-j`/`--parallel` on the build command
+(also after `--`) as a request: the lower of it and `PULP_BUILD_JOBS` caps the
+lease, and the flag is rewritten to the final share before the command runs.
+A literal count can therefore lower a build's share but never raise it past
+the lease, and a bare flag cannot go unbounded. Before that rule the flag
+silently overrode the governor (a `-j4` build reserved and logged the full
+profile share). Covered by the `explicit`/`flag` cases in
+`tools/ci/test_governed_build.py`.
+
+A `CMAKE_BUILD_PARALLEL_LEVEL` the caller exports is the same kind of request:
+the lowest of it, any flag, and `PULP_BUILD_JOBS` wins. The wrapper exports its
+own share under that name, which used to replace the caller's value, so
+`CMAKE_BUILD_PARALLEL_LEVEL=4` ran at the full lease. Covered by the
+`caller_parallel_level` cases.
+
 The TSan workflow keeps its SignalGraph selection exact and bounded: include
 the compile-first lifecycle cases, mutation-lock and prepare-swap publication
 cases, and the routed and parallel re-prepare/process race hammers. Do not
@@ -217,6 +232,24 @@ GitHub Actions job build `all` and drive `ctest` themselves, so the CLAUDE.md
 `shipyard pr`, run `pulp build --all` (and `pulp test --all` when you changed
 anything with tests); a focused green run proves the affected set, not the
 graph. `PULP_BUILD_FOCUS=0` disables focus for scripts that wrap the CLI.
+
+## GPU-audio proof targets are compiled, never run, by the macOS gate
+
+The arm64 macOS legs of `build.yml` and `build-macos.yml` configure
+`PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON`, so the full build compiles and links
+the GPU-audio hardware-evidence binaries against the pinned Dawn. Their ctest
+registrations carry the `gpu-proof` label, which `tools/ci/ctest_gate_args.py`
+excludes on every gate lane (the protected merge receipt's required selection
+carries the same literal; so do `changed_surface_inventory.EXCLUDED_LABEL_REGEX`
+and Shipyard's macOS test stage). A step after configure compares `ctest -N -L
+gpu-proof` with the reviewed allowlist `tools/ci/gpu_proof_tests.txt`, so a
+dropped proof target cannot pass by absence and a new one is a reviewed diff,
+and fails if the gate's own `-LE` selection contains any of them: ctest adds a
+required fixture's setup test even under `-LE`, so no ordinary test may require
+a gpu-proof fixture. With the proof ON the gate selects exactly the tests it
+selects with it OFF. `pulp_gpu_proof_begin()`/`pulp_gpu_proof_end()` bracket
+each proof block, and `end` is a configure error outside the proof option.
+Hardware receipts stay owner-run on m3.
 
 ## A2T structural evidence is produced only by the required macOS PR job
 
@@ -432,14 +465,19 @@ macOS.
   required context.
 - **Approve first, then the full lane, then arm.** A reviewer may APPROVE
   before the full macOS run. The sweep labels the approved head, and arms only
-  once the head's latest `macos` check run is no longer `deferred`. GitHub then
-  holds the auto-merge until that run succeeds. If the full lane fails, the PR
+  once the head's latest `macos` check run is a completed full-lane success
+  (not `deferred`). An earlier arm is disabled at once by
+  `macos-ci-arm-refusal.yml`, with a comment. If the full lane fails, the PR
   needs a fix, and the fix is a new head, which needs a new verdict.
 - **A push disarms and unlabels.** `macos-ci-label-reset.yml` disables
   auto-merge on `synchronize` (otherwise the new head's contract-lane green
   would merge it) and removes `macos-ci`. A queued PR leaves the queue on push
   anyway, and the fenced carrier's update-branch counts as a push. Re-arming
-  needs a fresh verdict, the label, and a full-lane success.
+  needs a fresh verdict, the label, and a full-lane success. A PR armed (or
+  queued) before approval fails its contract-lane `macos` ("armed before
+  approval and a full macOS run"); remove auto-merge and get a trusted APPROVE.
+  `macos-ci-deferred-disarm.yml` also disarms any PR still armed when a
+  `deferred` run completes, and dequeues it if it is already queued.
 - **A red contract lane is a real failure** of a pr-fast or pr-guard check.
   Fix it on the PR; it is exactly what would otherwise eject a batch. If the
   failing check needs a built target, add it to `PULP_PR_FAST_NEEDS_BUILD` in
@@ -842,6 +880,34 @@ on apply mode. The protected-main worker must stay repository-serialized,
 perform a dry run first, and prove one live exact-head canary before scheduled
 activation.
 
+## The control-shipping scanner reads raw bytes: two CMake quirks it depends on
+
+`tools/cmake/check_control_shipping_artifact.cmake` reads each linked image
+with `file(READ)` and searches the bytes with `string(FIND)`. Two CMake
+behaviours make that correct only as written:
+
+- **NUL truncation.** Several CMake paths stop a value at its first NUL byte,
+  measured on CMake 4.3 and 3.24.3: `${var}` in a `-P` script with no
+  `cmake_minimum_required` on 3.x (old CMP0053 rules), `set(... PARENT_SCOPE)`
+  on every version (a 44 MB image returned from a function arrived as 5 bytes
+  while the function's own length check passed), and `string(REPLACE)` /
+  `string(REGEX)` on every version. `string(LENGTH)` and `string(FIND)` see
+  the whole value. Truncation fails OPEN for the forbidden-marker checks. So
+  the scanner pins `cmake_minimum_required(VERSION 3.24)`, reads with a macro
+  (the bytes land in the caller's scope), touches the bytes only with LENGTH
+  and FIND, fails closed when the read is shorter than half the file, and has
+  `_pulp_binary_contains` re-check the searched length against the recorded
+  `<var>_length`. Never remove any of these; a test host on 4.x cannot catch
+  the 3.x case by itself.
+- **CRLF folding.** `file(READ)` turns each CRLF pair into LF, so the value is
+  shorter than the file by the number of folded pairs, at most half of it.
+  Markers contain no CR or LF, so the fold cannot hide or create one.
+
+The matrix test carries a NUL-before-marker and a CRLF-before-marker leak, and
+`_pulp_binary_contains` refuses markers that are under 14 bytes, contain
+whitespace or contain `;` (`-DPULP_CONTROL_MARKER_SELFTEST=<marker>` exercises
+the refusal).
+
 ## Every test file must run somewhere
 
 `unregistered-tests-check` fails when a tracked `tools/**/test_*.py` is invoked by
@@ -852,6 +918,22 @@ its assertions never execute, and a local break-confirm is its only evidence.
 Files that predated the check are in `tools/scripts/unregistered_tests_baseline.json`,
 which only shrinks: registering or deleting one fails the check until its row is
 removed. Register a new test file in the same PR that adds it.
+
+### An X11 case that skips on the Linux leg did not run
+
+The Linux build job has no display, so an X11 test that opens one with
+`XOpenDisplay(nullptr)` either skips or, written as `WARN(); return;`, passes
+having asserted nothing. The Linux job installs `xvfb`, and where `xvfb-run` is
+found at configure time `pulp-test-plugin-view-host-factory` runs every case
+through `xvfb-run -a` (the target's `CROSSCOMPILING_EMULATOR`, which Pulp's
+Catch discovery passes to each generated test), under `RESOURCE_LOCK pulp_xvfb`
+(`-a` races when several start at once) and a 120 s timeout. Those cases also
+get `PULP_TEST_REQUIRE_X11_DISPLAY=1`, so a missing display there fails instead
+of skipping. A new X11 suite needs the same wiring, or its skip is the only
+evidence it has. A case that holds a server grab must do nothing that waits on
+the server: the Linux plug-in host builds GPU surfaces regardless of
+`Options::use_gpu`, and they make X round trips on resize and paint, so such a
+case sets `PULP_TEST_X11_HOST_CPU_ONLY=1` and stays unattached.
 
 ## Runner timing metrics
 
@@ -4818,6 +4900,14 @@ uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
 
+- **A workflow that runs a test binary by name breaks when that suite joins
+  a test group.** `pulp_add_test_suite(... GROUP <group>)` compiles the
+  member into the group executable, so `./build/test/<member>` no longer
+  exists. The tracing workflow kept calling the old session binary for a
+  month (exit 127) after its build step had been moved to the groups. Run a
+  member as `./build/test/<group> -# "[#<source stem>]~[.]"`, the spec
+  ctest uses; Catch2 fails a spec that matches no case, so a later move
+  fails loudly.
 - **A path-filtered workflow that runs a Python test must also list the
   modules that test imports.** `workflow-lint.yml` ran
   `test_view_audio_archive_manifest.py` only when that test or

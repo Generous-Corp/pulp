@@ -165,6 +165,7 @@ add_executable(pulp-test-browser-capture-import
     test_browser_capture_group_opacity.cpp
     test_browser_capture_gradient_border.cpp
     test_browser_capture_ir.cpp
+    test_browser_capture_paint_scale.cpp
     test_browser_knob_sprites.cpp
     test_browser_capture_text_metrics.cpp
     test_browser_capture_tree.cpp
@@ -193,6 +194,7 @@ pulp_test_data(pulp-test-browser-capture-import NO_DEFINE
     SOURCES test_browser_capture_backdrop_filter.cpp
         test_browser_capture_group_opacity.cpp
         test_browser_capture_gradient_border.cpp test_browser_capture_ir.cpp
+        test_browser_capture_paint_scale.cpp
         test_browser_capture_text_metrics.cpp test_browser_capture_tree.cpp
         test_browser_capture_svg_render.cpp
     PATHS "test/fixtures/browser-capture-*"
@@ -329,6 +331,7 @@ target_link_libraries(pulp-test-import-design-tool
 target_compile_definitions(pulp-test-import-design-tool PRIVATE
     PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>"
     PULP_FIG_FIXTURE="${CMAKE_SOURCE_DIR}/test/fixtures/imports/fig/synthetic.fig"
+    PULP_TEST_JOST_REGULAR_TTF="${CMAKE_SOURCE_DIR}/external/fonts/Jost-Regular.ttf"
     PULP_FIG_DECODE_SCRIPT="${CMAKE_SOURCE_DIR}/tools/import-design/fig_decode.mjs"
     PULP_FIGMA_REST_EXPORT="${CMAKE_SOURCE_DIR}/tools/import-design/figma_rest_export.py")
 if(PULP_HAS_SKIA)

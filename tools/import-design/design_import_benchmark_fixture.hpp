@@ -65,9 +65,13 @@ class BenchmarkFixture {
 // benchmark never measures a tree the importer reported as wrong. Warnings
 // (a design that states no widget palette, say) do not change the tree's
 // structure; their codes are returned so the receipt shows every one.
-std::unique_ptr<view::View> materialize_checked(const view::DesignIR& ir, float width, float height,
-                                                std::string_view lane,
-                                                std::vector<std::string>* warning_codes);
+// `asset_base_directory` resolves the manifest's relative asset paths; an
+// importer writes them relative to the DesignIR's own directory, so without it
+// every image resolves against the process's working directory instead.
+std::unique_ptr<view::View>
+materialize_checked(const view::DesignIR& ir, float width, float height, std::string_view lane,
+                    std::vector<std::string>* warning_codes,
+                    const std::filesystem::path& asset_base_directory = {});
 
 // A file read whole, with the digest that binds a receipt to its bytes.
 struct HashedFile {

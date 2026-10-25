@@ -271,7 +271,10 @@ endfunction()
 # source is generated with $<TARGET_PROPERTY>, so a selection made after the
 # target exists (pulp_use_kit_ui) still lands, and the last selection wins.
 # When the target embeds a script (PULP_UI_EMBED_HEADER), the same source
-# starts from the embedded record and adds the on-disk paths to it.
+# starts from the embedded record and adds the on-disk paths to it. A target
+# that declares or embeds a script also installs the scripted editor builder
+# there; that call is what links the script runtime, so a target without a
+# script (AutoUi, or a theme only) never carries it.
 function(_pulp_attach_editor_assets_source target)
     get_property(_attached TARGET "${target}" PROPERTY _PULP_EDITOR_ASSETS_SOURCE)
     if(_attached)
@@ -297,6 +300,7 @@ struct PulpEditorAssetsRegistrar {
         assets.theme_path = R\"pulp_asset(${_theme})pulp_asset\";
         assets.asset_roots = R\"pulp_asset(${_roots})pulp_asset\";
         ::pulp::format::register_editor_assets(assets);
+$<$<OR:$<BOOL:${_script}>,${_has_embed}>:        ::pulp::format::install_scripted_editor_builder();>
     }
 } pulp_editor_assets_registrar;
 } // namespace

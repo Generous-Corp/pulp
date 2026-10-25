@@ -67,6 +67,12 @@ SCHEMA = "pulp-ctest-script-inputs/v1"
 DEFAULT_LIST = Path("test") / "ctest_script_inputs.json"
 INTERPRETERS = ("python", "python3", "node", "bash", "sh", "zsh")
 UNDECLARABLE_EXES = ("cmake", "ninja", "make", "ctest", "xcodebuild", "cargo")
+# GPU-audio hardware-evidence registrations (PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF).
+# The arm64 macOS gate compiles them, but every CI selection excludes this label
+# (tools/ci/ctest_gate_args.py) and only the owner runs them on a physical GPU.
+# Their inputs select nothing, so they are not tracked, and a proof configure is
+# otherwise gate-shaped.
+GPU_PROOF_LABEL = "gpu-proof"
 # An entry script that lives in the build tree (a configure-generated runner)
 # is recorded under this token, never under the build directory's name, so
 # a list written from `build-gate`, `build`, or a directory outside the
@@ -196,8 +202,10 @@ def outside_gate_profile_build(build_dir: Path | None,
                                root: Path | None = None) -> list[str]:
     """Why this build's compiled entries cannot stand for the gate's: each
     switch whose value differs from the gate's configure (examples off, a
-    Release build, no sanitizer, the exact-provider proof off). Empty for a gate-shaped build, and for one
-    with no CMakeCache.txt to read (no build tree, no compiled entries)."""
+    Release build, no sanitizer). Empty for a gate-shaped build, and for one
+    with no CMakeCache.txt to read (no build tree, no compiled entries). The
+    exact-provider proof is not judged: the arm64 gate configures it ON, and
+    the registrations it adds are `gpu-proof` tests, which are not tracked."""
     cache = _cache_values(build_dir) if build_dir else None
     if cache is None:
         return []
@@ -210,12 +218,6 @@ def outside_gate_profile_build(build_dir: Path | None,
     build_type = cache.get("CMAKE_BUILD_TYPE", "")
     if build_type and build_type != "Release":
         reasons.append(f"CMAKE_BUILD_TYPE={build_type} (the gate builds Release)")
-    # The GPU-audio exact-provider proof registers its probes only when ON;
-    # the gate configures it OFF, so a list written ON names tests the gate
-    # never has.
-    proof = cache.get("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF", "OFF")
-    if not off(proof):
-        reasons.append(f"PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF={proof} (the gate configures OFF)")
     # Without a format SDK the configure registers none of that format's
     # tests or plugin targets, so the list it writes silently drops their
     # inputs. A cache from before a flag existed omits it and is not judged.
@@ -944,6 +946,9 @@ def test_executables(build_dir: Path | None) -> dict[str, dict] | None:
         # named after the target.
         if not (rec.get("under_test", True) or run is None or program in run or target in run):
             continue
+        # Hardware-evidence executables run only on the owner's GPU; see GPU_PROOF_LABEL.
+        if rec.get("gpu_proof"):
+            continue
         if program in out:
             raise ValueError(f"{out[program]['target']} and {target} both build {program}; "
                              "a selector could not tell their tests apart")
@@ -1300,6 +1305,20 @@ def entries_write_would_delete(current: dict, checked_in: dict) -> list[str]:
     return sorted(gone)
 
 
+def test_labels(test: dict) -> list[str]:
+    labels: list[str] = []
+    for prop in test.get("properties") or []:
+        if prop.get("name") == "LABELS":
+            value = prop.get("value")
+            labels.extend(value if isinstance(value, list) else [value])
+    return labels
+
+
+def without_gpu_proof(tests: list[dict]) -> list[dict]:
+    """The registrations the gate can run: drop every `gpu-proof` test."""
+    return [test for test in tests if GPU_PROOF_LABEL not in test_labels(test)]
+
+
 def load_inventory(build_dir: str | None, inventory_json: str | None) -> dict | None:
     try:
         if inventory_json:
@@ -1471,6 +1490,7 @@ def main(argv: list[str]) -> int:
     inventory = load_inventory(a.build_dir, a.inventory_json)
     if inventory is None:
         return 2
+    inventory = {**inventory, "tests": without_gpu_proof(inventory.get("tests") or [])}
     build_dir = Path(a.build_dir).resolve() if a.build_dir else None
     if a.data_summary:
         summary = data_summary(root, build_dir)
@@ -1506,8 +1526,7 @@ def main(argv: list[str]) -> int:
         print("script-test-inputs: refusing to write: file=test/ctest_script_inputs.json; "
               "cause_class=INCOMPLETE_CONFIGURE; evidence=the compiled entries depend on the configuration and "
               "this build is not the gate's: " + "; ".join(off_profile) + ".\nRegenerate from a gate-profile "
-              "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER, "
-              "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF OFF).",
+              "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER).",
               file=sys.stderr)
         return 2
     if a.write:

@@ -100,6 +100,45 @@ virtuals: additive callbacks such as `process_f64(...)` belong after the
 existing f32 process surface, and descriptor fields added for new capabilities
 should be appended when positional aggregate initializer compatibility matters.
 
+### Editor stack: lite by default, GPU host by declaration
+
+On macOS a plug-in links the **lite editor stack** unless its
+`pulp_add_plugin(...)` declares otherwise. A lite binary has no GPU plug-in or
+window host, no Skia, Dawn or Tint, and its editor always opens on the
+CoreGraphics host (`PluginViewHost::create` in
+`core/view/platform/mac/plugin_view_host_mac.mm`, compiled with
+`PULP_VIEW_LITE_HOST` through `mac_gpu_host_config.h`). Pick the keyword by what
+the editor draws:
+
+| Declare | When |
+|---|---|
+| nothing (or `LITE_EDITOR`) | AutoUi, or C++ views that paint on the CoreGraphics host and never set `requires_gpu_host()` |
+| `UI_SCRIPT` | a scripted UI; it renders on the GPU host, so it always gets the full stack |
+| `GPU_UI` | C++ views that need the GPU host: `requires_gpu_host()` is true, Skia SVG that must composite, shaders, Dawn textures, 3D |
+| `FULL_EDITOR` | the full stack for any other reason (a deliberate control, a GPU feature that does not set the flag) |
+
+`LITE_EDITOR` with any of the other three is a configure error. Other
+platforms always build the full stack.
+
+A lite plug-in whose editor asks for the GPU host anyway (`decide_gpu_host`
+returns `use_gpu`) does not fail: `PluginViewHost::create` calls
+`detail::note_lite_host_gpu_request()`, which logs **one** warning per process
+naming `GPU_UI` and counts every request, and the editor opens on the
+CoreGraphics host, where GPU-only drawing is blank. That warning in a log means
+the plug-in is missing `GPU_UI`. `pulp-test-lite-editor-host-mac` holds this
+behavior; `editor-stack-*` tests check which stack each example module links.
+
+How the stack is cut, so a change does not reattach Skia by accident: the
+per-binary ObjC cluster leaves out the GPU hosts, and the binary links
+`pulp-canvas-lite-objects` / `pulp-view-lite-objects`, copies of
+`text_shaper.cpp`, `font_resolver.cpp`, `canvas_widget.cpp` and
+`asset_manager.cpp` built with `PULP_LITE_EDITOR=1`
+(`tools/cmake/PulpLiteEditorObjects.cmake`). Objects on the link line win over
+the library's archive members. `PULP_LITE_EDITOR` may change function bodies
+only, never a declaration. A new unconditional Skia call in a library function
+a lite editor reaches puts Skia back in every lite binary; the `editor-stack-*`
+symbol checks are what catch it.
+
 ## Editor open: content-first — the host's first image is the mounted document
 
 **Rule: the first thing a host composites of an editor is the settled document
@@ -3656,10 +3695,24 @@ same reason. A new direct call to a non-virtual `ScriptedUiSession` method (or
 any other view-script symbol) from glue pulls the whole runtime back into every
 plug-in; `plugin-module-no-script-runtime-PulpGain-*` (packaging label) fails
 when that happens, and `-Wl,-why_load` on the module link names the caller.
+The default editor's own scripted branch is the trap that broke this once:
+when the `UI_SCRIPT` selection became a runtime value, the inline
+`build_editor_ui_for_assets()` could no longer fold its
+`make_unique<ScriptedUiSession>` away, so every AutoUi plug-in linked the
+runtime again (PulpGain 18.7 -> 23.8 MB stripped) while the build stayed
+green. That branch now lives in `core/format/src/scripted_editor_builder.cpp`
+and is reached through `format::scripted_editor_builder_slot()`;
+`install_scripted_editor_builder()` fills the slot, and only the generated
+editor-assets source of a target with a script calls it. A runtime-valued
+choice in glue every plug-in links never removes code; only a reference that
+is absent at link time does.
 A processor that builds its own `ScriptedUiSession` needs no opt-in: its
 constructor call links the runtime, and that also installs the prewarm runner.
 That is also how a plug-in that loads a script at run time without declaring
 `UI_SCRIPT` opts back in; there is deliberately no CMake switch, because the
-link follows the reference. Reaching the runtime only by name (`dlsym`) cannot
+link follows the reference. A bundle whose scripts come only from keyed
+`PluginRegistration::ui_script` entries calls
+`install_scripted_editor_builder()` itself; without it ViewBridge logs the
+missing builder, reports it in `last_error()` and opens AutoUi. Reaching the runtime only by name (`dlsym`) cannot
 work: nothing links it. `docs/reference/cmake.md` "Shipped Module Size" is the
 user-facing version.
