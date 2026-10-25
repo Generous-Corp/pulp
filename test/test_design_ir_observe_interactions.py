@@ -125,6 +125,33 @@ class InteractionReplayTests(unittest.TestCase):
         digest = lambda p: hashlib.sha256((p / "render.png").read_bytes()).hexdigest()
         self.assertNotEqual(digest(before), digest(after))
 
+    def test_the_ui_js_lane_builds_the_same_controls_keyed_by_anchor(self) -> None:
+        native = self.run_dir("native-lane")
+        js = self.run_dir("js-lane")
+        native_run = observe(native, "--render-receipt", str(native / "receipt.json"))
+        js_run = observe(js, "--emitter", "js", "--render-receipt", str(js / "receipt.json"))
+        self.assertEqual(native_run.returncode, 0, native_run.stderr)
+        self.assertEqual(js_run.returncode, 0, js_run.stderr)
+        receipt = json.loads((js / "receipt.json").read_text(encoding="utf-8"))
+        self.assertEqual(receipt["emitter"], "js")
+        self.assertEqual(receipt["counters"]["script_bridge"], "not-counted")
+        self.assertEqual(
+            json.loads((native / "receipt.json").read_text(encoding="utf-8"))["emitter"],
+            "native")
+        # The program names views with bridge ids; the observer keys them by
+        # anchor so the layout joins the capture the way the native tree's does.
+        ids = {node["id"] for node in
+               json.loads((js / "layout.json").read_text(encoding="utf-8"))["nodes"]}
+        self.assertTrue({"cutoff-knob", "level-fader"} <= ids, ids)
+        strip = lambda log: [(e["anchor"], e["kind"], e["value"]) for e in log["initial_state"]]
+        self.assertEqual(strip(load_log(js)), strip(load_log(native)))
+
+    def test_an_unknown_emitter_is_refused(self) -> None:
+        out = self.run_dir("bad-emitter")
+        result = observe(out, "--emitter", "swiftui")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--emitter expects native or js", result.stderr)
+
     def test_replay_is_deterministic_across_processes(self) -> None:
         first = self.run_dir("first")
         second = self.run_dir("second")
