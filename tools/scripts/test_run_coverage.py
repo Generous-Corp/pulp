@@ -456,9 +456,9 @@ class NativePathListTests(unittest.TestCase):
                 env["MSYSTEM"] = msystem
             result = subprocess.run(
                 ["bash", "-c", f'source "{NATIVE_PATHS}"; coverage_native_path_list'],
-                input=stdin, capture_output=True, text=True, env=env, check=False,
+                input=stdin, capture_output=True, text=True, encoding="utf-8", env=env, check=False,
             )
-            return result, calls.read_text() if calls.exists() else ""
+            return result, calls.read_text(encoding="utf-8") if calls.exists() else ""
 
     def test_msys_lists_are_rewritten_to_native_paths(self) -> None:
         result, calls = self._run(
@@ -482,7 +482,7 @@ class NativePathListTests(unittest.TestCase):
         self.assertEqual(result.stdout, "/d/a/x\n")
 
     def test_both_file_read_lists_go_through_the_helper(self) -> None:
-        text = SCRIPT.read_text()
+        text = SCRIPT.read_text(encoding="utf-8")
         self.assertIn('source "${SCRIPT_DIR}/coverage_native_paths.sh"', text)
         self.assertEqual(text.count("| coverage_native_path_list"), 2,
                          "the profdata input list and the llvm-cov response file "
