@@ -30,11 +30,15 @@ For a panel or other vector artwork supplied as a PDF-compatible Illustrator
 file, convert it to SVG before using the validated preconverted-SVG lane:
 
 ```bash
-python3 tools/import-design/illustrator_to_svg.py \
+pulp import-design --from illustrator \
+  --file design/panel.ai \
   --output build/design/panel.svg \
-  --provenance build/design/panel.svg.provenance.json \
-  design/panel.ai
+  --provenance build/design/panel.svg.provenance.json
 ```
+
+The same command accepts `--from ai` and `--from pdf`. In a source checkout,
+calling `python3 tools/import-design/illustrator_to_svg.py` directly produces
+the same receipt.
 
 The helper also accepts `.pdf` input and uses Poppler's `pdftocairo`.  Pass
 `--page N` for a particular artboard, and set `PULP_PDF_TO_SVG` when a build

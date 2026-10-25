@@ -76,11 +76,14 @@ keeps the conversion outside the semantic design importer, where it can be
 reviewed and reproduced independently:
 
 ```bash
-python3 tools/import-design/illustrator_to_svg.py \
+pulp import-design --from illustrator \
+  --file hardware_design/panel/beads.ai \
   --output build/design/beads.svg \
-  --provenance build/design/beads.svg.provenance.json \
-  hardware_design/panel/beads.ai
+  --provenance build/design/beads.svg.provenance.json
 ```
+
+The aliases `--from ai` and `--from pdf` are equivalent. The Python helper is
+also available for source-checkout automation and emits the same receipt.
 
 The helper uses Poppler's `pdftocairo` through an argv-only subprocess.  It
 requires the converter to be present and executable, accepts only `.ai` and
