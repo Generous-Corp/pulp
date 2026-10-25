@@ -42,6 +42,8 @@ on:
       - 'tools/scripts/test_advisory_macos_runner_policy.py'
       - 'tools/scripts/resolve_linux_route.py'
       - 'tools/scripts/test_resolve_linux_route.py'
+      - 'tools/ci/macos_pr_lane.py'
+      - 'tools/ci/test_macos_pr_lane.py'
       - 'tools/scripts/workflow_runner_selector_audit.py'
       - 'tools/scripts/test_workflow_runner_selector_audit.py'
       - 'tools/scripts/test_windows_runner_policy.py'
@@ -182,6 +184,8 @@ on:
       - 'tools/scripts/test_advisory_macos_runner_policy.py'
       - 'tools/scripts/resolve_linux_route.py'
       - 'tools/scripts/test_resolve_linux_route.py'
+      - 'tools/ci/macos_pr_lane.py'
+      - 'tools/ci/test_macos_pr_lane.py'
       - 'tools/scripts/workflow_runner_selector_audit.py'
       - 'tools/scripts/test_workflow_runner_selector_audit.py'
       - 'tools/scripts/test_windows_runner_policy.py'
@@ -529,6 +533,8 @@ jobs:
           python3 tools/scripts/test_preamble_python_stable_cwd.py
           python3 tools/scripts/test_advisory_macos_runner_policy.py
           python3 tools/scripts/test_resolve_linux_route.py
+          # Which macOS lane a pull request takes, and who may approve it.
+          python3 tools/ci/test_macos_pr_lane.py
           # A runs-on that interpolates a *_RUNS_ON_JSON variable without
           # fromJSON yields one label no runner carries, so GitHub queues
           # the job forever instead of failing it. Substring guards could
