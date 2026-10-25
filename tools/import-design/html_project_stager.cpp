@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "html_project_stager.hpp"
 
+#include "html_reference_scan.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <deque>
@@ -78,18 +80,6 @@ std::optional<DependencyReference> safe_relative_reference(
 }
 
 std::vector<DependencyReference> referenced_paths(std::string_view content) {
-    static const std::regex kReference{
-        R"((?:src|href|poster)\s*=\s*["']([^"']+)["']|url\(\s*["']?([^"')]+)|@import\s+(?:url\(\s*)?["']([^"']+)["']|(?:import|fetch)\s*\(\s*["']([^"']+)["']|new\s+URL\s*\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*\)|import\s*["']([^"']+)["']|from\s*["']([^"']+)["'])",
-        std::regex::icase};
-    // Extensionless scripts and styles still need transitive dependency scans.
-    // Keep the generic reference matcher above for the complete copy graph, then
-    // mark references whose syntax establishes a text/executable context.
-    static const std::regex kScannableReference{
-        R"(<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["']|<link\b[^>]*\bhref\s*=\s*["']([^"']+)["']|@import\s+(?:url\(\s*)?["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']|import\s*["']([^"']+)["']|from\s*["']([^"']+)["'])",
-        std::regex::icase};
-    static const std::regex kSrcset{
-        R"(\bsrcset\s*=\s*["']([^"']+)["'])",
-        std::regex::icase};
     std::vector<DependencyReference> result;
     const std::string text(content);
     auto append = [&](std::string value, bool scan_as_text) {
@@ -107,33 +97,30 @@ std::vector<DependencyReference> referenced_paths(std::string_view content) {
         reference->scan_as_text = scan_as_text;
         result.push_back(std::move(*reference));
     };
-    for (std::sregex_iterator it(text.begin(), text.end(), kReference), end;
-         it != end; ++it) {
-        for (std::size_t group = 1; group < it->size(); ++group) {
-            if (!(*it)[group].matched) continue;
-            append((*it)[group].str(), false);
+    for_each_reference_match(text, html_reference_pattern(), [&](const std::smatch& match) {
+        for (std::size_t group = 1; group < match.size(); ++group) {
+            if (!match[group].matched) continue;
+            append(match[group].str(), false);
             break;
         }
-    }
-    for (std::sregex_iterator it(text.begin(), text.end(), kSrcset), end;
-         it != end; ++it) {
-        std::istringstream candidates((*it)[1].str());
+    });
+    for_each_reference_match(text, html_srcset_pattern(), [&](const std::smatch& match) {
+        std::istringstream candidates(match[1].str());
         for (std::string candidate; std::getline(candidates, candidate, ',');) {
             std::istringstream fields(candidate);
             std::string url;
             fields >> url;
             if (!url.empty()) append(std::move(url), false);
         }
-    }
-    for (std::sregex_iterator it(
-             text.begin(), text.end(), kScannableReference), end;
-         it != end; ++it) {
-        for (std::size_t group = 1; group < it->size(); ++group) {
-            if (!(*it)[group].matched) continue;
-            append((*it)[group].str(), true);
+    });
+    for_each_reference_match(text, html_scannable_reference_pattern(),
+                             [&](const std::smatch& match) {
+        for (std::size_t group = 1; group < match.size(); ++group) {
+            if (!match[group].matched) continue;
+            append(match[group].str(), true);
             break;
         }
-    }
+    });
     return result;
 }
 
@@ -158,6 +145,34 @@ std::string read_text(const fs::path& path) {
 }
 
 }  // namespace
+
+const ReferencePattern& html_reference_pattern() {
+    static const ReferencePattern pattern{
+        std::regex{
+            R"((?:src|href|poster)\s*=\s*["']([^"']+)["']|url\(\s*["']?([^"')]+)|@import\s+(?:url\(\s*)?["']([^"']+)["']|(?:import|fetch)\s*\(\s*["']([^"']+)["']|new\s+URL\s*\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*\)|import\s*["']([^"']+)["']|from\s*["']([^"']+)["'])",
+            std::regex::icase},
+        {"src", "href", "poster", "url(", "@import", "import", "fetch", "new", "from"}};
+    return pattern;
+}
+
+// Extensionless scripts and styles still need transitive dependency scans.
+// html_reference_pattern() finds the complete copy graph; this marks the
+// references whose syntax establishes a text/executable context.
+const ReferencePattern& html_scannable_reference_pattern() {
+    static const ReferencePattern pattern{
+        std::regex{
+            R"(<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["']|<link\b[^>]*\bhref\s*=\s*["']([^"']+)["']|@import\s+(?:url\(\s*)?["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']|import\s*["']([^"']+)["']|from\s*["']([^"']+)["'])",
+            std::regex::icase},
+        {"<script", "<link", "@import", "import", "from"}};
+    return pattern;
+}
+
+const ReferencePattern& html_srcset_pattern() {
+    static const ReferencePattern pattern{
+        std::regex{R"(\bsrcset\s*=\s*["']([^"']+)["'])", std::regex::icase},
+        {"srcset"}};
+    return pattern;
+}
 
 StagedHtmlProject stage_html_project(
     const fs::path& input_file,
