@@ -289,6 +289,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     rejected_output_.clear();
     rejected_input_ptrs_.resize(channels_);
     rejected_output_ptrs_.resize(channels_);
+    dropped_slots_.assign(latency_blocks_ + 1u, 0);
     auto rejected_in = rejected_input_.view();
     auto rejected_out = rejected_output_.view();
     for (uint32_t ch = 0; ch < channels_; ++ch) {
@@ -442,6 +443,7 @@ void GpuAudioTransport::reset_staged_transport_state() noexcept {
     worker_in_.clear();
     worker_out_.clear();
     blocks_owed_ = 0;
+    std::fill(dropped_slots_.begin(), dropped_slots_.end(), std::uint8_t{0});
 
     if (channels_ == 0 || block_size_ == 0 || latency_blocks_ == 0 || out_fptrs_.empty())
         return;
@@ -474,6 +476,7 @@ void GpuAudioTransport::release() noexcept {
     out_fptrs_.clear();
     rejected_input_ptrs_.clear();
     rejected_output_ptrs_.clear();
+    dropped_slots_.clear();
     // The worker has stopped: return a pipelining node to block-in,
     // block-out use. Only such a node is touched here; any other node may
     // already be gone.
@@ -552,7 +555,8 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
     // misalign every later block-sized read. Single-producer, so a free-space
     // check that passes here still holds at write time (the worker only frees
     // more). A full ring drops the whole block (telemetry) rather than blocking.
-    if (input_ring_.free_frames() >= n) {
+    const bool input_dropped = input_ring_.free_frames() < n;
+    if (!input_dropped) {
         input_ring_.write(input, n);
         // Nudge the worker awake (opt-in) so it reacts within the block instead
         // of at the next poll tick. RT-safe: a counting-semaphore post neither
@@ -562,6 +566,7 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
     } else {
         input_dropped_blocks_.fetch_add(1, std::memory_order_relaxed);
     }
+    const bool due_dropped = record_dropped_slot(sequence, input_dropped);
 
     // Resync after prior misses. Each miss substituted a dry/fallback block for
     // its timeline slot; when the worker later catches up it back-fills that
@@ -600,7 +605,9 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
     // Read the latency-delayed output produced earlier by the worker.
     // If debt remains, a worker write racing the snapshot above is still stale.
     // Leave it for the next bounded drain rather than accepting it as current.
-    if (blocks_owed_ == 0 && output_ring_.read(output, n)) {
+    // A slot whose input was dropped has no wet block: the ring's front is
+    // already the next slot's, so it stays queued for the next callback.
+    if (!due_dropped && blocks_owed_ == 0 && output_ring_.read(output, n)) {
         const auto disposition = sequence < latency_blocks_
                                      ? detail::SharedIoDeliveryDisposition::Priming
                                      : detail::SharedIoDeliveryDisposition::GpuDelivered;
@@ -610,8 +617,10 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
 
     // Miss: the worker has not produced this block in time. Substitute per the
     // policy and record the debt so the late wet block is dropped once it lands.
+    // A dropped slot's block never lands, so it owes nothing.
     miss_blocks_.fetch_add(1, std::memory_order_relaxed);
-    ++blocks_owed_;
+    if (!due_dropped)
+        ++blocks_owed_;
     std::uint8_t delivery =
         static_cast<std::uint8_t>(detail::SharedIoDeliveryDisposition::SilenceDelivered);
     switch (miss_policy_) {
@@ -751,11 +760,13 @@ void GpuAudioTransport::process_offline_position(const audio::BufferView<const f
     // was primed with `latency_blocks` of silence at prepare(), so the read below
     // still returns the latency-delayed output — identical latency to process(),
     // which keeps host PDC aligned between realtime and offline renders.
-    if (input_ring_.free_frames() >= n) {
+    const bool input_dropped = input_ring_.free_frames() < n;
+    if (!input_dropped) {
         input_ring_.write(input, n);
     } else {
         input_dropped_blocks_.fetch_add(1, std::memory_order_relaxed);
     }
+    const bool due_dropped = record_dropped_slot(sequence, input_dropped);
     pump(); // drains all ready input → node → output ring (blocking GPU readback)
 
     // Keep the fallback fed on the offline timeline too, so a backstop miss below
@@ -763,7 +774,7 @@ void GpuAudioTransport::process_offline_position(const audio::BufferView<const f
     if (miss_policy_ == MissPolicy::CpuFallback)
         node_->prime_fallback(input, n);
 
-    if (output_ring_.read(output, n))
+    if (!due_dropped && output_ring_.read(output, n))
         return;
 
     // Should not happen after a synchronous pump (the block was just produced),
@@ -785,6 +796,16 @@ void GpuAudioTransport::process_offline_position(const audio::BufferView<const f
         node_->process_cpu_fallback(input, output, n);
         break;
     }
+}
+
+bool GpuAudioTransport::record_dropped_slot(std::uint64_t sequence, bool dropped) noexcept {
+    // Record this slot before reading the due one: with zero latency they are
+    // the same slot. Every callback overwrites its own entry, so the window
+    // never carries a flag past the slot that reads it.
+    const auto window = dropped_slots_.size();
+    dropped_slots_[sequence % window] = dropped ? 1 : 0;
+    return sequence >= latency_blocks_ &&
+           dropped_slots_[(sequence - latency_blocks_) % window] != 0;
 }
 
 void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {

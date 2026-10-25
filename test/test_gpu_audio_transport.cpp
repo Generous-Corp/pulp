@@ -1360,6 +1360,42 @@ TEST_CASE("GpuAudioTransport rejects the sole stale result after deadline misses
     }
 }
 
+TEST_CASE("GpuAudioTransport keeps latency alignment after dropped input blocks",
+          "[gpu_audio][transport]") {
+    // The worker stalls after callback 9. Callbacks 12-15 miss, and inputs 14
+    // and 15 find the input ring full, so their wet blocks never exist. Once
+    // the worker catches up, slots 14 and 15 must still be substituted and
+    // every later callback must return the input from exactly L blocks ago.
+    constexpr uint32_t BS = 32, L = 2, RING = 4;
+    GainNode node(1, BS, 2.0f, MissPolicy::PassthroughDry, L);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {RING}));
+
+    Block in(1, BS), out(1, BS);
+    for (int k = 0; k < 24; ++k) {
+        INFO("callback " << k);
+        if (k == 16)
+            t.pump();
+        const float value = static_cast<float>(k + 1);
+        in.fill(value);
+        auto iv = in.cview();
+        auto ov = out.view();
+        t.process(iv, ov, BS);
+        if (k <= 9 || k >= 16)
+            t.pump();
+        float expected = 2.0f * static_cast<float>(k - 1); // wet input k - L
+        if (k < static_cast<int>(L))
+            expected = 0.0f;
+        else if (k >= 12 && k <= 17)
+            expected = value; // missed, or its input was dropped: dry substitute
+        CHECK(out.storage[0][0] == expected);
+    }
+    CHECK(t.stats().input_dropped_frames == 2 * BS);
+    CHECK(t.stats().miss_blocks == 6);
+    CHECK(t.stats().resynced_blocks == 4);
+}
+
 TEST_CASE("GpuAudioTransport wake-on-write worker drains the pipeline", "[gpu_audio][transport]") {
     // Same whole-block conservation invariant as the polling worker, but with the
     // opt-in wake-on-write path: process() posts a semaphore the worker waits on.
