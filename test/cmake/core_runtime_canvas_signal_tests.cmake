@@ -694,6 +694,24 @@ pulp_test_data(pulp-test-nam-tcn-adapter
     PATHS test/fixtures/neural/example.nam
     SOURCES test_nam_tcn_adapter.cpp)
 
+# Private SIMD neural CPU kernels: scalar-vs-NEON nulls per family, nulls
+# against the per-sample references, and the allocation/lock trap on the
+# adapter callback. "[neural-simd-perf]" prints the per-block cost receipt.
+pulp_add_test_suite(pulp-test-neural-cpu-simd
+    SOURCES test_neural_cpu_simd.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/audio/include
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_test_data(pulp-test-neural-cpu-simd
+    PATHS test/fixtures/neural/example.nam
+    SOURCES test_neural_cpu_simd.cpp)
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    target_compile_definitions(pulp-test-neural-cpu-simd PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
+endif()
+
 # Private synthetic LSTM/GRU CPU-family contract. This is deliberately separate
 # from provider capability and product-model registration.
 pulp_add_test_suite(pulp-test-recurrent-cpu-adapter
@@ -756,6 +774,23 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-realtime-node
 pulp_add_test_suite(pulp-test-gpu-neural-realtime-node
     SOURCES test_gpu_neural_realtime_node.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# The public neural model factory, through installed headers only.
+pulp_add_test_suite(pulp-test-gpu-neural-model-factory
+    SOURCES test_gpu_neural_model_factory.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio)
+
+# Shadow placement (Inline, Worker, None, Auto) for the neural node.
+pulp_add_test_suite(pulp-test-gpu-neural-shadow-policy
+    SOURCES test_gpu_neural_shadow_policy.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# The neural node with WP-S's SIMD CPU kernels as its shadow.
+pulp_add_test_suite(pulp-test-gpu-neural-shadow-simd
+    SOURCES test_gpu_neural_shadow_simd.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime pulp::signal Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
 # Plug-in-boundary continuity: a GPU-audio effect driven through the real CLAP
@@ -939,10 +974,18 @@ pulp_add_test_suite(pulp-test-flow-pans GROUP pulp-test-group-core-gpu-audio-sig
 # contention that intermittently trips their numeric checks after a 2s readback
 # timeout leaves a stale frame. (The GPU-agnostic transport/flow-pans suites
 # above do NOT create devices and are intentionally left parallel.)
-set(_pulp_gpu_convolver_defs "")
+# With the GPU device layer present, the staged-path cases drive the real
+# process_block against test/support/fake_gpu_compute.hpp.
+set(_pulp_gpu_convolver_def_list "")
 if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
-    set(_pulp_gpu_convolver_defs
-        COMPILE_DEFINITIONS PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
+    list(APPEND _pulp_gpu_convolver_def_list PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
+endif()
+if(TARGET pulp::gpu-device)
+    list(APPEND _pulp_gpu_convolver_def_list PULP_TEST_HAS_GPU_COMPUTE=1)
+endif()
+set(_pulp_gpu_convolver_defs "")
+if(_pulp_gpu_convolver_def_list)
+    set(_pulp_gpu_convolver_defs COMPILE_DEFINITIONS ${_pulp_gpu_convolver_def_list})
 endif()
 pulp_add_test_suite(pulp-test-gpu-convolver GROUP pulp-test-group-core-gpu-audio-private
     SOURCES test_gpu_convolver.cpp harness/rt_allocation_probe.cpp

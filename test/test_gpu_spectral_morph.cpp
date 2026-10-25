@@ -5,6 +5,9 @@
 #include <pulp/render/gpu_compute.hpp>
 #include <pulp/signal/fft.hpp>
 
+#include "support/fake_gpu_compute.hpp"
+
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <memory>
@@ -121,4 +124,33 @@ TEST_CASE("GpuSpectralFreeze and GpuSpectralMorph share one device",
     REQUIRE(peak_bin(fo) == KF);
     REQUIRE(peak_bin(mA) == KA);
     REQUIRE(peak_bin(mB) == KB);
+}
+
+TEST_CASE("GpuSpectralMorph refuses a lost or re-initialized shared device",
+          "[gpu_audio][morph][device-loss]") {
+    constexpr uint32_t N = 64;
+    pulp::test::FakeGpuCompute device;
+    GpuSpectralMorph morph;
+    REQUIRE(morph.prepare(N, pulp::signal::WindowFunction::Type::hann, &device));
+
+    std::vector<float> a(N, 0.5f), b(N, -0.25f), out(N, -1.0f);
+    // Positive control: both captures and a render run on a live device.
+    REQUIRE(morph.device_usable());
+    REQUIRE(morph.capture_a(a.data()));
+    REQUIRE(morph.capture_b(b.data()));
+    REQUIRE(morph.render(0.5f, out.data()));
+    const auto calls = device.fft_calls();
+
+    SECTION("device loss") {
+        device.lose_device();
+    }
+    SECTION("generation change without loss") {
+        device.reinitialize();
+    }
+    CHECK_FALSE(morph.device_usable());
+    std::fill(out.begin(), out.end(), -1.0f);
+    CHECK_FALSE(morph.render(0.5f, out.data()));
+    CHECK(std::all_of(out.begin(), out.end(), [](float v) { return v == 0.0f; }));
+    CHECK_FALSE(morph.capture_a(a.data()));
+    CHECK(device.fft_calls() == calls);
 }

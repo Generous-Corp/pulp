@@ -755,12 +755,20 @@ struct IRAssetManifest {
 /// envelope `font_family_assets[]`). The importer registers each one with the
 /// text renderer (#43b) so `setFontFamily(family)` resolves to the bundled
 /// face instead of silently falling back to a system font of the same name.
+///
+/// A browser capture adds one entry per captured `@font-face` rule, in the
+/// order the page defined them, carrying the rule's CSS descriptors. Several
+/// rules may share one asset (a variable font bound at several weights), and
+/// one family may span several assets split by `unicode_range`.
 struct IRFontAsset {
     std::string family;          // CSS family name nodes reference via font_family
     std::string style;           // "Regular", "Italic", … (informational)
-    int weight = 400;            // 100–900
-    std::string asset_id;        // → asset_manifest entry holding the .ttf/.otf
+    int weight = 400;            // 100–900; the lower bound of a weight range
+    std::string asset_id;        // → asset_manifest entry holding the .ttf/.otf/.woff2
     std::string resolved_path;   // absolute fs path, stamped by the CLI asset-resolution pass
+    std::string font_style;      // CSS font-style descriptor; empty when not captured
+    int weight_max = 0;          // upper bound of a font-weight range; 0 for one weight
+    std::string unicode_range;   // CSS unicode-range descriptor, verbatim; empty = every code point
 };
 
 struct IRTokenIdentity {

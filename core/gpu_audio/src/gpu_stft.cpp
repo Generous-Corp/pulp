@@ -1,5 +1,7 @@
 #include <pulp/gpu_audio/gpu_stft.hpp>
 
+#include <algorithm>
+
 namespace pulp::gpu_audio {
 
 namespace {
@@ -22,11 +24,22 @@ bool GpuStft::prepare(uint32_t fft_size, signal::WindowFunction::Type window,
         if (owned_ && owned_->initialize_standalone()) gpu_ = owned_.get();
         else { owned_.reset(); gpu_ = nullptr; }
     }
+    device_generation_ = gpu_ ? gpu_->device_generation() : 0;
     return true;  // prepared even without GPU; analyze/synthesize then no-op false
 }
 
+bool GpuStft::device_usable() const {
+    return gpu_ != nullptr && !gpu_->device_lost() &&
+           gpu_->device_generation() == device_generation_;
+}
+
 bool GpuStft::analyze(const float* frame_in, float* spectrum_out) {
-    if (!gpu_ || frame_in == nullptr || spectrum_out == nullptr) return false;
+    if (!gpu_ || frame_in == nullptr || spectrum_out == nullptr)
+        return false;
+    if (!device_usable()) {
+        std::fill_n(spectrum_out, static_cast<std::size_t>(fft_size_) * 2u, 0.0f);
+        return false;
+    }
     for (uint32_t i = 0; i < fft_size_; ++i) {
         scratch_[2u * i] = frame_in[i] * window_[i];
         scratch_[2u * i + 1u] = 0.0f;
@@ -35,7 +48,12 @@ bool GpuStft::analyze(const float* frame_in, float* spectrum_out) {
 }
 
 bool GpuStft::synthesize(const float* spectrum_in, float* frame_out) {
-    if (!gpu_ || spectrum_in == nullptr || frame_out == nullptr) return false;
+    if (!gpu_ || spectrum_in == nullptr || frame_out == nullptr)
+        return false;
+    if (!device_usable()) {
+        std::fill_n(frame_out, fft_size_, 0.0f);
+        return false;
+    }
     if (!gpu_->fft_inverse(spectrum_in, scratch_.data(), fft_size_)) return false;
     for (uint32_t i = 0; i < fft_size_; ++i) frame_out[i] = scratch_[2u * i];  // real part
     return true;

@@ -1804,7 +1804,7 @@ too, and the gate names the over-claimed family.
 
 **The authoritative check stays in CI, from a trusted root.**
 `.github/workflows/vellum-trusted-gate.yml` runs the checker from a trusted root
-rather than the pull request's copy, and `.github/CODEOWNERS` locks the events
+rather than the pull request's copy, and `.github/CODEOWNERS` lists the events
 directory, the checker and its test. A local refusal does not weaken that: it
 can only stop a push the required checks would also refuse, and it never
 accepts anything on CI's behalf. The real risk of a local copy is a FALSE red,
@@ -5241,9 +5241,10 @@ bisectable.
   gitlink), and NUL-bearing/UTF-16 text is skipped as binary. The upstream fix
   for the whole class — the merge tool refusing to commit a conflicted result —
   is tracked in Shipyard #372; this guard is the consumer-side backstop.
-- **Thread-safe-assertions guard (`thread_assert_check.py`).** Catch2 3.7.1's
-  assertion macros are NOT thread-safe (thread-safe assertions are opt-in only
-  from Catch2 3.9.0), so a `REQUIRE`/`CHECK`/`FAIL`/`SUCCEED` inside a
+- **Thread-safe-assertions guard (`thread_assert_check.py`).** Catch2's
+  assertion macros are NOT thread-safe in Pulp's build (thread-safe assertions
+  need the build-time opt-in `CATCH_CONFIG_THREAD_SAFE_ASSERTIONS`, which Pulp
+  leaves off), so a `REQUIRE`/`CHECK`/`FAIL`/`SUCCEED` inside a
   `std::thread` / `std::jthread` / `std::async` lambda in `test/` is undefined
   behavior: it corrupts Catch's per-run assertion counters + section state. Bare
   metal tolerated it, but the move of the required macOS gate onto Tart VMs made
