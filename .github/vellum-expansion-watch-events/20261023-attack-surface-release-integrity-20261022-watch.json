@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-attack-surface-release-integrity-20261022-watch",
+  "created_at": "2026-10-23T06:30:53Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Release-integrity hardening for the CLI: pulp upgrade and pulp sdk install verify SHA256SUMS before extraction in a private per-run directory, and pulp search verifies the Ed25519-signed remote package registry. The watched paths this range touches are shared CLI surfaces only (design-source-ingest: experimental/pulp-rs/src/main.rs, test/cmake/cli_import_tool_tests.cmake; design-output-and-packaging: docs/status/cli-commands.yaml): main.rs gains the --allow-unsigned-registry delegation to the C++ delegate and the private temp-dir helper for the control-broker transition; cli_import_tool_tests.cmake adds package_registry_trust.cpp to an existing test executable's source list. No design-import, Chromium, rendering, or packaging authority moves; disposition watch-only-no-authority.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-package-registry",
+    "ctest --test-dir build -R pulp-test-cli-release-checksum",
+    "ctest --test-dir build -R pulp-test-cli-upgrade-install",
+    "python3 tools/scripts/test_release_workflow_test_step.py",
+    "python3 tools/scripts/test_sign_package_registry.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

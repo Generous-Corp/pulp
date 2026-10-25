@@ -57,8 +57,29 @@ GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept;
 /// whose provider cannot be prepared runs the same CPU-only contract and
 /// reports a degraded GPU request instead of failing preparation.
 ///
-/// The shadow's cost is paid on the audio thread for every block, including
-/// blocks the GPU delivers. Measure it for the model size you ship.
+/// Where the shadow runs is the ShadowPolicy. Inline runs it on the audio
+/// thread every block, including blocks the GPU delivers. Worker runs it on a
+/// dedicated non-realtime thread: the callback only copies its input in and,
+/// when the GPU misses, copies the shadow's stamped result out. A shadow
+/// result that is late for its slot is dropped, and a block both paths miss
+/// is silent. None makes a realtime GPU miss silent. Auto times one block of
+/// the CPU model for one channel at prepare() and picks Inline when that cost
+/// times the channel count is at most kAutoInlineMaxCostPct of the block
+/// period, otherwise Worker. Families without a GPU backend, and a GPU family
+/// whose provider could not be prepared, always run Inline, because the CPU
+/// model is their output.
+///
+/// The policy governs realtime misses only. An offline render always runs the
+/// CPU model inline on the same timeline: under Worker and None the model is
+/// kept primed off the audio thread, the start of an offline render finishes
+/// its queue and continues it inline, and the first realtime callback after
+/// the render hands it back to the shadow thread. The node's `shadow_*` status fields are the
+/// authoritative shadow counts; the transport's CpuFallbackDelivered label
+/// means only that the fallback path ran, which can be a silent double miss.
+///
+/// On the GPU path the node detects device loss (the provider's loss query,
+/// which outranks the failed completions it causes) and a hung provider (a
+/// completion watchdog in callback blocks); both report Unavailable.
 ///
 /// Recovery is manual: any latched cause, including a single invalid
 /// callback, fences GPU delivery until the host prepares the node again. The
@@ -73,6 +94,37 @@ GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept;
 /// UI-safe read is `GpuAudioTransport::status_snapshot()`.
 class GpuNeuralRealtimeNode : public GpuAudioNode {
   public:
+    /// Where the built-in CPU shadow runs.
+    enum class ShadowPolicy : std::uint8_t {
+        Auto = 0,
+        Inline = 1,
+        Worker = 2,
+        /// A realtime GPU miss is silent. The model is still kept primed off
+        /// the audio thread so an offline render can continue it. Requires a
+        /// family with a GPU kernel.
+        None = 3,
+    };
+    /// Auto selects Inline when the total inline cost (one channel's cost
+    /// times the channel count) is at most this share of the block period.
+    static constexpr float kAutoInlineMaxCostPct = 15.0f;
+
+    /// Allocation-free shadow diagnostics.
+    struct ShadowStatus {
+        ShadowPolicy requested = ShadowPolicy::Auto;
+        /// One block of the shadow model for one channel, as a percentage of
+        /// the block period, timed on the host thread at prepare(). Negative
+        /// when no shadow was prepared.
+        float inline_cost_per_channel_pct = -1.0f;
+        /// The per-channel cost times the channel count: what Inline would
+        /// spend on the audio thread. This is what Auto compares.
+        float inline_cost_total_pct = -1.0f;
+        /// Worker inputs dropped because the shadow queue was full.
+        std::uint64_t shadow_input_dropped = 0;
+        /// Times the Worker restarted the model's state after a dropped input.
+        std::uint64_t shadow_resyncs = 0;
+        bool workgroup_joined = false;
+    };
+
     /// Why the last prepare() returned false.
     enum class PrepareError : std::uint8_t {
         None,
@@ -88,6 +140,10 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
         ShadowUnpublished,
         BridgeFailed,
         ReleaseFailed,
+        /// ShadowPolicy::None for a family without a GPU kernel.
+        ShadowRequired,
+        /// The shadow model's channels, block size or sample rate differ.
+        ShadowModelMismatch,
     };
 
     struct Config {
@@ -112,6 +168,23 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
         std::uint64_t completion_service_wait_ns = 0;
         /// Only CpuFallback is accepted: the shadow is built in.
         MissPolicy miss_policy = MissPolicy::CpuFallback;
+        ShadowPolicy shadow_policy = ShadowPolicy::Auto;
+        /// Optional cheaper model for the shadow. Never a default: status
+        /// reports `shadow_model_differs`, and its output will not null
+        /// against the GPU model. Binds like `model`.
+        GpuNeuralModelHandle shadow_model;
+        /// Worker queue depth in blocks, for both directions.
+        std::uint32_t shadow_queue_blocks = 16;
+        /// Borrowed os_workgroup_t of the host's audio thread. The Worker
+        /// shadow thread joins it; without one it runs at USER_INTERACTIVE.
+        void* shadow_audio_workgroup = nullptr;
+        /// GPU watchdog budget in callback blocks: a provider that completes
+        /// nothing for this many blocks while work is in flight latches
+        /// ProviderUnresponsive. Zero selects `capacity - 1`, which fires
+        /// before the ingress ring saturates while the worker keeps up with
+        /// the callback. A provider that keeps completing, however late, is
+        /// never unresponsive.
+        std::uint32_t watchdog_blocks = 0;
     };
 
     /// Host thread only.
@@ -150,6 +223,11 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
     /// prepare(). The GPU submission and the CPU shadow both see the
     /// replacement, so they stay comparable.
     std::uint64_t sanitized_input_samples() const noexcept;
+    /// Invalid or out-of-sequence callbacks observed on the CPU-only path.
+    /// They are counted, not latched: nothing is fenced there and the CPU
+    /// model keeps delivering. On the GPU path the same violation fences GPU
+    /// delivery and is reported as the recovery reason.
+    std::uint64_t callback_contract_violations() const noexcept;
     NeuralFamily family() const noexcept;
     /// True only while a GPU backend for this family is prepared and has not
     /// been quiesced by an offline fence.
@@ -168,6 +246,10 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
     GpuAudioStatus status_snapshot() const noexcept override;
     /// Allocation-free capability projection.
     GpuAudioCapabilityReport capability_report() const noexcept;
+    /// Allocation-free shadow diagnostics beyond the public `shadow_*` fields
+    /// of status_snapshot(), which carry the mode and the authoritative
+    /// delivered, late and double-miss counts.
+    ShadowStatus shadow_status() const noexcept;
 
   private:
     struct Impl;
@@ -185,6 +267,7 @@ class GpuNeuralRealtimeNode : public GpuAudioNode {
                                 std::uint64_t) noexcept;
     static std::uint32_t service(void*, std::uint64_t) noexcept;
     static bool fence(void*) noexcept;
+    static void offline_render(void*, bool offline) noexcept;
     static void delivered(void*, std::uint64_t, std::uint8_t, std::uint64_t,
                           std::uint64_t) noexcept;
     static std::uint64_t next_sequence(void*) noexcept;

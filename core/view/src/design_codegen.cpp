@@ -24,6 +24,7 @@
 
 #include "design_import_internal.hpp"
 #include "design_import_native_common.hpp"
+#include "design_import_svg_stroke.hpp"
 #include "design_ir_helpers.hpp"
 
 #include <algorithm>
@@ -700,14 +701,13 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     // AFTER the shorthand, never before: `background` resets `background-size`,
     // so emitting the size first silently throws it away.
     //
-    // Without this a tiled background collapses to one stretched copy of its
-    // gradient. That is not a texture nicety — a design-system grid or scanline
-    // IS a gradient plus a size, so losing the size loses the element. A
-    // spectrum display whose only content was `.grid-x` / `.grid-y` rendered as
-    // an empty panel and was reported as a layout bug three separate times, on
-    // three different panels, before the size was found missing here.
+    // Without this a tiled background collapses to one stretched copy of its gradient.
+    // A design-system grid or scanline IS a gradient plus a size, so losing the size
+    // loses the element: a spectrum display built only from `.grid-x` / `.grid-y`
+    // rendered as an empty panel, misreported as a layout bug on three panels.
     emit_str("backgroundSize", s.background_size);
     emit_str("backgroundPosition", s.background_position);
+    emit_str("backgroundOrigin", s.background_origin);
     emit_str("color", s.color);
     emit_float("opacity", s.opacity);
     emit_str("mixBlendMode", s.mix_blend_mode);
@@ -2092,12 +2092,11 @@ static bool emit_js_svg_path_node(const NativeEmit& e) {
         ss << ind << "setSvgStrokeWidth('" << id << "', " << sw->second << ");\n";
     else if (node.style.border_color && !node.style.border_color->empty() &&
              node.style.border_width && *node.style.border_width > 0.0f)
-        // Paired with the stroke color above: a stroke emitted without
-        // its weight paints at the widget's default, so a 1px rim
-        // arrives at the wrong thickness — visible, but wrong, which is
-        // harder to spot than missing.
+        // Paired with the stroke color above: a stroke without its weight paints at
+        // the default, so a 1px rim arrives visibly wrong, which is harder to spot.
         ss << ind << "setSvgStrokeWidth('" << id << "', "
            << *node.style.border_width << ");\n";
+    emit_svg_stroke_style_js(ss, ind, id, node);
     const float vw = node.style.width.value_or(0.0f);
     const float vh = node.style.height.value_or(0.0f);
     if (vw > 0.0f) ss << ind << "setFlex('" << id << "', 'width', " << vw << ");\n";
@@ -2396,17 +2395,16 @@ static void emit_js_text_node(const NativeEmit& e) {
         for (size_t i = 0; i < node.text_line_boxes.size(); ++i) {
             const auto& box = node.text_line_boxes[i];
             if (i) ss << ", ";
-            ss << "{ left: " << box.left
-               << ", top: " << box.top
-               << ", width: " << box.width
-               << ", height: " << box.height
-               << ", start: " << box.start
+            ss << "{ left: " << box.left << ", top: " << box.top << ", width: " << box.width
+               << ", height: " << box.height << ", start: " << box.start
                << ", length: " << box.length << " }";
         }
         ss << "], " << node.text_layout_basis->width << ", '"
-           << js_single_quote_escape(node.text_layout_basis->resolved_face)
-           << "', " << (browser_wrap_fallback ? "true" : "false")
-           << ");\n";
+           << js_single_quote_escape(node.text_layout_basis->resolved_face) << "', "
+           << (browser_wrap_fallback ? "true" : "false");
+        if (const auto& m = node.text_layout_basis->line_metrics)
+            ss << ", " << m->ascent << ", " << m->descent;
+        ss << ");\n";
     }
     // Cache eligibility and stale-cache fallback are separate. Even when a
     // captured basis cannot be installed, the boxes still prove this was a
@@ -3061,8 +3059,9 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
     // de-centering concentric shapes (knob value-ring vs body). Opt the
     // host's layout pass out; typeof-guarded so the bundle still loads on
     // runtimes that predate the function and on web-compat DOM hosts
-    // (browsers lay out subpixel already).
-    ss << "if (typeof setSubpixelLayout === 'function') setSubpixelLayout('', true);\n\n";
+    // (browsers lay out subpixel already). The root is also the captured frame.
+    ss << "if (typeof setSubpixelLayout === 'function') setSubpixelLayout('', true);\n"
+       << "if (typeof setCapturedFrameRoot === 'function') setCapturedFrameRoot('', true);\n\n";
 
     // Register bundled (non-system) fonts BEFORE any setFontFamily, so a
     // family like "Clash Grotesk" / "Inter" resolves to the shipped face

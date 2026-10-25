@@ -23,10 +23,16 @@ import { beginBridgeBatch, endBridgeBatch, queueBridgeCall } from './bridge-batc
 import {
     applyAllProps,
     applyChangedProps,
+    applyStyleProps,
     clearMaterializedEventCallbacks,
     isEventHandler,
     normalizeHostProps,
 } from './prop-applier.js';
+import {
+    forgetVisibility,
+    resumeVisibility,
+    suspendVisibility,
+} from './prop-applier-visibility.js';
 
 type Type = IntrinsicElementName;
 type Props = Record<string, unknown>;
@@ -308,7 +314,28 @@ function applyButtonCaptionLayout(textId: string, hasText: boolean): void {
 /// after createWidget.
 function createHtmlLabel(id: string, text: string, parentId: string): void {
     call('createLabel', id, text, parentId);
-    call('setWhiteSpace', id, 'normal');
+    applyCreationStyle(id, 'label', TEXT_CREATION_STYLE);
+}
+
+/// CSS's default for text, which a native Label does not share.
+const TEXT_CREATION_STYLE: Props = { whiteSpace: 'normal' };
+
+/// SVG primitives have no intrinsic Yoga size; the JSX width/height lives on
+/// the parent <svg>, so they are pinned to the parent bounds so zero-sized
+/// primitives still paint. Presentational SVG children should not intercept
+/// pointer events meant for the parent <svg> handler.
+const SVG_PRIMITIVE_CREATION_STYLE: Props = {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none',
+};
+
+/// Style the host config gives the widget materializeUnder is creating,
+/// collected while createWidget runs and recorded on the instance so a
+/// removed author prop falls back to it rather than to the bare widget.
+let creationStyleSink: Props | undefined;
+
+function applyCreationStyle(id: string, type: string, style: Props): void {
+    applyStyleProps(id, type, style);
+    creationStyleSink = { ...creationStyleSink, ...style };
 }
 
 // ── element-name → bridge createX dispatch ──────────────────────────
@@ -414,8 +441,7 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     // captured/computed display, alignment, and positioning
                     // styles remain free to override it afterwards.
                     call('createRow', id, parentId);
-                    call('setFlex', id, 'align_items', 'center');
-                    call('setFlex', id, 'justify_content', 'center');
+                    applyCreationStyle(id, type, { alignItems: 'center', justifyContent: 'center' });
                     const textId = id + '__text';
                     // Always create the caption—even for nested markup—so a
                     // dynamic nested↔plain-text React update has a stable
@@ -484,14 +510,7 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     // width/height lives on the parent <svg>. Pin children
                     // to the parent bounds so zero-sized primitives still
                     // paint.
-                    call('setPosition', id, 'absolute');
-                    call('setTop', id, 0);
-                    call('setLeft', id, 0);
-                    call('setRight', id, 0);
-                    call('setBottom', id, 0);
-                    // Presentational SVG children should not intercept
-                    // pointer events meant for the parent <svg> handler.
-                    call('setPointerEvents', id, 'none');
+                    applyCreationStyle(id, type, SVG_PRIMITIVE_CREATION_STYLE);
                     return;
                 }
                 case 'circle': {
@@ -523,38 +542,17 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                         }
                     }
                     // Same fill-parent sizing as <path> (see comment above).
-                    call('setPosition', id, 'absolute');
-                    call('setTop', id, 0);
-                    call('setLeft', id, 0);
-                    call('setRight', id, 0);
-                    call('setBottom', id, 0);
-                    // Presentational SVG children should not intercept
-                    // pointer events meant for the parent <svg> handler.
-                    call('setPointerEvents', id, 'none');
+                    applyCreationStyle(id, type, SVG_PRIMITIVE_CREATION_STYLE);
                     return;
                 }
                 case 'rect': {
                     call('createSvgRect', id, parentId);
-                    call('setPosition', id, 'absolute');
-                    call('setTop', id, 0);
-                    call('setLeft', id, 0);
-                    call('setRight', id, 0);
-                    call('setBottom', id, 0);
-                    // Presentational SVG children should not intercept
-                    // pointer events meant for the parent <svg> handler.
-                    call('setPointerEvents', id, 'none');
+                    applyCreationStyle(id, type, SVG_PRIMITIVE_CREATION_STYLE);
                     return;
                 }
                 case 'line': {
                     call('createSvgLine', id, parentId);
-                    call('setPosition', id, 'absolute');
-                    call('setTop', id, 0);
-                    call('setLeft', id, 0);
-                    call('setRight', id, 0);
-                    call('setBottom', id, 0);
-                    // Presentational SVG children should not intercept
-                    // pointer events meant for the parent <svg> handler.
-                    call('setPointerEvents', id, 'none');
+                    applyCreationStyle(id, type, SVG_PRIMITIVE_CREATION_STYLE);
                     return;
                 }
                 case 'g':        call('createCol', id, parentId); return; // <svg><g> group
@@ -925,6 +923,9 @@ export const PulpHostConfig: HostConfig<
         // prop-applier through here.
         const normalizedProps = normalizeHostProps(type, props as Record<string, unknown>);
         const id = (normalizedProps.id as string) ?? autoId(rootContainer);
+        // A new widget starts visible. An authored id can come back after its
+        // previous widget left while a boundary held it hidden.
+        forgetVisibility(id);
         // Public instances expose the web-compat Element shim when it is
         // available. Refs need DOM-shaped methods such as getContext(),
         // getBoundingClientRect(), style setters, and addEventListener().
@@ -1108,6 +1109,27 @@ export const PulpHostConfig: HostConfig<
         markMaterializedTreeDirty();
         // No-op for v0 — React always issues per-child removals.
         // Could be optimized later by tracking a list of root children.
+    },
+
+    // ── Suspense visibility ────────────────────────────────────────
+    // A suspended boundary keeps its primary children mounted and hides the
+    // top-most host widgets under it; resolving reveals them. The reveal
+    // restores the author's own `visible`/`display`, not a blanket true.
+    // Text instances are synthetic Labels, hidden on their own widget id.
+    // The reconciler can hide a widget before an ancestor's placement creates
+    // it; the write is a batched setter, so it reaches the bridge after the
+    // commit's creates.
+    hideInstance(instance) {
+        suspendVisibility(instance.id);
+    },
+    unhideInstance(instance, _props) {
+        resumeVisibility(instance.id);
+    },
+    hideTextInstance(textInstance) {
+        suspendVisibility((textInstance as unknown as Instance).id);
+    },
+    unhideTextInstance(textInstance, _text) {
+        resumeVisibility((textInstance as unknown as Instance).id);
     },
 
     // ── Updates ────────────────────────────────────────────────────
@@ -1449,6 +1471,7 @@ function bindSourceLocation(child: Instance): void {
 
 function materializeUnder(parentId: string, child: Instance, index?: number): void {
     if (child.onBridge) return;
+    creationStyleSink = undefined;
     createWidget(child.type, child.id, parentId, child.props);
     // An older native host has no indexed insert and can only append. Ordering
     // then degrades exactly as it did before this call existed, rather than
@@ -1462,7 +1485,9 @@ function materializeUnder(parentId: string, child: Instance, index?: number): vo
     // so state it explicitly — otherwise every imported paragraph inside a
     // width-constrained box truncates. An element that authored its own
     // `whiteSpace` still wins: applyAllProps runs after this.
-    if (child.anonymousTextTarget) call('setWhiteSpace', child.id, 'normal');  // same CSS default as createHtmlLabel
+    if (child.anonymousTextTarget) applyCreationStyle(child.id, child.type, TEXT_CREATION_STYLE);
+    child.creationStyle = creationStyleSink;
+    creationStyleSink = undefined;
     if (child._dom && typeof child._dom === 'object' && child.textTargetId) {
         (child._dom as Record<string, unknown>).__pulpTextTargetId = child.textTargetId;
     }
@@ -1525,6 +1550,7 @@ function unregisterDomSubtree(instance: Instance): void {
         if (typeof id === 'string' && id.length > 0) {
             registry.delete(id);
             clearMaterializedEventCallbacks(id);
+            forgetVisibility(id);
         }
         node._parentElement = null;
     };
@@ -1532,6 +1558,7 @@ function unregisterDomSubtree(instance: Instance): void {
     else {
         registry.delete(instance.id);
         clearMaterializedEventCallbacks(instance.id);
+        forgetVisibility(instance.id);
     }
 }
 

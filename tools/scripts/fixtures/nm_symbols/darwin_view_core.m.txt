@@ -1,0 +1,12 @@
+channel_strip_view.cpp.o:
+0000000000000940 (__DATA,__const) weak private external __ZTIN4pulp4view16ChannelStripViewE
+0000000000000958 (__TEXT,__const) weak private external __ZTSN4pulp4view16ChannelStripViewE
+0000000000000798 (__DATA,__const) weak external automatically hidden __ZTVN4pulp4view16ChannelStripViewE
+
+widgets.cpp.o:
+0000000000023200 (__DATA,__const) weak private external __ZTINSt3__110__function6__funcIZN4pulp4view10SliderCore12notify_valueENS3_6NotifyEEUlvE_FvvEEE
+00000000000232b8 (__DATA,__const) weak private external __ZTINSt3__112format_errorE
+000000000001e93c (__TEXT,__const) weak private external __ZTSNSt3__110__function6__funcIZN4pulp4view10SliderCore12notify_valueENS3_6NotifyEEUlvE_FvvEEE
+000000000001ea84 (__TEXT,__const) weak private external __ZTSNSt3__112format_errorE
+00000000000231a8 (__DATA,__const) weak external automatically hidden __ZTVNSt3__110__function6__funcIZN4pulp4view10SliderCore12notify_valueENS3_6NotifyEEUlvE_FvvEEE
+00000000000232d0 (__DATA,__const) weak external automatically hidden __ZTVNSt3__112format_errorE

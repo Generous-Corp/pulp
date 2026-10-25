@@ -795,6 +795,55 @@ function(pulp_add_test_suite NAME)
     _pulp_test_data_register_suite(${NAME} ${_target} ${P_SOURCES})
 endfunction()
 
+# A libFuzzer target plus its bounded ctest smoke. Only meaningful under
+# PULP_ENABLE_FUZZING (the caller guards the call); the smoke runs the target
+# over its seed corpus for a fixed number of iterations so the required lane of
+# a fuzzing build proves every target links, loads its seeds and survives a
+# short mutation pass. The open-ended exploration budget belongs to the
+# nightly workflow, which runs the same binaries with -max_total_time.
+#
+#   pulp_add_libfuzzer_target(<name>
+#       SOURCES <src>...            fuzz entry point and oracles
+#       LIBRARIES <lib>...          link line
+#       CORPUS <dir>                seed corpus directory (absolute)
+#       [INCLUDE_DIRECTORIES ...]   extra private include dirs
+#       [RUNS <n>]                  mutation iterations for the smoke (default 2000)
+#       [MAX_LEN <bytes>]           input ceiling for the smoke (default 65536)
+#       [FIXTURES_REQUIRED <f>...]  ctest fixtures the smoke needs (a corpus generator))
+function(pulp_add_libfuzzer_target NAME)
+    cmake_parse_arguments(P "" "CORPUS;RUNS;MAX_LEN"
+        "SOURCES;LIBRARIES;INCLUDE_DIRECTORIES;FIXTURES_REQUIRED" ${ARGN})
+    if(NOT P_SOURCES OR NOT P_CORPUS)
+        message(FATAL_ERROR "pulp_add_libfuzzer_target(${NAME}): SOURCES and CORPUS are required")
+    endif()
+    if(NOT P_RUNS)
+        set(P_RUNS 2000)
+    endif()
+    if(NOT P_MAX_LEN)
+        set(P_MAX_LEN 65536)
+    endif()
+    add_executable(${NAME} ${P_SOURCES})
+    target_include_directories(${NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz ${P_INCLUDE_DIRECTORIES})
+    target_link_libraries(${NAME} PRIVATE ${P_LIBRARIES})
+    target_compile_options(${NAME} PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
+    target_link_options(${NAME} PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS})
+    # libFuzzer writes every new interesting input into the first corpus
+    # directory it is given, so the smoke gets a scratch directory first and
+    # the seeds second; a checked-in seed corpus is never grown by a test run.
+    set(_scratch "${CMAKE_CURRENT_BINARY_DIR}/fuzz-corpus/${NAME}-smoke")
+    file(MAKE_DIRECTORY "${_scratch}")
+    add_test(NAME ${NAME}-smoke
+        COMMAND ${NAME} -runs=${P_RUNS} -max_len=${P_MAX_LEN} -seed=1 -timeout=25
+            -rss_limit_mb=2048 "${_scratch}" "${P_CORPUS}")
+    set_tests_properties(${NAME}-smoke PROPERTIES
+        LABELS "fuzz;libfuzzer"
+        ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1")
+    if(P_FIXTURES_REQUIRED)
+        set_tests_properties(${NAME}-smoke PROPERTIES FIXTURES_REQUIRED "${P_FIXTURES_REQUIRED}")
+    endif()
+endfunction()
+
 # The test directory compiles its shared support sources once (see
 # PulpTestSharedObjects.cmake).
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL "${CMAKE_SOURCE_DIR}/test")

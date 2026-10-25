@@ -21,6 +21,7 @@
 #include <numeric>
 
 #ifdef PULP_HAS_TEXT_SHAPING
+#include "font_tables.hpp"
 // SkParagraph headers — available when Skia is built with text shaping
 #include "modules/skparagraph/include/ParagraphBuilder.h"
 #include "modules/skparagraph/include/ParagraphStyle.h"
@@ -653,28 +654,9 @@ struct TextShaper::Impl {
         // entry the host lacks could take its ascent from the substitute and
         // its advances from a later entry. One mode for both is the point.
         opts.fallback_mode = FallbackMode::Deterministic;
-        // Mirror skia_canvas.cpp's split_font_family_list so comma-
-        // separated CSS family stacks are walked correctly. Strip
-        // whitespace + matching outer quotes.
-        size_t pos = 0;
-        while (pos < font_family.size()) {
-            size_t comma = font_family.find(',', pos);
-            std::string seg = font_family.substr(
-                pos, (comma == std::string::npos ? font_family.size() : comma) - pos);
-            pos = (comma == std::string::npos) ? font_family.size() : comma + 1;
-            // Strip outer whitespace.
-            size_t a = seg.find_first_not_of(" \t");
-            size_t b = seg.find_last_not_of(" \t");
-            if (a == std::string::npos) continue;
-            seg = seg.substr(a, b - a + 1);
-            // Strip matching outer quotes.
-            if (seg.size() >= 2
-                && (seg.front() == '"' || seg.front() == '\'')
-                && seg.back() == seg.front()) {
-                seg = seg.substr(1, seg.size() - 2);
-            }
-            if (!seg.empty()) opts.family_stack.push_back(std::move(seg));
-        }
+        // Entries keep their quotes; the resolver reads a quoted entry as a
+        // literal family name rather than a generic keyword.
+        opts.family_stack = split_css_font_family_list(font_family);
         auto resolved = FontResolver::instance().resolve_family_list(opts);
         return resolved.typeface;
     }
@@ -808,24 +790,15 @@ struct TextShaper::Impl {
         skia::textlayout::ParagraphStyle paragraph_style;
         skia::textlayout::TextStyle text_style;
         std::vector<SkString> families;
-        size_t cursor = 0;
-        while (cursor < font_family.size()) {
-            const size_t comma = font_family.find(',', cursor);
-            std::string entry = font_family.substr(
-                cursor, comma == std::string::npos ? std::string::npos
-                                                   : comma - cursor);
-            const size_t first = entry.find_first_not_of(" \t\n\r\f\v\"'");
-            const size_t last = entry.find_last_not_of(" \t\n\r\f\v\"'");
-            if (first != std::string::npos && last != std::string::npos)
-                families.emplace_back(entry.substr(first, last - first + 1).c_str());
-            if (comma == std::string::npos) break;
-            cursor = comma + 1;
-        }
+        for (const auto& entry : split_css_font_family_list(font_family))
+            families.emplace_back(platform_family_for_css_family(entry).c_str());
         const std::string emoji_family = ctx->emoji_family_name();
         if (!emoji_family.empty()) families.emplace_back(emoji_family.c_str());
         if (families.empty()) families.emplace_back("");
         text_style.setFontFamilies(families);
         text_style.setFontSize(font_size);
+        apply_auto_optical_size(
+            text_style, resolve_typeface(font_family, font_weight, font_slant).get(), font_size);
         text_style.setFontStyle(SkFontStyle(
             font_weight, SkFontStyle::kNormal_Width,
             skia_slant_from_int(font_slant)));
@@ -920,36 +893,23 @@ struct TextShaper::Impl {
                 skia::textlayout::ParagraphStyle paragraph_style;
                 skia::textlayout::TextStyle text_style;
                 std::vector<SkString> families;
-                size_t cursor = 0;
-                while (cursor < font_family.size()) {
-                    const size_t comma = font_family.find(',', cursor);
-                    std::string entry = font_family.substr(
-                        cursor, comma == std::string::npos
-                                    ? std::string::npos : comma - cursor);
-                    const size_t first = entry.find_first_not_of(" \t\n\r\f\v");
-                    const size_t last = entry.find_last_not_of(" \t\n\r\f\v");
-                    if (first != std::string::npos && last != std::string::npos) {
-                        entry = entry.substr(first, last - first + 1);
-                        if (entry.size() >= 2 &&
-                            (entry.front() == '\'' || entry.front() == '"') &&
-                            entry.front() == entry.back()) {
-                            entry = entry.substr(1, entry.size() - 2);
-                        }
-                        if (!entry.empty()) families.emplace_back(entry.c_str());
-                    }
-                    if (comma == std::string::npos) break;
-                    cursor = comma + 1;
-                }
+                for (const auto& entry : split_css_font_family_list(font_family))
+                    families.emplace_back(platform_family_for_css_family(entry).c_str());
                 const std::string emoji_family = ctx->emoji_family_name();
                 if (!emoji_family.empty()) families.emplace_back(emoji_family.c_str());
                 if (families.empty()) families.emplace_back("");
                 text_style.setFontFamilies(families);
+                const auto primary = resolve_typeface(font_family, font_weight, font_slant);
                 text_style.setFontSize(font_size);
+                apply_auto_optical_size(text_style, primary.get(), font_size);
                 text_style.setFontStyle(SkFontStyle(
                     font_weight, SkFontStyle::kNormal_Width,
                     skia_slant_from_int(font_slant)));
-                if (letter_spacing != 0.0f)
-                    text_style.setLetterSpacing(letter_spacing);
+                // The painter adds the primary face's AAT tracking to the
+                // letter-spacing; measure with the same spacing it draws.
+                const float tracking = aat_tracking_px(primary.get(), font_size);
+                if (letter_spacing + tracking != 0.0f)
+                    text_style.setLetterSpacing(letter_spacing + tracking);
                 for (const auto& feature : font_features) {
                     char tag_chars[4] = {
                         static_cast<char>((feature.tag >> 24) & 0xFF),
@@ -1047,6 +1007,7 @@ struct TextShaper::Impl {
                     }
                     tstyle.setFontFamilies(families);
                     tstyle.setFontSize(font_size);
+                    apply_auto_optical_size(tstyle, typeface.get(), font_size);
                     pstyle.setTextStyle(tstyle);
                     auto collection_use = ctx->lock_font_collection_use();
                     auto pb = skia::textlayout::ParagraphBuilder::make(

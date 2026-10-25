@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261024-importer-f2a-lowering-20261024-watch",
+  "created_at": "2026-10-24T17:08:48Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Imported theme-painted range/checkbox/radio controls (native_theme verdict native) lower onto the existing Chromium-refresh widget skins from capture-recorded HTML state (ua_* attributes, color-scheme newly captured, inputChecked read), with their UA-default background/border dropped; the skins paint in the captured CSS-px-snapped rect via View::self_paint_bounds(). Only native-verdict imported controls are affected; Chromium stays the only oracle and Skia/Dawn the renderer, so no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-browser-capture-tree",
+    "ctest --test-dir build -R pulp-test-design-import-form-controls",
+    "node --test tools/import-design/browser_capture/semantics.test.mjs",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

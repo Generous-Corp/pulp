@@ -247,6 +247,58 @@ TEST_CASE("WaveNet shared spec rejects zero stream instances and dilation",
     CHECK(result.error == WavenetSpecError::InvalidShape);
 }
 
+TEST_CASE("WaveNet shared spec bounds each layer's causal reach before allocation",
+          "[gpu_audio][shared_io][wavenet]") {
+    // Every layer's history lives in a power-of-two ring of at least
+    // reach + block columns. A model asking for more than kWavenetMaxRingColumns
+    // is rejected by the validator, so no program or provider ever sizes it.
+    const auto spec_with = [](Fixture& fixture, std::uint32_t dilation, std::uint32_t block) {
+        fixture.dilations[1] = dilation; // kernel 2: reach == dilation
+        return WavenetProgramSpec{
+            .block_size = block,
+            .head_scale = 1.0f,
+            .stream_instances = 1,
+            .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
+            .weights = fixture.weights,
+        };
+    };
+    constexpr std::uint32_t block = 64;
+    const auto limit = static_cast<std::uint32_t>(kWavenetMaxRingColumns);
+
+    Fixture at_limit;
+    CHECK(validate_wavenet_spec(spec_with(at_limit, limit - block, block)).accepted());
+
+    Fixture over_limit;
+    CHECK(validate_wavenet_spec(spec_with(over_limit, limit - block + 1u, block)).error ==
+          WavenetSpecError::HistoryOverflow);
+
+    // A crafted capture whose reach is near 2^31 used to pass validation and
+    // then spin the provider's ring sizing forever. Every WaveNet program and
+    // provider prepare runs this validator first, so it must refuse it at once.
+    // (Kept free of the Dawn program factory so the test links with GPU off.)
+    Fixture crafted;
+    const auto crafted_spec = spec_with(crafted, std::uint32_t{1} << 31, block);
+    const auto started = std::chrono::steady_clock::now();
+    CHECK(validate_wavenet_spec(crafted_spec).error == WavenetSpecError::HistoryOverflow);
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
+}
+
+TEST_CASE("WaveNet shared spec rejects an array without layers",
+          "[gpu_audio][shared_io][wavenet]") {
+    // The first layer of array 0 starts each block's head sum on the GPU, so a
+    // spec whose array has no layers must never reach a provider.
+    Fixture fixture;
+    fixture.layer.dilations = {};
+    const WavenetProgramSpec spec{
+        .block_size = 32,
+        .head_scale = 1.0f,
+        .stream_instances = 1,
+        .arrays = std::span<const WavenetLayerSpec>(&fixture.layer, 1),
+        .weights = fixture.weights,
+    };
+    CHECK(validate_wavenet_spec(spec).error == WavenetSpecError::InvalidLayer);
+}
+
 TEST_CASE("WaveNet shared spec rejects invalid flags and non-mono final heads",
           "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;

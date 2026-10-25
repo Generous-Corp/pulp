@@ -90,6 +90,8 @@ REPO_PREFIXES = ("tools/", "test/", "hooks/", ".githooks/", ".github/", "docs/",
                  "core/", "examples/", "templates/", "inspect/", "experimental/", "cmake/", "external/")
 LITERAL_RE = re.compile(r"""["'](?P<p>(?:%s)[A-Za-z0-9_./@+-]+)["']""" % "|".join(re.escape(p) for p in REPO_PREFIXES))
 NODE_IMPORT_RE = re.compile(r"""(?:from\s+|import\s*\(?\s*|require\s*\(\s*)["'](?P<s>\.{1,2}/[^"']+)["']""")
+# Node test files `node --test` may list after the first one.
+NODE_SOURCE_SUFFIXES = (".mjs", ".js", ".cjs")
 SHELL_SOURCE_LINE_RE = re.compile(r"""^\s*(?:source|\.)\s+(?P<rest>.+)$""")
 SHELL_TAIL_RE = re.compile(r"""(?P<f>[A-Za-z0-9_./-]+\.(?:sh|bash))["']?\s*$""")
 # A shell script usually names repository files through a directory variable
@@ -700,6 +702,11 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None, *,
     for a in args:
         for cand in (Path(a), wd / a):
             if cand.is_absolute() and w._in_repo(cand):
+                # `node --test a.mjs b.mjs ...` runs every listed file, so each
+                # one's imports are inputs, not only the first file's. Walk
+                # before adding: walk_node skips a file already in `seen`.
+                if kind == "node" and cand.suffix in NODE_SOURCE_SUFFIXES and cand.is_file():
+                    w.walk_node(cand, seen)
                 seen.add(cand)
     if tracked is None:
         tracked = tracked_paths(root)
@@ -822,9 +829,11 @@ def _read_json(path: Path) -> dict | None:
 
 def source_signals(root: Path, rel: str, defines: list[str]) -> list[str]:
     """The data-read signals a source's text carries: the fixed ones plus the
-    names of its executable's definitions that point into the checkout."""
+    names of its executable's definitions that point into the checkout. A
+    mention inside a comment is not a read."""
     try:
-        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        text = strip_c_comments((root / rel).read_text(encoding="utf-8", errors="replace"),
+                                keep_strings=True)
     except OSError:
         return []
     hits = [sig for sig in DATA_SIGNALS if sig in text]
@@ -1278,6 +1287,18 @@ def carry_unconfigured_entries(current: dict, checked_in: dict, inventory: dict,
     return sorted(set(carried))
 
 
+def entries_write_would_delete(current: dict, checked_in: dict) -> list[str]:
+    """Checked-in test and executable names absent from what --write would
+    write, after unconfigured entries were carried. Main's list holds every
+    gate-shaped configuration's entries, so a name missing here is either a
+    registration that was removed or one this configure simply cannot see; the
+    two look identical from here, so --write refuses unless told."""
+    gone = set((checked_in.get("tests") or {})) - set(current.get("tests") or {})
+    if "executables" in current:
+        gone |= set((checked_in.get("executables") or {})) - set(current["executables"])
+    return sorted(gone)
+
+
 def load_inventory(build_dir: str | None, inventory_json: str | None) -> dict | None:
     try:
         if inventory_json:
@@ -1434,6 +1455,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--base", default=None, help="diff-scope --check to changes since this ref "
                     "(default: PULP_SCRIPT_INPUTS_BASE, origin/$GITHUB_BASE_REF, or HEAD^1 in a merge group)")
     ap.add_argument("--full", action="store_true", help="--check every entry, ignoring any base")
+    ap.add_argument("--allow-delete", action="store_true",
+                    help="let --write remove checked-in entries this configure does not produce "
+                         "(only when their registration was really removed)")
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
@@ -1491,6 +1515,18 @@ def main(argv: list[str]) -> int:
         except (OSError, json.JSONDecodeError):
             previous = {}
         carried = carry_unconfigured_entries(current, previous, inventory, root, build_dir)
+        dropped = entries_write_would_delete(current, previous)
+        if dropped and not a.allow_delete:
+            print("script-test-inputs: refusing to write: it would delete "
+                  f"{len(dropped)} checked-in entr{'y' if len(dropped) == 1 else 'ies'} this configure "
+                  "does not produce: " + ", ".join(dropped) + ". A configure that cannot see an "
+                  "entry (an option off, a fixture it does not build) must not remove it; "
+                  f"file={DEFAULT_LIST}; cause_class=UNSEEN_ENTRY_DELETION; "
+                  "fix=regenerate from the gate's configure, or pass --allow-delete if the "
+                  "registration was really removed; safe_to_auto_apply=no; "
+                  "verify=`git diff --stat test/ctest_script_inputs.json` shows no removed entry",
+                  file=sys.stderr)
+            return 2
         list_path.parent.mkdir(parents=True, exist_ok=True)
         list_path.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         print(f"script-test-inputs: wrote {len(current['tests'])} declared tests "

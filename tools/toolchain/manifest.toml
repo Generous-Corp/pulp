@@ -104,20 +104,20 @@ unlocked = { windows-arm64 = "conda-forge publishes no windows-arm64 clang-forma
 # tools/toolchain/shipyard.sha256, which tools/install-shipyard.sh checks every
 # download against before installing. The digests are the release's own
 # checksums.sha256; `generate.py --shipyard <tag>` rewrites this table from it.
-version = "v0.335.0"
+version = "v0.353.0"
 repo = "danielraffel/Shipyard"
 # sha256 of install.sh at refs/tags/<version>: install-shipyard.sh runs that
 # script, so it is pinned like a binary and refused if it differs.
-installer_sha256 = "c6ad3645c90cbe91ab6c5caef20b3cc11d4a71abf2443f59aef38fee7387c9a8"
+installer_sha256 = "64fbb7ec1136e1cbf1e799754abc0132832e20b1c8e63f98bd1ad079883fc029"
 
 [shipyard.assets]
-"shipyard-linux-arm64" = "8c4b542bd744b7b76f552d51f7b8314e4fe5ef684b113d4517188972712f3f24"
-"shipyard-linux-x64" = "e0e7c5198adace9e092444c7eeb4ed14ca87114ed42617cef9c9b79a6d467d57"
-"shipyard-macos-arm64.dmg" = "b43228abec588b9093636cec4ebda5c85f69773d902d12baf5bd72b3a28c3ba8"
-"shipyard-windows-x64.exe" = "50c7ce8401a8b35cb6e24c085bf693bae5adf68c9b4037ed136feca1ad971d9a"
-"shipyard-workstream-provider-linux-arm64" = "9ec56631e1b60588505ee7efd4f8865f8ef4b0cbf9bdc8990f36778477acbc8e"
-"shipyard-workstream-provider-linux-x64" = "d97c3cf32a2e2aa6c2c763279581d7dbadd3038f1b7dfde80cbbf130f7082318"
-"shipyard-workstream-provider-windows-x64.exe" = "bf42f0bb5dfee507343cc5d93ef56005479f14b19518c94d5614e1199500f4a1"
+"shipyard-linux-arm64" = "68cba1afe6186f0d0aa278e0af5a73b29aff84b248ff843653ea28ea4a42c5f2"
+"shipyard-linux-x64" = "78b99f962930072ba18ebd06f0fa92849d2e13259f5dbe5db744c4c99e7e7752"
+"shipyard-macos-arm64.dmg" = "153d4707faf6929e48e423f8a8339be94248b106cc32999b95316be0d3d60d82"
+"shipyard-windows-x64.exe" = "68f791443ceadd80ea5cc0056093bbb83f8d1d7d9692a950b4adb5b11b29e8a8"
+"shipyard-workstream-provider-linux-arm64" = "8e767fcb353c1bc87c2b06e7255a1df319bf35e7b153da6918eeeb67336e8388"
+"shipyard-workstream-provider-linux-x64" = "233f419a52a36a4a2d46898498d11455dbfd31dcfdd77af4e51cf0a4d9efb2dd"
+"shipyard-workstream-provider-windows-x64.exe" = "420f80837ea353a3742c16841055c18c2aa74b3c238915adaba6e1f1f74a93e8"
 
 [npm]
 # Project dependencies install with `npm ci` from these committed lockfiles,

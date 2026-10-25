@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/auto_ui.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -619,6 +621,52 @@ TEST_CASE("AutoUi sync updates the padded value row", "[view][auto_ui]") {
     CHECK(value->text() == "-24.0 dB");
 }
 
+namespace {
+class DamageCapturingHost : public WindowHost {
+  public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override {
+        return true;
+    }
+    void repaint() override {}
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+};
+} // namespace
+
+TEST_CASE("AutoUi value rows repaint their own box when a value changes",
+          "[view][auto_ui][partial-repaint]") {
+    // Automation and drags rewrite the value row every step. A content-sized
+    // Label re-runs layout and marks the whole surface; the fixed, centered row
+    // marks only the knob and its readout.
+    StateStore store;
+    store.add_parameter(make_param(7, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param(8, "Mix", "%", {0.0f, 100.0f, 50.0f}));
+    auto root = AutoUi::build(store);
+    root->set_bounds({0, 0, 400, 300});
+    root->layout_children();
+    auto* tile = root->child_at(1)->child_at(0)->child_at(0);
+    auto* value = dynamic_cast<Label*>(tile->child_at(2));
+    REQUIRE(value != nullptr);
+    const auto tile_bounds = tile->bounds();
+    // Still centered under the knob.
+    CHECK(value->bounds().width == Catch::Approx(tile_bounds.width));
+
+    DamageCapturingHost host;
+    root->set_window_host(&host);
+    host.clear_pending_dirty();
+    store.set_value(7, -24.5f);
+    AutoUi::sync(*root, store);
+    CHECK(value->text() == "-24.5 dB");
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    REQUIRE(host.has_pending_dirty_bounds());
+    const auto d = host.pending_dirty_bounds();
+    CHECK(d.width < 200.0f);
+    CHECK(d.height < 200.0f);
+    root->set_window_host(nullptr);
+}
+
 TEST_CASE("AutoUi parameter changes preserve settled control geometry",
           "[view][auto_ui][layout][regression]") {
     // Six controls exercise the first-drag failure: the scroll body learned its
@@ -897,4 +945,26 @@ TEST_CASE("AutoUi knobs follow automation and show host modulation with no plugi
     REQUIRE_THAT(knob->modulated_display_value(), WithinAbs(0.4f, 1e-5f));
     REQUIRE(store.get_value(7) == 80.0f);
     REQUIRE(begins.empty());
+}
+
+TEST_CASE("AutoUi never builds Chromium's push-button surface", "[view][auto_ui][button-skin]") {
+    // Only an explicitly constructed ButtonSurface wears the browser skin; the
+    // generated editor keeps Pulp's own widgets for every parameter kind.
+    StateStore store;
+    store.add_parameter(make_param(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param(2, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f}));
+    store.add_parameter(make_param(3, "Mode", "", {0.0f, 3.0f, 0.0f, 1.0f}));
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+    int views = 0, surfaces = 0;
+    std::function<void(const View&)> walk = [&](const View& v) {
+        ++views;
+        if (dynamic_cast<const ButtonSurface*>(&v) != nullptr)
+            ++surfaces;
+        for (size_t i = 0; i < v.child_count(); ++i)
+            walk(*v.child_at(i));
+    };
+    walk(*root);
+    CHECK(views > 3);
+    CHECK(surfaces == 0);
 }

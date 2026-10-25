@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-ui-perf-20261021-watch",
+  "created_at": "2026-10-22T09:52:44Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Editor repaint scheduling and AU v2 editor lifetime in the macOS plug-in and standalone view hosts: a live FrameClock subscriber no longer forces a composite, the CoreGraphics plug-in host draws bounded damage once per display-link tick, AutoUi readouts and knob drags request bounded repaints, and the AU v2 Cocoa view hands its NSView to the host app and tears the editor down at the start of the view's dealloc. No design-import, Chromium, DesignIR, rendering-backend, Skia/Dawn, packaging or asset authority moves: these change when a host composites and who owns an editor view, not what is rendered or how.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-auto-ui",
+    "ctest --test-dir build -R pulp-test-host-frame-pump",
+    "ctest --test-dir build -R pulp-test-meter-source",
+    "ctest --test-dir build -R pulp-test-widget-bounded-repaint",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

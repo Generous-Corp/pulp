@@ -171,6 +171,47 @@ assets can be deduplicated by later baked outputs. Nodes preserve their raw
 URI attributes and may receive a parallel `*AssetId` attribute such as
 `srcAssetId` or `backgroundImageAssetId` for stable manifest references.
 
+## Font Family Assets
+
+`fontFamilyAssets` lists the fonts a design ships rather than expects the host
+to have. A renderer registers each one under `family` before laying out text,
+so a node whose `fontFamily` names that family is shaped with the shipped face.
+Each entry points at an asset manifest entry through `asset_id`; `resolvedPath`
+is the file the CLI's asset pass resolved it to.
+
+```json
+"fontFamilyAssets": [
+  {
+    "family": "JetBrains Mono",
+    "weight": 100,
+    "weightMax": 800,
+    "fontStyle": "normal",
+    "unicodeRange": "U+0000-00FF, U+0131",
+    "asset_id": "pulp-materialized-asset-<sha256>",
+    "resolvedPath": "assets/<sha256>.woff2"
+  }
+]
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `family` | string | Family name nodes reference. Required. |
+| `style` | string | Informational face name from a design tool (`Regular`, `Semi Bold`). |
+| `weight` | integer | The face's weight, or the lower bound of `weightMax`'s range. Default 400. |
+| `weightMax` | integer | Upper bound of a CSS `font-weight` range (a variable face). Absent for one weight. |
+| `fontStyle` | string | CSS `font-style` descriptor of a captured `@font-face` rule. |
+| `unicodeRange` | string | CSS `unicode-range` descriptor, verbatim. Absent means every code point. |
+| `asset_id` | string | Manifest entry holding the `.ttf`, `.otf` or `.woff2` bytes. |
+| `resolvedPath` | string | Filesystem path stamped by the CLI asset pass. |
+
+Figma plugin exports fill `family`, `style`, `weight` and `asset_id`. A browser
+capture of a page that serves its own fonts adds one entry per `@font-face`
+rule, in the order the page defined them, and fills the CSS descriptors.
+Several entries may share one asset, and one family may span several assets
+split by `unicodeRange`; CSS checks overlapping ranges from the last rule
+defined to the first. The descriptors are written only when set, so a document
+without them serializes as it did before they existed.
+
 ## Diagnostics
 
 Import diagnostics are structured and serializable. The top-level

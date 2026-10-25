@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261022-native-inert-style-clip-path-none-watch",
+  "created_at": "2026-10-22T05:04:40Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "The native DesignIR materializer treats clip-path none (any case, surrounding whitespace) as no clip instead of storing the keyword as SVG path data, matching what the JS lane already did, and a metamorphic suite checks that eleven inert style declarations leave the drawlist, the following sibling and the Skia raster unchanged. The licensing page gains two idea-only attribution rows. A local paint correction plus tests and docs; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R 'inert.style'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
