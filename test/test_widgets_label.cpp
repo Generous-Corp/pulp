@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <sstream>
 #include <vector>
 
 using namespace pulp::view;
@@ -97,12 +98,10 @@ TEST_CASE("intrinsic and multiline Label text still invalidates layout",
         CHECK(View::layout_generation() == generation + 1);
     }
 
-    SECTION("fixed width but multiline") {
+    SECTION("fixed width but multiline of intrinsic height") {
         Label label("one line");
         label.flex().dim_width = {120.0f, DimensionUnit::px};
         label.flex().preferred_width = 120.0f;
-        label.flex().dim_height = {40.0f, DimensionUnit::px};
-        label.flex().preferred_height = 40.0f;
         label.set_multi_line(true);
         label.clear_layout_dirty();
         const auto generation = View::layout_generation();
@@ -112,6 +111,212 @@ TEST_CASE("intrinsic and multiline Label text still invalidates layout",
         CHECK(label.layout_dirty());
         CHECK(View::layout_generation() == generation + 1);
     }
+
+    SECTION("fixed box but baseline-aligned") {
+        View row;
+        row.flex().direction = FlexDirection::row;
+        row.flex().align_items = FlexAlign::baseline;
+        auto owned = std::make_unique<Label>("one line");
+        auto* label = owned.get();
+        label->flex().preferred_width = 120.0f;
+        label->flex().preferred_height = 40.0f;
+        label->set_multi_line(true);
+        row.add_child(std::move(owned));
+        label->clear_layout_dirty();
+
+        label->set_text("one line that wraps onto another line");
+
+        CHECK(label->layout_dirty());
+    }
+
+    SECTION("a px dimension Yoga is never given") {
+        // yoga_layout() applies a px size only through preferred_*, so this
+        // Label is sized by its text and must reflow when the text changes.
+        auto root = std::make_unique<View>();
+        root->set_bounds({0, 0, 400, 100});
+        root->flex().direction = FlexDirection::row;
+        root->flex().align_items = FlexAlign::start;
+        auto owned = std::make_unique<Label>("short");
+        auto* label = owned.get();
+        label->flex().dim_width = {240.0f, DimensionUnit::px};
+        label->flex().dim_height = {26.0f, DimensionUnit::px};
+        root->add_child(std::move(owned));
+        root->layout_children_if_needed();
+        const auto before = label->bounds();
+
+        label->set_text("a much longer string than before");
+
+        CHECK(label->layout_dirty());
+        root->layout_children_if_needed();
+        CHECK(label->bounds().width > before.width);
+    }
+
+    SECTION("a percent height under a parent of auto height") {
+        // The percent is not fixed by any ancestor, so the fast path cannot
+        // prove the box holds still and the copy change must relay out.
+        auto root = std::make_unique<View>();
+        root->set_bounds({0, 0, 200, 400});
+        root->flex().align_items = FlexAlign::start;
+        auto column = std::make_unique<View>();
+        column->flex().preferred_width = 120.0f;
+        column->flex().dim_width = {120.0f, DimensionUnit::px};
+        auto owned = std::make_unique<Label>("one");
+        auto* label = owned.get();
+        label->flex().preferred_width = 120.0f;
+        label->flex().dim_width = {120.0f, DimensionUnit::px};
+        label->flex().dim_height = {50.0f, DimensionUnit::percent};
+        label->set_multi_line(true);
+        column->add_child(std::move(owned));
+        root->add_child(std::move(column));
+        root->layout_children_if_needed();
+        label->clear_layout_dirty();
+
+        label->set_text("one line of copy that wraps onto several more lines than before");
+
+        CHECK(label->layout_dirty());
+        CHECK_FALSE(root->layout_is_current());
+        root->layout_children_if_needed();
+        CHECK(root->layout_is_current());
+    }
+
+    SECTION("a percent size under a parent that fixes it still skips layout") {
+        // The bridge's setFlex(width|height, '100%') inside a fixed box: the
+        // percent resolves against a definite size, so the copy cannot move it.
+        auto root = std::make_unique<View>();
+        root->set_bounds({0, 0, 400, 300});
+        auto box = std::make_unique<View>();
+        box->flex().preferred_width = 240.0f;
+        box->flex().preferred_height = 26.0f;
+        auto owned = std::make_unique<Label>("BAND 1/64");
+        auto* label = owned.get();
+        label->flex().dim_width = {100.0f, DimensionUnit::percent};
+        label->flex().dim_height = {100.0f, DimensionUnit::percent};
+        label->set_multi_line(true);
+        box->add_child(std::move(owned));
+        root->add_child(std::move(box));
+        root->layout_children_if_needed();
+        label->clear_layout_dirty();
+
+        label->set_text("BAND 2/64");
+
+        CHECK_FALSE(label->layout_dirty());
+        CHECK(root->layout_is_current());
+    }
+
+    SECTION("fixed box but its text has a layout box of its own") {
+        Label label("");
+        label.flex().preferred_width = 120.0f;
+        label.flex().preferred_height = 40.0f;
+        label.set_multi_line(true);
+        label.clear_layout_dirty();
+
+        // An empty copy has no text box; the first one may need one.
+        label.set_text("one line that wraps onto another line");
+
+        CHECK(label.layout_dirty());
+    }
+}
+
+namespace {
+
+// A captured readout: absolutely placed, both dimensions fixed, and
+// `white-space: normal`, so it wraps.
+std::unique_ptr<View> build_fixed_readout(const std::string& text, float width, bool rtl) {
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 200, 120});
+    auto owned = std::make_unique<Label>(text);
+    owned->set_id("readout");
+    owned->set_position(View::Position::absolute);
+    owned->set_left(30.0f);
+    owned->set_top(20.0f);
+    // Both forms, as the DesignIR materializer writes a fixed size.
+    owned->flex().preferred_width = width;
+    owned->flex().preferred_height = 30.0f;
+    owned->flex().dim_width = {width, DimensionUnit::px};
+    owned->flex().dim_height = {30.0f, DimensionUnit::px};
+    owned->set_multi_line(true);
+    if (rtl)
+        owned->set_direction(View::WritingDirection::rtl);
+    root->add_child(std::move(owned));
+    root->add_child(std::make_unique<Label>("SPECTR"));
+    root->layout_children_if_needed();
+    return root;
+}
+
+// Every command a paint records, so two paints compare exactly.
+std::vector<std::string> paint_commands(View& root) {
+    RecordingCanvas canvas;
+    root.paint_all(canvas);
+    std::vector<std::string> out;
+    for (const auto& c : canvas.commands()) {
+        std::ostringstream line;
+        line << static_cast<int>(c.type) << '|' << c.text << '|' << c.color.r << ',' << c.color.g
+             << ',' << c.color.b << ',' << c.color.a;
+        for (float v : c.f)
+            line << '|' << v;
+        for (float v : c.floats)
+            line << '|' << v;
+        out.push_back(line.str());
+    }
+    return out;
+}
+
+// The tree that skipped its layout passes paints and places exactly what a
+// tree laid out from scratch with the same copy and width does.
+void check_matches_fresh(View& live, const std::string& copy, float width, bool rtl) {
+    auto fresh = build_fixed_readout(copy, width, rtl);
+    CHECK(paint_commands(live) == paint_commands(*fresh));
+    CHECK(live.child_at(0)->bounds() == fresh->child_at(0)->bounds());
+    CHECK(live.child_at(1)->bounds() == fresh->child_at(1)->bounds());
+}
+
+} // namespace
+
+TEST_CASE("fixed-box wrapping Label text repaints without a layout pass",
+          "[view][widget][label][layout][perf]") {
+    // Yoga never measures a node with both dimensions fixed, and paint breaks
+    // the lines at the box width, so no copy can move a box.
+    for (const bool rtl : {false, true}) {
+        INFO("rtl: " << rtl);
+        auto live = build_fixed_readout("-60.0 dB", 60.0f, rtl);
+        auto* label = dynamic_cast<Label*>(live->child_at(0));
+        REQUIRE(label != nullptr);
+        REQUIRE(live->layout_is_current());
+        const std::vector<std::string> copies =
+            rtl ? std::vector<std::string>{"\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d -12.5 dB",
+                                           "\xd7\x90 0.0 dB",
+                                           "\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d a readout long "
+                                           "enough to wrap twice"}
+                : std::vector<std::string>{"-12.5 dB", "0.0 dB",
+                                           "a readout long enough to wrap twice", "-3 dB"};
+        for (const auto& copy : copies) {
+            INFO("copy: " << copy);
+            const auto passes = View::layout_pass_count();
+            label->set_text(copy);
+            CHECK(live->layout_is_current());
+            live->layout_children_if_needed();
+            CHECK(View::layout_pass_count() == passes);
+            check_matches_fresh(*live, copy, 60.0f, rtl);
+        }
+    }
+}
+
+TEST_CASE("a fixed-box Label resized after a skipped layout matches a fresh tree",
+          "[view][widget][label][layout]") {
+    // The skipped pass must leave nothing a later resize reads stale: the
+    // new width re-breaks the copy the Label already holds.
+    auto live = build_fixed_readout("-60.0 dB", 60.0f, false);
+    auto* label = dynamic_cast<Label*>(live->child_at(0));
+    REQUIRE(label != nullptr);
+    const std::string copy = "a readout long enough to wrap twice";
+    label->set_text(copy);
+    REQUIRE(live->layout_is_current());
+    label->flex().preferred_width = 110.0f;
+    label->flex().dim_width = {110.0f, DimensionUnit::px};
+    label->invalidate_layout();
+    live->layout_children_if_needed();
+    CHECK(label->bounds().width == 110.0f);
+    check_matches_fresh(*live, copy, 110.0f, false);
 }
 
 TEST_CASE("fixed-size Label text with its own layout slot still lays out",
@@ -228,10 +433,18 @@ TEST_CASE("Captured Label text that can resize its box still lays out",
         CHECK(root.tree_layout_generation() != generation);
     }
 
-    SECTION("percent width") {
+    SECTION("percent width of an auto-width parent") {
+        // A percent of a parent that sizes itself from its content is not a
+        // fixed size. (A percent of the root, or of any chain of fixed sizes
+        // up to it, is, and skips layout like a px size does.)
         View root;
         root.set_bounds({0, 0, 400, 200});
-        auto& label = add_captured_label(root, 40.0f);
+        root.flex().direction = FlexDirection::row;
+        root.flex().align_items = FlexAlign::start;
+        auto owned_column = std::make_unique<View>();
+        auto& column = *owned_column;
+        root.add_child(std::move(owned_column));
+        auto& label = add_captured_label(column, 40.0f);
         if (label.cached_line_boxes().empty())
             SKIP("no resolvable face");
         label.flex().dim_width = {50.0f, DimensionUnit::percent};

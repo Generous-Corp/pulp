@@ -480,9 +480,13 @@ line on the captured box` in `test/test_widgets_label.cpp`.
   that alone used to send every `set_text` through `invalidate_layout()`. On the
   example instrument and MIDI-effect panels, 34 of 44 and 59 of 68 slot writes
   cost a full Yoga pass on each frame. `Label::set_text` now requests paint only
-  when width and height are both explicit, the Label is not a baseline
-  participant, it holds captured line boxes, and it has no children. The last
-  two conditions matter. Without captured boxes, a centred lone Label gets an
+  when width and height are both fixed, the Label is not a baseline
+  participant, has no children and no text slot of its own, and either holds
+  captured line boxes or changes between two non-empty copies. "Fixed" is what
+  `yoga_layout()` hands Yoga as a number: a px size through `preferred_*`
+  (a px `dim_*` alone is never applied), a viewport size, or a percent whose
+  every ancestor up to the root fixes that axis. A percent under an auto-sized
+  parent is not fixed. Without captured boxes, a centred lone Label gets an
   anonymous text slot from layout that is sized from its copy, so new copy
   moves layout output inside a pinned box. The older single-line fast path
   skipped that layout and painted into the stale slot (72 px wide for a
