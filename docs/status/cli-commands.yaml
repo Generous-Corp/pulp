@@ -1970,7 +1970,7 @@ commands:
     summary: Validate, preview, install, update, list, rescan, remove, and reveal data-only content packs for installed plugins. Content packs are the end-user data lane and never execute package code.
     subcommands:
       - name: validate
-        summary: Validate a .pulpcontent archive or content-pack directory without executing package code. Archives must include files.sha256.json, every payload file must be listed there, and hashes must match.
+        summary: Validate a .pulpcontent archive or content-pack directory without executing package code. Archives must include files.sha256.json, every payload file must be listed there, and hashes must match. An archive whose declared decompressed size or entry count exceeds the pack cap (4 GiB total, 1 GiB per entry, 65536 entries by default) is refused before anything is extracted.
         args:
           - name: path
             kind: positional
@@ -1979,6 +1979,9 @@ commands:
           - name: --json
             kind: flag
             description: Emit machine-readable validation JSON
+          - name: --max-pack-bytes
+            kind: option
+            description: Lower the pack byte caps to at most this many decompressed bytes (total and per entry); a value above a default leaves it
       - name: preview
         summary: Preview content-pack compatibility and reload policy against a trusted plugin runtime manifest without installing anything. Archives must include files.sha256.json.
         args:
@@ -1997,7 +2000,7 @@ commands:
             kind: flag
             description: Emit machine-readable preview JSON including install policy and restart guidance
       - name: install
-        summary: Install a validated data-only content pack for a plugin. Archives must include files.sha256.json.
+        summary: Install a validated data-only content pack for a plugin. Archives must include files.sha256.json and fit the decompressed-size pack cap.
         args:
           - name: path
             kind: positional
@@ -2014,8 +2017,11 @@ commands:
           - name: --root
             kind: option
             description: Override the user data root for tests or sandboxed installs
+          - name: --max-pack-bytes
+            kind: option
+            description: Lower the pack byte caps to at most this many decompressed bytes (total and per entry); a value above a default leaves it
       - name: update
-        summary: Update a validated local content pack for a plugin with rollback if replacing an installed version fails. Archives must include files.sha256.json.
+        summary: Update a validated local content pack for a plugin with rollback if replacing an installed version fails. Archives must include files.sha256.json and fit the decompressed-size pack cap.
         args:
           - name: path
             kind: positional
@@ -2032,6 +2038,9 @@ commands:
           - name: --root
             kind: option
             description: Override the user data root for tests or sandboxed installs
+          - name: --max-pack-bytes
+            kind: option
+            description: Lower the pack byte caps to at most this many decompressed bytes (total and per entry); a value above a default leaves it
       - name: list
         summary: List installed content packs.
         args:

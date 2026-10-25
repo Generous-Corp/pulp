@@ -428,6 +428,41 @@ class ComparatorV2Tests(unittest.TestCase):
         self.assertIn("sample_gpu_end_order:metal_shared_event:128:idle",
                       evaluate(seal(r))["reasons"])
 
+    def test_paravirtual_metal_gpu_clock_drift_is_inconclusive_not_refused(self):
+        # The VM GPU's clock drifts past the margin under load; the receipt is
+        # not counted, but it is not an impossible timeline either.
+        def drifted(device_name):
+            r = receipt()
+            r["device"] = {"metal_name": device_name, "registry_id": 1, "unified_memory": True}
+            c = find(r, "metal_shared_event", 128)
+            c["samples"]["gpu_end_ns"][7] = c["samples"]["visible_ns"][7] + 500_000
+            c["samples"]["gpu_end_ns"][9] = c["samples"]["visible_ns"][9] + 500_000
+            find(r, "dawn_staged_timestamps_timed_wait_any", 64)["samples"]["gpu_busy_ns"][2] = 5_000_000
+            return evaluate(seal(r))
+
+        result = drifted("Apple Paravirtual device")
+        self.assertNotEqual(result["verdict"], "REFUSED", result["reasons"])
+        self.assertIn("gpu_clock_untrusted:paravirtual_metal:metal_shared_event:128:idle",
+                      result["reasons"])
+        self.assertIn("gpu_clock_untrusted:paravirtual_metal:"
+                      "dawn_staged_timestamps_timed_wait_any:64:idle", result["reasons"])
+        # One reason per cell, however many samples drift.
+        self.assertEqual(sum(r.startswith("gpu_clock_untrusted:paravirtual_metal:metal_shared_event:128")
+                             for r in result["reasons"]), 1)
+        # Control: the same drift on a physical GPU is still refused.
+        result = drifted("Apple M3 Ultra")
+        self.assertEqual(result["verdict"], "REFUSED")
+        self.assertIn("sample_gpu_end_order:metal_shared_event:128:idle", result["reasons"])
+
+    def test_paravirtual_metal_still_refuses_host_clock_disorder(self):
+        r = receipt()
+        r["dawn"]["adapter_name"] = "Apple Paravirtual device"
+        c = find(r, "dawn_imported_timed_wait_any", 64)
+        c["samples"]["visible_ns"][5] = c["samples"]["submit_ns"][5] - 10
+        result = evaluate(seal(r))
+        self.assertEqual(result["verdict"], "REFUSED")
+        self.assertIn("sample_order:dawn_imported_timed_wait_any:64:idle", result["reasons"])
+
     def test_gpu_busy_longer_than_latency_is_refused(self):
         r = receipt()
         c = find(r, "dawn_staged_timestamps_timed_wait_any", 64)
