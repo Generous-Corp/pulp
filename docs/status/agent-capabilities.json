@@ -11456,7 +11456,7 @@
               "sin_cycles(float phase_cycles)",
               "sin_cycles(float phase_cycles, FastTrigProfile profile)",
               "tanh(float x)",
-              "tanh_pade_clamp(float x)",
+              "tanh_clamp(float x)",
               "tanh_accurate(float x)",
               "tanh_accurate_rational(float x, float u)",
               "tanh_minimax(float x)",
