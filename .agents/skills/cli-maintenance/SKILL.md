@@ -434,7 +434,11 @@ upgrade installs, and their tests compare against
 `tools/import-design/browser_capture/runtime_manifest.txt`. A module added to
 the manifest alone passes a source build and fails both upgrade tests; the
 release `common_cli_members` in `tools/scripts/release_product_matrix.json`
-needs it too. Update all four together.
+needs it too. Update all four together. A module missing from the manifest
+does not show up as a missing file. The built `pulp-import-design` runs its
+staged `browser_capture-v1/` copy, the capability probe hits
+`ERR_MODULE_NOT_FOUND`, and discovery reports that the system Chrome "does not
+provide the required headless/CDP capture capabilities".
 
 ## Adding a CLI Command — Full Checklist
 

@@ -3,6 +3,7 @@
 #include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_capture_fonts.hpp"
 
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/view/design_ir_io.hpp>
 #include <pulp/view/design_sources.hpp>
 
@@ -154,4 +155,88 @@ TEST_CASE("captured fonts that cannot be written fail the import",
     std::string error;
     CHECK_FALSE(attach_captured_font_faces(ir, *bundle, blocked, error));
     CHECK_FALSE(error.empty());
+}
+
+namespace {
+
+// A digest no carried bytes have.
+constexpr const char* kWrongSha =
+    "2cbb1c0ae72e1b35e1a1ec3c1c6f99d3a3f3a0b8e3e9e7d0b5ec2e3e5ed0d0f1";
+
+// The font-faces.json a capture writes for a plain page whose two url() faces
+// loaded "regular bytes" and "bold bytes".
+std::string page_font_faces(const std::string& regular_sha, const std::string& bold_sha) {
+    return R"JSON({"schema":"pulp-browser-capture-font-faces-v1",
+  "faces":[
+    {"family":"Pulp Page Face","weight":"400","style":"normal","unicode_range":"",
+     "format":"truetype","source":"pulp-capture:///fonts/Jost-Regular.ttf","sha256":")JSON" +
+           regular_sha + R"JSON("},
+    {"family":"Pulp Page Face","weight":"300 800","style":"italic","unicode_range":"U+0-FF",
+     "format":"woff2","source":"pulp-capture:///fonts/Jost-Bold.woff2","sha256":")JSON" +
+           bold_sha + R"JSON("}],
+  "assets":[
+    {"sha256":")JSON" +
+           regular_sha +
+           R"JSON(","mime_type":"font/ttf","byte_length":13,"data_base64":"cmVndWxhciBieXRlcw=="},
+    {"sha256":")JSON" +
+           bold_sha +
+           R"JSON(","mime_type":"font/woff2","byte_length":10,"data_base64":"Ym9sZCBieXRlcw=="}]
+})JSON";
+}
+
+} // namespace
+
+TEST_CASE("a plain page's url() @font-face files become IR font assets",
+          "[import-design][browser-capture][font-assets]") {
+    using pulp::import_design::attach_page_font_faces;
+    const auto regular = pulp::runtime::sha256_hex(std::string_view("regular bytes"));
+    const auto bold = pulp::runtime::sha256_hex(std::string_view("bold bytes"));
+    ScratchDir scratch;
+    const auto record = scratch.path / "font-faces.json";
+    std::ofstream(record, std::ios::binary) << page_font_faces(regular, bold);
+
+    DesignIR ir;
+    std::string error;
+    const bool attached = attach_page_font_faces(ir, record, scratch.path / "fonts", error);
+    INFO(error);
+    REQUIRE(attached);
+    REQUIRE(ir.font_family_assets.size() == 2);
+    const auto& first = ir.font_family_assets[0];
+    CHECK(first.family == "Pulp Page Face");
+    CHECK(first.weight == 400);
+    CHECK(first.weight_max == 0);
+    CHECK(first.font_style == "normal");
+    CHECK(first.asset_id == "pulp-page-font-" + regular);
+    CHECK(read_file(first.resolved_path) == "regular bytes");
+    CHECK(fs::path(first.resolved_path).extension() == ".ttf");
+    const auto& second = ir.font_family_assets[1];
+    CHECK(second.weight == 300);
+    CHECK(second.weight_max == 800);
+    CHECK(second.font_style == "italic");
+    CHECK(second.unicode_range == "U+0-FF");
+    CHECK(fs::path(second.resolved_path).extension() == ".woff2");
+    REQUIRE(ir.asset_manifest.assets.size() == 2);
+    CHECK(ir.asset_manifest.assets[1].mime == "font/woff2");
+    CHECK(ir.asset_manifest.assets[1].content_hash == bold);
+}
+
+TEST_CASE("a page font record whose bytes do not match fails the import",
+          "[import-design][browser-capture][font-assets]") {
+    using pulp::import_design::attach_page_font_faces;
+    const auto bold = pulp::runtime::sha256_hex(std::string_view("bold bytes"));
+    ScratchDir scratch;
+    const auto record = scratch.path / "font-faces.json";
+    std::ofstream(record, std::ios::binary) << page_font_faces(kWrongSha, bold);
+
+    DesignIR ir;
+    std::string error;
+    CHECK_FALSE(attach_page_font_faces(ir, record, scratch.path / "fonts", error));
+    CHECK(error.find("do not match their SHA-256") != std::string::npos);
+    CHECK(ir.font_family_assets.empty());
+
+    // No record means the page loaded no url() face.
+    DesignIR untouched;
+    CHECK(attach_page_font_faces(untouched, scratch.path / "absent.json", scratch.path / "fonts",
+                                 error));
+    CHECK(untouched.font_family_assets.empty());
 }

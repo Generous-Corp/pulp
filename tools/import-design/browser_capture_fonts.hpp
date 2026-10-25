@@ -33,4 +33,17 @@ bool attach_captured_font_faces(pulp::view::DesignIR& ir,
                                 const pulp::view::ClaudeBundle& materialized,
                                 const std::filesystem::path& font_directory, std::string& error);
 
+/// Add the @font-face faces a plain page loaded from url() sources, recorded
+/// by the capture in `font_faces_json` (font-faces.json beside capture.json,
+/// schema pulp-browser-capture-font-faces-v1), to `ir`, in-place.
+///
+/// Fonts are written and bound exactly as `attach_captured_font_faces` writes
+/// and binds materialized ones, under the asset id
+/// `pulp-page-font-<sha256>`. A missing file means the page loaded no url()
+/// face and leaves `ir` unchanged. Returns false and sets `error` when the
+/// record is malformed, a face names bytes it does not carry, or the bytes do
+/// not match their recorded SHA-256.
+bool attach_page_font_faces(pulp::view::DesignIR& ir, const std::filesystem::path& font_faces_json,
+                            const std::filesystem::path& font_directory, std::string& error);
+
 } // namespace pulp::import_design
