@@ -106,6 +106,22 @@
     endif()
     catch_discover_tests(pulp-test-skia-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # The glyph preblend every Skia surface is created with: selection rule,
+    # props, and that retained layers, screenshots and GPU surfaces carry it.
+    # The raster cases run everywhere; the GPU cases skip without an adapter.
+    add_executable(pulp-test-text-raster-policy test_text_raster_policy.cpp)
+    target_link_libraries(pulp-test-text-raster-policy PRIVATE
+        pulp::render pulp::view Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-text-raster-policy PRIVATE
+        PULP_TEST_JETBRAINS_TTF="${CMAKE_SOURCE_DIR}/external/fonts/JetBrainsMono-Regular.ttf")
+    if(PULP_HAS_SKIA)
+        target_compile_definitions(pulp-test-text-raster-policy PRIVATE PULP_HAS_SKIA=1)
+        target_include_directories(pulp-test-text-raster-policy PRIVATE ${SKIA_INCLUDE_DIRS})
+    endif()
+    pulp_test_data(pulp-test-text-raster-policy NO_DEFINE
+        PATHS external/fonts/JetBrainsMono-Regular.ttf)
+    catch_discover_tests(pulp-test-text-raster-policy ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
     # HeadlessSurface CI wrapper: one-call offscreen Dawn/Skia helper
     # for golden-test fixtures. Compiles on every
     # build; runtime cases gate on PULP_HAS_SKIA && __APPLE__ at the
