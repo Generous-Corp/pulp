@@ -171,15 +171,17 @@ families and weights Skia resolves a different face than CoreText paints:
   face ascent 13.69, width 120.0.
 - JetBrains Mono at 9 px: Skia adds 0.12 px of leading the painted face lacks.
 
-So the same design can place labels 0.5 to 1 logical px apart between a lite
-and a full build: whole labels shift, glyphs are identical. It shows on
-design-imported panels that use system families at non-400 weights
-(PulpDesignSynth, PulpDesignArp); Inter and AutoUi text are unaffected. The
-lite placement is the correct one. Before reading a lite-vs-full capture diff
-as a regression, check that the differing bands are pure vertical shifts
-(shift-search residual near 0), and compare `TextShaper` metrics from one probe
-executable built against each stack (link `pulp::canvas`, and the same plus
-`$<TARGET_OBJECTS:pulp-canvas-lite-objects>`).
+Captured text is not affected: a Label reuses a capture's line breaks only
+when `resolved_face_identity()` matches the capture's face, and the lite stack
+answers that through CoreText (`coretext_face_postscript_name`), the face it
+paints. When the lite answer was empty, every captured label re-broke with its
+own measurement and the design panels moved by whole labels (0.31% and 0.47%
+of pixels on PulpDesignSynth and PulpDesignArp); with the answer they match the
+full build (0 pixels, and one 21x16 px numeric box). So a lite-vs-full diff on
+a design panel is a regression to chase, not the face difference above.
+`pulp-test-face-identity-full` and `-lite` hold the bundled faces' identities
+equal across the two stacks. Text measured without a capture can still differ
+by up to 1 logical px for the system families listed above.
 
 ## A Label with element children does not paint at its own origin
 

@@ -16,16 +16,18 @@ faster in proportion. The Standalone app opens the same lite editor but still
 links Dawn through the standalone host's own render code.
 
 Editors that already opened on the CoreGraphics host (Pulp's generated AutoUi
-editor, and C++ views that never set `requires_gpu_host()`) render the same,
-with one correction. That host paints text through CoreText, but before this
-release it measured text through Skia, and the two can resolve different faces
-for the same family and weight. "Helvetica Neue" at weight 600 and 12 px, for
-example, measured with ascent 13.92 and width 116.7 but painted a face with
-ascent 13.69 and width 120.0; JetBrains Mono also picked up 0.12 px of leading
-at 9 px that the painted face does not have. The lite stack measures the face
-it paints, so labels in such editors can move by up to 1 logical pixel, now
-placed by the metrics of the glyphs actually drawn. Pulp's AutoUi editors and
-Inter text are unaffected.
+editor, and C++ views that never set `requires_gpu_host()`) render the same.
+That host paints text through CoreText; the lite stack also measures through
+CoreText, and it answers `resolved_face_identity()` with the face CoreText
+paints, so a design-imported panel still reuses the line breaks its capture
+recorded. Measured against the full stack: PulpGain, Pulp Delay and
+PulpDesignSynth are pixel-identical, and PulpDesignArp differs in one 21x16 px
+numeric box. Text that is measured rather than captured can still sit up to 1
+logical pixel differently for a few system families at non-400 weights, because
+the full build measures those through Skia, which can resolve a different face
+than CoreText paints ("Helvetica Neue" 600 at 12 px: ascent 13.92 and width
+116.7 in Skia, 13.69 and 120.0 for the painted face). The lite placement
+matches the glyphs drawn.
 
 Two kinds of plug-in need the full stack and must now say so:
 

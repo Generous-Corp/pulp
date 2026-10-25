@@ -382,14 +382,14 @@ GPU hosts and link `pulp-canvas-lite-objects` and `pulp-view-lite-objects`
 paths. Objects on the link line take precedence over the library's archive
 members, so the Skia versions are never loaded, and the binary links with
 `-dead_strip` so nothing they would have reached survives. The editor opens on
-the CoreGraphics host in both builds and draws the same glyphs. Text placement
-can differ by 0.5 to 1 logical pixel on editors that use system families at
-non-400 weights: the CoreGraphics host paints with CoreText, and the lite build
-also measures with CoreText, while the full build measures with Skia, which can
-resolve a different face for the same family and weight ("Helvetica Neue" 600
-at 12 px: ascent 13.92 and width 116.7 in Skia, 13.69 and 120.0 for the painted
-face). The lite placement matches the glyphs drawn. AutoUi and Inter text render
-byte-identically in both builds.
+the CoreGraphics host in both builds and draws the same glyphs, and captured
+line breaks are reused in both, because the lite build resolves a face's
+identity through CoreText. Text measured without a capture can differ by up to
+1 logical pixel for a few system families at non-400 weights: the lite build
+measures with CoreText, the face it paints, while the full build measures with
+Skia, which can resolve a different face ("Helvetica Neue" 600 at 12 px: ascent
+13.92 and width 116.7 in Skia, 13.69 and 120.0 for the painted face). AutoUi,
+Inter and design-imported panels render the same in both builds.
 
 A plug-in without a custom editor that does not need Pulp's generated parameter
 editor should use `NO_EDITOR`: it links none of the view, canvas, Skia, Dawn or
