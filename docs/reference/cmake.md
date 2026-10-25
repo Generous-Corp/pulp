@@ -302,6 +302,14 @@ module after `pulp_add_plugin()`:
 set_target_properties(MyPlugin_VST3 PROPERTIES PULP_DEAD_STRIP OFF)
 ```
 
+**Development-only shared runtime.** `-DPULP_DEV_SHARED_UI=ON` (macOS, off by
+default; `pulp dev` and `pulp loop` turn it on in SDK projects) links the VST3, CLAP, AU and
+Standalone binaries of plug-ins with the default view stack against one
+`libpulp-dev-shared-ui.<version>.dylib` in the build tree instead of the static
+Pulp libraries, so a one-file edit relinks a module of about a megabyte. Those
+artifacts load only from that build tree, and every ship path refuses them. See
+[Fast plug-in relinks](../guides/build.md#fast-plug-in-relinks-pulp_dev_shared_ui).
+
 Coverage: `plugin-module-dead-strip-PulpGain-<FORMAT>` checks the flag on
 PulpGain's modules, `cmake-plugin-dead-strip-switch` checks that the option and
 the property each remove it, and `test/test_host.cpp` loads and processes the

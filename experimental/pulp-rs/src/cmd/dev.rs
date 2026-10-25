@@ -57,6 +57,10 @@ pub struct DevArgs {
     pub wants_help: bool,
     /// `--examples` — configure a source checkout with examples on.
     pub examples: bool,
+    /// `--no-dev-shared`: keep static plug-in links instead of the
+    /// development-only shared Pulp runtime `pulp dev` uses for an SDK
+    /// project on macOS.
+    pub no_dev_shared: bool,
 }
 
 /// Print the C++ parity usage banner to `out`.
@@ -79,6 +83,8 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         \x20 --all                  Build every target and run every test (default: only\n\
         \x20                        those affected by the working diff)\n\
         \x20 --examples             Configure a source checkout with example projects\n\
+        \x20 --no-dev-shared        Link plug-ins statically instead of against the\n\
+        \x20                        development-only shared Pulp runtime (macOS SDK projects)\n\
         \x20 -- args...             Arguments passed to the launched app\n\n\
         Note: pulp-rs does not yet implement the watch loop. A single\n\
         build pass runs; use the C++ binary for live-reload workflows.\n";
@@ -122,6 +128,8 @@ pub fn parse_args(args: &[String]) -> DevArgs {
             out.run_validate = true;
         } else if a == "--examples" {
             out.examples = true;
+        } else if a == "--no-dev-shared" {
+            out.no_dev_shared = true;
         } else if a == "--run" && i + 1 < args.len() {
             i += 1;
             out.launch_target = Some(args[i].clone());
@@ -185,6 +193,9 @@ pub fn run<S: Spawner>(
         passthrough: build_tail,
         all: args.all,
         examples: args.examples,
+        // An SDK project on macOS; the source checkout keeps static links
+        // because its own tests inspect modules as they ship.
+        dev_shared: cfg!(target_os = "macos") && proj.standalone && !args.no_dev_shared,
         ..orchestrate::BuildArgs::default()
     };
     let rc = orchestrate::build_with(&proj, &build_req, spawner, out)?;

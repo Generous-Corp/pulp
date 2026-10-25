@@ -318,6 +318,56 @@ Unit-tested in both directions in `test/test_sdk_distribution_guard.cpp`, plus
 the CMake-level provenance contract in
 `test/cmake/test_sdk_provenance_contract.cmake`.
 
+### Dev-shared builds (`PULP_DEV_SHARED_UI`) never ship, and shipping still works
+
+`pulp dev` / `pulp loop` in SDK projects on macOS (and `pulp build
+--dev-shared`) link plug-in modules against
+`libpulp-dev-shared-ui.<version>.dylib` in the build tree
+(`tools/cmake/PulpDevSharedUi.cmake`). That module loads only on the machine and
+in the directory that built it. The rule: static builds ship exactly as before;
+a dev-shared build may be signed for local loading, never distributed.
+
+- `cmd_ship()` treats a dev-shared dir (`build_dir_is_dev_shared()` in
+  `tools/cli/ship_dev_build_guard.hpp`) like a `PULP_DEV_BUILD` dir: `package`,
+  `release` and non-local `sign` build `build-ship/` through `ensure_ship_build()`
+  and ship from it; `notarize`, `share` and `check` read it once it exists.
+  `PULP_DEV_SHARED_UI` is in `kShipBuildDroppedEntries` and set OFF explicitly in
+  the initial cache. Unlike a dev build, `--allow-dev-build` cannot keep a
+  dev-shared dir.
+- `refuse_dev_shared_build()` is the backstop when the redirect did not apply
+  (`sign --path` with a Developer ID and no `build-ship/`): it prints the
+  outermost command as one copy-pasteable line,
+  `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship <args>`.
+- `is_local_signing_identity()` (ad hoc `-`, `Apple Development`,
+  `Mac Developer`, from `--identity`) lets `sign` take a dev-shared build as it
+  is: no `build-ship/`, no artifact refusal. Ad hoc signing also skips the signing-keychain preflight,
+  because it needs no keychain.
+- `pulp::cli::dev_shared_artifact_offender()` scans every selected artifact for a
+  file named `libpulp-dev-shared-ui.*` or containing those bytes (the runtime's
+  install name, which is in every linked module's load commands). It runs at the
+  same call sites as the Vellum D15 scan, through
+  `enforce_no_development_runtimes()` in `tools/cli/cmd_ship.cpp`, and fails
+  closed on an uninspectable tree.
+- `tools/scripts/build_combined_installer.sh` greps its inputs for the same bytes
+  before any signing tool runs; a grep read error also refuses.
+
+There is no override flag. Tests: the `[dev-shared]` cases in
+`test/test_sdk_distribution_guard.cpp` and `test/test_cli_ship_shellout.cpp`:
+- `package` (also with `--allow-dev-build`), `release` and Developer ID `sign`
+  building a static `build-ship/` (real CMake, `LANGUAGES NONE` project);
+  `notarize` and `share` without `build-ship/` shipping nothing;
+- a static build that signs ad hoc, verifies with `codesign --verify --strict`,
+  and packages;
+- a dev-shared build that signs ad hoc in place, while a Developer ID
+  `sign --path` of it prints the exact fix;
+- `sign --path`, `sign` scan, `package`, `notarize` and `share` against artifact
+  bytes;
+
+plus
+`test_dev_shared_build_is_rejected_before_signing` in
+`tools/scripts/test_build_combined_installer.py`. A new distribution path must
+call `enforce_no_development_runtimes()` on exactly the inputs it selected.
+
 ## Workflows
 
 ### One-off share (macOS): hand a build to a friend, properly signed
