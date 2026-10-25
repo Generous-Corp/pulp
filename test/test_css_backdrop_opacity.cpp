@@ -100,17 +100,18 @@ void require_pixel(const std::vector<uint8_t>& rgba, uint32_t w, int x,
                    const std::array<int, 3>& chrome, const std::string& what) {
     const uint8_t* p = &rgba[(static_cast<size_t>(kRow) * w + x) * 4];
     for (int c = 0; c < 3; ++c) {
-        INFO(what << " x=" << x << " channel " << c << ": got "
-                  << static_cast<int>(p[c]) << ", Chrome " << chrome[c]);
+        INFO(what << " x=" << x << " channel " << c << ": got " << static_cast<int>(p[c])
+                  << ", Chrome " << chrome[c]);
         REQUIRE(std::abs(static_cast<int>(p[c]) - chrome[c]) <= kTolerance);
     }
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("backdrop-filter is composited at the element's opacity, as Chrome does",
           "[view][canvas][backdrop-filter]") {
-    if (!raw_rgba_render_available()) SKIP("no raw-RGBA render backend in this build");
+    if (!raw_rgba_render_available())
+        SKIP("no raw-RGBA render backend in this build");
     uint32_t w = 0, h = 0;
     const auto rgba = render_fixture(w, h);
     REQUIRE(w == static_cast<uint32_t>(kW));
