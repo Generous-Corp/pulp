@@ -38,7 +38,7 @@ REGISTRATION_DOMAIN = b"pulp-ctest-registration-v1\0"
 INVENTORY_DOMAIN = b"pulp-ctest-inventory-v1\0"
 DIGEST_DOMAIN = b"pulp-changed-surface-contract-v1\0"
 EXCLUDED_NAME_REGEX = "AudioWorkgroup"
-EXCLUDED_LABEL_REGEX = "validation|slow|performance|bench|quality-lab"
+EXCLUDED_LABEL_REGEX = "validation|slow|performance|bench|quality-lab|gpu-proof"
 NOT_BUILT_PLACEHOLDER = re.compile(
     r"^(?P<target>[A-Za-z0-9_.+:-]+)_NOT_BUILT-(?P<suffix>[0-9a-f]{7,64})$"
 )

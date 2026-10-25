@@ -198,8 +198,11 @@ TEST_CASE("public WaveNet session accepts a reusable slot-depth matrix",
 #define PULP_GPU_AUDIO_NAM_FIXTURE "test/fixtures/neural/example.nam"
 #endif
 
+// Hidden (`[.named-causal]`): an owner-run hardware campaign, not a CI case.
+// Hiding it keeps the exact-provider proof build from adding a case to the
+// gate's discovered selection; run it with "[named-causal]".
 TEST_CASE("named WaveNet fixture remains causal across transport slot reuse",
-          "[gpu_audio][wavenet][session][named-causal]") {
+          "[gpu_audio][wavenet][session][.named-causal]") {
     if (std::getenv("PULP_RUN_NAMED_CAUSAL_CAMPAIGN") == nullptr)
         SKIP("manual authenticated 100000-block campaign is disabled by default");
     pulp::gpu_audio::detail::NamTcnArtifact oracle;

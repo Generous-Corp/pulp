@@ -227,6 +227,7 @@
             PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}"
             PULP_GPU_AUDIO_BUILD_TYPE="$<CONFIG>")
         if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+            pulp_gpu_proof_begin()
             find_package(Python3 REQUIRED COMPONENTS Interpreter)
             set_property(TARGET pulp-gpu-host-mapped-pointer-probe APPEND PROPERTY
                 LINK_DEPENDS
@@ -283,6 +284,7 @@
             set_tests_properties(pulp-gpu-audio-provider-identity PROPERTIES
                 FIXTURES_SETUP pulp_gpu_audio_provider_identity
                 TIMEOUT 60)
+            pulp_gpu_proof_end()
         endif()
         add_test(NAME pulp-gpu-host-mapped-pointer-probe
             COMMAND pulp-gpu-host-mapped-pointer-probe)
@@ -324,19 +326,12 @@
                 SKIP_RETURN_CODE 77
                 TIMEOUT 20)
         if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
-            set_tests_properties(
-                pulp-gpu-host-mapped-pointer-probe
-                pulp-gpu-host-mapped-pointer-oracle-negative-control
-                pulp-gpu-host-mapped-pointer-feature-gate-negative-control
-                pulp-gpu-host-mapped-pointer-write-buffer-counter-negative-control
-                pulp-gpu-host-mapped-pointer-copy-buffer-counter-negative-control
-                pulp-gpu-host-mapped-pointer-map-async-counter-negative-control
-                PROPERTIES FIXTURES_REQUIRED pulp_gpu_audio_provider_identity)
-            if(_pulp_gpu_audio_target_is_arm64)
-                set_tests_properties(
-                    pulp-gpu-host-mapped-pointer-provider-negative-control
-                    PROPERTIES FIXTURES_REQUIRED pulp_gpu_audio_provider_identity)
-            endif()
+            pulp_gpu_proof_begin()
+            # The host-mapped pointer tests above are ordinary gate tests, not
+            # gpu-proof: they check the linked Dawn revision themselves at run
+            # time and never read the bound identity receipt. Requiring the
+            # identity fixture here would make ctest pull that gpu-proof setup
+            # into every selection that runs them, including the gate.
 
             add_executable(pulp-gpu-dawn-shared-io-provider-probe
                 test_gpu_dawn_shared_io_provider_probe.cpp)
@@ -962,6 +957,7 @@
                         TIMEOUT 180)
                 endif()
             endif()
+            pulp_gpu_proof_end()
         endif()
 
         unset(_pulp_gpu_audio_asset_sha256)
