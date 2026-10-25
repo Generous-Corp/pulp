@@ -23,6 +23,8 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/view.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -121,6 +123,51 @@ void require_pixel(const std::vector<uint8_t>& rgba, uint32_t w, int x,
     }
 }
 
+// A RecordingCanvas records the backdrop chain only as its summed blur, so it
+// cannot tell a plain blur from a blur that ends in opacity(). This one keeps
+// the list it was handed.
+class ChainRecordingCanvas final : public pulp::canvas::RecordingCanvas {
+  public:
+    void save_backdrop_filter_chain(float x, float y, float w, float h,
+                                    const FilterChainEntry* chain, int count) override {
+        ++chain_calls;
+        last_chain.assign(chain, chain + count);
+        RecordingCanvas::save_backdrop_filter_chain(x, y, w, h, chain, count);
+    }
+    int chain_calls = 0;
+    std::vector<FilterChainEntry> last_chain;
+};
+
+// Inert, so the allocation probe sees only what View::paint_all allocates.
+class NoOpCanvas final : public pulp::canvas::Canvas {
+  public:
+    void save() override {}
+    void restore() override {}
+    void translate(float, float) override {}
+    void scale(float, float) override {}
+    void rotate(float) override {}
+    void clip_rect(float, float, float, float) override {}
+    void set_fill_color(pulp::canvas::Color) override {}
+    void set_stroke_color(pulp::canvas::Color) override {}
+    void set_line_width(float) override {}
+    void set_line_cap(pulp::canvas::LineCap) override {}
+    void set_line_join(pulp::canvas::LineJoin) override {}
+    void fill_rect(float, float, float, float) override {}
+    void stroke_rect(float, float, float, float) override {}
+    void fill_rounded_rect(float, float, float, float, float) override {}
+    void stroke_rounded_rect(float, float, float, float, float) override {}
+    void fill_circle(float, float, float) override {}
+    void stroke_circle(float, float, float) override {}
+    void stroke_arc(float, float, float, float, float) override {}
+    void stroke_line(float, float, float, float) override {}
+    void set_font(const std::string&, float) override {}
+    void set_text_align(pulp::canvas::TextAlign) override {}
+    void fill_text(const std::string&, float, float) override {}
+    float measure_text(const std::string&) override {
+        return 0.0f;
+    }
+};
+
 } // namespace
 
 TEST_CASE("backdrop-filter is composited at the element's opacity as Chrome does",
@@ -155,4 +202,80 @@ TEST_CASE("an opacity 0 view opens no backdrop layer on any backend",
         REQUIRE(canvas.count(DrawCommand::Type::save_backdrop_filter) ==
                 (opacity > 0.0f ? 1u : 0u));
     }
+}
+
+TEST_CASE("a backdrop under opacity hands the canvas blur then opacity and no fade at 1",
+          "[view][canvas][backdrop-filter]") {
+    using Kind = pulp::canvas::Canvas::FilterChainEntry::Kind;
+    using pulp::canvas::DrawCommand;
+    auto paint = [](float opacity, bool saturate) {
+        auto view = std::make_unique<View>();
+        view->set_bounds({0.0f, 0.0f, 80.0f, 80.0f});
+        view->set_backdrop_blur(8.0f);
+        if (saturate) {
+            View::FilterOp op;
+            op.kind = View::FilterOp::Kind::saturate;
+            op.amount = 0.5f;
+            view->set_backdrop_filter_chain({op});
+        }
+        view->set_opacity(opacity);
+        auto canvas = std::make_unique<ChainRecordingCanvas>();
+        view->paint_all(*canvas);
+        return canvas;
+    };
+
+    // Opacity 1 takes the plain blur and never sees an opacity() step.
+    auto opaque = paint(1.0f, false);
+    REQUIRE(opaque->chain_calls == 0);
+    REQUIRE(opaque->count(DrawCommand::Type::save_backdrop_filter) == 1);
+
+    // A colour list at opacity 1 is handed over as written, with no fade added.
+    auto saturated = paint(1.0f, true);
+    REQUIRE(saturated->chain_calls == 1);
+    REQUIRE(saturated->last_chain.size() == 1);
+    REQUIRE(saturated->last_chain[0].kind == Kind::saturate);
+
+    // Below 1 the blur comes first and the element's opacity last.
+    auto half = paint(0.5f, false);
+    REQUIRE(half->chain_calls == 1);
+    REQUIRE(half->last_chain.size() == 2);
+    REQUIRE(half->last_chain[0].kind == Kind::blur);
+    REQUIRE(half->last_chain[0].amount == 8.0f);
+    REQUIRE(half->last_chain[1].kind == Kind::opacity);
+    REQUIRE(half->last_chain[1].amount == 0.5f);
+
+    // Under one 8-bit level of coverage the element paints nothing, and
+    // neither does its backdrop.
+    auto faint = paint(0.003f, false);
+    REQUIRE(faint->chain_calls == 0);
+    REQUIRE(faint->count(DrawCommand::Type::save_backdrop_filter) == 0);
+}
+
+TEST_CASE("painting a backdrop under opacity does not allocate",
+          "[view][canvas][backdrop-filter][rt-safety]") {
+    View root;
+    root.set_bounds({0.0f, 0.0f, 160.0f, 80.0f});
+    auto plain = std::make_unique<View>();
+    plain->set_bounds({0.0f, 0.0f, 80.0f, 80.0f});
+    plain->set_backdrop_blur(8.0f);
+    plain->set_opacity(0.5f);
+    root.add_child(std::move(plain));
+    auto listed = std::make_unique<View>();
+    listed->set_bounds({80.0f, 0.0f, 80.0f, 80.0f});
+    View::FilterOp blur;
+    blur.kind = View::FilterOp::Kind::blur;
+    blur.amount = 8.0f;
+    View::FilterOp saturate;
+    saturate.kind = View::FilterOp::Kind::saturate;
+    saturate.amount = 0.5f;
+    listed->set_backdrop_filter_chain({blur, saturate});
+    listed->set_opacity(0.5f);
+    root.add_child(std::move(listed));
+
+    NoOpCanvas canvas;
+    root.paint_all(canvas); // Warm any non-steady View state before probing.
+    pulp::test::RtAllocationProbe probe;
+    for (int i = 0; i < 32; ++i)
+        root.paint_all(canvas);
+    CHECK_FALSE(probe.saw_allocation());
 }

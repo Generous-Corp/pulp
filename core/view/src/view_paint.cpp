@@ -24,8 +24,10 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -328,36 +330,69 @@ namespace {
 /// serves both the element layer (`filter`) and the backdrop layer
 /// (`backdrop-filter`) rather than each keeping its own copy. The switch has
 /// no `default:` so adding a kind to either enum surfaces here.
-std::vector<canvas::Canvas::FilterChainEntry> to_canvas_filter_chain(
-    const std::vector<View::FilterOp>& ops) {
+canvas::Canvas::FilterChainEntry to_canvas_filter_entry(const View::FilterOp& op) {
     using ViewK = View::FilterOp::Kind;
     using CanvK = canvas::Canvas::FilterChainEntry::Kind;
+    canvas::Canvas::FilterChainEntry e{};
+    switch (op.kind) {
+    case ViewK::blur:
+        e.kind = CanvK::blur;
+        break;
+    case ViewK::brightness:
+        e.kind = CanvK::brightness;
+        break;
+    case ViewK::contrast:
+        e.kind = CanvK::contrast;
+        break;
+    case ViewK::grayscale:
+        e.kind = CanvK::grayscale;
+        break;
+    case ViewK::hue_rotate:
+        e.kind = CanvK::hue_rotate;
+        break;
+    case ViewK::invert:
+        e.kind = CanvK::invert;
+        break;
+    case ViewK::opacity:
+        e.kind = CanvK::opacity;
+        break;
+    case ViewK::saturate:
+        e.kind = CanvK::saturate;
+        break;
+    case ViewK::sepia:
+        e.kind = CanvK::sepia;
+        break;
+    case ViewK::drop_shadow:
+        e.kind = CanvK::drop_shadow;
+        break;
+    }
+    e.amount = op.amount;
+    e.angle_deg = op.angle_deg;
+    e.ds_offset_x = op.ds_offset_x;
+    e.ds_offset_y = op.ds_offset_y;
+    e.ds_blur = op.ds_blur;
+    e.ds_color = op.ds_color;
+    return e;
+}
+
+std::vector<canvas::Canvas::FilterChainEntry>
+to_canvas_filter_chain(const std::vector<View::FilterOp>& ops) {
     std::vector<canvas::Canvas::FilterChainEntry> chain;
     chain.reserve(ops.size());
-    for (const auto& op : ops) {
-        canvas::Canvas::FilterChainEntry e{};
-        switch (op.kind) {
-            case ViewK::blur:        e.kind = CanvK::blur;        break;
-            case ViewK::brightness:  e.kind = CanvK::brightness;  break;
-            case ViewK::contrast:    e.kind = CanvK::contrast;    break;
-            case ViewK::grayscale:   e.kind = CanvK::grayscale;   break;
-            case ViewK::hue_rotate:  e.kind = CanvK::hue_rotate;  break;
-            case ViewK::invert:      e.kind = CanvK::invert;      break;
-            case ViewK::opacity:     e.kind = CanvK::opacity;     break;
-            case ViewK::saturate:    e.kind = CanvK::saturate;    break;
-            case ViewK::sepia:       e.kind = CanvK::sepia;       break;
-            case ViewK::drop_shadow: e.kind = CanvK::drop_shadow; break;
-        }
-        e.amount      = op.amount;
-        e.angle_deg   = op.angle_deg;
-        e.ds_offset_x = op.ds_offset_x;
-        e.ds_offset_y = op.ds_offset_y;
-        e.ds_blur     = op.ds_blur;
-        e.ds_color    = op.ds_color;
-        chain.push_back(e);
-    }
+    for (const auto& op : ops)
+        chain.push_back(to_canvas_filter_entry(op));
     return chain;
 }
+
+// Paint runs inside a ScopedNoAlloc region, so a backdrop list, plus the blur
+// and opacity steps push_effect_layers may append, is built on the stack. A
+// longer list, which no design emits, goes to the heap rather than losing
+// entries.
+constexpr std::size_t kInlineBackdropChain = 16;
+
+// Below one 8-bit level of coverage an element paints nothing, so its
+// backdrop is not drawn either.
+constexpr float kMinVisibleOpacity = 1.0f / 255.0f;
 
 }  // namespace
 
@@ -380,7 +415,7 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     // as it is in Chrome.
     const auto& backdrop_chain = backdrop_filter_chain();
     bool needs_backdrop_layer =
-        opacity_ > 0.0f && (!backdrop_chain.empty() || backdrop_blur() > 0.0f);
+        opacity_ >= kMinVisibleOpacity && (!backdrop_chain.empty() || backdrop_blur() > 0.0f);
     if (needs_backdrop_layer) {
         if (!canvas.supports(canvas::CanvasCapability::backdrop_filter)) {
             warn_capability_fallback_once(
@@ -404,22 +439,25 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                     "canvas backend does not honor backdrop-filter color ops; "
                     "backdrop-filter collapses to its blur");
             }
-            auto chain = to_canvas_filter_chain(backdrop_chain);
+            std::array<canvas::Canvas::FilterChainEntry, kInlineBackdropChain> inline_chain{};
+            std::vector<canvas::Canvas::FilterChainEntry> long_chain;
+            canvas::Canvas::FilterChainEntry* chain = inline_chain.data();
+            if (backdrop_chain.size() + 2 > inline_chain.size()) {
+                long_chain.resize(backdrop_chain.size() + 2);
+                chain = long_chain.data();
+            }
+            int count = 0;
+            for (const auto& op : backdrop_chain)
+                chain[count++] = to_canvas_filter_entry(op);
             if (backdrop_chain.empty()) {
-                canvas::Canvas::FilterChainEntry blur{};
-                blur.kind = canvas::Canvas::FilterChainEntry::Kind::blur;
-                blur.amount = backdrop_blur();
-                chain.push_back(blur);
+                chain[count].kind = canvas::Canvas::FilterChainEntry::Kind::blur;
+                chain[count++].amount = backdrop_blur();
             }
             if (opacity_ < 1.0f) {
-                canvas::Canvas::FilterChainEntry fade{};
-                fade.kind = canvas::Canvas::FilterChainEntry::Kind::opacity;
-                fade.amount = opacity_;
-                chain.push_back(fade);
+                chain[count].kind = canvas::Canvas::FilterChainEntry::Kind::opacity;
+                chain[count++].amount = opacity_;
             }
-            canvas.save_backdrop_filter_chain(0, 0, bounds_.width,
-                                              bounds_.height, chain.data(),
-                                              static_cast<int>(chain.size()));
+            canvas.save_backdrop_filter_chain(0, 0, bounds_.width, bounds_.height, chain, count);
         }
     }
     state.backdrop_pushed = needs_backdrop_layer;
