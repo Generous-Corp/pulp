@@ -42,6 +42,33 @@ for key, body in fixture.items():
 """
 
 
+# The jobs allowed `checks: write`. Each runs no pull request code: the tier
+# record publisher, the macOS retarget's check publishers and reconciler (no
+# checkout), and the required-check machinery report (checks out `main`).
+CHECKS_WRITERS = {
+    ("macos-tier-record.yml", "tier-record"),
+    ("build-macos.yml", "publish-macos-pending"),
+    ("build-macos.yml", "complete-macos-check"),
+    ("build-macos-reconcile.yml", "reconcile"),
+    ("required-check-machinery.yml", "report"),
+}
+
+
+def effective_checks(workflow: dict, body: dict) -> str:
+    """The `checks` scope a job's GITHUB_TOKEN gets.
+
+    A job-level block replaces the workflow's; a scope a block leaves out is
+    `none`. With no block at all the repository default applies, which this
+    treats as write so the lint fails closed.
+    """
+    block = body["permissions"] if "permissions" in body else workflow.get("permissions")
+    if block is None:
+        return "write"
+    if isinstance(block, str):
+        return "write" if block == "write-all" else ("read" if block == "read-all" else "none")
+    return block.get("checks", "none")
+
+
 def job(name="macos", head=HEAD, **steps: str) -> dict:
     return {"name": name, "head_sha": head,
             "steps": [{"name": step, "conclusion": conclusion} for step, conclusion in steps.items()]}
@@ -117,12 +144,41 @@ class MacosTierRecordTest(unittest.TestCase):
         self.assertNotIn("actions/checkout", json.dumps(self.workflow))
         self.assertNotIn("permissions", self.job)
 
-    def test_no_job_that_runs_pull_request_code_can_write_checks(self) -> None:
+    def test_build_yml_grants_checks_read_explicitly_and_no_job_more(self) -> None:
+        # A job that runs pull request code with `checks: write` could rewrite
+        # this head's tier record from deferred to full.
         build = yaml.safe_load(BUILD.read_text(encoding="utf-8"))
-        self.assertNotIn("checks", build.get("permissions", {}))
+        self.assertEqual(build["permissions"].get("checks"), "read")
         for name, body in build["jobs"].items():
             with self.subTest(job=name):
-                self.assertNotEqual((body.get("permissions") or {}).get("checks"), "write")
+                self.assertIn(effective_checks(build, body), ("read", "none"))
+
+    def test_only_jobs_that_run_no_pull_request_code_may_write_checks(self) -> None:
+        # Every workflow, because a pull request runs many of them on the same
+        # head. A job may hold `checks: write` only if it is listed here and
+        # checks out nothing, or only the protected `main`.
+        writers = set()
+        for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")):
+            workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+            for name, body in (workflow.get("jobs") or {}).items():
+                if effective_checks(workflow, body) not in ("read", "none"):
+                    writers.add((path.name, name))
+                    with self.subTest(workflow=path.name, job=name):
+                        for step in body.get("steps") or []:
+                            if str(step.get("uses", "")).startswith("actions/checkout"):
+                                self.assertEqual((step.get("with") or {}).get("ref"), "main",
+                                                 "a checks writer must not check out pull request code")
+        self.assertEqual(writers, CHECKS_WRITERS,
+                         "a new `checks: write` job needs review: it must run no pull request code")
+
+    def test_the_writer_lint_sees_a_planted_writer(self) -> None:
+        # Positive control for the lint's permission reading.
+        workflow = {"permissions": {"checks": "read"}}
+        self.assertEqual(effective_checks(workflow, {"permissions": {"checks": "write"}}), "write")
+        self.assertEqual(effective_checks(workflow, {"permissions": "write-all"}), "write")
+        self.assertEqual(effective_checks({}, {}), "write", "no block anywhere is the repo default")
+        self.assertEqual(effective_checks(workflow, {"permissions": {}}), "none")
+        self.assertEqual(effective_checks(workflow, {}), "read")
 
     def test_the_steps_it_reads_exist_in_build_yml(self) -> None:
         # Renaming one of them in build.yml would leave every head without a

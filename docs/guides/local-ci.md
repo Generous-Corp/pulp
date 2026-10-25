@@ -3790,7 +3790,12 @@ attempt, or with a `deferred` one.
 `.github/workflows/macos-tier-record.yml` publishes it.
 It runs on `workflow_run` when a Build and Test run completes, from main, with
 no checkout. It handles same-repository `pull_request` and `workflow_dispatch`
-runs only, and it is the only job holding `checks: write`. It decides the tier
+runs only. No job that runs pull request code may hold `checks: write`,
+because one that did could rewrite the record from `deferred` to `full`.
+`build.yml` grants `checks: read` explicitly in its workflow-level block, and
+`tools/ci/test_macos_tier_record.py` fails on any job in any workflow that
+could write checks, unless it is a listed job that checks out nothing or only
+`main`. It decides the tier
 from the step conclusions the runner recorded for that attempt's `macos` job,
 not from anything the job printed:
 

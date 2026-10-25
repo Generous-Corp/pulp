@@ -100,10 +100,17 @@ concurrency:
   group: build-${{ inputs.local_proof && format('local-proof-{0}', github.run_id) || (github.event.action == 'labeled' && (vars.PULP_MACOS_PR_GATING != 'true' || github.event.label.name != 'macos-ci' || github.event.sender.login != 'shipyard-local[bot]')) && format('label-noop-{0}', github.run_id) || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' && !inputs.local_proof }}
 
+# Every job here that has no block of its own runs with exactly these, and
+# they include `checks: read` explicitly: a job that runs pull request code
+# must never hold `checks: write`, or it could rewrite the head's
+# `shipyard-test-tier/macos` record (macos-tier-record.yml, which runs no pull
+# request code, is the only writer). tools/ci/test_macos_tier_record.py fails
+# on any job, here or in another workflow, that could.
 permissions:
   actions: read
   contents: read
   pull-requests: read
+  checks: read
 
 jobs:
   # Default-off, non-mergeable assignment proof for the repository-isolated M1
