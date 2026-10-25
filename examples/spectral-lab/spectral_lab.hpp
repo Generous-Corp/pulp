@@ -198,12 +198,12 @@ public:
         requested_engine_.store(init_engine, std::memory_order_relaxed);
         requested_layers_.store(init_layers, std::memory_order_relaxed);
 
-        // A GPU device adds the transport's fixed delay (latency_blocks * block =
-        // 1 * kInternalBlock) to the wet path. We learn whether a device exists by
-        // probing once; the delay is rooms-/layers-independent, so it does not
-        // need a full stack build.
+        // A GPU device adds the transport's fixed delay (the node's declared
+        // latency_blocks * kInternalBlock) to the wet path. We learn whether a
+        // device exists by probing once; the delay is rooms-/layers-independent,
+        // so it does not need a full stack build.
         device_available_ = probe_gpu_device();
-        gpu_extra_ = device_available_ ? kInternalBlock : 0;
+        gpu_extra_ = device_available_ ? gpu_transport_delay_samples() : 0;
 
         // Total latency is FIXED for the prepared lifetime — see latency_samples().
         latency_samples_ =
@@ -509,6 +509,15 @@ private:
     int requested_layers_value() const {
         const int l = static_cast<int>(std::lround(state().get_value(kLayers)));
         return l > 1 ? l : 1;
+    }
+
+    // The GPU engine's transport delay, read from the node's own descriptor so
+    // the reported PDC follows the node rather than a copy of its lead.
+    std::size_t gpu_transport_delay_samples() const {
+        const GpuSpectralCloudNode node(static_cast<std::uint32_t>(kChannels),
+                                        static_cast<std::uint32_t>(kInternalBlock),
+                                        static_cast<std::uint32_t>(sample_rate_), 1, &controls_);
+        return static_cast<std::size_t>(node.descriptor().latency_blocks) * kInternalBlock;
     }
 
     static bool probe_gpu_device() {

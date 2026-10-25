@@ -1608,6 +1608,8 @@ public:
 private:
   static constexpr float kModulatedMarkerHalo = 6.0f;
   void paint_modulated_marker(canvas::Canvas& canvas);
+  // The stock thumb (slab or circle) at track position `pos`, 0..1.
+  void paint_stock_thumb(canvas::Canvas& canvas, float pos, canvas::Color color);
   bool has_modulated_ = false;
   float modulated_ = 0.0f;
   float value_ = 0.0f;
@@ -1801,6 +1803,41 @@ private:
     bool has_skin_track_width_ = false;
 };
 
+/// The SDF shape a widget's chart shader is drawn on: `flat_arc` for a Knob's
+/// value arc, `stadium` for a Fader's track (a vertical Fader turns it a
+/// quarter counter-clockwise, so `t` runs from the bottom up). Empty for a
+/// widget that draws no chart.
+std::optional<canvas::Canvas::SDFShape> widget_chart_shape(const View& view);
+
+/// Height of the stadium a Fader's chart is drawn in, given the fader's
+/// extent across its track: half of it, kept between 8 and 24 units.
+inline float fader_chart_track_thickness(float cross_extent) {
+    return std::clamp(cross_extent * 0.5f, 8.0f, 24.0f);
+}
+
+// ── UA form-control skins ───────────────────────────────────────────────────
+// An imported `appearance: auto` form control carries no CSS paint: the
+// browser's UA theme draws it. RangeSlider and Checkbox can wear Chromium's
+// cross-platform form-control theme so such a control renders the way the
+// browser drew it. The types below are shared by those widgets.
+
+/// Which skin a form-control widget paints with. `platform` is Pulp's own
+/// token-driven look; `chromium_refresh` is Chromium's form-control theme.
+enum class UaSkin { platform, chromium_refresh };
+
+/// The CSS `color-scheme` a `chromium_refresh` palette resolves against.
+enum class UaColorScheme { light, dark };
+
+/// Interaction state a `chromium_refresh` palette is keyed on.
+enum class UaControlState { normal, hovered, pressed, disabled };
+
+/// The scheme Chromium actually paints a control in when an author accent is
+/// set: it flips `scheme` to the other one when the accent's WCAG contrast with
+/// `contrast_light` (the part's light-scheme colour adjacent to the accent) is
+/// under 3:1 and lower than with `contrast_dark`; symmetrically from dark.
+UaColorScheme ua_scheme_for_accent(canvas::Color accent, UaColorScheme scheme,
+                                   canvas::Color contrast_light, canvas::Color contrast_dark);
+
 // ── RangeSlider ──────────────────────────────────────────────────────────────
 // Generic min/max/step slider mapped to HTML <input type="range">.
 //
@@ -1941,6 +1978,76 @@ public:
     bool has_accent_color() const { return has_accent_color_; }
     canvas::Color accent_color() const { return accent_color_; }
 
+    /// Which control skin paints the slider. `UaSkin::chromium_refresh`
+    /// reproduces Chromium's `appearance: auto` range: geometry and palette
+    /// come from `chromium_refresh_parts()`, and the platform-skin knobs
+    /// (track thickness, theme tokens, hover growth) do not apply.
+    using Skin = UaSkin;
+    using ColorScheme = UaColorScheme;
+    using ControlState = UaControlState;
+    void set_skin(Skin s) {
+        if (skin_ == s)
+            return;
+        skin_ = s;
+        request_repaint();
+    }
+    Skin skin() const {
+        return skin_;
+    }
+
+    /// The page colour scheme the `chromium_refresh` skin resolves its palette
+    /// from (CSS `color-scheme`). The `platform` skin ignores it.
+    void set_color_scheme(ColorScheme scheme) {
+        if (color_scheme_ == scheme)
+            return;
+        color_scheme_ = scheme;
+        request_repaint();
+    }
+    ColorScheme color_scheme() const {
+        return color_scheme_;
+    }
+
+    /// Everything the `chromium_refresh` skin paints, in local coordinates.
+    /// Paint order is track fill, value bar (the track rounded rect clipped to
+    /// `value_clip`), border stroke, thumb.
+    struct ChromiumRefreshParts {
+        Rect track;              ///< rounded track, shortened one device pixel per end
+        float track_radius = 0;  ///< corner radius of `track` (half its thickness)
+        Rect value_clip;         ///< clip for the value bar; the thumb covers its open end
+        Rect border;             ///< `track` inset by half the border width
+        float border_radius = 0; ///< corner radius of `border`
+        float border_width = 1.0f;
+        Rect thumb; ///< the circle's bounds (16px part inset half a device pixel)
+        ColorScheme scheme = ColorScheme::light; ///< palette used, after the accent flip
+        canvas::Color track_fill{};
+        canvas::Color value_fill{};
+        canvas::Color border_color{};
+        canvas::Color thumb_fill{};
+    };
+
+    /// Pure layout + palette of the `chromium_refresh` skin for a box of
+    /// `bounds` (local coordinates) with the thumb at track `position` [0,1].
+    /// `vertical` puts the minimum at the bottom. Outside the disabled state an
+    /// `accent` paints the value bar and thumb (hover and press shift its HSL
+    /// lightness), and flips the palette to the other scheme when it lacks
+    /// contrast with the track (`ua_scheme_for_accent`), as Chromium does.
+    /// Chromium paints the range in device pixels, so its two small insets
+    /// (track ends, thumb edge) are device pixels: `device_scale` is device
+    /// pixels per local unit (`Canvas::backing_scale()` when painting).
+    static ChromiumRefreshParts
+    chromium_refresh_parts(Rect bounds, float position, bool vertical, ControlState state,
+                           ColorScheme scheme, std::optional<canvas::Color> accent = std::nullopt,
+                           float device_scale = 1.0f);
+
+    /// `chromium_refresh_parts()` for this slider's current box, value,
+    /// orientation, state, scheme and accent.
+    ChromiumRefreshParts chromium_refresh_parts(float device_scale = 1.0f) const;
+
+    /// The state the `chromium_refresh` palette resolves for this slider now:
+    /// disabled when not enabled, pressed while dragged, hovered under the
+    /// pointer, otherwise normal.
+    ControlState control_state() const;
+
     /// Track thickness in pixels (default 5). Anything in 4–6 matches
     /// the visual weight of common HTML range styling.
     void set_track_thickness(float t) { track_thickness_ = std::max(1.0f, t); }
@@ -2018,6 +2125,10 @@ private:
     float track_thickness_ = 5.0f;
     canvas::Color accent_color_{};
     bool has_accent_color_ = false;
+    Skin skin_ = Skin::platform;
+    ColorScheme color_scheme_ = ColorScheme::light;
+
+    void paint_chromium_refresh_(canvas::Canvas& canvas);
 };
 
 // ── Toggle ───────────────────────────────────────────────────────────────────
@@ -2117,7 +2228,7 @@ public:
     void set_checked(bool v) {
         if (checked_ == v) return;
         checked_ = v;
-        set_access_checked(v ? "true" : "false");
+        set_access_checked(indeterminate_ ? "mixed" : (v ? "true" : "false"));
         request_repaint_self();
     }
 
@@ -2131,7 +2242,7 @@ public:
     bool set_checked(bool v, Notify notify) {
         if (checked_ == v) return false;
         checked_ = v;
-        set_access_checked(v ? "true" : "false");
+        set_access_checked(indeterminate_ ? "mixed" : (v ? "true" : "false"));
         request_repaint();
         if (notify == Notify::sync) {
             if (on_change) on_change(checked_);
@@ -2144,6 +2255,111 @@ public:
     }
     bool is_checked() const { return checked_; }
 
+    /// `checkbox` toggles on click. `radio` is the HTML radio button: clicking
+    /// selects it and never clears it, and a non-zero `radio_group` clears the
+    /// other checked radios with the same group among its siblings.
+    enum class Kind { checkbox, radio };
+    void set_kind(Kind k) {
+        if (kind_ == k)
+            return;
+        kind_ = k;
+        set_access_role(k == Kind::radio ? AccessRole::radio : AccessRole::checkbox);
+        request_repaint();
+    }
+    Kind kind() const {
+        return kind_;
+    }
+    void set_radio_group(int id) {
+        radio_group_ = id;
+    }
+    int radio_group() const {
+        return radio_group_;
+    }
+
+    /// HTML `indeterminate` (checkbox only): painted as a dash, reported as
+    /// "mixed". A click clears it, as in the browser.
+    void set_indeterminate(bool v) {
+        if (indeterminate_ == v)
+            return;
+        indeterminate_ = v;
+        set_access_checked(v ? "mixed" : (checked_ ? "true" : "false"));
+        request_repaint();
+    }
+    bool is_indeterminate() const {
+        return indeterminate_;
+    }
+
+    /// Skin, colour scheme and CSS `accent-color`; see `UaSkin`. The accent
+    /// only affects the `chromium_refresh` skin.
+    using Skin = UaSkin;
+    using ColorScheme = UaColorScheme;
+    using ControlState = UaControlState;
+    void set_skin(Skin s) {
+        if (skin_ == s)
+            return;
+        skin_ = s;
+        request_repaint();
+    }
+    Skin skin() const {
+        return skin_;
+    }
+    void set_color_scheme(ColorScheme scheme) {
+        if (color_scheme_ == scheme)
+            return;
+        color_scheme_ = scheme;
+        request_repaint();
+    }
+    ColorScheme color_scheme() const {
+        return color_scheme_;
+    }
+    void set_accent_color(canvas::Color c) {
+        accent_color_ = c;
+        request_repaint();
+    }
+    void clear_accent_color() {
+        accent_color_.reset();
+        request_repaint();
+    }
+    std::optional<canvas::Color> accent_color() const {
+        return accent_color_;
+    }
+
+    /// Everything the `chromium_refresh` skin paints, in local coordinates, in
+    /// paint order: `lighten` (disabled only), `background`, `border` (absent
+    /// for a checked or indeterminate checkbox), `accent_fill` (checked or
+    /// indeterminate checkbox), then the mark: the check stroke, the dash or the
+    /// radio dot.
+    struct ChromiumRefreshParts {
+        Rect box;                                ///< the largest centred square in the bounds
+        float radius = 0;                        ///< 2px for a checkbox, half the side for a radio
+        ColorScheme scheme = ColorScheme::light; ///< palette used, after the accent flip
+        std::optional<canvas::Color> lighten;    ///< disabled lighten layer on `background_rect`
+        Rect background_rect;                    ///< `box` inset 0.2px
+        canvas::Color background{};
+        std::optional<canvas::Color> border; ///< stroked 1px on `box` inset 0.5px
+        Rect border_rect;
+        std::optional<canvas::Color> accent_fill; ///< filled on `box`
+        canvas::Color mark{};                     ///< check / dash colour, or the radio dot colour
+        bool has_check = false;                   ///< polyline `check[0..2]`, `check_width` wide
+        std::array<Point, 3> check{};
+        float check_width = 0;
+        std::optional<Rect> dash; ///< indeterminate dash, rounded by `radius`
+        std::optional<Rect> dot;  ///< checked radio dot (`box` inset 20%)
+    };
+
+    /// Pure layout + palette of Chromium's checkbox / radio for `bounds`.
+    /// A checked, enabled control with an `accent` uses it for the fill, border
+    /// and dot, and flips to the other scheme when the accent lacks contrast
+    /// with the control background (`ua_scheme_for_accent`).
+    static ChromiumRefreshParts
+    chromium_refresh_parts(Rect bounds, Kind kind, bool checked, bool indeterminate,
+                           ControlState state, ColorScheme scheme,
+                           std::optional<canvas::Color> accent = std::nullopt);
+    ChromiumRefreshParts chromium_refresh_parts() const;
+
+    /// Disabled when not enabled, hovered under the pointer, otherwise normal.
+    ControlState control_state() const;
+
     std::function<void(bool)> on_change;
 
     void paint(canvas::Canvas& canvas) override;
@@ -2152,6 +2368,114 @@ public:
 
 private:
     bool checked_ = false;
+    bool indeterminate_ = false;
+    Kind kind_ = Kind::checkbox;
+    int radio_group_ = 0;
+    Skin skin_ = Skin::platform;
+    ColorScheme color_scheme_ = ColorScheme::light;
+    std::optional<canvas::Color> accent_color_;
+
+    void paint_chromium_refresh_(canvas::Canvas& canvas);
+};
+
+// ── ButtonSurface ───────────────────────────────────────────────────────────
+// The themed surface of an imported `appearance: auto` HTML <button>: Chromium's
+// push-button background, border and per-state colours, plus its focus-visible
+// ring. It paints nothing else; the button's content (labels, icons) is its
+// children, laid out like any container's. Only an explicitly constructed
+// ButtonSurface wears this skin; TextButton and generated UI are unaffected.
+//
+// The focus ring reaches one CSS px (two device px at scale 2) outside the
+// view's bounds, as Chromium's does; it is painted in paint() before the
+// children, which never reach the 2px band at the edge it covers.
+
+class ButtonSurface : public View {
+  public:
+    using ColorScheme = UaColorScheme;
+    using ControlState = UaControlState;
+
+    ButtonSurface() {
+        set_access_role(AccessRole::button);
+    }
+
+    /// The page colour scheme the palette resolves from (CSS `color-scheme`).
+    /// CSS `accent-color` does not apply: Chromium paints buttons without it.
+    void set_color_scheme(ColorScheme scheme) {
+        if (color_scheme_ == scheme)
+            return;
+        color_scheme_ = scheme;
+        request_repaint();
+    }
+    ColorScheme color_scheme() const {
+        return color_scheme_;
+    }
+
+    /// CSS `:active`: the pressed palette while true.
+    void set_pressed(bool pressed) {
+        if (pressed_ == pressed)
+            return;
+        pressed_ = pressed;
+        request_repaint();
+    }
+    bool is_pressed() const {
+        return pressed_;
+    }
+
+    /// CSS `:focus-visible`: paints Chromium's two-colour focus ring.
+    void set_focus_visible(bool visible) {
+        if (focus_visible_ == visible)
+            return;
+        focus_visible_ = visible;
+        request_repaint();
+    }
+    bool is_focus_visible() const {
+        return focus_visible_;
+    }
+
+    /// Disabled when not enabled, then pressed, then hovered under the pointer,
+    /// otherwise normal.
+    ControlState control_state() const;
+
+    /// Everything the skin paints, in local coordinates, in paint order: the
+    /// `lighten` layer (disabled only) and `fill` on `surface`, the `border`
+    /// stroke on `surface`, then, when focus-visible, the outer ring and the
+    /// inner ring over it.
+    struct ChromiumRefreshParts {
+        /// A box under 5 device px a side is one solid `fill` rect on `bounds`.
+        bool solid = false;
+        Rect bounds;
+        Rect surface;     ///< `bounds` inset half the border width
+        float radius = 0; ///< corner radius of `surface` and both rings
+        float border_width = 1.0f;
+        std::optional<canvas::Color> lighten;
+        canvas::Color fill{};
+        canvas::Color border{};
+        bool focus_ring = false;
+        Rect outer_ring; ///< stroke centreline of the outer ring
+        Rect inner_ring; ///< stroke centreline of the inner ring
+        float ring_width = 0;
+        canvas::Color outer_ring_color{};
+        canvas::Color inner_ring_color{};
+    };
+
+    /// Pure layout + palette of Chromium's push button for `bounds`. Chromium
+    /// sizes the border, radius and ring in whole device pixels, so
+    /// `device_scale` is device pixels per local unit (`Canvas::backing_scale()`
+    /// when painting). The ring colours are the macOS ones, where the inner
+    /// ring keeps the outline colour in a dark scheme.
+    static ChromiumRefreshParts chromium_refresh_parts(Rect bounds, ControlState state,
+                                                       ColorScheme scheme, bool focus_visible,
+                                                       float device_scale = 1.0f);
+    /// The parts for this view, in self_paint_bounds(): the captured,
+    /// CSS-edge-snapped box when the importer recorded one, else local_bounds().
+    ChromiumRefreshParts chromium_refresh_parts(float device_scale = 1.0f) const;
+
+    void paint(canvas::Canvas& canvas) override;
+
+  private:
+    ColorScheme color_scheme_ = ColorScheme::light;
+    bool pressed_ = false;
+    bool focus_visible_ = false;
 };
 
 // ── ToggleButton ────────────────────────────────────────────────────────────

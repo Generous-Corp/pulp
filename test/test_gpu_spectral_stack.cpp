@@ -4,6 +4,7 @@
 #include <pulp/signal/windowing.hpp>
 
 #include "support/gpu_audio_test_helpers.hpp"
+#include "support/fake_gpu_compute.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -209,4 +210,59 @@ TEST_CASE("SpectralStack keeps a muted layer's phase advancing (no un-mute click
         const auto c_out_muted = muted_then_unmuted(cmuted, FFT, kMutedHops);
         REQUIRE(peak_bin(c_out_muted) == peak_bin(g_out_muted));
     }
+}
+
+// The layer spectra live on the device the stack was prepared on. Once that
+// device is lost or re-initialized they are gone, so the stack must report
+// unavailable and refuse with a silent frame rather than render stale state.
+TEST_CASE("GpuSpectralStack refuses a lost or re-initialized shared device",
+          "[gpu_audio][spectral][device-loss]") {
+    constexpr uint32_t N = 64, HOP = 16, LAYERS = 2;
+    std::vector<float> frame(N);
+    fill_sine(frame, 4);
+    std::vector<float> in(N * 4, 0.25f);
+    SpectralFreezeControls ctl;
+
+    // Positive control: on a live device the framer streams the stack's
+    // rendered frames, so a framer over a refused stack being silent below is
+    // the refusal and not a framer that never produces output.
+    pulp::test::FakeGpuCompute live_device;
+    GpuSpectralStack live;
+    REQUIRE(live.prepare(N, HOP, LAYERS, &live_device));
+    REQUIRE(live.capture(0, frame.data()));
+    SpectralFreezeFramer live_framer;
+    REQUIRE(live_framer.prepare(&live, N, HOP));
+    std::vector<float> live_out(in.size(), 0.0f);
+    live_framer.process(in.data(), live_out.data(), static_cast<uint32_t>(in.size()), ctl);
+    CHECK(std::any_of(live_out.begin(), live_out.end(), [](float v) { return v != 0.0f; }));
+
+    pulp::test::FakeGpuCompute device;
+    GpuSpectralStack stack;
+    REQUIRE(stack.prepare(N, HOP, LAYERS, &device));
+    std::vector<float> out(N, -1.0f);
+    REQUIRE(stack.available());
+    REQUIRE(stack.capture(0, frame.data()));
+    REQUIRE(stack.render(out.data(), nullptr, 0.0f, 0.0f));
+    CHECK(out[0] == pulp::test::FakeGpuCompute::kStackMarker);
+    SpectralFreezeFramer framer;
+    REQUIRE(framer.prepare(&stack, N, HOP));
+    const auto calls = device.stack_calls();
+
+    SECTION("device loss") {
+        device.lose_device();
+    }
+    SECTION("generation change without loss") {
+        device.reinitialize();
+    }
+    CHECK_FALSE(stack.available());
+    std::fill(out.begin(), out.end(), -1.0f);
+    CHECK_FALSE(stack.render(out.data(), nullptr, 0.0f, 0.0f));
+    CHECK(std::all_of(out.begin(), out.end(), [](float v) { return v == 0.0f; }));
+    CHECK_FALSE(stack.capture(1, frame.data()));
+
+    // The framer driving the refused stack emits silence, not stale audio.
+    std::vector<float> framed(in.size(), -1.0f);
+    framer.process(in.data(), framed.data(), static_cast<uint32_t>(in.size()), ctl);
+    CHECK(std::all_of(framed.begin(), framed.end(), [](float v) { return v == 0.0f; }));
+    CHECK(device.stack_calls() == calls); // refused before reaching the device
 }

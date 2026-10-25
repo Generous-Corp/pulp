@@ -170,6 +170,35 @@ public:
     const std::filesystem::path& path() const { return path_; }
     std::uint64_t reload_attempts() const { return attempts_; }
 
+    /// The version the controller compares against: the watched file's mtime
+    /// and content hash it last acted on (or was seeded with).
+    struct Baseline {
+        std::filesystem::file_time_type mtime{};
+        std::uint64_t hash = 0;
+    };
+    std::optional<Baseline> baseline() const {
+        if (!baseline_set_ || !hash_valid_)
+            return std::nullopt;
+        return Baseline{last_mtime_, last_hash_};
+    }
+
+    /// Seed the baseline with the version that is actually live, so the first
+    /// poll() compares against it instead of adopting whatever the file holds
+    /// by then. The shell loads its initial logic at construction and starts
+    /// polling only after prepare(); without a seed, a build that lands in that
+    /// gap becomes the baseline and is never reloaded.
+    void set_baseline(const Baseline& b) {
+        last_mtime_ = b.mtime;
+        last_hash_ = b.hash;
+        hash_valid_ = true;
+        baseline_set_ = true;
+    }
+
+    /// Content fingerprint used for change detection (see hash_file).
+    static std::optional<std::uint64_t> content_hash(const std::filesystem::path& p) {
+        return hash_file(p);
+    }
+
 private:
     std::optional<std::filesystem::file_time_type> current_mtime() const {
         std::error_code ec;

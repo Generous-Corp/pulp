@@ -1,4 +1,5 @@
 #include "design_import_native_common.hpp"
+#include "design_import_form_controls.hpp"
 #include "design_import_svg_stroke.hpp"
 #include "design_ir_helpers.hpp"
 
@@ -796,8 +797,10 @@ ResolvedNativeNode resolve_node(const IRNode& node,
     // the authored presentation (type). A select is collapsed; a tab remains
     // segmented. Respect the more specific presentation before the generic
     // selector audio role can erase it.
-    if (node.audio_widget == AudioWidgetType::selector &&
-        lower_copy(node.type) == "select") {
+    if (auto ua_kind = ua_form_control_kind(node)) {
+        out.kind = *ua_kind;
+    } else if (node.audio_widget == AudioWidgetType::selector &&
+               lower_copy(node.type) == "select") {
         out.kind = NativeWidgetKind::combo_box;
     } else if (auto audio_kind = kind_from_audio(node.audio_widget)) {
         out.kind = *audio_kind;
@@ -1445,25 +1448,13 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.background_gradient && !style.background_gradient->empty())
         apply_css_background_gradient(view, *style.background_gradient);
 
-    // Box-shadows, in CSS author order.
-    //
-    // Not painting these was the single largest fidelity gap in an imported
-    // panel, and it did not present as a shadow bug. A knob whose softness IS
-    // its shadow stack — an inset bottom sheen plus two spread rings — renders
-    // as a flat, hard-edged disc, so the face reads as an over-contrasty
-    // gradient and the search goes to the gradient code, which was correct all
-    // along. Measured on one generated panel: the conic samples matched Chrome
-    // within 4/255 while the same node failed on the annulus its rings should
-    // have drawn.
-    //
-    // The first layer paints ON TOP (View::add_box_shadow appends and the
-    // painter iterates in reverse), which is the order the IR already holds, so
-    // set-then-append reproduces the cascade without reversing anything here.
-    //
-    // `skip_box_shadow` is for a node whose body is painted by the layer
-    // BENEATH it — see body_is_painted_beneath(). Installing the stack there
-    // draws every layer a second time over the copy that layer already drew,
-    // and two composites of one translucent layer are not one composite.
+    // Box-shadows, in CSS author order. A knob whose softness IS its shadow
+    // stack (an inset sheen plus spread rings) otherwise renders as a flat,
+    // hard-edged disc that reads as a gradient bug. The first layer paints ON
+    // TOP (add_box_shadow appends and the painter iterates in reverse), which is
+    // the IR's order, so set-then-append reproduces the cascade. `skip_box_shadow`
+    // marks a node whose body the layer BENEATH paints (body_is_painted_beneath()):
+    // installing the stack there would composite each translucent layer twice.
     if (!skip_box_shadow && !style.box_shadow.empty()) {
         bool first = true;
         for (const auto& layer : style.box_shadow) {
@@ -1731,16 +1722,12 @@ void apply_label_style(Label& label, const IRStyle& style) {
     }
     if (style.white_space && lower_copy(*style.white_space) != "nowrap")
         label.set_multi_line(true);
-    // Vertically center a single-line label whose design slot is taller than its
-    // font (e.g. an 8px "SEARCH" in a 17px box, tab digits in a 20px button).
-    // Figma centers text in a fixed-height frame but the IR drops
-    // textAlignVertical, so derive it from slot-vs-font. The web-compat codegen
-    // emits the SAME rule as `verticalAlign:middle` (design_codegen.cpp), so
-    // both render paths converge on Label::set_vertical_align(center) and the
-    // screenshot-parity invariant holds. The Label default is top.
-    if (style.height && style.font_size &&
-        *style.height > *style.font_size * 1.15f)
+    // The rule every lane shares (design_ir_helpers.hpp); the Label default is top.
+    const auto valign = imported_vertical_align(style);
+    if (valign == ImportedVerticalAlign::center)
         label.set_vertical_align(canvas::TextVerticalAlign::center);
+    else if (valign == ImportedVerticalAlign::bottom)
+        label.set_vertical_align(canvas::TextVerticalAlign::bottom);
 }
 
 canvas::AttributedString build_attributed_text(const IRNode& node) {
@@ -2322,8 +2309,11 @@ std::unique_ptr<View> make_widget(const IRNode& node,
         case NativeWidgetKind::checkbox: {
             auto checkbox = std::make_unique<Checkbox>();
             checkbox->set_checked(semantics.checked);
+            apply_ua_checkbox(*checkbox, node);
             return checkbox;
         }
+        case NativeWidgetKind::range_slider:
+            return make_ua_range_slider(node);
         case NativeWidgetKind::stepper: {
             auto stepper = std::make_unique<Stepper>();
             stepper->set_range(node.audio_min, node.audio_max);
@@ -2779,6 +2769,7 @@ bool is_interactive_native_kind(NativeWidgetKind kind) {
         case NativeWidgetKind::text_button:
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::range_slider:
         case NativeWidgetKind::toggle_button:
         case NativeWidgetKind::combo_box:
         case NativeWidgetKind::knob:
@@ -2807,6 +2798,7 @@ bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
         case NativeWidgetKind::text_button:
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::range_slider:
         case NativeWidgetKind::toggle_button:
         case NativeWidgetKind::combo_box:
         case NativeWidgetKind::knob:
@@ -2885,6 +2877,8 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
         case NativeWidgetKind::text_button: return "text_button";
         case NativeWidgetKind::text_editor: return "text_editor";
         case NativeWidgetKind::checkbox: return "checkbox";
+        case NativeWidgetKind::range_slider:
+            return "range_slider";
         case NativeWidgetKind::toggle_button: return "toggle_button";
         case NativeWidgetKind::segmented: return "segmented";
         case NativeWidgetKind::stepper: return "stepper";

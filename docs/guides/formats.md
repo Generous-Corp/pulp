@@ -39,8 +39,11 @@ The plugin descriptor (id, name, vendor, version, features) is derived automatic
 ### Parameter Sync
 
 **Host to plugin:** During `clap_process()`, the adapter iterates `in_events`,
-looking for `CLAP_EVENT_PARAM_VALUE` events. Each one is pushed into the
-per-block `ParameterEventQueue` and written with `StateStore::set_value_rt()`.
+looking for `CLAP_EVENT_PARAM_VALUE` events. Each one is written with
+`StateStore::set_value_rt()` and pushed into the per-block
+`ParameterEventQueue`. For a processor whose
+`wants_sample_accurate_parameters()` returns false, the queue stays empty and
+each parameter's last value is written once.
 Gesture events (`CLAP_EVENT_PARAM_GESTURE_BEGIN` / `END`) are forwarded to
 `StateStore::begin_gesture()` / `end_gesture()`.
 
@@ -68,7 +71,8 @@ CLAP note and MIDI events are converted into Pulp's block event surfaces:
 - `CLAP_EVENT_MIDI` carries raw MIDI 1.0 channel messages such as CC, pitch
   bend, channel pressure, poly pressure, and program change
 - `CLAP_EVENT_MIDI_SYSEX` is copied into a preallocated inbound payload arena
-  (128 events per block, 4096 bytes per event); overflow or larger payloads are
+  (128 events per block, 4096 bytes per event), reserved only when the
+  plug-in declares MIDI input; overflow or larger payloads are
   dropped and counted. Outbound processor-owned SysEx emits as
   `CLAP_EVENT_MIDI_SYSEX`
 - `CLAP_EVENT_MIDI2` is routed through `ump_input()` when the plugin opts into
@@ -175,12 +179,14 @@ The FUID must be generated once and never changed across versions. It is the sta
 ### Parameter Sync
 
 **Host to plugin:** During `process()`, the adapter reads
-`data.inputParameterChanges`. Each point is denormalized, pushed into the
-per-block `ParameterEventQueue`, and written with
-`StateStore::set_normalized_rt()`. If a host sends more than 1024 points in one
-block, the adapter keeps the first 1024 sample-accurate points, records the
-overflow/drop count on the queue, and still writes every incoming point to
-`StateStore` so block-end reads observe the latest host value.
+`data.inputParameterChanges`. Each parameter's last point is denormalized and
+written to `StateStore` once. Every point is also pushed into the per-block
+`ParameterEventQueue`, in time order, unless the processor's
+`wants_sample_accurate_parameters()` returns false. If a host sends more
+than 1024 points in one block, the adapter keeps the first 1024 sample-accurate
+points, records the overflow/drop count on the queue, and still writes each
+parameter's last point to `StateStore` so block-end reads observe the latest
+host value.
 
 **Plugin to host:** The adapter snapshots all parameter values before calling `Processor::process()`. After processing, any value that changed is:
 1. Written to `data.outputParameterChanges` as a normalized value (so the host can record automation)
@@ -336,13 +342,31 @@ inline store listener notifies the AU host with
 re-read via `GetParameter()` and record UI automation without calling
 `AudioUnitSetParameter()` on the render path.
 
-**Parameter event model:** AU v2 exposes current parameter values through the
-AU parameter store rather than a render-event list. The effect adapter attaches
-an empty `ParameterEventQueue` before `Processor::process()` so AU v2 effects
-see the same non-null queue contract as other adapters. The instrument adapter
-reads host parameters through the `StateStore` and does not expose a separate
-AU v2 parameter-event sidecar. AU v2 parameter changes are block-rate
-`StateStore` values today.
+**Parameter event model:** Immediate `SetParameter()` writes land in the
+store. Automation a host schedules with `AudioUnitScheduleParameters()` reaches
+the effect adapter as a buffer's event list, and what the processor sees
+depends on two `Processor` hooks, both default true:
+
+- By default the adapter renders one `process()` call per slice between
+  scheduled events. The store holds each parameter's value at the slice's
+  start, and the slice's points (immediates as steps, ramps as ramp segments)
+  are in `param_events()` relative to the slice. This is the AU v2 default
+  because it is what every processor received before the hooks existed, and
+  rendering once per buffer would change the output of a processor that reads
+  the store inside each slice.
+- A sample-accurate processor that reads automation only through
+  `param_events()` (or a `ParamCursor` over it) can return false from
+  `wants_au_scheduled_parameter_slices()`. The buffer then renders in one call,
+  as VST3 and CLAP render it: every point at its buffer offset, a ramp as a
+  step to its starting value plus a ramp to its value at the buffer's end, and
+  the store at the end-of-buffer value.
+- A block-rate processor returns false from
+  `wants_sample_accurate_parameters()`. The buffer renders in one call with an
+  empty queue, and each automated parameter is written to the store once, at
+  its end-of-buffer value.
+
+The instrument adapter reads host parameters through the `StateStore` and does
+not expose a separate AU v2 parameter-event sidecar.
 
 **Render-thread plugin output to host:** Parameter output changes made during
 `Processor::process()` are not emitted back to the AU host. The render thread

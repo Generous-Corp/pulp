@@ -64,14 +64,22 @@ target_compile_definitions(pulp-test-cli-configure-defaults PRIVATE
 catch_discover_tests(pulp-test-cli-configure-defaults)
 
 # CLI create shell-out edge tests. These launch the built CLI but stay on
-# fail-fast paths that do not run doctor, configure, build, or network setup.
+# fail-fast paths that do not run doctor, build, or network setup. One case
+# configures a --ci project against a stub SDK, with Catch2 served from this
+# build's own source copy so the configure stays offline.
 add_executable(pulp-test-cli-create-shellout test_cli_create_shellout.cpp)
 target_link_libraries(pulp-test-cli-create-shellout PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULP_CMAKE_COMMAND="${CMAKE_COMMAND}"
+    PULP_EXPECTED_SDK_VERSION="${PROJECT_VERSION}")
+if(catch2_SOURCE_DIR)
+    target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
+        PULP_CATCH2_SOURCE_DIR="${catch2_SOURCE_DIR}")
+endif()
 catch_discover_tests(pulp-test-cli-create-shellout)
 # `pulp create` reads the package kits and the built-in gain template (and
 # checks for a standalone variant of it), and the dependency-kit case copies
@@ -80,6 +88,7 @@ pulp_test_data(pulp-test-cli-create-shellout NO_DEFINE PATHS
     fixtures/packages/simple-plugin-template
     fixtures/packages/gain-dsp-kit
     tools/templates/gain
+    tools/templates/effect
     tools/templates/standalone
     tools/packages/registry.json
     # The package dependency root is found by a packages.lock.json probe.
@@ -443,6 +452,13 @@ endif()
 # for the non-destructive ship subcommand branches.
 add_executable(pulp-test-cli-ship-shellout test_cli_ship_shellout.cpp)
 target_link_libraries(pulp-test-cli-ship-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(APPLE)
+    # A real Mach-O module carrying a local symbol, for the ship-time strip case.
+    add_library(pulp-test-ship-strip-fixture MODULE fixtures/ship_strip/ship_strip_fixture.cpp)
+    add_dependencies(pulp-test-cli-ship-shellout pulp-test-ship-strip-fixture)
+    target_compile_definitions(pulp-test-cli-ship-shellout PRIVATE
+        PULP_SHIP_STRIP_FIXTURE="$<TARGET_FILE:pulp-test-ship-strip-fixture>")
+endif()
 # hdiutil attaches temporary disk images through a machine-wide service. Keep
 # the one real-image case parallel with ordinary CLI tests, but not with another
 # real-image creator: under ctest -j8 that collision has stretched a 17-second

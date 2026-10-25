@@ -63,6 +63,10 @@ public:
     std::vector<uint8_t> serialize_plugin_state() const override;
     bool deserialize_plugin_state(std::span<const uint8_t> data) override;
     int latency_samples() const override;
+    // The native core receives every automation point with its offset.
+    bool wants_sample_accurate_parameters() const override {
+        return true;
+    }
 
     /// Non-RT (host/UI thread) command channel into the native core's domain
     /// logic: send a JSON request, get a JSON reply. This is the seam for

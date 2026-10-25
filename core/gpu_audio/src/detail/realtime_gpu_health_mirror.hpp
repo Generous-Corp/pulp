@@ -116,12 +116,18 @@ inline GpuAudioProviderState provider_state_for_health(const RealtimeGpuHealth& 
     return GpuAudioProviderState::Ready;
 }
 
-// The latched cause as the status reports it. A loss observed after
-// sustained deadline misses is reported as the loss: misses describe a live
-// GPU, and a status may not be Unavailable for that cause.
+// The latched cause as the status reports it. The bridge keeps the first
+// cause, but a status may not be Unavailable for sustained misses, and a
+// failure or stall the lost device caused should not hide the loss.
 inline GpuAudioRecoveryReason reported_recovery_reason(const RealtimeGpuHealth& health) noexcept {
+    // A lost device is the root cause of the failures and stalls it induces,
+    // so loss observed after any of them is reported as the loss; the latched
+    // sequence still marks where delivery first stopped. Independent causes
+    // (sequence gaps, saturation, invalid callbacks, offline fences) stay first.
     if (health.device_lost &&
-        health.recovery_reason == GpuAudioRecoveryReason::SustainedDeadlineMisses)
+        (health.recovery_reason == GpuAudioRecoveryReason::ProviderFailure ||
+         health.recovery_reason == GpuAudioRecoveryReason::ProviderUnresponsive ||
+         health.recovery_reason == GpuAudioRecoveryReason::SustainedDeadlineMisses))
         return GpuAudioRecoveryReason::ProviderLost;
     return health.recovery_reason;
 }
@@ -151,6 +157,16 @@ inline RealtimeGpuHealth health_from_status(const GpuAudioStatus& status) noexce
     health.fenced = health.device_lost || status.recovery_reason != GpuAudioRecoveryReason::None;
     for (std::size_t i = 0; i < GpuAudioStatus::kTerminalDispositionCount; ++i)
         health.terminal_counts[i] = status.terminal_counts[i];
+    health.shadow_mode = status.shadow_mode;
+    health.shadow_inline_cost_pct = status.shadow_inline_cost_pct;
+    health.shadow_delivered_blocks = status.shadow_delivered_blocks;
+    health.shadow_late_blocks = status.shadow_late_blocks;
+    health.shadow_double_miss_blocks = status.shadow_double_miss_blocks;
+    health.shadow_model_differs = status.shadow_model_differs;
+    health.gpu_kernel_available = status.gpu_kernel_available;
+    health.completion_mode = status.completion_mode;
+    health.timestamps_available = status.timestamps_available;
+    health.last_delivery_ns = status.last_delivery_ns;
     return health;
 }
 

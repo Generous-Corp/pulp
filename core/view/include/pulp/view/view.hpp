@@ -1138,12 +1138,9 @@ public:
     Color background_color() const { return bg_color_; }
 
     /// Browser-compatible device-space paint rectangle for this box's own
-    /// background/border paint. It deliberately does not alter layout, hit
-    /// testing, child placement, or widget/text paint.
-    ///
-    /// The importer records the CSS-edge snapping contract verified against
-    /// Chromium, not a generic renderer rounding heuristic. Keeping both
-    /// edges matters: an integer origin can still have a fractional far edge.
+    /// paint (Chromium's CSS-edge snap, recorded by the importer). Layout, hit
+    /// testing and children keep the fractional box; both edges are kept
+    /// because an integer origin can still have a fractional far edge.
     void set_captured_box_paint_rect(float left, float top, float right,
                                      float bottom, float device_scale) {
         captured_box_paint_left_ = left;
@@ -1159,6 +1156,9 @@ public:
     float captured_box_paint_top() const { return captured_box_paint_top_; }
     float captured_box_paint_right() const { return captured_box_paint_right_; }
     float captured_box_paint_bottom() const { return captured_box_paint_bottom_; }
+    /// The rect, in local coordinates, this box's own paint covers: the snapped
+    /// captured rect when it is recorded and plausible, else local_bounds().
+    Rect self_paint_bounds() const;
 
     /// CSS `background-repeat` keyword. Storage-only at the View level:
     /// paint() of solid-color backgrounds is a no-op for repeat semantics, but

@@ -381,7 +381,9 @@ private:
     // Strokes the current path using either apply_stroke_color or, when
     // has_stroke_gradient_ is set, draws the active stroke gradient
     // clipped to the stroked-path outline (via CGContextReplacePathWithStrokedPath).
-    void stroke_with_active_paint();
+    // `apply_sticky_dash` is false for stroke_path, whose StrokeStyle has already
+    // set the dash for this draw and must not be overridden by the sticky one.
+    void stroke_with_active_paint(bool apply_sticky_dash = true);
     void release_path();
 
     // ── Retained layer state (cg_canvas_path.mm) ─────────────────────────
