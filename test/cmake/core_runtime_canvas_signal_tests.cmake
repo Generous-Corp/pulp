@@ -226,6 +226,17 @@ pulp_add_test_suite(pulp-test-safe-relative-path GROUP pulp-test-group-core-runt
 pulp_add_test_suite(pulp-test-xml-zip GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime)
 
+# pulp_add_binary_data(COMPRESS) round trip through zlib_decompress.
+pulp_add_binary_data(pulp-test-embed-compress-data
+    SOURCES ${CMAKE_SOURCE_DIR}/core/view/js/css-colors.js
+    NAMESPACE embed_compress_fixture
+    COMPRESS)
+pulp_add_test_suite(pulp-test-embed-compress
+    LIBRARIES pulp::runtime pulp-test-embed-compress-data
+    COMPILE_DEFINITIONS
+        "PULP_TEST_EMBED_COMPRESS_SOURCE=\"${CMAKE_SOURCE_DIR}/core/view/js/css-colors.js\"")
+pulp_test_data(pulp-test-embed-compress NO_DEFINE PATHS core/view/js/css-colors.js)
+
 # SIMD operations and aligned buffer tests
 pulp_add_test_suite(pulp-test-simd LIBRARIES pulp::runtime pulp::signal)
 

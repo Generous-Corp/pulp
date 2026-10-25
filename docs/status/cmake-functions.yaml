@@ -189,6 +189,7 @@ functions:
       - SOURCES
     optional:
       - NAMESPACE
+      - COMPRESS
     docs: reference/cmake.md#pulp_add_binary_data
 
   - name: pulp_add_js_bytecode
