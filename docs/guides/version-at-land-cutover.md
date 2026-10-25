@@ -134,7 +134,14 @@ every unreleased note into `docs/migrations/v<assigned>.md` with the canonical
 the removed sources are part of the bump commit. Like the regenerators the fold
 is best-effort: a malformed note leaves `unreleased/` untouched for the next SDK
 bump and the run log says why, rather than stopping the release. A plugin-only
-bump folds nothing. The `upgrade` skill maps only the two README files under
+bump folds nothing. On the PR route the bump PR is cut at one commit and merges
+later, so a change merged while it waited ships in the release tagged on that
+merge while its note is still unreleased; the fold therefore asks the release
+tags (`fold_migration_notes.shipped_version`) for the earliest `vX.Y.Z` that
+contains the commit adding each note, and appends a note whose change already
+shipped to that release's `vX.Y.Z.md` instead of the new one. The bot fetches
+tags first; a clone that lacks the newest tag keys the note to the new version,
+which was the behaviour before. The `upgrade` skill maps only the two README files under
 `docs/migrations/`, so neither an author's note nor the bot's fold owes a
 SKILL.md update.
 
