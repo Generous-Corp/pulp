@@ -45,8 +45,8 @@
       "anchor": "capture:out:38",
       "expected": "<absent>",
       "actual": "meter:out",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/10983",
-      "reason": "ui.js binds a meter from pulpMeterValueKey alone; the native and baked C++ binders need a meter source and channel."
+      "issue": "https://github.com/Generous-Corp/pulp/issues/11010",
+      "reason": "The native and baked C++ binders do not bind a key-only meter (a value key, no meter source or channel) that ui.js binds by its key through bindMeter; the gap is theirs."
     },
     {
       "lane": "swiftui",
