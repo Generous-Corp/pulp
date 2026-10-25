@@ -1440,11 +1440,20 @@ async function runCapture(options) {
       denyProxy = await serveDenyProxy();
     }
     progress.enterPhase("browser-launch");
+    // The page is laid out and rastered at `dpr` through
+    // Emulation.setDeviceMetricsOverride, but Chrome composites a
+    // backdrop-filter against the browser's own device scale. Headless runs
+    // at 1, and with the two disagreeing a frosted box came back with
+    // unblurred streaks of what was behind it. Launching at the capture scale
+    // makes the emulated and real scales agree, and the frame then matches a
+    // plain Chrome screenshot at that scale.
+    const deviceScaleArgs = [`--force-device-scale-factor=${dpr}`];
     launched = await launchBrowser(
       browserPath, profileDir, timeoutMs,
       (child) => browserCustody.adopt(child),
       denyProxy
         ? [
+            ...deviceScaleArgs,
             "--disable-quic",
             "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
             "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
@@ -1452,6 +1461,7 @@ async function runCapture(options) {
             `--proxy-bypass-list=<-loopback>;${server.origin}`,
           ]
         : [
+            ...deviceScaleArgs,
             "--disable-quic",
             "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
             `--host-resolver-rules=${

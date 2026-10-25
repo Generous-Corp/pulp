@@ -91,6 +91,16 @@ matches in `ids.map.json` are rejected. Verify deterministic output with
 and keep the browser capture's Chromium validation receipt alongside the
 emitted source tree.
 
+### The capture browser runs at the capture's device scale
+
+`capture.mjs` emulates its DPR with `Emulation.setDeviceMetricsOverride`, and
+also launches Chrome with `--force-device-scale-factor=<dpr>` so the browser's
+own scale agrees. Chrome composites `backdrop-filter` at the browser's scale:
+with headless left at 1 under an emulated 2, a frosted box came back with
+unblurred streaks of what was behind it (16,786 px on fixture
+`22-backdrop-opacity`), and the lab charged that to the native render. Do not
+drop the launch flag or emulate a scale the browser was not launched at.
+
 ### Browser capture provenance is an import boundary
 
 The native importer validates `capture.json` before lowering the browser tree
