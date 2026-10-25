@@ -1804,7 +1804,7 @@ too, and the gate names the over-claimed family.
 
 **The authoritative check stays in CI, from a trusted root.**
 `.github/workflows/vellum-trusted-gate.yml` runs the checker from a trusted root
-rather than the pull request's copy, and `.github/CODEOWNERS` locks the events
+rather than the pull request's copy, and `.github/CODEOWNERS` lists the events
 directory, the checker and its test. A local refusal does not weaken that: it
 can only stop a push the required checks would also refuse, and it never
 accepts anything on CI's behalf. The real risk of a local copy is a FALSE red,
@@ -2282,6 +2282,69 @@ a second time) means a new unconditional `FetchContent_Declare` was added
 without a registration and a `setup.sh` priming call.
 `test_setup_source_cache.sh` fails on that drift, and on any `setup.sh` curl
 that lacks `--retry-all-errors`.
+
+### Per-commit `pulp-view-audio` archives are immutable release assets
+
+`view-audio-archive.yml` runs only when dispatched on `main` and builds only
+the commit it runs on, so the commit a consumer re-pins to is whichever `main`
+commit was dispatched. It publishes
+`libpulp-view-audio.a`, its manifest, symbol floor, floor-gate verdict,
+`SHA256SUMS` and the Sigstore bundle as an immutable prerelease tagged
+`artifact/pulp-view-audio/<sha>`. Things that look optional are not:
+
+- **There is no commit input, on purpose.** An input naming the commit to
+  check out made CodeQL's cache-poisoning query fire on the build job (a
+  default-branch job running a checked-out tree that an input chose), and
+  validating the input in an earlier job did not change that. Building
+  `github.sha` removes the input, so an archive exists only for `main` commits
+  someone dispatched it on. It has no push trigger on purpose: a prerelease per
+  `main` push would also crowd SDK versions out of `pulp sdk`'s release list.
+- **The build job must never touch the Actions cache.** It runs this commit's
+  `setup.sh` and build in a job whose actions can write the default branch's
+  cache scope. A contract test fails on any `actions/cache`, `setup-*` action
+  or cache input in that job.
+- **`ZERO_AR_DATE=1` is load-bearing.** Apple `ar`/`ranlib` stamp member and
+  symbol-table times. The workflow's `rebuild` field records a second clean
+  configure and build of the same checkout into a separate build directory on
+  the same runner (`kind: separate-build-dir`); without the variable that
+  second archive differs. It says nothing about another runner image.
+- **The floor and the dependency gate count weak symbols differently, on
+  purpose.** Both read `nm` through `tools/scripts/nm_symbols.py`. The floor
+  is a contamination check and uses `defined_any()` (every type but U/w/v, so
+  weak `W`/`V`, GNU unique `u` and indirect `i` all count): a class's typeinfo
+  or vtable is often weak and is still the archive's. The closure gate uses
+  `defined_strong()`, because two archives emitting the same inline function
+  do not depend on each other.
+- **A consumer must check the ref and the manifest, not just the signature.**
+  `view_audio_archive_manifest.py verify-release --dir <assets> --source-sha
+  <sha> --repository Generous-Corp/pulp` is the whole check in one command, and
+  the publish job runs it on the staged draft before publishing. It runs `gh
+  attestation verify` on all five attested files with `--bundle` (the only
+  reason it works without a token), `--source-ref refs/heads/main` (the only
+  thing that rejects a modified copy of the workflow dispatched from a branch)
+  and `--source-digest <sha>`, then `verify` with the floor, the gate output,
+  `--require-gate-pass` and `--require-identical-rebuild`, which carry what the
+  signature alone does not.
+- **Build and publish are separate jobs.** The build job has `contents: read`
+  and no token or OIDC grant, so nothing `setup.sh` fetches can sign; the
+  publish job re-verifies the uploaded bytes before attesting them. A failing
+  floor gate, or a rebuild that is not byte-identical, stops in the build job
+  before any tag exists.
+- **The tag must stay outside `v*`, and is therefore unprotected.** `v*` is the
+  protected release-tag ruleset and the trigger for `release-cli.yml` /
+  `sign-and-release.yml`; a tag such as `view-audio-...` would match that glob.
+  Because `artifact/*` has no ruleset, the publish job refuses an existing tag
+  or draft that does not point at the commit (or a draft with unexpected
+  assets), creates the tag itself, verifies the staged draft (tag, exact
+  assets, attestation of what was downloaded back) and only then flips
+  `--draft=false`; `immutable: true` can only be checked after that flip. A
+  run that finds the commit already published verifies that release instead
+  of trusting it. Keep the release a prerelease with `--latest=false` so
+  `/releases/latest` and `pulp upgrade` never see it.
+- **Never delete one of these releases.** A published immutable release burns
+  its tag name forever; the workflow refuses to rebuild a commit that already
+  has one, because a second build on a newer runner image is different bytes.
+  Downstream identity is the attested manifest, not a rebuild.
 
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
@@ -4675,6 +4738,16 @@ uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
 
+- **A path-filtered workflow that runs a Python test must also list the
+  modules that test imports.** `workflow-lint.yml` ran
+  `test_view_audio_archive_manifest.py` only when that test or
+  `view_audio_archive_manifest.py` changed, not when `nm_symbols.py`, which
+  both import, changed. A reader change in `nm_symbols.py` went green on its
+  PR and turned Workflow lint red on `main` at the next push that matched the
+  filter, so every later PR inherited the red. When a workflow step runs a
+  test, add the test's local imports to both its `pull_request` and `push`
+  path lists.
+
 - **Node 20's npm 10 cannot resolve some packages fresh; a lockless `npm
   install` job reds permanently while passing on a dev machine.** npm 10
   crashes in `#loadPeerSet` with "Cannot read properties of null (reading
@@ -5168,9 +5241,10 @@ bisectable.
   gitlink), and NUL-bearing/UTF-16 text is skipped as binary. The upstream fix
   for the whole class — the merge tool refusing to commit a conflicted result —
   is tracked in Shipyard #372; this guard is the consumer-side backstop.
-- **Thread-safe-assertions guard (`thread_assert_check.py`).** Catch2 3.7.1's
-  assertion macros are NOT thread-safe (thread-safe assertions are opt-in only
-  from Catch2 3.9.0), so a `REQUIRE`/`CHECK`/`FAIL`/`SUCCEED` inside a
+- **Thread-safe-assertions guard (`thread_assert_check.py`).** Catch2's
+  assertion macros are NOT thread-safe in Pulp's build (thread-safe assertions
+  need the build-time opt-in `CATCH_CONFIG_THREAD_SAFE_ASSERTIONS`, which Pulp
+  leaves off), so a `REQUIRE`/`CHECK`/`FAIL`/`SUCCEED` inside a
   `std::thread` / `std::jthread` / `std::async` lambda in `test/` is undefined
   behavior: it corrupts Catch's per-run assertion counters + section state. Bare
   metal tolerated it, but the move of the required macOS gate onto Tart VMs made

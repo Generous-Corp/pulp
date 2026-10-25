@@ -778,9 +778,11 @@ def _read_json(path: Path) -> dict | None:
 
 def source_signals(root: Path, rel: str, defines: list[str]) -> list[str]:
     """The data-read signals a source's text carries: the fixed ones plus the
-    names of its executable's definitions that point into the checkout."""
+    names of its executable's definitions that point into the checkout. A
+    mention inside a comment is not a read."""
     try:
-        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        text = strip_c_comments((root / rel).read_text(encoding="utf-8", errors="replace"),
+                                keep_strings=True)
     except OSError:
         return []
     hits = [sig for sig in DATA_SIGNALS if sig in text]

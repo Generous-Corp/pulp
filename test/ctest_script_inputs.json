@@ -145,6 +145,7 @@
     "tools/cli/sdk_distribution_guard.cpp",
     "tools/cli/shell_quote.cpp",
     "tools/cli/shell_redirect.cpp",
+    "tools/cli/ship_bundle_strip.cpp",
     "tools/cli/tartci_lease.cpp",
     "tools/cli/tool_registry.cpp",
     "tools/cli/update_check.cpp",
@@ -418,6 +419,7 @@
     "fixtures/packages/gain-dsp-kit",
     "fixtures/packages/simple-plugin-template",
     "tools/packages/registry.json",
+    "tools/templates/effect",
     "tools/templates/gain",
     "tools/templates/standalone"
    ],
@@ -529,9 +531,7 @@
   },
   "pulp-test-cli-import-detect": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_cli_import_detect.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [
     "compat.json",
     "test/fixtures/imports"
@@ -933,7 +933,8 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-cli"
+    "pulp-cli",
+    "pulp-test-ship-strip-fixture"
    ],
    "sources": [],
    "spawning_sources": [
@@ -1743,9 +1744,7 @@
   },
   "pulp-test-group-script-view": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_threejs_resources.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -2070,6 +2069,20 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-neural-cpu-simd": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_neural_cpu_simd.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/neural/example.nam"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_neural_cpu_simd.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-node-pack": {
    "data": "none",
    "inputs": [],
@@ -2165,9 +2178,7 @@
   },
   "pulp-test-reload-library": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_reload_library.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -2368,9 +2379,7 @@
   },
   "pulp-test-validation-contract": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_validation_contract.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [
     "docs/contracts/phase1-reality-snapshot.yaml",
     "docs/contracts/validation-report-v1.schema.json"
@@ -2705,8 +2714,11 @@
   "pulp-test-gpu-health-provider",
   "pulp-test-gpu-health-read-result",
   "pulp-test-gpu-health-result",
+  "pulp-test-gpu-neural-model-factory",
   "pulp-test-gpu-neural-plugin-boundary-continuity",
   "pulp-test-gpu-neural-realtime-node",
+  "pulp-test-gpu-neural-shadow-policy",
+  "pulp-test-gpu-neural-shadow-simd",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-proc-installer",
@@ -2892,6 +2904,7 @@
   "pulp-test-native-metal-compute",
   "pulp-test-negative-path",
   "pulp-test-network-service-discovery",
+  "pulp-test-neural-cpu-simd",
   "pulp-test-node-pack",
   "pulp-test-notary-env",
   "pulp-test-nsis-installer",
@@ -3387,6 +3400,7 @@
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
     "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py",
     "tools/scripts/test_archive_symbol_closure_check.py"
    ],
    "kind": "python"
@@ -3909,6 +3923,8 @@
     "docs/status/gpu-recipes.yaml",
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
+    "test/cmake/check_plugin_module_dead_strip.cmake",
+    "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",
@@ -7816,7 +7832,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7824,7 +7841,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7832,7 +7850,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -7951,7 +7970,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -8037,7 +8057,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -8085,7 +8106,8 @@
    "entry": "tools/scripts/archive_symbol_closure_check.py",
    "inputs": [
     "tools/scripts/archive_symbol_closure_check.py",
-    "tools/scripts/nm_symbols.py"
+    "tools/scripts/nm_symbols.py",
+    "tools/scripts/rtti_ownership.py"
    ],
    "kind": "python"
   },
@@ -9947,6 +9969,8 @@
     "docs/status/gpu-recipes.yaml",
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
+    "test/cmake/check_plugin_module_dead_strip.cmake",
+    "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "test/cmake/quality_tests.cmake",

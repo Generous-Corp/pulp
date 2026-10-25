@@ -902,7 +902,8 @@ if [ -f "$CONFLICT_MARKER_GUARD" ]; then
 fi
 
 # ── 13. thread-safe-assertions guard ───────────────────────────────────────
-# Catch2 3.7.1 assertion macros aren't thread-safe; a REQUIRE/CHECK inside a
+# Catch2 assertion macros aren't thread-safe (Pulp leaves
+# CATCH_CONFIG_THREAD_SAFE_ASSERTIONS off); a REQUIRE/CHECK inside a
 # std::thread/async lambda in test/ is UB that bare metal tolerates but VM
 # scheduler timing trips (it reddened the required macOS gate on the Tart-VM
 # graduation). Also a ctest case, but running it here catches it pre-push.

@@ -420,6 +420,36 @@ inline void snapshot_param_values(const state::StateStore& store,
     }
 }
 
+/// Generation-gated pre-process snapshot: which generation it was taken at
+/// and whether it can be trusted.
+struct ParamSnapshotState {
+    std::uint64_t generation = 0;
+    bool valid = false;
+};
+
+/// Brings @p snapshot up to date for a block whose store generation is
+/// @p generation, re-reading every value only when a write landed since the
+/// last trusted snapshot. A writer advances the generation before it stores
+/// its value, so a snapshot is trusted only when no writer was in flight
+/// when it started and none had landed when it ended; a check at the end
+/// alone would accept a value read just before an in-flight writer stored
+/// its new one, and that parameter would later be reported to the host as a
+/// plugin-side change it never made. @p after_read runs between the read and
+/// the final check (tests use it to finish a writer there).
+template <typename AfterRead = void (*)()>
+inline void refresh_param_snapshot(
+    const state::StateStore& store, std::span<const state::ParamInfo> all_params,
+    std::vector<float>& snapshot, ParamSnapshotState& state, std::uint64_t generation,
+    AfterRead&& after_read = [] {}) {
+    if (state.valid && state.generation == generation && snapshot.size() == all_params.size())
+        return;
+    const bool quiet_before = store.state_snapshot_is_current(generation);
+    snapshot_param_values(store, all_params, snapshot);
+    after_read();
+    state.generation = generation;
+    state.valid = quiet_before && store.state_snapshot_is_current(generation);
+}
+
 /// True when @p current differs from @p snapshotted, compared *bitwise*.
 ///
 /// Deliberately not `current != snapshotted`. The question this answers is "did

@@ -64,6 +64,30 @@ TEST_CASE("detect_host_info returns coherent HostType + HostVersion",
     REQUIRE(info.version.patch >= 0);
 }
 
+TEST_CASE("Only host types with version-gated quirks read the host version",
+          "[format][host-version]") {
+    REQUIRE_FALSE(host_type_uses_version(HostType::Unknown));
+    REQUIRE_FALSE(host_type_uses_version(HostType::Other));
+    REQUIRE_FALSE(host_type_uses_version(HostType::Standalone));
+    for (auto type : {HostType::LogicPro, HostType::GarageBand, HostType::AbletonLive,
+                      HostType::Reaper, HostType::ProTools, HostType::Cubase, HostType::Nuendo,
+                      HostType::Wavelab, HostType::StudioOne, HostType::FLStudio, HostType::Bitwig,
+                      HostType::Ardour, HostType::Mixbus32C, HostType::DigitalPerformer}) {
+        INFO(host_type_name(type));
+        REQUIRE(host_type_uses_version(type));
+    }
+}
+
+TEST_CASE("detect_host_info leaves the version empty when the host type ignores it",
+          "[format][host-version]") {
+    HostInfo info = detect_host_info();
+    if (!host_type_uses_version(info.type)) {
+        REQUIRE(info.version.major == 0);
+        REQUIRE(info.version.minor == 0);
+        REQUIRE(info.version.patch == 0);
+    }
+}
+
 // ── iPlug2-quirks-audit-2026-05-25 — Ardour family classifier coverage.
 //    Mixbus 32C is an Ardour derivative whose process name carries
 //    "mixbus" (and sometimes "mixbus 32c" / "mixbus32c"); we classify

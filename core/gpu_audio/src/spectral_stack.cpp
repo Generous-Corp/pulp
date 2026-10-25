@@ -191,6 +191,7 @@ bool GpuSpectralStack::prepare(uint32_t fft_size, uint32_t hop,
         gpu_ = nullptr; owned_.reset();
         return true;  // over a device limit / failure → behave as unavailable
     }
+    device_generation_ = gpu_->device_generation();
     fft_ = std::make_unique<signal::Fft>(static_cast<int>(fft_size));
     cap_scratch_.assign(fft_size, {0.0f, 0.0f});
     mag_up_.assign(fft_size, 0.0f);
@@ -200,8 +201,14 @@ bool GpuSpectralStack::prepare(uint32_t fft_size, uint32_t hop,
     return true;
 }
 
+bool GpuSpectralStack::available() const {
+    return gpu_ != nullptr && !gpu_->device_lost() &&
+           gpu_->device_generation() == device_generation_;
+}
+
 bool GpuSpectralStack::capture(uint32_t layer, const float* frame_in) {
-    if (!gpu_ || layer >= num_layers_ || frame_in == nullptr || !fft_) return false;
+    if (!available() || layer >= num_layers_ || frame_in == nullptr || !fft_)
+        return false;
     fft_->forward_real(frame_in, cap_scratch_.data());
     for (uint32_t k = 0; k < n_; ++k) {
         mag_up_[k] = std::abs(cap_scratch_[k]);
@@ -224,7 +231,12 @@ bool GpuSpectralStack::layer_active(uint32_t layer) const {
 
 bool GpuSpectralStack::render(float* frame_out, const float* weights, float smear,
                              float jitter) {
-    if (!gpu_ || frame_out == nullptr) return false;
+    if (!gpu_ || frame_out == nullptr)
+        return false;
+    if (!available()) {
+        std::fill(frame_out, frame_out + n_, 0.0f);
+        return false;
+    }
     bool any = false;
     for (uint32_t L = 0; L < num_layers_; ++L) {
         weights_[L] = active_[L] ? (weights ? weights[L] : 1.0f) : 0.0f;

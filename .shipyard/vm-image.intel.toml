@@ -41,7 +41,7 @@ rust_targets = ["x86_64-apple-darwin"]
 rust = true
 
 # BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = c97272ea300029291d51de8e1dc1a1616c918583e1e9ae2a00d8bdd28349a041
+# source_sha256 = d3decd808113b9d8a77140753e8fd405f5fd98c247cac80cfc8c624701f98a03
 # generated_platform = intel
 # END GENERATED PULP TOOLCHAIN
 
