@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""The macos tier record: the more conservative of the label and the steps.
+"""The macos tier record: the more conservative of the run and the steps.
 
-Runs the workflow's own step bash against a fake `gh` that answers with raw
-API JSON, so the real jq that reads the jobs, pull requests and issue events
-is what runs.
+The run must be the fleet App's dispatch of an approved head; the steps must
+show the full lane. Runs the workflow's own step bash against a fake `gh` that
+answers with raw API JSON, so the real jq that reads the jobs, pull requests
+and verdict comments is what runs.
 """
 
 from __future__ import annotations
@@ -83,8 +84,11 @@ def native(build: str, full_suite: str = "skipped") -> dict:
                   "Test (non-Windows)": full_suite})
 
 
-def label(event: str = "labeled", actor: str = APP, at: str = BEFORE, name: str = "macos-ci") -> dict:
-    return {"event": event, "actor": {"login": actor}, "created_at": at, "label": {"name": name}}
+def verdict(word: str = "APPROVE", head: str = HEAD, author: str = APP, at: str = BEFORE,
+            reviewer: bool = True) -> dict:
+    body = ("reviewer: pulp-review2\n\n" if reviewer else "") + "Looked at it.\n\n" + \
+        f"verdict: {word} head:{head}\n"
+    return {"user": {"login": author}, "created_at": at, "body": body}
 
 
 def pages(items: list, key: str | None, count: int = 2) -> str:
@@ -125,64 +129,83 @@ class Harness(unittest.TestCase):
 
 
 class TierDecisionTest(Harness):
-    def _decide(self, jobs, events=(), run_prs="7", pulls=None, head_repo=REPO):
+    def _decide(self, jobs, comments=(), run_prs="7", pulls=None, head_repo=REPO,
+                event="workflow_dispatch", actor=APP):
         fixture = {
             "/attempts/2/jobs": jobs if isinstance(jobs, str) else pages(list(jobs), "jobs"),
             "/commits/": json.dumps(pulls if pulls is not None else []),
-            "/issues/7/events": pages(list(events), None),
+            "/issues/7/comments": comments if isinstance(comments, str) else pages(list(comments), None),
         }
         env = {"GH_TOKEN": "read-only", "RUN_ID": "4242", "RUN_ATTEMPT": "2",
                "RUN_CREATED_AT": CREATED, "HEAD_SHA": HEAD, "HEAD_REPO": head_repo,
-               "RUN_PRS": run_prs}
+               "RUN_PRS": run_prs, "TRIGGER_EVENT": event, "TRIGGERING_ACTOR": actor}
         return self._bash("Decide the tier", env, fixture)
 
-    def _tier(self, jobs, events=(), **kwargs) -> str | None:
-        proc, _, outputs = self._decide(jobs, events, **kwargs)
+    def _tier(self, jobs, comments=(), **kwargs) -> str | None:
+        proc, _, outputs = self._decide(jobs, comments, **kwargs)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         return outputs.get("tier")
 
     # --- both signals ------------------------------------------------------
 
-    def test_the_apps_label_and_a_build_that_ran_is_the_full_lane(self) -> None:
-        self.assertEqual(self._tier([native("success")], [label()]), "fast")
-        self.assertEqual(self._tier([native("success", full_suite="success")], [label()]), "full")
+    def test_the_apps_dispatch_of_an_approved_head_with_a_build_is_the_full_lane(self) -> None:
+        self.assertEqual(self._tier([native("success")], [verdict()]), "fast")
+        self.assertEqual(self._tier([native("success", full_suite="success")], [verdict()]), "full")
         # A failed build ran too; the check's own red is what blocks it.
-        self.assertEqual(self._tier([native("failure")], [label()]), "fast")
+        self.assertEqual(self._tier([native("failure")], [verdict()]), "fast")
 
-    def test_label_absent_is_deferred_whatever_the_steps_say(self) -> None:
-        self.assertEqual(self._tier([native("success", full_suite="success")], []), "deferred")
+    def test_a_pull_request_run_is_deferred_whatever_its_steps_say(self) -> None:
+        # Labels no longer start runs: the full lane comes from a dispatch.
+        self.assertEqual(self._tier([native("success", full_suite="success")], [verdict()],
+                                    event="pull_request"), "deferred")
 
-    def test_label_present_but_build_skipped_is_deferred(self) -> None:
-        self.assertEqual(self._tier([native("skipped")], [label()]), "deferred")
+    def test_a_dispatch_or_rerun_by_anyone_else_is_deferred(self) -> None:
+        for actor in ("a-maintainer", "github-actions[bot]", ""):
+            with self.subTest(actor=actor):
+                self.assertEqual(self._tier([native("success", full_suite="success")], [verdict()],
+                                            actor=actor), "deferred")
 
-    def test_only_the_fleet_apps_label_from_before_the_run_counts(self) -> None:
+    def test_an_approved_dispatch_whose_build_was_skipped_is_deferred(self) -> None:
+        self.assertEqual(self._tier([native("skipped")], [verdict()]), "deferred")
+
+    def test_only_the_apps_trusted_approve_for_this_head_before_the_run_counts(self) -> None:
         full = [native("success", full_suite="success")]
-        for case, events in (("someone else's", [label(actor="a-maintainer")]),
-                             ("applied after the run was created", [label(at=AFTER)]),
-                             ("removed again before the run", [label(), label("unlabeled", at="2026-10-25T11:30:00Z")]),
-                             ("another label", [label(name="queue-unblock")])):
+        for case, comments in (
+                ("no verdict at all", []),
+                ("approved after the run was created", [verdict(at=AFTER)]),
+                ("approved by someone else", [verdict(author="a-maintainer")]),
+                ("approved another head", [verdict(head="b" * 40)]),
+                ("no reviewer line", [verdict(reviewer=False)]),
+                ("a HOLD after the approve", [verdict(at="2026-10-25T10:00:00Z"),
+                                              verdict("HOLD", at=BEFORE)]),
+                ("verdict not on the last line",
+                 [{"user": {"login": APP}, "created_at": BEFORE,
+                   "body": f"reviewer: x\nverdict: APPROVE head:{HEAD}\nlater text\n"}])):
             with self.subTest(case=case):
-                self.assertEqual(self._tier(full, events), "deferred")
-        # Re-applied after a removal, still before the run: present.
-        self.assertEqual(self._tier(full, [label(at="2026-10-25T10:00:00Z"),
-                                           label("unlabeled", at="2026-10-25T10:30:00Z"),
-                                           label(at=BEFORE)]), "full")
+                self.assertEqual(self._tier(full, comments), "deferred")
+        # A re-approve after a HOLD, still before the run: counts.
+        self.assertEqual(self._tier(full, [verdict("HOLD", at="2026-10-25T10:00:00Z"),
+                                           verdict(at=BEFORE)]), "full")
+        # A later verdict on another head does not displace this head's approve.
+        self.assertEqual(self._tier(full, [verdict(at="2026-10-25T10:00:00Z"),
+                                           verdict("HOLD", head="b" * 40, at=BEFORE)]), "full")
 
     def test_the_skip_safe_bootstrap(self) -> None:
-        self.assertEqual(self._tier([job(**{BOOTSTRAP: "success"})], [label()]), "not-required")
-        self.assertEqual(self._tier([job(**{BOOTSTRAP: "success"})], []), "deferred")
-        self.assertEqual(self._tier([job(**{BOOTSTRAP: "failure"})], [label()]), "deferred")
+        self.assertEqual(self._tier([job(**{BOOTSTRAP: "success"})], [verdict()]), "not-required")
+        self.assertEqual(self._tier([job(**{BOOTSTRAP: "success"})], [verdict()],
+                                    event="pull_request"), "deferred")
+        self.assertEqual(self._tier([job(**{BOOTSTRAP: "failure"})], [verdict()]), "deferred")
 
     def test_annotations_never_enter_the_decision(self) -> None:
         # A contract-lane job whose code under test printed a wider tier.
         forged = native("skipped")
         forged["annotations"] = [{"title": "shipyard-test-tier", "message": '{"tier":"full"}'}]
-        self.assertEqual(self._tier([forged], [label()]), "deferred")
+        self.assertEqual(self._tier([forged], [verdict()]), "deferred")
         self.assertNotIn("annotations", self.steps["Decide the tier"]["run"])
 
     def test_the_summary_is_bound_to_the_run_and_attempt(self) -> None:
         proc, calls, outputs = self._decide(
-            [native("success"), job(name="Linux (x64) [github-hosted]", Build="success")], [label()])
+            [native("success"), job(name="Linux (x64) [github-hosted]", Build="success")], [verdict()])
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(json.loads(outputs["summary"]), {
             "schema": "shipyard-test-tier/v1", "check": "macos", "tier": "fast",
@@ -191,30 +214,39 @@ class TierDecisionTest(Harness):
         listing = next(" ".join(c) for c in calls if "/jobs" in " ".join(c))
         self.assertIn("actions/runs/4242/attempts/2/jobs", listing)
         self.assertIn("--paginate", listing)
+        verdicts = next(" ".join(c) for c in calls if "/comments" in " ".join(c))
+        self.assertIn("--paginate", verdicts)
 
-    # --- which pull request the label is read from -----------------------
+    def test_the_run_facts_come_from_the_workflow_run_event(self) -> None:
+        env = self.steps["Decide the tier"]["env"]
+        self.assertEqual(env["TRIGGER_EVENT"], "${{ github.event.workflow_run.event }}")
+        self.assertEqual(env["TRIGGERING_ACTOR"],
+                         "${{ github.event.workflow_run.triggering_actor.login }}")
+        self.assertEqual(env["RUN_CREATED_AT"], "${{ github.event.workflow_run.created_at }}")
+
+    # --- which pull request the verdict is read from ---------------------
 
     def test_without_run_prs_only_this_repositorys_pull_request_at_this_head_counts(self) -> None:
         pulls = [{"number": 7, "state": "open", "head": {"sha": HEAD, "repo": {"full_name": REPO}}},
                  {"number": 8, "state": "open", "head": {"sha": HEAD, "repo": {"full_name": "someone/pulp"}}},
                  {"number": 9, "state": "open", "head": {"sha": "b" * 40, "repo": {"full_name": REPO}}},
                  {"number": 10, "state": "closed", "head": {"sha": HEAD, "repo": {"full_name": REPO}}}]
-        self.assertEqual(self._tier([native("success")], [label()], run_prs="", pulls=pulls), "fast")
+        self.assertEqual(self._tier([native("success")], [verdict()], run_prs="", pulls=pulls), "fast")
 
     def test_no_or_several_pull_requests_at_the_head_is_deferred(self) -> None:
-        self.assertEqual(self._tier([native("success")], [label()], run_prs="", pulls=[]), "deferred")
-        self.assertEqual(self._tier([native("success")], [label()], run_prs="7 8"), "deferred")
+        self.assertEqual(self._tier([native("success")], [verdict()], run_prs="", pulls=[]), "deferred")
+        self.assertEqual(self._tier([native("success")], [verdict()], run_prs="7 8"), "deferred")
 
     # --- no record when it cannot be sure ---------------------------------
 
     def test_a_run_from_another_repository_gets_no_record(self) -> None:
-        proc, calls, outputs = self._decide([native("success")], [label()], head_repo="someone/pulp")
+        proc, calls, outputs = self._decide([native("success")], [verdict()], head_repo="someone/pulp")
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(calls, [], "no API call at all")
         self.assertNotIn("publish", outputs)
 
     def test_a_run_with_no_macos_job_gets_no_record(self) -> None:
-        self.assertIsNone(self._tier([job(name="Linux (x64) [github-hosted]", Build="success")], [label()]))
+        self.assertIsNone(self._tier([job(name="Linux (x64) [github-hosted]", Build="success")], [verdict()]))
 
     def test_an_unplaceable_job_gets_no_record_and_says_so(self) -> None:
         for case, jobs in (("two macos jobs", [native("success"), native("success")]),
@@ -222,11 +254,11 @@ class TierDecisionTest(Harness):
                            ("no lane steps", [job(**{"Set up job": "success"})]),
                            ("unreadable listing", "!FAIL")):
             with self.subTest(case=case):
-                proc, _, outputs = self._decide(jobs, [label()])
+                proc, _, outputs = self._decide(jobs, [verdict()])
                 self.assertNotEqual(proc.returncode, 0, proc.stdout)
                 self.assertNotIn("publish", outputs)
 
-    def test_unreadable_label_events_fail_with_no_record(self) -> None:
+    def test_unreadable_verdicts_fail_with_no_record(self) -> None:
         proc, _, outputs = self._decide([native("success")], "!FAIL")
         self.assertNotEqual(proc.returncode, 0)
         self.assertNotIn("publish", outputs)

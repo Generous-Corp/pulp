@@ -3803,12 +3803,16 @@ could rewrite those. It refuses a head with no counted record bound to its
   With the secrets absent the job fails visibly and publishes nothing.
 - **Tier:** the more conservative of two signals, since neither proves enough
   alone. A pull request's own build.yml decides its step names, so steps alone
-  cannot grant a full tier, and the label alone does not show the suite ran.
-  1. **Label.** The fleet App's `macos-ci` was on the pull request when the run
-     was created: the label's last add or remove before the run's
-     `created_at`, from the issue's events. If it was absent, applied by
-     anyone else, or the head has no single same-repository pull request, the
-     tier is `deferred`.
+  cannot grant a full tier, and who started the run does not show the suite
+  ran.
+  1. **The run.** It must be a `workflow_dispatch` whose triggering actor is
+     the fleet App (`shipyard-local[bot]`). The App moves an approved head to
+     the full lane that way, since label events no longer start Build and
+     Test runs. The App's latest verdict on the head, at or before the run's
+     `created_at`, must be a trusted `verdict: APPROVE head:<sha>` with a
+     `reviewer:` line. Otherwise the tier is `deferred`: a `pull_request` run,
+     a dispatch or rerun by anyone else, a missing or non-APPROVE verdict, or
+     a head without exactly one same-repository pull request.
   2. **Steps.** The conclusions the runner recorded for that attempt's
      `macos` job:
 
@@ -3824,12 +3828,14 @@ A run with no `macos` job, two of them, a job for another head, neither
 step, or an unreadable listing publishes no record, and the guard refuses
 that head. So do fork heads, which land through an in-repository branch.
 
-Because the label signal applies to every head, a head without the fleet
-App's `macos-ci` is `deferred` even on the full lane, and even when
-`PULP_MACOS_PR_GATING` is off. Turn on `tiered_required_checks` only after
-the App exists, the arm sweep labels every approved head (skip-safe and
-dispatch-validated ones included), and gating is on. That key and `[queue]
-tier_record_app` are the last change, and neither is set yet.
+Because the run signal applies to every head, only the fleet App's dispatch
+of an approved head can be anything but `deferred`. Every `pull_request` run
+is `deferred`, even on the full lane and even when `PULP_MACOS_PR_GATING` is
+off. The rule has no exemptions, since one would reopen the forgery surface.
+Turn on `tiered_required_checks` only after the App exists and the arm sweep
+dispatches `build.yml` for every approved head, skip-safe and release ones
+included, with gating on. That key and `[queue] tier_record_app` are the
+last change, and neither is set yet.
 
 **Trust boundary.** A same-repository pull request runs its own build.yml, so
 it can rename steps, or add a step that grants itself `checks: write`. The
@@ -3837,14 +3843,15 @@ tests that pin step names and checks writers are in the same pull request and
 can be edited too, so they stop only an honest mistake. That is the trust
 level of every required context here (see "Required checks trust the pull
 request's own workflow YAML"). Three things stand behind it:
-- the label signal, which no pull request controls;
+- the run signal (event, triggering actor and the App's verdict), which no
+  pull request controls;
 - the guard counting only the dedicated App's records;
 - the merge group's full macOS suite.
 
 The repository's default workflow token permission is `read`. That covers
 only jobs that declare no permissions; a pull request can still declare
-`checks: write` explicitly. #931 refuses tiers whose job log shows `Checks:
-write`.
+`checks: write` explicitly. That is harmless here, because the guard counts
+only the dedicated App's records, which no pull request job can rewrite.
 
 ### Why the contract lane's `macos` check is green
 

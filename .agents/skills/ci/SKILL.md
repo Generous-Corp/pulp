@@ -441,8 +441,8 @@ macOS.
   completed same-repository Build and Test run, bound to that run and attempt.
   It is created with a dedicated App's token from the main-only `tier-record`
   environment, never GITHUB_TOKEN. The tier is the more conservative of the
-  fleet App's `macos-ci` label at run creation and the `macos` job's step
-  conclusions (`Build` skipped means `deferred`). A head with no counted
+  run (a `workflow_dispatch` by the fleet App of a head it had approved) and
+  the `macos` job's step conclusions (`Build` skipped means `deferred`). A head with no counted
   record, or a `deferred` one, cannot be armed once `tiered_required_checks`
   is set.
 

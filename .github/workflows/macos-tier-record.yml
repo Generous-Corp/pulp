@@ -23,11 +23,13 @@ name: macOS test tier record
 #
 # The tier is the more conservative of two signals, because neither proves
 # enough alone. A pull request's own build.yml decides its step names, so steps
-# alone cannot grant `full`; the label alone does not show that the suite ran.
+# alone cannot grant `full`; who started the run does not show the suite ran.
 #
-# 1. The label: the fleet App's `macos-ci` on the pull request when the run was
-#    created (the label's last add or remove before the run's created_at, read
-#    from the issue's events). Absent, or applied by anyone else: `deferred`.
+# 1. The run: a workflow_dispatch whose triggering actor is the fleet App,
+#    which moves an approved head to the full lane that way (label events no
+#    longer start Build and Test runs). The App's latest verdict on the head at
+#    or before the run's created_at must be a trusted APPROVE. A pull_request
+#    run, a dispatch or rerun by anyone else, or no such verdict: `deferred`.
 # 2. The steps the runner recorded for that attempt's `macos` job (jobs API),
 #    never annotations, which any step can print. `Build` ran gives `fast`, or
 #    `full` when `Test (non-Windows)` ran too. `Build` skipped (the contract
@@ -88,6 +90,8 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
           RUN_PRS: ${{ join(github.event.workflow_run.pull_requests.*.number, ' ') }}
+          TRIGGER_EVENT: ${{ github.event.workflow_run.event }}
+          TRIGGERING_ACTOR: ${{ github.event.workflow_run.triggering_actor.login }}
         run: |
           set -euo pipefail
           repo="$GITHUB_REPOSITORY"
@@ -139,40 +143,55 @@ jobs:
             steps_tier=deferred
           fi
 
-          # --- signal 1: the fleet App's label when the run was created ------
-          # The same-repository open pull request whose head is this commit.
-          prs="$RUN_PRS"
-          if [ -z "$prs" ]; then
-            prs=$(gh api "repos/$repo/commits/$HEAD_SHA/pulls" \
-              | jq -r --arg sha "$HEAD_SHA" --arg repo "$repo" \
-                '[.[] | select(.state == "open" and .head.sha == $sha and .head.repo.full_name == $repo) | .number] | join(" ")')
-          fi
-          read -r -a pr_list <<< "$prs"
-          label="absent"
-          if [ "${#pr_list[@]}" -ne 1 ]; then
-            label="unplaced (${#pr_list[@]} pull requests at this head)"
+          # --- signal 1: the fleet App dispatched this run after approving -
+          # The full lane is a workflow_dispatch of build.yml by the fleet
+          # App on an approved head; label events no longer start runs. So
+          # the run must be that dispatch (its event and triggering actor,
+          # which a rerun by anyone else changes), and the App's latest
+          # verdict on this head at or before the run was created must be a
+          # trusted APPROVE (`reviewer:` line, last line
+          # `verdict: APPROVE head:<sha>`).
+          approval="absent"
+          if [ "$TRIGGER_EVENT" != workflow_dispatch ]; then
+            approval="not a dispatch ($TRIGGER_EVENT)"
+          elif [ "$TRIGGERING_ACTOR" != "$app" ]; then
+            approval="dispatched by $TRIGGERING_ACTOR, not $app"
           else
-            pr="${pr_list[0]}"
-            # The last add or remove of the label before the run was created.
-            last=$(gh api --paginate "repos/$repo/issues/$pr/events?per_page=100" \
-              | jq -s -r --arg before "$RUN_CREATED_AT" \
-                '[.[][] | select((.event == "labeled" or .event == "unlabeled")
-                                  and .label.name == "macos-ci" and .created_at < $before)]
-                 | sort_by(.created_at) | last // {} | "\(.event // "none") \(.actor.login // "none")"')
-            read -r last_event last_actor <<< "$last"
-            if [ "$last_event" = labeled ] && [ "$last_actor" = "$app" ]; then
-              label=present
-            elif [ "$last_event" = labeled ]; then
-              label="applied by $last_actor, not $app"
+            # The same-repository open pull request whose head is this commit.
+            prs="$RUN_PRS"
+            if [ -z "$prs" ]; then
+              prs=$(gh api "repos/$repo/commits/$HEAD_SHA/pulls" \
+                | jq -r --arg sha "$HEAD_SHA" --arg repo "$repo" \
+                  '[.[] | select(.state == "open" and .head.sha == $sha and .head.repo.full_name == $repo) | .number] | join(" ")')
+            fi
+            read -r -a pr_list <<< "$prs"
+            if [ "${#pr_list[@]}" -ne 1 ]; then
+              approval="unplaced (${#pr_list[@]} pull requests at this head)"
+            else
+              verdict=$(gh api --paginate "repos/$repo/issues/${pr_list[0]}/comments?per_page=100" \
+                | jq -s -r --arg app "$app" --arg at "$RUN_CREATED_AT" --arg sha "$HEAD_SHA" \
+                  '[.[][] | select(.user.login == $app and .created_at <= $at)
+                    | {at: .created_at, body: .body,
+                       last: ((.body | split("\n") | map(sub("\\s+$"; "")) | map(select(length > 0)) | last) // "")}
+                    | select(.last | test("^verdict: [A-Z_]+ head:" + $sha + "$"))]
+                   | sort_by(.at) | last
+                   | if . == null then "none"
+                     elif (.last | startswith("verdict: APPROVE ")) and (.body | test("(^|\n)reviewer: \\S")) then "approve"
+                     else "other" end')
+              case "$verdict" in
+                approve) approval=present ;;
+                none) approval="no verdict for this head before the run" ;;
+                *) approval="the latest verdict for this head before the run is not a trusted APPROVE" ;;
+              esac
             fi
           fi
 
           # --- the more conservative of the two ------------------------------
-          if [ "$label" != present ]; then tier=deferred; else tier="$steps_tier"; fi
+          if [ "$approval" != present ]; then tier=deferred; else tier="$steps_tier"; fi
           summary=$(jq -cn --arg tier "$tier" --argjson run "$RUN_ID" --argjson attempt "$RUN_ATTEMPT" \
             '{schema:"shipyard-test-tier/v1",check:"macos",tier:$tier,run_id:$run,
               run_attempt:$attempt,label:"macos-ci",full_suite_runs_in:"merge_group"}')
-          echo "tier $tier for $HEAD_SHA: steps say $steps_tier (Build=$build, Test (non-Windows)=$full_suite, bootstrap=$bootstrap); fleet-App macos-ci at run creation: $label"
+          echo "tier $tier for $HEAD_SHA: steps say $steps_tier (Build=$build, Test (non-Windows)=$full_suite, bootstrap=$bootstrap); approved fleet-App dispatch: $approval"
           {
             echo "publish=true"
             echo "tier=$tier"
