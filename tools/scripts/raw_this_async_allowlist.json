@@ -145,6 +145,11 @@
       "path": "core/view/src/scripted_ui.cpp",
       "needle": "std::thread watchdog([&]",
       "reason": "load_script_before_deadline joins the scoped watchdog before returning, so its captured stack synchronization state, bridge, and engine remain alive"
+    },
+    {
+      "path": "core/gpu_audio/src/detail/neural_shadow_worker.cpp",
+      "needle": "std::thread([this]",
+      "reason": "NeuralShadowWorker destructor and start() call stop(), which joins the shadow thread before any member teardown or restart; the worker is neither copyable nor movable"
     }
   ]
 }

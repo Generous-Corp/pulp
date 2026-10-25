@@ -4984,6 +4984,12 @@ TEST_CASE("WidgetBridge installs named chart shader presets on a knob",
         globalThis.badProfile = setWidgetShaderChartPreset('knob', 'tube', { profile: 'square' });
         globalThis.glow = setWidgetShaderChartPreset('knob', 'glow', { sigma: 6 });
         globalThis.hugeGlow = setWidgetShaderChartPreset('knob', 'glow', { sigma: 1e5 });
+        createFader('track', 'vertical', 'root');
+        createToggle('switch', 'root');
+        globalThis.onFader = setWidgetShaderChartPreset('track', 'inset-channel');
+        globalThis.onToggle = setWidgetShaderChartPreset('switch', 'bevel');
+        globalThis.rawOnToggle = setWidgetShaderChart('switch',
+          'half4 shade(PulpChart g) { return half4(1); }');
         // Keep the value pointer off the top of the arc the probes read.
         setValue('knob', 0.1);
     )");
@@ -5006,6 +5012,14 @@ TEST_CASE("WidgetBridge installs named chart shader presets on a knob",
     // The glow's falloff lives outside the band, so the preset carries the
     // reach that holds it, and an unbounded sigma is refused.
     REQUIRE_FALSE(engine.evaluate("hugeGlow.success").getWithDefault<bool>(true));
+    // Faders draw a chart on their track; a toggle draws none, so a chart for
+    // it is refused instead of being stored and never painted.
+    REQUIRE(engine.evaluate("onFader.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("onToggle.success").getWithDefault<bool>(true));
+    REQUIRE(
+        engine.evaluate("onToggle.error").getWithDefault<std::string>("").find("draws no chart") !=
+        std::string::npos);
+    REQUIRE_FALSE(engine.evaluate("rawOnToggle.success").getWithDefault<bool>(true));
     REQUIRE(knob->chart_reach() == Catch::Approx(chart_glow_reach(6.0f, 1.0f)));
     REQUIRE(knob->chart_reach() >= 18.0f);
     REQUIRE(knob->shader_reach() == 0.0f);

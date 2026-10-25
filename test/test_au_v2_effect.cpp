@@ -41,6 +41,7 @@
 #include <memory>
 #include <string>
 #include "../examples/pulp-gain/pulp_gain.hpp"
+#include "support/step_gain_fixture.hpp"
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -985,7 +986,14 @@ TEST_CASE("AU v2 effect clears OutputIsSilence when the processor generates outp
 namespace {
 
 class ScheduledAutomationProcessor final : public pulp::format::Processor {
-public:
+  public:
+    // These cases cover the AU v2 per-slice render.
+    bool wants_sample_accurate_parameters() const override {
+        return true;
+    }
+    bool wants_au_scheduled_parameter_slices() const override {
+        return true;
+    }
     pulp::format::PluginDescriptor descriptor() const override {
         return {
             .name = "AUScheduledAutomationTest",
@@ -1111,6 +1119,401 @@ TEST_CASE("AU v2 effect preserves scheduled offsets and ramps for processors",
     for (UInt32 n = 48; n < kFrames; ++n) REQUIRE(output_samples[n] == 1.0f);
 
     effect.DoCleanup();
+}
+
+namespace {
+
+class DenseAutomationProcessor final : public pulp::format::Processor {
+  public:
+    // Read when the AU effect constructs the processor.
+    static inline bool sample_accurate = true;
+    static inline bool slices = true;
+    bool wants_sample_accurate_parameters() const override {
+        return sample_accurate;
+    }
+    bool wants_au_scheduled_parameter_slices() const override {
+        return slices;
+    }
+    static inline int process_calls = 0;
+    static inline DenseAutomationProcessor* last = nullptr;
+    DenseAutomationProcessor() {
+        last = this;
+    }
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AUDenseAutomationTest",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-dense-automation",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 1}},
+            .output_buses = {{"Main Out", 1}},
+        };
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        for (pulp::state::ParamID id = 1; id <= 3; ++id)
+            store.add_parameter(
+                {.id = id, .name = "P" + std::to_string(id), .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        ++process_calls;
+        pulp::state::ParamCursor cursor(state(), param_events());
+        for (std::size_t n = 0; n < output.num_samples(); ++n) {
+            cursor.advance_to(static_cast<int32_t>(n));
+            output.channel_ptr(0)[n] = cursor.value(1);
+        }
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_dense_automation_effect() {
+    return std::make_unique<DenseAutomationProcessor>();
+}
+
+AudioUnitParameterEvent immediate_event(AudioUnitParameterID id, UInt32 offset, float value) {
+    AudioUnitParameterEvent event{};
+    event.eventType = kParameterEvent_Immediate;
+    event.parameter = id;
+    event.scope = kAudioUnitScope_Global;
+    event.eventValues.immediate.bufferOffset = offset;
+    event.eventValues.immediate.value = value;
+    return event;
+}
+
+} // namespace
+
+TEST_CASE("AU v2 renders sample-accurate automation once, each point at its offset",
+          "[au][au-v2][automation][parity]") {
+    // The same steps the VST3 and CLAP cases send; all three must produce
+    // step_gain_expected() exactly. A schedule one sample late must not.
+    const auto previous = pulp::format::registered_factory();
+    pulp::format::register_plugin(pulp::test::make_step_gain_processor);
+    struct Restore {
+        pulp::format::ProcessorFactory value;
+        ~Restore() {
+            pulp::format::register_plugin(value);
+        }
+    } restore{previous};
+
+    for (const int shift : {0, 1}) {
+        CAPTURE(shift);
+        constexpr UInt32 kFrames = pulp::test::kStepGainFrames;
+        TestScheduledEffect effect;
+        effect.CreateElements();
+        REQUIRE(effect.GetInput(0)->SetStreamFormat(silence_test_format(48000.0, 2)) == noErr);
+        REQUIRE(effect.GetOutput(0)->SetStreamFormat(silence_test_format(48000.0, 2)) == noErr);
+        UInt32 max_frames = kFrames;
+        REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+        REQUIRE(effect.DoInitialize() == noErr);
+
+        std::vector<AudioUnitParameterEvent> events;
+        for (const auto& [offset, value] : pulp::test::kStepGainPoints)
+            events.push_back(immediate_event(pulp::test::kStepGainParam,
+                                             static_cast<UInt32>(offset + shift), value));
+        REQUIRE(effect.ScheduleParameter(events.data(), static_cast<UInt32>(events.size())) ==
+                noErr);
+
+        std::array<std::array<float, kFrames>, 2> in{}, out{};
+        for (std::size_t ch = 0; ch < 2; ++ch)
+            for (std::size_t n = 0; n < kFrames; ++n)
+                in[ch][n] = pulp::test::step_gain_input(ch, n);
+        struct TwoBufferList {
+            AudioBufferList bl;
+            AudioBuffer second;
+        } input{}, output{};
+        input.bl.mNumberBuffers = 2;
+        output.bl.mNumberBuffers = 2;
+        for (UInt32 ch = 0; ch < 2; ++ch) {
+            input.bl.mBuffers[ch] = {1, kFrames * sizeof(float), in[ch].data()};
+            output.bl.mBuffers[ch] = {1, kFrames * sizeof(float), out[ch].data()};
+        }
+        pulp::test::StepGainProcessor::process_calls = 0;
+        AudioUnitRenderActionFlags flags = 0;
+        REQUIRE(effect.process_scheduled(flags, input.bl, output.bl, kFrames) == noErr);
+        effect.clear_scheduled();
+
+        REQUIRE(pulp::test::StepGainProcessor::process_calls == 1);
+        bool matches = true;
+        for (std::size_t ch = 0; ch < 2; ++ch)
+            for (std::size_t n = 0; n < kFrames; ++n)
+                matches = matches && out[ch][n] == pulp::test::step_gain_expected(ch, n);
+        CHECK(matches == (shift == 0));
+        Float32 value = 0.0f;
+        REQUIRE(effect.GetParameter(pulp::test::kStepGainParam, kAudioUnitScope_Global, 0, value) ==
+                noErr);
+        CHECK(value == 0.75f); // the store ends at the last point
+        effect.DoCleanup();
+    }
+}
+
+TEST_CASE("AU v2 effect slices dense scheduled automation in time order with final store values",
+          "[au][au-v2][automation][sample-accurate]") {
+    const auto previous = pulp::format::registered_factory();
+    pulp::format::register_plugin(create_dense_automation_effect);
+    struct RestoreFactory {
+        pulp::format::ProcessorFactory value;
+        ~RestoreFactory() {
+            pulp::format::register_plugin(value);
+        }
+    } restore{previous};
+
+    constexpr UInt32 kFrames = 64;
+    TestScheduledEffect effect;
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    std::array<float, kFrames> input_samples{};
+    std::array<float, kFrames> output_samples{};
+    AudioBufferList input{};
+    input.mNumberBuffers = 1;
+    AudioBufferList output{};
+    output.mNumberBuffers = 1;
+    const auto render = [&] {
+        input.mBuffers[0] = {1, kFrames * sizeof(float), input_samples.data()};
+        output.mBuffers[0] = {1, kFrames * sizeof(float), output_samples.data()};
+        AudioUnitRenderActionFlags flags = 0;
+        REQUIRE(effect.process_scheduled(flags, input, output, kFrames) == noErr);
+        effect.clear_scheduled();
+    };
+
+    SECTION("a step per 8 frames on one parameter, others interleaved, delivered parameter by "
+            "parameter") {
+        std::vector<AudioUnitParameterEvent> events;
+        for (UInt32 i = 0; i < 8; ++i)
+            events.push_back(immediate_event(1, i * 8, 0.1f * (i + 1)));
+        for (UInt32 i = 0; i < 8; ++i)
+            events.push_back(immediate_event(2, i * 8 + 4, 0.05f * (i + 1)));
+        events.push_back(immediate_event(3, 60, 0.5f));
+        events.push_back(immediate_event(3, 60, 0.7f)); // coincident: the later one wins
+        REQUIRE(effect.ScheduleParameter(events.data(), static_cast<UInt32>(events.size())) ==
+                noErr);
+        DenseAutomationProcessor::process_calls = 0;
+        render();
+        for (UInt32 n = 0; n < kFrames; ++n)
+            REQUIRE(output_samples[n] == Catch::Approx(0.1f * static_cast<float>(n / 8 + 1)));
+        // Break points at 0, 4, 8, ..., 60: one processor call per slice.
+        REQUIRE(DenseAutomationProcessor::process_calls == 16);
+        Float32 value = 0.0f;
+        REQUIRE(effect.GetParameter(1, kAudioUnitScope_Global, 0, value) == noErr);
+        REQUIRE(value == Catch::Approx(0.8f));
+        REQUIRE(effect.GetParameter(2, kAudioUnitScope_Global, 0, value) == noErr);
+        REQUIRE(value == Catch::Approx(0.4f));
+        REQUIRE(effect.GetParameter(3, kAudioUnitScope_Global, 0, value) == noErr);
+        REQUIRE(value == Catch::Approx(0.7f));
+    }
+
+    SECTION("a later immediate overrides a ramp on the same parameter") {
+        REQUIRE(effect.SetParameter(1, kAudioUnitScope_Global, 0, 0.0f, 0) == noErr);
+        AudioUnitParameterEvent ramp{};
+        ramp.eventType = kParameterEvent_Ramped;
+        ramp.parameter = 1;
+        ramp.scope = kAudioUnitScope_Global;
+        ramp.eventValues.ramp.startBufferOffset = 0;
+        ramp.eventValues.ramp.durationInFrames = 64;
+        ramp.eventValues.ramp.startValue = 0.0f;
+        ramp.eventValues.ramp.endValue = 1.0f;
+        const AudioUnitParameterEvent events[] = {ramp, immediate_event(1, 32, 0.25f)};
+        REQUIRE(effect.ScheduleParameter(events, 2) == noErr);
+        render();
+        REQUIRE(output_samples[16] == Catch::Approx(0.25f)); // 16/64 along the ramp
+        for (UInt32 n = 32; n < kFrames; ++n)
+            REQUIRE(output_samples[n] == Catch::Approx(0.25f));
+        Float32 value = 0.0f;
+        REQUIRE(effect.GetParameter(1, kAudioUnitScope_Global, 0, value) == noErr);
+        REQUIRE(value == Catch::Approx(0.25f));
+    }
+
+    effect.DoCleanup();
+}
+
+TEST_CASE("AU v2 effect renders scheduled automation in one call for a block-rate processor",
+          "[au][au-v2][automation]") {
+    const auto previous = pulp::format::registered_factory();
+    pulp::format::register_plugin(create_dense_automation_effect);
+    struct Restore {
+        pulp::format::ProcessorFactory value;
+        ~Restore() {
+            pulp::format::register_plugin(value);
+            DenseAutomationProcessor::sample_accurate = true;
+        }
+    } restore{previous};
+    DenseAutomationProcessor::sample_accurate = false;
+
+    constexpr UInt32 kFrames = 64;
+    TestScheduledEffect effect;
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    std::vector<AudioUnitParameterEvent> events;
+    for (UInt32 i = 0; i < 8; ++i)
+        events.push_back(immediate_event(1, i * 8, 0.1f * (i + 1)));
+    for (UInt32 i = 0; i < 8; ++i)
+        events.push_back(immediate_event(2, i * 8 + 4, 0.05f * (i + 1)));
+    AudioUnitParameterEvent ramp{};
+    ramp.eventType = kParameterEvent_Ramped;
+    ramp.parameter = 3;
+    ramp.scope = kAudioUnitScope_Global;
+    ramp.eventValues.ramp.startBufferOffset = 16;
+    ramp.eventValues.ramp.durationInFrames = 96; // runs past this buffer
+    ramp.eventValues.ramp.startValue = 0.0f;
+    ramp.eventValues.ramp.endValue = 1.0f;
+    events.push_back(ramp);
+    REQUIRE(effect.ScheduleParameter(events.data(), static_cast<UInt32>(events.size())) == noErr);
+    REQUIRE(DenseAutomationProcessor::last != nullptr);
+    int store_writes = 0;
+    auto counter = DenseAutomationProcessor::last->state().add_listener(
+        [&](pulp::state::ParamID, float) { ++store_writes; }, pulp::state::ListenerThread::Audio);
+
+    std::array<float, kFrames> input_samples{};
+    std::array<float, kFrames> output_samples{};
+    AudioBufferList input{};
+    input.mNumberBuffers = 1;
+    input.mBuffers[0] = {1, kFrames * sizeof(float), input_samples.data()};
+    AudioBufferList output{};
+    output.mNumberBuffers = 1;
+    output.mBuffers[0] = {1, kFrames * sizeof(float), output_samples.data()};
+    DenseAutomationProcessor::process_calls = 0;
+    AudioUnitRenderActionFlags flags = 0;
+    REQUIRE(effect.process_scheduled(flags, input, output, kFrames) == noErr);
+    effect.clear_scheduled();
+
+    // One call and one store write per automated parameter; no events, so
+    // every sample reads the block's final value.
+    REQUIRE(DenseAutomationProcessor::process_calls == 1);
+    REQUIRE(store_writes == 3);
+    counter.reset();
+    for (UInt32 n = 0; n < kFrames; ++n)
+        REQUIRE(output_samples[n] == Catch::Approx(0.8f));
+    Float32 value = 0.0f;
+    REQUIRE(effect.GetParameter(2, kAudioUnitScope_Global, 0, value) == noErr);
+    REQUIRE(value == Catch::Approx(0.4f));
+    REQUIRE(effect.GetParameter(3, kAudioUnitScope_Global, 0, value) == noErr);
+    REQUIRE(value == Catch::Approx(0.5f)); // 48 of the ramp's 96 frames
+    // Its ParamCursor read the queue while opted out: recorded, and
+    // reported once when the host cleans the unit up.
+    REQUIRE(effect.param_events_monitor().read_while_opted_out());
+    effect.DoCleanup();
+    REQUIRE_FALSE(effect.param_events_monitor().report(*DenseAutomationProcessor::last));
+}
+
+namespace {
+
+AudioUnitParameterEvent ramp_event(AudioUnitParameterID id, SInt32 start, UInt32 frames, float from,
+                                   float to) {
+    AudioUnitParameterEvent event{};
+    event.eventType = kParameterEvent_Ramped;
+    event.parameter = id;
+    event.scope = kAudioUnitScope_Global;
+    event.eventValues.ramp.startBufferOffset = start;
+    event.eventValues.ramp.durationInFrames = frames;
+    event.eventValues.ramp.startValue = from;
+    event.eventValues.ramp.endValue = to;
+    return event;
+}
+
+// Renders one buffer of `frames` with `events` scheduled through
+// DenseAutomationProcessor in the given mode, and returns parameter 1's
+// store value afterwards.
+float render_scheduled_and_read_p1(UInt32 frames, std::vector<AudioUnitParameterEvent> events,
+                                   bool sample_accurate, bool slices) {
+    DenseAutomationProcessor::sample_accurate = sample_accurate;
+    DenseAutomationProcessor::slices = slices;
+    TestScheduledEffect effect;
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(silence_test_format(48000.0, 1)) == noErr);
+    UInt32 max_frames = frames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+    REQUIRE(effect.SetParameter(1, kAudioUnitScope_Global, 0, 0.5f, 0) == noErr);
+    REQUIRE(effect.ScheduleParameter(events.data(), static_cast<UInt32>(events.size())) == noErr);
+    std::vector<float> input_samples(frames, 0.0f);
+    std::vector<float> output_samples(frames, 0.0f);
+    AudioBufferList input{};
+    input.mNumberBuffers = 1;
+    input.mBuffers[0] = {1, frames * static_cast<UInt32>(sizeof(float)), input_samples.data()};
+    AudioBufferList output{};
+    output.mNumberBuffers = 1;
+    output.mBuffers[0] = {1, frames * static_cast<UInt32>(sizeof(float)), output_samples.data()};
+    AudioUnitRenderActionFlags flags = 0;
+    REQUIRE(effect.process_scheduled(flags, input, output, frames) == noErr);
+    effect.clear_scheduled();
+    Float32 value = 0.0f;
+    REQUIRE(effect.GetParameter(1, kAudioUnitScope_Global, 0, value) == noErr);
+    effect.DoCleanup();
+    return value;
+}
+
+struct DenseModeRestore {
+    pulp::format::ProcessorFactory previous = pulp::format::registered_factory();
+    DenseModeRestore() {
+        pulp::format::register_plugin(create_dense_automation_effect);
+    }
+    ~DenseModeRestore() {
+        pulp::format::register_plugin(previous);
+        DenseAutomationProcessor::sample_accurate = true;
+        DenseAutomationProcessor::slices = true;
+    }
+};
+
+} // namespace
+
+TEST_CASE("AU v2 ignores scheduled events past the buffer's end in every render mode",
+          "[au][au-v2][automation]") {
+    DenseModeRestore restore;
+    // Per slice, one call per buffer with every point, and block-rate: an
+    // immediate at frame 100 of a 64-frame buffer is not in this buffer.
+    for (const auto [sample_accurate, slices] :
+         {std::pair{true, true}, std::pair{true, false}, std::pair{false, true}}) {
+        INFO("sample_accurate=" << sample_accurate << " slices=" << slices);
+        CHECK(render_scheduled_and_read_p1(64, {immediate_event(1, 100, 0.9f)}, sample_accurate,
+                                           slices) == Catch::Approx(0.5f));
+        // Control: the same event inside the buffer does land.
+        CHECK(render_scheduled_and_read_p1(64, {immediate_event(1, 10, 0.9f)}, sample_accurate,
+                                           slices) == Catch::Approx(0.9f));
+    }
+}
+
+TEST_CASE("AU v2 lets a later immediate override a ramp in host order, past the ramp capacity",
+          "[au][au-v2][automation]") {
+    DenseModeRestore restore;
+    // More ramps than the per-render ramp record holds, then a ramp on
+    // parameter 1 over the whole buffer and an immediate on it at 200: the
+    // immediate comes later, so it sets the value the buffer ends on.
+    std::vector<AudioUnitParameterEvent> events;
+    for (int i = 0; i < 300; ++i)
+        events.push_back(ramp_event(2, 0, 512, 0.0f, 1.0f));
+    events.push_back(ramp_event(1, 0, 512, 0.0f, 1.0f));
+    events.push_back(immediate_event(1, 200, 0.25f));
+    CHECK(render_scheduled_and_read_p1(512, events, true, true) == Catch::Approx(0.25f));
+
+    // Within the ramp capacity, an equal offset is decided by host order: an
+    // immediate then a ramp at 32 leaves the ramp in charge, and the reverse
+    // leaves the immediate.
+    CHECK(render_scheduled_and_read_p1(
+              64, {immediate_event(1, 32, 0.25f), ramp_event(1, 32, 32, 0.0f, 1.0f)}, true, true) ==
+          Catch::Approx(1.0f));
+    CHECK(render_scheduled_and_read_p1(
+              64, {ramp_event(1, 32, 32, 0.0f, 1.0f), immediate_event(1, 32, 0.25f)}, true, true) ==
+          Catch::Approx(0.25f));
 }
 
 TEST_CASE("AU v2 PulpGain at 0 dB is bit-transparent, including after a round trip",
@@ -1714,4 +2117,110 @@ TEST_CASE("AU v2 reports no factory-preset property when the plug-in ships none"
     // bank still draws the menu.
     REQUIRE(effect.DispatchGetPropertyInfo(kAudioUnitProperty_FactoryPresets,
                                            kAudioUnitScope_Global, 0, size, writable) != noErr);
+}
+
+// ===========================================================================
+// Initialize() warm-up: one render over silence that stops right after
+// validation and buffer wiring. It must not run the Processor or settle a
+// trigger the host raised before the first real render.
+// ===========================================================================
+namespace {
+
+class CountingTriggerEffect : public pulp::format::Processor {
+  public:
+    static constexpr pulp::state::ParamID kTriggerId = 1;
+    static inline int process_calls = 0;
+    static inline std::size_t midi_seen = 0;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AUWarmUp",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-warm-up",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 2}},
+            .output_buses = {{"Main Out", 2}},
+        };
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        pulp::state::ParamInfo trigger{};
+        trigger.id = kTriggerId;
+        trigger.name = "Reset";
+        trigger.range = {0.0f, 1.0f, 0.0f, 1.0f};
+        trigger.is_trigger = true;
+        store.add_parameter(trigger);
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer& midi_in_events, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        ++process_calls;
+        midi_seen += midi_in_events.size();
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_counting_trigger_effect() {
+    return std::make_unique<CountingTriggerEffect>();
+}
+
+} // namespace
+
+TEST_CASE("AU v2 effect: Initialize warm-up never runs the Processor or settles triggers",
+          "[au][au-v2][effect][activation][rt-safety]") {
+    struct Factory {
+        Factory() : previous(pulp::format::registered_factory()) {
+            pulp::format::register_plugin(create_counting_trigger_effect);
+        }
+        ~Factory() {
+            pulp::format::register_plugin(previous);
+        }
+        pulp::format::ProcessorFactory previous;
+    } factory;
+    CountingTriggerEffect::process_calls = 0;
+
+    constexpr UInt32 kFrames = 32;
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(silence_test_format(48000.0, 2)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(silence_test_format(48000.0, 2)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    // Raised before initialization: it must survive the warm-up and settle on
+    // the first real render.
+    REQUIRE(effect.SetParameter(CountingTriggerEffect::kTriggerId, kAudioUnitScope_Global, 0, 1.0f,
+                                0) == noErr);
+    // Likewise a note the host queued before initialization: the warm-up
+    // resets the MIDI buffers but must not drain the inbound queue.
+    CountingTriggerEffect::midi_seen = 0;
+    REQUIRE(effect.MIDIEvent(0x90, 60, 100, 0) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+    REQUIRE(CountingTriggerEffect::process_calls == 0);
+    Float32 trigger = 0.0f;
+    REQUIRE(effect.GetParameter(CountingTriggerEffect::kTriggerId, kAudioUnitScope_Global, 0,
+                                trigger) == noErr);
+    REQUIRE(trigger == 1.0f);
+
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    struct TwoBufferList {
+        AudioBufferList bl;
+        AudioBuffer second;
+    } input{}, output{};
+    input.bl.mNumberBuffers = 2;
+    input.bl.mBuffers[0] = {1, kFrames * sizeof(float), in_l.data()};
+    input.bl.mBuffers[1] = {1, kFrames * sizeof(float), in_r.data()};
+    output.bl.mNumberBuffers = 2;
+    output.bl.mBuffers[0] = {1, kFrames * sizeof(float), out_l.data()};
+    output.bl.mBuffers[1] = {1, kFrames * sizeof(float), out_r.data()};
+    AudioUnitRenderActionFlags flags = 0;
+    REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
+    REQUIRE(CountingTriggerEffect::process_calls == 1);
+    REQUIRE(CountingTriggerEffect::midi_seen == 1);
+    REQUIRE(effect.GetParameter(CountingTriggerEffect::kTriggerId, kAudioUnitScope_Global, 0,
+                                trigger) == noErr);
+    REQUIRE(trigger == 0.0f);
+
+    effect.DoCleanup();
 }

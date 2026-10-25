@@ -231,6 +231,43 @@ class DifferentialLabTests(unittest.TestCase):
                 untouched, _ = LAB.native_nodes(ir(transform), layout)
                 self.assertEqual(untouched.bounds, (478.518, 319.831, 110.963, 2.993))
 
+    def test_nested_native_rotations_compose_like_chromium(self) -> None:
+        # DOMSnapshot layout bounds from Chrome for Testing 151.0.7922.47
+        # (headless, DPR 2, the browser-capture flags) for this page, captured
+        # with `importer_differential_lab.py compare --viewport 400x300`:
+        #   #panel{position:relative;width:400px;height:300px}
+        #   .outer{position:absolute;left:120px;top:90px;width:160px;height:40px;
+        #          transform:rotate(30deg)}
+        #   .inner{position:absolute;left:100px;top:10px;width:50px;height:12px;
+        #          transform:rotate(-75deg)}   (inside .outer)
+        # Both rotate about their own centres (the CSS default origin):
+        #   outer (120.703125, 52.671875) 158.59375 x 114.65625
+        #   inner (219.046875, 107.109375) 43.859375 x 43.859375
+        # The native layout reports the untransformed boxes; the lab must
+        # apply the child's rotation inside the parent's, not before it.
+        ir = {"root": {"type": "frame", "stable_anchor_id": "outer",
+                       "style": {"transform": "rotate(30deg)"},
+                       "children": [{"type": "frame", "stable_anchor_id": "inner",
+                                     "style": {"transform": "rotate(-75deg)"},
+                                     "children": []}]}}
+        layout = {"views": [
+            {"anchor_id": "outer", "x": 120.0, "y": 90.0, "width": 160.0, "height": 40.0},
+            {"anchor_id": "inner", "x": 220.0, "y": 100.0, "width": 50.0, "height": 12.0},
+        ]}
+        outer, inner = LAB.native_nodes(ir, layout)
+        chromium = {"outer": (120.703125, 52.671875, 158.59375, 114.65625),
+                    "inner": (219.046875, 107.109375, 43.859375, 43.859375)}
+        for node in (outer, inner):
+            for got, want in zip(node.bounds, chromium[node.anchor]):
+                self.assertAlmostEqual(got, want, delta=0.05)
+        # Negative control: the child's rotation applied outside the parent's
+        # lands about 25 px away, so the assertion above can tell the orders apart.
+        from importer_differential.native_transform import compose, rotation_about, transformed_bounds
+        parent = rotation_about(30.0, 200.0, 110.0)
+        wrong = transformed_bounds(compose(rotation_about(-75.0, 245.0, 106.0), parent),
+                                   (220.0, 100.0, 50.0, 12.0))
+        self.assertGreater(abs(wrong[0] - chromium["inner"][0]), 20.0)
+
     def test_mismatched_backend_ids_fail_closed_despite_same_text_and_tag(self) -> None:
         browser = LAB.BrowserNode(
             1, "span", -1, "Gain", {}, (0, 0, 40, 20), {}, 35)

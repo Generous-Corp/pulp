@@ -161,6 +161,22 @@ box centre, so the differential lab maps each native box through the composed
 rotations (`importer_differential/native_transform.py`) before measuring
 geometry. A diagonal ADSR segment otherwise reads as a 90 px geometry failure.
 
+### Theme-painted form controls lower onto the Chromium-refresh skins
+
+A captured `<input type=range|checkbox|radio>` whose `native_theme` verdict is
+`native` has no CSS paint to lower. The capture records the HTML state the
+theme paints from as `ua_*` attributes (`browser_capture_controls.cpp`), and
+`design_import_form_controls.cpp` builds a `RangeSlider` / `Checkbox` in
+`UaSkin::chromium_refresh` from it, in the native lane and the baked C++ lane
+alike (`ua_form_control_state()` is the shared parse). Only those controls get
+the skin: an `author` or `unresolved` verdict, another import lane's checkbox,
+AutoUi and every hand-built widget keep `UaSkin::platform`. Chromium paints a
+theme part in its CSS-px-snapped box, so the skins paint in
+`View::self_paint_bounds()` (the captured `browser_box_paint_*` rect), never the
+fractional layout box; that is the 1 device px the Spectr slider was off by.
+`indeterminate` and a `disabled` inherited from a `<fieldset>` are not in the
+DOMSnapshot, so they are not recorded.
+
 ### Packaged SDK runtime contract
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
@@ -805,6 +821,17 @@ knowing before you touch that file:
   `paragraph_builds` ungated there because measuring text shapes it. Raw DOM-snapshot hashes differ per capture
   only by the CDP frame ID, so compare `*_snapshot_semantic_sha256` across
   runs, not the raw binding.
+
+  **Normalize gotcha:** `normalize_design_ir` (design_ir_normalize.cpp) runs
+  on every node `parse_ir_node` reads, and its rules are design-tool
+  heuristics that move geometry. A browser capture's design.ir.json goes
+  through the same parse when the observer loads it, so a rule that is right
+  for Figma can move a node Chromium already placed. The shadow sibling snap
+  lifted a knob label under a dial's `0 8px 16px` shadow by the gap minus the
+  shadow's y offset (2 px at a 10px gap, 4 px at 12px). `parse_design_ir_json`
+  now passes `IRParseOptions::measured_geometry` when the IR's source adapter
+  is `browser-capture`, and a geometry rule that only makes up for how a
+  design tool draws must check it. Fixture `20-flex-gap-knob` covers the snap.
 
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
   evidence. The differential matcher must join captured elements by
@@ -7028,7 +7055,8 @@ Paint consumes them through `svg_stroke_style_attributes()`
 (`design_import_svg_stroke.hpp`) in both the native lane and the baked C++
 lane; `SvgPathWidget::set_stroke_cap` / `_join` / `_miter_limit` keep the style
 local to the draw, because the canvas has no getter to restore its sticky
-stroke state. The JS bridge has no stroke-style setter yet. Two traps when
+stroke state. The JS lane emits one `setSvgStrokeStyle(id, cap, join[, limit])`
+call per styled vector from the same parser. Two traps when
 consuming the attributes: the canvas miter limit defaults to 10 where SVG's is
 4, which is why `svg_stroke_miterlimit` is always written under a miter join; and a
 shape's own `opacity` is already folded into `svg_fill`/`svg_stroke` alpha
