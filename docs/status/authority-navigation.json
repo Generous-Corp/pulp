@@ -45,11 +45,11 @@
       "id": "dsp-survey-admission",
       "aliases": ["dsp-admission", "dsp-claims", "dsp-survey"],
       "plane": "release_evidence",
-      "native_owner": "danielraffel/pulp-planning:dsp-survey-claims/WORKER-PROMPT.md",
+      "native_owner": "planning: the DSP survey admission protocol in the maintainers' private planning repository",
       "source_location": "planning",
       "installed_location": null,
       "query_or_validator": {
-        "source": "read dsp-survey-claims/WORKER-PROMPT.md from current danielraffel/pulp-planning main",
+        "source": "read the DSP survey admission protocol from the current main of the planning submodule's repository",
         "installed": null
       },
       "coverage_semantics": "Admission, claim, evidence, disposition, release, and cleanup protocol for the separately owned DSP survey workstream.",

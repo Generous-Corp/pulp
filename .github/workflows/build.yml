@@ -3,13 +3,17 @@ name: Build and Test
 on:
   pull_request:
     branches: [main, 'develop/**']
-    # The default three plus `labeled`. With PULP_MACOS_PR_GATING on, the
-    # fleet App applying `macos-ci` is what moves a pull request's macOS leg
-    # from its configure-only contract lane to the full lane (see "macOS on a
-    # pull request waits for approval" in docs/guides/local-ci.md); that run is
-    # macOS-only. Any other label event starts a run that skips every job and
-    # sits in its own concurrency group, so it never cancels the real run.
-    types: [opened, synchronize, reopened, labeled]
+    # The default three only, never `labeled`. A label event starts a run whose
+    # check suite is newer than the head's real run but has no `macos` check
+    # run, and the merge queue reads the required `macos` context from that
+    # newest suite: it refuses to enqueue with "Required status check "macos"
+    # is expected" even though the earlier run's `macos` passed. Shipyard adds
+    # several labels to every new pull request, so `labeled` shadowed every
+    # head. With PULP_MACOS_PR_GATING on, the fleet App must move a head to the
+    # full lane by dispatching this workflow (workflow_dispatch), not by a
+    # label event. The `github.event.action == 'labeled'` branches below are
+    # now unreachable.
+    types: [opened, synchronize, reopened]
   # Publish the Linux/Windows ccache + FetchContent caches that PR runs restore
   # from. Only a non-PR run on the default branch may write to GitHub's cloud
   # cache — a PR-run cache entry is scoped to the PR's own ref and is invisible
@@ -1773,7 +1777,9 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/install-linux-build-deps
         with:
-          extra-packages: ccache
+          # xvfb: the X11 plug-in host tests run under xvfb-run (see
+          # test/cmake/script_canvas_render_tests.cmake) rather than skipping.
+          extra-packages: ccache xvfb
 
       # ── Namespace cache ─────────────────────────────────────────────────
       # Namespace cache volumes persist across runs on the same workspace,
@@ -1862,10 +1868,23 @@ jobs:
           echo "::error::brew install ccache failed after 3 attempts"
           exit 1
 
-      - name: Install ccache (Windows)
+      # Ninja + cl from the developer environment, and ccache when the runner
+      # has it: the Visual Studio generator ignores the compiler launcher, so
+      # under it ccache saw no compiles ("ccache per-job: cacheable 0").
+      - name: Prepare the Windows build environment (Ninja, cl, ccache)
         if: runner.os == 'Windows'
-        continue-on-error: true
-        run: choco install ccache --no-progress -y
+        shell: powershell
+        run: tools/ci/windows_build_env.ps1
+
+      # A self-hosted Windows VM keeps nothing between jobs, so a host that
+      # serves a shared ccache names it in PULP_CCACHE_REMOTE_STORAGE. Unset,
+      # this writes nothing; set, only code already on main may store objects.
+      # The name must not start with "Configure": the pinned-Rust lane test
+      # finds the CMake configure step by that prefix.
+      - name: Point ccache at the host's remote storage (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python3 tools/ci/ccache_remote_storage.py --github-env "$GITHUB_ENV"
 
       # ── Caches (#420) ──────────────────────────────────────────────────
       # The local macOS runner keeps these paths on disk between jobs.
@@ -2271,8 +2290,9 @@ jobs:
           set -euo pipefail
           # macOS builds with Ninja — it schedules parallelism more
           # precisely and is meaningfully faster on the warm/incremental
-          # builds that are the self-hosted M1's common case. Linux and
-          # Windows keep their default generator. Self-hosted runners
+          # builds that are the self-hosted M1's common case. Windows uses
+          # Ninja with cl so ccache sees its compiles; Linux keeps its
+          # default generator. Self-hosted runners
           # reuse warm build dirs (clean: false), and CMake refuses to
           # reconfigure a dir created with a different generator, so the
           # build dir is recreated when its cached generator no longer
@@ -2307,6 +2327,10 @@ jobs:
             # root short so nested wgpu prebuilt-populate targets configure
             # reliably on GitHub-hosted Windows runners.
             cmake_extra=(-DFETCHCONTENT_BASE_DIR="$PWD/fc")
+            # Ninja with cl from the developer environment the "Prepare the
+            # Windows build environment" step entered.
+            gen=(-G Ninja)
+            cmake_extra+=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl)
           fi
           # Every event that reaches this job publishes the required `macos`
           # context, so every event must configure the same way. Turning the GPU

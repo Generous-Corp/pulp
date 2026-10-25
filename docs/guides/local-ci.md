@@ -846,6 +846,103 @@ run green on the new one; rolling back to it is the recovery. The evaluation
 license expires 180 days after installation (`slmgr /dlv` shows the time left),
 so install a fresh evaluation into a new golden before then.
 
+#### Windows build caches: what the workflows read, and the operator runbook
+
+Both Windows lanes keep nothing between jobs (the macpro slot rolls every disk
+back; the m5s ARM64 lane discards its overlay), so a cache only helps when it is
+baked into the golden or served by the host. The workflows already read the
+three hooks below; each is inert until a runner sets it:
+
+| Variable (runner job environment) | Read by | Unset |
+|---|---|---|
+| `PULP_SKIA_CACHE_ROOT` | `build.yml` configure (`PulpSkiaCache.cmake`) and the `cross-platform-check.yml` Windows Skia step (`fetch_skia_for_release.py --cache-root`) | `build.yml` uses `~/.cache/pulp/skia`; cross-platform-check fetches into `external/skia-build` as before |
+| `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` | `setup.sh` (`fetchcontent_cache_root`) | `%LOCALAPPDATA%\Pulp\fetchcontent-src` |
+| `PULP_CCACHE_REMOTE_STORAGE` | `tools/ci/ccache_remote_storage.py`, which sets `CCACHE_REMOTE_STORAGE` | nothing is written; ccache, when present, uses only its job-local cache |
+
+Both Windows jobs build with Ninja and `cl` from the developer environment
+(`tools/ci/windows_build_env.ps1`), because the Visual Studio generator ignores
+the compiler launcher: under it ccache counted `cacheable 0`, against 2394 for
+the same build under Ninja. The script uses a `ccache` already on `PATH`,
+installs one with `choco` when `choco` exists, and otherwise builds without a
+compiler cache and says so (the macpro golden has no `choco`).
+
+`ccache_remote_storage.py` gives write access only to code already on `main`:
+`push` and `schedule` on `refs/heads/main`, `workflow_dispatch` on
+`refs/heads/main`, and `merge_group`. Every other job gets the same URL with
+ccache's `|read-only` attribute. That attribute is honored by ccache, not
+enforced by the server, so it only separates honest jobs. Today the local
+Windows lanes run only operator dispatches. If pull-request code is ever routed
+to them, give PR jobs a separate pool and a storage endpoint they cannot write,
+as the Linux `pulp-trusted-*` and `pulp-pr-safe-*` pools are separated.
+
+**Operator runbook.** Apply this when the fleet freeze lifts. None of it is
+applied yet, and every step is a host or golden change.
+
+Golden prerequisites, as the x64 golden stands today: it has Windows PowerShell
+5.1 but **no PowerShell 7** (a `shell: pwsh` step fails with `pwsh: command not
+found`), and **no `choco`**. The workflows are written for that:
+`tools/ci/windows_build_env.ps1` runs under `shell: powershell` and needs neither.
+Any new Windows step for these lanes must use `shell: powershell` or `bash`
+unless the golden gains PowerShell 7. Tools the jobs need (ccache below) must be
+baked in, not installed per job.
+
+1. **Bake the Skia/Dawn generation and the source prime into the x64 golden.**
+   Follow "Refreshing the golden" above. While the VM is booted from the current
+   golden, in the guest as `ci`:
+
+   ```powershell
+   git clone --depth 1 https://github.com/Generous-Corp/pulp.git C:\pulp-bake
+   cd C:\pulp-bake
+   $env:PULP_SHARED_FETCHCONTENT_SOURCE_DIR = 'C:\pulp-cache\fetchcontent-src'
+   bash ./setup.sh --ci --deps-only
+   python tools/scripts/fetch_skia_for_release.py windows-x64 --cache-root C:/pulp-cache/skia
+   python tools/scripts/fetch_skia_for_release.py windows-x64 --cache-root C:/pulp-cache/skia --validate-only
+   ```
+
+   Then add these lines to `B:\actions-runner\.env`. The runner exports its
+   `.env` to every job.
+
+   ```
+   PULP_SKIA_CACHE_ROOT=C:/pulp-cache/skia
+   PULP_SHARED_FETCHCONTENT_SOURCE_DIR=C:/pulp-cache/fetchcontent-src
+   ```
+
+   Remove `C:\pulp-bake` afterwards. Install ccache in the guest too (the portable release zip from
+   ccache's GitHub releases, unpacked into a directory on the machine `PATH`).
+   Check thin-pool room with `macpro-governor.sh status` first: the source prime
+   is about 2.2 GB and the Skia generation about 0.4 GB. Snapshot under a new
+   dated name and switch `PULP_WINDOWS_GOLDEN_SNAPSHOT`, as in "Refreshing the
+   golden".
+
+   Because the caches live on a snapshot disk, a job can read them but anything
+   it writes there is rolled back. A pin bump therefore costs a fetch on every
+   job until the next bake, never a stale build: the Skia generation is keyed by
+   the asset sha256 and `setup.sh` re-fetches a source whose ref changed.
+
+2. **Serve a shared ccache from the lane host.** On macpro, run an HTTP server
+   that supports ccache's `http` remote storage (GET, PUT and HEAD; nginx with
+   `dav_methods PUT; create_full_put_path on;` is enough). Root it on host
+   storage outside `local-lvm` snapshots, listen only on the address the slot's
+   VM reaches (pin the VM's DHCP lease), and prune it on a timer, since the
+   server does not evict. Then add `PULP_CCACHE_REMOTE_STORAGE=http://<host
+   address>:<port>/pulp-windows-x64` to `B:\actions-runner\.env` in the golden.
+   Use one path per architecture and toolset.
+
+3. **The m5s ARM64 lane** needs the same golden steps on
+   `.shipyard/vm-image.windows.toml`'s image (`vcvarsarm64.bat` is selected
+   automatically), plus a reviewed change to that manifest's `[cache] mode =
+   "guest-local"` before any shared storage is attached. It also needs its
+   `qemu-runner-windows` LaunchAgent reinstalled: it is not running today.
+
+4. **Prove it.** Use at most three `cross-platform-check.yml` dispatches with
+   `windows_only=true` and the macpro selector (no macOS gate VM is taken):
+   - Skia: the log shows `OK: immutable Skia cache generation ready at
+     C:/pulp-cache/skia/...` and no `Downloading ->`.
+   - Sources: there are no `Priming shared ... source cache` lines.
+   - ccache: run the same commit twice, cold then warm. The second shows
+     `ccache remote storage: read-write` and a hit rate near the cacheable
+     count. The Build step needs a compiling `main`.
+
 ## Windows runs nightly, not per merge
 
 Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
@@ -1988,6 +2085,24 @@ It is tiered:
   and the no-op reads as "more cores did not help" rather than "the build was
   never asked to use them". `build.yml`'s `Build` step carried `--parallel 4`
   fleet-wide for this reason until it was replaced by the governor.
+
+  **An explicit `-j` under the wrapper is a ceiling, not an override.**
+  `tools/ci/governed-build.sh` reads a `-j N`, `-jN`, `--parallel N` or
+  `--parallel=N` on the build command (including a native-tool flag after
+  `--`) as a request, takes the lower of it and `PULP_BUILD_JOBS`, sizes the
+  lease to that, and rewrites the flag to the final share before running the
+  command. So `governed-build.sh cmake --build build -j4` runs at most four
+  jobs and reserves four cores, `-j64` under a 6-core lease runs six, and a
+  bare `--parallel` gets the governed count instead of going unbounded. The
+  log says so: `build command's own parallelism flag set to the governed share
+  -jN`. Before this, the command's own flag silently won in both directions: a
+  `-j4` reserved and logged a profile-sized lease, and a higher `-j` ran past
+  the lease. `PULP_BUILD_JOBS` remains the way to request a lower share without
+  touching the command. A `CMAKE_BUILD_PARALLEL_LEVEL` you export is a ceiling
+  in the same way: the lowest of it, the flag, and `PULP_BUILD_JOBS` sets the
+  share, and the wrapper then exports that final share under the same name.
+  (It used to overwrite the caller's value, so `CMAKE_BUILD_PARALLEL_LEVEL=4`
+  ran at the full lease.) A non-numeric or zero value is ignored.
 
   **A gate VM's `-j` is its lease.** tartci sizes each macOS gate clone from
   the lane's VM lease: `C` vCPUs and `(C-1) x 1536 x 4/3` MB of RAM, clamped to
@@ -3639,8 +3754,8 @@ variable `PULP_MACOS_PR_GATING`. Do not set this variable until Shipyard #929
 (queue-arm-guard refuses a head whose required `macos` check is tier
 `deferred`) is merged AND verified live, by arming a deferred head and seeing
 the refusal. Unless it is exactly `true`, every pull request
-takes the full lane, label events start runs that do nothing, and
-`macos-ci-label-reset.yml` does nothing: today's behaviour. Switch it on only
+takes the full lane and `macos-ci-label-reset.yml` does nothing: today's
+behaviour. Switch it on only
 after the arm side refuses a `deferred` green durably (a Shipyard
 queue-arm-guard change, tracked separately). The tartci interim sweep already
 refuses it. Turning it off again is the rollback.
@@ -3712,21 +3827,19 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
   event the lane checks the event's sender. On `opened` or `reopened` it reads
   who applied the label last from the issue's events. Anyone else's label, or
   an events listing that cannot be read, counts as no label.
-- **What starts a full-lane run.** The App's `labeled` event, or an `opened` or
-  `reopened` event on a pull request whose label the App applied. The label
-  event's run is macOS-only: Linux and Windows are no-ops, because the push
-  that made the head already ran them. It shares the pull request's
-  concurrency group, so it supersedes a run still in flight for that head,
-  including that run's Linux leg.
-- **The App's label does start a workflow.** A `labeled` event made with a
-  workflow's own `GITHUB_TOKEN` creates no workflow run, while an App
-  installation token's events run workflows normally (GitHub Docs, "Triggering
-  a workflow from a workflow":
-  <https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow#triggering-a-workflow-from-a-workflow>).
-  The label must therefore come from the App's token, never from a workflow's
-  `GITHUB_TOKEN`. Prove it live once gating is switched on: the App's label
-  on a test pull request starts a `Build and Test` run whose resolver log reads
-  `macOS lane = full`.
+- **What starts a full-lane run.** A `workflow_dispatch` of `build.yml` on the
+  pull request's branch made by the fleet App, or an `opened` or `reopened`
+  event on a pull request whose label the App applied. A label event starts
+  nothing.
+- **`build.yml` does not listen for `labeled`.** A label event's run would be a
+  check suite newer than the head's real run with no `macos` check run in it,
+  and the merge queue reads the required `macos` context from the newest
+  suite: it refuses to enqueue ("Required status check "macos" is expected")
+  even though the earlier run's `macos` passed, and re-running a job in the
+  good run does not clear it. Shipyard adds several labels to every new pull
+  request, so every head was shadowed this way (#11034, #11040). The
+  `github.event.action == 'labeled'` conditions still in `build.yml` are
+  unreachable.
 - **A new head needs approval again.** On `synchronize` the lane is the
   contract lane whatever the labels say, because the event payload still lists
   the label the previous head earned. `macos-ci-label-reset.yml`
@@ -3734,21 +3847,13 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
   - It **disables auto-merge.** Otherwise an armed pull request would
     auto-merge on the new head's contract-lane green. A pull request already in
     the merge queue leaves the queue on a push anyway.
-  - It **removes `macos-ci`**, so the sweep's next application fires a fresh
-    `labeled` event. Re-adding a label that is still present fires nothing, so
-    if the removal failed (it warns), the sweep must remove the label and apply
-    it again.
+  - It **removes `macos-ci`**, so the label never vouches for a head it was
+    not applied to.
 
   Re-arming needs a fresh verdict for the new head, the label, and a
   full-lane success.
 - **Removing the label** starts nothing: `build.yml` does not listen for
   `unlabeled`, and a run already in flight finishes.
-- **Any other label event** (another label, `macos-ci` from anyone but the App,
-  or any label while gating is off) starts a run that skips every job, in a
-  concurrency group of its own (`build-label-noop-<run id>`), so it never
-  cancels the real run. Its skipped alias jobs carry unused names
-  (`macos-pr-unused`, `linux-label-noop`, `windows-label-noop`) so a skipped
-  check cannot replace the head's real `macos`, `linux` or `windows` result.
 - **Escape hatch.** Dispatch `build.yml` on the branch: `workflow_dispatch`
   always runs the full lane. A hand-applied label no longer forces anything.
   Re-running a contract-lane run does not help either, because a re-run
@@ -3760,8 +3865,8 @@ A reviewer may give `verdict: APPROVE head:<sha>` before the head has had a
 full macOS run; the verdict is about the change, and the contract lane has
 already run the fast PR-caused checks. Approval is not arming:
 
-1. The arm sweep sees the trusted APPROVE for the current head and applies
-   `macos-ci`. The full lane runs.
+1. The arm sweep sees the trusted APPROVE for the current head, applies
+   `macos-ci` and dispatches `build.yml` on the branch. The full lane runs.
 2. The sweep arms only once the head's latest `macos` check run is from the
    full lane: its `shipyard-test-tier` annotation is not `deferred`. From then
    on GitHub's required-check rule holds the auto-merge until that run
@@ -3839,7 +3944,7 @@ is merge-group exposure to failures only a build reveals.
 ### Rollback
 
 Unset `PULP_MACOS_PR_GATING`, or set it to anything but `true`. Every pull
-request then takes the full lane, label events do nothing, and the reset
+request then takes the full lane and the reset
 workflow does nothing. `pr-guard` keeps running on the full lane.
 
 ## Windows is gated by the merge queue, not by the PR head

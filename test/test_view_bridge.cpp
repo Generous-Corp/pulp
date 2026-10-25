@@ -2957,3 +2957,91 @@ TEST_CASE("an unbound Toggle still dispatches without opening a gesture",
     CHECK(begins == 0);
     CHECK(store.open_gesture_count() == 0);
 }
+
+namespace {
+
+const unsigned char kEmbeddedEditorScript[] =
+    "createLabel('status', 'embedded', '');\n"
+    "var sidecar = __loadAssetSync__('assets/data.json');\n"
+    "createLabel('sidecar', sidecar.ok ? sidecar.text : String(sidecar.status), '');\n";
+const unsigned char kEmbeddedEditorSidecar[] = R"({"from":"embedded"})";
+const format::EmbeddedEditorFile kEmbeddedEditorFiles[] = {
+    {"assets/data.json", kEmbeddedEditorSidecar, sizeof(kEmbeddedEditorSidecar) - 1},
+};
+
+format::EditorAssets embedded_editor_assets() {
+    format::EditorAssets assets{};
+    assets.script_name = "main.js";
+    assets.script = kEmbeddedEditorScript;
+    assets.script_size = sizeof(kEmbeddedEditorScript) - 1;
+    assets.files = kEmbeddedEditorFiles;
+    assets.file_count = 1;
+    return assets;
+}
+
+} // namespace
+
+TEST_CASE("ViewBridge builds the embedded editor the plug-in binary registers",
+          "[view_bridge][scripted-ui][editor-assets][embedded]") {
+    EditorAssetsScope scope;
+    state::StateStore store;
+    StubProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    // The registration unit of a release build carries the script bytes and
+    // no path; every adapter's ViewBridge evaluates them.
+    format::register_editor_assets(embedded_editor_assets());
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    CHECK(bridge.uses_script_ui());
+    REQUIRE(bridge.scripted_ui() != nullptr);
+    CHECK(bridge.scripted_ui()->uses_embedded_source());
+    CHECK(bridge.scripted_ui()->script_label() == "main.js");
+    CHECK(std::string(format::decide_gpu_host(bridge).mode) == "scripted");
+    REQUIRE(bridge.scripted_ui()->bridge() != nullptr);
+    auto* sidecar = dynamic_cast<view::Label*>(bridge.scripted_ui()->bridge()->widget("sidecar"));
+    REQUIRE(sidecar != nullptr);
+    CHECK(sidecar->text() == R"({"from":"embedded"})");
+    // Persisted stores are keyed by the plug-in, since there is no directory.
+    CHECK(bridge.scripted_ui()->bridge()->storage_identity() == "com.acme.stub/main.js");
+}
+
+TEST_CASE("ViewBridge honors the dev path only for a hot-reloading editor",
+          "[view_bridge][scripted-ui][editor-assets][embedded]") {
+    EditorAssetsScope scope;
+    const std::string script =
+        write_editor_script("pulp-editor-assets-dev-path", "createLabel('status', 'disk', '');\n")
+            .string();
+    auto assets = embedded_editor_assets();
+    assets.script_path = script.c_str();
+    format::register_editor_assets(assets);
+
+    state::StateStore store;
+    StubProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    SECTION("a hosted editor evaluates the embedded bytes") {
+        format::ViewBridge bridge(p, store);
+        REQUIRE(bridge.open());
+        REQUIRE(bridge.scripted_ui() != nullptr);
+        CHECK(bridge.scripted_ui()->uses_embedded_source());
+        auto* status = dynamic_cast<view::Label*>(bridge.scripted_ui()->bridge()->widget("status"));
+        REQUIRE(status != nullptr);
+        CHECK(status->text() == "embedded");
+    }
+    SECTION("a hot-reloading editor reads the file the dev build points at") {
+        format::ViewBridge::Options options;
+        options.enable_hot_reload = true;
+        format::ViewBridge bridge(p, store, options);
+        REQUIRE(bridge.open());
+        REQUIRE(bridge.scripted_ui() != nullptr);
+        CHECK_FALSE(bridge.scripted_ui()->uses_embedded_source());
+        CHECK(bridge.scripted_ui()->script_path() == std::filesystem::path(script));
+        auto* status = dynamic_cast<view::Label*>(bridge.scripted_ui()->bridge()->widget("status"));
+        REQUIRE(status != nullptr);
+        CHECK(status->text() == "disk");
+    }
+    std::filesystem::remove_all(std::filesystem::path(script).parent_path());
+}

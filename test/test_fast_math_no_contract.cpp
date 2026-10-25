@@ -68,6 +68,26 @@ TEST_CASE("Branch-free math holds its bounds without fused multiply-add",
             FAIL("tanh_accurate(" << x << ") is not exactly 1");
         }
     }
+
+    double pade_err = 0.0;
+    double recursive_err = 0.0;
+    float pade_max = 0.0f;
+    float recursive_max = 0.0f;
+    for (std::uint32_t bits = 0; bits < 0x7f800000u; bits += 64) {
+        float x;
+        std::memcpy(&x, &bits, sizeof x);
+        const double reference = std::tanh(static_cast<double>(x));
+        pade_err = std::max(pade_err, std::abs(static_cast<double>(FastMath::tanh(x)) - reference));
+        recursive_err = std::max(
+            recursive_err,
+            std::abs(static_cast<double>(FastMath::tanh_minimax_recursive(x)) - reference));
+        pade_max = std::max(pade_max, FastMath::tanh(x));
+        recursive_max = std::max(recursive_max, FastMath::tanh_minimax_recursive(x));
+    }
+    CHECK(pade_err < 5.8e-5);
+    CHECK(pade_max < 1.0f);
+    CHECK(recursive_err < 3.8e-6);
+    CHECK(recursive_max <= 1.0f);
 }
 
 TEST_CASE("Compressor stays within -120 dBFS of libm without fused multiply-add",

@@ -811,7 +811,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:d15ee5596c20887770bc8f6025d0db955b0ba25048afa6f943e669dcd85120f5",
+        "fingerprint": "sha256:9eeb53dae479b4b32ba4f684420f645331c1821f15dfba5cbfb95bbe50aa448b",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1702,6 +1702,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "Runs N state-variable-filter voices in lockstep structure-of-arrays lanes with a "
             "per-voice mode, each voice bit-identical to Svf. A voice-processing primitive for "
             "polyphonic processors; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/waveshaper.hpp",
+        "fingerprint": "sha256:414fae751de0700326a73c259418799514ef35bf134e15d2cf1f29a766719b53",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Static waveshaping curves (soft, hard, tanh, fold, sine fold) with a drive, as "
+            "per-sample and buffer paths that agree bit for bit. A bounded DSP primitive; it "
+            "makes no installed agent capability claim of its own."
         ),
     },
 ]

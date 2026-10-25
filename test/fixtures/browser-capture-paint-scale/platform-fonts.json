@@ -1,0 +1,12 @@
+{
+  "schema": "pulp-browser-platform-fonts-v1",
+  "version": 1,
+  "summary": {
+    "text_runs": 0,
+    "interrogated": 0,
+    "resolved": 0,
+    "truncated": false
+  },
+  "faces_by_glyph_count": [],
+  "runs": []
+}

@@ -74,8 +74,9 @@ struct GpuNeuralModelRequest {
     /// leaves the node on its CPU model, reported Degraded.
     const GpuWaveNetSession::Config* wavenet_gpu = nullptr;
     /// GPU blocks in flight; at most the session's slots. A node using this
-    /// model may not set a larger max_inflight.
-    std::uint32_t gpu_max_inflight = 1;
+    /// model may not set a larger max_inflight. Zero selects two when the
+    /// session has at least two slots, else one.
+    std::uint32_t gpu_max_inflight = 0;
 };
 
 enum class GpuNeuralModelError : std::uint8_t {
