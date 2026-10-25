@@ -78,6 +78,16 @@ on:
         required: false
         default: false
         type: boolean
+      pr_number:
+        # The fleet App's full-lane dispatch of an approved head. With it the
+        # run tests what a pull_request run tests, refs/pull/<n>/merge, bound
+        # to this dispatch's branch and head, and records the ref and merge
+        # sha it tested; Linux routes as on a pull request (hosted). Empty
+        # keeps today's dispatch, which tests the bare branch head.
+        description: "Pull request whose merge ref to test (digits); the dispatch must be on that pull request's head branch at its head commit"
+        required: false
+        default: ""
+        type: string
 
 # Cancel superseded runs when a new commit lands on the same PR.
 # Stops stale build matrix runs (20-30 min each) from eating runner
@@ -169,6 +179,7 @@ jobs:
       macos_runs_on_json: ${{ steps.resolve.outputs.macos_runs_on_json }}
       windows_leg: ${{ steps.resolve.outputs.windows_leg }}
       hosted_windows_allowed: ${{ steps.resolve.outputs.hosted_windows_allowed }}
+      tested_ref: ${{ steps.pr_dispatch.outputs.tested_ref }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -199,7 +210,10 @@ jobs:
           # Local QEMU Windows is ARM64; it can smoke Windows-on-ARM behavior, but
           # it is not an Intel Windows replacement. Use a workflow_dispatch input
           # only for explicit one-off experiments.
-          WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
+          # A `pr_number` dispatch routes Linux as a pull_request run does
+          # (hosted), so the operator selectors do not apply to it.
+          WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.pr_number == '' && inputs.linux_runner_selector_json || '' }}
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
           WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
           # GitHub-hosted Windows is opt-in: a dispatch input, or the repository
           # variable PULP_ALLOW_HOSTED_WINDOWS=1 (which also covers a push).
@@ -208,7 +222,7 @@ jobs:
           CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
           AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
-          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON) || '' }}
+          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.pr_number == '' && (inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON)) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           # macOS routing has three layers, evaluated in order (highest
           # precedence first). The Python block below composes
@@ -286,6 +300,16 @@ jobs:
 
           REQUESTED = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
           EVENT_NAME = (os.environ.get("GITHUB_EVENT_NAME") or "").strip()
+          # The fleet App's full-lane dispatch of a pull request's merge ref.
+          # Its Linux leg routes as a pull_request run's does, on hosted
+          # Linux: never the operator's local selector, and never the trusted
+          # local pool, which takes protected-main pull_request and merge-group
+          # events only.
+          PR_DISPATCH = (
+              EVENT_NAME == "workflow_dispatch"
+              and bool((os.environ.get("DISPATCH_PR_NUMBER") or "").strip())
+          )
+          LINUX_EVENT_NAME = "pull_request" if PR_DISPATCH else EVENT_NAME
           REF = (os.environ.get("GITHUB_REF") or "").strip()
           WORKFLOW_REF = (os.environ.get("WORKFLOW_REF") or "").strip()
           # A pull request whose head lives in another repository. Empty
@@ -716,7 +740,7 @@ jobs:
           )
           configured_linux_selector = (
               operator_linux_selector
-              if EVENT_NAME == "workflow_dispatch"
+              if EVENT_NAME == "workflow_dispatch" and not PR_DISPATCH
               else parseable_automatic_linux_selector
           )
           automatic_local_linux_selector = (
@@ -735,6 +759,7 @@ jobs:
           )
           trusted_local_linux_event = (
               trusted_local_linux_workflow
+              and not PR_DISPATCH
               and (
                   EVENT_NAME == "merge_group"
                   or (EVENT_NAME == "pull_request" and not IS_FORK_PR)
@@ -768,7 +793,7 @@ jobs:
           ])
           linux_route_result = subprocess.run(
               LINUX_ROUTE_RESOLVER + [
-                  "--event-name", EVENT_NAME,
+                  "--event-name", LINUX_EVENT_NAME,
                   "--dispatch-selector-json",
                   os.environ.get("WORKFLOW_DISPATCH_LINUX_SELECTOR", ""),
                   "--configured-selector-json",
@@ -1027,6 +1052,38 @@ jobs:
           PY
           )
 
+      # A `pr_number` dispatch tests refs/pull/<n>/merge but posts its checks
+      # on this run's head, so bind the two before anything builds: the pull
+      # request must be open, in this repository, and headed exactly by this
+      # dispatch's branch and commit. Otherwise a dispatch on one branch could
+      # put another pull request's merge result on its head. Fails closed;
+      # a failed preamble fails `macos` closed.
+      - name: Bind the pull-request dispatch to its head
+        id: pr_dispatch
+        if: github.event_name == 'workflow_dispatch' && inputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$DISPATCH_PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error title=pr_number dispatch::pr_number must be digits, got '$DISPATCH_PR_NUMBER'"
+            exit 1
+          fi
+          if ! pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$DISPATCH_PR_NUMBER" \
+              --jq '[.state, .head.repo.full_name // "", .head.ref, .head.sha] | join(" ")'); then
+            echo "::error title=pr_number dispatch::could not read pull request #$DISPATCH_PR_NUMBER"
+            exit 1
+          fi
+          read -r state head_repo head_ref head_sha <<< "$pr"
+          expected="open $GITHUB_REPOSITORY $GITHUB_REF_NAME $GITHUB_SHA"
+          if [ "$state $head_repo $head_ref $head_sha" != "$expected" ]; then
+            echo "::error title=pr_number dispatch::#$DISPATCH_PR_NUMBER is '$state $head_repo $head_ref $head_sha', not '$expected'; dispatch on its head branch at its current head"
+            exit 1
+          fi
+          echo "tested_ref=refs/pull/$DISPATCH_PR_NUMBER/merge" >> "$GITHUB_OUTPUT"
+          echo "#$DISPATCH_PR_NUMBER is headed by $GITHUB_REF_NAME at $GITHUB_SHA; testing refs/pull/$DISPATCH_PR_NUMBER/merge"
+
   # ── Change classifier ────────────────────────────────────────────────────
   # Decides whether this PR needs the native build matrix at all. A PR that
   # touches only docs / markdown / git-hooks / Shipyard config does not need
@@ -1059,6 +1116,9 @@ jobs:
           # .git directory before this cheap preamble could report.
           fetch-depth: 1
           lfs: false
+          # A `pr_number` dispatch classifies the merge ref, as a pull_request
+          # run does. Empty is the event's own ref.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number != '' && format('refs/pull/{0}/merge', inputs.pr_number) || '' }}
       # Backstop for a HOLD that did not take its head out of the queue: fail
       # the group, before any VM, when a queued pull request's latest trusted
       # verdict on the head it lands is HOLD. A failed classify makes the
@@ -1735,16 +1795,62 @@ jobs:
           # the intent obvious. Net win: 5-10× faster on local mac on the
           # 2nd+ run of any PR (cache + build dir stay warm).
           clean: ${{ contains(matrix.runs_on_json, 'self-hosted') == false }}
+          # A `pr_number` dispatch tests the merge ref, exactly as a
+          # pull_request run does; resolve-provider bound it to this run's head.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number != '' && format('refs/pull/{0}/merge', inputs.pr_number) || '' }}
+
+      # The tree a `pr_number` dispatch tested: refs/pull/<n>/merge, whose
+      # second parent must be this run's head (a newer push or a stale merge
+      # ref fails here). Its first parent is the merged base. All three are
+      # step outputs and the job summary, and the next step's name carries
+      # the ref and sha so a reader of the jobs API sees them too.
+      - name: Verify the tested merge ref
+        id: tested
+        if: github.event_name == 'workflow_dispatch' && inputs.pr_number != ''
+        shell: bash
+        env:
+          TESTED_REF: refs/pull/${{ inputs.pr_number }}/merge
+        run: |
+          set -euo pipefail
+          tested_sha=$(git rev-parse HEAD)
+          head_parent=$(git rev-parse --verify --quiet HEAD^2 || true)
+          if [ "$head_parent" != "$GITHUB_SHA" ]; then
+            echo "::error title=pr_number dispatch::$TESTED_REF at $tested_sha does not merge this run's head $GITHUB_SHA (second parent: ${head_parent:-none}); dispatch again on the current head"
+            exit 1
+          fi
+          merged_base=$(git rev-parse HEAD^1)
+          {
+            echo "tested_ref=$TESTED_REF"
+            echo "tested_sha=$tested_sha"
+            echo "merged_base=$merged_base"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Tested $TESTED_REF"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| tested_ref | \`$TESTED_REF\` |"
+            echo "| tested_sha | \`$tested_sha\` |"
+            echo "| merged_base | \`$merged_base\` |"
+            echo "| head | \`$GITHUB_SHA\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "tested $TESTED_REF at $tested_sha: head $GITHUB_SHA merged onto $merged_base"
+
+      - name: "Tested ${{ steps.tested.outputs.tested_ref }} at ${{ steps.tested.outputs.tested_sha }} onto ${{ steps.tested.outputs.merged_base }}"
+        if: steps.tested.outcome == 'success'
+        shell: bash
+        run: echo "tested_ref=${{ steps.tested.outputs.tested_ref }} tested_sha=${{ steps.tested.outputs.tested_sha }} merged_base=${{ steps.tested.outputs.merged_base }}"
 
       # A depth-1 pull-request checkout contains only GitHub's synthetic merge
       # commit, not its protected-base parent. Materialize the event-pinned base
       # at the ref used by the fail-closed capability-history gate. Shipyard PR
       # validation arrives through workflow_dispatch, whose payload has no
-      # pull_request.base.sha, so that path retains the protected main fetch.
+      # pull_request.base.sha, so that path retains the protected main fetch,
+      # except a `pr_number` dispatch, which pins the merge ref's own base.
       - name: Fetch protected capability base
         if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         env:
-          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PULP_CAPABILITY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || steps.tested.outputs.merged_base }}
         shell: bash
         run: |
           if [ -n "$PULP_CAPABILITY_PR_BASE_SHA" ]; then
