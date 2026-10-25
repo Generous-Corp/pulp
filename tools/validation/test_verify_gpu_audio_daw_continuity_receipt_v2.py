@@ -782,6 +782,7 @@ class V2Receipt(unittest.TestCase):
 
         def problem(offset=None, reason=None, fault=None, **delivery):
             base = {"fault": fault or receipt["fault"], "pdc_samples": receipt["pdc_samples"],
+                    "plugin_identity": receipt["plugin_identity"],
                     "nulls": receipt["nulls"], "delivery": dict(receipt["delivery"], **delivery)}
             return hosts.exemption_problem(
                 run, "no_fallback", base, events, offset or receipt["host_offset"],
@@ -836,6 +837,26 @@ class V2Receipt(unittest.TestCase):
         run = self.plugin_shaped("busy-half", "no_fallback", shift=half)
         self.assertEqual(self.verify(self.receipt_of(run), run), ("fail", "negative_proved"))
         run = self.plugin_shaped("busy-half-plus", "no_fallback", shift=half + 1)
+        self.assertEqual(self.verify(self.receipt_of(run), run), ("fail", "negative_not_proved"))
+
+    def test_m12_the_owning_prepares_quantum_bounds_the_onset(self):
+        # A host that prepared once with a larger quantum before the prepare
+        # that owns the audio (Logic re-prepares). The onset tolerance is the
+        # owning prepare's half quantum, not the first prepare's.
+        def stale_first(run):
+            def edit(ev):
+                owning = next(e for e in ev if e["event"] == "prepared")
+                stale = dict(owning, quantum=8 * self.QUANTUM, prepare_index=0)
+                return [stale] + ev
+            _rewrite_events(run, edit)
+
+        run = self.plugin_shaped("busy-reprepared", "no_fallback")
+        stale_first(run)
+        receipt = self.receipt_of(run)
+        self.assertEqual(receipt["plugin_identity"]["quantum"], self.QUANTUM)
+        self.assertEqual(self.verify(receipt, run), ("fail", "negative_proved"))
+        run = self.plugin_shaped("busy-reprepared-late", "no_fallback", shift=2 * self.QUANTUM)
+        stale_first(run)
         self.assertEqual(self.verify(self.receipt_of(run), run), ("fail", "negative_not_proved"))
 
     def test_m3_a_span_that_is_not_the_defects_is_not_proved(self):

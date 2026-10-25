@@ -319,7 +319,12 @@ def _revert_entry(entry: dict) -> None:
     elif kind == "prefs_snapshot":
         _restore_prefs(Path(entry["path"]), Path(entry["saved"]))
     elif kind == "prefs_domain_snapshot":
-        _restore_domain(entry["domain"], Path(entry["saved"]))
+        saved = Path(entry["saved"])
+        if entry.get("sha256") and saved.is_file() and gfc.sha256_file(saved) != entry["sha256"]:
+            raise RuntimeError(f"cannot restore {entry['domain']}: the saved export {saved} no "
+                               "longer matches the snapshot's sha256; the current preferences "
+                               "were left untouched")
+        _restore_domain(entry["domain"], saved)
     elif kind == "throwaway_project":
         shutil.rmtree(entry["path"], ignore_errors=True)
     else:
@@ -471,10 +476,24 @@ def snapshot_prefs(run: Path, host_id: str) -> Path | None:
         shutil.copytree(source, saved, symlinks=True)
         record_change(run, "prefs_snapshot", path=str(source), saved=str(saved))
         return saved
-    saved.mkdir()
+    # Export every domain into a staging directory first: a domain that
+    # cannot be exported (a host never launched on this machine has none)
+    # must not leave a half-made snapshot that wedges the next attempt.
+    staging = saved.with_name(f"{saved.name}.partial-{now_us()}")
+    staging.mkdir()
+    try:
+        for domain in host["prefs_domains"]:
+            try:
+                defaults(["export", domain, str(staging / f"{domain}.plist")])
+            except (OSError, subprocess.CalledProcessError) as error:
+                raise SystemExit(f"snapshot-prefs: cannot export {domain} ({error}); launch "
+                                 "the host once so its preferences exist, then retry") from error
+        staging.rename(saved)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
     for domain in host["prefs_domains"]:
         export = saved / f"{domain}.plist"
-        defaults(["export", domain, str(export)])
         record_change(run, "prefs_domain_snapshot", domain=domain, saved=str(export),
                       sha256=gfc.sha256_file(export))
     return saved

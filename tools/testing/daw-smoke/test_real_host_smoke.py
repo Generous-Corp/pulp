@@ -12,6 +12,7 @@ import json
 import os
 import plistlib
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -37,10 +38,13 @@ class FakeDefaults:
         self.domains: dict[str, dict] = {}
         self.calls: list[list[str]] = []
         self.import_works = True
+        self.missing: set[str] = set()  # domains `defaults export` fails on
 
     def __call__(self, args: list[str]) -> None:
         self.calls.append(list(args))
         verb, domain = args[0], args[1]
+        if verb == "export" and domain in self.missing:
+            raise subprocess.CalledProcessError(1, ["/usr/bin/defaults", *args])
         if verb == "export":
             Path(args[2]).write_bytes(plistlib.dumps(self.domains.get(domain, {}),
                                                      fmt=plistlib.FMT_BINARY))
@@ -401,6 +405,31 @@ class Revert(Env):
                                     locked=lambda: False)
         self.assertFalse(ok, reasons)
 
+    def test_a_domain_that_cannot_be_exported_leaves_no_snapshot(self):
+        # A host never launched on this machine has no preferences domain.
+        self.prefs.missing.add("com.apple.logic10")
+        self.assertTrue(self.preflight()[0])
+        with self.assertRaisesRegex(SystemExit, "cannot export com.apple.logic10"):
+            rhs.snapshot_prefs(self.run, "logic")
+        self.assertFalse((self.run / "prefs-before").exists())
+        self.assertFalse(rhs.prefs_snapshot_taken(self.run))
+        self.assertEqual(list(self.run.glob("prefs-before*")), [])
+        # Once the domain exists the same run can take its snapshot.
+        self.prefs.missing.clear()
+        self.prefs.domains["com.apple.logic10"] = {"zoom": 150}
+        rhs.snapshot_prefs(self.run, "logic")
+        self.assertTrue(rhs.prefs_snapshot_taken(self.run))
+
+    def test_an_altered_export_is_not_restored(self):
+        self.logic_run_that_rewrites_prefs()
+        export = self.run / "prefs-before" / "com.apple.logic10.plist"
+        export.write_bytes(plistlib.dumps({"swapped": True}, fmt=plistlib.FMT_BINARY))
+        with self.assertRaisesRegex(RuntimeError, "no longer matches the snapshot's sha256"):
+            rhs.revert(self.run)
+        self.assertNotIn("import", [c[0] for c in self.prefs.calls])
+        self.assertEqual([e["kind"] for e in rhs.unreverted(self.run)],
+                         ["prefs_domain_snapshot"])
+
     def test_a_missing_export_leaves_the_prefs_untouched(self):
         self.logic_run_that_rewrites_prefs()
         shutil.rmtree(self.run / "prefs-before")
@@ -411,9 +440,8 @@ class Revert(Env):
     def test_garageband_exports_its_own_domain(self):
         self.assertTrue(self.preflight("garageband")[0])
         saved = rhs.snapshot_prefs(self.run, "garageband")
-        self.assertEqual(self.prefs.calls,
-                         [["export", "com.apple.garageband10",
-                           str(saved / "com.apple.garageband10.plist")]])
+        self.assertEqual([c[:2] for c in self.prefs.calls], [["export", "com.apple.garageband10"]])
+        self.assertTrue((saved / "com.apple.garageband10.plist").is_file())
 
 
 class Safety(Env):

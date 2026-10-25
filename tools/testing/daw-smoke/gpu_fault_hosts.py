@@ -373,8 +373,10 @@ def exemption_problem(run_dir: Path, planted: str, base: dict, events: Sequence[
     if offset.get("status") != "matched":
         return f"the host render offset is {offset.get('status')}, not matched at both ends"
     issued = base["fault"].get("issued_project_sample")
-    prepared = next((e for e in events if e.get("event") == "prepared"), {})
-    quantum, pdc, taps = prepared.get("quantum"), base.get("pdc_samples"), prepared.get("ir_taps")
+    # The prepare that owns the audio (a host may re-prepare with another
+    # quantum, as Logic does), not the first one in the log.
+    identity = base.get("plugin_identity") or {}
+    quantum, pdc, taps = identity.get("quantum"), base.get("pdc_samples"), identity.get("ir_taps")
     if not all(isinstance(v, int) and v > 0 for v in (issued, quantum, pdc, taps)):
         return "issued sample, quantum, PDC or IR length unknown"
     # The fallback takes over where the provider fault was applied, on the
