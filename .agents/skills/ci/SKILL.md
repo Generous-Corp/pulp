@@ -407,15 +407,20 @@ of two lanes. `tools/ci/macos_pr_lane.py` picks it:
   3.5 min, against a 23.4 min median for the full job. Its green carries a
   `shipyard-test-tier` annotation of `deferred`.
 - **Full lane**, on a head the App labelled `macos-ci`: everything the PR head
-  ran before, plus `pr-guard`. The label event's run is macOS-only.
+  ran before, plus `pr-guard`. The App starts it by dispatching `build.yml`
+  on the branch.
 
 `merge_group`, `push` and dispatch are unchanged; the merge queue always runs
 macOS.
 
-- **Only `shipyard-local[bot]`'s `macos-ci` counts.** On a `labeled` event the
-  lane checks the sender; otherwise it checks who last applied the label. A
-  label from an agent session or a person runs nothing: the run is a no-op. To
-  force the full lane, dispatch `build.yml` on the branch.
+- **Only `shipyard-local[bot]`'s `macos-ci` counts.** On `opened` or
+  `reopened` the lane checks who last applied the label. To force the full
+  lane, dispatch `build.yml` on the branch.
+- **`build.yml` does not listen for `labeled`.** A label event's run is a newer
+  check suite with no `macos` check run, and the merge queue then refuses to
+  enqueue with "Required status check "macos" is expected" although the
+  earlier run's `macos` passed. Never add `labeled` to a workflow that owns a
+  required context.
 - **Approve first, then the full lane, then arm.** A reviewer may APPROVE
   before the full macOS run. The sweep labels the approved head, and arms only
   once the head's latest `macos` check run is no longer `deferred`. GitHub then
@@ -425,15 +430,13 @@ macOS.
   auto-merge on `synchronize` (otherwise the new head's contract-lane green
   would merge it) and removes `macos-ci`. A queued PR leaves the queue on push
   anyway, and the fenced carrier's update-branch counts as a push. Re-arming
-  needs a fresh verdict, the label, and a full-lane success. If the label is
-  still present when re-approving, remove and re-apply it, because re-adding a
-  present label fires no event.
+  needs a fresh verdict, the label, and a full-lane success.
 - **A red contract lane is a real failure** of a pr-fast or pr-guard check.
   Fix it on the PR; it is exactly what would otherwise eject a batch. If the
   failing check needs a built target, add it to `PULP_PR_FAST_NEEDS_BUILD` in
   `test/cmake/pr_fast_tests.cmake`.
-- **The App's label must come from the App's token.** A `labeled` event made
-  with a workflow's `GITHUB_TOKEN` starts no workflow run.
+- **The App's dispatch must use the App's token.** A dispatch made with a
+  workflow's `GITHUB_TOKEN` starts no workflow run.
 - **`gate_suite_executed.py` reads both lanes as `tier-only`.** Use the
   `deferred` annotation, or the skipped `Build` step, to tell them apart.
 
