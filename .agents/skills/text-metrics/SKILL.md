@@ -405,6 +405,35 @@ line on the captured box` in `test/test_widgets_label.cpp`.
   every sibling in the row. Check `text_direction_` before returning an advance
   from any width path.
 
+- **SkParagraph's `LineMetrics::fHeight` is ONE line's height, whatever
+  `Metrics.h` says.** The header documents it as the paragraph height through
+  the current line; `TextLine::getMetrics` assigns the line's own advance.
+  Reading it as a running total made every equal-height line after the first
+  contribute nothing, and a later fallback-face line (Thai then CJK, both 22px
+  at 16px) lose its descent. `paragraph_text_extents()` holds the max-over-lines
+  rule as a pure function; the `[skia]` control in `test_text_shaper.cpp` pins
+  the library's per-line semantics so a Skia bump that changes them fails
+  there, not in a layout. An all-Latin multi-line test cannot see this bug:
+  equal lines give the same max under both readings.
+
+- **A text write into a pinned captured box must not dirty layout.** The
+  materializer passes `wrap_on_cache_miss` for every non-nowrap single-line
+  capture, so `captured_wrap_fallback()` is true on most imported text, and
+  that alone used to send every `set_text` through `invalidate_layout()`. On the
+  example instrument and MIDI-effect panels, 34 of 44 and 59 of 68 slot writes
+  cost a full Yoga pass on each frame. `Label::set_text` now requests paint only
+  when width and height are both explicit, the Label is not a baseline
+  participant, it holds captured line boxes, and it has no children. The last
+  two conditions matter. Without captured boxes, a centred lone Label gets an
+  anonymous text slot from layout that is sized from its copy, so new copy
+  moves layout output inside a pinned box. The older single-line fast path
+  skipped that layout and painted into the stale slot (72 px wide for a
+  277 px string). Any Label with `has_own_text_box()` now lays out on a text
+  write. The benchmark's
+  reported `layout_passes` cannot see any of this, because its step and
+  `render_frame` lay out unconditionally. Count `tree_layout_generation()`
+  changes per write instead.
+
 ## Selection geometry is recorded at PAINT, and only paint can record it
 
 `Label` implements `SelectableText` (`core/view/include/pulp/view/selectable_text.hpp`)
