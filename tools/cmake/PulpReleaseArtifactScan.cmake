@@ -40,6 +40,9 @@
 #         [-DIDS=<id;...>] [-DLABEL=<text>] [-DLIST=<json>]
 #         -P tools/cmake/PulpReleaseArtifactScan.cmake
 include_guard(GLOBAL)
+# The checks below use IN_LIST (CMP0057), which `cmake -P` and an includer
+# without cmake_minimum_required() leave unset.
+cmake_policy(VERSION 3.24)
 
 set(PULP_RELEASE_ARTIFACT_FORBIDDEN_LIST_DEFAULT
     "${CMAKE_CURRENT_LIST_DIR}/release_artifact_forbidden.json")
