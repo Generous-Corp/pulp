@@ -363,11 +363,17 @@ export async function censusOne(cdp, file, { width, height, concurrency = 1 }) {
     batch.forEach((row, j) => matchedFor.set(row, answers[j]));
   }
   const matchMs = Date.now() - started;
-  const prefilter = { candidates: 0, refs_outside_candidates: 0 };
+  // `candidates` is the coarse rule (own or ancestor var()); `own_candidates`
+  // the tight one (own var() only), with inherited values to come from the
+  // ancestor chain instead. `own_misses` counts non-inherited references the
+  // tight rule would lose, which must be zero for it to be safe.
+  const prefilter = { candidates: 0, refs_outside_candidates: 0, own_candidates: 0,
+                      own_misses: 0 };
   for (const row of rows) {
     const matched = matchedFor.get(row);
     if (!matched) continue;
     if (row.candidate || row.inheritCandidate) prefilter.candidates += 1;
+    if (row.candidate) prefilter.own_candidates += 1;
     const context = {
       defined: (name) => row.defined[name] === true,
       scoped: (name) => row.scoped[name] === true,
@@ -408,6 +414,7 @@ export async function censusOne(cdp, file, { width, height, concurrency = 1 }) {
           .includes(cls);
         const covered = row.candidate || (inherited && row.inheritCandidate);
         if (isRef && !covered) prefilter.refs_outside_candidates += 1;
+        if (isRef && !inherited && !row.candidate) prefilter.own_misses += 1;
         if (examples.length < 400)
           examples.push({ tag: row.tag, property, cls, declared: found?.text ?? null,
                           computed: row.uses[property] });
