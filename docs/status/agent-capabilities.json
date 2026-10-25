@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 81,
+  "manifest_revision": 82,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -11997,11 +11997,13 @@
             "methods": [
               "size()",
               "ready()",
+              "vdsp_split_offset_bytes(bool real_transform)",
               "forward(std::complex<SampleType>* data)",
               "inverse(std::complex<SampleType>* data)",
               "forward_real(const SampleType* input, std::complex<SampleType>* output)",
               "real_bins()",
-              "forward_real_half(const SampleType* input, std::complex<SampleType>* output, SampleType scale = SampleType{1})",
+              "forward_real_half(const SampleType* input, std::complex<SampleType>* output, SampleType scale)",
+              "forward_real_half(const SampleType* input, std::complex<SampleType>* output)",
               "inverse_real_half(const std::complex<SampleType>* input, SampleType* output, SampleType scale)",
               "inverse_real_half(const std::complex<SampleType>* input, SampleType* output)",
               "magnitude_db(const std::complex<SampleType>* freq, SampleType* out, int num_bins)",
@@ -12010,14 +12012,12 @@
             "enums": []
           },
           {
-            "class": "ConvolverT",
-            "qualified_name": "pulp::signal::ConvolverT",
-            "template": "typename SampleType = float",
+            "class": "FftRealSplit",
+            "qualified_name": "pulp::signal::detail::FftRealSplit",
+            "template": null,
             "methods": [
-              "process(SampleType input)",
-              "process(const SampleType* input, SampleType* output, int num_samples)",
-              "reset()",
-              "load_ir(const SampleType* ir, int ir_length, int block_size = 0)"
+              "constexpr(std::is_same_v<SampleType, float>)",
+              "checked_capacity_product(fft_size, kVdspFftSetupChargeBytesPerPoint, target_max_bytes, bytes)"
             ],
             "enums": []
           }
@@ -14470,6 +14470,20 @@
                 ]
               ]
             ]
+          }
+        ],
+        "overlap_add_convolver.hpp": [
+          {
+            "class": "ConvolverT",
+            "qualified_name": "pulp::signal::ConvolverT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process(SampleType input)",
+              "process(const SampleType* input, SampleType* output, int num_samples)",
+              "reset()",
+              "load_ir(const SampleType* ir, int ir_length, int block_size = 0)"
+            ],
+            "enums": []
           }
         ],
         "oversampling.hpp": [

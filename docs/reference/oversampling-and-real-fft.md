@@ -89,8 +89,11 @@ output can differ by less than that threshold while a signal dies away.
 
 The half-spectrum pair runs an N/2-point complex transform, so it is roughly a
 quarter faster than `forward_real()` and about twice as fast as a complex
-transform of the same real data. `PartitionedConvolver`, `Convolver`, the
-STFT and the spectral frame engine run on it. All of these calls are realtime
+transform of the same real data. `PartitionedConvolver`, the STFT and the
+spectral frame engine run on it. The overlap-add `Convolver` keeps its spectra
+as separate real and imaginary arrays instead, the layout vDSP's real
+transform produces, so a block multiplies its spectrum without interleaving
+it on the way in or out. All of these calls are realtime
 safe after construction; size must be at least 2.
 
 On Apple platforms the float transform pins where its vDSP split buffers sit
