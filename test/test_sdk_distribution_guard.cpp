@@ -165,3 +165,13 @@ TEST_CASE("dev-shared artifact scan fails closed on a symlink cycle",
 
     REQUIRE(pulp::cli::dev_shared_artifact_offender(bundle) == bundle);
 }
+
+TEST_CASE("only ad hoc and Apple Development identities sign a dev-shared build",
+          "[cli][sdk][ship][dev-shared]") {
+    REQUIRE(pulp::cli::is_local_signing_identity("-"));
+    REQUIRE(pulp::cli::is_local_signing_identity("Apple Development: Dev Person (ABCDE12345)"));
+    REQUIRE(pulp::cli::is_local_signing_identity("Mac Developer: Dev Person (ABCDE12345)"));
+    REQUIRE_FALSE(pulp::cli::is_local_signing_identity("Developer ID Application: Co (TEAMID)"));
+    REQUIRE_FALSE(pulp::cli::is_local_signing_identity("3rd Party Mac Developer Application: Co"));
+    REQUIRE_FALSE(pulp::cli::is_local_signing_identity(""));
+}

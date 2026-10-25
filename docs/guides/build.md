@@ -79,12 +79,24 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULP_DEV_SHARED_UI=ON
 
 It is a development-only link mode, by design:
 
-- **It never ships.** Each module loads Pulp from an absolute path inside this
-  build tree, so it fails to load on any other machine or after the build
-  directory moves. `pulp ship sign`, `package`, `notarize`, `release` and
-  `share` refuse a build cache with the option on and any artifact that is, or
-  names, the shared runtime; so does
-  `tools/scripts/build_combined_installer.sh`. Rebuild with `pulp build` first.
+- **It never ships, and shipping still works.** Each module loads Pulp from an
+  absolute path inside this build tree, so it fails to load on any other machine
+  or after the build directory moves. Normal and release builds (option off)
+  sign, package, notarize and release exactly as before. Run against a
+  dev-shared build:
+  - `pulp ship package`, `notarize`, `release` and `share`, and `pulp ship sign`
+    with a distribution identity (Developer ID), first switch the build dir back
+    to static links (`pulp build --all`, a relink, no recompile) and then ship
+    the static bundles. If the switch cannot happen, or under `--dry-run`, they
+    stop and print the one command that does it, for example
+    `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship package --version 1.2.3`.
+  - `pulp ship sign --identity -` (ad hoc) or an Apple Development identity
+    signs the dev-shared bundles as they are, so a host on this machine can load
+    them. That signature is for local loading only.
+  - An artifact that is, or names, the shared runtime (a bundle copied out of a
+    dev-shared tree, a hand-made `.pkg` input) is refused with the same command.
+    `tools/scripts/build_combined_installer.sh` refuses such inputs before any
+    signing tool runs.
 - **What stays static.** The format adapters (`libpulp-format*`,
   `libpulp-standalone*`) call hooks the plug-in defines, such as
   `make_plug_view` and the processor factory, so they stay in each module with

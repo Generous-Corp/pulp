@@ -326,29 +326,64 @@ static int enforce_no_vellum_d15(const std::vector<fs::path>& artifacts) {
     return 0;
 }
 
+// The command line that rebuilds the project with static plug-in links and
+// re-runs the outermost `pulp ship` invocation, for a refusal to print.
+static std::string g_dev_shared_fix;
+
 static int enforce_no_dev_shared_ui(const std::vector<fs::path>& artifacts) {
     for (const auto& artifact : artifacts) {
         const auto offender = pulp::cli::dev_shared_artifact_offender(artifact);
         if (offender.empty())
             continue;
-        std::cerr << "Error: refusing to ship a development-only dev-shared build "
+        std::cerr << "Error: refusing to distribute a development-only dev-shared build "
                      "(PULP_DEV_SHARED_UI=ON).\n"
                   << "  Offending artifact: " << offender.string() << "\n"
                   << "  It loads Pulp from libpulp-dev-shared-ui.<version>.dylib in its build "
-                     "tree,\n"
-                  << "  so it fails on any other machine. Rebuild with `pulp build` (static "
-                     "links)\n"
-                  << "  before signing, packaging, sharing, notarizing, or releasing it.\n";
+                     "tree, so it fails\n"
+                  << "  on any other machine. Rebuild it with static links and re-run:\n"
+                  << "    " << g_dev_shared_fix << "\n";
         return 1;
     }
     return 0;
 }
 
-// Development-only runtimes that must never reach a distributed artifact.
-static int enforce_no_development_runtimes(const std::vector<fs::path>& artifacts) {
+// Development-only runtimes that must never reach a distributed artifact. A
+// dev-shared build may still be signed with a local identity (ad hoc or Apple
+// Development) so a host on this machine loads it; `allow_dev_shared` says so.
+static int enforce_no_development_runtimes(const std::vector<fs::path>& artifacts,
+                                           bool allow_dev_shared = false) {
     if (int rc = enforce_no_vellum_d15(artifacts); rc != 0)
         return rc;
-    return enforce_no_dev_shared_ui(artifacts);
+    return allow_dev_shared ? 0 : enforce_no_dev_shared_ui(artifacts);
+}
+
+// A distribution step run against a dev-shared build dir switches it back to
+// static plug-in links first (`pulp build --all`: a relink, no recompile), so
+// the command ships exactly what it would from a static build. When the switch
+// cannot happen, or under --dry-run (which must not rebuild anything), the
+// refusal names the one command that makes it.
+static int ensure_static_build_for_shipping(const fs::path& build_dir, const std::string& sub,
+                                            bool dry_run = false) {
+    std::string error;
+    if (pulp::cli::dev_shared_build_allows_distribution(build_dir, error))
+        return 0;
+    if (dry_run) {
+        std::cerr << "Error: " << error << ".\n"
+                  << "  --dry-run does not rebuild; switch to static links and re-run:\n"
+                  << "    " << g_dev_shared_fix << "\n";
+        return 1;
+    }
+    std::cout << "pulp ship " << sub << ": " << build_dir.string()
+              << " links plug-ins against the development-only shared runtime "
+                 "(PULP_DEV_SHARED_UI=ON);\n  switching it to static links for shipping "
+                 "(`pulp build --all`, a relink)...\n";
+    if (cmd_build({"--all"}) == 0 &&
+        pulp::cli::dev_shared_build_allows_distribution(build_dir, error))
+        return 0;
+    std::cerr << "Error: " << error << ".\n"
+              << "  Rebuild with static links and re-run:\n"
+              << "    " << g_dev_shared_fix << "\n";
+    return 1;
 }
 
 // Load (or, on first use, create + store) the plugin's Ed25519 signing key from the
@@ -541,6 +576,18 @@ static int ship_sign(const std::vector<std::string>& args,
             return 1;
         }
 
+        // An ad hoc or Apple Development signature only lets a host on this
+        // machine load the bundle, so a dev-shared build may take one. Any
+        // other identity signs for distribution: the build switches back to
+        // static links first. Ad hoc signing needs no keychain, so it skips
+        // the signing-keychain preflight.
+        const bool local_identity = pulp::cli::is_local_signing_identity(identity);
+        const bool ad_hoc = identity == "-";
+        if (!local_identity) {
+            if (int rc = ensure_static_build_for_shipping(build_dir, sub); rc != 0)
+                return rc;
+        }
+
         // --path: sign exactly one artifact instead of auto-scanning the
         // build dirs. This is the composable primitive behind the one-off
         // "I built an app/DMG and want to hand it to a friend" flow — point
@@ -560,10 +607,12 @@ static int ship_sign(const std::vector<std::string>& args,
                              "  `pulp ship package` / `create_pkg`, not `sign --path`.\n";
                 return 1;
             }
-            if (int rc = enforce_no_development_runtimes({fs::path(sign_path)}); rc != 0)
+            if (int rc = enforce_no_development_runtimes({fs::path(sign_path)}, local_identity);
+                rc != 0)
                 return rc;
 #ifdef __APPLE__
-            if (!run_signing_preflight(root)) return 1;
+            if (!ad_hoc && !run_signing_preflight(root))
+                return 1;
 #endif
             // Hardened runtime + secure timestamp are mandatory for
             // notarization. Entitlements only apply to executables, so we
@@ -595,11 +644,12 @@ static int ship_sign(const std::vector<std::string>& args,
             std::cerr << "No plugin bundles found to sign. Run `pulp build` first.\n";
             return 1;
         }
-        if (int rc = enforce_no_development_runtimes(bundles); rc != 0)
+        if (int rc = enforce_no_development_runtimes(bundles, local_identity); rc != 0)
             return rc;
 
 #ifdef __APPLE__
-        if (!run_signing_preflight(root)) return 1;
+        if (!ad_hoc && !run_signing_preflight(root))
+            return 1;
 #endif
 
         int signed_count = 0;
@@ -2700,6 +2750,20 @@ static int ship_swap_pack(const std::vector<std::string>& args,
 int cmd_ship(const std::vector<std::string>& args) {
     // Parse subcommand
     std::string sub = args.empty() ? "help" : args[0];
+    // `release` re-enters cmd_ship for its stages; the fix a refusal prints is
+    // always the command the user typed.
+    if (g_dev_shared_fix.empty()) {
+        g_dev_shared_fix = "PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship";
+        for (const auto& arg : args) {
+            const bool plain =
+                !arg.empty() && std::all_of(arg.begin(), arg.end(), [](unsigned char c) {
+                    return std::isalnum(c) ||
+                           std::string_view("@%+=:,./_-").find(static_cast<char>(c)) !=
+                               std::string_view::npos;
+                });
+            g_dev_shared_fix += " " + (plain ? arg : shell_quote(arg));
+        }
+    }
     if (sub == "help" || sub == "--help" || sub == "-h")
         return print_ship_help();
 
@@ -2794,13 +2858,11 @@ int cmd_ship(const std::vector<std::string>& args) {
             return 1;
         }
     }
-    if (sub == "sign" || sub == "package" || sub == "notarize" || sub == "release" ||
-        sub == "share") {
-        std::string dev_shared_error;
-        if (!pulp::cli::dev_shared_build_allows_distribution(build_dir, dev_shared_error)) {
-            std::cerr << "Error: " << dev_shared_error << ".\n";
-            return 1;
-        }
+    // `sign` decides once it knows the identity (see ship_sign).
+    if (sub == "package" || sub == "notarize" || sub == "release" || sub == "share") {
+        const bool dry_run = std::find(args.begin(), args.end(), "--dry-run") != args.end();
+        if (int rc = ensure_static_build_for_shipping(build_dir, sub, dry_run); rc != 0)
+            return rc;
     }
 
     if (sub == "sign")           return ship_sign(args, root, build_dir);

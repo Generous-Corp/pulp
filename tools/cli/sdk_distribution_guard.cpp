@@ -120,6 +120,11 @@ std::filesystem::path dev_shared_artifact_offender(const std::filesystem::path& 
     return {};
 }
 
+bool is_local_signing_identity(std::string_view identity) {
+    return identity == "-" || identity.rfind("Apple Development", 0) == 0 ||
+           identity.rfind("Mac Developer", 0) == 0;
+}
+
 bool dev_shared_build_allows_distribution(const std::filesystem::path& build_dir,
                                           std::string& error) {
     std::ifstream cache(build_dir / "CMakeCache.txt");
@@ -131,9 +136,9 @@ bool dev_shared_build_allows_distribution(const std::filesystem::path& build_dir
     if (!value || !cmake_value_on(*value))
         return true;
     error = "the configured build links plug-ins against the development-only shared Pulp "
-            "runtime (PULP_DEV_SHARED_UI=ON), which loads only from this build tree. "
-            "Rebuild with `pulp build` (it switches the build back to static links) before "
-            "signing, packaging, notarizing, sharing, or releasing";
+            "runtime (PULP_DEV_SHARED_UI=ON), which loads only from this build tree. Only a "
+            "static build can be signed for distribution, packaged, notarized, shared, or "
+            "released";
     return false;
 }
 

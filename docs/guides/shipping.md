@@ -35,11 +35,16 @@ cmake --build build --config Release
 
 Output appears in `build/VST3/`, `build/CLAP/`, `build/AU/`.
 
-Ship from a `pulp build`, not a `pulp dev` or `pulp loop` tree. On macOS those
-link plug-ins against a development-only shared Pulp runtime
-(`PULP_DEV_SHARED_UI=ON`) that loads only from the build directory, and every
-signing, packaging, notarization and sharing path below refuses it. `pulp build`
-switches the build back to static links.
+Ship from a `pulp build` tree. In an SDK project on macOS, `pulp dev` and `pulp
+loop` link plug-ins against a development-only shared Pulp runtime
+(`PULP_DEV_SHARED_UI=ON`) that loads only from the build directory. The
+distribution steps below (`package`, `notarize`, `release`, `share`, and `sign`
+with a Developer ID identity) switch such a build back to static links
+(`pulp build --all`, a relink) before they ship, or, when they cannot (or under
+`--dry-run`), print the exact `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship
+...` command to run. `pulp ship sign --identity -` (ad hoc) or an Apple
+Development identity signs a dev-shared build as it is, for loading on this
+machine only. Static builds sign, package and notarize exactly as before.
 
 ### Build identity in every bundle
 

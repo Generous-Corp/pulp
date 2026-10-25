@@ -318,16 +318,27 @@ Unit-tested in both directions in `test/test_sdk_distribution_guard.cpp`, plus
 the CMake-level provenance contract in
 `test/cmake/test_sdk_provenance_contract.cmake`.
 
-### Dev-shared builds (`PULP_DEV_SHARED_UI`) never ship, and the guard is fail-closed
+### Dev-shared builds (`PULP_DEV_SHARED_UI`) never ship, and shipping still works
 
-`pulp dev` / `pulp loop` on macOS (and `pulp build --dev-shared`) link plug-in
-modules against `libpulp-dev-shared-ui.<version>.dylib` in the build tree
+`pulp dev` / `pulp loop` in SDK projects on macOS (and `pulp build
+--dev-shared`) link plug-in modules against
+`libpulp-dev-shared-ui.<version>.dylib` in the build tree
 (`tools/cmake/PulpDevSharedUi.cmake`). That module loads only on the machine and
-in the directory that built it, so unlike the development-SDK marker above this
-guard also covers `sign`, and it checks the artifact bytes, not only the cache:
+in the directory that built it. The rule: static builds ship exactly as before;
+a dev-shared build may be signed for local loading, never distributed.
 
-- `pulp::cli::dev_shared_build_allows_distribution()` refuses `sign`, `package`,
-  `notarize`, `release` and `share` when `CMakeCache.txt` has the option on.
+- `ensure_static_build_for_shipping()` in `tools/cli/cmd_ship.cpp` runs for
+  `package`, `notarize`, `release`, `share`, and for `sign` with a non-local
+  identity. When `dev_shared_build_allows_distribution()` says the cache has the
+  option on, it runs `cmd_build({"--all"})` (which reconfigures OFF: a relink)
+  and continues with the static bundles. When that fails, the option is still on
+  (a `PULP_DEV_SHARED_UI=1` environment override), or the command is
+  `--dry-run`, it refuses and prints the outermost command as one copy-pasteable
+  line: `PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship <args>`.
+- `is_local_signing_identity()` (ad hoc `-`, `Apple Development`,
+  `Mac Developer`) lets `sign` take a dev-shared build as it is: no switch, no
+  artifact refusal. Ad hoc signing also skips the signing-keychain preflight,
+  because it needs no keychain.
 - `pulp::cli::dev_shared_artifact_offender()` scans every selected artifact for a
   file named `libpulp-dev-shared-ui.*` or containing those bytes (the runtime's
   install name, which is in every linked module's load commands). It runs at the
@@ -337,11 +348,18 @@ guard also covers `sign`, and it checks the artifact bytes, not only the cache:
 - `tools/scripts/build_combined_installer.sh` greps its inputs for the same bytes
   before any signing tool runs; a grep read error also refuses.
 
-The fix is always `pulp build` (it switches the build dir back to static links,
-a relink only). There is no override flag. Tests: the `[dev-shared]` cases in
-`test/test_sdk_distribution_guard.cpp` and `test/test_cli_ship_shellout.cpp`
-(each subcommand against the cache; `sign --path`, `sign` scan, `package`,
-`notarize` and `share` against artifact bytes), and
+There is no override flag. Tests: the `[dev-shared]` cases in
+`test/test_sdk_distribution_guard.cpp` and `test/test_cli_ship_shellout.cpp`:
+- the switch for each subcommand against a fake `cmake`, the exact fix line when
+  it fails, and no rebuild under `--dry-run`;
+- a static build that signs ad hoc, verifies with `codesign --verify --strict`,
+  and packages;
+- a dev-shared build that signs ad hoc but is refused by `package`, `share`,
+  `notarize` and `release`;
+- `sign --path`, `sign` scan, `package`, `notarize` and `share` against artifact
+  bytes;
+
+plus
 `test_dev_shared_build_is_rejected_before_signing` in
 `tools/scripts/test_build_combined_installer.py`. A new distribution path must
 call `enforce_no_development_runtimes()` on exactly the inputs it selected.

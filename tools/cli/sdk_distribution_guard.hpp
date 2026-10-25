@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace pulp::cli {
 
@@ -21,5 +22,9 @@ bool dev_shared_build_allows_distribution(const std::filesystem::path& build_dir
 // linked module's load command does. Returns the artifact itself when it
 // cannot be inspected, and an empty path when it is clean or absent.
 std::filesystem::path dev_shared_artifact_offender(const std::filesystem::path& artifact);
+// Identities that sign only for loading on this machine: ad hoc ("-") and
+// Apple Development certificates. A dev-shared build may be signed with these
+// so a local host loads it; it may never be packaged, notarized or shared.
+bool is_local_signing_identity(std::string_view identity);
 
 } // namespace pulp::cli

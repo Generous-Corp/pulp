@@ -2201,46 +2201,212 @@ void write_dev_shared_module(const fs::path& file) {
 
 } // namespace
 
+#if !defined(_WIN32)
+namespace {
+
+// A `cmake` on PATH that records each call. With `flip`, a configure that asks
+// for PULP_DEV_SHARED_UI=OFF also rewrites the cache the way a real one would,
+// so `pulp build` succeeds in switching the dir back to static links.
+struct FakeCmake {
+    fs::path dir = pulp::test::make_unique_temp_dir("pulp-ship-fake-cmake");
+    fs::path log = dir / "cmake.log";
+    ScopedEnvVar path{"PATH", dir.string() + ":/usr/bin:/bin:/usr/sbin:/sbin"};
+    ScopedEnvVar skip_bootstrap{"PULP_SKIP_DEPENDENCY_BOOTSTRAP", "1"};
+    ScopedEnvVar skip_preflight{"PULP_SKIP_CACHE_PREFLIGHT", "1"};
+    ScopedEnvVar no_leases{"PULP_TARTCI_LEASES", "0"};
+    ScopedEnvVar no_metrics{"PULP_BUILD_METRICS", "0"};
+    ScopedEnvVar no_override{"PULP_DEV_SHARED_UI"};
+
+    FakeCmake(const fs::path& cache, bool flip) {
+        std::ofstream script(dir / "cmake");
+        script << "#!/bin/sh\nprintf '%s ' \"$@\" >> '" << log.string() << "'\n"
+               << "printf '\\n' >> '" << log.string() << "'\n";
+        if (flip)
+            script << "case \" $* \" in *\" -DPULP_DEV_SHARED_UI=OFF \"*)\n"
+                   << "  sed -i '' 's/^PULP_DEV_SHARED_UI:BOOL=ON$/PULP_DEV_SHARED_UI:BOOL=OFF/' '"
+                   << cache.string() << "' ;;\nesac\n";
+        script << "exit 0\n";
+        script.close();
+        fs::permissions(dir / "cmake", fs::perms::owner_all);
+    }
+    ~FakeCmake() {
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
+    std::string calls() const {
+        std::ifstream in(log);
+        return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    }
+};
+
+// The default entitlements `pulp ship sign` passes to codesign, so a real ad hoc
+// signature can be made inside a fake project.
+void write_default_entitlements(const fs::path& root) {
+    fs::create_directories(root / "ship" / "templates");
+    std::ofstream(root / "ship" / "templates" / "entitlements.plist")
+        << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+           "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+        << "<plist version=\"1.0\"><dict>"
+        << "<key>com.apple.security.cs.disable-library-validation</key><true/>"
+        << "</dict></plist>\n";
+}
+
+fs::path make_dev_shared_project(std::string_view name) {
+    auto root = make_fake_project(name, true);
+    std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+    cache << "PULP_DEV_SHARED_UI:BOOL=ON\n";
+    return root;
+}
+
+} // namespace
+
 TEST_CASE_METHOD(ShipShelloutFixture,
-                 "every distribution subcommand refuses a PULP_DEV_SHARED_UI build cache",
+                 "a distribution step switches a dev-shared build to static links first",
                  "[cli][shellout][ship][dev-shared]") {
     if (!binary_exists()) {
         SKIP("pulp binary not built");
     }
-    for (const char* sub : {"sign", "package", "notarize", "release", "share"}) {
-        DYNAMIC_SECTION("pulp ship " << sub) {
-            auto root = make_fake_project(std::string("dev-shared-cache-") + sub, true);
-            {
-                std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
-                cache << "PULP_DEV_SHARED_UI:BOOL=ON\n";
-            }
-            auto r = run_pulp_in(root, {"ship", sub});
+    const std::vector<std::vector<std::string>> commands = {
+        {"ship", "package"},
+        {"ship", "notarize"},
+        {"ship", "release"},
+        {"ship", "share"},
+        {"ship", "sign", "--identity", "Developer ID Application: Fake"}};
+    for (const auto& command : commands) {
+        DYNAMIC_SECTION("pulp " << command[1]) {
+            auto root = make_dev_shared_project("dev-shared-switch-" + command[1]);
+            FakeCmake cmake(root / "build" / "CMakeCache.txt", /*flip=*/true);
+            auto r = run_pulp_in(root, command);
             REQUIRE_FALSE(r.timed_out);
-            REQUIRE(r.exit_code == 1);
             const auto combined = r.stdout_output + r.stderr_output;
-            REQUIRE(contains(combined, "PULP_DEV_SHARED_UI=ON"));
-            REQUIRE_FALSE(fs::exists(root / "artifacts"));
+            INFO(combined);
+            REQUIRE(contains(combined, "switching it to static links for shipping"));
+            REQUIRE(contains(cmake.calls(), "-DPULP_DEV_SHARED_UI=OFF"));
+            REQUIRE_FALSE(contains(combined, "Rebuild with static links and re-run"));
             fs::remove_all(root);
         }
     }
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
-                 "pulp ship package accepts a cache with PULP_DEV_SHARED_UI off",
+                 "a dev-shared build that cannot switch is refused with one exact fix",
                  "[cli][shellout][ship][dev-shared]") {
     if (!binary_exists()) {
         SKIP("pulp binary not built");
     }
-    auto root = make_fake_project("dev-shared-cache-off", true);
-    {
-        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
-        cache << "PULP_DEV_SHARED_UI:BOOL=OFF\n";
+    const std::vector<std::vector<std::string>> commands = {
+        {"ship", "package", "--version", "1.2.3"},
+        {"ship", "sign", "--identity", "Developer ID Application: Fake"}};
+    const std::vector<std::string> fixes = {
+        "PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship package --version 1.2.3",
+        "PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship sign --identity "
+        "\"Developer ID Application: Fake\""};
+    for (std::size_t i = 0; i < commands.size(); ++i) {
+        DYNAMIC_SECTION("pulp " << commands[i][1]) {
+            auto root = make_dev_shared_project("dev-shared-refuse-" + commands[i][1]);
+            FakeCmake cmake(root / "build" / "CMakeCache.txt", /*flip=*/false);
+            auto r = run_pulp_in(root, commands[i]);
+            REQUIRE_FALSE(r.timed_out);
+            REQUIRE(r.exit_code == 1);
+            const auto combined = r.stdout_output + r.stderr_output;
+            INFO(combined);
+            REQUIRE(contains(combined, "PULP_DEV_SHARED_UI=ON"));
+            REQUIRE(contains(combined, fixes[i]));
+            REQUIRE_FALSE(fs::exists(root / "artifacts"));
+            fs::remove_all(root);
+        }
     }
-    auto r = run_pulp_in(root, {"ship", "package"});
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture, "--dry-run never rebuilds a dev-shared build",
+                 "[cli][shellout][ship][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_shared_project("dev-shared-dry-run");
+    FakeCmake cmake(root / "build" / "CMakeCache.txt", /*flip=*/true);
+    auto r = run_pulp_in(root, {"ship", "notarize", "--dry-run"});
     REQUIRE_FALSE(r.timed_out);
-    REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "PULP_DEV_SHARED_UI"));
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output,
+                     "PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship notarize --dry-run"));
+    REQUIRE(cmake.calls().empty());
     fs::remove_all(root);
 }
+#endif
+
+#if defined(__APPLE__) && defined(PULP_SHIP_STRIP_FIXTURE)
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "a static build still signs and packages and its signature verifies",
+                 "[cli][shellout][ship][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("static-sign-package", true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_DEV_SHARED_UI:BOOL=OFF\nPULP_SDK_DISTRIBUTION_ELIGIBLE:INTERNAL=TRUE\n";
+    }
+    auto bundle = make_module_bundle(root, "VST3", "StaticGain", ".vst3");
+    write_default_entitlements(root);
+
+    auto signed_run = run_pulp_in(root, {"ship", "sign", "--identity", "-"});
+    INFO(signed_run.stdout_output << signed_run.stderr_output);
+    REQUIRE_FALSE(signed_run.timed_out);
+    REQUIRE(signed_run.exit_code == 0);
+    REQUIRE(contains(signed_run.stdout_output, "Signed 1 bundles."));
+    auto verify = ChildProcess::run("/usr/bin/codesign", {"--verify", "--strict", bundle.string()},
+                                    ProcessOptions{});
+    REQUIRE(verify.exit_code == 0);
+
+    auto packaged = run_pulp_in(root, {"ship", "package", "--version", "1.0.0", "--separate"});
+    INFO(packaged.stdout_output << packaged.stderr_output);
+    REQUIRE_FALSE(packaged.timed_out);
+    REQUIRE(packaged.exit_code == 0);
+    REQUIRE(fs::exists(root / "artifacts" / "StaticGain-VST3-1.0.0.pkg"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "a dev-shared build signs for local loading but is never distributed",
+                 "[cli][shellout][ship][dev-shared]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_shared_project("dev-shared-local-sign");
+    auto bundle = make_module_bundle(root, "CLAP", "FastGain", ".clap");
+    write_default_entitlements(root);
+    // The scan flags any file naming the runtime, as a linked module's load
+    // commands do; a sealed resource keeps the bundle signable here.
+    fs::create_directories(bundle / "Contents" / "Resources");
+    std::ofstream(bundle / "Contents" / "Resources" / "runtime.txt")
+        << "@rpath/libpulp-dev-shared-ui.1.11.0.dylib\n";
+    FakeCmake cmake(root / "build" / "CMakeCache.txt", /*flip=*/false);
+
+    auto local = run_pulp_in(root, {"ship", "sign", "--identity", "-"});
+    INFO(local.stdout_output << local.stderr_output);
+    REQUIRE_FALSE(local.timed_out);
+    REQUIRE(local.exit_code == 0);
+    REQUIRE(cmake.calls().empty());
+    REQUIRE(ChildProcess::run("/usr/bin/codesign", {"--verify", "--strict", bundle.string()},
+                              ProcessOptions{})
+                .exit_code == 0);
+
+    auto path_sign =
+        run_pulp_in(root, {"ship", "sign", "--identity", "-", "--path", bundle.string()});
+    REQUIRE(path_sign.exit_code == 0);
+
+    for (const char* sub : {"package", "share", "notarize", "release"}) {
+        auto r = run_pulp_in(root, {"ship", sub});
+        INFO(sub << ": " << r.stdout_output << r.stderr_output);
+        REQUIRE(r.exit_code == 1);
+        REQUIRE(contains(r.stderr_output, "PULP_DEV_SHARED_UI=0 pulp build --all && pulp ship"));
+    }
+    REQUIRE_FALSE(fs::exists(root / "artifacts"));
+    fs::remove_all(root);
+}
+#endif
 
 #ifdef __APPLE__
 TEST_CASE_METHOD(ShipShelloutFixture,
