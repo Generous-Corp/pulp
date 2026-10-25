@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/view/callout_box.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/svg_fragment.hpp>
@@ -710,6 +711,183 @@ TEST_CASE("parse_annotated_manifest reports errors",
         CHECK_FALSE(impd::parse_annotated_manifest(
             R"({"elements":[{"kind":"frobnicator"}]})", m, err));
         CHECK(err.find("frobnicator") != std::string::npos);
+    }
+}
+
+TEST_CASE("strict annotated capture validation binds provenance and geometry",
+          "[view][annotated-capture][issue-port-fidelity]") {
+    const std::string svg =
+        R"(<svg width="200" height="100"><rect id="mix" x="10" y="20" width="40" height="30"/></svg>)";
+    const auto hash = pulp::runtime::sha256_hex(svg);
+    const std::string sidecar =
+        std::string(R"JSON({"provenance":{"source":"capture-tool-v1"},"svg_sha256":")JSON") + hash +
+        R"JSON(","canvas":{"width":200,"height":100},"elements":[{"selector":"#mix","kind":"knob","geometry":{"cx":30,"cy":35,"hit_radius":10}}]})JSON";
+    std::string error;
+    CHECK(impd::validate_annotated_capture(svg, sidecar, error));
+    CHECK(error.empty());
+    SECTION("hash mismatch") {
+        auto bad = sidecar;
+        bad.replace(bad.find(hash), hash.size(), std::string(64, '0'));
+        CHECK_FALSE(impd::validate_annotated_capture(svg, bad, error));
+        CHECK(error.find("sha256") != std::string::npos);
+    }
+    SECTION("unknown or duplicate control ids fail closed") {
+        auto bad = sidecar;
+        bad.replace(bad.find("#mix"), 4, "#missing");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, bad, error));
+        CHECK(error.find("absent") != std::string::npos);
+    }
+    SECTION("out of bounds geometry fails closed") {
+        auto bad = sidecar;
+        bad.replace(bad.find("\"cx\":30"), std::string("\"cx\":30").size(), "\"cx\":195");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, bad, error));
+        CHECK(error.find("outside") != std::string::npos);
+    }
+    SECTION("non-SVG bytes fail closed even with a matching digest") {
+        const std::string not_svg = "this is not an SVG document";
+        auto bad = sidecar;
+        const auto old_hash = pulp::runtime::sha256_hex(svg);
+        bad.replace(bad.find(old_hash), old_hash.size(), pulp::runtime::sha256_hex(not_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(not_svg, bad, error));
+        CHECK(error.find("<svg>") != std::string::npos);
+    }
+    SECTION("selectors bind real id attributes, not data-id or comments") {
+        const std::string deceptive_svg =
+            R"(<svg width="200" height="100"><rect data-id="mix" x="10" y="20" width="40" height="30"/></svg>)";
+        auto deceptive = sidecar;
+        deceptive.replace(deceptive.find(hash), hash.size(),
+                          pulp::runtime::sha256_hex(deceptive_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(deceptive_svg, deceptive, error));
+        CHECK(error.find("absent") != std::string::npos);
+
+        const std::string commented_svg =
+            R"(<svg width="200" height="100"><!-- id="mix" --></svg>)";
+        auto commented = sidecar;
+        commented.replace(commented.find(hash), hash.size(),
+                          pulp::runtime::sha256_hex(commented_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(commented_svg, commented, error));
+        CHECK(error.find("absent") != std::string::npos);
+
+        const std::string nested_markup_svg =
+            R"(<svg width="200" height="100"><!-- <rect id="mix"/> --><script>const fake = '<rect id="mix"/>';</script></svg>)";
+        auto nested_markup = sidecar;
+        nested_markup.replace(nested_markup.find(hash), hash.size(),
+                              pulp::runtime::sha256_hex(nested_markup_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(nested_markup_svg, nested_markup, error));
+        CHECK(error.find("absent") != std::string::npos);
+
+        const std::string unclosed_svg =
+            R"(<svg width="200" height="100"><!-- <rect id="mix"> </svg>)";
+        auto unclosed = sidecar;
+        unclosed.replace(unclosed.find(hash), hash.size(), pulp::runtime::sha256_hex(unclosed_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(unclosed_svg, unclosed, error));
+        CHECK((error.find("absent") != std::string::npos ||
+               error.find("<svg>") != std::string::npos));
+
+        const std::string commented_root_svg = R"(<!-- <svg width="200" height="100"></svg> -->)";
+        auto commented_root = sidecar;
+        commented_root.replace(commented_root.find(hash), hash.size(),
+                               pulp::runtime::sha256_hex(commented_root_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(commented_root_svg, commented_root, error));
+        CHECK(error.find("<svg>") != std::string::npos);
+
+        const std::string wrapped_svg = R"(<div><svg width="200" height="100"></svg></div>)";
+        auto wrapped = sidecar;
+        wrapped.replace(wrapped.find(hash), hash.size(), pulp::runtime::sha256_hex(wrapped_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(wrapped_svg, wrapped, error));
+
+        const std::string multiple_roots_svg =
+            R"(<svg width="200" height="100"></svg><svg width="200" height="100"></svg>)";
+        auto multiple_roots = sidecar;
+        multiple_roots.replace(multiple_roots.find(hash), hash.size(),
+                               pulp::runtime::sha256_hex(multiple_roots_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(multiple_roots_svg, multiple_roots, error));
+
+        const std::string malformed_child_svg = R"(<svg width="200" height="100"><path</svg>)";
+        auto malformed_child = sidecar;
+        malformed_child.replace(malformed_child.find(hash), hash.size(),
+                                pulp::runtime::sha256_hex(malformed_child_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(malformed_child_svg, malformed_child, error));
+
+        const std::string unclosed_quote_svg = R"(<svg width="200 height="100"></svg>)";
+        auto unclosed_quote = sidecar;
+        unclosed_quote.replace(unclosed_quote.find(hash), hash.size(),
+                               pulp::runtime::sha256_hex(unclosed_quote_svg));
+        CHECK_FALSE(impd::validate_annotated_capture(unclosed_quote_svg, unclosed_quote, error));
+    }
+    SECTION("typed-invalid and non-finite geometry fail closed") {
+        auto typed_invalid = sidecar;
+        typed_invalid.replace(typed_invalid.find("\"cx\":30"), std::string("\"cx\":30").size(),
+                              "\"cx\":\"oops\"");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, typed_invalid, error));
+        CHECK(error.find("must be numeric") != std::string::npos);
+
+        auto non_finite = sidecar;
+        non_finite.replace(non_finite.find("\"cx\":30"), std::string("\"cx\":30").size(),
+                           "\"cx\":1e999");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, non_finite, error));
+        CHECK((error.find("non-finite") != std::string::npos ||
+               error.find("invalid") != std::string::npos));
+    }
+    SECTION("integer metadata rejects fractional values before narrowing") {
+        auto fractional = sidecar;
+        fractional.replace(fractional.find("\"kind\":\"knob\""),
+                           std::string("\"kind\":\"knob\"").size(),
+                           "\"kind\":\"knob\",\"selected_index\":1.5");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, fractional, error));
+        CHECK(error.find("integer") != std::string::npos);
+    }
+    SECTION("required geometry cannot be omitted") {
+        auto missing_geometry = sidecar;
+        const auto geometry =
+            std::string(R"JSON("geometry":{"cx":30,"cy":35,"hit_radius":10})JSON");
+        missing_geometry.replace(missing_geometry.find(geometry), geometry.size(),
+                                 R"JSON("param_key":"mix")JSON");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, missing_geometry, error));
+        CHECK(error.find("requires a geometry object") != std::string::npos);
+    }
+    SECTION("zero-sized geometry fails closed") {
+        auto zero = sidecar;
+        zero.replace(zero.find("\"hit_radius\":10"), std::string("\"hit_radius\":10").size(),
+                     "\"hit_radius\":0");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, zero, error));
+        CHECK(error.find("outside canvas") != std::string::npos);
+    }
+    SECTION("xy pads are bounded by their rectangle, not a hit radius") {
+        const auto knob =
+            std::string(R"JSON("kind":"knob","geometry":{"cx":30,"cy":35,"hit_radius":10})JSON");
+        const auto with_pad = [&](const std::string& geometry) {
+            auto pad = sidecar;
+            pad.replace(pad.find(knob), knob.size(),
+                        R"JSON("kind":"xy_pad","geometry":)JSON" + geometry);
+            return pad;
+        };
+
+        const auto valid = with_pad(R"JSON({"x":10,"y":20,"w":40,"h":30,"cx":30,"cy":35})JSON");
+        CHECK(impd::validate_annotated_capture(svg, valid, error));
+        CHECK(error.empty());
+
+        const auto on_edge = with_pad(R"JSON({"x":10,"y":20,"w":40,"h":30,"cx":50,"cy":20})JSON");
+        CHECK(impd::validate_annotated_capture(svg, on_edge, error));
+
+        const auto center_outside_pad =
+            with_pad(R"JSON({"x":10,"y":20,"w":40,"h":30,"cx":60,"cy":35})JSON");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, center_outside_pad, error));
+        CHECK(error.find("outside its pad") != std::string::npos);
+
+        const auto center_above_pad =
+            with_pad(R"JSON({"x":10,"y":20,"w":40,"h":30,"cx":30,"cy":5})JSON");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, center_above_pad, error));
+        CHECK(error.find("outside its pad") != std::string::npos);
+
+        const auto pad_outside_canvas =
+            with_pad(R"JSON({"x":180,"y":20,"w":40,"h":30,"cx":190,"cy":35})JSON");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, pad_outside_canvas, error));
+        CHECK(error.find("outside canvas") != std::string::npos);
+
+        const auto missing_center = with_pad(R"JSON({"x":10,"y":20,"w":40,"h":30})JSON");
+        CHECK_FALSE(impd::validate_annotated_capture(svg, missing_center, error));
+        CHECK(error.find("requires 'cx'") != std::string::npos);
     }
 }
 

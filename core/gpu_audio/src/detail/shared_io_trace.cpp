@@ -16,11 +16,11 @@ bool SharedIoTraceRecord::valid() const noexcept {
         generation == 0 || valid_stages >> kSharedIoTraceStageCount != 0 ||
         static_cast<unsigned>(outcome) > static_cast<unsigned>(SharedIoTraceOutcome::Cancelled) ||
         static_cast<unsigned>(reason) >
-            static_cast<unsigned>(SharedIoFallbackReason::InvalidCallback) ||
+            static_cast<unsigned>(SharedIoFallbackReason::CalibrationStale) ||
         static_cast<unsigned>(gpu_reason) >
-            static_cast<unsigned>(SharedIoFallbackReason::InvalidCallback) ||
+            static_cast<unsigned>(SharedIoFallbackReason::CalibrationStale) ||
         static_cast<unsigned>(delivery_reason) >
-            static_cast<unsigned>(SharedIoFallbackReason::InvalidCallback) ||
+            static_cast<unsigned>(SharedIoFallbackReason::CalibrationStale) ||
         static_cast<unsigned>(gpu_terminal) >
             static_cast<unsigned>(SharedIoGpuTerminalDisposition::CancelledTeardown) ||
         static_cast<unsigned>(delivery) >
@@ -60,6 +60,17 @@ bool SharedIoTraceRecord::valid() const noexcept {
     const auto summary_reason =
         delivery_reason != SharedIoFallbackReason::None ? delivery_reason : gpu_reason;
     if (reason != summary_reason)
+        return false;
+    // The emitter projects these as signed trace arguments where a negative
+    // value means "unavailable"; an out-of-range value would wrap into that
+    // sentinel or a fabricated negative time instead of being refused.
+    constexpr auto max_signed_ns =
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    if (callback_ingress_ns > max_signed_ns)
+        return false;
+    if (callback_timing_available &&
+        (callback_end_ns < callback_start_ns || result_visible_ns < callback_end_ns ||
+         result_visible_ns > max_signed_ns))
         return false;
     bool seen = false;
     std::uint64_t previous = 0;
@@ -167,6 +178,12 @@ const char* shared_io_fallback_reason_name(SharedIoFallbackReason value) noexcep
         return "completion_failed";
     case SharedIoFallbackReason::InvalidCallback:
         return "invalid_callback";
+    case SharedIoFallbackReason::PredictionRefused:
+        return "prediction_refused";
+    case SharedIoFallbackReason::CalibrationMissing:
+        return "calibration_missing";
+    case SharedIoFallbackReason::CalibrationStale:
+        return "calibration_stale";
     case SharedIoFallbackReason::Teardown:
         return "teardown";
     }
@@ -346,13 +363,30 @@ void emit_shared_io_unresolved_ownership(const SharedIoTraceOwnership& ownership
         observer->ownership(observer->context, ownership);
 }
 
+// .agents/skills/trace-sql/pulp_gpu_audio_blocks.sql classifies the emitted
+// telemetry_error by these numeric values.
+static_assert(static_cast<unsigned>(SharedIoTelemetryError::None) == 0);
+static_assert(static_cast<unsigned>(SharedIoTelemetryError::TelemetryValidationDeferred) == 13);
+static_assert(static_cast<unsigned>(SharedIoTelemetryError::CompletionTimingInvalid) == 14);
+
 SharedIoTraceDrainResult
 drain_shared_io_trace(SharedIoTraceRecorder& recorder,
                       [[maybe_unused]] const SharedIoTelemetrySnapshot& telemetry,
-                      std::uint32_t budget, const SharedIoTraceDrainObserver* observer) noexcept {
+                      std::uint32_t budget, const SharedIoTraceDrainObserver* observer,
+                      bool telemetry_quiescent) noexcept {
     SharedIoTraceDrainResult result;
     result.tracing_compiled = runtime::kTracingEnabled;
+    const auto telemetry_validation =
+        telemetry_quiescent
+            ? validate_shared_io_telemetry(telemetry)
+            : SharedIoTelemetryValidation{SharedIoTelemetryError::TelemetryValidationDeferred};
+    result.telemetry_valid = telemetry_validation.accepted();
+    result.telemetry_error = telemetry_validation.error;
     result.recording_enabled = recorder.enabled();
+    if (!valid_shared_io_trace_drain_observer(observer)) {
+        result.observer_valid = false;
+        return result;
+    }
     if (!result.recording_enabled)
         return result;
     [[maybe_unused]] const auto& config = recorder.config();
@@ -402,7 +436,9 @@ drain_shared_io_trace(SharedIoTraceRecorder& recorder,
         "admissions_dropped", stats.admissions_dropped, "admissions_drained",
         stats.admissions_drained, "attempted", stats.attempted, "sampled_out", stats.sampled_out,
         "invalid", stats.invalid, "enqueued", stats.enqueued, "dropped", stats.dropped, "drained",
-        stats.drained, "callback_blocks", telemetry.callback_blocks, "submitted_blocks",
+        stats.drained, "telemetry_valid", telemetry_validation.accepted(), "telemetry_error",
+        static_cast<unsigned>(telemetry_validation.error), "callback_blocks",
+        telemetry.callback_blocks, "admitted_blocks", telemetry.admitted_blocks, "submitted_blocks",
         telemetry.submitted_blocks, "deadline_misses", telemetry.deadline_misses, "fallback_blocks",
         telemetry.fallback_blocks, "late_completions", telemetry.late_completions, "resync_drops",
         telemetry.resync_drops, "input_drops", telemetry.input_drops, "payload_bytes_copied",

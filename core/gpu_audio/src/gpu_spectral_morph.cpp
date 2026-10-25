@@ -17,14 +17,16 @@ bool GpuSpectralMorph::prepare(uint32_t fft_size, signal::WindowFunction::Type w
 }
 
 bool GpuSpectralMorph::capture_a(const float* frame_in) {
-    if (!stft_.gpu_available() || frame_in == nullptr) return false;
+    if (!stft_.device_usable() || frame_in == nullptr)
+        return false;
     if (!stft_.analyze(frame_in, a_.data())) return false;
     has_a_ = true;
     return true;
 }
 
 bool GpuSpectralMorph::capture_b(const float* frame_in) {
-    if (!stft_.gpu_available() || frame_in == nullptr) return false;
+    if (!stft_.device_usable() || frame_in == nullptr)
+        return false;
     if (!stft_.analyze(frame_in, b_.data())) return false;
     has_b_ = true;
     return true;
@@ -32,6 +34,10 @@ bool GpuSpectralMorph::capture_b(const float* frame_in) {
 
 bool GpuSpectralMorph::render(float t, float* frame_out) {
     if (!ready() || frame_out == nullptr) return false;
+    if (!stft_.device_usable()) {
+        std::fill_n(frame_out, fft_size(), 0.0f);
+        return false;
+    }
     t = std::clamp(t, 0.0f, 1.0f);
     const float ta = 1.0f - t;
     for (std::size_t i = 0; i < mix_.size(); ++i) mix_[i] = ta * a_[i] + t * b_[i];

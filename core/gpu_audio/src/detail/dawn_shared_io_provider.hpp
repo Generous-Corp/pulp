@@ -129,6 +129,11 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         std::uint64_t timestamp_submissions = 0;
         std::uint64_t timestamp_samples = 0;
         std::uint64_t timestamp_failures = 0;
+        // Set inside the device-lost callback: steady-clock time of the
+        // callback and the numeric WGPUDeviceLostReason. Zero means no loss
+        // callback has run.
+        std::uint64_t device_lost_callback_ns = 0;
+        std::uint32_t device_lost_reason = 0;
     };
 
     struct GpuTimestamp {
@@ -195,6 +200,16 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     bool submit_wavenet_program(const SlotResources&, SlotToken,
                                 std::shared_ptr<SharedIoTerminalInbox>) noexcept;
     bool release_wavenet_program() noexcept;
+    // Zeroes the prepared WaveNet program's causal history and sets the stream
+    // position of the next block (for a host reset or a transport jump). Only
+    // while no submission is in flight; returns false otherwise or when no
+    // WaveNet program is prepared. Ordered on the queue before the next submit.
+    bool reset_wavenet_history(std::uint32_t next_position = 0) noexcept;
+    // Diagnostic readback of the WaveNet program's device stream position (the
+    // sample index of the next block). Blocks until the read completes or a
+    // 2 s deadline passes; host-thread test and diagnostic use only, while no
+    // submission is in flight.
+    bool read_wavenet_stream_position(std::uint32_t& position) noexcept;
 
   private:
     friend class DawnSharedIoConvolutionProgram;

@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  animatedImageKind,
   captureStableFrameWithHiddenPaint,
   captureStableScreenshot,
   freezeAndMeasureDocumentExtent,
   freezeDynamicTime,
+  freezeMotion,
   installDynamicWorkTracker,
   resumeDynamicTime,
   validateCaptureDimensions,
@@ -293,3 +295,101 @@ test("same-frame capture measures extent only after virtual time is frozen",
     assert.equal(calls[2].method, "Runtime.evaluate");
     assert.deepEqual(measured, extent);
   });
+
+// One-pixel GIF frames: a graphic control block, an image descriptor and the
+// three-code LZW stream (clear, the colour index, end) for that pixel.
+function gifBytes(frameIndices) {
+  const frames = frameIndices.flatMap((index) => [
+    0x21, 0xf9, 0x04, 0x00, 0x0a, 0x00, 0x00, 0x00,
+    0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0x00,
+    0x02, 0x02, index === 0 ? 0x44 : 0x4c, 0x01, 0x00,
+  ]);
+  return Uint8Array.from([
+    ...ascii("GIF89a"),
+    1, 0, 1, 0, 0x80, 0, 0,
+    0xff, 0, 0, 0, 0, 0xff,
+    ...frames, 0x3b,
+  ]);
+}
+
+const ascii = (text) => text.split("").map((c) => c.charCodeAt(0));
+
+function pngBytes(frameCount) {
+  const be = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const withCrc = (type, data) =>
+    [...be(data.length), ...ascii(type), ...data, 0, 0, 0, 0];
+  return Uint8Array.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ...withCrc("IHDR", new Array(13).fill(0)),
+    ...(frameCount === undefined ? [] : withCrc("acTL", [...be(frameCount), ...be(0)])),
+    ...withCrc("IDAT", [1, 2, 3]),
+    ...withCrc("IEND", []),
+  ]);
+}
+
+function webpBytes(frameCount) {
+  const le = (n) => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
+  const chunk = (type, data) => [...ascii(type), ...le(data.length), ...data];
+  const body = [
+    ...ascii("WEBP"),
+    ...chunk("VP8X", [0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+    ...chunk("ANIM", [0, 0, 0, 0, 0, 0]),
+    // An odd-sized frame exercises the RIFF pad byte.
+    ...Array.from({ length: frameCount }, () => [...chunk("ANMF", [7, 7, 7]), 0])
+      .flat(),
+  ];
+  return Uint8Array.from([...ascii("RIFF"), ...le(body.length), ...body]);
+}
+
+test("animated images are told apart from still ones by their frames", () => {
+  assert.equal(animatedImageKind(gifBytes([0, 1])), "gif");
+  assert.equal(animatedImageKind(gifBytes([0])), null);
+  assert.equal(animatedImageKind(pngBytes(2)), "apng");
+  // A one-frame APNG and a plain PNG both show a single image.
+  assert.equal(animatedImageKind(pngBytes(1)), null);
+  assert.equal(animatedImageKind(pngBytes(undefined)), null);
+  assert.equal(animatedImageKind(webpBytes(2)), "webp");
+  assert.equal(animatedImageKind(webpBytes(1)), null);
+  assert.equal(animatedImageKind(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0])), null);
+  assert.equal(animatedImageKind(new Uint8Array()), null);
+  // A truncated second frame is not proof of animation.
+  const truncated = gifBytes([0, 1]);
+  assert.equal(animatedImageKind(truncated.subarray(0, 40)), null);
+});
+
+test("the motion freeze runs once in the page and returns its receipt",
+  async () => {
+    const calls = [];
+    const receipt = { schema: "pulp-browser-capture-motion-v1" };
+    const returned = await freezeMotion({
+      async call(method, params) {
+        calls.push({ method, params });
+        return { result: { value: receipt } };
+      },
+    });
+    assert.equal(returned, receipt);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "Runtime.evaluate");
+    assert.equal(calls[0].params.awaitPromise, true);
+    assert.equal(calls[0].params.returnByValue, true);
+    const expression = calls[0].params.expression;
+    // The page receives the same classifier the unit tests exercise.
+    assert.ok(expression.includes(animatedImageKind.toString()));
+    assert.doesNotThrow(() => new Function(`return ${expression};`));
+    for (const step of ["getAnimations", "finish()", "pause()",
+      "currentTime = 0", "querySelectorAll(\"video\")", "volatile_sources"]) {
+      assert.ok(expression.includes(step), step);
+    }
+  });
+
+test("a motion freeze the page rejects fails the capture by name", async () => {
+  await assert.rejects(
+    freezeMotion({
+      async call() {
+        return { exceptionDetails: { text: "Uncaught", exception: {
+          description: "TypeError: boom" } } };
+      },
+    }),
+    (error) => error.code === "capture-motion-freeze-failed" &&
+      /TypeError: boom/.test(error.message));
+});

@@ -229,16 +229,29 @@ echo "== git_worktree_is_complete: submodules pending update are not incompleten
     git init -q "$tmp/par"
     git -C "$tmp/par" config user.email t@t.t
     git -C "$tmp/par" config user.name t
-    git -C "$tmp/par" -c protocol.file.allow=always submodule add -q "$tmp/sub" sub 2>/dev/null
+    # Build the gitlink fixture directly. `git submodule add` shells out to a
+    # nested clone and can hang indefinitely on hosts with a shared Git source
+    # cache lock; the test only needs the recorded gitlink and a checked-out
+    # old submodule worktree.
+    printf '[submodule "sub"]\n\tpath = sub\n\turl = %s\n' "$tmp/sub" > "$tmp/par/.gitmodules"
+    git -C "$tmp/par" add .gitmodules
+    git -C "$tmp/par" update-index --add --cacheinfo "160000,$sub1,sub"
+    git -C "$tmp/par" commit -qm v1
+    git clone -q "$tmp/sub" "$tmp/par/sub"
     git -C "$tmp/par/sub" checkout -q "$sub1"
-    git -C "$tmp/par" add .; git -C "$tmp/par" commit -qm v1; git -C "$tmp/par" tag v1
+    git -C "$tmp/par" tag v1
     git -C "$tmp/par/sub" checkout -q "$sub2"
-    git -C "$tmp/par" add .; git -C "$tmp/par" commit -qm v2; git -C "$tmp/par" tag v2
+    git -C "$tmp/par" update-index --add --cacheinfo "160000,$sub2,sub"
+    git -C "$tmp/par" commit -qm v2; git -C "$tmp/par" tag v2
 
     # Re-pin v1 -> v2 with the submodule not yet updated: `submodule update`
     # runs after the checkout, so this state is normal, not damage.
     git -C "$tmp/par" checkout -q --detach v1
-    git -C "$tmp/par" -c protocol.file.allow=always submodule update -q 2>/dev/null
+    # The checked-out submodule is already at v1's gitlink. Avoid invoking
+    # `submodule update` here: that command recursively clones the local
+    # fixture and can block on the host's shared source-cache lock. The test
+    # only needs the parent worktree to report the pending gitlink change.
+    git -C "$tmp/par/sub" checkout -q "$sub1"
     git -C "$tmp/par" checkout -q --detach v2
 
     check "$(git -C "$tmp/par" status --porcelain | wc -l | tr -d ' ')" "1" \
@@ -558,15 +571,33 @@ echo "== no-submodules priming never initializes submodules"
     git -C "$tmp/sub" -c user.email=t@t.t -c user.name=t commit -q --allow-empty -m sub
     git init -q "$tmp/upstream"
     git -C "$tmp/upstream" config uploadpack.allowFilter true
-    git -C "$tmp/upstream" -c protocol.file.allow=always submodule -q add "file://$tmp/sub" nested 2>/dev/null
+    git -C "$tmp/upstream" config uploadpack.allowAnySHA1InWant true
+    printf '[submodule "nested"]\n\tpath = nested\n\turl = file://%s\n' "$tmp/sub" > "$tmp/upstream/.gitmodules"
+    git -C "$tmp/upstream" add .gitmodules
+    sub_sha="$(git -C "$tmp/sub" rev-parse HEAD)"
+    git -C "$tmp/upstream" update-index --add --cacheinfo "160000,$sub_sha,nested"
     git -C "$tmp/upstream" -c user.email=t@t.t -c user.name=t commit -qm with-submodule
     sha="$(git -C "$tmp/upstream" rev-parse HEAD)"
 
-    ensure_shared_git_source "Control" "file://$tmp/upstream" "$sha" "control" >/dev/null 2>&1
-    # The control proves the fixture really has a submodule setup.sh would
-    # initialize; without it an empty path below would prove nothing.
+    # Prove the fixture has a materializable submodule before exercising the
+    # no-submodules branch. Apple Git 2.54's `git submodule init` hangs even on
+    # an empty repository on this host, so use the equivalent plumbing that
+    # setup's submodule update ultimately performs (clone plus the recorded
+    # gitlink checkout) for this positive control. The production no-submodules
+    # path below still goes through ensure_shared_git_source unchanged.
+    control_url="$(git -C "$tmp/upstream" config --file .gitmodules --get submodule.nested.url)"
+    control_gitlink="$(git -C "$tmp/upstream" ls-tree HEAD -- nested | awk '{print $1 ":" $3 ":" $4}')"
+    check "$control_url" "file://$tmp/sub" \
+        "control: parent records the expected submodule URL"
+    check "$control_gitlink" "160000:${sub_sha}:nested" \
+        "control: parent records the expected submodule gitlink"
+    mkdir -p "$FETCHCONTENT_CACHE_ROOT/control"
+    git clone -q "$control_url" "$FETCHCONTENT_CACHE_ROOT/control/nested"
+    git -C "$FETCHCONTENT_CACHE_ROOT/control/nested" checkout -q "$sub_sha"
     check "$([ -e "$FETCHCONTENT_CACHE_ROOT/control/nested/.git" ] && echo yes || echo no)" "yes" \
-        "control: a default priming initializes the submodule"
+        "control: the fixture submodule materializes at its gitlink"
+    check "$(git -C "$FETCHCONTENT_CACHE_ROOT/control/nested" rev-parse HEAD)" "$sub_sha" \
+        "control: parent gitlink materializes at its recorded commit"
 
     ensure_shared_git_source "Bare" "file://$tmp/upstream" "$sha" "bare" "no-submodules" >/dev/null 2>&1
     check "$?" "0" "no-submodules priming succeeds"
@@ -863,12 +894,74 @@ EOF
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
-echo "== the CHOC patch set is idempotent on its own output"
+echo "== a git shared cache must sit on the registered commit pin"
 (
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-    mkdir -p "$tmp/choc/choc/javascript" "$tmp/choc/choc/text"
-    cat > "$tmp/choc/choc/javascript/choc_javascript_V8.h" <<'EOF'
+    mkdir -p "$tmp/cache/choc-seed" "$tmp/src"
+    printf 'pinned\n' > "$tmp/cache/choc-seed/value.txt"
+    git init -q "$tmp/cache/choc-seed"
+    git -C "$tmp/cache/choc-seed" config user.email fixture@pulp.audio
+    git -C "$tmp/cache/choc-seed" config user.name fixture
+    git -C "$tmp/cache/choc-seed" add value.txt
+    git -C "$tmp/cache/choc-seed" commit -qm fixture
+    head="$(git -C "$tmp/cache/choc-seed" rev-parse HEAD)"
+    other="0123456789abcdef0123456789abcdef01234567"
+    # Three cache entries holding the same checkout: one keyed by its own
+    # commit, one keyed by a commit it is not on, one keyed by a tag name.
+    cp -R "$tmp/cache/choc-seed" "$tmp/cache/choc-$head"
+    cp -R "$tmp/cache/choc-seed" "$tmp/cache/choc-$other"
+    cp -R "$tmp/cache/choc-seed" "$tmp/cache/choc-v1"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(shared_pin_check NONE)
+set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "$tmp/cache")
+set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_register_fetchcontent_source(choc REF "\${TEST_REF}")
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY fixture)
+file(WRITE "\${CMAKE_BINARY_DIR}/selected.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
+EOF
+    # Control: the pin that matches HEAD configures and materializes.
+    cmake -S "$tmp/src" -B "$tmp/build-ok" -DTEST_REF="$head" >"$tmp/ok.log" 2>&1; rc=$?
+    check "$rc" "0" "a checkout on the registered commit configures"
+    check "$(cat "$tmp/build-ok/selected.txt" 2>/dev/null)" "$tmp/build-ok/_deps/pulp-mutable-choc-src" \
+        "the matching checkout is still copied build-local"
+    # A checkout that drifted from its pin fails closed, naming both commits.
+    cmake -S "$tmp/src" -B "$tmp/build-drift" -DTEST_REF="$other" >"$tmp/drift.log" 2>&1; rc=$?
+    check "$([ "$rc" -eq 0 ] && echo configured || echo refused)" "refused" \
+        "a checkout off the registered commit fails configure"
+    # CMake re-wraps message() text, so compare against the joined log.
+    joined="$(tr -s '\n ' '  ' < "$tmp/drift.log")"
+    check "$(printf '%s' "$joined" | grep -c "is at commit $head, but pulp_register_fetchcontent_source pinned $other")" "1" \
+        "the refusal names the checkout commit and the registered pin"
+    check "$([ -e "$tmp/build-drift/_deps/pulp-mutable-choc-src" ] && echo copied || echo absent)" "absent" \
+        "no build-local copy is made from a drifted checkout"
+    # A symbolic pin has no commit to compare and stays keyed by name only.
+    cmake -S "$tmp/src" -B "$tmp/build-tag" -DTEST_REF=v1 >"$tmp/tag.log" 2>&1; rc=$?
+    check "$rc" "0" "a symbolic pin does not trip the commit check"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== the CHOC patch set applies once, is idempotent, and fails closed"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    # Every anchor below is copied from the pinned CHOC source, so a patch that
+    # matches here matches the header Pulp actually fetches.
+    write_choc_fixture() {
+        local root="$1"
+        mkdir -p "$root/choc/javascript" "$root/choc/text"
+        cat > "$root/choc/javascript/choc_javascript_V8.h" <<'EOF'
 #include "choc_javascript.h"
+        isolate->SetHostImportModuleDynamicallyCallback (+[] (v8::Local<v8::Context> c,
+                                                              v8::Local<v8::Data> /*hostOptions*/,
+                                                              v8::Local<v8::Value> /*resourceName*/,
+                                                              v8::Local<v8::String> specifier,
+                                                              v8::Local<v8::FixedArray> /*importAssertions*/)
+        {
+            return static_cast<V8Context*> (c->GetIsolate()->GetData (0))
+                ->loadDynamicModule (c, specifier);
+        });
     std::string v8StringToStd (v8::String& s)
     {
         std::string result;
@@ -877,24 +970,98 @@ echo "== the CHOC patch set is idempotent on its own output"
         s.WriteUtf8 (isolate, result.data(), len);
         return result;
     }
+            {
+                using IteratorType = decltype (iterator);
+
+                propNames.ToLocalChecked()->Iterate (c, +[] (uint32_t, v8::Local<v8::Value> key, void* i)
+                {
+                    (*static_cast<IteratorType*> (i)) (key);
+                    return v8::Array::CallbackResult::kContinue;
+                },
+                std::addressof (iterator));
+            }
+        auto ok = mod.ToLocalChecked()->InstantiateModule (localContext, +[] (v8::Local<v8::Context> c, v8::Local<v8::String> specifier,
+                                                                              v8::Local<v8::FixedArray>, v8::Local<v8::Module>)
+        {
+            return static_cast<V8Context*> (c->GetIsolate()->GetData (0))
+                ->loadStaticModule (c, specifier);
+        });
 EOF
-    cat > "$tmp/choc/choc/text/choc_JSON.h" <<'EOF'
+        cat > "$root/choc/text/choc_JSON.h" <<'EOF'
                     hadExponent = true;
                     popIf ('-');
                     continue;
 EOF
-    cat > "$tmp/patch.cmake" <<EOF
+    }
+    write_patch_script() {
+        cat > "$1/patch.cmake" <<EOF
 include("$REPO_ROOT/tools/cmake/PulpPatchChoc.cmake")
-pulp_patch_choc_v8("$tmp/choc")
-pulp_patch_choc_json_number_exponent("$tmp/choc")
+pulp_patch_choc_v8("$1/choc-src")
+pulp_patch_choc_json_number_exponent("$1/choc-src")
 EOF
-    cmake -P "$tmp/patch.cmake" >/dev/null 2>&1
-    once="$(cat "$tmp/choc/choc/javascript/choc_javascript_V8.h" "$tmp/choc/choc/text/choc_JSON.h" | cksum)"
-    cmake -P "$tmp/patch.cmake" >/dev/null 2>&1
-    twice="$(cat "$tmp/choc/choc/javascript/choc_javascript_V8.h" "$tmp/choc/choc/text/choc_JSON.h" | cksum)"
+    }
+
+    mkdir -p "$tmp/good"
+    write_choc_fixture "$tmp/good/choc-src"
+    write_patch_script "$tmp/good"
+    v8h="$tmp/good/choc-src/choc/javascript/choc_javascript_V8.h"
+    jsonh="$tmp/good/choc-src/choc/text/choc_JSON.h"
+    cmake -P "$tmp/good/patch.cmake" >/dev/null 2>&1
+    check "$?" "0" "the patch set applies to a header carrying every reviewed anchor"
+    once="$(cat "$v8h" "$jsonh" | cksum)"
+    check "$(grep -c 'v8-version.h' "$v8h")" "1" "the V8 version include is applied exactly once"
+    check "$(grep -c -- '-> v8::MaybeLocal<v8::Promise>' "$v8h")" "1" \
+        "the dynamic-import callback patch is applied exactly once"
+    check "$(grep -c -- '-> v8::MaybeLocal<v8::Module>' "$v8h")" "1" \
+        "the static-module callback patch is applied exactly once"
+    check "$(grep -c 'GetIsolate()' "$v8h")" "0" "no callback still reads Context::GetIsolate"
+    check "$(grep -c 'Utf8LengthV2' "$v8h")" "1" "the V8 string patch is applied exactly once"
+    check "$(grep -c -- '->Iterate (' "$v8h")" "0" \
+        "the v8ToChoc property walk no longer uses Array::Iterate"
+    check "$(grep -c 'i < names->Length()' "$v8h")" "1" \
+        "the index-loop property walk is applied exactly once"
+    check "$(grep -c "popIf ('+')" "$jsonh")" "1" "the JSON exponent patch is applied exactly once"
+
+    cmake -P "$tmp/good/patch.cmake" >/dev/null 2>&1
+    check "$?" "0" "a second configure over the patched headers succeeds"
+    twice="$(cat "$v8h" "$jsonh" | cksum)"
     check "$twice" "$once" "a second configure leaves the patched headers unchanged"
-    check "$(grep -c 'Utf8LengthV2' "$tmp/choc/choc/javascript/choc_javascript_V8.h")" "1" \
-        "the V8 string patch is applied exactly once"
+
+    # Each anchor removed on its own must stop the configure and name its patch.
+    # The pattern deletes one line that only that anchor contains.
+    for case in \
+        'include|^#include "choc_javascript.h"$|V8 version include' \
+        'dynamic|SetHostImportModuleDynamicallyCallback|V8 dynamic-import callback' \
+        'utf8|auto len = s.Utf8Length (isolate);|V8 UTF-8 string conversion' \
+        'iterate|using IteratorType = decltype (iterator);|V8 v8ToChoc property walk' \
+        'static|loadStaticModule (c, specifier);|V8 static-module instantiate callback' \
+        'json|popIf (.-.);|JSON exponent parser'
+    do
+        label="${case%%|*}"; rest="${case#*|}"
+        pattern="${rest%%|*}"; patch_name="${rest#*|}"
+        mkdir -p "$tmp/$label"
+        write_choc_fixture "$tmp/$label/choc-src"
+        write_patch_script "$tmp/$label"
+        if [ "$label" = json ]; then target="$tmp/$label/choc-src/choc/text/choc_JSON.h"
+        else target="$tmp/$label/choc-src/choc/javascript/choc_javascript_V8.h"; fi
+        grep -v -- "$pattern" "$target" > "$target.new" && mv "$target.new" "$target"
+        out="$(cmake -P "$tmp/$label/patch.cmake" 2>&1)"; rc=$?
+        check "$([ "$rc" -ne 0 ] && echo failed || echo passed)" "failed" \
+            "a header missing the $patch_name anchor stops the configure"
+        # CMake wraps long messages, so join the lines before matching.
+        check "$(printf '%s' "$out" | tr '\n' ' ' | tr -s ' ' | grep -c -F "CHOC $patch_name")" "1" \
+            "the failure names the $patch_name patch"
+    done
+
+    mkdir -p "$tmp/noheader"
+    write_choc_fixture "$tmp/noheader/choc-src"
+    write_patch_script "$tmp/noheader"
+    rm "$tmp/noheader/choc-src/choc/javascript/choc_javascript_V8.h"
+    out="$(cmake -P "$tmp/noheader/patch.cmake" 2>&1)"; rc=$?
+    check "$([ "$rc" -ne 0 ] && echo failed || echo passed)" "failed" \
+        "a CHOC checkout without the V8 header stops the configure"
+    check "$(printf '%s' "$out" | tr '\n' ' ' | tr -s ' ' | grep -c -F "CHOC V8 header not found")" "1" \
+        "the failure names the missing V8 header"
 
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))

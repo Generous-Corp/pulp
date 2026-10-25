@@ -17,6 +17,8 @@ enum class NativeWidgetKind {
     text_button,
     text_editor,
     checkbox,
+    range_slider,
+    button_surface,
     toggle_button,
     segmented,
     stepper,

@@ -1,7 +1,7 @@
 # PulpV8Windows.cmake — Windows V8-consumer ABI contract for the sealed
 # v8-builder drop-in.
 #
-# The sealed Windows v8.dll (v8-builder, v8-m153-15.3.76.5-26cef0256b0e) is built — by deliberate,
+# The sealed Windows v8.dll (v8-builder, v8-m157-15.7.112.5-3362da6c495d) is built — by deliberate,
 # documented decision in v8-builder/build-v8.py:win_gn_args() — with:
 #
 #   * v8_enable_pointer_compression = true   (Windows-only; mac/linux are OFF)
@@ -10,15 +10,17 @@
 #   * v8_enable_sandbox              = false
 #   * use_rtti                       = false
 #
-# The m153 archive's ABI shape and required files are inspected and pinned.
+# The m157 x64 and arm64 archives' ABI shape and required files are inspected and
+# pinned (same file layout as m153; v8.dll.lib exports ~314 __Cr@std records;
+# V8_COMPRESS_POINTERS in the embedded consumer_defines).
 # The following consumer consequences were last link/run VERIFIED with m152
 # (15.2.124.7) on the Win11-24H2 arm64 QEMU golden (host arm64; x64 V8 + x64
-# consumer run under Windows-ARM x64 emulation). Repeat that gate for m153 before
-# claiming m153 Windows runtime acceptance:
+# consumer run under Windows-ARM x64 emulation). Repeat that gate for m157 before
+# claiming m157 Windows runtime acceptance:
 #
 #  1. v8.dll.lib exports its std::-bearing API surface mangled into the Chromium
 #     libc++ ABI namespace — e.g. ...V?$shared_ptr@...@__Cr@std@@... (hundreds
-#     of such records in the m153 import library). A consumer built with MSVC cl + the MSVC
+#     of such records in the m157 import library). A consumer built with MSVC cl + the MSVC
 #     STL emits plain `@std@@` symbols that never resolve against those `__Cr@std`
 #     imports → unresolved-external link failure (observed:
 #     `lld-link: error: undefined symbol: ... std::unique_ptr<v8::Platform> ...
@@ -42,7 +44,7 @@
 # (choc_javascript_V8.h + Console) built with the flags below links the sealed
 # v8.dll.lib + a __Cr-ABI libc++.lib and runs —
 #   V8::GetVersion() = 15.2.124.7 / evaluateExpression('40 + 2') = 42 / PASS.
-# m153 has structural ABI inspection only; its equivalent consumer link/run is
+# m157 has structural ABI inspection only; its equivalent consumer link/run is
 # still pending.
 #
 # This module is a NO-OP off Windows.
@@ -58,6 +60,22 @@
 #   PULP_V8_WIN_LIBCXX_LIB     — the __Cr-ABI libc++.lib to link for the
 #                                out-of-line libc++ runtime (REQUIRED for the
 #                                choc consumer; see point 3 above).
+#
+# The provider archive's own lib/libc++.lib is NOT a substitute for that
+# runtime. It is a static-CRT build (/MT, /DEFAULTLIB:libcmt) that embeds
+# /FAILIFMISMATCH:"_CRT_STDIO_ISO_WIDE_SPECIFIERS=0" and carries no vcruntime
+# exception_ptr glue, while the flags below assume the llvm-project
+# LIBCXX_CXX_ABI=vcruntime build (_CRT_STDIO_ISO_WIDE_SPECIFIERS=1, dynamic CRT
+# via msvcprt.lib). Linking it as-is turns a clear configure error into an
+# LNK2038 mismatch at link time; using it would need both settings switched,
+# which has not been link/run verified on Windows.
+#
+# pulp_v8_windows_apply_abi puts the __Cr libc++ headers on every source in
+# the target it is given (pulp-view-script), while pulp-view-core and the tests
+# compile against the MSVC STL. A non-virtual call that passes std:: types
+# across that boundary therefore names a symbol in one std ABI and resolves it
+# in the other, and will not link. Narrowing the __Cr flags to a target that
+# holds only js_v8_engine.cpp behind a std-free surface is still open.
 set(PULP_V8_WIN_LIBCXX_INCLUDE "" CACHE PATH
     "Chromium-style libc++ header root for the Windows V8 consumer (dir with <vector>, <__config>)")
 set(PULP_V8_WIN_LIBCXX_CONFIG "" CACHE PATH

@@ -292,6 +292,7 @@ endif()
 # The plugin module's ordinary-build default remains
 # `set(_pulp_control_profile "production-stripped")`.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpUiAssets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/PulpJsBytecode.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpInstall.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpReload.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpPluginFormats.cmake")

@@ -378,6 +378,72 @@ void append_update(DesignChildUpdatePlan& plan, DesignUpdateKind kind, std::stri
         plan.blocks.push_back({kind, index, 1});
     }
 }
+void append_key_diagnostics(std::span<const IRNode> nodes, bool old_side,
+                            std::vector<DesignKeyDiagnostic>& out) {
+    const bool any_keyed = std::any_of(nodes.begin(), nodes.end(),
+                                       [](const IRNode& node) { return !key_for(node).empty(); });
+    if (!any_keyed) {
+        if (!nodes.empty())
+            out.push_back({DesignKeyDiagnosticReason::missing, {}, 0, old_side});
+        return;
+    }
+    std::unordered_set<std::string_view> seen;
+    seen.reserve(nodes.size());
+    for (std::size_t i = 0; i < nodes.size(); ++i) {
+        const auto& key = key_for(nodes[i]);
+        if (key.empty())
+            out.push_back({DesignKeyDiagnosticReason::mixed, {}, i, old_side});
+        else if (!seen.insert(key).second)
+            out.push_back({DesignKeyDiagnosticReason::duplicate, key, i, old_side});
+    }
+}
+
+// Indices into `sequence` of one longest strictly increasing subsequence,
+// in ascending order. Patience sorting keeps, for each length, the entry
+// with the smallest tail, so ties resolve toward earlier old positions.
+std::vector<std::size_t> longest_increasing_subsequence(std::span<const std::size_t> sequence) {
+    std::vector<std::size_t> tails;
+    std::vector<std::size_t> previous(sequence.size(), sequence.size());
+    tails.reserve(sequence.size());
+    for (std::size_t i = 0; i < sequence.size(); ++i) {
+        const auto slot = std::lower_bound(
+            tails.begin(), tails.end(), sequence[i],
+            [&](std::size_t tail, std::size_t value) { return sequence[tail] < value; });
+        if (slot != tails.begin())
+            previous[i] = *(slot - 1);
+        if (slot == tails.end())
+            tails.push_back(i);
+        else
+            *slot = i;
+    }
+    std::vector<std::size_t> result(tails.size());
+    for (std::size_t at = tails.empty() ? sequence.size() : tails.back(), n = result.size();
+         n-- > 0; at = previous[at])
+        result[n] = at;
+    return result;
+}
+
+// Counts live children per slot so a slot's current child-vector position
+// is a prefix sum.
+class SlotPositions {
+  public:
+    explicit SlotPositions(std::size_t size) : tree_(size + 1, 0) {}
+
+    void add(std::size_t slot, int delta) {
+        for (auto i = slot + 1; i < tree_.size(); i += i & (~i + 1))
+            tree_[i] += delta;
+    }
+
+    std::size_t before(std::size_t slot) const {
+        int count = 0;
+        for (auto i = slot; i > 0; i -= i & (~i + 1))
+            count += tree_[i];
+        return static_cast<std::size_t>(count);
+    }
+
+  private:
+    std::vector<int> tree_;
+};
 } // namespace
 
 DesignChildUpdatePlan plan_design_child_updates(std::span<const IRNode> old_children,
@@ -386,6 +452,8 @@ DesignChildUpdatePlan plan_design_child_updates(std::span<const IRNode> old_chil
     plan.keyed = has_unique_nonempty_keys(old_children) && has_unique_nonempty_keys(new_children);
     plan.ambiguous_keys = !plan.keyed;
     if (!plan.keyed) {
+        append_key_diagnostics(old_children, true, plan.key_diagnostics);
+        append_key_diagnostics(new_children, false, plan.key_diagnostics);
         // No identity is safe to retain. Replace the ambiguous sibling set
         // wholesale instead of accidentally reusing a view by position.
         // Removals are emitted from the end so these indices remain valid for
@@ -396,63 +464,133 @@ DesignChildUpdatePlan plan_design_child_updates(std::span<const IRNode> old_chil
             append_update(plan, DesignUpdateKind::inserted, key_for(new_children[i]), 0, i);
         return plan;
     }
-    std::unordered_map<std::string, std::size_t> old_by_key;
+    constexpr auto none = static_cast<std::size_t>(-1);
+    std::unordered_map<std::string_view, std::size_t> old_by_key;
     old_by_key.reserve(old_children.size());
     for (std::size_t i = 0; i < old_children.size(); ++i)
         old_by_key.emplace(key_for(old_children[i]), i);
-    std::vector<bool> consumed(old_children.size(), false);
-    std::vector<bool> recreate(new_children.size(), false);
-    std::vector<bool> recreate_by_old(old_children.size(), false);
+    // The old index each new child keeps, or `none` when it is inserted or
+    // recreated because its materialization shape changed.
+    std::vector<std::size_t> source(new_children.size(), none);
+    std::vector<bool> survives(old_children.size(), false);
 
     // First classify the old materializations.  All removals must precede
     // moves/inserts: otherwise an index-based consumer can move a child and
     // then remove that same slot, deleting the wrong identity.
     for (std::size_t new_index = 0; new_index < new_children.size(); ++new_index) {
-        const auto& key = key_for(new_children[new_index]);
-        const auto it = old_by_key.find(key);
-        if (it == old_by_key.end())
+        const auto it = old_by_key.find(key_for(new_children[new_index]));
+        if (it == old_by_key.end() ||
+            !shape_compatible(old_children[it->second], new_children[new_index]))
             continue;
-        const auto old_index = it->second;
-        consumed[old_index] = true;
-        recreate[new_index] = !shape_compatible(old_children[old_index], new_children[new_index]);
-        recreate_by_old[old_index] = recreate[new_index];
+        source[new_index] = it->second;
+        survives[it->second] = true;
     }
 
     for (std::size_t old_index = old_children.size(); old_index-- > 0;) {
-        if (!consumed[old_index] || recreate_by_old[old_index])
+        if (!survives[old_index])
             append_update(plan, DesignUpdateKind::removed, key_for(old_children[old_index]),
                           old_index, 0);
     }
 
-    // Track the post-removal working order so every subsequent index is
-    // directly applicable to a mutable child vector.
-    std::vector<std::string> working;
-    working.reserve(old_children.size() + new_children.size());
+    // Position of each survivor in the child vector once removals apply.
+    std::vector<std::size_t> survivor_position(old_children.size(), none);
+    std::size_t survivors = 0;
     for (std::size_t old_index = 0; old_index < old_children.size(); ++old_index) {
-        if (consumed[old_index] && !recreate_by_old[old_index])
-            working.push_back(key_for(old_children[old_index]));
+        if (survives[old_index])
+            survivor_position[old_index] = survivors++;
     }
+
+    // Survivors that keep their relative order stay where they are. A shared
+    // prefix and suffix are kept unconditionally; the middle keeps a longest
+    // increasing run of survivor positions.
+    std::vector<bool> stays(new_children.size(), false);
+    std::size_t prefix = 0;
+    while (prefix < new_children.size() && source[prefix] == prefix) {
+        stays[prefix] = true;
+        ++prefix;
+    }
+    std::size_t suffix = 0;
+    while (suffix < new_children.size() - prefix && suffix < old_children.size() - prefix) {
+        const auto new_index = new_children.size() - 1 - suffix;
+        if (source[new_index] != old_children.size() - 1 - suffix)
+            break;
+        stays[new_index] = true;
+        ++suffix;
+    }
+    std::vector<std::size_t> middle_indices;
+    std::vector<std::size_t> middle_positions;
+    for (auto new_index = prefix; new_index < new_children.size() - suffix; ++new_index) {
+        if (source[new_index] == none)
+            continue;
+        middle_indices.push_back(new_index);
+        middle_positions.push_back(survivor_position[source[new_index]]);
+    }
+    for (const auto at : longest_increasing_subsequence(middle_positions))
+        stays[middle_indices[at]] = true;
+
+    // Every child that is placed (moved or inserted) goes directly after its
+    // new-order predecessor, so it lands after the nearest staying child
+    // before it, in new order. Give each staying survivor a slot followed by
+    // slots for the children placed after it; a leading group precedes all
+    // survivors. Slot order is then child-vector order at every step.
+    std::vector<std::size_t> anchor(new_children.size(), 0);
+    std::vector<std::size_t> rank(new_children.size(), 0);
+    std::vector<std::size_t> placed_after(survivors + 1, 0);
+    std::size_t current_anchor = 0;
+    for (std::size_t new_index = 0; new_index < new_children.size(); ++new_index) {
+        if (stays[new_index]) {
+            current_anchor = survivor_position[source[new_index]] + 1;
+        } else {
+            anchor[new_index] = current_anchor;
+            rank[new_index] = ++placed_after[current_anchor];
+        }
+    }
+    // first_slot[a] is the first slot of group a; group a > 0 opens with the
+    // slot of survivor a - 1 at its old position.
+    std::vector<std::size_t> first_slot(survivors + 2, 0);
+    for (std::size_t group = 0; group <= survivors; ++group)
+        first_slot[group + 1] = first_slot[group] + (group > 0 ? 1 : 0) + placed_after[group];
+    const auto survivor_slot = [&](std::size_t position) { return first_slot[position + 1]; };
+    const auto placed_slot = [&](std::size_t new_index) {
+        const auto group = anchor[new_index];
+        return first_slot[group] + (group > 0 ? 1 : 0) + rank[new_index] - 1;
+    };
+
+    SlotPositions positions(first_slot[survivors + 1]);
+    for (std::size_t position = 0; position < survivors; ++position)
+        positions.add(survivor_slot(position), 1);
+
     for (std::size_t new_index = 0; new_index < new_children.size(); ++new_index) {
         const auto& key = key_for(new_children[new_index]);
-        const auto it = old_by_key.find(key);
-        if (it == old_by_key.end() || recreate[new_index]) {
-            append_update(plan, DesignUpdateKind::inserted, key, 0, new_index);
-            working.insert(working.begin() + static_cast<std::ptrdiff_t>(new_index), key);
+        const auto old_index = source[new_index];
+        if (stays[new_index]) {
+            append_update(plan, DesignUpdateKind::retained, key, old_index, new_index);
             continue;
         }
-        const auto current = std::find(working.begin(), working.end(), key);
-        const auto old_index = static_cast<std::size_t>(current - working.begin());
-        if (old_index == new_index) {
-            append_update(plan, DesignUpdateKind::retained, key, old_index, new_index);
+        const auto slot = placed_slot(new_index);
+        if (old_index == none) {
+            append_update(plan, DesignUpdateKind::inserted, key, 0, positions.before(slot));
         } else {
-            append_update(plan, DesignUpdateKind::moved, key, old_index, new_index);
-            auto value = *current;
-            working.erase(current);
-            working.insert(working.begin() + static_cast<std::ptrdiff_t>(new_index),
-                           std::move(value));
+            const auto from_slot = survivor_slot(survivor_position[old_index]);
+            const auto from = positions.before(from_slot);
+            positions.add(from_slot, -1);
+            append_update(plan, DesignUpdateKind::moved, key, from, positions.before(slot));
         }
+        positions.add(slot, 1);
     }
     return plan;
+}
+
+std::string_view to_string(DesignKeyDiagnosticReason reason) noexcept {
+    switch (reason) {
+    case DesignKeyDiagnosticReason::missing:
+        return "missing";
+    case DesignKeyDiagnosticReason::duplicate:
+        return "duplicate";
+    case DesignKeyDiagnosticReason::mixed:
+        return "mixed";
+    }
+    return "missing";
 }
 
 std::vector<DesignSlot> classify_design_slots(const IRNode& node) {

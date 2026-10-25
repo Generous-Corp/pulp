@@ -18,6 +18,14 @@
 // Header-only, like the rest of the catalog: FdnReverbT is a header-only
 // template, so including this pulls in no new link dependency for pulp-host.
 //
+// TIER. A thirteenth baked param, appended after the engine's twelve, selects
+// the engine behind the same knobs: 0 runs the multirate network (the default,
+// so a patch baked before the param existed renders exactly as it did), 1 the
+// classic comb/allpass tier (signal::ClassicReverbT). A tier change is a clean
+// flush of the engine it switches to. The network-only knobs (low damping,
+// modulation, shimmer, drive, bloom, tank rate) stay declared on every
+// realization and have no effect on the classic tier.
+//
 // PARAMETER GRANULARITY. The twelve knobs are read at the engine's own control
 // cadence (32 samples) rather than once per block: the node walks the block in
 // control-rate chunks and re-reads the BakedParamView at each one. That is the
@@ -97,6 +105,13 @@ inline constexpr state::ParamID kDrive = param_id_for(fdn::Param::drive);
 inline constexpr state::ParamID kBloom = param_id_for(fdn::Param::bloom);
 inline constexpr state::ParamID kWidth = param_id_for(fdn::Param::width);
 inline constexpr state::ParamID kTankRate = param_id_for(fdn::Param::tank_rate);
+// Not an engine parameter: the node-local id after the engine's table. Append
+// new node params after this one; never renumber.
+inline constexpr state::ParamID kTier = param_id_for(fdn::Param::count);
+
+inline constexpr fdn::Tier tier_for(float value) {
+    return value >= 0.5f ? fdn::Tier::classic : fdn::Tier::network;
+}
 
 // Worst-case linear gain the node can present, for the path-gain lint. The tank
 // is unitary and the realized per-pass gain is provably below kGainCeil, so the
@@ -120,6 +135,7 @@ inline void declare_params(CustomNodeType& t, fdn::Mode mode) {
                                   static_cast<float>(spec.max),
                                   static_cast<float>(fdn::mode_default(mode, param))});
     }
+    t.baked_params.push_back({kTier, 0.0f, 1.0f, 0.0f});
 }
 
 inline CustomNodeType make_fdn_reverb_node(fdn::Mode mode) {
@@ -167,6 +183,7 @@ inline CustomNodeType make_fdn_reverb_node(fdn::Mode mode) {
                     s->engine.set_parameter(
                         param, static_cast<double>(params.value_at(param_id_for(param), at)));
                 }
+                s->engine.set_tier(tier_for(params.value_at(kTier, at)));
                 s->engine.process_block(il + offset, ir + offset, ol + offset,
                                         or_ + offset, chunk);
             }
@@ -179,7 +196,8 @@ inline ForgeNodeDescriptor fdn_reverb_descriptor() {
     d.key = "fdn_reverb";
     d.label = "FDN Reverb";
     d.description = "True-stereo multirate feedback-delay-network reverb with five musical "
-                    "voicings and a wet-only output.";
+                    "voicings and a wet-only output, plus a lighter classic comb/allpass "
+                    "tier behind the same controls.";
     d.axes = {{"mode",
                "Mode",
                "A complete voicing of the shared tank, including its starting "
@@ -225,6 +243,15 @@ inline ForgeNodeDescriptor fdn_reverb_descriptor() {
          ForgeParamKind::continuous, ForgeParamCurve::linear},
         {"tank_rate", kTankRate, "Tank Rate", "Hz", "Internal multirate tank processing frequency.",
          ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"tier",
+         kTier,
+         "Tier",
+         "",
+         "Feedback-delay network, or the lighter classic comb and allpass reverb. Low "
+         "damping, modulation, shimmer, drive, bloom, and tank rate apply to the network only.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"fdn", "FDN", 0.0f}, {"classic", "Classic", 1.0f}}},
     };
     return d;
 }

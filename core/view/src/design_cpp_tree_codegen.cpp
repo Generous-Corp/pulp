@@ -2,6 +2,7 @@
 
 #include <pulp/runtime/base64.hpp>
 
+#include "design_import_form_controls.hpp"
 #include "design_ir_helpers.hpp"
 
 #include <algorithm>
@@ -99,6 +100,10 @@ std::string widget_make_expr(const IRNode& node,
             return "std::make_unique<pulp::view::TextEditor>()";
         case NativeWidgetKind::checkbox:
             return "std::make_unique<pulp::view::Checkbox>()";
+        case NativeWidgetKind::range_slider:
+            return "std::make_unique<pulp::view::RangeSlider>()";
+        case NativeWidgetKind::button_surface:
+            return "std::make_unique<pulp::view::ButtonSurface>()";
         case NativeWidgetKind::toggle_button:
             return "std::make_unique<pulp::view::ToggleButton>()";
         case NativeWidgetKind::segmented:
@@ -242,9 +247,52 @@ void emit_captured_text_layout(std::ostringstream& out,
                   float_expr(ctx, node.text_layout_basis->width) + ", " +
                   cpp_string_literal(node.text_layout_basis->resolved_face) +
                   ", " + (wrap_on_cache_miss ? "true" : "false") + ");");
+    if (const auto& m = node.text_layout_basis->line_metrics)
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  std::string(var) + "->set_cached_line_metrics({" + float_expr(ctx, m->ascent) +
+                      ", " + float_expr(ctx, m->descent) + "});");
     if (!explicit_nowrap && node.text_line_boxes.size() > 1)
         emit_line(out, depth, ctx.opts.indent_spaces,
                   std::string(var) + "->set_multi_line(true);");
+}
+
+// The same state the native lane applies in design_import_form_controls.cpp,
+// so a baked panel builds the identical theme-painted control.
+void emit_ua_form_control(std::ostringstream& out, int depth, const EmitContext& ctx,
+                          std::string_view var, const IRNode& node) {
+    const auto state = ua_form_control_state(node);
+    if (!state)
+        return;
+    const auto line = [&](const std::string& call) {
+        emit_line(out, depth, ctx.opts.indent_spaces, std::string(var) + "->" + call + ";");
+    };
+    using Control = UaFormControlState::Control;
+    // A ButtonSurface is the skin itself and paints without an accent.
+    const bool button = state->control == Control::button;
+    if (!button)
+        line("set_skin(pulp::view::UaSkin::chromium_refresh)");
+    if (state->scheme == UaColorScheme::dark)
+        line("set_color_scheme(pulp::view::UaColorScheme::dark)");
+    if (state->accent && !button) {
+        if (auto expr = color_expr(ctx, *state->accent); !expr.empty())
+            line("set_accent_color(" + expr + ")");
+    }
+    if (state->control == Control::range) {
+        line("set_step(0.0f)");
+        line("set_max(" + float_expr(ctx, state->max) + ")");
+        line("set_min(" + float_expr(ctx, state->min) + ")");
+        line("set_step(" + float_expr(ctx, state->step) + ")");
+        line("set_value(" + float_expr(ctx, state->value) + ", pulp::view::Notify::none)");
+    } else if (!button) {
+        if (state->control == Control::radio) {
+            line("set_kind(pulp::view::Checkbox::Kind::radio)");
+            if (state->radio_group != 0)
+                line("set_radio_group(" + std::to_string(state->radio_group) + ")");
+        }
+        line(std::string("set_checked(") + (state->checked ? "true" : "false") + ")");
+    }
+    if (state->disabled)
+        line("set_enabled(false)");
 }
 
 void emit_widget_specific(std::ostringstream& out,
@@ -272,6 +320,11 @@ void emit_widget_specific(std::ostringstream& out,
         case NativeWidgetKind::checkbox:
             if (semantics.checked)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_checked(true);");
+            emit_ua_form_control(out, depth, ctx, var, node);
+            break;
+        case NativeWidgetKind::range_slider:
+        case NativeWidgetKind::button_surface:
+            emit_ua_form_control(out, depth, ctx, var, node);
             break;
         case NativeWidgetKind::toggle_button:
             if (!text.empty())
@@ -893,6 +946,7 @@ void emit_node(std::ostringstream& out,
         // component factories, so opt each tree out of Yoga's pixel rounding.
         emit_line(out, depth, ctx.opts.indent_spaces,
                   var + "->set_subpixel_layout(true);");
+        emit_line(out, depth, ctx.opts.indent_spaces, var + "->set_captured_frame_root(true);");
         emit_line(out, depth, ctx.opts.indent_spaces, "return " + var + ";");
     }
 

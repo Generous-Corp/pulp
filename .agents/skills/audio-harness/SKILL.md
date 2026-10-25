@@ -188,6 +188,21 @@ evidence, never a skip-pass. Add `--negative-control` when validating the probe
 itself; the planted FFT mutation must complete GPU work and return the typed
 failure that proves the CPU oracle can catch it.
 
+## Float-vs-double agreement: bound the RMS, not the worst sample
+
+A float instantiation's deviation from its double twin is rounding noise.
+Its worst sample is a noise statistic that moves by several dB with the seed
+and the render length, so a tight bound on it passes only for the one seed it
+was tuned on. On x86-64 without hardware FMA the float chain rounds every
+multiply-add twice and sits about 6 dB above arm64 (the speaker cabinet:
+RMS near -106 dBFS on x86-64 against -112.7 on arm64, worst sample -98 to -94
+across seeds). Bound the RMS with margin over the x86-64 figure, hold the
+worst sample to a loose ceiling such as one 16-bit step (-90.3 dBFS), record
+the measured ranges next to the bound, and prove the bound with a negative
+control that truncates the float state (12 mantissa bits trips both by tens
+of dB). An arm64 host cannot see the x86-64 figure; build the comparison with
+`-arch x86_64 -ffp-contract=off` and run it under Rosetta.
+
 ## Measuring a reverb — two traps that make a working engine look broken
 
 Both of these cost real debugging time on the multirate FDN reverb, and both
@@ -1504,6 +1519,17 @@ caller ordering/internal headroom, coefficient replacement and reset tails,
 non-finite/unstable/over-capacity transaction failures, denormal decay, and an
 allocation probe around the prepared runtime surface. Build and time the largest
 supported product in Release; Debug timing is not performance evidence.
+
+Two traps when timing a vectorized recursive kernel (`pulp::simd::Lanes`):
+- A block path's mismatch against the per-sample loop is not its error. Measure
+  both against a float64 reference; a single float biquad's block and sample
+  paths differ by up to about -45 dBFS, and that gap is the sample path's own
+  round-off, not the block path's.
+- Keep the per-sample loop body in the caller. Passing it as a lambda that
+  captures the filter state (a `for_each_chunk(n, fn)` helper) kept the state
+  out of registers and made an 8-section cascade 1.7x slower; a chunk range
+  the caller iterates (`snap_chunks(n)`) did not.
+
 ## Sample-region proof surface
 
 For sample-region DSP, pair the declared scalar-kernel contract with a focused

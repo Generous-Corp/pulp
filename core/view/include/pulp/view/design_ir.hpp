@@ -10,6 +10,8 @@
 /// asset collection, and interactive-frame promotion entry points are importer
 /// operations and live in design_ir_io.hpp (`pulp-design-import`).
 
+#include <pulp/view/design_line_metrics.hpp>
+
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -39,9 +41,10 @@ enum class DesignSource {
     pencil,
     claude,   // Anthropic Claude Design — manual HTML/zip export, no Anthropic API
     designmd, // Google DESIGN.md (Apache-2.0) — YAML frontmatter + Markdown body
-    jsx,           // Single-file React JSX instrument — compiled via esbuild + bundled React/ReactDOM
-    figma_plugin,  // Pulp's "Design for Pulp" Figma plugin export envelope
-    html           // Generic runnable HTML evaluated by the isolated browser lane
+    jsx,      // Single-file React JSX instrument — compiled via esbuild + bundled React/ReactDOM
+    figma_plugin,    // Pulp's "Design for Pulp" Figma plugin export envelope
+    html,            // Generic runnable HTML evaluated by the isolated browser lane
+    preconverted_svg // Validated SVG + control-map sidecar; no source conversion
 };
 
 // ── Normalized Intermediate Representation ──────────────────────────────
@@ -86,6 +89,11 @@ struct IRStyle {
     // background-image paint honoring is the same deferred slot as
     // background_repeat (View::style_extras).
     std::optional<std::string> background_size;
+    // CSS background-origin ("padding-box", "border-box", "content-box"),
+    // possibly a per-layer list. It decides the box a repeating background
+    // tile is sized and positioned in; absent means the CSS initial value,
+    // padding-box.
+    std::optional<std::string> background_origin;
     // CSS object-fit for image-shaped nodes ("fill", "contain", "cover",
     // "none", "scale-down"). Figma IMAGE fill scale modes lower here when the
     // fill becomes a dedicated image node (FILL → cover, FIT → contain);
@@ -409,6 +417,9 @@ struct IRTextLayoutBasis {
     /// requested family. Empty when the capture recorded no platform font,
     /// which makes the cache unusable rather than usable-on-trust.
     std::string resolved_face;
+    /// The primary font's line metrics Chrome laid the lines out with, when
+    /// the capture measured them (see design_line_metrics.hpp).
+    std::optional<LineMetrics> line_metrics;
 };
 
 struct IRTextRun {
@@ -744,12 +755,20 @@ struct IRAssetManifest {
 /// envelope `font_family_assets[]`). The importer registers each one with the
 /// text renderer (#43b) so `setFontFamily(family)` resolves to the bundled
 /// face instead of silently falling back to a system font of the same name.
+///
+/// A browser capture adds one entry per captured `@font-face` rule, in the
+/// order the page defined them, carrying the rule's CSS descriptors. Several
+/// rules may share one asset (a variable font bound at several weights), and
+/// one family may span several assets split by `unicode_range`.
 struct IRFontAsset {
     std::string family;          // CSS family name nodes reference via font_family
     std::string style;           // "Regular", "Italic", … (informational)
-    int weight = 400;            // 100–900
-    std::string asset_id;        // → asset_manifest entry holding the .ttf/.otf
+    int weight = 400;            // 100–900; the lower bound of a weight range
+    std::string asset_id;        // → asset_manifest entry holding the .ttf/.otf/.woff2
     std::string resolved_path;   // absolute fs path, stamped by the CLI asset-resolution pass
+    std::string font_style;      // CSS font-style descriptor; empty when not captured
+    int weight_max = 0;          // upper bound of a font-weight range; 0 for one weight
+    std::string unicode_range;   // CSS unicode-range descriptor, verbatim; empty = every code point
 };
 
 struct IRTokenIdentity {

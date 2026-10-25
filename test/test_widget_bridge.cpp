@@ -1,4 +1,8 @@
 #include "widget_bridge_test_support.hpp"
+#include <pulp/view/chart_shader_presets.hpp>
+#include <pulp/view/screenshot.hpp>
+
+#include <array>
 
 TEST_CASE("WidgetBridge counts native calls used by imported UI mount and steps",
           "[view][bridge][wp0]") {
@@ -16,6 +20,30 @@ TEST_CASE("WidgetBridge counts native calls used by imported UI mount and steps"
     bridge.reset_bridge_call_count();
     bridge.load_script("setText('imported-label', 'step');");
     REQUIRE(bridge.bridge_call_count() > 0);
+}
+
+TEST_CASE("WidgetBridge attaches a widget named as its own parent under the root",
+          "[view][bridge]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The widget is registered under its id before it is attached, so a
+    // script naming that id as the parent used to link the view to itself
+    // and send every walk to the root into an endless loop.
+    bridge.load_script("createKnob('gain', 'gain'); setValue('gain', 0.5);");
+    REQUIRE(root.child_count() == 1);
+    REQUIRE(root.child_at(0)->id() == "gain");
+    REQUIRE(root.child_at(0)->parent() == &root);
+    REQUIRE(root.child_at(0)->child_count() == 0);
+
+    // A parent that is a descendant of the new widget cannot exist at create
+    // time, but one that is the widget itself can on every factory path.
+    bridge.load_script("createRow('row', 'row');");
+    REQUIRE(root.child_count() == 2);
+    REQUIRE(root.child_at(1)->parent() == &root);
 }
 
 TEST_CASE("WidgetBridge counter ignores pure JavaScript work",
@@ -4858,6 +4886,178 @@ TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
 #ifdef PULP_HAS_SKIA
     REQUIRE_FALSE(knob->chart_shader().empty());
 #else
+    REQUIRE(knob->chart_shader().empty());
+#endif
+}
+
+TEST_CASE("WidgetBridge knob chart glow paints outside the widget rect",
+          "[view][bridge][shader][feather]") {
+#ifdef PULP_HAS_SKIA
+    if (!raw_rgba_render_available())
+        SKIP("this build has no raw RGBA render backend");
+    // An 80 px knob laid out at the root's origin: the flat arc's outer edge
+    // is 2 px inside the knob, so x = 81 is 3 px outside the arc and x = 83 is
+    // 3 px outside the knob's own rect, both on its horizontal centre line.
+    // The capture fills its background opaque, so "painted" means the colour
+    // moved off that background.
+    auto render_knob = [](const char* feather, const char* after,
+                          const char* body = "PulpFragment shade(PulpGeom g, float2 p) "
+                                             "{ return PulpFragment(half4(0), 0, 0); }") {
+        ScriptEngine engine;
+        View root;
+        root.set_bounds({0, 0, 160, 160});
+        StateStore store;
+        WidgetBridge bridge(engine, root, store);
+        bridge.load_script(std::string(R"(
+            createKnob('knob', 'root');
+            setFlex('knob', 'width', 80);
+            setFlex('knob', 'height', 80);
+            globalThis.body = setWidgetShader('knob', ')") +
+                           body + R"(',
+              { geometry: { shape: 'flat_arc' }, )" +
+                           feather + R"( });
+            globalThis.chart = setWidgetShaderChart('knob',
+              'half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }');
+        )" + after);
+        REQUIRE(engine.evaluate("body.success").getWithDefault<bool>(false));
+        REQUIRE(engine.evaluate("chart.success").getWithDefault<bool>(false));
+        uint32_t w = 0, h = 0;
+        auto rgba = render_to_rgba(root, 160, 160, 1.0f, &w, &h);
+        REQUIRE(w == 160);
+        REQUIRE(h == 160);
+        REQUIRE(rgba.size() == size_t{160} * 160 * 4);
+        return rgba;
+    };
+    auto red_at = [](const std::vector<uint8_t>& rgba, int x, int y) {
+        return static_cast<int>(rgba[(static_cast<size_t>(y) * 160 + static_cast<size_t>(x)) * 4]);
+    };
+    constexpr int kBackgroundRed = 30;
+
+    const auto glow = render_knob("feather: { sigma: 8, mode: 'glow' }", "");
+    CHECK(red_at(glow, 81, 40) > kBackgroundRed + 40);
+    CHECK(red_at(glow, 83, 40) > kBackgroundRed + 30);
+
+    // Negative: sigma 0 leaves no glow, so nothing paints outside the knob.
+    const auto flat = render_knob("feather: { sigma: 0, mode: 'glow' }", "");
+    CHECK(red_at(flat, 81, 40) == kBackgroundRed);
+    CHECK(red_at(flat, 83, 40) == kBackgroundRed);
+
+    // Shrinking the reach below 3 sigma refuses the chart draw rather than
+    // cutting the glow off at the rect edge, and the body shader paints
+    // instead, as it does for any chart draw that fails. An opaque green body
+    // tells it apart from both the white chart and the default knob body.
+    const auto refused =
+        render_knob("feather: { sigma: 8, mode: 'glow' }", "setWidgetShaderReach('knob', 4);",
+                    "half4 main(float2 p) { return half4(0, 1, 0, 1); }");
+    auto pixel_at = [](const std::vector<uint8_t>& rgba, int x, int y) {
+        const auto* p = &rgba[(static_cast<size_t>(y) * 160 + static_cast<size_t>(x)) * 4];
+        return std::array<int, 3>{p[0], p[1], p[2]};
+    };
+    for (const auto& [x, y] : {std::pair{40, 40}, std::pair{4, 40}, std::pair{40, 4}}) {
+        const auto rgb = pixel_at(refused, x, y);
+        CHECK(rgb[0] < 10);
+        CHECK(rgb[1] > 240);
+        CHECK(rgb[2] < 10);
+    }
+    // No white chart glow reaches past the knob.
+    CHECK(red_at(refused, 83, 40) < kBackgroundRed + 10);
+#else
+    SUCCEED("chart shaders need the Skia backend");
+#endif
+}
+
+TEST_CASE("WidgetBridge installs named chart shader presets on a knob",
+          "[view][bridge][shader][chart-preset]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 160, 160});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'root');
+        setFlex('knob', 'width', 80);
+        setFlex('knob', 'height', 80);
+        globalThis.source = getShaderChartPreset('tube', { profile: 'chamfer', color: '#808890' });
+        globalThis.unknown = getShaderChartPreset('chrome');
+        globalThis.badOption = setWidgetShaderChartPreset('knob', 'bevel', { lightAngle: 90 });
+        globalThis.badColor = setWidgetShaderChartPreset('knob', 'bevel', { color: 'not-a-colour' });
+        globalThis.badProfile = setWidgetShaderChartPreset('knob', 'tube', { profile: 'square' });
+        globalThis.glow = setWidgetShaderChartPreset('knob', 'glow', { sigma: 6 });
+        globalThis.hugeGlow = setWidgetShaderChartPreset('knob', 'glow', { sigma: 1e5 });
+        createFader('track', 'vertical', 'root');
+        createToggle('switch', 'root');
+        globalThis.onFader = setWidgetShaderChartPreset('track', 'inset-channel');
+        globalThis.onToggle = setWidgetShaderChartPreset('switch', 'bevel');
+        globalThis.rawOnToggle = setWidgetShaderChart('switch',
+          'half4 shade(PulpChart g) { return half4(1); }');
+        // Keep the value pointer off the top of the arc the probes read.
+        setValue('knob', 0.1);
+    )");
+    REQUIRE(engine.evaluate("source.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("source.sksl")
+                .getWithDefault<std::string>("")
+                .find("half4 shade(PulpChart g)") != std::string::npos);
+    REQUIRE_FALSE(engine.evaluate("unknown.success").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("unknown.error").getWithDefault<std::string>("").find("'chrome'") !=
+            std::string::npos);
+    REQUIRE_FALSE(engine.evaluate("badOption.success").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("badOption.error").getWithDefault<std::string>("").find("lightAngle") !=
+            std::string::npos);
+    REQUIRE_FALSE(engine.evaluate("badColor.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("badProfile.success").getWithDefault<bool>(true));
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+#ifdef PULP_HAS_SKIA
+    REQUIRE(engine.evaluate("glow.success").getWithDefault<bool>(false));
+    // The glow's falloff lives outside the band, so the preset carries the
+    // reach that holds it, and an unbounded sigma is refused.
+    REQUIRE_FALSE(engine.evaluate("hugeGlow.success").getWithDefault<bool>(true));
+    // Faders draw a chart on their track; a toggle draws none, so a chart for
+    // it is refused instead of being stored and never painted.
+    REQUIRE(engine.evaluate("onFader.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("onToggle.success").getWithDefault<bool>(true));
+    REQUIRE(
+        engine.evaluate("onToggle.error").getWithDefault<std::string>("").find("draws no chart") !=
+        std::string::npos);
+    REQUIRE_FALSE(engine.evaluate("rawOnToggle.success").getWithDefault<bool>(true));
+    REQUIRE(knob->chart_reach() == Catch::Approx(chart_glow_reach(6.0f, 1.0f)));
+    REQUIRE(knob->chart_reach() >= 18.0f);
+    REQUIRE(knob->shader_reach() == 0.0f);
+    REQUIRE_FALSE(knob->has_custom_shader());
+    // That reach belongs to the glow: another preset replaces it.
+    bridge.load_script("globalThis.plain = setWidgetShaderChartPreset('knob', 'bevel');");
+    REQUIRE(engine.evaluate("plain.success").getWithDefault<bool>(false));
+    REQUIRE(knob->chart_reach() == 0.0f);
+
+    if (!raw_rgba_render_available())
+        SKIP("this build has no raw RGBA render backend");
+    // A preset alone, with no body shader, paints the knob's arc. At the top
+    // of the 80 px knob the band runs from row 2 to row 21 (centre row 11.5,
+    // half width 9.5), so rows 3 and 19 sit at u = +0.84 and -0.84: the upper
+    // and lower edges of the band there.
+    auto top_minus_bottom = [&](const char* light) {
+        bridge.load_script(std::string("globalThis.lit = setWidgetShaderChartPreset('knob', "
+                                       "'bevel', { light: ") +
+                           light + " });");
+        REQUIRE(engine.evaluate("lit.success").getWithDefault<bool>(false));
+        uint32_t w = 0, h = 0;
+        auto rgba = render_to_rgba(root, 160, 160, 1.0f, &w, &h);
+        REQUIRE(w == 160);
+        auto luma = [&](int x, int y) {
+            const auto* p = &rgba[(static_cast<size_t>(y) * 160 + static_cast<size_t>(x)) * 4];
+            return 0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2];
+        };
+        return luma(40, 3) - luma(40, 19);
+    };
+    const float from_above = top_minus_bottom("90");
+    const float from_below = top_minus_bottom("270");
+    INFO("top-bottom luma: light above " << from_above << ", below " << from_below);
+    CHECK(from_above > 8.0f);
+    CHECK(from_below < -8.0f);
+#else
+    // Without Skia there is no chart compiler, so the install is refused and
+    // nothing is installed.
+    REQUIRE_FALSE(engine.evaluate("glow.success").getWithDefault<bool>(true));
     REQUIRE(knob->chart_shader().empty());
 #endif
 }

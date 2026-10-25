@@ -115,6 +115,230 @@ TEST_CASE("AU v2 editor pins the design viewport per the shared resize contract"
     CHECK_FALSE(should_pin_design_viewport(degenerate));
 }
 
+// ── Real editor lifetime ────────────────────────────────────────────────
+//
+// The factory builds a real PluginViewHost and returns its NSView. The host
+// app's reference must decide the editor's lifetime: closing the editor
+// (removing and dropping the view) has to deallocate the view, destroy the
+// host, and fire Processor::on_view_closed. A view that the host itself kept
+// alive leaked every editor (a GPU editor's Dawn device and surfaces with it)
+// and never told the processor it closed.
+
+#import <AppKit/AppKit.h>
+#import <objc/runtime.h>
+
+#include <pulp/format/au_v2_common.hpp>
+#include <pulp/format/processor.hpp>
+#include <pulp/runtime/alive_token.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/view/view.hpp>
+
+#include <cstdlib>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace {
+
+class LifetimeProcessor : public pulp::format::Processor {
+  public:
+    int opened = 0;
+    int closed = 0;
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {"Lifetime", "Acme", "com.acme.lifetime", "1.0.0",
+                pulp::format::PluginCategory::Effect};
+    }
+    void define_parameters(pulp::state::StateStore& s) override {
+        s.add_parameter({1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    std::unique_ptr<pulp::view::View> create_view() override {
+        auto root = std::make_unique<pulp::view::View>();
+        root->add_child(std::make_unique<pulp::view::View>());
+        return root;
+    }
+    void on_view_opened(pulp::view::View&) override {
+        ++opened;
+    }
+    void on_view_closed(pulp::view::View&) override;
+    // Whether the last close ran while the editor view was still whole.
+    bool closed_before_view_teardown = false;
+};
+
+// The AU instance the factory talks to: it only answers the private editor
+// context property, which is all uiViewForAudioUnit: reads.
+struct FakeEditorAU {
+    AudioComponentPlugInInterface iface{};
+    pulp::format::au::PulpEditorContext ctx{};
+};
+FakeEditorAU* g_fake_au_ctx_source = nullptr;
+
+OSStatus fake_get_property(void* self, AudioUnitPropertyID id, AudioUnitScope, AudioUnitElement,
+                           void* out, UInt32* io_size) {
+    auto* au = static_cast<FakeEditorAU*>(self);
+    if (id != pulp::format::au::kPulpEditorContextProperty || !out || !io_size ||
+        *io_size < sizeof(au->ctx))
+        return kAudioUnitErr_InvalidProperty;
+    *static_cast<pulp::format::au::PulpEditorContext*>(out) = au->ctx;
+    *io_size = sizeof(au->ctx);
+    return noErr;
+}
+OSStatus fake_open(void* self, AudioComponentInstance) {
+    static_cast<FakeEditorAU*>(self)->ctx = g_fake_au_ctx_source->ctx;
+    return noErr;
+}
+OSStatus fake_close(void* self) {
+    delete static_cast<FakeEditorAU*>(self);
+    return noErr;
+}
+AudioComponentMethod fake_lookup(SInt16 selector) {
+    if (selector == kAudioUnitGetPropertySelect)
+        return reinterpret_cast<AudioComponentMethod>(&fake_get_property);
+    return nullptr;
+}
+AudioComponentPlugInInterface* fake_factory(const AudioComponentDescription*) {
+    auto* au = new FakeEditorAU; // iface is the first member: self == au
+    au->iface.Open = fake_open;
+    au->iface.Close = fake_close;
+    au->iface.Lookup = fake_lookup;
+    return &au->iface;
+}
+
+int g_view_deallocs = 0;
+
+// NSView's own -dealloc is wrapped for the test so it can tell whether the
+// editor closed before the view began tearing itself down (the plug-in view
+// class's -dealloc runs its hook, then calls into NSView's).
+void* g_editor_view = nullptr;
+bool g_editor_nsview_dealloc_entered = false;
+IMP g_nsview_dealloc = nullptr;
+void wrapped_nsview_dealloc(id self, SEL sel) {
+    if ((__bridge void*)self == g_editor_view)
+        g_editor_nsview_dealloc_entered = true;
+    ((void (*)(id, SEL))g_nsview_dealloc)(self, sel);
+}
+
+void LifetimeProcessor::on_view_closed(pulp::view::View&) {
+    ++closed;
+    closed_before_view_teardown = !g_editor_nsview_dealloc_entered;
+}
+
+} // namespace
+
+// Associated with each returned view: released (and counted) when the view
+// itself deallocates.
+@interface PulpTestDeallocSentinel : NSObject
+@end
+@implementation PulpTestDeallocSentinel
+- (void)dealloc {
+    ++g_view_deallocs;
+    [super dealloc];
+}
+@end
+
+namespace {
+
+// The factory refuses to build an editor under CI/test environment flags;
+// lift them for this test and put them back after.
+class EditorEnvironment {
+  public:
+    EditorEnvironment() {
+        for (const char* k : kKeys) {
+            const char* v = std::getenv(k);
+            saved_.push_back(v ? std::optional<std::string>(v) : std::nullopt);
+            ::unsetenv(k);
+        }
+    }
+    ~EditorEnvironment() {
+        for (std::size_t i = 0; i < saved_.size(); ++i)
+            if (saved_[i])
+                ::setenv(kKeys[i], saved_[i]->c_str(), 1);
+    }
+
+  private:
+    static constexpr const char* kKeys[] = {"CI", "PULP_TEST_MODE", "PULP_HEADLESS",
+                                            "PULP_DISABLE_PLUGIN_EDITOR"};
+    std::vector<std::optional<std::string>> saved_;
+};
+
+} // namespace
+
+TEST_CASE("AU v2 editor views close and deallocate when the host drops them",
+          "[auv2][cocoa][editor][lifetime]") {
+    EditorEnvironment env;
+    LifetimeProcessor processor;
+    pulp::state::StateStore store;
+    processor.set_state_store(&store);
+    processor.define_parameters(store);
+    pulp::runtime::AliveToken alive;
+
+    FakeEditorAU source;
+    source.ctx.processor = &processor;
+    source.ctx.store = &store;
+    source.ctx.owner_alive = alive.capture();
+    g_fake_au_ctx_source = &source;
+
+    AudioComponentDescription desc{kAudioUnitType_Effect, 'LfTm', 'Acme', 0, 0};
+    AudioComponent comp = AudioComponentRegister(&desc, CFSTR("Acme: Lifetime"), 1, fake_factory);
+    REQUIRE(comp != nullptr);
+    AudioUnit au = nullptr;
+    REQUIRE(AudioComponentInstanceNew(comp, &au) == noErr);
+
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 480, 320)
+                                                   styleMask:NSWindowStyleMaskTitled
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+    if (!window || !window.contentView)
+        SKIP("No Cocoa window available.");
+    Class factory_class = NSClassFromString(@"PulpAUCocoaViewFactory_Test");
+    REQUIRE(factory_class != nil);
+
+    constexpr int kOpens = 3;
+    g_view_deallocs = 0;
+    Method nsview_dealloc =
+        class_getInstanceMethod([NSView class], NSSelectorFromString(@"dealloc"));
+    g_nsview_dealloc = method_setImplementation(nsview_dealloc, (IMP)wrapped_nsview_dealloc);
+    for (int i = 0; i < kOpens; ++i) {
+        @autoreleasepool {
+            id<AUCocoaUIBase> factory = [[factory_class alloc] init];
+            NSView* view = [factory uiViewForAudioUnit:au withSize:NSMakeSize(480, 320)];
+            [factory release];
+            REQUIRE(view != nil);
+            PulpTestDeallocSentinel* sentinel = [[PulpTestDeallocSentinel alloc] init];
+            static char kSentinelKey;
+            objc_setAssociatedObject(view, &kSentinelKey, sentinel,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [sentinel release];
+            g_editor_view = (__bridge void*)view;
+            g_editor_nsview_dealloc_entered = false;
+            [window.contentView addSubview:view];
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+            REQUIRE(processor.opened == i + 1);
+            [view removeFromSuperview]; // the host closes its editor window
+        }
+        @autoreleasepool {
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+        }
+        INFO("open " << i);
+        CHECK(g_view_deallocs == i + 1);
+        CHECK(processor.closed == i + 1);
+        // The editor closed while its view was still whole: the host's
+        // teardown messages that view.
+        CHECK(processor.closed_before_view_teardown);
+    }
+
+    [window close];
+    method_setImplementation(nsview_dealloc, g_nsview_dealloc);
+    g_editor_view = nullptr;
+    AudioComponentInstanceDispose(au);
+    g_fake_au_ctx_source = nullptr;
+}
+
 #else
 
 TEST_CASE("AU v2 Cocoa view advertisement is mac-only", "[auv2][cocoa]") {

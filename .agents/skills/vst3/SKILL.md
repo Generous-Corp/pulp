@@ -33,7 +33,7 @@ of Pulp's three first-class plugin formats alongside CLAP and AU v3.
 | Entry-point generator macro | `core/format/include/pulp/format/vst3_entry.hpp` |
 | Editor `IPlugView` implementation | `core/format/src/vst3_plug_view.cpp`, `core/format/include/pulp/format/vst3_plug_view.hpp` |
 | Info.plist template (macOS bundle) | `tools/cmake/PulpInfoPlist.vst3.in` |
-| VST3 SDK fetch | `external/vst3sdk` — `git clone --depth 1 --branch v3.8.0_build_66 https://github.com/steinbergmedia/vst3sdk.git` (MIT) |
+| VST3 SDK fetch | `external/vst3sdk` — `git clone --depth 1 --branch v3.8.1_build_84 https://github.com/steinbergmedia/vst3sdk.git` (MIT) |
 | CLI validator invocation | `tools/cli/cmd_validate.cpp` (`pluginval --strictness-level 5 --timeout-ms 30000 --validate …`) |
 
 There is no hand-written `PulpVst3.cmake` helper — the VST3 target is
@@ -777,6 +777,20 @@ structural test enforces that every hosted adapter uses the factory. See the
 
 ## Gotchas
 
+### Linux: export only `GetPluginFactory` / `ModuleEntry` / `ModuleExit`
+
+On Linux a plug-in image exports only its entry points: `_pulp_apply_elf_exports`
+(`tools/cmake/PulpInstall.cmake`) compiles the format target with
+`-fvisibility=hidden -fvisibility-inlines-hidden` and links it with a version
+script whose `local: *` localizes everything else, including the archives'
+symbols. Without it, every Pulp plug-in in a Linux host shared its inline
+variables and function-local statics with every other one: they are
+`STB_GNU_UNIQUE`, which glibc binds process-wide **even under `RTLD_LOCAL`**,
+so two different plug-ins' factories each listed both plug-ins. For VST3 the measured failure was under `RTLD_GLOBAL`: the second module's
+factory reported the first module's class. `linux-plugin-isolation-vst3` checks
+that each module's factory lists only its own class under both modes and that
+nothing else is exported.
+
 ### Missing `vst3_entry.cpp` → no `GetPluginFactory` symbol → silent host reject
 
 `PulpPluginFormats.cmake`'s `_pulp_add_vst3()` only links a user-side
@@ -969,6 +983,24 @@ then process. If the adapter needs additional logic (e.g.
 gesture-coalesced output events), insert it after `process()` and
 before the snapshot diff, not before `set_normalized`.
 
+### Per-block work is gated on the StateStore generation
+
+Every store write advances `StateStore::state_generation()`. `process()`
+refreshes `param_snapshot_` only when the generation moved since the last
+snapshot, and `process_publish_output_params()` returns immediately unless the
+processor pushed explicit output events or the generation moved across
+`process()`. Keep it that way: an O(params) loop that runs on idle blocks is a
+regression in the framework's overhead floor. A new store write path must go
+through a `StateStore` setter (they all advance the generation) or the diff
+will not see it.
+
+The expected channel count of each declared bus is cached by
+`refresh_bus_channel_cache()` (called from `setActive(true)` and
+`setupProcessing()`) and invalidated at the top of `setBusArrangements()`.
+A new code path that rewrites `audioInputs`/`audioOutputs` arrangements must
+invalidate it too; while invalid, layout validation falls back to the SDK
+buses.
+
 ### `getTailSamples` returns `kInfiniteTail` for `tail_samples < 0`
 
 Pulp uses `tail_samples = -1` to mean "infinite" (reverb, delay with
@@ -1000,7 +1032,7 @@ until the descriptor gains a richer topology contract.
 
 ### VST3 SDK is MIT, fetched via `git clone` in setup.sh
 
-`external/vst3sdk` is not checked in. `setup.sh` clones v3.8.0_build_66 by
+`external/vst3sdk` is not checked in. `setup.sh` clones v3.8.1_build_84 by
 default. If you bump the SDK version, also update the note in
 `docs/guides/formats.md` and verify `public.sdk/source/...` ABI didn't
 shift.
@@ -1426,3 +1458,81 @@ editor, or nothing to prewarm, costs one virtual call. The editor itself does
 not change: an open that races the worker waits for the in-flight result
 instead of compiling again. Details: `view-bridge`, "What the host shows while
 it waits".
+
+## Host-normalized writes keep continuous values exact
+
+VST3 is the one format whose host writes normalized values, and
+`ParamRange::denormalize` rounds to `range.step`. A `Continuous` parameter
+advertises `stepCount = 0`, so rounding a host write there made the same
+automation land on different values than AU and CLAP, which write plain values
+the store only clamps (a 0.1 dB step turned -19.963 dB into -20.0 dB). Every
+VST3 write path (the process parameter queue, `setParamNormalized`, and the
+value-to-string display) goes through `state::value_from_host_normalized`,
+which drops the step for continuous kinds and still snaps discrete ones. A new
+normalized write path must use it too; `[vst3][param][host]` in
+`test_vst3_plugin_state.cpp` pins both write paths.
+
+The mapping is done in double precision for a linear range, and every value
+the adapter reports back (the default, output parameters, editor edits, the
+post-restore sync) goes through its inverse, `state::host_normalized_from_value`.
+In single precision, with fused multiply-add, a host's own 0 dB on a -60..24
+range came back as 1.4e-6 dB: a gain of 1 + 1 ulp, and a failed null test.
+Two more rules keep unity bit-exact. `setParamNormalized` skips the store write
+when the value is an echo of what the store already holds, because the double
+round trip can differ from it in the last bit. `setState` syncs only the VST3
+parameter objects (`SingleComponentEffect::setParamNormalized`), never
+rewriting the restored store. `[null-test]` cases in
+`test_vst3_plugin_state.cpp`, `test_au_v2_effect.cpp` and `test_clap_entry.cpp`
+null PulpGain at 0 dB through all three formats. They live in core tests on
+purpose: the required macOS gate builds with examples off, so a null test kept
+in `examples/pulp-gain` would never run there.
+
+The editor edit callback maps the bridge's snapshot (`plain`), never a fresh
+`store_.get_value()`: another listener on the same write can run a host
+automation write first, and a re-read would report the host's value to the host
+as the user's edit. `[vst3][editor][automation]` in `test_vst3_plugin_state.cpp`
+interleaves exactly that.
+
+## Automation points: one store write per parameter; the queue only on opt-in
+
+Sample-accurate automation is the default: `Processor::wants_sample_accurate_parameters()`
+(default true, asked once when the adapter creates the processor). Opted out
+(the override returns false), the decode loop reads each
+`IParamValueQueue`'s last point only, writes the store once and leaves
+`param_events_` empty and unsorted. Opted in, it does what follows.
+
+Sample-accurate is the default, and block-rate the opt-out, because an opt-in
+default would silently zipper existing plug-ins: a processor that reads the
+queue would get an empty one and step its automation once per block, with
+nothing failing or warning. An opted-out processor that still reads
+`param_events()` is recorded on the audio thread (`Processor::param_events()`
+does one relaxed store) and logged once by `report_param_events_while_opted_out()`
+in `setActive(false)` and `terminate()`.
+
+VST3 delivers one time-ordered `IParamValueQueue` per parameter, so a block's
+`param_events_` arrive as one sorted run per parameter. An insertion sort over
+those interleaved runs was quadratic (about 28 us for 32 parameters x 16
+points), and writing the store per point cost a revisioned atomic write and a
+listener notification each. The decode loop now pushes every point to the
+sample-accurate queue, writes the store once per parameter with its last
+value, and sorts with `ParameterEventQueue::sort(scratch, counts)`, a stable
+counting sort over scratch sized in `setupProcessing()`. When timing
+automation in a private host, run `process()` on a thread other than the one
+that created the plug-in: writes on the creating thread are treated as editor
+edits by `HostParameterEditBridge` and echoed back through `performEdit` and
+`setParamNormalized`, which inflated the old numbers by several times.
+
+## Instantiation is a hot path: no Foundation singletons, no info logs
+
+Hosts and scanners instantiate plug-ins far more often than they open
+editors, and a scanner or validator process may not have created
+`NSProcessInfo` or `NSBundle` yet. Host detection (`detect_host_info()` ->
+`current_auv3_wrapper_identifier()`) used to cost about 300 us per
+instantiation in such a process because it asked `NSProcessInfo` for the
+process name and `NSBundle` for the main bundle; it now uses `getprogname()`
+and CoreFoundation, and `initialize()` dropped from about 320 us to 40 us.
+Each `runtime::log_info` costs tens of microseconds (an `os_log` record plus
+an unbuffered stderr write), so per-instance happy-path lifecycle messages
+(VST3 initialized / ARA factory published / bus arrangement accepted, and the
+AU v2 and CLAP equivalents) are `log_debug`; keep `log_info` for refusals and
+accommodations a user may need to see.

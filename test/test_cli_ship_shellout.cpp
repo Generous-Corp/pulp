@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -499,6 +500,113 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     fs::remove_all(root);
 }
+
+// An SDK consumer project has pulp.toml and no core/. `pulp ship` resolves it
+// as the project root and takes the signing preflight from the selected SDK's
+// share/pulp/ship, since there is no Pulp checkout to take it from.
+static fs::path make_fake_consumer_project(std::string_view name, bool with_build_cache) {
+    auto root = pulp::test::make_unique_temp_dir("pulp-ship-consumer-" + std::string(name));
+    {
+        std::ofstream cmake(root / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.24)\n"
+              << "project(FakeConsumerPlugin VERSION 1.0.0)\n";
+    }
+    {
+        std::ofstream toml(root / "pulp.toml");
+        toml << "sdk_version = \"latest\"\n";
+    }
+    if (with_build_cache) {
+        fs::create_directories(root / "build");
+        std::ofstream cache(root / "build" / "CMakeCache.txt");
+        cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << root.string() << "\n";
+    }
+    return root;
+}
+
+// An installed SDK under <pulp_home>/sdk/<version> carrying a stub preflight.
+static void make_fake_installed_sdk(const fs::path& pulp_home, std::string_view version) {
+    auto sdk = pulp_home / "sdk" / std::string(version);
+    fs::create_directories(sdk / "lib" / "cmake" / "Pulp");
+    std::ofstream(sdk / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake") << "\n";
+    std::ofstream(sdk / "version.txt") << version << "\n";
+    auto ship_dir = sdk / "share" / "pulp" / "ship";
+    fs::create_directories(ship_dir);
+    auto stub = ship_dir / "ensure_signing_ready.sh";
+    {
+        std::ofstream out(stub);
+        out << "#!/usr/bin/env bash\n"
+               "echo \"SDK-DOCTOR-STUB-RAN args=$*\"\n"
+               "exit 0\n";
+    }
+    fs::permissions(stub, fs::perms::owner_all | fs::perms::group_read | fs::perms::others_read);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship doctor in an SDK consumer project runs the SDK's preflight",
+                 "[cli][shellout][ship][doctor][sdk-consumer]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    make_fake_installed_sdk(home_dir, "0.1.0");
+    auto root = make_fake_consumer_project("doctor", /*with_build_cache=*/false);
+    REQUIRE_FALSE(fs::exists(root / "core"));
+
+    auto r = run_pulp_in(root, {"ship", "doctor", "--print-env"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE_FALSE(contains(combined, "not in a Pulp project directory"));
+    REQUIRE(contains(combined, "SDK-DOCTOR-STUB-RAN args=--print-env"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship doctor in an SDK consumer project names the SDK path it needs",
+                 "[cli][shellout][ship][doctor][sdk-consumer]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    // The SDK is installed but predates the shipped preflight.
+    make_fake_installed_sdk(home_dir, "0.1.0");
+    fs::remove(home_dir / "sdk" / "0.1.0" / "share" / "pulp" / "ship" / "ensure_signing_ready.sh");
+    auto root = make_fake_consumer_project("doctor-old-sdk", false);
+
+    auto r = run_pulp_in(root, {"ship", "doctor"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(combined, "missing"));
+    REQUIRE(contains(combined,
+                     (fs::path("share") / "pulp" / "ship" / "ensure_signing_ready.sh").string()));
+
+    fs::remove_all(root);
+}
+
+#if defined(__APPLE__)
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package in an SDK consumer project reaches the packager",
+                 "[cli][shellout][ship][package][sdk-consumer]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    make_fake_installed_sdk(home_dir, "0.1.0");
+    auto root = make_fake_consumer_project("package", /*with_build_cache=*/true);
+
+    auto r = run_pulp_in(root, {"ship", "package", "--version", "1.0.0"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE_FALSE(contains(combined, "not in a Pulp project directory"));
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output, "nothing to package"));
+    REQUIRE(fs::exists(root / "artifacts"));
+
+    fs::remove_all(root);
+}
+#endif
 
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship sign in project without identity reports signing guidance",
@@ -1030,13 +1138,184 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     auto r = run_pulp_in(root, {"ship", "package", "--version", "9.9.9"});
     REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 0);
+    // Nothing to package is a failed `package`, as on Linux: `release` and
+    // scripts read the exit code, not the summary line.
+    REQUIRE(r.exit_code == 1);
     REQUIRE(contains(r.stdout_output, "Created 0 .pkg and 0 .dmg artifacts"));
+    REQUIRE(contains(r.stderr_output, "nothing to package"));
     REQUIRE(fs::exists(root / "artifacts"));
     REQUIRE(fs::is_empty(root / "artifacts"));
 
     fs::remove_all(root);
 }
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package exits non-zero when the combined installer fails",
+                 "[cli][shellout][ship][package]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("package-combined-fails", true);
+    make_fake_bundle(root, "VST3", "FakeShipPlugin.vst3");
+    make_fake_bundle(root, "CLAP", "FakeShipPlugin.clap");
+
+    // HOME is the fixture's empty directory, so no installer identity by this
+    // name can exist and productbuild's signing step must fail.
+    auto r = run_pulp_in(root, {"ship", "package", "--version", "9.9.9", "--installer-identity",
+                                "Developer ID Installer: Pulp Fixture Nobody (0000000000)"});
+    REQUIRE_FALSE(r.timed_out);
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stderr_output, "FAILED to create combined installer"));
+    REQUIRE(contains(r.stderr_output, "installer(s) failed to build"));
+    REQUIRE(contains(r.stdout_output, "Created 0 .pkg and 0 .dmg artifacts"));
+
+    fs::remove_all(root);
+}
+
+#if defined(PULP_SHIP_STRIP_FIXTURE)
+namespace {
+
+fs::path make_module_bundle(const fs::path& root, std::string_view format, std::string_view name,
+                            std::string_view ext) {
+    auto bundle = root / "build" / std::string(format) / (std::string(name) + std::string(ext));
+    fs::create_directories(bundle / "Contents" / "MacOS");
+    {
+        std::ofstream plist(bundle / "Contents" / "Info.plist");
+        plist << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+              << "<plist version=\"1.0\"><dict>"
+              << "<key>CFBundleExecutable</key><string>" << name << "</string>"
+              << "<key>CFBundleIdentifier</key><string>com.pulp.test." << name << "</string>"
+              << "<key>CFBundlePackageType</key><string>BNDL</string>"
+              << "<key>CFBundleVersion</key><string>1.0.0</string>"
+              << "</dict></plist>\n";
+    }
+    fs::copy_file(PULP_SHIP_STRIP_FIXTURE, bundle / "Contents" / "MacOS" / std::string(name),
+                  fs::copy_options::overwrite_existing);
+    return bundle;
+}
+
+// nm lists a local text symbol with a lower-case "t".
+bool has_local_fixture_symbol(const fs::path& binary) {
+    auto r = ChildProcess::run("/usr/bin/nm", {binary.string()}, ProcessOptions{});
+    std::istringstream lines(r.stdout_output);
+    for (std::string line; std::getline(lines, line);) {
+        if (contains(line, " t ") && contains(line, "pulp_ship_strip_fixture_local"))
+            return true;
+    }
+    return false;
+}
+
+fs::path packaged_binary(const fs::path& pkg, const fs::path& out, std::string_view name) {
+    auto r = ChildProcess::run("/usr/sbin/pkgutil", {"--expand-full", pkg.string(), out.string()},
+                               ProcessOptions{});
+    REQUIRE(r.exit_code == 0);
+    const auto suffix = fs::path("Contents") / "MacOS" / std::string(name);
+    for (const auto& entry : fs::recursive_directory_iterator(out)) {
+        const auto& p = entry.path();
+        if (p.filename() == std::string(name) && p.parent_path().filename() == "MacOS" &&
+            entry.is_regular_file())
+            return p;
+    }
+    FAIL("no packaged " << suffix.string() << " under " << out.string());
+    return {};
+}
+
+} // namespace
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package strips local symbols from the shipped copy only",
+                 "[cli][shellout][ship][package][strip]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("package-strip", true);
+    auto bundle = make_module_bundle(root, "CLAP", "StripMe", ".clap");
+    const auto build_binary = bundle / "Contents" / "MacOS" / "StripMe";
+    // Control: the fixture really carries the local symbol the case looks for.
+    REQUIRE(has_local_fixture_symbol(build_binary));
+    // codesign embeds entitlements only in an executable's signature, not in a
+    // loadable module's, so a second bundle carries a copy of an executable
+    // to tell whether re-signing the stripped copy keeps them.
+    auto entitled = make_module_bundle(root, "CLAP", "EntMe", ".clap");
+    const auto entitled_binary = entitled / "Contents" / "MacOS" / "EntMe";
+    fs::copy_file("/usr/bin/true", entitled_binary, fs::copy_options::overwrite_existing);
+    // Sign it with an entitlement, as `pulp ship sign` would.
+    const auto entitlements_plist = root / "fixture.entitlements";
+    {
+        std::ofstream ent(entitlements_plist);
+        ent << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+               "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+            << "<plist version=\"1.0\"><dict>"
+            << "<key>com.apple.security.cs.disable-library-validation</key><true/>"
+            << "</dict></plist>\n";
+    }
+    REQUIRE(ChildProcess::run("/usr/bin/codesign",
+                              {"--force", "--sign", "-", "--entitlements",
+                               entitlements_plist.string(), entitled.string()},
+                              ProcessOptions{})
+                .exit_code == 0);
+    auto entitlements_of = [](const fs::path& signed_bundle) {
+        auto e = ChildProcess::run("/usr/bin/codesign",
+                                   {"-d", "--entitlements", "-", "--xml", signed_bundle.string()},
+                                   ProcessOptions{});
+        REQUIRE(e.exit_code == 0);
+        return e.stdout_output;
+    };
+    const auto original_entitlements = entitlements_of(entitled);
+    REQUIRE(contains(original_entitlements, "disable-library-validation"));
+
+    auto r = run_pulp_in(root, {"ship", "package", "--version", "1.0.0", "--separate"});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output, "stripped local symbols from StripMe.clap"));
+
+    const auto pkg = root / "artifacts" / "StripMe-CLAP-1.0.0.pkg";
+    REQUIRE(fs::exists(pkg));
+    const auto shipped = packaged_binary(pkg, root / "expanded", "StripMe");
+    CHECK_FALSE(has_local_fixture_symbol(shipped));
+    // The build output keeps its symbols for debugging and nm-based checks.
+    CHECK(has_local_fixture_symbol(build_binary));
+    // A dSYM of the unstripped executable is written before stripping: it
+    // keeps the local symbol under the UUID the shipped binary carries, so a
+    // crash report from the shipped copy still symbolicates.
+    const auto dsym = root / "artifacts" / "symbols" / "CLAP" / "StripMe.clap.dSYM";
+    const auto dsym_binary = dsym / "Contents" / "Resources" / "DWARF" / "StripMe";
+    REQUIRE(fs::is_regular_file(dsym_binary));
+    CHECK(has_local_fixture_symbol(dsym_binary));
+    auto uuid_of = [](const fs::path& binary) {
+        auto u = ChildProcess::run("/usr/bin/xcrun", {"dwarfdump", "--uuid", binary.string()},
+                                   ProcessOptions{});
+        REQUIRE(u.exit_code == 0);
+        const auto at = u.stdout_output.find("UUID: ");
+        REQUIRE(at != std::string::npos);
+        return u.stdout_output.substr(at + 6, 36);
+    };
+    CHECK(uuid_of(dsym_binary) == uuid_of(shipped));
+    // Re-signing the stripped copy keeps the original's entitlements.
+    REQUIRE(contains(r.stdout_output, "stripped local symbols from EntMe.clap"));
+    const auto shipped_entitled =
+        packaged_binary(root / "artifacts" / "EntMe-CLAP-1.0.0.pkg", root / "expanded-ent", "EntMe");
+    CHECK(entitlements_of(shipped_entitled.parent_path().parent_path().parent_path()) ==
+          original_entitlements);
+    // The stripped copy carries a valid (ad hoc) signature, so it still loads.
+    auto verify = ChildProcess::run(
+        "/usr/bin/codesign",
+        {"--verify", shipped.parent_path().parent_path().parent_path().string()}, ProcessOptions{});
+    CHECK(verify.exit_code == 0);
+
+    auto kept = run_pulp_in(
+        root, {"ship", "package", "--version", "1.0.1", "--separate", "--keep-symbols"});
+    REQUIRE(kept.exit_code == 0);
+    const auto kept_binary = packaged_binary(root / "artifacts" / "StripMe-CLAP-1.0.1.pkg",
+                                             root / "expanded-kept", "StripMe");
+    CHECK(has_local_fixture_symbol(kept_binary));
+
+    fs::remove_all(root);
+}
+#endif
 #elif defined(__linux__)
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package on Linux with no plugin bundles reports missing plugins",

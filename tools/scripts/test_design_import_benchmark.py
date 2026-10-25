@@ -509,5 +509,183 @@ class ReportTests(unittest.TestCase):
         self.assertIn("Fixture: `fake`", out.getvalue())
 
 
+def receipt(lane: str, frame_ms: float, *, confounded: bool = False, paint: int = 50,
+            allocations: float = 100.0, slope: float = 0.0, layout: int = 600,
+            consistent: bool = True) -> dict:
+    """A v2 receipt with the fields the speed-win judge reads."""
+    return {
+        "lane": lane,
+        "host_conditions": {"confounded": confounded,
+                            "confounders": ["load_1m 40.00 > cores/4 (7.50)"] if confounded else []},
+        "cycles": {"phys_footprint_slope_bytes_per_cycle": slope},
+        "interactive": {
+            "samples": 600,
+            "frame_ms_median": frame_ms,
+            "frame_ms_p95": frame_ms * 1.2,
+            "allocations_per_frame_median": allocations,
+            "paint_commands_last": paint,
+            "stages": {"update": {"median_ms": frame_ms / 4, "p95_ms": frame_ms / 3},
+                       "consistent": consistent},
+            "counters": {"counter_schema": "pulp-design-import-benchmark-counters-v1",
+                         "layout_passes": layout, "paint_commands_total": paint * 600,
+                         "slot_text_mismatches": 0},
+        },
+    }
+
+
+NOMINAL = [{"thermal_state": "nominal"}]
+
+
+class CompareTests(unittest.TestCase):
+    def test_abab_order_interleaves_sides(self) -> None:
+        self.assertEqual(dib.abab_order("a", "b", 2),
+                         [("baseline", "a"), ("candidate", "b"),
+                          ("baseline", "a"), ("candidate", "b")])
+
+    def test_win_needs_mechanism_ratio_and_quiet_host(self) -> None:
+        base = [receipt("baked-native", 1.0) for _ in range(5)]
+        cand = [receipt("retained", 0.7, layout=0) for _ in range(5)]
+        result = dib.judge(base, cand, mechanism=("layout_passes", "down"), thermal=NOMINAL)
+        self.assertEqual(result["verdict"], "win", result)
+        self.assertAlmostEqual(result["ratio"], 0.7)
+        self.assertTrue(result["mechanism"]["moved"])
+
+    def test_planted_confounded_rep_is_never_a_win(self) -> None:
+        # Planted negative: the same winning numbers, one rep taken on a
+        # contended host.
+        base = [receipt("baked-native", 1.0) for _ in range(5)]
+        cand = [receipt("retained", 0.7, layout=0) for _ in range(4)]
+        cand.append(receipt("retained", 0.7, layout=0, confounded=True))
+        result = dib.judge(base, cand, mechanism=("layout_passes", "down"), thermal=NOMINAL)
+        self.assertEqual(result["verdict"], "confounded")
+        self.assertIn("load_1m 40.00 > cores/4 (7.50)", result["confounders"])
+        # A hot or unobservable thermal state confounds as well.
+        clean = [receipt("retained", 0.7, layout=0) for _ in range(5)]
+        for state in ({"thermal_state": "fair"},
+                      {"thermal_state": None, "reason": "no Apple thermal-state helper"}):
+            with self.subTest(state=state):
+                self.assertEqual(dib.judge(base, clean, mechanism=("layout_passes", "down"),
+                                           thermal=[state])["verdict"], "confounded")
+        # A receipt that does not say whether it was confounded is not quiet.
+        unknown = [dict(r) for r in clean]
+        del unknown[0]["host_conditions"]
+        self.assertEqual(dib.judge(base, unknown, mechanism=("layout_passes", "down"),
+                                   thermal=NOMINAL)["verdict"], "confounded")
+
+    def test_partial_evidence_is_work_moved_or_no_win(self) -> None:
+        base = [receipt("baked-native", 1.0) for _ in range(5)]
+        fast = [receipt("retained", 0.7, layout=0) for _ in range(5)]
+        # Timing without a declared counter.
+        self.assertEqual(dib.judge(base, fast, thermal=NOMINAL)["verdict"], "work-moved")
+        # The counter without the timing.
+        slow = [receipt("retained", 0.95, layout=0) for _ in range(5)]
+        moved = dib.judge(base, slow, mechanism=("layout_passes", "down"), thermal=NOMINAL)
+        self.assertEqual(moved["verdict"], "work-moved")
+        self.assertIn("frame median ratio 0.950 > 0.80", moved["blockers"])
+        # Neither.
+        self.assertEqual(dib.judge(base, slow, mechanism=("layout_passes", "up"),
+                                   thermal=NOMINAL)["verdict"], "no-win")
+        # Too few reps, more allocations, a rising memory slope, or a different
+        # paint stream each block a win.
+        self.assertEqual(dib.judge(base[:4], fast[:4], mechanism=("layout_passes", "down"),
+                                   thermal=NOMINAL)["verdict"], "insufficient-reps")
+        for name, cand in {
+            "allocations": [receipt("r", 0.7, layout=0, allocations=101.0) for _ in range(5)],
+            "slope": [receipt("r", 0.7, layout=0, slope=4.0e6) for _ in range(5)],
+            "paint": [receipt("r", 0.7, layout=0, paint=51) for _ in range(5)],
+        }.items():
+            with self.subTest(name):
+                result = dib.judge(base, cand, mechanism=("layout_passes", "down"),
+                                   thermal=NOMINAL)
+                self.assertEqual(result["verdict"], "work-moved", result["blockers"])
+        # A Skia target counts no paint commands; the untimed recorded count
+        # is what has to agree, and two different trees must not "agree" on 0.
+        skia_base = [dict(receipt("b", 1.0), paint_commands_recorded=50) for _ in range(5)]
+        for r in skia_base:
+            r["interactive"] = dict(r["interactive"], paint_commands_last=0)
+        other_tree = [dict(receipt("r", 0.7, layout=0), paint_commands_recorded=44)
+                      for _ in range(5)]
+        for r in other_tree:
+            r["interactive"] = dict(r["interactive"], paint_commands_last=0)
+        diverged = dib.judge(skia_base, other_tree, mechanism=("layout_passes", "down"),
+                             thermal=NOMINAL)
+        self.assertFalse(diverged["agreement"]["paint_stream_count_equal"])
+        self.assertEqual(diverged["verdict"], "work-moved")
+        inconsistent = [receipt("r", 0.7, layout=0, consistent=False) for _ in range(5)]
+        self.assertEqual(dib.judge(base, inconsistent, mechanism=("layout_passes", "down"),
+                                   thermal=NOMINAL)["verdict"], "instrument-inconsistent")
+
+    def test_named_stage_is_judged(self) -> None:
+        base = [receipt("baked-native", 1.0) for _ in range(5)]
+        cand = [receipt("retained", 0.7, layout=0) for _ in range(5)]
+        result = dib.judge(base, cand, stage="update", mechanism=("layout_passes", "down"),
+                           thermal=NOMINAL)
+        self.assertAlmostEqual(result["stage_median_ms"]["baseline"], 0.25)
+        with self.assertRaises(ValueError):
+            dib.parse_mechanism("layout_passes:sideways")
+        self.assertEqual(dib.parse_mechanism("image_decodes:zero"), ("image_decodes", "zero"))
+
+    def test_run_compare_runs_separate_processes_in_abab_order(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **kwargs: object) -> object:
+            calls.append(cmd)
+            lane = next(a for a in cmd if a.startswith("--lane=")).split("=", 1)[1]
+            out = pathlib.Path(next(a for a in cmd if a.startswith("--output=")).split("=", 1)[1])
+            frame = 1.0 if lane == "baked-native" else 0.7
+            body = receipt(lane, frame, layout=600 if lane == "baked-native" else 0)
+            body["idle"] = {"counters": {"counter_schema": "pulp-design-import-benchmark-counters-v1",
+                                         **{name: 0 for name in dib.COUNTER_FIELDS}}}
+            body["interactive"]["counters"].update(
+                {name: body["interactive"]["counters"].get(name, 0) for name in dib.COUNTER_FIELDS})
+            out.write_text(json.dumps(body), encoding="utf-8")
+            return object()
+
+        with tempfile.TemporaryDirectory() as td:
+            result = dib.run_compare(pathlib.Path("/tmp/fake-bench"), "baked-native", "retained", 5,
+                                     ["--frames=600"], pathlib.Path(td),
+                                     mechanism=("layout_passes", "down"),
+                                     observe=lambda: {"thermal_state": "nominal"},
+                                     runner=fake_run)
+        self.assertEqual([c[1] for c in calls[:4]], ["--lane=baked-native", "--lane=retained",
+                                                    "--lane=baked-native", "--lane=retained"])
+        self.assertTrue(all("--frames=600" in c for c in calls))
+        self.assertEqual(len(result["thermal_observations"]), 20)
+        self.assertEqual(result["verdict"], "win")
+
+    def test_thermal_helper_output_is_validated(self) -> None:
+        class Done:
+            def __init__(self, code: int, out: str) -> None:
+                self.returncode, self.stdout = code, out
+
+        good = json.dumps({"schema": dib.THERMAL_SCHEMA, "thermal_state": "nominal",
+                           "source": "Foundation.ProcessInfo.thermalState"})
+        if sys.platform != "darwin":
+            self.assertIsNone(dib.observe_thermal()["thermal_state"])
+            return
+        self.assertEqual(dib.observe_thermal(runner=lambda *a, **k: Done(0, good))["thermal_state"],
+                         "nominal")
+        for name, done in {"exit": Done(2, ""), "json": Done(0, "not json"),
+                           "schema": Done(0, json.dumps({"schema": "other"}))}.items():
+            with self.subTest(name):
+                self.assertIsNone(dib.observe_thermal(runner=lambda *a, d=done, **k: d)["thermal_state"])
+
+    def test_mechanism_reads_v2_resource_series(self) -> None:
+        counters = {"layout_passes": 3, "resources": {
+            "image_decodes": {"total": 12}, "scene_cache": {"replays": {"total": 5}}}}
+        self.assertEqual(dib.counter_total(counters, "layout_passes"), 3)
+        self.assertEqual(dib.counter_total(counters, "image_decodes"), 12)
+        self.assertEqual(dib.counter_total(counters, "scene_cache.replays"), 5)
+        self.assertIsNone(dib.counter_total(counters, "gpu_uploads"))
+        phase = {"samples": 6, "counters": counters}
+        self.assertEqual(dib.per_frame_counter(phase, "image_decodes"), 2.0)
+
+    def test_phase_rss_reads_v2_memory_and_v1_flat_fields(self) -> None:
+        self.assertEqual(dib.phase_rss({"memory": {"rss": {"p99_bytes": 7}}}, "p99"), 7)
+        self.assertIsNone(dib.phase_rss({"memory": {"rss": {"p99_bytes": None}}}, "p99"))
+        self.assertEqual(dib.phase_rss({"rss_p99_bytes": 9}, "p99"), 9)
+        self.assertEqual(dib.format_bytes(None), "n/a")
+
+
 if __name__ == "__main__":
     unittest.main()

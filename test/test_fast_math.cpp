@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <vector>
 #include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 
@@ -78,6 +79,108 @@ TEST_CASE("FastMath tanh clamps exactly beyond approximation range", "[signal][f
     REQUIRE(FastMath::tanh(-4.0001f) == -1.0f);
     REQUIRE(FastMath::tanh(4.0001f) == 1.0f);
     REQUIRE(FastMath::tanh(100.0f) == 1.0f);
+}
+
+namespace {
+
+/// Worst absolute error against double `std::tanh`, plus the largest output,
+/// over every `stride`-th non-negative float up to `limit`.
+template <typename F>
+std::pair<double, float> tanh_error_scan(F&& approx, std::uint32_t stride, float limit) {
+    double worst = 0.0;
+    float largest = 0.0f;
+    for (std::uint32_t bits = 0;; bits += stride) {
+        const float x = std::bit_cast<float>(bits);
+        if (!(x <= limit))
+            break;
+        const float y = approx(x);
+        worst =
+            std::max(worst, std::abs(static_cast<double>(y) - std::tanh(static_cast<double>(x))));
+        largest = std::max(largest, y);
+    }
+    return {worst, largest};
+}
+
+} // namespace
+
+TEST_CASE("FastMath tanh_minimax holds its worst-case bound across the float range",
+          "[signal][fast_math]") {
+    // A stride co-prime with the mantissa walks every binade densely. The same
+    // scan over tanh() must see that function's 6.7e-4 seam at |x| = 4, which
+    // shows the instrument reaches the region where a clamp hides its error.
+    const auto pade = tanh_error_scan([](float x) { return FastMath::tanh(x); }, 101u, 30.0f);
+    const auto minimax =
+        tanh_error_scan([](float x) { return FastMath::tanh_minimax(x); }, 101u, 30.0f);
+    REQUIRE(pade.first > 6.0e-4);
+    REQUIRE(minimax.first < 3.8e-6);
+    REQUIRE(pade.first / minimax.first > 150.0);
+    REQUIRE(minimax.second == 1.0f);
+}
+
+TEST_CASE("FastMath tanh_minimax is odd, unit-slope, and seamless at its clamp",
+          "[signal][fast_math]") {
+    for (float x : {1e-30f, 1e-6f, 0.1f, 0.5f, 1.0f, 2.5f, 6.99f, 7.0f, 7.01f, 1e6f}) {
+        REQUIRE(FastMath::tanh_minimax(-x) == -FastMath::tanh_minimax(x));
+        REQUIRE(std::abs(FastMath::tanh_minimax(x)) <= 1.0f);
+    }
+    REQUIRE(FastMath::tanh_minimax(0.0f) == 0.0f);
+    // Unit small-signal gain is a constraint of the fit, not a fitted outcome.
+    REQUIRE_THAT(FastMath::tanh_minimax(1e-4f) / 1e-4f, WithinAbs(1.0, 1e-6));
+    // f(7) = 1 and f'(7) = 0 (before the 2^-21 numerator scale): approaching
+    // the clamp from inside, the value is already within the tail error of 1
+    // and has stopped rising.
+    REQUIRE_THAT(FastMath::tanh_minimax(6.999f), WithinAbs(1.0, 2e-6));
+    REQUIRE(FastMath::tanh_minimax(7.5f) == 1.0f);
+    REQUIRE(FastMath::tanh_minimax(-7.5f) == -1.0f);
+    REQUIRE(FastMath::tanh_minimax(std::numeric_limits<float>::max()) == 1.0f);
+    REQUIRE(std::isnan(FastMath::tanh_minimax(std::numeric_limits<float>::quiet_NaN())));
+    // The Lambert form's seam, for contrast: a 6.7e-4 jump across x = 4.
+    REQUIRE(FastMath::tanh(4.0001f) - FastMath::tanh(3.9999f) > 6.0e-4f);
+    REQUIRE(FastMath::tanh_minimax(4.0001f) - FastMath::tanh_minimax(3.9999f) < 1.0e-6f);
+}
+
+TEST_CASE("FastMath tanh_minimax block form agrees with the scalar form", "[signal][fast_math]") {
+    // Lengths straddle the 16-sample vector step so both the vector body and
+    // the scalar tail run; the in-place call exercises output == input.
+    for (std::size_t count :
+         {std::size_t{1}, std::size_t{15}, std::size_t{16}, std::size_t{37}, std::size_t{1000}}) {
+        std::vector<float> input(count);
+        for (std::size_t i = 0; i < count; ++i)
+            input[i] = 12.0f * std::sin(0.7f * static_cast<float>(i) + 0.3f);
+        std::vector<float> output(count, 0.0f);
+        FastMath::tanh_minimax(input.data(), output.data(), count);
+        std::vector<float> in_place = input;
+        FastMath::tanh_minimax(in_place.data(), in_place.data(), count);
+        for (std::size_t i = 0; i < count; ++i) {
+            const float x = input[i];
+            INFO("count " << count << " x " << x);
+            REQUIRE(in_place[i] == output[i]);
+            REQUIRE(std::abs(output[i]) <= 1.0f);
+            REQUIRE(std::abs(static_cast<double>(output[i]) - std::tanh(static_cast<double>(x))) <
+                    3.8e-6);
+            // Inside the clamp the two forms evaluate the same rational.
+            if (std::abs(x) <= 7.0f)
+                REQUIRE(output[i] == FastMath::tanh_minimax(x));
+            else
+                REQUIRE(std::abs(output[i] - FastMath::tanh_minimax(x)) < 5e-7f);
+        }
+    }
+    // Every float in [0, 8] by stride, through the vector body.
+    std::vector<float> xs;
+    for (std::uint32_t bits = 0;; bits += 4099u) {
+        const float x = std::bit_cast<float>(bits);
+        if (!(x <= 8.0f))
+            break;
+        xs.push_back(x);
+        xs.push_back(-x);
+    }
+    std::vector<float> ys(xs.size());
+    FastMath::tanh_minimax(xs.data(), ys.data(), xs.size());
+    double worst = 0.0;
+    for (std::size_t i = 0; i < xs.size(); ++i)
+        worst = std::max(
+            worst, std::abs(static_cast<double>(ys[i]) - std::tanh(static_cast<double>(xs[i]))));
+    REQUIRE(worst < 3.8e-6);
 }
 
 TEST_CASE("FastMath sin approximation", "[signal][fast_math]") {
@@ -485,4 +588,115 @@ TEST_CASE("FastMath log2 orders common gain ratios", "[signal][fast_math]") {
     REQUIRE(FastMath::log2(0.5f) < FastMath::log2(1.0f));
     REQUIRE(FastMath::log2(1.0f) < FastMath::log2(2.0f));
     REQUIRE(FastMath::log2(2.0f) < FastMath::log2(4.0f));
+}
+
+namespace {
+
+// FastMath::tanh's contract written with early returns: exactly +/-1 beyond
+// |x| = 4, the [7/6] Pade form inside.
+float tanh_reference(float x) {
+    if (x < -4.0f)
+        return -1.0f;
+    if (x > 4.0f)
+        return 1.0f;
+    const float x2 = x * x;
+    const float num = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
+    const float den = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
+    return num / den;
+}
+
+double ulp_of(double value) {
+    const float f = static_cast<float>(std::abs(value));
+    return static_cast<double>(std::nextafter(f, std::numeric_limits<float>::infinity()) - f);
+}
+
+} // namespace
+
+TEST_CASE("FastMath::tanh is bit-identical to its saturating Pade contract",
+          "[signal][fast-math][tanh]") {
+    std::size_t mismatches = 0;
+    for (float x = -12.0f; x <= 12.0f; x += 1.0e-4f) {
+        const float a = FastMath::tanh(x);
+        const float b = tanh_reference(x);
+        mismatches += std::bit_cast<std::uint32_t>(a) != std::bit_cast<std::uint32_t>(b);
+    }
+    CHECK(mismatches == 0);
+    CHECK(FastMath::tanh(4.0f) == tanh_reference(4.0f));
+    CHECK(FastMath::tanh(-4.0f) == tanh_reference(-4.0f));
+    CHECK(FastMath::tanh(std::nextafter(4.0f, 5.0f)) == 1.0f);
+    CHECK(FastMath::tanh(std::nextafter(-4.0f, -5.0f)) == -1.0f);
+    CHECK(FastMath::tanh(1.0e30f) == 1.0f);
+    CHECK(FastMath::tanh(-1.0e30f) == -1.0f);
+    CHECK(FastMath::tanh(std::numeric_limits<float>::infinity()) == 1.0f);
+    CHECK(FastMath::tanh(-std::numeric_limits<float>::infinity()) == -1.0f);
+    CHECK(std::isnan(FastMath::tanh(std::numeric_limits<float>::quiet_NaN())));
+}
+
+TEST_CASE("FastMath::log10_accurate stays within a few ulps of libm",
+          "[signal][fast-math][decibel]") {
+    double worst_ulps = 0.0;
+    for (float x = 1.0e-10f; x < 1.0e6f; x *= 1.0001f) {
+        const double reference = std::log10(static_cast<double>(x));
+        const double err =
+            std::abs(static_cast<double>(pulp::signal::FastMath::log10_accurate(x)) - reference);
+        // Near log10(x) = 0 the result ulp shrinks without bound; hold those
+        // inputs to an absolute error instead.
+        if (std::abs(reference) < 1.0e-3)
+            CHECK(err < 1.0e-9);
+        else
+            worst_ulps = std::max(worst_ulps, err / ulp_of(reference));
+    }
+    CHECK(worst_ulps <= 4.0);
+    CHECK(pulp::signal::FastMath::log10_accurate(1.0f) == 0.0f);
+    CHECK(pulp::signal::FastMath::log10_accurate(1000.0f) == 3.0f);
+    CHECK(pulp::signal::FastMath::log10_accurate(1.0e-10f) ==
+          static_cast<float>(std::log10(static_cast<double>(1.0e-10f))));
+}
+
+TEST_CASE("FastMath::exp10_accurate stays within a few parts in 1e7 of libm and saturates like pow",
+          "[signal][fast-math][decibel]") {
+    double worst = 0.0;
+    for (float x = -37.0f; x < 38.0f; x += 1.0e-4f) {
+        const double reference = std::pow(10.0, static_cast<double>(x));
+        worst = std::max(
+            worst,
+            std::abs(static_cast<double>(pulp::signal::FastMath::exp10_accurate(x)) - reference) /
+                reference);
+    }
+    CHECK(worst < 2.0e-7);
+    CHECK(pulp::signal::FastMath::exp10_accurate(0.0f) == 1.0f);
+    CHECK(std::isinf(pulp::signal::FastMath::exp10_accurate(39.0f)));
+    CHECK(std::isinf(pulp::signal::FastMath::exp10_accurate(1.0e30f)));
+    CHECK(pulp::signal::FastMath::exp10_accurate(-46.0f) == 0.0f);
+    CHECK(pulp::signal::FastMath::exp10_accurate(-1.0e30f) == 0.0f);
+    CHECK_FALSE(std::signbit(pulp::signal::FastMath::exp10_accurate(-1.0e30f)));
+    // Gradual underflow keeps the subnormal range, as std::pow does.
+    const float sub = pulp::signal::FastMath::exp10_accurate(-40.0f);
+    CHECK(sub > 0.0f);
+    CHECK(std::abs(static_cast<double>(sub) - 1.0e-40) / 1.0e-40 < 1.0e-3);
+}
+
+TEST_CASE("Bit-operation selects match the conditionals they replace",
+          "[signal][fast-math][select]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    CHECK(pulp::signal::detail::select_bits(true, 1.5f, -2.0f) == 1.5f);
+    CHECK(pulp::signal::detail::select_bits(false, 1.5f, -2.0f) == -2.0f);
+    CHECK(std::isnan(pulp::signal::detail::select_bits(true, nan, 0.0f)));
+    CHECK(std::signbit(pulp::signal::detail::select_bits(false, 0.0f, -0.0f)));
+    CHECK(pulp::signal::detail::select_bits(true, 2.0, 3.0) == 2.0);
+    std::size_t mismatches = 0;
+    for (std::uint32_t bits = 0; bits < 0x7f800000u; bits += 4099) {
+        for (const float sign : {1.0f, -1.0f}) {
+            const float x = sign * std::bit_cast<float>(bits);
+            mismatches +=
+                std::bit_cast<std::uint32_t>(pulp::signal::detail::tanh_accurate_bits(x)) !=
+                std::bit_cast<std::uint32_t>(FastMath::tanh_accurate(x));
+            mismatches +=
+                std::bit_cast<std::uint32_t>(pulp::signal::detail::snap_to_zero_bits(x)) !=
+                std::bit_cast<std::uint32_t>(pulp::signal::snap_to_zero(x));
+        }
+    }
+    CHECK(mismatches == 0);
+    CHECK(std::isnan(pulp::signal::detail::tanh_accurate_bits(nan)));
+    CHECK(std::isnan(pulp::signal::detail::snap_to_zero_bits(nan)));
 }

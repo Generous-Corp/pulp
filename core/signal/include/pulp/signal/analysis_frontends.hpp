@@ -165,6 +165,8 @@ class StreamingAnalysisWindowT {
         return static_cast<double>(sum);
     }
 
+    /// Latest rendered spectrum. Bins DC through Nyquist (fft_size / 2 + 1)
+    /// are written; the slots above Nyquist are not.
     [[nodiscard]] const std::array<std::complex<SampleType>, MaxFftSize>&
     spectrum() const noexcept {
         return spectrum_;
@@ -203,7 +205,7 @@ class StreamingAnalysisWindowT {
             if (!std::isfinite(time_frame_[i]))
                 return false;
         }
-        fft_->forward_real(time_frame_.data(), spectrum_.data());
+        fft_->forward_real_half(time_frame_.data(), spectrum_.data());
         for (std::size_t bin = 0; bin <= config_.fft_size / 2u; ++bin) {
             if (!std::isfinite(spectrum_[bin].real()) || !std::isfinite(spectrum_[bin].imag()))
                 return false;

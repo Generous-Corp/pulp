@@ -1,12 +1,19 @@
 #include <pulp/runtime/http.hpp>
 
-// Disable SSL/TLS support to avoid OpenSSL dependency.
-// This must be set BEFORE including httplib.h.
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-#undef CPPHTTPLIB_OPENSSL_SUPPORT
-#endif
-
+// TLS is provided by cpp-httplib's mbedTLS backend: the pulp-cpp-httplib
+// interface target defines CPPHTTPLIB_MBEDTLS_SUPPORT for every TU that
+// includes httplib.h, and httplib verifies the server certificate and hostname
+// by default. OpenSSL is deliberately not used. The backend macros must not be
+// defined or undefined here: they change httplib's class layout, so a TU that
+// disagrees with the interface target ODR-corrupts the shared httplib state.
 #include <httplib.h>
+
+// httplib derives CPPHTTPLIB_SSL_ENABLED from whichever backend macro is set.
+// Without it, httplib::Client rejects every https URL, so refuse to build a
+// client that would silently lose TLS.
+#ifndef CPPHTTPLIB_SSL_ENABLED
+#error "pulp::runtime::http requires a TLS backend (CPPHTTPLIB_MBEDTLS_SUPPORT)"
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -80,10 +87,6 @@ HttpResponse http_request(const HttpRequest& request) {
     }
 
     std::string base = scheme + "://" + host + ":" + std::to_string(port);
-    httplib::Client client(base);
-    client.set_connection_timeout(request.timeout_seconds);
-    client.set_read_timeout(request.timeout_seconds);
-    client.set_write_timeout(request.timeout_seconds);
 
     httplib::Request transport_request;
     transport_request.method = method;
@@ -117,8 +120,27 @@ HttpResponse http_request(const HttpRequest& request) {
             };
     }
 
+    // The client is constructed inside the try: httplib::Client throws
+    // std::invalid_argument for a scheme it cannot serve, and that must surface
+    // as an HttpResponse error rather than escape to the caller.
     httplib::Result result;
     try {
+        httplib::Client client(base);
+        if (scheme == "https") {
+            // Keep chain verification on for an IP-literal host. Without a
+            // verifier httplib's mbedTLS backend drops to VERIFY_NONE for an
+            // IP host (it has no hostname to pin), the handshake records no
+            // verify flags, and the post-handshake check passes vacuously, so
+            // any self-signed certificate carrying the IP in its SAN is
+            // accepted. With a verifier installed the backend runs the chain
+            // check and reports the result per certificate; accepting exactly
+            // the backend's verdict restores the hostname-URL behavior.
+            client.set_server_certificate_verifier(
+                [](const httplib::tls::VerifyContext& context) { return context.preverify_ok; });
+        }
+        client.set_connection_timeout(request.timeout_seconds);
+        client.set_read_timeout(request.timeout_seconds);
+        client.set_write_timeout(request.timeout_seconds);
         result = client.send(transport_request);
     } catch (...) {
         response.error = "HTTP request failed";

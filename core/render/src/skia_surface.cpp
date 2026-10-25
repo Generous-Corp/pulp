@@ -90,7 +90,21 @@ const char* wgpu_texture_format_name(wgpu::TextureFormat format) {
     }
 }
 
+// Installed by set_insert_outcome_hook_for_testing(); null in production.
+SkiaSurface::InsertOutcomeHook g_insert_outcome_hook = nullptr;
+
+// Cleared by set_async_readback_for_testing(false); true in production.
+bool g_async_readback_enabled = true;
+
 }  // namespace
+
+void SkiaSurface::set_insert_outcome_hook_for_testing(InsertOutcomeHook hook) {
+    g_insert_outcome_hook = hook;
+}
+
+void SkiaSurface::set_async_readback_for_testing(bool enabled) {
+    g_async_readback_enabled = enabled;
+}
 
 class SkiaSurfaceImpl : public SkiaSurface {
 public:
@@ -188,6 +202,8 @@ public:
         // the next one.
         frame_work_submitted_ = false;
         if (!recorder_ || !context_) return nullptr;
+        // Images this frame draws are kept for it even past the byte budget.
+        canvas::ImageFileCache::instance().begin_frame(recorder_.get());
 
         // Persistent-scene mode (FU-2): draw into the retained scene surface,
         // not the swapchain. The scene keeps last frame's pixels, so the host
@@ -297,9 +313,9 @@ public:
         if (!context_)
             return false;
         PULP_TRACE_SCOPE_NAMED("render", "first_frame_gpu_wait");
-        context_->submit(skgpu::graphite::SyncToCpu::kYes);
+        const bool submitted = context_->submit(skgpu::graphite::SyncToCpu::kYes);
         context_->checkAsyncWorkCompletion();
-        return true;
+        return submitted;
     }
 
     FrameOutcome end_frame() override {
@@ -363,8 +379,7 @@ public:
             }
 
             frames_in_flight_.on_submitted();
-            const auto status = context_->insertRecording(info);
-            insert_ok = (status == skgpu::graphite::InsertStatus::kSuccess);
+            insert_ok = insert_recording(info);
             if (!insert_ok) {
                 runtime::log_error(
                     "SkiaSurface: Graphite rejected this frame's recording — "
@@ -450,14 +465,25 @@ public:
         // end_frame() instead — MacGpuWindowHost::render_frame() does, between
         // the Skia submit and the Metal present — finds nothing pending here
         // and pays nothing for the guard.
+        //
+        // The flush is judged exactly as end_frame() judges its own insert: a
+        // recording Graphite rejects never reached the texture, so the readback
+        // would return whatever the texture held before this frame. Report the
+        // capture as failed, and leave frame_work_submitted_ unset so the
+        // following end_frame() reports the frame as failed too.
         if (canvas_ && recorder_ && context_) {
             canvas_.reset();
             auto recording = recorder_->snap();
             if (recording) {
                 skgpu::graphite::InsertRecordingInfo info;
                 info.fRecording = recording.get();
-                context_->insertRecording(info);
+                const bool inserted = insert_recording(info);
                 context_->submit({});
+                if (!inserted) {
+                    runtime::log_error("SkiaSurface: Graphite rejected the recording flushed "
+                                       "for readback; the capture does not hold this frame.");
+                    return false;
+                }
                 // end_frame()'s second snap() will legitimately find nothing
                 // left to record; remember that this frame's work DID reach the
                 // GPU so it is not misreported as a failed frame.
@@ -510,7 +536,7 @@ public:
             state->finished.store(true, std::memory_order_release);
         };
 
-        if (context_) {
+        if (context_ && g_async_readback_enabled) {
             // The callback owns this heap context. On a timeout, do not free it:
             // Graphite may still deliver a late callback, and a tiny leaked
             // shared_ptr is safer than reintroducing a callback use-after-free.
@@ -543,7 +569,12 @@ public:
 
         pixels.resize(static_cast<size_t>(pixel_width) * static_cast<size_t>(pixel_height) * 4u);
         SkPixmap pixmap(info, pixels.data(), row_bytes);
-        auto image = source->makeImageSnapshot();
+        // A copy, not makeImageSnapshot: the blit takes AsImage views of the
+        // scene surface, and Graphite warns on every later AsImage of a
+        // surface that has ever handed out a legacy snapshot.
+        auto image = SkSurfaces::AsImageCopy(sk_ref_sp(source));
+        if (!image)
+            image = source->makeImageSnapshot();
         if (image && image->readPixels(pixmap, 0, 0)) {
             return true;
         }
@@ -707,7 +738,15 @@ private:
             return false;
         }
 
-        sk_sp<SkImage> snapshot = scene_surface_->makeImageSnapshot();
+        // AsImage shares the scene's texture instead of copying it (Graphite's
+        // makeImageSnapshot always copies). The view aliases a surface the
+        // next frame draws into, which is safe because the view lives only in
+        // this function: the blit is recorded into this frame's recording,
+        // ahead of every later scene draw in queue order. A scene that is not
+        // textureable has no view and is copied instead.
+        sk_sp<SkImage> snapshot = SkSurfaces::AsImage(scene_surface_);
+        if (!snapshot)
+            snapshot = scene_surface_->makeImageSnapshot();
         if (!snapshot) {
             runtime::log_error(
                 "SkiaSurface: retained scene produced no snapshot — nothing "
@@ -726,6 +765,15 @@ private:
     FrameOutcome finish_frame(FrameOutcome outcome) {
         last_outcome_ = outcome;
         return outcome;
+    }
+
+    /// Insert a recording and report whether Graphite accepted it. Every
+    /// insert goes through here so the frame path and the readback flush judge
+    /// the same InsertStatus, and the test seam sees both.
+    bool insert_recording(const skgpu::graphite::InsertRecordingInfo& info) {
+        const bool accepted =
+            context_->insertRecording(info) == skgpu::graphite::InsertStatus::kSuccess;
+        return g_insert_outcome_hook ? g_insert_outcome_hook(accepted) : accepted;
     }
 
     /// Outcome of the frame in flight. begin_frame() seeds it so a caller that
@@ -753,6 +801,8 @@ namespace pulp::render {
 std::unique_ptr<SkiaSurface> SkiaSurface::create(GpuSurface&, const Config&) {
     return nullptr;
 }
+void SkiaSurface::set_insert_outcome_hook_for_testing(InsertOutcomeHook) {}
+void SkiaSurface::set_async_readback_for_testing(bool) {}
 }
 
 #endif

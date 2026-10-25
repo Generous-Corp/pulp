@@ -15,8 +15,8 @@ Last refresh: **2026-05-04** against `origin/main` at SHA `a5f4f5ac`.
 
 ## Status
 
-As of 2026-05-04 the renderer is built on `react-reconciler@0.31` and
-supports the basic function-component + `useState` + `useEffect` +
+The renderer is built on `react-reconciler@0.29` (React 18, a `LegacyRoot`
+container) and supports the basic function-component + `useState` + `useEffect` +
 `useRef` + `useMemo` / `useCallback` set; concurrent features are not
 exercised. The matrix entries here are currently empty pending a
 dedicated end-to-end React-feature audit.
@@ -44,6 +44,28 @@ widget for web-compat consumers.
 Follow-up: enumerate observed React features (concurrent rendering,
 suspense boundaries, transition state, error boundaries, portal
 targets) and populate per-feature entries.
+
+## Suspense
+
+A `<Suspense>` boundary whose children throw a pending promise (`React.lazy`,
+a data hook that suspends) mounts its fallback and keeps the primary children
+mounted but hidden. Under the `LegacyRoot` container this happens on the first
+suspension too: React commits the partial primary tree hidden beside the
+fallback, so the host config must implement `hideInstance`,
+`unhideInstance`, `hideTextInstance` and `unhideTextInstance`, or the commit
+throws and nothing mounts. The renderer hides the top-most widgets under the
+boundary with `setVisible(id, false)`; loose text is hidden on its synthetic
+Label.
+
+Hiding belongs to the boundary, not to the author's props. Every authored
+visibility write — `visible`, `style.display`, the reset when either key is
+removed, and `e.currentTarget.style.visibility` in a handler — is remembered
+and reaches the widget only while no boundary holds it hidden. On resolve the
+widget gets the author's latest value back, so `visible={false}` or
+`display: 'none'` survives a suspend and resume, and a parent that flips
+`visible` to true while the boundary is suspended does not reveal the widget
+early. Bridge calls made outside `@pulp/react` (a web-compat `el.style`
+write, or captured import metadata) are not routed through that rule.
 
 ## Hit-test-only props
 

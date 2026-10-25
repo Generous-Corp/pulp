@@ -1,0 +1,34 @@
+{
+  "schema": "pulp.neural.nam-tcn.cpu-receipt.v1",
+  "status": "passed",
+  "baseline_sha": "9261578824a2ab69ad4cd54f6be2c25fc3bd4793",
+  "fixture": "test/fixtures/neural/example.nam",
+  "fixture_sha256": "66bda2b379289eff079c0755588bc9a92760654d9cc9af1b97cf30d0e92b167d",
+  "oracle_generator": "tools/validation/generate_nam_cpu_oracle.py",
+  "oracle_generator_sha256": "074c3178b2a6637abf8b89d932f9a05297895e08e5f11c885f352cb68b1c7aed",
+  "generation_command": "python3 tools/validation/generate_nam_cpu_oracle.py",
+  "oracle_vector_sha256": "29118e9ad81068cf95576ba4ff3fc289faffd5c39ffe7281f4afceac604650a7",
+  "architecture": "WaveNet-A1",
+  "sample_rate_hz": 48000,
+  "block_sizes": [32, 64, 128],
+  "frames": 128,
+  "oracle": "independent generated scalar reference vector",
+  "max_abs_error": 1e-8,
+  "max_abs_error_limit": 1e-6,
+  "reset_replay": true,
+  "tensor_shape_validation": true,
+  "reprepare_and_release_lifecycle": true,
+  "realtime_negative_controls": [
+    "oversized_frame_count",
+    "non_mono_buffers",
+    "input_output_alias",
+    "partial_buffer_overlap"
+  ],
+  "callback_allocation_probe": {
+    "frames": 128,
+    "allocations": 0
+  },
+  "model_support": false,
+  "provider_execution": false,
+  "product_claim": false
+}

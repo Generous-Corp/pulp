@@ -489,15 +489,19 @@ metric ends up reporting full marks on a band it cannot see.
 
 `OversamplerT` offers three kinds — `fir_biquad`, `polyphase_iir`, and
 `linear_phase_fir` — and it is a member set with `set_kind()`, defaulting to
-**`fir_biquad`**. That default has a worst-case base-band alias rejection of
-about 7 dB just above base Nyquist, improving to roughly 9 dB by 0.55 of the
-base rate, and a passband about 1.9 dB down at 0.3 of the base rate. Those
-figures hold at every oversampling factor.
+**`polyphase_iir`**. `fir_biquad` has a worst-case base-band alias rejection
+of about 7 dB just above base Nyquist, improving to roughly 9 dB by 0.55 of
+the base rate, and a passband about 1.9 dB down at 0.3 of the base rate.
+Those figures hold at every oversampling factor.
 
-So any anti-aliasing measurement that does not explicitly select a kind is
-measuring a 7 dB filter, whatever the DSP under it does. `linear_phase_fir`
+So any anti-aliasing measurement that runs on `fir_biquad` is measuring a
+7 dB filter, whatever the DSP under it does — and code written before the
+default changed may still select it. Name the kind in every measurement. `linear_phase_fir`
 offers a 96 dB design at standard quality and a 140 dB design at pristine, and
-the suite holds them to within about 2 dB of those targets. The
+the suite holds them to within about 2 dB of those targets. `polyphase_iir`
+rejects from 0.58 Fs by 94.8 dB at standard and from 0.55 Fs by 146 dB at
+pristine (measured to the design in double; the float pristine build reads
+about -143 dB at its stopband edge). The
 below −100 dB residual test mentioned above pins `linear_phase_fir`, `pristine`,
 and 16× explicitly — that threshold is a statement about that configuration and
 not about the oversampler generally.

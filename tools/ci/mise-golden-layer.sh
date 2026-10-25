@@ -92,11 +92,13 @@ reported="$(guest "MISE_DISABLE_UPDATE_WARNING=1 \"\$HOME/$ML_PATH\" --version" 
 [ "$reported" = "$ML_VERSION" ] || die "guest mise reports $reported, the manifest pins $ML_VERSION"
 note "mise $ML_VERSION in the guest, sha256 $ML_SHA"
 
-# 2. The locked toolchain.
+# 2. The locked toolchain. MISE_LOCKED and MISE_AUTO_INSTALL hold even if mise
+# stops applying the trusted project's [settings]: environment settings
+# never depend on trust, so no guest command can resolve or install a tool.
 for f in .mise.toml .mise.toolchain.toml mise.toolchain.lock; do
   to_guest "$ROOT/$f" ".pulp-toolchain/$f"
 done
-guest "cd \"\$HOME/.pulp-toolchain\" && MISE_TRUSTED_CONFIG_PATHS=\"\$PWD\" MISE_ENV=toolchain MISE_DISABLE_UPDATE_WARNING=1 MISE_YES=1 \"\$HOME/$ML_PATH\" install --locked" \
+guest "cd \"\$HOME/.pulp-toolchain\" && MISE_TRUSTED_CONFIG_PATHS=\"\$PWD\" MISE_LOCKED=1 MISE_AUTO_INSTALL=0 MISE_ENV=toolchain MISE_DISABLE_UPDATE_WARNING=1 MISE_YES=1 \"\$HOME/$ML_PATH\" install --locked" \
   || die "mise install --locked failed in the guest"
 
 # 3. Rust by name, and rustup never self-updates.
@@ -110,7 +112,7 @@ guest "\"\$HOME/.cargo/bin/rustup\" toolchain list | grep -q '^$ML_RUST-'" \
 
 # 4. The guest's own report.
 lock_sha="$(sha256_of "$ROOT/mise.toolchain.lock")"
-guest "cd \"\$HOME/.pulp-toolchain\" && { printf '{\"commit\": \"%s\", \"lock_sha256\": \"%s\", \"mise_sha256\": \"%s\", \"mise_version\": \"%s\", \"rust\": \"%s\",\n' '$COMMIT' '$lock_sha' '$ML_SHA' '$ML_VERSION' '$ML_RUST'; printf ' \"mise_ls\": '; MISE_TRUSTED_CONFIG_PATHS=\"\$PWD\" MISE_ENV=toolchain MISE_DISABLE_UPDATE_WARNING=1 \"\$HOME/$ML_PATH\" ls --current --json; printf ',\n \"rustup_toolchains\": \"%s\",\n' \"\$(\"\$HOME/.cargo/bin/rustup\" toolchain list | tr '\n' ';')\"; printf ' \"xcode\": \"%s\"}\n' \"\$(xcodebuild -version 2>/dev/null | tr '\n' ' ')\"; }" > "$RECEIPT" \
+guest "cd \"\$HOME/.pulp-toolchain\" && { printf '{\"commit\": \"%s\", \"lock_sha256\": \"%s\", \"mise_sha256\": \"%s\", \"mise_version\": \"%s\", \"rust\": \"%s\",\n' '$COMMIT' '$lock_sha' '$ML_SHA' '$ML_VERSION' '$ML_RUST'; printf ' \"mise_ls\": '; MISE_TRUSTED_CONFIG_PATHS=\"\$PWD\" MISE_LOCKED=1 MISE_AUTO_INSTALL=0 MISE_ENV=toolchain MISE_DISABLE_UPDATE_WARNING=1 \"\$HOME/$ML_PATH\" ls --current --json; printf ',\n \"rustup_toolchains\": \"%s\",\n' \"\$(\"\$HOME/.cargo/bin/rustup\" toolchain list | tr '\n' ';')\"; printf ' \"xcode\": \"%s\"}\n' \"\$(xcodebuild -version 2>/dev/null | tr '\n' ' ')\"; }" > "$RECEIPT" \
   || die "could not write the receipt"
 python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$RECEIPT" || die "the receipt is not valid JSON: $RECEIPT"
 note "receipt: $RECEIPT"

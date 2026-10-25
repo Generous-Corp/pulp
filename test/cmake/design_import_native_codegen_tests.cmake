@@ -4,11 +4,16 @@
 # Design import tests (Figma/Stitch/v0/Pencil -> Pulp, W3C tokens)
 pulp_add_test_suite(pulp-test-design-import
     SOURCES test_design_update.cpp
-    SOURCES test_design_import_ir.cpp test_design_ir_normalize.cpp test_design_import_codegen.cpp test_design_import_codegen_layout_text.cpp test_design_import_codegen_paint.cpp test_design_import_codegen_web_controls.cpp test_design_cpp_codegen_golden.cpp test_design_browser_capture.cpp test_design_import_sources.cpp test_design_import_masks.cpp test_design_import_fidelity.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp test_design_tweaks.cpp test_design_knobs.cpp
+    SOURCES test_design_import_ir.cpp test_design_ir_normalize.cpp test_design_import_codegen.cpp test_design_import_codegen_layout_text.cpp test_design_import_codegen_paint.cpp test_design_import_codegen_web_controls.cpp test_design_cpp_codegen_golden.cpp test_design_browser_capture.cpp test_design_import_sources.cpp test_design_import_masks.cpp test_design_import_fidelity.cpp test_design_ir_font_assets.cpp test_recognition_resolver.cpp test_design_manifest.cpp test_design_adherence.cpp test_design_fidelity_ledger.cpp test_design_gallery.cpp test_design_ledger.cpp test_design_handoff.cpp test_design_variants.cpp test_design_tweaks.cpp test_design_knobs.cpp
     LIBRARIES pulp::view
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
-    TEST_SPEC "~[network]"
+    TEST_SPEC "~[network]~[bench]"
     LABELS "parser-import")
+# Planner timing cases report cost only and stay off the required lane.
+catch_discover_tests(pulp-test-design-import
+    TEST_SPEC "[bench]"
+    TEST_PREFIX "bench::"
+    PROPERTIES LABELS "bench")
 pulp_test_data(pulp-test-design-import NO_DEFINE
     SOURCES test_design_import_ir.cpp test_recognition_resolver.cpp
     PATHS test/fixtures/imports/claude/vite-assets.html
@@ -102,6 +107,7 @@ endif()
 add_executable(pulp-test-design-import-native-materializer
     test_design_import_native_materializer.cpp
     test_design_import_native_capture.cpp
+    test_design_import_form_controls.cpp
     fixtures/design_import_generated_binding_runtime_fixture.cpp)
 target_link_libraries(pulp-test-design-import-native-materializer
     PRIVATE pulp::view Catch2::Catch2WithMain)
@@ -123,6 +129,15 @@ pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
         core/signal/include core/host/include
         core/music/include/pulp/music/pitch.hpp
         test/fixtures/import-fidelity/assets/fader_ref.png)
+
+# Inert style declarations (`opacity: 1`, `clip-path: none`, ...) must not
+# change the native drawlist, the Skia raster, or the sibling painted next.
+add_executable(pulp-test-design-import-inert-styles
+    test_design_import_inert_styles.cpp)
+target_link_libraries(pulp-test-design-import-inert-styles
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-import-inert-styles
+    PROPERTIES LABELS "parser-import")
 
 # A lowered on/off, proved on BOTH consumers of a control: the native
 # materializer's binder callbacks and the emitted script the widget bridge
@@ -375,7 +390,12 @@ catch_discover_tests(pulp-test-design-import-benchmark
     PROPERTIES LABELS "parser-import")
 
 add_executable(pulp-test-design-import-benchmark-contracts
-    test_design_import_benchmark_contracts.cpp)
+    test_design_import_benchmark_contracts.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/design_import_benchmark_ir.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/design_import_benchmark_measure.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/design_import_benchmark_targets.cpp
+    harness/rt_allocation_probe.cpp)
+target_include_directories(pulp-test-design-import-benchmark-contracts PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-test-design-import-benchmark-contracts
     PRIVATE pulp::view pulp::state Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import-benchmark-contracts

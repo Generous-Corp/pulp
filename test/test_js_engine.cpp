@@ -3,6 +3,7 @@
 #include <pulp/view/js_engine.hpp>
 #include <pulp/view/js_engine_recommend.hpp>
 #include <pulp/view/script_engine.hpp>
+#include <pulp/view/scripted_ui.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -323,6 +324,30 @@ TEST_CASE("JsEngine circular reference safety (;void 0 pattern)", "[js_engine]")
     END_FOR_EACH_ENGINE
 }
 
+TEST_CASE("JsEngine converts an object whose early members are objects", "[js_engine]") {
+    // Converting the first member allocates handles. If the property walk keeps
+    // handles that outlived their scope (V8's Array::Iterate since 15.4), that
+    // allocation overwrites the later members, which then read as garbage or
+    // crash the property enumeration.
+    FOR_EACH_ENGINE(engine)
+    auto result = engine->evaluate("({ first: { x: 1, nested: { deep: 'd' } },"
+                                   "   second: [2, 3, { inner: 4 }],"
+                                   "   helper: function() { return 0; },"
+                                   "   other: function(a, b) { return a + b; },"
+                                   "   third: { y: 'z' },"
+                                   "   fifth: 5 })");
+    REQUIRE(result.isObject());
+    REQUIRE(result["first"]["x"].getWithDefault<int>(0) == 1);
+    REQUIRE(result["first"]["nested"]["deep"].getWithDefault<std::string>("") == "d");
+    REQUIRE(result["second"].isArray());
+    REQUIRE(result["second"].size() == 3);
+    REQUIRE(result["second"][1].getWithDefault<int>(0) == 3);
+    REQUIRE(result["second"][2]["inner"].getWithDefault<int>(0) == 4);
+    REQUIRE(result["third"]["y"].getWithDefault<std::string>("") == "z");
+    REQUIRE(result["fifth"].getWithDefault<int>(0) == 5);
+    END_FOR_EACH_ENGINE
+}
+
 TEST_CASE("JsEngine error message includes details", "[js_engine]") {
     FOR_EACH_ENGINE(engine)
         bool threw = false;
@@ -423,7 +448,7 @@ TEST_CASE("V8 engine reports a non-empty runtime version and provider identity",
     REQUIRE(engine != nullptr);
     REQUIRE(engine->type() == JsEngineType::v8);
 
-    // v8::V8::GetVersion() must yield something like "15.3.76.5".
+    // v8::V8::GetVersion() must yield something like "15.7.112.5".
     const auto runtime = engine->runtime_version();
     INFO("runtime_version=" << runtime);
     REQUIRE_FALSE(runtime.empty());
@@ -1040,4 +1065,58 @@ TEST_CASE("QuickJS evaluate_script keeps evaluate's error and small-script behav
     CHECK_THROWS(other->evaluate_script(throwing));
     CHECK(script_bytecode_cache_stats().hits == hits_before + 1);
     clear_script_bytecode_cache();
+}
+
+// ── Heap ceiling ─────────────────────────────────────────────────────────────
+// A hostile or runaway script must hit a JS error at the realm's memory limit
+// rather than allocating until the hosting process is OOM-killed. The hostile
+// script's total is bounded (64 MiB) so that a realm which ignores the cap
+// still finishes quickly and simply fails the assertion.
+
+namespace {
+constexpr std::size_t kSmallHeapLimitBytes = std::size_t{8} * 1024 * 1024;
+constexpr const char* kHostileAllocationScript =
+    "var a = []; for (var i = 0; i < 64; i++) a.push('x'.repeat(1 << 20)); a.length";
+constexpr const char* kBoundedAllocationScript =
+    "var a = []; for (var i = 0; i < 1000; i++) a.push('x'.repeat(1024)); a.length";
+} // namespace
+
+TEST_CASE("QuickJS heap limit raises a JS error instead of growing unbounded",
+          "[js_engine][memory-limit]") {
+    auto engine = create_js_engine(JsEngineType::quickjs);
+    REQUIRE(engine->set_memory_limit(kSmallHeapLimitBytes));
+
+    bool threw = false;
+    std::string message;
+    const auto start = std::chrono::steady_clock::now();
+    try {
+        engine->evaluate(kHostileAllocationScript);
+    } catch (const std::exception& error) {
+        threw = true;
+        message = error.what();
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    REQUIRE(threw);
+    INFO("error: " << message);
+    REQUIRE(message.find("out of memory") != std::string::npos);
+    REQUIRE(elapsed < std::chrono::seconds(5));
+
+    // The failure is a recoverable JS error: once the hostile array is
+    // unreachable the same realm evaluates ordinary code again.
+    const auto after = engine->evaluate("a = undefined; String(40 + 2)");
+    REQUIRE(after.toString() == "42");
+}
+
+TEST_CASE("QuickJS heap limit leaves allocation under the cap untouched",
+          "[js_engine][memory-limit]") {
+    ScriptEngine engine(JsEngineType::quickjs);
+    REQUIRE(engine.set_memory_limit(kSmallHeapLimitBytes));
+    REQUIRE(engine.evaluate(kBoundedAllocationScript).getWithDefault<int64_t>(0) == 1000);
+}
+
+TEST_CASE("Scripted UI realms default to the shared JS heap ceiling", "[js_engine][memory-limit]") {
+    STATIC_REQUIRE(kDefaultJsMemoryLimitBytes == std::size_t{512} * 1024 * 1024);
+    ScriptedUiOptions options;
+    REQUIRE(options.js_memory_limit_bytes == kDefaultJsMemoryLimitBytes);
 }

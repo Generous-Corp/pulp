@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstdint>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -335,6 +337,177 @@ TEST_CASE("FFT64 runs a double-precision round trip and real transform",
 
 // ── Convolver ────────────────────────────────────────────────────────────────
 
+// ── Real-input transform ────────────────────────────────────────────────────
+
+namespace {
+
+// Deterministic broadband test signal: a few incommensurate tones plus a
+// linear-congruential noise floor, so every bin carries energy.
+template <typename T> std::vector<T> real_fft_stimulus(int n) {
+    std::vector<T> x(static_cast<std::size_t>(n));
+    std::uint32_t state = 0x9E3779B9u;
+    for (int i = 0; i < n; ++i) {
+        state = state * 1664525u + 1013904223u;
+        const double noise = static_cast<double>(state >> 8) / 16777216.0 - 0.5;
+        x[static_cast<std::size_t>(i)] =
+            static_cast<T>(0.6 * std::sin(0.31 * i) + 0.25 * std::cos(2.9 * i + 0.4) + 0.1 * noise);
+    }
+    return x;
+}
+
+// Direct O(N^2) DFT in long double: the reference every transform is graded
+// against.
+std::vector<std::complex<long double>> reference_dft(const std::vector<double>& x) {
+    const auto n = static_cast<long double>(x.size());
+    std::vector<std::complex<long double>> out(x.size() / 2 + 1);
+    const long double two_pi = 6.283185307179586476925286766559L;
+    for (std::size_t k = 0; k < out.size(); ++k) {
+        long double re = 0, im = 0;
+        for (std::size_t t = 0; t < x.size(); ++t) {
+            const long double phase = -two_pi * static_cast<long double>((k * t) % x.size()) / n;
+            re += x[t] * std::cos(phase);
+            im += x[t] * std::sin(phase);
+        }
+        out[k] = {re, im};
+    }
+    return out;
+}
+
+// Error energy over reference energy, in dB.
+template <typename C>
+double spectrum_error_db(const C* actual, const std::vector<std::complex<long double>>& reference,
+                         double scale = 1.0) {
+    long double err = 0, ref = 0;
+    for (std::size_t k = 0; k < reference.size(); ++k) {
+        const auto r = reference[k] * static_cast<long double>(scale);
+        const std::complex<long double> a(actual[k].real(), actual[k].imag());
+        err += std::norm(a - r);
+        ref += std::norm(r);
+    }
+    return 10.0 * std::log10(static_cast<double>(err / ref) + 1e-300);
+}
+
+template <typename T> double signal_error_db(const T* actual, const std::vector<T>& expected) {
+    double err = 0, ref = 0;
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        const double d = static_cast<double>(actual[i]) - static_cast<double>(expected[i]);
+        err += d * d;
+        ref += static_cast<double>(expected[i]) * static_cast<double>(expected[i]);
+    }
+    return 10.0 * std::log10(err / ref + 1e-300);
+}
+
+} // namespace
+
+TEST_CASE("FFT forward_real_half matches a long-double DFT and writes only N/2+1 bins",
+          "[signal][fft][real]") {
+    for (const int n : {2, 4, 8, 16, 64, 512, 2048, 4096}) {
+        const auto x32 = real_fft_stimulus<float>(n);
+        std::vector<double> x64(x32.begin(), x32.end());
+        const auto reference = reference_dft(x64);
+
+        Fft fft(n);
+        REQUIRE(fft.real_bins() == n / 2 + 1);
+        const float sentinel = std::numeric_limits<float>::quiet_NaN();
+        std::vector<std::complex<float>> out(static_cast<std::size_t>(n) + 4, {sentinel, sentinel});
+        fft.forward_real_half(x32.data(), out.data());
+        const double err32 = spectrum_error_db(out.data(), reference);
+        INFO("n=" << n << " float error=" << err32 << " dB");
+        REQUIRE(err32 < -120.0);
+        REQUIRE(out[0].imag() == 0.0f);
+        REQUIRE(out[static_cast<std::size_t>(n / 2)].imag() == 0.0f);
+        for (std::size_t k = static_cast<std::size_t>(n / 2) + 1; k < out.size(); ++k)
+            REQUIRE(std::isnan(out[k].real()));
+
+        // Scale folds into the pack: a quarter of the transform, not a rerun.
+        std::vector<std::complex<float>> scaled(static_cast<std::size_t>(n / 2 + 1));
+        fft.forward_real_half(x32.data(), scaled.data(), 0.25f);
+        REQUIRE(spectrum_error_db(scaled.data(), reference, 0.25) < -120.0);
+
+        Fft64 fft64(n);
+        std::vector<std::complex<double>> out64(static_cast<std::size_t>(n / 2 + 1));
+        fft64.forward_real_half(x64.data(), out64.data());
+        const double err64 = spectrum_error_db(out64.data(), reference);
+        INFO("double error=" << err64 << " dB");
+        REQUIRE(err64 < -280.0);
+    }
+}
+
+TEST_CASE("FFT real round trip recovers the signal, in place or not", "[signal][fft][real]") {
+    for (const int n : {2, 4, 8, 32, 512, 4096}) {
+        const auto x32 = real_fft_stimulus<float>(n);
+        Fft fft(n);
+        std::vector<std::complex<float>> bins(static_cast<std::size_t>(n / 2 + 1));
+        fft.forward_real_half(x32.data(), bins.data());
+        std::vector<float> back(static_cast<std::size_t>(n));
+        fft.inverse_real_half(bins.data(), back.data());
+        INFO("n=" << n);
+        REQUIRE(signal_error_db(back.data(), x32) < -130.0);
+
+        // Same spectrum transformed in its own storage: the complex buffer
+        // needs N + 2 scalars, enough to hold the N real outputs.
+        auto inplace = bins;
+        fft.inverse_real_half(inplace.data(), reinterpret_cast<float*>(inplace.data()));
+        const auto* inplace_samples = reinterpret_cast<const float*>(inplace.data());
+        for (int i = 0; i < n; ++i)
+            REQUIRE(inplace_samples[i] == back[static_cast<std::size_t>(i)]);
+
+        // A real signal cannot carry imaginary DC or Nyquist; junk there is
+        // ignored rather than leaking into the samples.
+        auto junk = bins;
+        junk[0].imag(123.0f);
+        junk[static_cast<std::size_t>(n / 2)].imag(-77.0f);
+        std::vector<float> ignored(static_cast<std::size_t>(n));
+        fft.inverse_real_half(junk.data(), ignored.data());
+        REQUIRE(ignored == back);
+
+        const auto x64 = real_fft_stimulus<double>(n);
+        Fft64 fft64(n);
+        std::vector<std::complex<double>> bins64(static_cast<std::size_t>(n / 2 + 1));
+        fft64.forward_real_half(x64.data(), bins64.data());
+        std::vector<double> back64(static_cast<std::size_t>(n));
+        fft64.inverse_real_half(bins64.data(), back64.data());
+        REQUIRE(signal_error_db(back64.data(), x64) < -280.0);
+        auto inplace64 = bins64;
+        fft64.inverse_real_half(inplace64.data(), reinterpret_cast<double*>(inplace64.data()));
+        REQUIRE(signal_error_db(reinterpret_cast<const double*>(inplace64.data()), x64) < -280.0);
+    }
+}
+
+TEST_CASE("FFT real transform error gate sees a planted defect", "[signal][fft][real]") {
+    // Negative control for the -120 dB gate: the same measurement against a
+    // spectrum with one bin nudged by 1e-5 of the spectrum's RMS norm (a
+    // -100 dB defect) must fail the gate, or the gate is checking nothing.
+    constexpr int n = 512;
+    const auto x32 = real_fft_stimulus<float>(n);
+    const auto reference = reference_dft(std::vector<double>(x32.begin(), x32.end()));
+    Fft fft(n);
+    std::vector<std::complex<float>> out(n / 2 + 1);
+    fft.forward_real_half(x32.data(), out.data());
+    REQUIRE(spectrum_error_db(out.data(), reference) < -120.0);
+    double energy = 0.0;
+    for (const auto& bin : out)
+        energy += std::norm(bin);
+    out[37] += std::complex<float>(static_cast<float>(1e-5 * std::sqrt(energy)), 0.0f);
+    REQUIRE(spectrum_error_db(out.data(), reference) > -120.0);
+}
+
+TEST_CASE("FFT forward_real equals the half spectrum mirrored", "[signal][fft][real]") {
+    for (const int n : {8, 512, 2048}) {
+        const auto x = real_fft_stimulus<float>(n);
+        Fft fft(n);
+        std::vector<std::complex<float>> full(static_cast<std::size_t>(n));
+        std::vector<std::complex<float>> half(static_cast<std::size_t>(n / 2 + 1));
+        fft.forward_real(x.data(), full.data());
+        fft.forward_real_half(x.data(), half.data());
+        for (int k = 0; k <= n / 2; ++k)
+            REQUIRE(full[static_cast<std::size_t>(k)] == half[static_cast<std::size_t>(k)]);
+        for (int k = 1; k < n / 2; ++k)
+            REQUIRE(full[static_cast<std::size_t>(n - k)] ==
+                    std::conj(half[static_cast<std::size_t>(k)]));
+    }
+}
+
 TEST_CASE("Convolver with identity IR", "[signal][convolver]") {
     Convolver conv;
 
@@ -489,4 +662,117 @@ TEST_CASE("Convolver64 identity IR preserves double buffers",
 
     REQUIRE_THAT(output[8], WithinAbs(0.25, 1e-12));
     REQUIRE_THAT(output[9], WithinAbs(-0.5, 1e-12));
+}
+
+TEST_CASE("Convolver overlap-add keeps the whole tail of an IR longer than one block",
+          "[signal][convolver][null][regression]") {
+    // Regression: an IR longer than the block leaves a tail reaching several
+    // blocks ahead, and every block's tail must accumulate into the pending
+    // overlap. Replacing the overlap with only the newest block's tail dropped
+    // the older tails, so any such IR convolved wrongly (about -0.2 to -37 dB
+    // null instead of -130). Every case here has ir.size() > block. Output is
+    // delayed by exactly one block.
+    std::vector<float> input(4096), ir(300);
+    std::uint32_t state = 0x777u;
+    for (auto& v : input) {
+        state = state * 1664525u + 1013904223u;
+        v = static_cast<float>(state >> 8) / 8388608.0f - 1.0f;
+    }
+    for (std::size_t i = 0; i < ir.size(); ++i) {
+        state = state * 1664525u + 1013904223u;
+        ir[i] = (static_cast<float>(state >> 8) / 8388608.0f - 1.0f) *
+                std::exp(-0.01f * static_cast<float>(i));
+    }
+    for (const int block : {1, 64, 256}) {
+        REQUIRE(ir.size() > static_cast<std::size_t>(block));
+        Convolver conv;
+        conv.load_ir(ir.data(), static_cast<int>(ir.size()), block);
+        std::vector<float> out(input.size());
+        conv.process(input.data(), out.data(), static_cast<int>(input.size()));
+        long double err = 0, ref = 0;
+        for (std::size_t n = 0; n + static_cast<std::size_t>(block) < input.size(); ++n) {
+            long double y = 0;
+            for (std::size_t k = 0; k < ir.size() && k <= n; ++k)
+                y += static_cast<long double>(ir[k]) * input[n - k];
+            const long double d = out[n + static_cast<std::size_t>(block)] - y;
+            err += d * d;
+            ref += y * y;
+        }
+        const double null_db = 10.0 * std::log10(static_cast<double>(err / ref));
+        INFO("block=" << block << " null=" << null_db << " dB");
+        REQUIRE(null_db < -120.0);
+    }
+}
+
+TEST_CASE("FFT transforms stay exact across every split placement", "[signal][fft][real]") {
+    // The float transform places its vDSP split buffers on or off a 64-byte
+    // boundary depending on the size and the transform; both placements, and
+    // the switch-over sizes either side of each threshold, must round-trip.
+    for (const int n : {256, 512, 2048, 4096}) {
+        const auto x = real_fft_stimulus<float>(n);
+        Fft fft(n);
+        REQUIRE(fft.ready());
+        std::vector<std::complex<float>> bins(static_cast<std::size_t>(n / 2 + 1));
+        fft.forward_real_half(x.data(), bins.data());
+        std::vector<float> back(static_cast<std::size_t>(n));
+        fft.inverse_real_half(bins.data(), back.data());
+        INFO("n=" << n);
+        REQUIRE(signal_error_db(back.data(), x) < -130.0);
+
+        std::vector<std::complex<float>> c(static_cast<std::size_t>(n));
+        for (int i = 0; i < n; ++i)
+            c[static_cast<std::size_t>(i)] = {x[static_cast<std::size_t>(i)],
+                                              x[static_cast<std::size_t>(n - 1 - i)]};
+        const auto original = c;
+        fft.forward(c.data());
+        fft.inverse(c.data());
+        double err = 0.0, ref = 0.0;
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            err += std::norm(c[i] - original[i]);
+            ref += std::norm(original[i]);
+        }
+        REQUIRE(10.0 * std::log10(err / ref) < -130.0);
+
+        // A moved transform keeps its placement valid.
+        Fft moved(std::move(fft));
+        REQUIRE(moved.ready());
+        std::vector<float> again(static_cast<std::size_t>(n));
+        moved.forward_real_half(x.data(), bins.data());
+        moved.inverse_real_half(bins.data(), again.data());
+        REQUIRE(again == back);
+    }
+}
+
+TEST_CASE("Convolver overlap-add matches a direct convolution when the IR fits one block",
+          "[signal][convolver][null]") {
+    // The single-block case never needed the carried tail; it must keep nulling
+    // after the tail fix and the move to real transforms.
+    std::vector<float> input(2048), ir(50);
+    std::uint32_t state = 0x31u;
+    for (auto& v : input) {
+        state = state * 1664525u + 1013904223u;
+        v = static_cast<float>(state >> 8) / 8388608.0f - 1.0f;
+    }
+    for (auto& v : ir) {
+        state = state * 1664525u + 1013904223u;
+        v = static_cast<float>(state >> 8) / 8388608.0f - 1.0f;
+    }
+    for (const int block : {64, 512}) {
+        Convolver conv;
+        conv.load_ir(ir.data(), static_cast<int>(ir.size()), block);
+        std::vector<float> out(input.size());
+        conv.process(input.data(), out.data(), static_cast<int>(input.size()));
+        long double err = 0, ref = 0;
+        for (std::size_t n = 0; n + static_cast<std::size_t>(block) < input.size(); ++n) {
+            long double y = 0;
+            for (std::size_t k = 0; k < ir.size() && k <= n; ++k)
+                y += static_cast<long double>(ir[k]) * input[n - k];
+            const long double d = out[n + static_cast<std::size_t>(block)] - y;
+            err += d * d;
+            ref += y * y;
+        }
+        const double null_db = 10.0 * std::log10(static_cast<double>(err / ref));
+        INFO("block=" << block << " null=" << null_db << " dB");
+        REQUIRE(null_db < -120.0);
+    }
 }

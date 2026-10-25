@@ -1,0 +1,36 @@
+# Pulp Windows ARM64 QEMU image manifest.
+#
+# This is a host-side provenance and preflight contract for the advisory local
+# Windows runner. It does not route a workflow or create a VM. The runner must
+# clone this image as a copy-on-write overlay and discard the overlay after one
+# job. Keep the image stopped and immutable while overlays are active.
+schema = 1
+name = "pulp-windows-build-24h2-arm64"
+strategy = "ephemeral-overlay"
+provisioning = "ephemeral"
+architecture = "arm64"
+
+# This golden was boot-probed on M5S with Windows 11 Pro ARM64, SSH and RDP
+# reachable. The older retained UTM disk did not reach a guest identity.
+
+[base_image]
+path = "/Volumes/Atelier/VMs/goldens/pulp-windows-build-24h2-arm64-2026-06-12-cacheopt.qcow2"
+sha256 = "6ba33462b435e10440a5edf0adf9422c3d7ddcbe078c2f0e51dc9270f90bd9cd"
+
+[firmware]
+code_path = "/opt/homebrew/share/qemu/edk2-aarch64-code.fd"
+code_sha256 = "47765fe344818cbc464b1c14ae658fb4b854f5c2ceffa982411731eb4865594d"
+# The Windows boot entry lives in this copied, hash-bound EFI template. Each
+# job copies it before launch and discards the copy with its overlay.
+vars_template_path = "/Volumes/Atelier/VMs/goldens/pulp-windows-build-24h2-arm64-2026-06-12-efi-vars.fd"
+vars_template_sha256 = "6cad907f6fc81663745a9532a6ab9a047056da30e34ffe96f7f139f84507dfa6"
+
+[overlay]
+state_dir = "$HOME/VMs/sessions/pulp-windows"
+cleanup = "on-exit"
+copy_on_write = true
+
+[cache]
+# Mutable compiler/build caches are guest-local. A future shared cache mount
+# needs its own reviewed contract and must not turn this into a warm build dir.
+mode = "guest-local"

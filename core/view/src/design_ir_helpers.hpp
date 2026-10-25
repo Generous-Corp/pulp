@@ -574,4 +574,27 @@ inline ResolvedLayoutConstraints resolve_layout_constraints(
     return r;
 }
 
+/// How an imported text node sits vertically in its slot. The native lowering
+/// and the baked C++ lane both read it, and design_codegen.cpp applies the same
+/// rule to the JS lanes, so every lane paints the label at one height.
+enum class ImportedVerticalAlign { top, center, bottom };
+
+/// An explicit `verticalAlign` is design authority and wins, `top` included: a
+/// browser capture records one for a control's value text, and the Figma
+/// producers record `textAlignVertical`. Without one, a slot meaningfully
+/// taller than its font is centred, because Figma reserves such a slot for
+/// centred text and drops the alignment from the IR.
+inline ImportedVerticalAlign imported_vertical_align(const IRStyle& style) {
+    if (style.vertical_align) {
+        if (*style.vertical_align == "middle")
+            return ImportedVerticalAlign::center;
+        if (*style.vertical_align == "bottom")
+            return ImportedVerticalAlign::bottom;
+        return ImportedVerticalAlign::top;
+    }
+    if (style.height && style.font_size && *style.height > *style.font_size * 1.15f)
+        return ImportedVerticalAlign::center;
+    return ImportedVerticalAlign::top;
+}
+
 }  // namespace pulp::view

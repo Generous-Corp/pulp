@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261021-import-run-installed-build-hint-watch",
+  "created_at": "2026-10-21T05:09:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "import_run.cpp only changes the printed Next-steps build hint: an installed CLI with no checkout (or no governed-build.sh) now prints a plain cmake --build instead of a nonexistent relative wrapper path. No design-import, Chromium, rendering, or packaging authority moves; emitted scaffold files are unchanged.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-import-emit",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

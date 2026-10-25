@@ -218,14 +218,16 @@ pulp_add_test_suite(pulp-test-graph-runtime-levelization GROUP pulp-test-group-s
 # Persistent fork-join worker pool for the levelized parallel executor.
 pulp_add_test_suite(pulp-test-graph-runtime-worker-pool
     SOURCES test_graph_runtime_worker_pool.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::format)
+    LIBRARIES pulp::format
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 target_compile_definitions(pulp-test-graph-runtime-worker-pool
     PRIVATE PULP_GRAPH_RUNTIME_WORKER_POOL_TEST_HOOKS=1)
 # Executor routing path moves audio between nodes (chain/diamond/feedback/
 # multi-output parity vs SignalGraph) and is allocation-free on the RT thread.
 pulp_add_test_suite(pulp-test-graph-executor-routing
     SOURCES test_graph_executor_routing.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::host pulp::format pulp::graph)
+    LIBRARIES pulp::host pulp::format pulp::graph
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 # A SignalGraph translated to the executor produces bit-identical output to its
 # own walk for the eligible node/connection subset.
 pulp_add_test_suite(pulp-test-crossfade-plugin-slot GROUP pulp-test-group-sampler-host-graph
@@ -239,7 +241,8 @@ pulp_add_test_suite(pulp-test-signal-graph-live-swap-staging GROUP pulp-test-gro
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 pulp_add_test_suite(pulp-test-signal-graph-executor-parity
     SOURCES test_signal_graph_executor_parity.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::host pulp::format pulp::graph)
+    LIBRARIES pulp::host pulp::format pulp::graph
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 # SignalGraph's multi-path routing renders an arithmetic oracle bit-exactly on
 # the legacy walk, the routed serial path, and the routed parallel path, and the
 # paths stay independent across block partitionings and an aborted swap edit.
@@ -248,7 +251,8 @@ pulp_add_test_suite(pulp-test-signal-graph-executor-parity
 # which test/CMakeLists.txt includes AFTER this manifest.
 pulp_add_test_suite(pulp-test-signal-graph-audio-parity
     SOURCES test_signal_graph_audio_parity.cpp support/audio_signal_generators.cpp
-    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::audio-analysis)
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::audio-analysis
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 # Offline-equals-online: OfflineSignalGraphHost renders a deterministic graph at
 # different block partitionings and the harness proves block-partitioning
 # invariance (with a declared-exemption path for block-size-dependent nodes).
@@ -271,16 +275,19 @@ pulp_add_test_suite(pulp-test-baked-graph-processor-parity
 # scratch when the routed executor runs same-level Plugin nodes concurrently.
 pulp_add_test_suite(pulp-test-signal-graph-parallel-plugin-scratch GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_parallel_plugin_scratch.cpp
-    LIBRARIES pulp::host pulp::format pulp::graph)
+    LIBRARIES pulp::host pulp::format pulp::graph
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 # Host-facing coverage for the parallel executor's break-even threshold wiring.
 pulp_add_test_suite(pulp-test-signal-graph-parallel-cost GROUP pulp-test-group-sampler-host-graph
-    LIBRARIES pulp::host pulp::format pulp::graph)
+    LIBRARIES pulp::host pulp::format pulp::graph
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 # Differential routing parity: random audio-only DAGs driven through both
 # SignalGraph (oracle) and the routed executor must agree, fuzzing the gather /
 # fan-in / scratch-reuse / feedback paths the fixed shapes above only sample.
 pulp_add_test_suite(pulp-test-graph-routing-differential-parity GROUP pulp-test-group-sampler-host-graph
     SOURCES test_graph_routing_differential_parity.cpp
-    LIBRARIES pulp::host pulp::format pulp::graph)
+    LIBRARIES pulp::host pulp::format pulp::graph
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 # Pins the single connection-classification surface (classify): every host
 # Connection variant maps to one runtime lane, so the routed gather and the
 # reference-walk bucketer can never drift apart.
@@ -353,14 +360,16 @@ pulp_add_test_suite(pulp-test-signal-graph-prepared-swap-live GROUP pulp-test-gr
 # 64-frame blocks catches cursor resets that block-aligned fixtures would miss.
 pulp_add_test_suite(pulp-test-signal-graph-pdc-swap-continuity GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_pdc_swap_continuity.cpp
-    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 # Transport plumbing for SignalGraph::process: the transport-aware overload is
 # bit-identical for transport-inert routed nodes, populates the routed block so a
 # ProcessorNode consumer receives the host transport / process_mode / render-speed
 # hint, and suppresses (and counts) the transport whenever anticipation is active.
 pulp_add_test_suite(pulp-test-signal-graph-transport GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_transport.cpp
-    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::state)
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::state
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 
 # Live plugin-instance swap produces no dropout/xrun and a sample-continuous
 # output across the swap block, for every hosted format. CI-runnable mirror of

@@ -14,6 +14,7 @@ import {
   authorizeInput,
   hostResolverRules,
   installNetworkGuard,
+  maskSecretText,
   normalizeDeclaredHttpsOrigins,
   resolvePublicHttpsOrigins,
   sanitizeCaptureError,
@@ -32,6 +33,7 @@ import {
   captureStableScreenshot,
   disableMotion,
   freezeAndMeasureDocumentExtent,
+  freezeMotion,
   installDynamicWorkTracker,
   MAX_LOGICAL_CAPTURE_DIMENSION,
   measureClippedControls,
@@ -66,6 +68,8 @@ import {
   createCaptureProgress,
 } from "./lifecycle.mjs";
 import { evaluateDesignTokens } from "./tokens.mjs";
+import { evaluateDocumentCanvas } from "./document_canvas.mjs";
+import { evaluateFormControlTheme } from "./form_control_theme.mjs";
 import { evaluatePlatformFonts } from "./platform_fonts.mjs";
 import { buildMaterializedTextBindings } from "./materialized_text_bindings.mjs";
 import { buildMaterializedLayoutBindings } from "./materialized_layout_bindings.mjs";
@@ -318,12 +322,12 @@ function withTimeout(promise, milliseconds, label) {
   ]).finally(() => clearTimeout(timer));
 }
 
+// Speaks CDP over the browser's debugging pipe. Commands go to the attached
+// page session unless a caller names another session.
 class Cdp {
-  constructor(webSocketUrl, timeoutMs, progress = createCaptureProgress()) {
-    if (typeof WebSocket !== "function") {
-      throw new Error("Node.js 22 or newer is required (WebSocket unavailable)");
-    }
-    this.socket = new WebSocket(webSocketUrl);
+  constructor(pipe, timeoutMs, progress = createCaptureProgress()) {
+    this.pipe = pipe;
+    this.sessionId = undefined;
     this.timeoutMs = timeoutMs;
     this.progress = progress;
     this.nextId = 1;
@@ -332,14 +336,10 @@ class Cdp {
   }
 
   async open() {
-    await withTimeout(new Promise((resolve, reject) => {
-      this.socket.addEventListener("open", resolve, { once: true });
-      this.socket.addEventListener("error", reject, { once: true });
-    }), this.timeoutMs, "CDP WebSocket connection");
-    this.socket.addEventListener("message", (event) => {
+    this.pipe.onMessage((data) => {
       let message;
       try {
-        message = JSON.parse(String(event.data));
+        message = JSON.parse(data);
       } catch {
         return;
       }
@@ -359,21 +359,33 @@ class Cdp {
         }
         return;
       }
+      // Browser-session events carry no sessionId. Listeners here handle the
+      // page session and the child sessions it auto-attaches, nothing else.
+      if (!message.sessionId) return;
       for (const listener of this.listeners.get(message.method) ?? []) {
         Promise.resolve(listener(message.params ?? {})).catch(() => {});
       }
     });
-    this.socket.addEventListener("close", () => {
+    this.pipe.onClose(() => {
       for (const pending of this.pending.values()) {
         clearTimeout(pending.timer);
         pending.settle(false);
-        pending.reject(new Error("CDP WebSocket closed"));
+        pending.reject(new Error("CDP pipe closed"));
       }
       this.pending.clear();
     });
   }
 
-  call(method, params = {}, sessionId = undefined) {
+  async attachToPage() {
+    const target = await pageTarget(
+      (method, params) => this.call(method, params, null), this.timeoutMs);
+    const { sessionId } = await this.call(
+      "Target.attachToTarget", { targetId: target.targetId, flatten: true }, null);
+    this.sessionId = sessionId;
+  }
+
+  // `sessionId` defaults to the attached page; null addresses the browser.
+  call(method, params = {}, sessionId = this.sessionId) {
     const id = this.nextId++;
     const settle = this.progress.begin(method);
     return new Promise((resolve, reject) => {
@@ -383,12 +395,19 @@ class Cdp {
         reject(new Error(`${method} timed out`));
       }, this.timeoutMs);
       this.pending.set(id, { resolve, reject, settle, timer, method });
-      this.socket.send(JSON.stringify({
-        id,
-        method,
-        params,
-        ...(sessionId ? { sessionId } : {}),
-      }));
+      try {
+        this.pipe.send(JSON.stringify({
+          id,
+          method,
+          params,
+          ...(sessionId ? { sessionId } : {}),
+        }));
+      } catch (error) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        settle(false);
+        reject(error);
+      }
     });
   }
 
@@ -410,10 +429,7 @@ class Cdp {
   }
 
   close() {
-    if (this.socket.readyState === WebSocket.OPEN ||
-        this.socket.readyState === WebSocket.CONNECTING) {
-      this.socket.close();
-    }
+    this.pipe.close();
   }
 }
 
@@ -665,15 +681,26 @@ async function captureCanvasAssets(cdp, snapshot, screenshotOptions) {
           if (body) body.style.setProperty('visibility', 'hidden', 'important');
           for (const item of backgrounds)
             item.element.style.setProperty('background', 'transparent', 'important');
+          // Chromium draws a canvas bitmap into the element's CONTENT box;
+          // the border and padding around it belong to the element's own box
+          // paint. Placing the overlay on the border box would stretch the
+          // bitmap across the border and shift every stroke inward.
+          const computed = getComputedStyle(this);
+          const px = name => parseFloat(computed.getPropertyValue(name)) || 0;
+          const insetLeft = px('border-left-width') + px('padding-left');
+          const insetTop = px('border-top-width') + px('padding-top');
+          const insetRight = px('border-right-width') + px('padding-right');
+          const insetBottom = px('border-bottom-width') + px('padding-bottom');
           const overlay = document.createElement('img');
           overlay.src = this.toDataURL('image/png');
           overlay.style.cssText = [
             'position:absolute', 'display:block', 'visibility:visible',
             'pointer-events:none', 'margin:0', 'padding:0', 'border:0',
             'max-width:none', 'max-height:none', 'object-fit:fill',
-            'left:' + (rect.left + window.scrollX) + 'px',
-            'top:' + (rect.top + window.scrollY) + 'px',
-            'width:' + rect.width + 'px', 'height:' + rect.height + 'px'
+            'left:' + (rect.left + window.scrollX + insetLeft) + 'px',
+            'top:' + (rect.top + window.scrollY + insetTop) + 'px',
+            'width:' + Math.max(0, rect.width - insetLeft - insetRight) + 'px',
+            'height:' + Math.max(0, rect.height - insetTop - insetBottom) + 'px'
           ].join(';');
           root.appendChild(overlay);
           globalThis.__pulpCanvasIsolationRestore = {
@@ -1013,8 +1040,8 @@ async function captureMaterializedDocument(cdp) {
   materialized.font_bindings = fontBindings;
 
   // Production bundles include Babel/React/font payloads. Returning them all
-  // in one Runtime.evaluate result can exceed Chrome's DevTools WebSocket
-  // message budget and close the connection without a protocol error. Read
+  // in one Runtime.evaluate result can exceed Chrome's DevTools message
+  // budget and close the connection without a protocol error. Read
   // each bounded blob independently and assemble the durable sidecar here.
   for (let index = 0; index < materialized.assets.length; index += 1) {
     const payload = await cdp.call("Runtime.evaluate", {
@@ -1282,9 +1309,9 @@ async function runProbe(options) {
     launched = await launchBrowser(
       browserPath, profileDir, timeoutMs,
       (child) => browserCustody.adopt(child));
-    const target = await pageTarget(launched.endpoint.port, timeoutMs);
-    cdp = new Cdp(target.webSocketDebuggerUrl, timeoutMs, progress);
+    cdp = new Cdp(launched.pipe, timeoutMs, progress);
     await cdp.open();
+    await cdp.attachToPage();
     progress.enterPhase("page-configuration");
     const version = await cdp.call("Browser.getVersion");
     browser = reportBrowser(version);
@@ -1426,9 +1453,9 @@ async function runCapture(options) {
             `--host-resolver-rules=${
               hostResolverRules(resolvedExternalOrigins)}`,
           ]);
-    const target = await pageTarget(launched.endpoint.port, timeoutMs);
-    cdp = new Cdp(target.webSocketDebuggerUrl, timeoutMs, progress);
+    cdp = new Cdp(launched.pipe, timeoutMs, progress);
     await cdp.open();
+    await cdp.attachToPage();
 
     progress.enterPhase("page-configuration");
     browser = reportBrowser(await cdp.call("Browser.getVersion"));
@@ -1473,6 +1500,14 @@ async function runCapture(options) {
       pendingNetwork.delete(requestId);
     });
 
+    // Each page-settle round first settles the Web Animations and videos the
+    // page has by then, so a moving one, including one started mid-settle by
+    // a font load or a late timer, cannot keep the layout from settling.
+    const settleFrozen = (settleOptions) => waitForStable(cdp, {
+      ...settleOptions,
+      beforeSample: () => freezeMotion(cdp, { declareSources: false }),
+    });
+
     progress.enterPhase("navigation");
     const loaded = cdp.waitFor("Page.loadEventFired");
     const navigation = await cdp.call("Page.navigate", {
@@ -1485,7 +1520,7 @@ async function runCapture(options) {
 
     progress.enterPhase("page-settle");
     await disableMotion(cdp);
-    const firstSettle = await waitForStable(cdp, {
+    const firstSettle = await settleFrozen({
       networkIdle: () => pendingNetwork.size === 0,
       // Runnable design frameworks can briefly plateau before their
       // dynamically-loaded render helpers commit. Observe a full readiness
@@ -1494,7 +1529,7 @@ async function runCapture(options) {
     });
     let readiness = await awaitExplicitReadiness(cdp);
     let rendererHooks = await finalizeKnownRenderers(cdp);
-    const rendererSettle = await waitForStable(cdp, {
+    const rendererSettle = await settleFrozen({
       networkIdle: () => pendingNetwork.size === 0,
     });
     let resolvedViewportWidth = initialWidth;
@@ -1530,13 +1565,13 @@ async function runCapture(options) {
       await reloaded;
       progress.enterPhase("page-settle");
       await disableMotion(cdp);
-      const reloadSettle = await waitForStable(cdp, {
+      const reloadSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
         minimumElapsedMs: 1000,
       });
       readiness = await awaitExplicitReadiness(cdp);
       rendererHooks = await finalizeKnownRenderers(cdp);
-      const reloadRendererSettle = await waitForStable(cdp, {
+      const reloadRendererSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
       });
       fitSettle = {
@@ -1571,7 +1606,7 @@ async function runCapture(options) {
       interactionNavigationGuard =
         await createMainFrameNavigationGuard(cdp);
       const settleAfterInteraction = async () => {
-        const settled = await waitForStable(cdp, {
+        const settled = await settleFrozen({
           networkIdle: () => pendingNetwork.size === 0,
           minimumElapsedMs: 100,
         });
@@ -1629,7 +1664,7 @@ async function runCapture(options) {
         screenWidth: resolvedViewportWidth,
         screenHeight: resolvedViewportHeight,
       });
-      widthSettle = await waitForStable(cdp, {
+      widthSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
       });
       finalExtent = await measureDocumentExtent(cdp);
@@ -1657,7 +1692,7 @@ async function runCapture(options) {
         screenWidth: resolvedViewportWidth,
         screenHeight: resolvedViewportHeight,
       });
-      heightSettle = await waitForStable(cdp, {
+      heightSettle = await settleFrozen({
         networkIdle: () => pendingNetwork.size === 0,
       });
       finalExtent = await measureDocumentExtent(cdp);
@@ -1684,7 +1719,7 @@ async function runCapture(options) {
             ` document.head.appendChild(s); return true; })()`,
           returnByValue: true,
         });
-        heightSettle = await waitForStable(cdp, {
+        heightSettle = await settleFrozen({
           networkIdle: () => pendingNetwork.size === 0,
         });
         finalExtent = await measureDocumentExtent(cdp);
@@ -1738,7 +1773,7 @@ async function runCapture(options) {
         await setCaptureViewport(cdp, settledWidth, settledHeight, dpr);
         resolvedViewportWidth = settledWidth;
         resolvedViewportHeight = settledHeight;
-        await waitForStable(cdp, {
+        await settleFrozen({
           networkIdle: () => pendingNetwork.size === 0,
         });
         finalExtent = await measureDocumentExtent(cdp);
@@ -1768,6 +1803,11 @@ async function runCapture(options) {
 
     progress.enterPhase("same-frame-capture");
     await interactionNavigationGuard?.assertUnchanged();
+    // After load, fonts, readiness and every settle, and before anything of
+    // the frame is read: Web Animations, videos and the clock they run on are
+    // the motion the stylesheet and scheduler stubs above cannot stop. The
+    // page-settle passes above already settled what existed at load.
+    const motion = await freezeMotion(cdp);
     const materializedDocument = await captureMaterializedDocument(cdp);
     // Pause page virtual time before collecting any sidecar. Canvas/WebGL
     // requestAnimationFrame callbacks and timers must not advance while DOM,
@@ -1897,6 +1937,9 @@ async function runCapture(options) {
       includeBlendedBackgroundColors: true,
       includeTextColorOpacities: true,
     });
+    // Before anything reads it: every sidecar below and the persisted bytes
+    // (and so their hash binding) see masked strings, never the secret.
+    maskSecretText(snapshot, COMPUTED_STYLES);
     // Canvas paint is captured after the final presented browser frame below;
     // the DOMSnapshot already provides its stable backend-node identities.
     let canvasAssets = [];
@@ -1936,6 +1979,11 @@ async function runCapture(options) {
     // Read before time resumes, like every other DOM-derived sidecar: the
     // faces reported have to be the ones the frozen frame was shaped with.
     const platformFontReport = await evaluatePlatformFonts(
+      cdp, snapshot, COMPUTED_STYLES);
+    // Whether the native theme painted each form control is decided by who
+    // styled it, which only matched-rule origins can say. Written INTO the
+    // snapshot below, so the verdict is bound by the same hash as the boxes.
+    const formControlTheme = await evaluateFormControlTheme(
       cdp, snapshot, COMPUTED_STYLES);
     if (materializedDocument) {
       materializedDocument.layout_bindings = buildMaterializedLayoutBindings(
@@ -2137,6 +2185,10 @@ async function runCapture(options) {
     // and command-stream bindings remain the shipping/runtime contract.
     const canvasComposition = await deriveCanvasCompositionEvidence(
       cdp, screenshotBytes, chromeBytes);
+    // The UA canvas colour, read with a transient probe now that every frame
+    // has been captured. Written INTO the snapshot below, beside the
+    // transparent root and body backgrounds it completes.
+    const documentCanvas = await evaluateDocumentCanvas(cdp);
     await interactionNavigationGuard?.assertUnchanged();
     const pixels = pngDimensions(screenshotBytes);
     if (pixels.width !== captureWidth * dpr ||
@@ -2154,6 +2206,8 @@ async function runCapture(options) {
     const snapshotBytes = Buffer.from(serializeJson({
       ...sanitizedSnapshot,
       computedStyleNames: COMPUTED_STYLES,
+      formControlTheme,
+      documentCanvas,
     }), "utf8");
     const interactionReportBytes = interactionReport
       ? serializeJson(interactionReport)
@@ -2243,6 +2297,7 @@ async function runCapture(options) {
         timezone: "UTC",
         color_scheme: "light",
         reduced_motion: false,
+        motion,
         settle: {
           rounds:
             firstSettle.rounds + rendererSettle.rounds +

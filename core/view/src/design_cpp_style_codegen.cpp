@@ -1,5 +1,6 @@
 #include "design_cpp_codegen_internal.hpp"
 
+#include "design_import_svg_stroke.hpp"
 #include "design_ir_helpers.hpp"
 
 #include <pulp/view/css_effect_parse.hpp>
@@ -244,6 +245,50 @@ void emit_common_layout(std::ostringstream& out,
                   "flex.dim_min_height = {100.0f, pulp::view::DimensionUnit::percent};");
 }
 
+namespace {
+
+// CSS keywords match ASCII case-insensitively and ignore surrounding whitespace.
+bool is_css_keyword(std::string_view value, std::string_view keyword) {
+    const auto is_space = [](char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; };
+    while (!value.empty() && is_space(value.front()))
+        value.remove_prefix(1);
+    while (!value.empty() && is_space(value.back()))
+        value.remove_suffix(1);
+    return std::equal(value.begin(), value.end(), keyword.begin(), keyword.end(),
+                      [](char a, char b) {
+                          return std::tolower(static_cast<unsigned char>(a)) ==
+                                 std::tolower(static_cast<unsigned char>(b));
+                      });
+}
+
+// True when the lane drops something: the value is set and is not the one
+// keyword whose rendering the lane already produces (usually the initial value).
+bool drops(const std::optional<std::string>& value, std::string_view rendered_keyword) {
+    return value && !value->empty() && !is_css_keyword(*value, rendered_keyword);
+}
+
+struct BorderSides {
+    bool lane_draws = false; // some side has a recorded width above zero
+    bool unrecorded = false; // some side has no recorded width
+};
+
+// A side takes its own width, else the shorthand's. A side with neither is
+// CSS `medium`, which paints, while this lane strokes only a recorded width.
+BorderSides border_sides(const IRStyle& style) {
+    BorderSides sides;
+    for (const auto& side : {style.border_top_width, style.border_right_width,
+                             style.border_bottom_width, style.border_left_width}) {
+        const auto& width = side ? side : style.border_width;
+        if (!width)
+            sides.unrecorded = true;
+        else if (*width > 0.0f)
+            sides.lane_draws = true;
+    }
+    return sides;
+}
+
+} // namespace
+
 void report_unlowered_visual_style(const EmitContext& ctx,
                                    const IRNode& node,
                                    const IRStyle& style);
@@ -274,6 +319,10 @@ void emit_visual_style(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_size(" + cpp_string_literal(*style.background_size) + ");");
     if (style.background_position)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_position(" + cpp_string_literal(*style.background_position) + ");");
+    if (style.background_origin)
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_background_origin(" +
+                      cpp_string_literal(*style.background_origin) + ");");
     const auto box_paint_dpr = attr_float(node, "browser_box_paint_dpr");
     const auto box_paint_left = attr_float(node, "browser_box_paint_left_px");
     const auto box_paint_top = attr_float(node, "browser_box_paint_top_px");
@@ -429,25 +478,41 @@ void report_unlowered_visual_style(const EmitContext& ctx,
 
     if (!style.box_shadow.empty())
         note("box-shadow", "the node paints flat");
-    if (style.mix_blend_mode && !style.mix_blend_mode->empty())
+    if (drops(style.mix_blend_mode, "normal"))
         note("mix-blend-mode", "the node composites as an opaque fill");
-    if (style.filter && !style.filter->empty())
+    if (drops(style.filter, "none"))
         note("filter", "the node renders unfiltered");
-    if (style.backdrop_filter && !style.backdrop_filter->empty())
+    if (drops(style.backdrop_filter, "none"))
         note("backdrop-filter", "the backdrop renders opaque");
-    if (style.clip_path && !style.clip_path->empty())
+    if (drops(style.clip_path, "none"))
         note("clip-path", "the node paints its full rectangle");
     // Rotation lowers above. A transform that carries anything else (scale,
     // skew, translate, matrix) still does not, so report only that remainder
     // rather than claiming the whole property was dropped.
-    if (style.transform && !style.transform->empty() &&
-        !css_transform_rotation(*style.transform))
+    if (drops(style.transform, "none") && !css_transform_rotation(*style.transform))
         note("transform", "the node renders untransformed");
-    if (style.border_style && !style.border_style->empty())
-        note("border-style", "the border renders solid");
-    if (style.text_overflow && !style.text_overflow->empty())
+    // Borders lower as solid strokes of the recorded width. A non-solid style
+    // on a stroked side renders solid. A side with no recorded width paints at
+    // `medium` in CSS, unless the style is `none` or `hidden`, and this lane
+    // leaves it bare whatever the style.
+    if (style.border_style && !style.border_style->empty()) {
+        const auto& border_style = *style.border_style;
+        const auto sides = border_sides(style);
+        const bool hides =
+            is_css_keyword(border_style, "none") || is_css_keyword(border_style, "hidden");
+        const bool restyled = sides.lane_draws && !is_css_keyword(border_style, "solid");
+        const bool bare = sides.unrecorded && !hides;
+        if (restyled && bare)
+            note("border-style", "recorded sides render solid and the rest do not render");
+        else if (restyled)
+            note("border-style", "the border renders solid");
+        else if (bare)
+            note("border-style", sides.lane_draws ? "sides with no recorded width do not render"
+                                                  : "the border does not render");
+    }
+    if (drops(style.text_overflow, "clip"))
         note("text-overflow", "overflowing text hard-clips instead of ellipsising");
-    if (style.pointer_events && !style.pointer_events->empty())
+    if (drops(style.pointer_events, "auto"))
         note("pointer-events", "the node keeps default hit behaviour");
     // design-import-parity: non-lowering-end
 }
@@ -499,6 +564,16 @@ void emit_label_style(std::ostringstream& out,
     }
     if (style.white_space && *style.white_space != "nowrap")
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_multi_line(true);");
+    // The native lane's rule, so a baked label sits at the same height.
+    const auto valign = imported_vertical_align(style);
+    if (valign == ImportedVerticalAlign::center)
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) +
+                      "->set_vertical_align(pulp::canvas::TextVerticalAlign::center);");
+    else if (valign == ImportedVerticalAlign::bottom)
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) +
+                      "->set_vertical_align(pulp::canvas::TextVerticalAlign::bottom);");
 }
 
 void emit_svg_paint(std::ostringstream& out,
@@ -558,6 +633,25 @@ void emit_svg_paint(std::ostringstream& out,
             break;
         }
     }
+    const auto stroke_style = svg_stroke_style_attributes(node);
+    if (stroke_style.cap) {
+        const char* cap = *stroke_style.cap == canvas::LineCap::round    ? "round"
+                          : *stroke_style.cap == canvas::LineCap::square ? "square"
+                                                                         : "butt";
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_stroke_cap(pulp::canvas::LineCap::" + cap + ");");
+    }
+    if (stroke_style.join) {
+        const char* join = *stroke_style.join == canvas::LineJoin::round   ? "round"
+                           : *stroke_style.join == canvas::LineJoin::bevel ? "bevel"
+                                                                           : "miter";
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_stroke_join(pulp::canvas::LineJoin::" + join + ");");
+    }
+    if (stroke_style.miter_limit)
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_stroke_miter_limit(" +
+                      float_expr(ctx, *stroke_style.miter_limit) + ");");
 }
 
 

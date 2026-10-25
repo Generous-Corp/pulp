@@ -67,6 +67,47 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/validation/test_dspx07_projection_installed_sdk.py")
 
+    add_test(NAME gpu-audio-p5-unified-receipt-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_p5_receipt.py")
+
+    add_test(NAME gpu-audio-daw-continuity-receipt-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt.py")
+
+    add_test(NAME gpu-audio-daw-continuity-v2-receipt-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py")
+    # 53 cases: about 45 s on an M1 and 86 s to past 120 s on a GitHub-hosted
+    # Linux runner, so it needs more than ctest's default 120 s.
+    set_tests_properties(gpu-audio-daw-continuity-v2-receipt-verifier-selftest PROPERTIES
+        TIMEOUT 300)
+
+    # The GPU fault-injection test hooks never reach a build that did not ask
+    # for them: the self-test plants each way in; the gate scans this tree.
+    add_test(NAME gpu-fault-real-host-driver-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/testing/daw-smoke/test_real_host_smoke.py")
+
+    add_test(NAME gpu-fault-hooks-release-gate-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_fault_hooks_release_gate.py")
+    if(APPLE)
+        add_test(NAME gpu-fault-hooks-release-gate-macos-selftest
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_fault_hooks_release_gate_macos.py")
+    endif()
+    if(NOT PULP_GPU_AUDIO_FAULT_HOOKS)
+        add_test(NAME gpu-fault-hooks-release-gate
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/gpu_fault_hooks_release_gate.py"
+                --build-dir "${CMAKE_BINARY_DIR}")
+    endif()
+
+    add_test(NAME gpu-audio-provider-conformance-verifier-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_verify_gpu_audio_provider_conformance.py")
+
     # The importer, UI compiler and SDK are extractable packages.  Keep their
     # dependency seam executable in every configured tree, including trees
     # without a JavaScript toolchain; the self-test plants a private include
@@ -396,7 +437,8 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/raw_this_async_check.py" --selftest)
 
     # Thread-safe assertions: fail on a Catch2 assertion macro invoked inside a
-    # worker-thread lambda. Catch2 3.7.1's macros aren't thread-safe; off-main
+    # worker-thread lambda. Catch2's macros aren't thread-safe without
+    # CATCH_CONFIG_THREAD_SAFE_ASSERTIONS, which Pulp leaves off; off-main
     # assertions are UB that bare metal tolerates but VM scheduler timing trips.
     add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
@@ -1020,6 +1062,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME base-poison-detector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_base_poison_detector.py")
     set_tests_properties(base-poison-detector-selftest PROPERTIES TIMEOUT 120)
+    # Merge-queue circuit breaker: the PULP_QUEUE_BREAKER state, which groups
+    # it fails pre-VM, the trusted queue-unblock override, fail-open on
+    # unreadable input, and the classify/notify wiring in build.yml.
+    add_test(NAME queue-breaker-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_queue_breaker.py")
+    set_tests_properties(queue-breaker-selftest PROPERTIES TIMEOUT 60)
 
     # ODR macro-gated-header guard. A macro-gated inline/template function in a
     # header, plus a TU that redefines that macro, is an ODR violation a Release
@@ -1232,6 +1280,11 @@ if(Python3_Interpreter_FOUND)
     # Pure Python against a recorded host observation; runs on every host.
     add_test(NAME proxmox-host-watch-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_host_watch.py")
+    # Drives the supervisor against fake qm/gh/ssh, so it runs on any Unix host.
+    if(UNIX)
+        add_test(NAME proxmox-ephemeral-windows-runner-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_runner_windows.py")
+    endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME proxmox-ephemeral-linux-runner-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_proxmox_ephemeral_runner_linux.py")
@@ -1258,12 +1311,20 @@ if(Python3_Interpreter_FOUND)
     # else's unrelated PR, which is exactly the signal nobody attributes here.
     add_test(NAME gpu-test-resource-locks COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_test_resource_locks.py")
+    # Realtime worker-pool lock policy: a suite that starts a graph worker pool
+    # serializes on RESOURCE_LOCK pulp_realtime_worker_pool, because its
+    # workers spin at realtime priority and starve every normal-priority test
+    # running beside them. Manifest-only, like the GPU policy above.
+    add_test(NAME realtime-pool-resource-locks COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_realtime_pool_resource_locks.py")
     add_test(NAME gpu-audio-provider-identity-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_provider_identity.py")
     add_test(NAME gpu-audio-p2-campaign-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p2_campaign.py")
     add_test(NAME gpu-audio-p2-host-preflight-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p2_host_preflight.py")
+    add_test(NAME gpu-audio-comparator-v2-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_comparator_v2.py")
     add_test(NAME gpu-provenance-hydration-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_gpu_provenance_commits.py")
 
@@ -1549,6 +1610,30 @@ if(Python3_Interpreter_FOUND)
     # otherwise inherit. 3x the worst run observed on 2026-09-13, rounded up.
     set_tests_properties(version-at-land-selftest PROPERTIES
         TIMEOUT 180)
+
+    # The release bot's bump: build.yml's classify step reports whether the
+    # exact-generated-bump fast path was taken (run in Bash with a fake
+    # verifier), bump_fastpath_report.py counts those reports, and the four
+    # advisory workflows skip every job on release/version-bump while every
+    # other pull request still runs them and none of their contexts is required.
+    add_test(NAME bump-fastpath-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_bump_fastpath.py")
+
+    # Unreleased migration notes: their validation in the index generator and
+    # the fold the version-at-land bump runs to key them to the version it
+    # assigns. Pure file fixtures in a temporary directory.
+    add_test(NAME fold-migration-notes-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_fold_migration_notes.py")
+
+    # A pull request may not add docs/migrations/vX.Y.Z.md by hand; only the
+    # version-at-land bump commit adds one. Throwaway git ranges.
+    add_test(NAME migration-note-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_migration_note_guard.py")
+
+    # The build-free pre-push stand-in for script-test-inputs-drift: a new
+    # script-driven add_test needs a ctest_script_inputs.json entry.
+    add_test(NAME script-inputs-precheck-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_inputs_precheck.py")
 
     # GitHub's itemTypes-filtered timelineItems connection reports totalCount
     # over EVERY timeline item, so a filtered totalCount reads a never-queued

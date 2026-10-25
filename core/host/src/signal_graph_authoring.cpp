@@ -178,6 +178,23 @@ bool SignalGraph::is_processor_node(NodeId id) const {
     return processor_nodes_.contains(id);
 }
 
+bool SignalGraph::set_processor_audio_input_provider(
+    NodeId id, format::AudioInputBusProvider provider) noexcept {
+    GraphMutationLock mutation_lock(*this);
+    if (!provider)
+        return false;
+    // ProcessorNode copies the handle before prepare() and reads it from the
+    // realtime callback thereafter. Refuse a live graph mutation rather than
+    // racing a published snapshot or silently changing a running processor.
+    if (live_slot_.has_value())
+        return false;
+    const auto it = processor_nodes_.find(id);
+    if (it == processor_nodes_.end() || !it->second || !it->second->instance)
+        return false;
+    it->second->instance->set_audio_input_provider(provider);
+    return true;
+}
+
 NodeId SignalGraph::add_gain_node(const std::string& name) {
     GraphMutationLock mutation_lock(*this);
     GraphNode node;

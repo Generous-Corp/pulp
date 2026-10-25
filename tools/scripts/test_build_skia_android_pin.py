@@ -29,7 +29,7 @@ class AndroidSkiaBuilderPinTests(unittest.TestCase):
             'DAWN_EXPECTED_COMMIT="${DAWN_EXPECTED_COMMIT:-$(read_manifest_pin built_dawn)}"',
             script,
         )
-        self.assertEqual(determinism["skia_branch"], "chrome/m153")
+        self.assertEqual(determinism["skia_branch"], "chrome/m157")
         self.assertEqual(len(determinism["skia_commit"]), 40)
         self.assertEqual(len(determinism["built_dawn"]), 40)
 

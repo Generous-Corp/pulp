@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -754,20 +755,367 @@ TEST_CASE("Label honors Chromium captured vertical line positions",
     REQUIRE(zero_fills.size() == 1);
     CHECK(fills[0].f[1] - zero_fills[0].f[1] == Catch::Approx(3.0f));
 
-    // Chromium splits the 4px difference between a 16px line box and the
-    // 12px font em evenly. Native paint must retain the 2px top half-leading;
-    // otherwise compact controls look high even though their boxes match.
-    Label em_height("CENTERED");
-    em_height.set_font_family("Inter");
-    em_height.set_font_size(12.0f);
-    em_height.set_bounds({0, 0, 100, 40});
-    em_height.set_cached_line_boxes(
-        {{7, 3, 58, 12, 0, 8}}, 100.0f, face, false);
-    RecordingCanvas em_canvas;
-    em_height.paint(em_canvas);
-    const auto em_fills = commands_of(em_canvas, DrawCommand::Type::fill_text);
-    REQUIRE(em_fills.size() == 1);
-    CHECK(fills[0].f[1] - em_fills[0].f[1] == Catch::Approx(2.0f));
+    // Chromium's run rect is round(fAscent) + round(fDescent) tall, plus an
+    // ascent adjustment Blink applies to faces such as Times, Helvetica and
+    // Courier, and the baseline sits round(fDescent) above its bottom. A box
+    // grown at the top by that adjustment (here 2px: top 1, height 18, same
+    // bottom) must paint on the same baseline, not 1px lower as centring the
+    // ink in the box would.
+    Label adjusted("CENTERED");
+    adjusted.set_font_family("Inter");
+    adjusted.set_font_size(12.0f);
+    adjusted.set_bounds({0, 0, 100, 40});
+    adjusted.set_cached_line_boxes({{7, 1, 58, 18, 0, 8}}, 100.0f, face, false);
+    RecordingCanvas adjusted_canvas;
+    adjusted.paint(adjusted_canvas);
+    const auto adjusted_fills = commands_of(adjusted_canvas, DrawCommand::Type::fill_text);
+    REQUIRE(adjusted_fills.size() == 1);
+    CHECK(adjusted_fills[0].f[1] == Catch::Approx(fills[0].f[1]));
+
+    // The selection band covers the captured rect, not the worst-case glyph
+    // extent hanging from the baseline.
+    adjusted.set_selection_policy(Label::SelectionPolicy::always);
+    RecordingCanvas selection_canvas;
+    adjusted.paint(selection_canvas);
+    const auto layout = adjusted.selectable_layout();
+    REQUIRE(layout.measured);
+    REQUIRE(layout.lines.size() == 1);
+    CHECK(layout.lines[0].top == Catch::Approx(1.0f));
+    CHECK(layout.lines[0].height == Catch::Approx(18.0f));
+}
+
+TEST_CASE("Label places a captured baseline from the face's typographic metrics",
+          "[view][widget][label-cache][alignment][typography]") {
+    // Chromium's text run rect is the content area, the face's typographic
+    // ascent + descent rounded to whole px, whatever the line-height, and its
+    // baseline sits the rounded descent above the rect's bottom. The shaper's
+    // clip-safe ascent()/descent() carry the glyph bounding box instead,
+    // which for most faces is taller; placing the baseline from them paints
+    // every captured line off by part of the gap, growing with size.
+    constexpr float kSize = 32.0f;
+    const auto prepared = global_text_shaper().prepare(" ", "Inter", kSize, 400, 0);
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    if (face.empty() || !prepared.metrics_are_real()) {
+        SKIP("Inter does not resolve to a real face on this host");
+    }
+    const float typo_ascent = prepared.typographic_ascent();
+    const float typo_descent = prepared.typographic_descent();
+    REQUIRE(typo_ascent > 0.0f);
+    REQUIRE(typo_descent > 0.0f);
+    // Control: the two metric pairs must actually disagree, or the
+    // assertion below could not tell them apart.
+    const float clip_safe_baseline =
+        ((typo_ascent + typo_descent) - (prepared.ascent() + prepared.descent())) * 0.5f +
+        prepared.ascent();
+    REQUIRE(std::abs(clip_safe_baseline - typo_ascent) > 0.5f);
+
+    const float content_h = std::round(typo_ascent) + std::round(typo_descent);
+    constexpr float kTop = 5.0f;
+    Label label("Analog character");
+    label.set_font_family("Inter");
+    label.set_font_size(kSize);
+    label.set_bounds({0, 0, 400, 60});
+    label.set_cached_line_boxes({{0, kTop, 300, content_h, 0, 16}}, 400.0f, face, false);
+    REQUIRE_FALSE(label.cached_line_boxes().empty());
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    CHECK(fills[0].f[1] == Catch::Approx(kTop + std::round(typo_ascent)).margin(0.01f));
+
+    // A rect grown at the top, as Blink grows it for faces it adjusts, keeps
+    // its baseline the same rounded descent above the bottom.
+    Label grown("Analog character");
+    grown.set_font_family("Inter");
+    grown.set_font_size(kSize);
+    grown.set_bounds({0, 0, 400, 60});
+    grown.set_cached_line_boxes({{0, kTop - 4.0f, 300, content_h + 4.0f, 0, 16}}, 400.0f, face,
+                                false);
+    RecordingCanvas grown_canvas;
+    grown.paint(grown_canvas);
+    const auto grown_fills = commands_of(grown_canvas, DrawCommand::Type::fill_text);
+    REQUIRE(grown_fills.size() == 1);
+    CHECK(grown_fills[0].f[1] == Catch::Approx(fills[0].f[1]).margin(0.01f));
+}
+
+TEST_CASE("Label puts a captured text fragment's baseline a rounded ascent below its top",
+          "[view][widget][label-cache][alignment][typography]") {
+    // Chromium rounds ascent and descent to whole CSS px, and a text
+    // fragment's rect is exactly that rounded content area, so its baseline
+    // is top + round(ascent). Inter 17px rounds its ascent and descent by
+    // different amounts, which makes that differ from the unrounded
+    // half-leading split.
+    constexpr float kSize = 17.0f;
+    const auto prepared = global_text_shaper().prepare(" ", "Inter", kSize, 400, 0);
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    if (face.empty() || !prepared.metrics_are_real()) {
+        SKIP("Inter does not resolve to a real face on this host");
+    }
+    const float a = prepared.typographic_ascent();
+    const float d = prepared.typographic_descent();
+    const float fragment_h = std::round(a) + std::round(d);
+    // Control: the unrounded split must land somewhere else, or this
+    // assertion could not tell the two rules apart.
+    const float unrounded = (fragment_h - (a + d)) * 0.5f + a;
+    REQUIRE(std::abs(unrounded - std::round(a)) > 0.05f);
+
+    // A whole-px top keeps the captured baseline on the CSS-px grid it is
+    // snapped to, so this measures the rounded-ascent rule alone.
+    constexpr float kTop = 3.0f;
+    Label label("Fragment");
+    label.set_font_family("Inter");
+    label.set_font_size(kSize);
+    label.set_bounds({0, 0, 200, 40});
+    label.set_cached_line_boxes({{0, kTop, 120, fragment_h, 0, 8}}, 200.0f, face, false);
+    REQUIRE_FALSE(label.cached_line_boxes().empty());
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    CHECK(fills[0].f[1] == Catch::Approx(kTop + std::round(a)).margin(0.001f));
+}
+
+TEST_CASE("LineMetrics is valid only when finite with a positive ascent",
+          "[view][widget][label-cache][typography]") {
+    CHECK(LineMetrics{14.0f, 4.0f}.valid());
+    CHECK(LineMetrics{14.0f, 0.0f}.valid());
+    CHECK_FALSE(LineMetrics{0.0f, 4.0f}.valid());
+    CHECK_FALSE(LineMetrics{14.0f, -1.0f}.valid());
+    CHECK_FALSE(LineMetrics{std::nanf(""), 4.0f}.valid());
+    CHECK_FALSE(LineMetrics{14.0f, INFINITY}.valid());
+    // A Label refuses invalid metrics rather than storing them: its captured
+    // baseline stays where the derived rule puts it.
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    if (face.empty())
+        SKIP("Inter does not resolve to a real face on this host");
+    auto baseline = [&](LineMetrics m) {
+        Label label("Refused");
+        label.set_font_family("Inter");
+        label.set_font_size(17.0f);
+        label.set_bounds({0, 0, 200, 40});
+        label.set_cached_line_boxes({{0, 2, 120, 20, 0, 7}}, 200.0f, face, false);
+        label.set_cached_line_metrics(m);
+        RecordingCanvas canvas;
+        label.paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return fills[0].f[1];
+    };
+    CHECK(baseline({13.0f, 7.0f}) == Catch::Approx(15.0f).margin(0.001f));
+    CHECK(baseline({-13.0f, 33.0f}) == Catch::Approx(baseline({0.0f, 0.0f})).margin(0.001f));
+}
+
+TEST_CASE("Label places a captured baseline from the browser's measured ascent",
+          "[view][widget][label-cache][alignment][typography]") {
+    // The browser can lay a face out with metrics its font file does not
+    // state: it rounds them, and on some platforms adjusts them per face
+    // first. When the capture measured the ascent and descent it used, and the
+    // captured box is exactly that content area, the baseline is the box top
+    // plus that ascent -- whatever this Label would derive from the face.
+    constexpr float kSize = 17.0f;
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    const auto prepared = global_text_shaper().prepare(" ", "Inter", kSize, 400, 0);
+    if (face.empty() || !prepared.metrics_are_real()) {
+        SKIP("Inter does not resolve to a real face on this host");
+    }
+    // Deliberately not Inter's own rounded metrics, so only the recorded
+    // values can produce the expected baseline.
+    constexpr float kAscent = 13.0f;
+    constexpr float kDescent = 7.0f;
+    constexpr float kTop = 2.0f;
+    REQUIRE(std::abs(std::round(prepared.typographic_ascent()) - kAscent) > 0.5f);
+
+    auto paint_baseline = [&](bool recorded, float box_h, float top) {
+        Label label("Measured");
+        label.set_font_family("Inter");
+        label.set_font_size(kSize);
+        label.set_bounds({0, 0, 200, 40});
+        label.set_cached_line_boxes({{0, top, 120, box_h, 0, 8}}, 200.0f, face, false);
+        if (recorded)
+            label.set_cached_line_metrics({kAscent, kDescent});
+        RecordingCanvas canvas;
+        label.paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return fills[0].f[1];
+    };
+
+    // The recorded ascent wins over the derived one.
+    const float with_metrics = paint_baseline(true, kAscent + kDescent, kTop);
+    const float derived = paint_baseline(false, kAscent + kDescent, kTop);
+    CHECK(with_metrics == Catch::Approx(kTop + kAscent).margin(0.001f));
+    CHECK(std::abs(derived - (kTop + kAscent)) > 0.25f);
+
+    // A rect grown at the top keeps its baseline the measured descent above
+    // the bottom: the measured metrics still decide where the baseline is.
+    const float grown = paint_baseline(true, kAscent + kDescent + 4.0f, kTop - 4.0f);
+    const float grown_derived = paint_baseline(false, kAscent + kDescent + 4.0f, kTop - 4.0f);
+    CHECK(grown == Catch::Approx(kTop + kAscent).margin(0.001f));
+    CHECK(std::abs(grown_derived - (kTop + kAscent)) > 0.25f);
+}
+
+TEST_CASE("captured_baseline places and snaps a captured line",
+          "[view][widget][label-cache][alignment][typography]") {
+    const LineMetrics measured{13.0f, 7.0f};
+    // The measured descent above the rect's bottom, whatever the face says.
+    CHECK(captured_baseline_offset(20.0f, 99.0f, measured) == 13.0f);
+    // A rect grown at the top keeps the baseline that far above the bottom.
+    CHECK(captured_baseline_offset(24.0f, 99.0f, measured) == 17.0f);
+    // Nothing measured: the face's descent rounded to a whole CSS px.
+    CHECK(captured_baseline_offset(20.0f, 4.117f, std::nullopt) == 16.0f);
+    CHECK(captured_baseline_offset(21.0f, 4.6f, std::nullopt) == 16.0f);
+    // The fallback is approximate wherever the browser's descent is not the
+    // file's: Arial 16px under `descent-override: 40%` gives Chromium a 20px
+    // rect with its baseline 14px down, but the file's fDescent (3.39) puts
+    // this rule at 17. Only measured metrics place such a face correctly.
+    CHECK(captured_baseline_offset(20.0f, 3.390625f, std::nullopt) == 17.0f);
+    CHECK(captured_baseline_offset(20.0f, 3.390625f, LineMetrics{14.0f, 6.0f}) == 14.0f);
+
+    // Snapped to a whole CSS px measured from the captured frame, returned
+    // in the label's own coordinates.
+    CHECK(captured_baseline(2.0f, 13.0f, 0.0f) == 15.0f);
+    // root 10.375 + local 2.25 + 13 = 25.625 -> 26, i.e. local 15.625.
+    CHECK(captured_baseline(2.25f, 13.0f, 10.375f) == Catch::Approx(15.625f).margin(1e-4f));
+    // root 10.125 + local 2.25 + 13 = 25.375 -> 25, i.e. local 14.875.
+    CHECK(captured_baseline(2.25f, 13.0f, 10.125f) == Catch::Approx(14.875f).margin(1e-4f));
+}
+
+TEST_CASE("A captured baseline snaps on its captured frame's grid and not the host's",
+          "[view][widget][label-cache][alignment][typography]") {
+    // An imported panel mounted at a fractional offset, or under a scaled or
+    // scrolled host container, must paint its text exactly as it does at the
+    // origin: the snap grid is the captured frame (the import root, which
+    // every import lane marks as one), not the application root.
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    if (face.empty())
+        SKIP("Inter does not resolve to a real face on this host");
+    auto local_baseline = [&](float embed_y, float scale, bool mark_frame) {
+        View host;
+        host.set_bounds({0, 0, 800, 600});
+        auto embed = std::make_unique<View>();
+        embed->set_bounds({0, embed_y, 600, 400});
+        if (scale != 1.0f)
+            embed->set_scale(scale);
+        auto frame = std::make_unique<View>();
+        frame->set_bounds({0, 0, 500, 300});
+        frame->set_captured_frame_root(mark_frame);
+        // Sub-pixel layout is a separate property and does not mark a frame.
+        frame->set_subpixel_layout(true);
+        auto label = std::make_unique<Label>("Grid");
+        label->set_font_family("Inter");
+        label->set_font_size(17.0f);
+        label->set_bounds({0, 3.25f, 200, 40});
+        label->set_cached_line_boxes({{0, 0, 120, 19, 0, 4}}, 200.0f, face, false);
+        label->set_cached_line_metrics({15.0f, 4.0f});
+        Label* raw = label.get();
+        frame->add_child(std::move(label));
+        embed->add_child(std::move(frame));
+        host.add_child(std::move(embed));
+        RecordingCanvas canvas;
+        raw->paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return fills[0].f[1];
+    };
+    // In the frame: 3.25 + 15 = 18.25 -> 18, so 14.75 below the label's top.
+    const float at_origin = local_baseline(0.0f, 1.0f, true);
+    CHECK(at_origin == Catch::Approx(14.75f).margin(1e-4f));
+    CHECK(local_baseline(10.5f, 1.0f, true) == Catch::Approx(at_origin).margin(1e-4f));
+    CHECK(local_baseline(10.5f, 1.5f, true) == Catch::Approx(at_origin).margin(1e-4f));
+    // Control: without the frame marker the grid falls back to the host's,
+    // and the half-pixel embed offset moves the snapped baseline, even though
+    // the frame still lays out at sub-pixel precision.
+    CHECK(std::abs(local_baseline(10.5f, 1.0f, false) - at_origin) > 0.25f);
+}
+
+TEST_CASE("An embedded JS import keeps its captured frame's snap grid",
+          "[view][widget][label-cache][alignment][typography][bridge]") {
+    // The JS import lane marks its root through the bridge, as generated code
+    // does with setCapturedFrameRoot('', true). The bridge root is embedded
+    // in a host at a half-pixel offset; the text must paint where it does at
+    // the origin.
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    if (face.empty())
+        SKIP("Inter does not resolve to a real face on this host");
+    auto local_baseline = [&](float embed_y, bool mark_frame) {
+        View host;
+        host.set_bounds({0, 0, 800, 600});
+        auto frame_owned = std::make_unique<View>();
+        View* frame = frame_owned.get();
+        frame->set_bounds({0, embed_y, 500, 300});
+        host.add_child(std::move(frame_owned));
+        pulp::view::ScriptEngine engine;
+        pulp::state::StateStore store;
+        WidgetBridge bridge(engine, *frame, store);
+        bridge.load_script(mark_frame
+                               ? "setSubpixelLayout('', true); setCapturedFrameRoot('', true);"
+                                 " createLabel('t', 'Grid', '');"
+                               : "setSubpixelLayout('', true); createLabel('t', 'Grid', '');");
+        auto* label = dynamic_cast<Label*>(bridge.widget("t"));
+        REQUIRE(label != nullptr);
+        CHECK(frame->captured_frame_root() == mark_frame);
+        label->set_font_family("Inter");
+        label->set_font_size(17.0f);
+        label->set_bounds({0, 3.25f, 200, 40});
+        label->set_cached_line_boxes({{0, 0, 120, 19, 0, 4}}, 200.0f, face, false);
+        label->set_cached_line_metrics({15.0f, 4.0f});
+        RecordingCanvas canvas;
+        label->paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return fills[0].f[1];
+    };
+    // In the frame: 3.25 + 15 = 18.25 -> 18, so 14.75 below the label's top.
+    const float at_origin = local_baseline(0.0f, true);
+    CHECK(at_origin == Catch::Approx(14.75f).margin(1e-4f));
+    CHECK(local_baseline(10.5f, true) == Catch::Approx(at_origin).margin(1e-4f));
+    // Control: unmarked, the grid is the host's and the offset moves the text.
+    CHECK(std::abs(local_baseline(10.5f, false) - at_origin) > 0.25f);
+}
+
+TEST_CASE("Label snaps a captured baseline to a whole CSS px in root space",
+          "[view][widget][label-cache][alignment][typography]") {
+    // Chromium paints captured text with each line's baseline on a whole CSS
+    // px, measured from the page; the label's own origin can be fractional.
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    const auto prepared = global_text_shaper().prepare(" ", "Inter", 17.0f, 400, 0);
+    if (face.empty() || !prepared.metrics_are_real()) {
+        SKIP("Inter does not resolve to a real face on this host");
+    }
+    constexpr float kAscent = 15.0f;
+    constexpr float kDescent = 4.0f;
+    auto root_baseline = [&](float parent_y, float label_y, bool captured) {
+        View root;
+        root.set_bounds({0, 0, 400, 200});
+        auto parent = std::make_unique<View>();
+        parent->set_bounds({0, parent_y, 300, 100});
+        auto label = std::make_unique<Label>("Snap");
+        label->set_font_family("Inter");
+        label->set_font_size(17.0f);
+        label->set_bounds({0, label_y, 200, 40});
+        if (captured) {
+            label->set_cached_line_boxes({{0, 0, 120, kAscent + kDescent, 0, 4}}, 200.0f, face,
+                                         false);
+            label->set_cached_line_metrics({kAscent, kDescent});
+        }
+        Label* raw = label.get();
+        parent->add_child(std::move(label));
+        root.add_child(std::move(parent));
+        RecordingCanvas canvas;
+        raw->paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return parent_y + label_y + fills[0].f[1];
+    };
+    // 10.375 + 0.25 + 15 = 25.625 in root space: snapped to 26.
+    CHECK(root_baseline(10.375f, 0.25f, true) == Catch::Approx(26.0f).margin(0.001f));
+    // 10.125 + 0.25 + 15 = 25.375: snapped down to 25.
+    CHECK(root_baseline(10.125f, 0.25f, true) == Catch::Approx(25.0f).margin(0.001f));
+    // Control: the same label without a captured layout is not snapped, so
+    // its root baseline keeps the fractional origin.
+    const float native = root_baseline(10.375f, 0.25f, false);
+    CHECK(std::abs(native - std::round(native)) > 0.01f);
 }
 
 TEST_CASE("Label keeps a retyped single captured line where Chromium put it",

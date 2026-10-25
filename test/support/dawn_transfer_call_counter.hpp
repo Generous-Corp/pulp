@@ -3,6 +3,8 @@
 #include "dawn/dawn_proc.h"
 #include "dawn/native/DawnNative.h"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -27,6 +29,18 @@ namespace pulp::test {
 // closed.
 class DawnTransferCallCounter {
   public:
+    // The histogram is intentionally bounded and test-only. It records exact
+    // frontend transfer sizes without allocating from a Dawn callback or
+    // changing the provider's runtime path. Entries are indexed by byte size;
+    // larger transfers remain represented by the aggregate fields below.
+    static constexpr std::size_t kTransferSizeHistogramBytes = 256;
+    static constexpr std::size_t kTrackedBuffers = 1024;
+
+    struct CreatedBuffer {
+        WGPUBuffer buffer = nullptr;
+        std::uint64_t size = 0;
+    };
+
     enum class InstallMode : std::uint8_t { InstallAndRestore, DeferredSingleInstall };
     // Byte fields are requested frontend API bytes. They do not observe copies
     // performed internally by a Dawn backend, writes made through a buffer mapped
@@ -36,6 +50,11 @@ class DawnTransferCallCounter {
         std::uint64_t queue_write_buffer_bytes = 0;
         std::uint64_t copy_buffer_to_buffer_calls = 0;
         std::uint64_t copy_buffer_to_buffer_bytes = 0;
+        std::array<std::uint64_t, kTransferSizeHistogramBytes>
+            copy_buffer_to_buffer_size_histogram{};
+        std::array<std::uint64_t, kTransferSizeHistogramBytes> queue_write_buffer_size_histogram{};
+        std::array<std::uint64_t, kTransferSizeHistogramBytes>
+            queue_write_buffer_target_size_histogram{};
         std::uint64_t buffer_map_async_calls = 0;
         std::uint64_t buffer_map_async_bytes = 0;
         std::uint64_t buffer_get_mapped_range_calls = 0;
@@ -43,6 +62,11 @@ class DawnTransferCallCounter {
         std::uint64_t buffer_unmap_calls = 0;
         std::uint64_t queue_submit_calls = 0;
         std::uint64_t submitted_command_buffers = 0;
+        // Texture allocations and texture-to-texture copies. A per-frame
+        // snapshot copy that Graphite recycles from its scratch pool creates
+        // no texture but is still one encoded copy.
+        std::uint64_t device_create_texture_calls = 0;
+        std::uint64_t copy_texture_to_texture_calls = 0;
     };
 
     explicit DawnTransferCallCounter(InstallMode mode = InstallMode::InstallAndRestore)
@@ -53,11 +77,14 @@ class DawnTransferCallCounter {
             std::abort();
 
         interposed_->queueWriteBuffer = &count_queue_write_buffer;
+        interposed_->deviceCreateBuffer = &count_device_create_buffer;
         interposed_->commandEncoderCopyBufferToBuffer = &count_copy_buffer_to_buffer;
         interposed_->bufferMapAsync = &count_buffer_map_async;
         interposed_->bufferGetMappedRange = &count_buffer_get_mapped_range;
         interposed_->bufferUnmap = &count_buffer_unmap;
         interposed_->queueSubmit = &count_queue_submit;
+        interposed_->deviceCreateTexture = &count_device_create_texture;
+        interposed_->commandEncoderCopyTextureToTexture = &count_copy_texture_to_texture;
         if (mode_ == InstallMode::InstallAndRestore)
             dawnProcSetProcs(interposed_.get());
     }
@@ -97,6 +124,9 @@ class DawnTransferCallCounter {
                 copy_buffer_to_buffer_calls_.load(std::memory_order_relaxed),
             .copy_buffer_to_buffer_bytes =
                 copy_buffer_to_buffer_bytes_.load(std::memory_order_relaxed),
+            .copy_buffer_to_buffer_size_histogram = copy_buffer_size_histogram(),
+            .queue_write_buffer_size_histogram = queue_write_size_histogram(),
+            .queue_write_buffer_target_size_histogram = queue_write_target_size_histogram(),
             .buffer_map_async_calls = buffer_map_async_calls_.load(std::memory_order_relaxed),
             .buffer_map_async_bytes = buffer_map_async_bytes_.load(std::memory_order_relaxed),
             .buffer_get_mapped_range_calls =
@@ -106,6 +136,10 @@ class DawnTransferCallCounter {
             .buffer_unmap_calls = buffer_unmap_calls_.load(std::memory_order_relaxed),
             .queue_submit_calls = queue_submit_calls_.load(std::memory_order_relaxed),
             .submitted_command_buffers = submitted_command_buffers_.load(std::memory_order_relaxed),
+            .device_create_texture_calls =
+                device_create_texture_calls_.load(std::memory_order_relaxed),
+            .copy_texture_to_texture_calls =
+                copy_texture_to_texture_calls_.load(std::memory_order_relaxed),
         };
     }
 
@@ -116,6 +150,12 @@ class DawnTransferCallCounter {
         queue_write_buffer_bytes_.store(0, std::memory_order_relaxed);
         copy_buffer_to_buffer_calls_.store(0, std::memory_order_relaxed);
         copy_buffer_to_buffer_bytes_.store(0, std::memory_order_relaxed);
+        for (auto& counter : copy_buffer_to_buffer_size_histogram_)
+            counter.store(0, std::memory_order_relaxed);
+        for (auto& counter : queue_write_buffer_size_histogram_)
+            counter.store(0, std::memory_order_relaxed);
+        for (auto& counter : queue_write_buffer_target_size_histogram_)
+            counter.store(0, std::memory_order_relaxed);
         buffer_map_async_calls_.store(0, std::memory_order_relaxed);
         buffer_map_async_bytes_.store(0, std::memory_order_relaxed);
         buffer_get_mapped_range_calls_.store(0, std::memory_order_relaxed);
@@ -123,6 +163,8 @@ class DawnTransferCallCounter {
         buffer_unmap_calls_.store(0, std::memory_order_relaxed);
         queue_submit_calls_.store(0, std::memory_order_relaxed);
         submitted_command_buffers_.store(0, std::memory_order_relaxed);
+        device_create_texture_calls_.store(0, std::memory_order_relaxed);
+        copy_texture_to_texture_calls_.store(0, std::memory_order_relaxed);
     }
 
   private:
@@ -152,6 +194,53 @@ class DawnTransferCallCounter {
         }
     }
 
+    template <std::size_t N>
+    static void record_size(std::array<std::atomic<std::uint64_t>, N>& histogram,
+                            std::uint64_t size) noexcept {
+        if (size < N)
+            add_saturating(histogram[static_cast<std::size_t>(size)], 1);
+    }
+
+    template <std::size_t N>
+    static std::array<std::uint64_t, N>
+    snapshot_sizes(const std::array<std::atomic<std::uint64_t>, N>& histogram) noexcept {
+        std::array<std::uint64_t, N> result{};
+        for (std::size_t index = 0; index < N; ++index)
+            result[index] = histogram[index].load(std::memory_order_relaxed);
+        return result;
+    }
+
+    std::array<std::uint64_t, kTransferSizeHistogramBytes>
+    copy_buffer_size_histogram() const noexcept {
+        return snapshot_sizes(copy_buffer_to_buffer_size_histogram_);
+    }
+
+    std::array<std::uint64_t, kTransferSizeHistogramBytes>
+    queue_write_size_histogram() const noexcept {
+        return snapshot_sizes(queue_write_buffer_size_histogram_);
+    }
+
+    std::array<std::uint64_t, kTransferSizeHistogramBytes>
+    queue_write_target_size_histogram() const noexcept {
+        return snapshot_sizes(queue_write_buffer_target_size_histogram_);
+    }
+
+    void remember_buffer(WGPUBuffer buffer, std::uint64_t size) noexcept {
+        const auto index = created_buffer_count_.fetch_add(1, std::memory_order_relaxed);
+        if (index < created_buffers_.size()) {
+            created_buffers_[static_cast<std::size_t>(index)] = {buffer, size};
+        }
+    }
+
+    std::uint64_t allocation_size(WGPUBuffer buffer) const noexcept {
+        const auto count = std::min(created_buffer_count_.load(std::memory_order_acquire),
+                                    static_cast<std::uint64_t>(created_buffers_.size()));
+        for (std::uint64_t index = 0; index < count; ++index)
+            if (created_buffers_[static_cast<std::size_t>(index)].buffer == buffer)
+                return created_buffers_[static_cast<std::size_t>(index)].size;
+        return 0;
+    }
+
     static std::uint64_t mapped_bytes(DawnTransferCallCounter& counter, WGPUBuffer buffer,
                                       std::size_t offset, std::size_t size) noexcept {
         if (size != WGPU_WHOLE_MAP_SIZE)
@@ -172,7 +261,19 @@ class DawnTransferCallCounter {
         auto& counter = active();
         add_saturating(counter.queue_write_buffer_calls_, 1);
         add_saturating(counter.queue_write_buffer_bytes_, as_u64(size));
+        record_size(counter.queue_write_buffer_size_histogram_, as_u64(size));
+        record_size(counter.queue_write_buffer_target_size_histogram_,
+                    counter.allocation_size(buffer));
         counter.original_.queueWriteBuffer(queue, buffer, buffer_offset, data, size);
+    }
+
+    static WGPUBuffer count_device_create_buffer(WGPUDevice device,
+                                                 const WGPUBufferDescriptor* descriptor) {
+        auto& counter = active();
+        auto buffer = counter.original_.deviceCreateBuffer(device, descriptor);
+        if (buffer && descriptor)
+            counter.remember_buffer(buffer, descriptor->size);
+        return buffer;
     }
 
     static void count_copy_buffer_to_buffer(WGPUCommandEncoder command_encoder, WGPUBuffer source,
@@ -181,6 +282,7 @@ class DawnTransferCallCounter {
         auto& counter = active();
         add_saturating(counter.copy_buffer_to_buffer_calls_, 1);
         add_saturating(counter.copy_buffer_to_buffer_bytes_, size);
+        record_size(counter.copy_buffer_to_buffer_size_histogram_, size);
         counter.original_.commandEncoderCopyBufferToBuffer(command_encoder, source, source_offset,
                                                            destination, destination_offset, size);
     }
@@ -218,7 +320,26 @@ class DawnTransferCallCounter {
         counter.original_.queueSubmit(queue, command_count, commands);
     }
 
+    static WGPUTexture count_device_create_texture(WGPUDevice device,
+                                                   const WGPUTextureDescriptor* descriptor) {
+        auto& counter = active();
+        add_saturating(counter.device_create_texture_calls_, 1);
+        return counter.original_.deviceCreateTexture(device, descriptor);
+    }
+
+    static void count_copy_texture_to_texture(WGPUCommandEncoder command_encoder,
+                                              const WGPUTexelCopyTextureInfo* source,
+                                              const WGPUTexelCopyTextureInfo* destination,
+                                              const WGPUExtent3D* copy_size) {
+        auto& counter = active();
+        add_saturating(counter.copy_texture_to_texture_calls_, 1);
+        counter.original_.commandEncoderCopyTextureToTexture(command_encoder, source, destination,
+                                                             copy_size);
+    }
+
     static_assert(std::is_same_v<decltype(&count_queue_write_buffer), WGPUProcQueueWriteBuffer>);
+    static_assert(
+        std::is_same_v<decltype(&count_device_create_buffer), WGPUProcDeviceCreateBuffer>);
     static_assert(std::is_same_v<decltype(&count_copy_buffer_to_buffer),
                                  WGPUProcCommandEncoderCopyBufferToBuffer>);
     static_assert(std::is_same_v<decltype(&count_buffer_map_async), WGPUProcBufferMapAsync>);
@@ -226,6 +347,10 @@ class DawnTransferCallCounter {
     static_assert(
         std::is_same_v<decltype(&count_buffer_get_mapped_range), WGPUProcBufferGetMappedRange>);
     static_assert(std::is_same_v<decltype(&count_buffer_unmap), WGPUProcBufferUnmap>);
+    static_assert(
+        std::is_same_v<decltype(&count_device_create_texture), WGPUProcDeviceCreateTexture>);
+    static_assert(std::is_same_v<decltype(&count_copy_texture_to_texture),
+                                 WGPUProcCommandEncoderCopyTextureToTexture>);
 
     InstallMode mode_ = InstallMode::InstallAndRestore;
     DawnProcTable original_{};
@@ -235,6 +360,14 @@ class DawnTransferCallCounter {
     std::atomic<std::uint64_t> queue_write_buffer_bytes_{0};
     std::atomic<std::uint64_t> copy_buffer_to_buffer_calls_{0};
     std::atomic<std::uint64_t> copy_buffer_to_buffer_bytes_{0};
+    std::array<std::atomic<std::uint64_t>, kTransferSizeHistogramBytes>
+        copy_buffer_to_buffer_size_histogram_{};
+    std::array<std::atomic<std::uint64_t>, kTransferSizeHistogramBytes>
+        queue_write_buffer_size_histogram_{};
+    std::array<std::atomic<std::uint64_t>, kTransferSizeHistogramBytes>
+        queue_write_buffer_target_size_histogram_{};
+    std::array<CreatedBuffer, kTrackedBuffers> created_buffers_{};
+    std::atomic<std::uint64_t> created_buffer_count_{0};
     std::atomic<std::uint64_t> buffer_map_async_calls_{0};
     std::atomic<std::uint64_t> buffer_map_async_bytes_{0};
     std::atomic<std::uint64_t> buffer_get_mapped_range_calls_{0};
@@ -242,6 +375,8 @@ class DawnTransferCallCounter {
     std::atomic<std::uint64_t> buffer_unmap_calls_{0};
     std::atomic<std::uint64_t> queue_submit_calls_{0};
     std::atomic<std::uint64_t> submitted_command_buffers_{0};
+    std::atomic<std::uint64_t> device_create_texture_calls_{0};
+    std::atomic<std::uint64_t> copy_texture_to_texture_calls_{0};
 
     inline static std::atomic<DawnTransferCallCounter*> active_{nullptr};
 };

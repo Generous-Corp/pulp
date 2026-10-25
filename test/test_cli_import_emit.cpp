@@ -324,6 +324,28 @@ TEST_CASE("import emit scan ACCEPTS the same content in a copied-user-file",
 #if defined(PULP_CLI_BINARY) && !defined(_WIN32)
 namespace {
 fs::path cli_binary() { return fs::path(PULP_CLI_BINARY); }
+
+// A mock SPI responder: dispatches BOTH verbs the CLI calls. analyze returns
+// a minimal ProjectIR; emit returns the given manifest.
+fs::path write_emit_responder(const fs::path& dir, const std::string& manifest) {
+    fs::path mock = dir / "mock_emit.sh";
+    write_file(mock,
+               "#!/bin/sh\n"
+               "while read line; do\n"
+               "  case \"$line\" in\n"
+               "    *'\"verb\":\"analyze\"'*)\n"
+               "      printf '%s\\n' '{\"spi_version\":0,\"id\":\"analyze-1\",\"ok\":true,"
+               "\"result\":{\"schema\":\"pulp.import.project_ir.v0\",\"parameters\":[]}}' ;;\n"
+               "    *'\"verb\":\"emit\"'*)\n"
+               "      printf '%s\\n' '{\"spi_version\":0,\"id\":\"emit-1\",\"ok\":true,"
+               "\"result\":" +
+                   manifest +
+                   "}' ;;\n"
+                   "  esac\n"
+                   "done\n");
+    fs::permissions(mock, fs::perms::owner_all, fs::perm_options::add);
+    return mock;
+}
 }  // namespace
 
 TEST_CASE("import emit end-to-end materialises a scaffold + provenance marker",
@@ -339,26 +361,10 @@ TEST_CASE("import emit end-to-end materialises a scaffold + provenance marker",
     fs::path user_core = proj.path / "Core.h";
     write_file(user_core, "// the user's own DSP core\nstruct Core {};\n");
 
-    // A mock SPI responder: dispatches BOTH verbs the CLI calls. analyze returns
-    // a minimal ProjectIR; emit returns a manifest that copies the user core.
-    fs::path mock = td.path / "mock_emit.sh";
-    std::string manifest = mock_manifest(user_core.string());
-    // The mock echoes raw JSON; embed the manifest with single quotes escaped.
-    write_file(mock,
-        "#!/bin/sh\n"
-        "while read line; do\n"
-        "  case \"$line\" in\n"
-        "    *'\"verb\":\"analyze\"'*)\n"
-        "      printf '%s\\n' '{\"spi_version\":0,\"id\":\"analyze-1\",\"ok\":true,"
-        "\"result\":{\"schema\":\"pulp.import.project_ir.v0\",\"parameters\":[]}}' ;;\n"
-        "    *'\"verb\":\"emit\"'*)\n"
-        "      printf '%s\\n' '{\"spi_version\":0,\"id\":\"emit-1\",\"ok\":true,"
-        "\"result\":" + manifest + "}' ;;\n"
-        "  esac\n"
-        "done\n");
-    fs::permissions(mock, fs::perms::owner_all, fs::perm_options::add);
+    // The manifest copies the user core verbatim.
+    const auto mock = write_emit_responder(td.path, mock_manifest(user_core.string()));
 
-    fs::path out = td.path / "scaffold";
+    fs::path out = td.path / "scaffold with space";
 
     pulp::platform::ProcessOptions opts;
     opts.timeout_ms = pulp_test_cli::shellout_timeout_ms();  // shared hang guard
@@ -397,6 +403,58 @@ TEST_CASE("import emit end-to-end materialises a scaffold + provenance marker",
     REQUIRE(r.stdout_output.find("Materialised Pulp migration scaffold")
             != std::string::npos);
     REQUIRE(r.stdout_output.find("framework-source scan: passed") != std::string::npos);
+    // The CLI wraps long paths for the terminal, so assert the governed
+    // wrapper and build verb independently while rejecting the old raw chain.
+    REQUIRE(r.stdout_output.find("governed-build.sh") != std::string::npos);
+    REQUIRE(r.stdout_output.find("cmake --build") != std::string::npos);
+    REQUIRE(r.stdout_output.find("&& cmake --build") == std::string::npos);
+    const auto build_dir = out / "build";
+    const auto configure_recipe =
+        "cmake -S \"" + out.string() + "\" -B \"" + build_dir.string() + "\" &&";
+    REQUIRE(r.stdout_output.find(configure_recipe) != std::string::npos);
+}
+
+TEST_CASE("import emit from an installed CLI prints a build step that exists",
+          "[cli][import][emit][shellout]") {
+    // An installed CLI has no source checkout above it, so it cannot name the
+    // checkout's governed-build wrapper. Copy the binary somewhere with no
+    // checkout and confirm the recipe falls back to a plain cmake build.
+    TempDir installed("pulp-emit-installed");
+    const auto bin_dir = installed.path / "bin";
+    fs::create_directories(bin_dir);
+    const auto installed_cli = bin_dir / cli_binary().filename();
+    fs::copy_file(cli_binary(), installed_cli);
+    fs::permissions(installed_cli, fs::perms::owner_all, fs::perm_options::add);
+
+    TempDir td("pulp-emit-installed-work");
+    fs::path idx = td.path / "known-frameworks.json";
+    write_file(idx, kNeutralIndex);
+    TempDir proj("pulp-emit-installed-proj");
+    write_file(proj.path / "x.exproj", "<x/>\n");
+    fs::path user_core = proj.path / "Core.h";
+    write_file(user_core, "struct Core {};\n");
+    const auto mock = write_emit_responder(td.path, mock_manifest(user_core.string()));
+    fs::path out = td.path / "scaffold";
+
+    pulp::platform::ProcessOptions opts;
+    opts.timeout_ms = pulp_test_cli::shellout_timeout_ms();
+    opts.working_directory = td.path.string();
+    ::setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+    ::setenv("PULP_KNOWN_FRAMEWORKS", idx.string().c_str(), 1);
+
+    auto r = pulp::platform::ChildProcess::run(installed_cli.string(),
+                                               {"import", "emit", "--from", "example-framework",
+                                                "--importer-cmd", "/bin/sh " + mock.string(),
+                                                "--output", out.string(), proj.path.string()},
+                                               opts);
+
+    INFO("stdout=" << r.stdout_output << " stderr=" << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("governed-build.sh") == std::string::npos);
+    const auto build_dir = out / "build";
+    const auto recipe = "cmake -S \"" + out.string() + "\" -B \"" + build_dir.string() +
+                        "\" && cmake --build \"" + build_dir.string() + "\"";
+    REQUIRE(r.stdout_output.find(recipe) != std::string::npos);
 }
 
 TEST_CASE("import emit end-to-end fails closed when the importer smuggles "

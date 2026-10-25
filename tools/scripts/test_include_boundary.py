@@ -79,9 +79,24 @@ class ViewCoreBoundaryTests(unittest.TestCase):
         self.assertEqual(self._plant('  #  include   "pulp/host/plugin_slot.hpp"\n'), 1)
 
     def test_every_forbidden_area_fails(self):
-        for area in ("audio", "signal", "host", "midi", "format"):
+        for area in ("audio", "signal", "host", "midi", "format", "timebase", "graph",
+                     "playback", "content", "sample_bank_manifest"):
             with self.subTest(area=area):
                 self.assertEqual(self._plant(f"#include <pulp/{area}/x.hpp>\n"), 1)
+
+    def test_forbidden_area_list_is_exact(self):
+        # A dropped area would silently re-admit that retained subsystem.
+        self.assertEqual(boundary.BOUNDARIES["view-core"].forbidden_areas, frozenset({
+            "audio", "signal", "host", "midi", "format", "timebase", "graph", "playback",
+            "content", "sample_bank_manifest"}))
+
+    def test_content_header_under_state_prefix_fails(self):
+        # pulp-content installs its registry under the pulp/state prefix that
+        # view-core may otherwise use; the header's owning directory decides.
+        self._write("core/content/include/pulp/state/content_registry.hpp", "#pragma once\n")
+        self._write("core/state/include/pulp/state/store.hpp", "#pragma once\n")
+        self.assertEqual(self._plant("#include <pulp/state/content_registry.hpp>\n"), 1)
+        self.assertEqual(self._plant("#include <pulp/state/store.hpp>\n"), 0)
 
     def test_relative_escape_out_of_view_fails(self):
         self.assertEqual(

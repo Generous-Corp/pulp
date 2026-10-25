@@ -11,6 +11,9 @@
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
 #include <pulp/canvas/text_shaper.hpp>
+#if !defined(PULP_HAS_TEXT_SHAPING) && defined(__APPLE__)
+#include "coretext_text.hpp"
+#endif
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -18,6 +21,7 @@
 #include <numeric>
 
 #ifdef PULP_HAS_TEXT_SHAPING
+#include "font_tables.hpp"
 // SkParagraph headers — available when Skia is built with text shaping
 #include "modules/skparagraph/include/ParagraphBuilder.h"
 #include "modules/skparagraph/include/ParagraphStyle.h"
@@ -622,6 +626,9 @@ struct TextShaper::Impl {
         float descent = 0;  // positive distance below baseline
         float leading = 0;  // extra inter-line gap
         float line_height = 0;  // ascent + descent + leading
+        // fAscent/fDescent, flipped positive and never widened to fTop/fBottom.
+        float typographic_ascent = 0;
+        float typographic_descent = 0;
         bool real = false;      // true if derived from SkFontMetrics, false for the heuristic fallback
     };
     std::unordered_map<CacheKey, LineBox, CacheKeyHash> metrics_cache;
@@ -647,28 +654,9 @@ struct TextShaper::Impl {
         // entry the host lacks could take its ascent from the substitute and
         // its advances from a later entry. One mode for both is the point.
         opts.fallback_mode = FallbackMode::Deterministic;
-        // Mirror skia_canvas.cpp's split_font_family_list so comma-
-        // separated CSS family stacks are walked correctly. Strip
-        // whitespace + matching outer quotes.
-        size_t pos = 0;
-        while (pos < font_family.size()) {
-            size_t comma = font_family.find(',', pos);
-            std::string seg = font_family.substr(
-                pos, (comma == std::string::npos ? font_family.size() : comma) - pos);
-            pos = (comma == std::string::npos) ? font_family.size() : comma + 1;
-            // Strip outer whitespace.
-            size_t a = seg.find_first_not_of(" \t");
-            size_t b = seg.find_last_not_of(" \t");
-            if (a == std::string::npos) continue;
-            seg = seg.substr(a, b - a + 1);
-            // Strip matching outer quotes.
-            if (seg.size() >= 2
-                && (seg.front() == '"' || seg.front() == '\'')
-                && seg.back() == seg.front()) {
-                seg = seg.substr(1, seg.size() - 2);
-            }
-            if (!seg.empty()) opts.family_stack.push_back(std::move(seg));
-        }
+        // Entries keep their quotes; the resolver reads a quoted entry as a
+        // literal family name rather than a generic keyword.
+        opts.family_stack = split_css_font_family_list(font_family);
         auto resolved = FontResolver::instance().resolve_family_list(opts);
         return resolved.typeface;
     }
@@ -701,6 +689,8 @@ struct TextShaper::Impl {
         box.descent = font_size * 0.2f;
         box.leading = font_size * 0.5f;
         box.line_height = box.ascent + box.descent + box.leading;
+        box.typographic_ascent = box.ascent;
+        box.typographic_descent = box.descent;
         box.real = false;
 
 #ifdef PULP_HAS_TEXT_SHAPING
@@ -733,6 +723,8 @@ struct TextShaper::Impl {
             const float bottom = m.fBottom > m.fDescent ? m.fBottom : m.fDescent;
             box.ascent  = -top;           // worst-case distance above baseline (positive)
             box.descent =  bottom;        // worst-case distance below baseline (positive)
+            box.typographic_ascent = -m.fAscent;
+            box.typographic_descent = m.fDescent;
             box.leading =  m.fLeading > 0 ? m.fLeading : 0;
             // Raw fTop/fBottom is now the default line box. The legacy
             // empirical `0.5 * font_size` safety margin was a stopgap for
@@ -746,6 +738,24 @@ struct TextShaper::Impl {
             const float safety = legacy_margin ? font_size * 0.5f : 0.0f;
             box.line_height = box.ascent + box.descent + box.leading + safety;
             box.real = true;
+        }
+#elif defined(__APPLE__)
+        // Without Skia the CoreGraphics canvas paints through CoreText, so
+        // measure the face it will paint with. The definitions mirror Skia's
+        // CoreText backend: worst-case extents from the font bounding box,
+        // typographic ascent/descent/leading from the font.
+        {
+            const auto m =
+                detail::coretext_face_metrics(font_family, font_size, font_weight, font_slant);
+            if (m.ascent > 0.0f) {
+                box.ascent = std::max(m.top, m.ascent);
+                box.descent = std::max(m.bottom, m.descent);
+                box.typographic_ascent = m.ascent;
+                box.typographic_descent = m.descent;
+                box.leading = std::max(0.0f, m.leading);
+                box.line_height = box.ascent + box.descent + box.leading;
+                box.real = true;
+            }
         }
 #endif
 
@@ -780,24 +790,15 @@ struct TextShaper::Impl {
         skia::textlayout::ParagraphStyle paragraph_style;
         skia::textlayout::TextStyle text_style;
         std::vector<SkString> families;
-        size_t cursor = 0;
-        while (cursor < font_family.size()) {
-            const size_t comma = font_family.find(',', cursor);
-            std::string entry = font_family.substr(
-                cursor, comma == std::string::npos ? std::string::npos
-                                                   : comma - cursor);
-            const size_t first = entry.find_first_not_of(" \t\n\r\f\v\"'");
-            const size_t last = entry.find_last_not_of(" \t\n\r\f\v\"'");
-            if (first != std::string::npos && last != std::string::npos)
-                families.emplace_back(entry.substr(first, last - first + 1).c_str());
-            if (comma == std::string::npos) break;
-            cursor = comma + 1;
-        }
+        for (const auto& entry : split_css_font_family_list(font_family))
+            families.emplace_back(platform_family_for_css_family(entry).c_str());
         const std::string emoji_family = ctx->emoji_family_name();
         if (!emoji_family.empty()) families.emplace_back(emoji_family.c_str());
         if (families.empty()) families.emplace_back("");
         text_style.setFontFamilies(families);
         text_style.setFontSize(font_size);
+        apply_auto_optical_size(
+            text_style, resolve_typeface(font_family, font_weight, font_slant).get(), font_size);
         text_style.setFontStyle(SkFontStyle(
             font_weight, SkFontStyle::kNormal_Width,
             skia_slant_from_int(font_slant)));
@@ -892,36 +893,23 @@ struct TextShaper::Impl {
                 skia::textlayout::ParagraphStyle paragraph_style;
                 skia::textlayout::TextStyle text_style;
                 std::vector<SkString> families;
-                size_t cursor = 0;
-                while (cursor < font_family.size()) {
-                    const size_t comma = font_family.find(',', cursor);
-                    std::string entry = font_family.substr(
-                        cursor, comma == std::string::npos
-                                    ? std::string::npos : comma - cursor);
-                    const size_t first = entry.find_first_not_of(" \t\n\r\f\v");
-                    const size_t last = entry.find_last_not_of(" \t\n\r\f\v");
-                    if (first != std::string::npos && last != std::string::npos) {
-                        entry = entry.substr(first, last - first + 1);
-                        if (entry.size() >= 2 &&
-                            (entry.front() == '\'' || entry.front() == '"') &&
-                            entry.front() == entry.back()) {
-                            entry = entry.substr(1, entry.size() - 2);
-                        }
-                        if (!entry.empty()) families.emplace_back(entry.c_str());
-                    }
-                    if (comma == std::string::npos) break;
-                    cursor = comma + 1;
-                }
+                for (const auto& entry : split_css_font_family_list(font_family))
+                    families.emplace_back(platform_family_for_css_family(entry).c_str());
                 const std::string emoji_family = ctx->emoji_family_name();
                 if (!emoji_family.empty()) families.emplace_back(emoji_family.c_str());
                 if (families.empty()) families.emplace_back("");
                 text_style.setFontFamilies(families);
+                const auto primary = resolve_typeface(font_family, font_weight, font_slant);
                 text_style.setFontSize(font_size);
+                apply_auto_optical_size(text_style, primary.get(), font_size);
                 text_style.setFontStyle(SkFontStyle(
                     font_weight, SkFontStyle::kNormal_Width,
                     skia_slant_from_int(font_slant)));
-                if (letter_spacing != 0.0f)
-                    text_style.setLetterSpacing(letter_spacing);
+                // The painter adds the primary face's AAT tracking to the
+                // letter-spacing; measure with the same spacing it draws.
+                const float tracking = aat_tracking_px(primary.get(), font_size);
+                if (letter_spacing + tracking != 0.0f)
+                    text_style.setLetterSpacing(letter_spacing + tracking);
                 for (const auto& feature : font_features) {
                     char tag_chars[4] = {
                         static_cast<char>((feature.tag >> 24) & 0xFF),
@@ -1019,6 +1007,7 @@ struct TextShaper::Impl {
                     }
                     tstyle.setFontFamilies(families);
                     tstyle.setFontSize(font_size);
+                    apply_auto_optical_size(tstyle, typeface.get(), font_size);
                     pstyle.setTextStyle(tstyle);
                     auto collection_use = ctx->lock_font_collection_use();
                     auto pb = skia::textlayout::ParagraphBuilder::make(
@@ -1040,6 +1029,12 @@ struct TextShaper::Impl {
             // build uses, so callers still get a sane positive width.
             width = static_cast<float>(text.size()) * font_size * 0.6f;
         }
+#elif defined(__APPLE__)
+        // Measure with the CoreText face the CoreGraphics canvas paints.
+        width = detail::coretext_advance(text, font_family, font_size, font_weight, font_slant,
+                                         font_features);
+        if (width <= 0.0f && !text.empty())
+            width = static_cast<float>(text.size()) * font_size * 0.6f;
 #else
         // Fallback: character-width estimation
         width = static_cast<float>(text.size()) * font_size * 0.6f;
@@ -1119,6 +1114,9 @@ PreparedText TextShaper::prepare(
     result.ascent_       = box.ascent;
     result.descent_      = box.descent;
     result.leading_      = box.leading;
+    // From the face alone: shaping a string widens only the worst-case extents.
+    result.typographic_ascent_ = box.typographic_ascent;
+    result.typographic_descent_ = box.typographic_descent;
     result.metrics_real_ = box.real;
 
     // Segment the text: split on whitespace and newlines
@@ -1211,6 +1209,10 @@ PreparedText TextShaper::prepare(
         result.ascent_ = std::max(result.ascent_, span_prepared.ascent_);
         result.descent_ = std::max(result.descent_, span_prepared.descent_);
         result.leading_ = std::max(result.leading_, span_prepared.leading_);
+        result.typographic_ascent_ =
+            std::max(result.typographic_ascent_, span_prepared.typographic_ascent_);
+        result.typographic_descent_ =
+            std::max(result.typographic_descent_, span_prepared.typographic_descent_);
         result.metrics_real_ = result.metrics_real_ || span_prepared.metrics_real_;
         fallback_line_height = std::max(fallback_line_height,
                                         span_prepared.line_height_);

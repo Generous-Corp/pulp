@@ -343,6 +343,10 @@ expect_leak_blocked(remote-view-legacy-handler
     "#if defined(_MSC_VER)\n#define USED\n#else\n#define USED __attribute__((used))\n#endif\nextern \"C\" USED const volatile char leak[] = \"view.param_set\";")
 expect_leak_blocked(capability-marker
     "#if defined(_MSC_VER)\n#define USED\n#else\n#define USED __attribute__((used))\n#endif\nextern \"C\" USED const volatile char leak[] = \"PULP_INSPECT_CAPABILITY_STATE_WRITE_V1\";")
+# The scanner searches the binary's printable runs, so a marker that sits
+# inside a longer run of printable bytes must still be found.
+expect_leak_blocked(embedded-marker
+    "#if defined(_MSC_VER)\n#define USED\n#else\n#define USED __attribute__((used))\n#endif\nextern \"C\" USED const volatile char leak[] = \"prefix-PULP_INSPECT_SHIPPING_MANIFEST_V1-suffix\";")
 expect_leak_blocked(symbol-leak
     "namespace pulp::inspect { class ControlBroker { public: int run(); }; int ControlBroker::run() { return 7; } }")
 

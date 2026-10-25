@@ -131,6 +131,8 @@ public:
 
     /// Process one audio block.
     ///
+    /// `input` and `output` may be the same buffer (in-place processing).
+    ///
     /// **Precondition: `num_samples == block_size()` whenever an IR is loaded.**
     /// The head/tail stages advance interlocked cursors sized to `block_size()`;
     /// a block of any other length desynchronizes them.
@@ -159,7 +161,8 @@ public:
                  std::size_t num_samples) {
         // No IR to convolve with: pass through.
         if (!loaded_) {
-            std::copy_n(input, num_samples, output);
+            if (input != output)
+                std::copy_n(input, num_samples, output);
             return;
         }
         // Loaded, but the caller's block size does not match the partitioning.
@@ -172,6 +175,14 @@ public:
         // Recover from a previous violation before folding a valid block in.
         if (history_torn_) reset();
 
+        // ── feed this block into the tail input buffer ──
+        // Captured before the head writes `output`, so `input` may be the
+        // same buffer as `output`.
+        if (tail_block_ > 0) {
+            std::copy_n(input, block_size_, tail_input_buf_.data() + tail_fill_);
+            tail_fill_ += block_size_;
+        }
+
         // ── head stage: live ──
         head_.process(input, output, num_samples);
 
@@ -183,11 +194,6 @@ public:
                 output[i] += tail_output_buf_[tail_stream_pos_ + i];
             tail_stream_pos_ += block_size_;
         }
-
-        // ── feed this block into the tail input buffer ──
-        for (std::size_t i = 0; i < block_size_; ++i)
-            tail_input_buf_[tail_fill_ + i] = input[i];
-        tail_fill_ += block_size_;
 
         if (tail_fill_ >= tail_block_) {
             // Process one tail block worth of input. Result will be

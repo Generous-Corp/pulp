@@ -1,0 +1,188 @@
+{
+  "schema": "pulp-importer-differential-manifest-v1",
+  "version": 1,
+  "license": "MIT",
+  "ownership": "Pulp synthetic fixtures; reset workstream baseline",
+  "defaults": {
+    "from": "claude",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "split": "challenging"
+  },
+  "freeze": {
+    "date": "2026-10-18",
+    "purpose": "baseline before importer tuning; held-out fixtures must not guide rule changes",
+    "held_out_ids": [
+      "keyed-list-panel",
+      "svg-invalid",
+      "svg-shapes",
+      "typography"
+    ]
+  },
+  "fixtures": [
+    {
+      "id": "basic-card",
+      "source": "01-basic-card.html",
+      "sha256": "10dedd9b815d98d60666cc46a70ef901c62944819ae61ef857d68b3e0c4bac8d",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "flex-controls",
+      "source": "02-flex-controls.html",
+      "sha256": "8ebcfbe7126757855abe087f6261f65cad47e08f2094e5204fb67f1c6f682651",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "grid-meter",
+      "source": "03-grid-meter.html",
+      "sha256": "5db2a975b9072119b35384d746de0d8bb3cae3a75d06d21696c8d844e38cfa01",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "css-variables",
+      "source": "04-css-variables.html",
+      "sha256": "cfb070db40be31d33793923bbe8a79dcd6295a846bcc482c34a65bbaf0c58c61",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "pseudo-badge",
+      "source": "05-pseudo-badge.html",
+      "sha256": "1bc28ac1efce34c27ae2f677f1c85d5500b4cd3e85787a98f1409f76b557960d",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "absolute-overlay",
+      "source": "06-absolute-overlay.html",
+      "sha256": "a4050bf1aa2ff608552c3f0f20b52dd956d7e05d1592087bdf781c27db0168f7",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "inline-svg",
+      "source": "07-inline-svg.html",
+      "sha256": "a087830d6f34486fe8024ac0ed03cd24d74ae16b2ea8fa36e98e8a76e7623e7e",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "form-controls",
+      "source": "08-form-controls.html",
+      "sha256": "64cac79b3a3b93ec5e11cb6945e968305d8476d7785d82dec59fc917233ff5d6",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "static-canvas",
+      "source": "09-static-canvas.html",
+      "sha256": "61286b4f7283ccdac4f5a691553d9fd306eb87e37d9a4f26044d523ce820f9da",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "runtime-state",
+      "source": "10-runtime-state.html",
+      "sha256": "3b031ffa258df0cb3450bf6a556412f19a5bd1d0a6dd2cc69cd5b6c40f13da40",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "typography",
+      "source": "11-typography.html",
+      "sha256": "cd2f4e29372c13675cf2d48ecd9cc38a316e0ba634e099d0aa5dc2ab14677699",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "held-out",
+      "expected_blockers": []
+    },
+    {
+      "id": "responsive-panel",
+      "source": "12-responsive-panel.html",
+      "sha256": "4fb08ee65c8b6621fd68ffcd5d6f9e0e398d83ddd6810d0fd4cdf5ab62de001b",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "canvas-primitives",
+      "source": "13-canvas-primitives.html",
+      "sha256": "7cc41d24e6a137dda43070a9e486cbf3b67803ec281014849009096217c9a1c7",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "canvas-state",
+      "source": "14-canvas-state.html",
+      "sha256": "c3ee67c1678847951fd52a1b18aa772b41e0ee575b88409009dbca0360ef0db6",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "svg-shapes",
+      "source": "15-svg-shapes.html",
+      "sha256": "6d9397dfb5a7eb550bf7f792ded18692276bd09fa50d045cb85ad6fc9080e507",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "held-out",
+      "expected_blockers": []
+    },
+    {
+      "id": "svg-invalid",
+      "source": "16-svg-invalid.html",
+      "sha256": "f6a472ff50f552dfe1e2cae36fd5b0c082a3fe2a4f8c765105f5359faa98e52d",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "held-out",
+      "expected_blockers": []
+    },
+    {
+      "id": "fresh-plugin-panel",
+      "source": "17-fresh-plugin-panel.html",
+      "sha256": "b39adabbe9f66819c4b43d67bad8b9bd4db56bebd9baf3fa11f4e94213743b11",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "challenging",
+      "expected_blockers": []
+    },
+    {
+      "id": "keyed-list-panel",
+      "source": "18-keyed-list-panel.html",
+      "sha256": "6e789f8044d72e5a8875008a12214d84b285b11dbe28da0c5b1c0327cc84fb25",
+      "shape": "self-contained-html",
+      "from": "claude",
+      "split": "held-out",
+      "expected_blockers": []
+    }
+  ]
+}

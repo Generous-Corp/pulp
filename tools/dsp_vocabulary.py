@@ -589,8 +589,7 @@ def public_methods(text: str, cls: str, *, source_is_code: bool = False):
     kKeywords = ("if(", "for(", "while(", "switch(", "return(", "sizeof(")
     out = [s for s in out if not s.startswith(kKeywords)]
     # Platform-only SIMD overloads are implementation accelerators, not
-    # portable generator vocabulary. Keeping this overload would consume one
-    # of the bounded FastMath slots and hide the portable soft_clip API.
+    # portable generator vocabulary.
     if cls == "FastMath":
         out = [s for s in out if "simd_float4" not in s]
     seen, uniq = set(), []
@@ -598,10 +597,10 @@ def public_methods(text: str, cls: str, *, source_is_code: bool = False):
         if s not in seen:
             seen.add(s)
             uniq.append(s)
-    # Core lifecycle always comes first. BeatRepeatKernelT additionally needs
-    # its direct gesture controls promoted because they replace the old event
-    # API; retain declaration order for every unrelated type so this targeted
-    # contract repair does not crowd established accessors out of the cap.
+    # Core lifecycle always comes first, so a reader meets prepare/reset/process
+    # before the accessors. BeatRepeatKernelT additionally leads with its
+    # direct gesture controls because they replace the old event API; every
+    # other type keeps declaration order.
     lifecycle = ("prepare(", "reset(", "process(", "set_immediate(")
     first = [method for method in uniq if method.startswith(lifecycle)]
     if cls == "BeatRepeatKernelT":
@@ -614,13 +613,16 @@ def public_methods(text: str, cls: str, *, source_is_code: bool = False):
         prioritized = first + direct + setters + rest
     else:
         prioritized = first + [method for method in uniq if method not in first]
-    # 14 rather than 7: the cap exists to keep the prompt readable, and half of
-    # these classes have more than seven methods worth knowing about. TomVoice
-    # retains its existing 14-method compatibility surface while publishing the
-    # two measured ladder-profile controls; dropping established preset or
-    # lo-fi calls would break generator consumers for an unrelated opt-in.
-    limit = 16 if cls == "TomVoice" else 14
-    return prioritized[:limit]
+    # Every public method, uncapped. This list is the vocabulary's authority:
+    # Forge's exporter validates emitted calls against it and the generator
+    # is told it is exact, so a method missing from it is a valid call
+    # reported as invalid and an API the model is steered away from. A
+    # per-class cap did exactly that, silently: a class that grew past it lost
+    # its last-declared methods (FastMath's soft_clip and clamp_unit, after
+    # four decibel helpers were added), and over a hundred classes were
+    # truncated. Prompt size is the job of the --query shortlist, which picks
+    # the classes a request needs, not of dropping methods from every class.
+    return prioritized
 
 
 def _namespace_at(text: str, position: int) -> str:

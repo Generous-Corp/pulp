@@ -11,8 +11,10 @@ or as part of the aggregate suite via `test_gates.py`.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from gate_test_support import GateFixtureTestCase, VBC, _run
@@ -433,6 +435,67 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
         )
         self.assertEqual(code, 2, msg=out)
         self.assertIn("config not found", out)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+INSTALL_RULES = "tools/cmake/PulpInstallRules.cmake"
+_INSTALL_CALL = re.compile(r"install\s*\((.*?)\n\s*\)", re.S)
+_SHIPPED_MODULE = re.compile(r'/tools/cmake/(Pulp[A-Za-z0-9_]*\.cmake)"')
+
+
+def installed_pulp_modules(install_rules_text: str) -> set[str]:
+    """Every tools/cmake/Pulp*.cmake an install(FILES|PROGRAMS ...) ships.
+
+    Reads each install() call whatever if() block it sits in, so a module
+    installed only under an option (AAX, ARA, Android) is still counted.
+    """
+    shipped: set[str] = set()
+    for call in _INSTALL_CALL.finditer(install_rules_text):
+        body = call.group(1)
+        if re.match(r"\s*(FILES|PROGRAMS)\b", body):
+            shipped.update(f"tools/cmake/{name}" for name in _SHIPPED_MODULE.findall(body))
+    return shipped
+
+
+def sdk_module_drift(install_rules_text: str, sdk_trigger_paths: list[str]) -> tuple[set[str], set[str]]:
+    """(shipped modules the sdk surface does not trigger on,
+    listed tools/cmake/Pulp*.cmake modules that do not ship)."""
+    shipped = installed_pulp_modules(install_rules_text)
+    listed = {p for p in sdk_trigger_paths
+              if re.fullmatch(r"tools/cmake/Pulp[A-Za-z0-9_]*\.cmake", p)}
+    # The install rules file defines what ships rather than shipping itself.
+    return shipped - listed, listed - shipped - {INSTALL_RULES}
+
+
+class SdkShippedCmakeModulesTests(unittest.TestCase):
+    """Every CMake module the SDK installs is an sdk trigger path, so a fix to
+    one cuts a release (version-at-land ignores a Version-Bump trailer on a
+    surface the diff does not touch)."""
+
+    def setUp(self) -> None:
+        config = json.loads((REPO_ROOT / "tools/scripts/versioning.json").read_text(encoding="utf-8"))
+        self.triggers = config["surfaces"]["sdk"]["trigger_paths"]
+        self.rules = (REPO_ROOT / INSTALL_RULES).read_text(encoding="utf-8")
+
+    def test_the_sdk_surface_lists_exactly_the_shipped_modules(self) -> None:
+        unlisted, unshipped = sdk_module_drift(self.rules, self.triggers)
+        self.assertEqual(unlisted, set(), "installed by PulpInstallRules.cmake but not an sdk trigger path")
+        self.assertEqual(unshipped, set(), "an sdk trigger path for a module the SDK does not install")
+        self.assertGreater(len(installed_pulp_modules(self.rules)), 30,
+                           "the install-list parser found almost nothing; it is broken")
+
+    def test_a_planted_install_or_a_dropped_trigger_is_reported(self) -> None:
+        planted = self.rules + (
+            '\nif(PULP_PLANTED)\ninstall(FILES\n'
+            '    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlantedModule.cmake"\n'
+            '    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp\n)\nendif()\n')
+        unlisted, _ = sdk_module_drift(planted, self.triggers)
+        self.assertEqual(unlisted, {"tools/cmake/PulpPlantedModule.cmake"})
+        dropped = [p for p in self.triggers if p != "tools/cmake/PulpPlugin.cmake"]
+        unlisted, _ = sdk_module_drift(self.rules, dropped)
+        self.assertEqual(unlisted, {"tools/cmake/PulpPlugin.cmake"})
+        _, unshipped = sdk_module_drift(self.rules, self.triggers + ["tools/cmake/PulpTestSuite.cmake"])
+        self.assertEqual(unshipped, {"tools/cmake/PulpTestSuite.cmake"})
 
 
 if __name__ == "__main__":

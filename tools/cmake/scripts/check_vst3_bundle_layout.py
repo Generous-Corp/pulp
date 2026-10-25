@@ -25,8 +25,31 @@ have been built.
 """
 
 import argparse
+import json
+import ntpath
 import pathlib
 import sys
+
+
+def _runtime_sidecar_path(arch_dir: pathlib.Path, value: object) -> tuple[pathlib.Path | None, str | None]:
+    """Validate a producer-emitted runtime sidecar basename."""
+    if not isinstance(value, str):
+        return None, "file must be a JSON string"
+    if not value:
+        return None, "file must be a non-empty basename"
+    if value in {".", ".."} or "/" in value or "\\" in value:
+        return None, f"file {value!r} must be a plain basename"
+    if pathlib.PurePath(value).name != value or ntpath.basename(value) != value:
+        return None, f"file {value!r} must be a plain basename"
+    if pathlib.PurePath(value).is_absolute() or ntpath.isabs(value) or ntpath.splitdrive(value)[0]:
+        return None, f"file {value!r} must be a relative basename"
+
+    candidate = arch_dir / value
+    try:
+        candidate.resolve(strict=False).relative_to(arch_dir.resolve())
+    except (OSError, ValueError):
+        return None, f"file {value!r} resolves outside the architecture directory"
+    return candidate, None
 
 
 def check(bundle: pathlib.Path) -> list[str]:
@@ -60,6 +83,45 @@ def check(bundle: pathlib.Path) -> list[str]:
                        for p in arch_dir.iterdir()):
                 problems.append(
                     f"{bundle.name}: {arch_dir.name} contains no loadable .vst3 module")
+            expected_build_info_name = f"{bundle.stem}.pulp-build-info.json"
+            build_info = arch_dir / expected_build_info_name
+            if not build_info.is_file():
+                problems.append(
+                    f"{bundle.name}: {arch_dir.name} is missing {expected_build_info_name}")
+                continue
+            try:
+                info = json.loads(build_info.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                problems.append(f"{bundle.name}: invalid {build_info.name}: {exc}")
+                continue
+            if not isinstance(info, dict):
+                problems.append(
+                    f"{bundle.name}: {build_info.name} must contain a JSON object")
+                continue
+            if info.get("schema") != "pulp.build-info.v1":
+                problems.append(f"{bundle.name}: {build_info.name} has the wrong schema")
+            if "bundled_runtime_libraries" not in info:
+                problems.append(
+                    f"{bundle.name}: {build_info.name} is missing bundled_runtime_libraries")
+                continue
+            libraries = info["bundled_runtime_libraries"]
+            if not isinstance(libraries, list):
+                problems.append(
+                    f"{bundle.name}: bundled_runtime_libraries must be a JSON list")
+                continue
+            for library in libraries:
+                if not isinstance(library, dict):
+                    problems.append(
+                        f"{bundle.name}: bundled_runtime_libraries entries must be JSON objects")
+                    continue
+                candidate, error = _runtime_sidecar_path(arch_dir, library.get("file"))
+                if error:
+                    problems.append(f"{bundle.name}: invalid runtime sidecar declaration: {error}")
+                    continue
+                assert candidate is not None
+                if not candidate.is_file():
+                    problems.append(
+                        f"{bundle.name}: {arch_dir.name} is missing declared runtime sidecar {library.get('file')!r}")
     return problems
 
 

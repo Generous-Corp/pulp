@@ -16,6 +16,7 @@
 
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/processor.hpp>
+#include "../examples/pulp-gain/pulp_gain.hpp"
 
 #include <pluginterfaces/base/ustring.h>
 #include <pluginterfaces/vst/ivsthostapplication.h>
@@ -155,6 +156,27 @@ TEST_CASE("VST3 getParamValueByString uses ParamInfo::from_string",
     Steinberg::Vst::String128 out{};
     REQUIRE(processor.getParamStringByValue(kGainId, norm, out) == Steinberg::kResultTrue);
     REQUIRE(to_ascii(out) == "-18.0 dB");
+
+    processor.terminate();
+}
+
+TEST_CASE("VST3 parses the text it shows for a toggle without labels", "[vst3][params][display]") {
+    // PulpGain's Bypass is a Toggle with no value labels, displayed as "0" or
+    // "1". A host that converts that text back must get the same value, as
+    // validators check for every parameter.
+    HostApp host;
+    pulp::format::vst3::PulpVst3Processor processor(pulp::examples::create_pulp_gain);
+    REQUIRE(processor.initialize(&host) == Steinberg::kResultOk);
+
+    for (const double normalized : {0.0, 1.0}) {
+        Steinberg::Vst::String128 shown{};
+        REQUIRE(processor.getParamStringByValue(pulp::examples::kBypass, normalized, shown) ==
+                Steinberg::kResultTrue);
+        Steinberg::Vst::ParamValue parsed = -1.0;
+        REQUIRE(processor.getParamValueByString(pulp::examples::kBypass, shown, parsed) ==
+                Steinberg::kResultTrue);
+        REQUIRE(parsed == normalized);
+    }
 
     processor.terminate();
 }

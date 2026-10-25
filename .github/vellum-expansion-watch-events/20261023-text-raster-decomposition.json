@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-text-raster-decomposition",
+  "created_at": "2026-10-23T09:34:03Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Adds an analysis-only text raster decomposition script, its selftest, a recorded Chromium/Pulp glyph fixture, the tools registry entry and an import-design skill note. No importer, capture, lowering, IR or renderer behaviour changes; the watched families are touched only by the new measurement instrument and its documentation.",
+  "tests": [
+    "python3 tools/import-validation/test_text_raster_decomposition.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -412,7 +412,8 @@ pulp_add_test_suite(pulp-test-timeline-replay-golden GROUP pulp-test-group-timel
 # and benefits from failing on its own.
 pulp_add_test_suite(pulp-test-timeline-offline-renderer
     SOURCES test_timeline_offline_renderer.cpp
-    LIBRARIES pulp::host pulp::sequence)
+    LIBRARIES pulp::host pulp::sequence
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 
 pulp_add_test_suite(pulp-test-timeline-graph-binding
     SOURCES test_timeline_graph_binding.cpp
@@ -427,7 +428,8 @@ pulp_add_test_suite(pulp-test-timeline-graph-binding
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::host pulp::sequence pulp::native-components ${CMAKE_DL_LIBS}
-    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 
 # MIDI controller -> parameter value scaling, and the DoD proof that a hardware
 # CC maps to any parameter with zero driver code. The routing/learn foundation
@@ -726,8 +728,15 @@ if(PULP_ENABLE_FUZZING)
     target_include_directories(pulp-fuzz-timeline-document PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(pulp-fuzz-timeline-document PRIVATE
-        -fsanitize=fuzzer,address -fno-omit-frame-pointer)
-    target_link_options(pulp-fuzz-timeline-document PRIVATE -fsanitize=fuzzer,address)
+        -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
+    target_link_options(pulp-fuzz-timeline-document PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS})
+
+    # Standard MIDI File import: chunk framing, variable-length quantities,
+    # running status and meta payload lengths all come from the file.
+    pulp_add_libfuzzer_target(pulp-fuzz-smf
+        SOURCES fuzz/smf_fuzz_target.cpp
+        LIBRARIES pulp::smf-interop
+        CORPUS "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fuzz/smf")
 endif()
 
 # Engine-side half of the reference-clock sync soak, owned by this subsystem.

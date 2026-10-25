@@ -254,6 +254,33 @@ pulp_add_test_suite(pulp-test-plugin-state-io LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-plugin-state-restore-diagnostics GROUP pulp-test-group-fmt-format
     LIBRARIES pulp::format)
 
+# Seed corpus for the plugin-state fuzz lane: blobs serialized by the same
+# store and processor the target restores into. Built unconditionally so the
+# fixture keeps compiling on the required gate; only a fuzzing build runs it.
+add_executable(pulp-generate-plugin-state-fuzz-corpus
+    fuzz/plugin_state_seed_corpus_main.cpp)
+target_include_directories(pulp-generate-plugin-state-fuzz-corpus PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/fuzz)
+target_link_libraries(pulp-generate-plugin-state-fuzz-corpus PRIVATE pulp::format)
+
+# Coverage-guided lane over the host-facing state restore path (envelope,
+# legacy store blob, raw StateStore decoder). Off by default; the libFuzzer
+# runtime probe lives in timeline_tests.cmake and fails the whole configure
+# when the toolchain lacks it.
+if(PULP_ENABLE_FUZZING)
+    add_test(NAME pulp-fuzz-plugin-state-corpus
+        COMMAND pulp-generate-plugin-state-fuzz-corpus
+            "${CMAKE_CURRENT_BINARY_DIR}/fuzz-corpus/plugin-state")
+    set_tests_properties(pulp-fuzz-plugin-state-corpus PROPERTIES
+        LABELS "fuzz;libfuzzer"
+        FIXTURES_SETUP pulp-fuzz-plugin-state-corpus)
+    pulp_add_libfuzzer_target(pulp-fuzz-plugin-state
+        SOURCES fuzz/plugin_state_fuzz_target.cpp
+        LIBRARIES pulp::format
+        CORPUS "${CMAKE_CURRENT_BINARY_DIR}/fuzz-corpus/plugin-state"
+        FIXTURES_REQUIRED pulp-fuzz-plugin-state-corpus)
+endif()
+
 # Shared max-block-overrun contract (clamp+zero) used by every format adapter
 pulp_add_test_suite(pulp-test-max-block-contract GROUP pulp-test-group-fmt-format
     LIBRARIES pulp::format)

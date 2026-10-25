@@ -780,6 +780,10 @@ export interface PulpInstance {
     /// element publishes these renderer targets by ordinal so Chromium text
     /// evidence can address mixed content such as `<button><span>*</span>Save`.
     anonymousTextTarget?: boolean;
+    /// Style the host config gives the widget when it creates it, as props
+    /// (a lowercase `<button>` centres its content). A removed author prop
+    /// falls back to these rather than to the bare widget's value.
+    creationStyle?: Record<string, unknown>;
     /// Mount-time focus bookkeeping, filled in while React assembles a new
     /// subtree (appendInitialChild runs in document order, after each child
     /// subtree is complete). `autoFocusRequested` mirrors the element's own
