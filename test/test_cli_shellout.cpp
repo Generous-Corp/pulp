@@ -3382,11 +3382,16 @@ TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
         std::ofstream placeholder(placeholder_dmg, std::ios::binary);
         placeholder << "not a disk image";
     }
+    // A container the scan cannot open is refused, dry run or not: the
+    // development-runtime check fails closed rather than plan an unchecked share.
     auto placeholder_plan =
         run_pulp_in_directory(project, {"ship", "share", placeholder_dmg.string(), "--dry-run"});
     REQUIRE_FALSE(placeholder_plan.timed_out);
-    REQUIRE(placeholder_plan.exit_code == 0);
-    REQUIRE(placeholder_plan.stdout_output.find("pulp ship share plan") != std::string::npos);
+    REQUIRE(placeholder_plan.exit_code == 1);
+    REQUIRE(placeholder_plan.stderr_output.find("cannot check") != std::string::npos);
+    REQUIRE(placeholder_plan.stderr_output.find("hdiutil attach failed") != std::string::npos);
+    REQUIRE(placeholder_plan.stderr_output.find("fails closed") != std::string::npos);
+    REQUIRE(placeholder_plan.stdout_output.find("pulp ship share plan") == std::string::npos);
 #endif
 }
 

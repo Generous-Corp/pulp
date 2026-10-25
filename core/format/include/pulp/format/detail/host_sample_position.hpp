@@ -8,6 +8,8 @@
 // below the true integer: REAPER reports 13823.9999 for sample 13824.
 // Truncating that steps the position back one sample and then jumps it two
 // forward on the next block, so the position is rounded to the nearest sample.
+// The same rounding places AUv3 render events within the block and stamps
+// AUv3 MIDI output, and bounds CLAP's seconds-to-samples conversion.
 //
 // Header-only and SDK-free so it is unit-testable without the AU SDK.
 
@@ -30,6 +32,49 @@ inline std::optional<std::int64_t> host_sample_position(double samples) noexcept
     if (rounded >= kLimit || rounded < -kLimit)
         return std::nullopt;
     return static_cast<std::int64_t>(rounded);
+}
+
+/// An AUv3 render event's offset into the block, clamped to
+/// [0, frame_count - 1]. `immediate` is AUEventSampleTimeImmediate: times in
+/// [immediate, immediate + 4096) are already block offsets. Otherwise the
+/// offset is the event time minus the block's start, `block_sample_time`
+/// rounded to the nearest sample; when the block time is unavailable or
+/// unrepresentable (or the difference overflows), the event time itself is
+/// taken as the offset.
+inline std::int32_t au_event_block_offset(std::int64_t event_sample_time, std::int64_t immediate,
+                                          std::optional<double> block_sample_time,
+                                          std::uint32_t frame_count) noexcept {
+    constexpr std::int64_t kImmediateWindow = 4096;
+    std::int64_t offset = event_sample_time;
+    if (event_sample_time >= immediate && event_sample_time < immediate + kImmediateWindow) {
+        offset = event_sample_time - immediate;
+    } else if (block_sample_time) {
+        // Portable overflow check (MSVC builds this header too).
+        const auto start = host_sample_position(*block_sample_time);
+        if (start && !(*start > 0 && event_sample_time < INT64_MIN + *start) &&
+            !(*start < 0 && event_sample_time > INT64_MAX + *start))
+            offset = event_sample_time - *start;
+    }
+    if (offset < 0)
+        return 0;
+    if (frame_count > 0 && offset >= static_cast<std::int64_t>(frame_count))
+        return static_cast<std::int32_t>(frame_count - 1);
+    if (offset > static_cast<std::int64_t>(INT32_MAX))
+        return INT32_MAX;
+    return static_cast<std::int32_t>(offset);
+}
+
+/// The AUv3 event time for a MIDI event `sample_offset` frames into a block
+/// that starts at `block_sample_time`, rounded to the nearest sample. When
+/// the block time is unrepresentable, or the sum overflows, the event is sent
+/// at `immediate + sample_offset` (AUEventSampleTimeImmediate plus the offset).
+inline std::int64_t au_event_sample_time(double block_sample_time, std::int32_t sample_offset,
+                                         std::int64_t immediate) noexcept {
+    const auto start = host_sample_position(block_sample_time);
+    if (start && !(sample_offset > 0 && *start > INT64_MAX - sample_offset) &&
+        !(sample_offset < 0 && *start < INT64_MIN - sample_offset))
+        return *start + sample_offset;
+    return immediate + sample_offset;
 }
 
 } // namespace pulp::format::detail
