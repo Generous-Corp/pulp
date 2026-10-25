@@ -1611,19 +1611,30 @@ TEST_CASE("ui.js gives a captured one-line run its captured width, as native doe
     CodeGenOptions opts;
     opts.mode = CodeGenMode::bridge_native_js;
     const auto js = generate_pulp_js(ir, opts);
-    const auto has = [&](const std::string& text) { return js.find(text) != std::string::npos; };
+    // The JS id is the node name plus a suffix, so match one call by its prefix
+    // and the rest of that line.
+    const auto has = [&](const std::string& call, const std::string& name,
+                         const std::string& rest) {
+        const std::string head = call + "('" + name;
+        for (auto at = js.find(head); at != std::string::npos; at = js.find(head, at + 1)) {
+            const auto line = js.substr(at, js.find('\n', at) - at);
+            if (line.find(rest) != std::string::npos)
+                return true;
+        }
+        return false;
+    };
 
-    CHECK(has("setFlex('CapturedRun', 'width', 37);"));
-    CHECK(has("setFlex('CapturedRun', 'min_width', 37);"));
-    CHECK(has("setFlex('CapturedCaps', 'width', 37);"));
-    CHECK(has("setFlex('CapturedCaps', 'min_width', 37);"));
-    CHECK(has("setFlex('ControlValue', 'width', 71.1406"));
-    CHECK(has("setVerticalAlign('ControlValue', 'center');"));
-    CHECK_FALSE(has("setMultiLine('CapturedRun"));
-    CHECK_FALSE(has("setMultiLine('ControlValue"));
+    CHECK(has("setFlex", "CapturedRun", "', 'width', 37);"));
+    CHECK(has("setFlex", "CapturedRun", "', 'min_width', 37);"));
+    CHECK(has("setFlex", "CapturedCaps", "', 'width', 37);"));
+    CHECK(has("setFlex", "CapturedCaps", "', 'min_width', 37);"));
+    CHECK(has("setFlex", "ControlValue", "', 'width', 71.1406"));
+    CHECK(has("setVerticalAlign", "ControlValue", "', 'center');"));
+    CHECK_FALSE(has("setMultiLine", "CapturedRun", ""));
+    CHECK_FALSE(has("setMultiLine", "ControlValue", ""));
 
-    CHECK_FALSE(has("setFlex('FigmaTitle', 'width'"));
-    CHECK(has("setFlex('FigmaTitle', 'min_width', 37);"));
-    CHECK_FALSE(has("setFlex('FigmaCaps', 'width'"));
-    CHECK(has("setFlex('FigmaCaps', 'min_width', 44.4"));
+    CHECK_FALSE(has("setFlex", "FigmaTitle", "', 'width'"));
+    CHECK(has("setFlex", "FigmaTitle", "', 'min_width', 37);"));
+    CHECK_FALSE(has("setFlex", "FigmaCaps", "', 'width'"));
+    CHECK(has("setFlex", "FigmaCaps", "', 'min_width', 44.4"));
 }
