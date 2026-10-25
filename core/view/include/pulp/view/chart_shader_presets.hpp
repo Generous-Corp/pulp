@@ -42,8 +42,9 @@ struct ChartShaderPresetOptions {
     /// `centre-highlight`.
     canvas::Color accent = canvas::Color::rgba8(100, 170, 255);
     /// Direction the light comes from, in screen degrees counter-clockwise
-    /// from the right: 90 is from above, 270 from below. The light lives in
-    /// the canvas's local space, so a rotated draw rotates it too.
+    /// from the right: 90 is from above, 270 from below. The chart reports its
+    /// direction in device orientation, so the light stays fixed on screen
+    /// when the canvas is rotated.
     float light_angle_deg = 120.0f;
     /// Height of the light above the surface, 0 (grazing) to 90 (overhead).
     float light_elevation_deg = 45.0f;

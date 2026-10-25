@@ -1047,7 +1047,7 @@ static bool parse_ir_audio_widget(IRNode& node, const choc::value::ValueView& ob
     return explicit_audio_widget;
 }
 
-IRNode parse_ir_node(const choc::value::ValueView& obj) {
+IRNode parse_ir_node(const choc::value::ValueView& obj, const IRParseOptions& options) {
     IRNode node;
     node.type = get_string(obj, "type", "frame");
     node.name = get_string(obj, "name");
@@ -1485,7 +1485,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     if (obj.hasObjectMember("children") && obj["children"].isArray()) {
         auto children = obj["children"];
         for (uint32_t i = 0; i < children.size(); ++i)
-            node.children.push_back(parse_ir_node(children[static_cast<int>(i)]));
+            node.children.push_back(parse_ir_node(children[static_cast<int>(i)], options));
     }
 
     // Alternate frames (multi-state capture). Array ORDER is the frame index a
@@ -1496,7 +1496,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         for (uint32_t i = 0; i < frames.size(); ++i) {
             const auto f = frames[static_cast<int>(i)];
             if (!f.isObject()) continue;
-            node.alternate_frames.push_back(parse_ir_node(f));
+            node.alternate_frames.push_back(parse_ir_node(f, options));
         }
         if (!node.alternate_frames.empty()) break;
     }
@@ -1507,7 +1507,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // (design_ir_normalize.cpp). Runs after children and alternate frames
     // are parsed so every rule sees final child geometry; children were
     // normalized during their own parse_ir_node recursion.
-    normalize_design_ir(node);
+    normalize_design_ir(node, options);
 
     // Tail post-passes, extracted into named functions.
     detect_node_audio_widget(node, explicit_audio_widget);
@@ -2307,24 +2307,7 @@ std::string serialize_design_ir(const DesignIR& ir,
         write_key(out, first, "assetManifest");
         write_asset_manifest_json(out, ir.asset_manifest);
     }
-    if (!ir.font_family_assets.empty()) {
-        write_key(out, first, "fontFamilyAssets");
-        out << "[";
-        bool ffirst = true;
-        for (const auto& fa : ir.font_family_assets) {
-            if (!ffirst) out << ",";
-            ffirst = false;
-            out << "{";
-            bool mf = true;
-            write_string_member(out, mf, "family", fa.family);
-            if (!fa.style.empty()) write_string_member(out, mf, "style", fa.style);
-            write_key(out, mf, "weight"); out << fa.weight;
-            if (!fa.asset_id.empty()) write_string_member(out, mf, "asset_id", fa.asset_id);
-            if (!fa.resolved_path.empty()) write_string_member(out, mf, "resolvedPath", fa.resolved_path);
-            out << "}";
-        }
-        out << "]";
-    }
+    write_ir_font_family_assets(out, first, ir);
     if (!ir.diagnostics.empty()) {
         write_key(out, first, "diagnostics");
         write_diagnostics_array_json(out, ir.diagnostics);
@@ -2432,31 +2415,12 @@ DesignIR parse_design_ir_json(const std::string& json) {
         if (ir.source_version.empty()) ir.source_version = get_string(parsed, "sourceVersion");
         ir.imported_at = get_string(parsed, "imported_at");
         if (ir.imported_at.empty()) ir.imported_at = get_string(parsed, "importedAt");
-        ir.root = parse_ir_node(parsed["root"]);
+        ir.root = parse_ir_node(parsed["root"], ir_parse_options_for(ir));
         if (parsed.hasObjectMember("tokens"))
             ir.tokens = parse_ir_tokens(parsed["tokens"]);
         if (parsed.hasObjectMember("assetManifest"))
             ir.asset_manifest = parse_asset_manifest(parsed["assetManifest"]);
-        for (const char* fk : {"fontFamilyAssets", "font_family_assets"}) {
-            if (parsed.hasObjectMember(fk) && parsed[fk].isArray()) {
-                auto arr = parsed[fk];
-                for (uint32_t i = 0; i < arr.size(); ++i) {
-                    auto e = arr[static_cast<int>(i)];
-                    if (!e.isObject()) continue;
-                    IRFontAsset fa;
-                    fa.family = get_string(e, "family");
-                    fa.style = get_string(e, "style");
-                    if (e.hasObjectMember("weight"))
-                        fa.weight = static_cast<int>(e["weight"].getWithDefault<int64_t>(400));
-                    fa.asset_id = get_string(e, "asset_id");
-                    if (fa.asset_id.empty()) fa.asset_id = get_string(e, "assetId");
-                    fa.resolved_path = get_string(e, "resolvedPath");
-                    if (fa.resolved_path.empty()) fa.resolved_path = get_string(e, "resolved_path");
-                    if (!fa.family.empty()) ir.font_family_assets.push_back(std::move(fa));
-                }
-                break;
-            }
-        }
+        parse_ir_font_family_assets(ir, parsed);
         if (parsed.hasObjectMember("diagnostics"))
             ir.diagnostics = parse_import_diagnostics(parsed["diagnostics"]);
         validate_blend_modes(ir.root, ir.diagnostics);

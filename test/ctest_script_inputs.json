@@ -531,9 +531,7 @@
   },
   "pulp-test-cli-import-detect": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_cli_import_detect.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [
     "compat.json",
     "test/fixtures/imports"
@@ -1746,9 +1744,7 @@
   },
   "pulp-test-group-script-view": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_threejs_resources.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -2073,6 +2069,20 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-neural-cpu-simd": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_neural_cpu_simd.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/neural/example.nam"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_neural_cpu_simd.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-node-pack": {
    "data": "none",
    "inputs": [],
@@ -2168,9 +2178,7 @@
   },
   "pulp-test-reload-library": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_reload_library.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -2371,9 +2379,7 @@
   },
   "pulp-test-validation-contract": {
    "data": "declared",
-   "detected_sources": [
-    "test/test_validation_contract.cpp"
-   ],
+   "detected_sources": [],
    "inputs": [
     "docs/contracts/phase1-reality-snapshot.yaml",
     "docs/contracts/validation-report-v1.schema.json"
@@ -2709,8 +2715,11 @@
   "pulp-test-gpu-health-provider",
   "pulp-test-gpu-health-read-result",
   "pulp-test-gpu-health-result",
+  "pulp-test-gpu-neural-model-factory",
   "pulp-test-gpu-neural-plugin-boundary-continuity",
   "pulp-test-gpu-neural-realtime-node",
+  "pulp-test-gpu-neural-shadow-policy",
+  "pulp-test-gpu-neural-shadow-simd",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-proc-installer",
@@ -2896,6 +2905,7 @@
   "pulp-test-native-metal-compute",
   "pulp-test-negative-path",
   "pulp-test-network-service-discovery",
+  "pulp-test-neural-cpu-simd",
   "pulp-test-node-pack",
   "pulp-test-notary-env",
   "pulp-test-nsis-installer",
