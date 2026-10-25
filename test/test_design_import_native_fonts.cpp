@@ -2,12 +2,23 @@
 // every font-family stack that names them is pointed at the shipped faces.
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/unique_temp_dir.hpp"
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir_io.hpp>
 #include <pulp/view/widgets.hpp>
 
+#ifdef PULP_HAS_SKIA
+#include "include/core/SkCanvas.h"
+#include "include/core/SkFontArguments.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
+#include "include/core/SkTypeface.h"
+#endif
+
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -95,6 +106,78 @@ Label* only_label(View& root) {
     return labels.size() == 1 ? labels.front() : nullptr;
 }
 
+// `font` wrapped as a one-face TrueType collection ('ttcf'). A collection's
+// table offsets count from the start of the file, so each moves by the
+// 16-byte collection header (tag, version, face count, the one face offset).
+std::vector<std::uint8_t> as_collection(const fs::path& font) {
+    std::ifstream in(font, std::ios::binary);
+    std::vector<std::uint8_t> face{std::istreambuf_iterator<char>(in),
+                                   std::istreambuf_iterator<char>()};
+    const auto u16 = [&](std::size_t at) {
+        return static_cast<std::size_t>(face[at] << 8 | face[at + 1]);
+    };
+    const std::size_t tables = u16(4);
+    for (std::size_t i = 0; i < tables; ++i) {
+        const std::size_t at = 12 + i * 16 + 8;
+        std::uint32_t offset = static_cast<std::uint32_t>(face[at]) << 24 |
+                               static_cast<std::uint32_t>(face[at + 1]) << 16 |
+                               static_cast<std::uint32_t>(face[at + 2]) << 8 | face[at + 3];
+        offset += 16;
+        for (int b = 0; b < 4; ++b)
+            face[at + static_cast<std::size_t>(b)] =
+                static_cast<std::uint8_t>(offset >> (24 - 8 * b));
+    }
+    std::vector<std::uint8_t> out{'t', 't', 'c', 'f', 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 16};
+    out.insert(out.end(), face.begin(), face.end());
+    return out;
+}
+
+#ifdef PULP_HAS_SKIA
+sk_sp<SkTypeface> resolved_typeface(const std::string& stack, float weight) {
+    pulp::canvas::FontOptions options;
+    options.weight = weight;
+    options.family_stack = pulp::canvas::split_css_font_family_list(stack);
+    return pulp::canvas::FontResolver::instance().resolve_family_list(options).typeface;
+}
+
+// The face's family as its own name table spells it, and the wght coordinate
+// it is instanced at (its default when no coordinate is set). Both read the
+// same on every platform, unlike the PostScript name a port synthesizes for a
+// variation instance.
+std::string family_of(const SkTypeface& face) {
+    SkString name;
+    face.getFamilyName(&name);
+    return std::string(name.c_str(), name.size());
+}
+
+float wght_of(const SkTypeface& face) {
+    constexpr SkFourByteTag kWght = SkSetFourByteTag('w', 'g', 'h', 't');
+    std::vector<SkFontArguments::VariationPosition::Coordinate> position(8);
+    const int count = face.getVariationDesignPosition(SkSpan(position));
+    for (int i = 0; i < count && i < static_cast<int>(position.size()); ++i)
+        if (position[static_cast<std::size_t>(i)].axis == kWght)
+            return position[static_cast<std::size_t>(i)].value;
+    return -1.0f;
+}
+
+// Ink (sum of 255 - red) of `text` drawn black on white with `face`.
+double ink_of(const sk_sp<SkTypeface>& face, const char* text) {
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(320, 64));
+    surface->getCanvas()->clear(SK_ColorWHITE);
+    SkPaint paint;
+    paint.setColor(SK_ColorBLACK);
+    surface->getCanvas()->drawString(text, 8, 44, SkFont(face, 32), paint);
+    SkPixmap pixels;
+    if (!surface->peekPixels(&pixels))
+        return 0.0;
+    double ink = 0;
+    for (int y = 0; y < pixels.height(); ++y)
+        for (int x = 0; x < pixels.width(); ++x)
+            ink += 255 - SkColorGetR(pixels.getColor(x, y));
+    return ink;
+}
+#endif
+
 } // namespace
 
 TEST_CASE("a shipped variable font is what an imported label resolves to",
@@ -176,10 +259,64 @@ TEST_CASE("a shipped font that cannot be read leaves the stack alone and says so
         REQUIRE(root);
         CHECK(only_label(*root)->effective_font_family() == "'" + family + "', sans-serif");
     }
+    SECTION("a file that is not a TrueType, OpenType or WOFF2 font") {
+        // A font collection holding the shipped face: the platform managers
+        // would load it, but it is not a container a capture ships.
+        const auto collection = pulp::test::unique_temp_path("pulp-shipped-font", ".ttc");
+        {
+            std::ofstream out(collection, std::ios::binary);
+            const auto bytes = as_collection(kVariableFont);
+            out.write(reinterpret_cast<const char*>(bytes.data()),
+                      static_cast<std::streamsize>(bytes.size()));
+        }
+        auto ir = shipped_font_design(family, 600, {face(family, "font-collection")}, collection);
+        REQUIRE_FALSE(ir.asset_manifest.assets[0].content_hash.empty());
+        auto root =
+            build_native_view_tree(ir, ir.asset_manifest, {.diagnostics_out = &diagnostics});
+        std::error_code ec;
+        fs::remove(collection, ec);
+        REQUIRE(root);
+        CHECK(only_label(*root)->effective_font_family() == "'" + family + "', sans-serif");
+    }
+    SECTION("a font file larger than any real face") {
+        const auto big = pulp::test::unique_temp_path("pulp-shipped-font", ".ttf");
+        // The shipped face padded past the cap: loadable, but never read.
+        auto ir = shipped_font_design(family, 600, {face(family, "font-oversized")}, big);
+        fs::copy_file(kVariableFont, big);
+        fs::resize_file(big, 32u * 1024u * 1024u + 1u);
+        auto root =
+            build_native_view_tree(ir, ir.asset_manifest, {.diagnostics_out = &diagnostics});
+        std::error_code ec;
+        fs::remove(big, ec);
+        REQUIRE(root);
+        CHECK(only_label(*root)->effective_font_family() == "'" + family + "', sans-serif");
+    }
     bool reported = false;
     for (const auto& d : diagnostics)
         reported = reported || d.code == "font-asset-unavailable";
     CHECK(reported);
+}
+
+TEST_CASE("a shipped font's alias changes when its file's bytes do",
+          "[design-import][font-assets][native-fonts]") {
+    // Same family, range and asset id; only the file behind the id differs.
+    const std::string family = "Pulp Shipped Rewritten";
+    const auto stack_with = [&](const fs::path& font) {
+        auto ir = shipped_font_design(family, 400, {face(family, "font-rewritten")}, font);
+        auto root = build_native_view_tree(ir, ir.asset_manifest);
+        REQUIRE(root);
+        auto* label = only_label(*root);
+        REQUIRE(label != nullptr);
+        return label->effective_font_family();
+    };
+    const auto variable = stack_with(kVariableFont);
+    const auto rewritten = stack_with(kStaticFont);
+    CHECK(variable.find(family + " [") != std::string::npos);
+    CHECK(rewritten.find(family + " [") != std::string::npos);
+    CHECK(variable != rewritten);
+    // The alias still names the face the file holds now, not the old one.
+    CHECK(pulp::canvas::resolved_face_identity(rewritten, 400.0f).rfind("Inter", 0) == 0);
+    CHECK(stack_with(kVariableFont) == variable);
 }
 
 TEST_CASE("every captured label of the variable-font fixture resolves its captured face",
@@ -195,10 +332,16 @@ TEST_CASE("every captured label of the variable-font fixture resolves its captur
     auto root = build_native_view_tree(ir, ir.asset_manifest, {.asset_base_directory = kFixture});
     REQUIRE(root);
 
-    std::vector<std::pair<std::string, std::string>> captured; // text, basis face
+    struct Captured {
+        std::string text;
+        std::string basis_face;
+        int weight = 400;
+    };
+    std::vector<Captured> captured;
     const auto walk = [&](auto&& self, const IRNode& node) -> void {
         if (node.text_layout_basis && !node.text_layout_basis->resolved_face.empty())
-            captured.emplace_back(node.text_content, node.text_layout_basis->resolved_face);
+            captured.push_back({node.text_content, node.text_layout_basis->resolved_face,
+                                node.style.font_weight.value_or(400)});
         for (const auto& child : node.children)
             self(self, child);
     };
@@ -207,17 +350,45 @@ TEST_CASE("every captured label of the variable-font fixture resolves its captur
 
     std::vector<Label*> labels;
     collect_labels(*root, labels);
-    for (const auto& [text, basis_face] : captured) {
-        INFO(text << " captured with " << basis_face);
-        bool matched = false;
+    for (const auto& [text, basis_face, weight] : captured) {
+        INFO(text << " captured at " << weight << " with " << basis_face);
+        std::size_t seen = 0;
         for (auto* label : labels) {
             if (label->text() != text)
                 continue;
-            matched =
-                matched || pulp::canvas::resolved_face_identity(
-                               label->effective_font_family(),
-                               static_cast<float>(label->effective_font_weight())) == basis_face;
+            ++seen;
+            const auto stack = label->effective_font_family();
+            const auto label_weight = static_cast<float>(label->effective_font_weight());
+            INFO("stack " << stack << " resolves to "
+                          << pulp::canvas::resolved_face_identity(stack, label_weight));
+            CHECK(label_weight == static_cast<float>(weight));
+#ifdef PULP_HAS_SKIA
+            // On every platform: the shipped family, instanced at the captured
+            // weight.
+            const auto face = resolved_typeface(stack, label_weight);
+            REQUIRE(face);
+            // Name ID 1 is "Funnel Display Light", ID 16 "Funnel Display";
+            // ports differ in which they report.
+            CHECK(family_of(*face).rfind("Funnel Display", 0) == 0);
+            CHECK(std::abs(wght_of(*face) - static_cast<float>(weight)) < 0.5f);
+#endif
+#if defined(__APPLE__)
+            // CoreText names the instance exactly as Chromium on macOS
+            // reported it, which is what lets the Label reuse its captured
+            // line boxes. FreeType synthesizes a different PostScript name
+            // for the same instance.
+            CHECK(pulp::canvas::resolved_face_identity(stack, label_weight) == basis_face);
+#endif
         }
-        CHECK(matched);
+        CHECK(seen > 0);
     }
+#ifdef PULP_HAS_SKIA
+    // The coordinate reaches the outlines: the 600 instance draws heavier.
+    REQUIRE_FALSE(labels.empty());
+    const auto stack = labels.front()->effective_font_family();
+    const double semibold = ink_of(resolved_typeface(stack, 600.0f), "SPECTR Sweep");
+    const double regular = ink_of(resolved_typeface(stack, 400.0f), "SPECTR Sweep");
+    REQUIRE(regular > 0.0);
+    CHECK(semibold > regular * 1.1);
+#endif
 }

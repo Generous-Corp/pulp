@@ -10,8 +10,9 @@
 // through the aliases per glyph, which picks the subset that covers the glyph
 // the way CSS unicode-range matching does, and the weight within a segment is
 // still chosen by the resolver from the faces registered there. The aliases
-// are named from their content, so two designs that both ship a "JetBrains
-// Mono" never share a registry entry.
+// are named from their content (the family, the range, and the bytes of every
+// file), so two designs that both ship a "JetBrains Mono" never share a
+// registry entry, and a changed file gets a new one.
 #include "design_import_native_common.hpp"
 
 #include <pulp/canvas/bundled_fonts.hpp>
@@ -24,6 +25,8 @@
 #include <iterator>
 #include <map>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace pulp::view {
@@ -51,6 +54,20 @@ struct Segment {
     std::string alias;
 };
 
+// A shipped font larger than this is not read: no real face is near it, and
+// the bytes are copied whole into the registry.
+constexpr std::uintmax_t kMaxShippedFontBytes = 32u * 1024u * 1024u;
+
+// TrueType (0x00010000 or 'true'), OpenType ('OTTO') or WOFF2 ('wOF2'): the
+// containers the platform font managers and the WOFF2 decoder accept.
+bool has_font_signature(const std::vector<std::uint8_t>& bytes) {
+    if (bytes.size() < 4)
+        return false;
+    const std::string_view tag(reinterpret_cast<const char*>(bytes.data()), 4);
+    return tag == std::string_view("\0\1\0\0", 4) || tag == "true" || tag == "OTTO" ||
+           tag == "wOF2";
+}
+
 std::optional<std::vector<std::uint8_t>> read_font(const IRFontAsset& face,
                                                    const IRAssetManifest& manifest,
                                                    const NativeMaterializeOptions& options) {
@@ -61,6 +78,10 @@ std::optional<std::vector<std::uint8_t>> read_font(const IRFontAsset& face,
     std::filesystem::path resolved{path};
     if (resolved.is_relative() && !options.asset_base_directory.empty())
         resolved = options.asset_base_directory / resolved;
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(resolved, ec);
+    if (ec || size == 0 || size > kMaxShippedFontBytes)
+        return std::nullopt;
     std::ifstream in(resolved, std::ios::binary);
     if (!in)
         return std::nullopt;
@@ -68,7 +89,7 @@ std::optional<std::vector<std::uint8_t>> read_font(const IRFontAsset& face,
                                     std::istreambuf_iterator<char>()};
     // A file that no longer holds the bytes the manifest recorded is not the
     // face the design was captured with.
-    if (bytes.empty() ||
+    if (!has_font_signature(bytes) ||
         (asset && !asset->content_hash.empty() &&
          pulp::runtime::sha256_hex(bytes.data(), bytes.size()) != asset->content_hash))
         return std::nullopt;
@@ -76,8 +97,7 @@ std::optional<std::vector<std::uint8_t>> read_font(const IRFontAsset& face,
 }
 
 bool register_face(const std::vector<std::uint8_t>& bytes, const std::string& family) {
-    const bool woff2 = bytes.size() >= 4 && bytes[0] == 'w' && bytes[1] == 'O' && bytes[2] == 'F' &&
-                       bytes[3] == '2';
+    const bool woff2 = bytes[0] == 'w' && bytes[1] == 'O' && bytes[2] == 'F' && bytes[3] == '2';
     if (woff2 && pulp::canvas::register_font_woff2(bytes.data(), bytes.size(), family))
         return true;
     return pulp::canvas::register_font(bytes.data(), bytes.size(), family);
@@ -152,17 +172,26 @@ DesignIR prepare_native_ir_with_fonts(const DesignIR& source, const IRAssetManif
         });
         std::string stack;
         for (auto& segment : segments) {
+            std::vector<std::optional<std::vector<std::uint8_t>>> files;
             std::string identity = key + "\n" + segment.unicode_range;
-            for (const auto& id : segment.asset_ids)
-                identity += "\n" + id;
-            segment.alias =
-                spelling[key] + " [" + pulp::runtime::sha256_hex(identity).substr(0, 12) + "]";
-            bool registered = false;
             for (const auto& id : segment.asset_ids) {
                 const auto face =
                     std::find_if(ir.font_family_assets.begin(), ir.font_family_assets.end(),
                                  [&](const IRFontAsset& f) { return f.asset_id == id; });
-                const auto bytes = read_font(*face, manifest, options);
+                files.push_back(read_font(*face, manifest, options));
+                identity += "\n" + id;
+                if (const auto& bytes = files.back())
+                    identity += " " + pulp::runtime::sha256_hex(bytes->data(), bytes->size());
+            }
+            segment.alias =
+                spelling[key] + " [" + pulp::runtime::sha256_hex(identity).substr(0, 12) + "]";
+            bool registered = false;
+            for (std::size_t i = 0; i < segment.asset_ids.size(); ++i) {
+                const auto& id = segment.asset_ids[i];
+                const auto face =
+                    std::find_if(ir.font_family_assets.begin(), ir.font_family_assets.end(),
+                                 [&](const IRFontAsset& f) { return f.asset_id == id; });
+                const auto& bytes = files[i];
                 if (bytes && register_face(*bytes, segment.alias)) {
                     registered = true;
                 } else if (options.diagnostics_out != nullptr) {

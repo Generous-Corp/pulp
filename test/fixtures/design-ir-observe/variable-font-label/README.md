@@ -11,6 +11,6 @@ real page with `DOMParser`, the way a Claude standalone export does. It draws
 
 The font is byte-identical to `external/fonts/FunnelDisplay-VariableFont_wght.ttf`
 (SIL Open Font License 1.1; see `external/fonts/README.md`). Regenerate
-`source.html` with
-`make_variable_font_fixture.py external/fonts/FunnelDisplay-VariableFont_wght.ttf source.html`,
+`source.html` from the repository root with
+`python3 test/fixtures/design-ir-observe/variable-font-label/make_variable_font_fixture.py external/fonts/FunnelDisplay-VariableFont_wght.ttf test/fixtures/design-ir-observe/variable-font-label/source.html`,
 then import it with the importer differential lab at a 420x120 viewport.
