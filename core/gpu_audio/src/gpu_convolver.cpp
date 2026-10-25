@@ -699,7 +699,7 @@ std::uint8_t GpuConvolver::process_realtime_shared_io(void* self,
     // Invalid external views consume a zero-input timeline position, but may
     // never admit fresh GPU work. The transport owns their silent disposition.
     if (!input_valid)
-        state.session->request_recovery(detail::SharedIoRecoveryReason::InvalidCallback);
+        state.session->request_recovery(detail::SharedIoRecoveryReason::InvalidCallback, sequence);
     for (uint32_t ch = 0; ch < convolver->channels_; ++ch) {
         const float* src = input.channel_ptr(ch);
         auto* dst = state.callback_input.data() + static_cast<std::size_t>(ch) * convolver->block_;
@@ -856,13 +856,9 @@ bool GpuConvolver::realtime_shared_io_health(const void* self,
     const auto& session = *convolver->shared_io_->session;
     detail::RealtimeGpuHealth health;
     health.recovery_reason = detail::public_recovery_reason(session.recovery_reason());
+    // Every cause latches at the block it names: the refused or failed block,
+    // the oldest one in flight for a loss or fence, the callback's own block.
     health.recovery_sequence = session.recovery_sequence();
-    // A cause the worker latched without a stream position (provider loss,
-    // failure or an offline fence) is attributed to the first sequence of the
-    // epoch it fenced; the exact position is unknown.
-    if (health.recovery_reason != GpuAudioRecoveryReason::None &&
-        health.recovery_sequence == std::numeric_limits<std::uint64_t>::max())
-        health.recovery_sequence = session.epoch_first_sequence();
     health.epoch = session.epoch();
     health.delivery_epoch_active = session.delivery_epoch() != 0;
     health.device_lost = session.provider_device_lost();

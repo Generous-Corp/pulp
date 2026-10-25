@@ -443,11 +443,15 @@ SharedIoConvolutionSession::consume_output(const Callback& callback, std::span<f
 }
 
 void SharedIoConvolutionSession::fail_closed() noexcept {
+    fail_closed(pipeline_.first_undelivered());
+}
+
+void SharedIoConvolutionSession::fail_closed(std::uint64_t sequence) noexcept {
     failed_ = true;
     // This atomic bridge gate keeps subsequent callbacks CPU-only. The service
     // thread may still drain an already-held ingress lease, but no new GPU
     // ingress is admitted after an unprovable completion disposition.
-    pipeline_.request_recovery(SharedIoRecoveryReason::ProviderFailure);
+    pipeline_.request_recovery(SharedIoRecoveryReason::ProviderFailure, sequence);
 }
 
 bool SharedIoConvolutionSession::pack_input(const SharedIoConvolutionPipeline::Lease& ingress,
@@ -498,7 +502,8 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns, Service
     // deadline (zero: a nonblocking poll).
     plan_.drain_until(now_ns, service_deadline_ns);
     if (provider_->device_lost())
-        pipeline_.request_recovery(SharedIoRecoveryReason::ProviderLost);
+        pipeline_.request_recovery(SharedIoRecoveryReason::ProviderLost,
+                                   pipeline_.first_undelivered());
     while (const auto completion = plan_.pop_completion()) {
         ++result.completions;
         const auto& token = completion->token.slot;
@@ -519,7 +524,7 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns, Service
             if (recorded)
                 ++result.terminal_records;
             if (!discarded || (!recorded && !pipeline_.fenced())) {
-                fail_closed();
+                fail_closed(stamp.sequence);
                 return false;
             }
             continue;
@@ -533,7 +538,7 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns, Service
             if (recorded)
                 ++result.terminal_records;
             if (!discarded || (!recorded && !pipeline_.fenced())) {
-                fail_closed();
+                fail_closed(stamp.sequence);
                 return false;
             }
             continue;
@@ -547,7 +552,7 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns, Service
                            SharedIoFallbackReason::Teardown);
             if (pipeline_.record_terminal(stamp, SharedIoConvolutionPipeline::Terminal::Failed, {}))
                 ++result.terminal_records;
-            fail_closed();
+            fail_closed(stamp.sequence);
             return false;
         }
         auto accepted_terminal = SharedIoConvolutionPipeline::Terminal::Failed;
@@ -566,7 +571,7 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns, Service
         if (recorded)
             ++result.terminal_records;
         else if (!pipeline_.fenced()) {
-            fail_closed();
+            fail_closed(stamp.sequence);
             return false;
         }
     }
@@ -618,7 +623,7 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
             ++result.dropped_ingress;
             if (!pipeline_.record_terminal(stamp, SharedIoConvolutionPipeline::Terminal::Failed,
                                            {})) {
-                fail_closed();
+                fail_closed(stamp.sequence);
                 return false;
             }
             ++result.terminal_records;
@@ -651,7 +656,7 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
                     ++result.terminal_records;
                 pipeline_.drain_terminals();
             }
-            fail_closed();
+            fail_closed(stamp.sequence);
             return false;
         }
         trace_stage(input->token, SharedIoTraceStage::EncodeEnd);
@@ -685,7 +690,7 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
             if (recorded)
                 ++result.terminal_records;
             if (!recorded && !pipeline_.fenced()) {
-                fail_closed();
+                fail_closed(submit.slot.stream_sequence);
                 return false;
             }
             pipeline_.drain_terminals();
@@ -760,7 +765,7 @@ bool SharedIoConvolutionSession::drain_quiescent() noexcept {
 
 bool SharedIoConvolutionSession::fence_for_offline() noexcept {
     offline_fenced_ = true;
-    request_recovery(SharedIoRecoveryReason::OfflineFence);
+    request_recovery(SharedIoRecoveryReason::OfflineFence, pipeline_.first_undelivered());
     return drain_quiescent();
 }
 
@@ -773,7 +778,8 @@ bool SharedIoConvolutionSession::fence_and_reprime() noexcept {
     if (!drain_quiescent())
         return false;
     if (provider_->device_lost()) {
-        pipeline_.request_recovery(SharedIoRecoveryReason::ProviderLost);
+        pipeline_.request_recovery(SharedIoRecoveryReason::ProviderLost,
+                                   pipeline_.first_undelivered());
         return false;
     }
     if (!provider_->can_resume_after_drain()) {

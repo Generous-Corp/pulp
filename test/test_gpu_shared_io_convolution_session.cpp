@@ -632,6 +632,53 @@ TEST_CASE("shared session loss retires exact work but never reprimes the lost pr
     REQUIRE(fixture.session.release());
 }
 
+TEST_CASE("shared session latches a worker-observed fault at the block it refused",
+          "[gpu_audio][shared_io][session][recovery]") {
+    // Four healthy blocks first, so the faulted block is not the epoch's first.
+    constexpr std::uint64_t kFaulted = 4;
+    Fixture fixture;
+    fixture.prepare();
+    std::array<float, 2> output;
+    for (std::uint64_t block = 0; block < kFaulted; ++block) {
+        callback(fixture.session, a, output);
+        (void)fixture.session.service(block + 1);
+    }
+    REQUIRE(fixture.session.recovery_reason() == SharedIoRecoveryReason::None);
+    REQUIRE(fixture.session.next_sequence() == kFaulted);
+
+    auto expected = SharedIoRecoveryReason::ProviderFailure;
+    SECTION("a failed terminal") {
+        fixture.provider->terminal_status = SharedIoTerminalStatus::RetiredFailed;
+        callback(fixture.session, a, output);
+        (void)fixture.session.service(kFaulted + 1);
+    }
+    SECTION("a refused submission") {
+        fixture.provider->accept_submissions = false;
+        callback(fixture.session, a, output);
+        (void)fixture.session.service(kFaulted + 1);
+    }
+    SECTION("a provider lost with the block in flight") {
+        fixture.provider->complete_on_poll = false;
+        callback(fixture.session, a, output);
+        REQUIRE(fixture.session.service(kFaulted + 1).submitted == 1);
+        fixture.provider->lost = true;
+        fixture.provider->terminal_status = SharedIoTerminalStatus::RetiredFailed;
+        fixture.provider->complete_all();
+        (void)fixture.session.service(kFaulted + 2);
+        expected = SharedIoRecoveryReason::ProviderLost;
+    }
+    SECTION("an offline fence with the block in flight") {
+        fixture.provider->complete_on_poll = false;
+        callback(fixture.session, a, output);
+        REQUIRE(fixture.session.service(kFaulted + 1).submitted == 1);
+        REQUIRE(fixture.session.fence_for_offline());
+        expected = SharedIoRecoveryReason::OfflineFence;
+    }
+    CHECK(fixture.session.recovery_reason() == expected);
+    CHECK(fixture.session.recovery_sequence() == kFaulted);
+    REQUIRE(fixture.session.release());
+}
+
 TEST_CASE("shared session offline fence retires work and leaves future callbacks CPU-only",
           "[gpu_audio][shared_io][session][recovery]") {
     Fixture fixture;
@@ -708,7 +755,8 @@ TEST_CASE("shared session offline fence refuses reprime behind an earlier recove
     callback(fixture.session, a, output);
     REQUIRE(fixture.session.service(1).submitted == 1);
     // Recovery reasons latch first-wins, so the guard cannot key on the reason.
-    fixture.session.request_recovery(SharedIoRecoveryReason::SequenceGap);
+    fixture.session.request_recovery(SharedIoRecoveryReason::SequenceGap,
+                                     fixture.session.next_sequence());
     REQUIRE(fixture.session.fence_for_offline());
     CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::SequenceGap);
     CHECK_FALSE(fixture.session.fence_and_reprime());
@@ -720,7 +768,8 @@ TEST_CASE("shared session offline fence refuses reprime behind an earlier recove
     control.prepare();
     callback(control.session, a, output);
     REQUIRE(control.session.service(1).submitted == 1);
-    control.session.request_recovery(SharedIoRecoveryReason::SequenceGap);
+    control.session.request_recovery(SharedIoRecoveryReason::SequenceGap,
+                                     control.session.next_sequence());
     CHECK(control.session.fence_and_reprime());
     CHECK_FALSE(control.session.fenced());
     REQUIRE(control.session.release());

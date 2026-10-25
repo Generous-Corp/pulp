@@ -1202,6 +1202,41 @@ TEST_CASE("GpuConvolver shared-path status reports provider loss through the tra
     transport.release();
 }
 
+TEST_CASE("GpuConvolver shared path latches an invalid callback at its own block",
+          "[gpu_audio][convolver][status][health]") {
+    LossProvider* provider = nullptr;
+    auto convolver = convolver_with_loss_provider(provider);
+    if (!convolver)
+        SKIP("shared-I/O provider state is not compiled into this build");
+    const auto path = pulp::gpu_audio::detail::realtime_gpu_node_path(convolver.get());
+    REQUIRE(path.active());
+    std::vector<float> in(kHealthBlock, 0.5f), out(kHealthBlock, 0.0f);
+    const float* in_ptrs[] = {in.data()};
+    float* out_ptrs[] = {out.data()};
+    BufferView<const float> input(in_ptrs, 1, kHealthBlock);
+    BufferView<float> output(out_ptrs, 1, kHealthBlock);
+    // No service step runs, so nothing but the rejected view can latch.
+    constexpr std::uint64_t kRejected = 3;
+    for (std::uint64_t sequence = 0; sequence <= kRejected; ++sequence) {
+        (void)path.process(path.context, input, output, kHealthBlock, sequence,
+                           sequence != kRejected, 0);
+        path.delivered(
+            path.context, sequence,
+            static_cast<std::uint8_t>(
+                sequence == kRejected
+                    ? pulp::gpu_audio::detail::SharedIoDeliveryDisposition::InvalidRejected
+                    : pulp::gpu_audio::detail::SharedIoDeliveryDisposition::Priming),
+            0, 0);
+    }
+    pulp::gpu_audio::detail::RealtimeGpuHealth health;
+    REQUIRE(path.health(path.context, health));
+    CHECK(health.recovery_reason == GpuAudioRecoveryReason::InvalidCallback);
+    CHECK(health.recovery_sequence == kRejected);
+    const auto status = validated(convolver->status_snapshot());
+    CHECK(status.recovery_reason == GpuAudioRecoveryReason::InvalidCallback);
+    CHECK(status.recovery_sequence == kRejected);
+}
+
 TEST_CASE("GpuConvolver shared path reports no GPU kernel after the offline fence",
           "[gpu_audio][convolver][status][health]") {
     LossProvider* provider = nullptr;
