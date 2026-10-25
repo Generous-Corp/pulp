@@ -1049,5 +1049,86 @@ class MacosDeferredDisarmTest(unittest.TestCase):
             with self.subTest(case=label):
                 self.assertFalse(self._disarmed(self._run(fixture)))
 
+
+class ContractLaneArmedHeadTest(unittest.TestCase):
+    """The contract lane fails a head that was armed before approval.
+
+    Its green satisfies the required `macos` check without a build, so an
+    arm-on-open pull request would be enqueued on it.
+    """
+
+    NAME = "Refuse a head armed before approval (contract lane)"
+    HEAD = "c" * 40
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.step = _build_steps()[cls.NAME]
+
+    def test_it_runs_only_on_the_gated_contract_lane(self) -> None:
+        on = {"vars.PULP_MACOS_PR_GATING": "true", "github.event_name": "pull_request",
+              "matrix.lane": "contract"}
+        self.assertTrue(_evaluate_if(self.step["if"], on))
+        for off in ({"vars.PULP_MACOS_PR_GATING": ""}, {"matrix.lane": "full"},
+                    {"github.event_name": "merge_group"}):
+            with self.subTest(off=off):
+                self.assertFalse(_evaluate_if(self.step["if"], {**on, **off}))
+
+    def test_it_reads_arm_state_with_graphql_and_a_read_only_token(self) -> None:
+        # REST `auto_merge` reads null for a pull request the queue holds.
+        self.assertIn("autoMergeRequest", self.step["run"])
+        self.assertIn("mergeQueueEntry", self.step["run"])
+        self.assertNotIn("permissions", _workflow()["jobs"]["build"])
+        self.assertEqual(_workflow()["permissions"]["pull-requests"], "read")
+
+    def _run(self, answer: str | None) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            if answer is None:
+                gh.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            else:
+                gh.write_text(FAKE_GH, encoding="utf-8")
+            gh.chmod(0o755)
+            fixture = Path(tmp) / "fixture.json"
+            fixture.write_text(json.dumps({"query(": answer or ""}), encoding="utf-8")
+            log = Path(tmp) / "log"
+            log.write_text("", encoding="utf-8")
+            env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                   "FAKE_GH_FIXTURE": str(fixture), "FAKE_GH_LOG": str(log),
+                   "GITHUB_REPOSITORY": "Generous-Corp/pulp", "PR_NUMBER": "7",
+                   "PR_HEAD_SHA": self.HEAD, "GH_TOKEN": "x"}
+            # The retry back-off sleeps; a test does not need to wait for it.
+            run = self.step["run"].replace("sleep $((attempt * 5))", ":")
+            return subprocess.run(["bash", "-c", run], env=env, capture_output=True,
+                                  text=True, encoding="utf-8", check=False)
+
+    def test_an_armed_head_fails(self) -> None:
+        proc = self._run(f"{self.HEAD} true false\n")
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("armed before approval and a full macOS run: remove auto-merge, "
+                      "get a trusted APPROVE; the fleet App applies macos-ci for the full lane",
+                      proc.stdout)
+
+    def test_a_head_already_in_the_queue_fails(self) -> None:
+        # A queued pull request's arm reads as unarmed, so the queue entry is
+        # checked on its own.
+        proc = self._run(f"{self.HEAD} false true\n")
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("armed before approval", proc.stdout)
+
+    def test_an_unarmed_head_passes(self) -> None:
+        proc = self._run(f"{self.HEAD} false false\n")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_an_armed_pull_request_that_moved_on_is_its_new_heads_business(self) -> None:
+        proc = self._run(f"{'d' * 40} true false\n")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_an_unreadable_arm_state_fails_closed(self) -> None:
+        proc = self._run(None)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("arm state unreadable", proc.stdout)
+
 if __name__ == "__main__":
     unittest.main()

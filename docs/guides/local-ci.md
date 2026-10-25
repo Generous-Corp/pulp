@@ -3741,15 +3741,19 @@ or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
 
   Re-arming needs a fresh verdict for the new head, the label, and a
   full-lane success.
-- **A pull request armed before its checks ran is disarmed too.** The arm-side
+- **A pull request armed before its checks ran is refused too.** The arm-side
   guard refuses a `deferred` head, but a pull request armed on open has no
-  annotation yet for it to read. `macos-ci-deferred-disarm.yml` (`workflow_run`
-  on a completed Build and Test run, gated on the variable, no checkout) reads
-  the run's `macos` `shipyard-test-tier` annotation and, when it is `deferred`
-  and the pull request is armed at that head, disables auto-merge. The run
-  completes only after its slowest job, so a head whose other required checks
-  are already green can be enqueued first; the step then warns, and that merge
-  group still runs the full macOS suite.
+  annotation yet for it to read. So the contract lane's last check, `Refuse a
+  head armed before approval (contract lane)`, fails the `macos` job when this
+  exact head is armed for auto-merge or already in the merge queue (read over
+  GraphQL with the read-only token; REST `auto_merge` reads null for a queued
+  pull request): "armed before approval and a full macOS run: remove
+  auto-merge, get a trusted APPROVE; the fleet App applies macos-ci for the
+  full lane". An arm state it cannot read fails closed. As defence in depth,
+  `macos-ci-deferred-disarm.yml` (`workflow_run` on a completed Build and Test
+  run, gated on the variable, no checkout) disables auto-merge on a pull
+  request still armed at a head whose `macos` is tier `deferred`, for one armed
+  in the seconds between that check and the job's conclusion.
 - **Removing the label** starts nothing: `build.yml` does not listen for
   `unlabeled`, and a run already in flight finishes.
 - **Any other label event** (another label, `macos-ci` from anyone but the App,

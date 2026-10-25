@@ -5,7 +5,9 @@ name: macOS CI deferred disarm
 # approval" in docs/guides/local-ci.md). The arm-side guard refuses to arm such
 # a head, but a pull request armed BEFORE its checks ran (arm-on-open) carries
 # no annotation for the guard to read, and GitHub's native auto-merge would
-# enqueue it the moment that green lands. When a Build and Test run for a pull
+# enqueue it the moment that green lands. The contract lane's own last check
+# fails a head armed at that point; this is defence in depth for one armed in
+# the seconds after that check. When a Build and Test run for a pull
 # request completes, this reads its `macos` job's `shipyard-test-tier`
 # annotation and, if the tier is `deferred` and the pull request is armed at
 # that run's head, disables auto-merge. Re-arming then takes the normal path:

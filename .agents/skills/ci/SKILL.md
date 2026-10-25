@@ -427,9 +427,10 @@ macOS.
   anyway, and the fenced carrier's update-branch counts as a push. Re-arming
   needs a fresh verdict, the label, and a full-lane success. If the label is
   still present when re-approving, remove and re-apply it, because re-adding a
-  present label fires no event. A PR armed before its checks ran is disarmed
-  when its Build and Test run completes with a `deferred` `macos`
-  (`macos-ci-deferred-disarm.yml`).
+  present label fires no event. A PR armed (or queued) before approval fails
+  its contract-lane `macos` ("armed before approval and a full macOS run");
+  remove auto-merge and get a trusted APPROVE. `macos-ci-deferred-disarm.yml`
+  also disarms any PR still armed when a `deferred` run completes.
 - **A red contract lane is a real failure** of a pr-fast or pr-guard check.
   Fix it on the PR; it is exactly what would otherwise eject a batch. If the
   failing check needs a built target, add it to `PULP_PR_FAST_NEEDS_BUILD` in
