@@ -968,6 +968,14 @@ links it into the framework. Mirrors `PULP_CLAP_PLUGIN` and
 
 The render timestamp's `mSampleTime` is a double too, and the same rule applies to the two places that use it as the block start: an incoming render event's offset into the block (`detail::au_event_block_offset`) and an outgoing MIDI event's `AUEventSampleTime` (`detail::au_event_sample_time`). Truncating `13823.9999` placed every event one sample late. Both helpers fall back rather than overflow: an unusable block start makes the incoming event's own time its offset, and makes MIDI out go at `AUEventSampleTimeImmediate + offset`.
 
+### A hidden AU v3 editor returns its GPU caches from `viewDidDisappear`
+
+Both view controllers (`au_view_controller_mac.mm`, `au_view_controller_ios.mm`)
+call `PluginViewHost::release_gpu_caches()` there, and only on the main thread: the
+appearance callbacks arrive on main, but `createAudioUnit…` and `-dealloc` can
+arrive on the XPC queue (see the view-bridge skill), and a trim off the render
+thread would race a frame.
+
 ### `AURenderEventMIDIEventList` = UMP — not short MIDI, not raw sysex
 
 AU v3.1+ delivers long MIDI and MIDI 2.0 messages through
