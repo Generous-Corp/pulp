@@ -7663,8 +7663,10 @@
     "tools/import-design/browser_capture/capture_interaction_guards.integration.test.mjs",
     "tools/import-design/browser_capture/capture_interactions.integration.test.mjs",
     "tools/import-design/browser_capture/capture_paint.integration.test.mjs",
+    "tools/import-design/browser_capture/motion_freeze.integration.test.mjs",
     "tools/import-design/browser_capture/run_integration.mjs",
-    "tools/import-design/browser_capture/security.mjs"
+    "tools/import-design/browser_capture/security.mjs",
+    "tools/import-design/browser_capture/settle.mjs"
    ],
    "kind": "node"
   },

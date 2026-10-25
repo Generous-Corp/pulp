@@ -4552,6 +4552,25 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   timers/intervals/rAFs are cancelled, the schedulers are stubbed, CSS animation
   and transition are disabled, and `captureStableScreenshot` requires a
   byte-identical trailing run as the observable proof of stillness.
+- **Web Animations and video are frozen before the frame is read.** The
+  motion stylesheet and scheduler stubs cannot reach `element.animate()` or a
+  playing `<video>`; both run on the document clock. `freezeMotion`
+  (`settle.mjs`) runs before every page-settle sample (`waitForStable`'s
+  `beforeSample`), because a Web Animation that moves a box would otherwise
+  keep the layout from ever settling, even one a late timer or font load
+  starts mid-settle, and once more after every settle and before the
+  materialized document and the screenshot horizon. Each pass
+  settles only what an earlier one did not, or what the page restarted, and
+  counts each animation and video once: a finite Web Animation is `finish()`ed (its
+  resting frame), an infinite or unresolved one is paused at `currentTime 0`,
+  and a video is paused and rewound to its first frame unless it still shows
+  its poster. CSS animations and transitions stay on the stylesheet path, and
+  scroll- or view-driven animations are left to the fixed scroll position. An
+  animated GIF, APNG or WebP runs on the decoder's clock, so it is left alone
+  and listed in `provenance.motion.volatile_sources` (classified from its own
+  bytes by `animatedImageKind`, in the last pass only), next to the per-kind
+  counts. A page that
+  throws inside the freeze fails with `capture-motion-freeze-failed`.
 - **Browser discovery has a version FLOOR and no ceiling.**
   `kMinimumChromiumMajor = 109` (`browser_capture_backend.hpp`) is the only
   version comparison in the probe — nothing rejects a browser for being too
