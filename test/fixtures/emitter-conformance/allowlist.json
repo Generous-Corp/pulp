@@ -10,7 +10,7 @@
       ],
       "expected": "pulp::view::(RangeSlider|Checkbox)",
       "actual": "pulp::view::View",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/ISSUE_F2A",
+      "issue": "https://github.com/Generous-Corp/pulp/issues/10981",
       "reason": "ui.js does not lower a theme-painted range, checkbox or radio onto its widget; the node stays a plain View."
     },
     {
@@ -21,7 +21,7 @@
         "spectr"
       ],
       "actual": "<absent>",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/ISSUE_F2A",
+      "issue": "https://github.com/Generous-Corp/pulp/issues/10981",
       "reason": "With no widget, ui.js carries none of the control's HTML state (value, range, checked, skin, accent, disabled)."
     },
     {
@@ -33,7 +33,7 @@
         "kelvin"
       ],
       "actual": "<absent>",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/ISSUE_PAINT_RECT",
+      "issue": "https://github.com/Generous-Corp/pulp/issues/10982",
       "reason": "ui.js never records the captured snapped paint rect, so its boxes paint in the fractional layout box."
     },
     {
@@ -45,7 +45,7 @@
       "anchor": "capture:out:38",
       "expected": "<absent>",
       "actual": "meter:out",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/ISSUE_METER",
+      "issue": "https://github.com/Generous-Corp/pulp/issues/10983",
       "reason": "ui.js binds a meter from pulpMeterValueKey alone; the native and baked C++ binders need a meter source and channel."
     },
     {
@@ -57,7 +57,7 @@
       ],
       "expected": "<absent>",
       "actual": "param:",
-      "issue": "https://github.com/Generous-Corp/pulp/issues/ISSUE_SWIFT_NAMES",
+      "issue": "https://github.com/Generous-Corp/pulp/issues/10984",
       "reason": "SwiftUI resolves controls by display name and declares an entry with no param key for controls the other lanes leave unbound."
     },
     {
