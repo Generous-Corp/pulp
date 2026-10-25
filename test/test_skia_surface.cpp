@@ -1036,19 +1036,40 @@ struct TrimClockGuard {
 };
 
 // The image cache is process-wide, so a failed REQUIRE must not leave a later
-// test running with this one's capacity.
+// test running with this one's capacity: restore the one this guard found.
 struct ImageCacheCapacityGuard {
-    explicit ImageCacheCapacityGuard(std::size_t capacity) {
+    explicit ImageCacheCapacityGuard(std::size_t capacity)
+        : previous_(pulp::canvas::ImageFileCache::instance().capacity()) {
         pulp::canvas::ImageFileCache::instance().set_capacity(capacity);
     }
     ~ImageCacheCapacityGuard() {
         auto& cache = pulp::canvas::ImageFileCache::instance();
-        cache.set_capacity(32);
+        cache.set_capacity(previous_);
         cache.clear();
     }
+
+  private:
+    std::size_t previous_;
 };
 } // namespace
 #endif
+
+TEST_CASE("ImageCacheCapacityGuard restores the capacity it found", "[render][gpu-trim]") {
+#ifdef PULP_HAS_SKIA
+    auto& cache = pulp::canvas::ImageFileCache::instance();
+    const auto original = cache.capacity();
+    // Not the default, so restoring a hard-coded default would show here.
+    cache.set_capacity(7);
+    {
+        ImageCacheCapacityGuard guard(1);
+        CHECK(cache.capacity() == 1);
+    }
+    CHECK(cache.capacity() == 7);
+    cache.set_capacity(original);
+#else
+    REQUIRE(true);
+#endif
+}
 
 TEST_CASE("SkiaSurface trim everything returns released image textures to the device",
           "[render][skia][gpu-trim]") {
