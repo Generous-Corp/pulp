@@ -2299,6 +2299,13 @@ private:
         // requesting layer-backing; AppKit calls -makeBackingLayer synchronously.
         _backgroundRGB = pulp::view::kEditorHostClearRgb;
         self.wantsLayer = YES;
+        // Between a resize and the frame that draws it, the layer keeps
+        // showing the last frame at its own pixel size, anchored like the
+        // view's content, rather than stretched into the new bounds. Only an
+        // area the view grew into shows the background, for at most that one
+        // frame. AppKit owns a layer-backed view's contentsGravity and sets it
+        // from this placement, so the layer's own property would not stick.
+        self.layerContentsPlacement = NSViewLayerContentsPlacementTopLeft;
     }
     return self;
 }
@@ -2330,11 +2337,6 @@ private:
     CGColorRef seed = pulp::view::mac_host::cg_color_from_rgb(_backgroundRGB);
     layer.backgroundColor = seed;
     CGColorRelease(seed);
-    // Between a resize and the frame that draws it, the layer keeps showing
-    // the last frame at its own pixel size, anchored like the view's content,
-    // rather than stretched into the new bounds. Only an area the view grew
-    // into shows the background, for at most that one frame.
-    layer.contentsGravity = kCAGravityTopLeft;
 
     _metalLayer = layer;
     return layer;

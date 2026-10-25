@@ -248,7 +248,10 @@ TEST_CASE("GPU plug-in host: a resize keeps the last frame until the next one dr
         REQUIRE(e.settle());
         CAMetalLayer* layer = (CAMetalLayer*)e.view.layer;
         REQUIRE([layer isKindOfClass:[CAMetalLayer class]]);
-        CHECK([layer.contentsGravity isEqualToString:kCAGravityTopLeft]);
+        // Pinned, not stretched: the last frame stays at its pixel size.
+        CHECK(e.view.layerContentsPlacement == NSViewLayerContentsPlacementTopLeft);
+        INFO("layer contentsGravity " << layer.contentsGravity.UTF8String);
+        CHECK_FALSE([layer.contentsGravity isEqualToString:kCAGravityResize]);
         const double s = e.scale();
         CHECK(layer.drawableSize.width == 400 * s);
         CHECK(layer.contents != nil);
