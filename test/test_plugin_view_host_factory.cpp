@@ -32,6 +32,8 @@
 // WM_SIZE, MAKELPARAM, GetClientRect).
 #include <pulp/platform/win32_sane.hpp>
 #include <cstdint>
+#include <utility>
+#include <vector>
 #endif
 
 using namespace pulp::view;
@@ -387,6 +389,72 @@ TEST_CASE("Windows plugin host reconciles a WM_SIZE host resize",
     } else {
         WARN("no GPU adapter/device (headless CI) — GPU swapchain check skipped");
     }
+}
+
+// A DAW drag resizes the attached editor once per mouse move. The processor
+// hears about it once per frame, from the frame timer, with the last size.
+TEST_CASE("Windows attached editor notifies a WM_SIZE flood once per frame",
+          "[view][plugin-view-host][resize][windows]") {
+    struct ParentWindow {
+        HWND hwnd =
+            CreateWindowExW(0, L"STATIC", L"Pulp resize coalescing", WS_OVERLAPPEDWINDOW, 0, 0, 512,
+                            512, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
+    } parent;
+    REQUIRE(parent.hwnd != nullptr);
+
+    View root;
+    root.set_theme(Theme::dark());
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {64, 64};
+    opts.use_gpu = true; // may degrade to raster-only on a GPU-less runner
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    host->attach_to_parent(parent.hwnd);
+    REQUIRE(host->is_attached());
+
+    const auto child = static_cast<HWND>(host->native_handle());
+    REQUIRE(child != nullptr);
+    const auto dispatch_frame_timer = [&] {
+        const auto deadline = GetTickCount64() + 1000;
+        MSG msg{};
+        while (GetTickCount64() < deadline) {
+            if (PeekMessageW(&msg, child, WM_TIMER, WM_TIMER, PM_REMOVE)) {
+                DispatchMessageW(&msg);
+                return true;
+            }
+            Sleep(1);
+        }
+        return false;
+    };
+
+    std::vector<std::pair<uint32_t, uint32_t>> notified;
+    host->set_resize_callback([&](uint32_t w, uint32_t h) { notified.emplace_back(w, h); });
+    const float scale = host->scale_factor();
+    REQUIRE(scale > 0.0f);
+    const auto send_logical = [&](uint32_t w, uint32_t h) {
+        const auto pw = static_cast<uint32_t>(w * scale + 0.5f);
+        const auto ph = static_cast<uint32_t>(h * scale + 0.5f);
+        SendMessageW(child, WM_SIZE, SIZE_RESTORED, static_cast<LPARAM>(MAKELPARAM(pw, ph)));
+    };
+
+    for (uint32_t i = 1; i <= 60; ++i)
+        send_logical(100 + i, 80);
+    CHECK(notified.empty());
+    REQUIRE(dispatch_frame_timer());
+    REQUIRE(notified.size() == 1);
+    CHECK(notified.back() == std::make_pair(160u, 80u));
+    CHECK(host->get_size().width == 160);
+
+    // A frame with no resize notifies nothing.
+    host->repaint();
+    REQUIRE(dispatch_frame_timer());
+    CHECK(notified.size() == 1);
+    host->detach();
 }
 
 TEST_CASE("Windows attached GPU editor coalesces scripted repaint requests",
