@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "support/unique_temp_dir.hpp"
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/view/design_import.hpp>
@@ -19,6 +20,7 @@
 #endif
 
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -106,6 +108,60 @@ Label* only_label(View& root) {
     return labels.size() == 1 ? labels.front() : nullptr;
 }
 
+// What this build's font resolver can answer, probed by registering the
+// shipped files directly with the canvas, not through the importer. A build
+// without text shaping (the sanitizer lanes) resolves nothing; a lite build
+// resolves through CoreText. The tests below check the importer's aliases, so
+// they skip, saying why, where the resolver itself cannot tell those faces
+// apart, and fail where it can and the importer gets them wrong.
+struct ResolverProbe {
+    std::string variable_600; // the shipped variable face at 600
+    std::string variable_300; // ... and at its 300 default
+    std::string static_400;   // the shipped static face
+};
+
+const ResolverProbe& resolver_probe() {
+    static const ResolverProbe probe = [] {
+        const auto register_file = [](const fs::path& path, const std::string& family) {
+            std::ifstream in(path, std::ios::binary);
+            const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(in),
+                                                  std::istreambuf_iterator<char>()};
+            pulp::canvas::register_font(bytes.data(), bytes.size(), family);
+        };
+        register_file(kVariableFont, "Pulp Resolver Probe Variable");
+        register_file(kStaticFont, "Pulp Resolver Probe Static");
+        ResolverProbe out;
+        out.variable_600 =
+            pulp::canvas::resolved_face_identity("'Pulp Resolver Probe Variable'", 600.0f);
+        out.variable_300 =
+            pulp::canvas::resolved_face_identity("'Pulp Resolver Probe Variable'", 300.0f);
+        out.static_400 =
+            pulp::canvas::resolved_face_identity("'Pulp Resolver Probe Static'", 400.0f);
+        return out;
+    }();
+    return probe;
+}
+
+// SKIPs (with the resolver's answers) unless a face registered from each
+// shipped file resolves to that file's face.
+void require_shipped_faces_resolve() {
+    const auto& probe = resolver_probe();
+    if (probe.variable_600.rfind("FunnelDisplay", 0) != 0 ||
+        probe.static_400.rfind("Inter", 0) != 0)
+        SKIP("this build's font resolver does not resolve a registered shipped face (variable "
+             "font at 600: '"
+             << probe.variable_600 << "', static font: '" << probe.static_400 << "')");
+}
+
+// SKIPs unless the resolver also instances the variable font's wght axis.
+void require_variable_weights_resolve() {
+    require_shipped_faces_resolve();
+    const auto& probe = resolver_probe();
+    if (probe.variable_600 == probe.variable_300)
+        SKIP("this build's font resolver names the variable font's 600 and 300 instances alike ('"
+             << probe.variable_600 << "')");
+}
+
 // `font` wrapped as a one-face TrueType collection ('ttcf'). A collection's
 // table offsets count from the start of the file, so each moves by the
 // 16-byte collection header (tag, version, face count, the one face offset).
@@ -183,6 +239,7 @@ double ink_of(const sk_sp<SkTypeface>& face, const char* text) {
 TEST_CASE("a shipped variable font is what an imported label resolves to",
           "[design-import][font-assets][native-fonts]") {
     REQUIRE(fs::exists(kVariableFont));
+    require_variable_weights_resolve();
     const std::string family = "Pulp Shipped Variable";
     auto ir = shipped_font_design(family, 600, {face(family, "font-variable")});
     auto root = build_native_view_tree(ir, ir.asset_manifest);
@@ -205,6 +262,8 @@ TEST_CASE("a shipped variable font is what an imported label resolves to",
     // The wght axis is instanced at 600, not the 300 default face drawn with a
     // synthesized weight.
     CHECK(shipped != pulp::canvas::resolved_face_identity(stack, 300.0f));
+    // The probe's own face, registered without the importer, is the same face.
+    CHECK(shipped == resolver_probe().variable_600);
 #if defined(__APPLE__)
     // CoreText names the instance the way Chromium reported this font at 600
     // in the variable-font-label fixture's capture.
@@ -216,6 +275,7 @@ TEST_CASE("a family split by unicode-range checks its last-defined subset first"
           "[design-import][font-assets][native-fonts]") {
     // Two subsets of one family in different files. The stack lists the
     // last-defined first, so that is the face the family resolves to.
+    require_shipped_faces_resolve();
     const std::string family = "Pulp Shipped Subsets";
     const std::map<std::string, fs::path> fonts{{"font-cyrillic", kStaticFont},
                                                 {"font-latin", kVariableFont}};
@@ -300,6 +360,7 @@ TEST_CASE("a shipped font that cannot be read leaves the stack alone and says so
 TEST_CASE("a shipped font's alias changes when its file's bytes do",
           "[design-import][font-assets][native-fonts]") {
     // Same family, range and asset id; only the file behind the id differs.
+    require_shipped_faces_resolve();
     const std::string family = "Pulp Shipped Rewritten";
     const auto stack_with = [&](const fs::path& font) {
         auto ir = shipped_font_design(family, 400, {face(family, "font-rewritten")}, font);
@@ -324,6 +385,7 @@ TEST_CASE("every captured label of the variable-font fixture resolves its captur
     // The face check a Label makes before it reuses its captured line boxes:
     // the face its stack resolves to must be the face Chromium laid them out
     // with. With the shipped face registered it is, for both weights.
+    require_variable_weights_resolve();
     std::ifstream in(kFixture / "design.ir.json", std::ios::binary);
     REQUIRE(in);
     const std::string json{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
