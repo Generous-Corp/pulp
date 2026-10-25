@@ -76,6 +76,11 @@ catch_discover_tests(pulp-test-scripted-ui PROPERTIES LABELS slow)
 pulp_add_test_suite(pulp-test-scripted-ui-runtime-eval GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
 
+# Embedded-source sessions never touch the file watcher, so they stay in the
+# normal-speed lane rather than the `slow` file-watch suite above.
+pulp_add_test_suite(pulp-test-scripted-ui-embedded GROUP pulp-test-group-script-view
+    LIBRARIES pulp::view)
+
 # JS engine abstraction tests (shared across all backends)
 pulp_add_test_suite(pulp-test-js-engine GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)

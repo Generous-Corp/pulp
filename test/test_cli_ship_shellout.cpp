@@ -2269,3 +2269,173 @@ TEST_CASE("shellout timeout falls back to the default on unusable overrides",
                 pulp_test_cli::kDefaultShelloutTimeoutMs);
     }
 }
+
+// ── PULP_DEV_BUILD: ship builds build-ship/ instead of refusing ──────────────
+//
+// A `pulp build` dir is a dev build (PULP_DEV_BUILD=ON records the on-disk
+// ui.js hot-reload path). `pulp ship` must neither ship it nor refuse it: the
+// artifact-producing subcommands configure and build <root>/build-ship with
+// PULP_DEV_BUILD=OFF and ship from there. The fake project configures with no
+// languages so the shippable configure is a sub-second CMake run.
+
+namespace {
+
+fs::path make_dev_build_project(std::string_view name) {
+    auto root = make_fake_project(name, true);
+    {
+        std::ofstream cmake(root / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.22)\n"
+              << "project(FakeShipPlugin VERSION 2.3.4 LANGUAGES NONE)\n";
+    }
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "CMAKE_BUILD_TYPE:STRING=Release\n"
+              << "PULP_ENABLE_ARA:BOOL=ON\n"
+              << "PULP_DEV_BUILD:BOOL=ON\n";
+    }
+    return root;
+}
+
+} // namespace
+
+TEST_CASE_METHOD(
+    ShipShelloutFixture,
+    "pulp ship package on a dev build configures and builds build-ship instead of refusing",
+    "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-package");
+    ScopedEnvVar leases("PULP_TARTCI_LEASES", "0");
+
+    auto r = run_pulp_in(root, {"ship", "package"});
+    REQUIRE_FALSE(r.timed_out);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "is a dev build"));
+    REQUIRE(contains(combined, "build-ship"));
+    REQUIRE_FALSE(contains(combined, "refusing"));
+    // The shippable build was configured from the dev cache with the option off.
+    REQUIRE(fs::exists(root / "build-ship" / "CMakeCache.txt"));
+    const auto ship_cache = read_text_file(root / "build-ship" / "CMakeCache.txt");
+    REQUIRE(contains(ship_cache, "PULP_DEV_BUILD:BOOL=OFF"));
+    REQUIRE_FALSE(contains(ship_cache, "PULP_DEV_BUILD:BOOL=ON"));
+    // Every other switch the developer configured came along.
+    REQUIRE(contains(ship_cache, "PULP_ENABLE_ARA:BOOL=ON"));
+    REQUIRE(fs::exists(root / "build-ship" / "pulp-ship-initial-cache.cmake"));
+    // Packaging then ran against build-ship, which holds no plug-ins.
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(contains(combined, "build-ship"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship --allow-dev-build ships the dev build dir and says so",
+                 "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-allowed");
+    ScopedEnvVar leases("PULP_TARTCI_LEASES", "0");
+
+    auto r = run_pulp_in(root, {"ship", "package", "--allow-dev-build"});
+    REQUIRE_FALSE(r.timed_out);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "--allow-dev-build was passed"));
+    REQUIRE_FALSE(contains(combined, "Building the shippable build"));
+    REQUIRE_FALSE(fs::exists(root / "build-ship"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(
+    ShipShelloutFixture,
+    "pulp ship sign --path on a dev build signs the named artifact without building build-ship",
+    "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-sign-path");
+    ScopedEnvVar leases("PULP_TARTCI_LEASES", "0");
+
+    // The artifact is explicit, so the dev build dir is never a reason to
+    // configure and build a second tree; the missing path is reported as such.
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "Developer ID Application: Fake",
+                                "--path", (root / "does-not-exist.app").string()});
+    REQUIRE_FALSE(r.timed_out);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "--path not found"));
+    REQUIRE_FALSE(contains(combined, "Building the shippable build"));
+    REQUIRE_FALSE(fs::exists(root / "build-ship"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship check names the shippable build dir a dev build will ship from",
+                 "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-check");
+
+    // Not built yet: check reads build/ and says what sign/package will do.
+    auto r = run_pulp_in(root, {"ship", "check"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "is a dev build"));
+    REQUIRE(contains(combined, "build-ship"));
+    REQUIRE(contains(combined, "not built yet"));
+
+    // Once build-ship exists, every read-only subcommand reads it.
+    fs::create_directories(root / "build-ship");
+    std::ofstream(root / "build-ship" / "CMakeCache.txt")
+        << "CMAKE_HOME_DIRECTORY:INTERNAL=" << root.string() << "\nPULP_DEV_BUILD:BOOL=OFF\n";
+    r = run_pulp_in(root, {"ship", "check"});
+    REQUIRE_FALSE(r.timed_out);
+    combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "reading build-ship/"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize on a dev build without build-ship points at package",
+                 "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-notarize");
+    auto r = run_pulp_in(root, {"ship", "notarize", "--dry-run"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "has not been built yet"));
+    REQUIRE(contains(combined, "pulp ship package"));
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package refuses a shippable build that lacks a dev-build artifact",
+                 "[cli][shellout][ship][dev-build]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_dev_build_project("dev-build-artifact-set");
+    ScopedEnvVar leases("PULP_TARTCI_LEASES", "0");
+    // The dev build holds an AAX bundle the fresh build-ship (no languages, no
+    // targets) can never produce.
+    fs::create_directories(root / "build" / "AAX" / "Fake.aaxplugin");
+
+    auto r = run_pulp_in(root, {"ship", "package"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    INFO(combined);
+    REQUIRE(contains(combined, "refusing to ship from"));
+    REQUIRE(contains(combined, "AAX/Fake.aaxplugin"));
+    REQUIRE_FALSE(fs::exists(root / "artifacts"));
+    fs::remove_all(root);
+}

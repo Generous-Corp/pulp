@@ -133,6 +133,20 @@ add_test(NAME cmake-plugin-bundle-icon
     COMMAND ${CMAKE_COMMAND}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_bundle_icon.cmake)
 
+# UI_SCRIPT embedding contract: configures, builds and runs a throwaway project
+# through the helper every format target uses, and scans the binary for the
+# script bytes (present) and the script's absolute source path (absent without
+# PULP_DEV_BUILD, present under PULP_DEV_BUILD=ON as the control).
+add_test(NAME cmake-ui-script-embed
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_UI_SCRIPT_EMBED_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/ui-script-embed
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ui_script_embed.cmake)
+set_tests_properties(cmake-ui-script-embed PROPERTIES
+    LABELS "cmake;view;scripted-ui;embed"
+    # Two throwaway configures plus two three-file builds; the budget covers
+    # compiler detection on a cold runner.
+    TIMEOUT 300)
+
 # PULP_DEAD_STRIP_PLUGINS and the per-module PULP_DEAD_STRIP property each
 # remove -dead_strip from an Apple plug-in module's link; the default keeps it.
 add_test(NAME cmake-plugin-dead-strip-switch
