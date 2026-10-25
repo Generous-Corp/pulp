@@ -1,6 +1,6 @@
 #include "design_js_capture_lowering.hpp"
 
-#include "design_import_form_controls.hpp"
+#include "design_ua_form_control_state.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -65,7 +65,7 @@ bool emit_js_ua_form_control(std::ostream& out, const IRNode& node, const std::s
     const std::string target = "'" + id + "'";
     out << indent << factory << target << ", " << parent << ");\n";
     out << indent << "setUaSkin(" << target << ", 'chromium_refresh', '"
-        << (state->scheme == UaColorScheme::dark ? "dark" : "light") << "');\n";
+        << ua_color_scheme_name(state->scheme) << "');\n";
     if (state->accent)
         out << indent << "setAccentColor(" << target << ", '"
             << js_single_quote_escape(*state->accent) << "');\n";
@@ -100,7 +100,7 @@ bool emit_js_ua_button_surface(std::ostream& out, const IRNode& node, const std:
     out << indent << "createButtonSurface(" << target << ", " << parent << ", '"
         << (row ? "row" : "column") << "');\n";
     out << indent << "setUaSkin(" << target << ", 'chromium_refresh', '"
-        << (state->scheme == UaColorScheme::dark ? "dark" : "light") << "');\n";
+        << ua_color_scheme_name(state->scheme) << "');\n";
     if (state->disabled)
         out << indent << "setEnabled(" << target << ", false);\n";
     return true;

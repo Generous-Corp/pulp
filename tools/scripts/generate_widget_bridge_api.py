@@ -614,6 +614,8 @@ def signature_for(row: ManifestRow) -> str:
             return "(id: string, text: string, parentId: string) => string"
         if row.name == "createBadge":
             return "(id: string, text: string, tone: string, parentId: string) => string"
+        if row.name == "createButtonSurface":
+            return "(id: string, parentId: string, direction?: 'row' | 'column') => string"
         return "(id: string, parentId: string) => string"
     if row.name in ID_BOOLEAN_SETTERS:
         return "(id: string, value: boolean) => void"
