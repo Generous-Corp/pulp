@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -647,6 +648,356 @@ class WindowsAliasTest(unittest.TestCase):
         self.assertEqual(step["env"]["INTEL_CANARY_PR_BASE"],
                          "${{ github.event.pull_request.base.sha || steps.tested.outputs.merged_base }}")
         self.assertNotIn('"${{ github.event_name }}" = "pull_request"', step["run"])
+
+
+# --- Static reachability on a pr_number dispatch ---------------------------
+#
+# A three-valued evaluator for GitHub expressions: the facts a pr_number
+# dispatch fixes are known, and everything an operator or the run itself
+# decides (other inputs, vars, needs, steps, matrix entries) is UNKNOWN. A job
+# or step whose `if:` is not definitely false counts as reachable.
+
+class _Unknown:
+    def __repr__(self) -> str:
+        return "UNKNOWN"
+
+
+UNKNOWN = _Unknown()
+_EXPR_TOKEN = re.compile(r"\s*(?:(\d+\.\d+|\d+)|('(?:[^']|'')*')|(&&|\|\||==|!=|<=|>=|[!<>(),\[\]]|\.)"
+                         r"|([A-Za-z_][A-Za-z0-9_\-]*|\*))")
+
+
+def _tokens(text: str) -> list[tuple[str, object]]:
+    pos, out, text = 0, [], text.strip()
+    while pos < len(text):
+        match = _EXPR_TOKEN.match(text, pos)
+        if not match or match.end() == pos:
+            raise ValueError(f"cannot tokenize {text[pos:pos + 30]!r}")
+        number, string, op, ident = match.groups()
+        if number is not None:
+            out.append(("lit", float(number) if "." in number else int(number)))
+        elif string is not None:
+            out.append(("lit", string[1:-1].replace("''", "'")))
+        elif op is not None:
+            out.append(("op", op))
+        elif ident in ("true", "false"):
+            out.append(("lit", ident == "true"))
+        elif ident == "null":
+            out.append(("lit", None))
+        else:
+            out.append(("id", ident))
+        pos = match.end()
+    return out
+
+
+def _truthy(value):
+    return UNKNOWN if value is UNKNOWN else (bool(value) and value != 0)
+
+
+class _Expr:
+    def __init__(self, text: str, resolve):
+        self.tokens, self.i, self.resolve = _tokens(text), 0, resolve
+
+    def peek(self):
+        return self.tokens[self.i] if self.i < len(self.tokens) else (None, None)
+
+    def take(self, value=None):
+        token = self.peek()
+        if value is not None and token[1] != value:
+            raise ValueError(f"expected {value!r}, got {token}")
+        self.i += 1
+        return token
+
+    def run(self):
+        value = self.or_()
+        if self.i != len(self.tokens):
+            raise ValueError(f"trailing {self.tokens[self.i:]}")
+        return value
+
+    def or_(self):
+        a = self.and_()
+        while self.peek() == ("op", "||"):
+            self.take()
+            b = self.and_()
+            ta = _truthy(a)
+            a = a if ta is True else b if ta is False else (b if _truthy(b) is True else UNKNOWN)
+        return a
+
+    def and_(self):
+        a = self.cmp()
+        while self.peek() == ("op", "&&"):
+            self.take()
+            b = self.cmp()
+            ta = _truthy(a)
+            a = a if ta is False else b if ta is True else (b if _truthy(b) is False else UNKNOWN)
+        return a
+
+    def cmp(self):
+        a = self.unary()
+        while self.peek()[0] == "op" and self.peek()[1] in ("==", "!=", "<", "<=", ">", ">="):
+            op = self.take()[1]
+            b = self.unary()
+            if a is UNKNOWN or b is UNKNOWN:
+                a = UNKNOWN
+                continue
+            x, y = a, b
+            if isinstance(x, str) and isinstance(y, str):
+                x, y = x.lower(), y.lower()
+            elif type(x) is not type(y):
+                def num(v):
+                    if v is None or v == "":
+                        return 0
+                    if isinstance(v, (bool, int, float)):
+                        return float(v)
+                    try:
+                        return float(v)
+                    except ValueError:
+                        return float("nan")
+                x, y = num(x), num(y)
+            a = {"==": x == y, "!=": x != y, "<": x < y, "<=": x <= y, ">": x > y, ">=": x >= y}[op]
+        return a
+
+    def unary(self):
+        if self.peek() == ("op", "!"):
+            self.take()
+            value = _truthy(self.unary())
+            return UNKNOWN if value is UNKNOWN else not value
+        return self.primary()
+
+    def primary(self):
+        kind, value = self.peek()
+        if kind == "lit":
+            self.take()
+            return value
+        if (kind, value) == ("op", "("):
+            self.take()
+            inner = self.or_()
+            self.take(")")
+            return inner
+        if kind != "id":
+            raise ValueError(f"unexpected {kind} {value}")
+        self.take()
+        if self.peek() == ("op", "("):
+            self.take()
+            args = []
+            if self.peek() != ("op", ")"):
+                args.append(self.or_())
+                while self.peek() == ("op", ","):
+                    self.take()
+                    args.append(self.or_())
+            self.take(")")
+            if value in ("contains", "startsWith", "endsWith") and UNKNOWN not in args:
+                a, b = (str(arg).lower() for arg in args)
+                return {"contains": b in a, "startsWith": a.startswith(b), "endsWith": a.endswith(b)}[value]
+            return UNKNOWN  # status functions, fromJSON, format, ... decide at run time
+        path = [value]
+        while self.peek() in (("op", "."), ("op", "[")):
+            if self.take()[1] == ".":
+                path.append(str(self.take()[1]))
+            else:
+                path.append(str(self.or_()))
+                self.take("]")
+        return self.resolve(".".join(path))
+
+
+def _can_be_true(condition, resolve) -> bool:
+    if condition is None or condition == "":
+        return True
+    if isinstance(condition, bool):
+        return condition
+    text = str(condition).strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2]
+    return _truthy(_Expr(text, resolve).run()) is not False
+
+
+# What a pr_number dispatch fixes. The bind refuses the default branch, so the
+# ref is a pull request's branch; the lane is `full` (the contract lane is
+# pull_request-only); event payload fields of other events are null.
+PR_DISPATCH_FACTS = {
+    "github.event_name": "workflow_dispatch", "inputs.pr_number": "11053",
+    "github.event.action": None, "github.event.label.name": None,
+    "github.ref": "refs/heads/topic", "github.ref_name": "topic",
+    "github.repository": REPO, "matrix.lane": "full",
+}
+# The build matrix's legs on this path (RoutingParityTest): macOS on the
+# PR-head pool or its hosted overflow, and hosted Linux. No Windows leg.
+PR_DISPATCH_LEGS = (
+    {"matrix.key": "macos", "runner.os": "macOS", "runner.environment": "self-hosted"},
+    {"matrix.key": "macos", "runner.os": "macOS", "runner.environment": "github-hosted"},
+    {"matrix.key": "linux", "runner.os": "Linux", "runner.environment": "github-hosted"},
+)
+
+
+def _resolver(extra: dict):
+    facts = {**PR_DISPATCH_FACTS, **extra}
+
+    def resolve(path: str):
+        if path in facts:
+            return facts[path]
+        if path.startswith(("github.event.pull_request.", "github.event.merge_group.")):
+            return None
+        return UNKNOWN
+    return resolve
+
+
+def _label(step: dict) -> str:
+    return step.get("name") or step.get("id") or step.get("uses")
+
+
+def reachable_on_pr_dispatch(data: dict) -> dict[tuple[str, str], dict]:
+    """Every (job, step) a pr_number dispatch can run, with what it is."""
+    found: dict[tuple[str, str], dict] = {}
+    for job_name, job in data["jobs"].items():
+        for leg in (PR_DISPATCH_LEGS if job_name == "build" else ({},)):
+            resolve = _resolver(leg)
+            if not _can_be_true(job.get("if"), resolve):
+                continue
+            job_inputs = set(re.findall(r"inputs\.([a-z_]+)", json.dumps(job.get("env") or {})))
+            for step in job.get("steps") or []:
+                if _can_be_true(step.get("if"), resolve):
+                    inputs = job_inputs | set(re.findall(r"inputs\.([a-z_]+)", json.dumps(step)))
+                    cache = (step.get("with") or {}).get("cache")
+                    found[(job_name, _label(step))] = {
+                        "uses": str(step.get("uses", "")), "inputs": tuple(sorted(inputs)),
+                        "saves_cache": bool(cache) and _can_be_true(cache, resolve),
+                        "permissions": job.get("permissions")}
+    return found
+
+
+TESTED_STEP = ("Tested ${{ steps.tested.outputs.tested_ref }} at ${{ steps.tested.outputs.tested_sha }}"
+               " onto ${{ steps.tested.outputs.merged_base }}")
+RESOLVER_INPUTS = ("allow_hosted_windows", "linux_runner_selector_json", "local_proof",
+                   "macos_runner_selector_json", "mise_candidate", "pr_number", "run_windows",
+                   "runner_provider", "windows_runner_selector_json")
+
+# Every step a pr_number dispatch can run, reviewed. Each entry names the
+# `inputs.*` it reads (an input reaching a new step must be reviewed) and why
+# the step is safe to run on a pull request's code. A new step on this path,
+# or one that newly reads an input, fails the test until it is added here.
+PR_DISPATCH_ALLOWLIST: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
+    ("resolve-provider", "actions/checkout@v7"): ((), "checks out the dispatched branch to read the resolver scripts"),
+    ("resolve-provider", "resolve"): (RESOLVER_INPUTS, "routes legs; on this path every operator input is blanked (RoutingParityTest)"),
+    ("classify", "Bind the pull-request dispatch to its head"): (("pr_number",), "the fail-closed bind; read-only token passed to its reads only"),
+    ("classify", "actions/checkout@v7"): ((), "checks out the bound merge sha"),
+    ("classify", "classify"): (("pr_number",), "diffs the bound merge against its merged base; read-only"),
+    ("protected-receipt-reuse", "actions/checkout@v7"): ((), "reads the reuse scripts; the decision itself is merge_group-only"),
+    ("protected-receipt-reuse", "reuse"): ((), "merge_group-only logic; on a dispatch it passes the matrix through"),
+    ("build", "Mark job start for the reuse replay record"): ((), "writes a timestamp to the job's own env"),
+    ("build", "Seed the checkout from the host git mirror (tartci macOS)"): ((), "reads the host mirror as a PR-head job does"),
+    ("build", "actions/checkout@v7"): ((), "checks out the merge sha classify bound"),
+    ("build", "Verify the tested merge ref"): (("pr_number",), "re-checks the bound sha and its parents; outputs only"),
+    ("build", TESTED_STEP): ((), "names the tested ref and sha for the jobs API; echo only"),
+    ("build", "Fetch protected capability base"): ((), "fetches the merged base read-only"),
+    ("build", "Hydrate bounded GPU provenance commits"): ((), "read-only history fetch, as on a PR run"),
+    ("build", "brew update (macOS)"): ((), "advisory toolchain refresh on the VM, as on a PR run"),
+    ("build", "Install ccache (macOS)"): ((), "VM-local install, as on a PR run"),
+    ("build", "Bootstrap repository dependencies"): ((), "fetches pinned deps, as on a PR run"),
+    ("build", "Install pinned Chrome for browser-source fidelity (macOS ARM64)"): ((), "VM-ephemeral install, as on a PR run"),
+    ("build", "Provide the pinned Rust toolchain"): ((), "VM-local toolchain, as on a PR run"),
+    ("build", "Upload the Rust fallback receipt"): ((), "diagnostic upload; no run consumes it"),
+    ("build", "Fetch pulp-rs crates"): ((), "read-only crate fetch, as on a PR run"),
+    ("build", "Fetch prebuilt Skia (macOS)"): ((), "fetches the pinned Skia, as on a PR run"),
+    ("build", "Intel canary — lint + x86_64 GPU-off compile"): ((), "lints against the merged base, as a PR against base.sha"),
+    ("build", "Ccache effective config (proof of override)"): ((), "prints ccache config"),
+    ("build", "Install materialized runtime Node test dependencies (macOS)"): ((), "workspace-local install, as on a PR run"),
+    ("build", "Install materialized runtime Node test dependencies (Linux)"): ((), "workspace-local install, as on a PR run"),
+    ("build", "Toolchain report against the manifest (warn only)"): ((), "report only"),
+    ("build", "Configure"): ((), "configures the build dir, identical on every event"),
+    ("build", "Verify GPU-audio proof targets are configured and never run"): ((), "reads the configured tree"),
+    ("build", "Install visual-analysis Python dependencies"): ((), "pinned lock into the job's venv, as on a PR run"),
+    ("build", "Install build-time Node dependencies"): ((), "workspace-local install, as on a PR run"),
+    ("build", "Build"): ((), "the build itself; ccache writes stay in the PR-head pool's namespace"),
+    ("build", "Ccache stats"): ((), "prints ccache stats"),
+    ("build", "Test (non-Windows)"): ((), "the full suite, as on any dispatch"),
+    ("build", "Announce A2T scope-history headroom"): ((), "annotation only"),
+    ("build", "Observe ctest non-runs (non-Windows)"): ((), "writes the job summary"),
+    ("build", "Observe GPU adapter contract (self-hosted macOS)"): ((), "observation, continue-on-error"),
+    ("build", "Install and publish exact GPU-audio SDK (macOS ARM64)"): ((), "installs into runner.temp; its upload is skipped on this path"),
+    ("build", "Wait before retrying the GPU-audio SDK upload"): ((), "runs only if the skipped upload failed: dead on this path"),
+    ("build", "Upload exact GPU-audio SDK (macOS ARM64, retry)"): ((), "runs only if the skipped upload failed: dead on this path"),
+    ("build", "Test A2T structural receipt issuer"): ((), "self-test of the issuer"),
+    ("build", "Verify A2T structural receipt"): ((), "verify-only off a pull_request event: issues nothing"),
+    ("build", "Publish A2T structural verification"): ((), "classify sets attestation_required only on pull_request: dead on this path"),
+    ("build", "Surface ctest failures (non-Windows)"): ((), "writes the job summary"),
+    ("build", "Upload ctest logs and JUnit report"): ((), "diagnostic upload (7 days); no run consumes it"),
+    ("build", "Record per-test results for reuse replay (macOS)"): ((), "writes a local record; its upload is skipped on this path"),
+    ("build", "Publish exact protected-validation receipt"): ((), "publishes only the pull_request-only issuer's output: dead on this path"),
+    ("build", "Restore FetchContent sources (GitHub-hosted)"): ((), "restore-only cache"),
+    ("build", "Restore ccache (GitHub-hosted)"): ((), "restore-only cache"),
+    ("build", "Install Linux dependencies"): ((), "apt install on the hosted runner, as on a PR run"),
+    ("build", "Set up Node.js for materialized runtime tests (Linux)"): (("pr_number",), "its npm cache is off on this path"),
+    ("macos", "macOS PR/dispatch bootstrap (required when native leg is absent)"): ((), "skip-safe or fail-closed verdict; no build"),
+    ("macos", "Check out the reuse record writer"): ((), "sparse checkout of one script"),
+    ("macos", "Record that no suite ran, for reuse replay"): ((), "writes a local record; its upload is skipped on this path"),
+    ("linux", "Linux leg outcome (advisory)"): ((), "reads this run's jobs"),
+    ("windows", "Windows leg outcome (advisory)"): (("pr_number", "run_windows"), "passes a pr_number dispatch as it does a PR"),
+    ("ci-cause", "actions/checkout@v7"): ((), "sparse checkout of the cause script"),
+    ("ci-cause", "Name the cause of each failed job"): ((), "advisory; reads this run's logs, writes annotations"),
+}
+DIAGNOSTIC_UPLOADS = {"Upload the Rust fallback receipt", "Upload ctest logs and JUnit report"}
+DEAD_UPLOADS = {"Upload exact GPU-audio SDK (macOS ARM64, retry)", "Publish A2T structural verification",
+                "Publish exact protected-validation receipt"}
+
+
+class EveryJobReachabilityTest(unittest.TestCase):
+    """Every job and step a pr_number dispatch can run is reviewed."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.reachable = reachable_on_pr_dispatch(workflow())
+
+    def test_every_reachable_step_is_in_the_reviewed_allowlist(self) -> None:
+        unreviewed = sorted(set(self.reachable) - set(PR_DISPATCH_ALLOWLIST))
+        stale = sorted(set(PR_DISPATCH_ALLOWLIST) - set(self.reachable))
+        self.assertEqual(unreviewed, [], "new steps on the pr_number path need a review and an entry")
+        self.assertEqual(stale, [], "entries for steps no longer on the path: remove them")
+        for key, (_, reason) in PR_DISPATCH_ALLOWLIST.items():
+            with self.subTest(step=key):
+                self.assertTrue(reason.strip())
+
+    def test_every_input_a_reachable_step_reads_is_reviewed(self) -> None:
+        for key, found in self.reachable.items():
+            with self.subTest(step=key):
+                self.assertEqual(found["inputs"], PR_DISPATCH_ALLOWLIST[key][0])
+
+    def test_no_reachable_step_saves_a_cache(self) -> None:
+        for key, found in self.reachable.items():
+            with self.subTest(step=key):
+                uses = found["uses"]
+                self.assertFalse(uses.startswith(("actions/cache@", "actions/cache/save@")), uses)
+                self.assertNotIn("cache-action", uses)
+                self.assertNotIn("namespace-macos-cache", uses)
+                self.assertFalse(found["saves_cache"], "a setup-* cache: that saves on this path")
+
+    def test_reachable_uploads_are_only_diagnostics_or_dead(self) -> None:
+        uploads = {step for (_, step), found in self.reachable.items()
+                   if found["uses"].startswith("actions/upload-artifact")}
+        self.assertEqual(uploads, DIAGNOSTIC_UPLOADS | DEAD_UPLOADS)
+
+    def test_no_reachable_job_raises_its_token_scope(self) -> None:
+        for key, found in self.reachable.items():
+            with self.subTest(step=key):
+                self.assertIsNone(found["permissions"], "the read-only workflow block applies")
+
+    def test_the_scan_catches_a_planted_step(self) -> None:
+        # Positive control: an unguarded step and a guarded one, in two jobs.
+        data = workflow()
+        data["jobs"]["build"]["steps"].append({"name": "planted upload", "uses": "actions/upload-artifact@v7"})
+        data["jobs"]["linux"]["steps"].append({"name": "planted but guarded",
+                                               "if": "inputs.pr_number == ''", "run": "true"})
+        found = reachable_on_pr_dispatch(data)
+        self.assertIn(("build", "planted upload"), found)
+        self.assertNotIn(("linux", "planted but guarded"), found)
+
+    def test_the_evaluator_is_three_valued(self) -> None:
+        resolve = _resolver({})
+        self.assertFalse(_can_be_true("github.event_name == 'pull_request'", resolve))
+        self.assertTrue(_can_be_true("success() && github.event_name != 'push'", resolve))
+        self.assertTrue(_can_be_true("vars.X == '1'", resolve), "unknown is reachable")
+        self.assertFalse(_can_be_true("vars.X == '1' && inputs.pr_number == ''", resolve))
+        self.assertFalse(_can_be_true("${{ !cancelled() && matrix.lane == 'contract' }}", resolve))
+        self.assertTrue(_can_be_true("contains(github.ref, 'topic')", resolve))
 
 if __name__ == "__main__":
     unittest.main()

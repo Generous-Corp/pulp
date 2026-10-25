@@ -3568,7 +3568,8 @@ jobs:
           retention-days: 90
 
       - name: Announce a missing reuse replay record (macOS)
-        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' && steps.reuse_record_upload.outcome != 'success' }}
+        # A pr_number dispatch uploads no record by design, so nothing is missing.
+        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' && steps.reuse_record_upload.outcome != 'success' && inputs.pr_number == '' }}
         continue-on-error: true
         shell: bash
         run: echo "::warning title=reuse-record NOT written::the record was built but its upload failed; this job's per-test replay history is lost"
@@ -4057,7 +4058,9 @@ jobs:
 
       - name: Upload reuse replay record
         id: reuse_record_upload
-        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
+        # Not from a pr_number dispatch: it runs a pull request's code, and
+        # nothing it uploads may feed a later run.
+        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' && inputs.pr_number == '' }}
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
@@ -4067,7 +4070,8 @@ jobs:
           retention-days: 90
 
       - name: Announce a missing reuse replay record
-        if: ${{ !cancelled() && (steps.reuse_record_checkout.outcome != 'success' || steps.reuse_record.outcome != 'success' || steps.reuse_record_upload.outcome != 'success') }}
+        # A pr_number dispatch uploads no record by design, so nothing is missing.
+        if: ${{ !cancelled() && (steps.reuse_record_checkout.outcome != 'success' || steps.reuse_record.outcome != 'success' || steps.reuse_record_upload.outcome != 'success') && inputs.pr_number == '' }}
         continue-on-error: true
         shell: bash
         run: echo "::warning title=reuse-record NOT written::checkout, record or upload did not succeed; this job's replay history is lost"
