@@ -761,6 +761,54 @@ TEST_CASE("fdn reverb reports zero latency and bounds its interpolation skew",
     }
 }
 
+TEST_CASE("fdn bridge read positions stay on the exact stream clock", "[fdn][reverb][bridge]") {
+    // Each leg reads its source at positions that advance by a rate ratio no
+    // double represents exactly. Summing that ratio sample by sample drifts:
+    // over hours the output leg reads past what the tank has written, or
+    // falls behind into overwritten samples. The positions must stay at
+    // origin + count * ratio to rounding, however long the stream runs.
+    constexpr int kBlockSize = 256;
+    constexpr std::int64_t kHostSamples = std::int64_t{1} << 24;
+    for (const auto [host, tank] :
+         {std::pair{44100.0, 32000.0}, std::pair{48000.0, 20000.0}, std::pair{96000.0, 44100.0}}) {
+        INFO("host " << host << " tank " << tank);
+        fdn::MultirateBridge<float> bridge;
+        bridge.prepare(host, kBlockSize);
+        bridge.configure(tank);
+        const double origin = bridge.output_read_position();
+        std::vector<float> in(static_cast<std::size_t>(kBlockSize), 0.25f);
+        std::vector<float> out(static_cast<std::size_t>(kBlockSize), 0.0f);
+        std::int64_t produced = 0;
+        for (std::int64_t done = 0; done < kHostSamples; done += kBlockSize) {
+            const int tank_n = bridge.host_to_tank(in.data(), in.data(), kBlockSize);
+            produced += tank_n;
+            bridge.tank_to_host(tank_n, out.data(), out.data(), kBlockSize);
+        }
+        const double expected_in = static_cast<double>(produced) * host / tank;
+        const double expected_out = origin + static_cast<double>(kHostSamples) * tank / host;
+        CHECK(std::abs(bridge.input_read_position() - expected_in) < 1.0e-6);
+        CHECK(std::abs(bridge.output_read_position() - expected_out) < 1.0e-6);
+    }
+}
+
+TEST_CASE("fdn stereo position ring reads outside the written stream as silence",
+          "[fdn][reverb][bridge]") {
+    // After the ring has wrapped, a position past the newest sample must not
+    // return the older samples still sitting in those slots.
+    fdn::StereoPositionRing<float> ring;
+    ring.prepare(8);
+    for (int k = 0; k < 100; ++k)
+        ring.push(pulp::signal::detail::lanes::splat(1.0 + k));
+    const auto past = ring.read(static_cast<double>(ring.written() + 4));
+    CHECK(pulp::signal::detail::lanes::lane(past, 0) == 0.0);
+    CHECK(pulp::signal::detail::lanes::lane(past, 1) == 0.0);
+    const auto before = ring.read(-6.0);
+    CHECK(pulp::signal::detail::lanes::lane(before, 0) == 0.0);
+    // Inside the stream the read is the sample at that position.
+    const auto inside = ring.read(static_cast<double>(ring.written() - 3));
+    CHECK(pulp::signal::detail::lanes::lane(inside, 0) == 98.0);
+}
+
 // ── Mode table ───────────────────────────────────────────────────────────────
 
 TEST_CASE("fdn reverb modes stamp parameters without branching the DSP",

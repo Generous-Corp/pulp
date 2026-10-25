@@ -88,6 +88,29 @@ TEST_CASE("Branch-free math holds its bounds without fused multiply-add",
     CHECK(pade_max < 1.0f);
     CHECK(recursive_err < 3.8e-6);
     CHECK(recursive_max <= 1.0f);
+
+    // tanh_minimax: its documented bound and |y| <= 1, every 64th float and
+    // every float around the worst case (|x| near 4.745).
+    double minimax_err = 0.0;
+    float minimax_largest = 0.0f;
+    auto visit = [&](float x) {
+        const float y = FastMath::tanh_minimax(x);
+        minimax_err = std::max(
+            minimax_err, std::abs(static_cast<double>(y) - std::tanh(static_cast<double>(x))));
+        minimax_largest = std::max(minimax_largest, std::abs(y));
+    };
+    for (std::uint32_t bits = 0; bits < 0x7f800000u; bits += 64) {
+        float x;
+        std::memcpy(&x, &bits, sizeof x);
+        visit(x);
+        visit(-x);
+    }
+    for (float x = 4.6f; x < 4.9f; x = std::nextafter(x, 5.0f)) {
+        visit(x);
+        visit(-x);
+    }
+    CHECK(minimax_err < 3.8e-6);
+    CHECK(minimax_largest <= 1.0f);
 }
 
 TEST_CASE("Compressor stays within -120 dBFS of libm without fused multiply-add",
