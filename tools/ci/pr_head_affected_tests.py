@@ -94,16 +94,18 @@ PULP_RS_EXTERNAL_INPUTS = (
     "tools/scripts/release_product_matrix.json",
 )
 
-# Files outside the crate that its cargo tests open at run time through
-# CARGO_MANIFEST_DIR. These are listed by hand: run-time path arithmetic cannot
-# be enumerated statically, so this list is the coverage boundary. A test that
-# reads some other repository file at run time (pkg_pin_test and the trace
-# tool tests compute a repo root and join paths under it) is not selected by an
-# edit to that file; add the file here when such a read is introduced.
+# Files outside the crate that its tests open at run time through
+# CARGO_MANIFEST_DIR (a trailing `/` names a directory). A test reads the
+# crate's sources for repo-root joins it can resolve statically (string
+# literals and `const` paths) and requires each to be listed here. A path
+# built at run time from anything else is outside that check, so this list is
+# still the coverage boundary for such a read.
 PULP_RS_TEST_TIME_INPUTS = (
+    "test/fixtures/perfetto-gpu/",
     "tools/ci/record_build_metric.sh",
     "tools/packages/chrome-for-testing-verification.md",
     "tools/packages/packages.lock.schema.json",
+    "tools/packages/tool-registry.json",
 )
 
 # Paths the build graph cannot connect to the tests that read them.
@@ -135,7 +137,7 @@ PATH_FAMILIES = (
      re.compile(r"^cmake-ios-auv3-control-shipping$")),
     ("no-editor-link-floor",
      re.compile(r"^test/fixtures/no_editor_link_floor/"),
-     re.compile(r"^no-editor-plugin-link-floor-artifacts$")),
+     re.compile(r"^no-editor-(plugin-link-floor-artifacts|link-floor-runtime-pattern)$")),
     # The Rust CLI is built and tested by cargo, not by CMake targets, so the
     # crate owns no CMake sources and the projection never reaches its cargo
     # tests. Without this an edit to the crate, or to a file it reads, runs
@@ -144,8 +146,8 @@ PATH_FAMILIES = (
     # tests/fixtures is test input.
     ("pulp-rs-cargo",
      re.compile(r"^(experimental/pulp-rs/(?!(README|UPSTREAM_SYNC)\.md$)"
-                r"|(" + "|".join(re.escape(p) for p in
-                                 PULP_RS_EXTERNAL_INPUTS + PULP_RS_TEST_TIME_INPUTS) + r")$)"),
+                r"|(" + "|".join(re.escape(p) + ("" if p.endswith("/") else "$") for p in
+                                 PULP_RS_EXTERNAL_INPUTS + PULP_RS_TEST_TIME_INPUTS) + r"))"),
      re.compile(r"^pulp-rust-")),
     # The sync primitives are included by most of the tree, so an edit to one
     # selects thousands of tests and the budget reaches their own concurrency
@@ -232,6 +234,22 @@ def source_lane_contract_tests(paths: list[str], names: list[str],
 # fails. The other families name platform- or configuration-specific tests
 # that are legitimately absent from some builds.
 REQUIRED_FAMILIES = frozenset({"runtime-sync-hammers", "audio-buffer-ops", "pulp-rs-cargo"})
+
+
+# A required family whose tests exist only when an optional component is
+# configured. When none is registered the lane lacks the component, and saying
+# the case was renamed sends the reader to the wrong fix.
+UNCONFIGURED_FAMILY_REASONS = {
+    "pulp-rs-cargo": "no pulp-rust-* test is registered: pulp-rs is not configured on this lane "
+                     "(cargo or rustc not found, PULP_BUILD_RUST_CLI=OFF, or PULP_SKIP_RUST_CLI set)",
+}
+
+
+def empty_family_message(family: str) -> str:
+    reason = UNCONFIGURED_FAMILY_REASONS.get(
+        family, "its test-name pattern no longer matches the registered cases (a renamed "
+                "case?); update PATH_FAMILIES so the diff's own checks run")
+    return f"path family {family} matched this diff but selected no test: {reason}"
 
 
 def empty_required_families(families: dict[str, list[str]]) -> list[str]:
@@ -485,6 +503,43 @@ def registration_tests(build: Path, paths: list[str], root: Path = REPO_ROOT,
     return sorted(names)
 
 
+_CMAKE_MODULE = re.compile(r"[\w.-]+\.cmake\b")
+
+
+def command_reference_tests(build: Path, paths: list[str], root: Path = REPO_ROOT) -> list[str]:
+    """Tests whose command names a file the diff edits, directly or through a
+    `cmake -P` script that includes it.
+
+    A `-D<VAR>=<file>` argument or a module a `cmake -P` script include()s is
+    an input no build edge records, and an edit under tools/cmake/ makes the
+    projection too wide to use, so these run as direct edges. A script's
+    modules are matched by file name: include() paths are built from
+    CMAKE_CURRENT_LIST_DIR and variables, which a static read cannot resolve.
+    """
+    changed = {os.path.normpath(str(root / p)) for p in paths}
+    modules = {os.path.basename(p) for p in paths if p.endswith(".cmake")}
+    if not changed:
+        return []
+    picked: set[str] = set()
+    for entry in inventory.load_projection_ctest_entries(build) or []:
+        refs = inventory.command_path_refs(entry.command)
+        if changed & set(refs):
+            picked.add(entry.name)
+            continue
+        if not modules or "-P" not in entry.command:
+            continue
+        script = entry.command[entry.command.index("-P") + 1:][:1]
+        if not script:
+            continue
+        try:
+            text = Path(script[0]).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if modules & set(_CMAKE_MODULE.findall(text)):
+            picked.add(entry.name)
+    return sorted(picked)
+
+
 def script_reference_tests(paths: list[str], root: Path = REPO_ROOT) -> list[str]:
     """Script-driven ctests the gates.sh lanes would select for this diff.
 
@@ -569,6 +624,9 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     scripts = script_reference_tests(paths, root)
     plan["script_references"] = len(scripts)
     chosen.extend(scripts)
+    referenced = command_reference_tests(build, paths, root)
+    plan["command_references"] = len(referenced)
+    chosen.extend(referenced)
     # Unknown or undeclared script inputs are unsafe to skip. Run every
     # script-driven test when a tools/ script changed without a known edge.
     script_paths = [p for p in paths if p.startswith(("tools/ci/", "tools/scripts/"))]
@@ -612,7 +670,7 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     # else runs them before the merge group, so they go first, where the
     # budget is sure to reach them. The tests built from the sources the diff
     # edits come next, ahead of the wider projection.
-    merge_only = set(inputs) | set(registered)
+    merge_only = set(inputs) | set(registered) | set(referenced)
     for tests in families.values():
         merge_only.update(tests)
     seen: set[str] = set()
@@ -841,9 +899,7 @@ def main(argv: list[str] | None = None) -> int:
     if plan.get("rebuilt_binaries_ignored"):
         print(f"pr-head-affected-tests: {plan['rebuilt_binaries_ignored']}", flush=True)
     for family in plan.get("empty_required_families", []):
-        print(f"::error title=pr-head-affected-tests::path family {family} matched this diff but "
-              "selected no test: its test-name pattern no longer matches the registered cases "
-              "(a renamed case?); update PATH_FAMILIES so the diff's own checks run")
+        print(f"::error title=pr-head-affected-tests::{empty_family_message(family)}")
     if args.dry_run:
         print(json.dumps(plan, indent=2))
         return 1 if plan.get("empty_required_families") else 0

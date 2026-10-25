@@ -333,8 +333,9 @@ build_and_verify_recompile() {
     if ! PULP_BUILD_JOBS="$JOBS" bash "$GOVERNED_BUILD" \
         cmake --build "$BUILD_DIR" --target "$TARGET" > "$BUILD_LOG" 2>&1; then
         if grep -qE '\berror:' "$BUILD_LOG"; then
-            # A break that does not compile still proves the test depends on the
-            # code, but it is not the same evidence, so say which one happened.
+            # A break that does not compile proves nothing about the test: the
+            # binary it would run was never built. The caller treats it as
+            # INCONCLUSIVE.
             say "$phase: the edit does not compile"
             return 1
         fi
@@ -461,6 +462,11 @@ if ! run_test restored; then
 fi
 
 # ── 4. Verdict ───────────────────────────────────────────────────────────────
+if [ "$BUILD_STATUS" -eq 1 ]; then
+    die_inconclusive "the break does not compile, so the test never ran against
+    broken code. Write a --break that still builds (change a value or a branch,
+    not a signature)"
+fi
 if [ "$BROKEN_PASSES" -eq 1 ]; then
     say "NOT CONFIRMED — the test passed with the fix broken."
     say "  It does not cover this change. Common causes: the assertion restates"

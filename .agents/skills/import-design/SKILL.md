@@ -113,6 +113,19 @@ records three agreeing source, importer, observer, font, capture, PNG, layout,
 and native render receipt digests. Short campaigns remain unverified, and the
 raw visual threshold is not relaxed by calibration or renderer disagreement.
 
+### HTML staging scans references from their literal starts
+
+`stage_html_project` follows a project's dependencies with the three patterns in
+`html_project_stager.cpp` (`html_reference_pattern()` and its two siblings).
+Each `ReferencePattern` lists the literals its alternatives begin with, and
+`for_each_reference_match` runs the regex only at offsets where one begins.
+`std::sregex_iterator` over the same text yields the same matches, but it runs
+libc++'s backtracking engine at every byte: on the 1.8 MB Spectr export that
+was about 2 s per import. A new alternative must add its leading literal to
+`starts`, or the scan never tries it; the differential case in
+`test_html_project_stager.cpp` compares both scans over generated text and
+fails when a literal is missing.
+
 ### Captured line metrics travel as one `LineMetrics`
 
 The capture's measured ascent/descent ride the line-box basis as
@@ -123,6 +136,42 @@ JSON (`lineBoxes` / `lineBoxBasis`) is read and written in
 `design_ir_json_text.cpp`, with the shared field readers and member writers in
 `design_ir_json_primitives.hpp`; add a basis field there, not in
 `design_ir_json.cpp`, which is a frozen hotspot.
+
+### A captured page's own fonts ride the IR as `fontFamilyAssets`
+
+`font_faces.mjs` reads every `@font-face` rule in the page's readable style
+sheets, resolves each `url()` source against its own sheet, and keeps a face
+only when Chromium loaded and decoded it. The capture's own network responses
+say which staged or remote source answered, a `data:` or Blob source counts
+when its family loaded, and the rule's `FontFace` status says whether
+Chromium's font sanitizer accepted the file. A kept face's bytes must also
+start with a TrueType (`0x00010000`/`true`), `OTTO` or `wOF2` signature.
+Anything else, WOFF 1.0 included (not every platform font manager decodes
+it), is dropped, named in `font-faces.json` `dropped` and in the import's
+warnings, and never handed to the platform font manager. `register_font_file`
+sends WOFF2 files through `register_font_woff2`, so they decode the same way
+on every platform. CoreText decodes WOFF2 itself, but a FreeType build without
+Brotli does not. `font_faces.mjs` writes the bytes and descriptors to `font-faces.json`, and
+`attach_page_font_faces` (`tools/import-design/browser_capture_fonts.cpp`)
+writes each font once into the capture directory, adds it to the asset
+manifest, and adds one `font_family_assets` entry per rule in page order, with
+`weight`/`weightMax`, `fontStyle` and `unicodeRange`. A bundle's Blob font
+(Claude standalone exports) keeps the `pulp-materialized-asset-<sha256>` id
+its materialized runtime names it by; a file or `data:` font is
+`pulp-page-font-<sha256>`. A Blob font is page input like any other: it is
+typed and checked by its own bytes, never by the Blob's declared type, and a
+Blob URL the page revoked before the capture read it is dropped by name. The
+caps (256 distinct faces after verbatim repeats are folded, 64 MiB of
+distinct bytes) leave room above real bundles, and Spectr declares 59. Descriptors of an inline `<style>` rule are read as
+authored, because CSSOM re-serializes them (`U+0000-00FF` reads back as
+`U+0-FF`) and DesignIR keeps them verbatim. Fonts never come from the
+materialized document, so a capture that skips it still carries them. Without
+them, native text is shaped with whatever same-named face the host has. For
+JetBrains Mono that is the bundled static Regular, so 600 is synthesized and a
+captured basis naming the variable instance (`JetBrainsMono-Regular_wght2580000`)
+is rejected. A remote `https` font is read only with `--allow-browser-network`,
+and a used face whose staged file is absent fails as `capture-font-missing`,
+naming the authored path. Fixture: `test/fixtures/browser-capture-font-face-url`.
 
 ### Imported text looks heavier than Chromium: check font smoothing first
 
@@ -182,6 +231,13 @@ theme part in its CSS-px-snapped box, so the skins paint in
 fractional layout box; that is the 1 device px the Spectr slider was off by.
 `indeterminate` and a `disabled` inherited from a `<fieldset>` are not in the
 DOMSnapshot, so they are not recorded.
+
+A native-verdict `<button>` records `ua_control=button`, `ua_color_scheme` and
+`ua_disabled`, loses the UA stylesheet's grey background and 2px outset border,
+and becomes a `ButtonSurface` (Chromium's push-button paint) in place of the
+frame, with its text and icons kept as children. An author-styled button keeps
+its captured paint and stays a frame. `<input type=button|submit|reset>` is not
+lowered this way yet.
 
 ### Packaged SDK runtime contract
 
@@ -361,7 +417,11 @@ python3 tools/import-design/layout_parity.py --capture p.pulp-browser-capture --
 
 Three things that are not obvious. Parents come from the DOM, not the IR: a
 native panel is lowered FLAT under `browser:root`, so IR parents would cluster
-the whole page into one finding. The capture must be the IR's OWN capture:
+the whole page into one finding. The DOM parent is the nearest ancestor the
+import LOWERED, walking past wrappers it skipped (the importer drops empty,
+non-painting boxes); stopping at the direct DOM parent leaves such a node
+parentless and reports a moved container's children as misplaced too. The
+capture must be the IR's OWN capture:
 backend ids are small sequential integers, and a second capture of the same
 page joined all 105 of Spectr's ids cleanly — a wrong pairing looks right — so
 the tool compares the IR's recorded capture-image hashes and exits 2 on a
@@ -828,9 +888,46 @@ knowing before you touch that file:
   only by the CDP frame ID, so compare `*_snapshot_semantic_sha256` across
   runs, not the raw binding.
 
+  **Normalize gotcha:** `normalize_design_ir` (design_ir_normalize.cpp) runs
+  on every node `parse_ir_node` reads, and its rules are design-tool
+  heuristics that move geometry. A browser capture's design.ir.json goes
+  through the same parse when the observer loads it, so a rule that is right
+  for Figma can move a node Chromium already placed. The shadow sibling snap
+  lifted a knob label under a dial's `0 8px 16px` shadow by the gap minus the
+  shadow's y offset (2 px at a 10px gap, 4 px at 12px). `parse_design_ir_json`
+  now passes `IRParseOptions::measured_geometry` when the IR's source adapter
+  is `browser-capture`, and a geometry rule that only makes up for how a
+  design tool draws must check it. Fixture `20-flex-gap-knob` covers the snap.
+
+  **Paint-order gotcha:** Chrome's paint order numbers a node by when its OWN
+  box paints, and an inkless wrapper still holds a number. Ordering siblings by
+  that number drew Spectr's full-panel `body::before` over every descendant of
+  the inkless `div#root` and flattened the whole panel. Siblings are ordered by
+  where their ink lands instead (an inkless node that takes no input and does
+  not clip, composite or transform moves to its subtree's first ink). The
+  reorder audit counts a pair only when both nodes paint or either takes input:
+  in a counted pair the SECOND node is drawn on top. Prove a change here by
+  rendering the same snapshot nested and flat (`lower_painted_tree` with
+  `flatten_to_paint_order`) and comparing bytes.
+
+  **Transform gotcha:** the capture places a node by its post-transform paint
+  box and copies every other length from computed style, which is
+  pre-transform. `transform` itself is not written to the IR (only a recovered
+  lone rotation is). So anything drawn inside the box has to be brought into
+  the box's scale by hand: type through `inherited_type_scale` (uniform only),
+  and border widths, radii and shadows through `inherited_paint_scale` and
+  `apply_paint_scale` (per axis for borders and hard shadow offsets, uniform
+  only for radii and blur). A chain one factor per axis cannot express is
+  refused and counted (`native_nodes_paint_scale_refused`), never approximated.
+  A new length-bearing style field needs the same treatment, or it will draw at
+  its untransformed size inside a scaled box.
+
   **Gate gotcha:** a stable Chromium/native PNG hash is only determinism
-  evidence. The differential matcher must join captured elements by
-  `backendNodeId` when both sides provide one and fail closed on a mismatch;
+  evidence. The differential matcher must join captured elements by their
+  capture anchor (`stable_anchor_id`, which `capture_anchors` derives from the
+  browser snapshot the way the importer does) and fail closed on a mismatch.
+  Never join the two lanes by `backendNodeId`: they are two Chromium sessions,
+  and Spectr's `div#root` came back 31 in one and 30 in the other;
   otherwise a same-text fallback can hide a wrong DOM identity. Native
   synthetic roots, `html`/`body` wrappers, and explicit text children are
   representation nodes and must be reported separately from browser element
@@ -1131,9 +1228,13 @@ materializer. Baked C++ alone still flattens — honest partial.
 **`textAlignVertical` is design authority; the tall-slot heuristic is only a
 fallback.** All three producers emit `style.vertical_align`
 (top/middle/bottom; kiwi omits the `.fig` TOP default so it only appears when
-set). Codegen honors it verbatim in both JS arms — including an explicit
-`top`, which SUPPRESSES the old slot-taller-than-font centering guess (that
-heuristic now fires only when the source never says). Expect imports to MOVE
+set). Codegen honors it verbatim in both JS arms, and the native materializer
+and baked C++ lane share the same rule (`imported_vertical_align()` in
+`design_ir_helpers.hpp`), including an explicit `top`, which SUPPRESSES the
+old slot-taller-than-font centering guess (that heuristic now fires only when
+the source never says). A browser capture records `middle` for a control's
+`#control-value` text; before the native lane read it, a button input's label
+painted top-aligned, 1.41 CSS px below Chromium's. Expect imports to MOVE
 text vs pre-emission renders where designs author TOP in a reserved slot —
 that movement is fidelity, not a regression (layout dumps stay byte-identical;
 vertical align is paint, not geometry). Auto-resize / truncation / max-lines /
@@ -2564,9 +2665,17 @@ Benchmark receipt (`pulp-design-import-benchmark-v2`) gotchas:
   shaping** — RecordingCanvas records commands and does none of that work.
   Resource claims need `--canvas=skia-raster` (or `skia-graphite` where a Dawn
   adapter exists); `--require-steady-state` exits 4 on a `blind` gate rather
-  than passing it. `paragraph_builds` is reported but never gated: SkiaCanvas
-  shapes every label on every paint until it has a paragraph cache, so a
-  gate on it would fail every text fixture today.
+  than passing it. Paragraph builds are gated by TEXT, not by count: a step
+  legitimately shapes the runs it wrote (the IR fixtures write fresh
+  `slot i frame N` strings every frame), so the gate reads
+  `paragraph_builds.unwritten`, the builds of any text the fixture's
+  `text_written_by_step(frame)` did not list. A count budget ("at most N
+  builds") is blind to a culled slot: the slot shapes nothing, and a static
+  label re-shaping every frame fits inside N. A new fixture that writes text
+  must list it, or the gate fails it.
+  `--paragraph-cache=off` is the uncached text path and the gate's planted
+  negative; compare cached vs uncached with `--baseline-arg` /
+  `--candidate-arg` on the same lane.
 - **`--lane=live --ir` (optionally `--bundle`) is the production JS path over
   importer output.** The runtime's `__pulpRuntimeSettle__` called from
   `engine.evaluate` only records a budget; `WidgetBridge::load_script` drains
@@ -3298,6 +3407,25 @@ they share no code unless you make them.
   it), `[gradient]` cpp-emit section in the always-built `pulp-test-import-design-tool`
   (so the codegen path is covered even when the planning-gated cpp-codegen target
   is skipped), plus the gated `pulp-test-design-import-cpp-codegen`.
+
+### Gradient colour-interpolation (`in oklab`) and the default Chrome hides
+
+`css_gradient.cpp` honours `in <space> [<hue> hue]` anywhere in a gradient's
+prefix (Chrome's computed style writes `to right in oklab`, `circle in hsl` and
+`from 90deg in oklch`). Two things are easy to get wrong:
+
+- **The clause is not always there to read.** CSS Color 4 makes Oklab the
+  default as soon as one stop is a non-legacy colour, and Chrome's computed style
+  DROPS `in oklab` from such a gradient because it is the default. Captured
+  designs are full of `oklab(...)` stops (Chrome serializes every modern colour
+  and every `color-mix()` that way), so a parser that only reads the clause
+  paints them in sRGB with nothing in the CSS to say why. `default_interpolation`
+  keys on the stop text for this reason.
+- **The oracle's green backdrop cannot see a refusal on its own.** `in oklch
+  longer hue` from red to blue is green at its midpoint, which the geometry
+  scan's `unpainted()` reads as backdrop. `chrome_gradient_oracle.py --colors`
+  paints each case over two backdrops and reports a refusal only when the
+  renders differ; reuse that trick for any colour oracle.
 
 ### Per-range text styles → nested `<span>`s
 
@@ -4306,6 +4434,16 @@ resolver lane (`design_import_native_common.cpp`) diagnoses `filter` /
 `backdropFilter` as unsupported (it doesn't call the View setters), and
 cpp/swiftui codegen don't emit them.
 
+**Backdrop under opacity:** Chrome composites a backdrop-filter at the
+element's opacity. It draws the filtered backdrop at that opacity, then the
+element over it at that opacity, so an `opacity: 0` box with
+`backdrop-filter` shows nothing at all, and a hidden frosted toast must not
+blur what is under it. `View::push_effect_layers` skips the backdrop layer
+at opacity 0 and ends the chain in `opacity()` below 1. An ancestor's
+opacity layer is the backdrop root, as in Chrome. Chrome's numbers come from
+`tools/import-validation/chrome_backdrop_opacity_oracle.py` over fixture
+`22-backdrop-opacity`, and `pulp-test-css-backdrop-opacity` holds Skia to them.
+
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:
@@ -4520,6 +4658,25 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   timers/intervals/rAFs are cancelled, the schedulers are stubbed, CSS animation
   and transition are disabled, and `captureStableScreenshot` requires a
   byte-identical trailing run as the observable proof of stillness.
+- **Web Animations and video are frozen before the frame is read.** The
+  motion stylesheet and scheduler stubs cannot reach `element.animate()` or a
+  playing `<video>`; both run on the document clock. `freezeMotion`
+  (`settle.mjs`) runs before every page-settle sample (`waitForStable`'s
+  `beforeSample`), because a Web Animation that moves a box would otherwise
+  keep the layout from ever settling, even one a late timer or font load
+  starts mid-settle, and once more after every settle and before the
+  materialized document and the screenshot horizon. Each pass
+  settles only what an earlier one did not, or what the page restarted, and
+  counts each animation and video once: a finite Web Animation is `finish()`ed (its
+  resting frame), an infinite or unresolved one is paused at `currentTime 0`,
+  and a video is paused and rewound to its first frame unless it still shows
+  its poster. CSS animations and transitions stay on the stylesheet path, and
+  scroll- or view-driven animations are left to the fixed scroll position. An
+  animated GIF, APNG or WebP runs on the decoder's clock, so it is left alone
+  and listed in `provenance.motion.volatile_sources` (classified from its own
+  bytes by `animatedImageKind`, in the last pass only), next to the per-kind
+  counts. A page that
+  throws inside the freeze fails with `capture-motion-freeze-failed`.
 - **Browser discovery has a version FLOOR and no ceiling.**
   `kMinimumChromiumMajor = 109` (`browser_capture_backend.hpp`) is the only
   version comparison in the probe — nothing rejects a browser for being too
@@ -4591,9 +4748,13 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   full 32-frame horizon (an early A,A plateau must not hide a later B,B
   presentation) at ~50 ms per frame of headless software-compositing pacing,
   once per pixel artifact that differs from the accepted frame, plus settle,
-  launch and a ~1.5 s shutdown (the
-  custody anchor ignores SIGTERM by design, so the guardian waits out its grace
-  window before SIGKILL). It used to take ~12 s because every bounded teardown
+  launch and shutdown. Shutdown used to be a fixed ~1.5 s: the custody anchor
+  ignores SIGTERM by design, so the group never empties on its own and the
+  guardian waited out its whole grace window before SIGKILL even after
+  Chromium's processes had exited, about 200 ms in. The grace now ends once the
+  group's leader is its only member (`processGroupHasMembersBesidesLeader`,
+  `/bin/ps`); a helper that ignores SIGTERM still gets the full window, and an
+  unreadable or capped listing waits as before. It used to take ~12 s because every bounded teardown
   wait was `Promise.race([p, delay(ms)])`: the losing timer stayed armed and
   held the capture process open for the rest of a 6 s bound after cleanup had
   finished. Bound a wait with `waitAtMost` (`browser_process.mjs`), which clears
@@ -4606,6 +4767,17 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   horizons (64 frames); on a loaded gate VM those frames stretch to several
   hundred ms each, and the repeat alone ran the capture past its deadline in the
   same-frame-capture phase. A new hidden-paint plate goes through that helper.
+- **Only a horizon's decisive frames carry the caller's encoding.** The verdict
+  and the shipped bytes depend on the last `STABLE_RUN_FRAMES` (3) of
+  `SCREENSHOT_HORIZON_FRAMES` (32) frames alone, so the 29 before them are
+  taken as quality-1 JPEG with the caller's clip, `captureBeyondViewport` and
+  `fromSurface` untouched; they still wait for a fresh presentation each. Keep
+  the stable run equal to the decisive frame count, or a presentation frame
+  could extend the run that decides. A capture whose motion receipt lists an
+  animated image (`volatile_sources`) takes every frame in the caller's
+  encoding (`horizonPresentationEncoding`), because that image runs on the
+  decoder's wall clock and a faster horizon would move when the decisive
+  frames land; `provenance.motion.horizon_presentation_format` records which.
 - **Integration deadlines come from `capture_integration_support.mjs`.** Every
   capture in the `*.integration.test.mjs` files runs under
   `CAPTURE_DEADLINE_MS` (30 s), and each case's node:test timeout is

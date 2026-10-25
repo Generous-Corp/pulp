@@ -965,6 +965,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Presence is not correctness — an element can be present, misplaced and unreadable.
 - Prove each hop of the agent-HTML -> Chromium -> DesignIR pipeline actually ran, before trusting any fidelity number from the same panel. → `tools/import-validation/check_pipeline_stages.py`
   - ⚠ **Cannot see:** Asserts MECHANISM, not quality. A panel can pass every stage and still render badly — that is score-native-panel's job. Conversely a high similarity score says nothing about whether Chromium ran at all, which is exactly the confusion this exists to end.
+- Get Chrome's own composite of backdrop-filter under element and ancestor opacity. → `tools/import-validation/chrome_backdrop_opacity_oracle.py`
+  - ⚠ **Cannot see:** Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation, which is the target here but is not the CSS spec.
 - Get Chrome's own answer for a CSS gradient when the native paint disagrees. → `tools/import-validation/chrome_gradient_oracle.py`
   - ⚠ **Cannot see:** Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation, which is the target here but is not the CSS spec.
 - Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`

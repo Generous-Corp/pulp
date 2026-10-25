@@ -3,10 +3,13 @@
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/channel_set.hpp>
 #include <pulp/audio/load_measurer.hpp>
+#include <pulp/audio/restored_path.hpp>
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 #include "../core/audio/platform/mac/coreaudio_device.hpp"
 #endif
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <numbers>
 #include <stdexcept>
@@ -1062,3 +1065,40 @@ TEST_CASE("CoreAudio output-only open falls back to DefaultOutput when HAL devic
     device.close();
 }
 #endif
+
+TEST_CASE("confine_restored_path admits only paths that resolve inside the root",
+          "[audio][restored-path]") {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "pulp-restored-path-root";
+    fs::remove_all(root);
+    fs::create_directories(root / "irs");
+    std::ofstream(root / "irs" / "hall.wav", std::ios::binary) << "RIFF";
+    const fs::path canonical_root = fs::weakly_canonical(root);
+
+    // Absolute and relative spellings of a file inside the root both resolve to it.
+    auto inside = confine_restored_path(root / "irs" / "hall.wav", root);
+    REQUIRE(inside.has_value());
+    REQUIRE(*inside == canonical_root / "irs" / "hall.wav");
+    auto relative = confine_restored_path(fs::path("irs") / "hall.wav", root);
+    REQUIRE(relative.has_value());
+    REQUIRE(*relative == *inside);
+    // A file that does not exist yet still resolves, so a missing IR is the
+    // loader's problem (it falls back), not a confinement failure.
+    REQUIRE(confine_restored_path(root / "irs" / "missing.wav", root).has_value());
+
+    // Anything that leaves the root is refused: an absolute path elsewhere, a
+    // relative climb, and an in-root symlink whose target is outside.
+    REQUIRE_FALSE(confine_restored_path("/etc/passwd", root).has_value());
+    REQUIRE_FALSE(confine_restored_path("../../etc/passwd", root).has_value());
+    REQUIRE_FALSE(confine_restored_path(root / ".." / "elsewhere.wav", root).has_value());
+    std::error_code ec;
+    fs::create_symlink("/etc/passwd", root / "irs" / "link.wav", ec);
+    if (!ec)
+        REQUIRE_FALSE(confine_restored_path(root / "irs" / "link.wav", root).has_value());
+
+    // An empty root vouches for nothing, and an empty path names nothing.
+    REQUIRE_FALSE(confine_restored_path(root / "irs" / "hall.wav", fs::path()).has_value());
+    REQUIRE_FALSE(confine_restored_path(fs::path(), root).has_value());
+
+    fs::remove_all(root);
+}

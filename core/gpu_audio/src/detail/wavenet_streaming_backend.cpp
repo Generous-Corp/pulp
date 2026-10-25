@@ -6,30 +6,6 @@
 namespace pulp::gpu_audio::detail {
 namespace {
 
-class SessionChannel final : public WaveNetRealtimeChannel {
-  public:
-    explicit SessionChannel(std::unique_ptr<GpuWaveNetSession> session)
-        : session_(std::move(session)) {}
-    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
-        return session_->submit_block(input, sequence);
-    }
-    void service(std::uint64_t now) noexcept override {
-        session_->service(now);
-    }
-    void service_until(std::uint64_t, std::uint64_t deadline) noexcept override {
-        session_->service_until(deadline);
-    }
-    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
-        return session_->receive(output);
-    }
-    bool release() noexcept override {
-        return session_->release();
-    }
-
-  private:
-    std::unique_ptr<GpuWaveNetSession> session_;
-};
-
 std::uint64_t now_ns() noexcept {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                           std::chrono::steady_clock::now().time_since_epoch())
@@ -38,8 +14,11 @@ std::uint64_t now_ns() noexcept {
 
 } // namespace
 
-WaveNetStreamingBackend::WaveNetStreamingBackend(const Config& config, ChannelFactory factory)
-    : config_(config), factory_(std::move(factory)), production_(!factory_),
+WaveNetStreamingBackend::WaveNetStreamingBackend(const Config& config, ChannelFactory factory,
+                                                 SessionCreator creator)
+    : config_(config), factory_(std::move(factory)),
+      creator_(creator != nullptr ? creator : &create_session_channel<GpuWaveNetSession>),
+      production_(!factory_ && creator == nullptr),
       layers_(config.session.descriptor.layers.begin(), config.session.descriptor.layers.end()),
       weights_(config.session.weights.begin(), config.session.weights.end()) {
     dilations_.reserve(layers_.size());
@@ -49,6 +28,8 @@ WaveNetStreamingBackend::WaveNetStreamingBackend(const Config& config, ChannelFa
     }
     config_.session.descriptor.layers = layers_;
     config_.session.weights = weights_;
+    if (config_.max_inflight == 0)
+        config_.max_inflight = config_.session.slots >= 2 ? 2 : 1;
 }
 
 WaveNetStreamingBackend::~WaveNetStreamingBackend() {
@@ -73,13 +54,7 @@ bool WaveNetStreamingBackend::prepare(const StreamingPrepareContext& context) no
             if (factory_) {
                 channel = factory_(ch);
             } else {
-                auto result = GpuWaveNetSession::create(c.session);
-                // Retain a partially prepared session so release() can retry
-                // its physical drain.
-                if (result.session)
-                    channels_.push_back(
-                        std::make_unique<SessionChannel>(std::move(result.session)));
-                if (!result) {
+                if (!creator_(c.session, channels_)) {
                     (void)release();
                     return false;
                 }
@@ -101,6 +76,7 @@ bool WaveNetStreamingBackend::prepare(const StreamingPrepareContext& context) no
     all_channels_mask_ = c.channels == 64 ? UINT64_MAX : (UINT64_C(1) << c.channels) - 1;
     head_ = count_ = 0;
     epoch_ = 0;
+    lost_ = false;
     prepared_ = true;
     return true;
 }
@@ -114,6 +90,7 @@ WaveNetStreamingBackend::enqueue_validated(const StreamingBlock& block) noexcept
     auto& slot = slots_[(head_ + count_) % slots_.size()];
     slot = {};
     slot.stamp = block.stamp;
+    slot.ticket = admit_submission(block.stamp.epoch, block.stamp.sequence);
     slot.output = block.output;
     slot.output_channel_stride = block.output_channel_stride;
     slot.output_frame_stride = block.output_frame_stride;
@@ -130,9 +107,10 @@ WaveNetStreamingBackend::enqueue_validated(const StreamingBlock& block) noexcept
                     block.input[base + static_cast<std::size_t>(i) * block.input_frame_stride];
             samples = {scratch_.data(), block.frames};
         }
-        if (channels_[ch]->submit(samples, block.stamp.sequence)) {
+        if (channels_[ch]->submit(samples, slot.ticket)) {
             ++submitted;
         } else {
+            lost_ = lost_ || channels_[ch]->lost();
             // The channel holds no work for this sequence; account for it now
             // so the remaining channels still retire the block as a failure.
             slot.completed_mask |= UINT64_C(1) << ch;
@@ -156,6 +134,13 @@ WaveNetStreamingBackend::Slot* WaveNetStreamingBackend::find(std::uint64_t seque
     return nullptr;
 }
 
+bool WaveNetStreamingBackend::any_channel_lost() const noexcept {
+    for (const auto& channel : channels_)
+        if (channel->lost())
+            return true;
+    return false;
+}
+
 void WaveNetStreamingBackend::fail_all_pending() noexcept {
     for (std::size_t offset = 0; offset < count_; ++offset)
         slots_[(head_ + offset) % slots_.size()].failed = true;
@@ -165,16 +150,33 @@ std::size_t WaveNetStreamingBackend::service_until(std::uint64_t deadline_ns) no
     if (!prepared_)
         return 0;
     const auto now = now_ns();
-    for (std::uint32_t ch = 0; ch < channels_.size(); ++ch) {
+    for (auto& channel : channels_) {
         if (deadline_ns > now)
-            channels_[ch]->service_until(now, deadline_ns);
+            channel->service_until(now, deadline_ns);
         else
-            channels_[ch]->service(now);
+            channel->service(now);
+    }
+    // Device loss outranks the failed completions it causes, so it is
+    // latched before any of this pass's results are attributed.
+    lost_ = lost_ || any_channel_lost();
+    std::size_t completions = 0;
+    for (std::uint32_t ch = 0; ch < channels_.size(); ++ch) {
         for (std::size_t received = 0; received < count_; ++received) {
-            auto result = channels_[ch]->receive(scratch_);
-            if (!result)
+            auto completion = channels_[ch]->receive(scratch_);
+            if (!completion)
                 break;
+            ++completions;
+            const auto* result = &completion->result;
             auto* slot = find(result->sequence);
+            if (slot != nullptr &&
+                !completion->ticket.admits(slot->ticket.generation, slot->ticket.sequence)) {
+                // A ticket from another generation never completes this
+                // admission; drop it rather than fail the stream.
+                if (completion->ticket.accepted() &&
+                    completion->ticket.generation != slot->ticket.generation)
+                    continue;
+                slot = nullptr;
+            }
             if (slot == nullptr) {
                 // An unattributable completion means this provider stream is
                 // no longer trustworthy; nothing pending may be delivered.
@@ -198,13 +200,7 @@ std::size_t WaveNetStreamingBackend::service_until(std::uint64_t deadline_ns) no
                     scratch_[i];
         }
     }
-    std::size_t ready = 0;
-    for (std::size_t offset = 0; offset < count_; ++offset) {
-        if (slots_[(head_ + offset) % slots_.size()].completed_mask != all_channels_mask_)
-            break;
-        ++ready;
-    }
-    return ready;
+    return completions;
 }
 
 bool WaveNetStreamingBackend::receive(StreamingTerminal& terminal) noexcept {
@@ -214,10 +210,12 @@ bool WaveNetStreamingBackend::receive(StreamingTerminal& terminal) noexcept {
     if (slot.completed_mask != all_channels_mask_)
         return false;
     terminal.stamp = slot.stamp;
-    if (slot.stamp.epoch != epoch_ || slot.late)
+    // A failure caused by a lost device is reported as the loss.
+    if (slot.failed)
+        terminal.disposition = lost_ ? StreamingBackendTerminalDisposition::DeviceLost
+                                     : StreamingBackendTerminalDisposition::ProviderFailed;
+    else if (slot.stamp.epoch != epoch_ || slot.late)
         terminal.disposition = StreamingBackendTerminalDisposition::Stale;
-    else if (slot.failed)
-        terminal.disposition = StreamingBackendTerminalDisposition::ProviderFailed;
     else
         terminal.disposition = StreamingBackendTerminalDisposition::Completed;
     slot = {};
@@ -262,6 +260,7 @@ bool WaveNetStreamingBackend::release() noexcept {
     slots_.clear();
     scratch_.clear();
     epoch_ = 0;
+    lost_ = false;
     return true;
 }
 

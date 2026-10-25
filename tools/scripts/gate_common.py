@@ -539,14 +539,29 @@ def version_bump_skip_reason(trailers: dict[str, list[str]]) -> str | None:
 # One left-to-right pass, as the compiler reads it: whichever opener comes
 # first wins, so a `/*` inside a `//` comment opens nothing.
 _C_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.DOTALL)
+# The same pass with string and character literals as alternatives, so a
+# literal is consumed whole and a `/*` or `//` inside it opens nothing. Raw
+# strings (`R"d( ... )d"`) come first because their body may hold quotes.
+_C_COMMENT_OR_LITERAL = re.compile(
+    r'R"(?P<delim>[^()\\\s"]{0,16})\(.*?\)(?P=delim)"'
+    r'|"(?:\\.|[^"\\\n])*"'
+    r"|'(?:\\.|[^'\\\n])*'"
+    r"|/\*.*?\*/|//[^\n]*",
+    re.DOTALL,
+)
 
 
-def strip_c_comments(text: str) -> str:
+def strip_c_comments(text: str, *, keep_strings: bool = False) -> str:
     """Remove C/C++/JS comments: ``/* ... */`` blocks and ``//`` to the end
-    of the line. String literals are not modelled, so ``//`` or ``/*``
-    inside one is removed as a comment too; callers scanning for code
-    accept that over-removal."""
-    return _C_COMMENT.sub("", text)
+    of the line. By default string literals are not modelled, so ``//`` or
+    ``/*`` inside one is removed as a comment too; callers scanning for code
+    accept that over-removal. ``keep_strings=True`` skips over literals
+    instead, for scans where over-removal would hide a real use (a glob like
+    ``"**/*.json"`` otherwise opens a block that swallows the code after it)."""
+    if not keep_strings:
+        return _C_COMMENT.sub("", text)
+    return _C_COMMENT_OR_LITERAL.sub(
+        lambda m: "" if m.group(0).startswith("/") else m.group(0), text)
 
 
 def strip_meta(data):

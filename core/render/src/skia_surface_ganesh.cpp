@@ -266,6 +266,8 @@ public:
         // No present call: the browser composites the canvas element itself,
         // so a successful flush IS the frame reaching its output.
         context_->flushAndSubmit();
+        if (idle_trim_.due(GpuIdleTrimSchedule::Clock::now()))
+            trim_gpu_resources(TrimLevel::unused_for(GpuIdleTrimSchedule::kUnusedAge));
         return last_outcome_ = FrameOutcome::presented;
     }
 
@@ -334,6 +336,30 @@ public:
     double gpu_render_time_ms() const override { return 0.0; }
     bool gpu_render_timing_available() const override { return false; }
 
+    void trim_gpu_resources(TrimLevel level) override {
+        if (!context_ || lost_ || canvas_)
+            return;
+        context_->checkAsyncWorkCompletion();
+        if (level.frees_everything())
+            context_->freeGpuResources();
+        else
+            context_->performDeferredCleanup(level.idle());
+    }
+
+    // GrDirectContext has no budgeted-bytes query, so `budgeted` is the
+    // cache's whole footprint, budgeted or not.
+    GpuCacheBytes gpu_cache_bytes() const override {
+        if (!context_ || lost_)
+            return {};
+        size_t bytes = 0;
+        context_->getResourceCacheUsage(nullptr, &bytes);
+        return {bytes, context_->getResourceCachePurgeableBytes()};
+    }
+
+    std::uint64_t idle_trim_count() const override {
+        return idle_trim_.trims();
+    }
+
 private:
     // Returning EM_TRUE calls preventDefault() on the webglcontextlost event,
     // which is what tells the browser we WANT the context back (without it, no
@@ -382,6 +408,7 @@ private:
     sk_sp<GrDirectContext> context_;
     bool lost_ = false;   // true between webglcontextlost and webglcontextrestored
     FrameOutcome last_outcome_ = FrameOutcome::presented;
+    GpuIdleTrimSchedule idle_trim_{GpuIdleTrimSchedule::Clock::now()};
 
     sk_sp<SkSurface> frame_surface_;
     sk_sp<SkSurface> offscreen_surface_;
