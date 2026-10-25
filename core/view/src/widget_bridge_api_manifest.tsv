@@ -155,6 +155,8 @@ setFontFamily	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setFontWeight	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setFontStyle	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setLetterSpacing	typography	function	core/view/src/widget_bridge/typography_api.cpp
+setFontSmoothing	typography	function	core/view/src/widget_bridge/typography_api.cpp
+setTextRasterPolicy	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setLineHeight	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setTextAlign	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setMultiLine	typography	function	core/view/src/widget_bridge/typography_api.cpp

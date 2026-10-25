@@ -859,7 +859,8 @@ int main(int argc, char* argv[]) {
                      : (cap.used == ScreenshotBackend::coregraphics) ? "coregraphics"
                                                                      : "skia";
     } else {
-        png = render_to_png(*capture_root, options.width, options.height, options.scale, backend);
+        png = render_to_png(*capture_root, options.width, options.height, options.scale, backend,
+                            bridge.text_raster_policy());
         if (png.empty()) {
             std::cerr << "Error: rendering failed\n";
             return 1;

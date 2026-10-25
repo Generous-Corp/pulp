@@ -8,6 +8,7 @@
 
 #include <pulp/canvas/recording_canvas.hpp>
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/widgets.hpp>
 
@@ -254,4 +255,27 @@ TEST_CASE("auto text measures and draws exactly as with no smoothing set",
         return all;
     };
     CHECK(draw(true) == draw(false));
+}
+
+TEST_CASE("generated ui.js carries captured font smoothing and the surface policy",
+          "[browser-capture][font-smoothing]") {
+    auto lowered = lower_smoothing_fixture();
+    REQUIRE(lowered.design_ir.has_value());
+    auto& ir = *lowered.design_ir;
+    const auto count = [](const std::string& js, const std::string& needle) {
+        std::size_t n = 0;
+        for (auto at = js.find(needle); at != std::string::npos; at = js.find(needle, at + 1))
+            ++n;
+        return n;
+    };
+    const auto js = pulp::view::generate_pulp_js(ir);
+    // Exactly the one antialiased node, and the document asks for chromium.
+    CHECK(count(js, "setFontSmoothing(") == 1);
+    CHECK(count(js, "', 'antialiased');") == 1);
+    CHECK(count(js, "setTextRasterPolicy('chromium')") == 1);
+
+    find_text(ir.root, "Antialiased")->attributes.erase("font_smoothing");
+    const auto plain = pulp::view::generate_pulp_js(ir);
+    CHECK(count(plain, "setFontSmoothing(") == 0);
+    CHECK(count(plain, "setTextRasterPolicy(") == 0);
 }

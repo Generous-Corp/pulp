@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-uijs-font-smoothing-watch",
+  "created_at": "2026-10-25T02:04:23Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Generated ui.js carries captured -webkit-font-smoothing: the WidgetBridge gains setFontSmoothing(id, value), wired to Label::set_font_smoothing, and setTextRasterPolicy(policy), stored for the host to read through WidgetBridge::text_raster_policy(); the JS emitter writes them (typeof-guarded) for antialiased text nodes and documents whose design_ir_text_raster_policy is chromium; capture_view and pulp-screenshot pass the policy to the existing render_to_png surface configuration. Bridge manifest, typings, mocks and reference docs regenerated. Pulp-owned paths only; no Vellum-transferred slice, capture or IR format, Chromium, packaging or framework authority moves.",
+  "tests": [
+    "build/test/pulp-test-browser-capture-import \"[font-smoothing]\"",
+    "ctest --test-dir build -R \"WidgetBridge setFontSmoothing\"",
+    "python3 tools/scripts/generate_widget_bridge_api.py --check",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

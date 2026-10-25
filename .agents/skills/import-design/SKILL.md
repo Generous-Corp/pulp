@@ -150,6 +150,10 @@ those text nodes, and the materialized Label paints them unhinted
 `design_ir_text_raster_policy(ir)` returns `chromium` when any captured text is
 antialiased, and the observer creates its surfaces with it. A host or emitter
 that renders imported text on a `legacy` surface still paints it heavy.
+Generated ui.js carries both: `setFontSmoothing(id, 'antialiased')` per
+antialiased node and `setTextRasterPolicy('chromium')` once per document, read
+back by the host through `WidgetBridge::text_raster_policy()` (pulp-screenshot
+applies it). Each call is `typeof`-guarded for older runtimes.
 
 ### DesignIR JSON floats are shortest round-trip, not six digits
 

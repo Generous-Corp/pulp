@@ -97,6 +97,30 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
+    // CSS `-webkit-font-smoothing` of an imported text run: "antialiased" or
+    // "auto". Anything else, or a widget that draws no Label text, is ignored.
+    register_bridge_function(api, "setFontSmoothing", [&self](choc::javascript::ArgumentList args) {
+        auto* label = dynamic_cast<Label*>(self.widget(args.get<std::string>(0, "")));
+        const auto value = args.get<std::string>(1, "");
+        if (label && (value == "antialiased" || value == "auto"))
+            label->set_font_smoothing(value == "antialiased"
+                                          ? canvas::FontSmoothing::antialiased
+                                          : canvas::FontSmoothing::auto_smoothing);
+        return choc::value::Value();
+    });
+
+    // The document's text raster policy, "chromium" or "legacy"; the host
+    // reads it back through WidgetBridge::text_raster_policy().
+    register_bridge_function(api, "setTextRasterPolicy",
+                             [&self](choc::javascript::ArgumentList args) {
+                                 const auto value = args.get<std::string>(0, "");
+                                 if (value == "chromium")
+                                     self.text_raster_policy_ = canvas::TextRasterPolicy::chromium;
+                                 else if (value == "legacy")
+                                     self.text_raster_policy_ = canvas::TextRasterPolicy::legacy;
+                                 return choc::value::Value();
+                             });
+
     register_bridge_function(api, "setLineHeight", [&self, finite_float](choc::javascript::ArgumentList args) {
         auto* v = self.widget(args.get<std::string>(0, ""));
         float lh = 0.0f;

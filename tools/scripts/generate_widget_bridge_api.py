@@ -163,6 +163,8 @@ export type PulpBridgeUnknownFunction = (...args: unknown[]) => unknown;
 
 
 SIGNATURE_OVERRIDES: dict[str, str] = {
+    "setFontSmoothing": "(id: string, value: 'auto' | 'antialiased') => void",
+    "setTextRasterPolicy": "(policy: 'legacy' | 'chromium') => void",
     "__pulpRuntimeImport__": "(specifier: string, options?: unknown) => unknown",
     "__pulpRuntimeSettle__": "(rounds?: number) => void",
     "__requestFrame__": "(callbackName: string) => number",

@@ -456,3 +456,38 @@ TEST_CASE("WidgetBridge: explicit Label setter wins over panel-level cascade",
     REQUIRE(fill.has_value());
     REQUIRE(fill.value() == Color::rgba8(255, 0, 0));
 }
+
+TEST_CASE("WidgetBridge setFontSmoothing and setTextRasterPolicy reach the label and the host",
+          "[view][typography][bridge][font-smoothing]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    REQUIRE(bridge.text_raster_policy() == TextRasterPolicy::legacy);
+
+    bridge.load_script(R"(
+        createLabel('smooth', 'Antialiased', '');
+        createLabel('plain', 'Default', '');
+        createLabel('odd', 'Odd', '');
+        setFontSmoothing('smooth', 'antialiased');
+        setFontSmoothing('odd', 'subpixel-antialiased');
+        setTextRasterPolicy('chromium');
+    )");
+
+    auto* smooth = dynamic_cast<Label*>(bridge.widget("smooth"));
+    auto* plain = dynamic_cast<Label*>(bridge.widget("plain"));
+    auto* odd = dynamic_cast<Label*>(bridge.widget("odd"));
+    REQUIRE(smooth != nullptr);
+    REQUIRE(plain != nullptr);
+    REQUIRE(odd != nullptr);
+    CHECK(smooth->font_smoothing() == FontSmoothing::antialiased);
+    CHECK(plain->font_smoothing() == FontSmoothing::auto_smoothing);
+    // Only the two values the importer emits are honoured.
+    CHECK(odd->font_smoothing() == FontSmoothing::auto_smoothing);
+    CHECK(bridge.text_raster_policy() == TextRasterPolicy::chromium);
+
+    bridge.load_script("setFontSmoothing('smooth', 'auto'); setTextRasterPolicy('legacy');");
+    CHECK(smooth->font_smoothing() == FontSmoothing::auto_smoothing);
+    CHECK(bridge.text_raster_policy() == TextRasterPolicy::legacy);
+}

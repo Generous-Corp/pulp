@@ -2347,6 +2347,9 @@ static void emit_js_text_node(const NativeEmit& e) {
         ss << ind << "setTextAlign('" << id << "', '" << *node.style.text_align << "');\n";
     if (node.style.letter_spacing)
         ss << ind << "setLetterSpacing('" << id << "', " << *node.style.letter_spacing << ");\n";
+    if (captured_font_smoothing(node) == canvas::FontSmoothing::antialiased)
+        ss << ind << "if (typeof setFontSmoothing === 'function') setFontSmoothing('" << id
+           << "', 'antialiased');\n";
     if (node.style.line_height)
         ss << ind << "setLineHeight('" << id << "', " << *node.style.line_height << ");\n";
     if (node.style.text_overflow)
@@ -3062,6 +3065,10 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
     // (browsers lay out subpixel already). The root is also the captured frame.
     ss << "if (typeof setSubpixelLayout === 'function') setSubpixelLayout('', true);\n"
        << "if (typeof setCapturedFrameRoot === 'function') setCapturedFrameRoot('', true);\n\n";
+    // Antialiased text matches Chromium only on a surface with the matching
+    // glyph preblend, which the host creates from this.
+    if (design_ir_text_raster_policy(ir) == canvas::TextRasterPolicy::chromium)
+        ss << "if (typeof setTextRasterPolicy === 'function') setTextRasterPolicy('chromium');\n\n";
 
     // Register bundled (non-system) fonts BEFORE any setFontFamily, so a
     // family like "Clash Grotesk" / "Inter" resolves to the shipped face

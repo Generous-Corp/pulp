@@ -176,6 +176,11 @@ public:
         script_base_dir_ = ec ? dir.lexically_normal() : abs;
     }
     const std::filesystem::path& script_base_dir() const noexcept { return script_base_dir_; }
+    /// The glyph preblend this document asked for (`setTextRasterPolicy`); a
+    /// host creates the surfaces that show this bridge's tree with it.
+    canvas::TextRasterPolicy text_raster_policy() const noexcept {
+        return text_raster_policy_;
+    }
 
     /// Resolve an existing relative file against the script directory or a
     /// reviewed asset root. Asset-root candidates are canonicalized and must
@@ -457,6 +462,7 @@ private:
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;
     std::filesystem::path script_base_dir_;
+    canvas::TextRasterPolicy text_raster_policy_ = canvas::TextRasterPolicy::legacy;
 
     /// Per-bridge persisted-store directories (widget storage, style presets),
     /// resolved once per script base dir by the storage registrars so a UI
