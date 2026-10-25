@@ -1031,11 +1031,20 @@ TEST_CASE("a GPU the miss substitute carries reads Degraded on the substitute's 
     using D = detail::SharedIoDeliveryDisposition;
     const auto none = GpuAudioRecoveryReason::None;
     detail::RecentGpuDelivery recent;
-    // Too few counted blocks are no evidence; priming is never counted.
-    for (int i = 0; i < detail::RecentGpuDelivery::kMinBlocks - 1; ++i)
-        recent.record(D::CpuFallbackDelivered);
+    // Priming is never counted, so an empty window is no evidence.
     for (int i = 0; i < 64; ++i)
         recent.record(D::Priming);
+    CHECK_FALSE(recent.lagging());
+    // A counted block the GPU did not deliver, with none it did (a re-acquired
+    // epoch's warmup), is the substitute carrying the stream.
+    recent.record(D::CpuFallbackDelivered);
+    CHECK(recent.lagging());
+    // Too few counted blocks are no evidence of falling behind once the GPU
+    // delivered one of them.
+    recent.reset();
+    recent.record(D::GpuDelivered);
+    for (int i = 0; i < detail::RecentGpuDelivery::kMinBlocks - 2; ++i)
+        recent.record(D::CpuFallbackDelivered);
     CHECK_FALSE(recent.lagging());
     recent.record(D::CpuFallbackDelivered);
     CHECK(recent.lagging());

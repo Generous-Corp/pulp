@@ -192,7 +192,9 @@ inline GpuAudioRecoveryReason public_recovery_reason(SharedIoRecoveryReason reas
 class RecentGpuDelivery {
   public:
     static constexpr int kWindowBlocks = 32;
-    // Fewer counted blocks than this are not evidence either way.
+    // Fewer counted blocks than this are not evidence of a GPU falling behind,
+    // but counted blocks with no GPU delivery at all (a re-acquired epoch's
+    // warmup, or a first prepare's) are: the substitute carries them.
     static constexpr int kMinBlocks = 8;
 
     // Realtime, single writer: two relaxed word accesses, no read-modify-write.
@@ -220,11 +222,14 @@ class RecentGpuDelivery {
     void reset() noexcept {
         bits_.store(0, std::memory_order_relaxed);
     }
-    // The GPU delivered fewer than half of enough recent blocks.
+    // The GPU delivered none of the counted blocks yet, or fewer than half of
+    // enough recent blocks.
     bool lagging() const noexcept {
         const auto bits = bits_.load(std::memory_order_relaxed);
         const int counted = std::popcount(static_cast<std::uint32_t>(bits >> 32));
         const int delivered = std::popcount(static_cast<std::uint32_t>(bits));
+        if (counted > 0 && delivered == 0)
+            return true;
         return counted >= kMinBlocks && delivered * 2 < counted;
     }
 
