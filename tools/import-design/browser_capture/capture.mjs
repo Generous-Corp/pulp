@@ -59,6 +59,7 @@ import {
   installCaptureHealthMonitor,
   verifyCaptureHealth,
 } from "./health.mjs";
+import { capturePageFontFaces, recordResponseStatuses } from "./font_faces.mjs";
 import {
   createMainFrameNavigationGuard,
   executeInteractionPlan,
@@ -1488,6 +1489,7 @@ async function runCapture(options) {
     await configurePage(cdp, initialWidth, initialHeight, dpr);
     await installDynamicWorkTracker(cdp);
     const healthMonitor = installCaptureHealthMonitor(cdp);
+    const responseStatuses = recordResponseStatuses(cdp);
     const networkGuard = installNetworkGuard(
       cdp, server.origin, allowedExternalOrigins, server.privatePrefix);
     await networkGuard.enable();
@@ -1815,6 +1817,13 @@ async function runCapture(options) {
     const stableScreenshot = (options) => captureStableScreenshot(cdp, options,
       undefined, undefined, undefined, presentationEncoding);
     const materializedDocument = await captureMaterializedDocument(cdp);
+    // The url() faces a plain page loads from files beside it, read while
+    // virtual time still runs, since each read is a fetch.
+    const pageFontFaces = await capturePageFontFaces(cdp, {
+      privatePrefix: server.privatePrefix,
+      allowNetwork,
+      statuses: responseStatuses,
+    });
     // Pause page virtual time before collecting any sidecar. Canvas/WebGL
     // requestAnimationFrame callbacks and timers must not advance while DOM,
     // semantics, tokens, health, and the authoritative pixels are read.
@@ -2242,6 +2251,9 @@ async function runCapture(options) {
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
       writeJson(
         path.join(outputDir, "platform-fonts.json"), platformFontReport),
+      ...(pageFontFaces.faces.length > 0 || pageFontFaces.dropped.length > 0
+        ? [writeJson(path.join(outputDir, "font-faces.json"), pageFontFaces)]
+        : []),
       ...(materializedDocument
         ? [writeJson(
             path.join(outputDir, "materialized-document.json"),

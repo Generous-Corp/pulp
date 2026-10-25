@@ -261,6 +261,12 @@ BrowserHtmlImportResult import_browser_html(
             return BrowserHtmlFailure{3, std::move(font_error), shape, std::move(workspaces)};
         }
     }
+    // And the url() faces a plain page loads from files beside it.
+    std::string page_font_error;
+    if (!attach_page_font_faces(*lowered.design_ir, capture_directory / "font-faces.json",
+                                capture_directory / "fonts", lowered.warnings, page_font_error)) {
+        return BrowserHtmlFailure{3, std::move(page_font_error), shape, std::move(workspaces)};
+    }
     return BrowserHtmlCaptured{shape,
                                std::move(*lowered.design_ir),
                                capture_directory,

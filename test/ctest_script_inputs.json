@@ -7675,6 +7675,7 @@
     "tools/import-design/browser_capture/capture_interaction_guards.integration.test.mjs",
     "tools/import-design/browser_capture/capture_interactions.integration.test.mjs",
     "tools/import-design/browser_capture/capture_paint.integration.test.mjs",
+    "tools/import-design/browser_capture/font_faces.integration.test.mjs",
     "tools/import-design/browser_capture/motion_freeze.integration.test.mjs",
     "tools/import-design/browser_capture/run_integration.mjs",
     "tools/import-design/browser_capture/security.mjs",
@@ -7687,6 +7688,8 @@
    "inputs": [
     "tools/import-design/browser_capture/document_canvas.mjs",
     "tools/import-design/browser_capture/document_canvas.test.mjs",
+    "tools/import-design/browser_capture/font_faces.mjs",
+    "tools/import-design/browser_capture/font_faces.test.mjs",
     "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture/form_control_theme.test.mjs",
     "tools/import-design/browser_capture/health.mjs",
