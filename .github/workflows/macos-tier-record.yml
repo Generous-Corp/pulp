@@ -8,8 +8,14 @@ name: macOS test tier record
 # check:
 #
 #   {"schema":"shipyard-test-tier/v1","check":"macos","tier":"deferred",
-#    "run_id":123,"run_attempt":1,"label":"macos-ci",
+#    "run_id":123,"run_attempt":1,"trigger":"pull_request","actor":"<author>",
+#    "selector":"pr-fast+pr-guard","full_lane_workflow":"build.yml",
 #    "full_suite_runs_in":"merge_group"}
+#
+# `trigger` and `actor` name the event and account that started the run; the
+# guard reports them but does not trust them. `full_lane_workflow` is what the
+# guard's fix line tells an operator to dispatch. The record carries no label:
+# a label is not a full-lane path (#11044).
 #
 # Who may write it. The guard counts only records created by the App named in
 # `[queue] tier_record_app`, never `github-actions`: any job holding
@@ -134,13 +140,18 @@ jobs:
             # The bootstrap claims `macos` when no native build is needed, and
             # fails it closed when routing or classification failed.
             if [ "$bootstrap" = success ]; then steps_tier=not-required; else steps_tier=deferred; fi
+            selector=none
           elif [ "$build" = absent ]; then
             echo "::error title=no tier record::the macos job of run $RUN_ID has neither a Build step nor the bootstrap step, so its lane cannot be read; no record, which the guard refuses"
             exit 1
           elif ran "$build"; then
-            if ran "$full_suite"; then steps_tier=full; else steps_tier=fast; fi
+            if ran "$full_suite"; then
+              steps_tier=full; selector=full
+            else
+              steps_tier=fast; selector=pr-fast+pr-guard+affected
+            fi
           else
-            steps_tier=deferred
+            steps_tier=deferred; selector=pr-fast+pr-guard
           fi
 
           # --- signal 1: the fleet App dispatched this run after approving -
@@ -188,9 +199,12 @@ jobs:
 
           # --- the more conservative of the two ------------------------------
           if [ "$approval" != present ]; then tier=deferred; else tier="$steps_tier"; fi
+          # The fields and their order follow Shipyard's docs/ghapp-guards.md.
           summary=$(jq -cn --arg tier "$tier" --argjson run "$RUN_ID" --argjson attempt "$RUN_ATTEMPT" \
+            --arg trigger "$TRIGGER_EVENT" --arg actor "$TRIGGERING_ACTOR" --arg selector "$selector" \
             '{schema:"shipyard-test-tier/v1",check:"macos",tier:$tier,run_id:$run,
-              run_attempt:$attempt,label:"macos-ci",full_suite_runs_in:"merge_group"}')
+              run_attempt:$attempt,trigger:$trigger,actor:$actor,selector:$selector,
+              full_lane_workflow:"build.yml",full_suite_runs_in:"merge_group"}')
           echo "tier $tier for $HEAD_SHA: steps say $steps_tier (Build=$build, Test (non-Windows)=$full_suite, bootstrap=$bootstrap); approved fleet-App dispatch: $approval"
           {
             echo "publish=true"

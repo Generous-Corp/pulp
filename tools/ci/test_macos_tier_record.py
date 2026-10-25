@@ -207,15 +207,32 @@ class TierDecisionTest(Harness):
         proc, calls, outputs = self._decide(
             [native("success"), job(name="Linux (x64) [github-hosted]", Build="success")], [verdict()])
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(json.loads(outputs["summary"]), {
-            "schema": "shipyard-test-tier/v1", "check": "macos", "tier": "fast",
-            "run_id": 4242, "run_attempt": 2, "label": "macos-ci",
-            "full_suite_runs_in": "merge_group"})
+        # Exactly #931's field set, in its order, and no label.
+        self.assertEqual(list(json.loads(outputs["summary"]).items()), [
+            ("schema", "shipyard-test-tier/v1"), ("check", "macos"), ("tier", "fast"),
+            ("run_id", 4242), ("run_attempt", 2), ("trigger", "workflow_dispatch"),
+            ("actor", APP), ("selector", "pr-fast+pr-guard+affected"),
+            ("full_lane_workflow", "build.yml"), ("full_suite_runs_in", "merge_group")])
         listing = next(" ".join(c) for c in calls if "/jobs" in " ".join(c))
         self.assertIn("actions/runs/4242/attempts/2/jobs", listing)
         self.assertIn("--paginate", listing)
         verdicts = next(" ".join(c) for c in calls if "/comments" in " ".join(c))
         self.assertIn("--paginate", verdicts)
+
+    def test_trigger_actor_and_selector_report_what_ran(self) -> None:
+        # Reported, not trusted: a pull_request run by its author stays deferred.
+        proc, _, outputs = self._decide([native("skipped")], [verdict()],
+                                        event="pull_request", actor="an-author")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        summary = json.loads(outputs["summary"])
+        self.assertEqual((summary["tier"], summary["trigger"], summary["actor"], summary["selector"]),
+                         ("deferred", "pull_request", "an-author", "pr-fast+pr-guard"))
+        self.assertNotIn("label", summary)
+        for jobs, selector in (([native("success", full_suite="success")], "full"),
+                               ([job(**{BOOTSTRAP: "success"})], "none")):
+            with self.subTest(selector=selector):
+                _, _, outputs = self._decide(jobs, [verdict()])
+                self.assertEqual(json.loads(outputs["summary"])["selector"], selector)
 
     def test_the_run_facts_come_from_the_workflow_run_event(self) -> None:
         env = self.steps["Decide the tier"]["env"]

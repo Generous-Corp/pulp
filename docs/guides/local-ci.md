@@ -3782,7 +3782,10 @@ any step, including the code under test, can print one. It reads a *tier
 record* instead (Shipyard `docs/ghapp-guards.md`, "A tiered required check must
 prove its full lane"). That record is a check run named
 `shipyard-test-tier/macos` on the head, whose summary is
-`{"schema":"shipyard-test-tier/v1","check":"macos","tier":...,"run_id":...,"run_attempt":...,"label":"macos-ci","full_suite_runs_in":"merge_group"}`.
+`{"schema":"shipyard-test-tier/v1","check":"macos","tier":...,"run_id":...,"run_attempt":...,"trigger":...,"actor":...,"selector":...,"full_lane_workflow":"build.yml","full_suite_runs_in":"merge_group"}`.
+`trigger` and `actor` name the event and account that started the run; the
+guard reports them but does not trust them. `full_lane_workflow` is what its
+fix line says to dispatch. The record carries no label.
 The guard counts only records created by the App named in `[queue]
 tier_record_app`, never `github-actions`: any job holding `checks: write`
 could rewrite those. It refuses a head with no counted record bound to its
@@ -3793,6 +3796,9 @@ could rewrite those. It refuses a head with no counted record bound to its
 - **Trigger:** `workflow_run` when a Build and Test run completes. It runs from
   main, with no checkout, for same-repository `pull_request` and
   `workflow_dispatch` runs only.
+- **The tiered job's own token:** the guard also reads the `macos` job's
+  `GITHUB_TOKEN Permissions` log group and refuses if `Checks` is `write`.
+  `build.yml` grants `checks: read` explicitly, which satisfies that.
 - **Token:** its own `GITHUB_TOKEN` only reads. The record is created with a
   token for a dedicated App, minted in the job from `TIER_RECORD_APP_ID` and
   `TIER_RECORD_APP_KEY`. Those are secrets of the `tier-record` GitHub
