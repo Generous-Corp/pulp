@@ -265,9 +265,10 @@ resolves, and its worker never waits on the GPU at all.
   routing and breaker). The transport's `release()` opts a pipelining
   convolver back out; a convolver destroyed before that call detaches itself
   from the transport first, and a non-pipelining node is never touched there.
-  That holds only once nothing pumps the node: a transport with its own worker
-  pumps it until `release()` joins the worker, so release that transport
-  before destroying the node.
+  That holds only once neither `pump()` nor `process()` runs on its transport:
+  the audio callback's `process()` calls the node's CPU fallback, and a
+  transport with its own worker pumps it until `release()` joins the worker.
+  Otherwise release that transport before destroying the node.
 - Every block's input goes to exactly one place: the GPU overlap-add carry when
   its readback is on time, otherwise the worker's zero-latency CPU convolution.
   The output is the carry plus whatever the CPU convolution still owes, so a

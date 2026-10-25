@@ -92,10 +92,11 @@ std::uint64_t gpu_convolver_trial_engine_id(const GpuConvolver&) noexcept;
 /// (descriptor().worker_pipeline_blocks > 0), the transport's release() opts
 /// the node back out of pipelining. A node destroyed first detaches itself
 /// from the transport, so release() then touches nothing; a non-pipelining
-/// node is never touched by release(). Destroying it first is safe only when
-/// nothing pumps it any more: a transport running its own worker
-/// (Config::run_worker_thread) pumps the node until release() joins it, so
-/// release that transport before destroying the node.
+/// node is never touched by release(). Destroying it first is safe only once
+/// neither pump() nor process() runs on its transport: the audio callback's
+/// process() calls the node's CPU fallback, and a transport running its own
+/// worker (Config::run_worker_thread) pumps the node until release() joins it.
+/// Otherwise release that transport before destroying the node.
 ///
 /// CPU fallback (MissPolicy::CpuFallback). The fallback is a zero-latency
 /// `signal::FixedIrConvolver` per channel that the transport keeps
