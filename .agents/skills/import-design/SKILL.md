@@ -130,9 +130,19 @@ per rule in page order, with `weight`/`weightMax`, `fontStyle` and
 `unicodeRange`. Without them, native text is shaped with whatever
 same-named face the host has. For JetBrains Mono that is the bundled static
 Regular, so 600 is synthesized and a captured basis naming the variable
-instance (`JetBrainsMono-Regular_wght2580000`) is rejected. A plain HTML page
-whose `@font-face` uses `url(...)` is not carried yet. The capture only
-packages Blob-backed faces.
+instance (`JetBrainsMono-Regular_wght2580000`) is rejected.
+
+A plain HTML page whose `@font-face` names files with `url(...)` is carried
+too. `font_faces.mjs` reads every rule in the page's readable style sheets,
+resolves each source against its own sheet, and keeps a face only when
+Chromium fetched it. The capture's own network responses say which source
+answered. It writes the bytes and descriptors to `font-faces.json`, and
+`attach_page_font_faces` binds them through the same writer under
+`pulp-page-font-<sha256>`. Staged files and `data:` fonts are read. A remote
+`https` font is read only with `--allow-browser-network`, and Blob fonts stay
+with the materialized document. A used face whose staged file is absent fails
+as `capture-font-missing`, naming the authored path. Fixture:
+`test/fixtures/browser-capture-font-face-url`.
 
 ### Imported text looks heavier than Chromium: check font smoothing first
 
