@@ -331,7 +331,9 @@ def evaluate(root: pathlib.Path, base: str, head: str, *,
                    errors=errors, event=event)
 
 
-def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str) -> list[str]:
+def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str, *,
+                            source_head: str | None = None,
+                            own_branch: str | None = None) -> list[str]:
     """Remote branches whose commits added every watch event this range adds.
 
     A branch stacked on another unmerged PR inherits that PR's commits, and
@@ -340,6 +342,10 @@ def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str) -> list[st
     merge queue measures only this branch's change, finds no event, and
     ejects the whole batch. Empty when the range adds an event of its own
     (one no other remote branch carries) or adds none, and on any git error.
+
+    CI measures a synthetic merge of live main and the PR head, which no ref
+    contains: ``source_head`` is the PR's own head for the descendant test,
+    and ``own_branch`` is its branch name, ignored on every remote.
     """
     checker = _load_checker(root)
     resolved = _resolve_range(root, base, head)
@@ -356,7 +362,8 @@ def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str) -> list[st
     # The branch's own copies never count: its real upstream, and on every
     # remote (GitHub need not be "origin") the same-named branch, main, HEAD
     # and merge-queue refs.
-    branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD") or ""
+    branch = own_branch or _git(root, "rev-parse", "--abbrev-ref", "HEAD") or ""
+    descendant_of = source_head or head_sha
     upstream = _git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     remotes = (_git(root, "remote") or "").split()
     ignored = {upstream} if upstream else set()
@@ -370,7 +377,7 @@ def borrowed_watch_coverage(root: pathlib.Path, base: str, head: str) -> list[st
         # stacked on THIS one carries its commits, but this branch is the
         # parent there, not the borrower.
         refs = _git(root, "branch", "-r", "--contains", commit,
-                    "--no-contains", head_sha, "--format=%(refname:short)")
+                    "--no-contains", descendant_of, "--format=%(refname:short)")
         if refs is None:
             return []
         carriers = {r for r in refs.split()

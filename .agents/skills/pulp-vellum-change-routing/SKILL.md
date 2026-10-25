@@ -735,6 +735,18 @@ as duplicates. `vellum_watch_preflight.py` prints an advisory when every
 covering event was added by a commit another remote branch carries. Merge main
 after the parent lands, write the branch's own event, and only then enqueue it.
 
+The PR job of `Vellum freeze` enforces the same rule
+(`tools/scripts/vellum_borrowed_coverage_check.py`): it fails, naming the
+parent branch, so a stacked PR is red until its parent merges, rather than
+green until its batch ejects. CI measures a synthetic merge of live main and
+the PR head that no ref contains, so the check passes the PR head
+(`--source-head`) for the descendant test and the PR's branch name
+(`--own-branch`) for the ignore list. The merge_group job does not run it:
+the queued base already holds every merged parent. Two edges to know: a
+remote branch holding an older copy of this PR's commits under another name
+(a hand-made batch branch, say) counts as a parent, and a fork PR whose
+branch name matches an origin branch ignores that origin branch.
+
 ## Refreshing the ledger no longer pulls this skill into skill-sync
 
 `docs/status/gpu-vellum-handoff.yaml` is mapped to this skill in

@@ -125,6 +125,21 @@ jobs:
             --head '${{ steps.comparison.outputs.head }}' \
             --output "$RUNNER_TEMP/vellum-expansion-watch.json"
 
+      # A branch stacked on an unmerged PR passes the watch check on its
+      # parent's event, then ejects its merge-queue batch once the parent
+      # lands and the queue measures this change alone. merge_group needs no
+      # such step: its base already holds every merged parent.
+      - name: Refuse watch coverage borrowed from a stacked parent
+        if: github.event_name == 'pull_request'
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
+        run: |
+          python3 tools/scripts/vellum_borrowed_coverage_check.py \
+            --base '${{ steps.comparison.outputs.base }}' \
+            --head '${{ steps.comparison.outputs.head }}' \
+            --source-head '${{ steps.comparison.outputs.source_head }}' \
+            --own-branch "$PR_HEAD_REF"
+
       - name: Install inventory parser dependency
         run: tools/ci/net-retry.sh python3 -m pip install --quiet 'pyyaml==6.0.2'
 
@@ -135,6 +150,7 @@ jobs:
           python3 tools/scripts/test_github_app_jwt.py
           python3 tools/scripts/test_vellum_authority_workflows.py
           python3 tools/scripts/test_vellum_trusted_merge.py
+          python3 tools/scripts/test_vellum_borrowed_coverage_check.py
 
       - name: Verify extraction and tooling inventories
         run: |
