@@ -17,7 +17,7 @@
 #include <pulp/view/continuous_frames.hpp> // needs_continuous_frames (CPU + GPU host repaint gate)
 #include <pulp/view/host_drag_coalescer.hpp> // per-presented-frame drag coalescing
 #include <pulp/view/input_events.hpp>
-#include <pulp/view/pending_resize.hpp>
+#include "../../src/pending_resize.hpp"
 #include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/platform/ns_role_mapping.hpp>
 #include <pulp/view/pointer_dispatch.hpp> // dispatch_context_menu (no-Skia builds too)

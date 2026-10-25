@@ -21,7 +21,7 @@
 
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
-#include <pulp/view/pending_resize.hpp>
+#include "../../src/pending_resize.hpp"
 #include <pulp/view/platform/win_plugin_input_router.hpp>
 #include <pulp/view/platform/win_pointer_input.hpp>
 #include <pulp/view/platform/win_surface_lifecycle.hpp>

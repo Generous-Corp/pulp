@@ -56,8 +56,10 @@ class SwapchainResizeState {
     }
 
     /// Settled: the last kSettleFrames frames presented without configuring,
-    /// and no resize is pending. A live resize is over once this holds, so it
-    /// is the point to trust the final size and to release resize-time slack.
+    /// and no resize is pending, so a live resize is over and width()/height()
+    /// are the final size. Nothing in the surface acts on it; it is a signal
+    /// for callers that want to wait out a drag, such as a GPU cache trim or a
+    /// final-size check.
     bool settled() const {
         return presentable() && !needs_configure() && stable_frames_ >= kSettleFrames;
     }
