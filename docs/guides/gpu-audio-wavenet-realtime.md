@@ -114,6 +114,14 @@ and a provider failure under the declared miss policy, `CpuFallback` only after
 its consumer delivered the fallback. A quiescent snapshot therefore passes
 `validate_gpu_audio_status()`.
 
+Completions collected in either completion pass count as provider progress,
+and completions are collected before the watchdog is evaluated, so a starved
+worker whose provider keeps completing is not reported as unresponsive.
+
+Recovery is manual: nothing re-acquires a lost or unresponsive provider. See
+[GPU audio reliability on macOS](gpu-audio-macos-reliability.md) for how this
+node's health compares with the other GPU-audio nodes.
+
 ## Evidence and limits
 
 `pulp-test-gpu-wavenet-realtime-node` uses private fake providers to force delayed,

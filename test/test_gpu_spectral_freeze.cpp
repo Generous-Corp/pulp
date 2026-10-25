@@ -5,8 +5,10 @@
 #include <pulp/gpu_audio/spectral_stack.hpp>
 #include <pulp/signal/windowing.hpp>
 
+#include "support/fake_gpu_compute.hpp"
 #include "support/gpu_audio_test_helpers.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -186,4 +188,32 @@ TEST_CASE("GpuSpectralFreeze matches CpuSpectralStack under the unified jitter",
     }
     const double corr = (na > 0.0 && nb > 0.0) ? dot / std::sqrt(na * nb) : 0.0;
     REQUIRE(corr > 0.8);
+}
+
+TEST_CASE("GpuSpectralFreeze refuses a lost or re-initialized shared device",
+          "[gpu_audio][freeze][device-loss]") {
+    constexpr uint32_t N = 64, HOP = 16;
+    pulp::test::FakeGpuCompute device;
+    GpuSpectralFreeze fz;
+    REQUIRE(fz.prepare(N, HOP, pulp::signal::WindowFunction::Type::hann, &device));
+
+    std::vector<float> frame(N, 0.5f), out(N, -1.0f);
+    // Positive control: capture + render run on a live device.
+    REQUIRE(fz.device_usable());
+    REQUIRE(fz.capture(frame.data()));
+    REQUIRE(fz.render(out.data()));
+    const auto calls = device.fft_calls();
+
+    SECTION("device loss") {
+        device.lose_device();
+    }
+    SECTION("generation change without loss") {
+        device.reinitialize();
+    }
+    CHECK_FALSE(fz.device_usable());
+    std::fill(out.begin(), out.end(), -1.0f);
+    CHECK_FALSE(fz.render(out.data()));
+    CHECK(std::all_of(out.begin(), out.end(), [](float v) { return v == 0.0f; }));
+    CHECK_FALSE(fz.capture(frame.data()));
+    CHECK(device.fft_calls() == calls);
 }

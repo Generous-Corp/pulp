@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1171,6 +1172,150 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
     fs::remove_all(root);
 }
+
+#if defined(PULP_SHIP_STRIP_FIXTURE)
+namespace {
+
+fs::path make_module_bundle(const fs::path& root, std::string_view format, std::string_view name,
+                            std::string_view ext) {
+    auto bundle = root / "build" / std::string(format) / (std::string(name) + std::string(ext));
+    fs::create_directories(bundle / "Contents" / "MacOS");
+    {
+        std::ofstream plist(bundle / "Contents" / "Info.plist");
+        plist << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+              << "<plist version=\"1.0\"><dict>"
+              << "<key>CFBundleExecutable</key><string>" << name << "</string>"
+              << "<key>CFBundleIdentifier</key><string>com.pulp.test." << name << "</string>"
+              << "<key>CFBundlePackageType</key><string>BNDL</string>"
+              << "<key>CFBundleVersion</key><string>1.0.0</string>"
+              << "</dict></plist>\n";
+    }
+    fs::copy_file(PULP_SHIP_STRIP_FIXTURE, bundle / "Contents" / "MacOS" / std::string(name),
+                  fs::copy_options::overwrite_existing);
+    return bundle;
+}
+
+// nm lists a local text symbol with a lower-case "t".
+bool has_local_fixture_symbol(const fs::path& binary) {
+    auto r = ChildProcess::run("/usr/bin/nm", {binary.string()}, ProcessOptions{});
+    std::istringstream lines(r.stdout_output);
+    for (std::string line; std::getline(lines, line);) {
+        if (contains(line, " t ") && contains(line, "pulp_ship_strip_fixture_local"))
+            return true;
+    }
+    return false;
+}
+
+fs::path packaged_binary(const fs::path& pkg, const fs::path& out, std::string_view name) {
+    auto r = ChildProcess::run("/usr/sbin/pkgutil", {"--expand-full", pkg.string(), out.string()},
+                               ProcessOptions{});
+    REQUIRE(r.exit_code == 0);
+    const auto suffix = fs::path("Contents") / "MacOS" / std::string(name);
+    for (const auto& entry : fs::recursive_directory_iterator(out)) {
+        const auto& p = entry.path();
+        if (p.filename() == std::string(name) && p.parent_path().filename() == "MacOS" &&
+            entry.is_regular_file())
+            return p;
+    }
+    FAIL("no packaged " << suffix.string() << " under " << out.string());
+    return {};
+}
+
+} // namespace
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package strips local symbols from the shipped copy only",
+                 "[cli][shellout][ship][package][strip]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto root = make_fake_project("package-strip", true);
+    auto bundle = make_module_bundle(root, "CLAP", "StripMe", ".clap");
+    const auto build_binary = bundle / "Contents" / "MacOS" / "StripMe";
+    // Control: the fixture really carries the local symbol the case looks for.
+    REQUIRE(has_local_fixture_symbol(build_binary));
+    // codesign embeds entitlements only in an executable's signature, not in a
+    // loadable module's, so a second bundle carries a copy of an executable
+    // to tell whether re-signing the stripped copy keeps them.
+    auto entitled = make_module_bundle(root, "CLAP", "EntMe", ".clap");
+    const auto entitled_binary = entitled / "Contents" / "MacOS" / "EntMe";
+    fs::copy_file("/usr/bin/true", entitled_binary, fs::copy_options::overwrite_existing);
+    // Sign it with an entitlement, as `pulp ship sign` would.
+    const auto entitlements_plist = root / "fixture.entitlements";
+    {
+        std::ofstream ent(entitlements_plist);
+        ent << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+               "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+            << "<plist version=\"1.0\"><dict>"
+            << "<key>com.apple.security.cs.disable-library-validation</key><true/>"
+            << "</dict></plist>\n";
+    }
+    REQUIRE(ChildProcess::run("/usr/bin/codesign",
+                              {"--force", "--sign", "-", "--entitlements",
+                               entitlements_plist.string(), entitled.string()},
+                              ProcessOptions{})
+                .exit_code == 0);
+    auto entitlements_of = [](const fs::path& signed_bundle) {
+        auto e = ChildProcess::run("/usr/bin/codesign",
+                                   {"-d", "--entitlements", "-", "--xml", signed_bundle.string()},
+                                   ProcessOptions{});
+        REQUIRE(e.exit_code == 0);
+        return e.stdout_output;
+    };
+    const auto original_entitlements = entitlements_of(entitled);
+    REQUIRE(contains(original_entitlements, "disable-library-validation"));
+
+    auto r = run_pulp_in(root, {"ship", "package", "--version", "1.0.0", "--separate"});
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(r.stdout_output, "stripped local symbols from StripMe.clap"));
+
+    const auto pkg = root / "artifacts" / "StripMe-CLAP-1.0.0.pkg";
+    REQUIRE(fs::exists(pkg));
+    const auto shipped = packaged_binary(pkg, root / "expanded", "StripMe");
+    CHECK_FALSE(has_local_fixture_symbol(shipped));
+    // The build output keeps its symbols for debugging and nm-based checks.
+    CHECK(has_local_fixture_symbol(build_binary));
+    // A dSYM of the unstripped executable is written before stripping: it
+    // keeps the local symbol under the UUID the shipped binary carries, so a
+    // crash report from the shipped copy still symbolicates.
+    const auto dsym = root / "artifacts" / "symbols" / "CLAP" / "StripMe.clap.dSYM";
+    const auto dsym_binary = dsym / "Contents" / "Resources" / "DWARF" / "StripMe";
+    REQUIRE(fs::is_regular_file(dsym_binary));
+    CHECK(has_local_fixture_symbol(dsym_binary));
+    auto uuid_of = [](const fs::path& binary) {
+        auto u = ChildProcess::run("/usr/bin/xcrun", {"dwarfdump", "--uuid", binary.string()},
+                                   ProcessOptions{});
+        REQUIRE(u.exit_code == 0);
+        const auto at = u.stdout_output.find("UUID: ");
+        REQUIRE(at != std::string::npos);
+        return u.stdout_output.substr(at + 6, 36);
+    };
+    CHECK(uuid_of(dsym_binary) == uuid_of(shipped));
+    // Re-signing the stripped copy keeps the original's entitlements.
+    REQUIRE(contains(r.stdout_output, "stripped local symbols from EntMe.clap"));
+    const auto shipped_entitled =
+        packaged_binary(root / "artifacts" / "EntMe-CLAP-1.0.0.pkg", root / "expanded-ent", "EntMe");
+    CHECK(entitlements_of(shipped_entitled.parent_path().parent_path().parent_path()) ==
+          original_entitlements);
+    // The stripped copy carries a valid (ad hoc) signature, so it still loads.
+    auto verify = ChildProcess::run(
+        "/usr/bin/codesign",
+        {"--verify", shipped.parent_path().parent_path().parent_path().string()}, ProcessOptions{});
+    CHECK(verify.exit_code == 0);
+
+    auto kept = run_pulp_in(
+        root, {"ship", "package", "--version", "1.0.1", "--separate", "--keep-symbols"});
+    REQUIRE(kept.exit_code == 0);
+    const auto kept_binary = packaged_binary(root / "artifacts" / "StripMe-CLAP-1.0.1.pkg",
+                                             root / "expanded-kept", "StripMe");
+    CHECK(has_local_fixture_symbol(kept_binary));
+
+    fs::remove_all(root);
+}
+#endif
 #elif defined(__linux__)
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package on Linux with no plugin bundles reports missing plugins",

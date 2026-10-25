@@ -61,6 +61,8 @@ test("the capture collects the properties a whole panel needs to be drawn",
       // Padding places the value text a text input or select draws itself.
       "appearance",
       "accent-color",
+      // The theme's light or dark palette.
+      "color-scheme",
       "padding-top",
       "padding-right",
       "padding-bottom",

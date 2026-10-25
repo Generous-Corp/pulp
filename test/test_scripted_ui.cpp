@@ -15,6 +15,7 @@
 #include <optional>
 #include <pulp/format/reload/scripted_ui_swap_unit.hpp>
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/scripted_ui_prewarm.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/widgets.hpp>
@@ -1092,6 +1093,61 @@ TEST_CASE("ScriptedUiSession keeps its declared host kind across a reload",
     REQUIRE(session.reload(&error));
     CHECK(session.bridge()->host_kind() == "plugin");
     CHECK(rendered_kind() == "plugin");
+}
+
+// Editor hosts are linked into every plug-in, including ones whose editor runs
+// no script, so they may reach a session only through ScriptedEditorSession's
+// virtual calls. Drive a full view-first open, host-kind declaration, and
+// teardown through that interface alone, and check that linking session code
+// published the prewarm entry point the hosts call through.
+TEST_CASE(
+    "ScriptedUiSession: a host drives the whole editor lifecycle through ScriptedEditorSession",
+    "[view][scripted-ui][deferred-load][editor-open]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-ui-editor-session");
+    const auto script_path = temp_dir / "main.js";
+    write_text(script_path, R"(
+        createLabel('kind', hostKind(), '');
+    )");
+
+    View root;
+    root.set_bounds({0, 0, 240, 160});
+    StateStore store;
+    auto owned = std::make_unique<ScriptedUiSession>(
+        root, store,
+        ScriptedUiOptions{
+            .script_path = script_path, .enable_hot_reload = false, .enable_theme_reload = false});
+    ScriptedUiSession& concrete = *owned;
+    std::unique_ptr<ScriptedEditorSession> session = std::move(owned);
+
+    session->set_host_kind("plugin");
+    CHECK(concrete.host_kind() == "plugin");
+    {
+        ScopedDeferredDocumentLoad guard;
+        CHECK(ScopedDeferredDocumentLoad::active());
+        {
+            ScopedDeferredDocumentLoad nested;
+            CHECK(ScopedDeferredDocumentLoad::active());
+        }
+        CHECK(ScopedDeferredDocumentLoad::active());
+        REQUIRE(concrete.load_deferrable());
+    }
+    CHECK_FALSE(ScopedDeferredDocumentLoad::active());
+    REQUIRE(concrete.document_load_pending());
+    std::string error;
+    REQUIRE(session->complete_pending_load(&error));
+    REQUIRE_FALSE(concrete.document_load_pending());
+    REQUIRE(concrete.bridge() != nullptr);
+    auto* label = dynamic_cast<Label*>(concrete.bridge()->widget("kind"));
+    REQUIRE(label != nullptr);
+    CHECK(label->text() == "plugin");
+    session->poll(&error);
+    CHECK_FALSE(session->settling());
+
+    session->release_root();
+    CHECK_FALSE(concrete.load(&error)); // released: the session refuses loads
+    session.reset();                    // destroys through the interface
+
+    CHECK(scripted_ui_prewarm_runner().load() == &prewarm_scripted_ui);
 }
 
 // A view-first (deferred) document mounts inside poll() or

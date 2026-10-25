@@ -14,6 +14,13 @@ namespace pulp::examples::delay {
 
 class PulpDelayProcessor final : public format::Processor {
   public:
+    // Reads its parameters once per block, so it opts out of per-point
+    // automation: the VST3, AU v2 and CLAP adapters then write each
+    // automated parameter once per block and dense automation costs nothing.
+    bool wants_sample_accurate_parameters() const override {
+        return false;
+    }
+
     format::PluginDescriptor descriptor() const override;
     void define_parameters(state::StateStore& store) override;
     std::unique_ptr<view::View> create_view() override;

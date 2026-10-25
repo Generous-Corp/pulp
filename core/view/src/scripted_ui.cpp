@@ -1,4 +1,5 @@
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/scripted_ui_prewarm.hpp>
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/runtime/log.hpp>
@@ -16,6 +17,13 @@ namespace pulp::view {
 
 namespace {
 std::atomic<ScriptInspectorPortFactory> g_script_inspector_port_factory{nullptr};
+
+// Any binary that links session code can run a scripted editor, so it is the
+// one place that publishes the prewarm entry point to the editor glue.
+[[maybe_unused]] const bool g_prewarm_runner_installed = [] {
+    scripted_ui_prewarm_runner().store(&prewarm_scripted_ui, std::memory_order_release);
+    return true;
+}();
 } // namespace
 
 ScriptInspectorPort::~ScriptInspectorPort() = default;
@@ -247,23 +255,6 @@ void ScriptedUiSession::attach_gpu_surface(render::GpuSurface* gpu_surface) {
     }
     // Stashed in gpu_surface_ so that the next hot-reload rebuild_from_code
     // passes the same surface into the freshly-constructed WidgetBridge.
-}
-
-namespace {
-thread_local bool deferred_document_load_active = false;
-} // namespace
-
-ScopedDeferredDocumentLoad::ScopedDeferredDocumentLoad()
-    : previous_(deferred_document_load_active) {
-    deferred_document_load_active = true;
-}
-
-ScopedDeferredDocumentLoad::~ScopedDeferredDocumentLoad() {
-    deferred_document_load_active = previous_;
-}
-
-bool ScopedDeferredDocumentLoad::active() noexcept {
-    return deferred_document_load_active;
 }
 
 bool ScriptedUiSession::load(std::string* error) {

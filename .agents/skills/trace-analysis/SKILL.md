@@ -462,6 +462,20 @@ A good answer reads like this:
 > per editor open) and cache the compiled JS module. Re-opens should drop from
 > ~2.4 s to well under 500 ms.
 
+### Instantiation and first editor open: the `lifecycle` category
+
+The format adapters wrap host lifecycle calls in `lifecycle` spans:
+`vst3_initialize`, `vst3_setup_processing`, `vst3_set_active`,
+`vst3_create_view`, `vst3_editor_attached`, `clap_init`, `clap_activate` and
+`au_v2_initialize`. Capture with `--categories lifecycle,layout,text` to split
+"slow to instantiate" from "slow to open". Two things these spans showed that
+are easy to misread. The adapter phases themselves are tens of microseconds; a
+slow instantiation is almost always module load (dyld) or a static
+initializer, outside every span. And the text stack's one-time cost (building
+the platform font manager, about 15-18 ms for CoreText) lands in the first
+layout after `vst3_editor_attached` returns, so it does not show up as part of
+attach.
+
 ### Editor-open recipe for a scripted / imported plug-in editor
 
 Measure the open the way the host does it, and measure the *full UI drawn*,

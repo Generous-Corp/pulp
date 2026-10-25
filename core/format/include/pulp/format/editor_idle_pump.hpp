@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/format/view_bridge.hpp>
+#include <pulp/view/scripted_editor_session.hpp>
 #include <pulp/view/scripted_ui.hpp>
 
 #include <atomic>
@@ -30,7 +31,7 @@ inline std::function<void()> make_editor_idle_pump(ViewBridge& bridge) {
         if (bridge_ptr->poll_editor_reload()) {
             if (auto* v = bridge_ptr->view()) v->request_repaint();
         }
-        if (auto* session = bridge_ptr->scripted_ui()) {
+        if (view::ScriptedEditorSession* session = bridge_ptr->scripted_ui()) {
             session->poll();
         }
     };

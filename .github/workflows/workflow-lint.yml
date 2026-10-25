@@ -27,6 +27,8 @@ on:
       - 'tools/ci/release_path_changed.py'
       - 'tools/scripts/action_pin_lint.py'
       - 'tools/scripts/view_audio_archive_manifest.py'
+      # The manifest and its tests read listings through this reader.
+      - 'tools/scripts/nm_symbols.py'
       - 'tools/scripts/test_view_audio_archive_manifest.py'
       - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'
@@ -164,6 +166,8 @@ on:
       - 'tools/ci/release_path_changed.py'
       - 'tools/scripts/action_pin_lint.py'
       - 'tools/scripts/view_audio_archive_manifest.py'
+      # The manifest and its tests read listings through this reader.
+      - 'tools/scripts/nm_symbols.py'
       - 'tools/scripts/test_view_audio_archive_manifest.py'
       - 'tools/scripts/test_action_pin_lint.py'
       - '.github/schedule-backstop.json'

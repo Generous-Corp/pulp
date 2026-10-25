@@ -275,6 +275,62 @@ Format targets are only created when the corresponding SDK is available:
 
 On Linux and Ubuntu, requesting `AAX` in `FORMATS` is a configure-time error.
 
+### Shipped Module Size
+
+Three defaults keep shipped plug-in modules small. Each changes what a shipped
+binary contains, so each has an opt-out.
+
+**Dead stripping.** In every non-Debug Apple build the VST3, CLAP, AU v2, LV2
+and AAX modules link with `-dead_strip`, so code no entry point reaches is
+removed. AU v3 targets are not dead-stripped. The linker keeps everything
+reachable from an exported symbol (the format entry points), every static
+initializer and what it reaches (self-registering factories survive),
+Objective-C class and category metadata, and anything marked
+`__attribute__((used))`. What it can drop is code reached only by a runtime
+name lookup it cannot see: `dlsym()` of a symbol the module does not export,
+or an Objective-C class found only through `NSClassFromString()`. Export such a
+symbol (`__attribute__((visibility("default")))`), mark it `used`, or
+reference it from code that is reached.
+
+Opt out for every plug-in with `-DPULP_DEAD_STRIP_PLUGINS=OFF`, or for one
+module after `pulp_add_plugin()`:
+
+```cmake
+set_target_properties(MyPlugin_VST3 PROPERTIES PULP_DEAD_STRIP OFF)
+```
+
+Coverage: `plugin-module-dead-strip-PulpGain-<FORMAT>` checks the flag on
+PulpGain's modules, `cmake-plugin-dead-strip-switch` checks that the option and
+the property each remove it, and `test/test_host.cpp` loads and processes the
+dead-stripped Release `PulpGain.clap`. Opening a dead-stripped module's editor
+in every format is not covered by an automated test.
+
+**No script runtime unless the editor runs a script.** Editor glue that every
+plug-in links reaches a scripted editor only through
+`view::ScriptedEditorSession`'s virtual calls and a prewarm runner slot, so a
+plug-in whose editor runs no script (the generated AutoUI editor, or native
+views) links none of the JS engine, the widget bridge or the session code;
+about 5 MB of a stripped module. Linking follows code references, not a flag:
+`UI_SCRIPT`, or any code in the plug-in that constructs a
+`view::ScriptedUiSession`, links the runtime, and the session's static
+initializer installs the prewarm runner. A plug-in that loads a script at run
+time without declaring `UI_SCRIPT` opts back in simply by constructing its
+session in its own code; nothing else is needed. The one case this does not
+cover is reaching the runtime only by name at run time (`dlsym()`), which
+cannot work because nothing links it. Coverage:
+`plugin-module-no-script-runtime-PulpGain-<FORMAT>`.
+
+**Local symbols stripped at packaging.** `pulp ship package` and
+`tools/scripts/build_combined_installer.sh` ship a copy of each AU, VST3 and
+CLAP bundle with `strip -x` applied to its main executable; the build output
+keeps its symbols, and AAX is never touched. Before stripping, each writes a
+dSYM of the unstripped executable (`artifacts/symbols/<FORMAT>/<bundle>.dSYM`,
+or `<out>/symbols/<kind>/` for the installer script) under the UUID the
+stripped copy keeps, so crash reports from installed plug-ins still
+symbolicate; archive it with the release. Stripping happens at packaging, not
+at build time, so the opt-out is the packaging flag `--keep-symbols`, not a
+CMake option. See the `ship` skill for the details.
+
 ### Install Target
 
 `pulp-install-${target}` copies supported built bundles to platform-standard locations:

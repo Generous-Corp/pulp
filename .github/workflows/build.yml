@@ -3916,9 +3916,12 @@ jobs:
   ci-cause:
     name: ci-cause (advisory)
     needs: [build, macos, macos-merge-group, linux, windows]
+    # Use GitHub's native post-failure hook as well as the explicit dependency
+    # result check. The latter documents exactly whose logs this job reads.
     if: >-
       (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
       && !cancelled()
+      && failure()
       && contains(needs.*.result, 'failure')
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     continue-on-error: true

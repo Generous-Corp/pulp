@@ -110,6 +110,15 @@ set_tests_properties(cmake-au-v2-type-selection PROPERTIES
     LABELS "cmake;au;au-v2;midi"
     TIMEOUT 30)
 
+# SDL3 Linux X11 extension defaults: which SDL_X11_* options are defaulted OFF
+# because their development header is absent.
+add_test(NAME cmake-sdl3-linux-x11-defaults
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_sdl3_linux_x11_defaults.cmake)
+set_tests_properties(cmake-sdl3-linux-x11-defaults PROPERTIES
+    LABELS "cmake;sdl3;linux"
+    TIMEOUT 30)
+
 # Standalone document-type / exported-UTType declaration contract. Argument
 # validation runs under `cmake -P` everywhere; on macOS the same test also
 # configures a throwaway bundle project and reads the Info.plist CMake
@@ -123,6 +132,17 @@ add_test(NAME cmake-standalone-document-types
 add_test(NAME cmake-plugin-bundle-icon
     COMMAND ${CMAKE_COMMAND}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_bundle_icon.cmake)
+
+# PULP_DEAD_STRIP_PLUGINS and the per-module PULP_DEAD_STRIP property each
+# remove -dead_strip from an Apple plug-in module's link; the default keeps it.
+add_test(NAME cmake-plugin-dead-strip-switch
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_DEAD_STRIP_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-dead-strip-switch
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_dead_strip_switch.cmake)
+set_tests_properties(cmake-plugin-dead-strip-switch PROPERTIES
+    LABELS "cmake;plugin;packaging"
+    # Three throwaway configures, each paying C compiler detection.
+    TIMEOUT 180)
 set_tests_properties(cmake-standalone-document-types PROPERTIES
     LABELS "cmake;app;standalone;plist"
     # Runs in ~1.5s warm; the budget covers three throwaway project configures
@@ -165,6 +185,16 @@ add_test(NAME pulp-windows-target-arch
 set_tests_properties(pulp-windows-target-arch PROPERTIES
     LABELS "cmake;windows;packaging"
     TIMEOUT 30)
+
+# The platform a source install stamps: the real install-time script, run
+# under `cmake -P` for every target's OS/architecture, so a name the script
+# refuses fails here rather than in a native Intel or Android install.
+add_test(NAME pulp-source-install-platform
+    COMMAND ${CMAKE_COMMAND} -DPULP_TEST_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_source_install_platform.cmake)
+set_tests_properties(pulp-source-install-platform PROPERTIES
+    LABELS "cmake;packaging"
+    TIMEOUT 60)
 
 add_test(NAME pulp-gpu-provider-decision
     COMMAND ${CMAKE_COMMAND} -P
