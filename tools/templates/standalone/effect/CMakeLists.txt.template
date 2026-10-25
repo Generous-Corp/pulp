@@ -17,8 +17,8 @@ endif()
 # release archive is fetched and checked against its hash, which is quicker
 # than a git clone of the whole history.
 FetchContent_Declare(Catch2
-    URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.7.1.tar.gz
-    URL_HASH SHA256=c991b247a1a0d7bb9c39aa35faf0fe9e19764213f28ffba3109388e62ee0269c
+    URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.16.1.tar.gz
+    URL_HASH SHA256=d16bd1b8b2364918bd472cb216394acb93bde6784890df0d91bccfb3f28d777d
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     FIND_PACKAGE_ARGS 3 CONFIG
 )

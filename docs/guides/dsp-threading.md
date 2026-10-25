@@ -217,7 +217,9 @@ If you want the parameter change to take effect *within* a block
 instead of polling atomics inside the loop:
 
 * `param_events()` exposes the host-delivered sparse
-  `ParameterEventQueue` for the current block.
+  `ParameterEventQueue` for the current block. The VST3, AU v2 and CLAP
+  adapters leave it empty for a processor that overrides
+  `wants_sample_accurate_parameters()` to return false.
 * `ParameterEventQueue` is fixed-capacity; excess events are dropped,
   counted for the current block, and never trigger audio-thread allocation.
 * `format::EventBlock::audio_rate_modulations` carries dense

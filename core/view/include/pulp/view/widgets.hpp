@@ -1490,6 +1490,8 @@ public:
 private:
   static constexpr float kModulatedMarkerHalo = 6.0f;
   void paint_modulated_marker(canvas::Canvas& canvas);
+  // The stock thumb (slab or circle) at track position `pos`, 0..1.
+  void paint_stock_thumb(canvas::Canvas& canvas, float pos, canvas::Color color);
   bool has_modulated_ = false;
   float modulated_ = 0.0f;
   float value_ = 0.0f;
@@ -1682,6 +1684,18 @@ private:
     float skin_track_width_ = 0.0f;
     bool has_skin_track_width_ = false;
 };
+
+/// The SDF shape a widget's chart shader is drawn on: `flat_arc` for a Knob's
+/// value arc, `stadium` for a Fader's track (a vertical Fader turns it a
+/// quarter counter-clockwise, so `t` runs from the bottom up). Empty for a
+/// widget that draws no chart.
+std::optional<canvas::Canvas::SDFShape> widget_chart_shape(const View& view);
+
+/// Height of the stadium a Fader's chart is drawn in, given the fader's
+/// extent across its track: half of it, kept between 8 and 24 units.
+inline float fader_chart_track_thickness(float cross_extent) {
+    return std::clamp(cross_extent * 0.5f, 8.0f, 24.0f);
+}
 
 // ── UA form-control skins ───────────────────────────────────────────────────
 // An imported `appearance: auto` form control carries no CSS paint: the
@@ -2244,6 +2258,106 @@ private:
     std::optional<canvas::Color> accent_color_;
 
     void paint_chromium_refresh_(canvas::Canvas& canvas);
+};
+
+// ── ButtonSurface ───────────────────────────────────────────────────────────
+// The themed surface of an imported `appearance: auto` HTML <button>: Chromium's
+// push-button background, border and per-state colours, plus its focus-visible
+// ring. It paints nothing else; the button's content (labels, icons) is its
+// children, laid out like any container's. Only an explicitly constructed
+// ButtonSurface wears this skin; TextButton and generated UI are unaffected.
+//
+// The focus ring reaches one CSS px (two device px at scale 2) outside the
+// view's bounds, as Chromium's does; it is painted in paint() before the
+// children, which never reach the 2px band at the edge it covers.
+
+class ButtonSurface : public View {
+  public:
+    using ColorScheme = UaColorScheme;
+    using ControlState = UaControlState;
+
+    ButtonSurface() {
+        set_access_role(AccessRole::button);
+    }
+
+    /// The page colour scheme the palette resolves from (CSS `color-scheme`).
+    /// CSS `accent-color` does not apply: Chromium paints buttons without it.
+    void set_color_scheme(ColorScheme scheme) {
+        if (color_scheme_ == scheme)
+            return;
+        color_scheme_ = scheme;
+        request_repaint();
+    }
+    ColorScheme color_scheme() const {
+        return color_scheme_;
+    }
+
+    /// CSS `:active`: the pressed palette while true.
+    void set_pressed(bool pressed) {
+        if (pressed_ == pressed)
+            return;
+        pressed_ = pressed;
+        request_repaint();
+    }
+    bool is_pressed() const {
+        return pressed_;
+    }
+
+    /// CSS `:focus-visible`: paints Chromium's two-colour focus ring.
+    void set_focus_visible(bool visible) {
+        if (focus_visible_ == visible)
+            return;
+        focus_visible_ = visible;
+        request_repaint();
+    }
+    bool is_focus_visible() const {
+        return focus_visible_;
+    }
+
+    /// Disabled when not enabled, then pressed, then hovered under the pointer,
+    /// otherwise normal.
+    ControlState control_state() const;
+
+    /// Everything the skin paints, in local coordinates, in paint order: the
+    /// `lighten` layer (disabled only) and `fill` on `surface`, the `border`
+    /// stroke on `surface`, then, when focus-visible, the outer ring and the
+    /// inner ring over it.
+    struct ChromiumRefreshParts {
+        /// A box under 5 device px a side is one solid `fill` rect on `bounds`.
+        bool solid = false;
+        Rect bounds;
+        Rect surface;     ///< `bounds` inset half the border width
+        float radius = 0; ///< corner radius of `surface` and both rings
+        float border_width = 1.0f;
+        std::optional<canvas::Color> lighten;
+        canvas::Color fill{};
+        canvas::Color border{};
+        bool focus_ring = false;
+        Rect outer_ring; ///< stroke centreline of the outer ring
+        Rect inner_ring; ///< stroke centreline of the inner ring
+        float ring_width = 0;
+        canvas::Color outer_ring_color{};
+        canvas::Color inner_ring_color{};
+    };
+
+    /// Pure layout + palette of Chromium's push button for `bounds`. Chromium
+    /// sizes the border, radius and ring in whole device pixels, so
+    /// `device_scale` is device pixels per local unit (`Canvas::backing_scale()`
+    /// when painting). The ring colours are the macOS ones, where the inner
+    /// ring keeps the outline colour in a dark scheme.
+    static ChromiumRefreshParts chromium_refresh_parts(Rect bounds, ControlState state,
+                                                       ColorScheme scheme, bool focus_visible,
+                                                       float device_scale = 1.0f);
+    /// The parts for this view, in self_paint_bounds(): the captured,
+    /// CSS-edge-snapped box when the importer recorded one, else local_bounds().
+    ChromiumRefreshParts chromium_refresh_parts(float device_scale = 1.0f) const;
+
+    void paint(canvas::Canvas& canvas) override;
+
+  private:
+    ColorScheme color_scheme_ = ColorScheme::light;
+    bool pressed_ = false;
+    bool focus_visible_ = false;
 };
 
 // ── ToggleButton ────────────────────────────────────────────────────────────

@@ -33,6 +33,9 @@ class GpuNeuralModel {
         runtime, state_schema;
     std::uint32_t sample_rate = 0;
     std::uint32_t block_size = 0;
+    /// Adapter objects the public factory created. Declared before the
+    /// channel models, which point into them, so they are destroyed last.
+    std::vector<std::shared_ptr<void>> owned;
     /// One independent causal state per audio channel.
     std::vector<std::unique_ptr<detail::StreamingModel>> channel_models;
     /// Present only for families with a GPU kernel.
