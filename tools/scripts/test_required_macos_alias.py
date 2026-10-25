@@ -74,6 +74,11 @@ require(
 )
 require("Skip-safe PR/dispatch" in pr_alias, "native skip must remain green")
 require(
+    "macos_deferred" not in pr_alias and "deferred" not in pr_alias,
+    "an unapproved PR head's `macos` comes from the native leg's contract lane, "
+    "never from this bootstrap",
+)
+require(
     "macos-pr-unused" in pr_alias,
     "native PRs must not emit a duplicate required context from the bootstrap",
 )

@@ -180,6 +180,21 @@ route the build through `tools/ci/governed-build.sh` without an explicit
 `--parallel` cap. The governor owns the worker share and build-directory lock;
 the emulator and fixture execution steps remain separate.
 
+`governed-build.sh` treats an explicit `-j`/`--parallel` on the build command
+(also after `--`) as a request: the lower of it and `PULP_BUILD_JOBS` caps the
+lease, and the flag is rewritten to the final share before the command runs.
+A literal count can therefore lower a build's share but never raise it past
+the lease, and a bare flag cannot go unbounded. Before that rule the flag
+silently overrode the governor (a `-j4` build reserved and logged the full
+profile share). Covered by the `explicit`/`flag` cases in
+`tools/ci/test_governed_build.py`.
+
+A `CMAKE_BUILD_PARALLEL_LEVEL` the caller exports is the same kind of request:
+the lowest of it, any flag, and `PULP_BUILD_JOBS` wins. The wrapper exports its
+own share under that name, which used to replace the caller's value, so
+`CMAKE_BUILD_PARALLEL_LEVEL=4` ran at the full lease. Covered by the
+`caller_parallel_level` cases.
+
 The TSan workflow keeps its SignalGraph selection exact and bounded: include
 the compile-first lifecycle cases, mutation-lock and prepare-swap publication
 cases, and the routed and parallel re-prepare/process race hammers. Do not
@@ -362,7 +377,9 @@ runner failure or gate verdict, with a class and a confidence.
 The required `macos` context is reported by more than one job: the macOS matrix
 leg, which builds and tests, and bootstrap jobs that claim the name without
 running anything — when no native input changed, or when a protected receipt is
-reused. A reused receipt produces a **three-step** green job (`Set up job`, the
+reused. With `PULP_MACOS_PR_GATING` on, an unapproved pull-request head's own
+macOS leg is green after only its configure-only contract lane (`deferred`
+tier). A reused receipt produces a **three-step** green job (`Set up job`, the
 bootstrap step, `Complete job`). In the checks list it is indistinguishable
 from a real pass, and reasoning from one as evidence that the suite passed has
 already cost hours of wrong conclusions.
@@ -384,6 +401,59 @@ affected tier can select nothing), so `--require-executed` refuses it.
 Each bootstrap job also writes a banner into its own job summary saying no
 build and no test step ran. A step count near three on a `macos` job is the
 tell.
+
+## macOS PR CI runs after approval; the arming path labels approved heads
+
+**Behind `PULP_MACOS_PR_GATING`, default off.** Until the repository variable is
+exactly `true`, every pull request runs the full macOS lane, label events do
+nothing, and none of the rest of this section applies. Do not set it until
+Shipyard #929 (queue-arm-guard refuses a head whose required `macos` check is
+tier `deferred`) is merged AND verified live, by arming a deferred head and
+seeing the refusal. Design, measurements,
+decision-row coverage and rollback: "macOS on a pull request waits for
+approval" in `docs/guides/local-ci.md`.
+
+With gating on, a pull request's macOS leg (the job named `macos`) runs in one
+of two lanes. `tools/ci/macos_pr_lane.py` picks it:
+
+- **Contract lane**, on every head the fleet App has not approved: configure,
+  the `pr-fast` tier minus `needs-build` members, and the `pr-guard` tier (the
+  A2T acceptance and verifier selftests). There is no build. It takes about
+  3.5 min, against a 23.4 min median for the full job. Its green carries a
+  `shipyard-test-tier` annotation of `deferred`.
+- **Full lane**, on a head the App labelled `macos-ci`: everything the PR head
+  ran before, plus `pr-guard`. The App starts it by dispatching `build.yml`
+  on the branch.
+
+`merge_group`, `push` and dispatch are unchanged; the merge queue always runs
+macOS.
+
+- **Only `shipyard-local[bot]`'s `macos-ci` counts.** On `opened` or
+  `reopened` the lane checks who last applied the label. To force the full
+  lane, dispatch `build.yml` on the branch.
+- **`build.yml` does not listen for `labeled`.** A label event's run is a newer
+  check suite with no `macos` check run, and the merge queue then refuses to
+  enqueue with "Required status check "macos" is expected" although the
+  earlier run's `macos` passed. Never add `labeled` to a workflow that owns a
+  required context.
+- **Approve first, then the full lane, then arm.** A reviewer may APPROVE
+  before the full macOS run. The sweep labels the approved head, and arms only
+  once the head's latest `macos` check run is no longer `deferred`. GitHub then
+  holds the auto-merge until that run succeeds. If the full lane fails, the PR
+  needs a fix, and the fix is a new head, which needs a new verdict.
+- **A push disarms and unlabels.** `macos-ci-label-reset.yml` disables
+  auto-merge on `synchronize` (otherwise the new head's contract-lane green
+  would merge it) and removes `macos-ci`. A queued PR leaves the queue on push
+  anyway, and the fenced carrier's update-branch counts as a push. Re-arming
+  needs a fresh verdict, the label, and a full-lane success.
+- **A red contract lane is a real failure** of a pr-fast or pr-guard check.
+  Fix it on the PR; it is exactly what would otherwise eject a batch. If the
+  failing check needs a built target, add it to `PULP_PR_FAST_NEEDS_BUILD` in
+  `test/cmake/pr_fast_tests.cmake`.
+- **The App's dispatch must use the App's token.** A dispatch made with a
+  workflow's `GITHUB_TOKEN` starts no workflow run.
+- **`gate_suite_executed.py` reads both lanes as `tier-only`.** Use the
+  `deferred` annotation, or the skipped `Build` step, to tell them apart.
 
 ## Diff-scoped gates on merge_group use the entry's own base
 
@@ -778,6 +848,34 @@ on apply mode. The protected-main worker must stay repository-serialized,
 perform a dry run first, and prove one live exact-head canary before scheduled
 activation.
 
+## The control-shipping scanner reads raw bytes: two CMake quirks it depends on
+
+`tools/cmake/check_control_shipping_artifact.cmake` reads each linked image
+with `file(READ)` and searches the bytes with `string(FIND)`. Two CMake
+behaviours make that correct only as written:
+
+- **NUL truncation.** Several CMake paths stop a value at its first NUL byte,
+  measured on CMake 4.3 and 3.24.3: `${var}` in a `-P` script with no
+  `cmake_minimum_required` on 3.x (old CMP0053 rules), `set(... PARENT_SCOPE)`
+  on every version (a 44 MB image returned from a function arrived as 5 bytes
+  while the function's own length check passed), and `string(REPLACE)` /
+  `string(REGEX)` on every version. `string(LENGTH)` and `string(FIND)` see
+  the whole value. Truncation fails OPEN for the forbidden-marker checks. So
+  the scanner pins `cmake_minimum_required(VERSION 3.24)`, reads with a macro
+  (the bytes land in the caller's scope), touches the bytes only with LENGTH
+  and FIND, fails closed when the read is shorter than half the file, and has
+  `_pulp_binary_contains` re-check the searched length against the recorded
+  `<var>_length`. Never remove any of these; a test host on 4.x cannot catch
+  the 3.x case by itself.
+- **CRLF folding.** `file(READ)` turns each CRLF pair into LF, so the value is
+  shorter than the file by the number of folded pairs, at most half of it.
+  Markers contain no CR or LF, so the fold cannot hide or create one.
+
+The matrix test carries a NUL-before-marker and a CRLF-before-marker leak, and
+`_pulp_binary_contains` refuses markers that are under 14 bytes, contain
+whitespace or contain `;` (`-DPULP_CONTROL_MARKER_SELFTEST=<marker>` exercises
+the refusal).
+
 ## Every test file must run somewhere
 
 `unregistered-tests-check` fails when a tracked `tools/**/test_*.py` is invoked by
@@ -788,6 +886,22 @@ its assertions never execute, and a local break-confirm is its only evidence.
 Files that predated the check are in `tools/scripts/unregistered_tests_baseline.json`,
 which only shrinks: registering or deleting one fails the check until its row is
 removed. Register a new test file in the same PR that adds it.
+
+### An X11 case that skips on the Linux leg did not run
+
+The Linux build job has no display, so an X11 test that opens one with
+`XOpenDisplay(nullptr)` either skips or, written as `WARN(); return;`, passes
+having asserted nothing. The Linux job installs `xvfb`, and where `xvfb-run` is
+found at configure time `pulp-test-plugin-view-host-factory` runs every case
+through `xvfb-run -a` (the target's `CROSSCOMPILING_EMULATOR`, which Pulp's
+Catch discovery passes to each generated test), under `RESOURCE_LOCK pulp_xvfb`
+(`-a` races when several start at once) and a 120 s timeout. Those cases also
+get `PULP_TEST_REQUIRE_X11_DISPLAY=1`, so a missing display there fails instead
+of skipping. A new X11 suite needs the same wiring, or its skip is the only
+evidence it has. A case that holds a server grab must do nothing that waits on
+the server: the Linux plug-in host builds GPU surfaces regardless of
+`Options::use_gpu`, and they make X round trips on resize and paint, so such a
+case sets `PULP_TEST_X11_HOST_CPU_ONLY=1` and stays unattached.
 
 ## Runner timing metrics
 
@@ -944,6 +1058,21 @@ release name, which is why an identical `stable` is selected with
 `.githooks/post-checkout` trusts a new worktree's own `.mise.toml` (null old
 sha and branch flag 1 only) and never fails the checkout. Do not widen it to a
 parent directory or add `trusted_config_paths` roots (contract row 28).
+
+## Local Windows lanes keep nothing between jobs
+
+The macpro x64 slot rolls every disk back to its golden before and after each
+job, and the m5s ARM64 lane discards its overlay, so `actions/cache` and any
+"warm build dir" idea do nothing there. Caches reach a local Windows job only
+through the runner's job environment: `PULP_SKIA_CACHE_ROOT` and
+`PULP_SHARED_FETCHCONTENT_SOURCE_DIR` (pointing into the golden), and
+`PULP_CCACHE_REMOTE_STORAGE` (a host-served ccache;
+`tools/ci/ccache_remote_storage.py` makes non-main jobs read-only). The jobs
+build with Ninja and `cl` (`tools/ci/windows_build_env.ps1`), because the Visual
+Studio generator ignores the ccache launcher. If a Windows job's `ccache per-job`
+line reads `cacheable 0`, check for `-- Building for: Visual Studio` in its
+configure log before checking the cache. The bake and server steps are in
+`docs/guides/local-ci.md`, "Windows build caches".
 
 ## Android minimum-API allocation check
 
@@ -1219,7 +1348,7 @@ boundary) → every `pulp-rust-*` test,
 because cargo, not a CMake target, builds that crate, so the projection never
 reaches it and a Rust failure otherwise surfaces only in the merge group; it is
 a required family, so a leg that stops registering those tests fails the step).
-A test is tied to a target when any path its command names is that target's artifact or a bundle directory (`.clap`, `.vst3`, `.app`, ...) holding it, including the value of `-D<VAR>=`, `--flag=` or `NAME=` assignments and `|`/`;` lists (`changed_surface_inventory.command_path_refs`): exact-argument matching alone missed every CMake-script test that takes its binary as `-DCLI=`, so they ran only in the merge group. Direct edges are added even when
+A test is tied to a target when any path its command names is that target's artifact or a bundle directory (`.clap`, `.vst3`, `.app`, ...) holding it, including the value of `-D<VAR>=`, `--flag=` or `NAME=` assignments and `|`/`;` lists (`changed_surface_inventory.command_path_refs`): exact-argument matching alone missed every CMake-script test that takes its binary as `-DCLI=`, so they ran only in the merge group. A test that reads what CMake records about a target rather than an artifact of it (a generated link or flags file, a header boundary) declares the targets with `set_tests_properties(<t> PROPERTIES PULP_SELECT_WITH_TARGETS "a;b")`. On the PR head, a test whose command names an edited file (`-DGUARD=<file>`) or whose `cmake -P` script includes an edited `.cmake` module by name runs first as a merge-only check, because an edit under `tools/cmake/` makes the projection too wide to use. `cmake -E env ... <script>` and `python -m unittest discover -s -p` registrations are declared in `test/ctest_script_inputs.json` like any other script test. Direct edges are added even when
 the projection is too wide or the diff is docs-only: tests whose declared inputs
 (`test/ctest_script_inputs.json`) the diff touches, script tests the gates.sh
 rules select, the tests running a program whose own source changed, and the
@@ -4273,7 +4402,8 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   the receipt's selected/passed counts and source run, or refused, with the
   protected-base verifier's reason) and a job-summary table; every gate test step
   publishes a `shipyard-test-tier` annotation (`fast` on PR heads, `full`,
-  `receipt-reused`, `not-required`). The checked-out script only renders these
+  `receipt-reused`, `not-required`, and `deferred` from a PR head's
+  contract lane, without `macos-ci`). The checked-out script only renders these
   after the base verifier decided — `test_build_workflow.py` pins that the
   workspace copy is only ever called for `note`/`publish-notes`.
 - **"Is the gate slower than usual on this host?"** is `shipyard metrics watch

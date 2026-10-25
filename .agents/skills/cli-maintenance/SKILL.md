@@ -434,7 +434,11 @@ upgrade installs, and their tests compare against
 `tools/import-design/browser_capture/runtime_manifest.txt`. A module added to
 the manifest alone passes a source build and fails both upgrade tests; the
 release `common_cli_members` in `tools/scripts/release_product_matrix.json`
-needs it too. Update all four together.
+needs it too. Update all four together. A module missing from the manifest
+does not show up as a missing file. The built `pulp-import-design` runs its
+staged `browser_capture-v1/` copy, the capability probe hits
+`ERR_MODULE_NOT_FOUND`, and discovery reports that the system Chrome "does not
+provide the required headless/CDP capture capabilities".
 
 ## Adding a CLI Command — Full Checklist
 
@@ -788,6 +792,15 @@ A source-only row reports
 without that SDK registry reports the registry unavailable. Do not search a
 different checkout or SDK, or another installed SDK version.
 
+The registry is installed into every SDK (`share/pulp/authority-navigation.json`),
+so a row may describe a private authority but must not name the private
+repository or a file inside it. The `dsp-survey-admission` row says "the DSP
+survey admission protocol in the maintainers' private planning repository";
+the Python and C++ validators pin that exact text, `test_cli_shellout.cpp` pins
+the registry's SHA-256, and `cmake-share-files-no-host-identifiers` /
+`cmake-pulp-install-layout` fail on a private repo, host name, home path or user
+name anywhere under share/pulp (allowlist entries carry their reason).
+
 This is intentionally CLI-only in the parity baseline. It describes the
 separate offline MCP authority and the exact-instance live-control route; it
 does not wrap either as a new generic MCP or control operation. The live row
@@ -926,6 +939,17 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
 - Output path flags should accept both nested paths and bare filenames; guard
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
+
+### `pulp content` archives are size-budgeted before extraction
+
+`validate` / `install` / `update` admit a `.pulpcontent` archive from its central
+directory before inflating anything: 4 GiB total, 1 GiB per entry and 65536
+entries by default; `--max-pack-bytes <n>` lowers the byte caps and is a clamp,
+never a raise (`clamp_content_install_bytes`). The budget (`pulp::state::ContentSizeBudget`
+in `core/state/include/pulp/state/content_install_limits.hpp`) is shared with
+the runtime installer, so a cap change belongs in that header, not in
+`content_commands.cpp`. The CLI parses options per subcommand, so a new content
+flag is added to each parser (and to `print_usage`), not in one place.
 
 ### `pulp build --seed-build` is best-effort by contract
 
@@ -2170,6 +2194,28 @@ a stripped build uses `PULP_BUILD_TESTS=OFF`.
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
 
+## `pulp create` templates: a placeholder or file has four owners
+
+A `{{VAR}}` placeholder or a new template file must be known in four places,
+and missing any one fails somewhere different:
+
+- `tools/cli/cmd_create.cpp` (the substitution map and the file-rename map) and
+  `experimental/pulp-rs/src/cmd/create.rs` (the same two maps for the Rust
+  front end). Missing one scaffolds a project with a literal `{{VAR}}` in it.
+- `test/cmake/create_template_tests.cmake`, which expands the plugin templates
+  at configure time and compiles them as `pulp-test-create-template-*`. An
+  unknown placeholder fails the Pulp configure itself, with the name. A new
+  source file must also be compiled there, or the template's test fails to
+  link (the processor body moved into `processor.cpp.template` hit both).
+- `tools/scripts/verify_create_templates.py` (`KNOWN_TEMPLATE_VARS` and the
+  required-files list), which runs without a build.
+
+The effect and instrument templates keep `process()` in their own source,
+listed under `SOURCES`, and the generated test links `<target>_Core` rather
+than compiling that source again. An edit to the processor body then
+recompiles one object and relinks each format; when the body lived in the
+header, every format's entry TU and the test recompiled it.
+
 ## The macOS CLI force-load list names implementation archives, not modules
 
 `tools/cli/CMakeLists.txt` force-loads a fixed list of static archives into
@@ -2181,6 +2227,20 @@ the example: it left `pulp-view-core` for `pulp-design-import`, and only
 force-loading `pulp-view-core` would no longer pull the importer's objects.
 Guard each entry with `if(TARGET …)` (the importer target exists only with
 `PULP_ENABLE_DESIGN_IMPORT=ON`).
+
+## Configure defaults carry `-DPULP_DEV_BUILD=ON`
+
+`configure_default_args` (`tools/cli/configure_defaults.hpp`, mirrored in
+`experimental/pulp-rs/src/cmd/orchestrate.rs`) adds `-DPULP_DEV_BUILD=ON` on
+a fresh configure or when the cache never recorded the option, and keeps a
+recorded value; `create_standalone_configure_command` passes it outright.
+That is what records the on-disk `ui.js` hot-reload path in a developer
+build. `pulp ship sign|package|release` on a dev build dir configure and build
+`build-ship/` with the option off and ship from there
+(`ship_dev_build_guard.hpp`; `--allow-dev-build` ships `build/` as it is).
+Keep the two `configure_default_args` and their tests
+(`test/test_cli_configure_defaults.cpp`, the Rust unit + parity tests) in
+step when changing either.
 
 ## CLI Git/CMake shell helpers
 

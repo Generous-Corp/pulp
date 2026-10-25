@@ -75,6 +75,10 @@ struct GpuAudioNodeDescriptor {
 
 namespace pulp::gpu_audio {
 
+namespace detail {
+struct RealtimeGpuNodeBinding;
+} // namespace detail
+
 /// A unit of audio work the transport schedules onto a non-real-time worker.
 ///
 /// Lifecycle:
@@ -149,6 +153,14 @@ public:
     /// budget. The default holds nothing to release.
     virtual bool release_bounded(std::uint64_t /*budget_ns*/) noexcept {
         return true;
+    }
+
+    /// Private transport hook, not for node authors: a node that the GPU audio
+    /// transport drives through a stamped realtime path describes that path
+    /// here. Returns false for a node the transport drives through its staged
+    /// worker path, which is the default.
+    virtual bool bind_realtime_path(detail::RealtimeGpuNodeBinding& /*binding*/) noexcept {
+        return false;
     }
 };
 

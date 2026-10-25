@@ -2421,11 +2421,16 @@ static void emit_js_text_node(const NativeEmit& e) {
     // into the next flex sibling (visible bug: "FILTER & EQHOLLOW
     // PUNCH" — the EQ label overflows its 77-px slot, painting on
     // top of the dropdown's "Hollow Punch" text).
+    // A run whose captured layout is in use (a control's value text, which
+    // has no basis, included). A rejected basis rewraps, so it stays soft.
+    const bool captured_run =
+        has_browser_line_layout || node.attributes.count("control_value_of") != 0;
     if (node.style.width) {
         bool uppercase = node.style.text_transform &&
                          *node.style.text_transform == "uppercase";
         float w = *node.style.width;
-        if (uppercase) w *= 1.20f;  // empirical: caps run ~15-20% wider
+        if (uppercase && !captured_run)
+            w *= 1.20f; // empirical: caps run ~15-20% wider
         ss << ind << "setFlex('" << id << "', 'min_width', " << w << ");\n";
 
         // Multi-line text box: when the design's own box is taller than a
@@ -2439,7 +2444,8 @@ static void emit_js_text_node(const NativeEmit& e) {
         // (height ≈ one line, e.g. a title) is intentionally NOT bounded
         // here: forcing its narrow hug-width as a hard wrap box would make
         // it wrap when Pulp's font metrics run a hair wider than Figma's,
-        // breaking a title that the design drew on one line.
+        // breaking a title that the design drew on one line. A captured run
+        // takes its box as native does: it is the width Chromium laid it out at.
         // Multi-line only when the box clears ~1.8 line boxes. Prefer the
         // IR's declared line_height; when absent assume a tight font*1.2
         // (a single rendered line), NOT font*1.4 — the looser fallback let
@@ -2454,7 +2460,7 @@ static void emit_js_text_node(const NativeEmit& e) {
             *node.style.text_overflow == "ellipsis";
         const bool needs_multiline =
             (multiline_box && !browser_single_line) || browser_wrapped;
-        if (needs_multiline || ellipsis_clip) {
+        if (needs_multiline || ellipsis_clip || captured_run) {
             ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
             if (needs_multiline && !has_browser_line_layout)
                 ss << ind << "setMultiLine('" << id << "', true);\n";

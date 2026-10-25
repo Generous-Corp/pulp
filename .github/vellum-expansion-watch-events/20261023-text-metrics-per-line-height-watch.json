@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261023-text-metrics-per-line-height-watch",
+  "created_at": "2026-10-23T03:57:47Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "TextShaper's multi-line metrics now take each SkParagraph line's own height and the max ascent, descent and leading over all lines, through a new public pure function paragraph_text_extents. Single-style single-line text measures exactly as before; only multi-line text whose later lines resolve a taller fallback face gets taller extents. Pulp continues to own this canvas target under the 2026-10-04 design-import refactor inheritance decision; Vellum inherits the rule when that target adopts the Vellum package. No design-import, Chromium, rendering, packaging or source-authority boundary moves.",
+  "tests": [
+    "ctest --test-dir build -R 'Paragraph extents take a taller later line'",
+    "ctest --test-dir build -R 'SkParagraph reports LineMetrics fHeight per line'",
+    "ctest --test-dir build -R 'TextShaper multiline metrics enclose each line shaped alone'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": true
+}

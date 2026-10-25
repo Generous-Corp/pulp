@@ -4,8 +4,9 @@
 # New projects copy these templates verbatim, so a template that does not
 # compile, or whose generated test fails, ships a broken first build to every
 # user who scaffolds that type. Each plugin template's processor header and
-# test are expanded here with fixed placeholder values and compiled against
-# the in-tree SDK, the same way the generated CMakeLists.txt builds them.
+# test (and its processor source, where the type has one) are expanded here
+# with fixed placeholder values and compiled against the in-tree SDK, the same
+# way the generated CMakeLists.txt builds them.
 
 set(_pulp_create_template_types gain effect app instrument bare)
 set(_pulp_create_template_root "${CMAKE_SOURCE_DIR}/tools/templates")
@@ -22,6 +23,7 @@ function(_pulp_expand_create_template type in_file out_file)
             "NAMESPACE=${lower}"
             "FACTORY_NAME=${lower}"
             "HEADER_NAME=${lower}.hpp"
+            "SOURCE_NAME=${lower}.cpp"
             "TARGET_NAME=${class}"
             "MANUFACTURER=Pulp"
             "MANUFACTURER_CODE=Pulp"
@@ -70,8 +72,17 @@ foreach(_type IN LISTS _pulp_create_template_types)
     _pulp_expand_create_template(${_type}
         "${_src_dir}/test.cpp.template" "${_out_dir}/test_tplcheck_${_type}.cpp")
 
+    # Types whose processor body lives in its own source compile it here too,
+    # as the generated CMakeLists.txt lists it under SOURCES.
+    set(_extra_sources "")
+    if(EXISTS "${_src_dir}/processor.cpp.template")
+        _pulp_expand_create_template(${_type}
+            "${_src_dir}/processor.cpp.template" "${_out_dir}/tplcheck_${_type}.cpp")
+        list(APPEND _extra_sources "${_out_dir}/tplcheck_${_type}.cpp")
+    endif()
+
     set(_target pulp-test-create-template-${_type})
-    add_executable(${_target} "${_out_dir}/test_tplcheck_${_type}.cpp")
+    add_executable(${_target} "${_out_dir}/test_tplcheck_${_type}.cpp" ${_extra_sources})
     target_include_directories(${_target} PRIVATE "${_out_dir}")
     target_link_libraries(${_target} PRIVATE pulp::format Catch2::Catch2WithMain)
     catch_discover_tests(${_target}

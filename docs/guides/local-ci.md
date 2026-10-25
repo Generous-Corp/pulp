@@ -846,6 +846,103 @@ run green on the new one; rolling back to it is the recovery. The evaluation
 license expires 180 days after installation (`slmgr /dlv` shows the time left),
 so install a fresh evaluation into a new golden before then.
 
+#### Windows build caches: what the workflows read, and the operator runbook
+
+Both Windows lanes keep nothing between jobs (the macpro slot rolls every disk
+back; the m5s ARM64 lane discards its overlay), so a cache only helps when it is
+baked into the golden or served by the host. The workflows already read the
+three hooks below; each is inert until a runner sets it:
+
+| Variable (runner job environment) | Read by | Unset |
+|---|---|---|
+| `PULP_SKIA_CACHE_ROOT` | `build.yml` configure (`PulpSkiaCache.cmake`) and the `cross-platform-check.yml` Windows Skia step (`fetch_skia_for_release.py --cache-root`) | `build.yml` uses `~/.cache/pulp/skia`; cross-platform-check fetches into `external/skia-build` as before |
+| `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` | `setup.sh` (`fetchcontent_cache_root`) | `%LOCALAPPDATA%\Pulp\fetchcontent-src` |
+| `PULP_CCACHE_REMOTE_STORAGE` | `tools/ci/ccache_remote_storage.py`, which sets `CCACHE_REMOTE_STORAGE` | nothing is written; ccache, when present, uses only its job-local cache |
+
+Both Windows jobs build with Ninja and `cl` from the developer environment
+(`tools/ci/windows_build_env.ps1`), because the Visual Studio generator ignores
+the compiler launcher: under it ccache counted `cacheable 0`, against 2394 for
+the same build under Ninja. The script uses a `ccache` already on `PATH`,
+installs one with `choco` when `choco` exists, and otherwise builds without a
+compiler cache and says so (the macpro golden has no `choco`).
+
+`ccache_remote_storage.py` gives write access only to code already on `main`:
+`push` and `schedule` on `refs/heads/main`, `workflow_dispatch` on
+`refs/heads/main`, and `merge_group`. Every other job gets the same URL with
+ccache's `|read-only` attribute. That attribute is honored by ccache, not
+enforced by the server, so it only separates honest jobs. Today the local
+Windows lanes run only operator dispatches. If pull-request code is ever routed
+to them, give PR jobs a separate pool and a storage endpoint they cannot write,
+as the Linux `pulp-trusted-*` and `pulp-pr-safe-*` pools are separated.
+
+**Operator runbook.** Apply this when the fleet freeze lifts. None of it is
+applied yet, and every step is a host or golden change.
+
+Golden prerequisites, as the x64 golden stands today: it has Windows PowerShell
+5.1 but **no PowerShell 7** (a `shell: pwsh` step fails with `pwsh: command not
+found`), and **no `choco`**. The workflows are written for that:
+`tools/ci/windows_build_env.ps1` runs under `shell: powershell` and needs neither.
+Any new Windows step for these lanes must use `shell: powershell` or `bash`
+unless the golden gains PowerShell 7. Tools the jobs need (ccache below) must be
+baked in, not installed per job.
+
+1. **Bake the Skia/Dawn generation and the source prime into the x64 golden.**
+   Follow "Refreshing the golden" above. While the VM is booted from the current
+   golden, in the guest as `ci`:
+
+   ```powershell
+   git clone --depth 1 https://github.com/Generous-Corp/pulp.git C:\pulp-bake
+   cd C:\pulp-bake
+   $env:PULP_SHARED_FETCHCONTENT_SOURCE_DIR = 'C:\pulp-cache\fetchcontent-src'
+   bash ./setup.sh --ci --deps-only
+   python tools/scripts/fetch_skia_for_release.py windows-x64 --cache-root C:/pulp-cache/skia
+   python tools/scripts/fetch_skia_for_release.py windows-x64 --cache-root C:/pulp-cache/skia --validate-only
+   ```
+
+   Then add these lines to `B:\actions-runner\.env`. The runner exports its
+   `.env` to every job.
+
+   ```
+   PULP_SKIA_CACHE_ROOT=C:/pulp-cache/skia
+   PULP_SHARED_FETCHCONTENT_SOURCE_DIR=C:/pulp-cache/fetchcontent-src
+   ```
+
+   Remove `C:\pulp-bake` afterwards. Install ccache in the guest too (the portable release zip from
+   ccache's GitHub releases, unpacked into a directory on the machine `PATH`).
+   Check thin-pool room with `macpro-governor.sh status` first: the source prime
+   is about 2.2 GB and the Skia generation about 0.4 GB. Snapshot under a new
+   dated name and switch `PULP_WINDOWS_GOLDEN_SNAPSHOT`, as in "Refreshing the
+   golden".
+
+   Because the caches live on a snapshot disk, a job can read them but anything
+   it writes there is rolled back. A pin bump therefore costs a fetch on every
+   job until the next bake, never a stale build: the Skia generation is keyed by
+   the asset sha256 and `setup.sh` re-fetches a source whose ref changed.
+
+2. **Serve a shared ccache from the lane host.** On macpro, run an HTTP server
+   that supports ccache's `http` remote storage (GET, PUT and HEAD; nginx with
+   `dav_methods PUT; create_full_put_path on;` is enough). Root it on host
+   storage outside `local-lvm` snapshots, listen only on the address the slot's
+   VM reaches (pin the VM's DHCP lease), and prune it on a timer, since the
+   server does not evict. Then add `PULP_CCACHE_REMOTE_STORAGE=http://<host
+   address>:<port>/pulp-windows-x64` to `B:\actions-runner\.env` in the golden.
+   Use one path per architecture and toolset.
+
+3. **The m5s ARM64 lane** needs the same golden steps on
+   `.shipyard/vm-image.windows.toml`'s image (`vcvarsarm64.bat` is selected
+   automatically), plus a reviewed change to that manifest's `[cache] mode =
+   "guest-local"` before any shared storage is attached. It also needs its
+   `qemu-runner-windows` LaunchAgent reinstalled: it is not running today.
+
+4. **Prove it.** Use at most three `cross-platform-check.yml` dispatches with
+   `windows_only=true` and the macpro selector (no macOS gate VM is taken):
+   - Skia: the log shows `OK: immutable Skia cache generation ready at
+     C:/pulp-cache/skia/...` and no `Downloading ->`.
+   - Sources: there are no `Priming shared ... source cache` lines.
+   - ccache: run the same commit twice, cold then warm. The second shows
+     `ccache remote storage: read-write` and a hit rate near the cacheable
+     count. The Build step needs a compiling `main`.
+
 ## Windows runs nightly, not per merge
 
 Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
@@ -1988,6 +2085,24 @@ It is tiered:
   and the no-op reads as "more cores did not help" rather than "the build was
   never asked to use them". `build.yml`'s `Build` step carried `--parallel 4`
   fleet-wide for this reason until it was replaced by the governor.
+
+  **An explicit `-j` under the wrapper is a ceiling, not an override.**
+  `tools/ci/governed-build.sh` reads a `-j N`, `-jN`, `--parallel N` or
+  `--parallel=N` on the build command (including a native-tool flag after
+  `--`) as a request, takes the lower of it and `PULP_BUILD_JOBS`, sizes the
+  lease to that, and rewrites the flag to the final share before running the
+  command. So `governed-build.sh cmake --build build -j4` runs at most four
+  jobs and reserves four cores, `-j64` under a 6-core lease runs six, and a
+  bare `--parallel` gets the governed count instead of going unbounded. The
+  log says so: `build command's own parallelism flag set to the governed share
+  -jN`. Before this, the command's own flag silently won in both directions: a
+  `-j4` reserved and logged a profile-sized lease, and a higher `-j` ran past
+  the lease. `PULP_BUILD_JOBS` remains the way to request a lower share without
+  touching the command. A `CMAKE_BUILD_PARALLEL_LEVEL` you export is a ceiling
+  in the same way: the lowest of it, the flag, and `PULP_BUILD_JOBS` sets the
+  share, and the wrapper then exports that final share under the same name.
+  (It used to overwrite the caller's value, so `CMAKE_BUILD_PARALLEL_LEVEL=4`
+  ran at the full lease.) A non-numeric or zero value is ignored.
 
   **A gate VM's `-j` is its lease.** tartci sizes each macOS gate clone from
   the lane's VM lease: `C` vCPUs and `(C-1) x 1536 x 4/3` MB of RAM, clamped to
@@ -3188,7 +3303,9 @@ them append-only.
 The required `macos` context is reported by more than one job. It can come from
 the macOS matrix leg, which builds and tests, or from a bootstrap job that
 claims the name without running anything, because the change touched no native
-build input or because an earlier run's protected receipt was reused. Both look
+build input or because an earlier run's protected receipt was reused. With
+`PULP_MACOS_PR_GATING` on, an unapproved pull-request head's macOS leg itself
+runs only its configure-only contract lane. Both look
 identical in the checks list.
 
 A reused receipt produces a three-step job (`Set up job`, the bootstrap step,
@@ -3488,8 +3605,10 @@ echoes the step's script, which contains every refusal message verbatim.
 The test step of each gate job likewise emits a `shipyard-test-tier`
 annotation: `fast` on a pull-request head (only the `pr-fast` label tier runs
 there; the full suite runs in the merge queue), `full` where the full suite
-ran, and `receipt-reused` / `not-required` from the no-suite bootstraps, so a
-fast-tier green is never read as full validation.
+ran, `receipt-reused` / `not-required` from the no-suite bootstraps, and
+`deferred` from the contract lane of a pull-request head without `macos-ci`
+(see "macOS on a pull request waits for approval"), so a fast-tier or deferred
+green is never read as full validation.
 
 ### Required checks trust the pull request's own workflow YAML
 
@@ -3628,6 +3747,206 @@ writes `ctest-pr-fast.junit.xml` rather than `ctest.junit.xml`: the tier is
 not the merge's test evidence and must never satisfy a protected-validation
 receipt.
 
+## macOS on a pull request waits for approval
+
+**Off by default.** Everything in this section is behind the repository
+variable `PULP_MACOS_PR_GATING`. Do not set this variable until Shipyard #929
+(queue-arm-guard refuses a head whose required `macos` check is tier
+`deferred`) is merged AND verified live, by arming a deferred head and seeing
+the refusal. Unless it is exactly `true`, every pull request
+takes the full lane and `macos-ci-label-reset.yml` does nothing: today's
+behaviour. Switch it on only
+after the arm side refuses a `deferred` green durably (a Shipyard
+queue-arm-guard change, tracked separately). The tartci interim sweep already
+refuses it. Turning it off again is the rollback.
+
+With gating on, a pull request's macOS leg runs in one of two lanes:
+
+- **Contract lane** (every head the fleet App has not approved). The leg
+  configures exactly as the gate does and runs the `pr-fast` tier (minus the
+  members labelled `needs-build`) plus the `pr-guard` tier, then stops. No
+  build, no iOS compile, no affected-tests tier, no full suite.
+- **Full lane** (a head the fleet App labelled `macos-ci`). Build, `pr-fast`,
+  `pr-guard`, the affected-tests tier and everything else the PR head ran
+  before.
+
+Linux runs on every push either way. `merge_group`, `push` and
+`workflow_dispatch` are unchanged: the merge queue runs the full macOS suite
+(or reuses an exact-tree receipt, as before) whatever the label says. The lane
+is a matrix field (`matrix.lane`); `resolve-provider` gets it from
+`tools/ci/macos_pr_lane.py`, which holds the whole rule and its tests.
+
+Why: the fleet has a hard ceiling of eight macOS VMs (two per Mac, four Macs),
+and it was saturated, with PR-head macOS jobs waiting p50 8 min and p90 46 min.
+Over 12 hours on 2026-10-24/25 the `macos` job's time split 57% pull request
+(61 runs, 26% of them failed), 33% merge group and 7% dispatch. Those 61 runs
+covered 88 distinct heads, of which about 12 to 15 pull requests merged. Most
+PR macOS time went on heads that never landed.
+
+### Why the contract lane exists, and what it costs
+
+Under the ALLGREEN merge queue a PR-caused macOS failure found in a merge group
+ejects the whole batch. The ones that did so most often are fast and need no
+build: `script-test-inputs-drift`, the `consumption-census-*` drift and
+negative-contract checks, and the A2T scope-history headroom guard. Deferring
+them to approval would move them into batches, so the contract lane keeps them
+on every head.
+
+They need only a configured tree. The census facts, the compiled-test evidence
+`script-test-inputs-drift` compares, and the Scene3D boundary paths are all
+written at configure time. A Catch2 suite that is not built registers as a
+`<target>_NOT_BUILT-<hash>` placeholder (`tools/cmake/PulpCatch.cmake`), and the
+inventory readers skip those. The one member that runs a compiled target,
+`project-package-mutation-control`, carries `needs-build` and waits for the
+full lane. The A2T guard lives in `gpu-trace-overhead-acceptance-selftest`, and
+`gpu-trace-overhead-verifier-selftest` drives the same tooling; each takes
+about a minute, too slow for `pr-fast`, so both carry the `pr-guard` label
+(`test/cmake/pr_fast_tests.cmake`) and run in parallel.
+
+Step times from the 12 most recent green PR `macos` jobs (2026-10-24), job time
+only, without VM clone and boot:
+
+| | Median | Range |
+|---|---|---|
+| Whole job today (full lane) | 23.4 min | 14.6 to 34.4 |
+| Steps the contract lane keeps (setup, configure, `pr-fast`, A2T issuer, uploads) | 2.4 min | 2.0 to 3.1 |
+| `pr-guard` (new, both lanes; two tests of about 68 s each, run in parallel) | about 1.2 min | |
+| **Contract lane, expected** | **about 3.5 min** | |
+| Deferred until approval (Build 5.9, affected tier 10.3, reuse record 2.1, SDK contract 2.6 when it applies, and others) | 20.9 min | 12.1 to 31.4 |
+
+The full lane gets about a minute longer, for `pr-guard`. A member that turns out
+to need the build fails the contract lane by name ("Could not find executable",
+or its own message), and the fix is to add it to `PULP_PR_FAST_NEEDS_BUILD`.
+
+### The `macos-ci` contract
+
+- **Name.** Exactly `macos-ci`.
+- **Only the fleet App's label counts.** The App (`shipyard-local[bot]`)
+  applies it as part of arming, after a trusted verdict comment whose last line
+  is `verdict: APPROVE head:<sha>` names the current head. On a `labeled`
+  event the lane checks the event's sender. On `opened` or `reopened` it reads
+  who applied the label last from the issue's events. Anyone else's label, or
+  an events listing that cannot be read, counts as no label.
+- **What starts a full-lane run.** A `workflow_dispatch` of `build.yml` on the
+  pull request's branch made by the fleet App, or an `opened` or `reopened`
+  event on a pull request whose label the App applied. A label event starts
+  nothing.
+- **`build.yml` does not listen for `labeled`.** A label event's run would be a
+  check suite newer than the head's real run with no `macos` check run in it,
+  and the merge queue reads the required `macos` context from the newest
+  suite: it refuses to enqueue ("Required status check "macos" is expected")
+  even though the earlier run's `macos` passed, and re-running a job in the
+  good run does not clear it. Shipyard adds several labels to every new pull
+  request, so every head was shadowed this way (#11034, #11040). The
+  `github.event.action == 'labeled'` conditions still in `build.yml` are
+  unreachable.
+- **A new head needs approval again.** On `synchronize` the lane is the
+  contract lane whatever the labels say, because the event payload still lists
+  the label the previous head earned. `macos-ci-label-reset.yml`
+  (`pull_request_target`, checks out nothing) then does two things:
+  - It **disables auto-merge.** Otherwise an armed pull request would
+    auto-merge on the new head's contract-lane green. A pull request already in
+    the merge queue leaves the queue on a push anyway.
+  - It **removes `macos-ci`**, so the label never vouches for a head it was
+    not applied to.
+
+  Re-arming needs a fresh verdict for the new head, the label, and a
+  full-lane success.
+- **Removing the label** starts nothing: `build.yml` does not listen for
+  `unlabeled`, and a run already in flight finishes.
+- **Escape hatch.** Dispatch `build.yml` on the branch: `workflow_dispatch`
+  always runs the full lane. A hand-applied label no longer forces anything.
+  Re-running a contract-lane run does not help either, because a re-run
+  replays the original event.
+
+### Approve first, then the full lane, then arm
+
+A reviewer may give `verdict: APPROVE head:<sha>` before the head has had a
+full macOS run; the verdict is about the change, and the contract lane has
+already run the fast PR-caused checks. Approval is not arming:
+
+1. The arm sweep sees the trusted APPROVE for the current head, applies
+   `macos-ci` and dispatches `build.yml` on the branch. The full lane runs.
+2. The sweep arms only once the head's latest `macos` check run is from the
+   full lane: its `shipyard-test-tier` annotation is not `deferred`. From then
+   on GitHub's required-check rule holds the auto-merge until that run
+   concludes `success`.
+3. If the full lane fails, the pull request needs a fix. The fix is a new head,
+   which disarms the pull request, drops the label and needs a new verdict, and
+   the cycle repeats.
+
+A head that is already armed when the full lane reaches `Decide pull-request
+test suite` (and still merges onto the tip of `main`) also runs the full suite
+there and issues an exact-tree receipt, as before (see "Only a ready-to-land PR
+head issues a receipt" in the CI skill).
+
+### Why the contract lane's `macos` check is green
+
+`macos` is a required context and the contract lane's job is the one named
+`macos`. When its tiers pass it concludes `success`. That passes the required
+check exactly as a full-lane success does, and the alternatives are no better:
+`skipped` and `neutral` satisfy a required check the same way (and an Actions
+job cannot conclude `neutral`), and a forced `failure` would turn every
+unapproved head red for a defect it does not have. A contract-lane failure is a
+real failure and stays red.
+
+So GitHub cannot tell a contract-lane green from a full one, and the arming side
+has to. The `pr-fast` step's log carries
+`::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"deferred",...}`
+on the contract lane (and `"tier":"fast"` on the full lane), and the job summary
+says that nothing was built. `tools/scripts/gate_suite_executed.py` reads
+both lanes as `tier-only`, so use the annotation, or the skipped `Build` step,
+to tell them apart. That is why gating stays off until the arm side refuses
+`deferred` durably. If a head were armed on a contract-lane green anyway,
+nothing unsafe would land, because the merge group still runs macOS; the cost
+is merge-group exposure to failures only a build reveals.
+
+### Decisions this has to keep
+
+- **Decision 17, strict up-to-date protection stays on.** Untouched: no ruleset
+  or protection setting changes, and `macos` stays a required context on
+  `main`. What keeps `main` green is the merge group's full macOS run of `main`
+  plus the entry, and that run is unchanged.
+- **Decision 11, the live ALLGREEN merge queue.** Unchanged in shape (ruleset,
+  grouping, MERGE method). What ALLGREEN multiplies is a PR-caused failure first
+  found in a batch. The contract lane keeps the fast PR-caused checks on every
+  head, and the arming rule keeps a full PR-head macOS success before any head
+  enters the queue, so batch exposure stays where it is today. It worsens only
+  if a head is armed on a `deferred` green, which the default-off switch and
+  the disarm-on-push exist to prevent.
+- **Decision 5, auto-merge rides on required checks.** `macos` stays required,
+  and the contract lane reports it, so auto-merge keeps working. Because a
+  `deferred` green also satisfies it, the arming rule and the disarm-on-push
+  are what keep auto-merge from admitting a head with no full macOS run.
+- **Decision 2, the fenced carrier's merge-update of a BEHIND armed PR.** With
+  gating on, that update is a `synchronize`: it disarms the pull request, drops
+  `macos-ci`, and the next run is the contract lane. Update-branch already
+  disarms auto-merge (see "The arm is not armed until you read it back" in the
+  CI skill). Re-arming takes the full path: a verdict for the new head, the
+  label, a full-lane success.
+- **Decision 23, the iOS compile gate.** The contract lane builds nothing, so
+  it neither runs the iOS gate nor records a digest. Those come from full-lane
+  and merge-group runs, as the receipts already require.
+
+### Interactions
+
+- **Skip-safe pull requests** (no native build input, including the
+  release-bot and release-please version-bump fast path in `classify`) never
+  had a macOS leg, and still report the skip-safe green from the `macos` alias.
+  The lanes apply only when `classify` says a native build is required.
+- **A version-bump or release PR that the fast path cannot prove** gets the
+  contract lane like any other head. If the release path arms through a guard
+  that enforces the rule above, that path must have the App apply `macos-ci`
+  too. Otherwise its merge group runs macOS, as it does today.
+- **A2T evidence pull requests** still issue their structural attestation on
+  every head. The issuer is a Python step the contract lane keeps.
+
+### Rollback
+
+Unset `PULP_MACOS_PR_GATING`, or set it to anything but `true`. Every pull
+request then takes the full lane and the reset
+workflow does nothing. `pr-guard` keeps running on the full lane.
+
 ## Windows is gated by the merge queue, not by the PR head
 
 Windows is advisory and runs entirely on GitHub-hosted runners, and a single
@@ -3651,8 +3970,9 @@ So Windows runs where it supplies independent value without blocking every merge
 - **`push: main`** — publishes the Windows ccache.
 - **`workflow_dispatch`** — explicit reruns when you want Windows early.
 
-A PR head keeps macOS on the self-hosted Macs and Linux on GitHub-hosted Linux
-for fast signal. The Linux leg therefore does consume hosted capacity; the
+A PR head keeps macOS on the self-hosted Macs (with `PULP_MACOS_PR_GATING` on,
+the configure-only contract lane until approved; see "macOS on a pull request
+waits for approval") and Linux on GitHub-hosted Linux for fast signal. The Linux leg therefore does consume hosted capacity; the
 security boundary above deliberately prevents automatic PRs from reaching the
 private Mac Pro VMs. The advisory `windows` alias job
 short-circuits to green on `pull_request` — without that it would fail closed

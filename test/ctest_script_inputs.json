@@ -265,6 +265,7 @@
     "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
+    "test/test_browser_capture_paint_scale.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
     "test/test_browser_capture_tree.cpp"
@@ -279,6 +280,7 @@
     "test/test_browser_capture_gradient_border.cpp",
     "test/test_browser_capture_group_opacity.cpp",
     "test/test_browser_capture_ir.cpp",
+    "test/test_browser_capture_paint_scale.cpp",
     "test/test_browser_capture_svg_render.cpp",
     "test/test_browser_capture_text_metrics.cpp",
     "test/test_browser_capture_tree.cpp"
@@ -1580,7 +1582,8 @@
    "data": "declared",
    "detected_sources": [
     "test/test_coretext_text.cpp",
-    "test/test_font_woff2.cpp"
+    "test/test_font_woff2.cpp",
+    "test/test_paragraph_cache.cpp"
    ],
    "inputs": [
     "external/fonts/Inter-Regular.ttf",
@@ -1591,7 +1594,8 @@
    "kind": "compiled",
    "sources": [
     "test/test_coretext_text.cpp",
-    "test/test_font_woff2.cpp"
+    "test/test_font_woff2.cpp",
+    "test/test_paragraph_cache.cpp"
    ],
    "undeclared_sources": []
   },
@@ -2637,6 +2641,7 @@
   "pulp-test-cross-platform-audio-golden",
   "pulp-test-crossfade",
   "pulp-test-css-gradient-dither-gpu",
+  "pulp-test-css-gradient-interpolation-gpu",
   "pulp-test-css-gradient-render",
   "pulp-test-css-translator-gaps-1434",
   "pulp-test-data-display-link-floor",
@@ -2700,7 +2705,7 @@
   "pulp-test-gesture-threading",
   "pulp-test-golden",
   "pulp-test-golden-effect",
-  "pulp-test-gpu-audio-execution-controller",
+  "pulp-test-gpu-audio-capability-validation",
   "pulp-test-gpu-audio-plugin-boundary-continuity",
   "pulp-test-gpu-audio-trace",
   "pulp-test-gpu-audio-transport",
@@ -2979,6 +2984,7 @@
   "pulp-test-sdk-distribution-guard",
   "pulp-test-sdl3-surface",
   "pulp-test-settings-sections",
+  "pulp-test-ship-dev-build-guard",
   "pulp-test-ship-tracing-guard",
   "pulp-test-signal-additive-bank",
   "pulp-test-signal-analysis-frontends",
@@ -3665,6 +3671,14 @@
    "entry": "tools/scripts/test_ccache_pch_isolation.py",
    "inputs": [
     "tools/scripts/test_ccache_pch_isolation.py"
+   ],
+   "kind": "python"
+  },
+  "ccache-remote-storage-selftest": {
+   "entry": "tools/ci/test_ccache_remote_storage.py",
+   "inputs": [
+    "tools/ci/ccache_remote_storage.py",
+    "tools/ci/test_ccache_remote_storage.py"
    ],
    "kind": "python"
   },
@@ -4679,15 +4693,43 @@
   "design-unit-boundary": {
    "entry": "tools/scripts/design_unit_boundary_check.py",
    "inputs": [
-    "tools/scripts/design_unit_boundary_check.py"
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
+    "tools/scripts/design_unit_boundary_check.py",
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
   "design-unit-boundary-selftest": {
    "entry": "tools/scripts/test_design_unit_boundary_check.py",
    "inputs": [
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
     "tools/scripts/design_unit_boundary_check.py",
-    "tools/scripts/test_design_unit_boundary_check.py"
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/test_design_unit_boundary_check.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -5064,10 +5106,16 @@
    ],
    "kind": "shell"
   },
+  "format-header-view-boundary": {
+   "entry": "tools/scripts/format_header_view_boundary.py",
+   "inputs": [
+    "tools/scripts/format_header_view_boundary.py"
+   ],
+   "kind": "python"
+  },
   "foundation-include-lint": {
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -5080,7 +5128,9 @@
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/reload_exports.cpp",
     "tools/scripts/foundation_include_lint.py",
-    "tools/scripts/include_boundary.py"
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -5269,6 +5319,20 @@
    "entry": "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py",
    "inputs": [
     "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-header-vocabulary-guard": {
+   "entry": "tools/scripts/gpu_audio_header_vocabulary_guard.py",
+   "inputs": [
+    "tools/scripts/gpu_audio_header_vocabulary_guard.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-header-vocabulary-guard-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_header_vocabulary_guard.py",
+   "inputs": [
+    "tools/scripts/test_gpu_audio_header_vocabulary_guard.py"
    ],
    "kind": "python"
   },
@@ -6429,6 +6493,14 @@
    ],
    "kind": "python"
   },
+  "gpu-same-device-storage-receipt-controls": {
+   "entry": "test/test_verify_gpu_same_device_storage.py",
+   "inputs": [
+    "test/test_verify_gpu_same_device_storage.py",
+    "test/verify_gpu_same_device_storage.py"
+   ],
+   "kind": "python"
+  },
   "gpu-test-resource-locks": {
    "entry": "tools/scripts/test_gpu_test_resource_locks.py",
    "inputs": [
@@ -6680,6 +6752,13 @@
    ],
    "kind": "python"
   },
+  "import-design-ir-observe-half-pixel-label": {
+   "entry": "test/test_design_ir_observe_half_pixel_label.py",
+   "inputs": [
+    "test/test_design_ir_observe_half_pixel_label.py"
+   ],
+   "kind": "python"
+  },
   "import-design-ir-observe-interactions": {
    "entry": "test/test_design_ir_observe_interactions.py",
    "inputs": [
@@ -6865,6 +6944,7 @@
   "importer-differential-lab": {
    "entry": "test/test_importer_differential_lab.py",
    "inputs": [
+    "test/fixtures",
     "test/fixtures/browser-capture-layout-rows",
     "test/test_importer_differential_lab.py",
     "tools/import-design/browser_capture/form_control_theme.mjs",
@@ -7446,11 +7526,14 @@
     "experimental/pulp-rs/src/main.rs",
     "experimental/pulp-rs/tests/fixtures/docs/mini_docs_tree/docs/reference/cli.md",
     "test/CMakeLists.txt",
+    "test/cmake",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
     "test/cmake/test_ios_auv3_control_shipping.cmake",
     "test/fixtures",
+    "test/fixtures/no_editor_link_floor/no_editor_runtime_deps.cmake",
     "test/fixtures/no_editor_link_floor/scan_no_editor_link_floor.cmake",
+    "test/fixtures/perfetto-gpu",
     "test/fixtures/sample-region-compat/expected/abi.txt",
     "test/sample_region_compat/compat_runner.cpp",
     "test/support",
@@ -7476,8 +7559,10 @@
     "tools/ci/spawn_none_build_path_reviews.json",
     "tools/ci/test_pr_head_affected_tests.py",
     "tools/ci/wide_non_native_checks.json",
+    "tools/cmake",
     "tools/cmake/PulpGpuAudioProviderIdentity.cmake",
     "tools/cmake/PulpPlugin.cmake",
+    "tools/cmake/PulpSimdSupport.cmake",
     "tools/cmake/PulpTestData.cmake",
     "tools/deps/manifest.json",
     "tools/import-design/browser_capture/runtime_manifest.txt",
@@ -7519,6 +7604,7 @@
     "docs/status/consumption-profiles.schema.json",
     "test/cmake/pr_fast_tests.cmake",
     "test/fixtures",
+    "test/fixtures/perfetto-gpu",
     "test/support",
     "tools/ci",
     "tools/ci/build_dir_lock.py",
@@ -7661,10 +7747,12 @@
     "tools/import-design/browser_capture/capture.integration.test.mjs",
     "tools/import-design/browser_capture/capture_frame_fitting.integration.test.mjs",
     "tools/import-design/browser_capture/capture_geometry.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_horizon.integration.test.mjs",
     "tools/import-design/browser_capture/capture_integration_support.mjs",
     "tools/import-design/browser_capture/capture_interaction_guards.integration.test.mjs",
     "tools/import-design/browser_capture/capture_interactions.integration.test.mjs",
     "tools/import-design/browser_capture/capture_paint.integration.test.mjs",
+    "tools/import-design/browser_capture/font_faces.integration.test.mjs",
     "tools/import-design/browser_capture/motion_freeze.integration.test.mjs",
     "tools/import-design/browser_capture/run_integration.mjs",
     "tools/import-design/browser_capture/security.mjs",
@@ -7677,6 +7765,8 @@
    "inputs": [
     "tools/import-design/browser_capture/document_canvas.mjs",
     "tools/import-design/browser_capture/document_canvas.test.mjs",
+    "tools/import-design/browser_capture/font_faces.mjs",
+    "tools/import-design/browser_capture/font_faces.test.mjs",
     "tools/import-design/browser_capture/form_control_theme.mjs",
     "tools/import-design/browser_capture/form_control_theme.test.mjs",
     "tools/import-design/browser_capture/health.mjs",
@@ -8078,7 +8168,6 @@
   "pulp-view-core-include-boundary": {
    "entry": "tools/scripts/include_boundary.py",
    "inputs": [
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8090,7 +8179,9 @@
     "core/view/include",
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/reload_exports.cpp",
-    "tools/scripts/include_boundary.py"
+    "tools/scripts/include_boundary.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8102,7 +8193,9 @@
     "core/state/include/pulp/state/store.hpp",
     "core/view/include/pulp/view/view.hpp",
     "core/view/src/view.cpp",
-    "tools/scripts/test_include_boundary.py"
+    "tools/scripts/test_include_boundary.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8130,7 +8223,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8151,7 +8243,9 @@
     "tools/cmake/scripts/encode_binary_data.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8169,7 +8263,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8190,7 +8283,9 @@
     "tools/cmake/scripts/encode_binary_data.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8199,7 +8294,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8220,7 +8314,9 @@
     "tools/cmake/scripts/encode_binary_data.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8238,7 +8334,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8260,7 +8355,9 @@
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_closure.py",
     "tools/scripts/vellum_closure_allowlist.json",
-    "tools/scripts/vellum_d3_units.json"
+    "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
@@ -8282,7 +8379,6 @@
     "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
     "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
-    "core/content/include",
     "core/platform",
     "core/platform/include",
     "core/render/include/pulp/render/gpu_compute.hpp",
@@ -8322,14 +8418,30 @@
     "tools/scripts/vellum_closure_allowlist.json",
     "tools/scripts/vellum_d3_units.json",
     "tools/scripts/vellum_mirror_edge_patterns.json",
-    "tools/scripts/vellum_mirror_edge_table.py"
+    "tools/scripts/vellum_mirror_edge_table.py",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py"
    ],
    "kind": "python"
   },
   "pulp.vellum-view-core-pulp-kept": {
    "entry": "tools/scripts/vellum_view_core_pulp_kept_check.py",
    "inputs": [
+    "core/platform",
+    "core/platform/include",
+    "core/runtime",
+    "core/runtime/include",
+    "core/simd",
+    "core/simd/include",
+    "core/view",
+    "core/view/audio",
+    "core/view/include",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/reload_exports.cpp",
+    "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_d3_units.json",
+    "tools/scripts/vellum_policy.json",
+    "tools/scripts/vellum_policy.py",
     "tools/scripts/vellum_view_core_pulp_kept_check.py"
    ],
    "kind": "python"
@@ -11766,6 +11878,7 @@
     "external/tweetnacl/tweetnacl.c",
     "test/cmake/pr_fast_tests.cmake",
     "test/fixtures",
+    "test/fixtures/perfetto-gpu",
     "test/fixtures/sample-region-compat",
     "test/sample_region_compat/CMakeLists.txt",
     "test/sample_region_compat/README.md",
@@ -12744,6 +12857,7 @@
    "inputs": [
     "core/view/audio/include",
     "core/view/platform/mac/window_host_mac_internal.hpp",
+    "core/view/src/view.cpp",
     "tools/import-design",
     "tools/import-design/pulp-package.json",
     "tools/scripts/test_vellum_boundary_lint.py",

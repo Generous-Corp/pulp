@@ -792,6 +792,18 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: chrome-backdrop-opacity-oracle
+  path: tools/import-validation/chrome_backdrop_opacity_oracle.py
+  category: visual-compare
+  use_when: Get Chrome's own composite of backdrop-filter under element and ancestor opacity.
+  invocation: python3 tools/import-validation/chrome_backdrop_opacity_oracle.py --help
+  inputs: test/fixtures/import-differential/22-backdrop-opacity.html.
+  outputs: A gridline and a gap pixel under each frosted box, as the C++ initializers test_css_backdrop_opacity.cpp asserts.
+  caveat: Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation,
+    which is the target here but is not the CSS spec.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: diff-against-reference
   path: tools/import-validation/diff_against_reference.py
   category: visual-compare

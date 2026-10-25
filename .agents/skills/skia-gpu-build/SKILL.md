@@ -100,7 +100,18 @@ headers with another's libraries.
 ## Building from source (only when no cached libs anywhere)
 
 `tools/build-skia.sh` builds the currently pinned chrome/m157 Skia+Dawn from source — slow
-(tens of minutes). Prefer the release zip from
+(tens of minutes). It passes the manifest's exact `skia_commit` to skia-builder
+(`-revision`, so the builder ref must support it) and refuses to copy output
+unless the built Skia and synced Dawn HEADs equal `skia_commit` / `built_dawn`;
+the moving milestone branch only seeds the clone. skia-builder keeps its Skia
+checkout and outputs under `external/skia-builder/build/` (`src/skia`,
+`include`, `share`, `<platform>-gpu`), and that tree persists between runs, so
+the script clears this run's outputs before building and publishes only them:
+the result replaces `external/skia-build/build/` whole, staged in a sibling
+directory and renamed into place, so another revision's slice never survives
+beside the new one and a failed copy keeps the previous generation.
+`PULP_SKIA_DRY_RUN=1` prints the resolved pins and builder command without
+cloning anything. Prefer the release zip from
 `danielraffel/skia-builder` (chrome/m157, see `external/skia-build/VERSION.md`)
 or the immutable fetcher-owned cache generation above.
 
