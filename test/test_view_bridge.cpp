@@ -1026,9 +1026,16 @@ TEST_CASE("Editor open: a missing script still fails inside open()",
 
 namespace {
 
-// Restores the binary-wide editor assets and the keyed registry a case changed.
+// Installs the scripted editor builder the way a UI_SCRIPT target's generated
+// source does, and restores the builder slot, the binary-wide editor assets
+// and the keyed registry a case changed.
 struct EditorAssetsScope {
+    format::ScriptedEditorBuilder saved_builder = format::scripted_editor_builder_slot().load();
+    EditorAssetsScope() {
+        format::install_scripted_editor_builder();
+    }
     ~EditorAssetsScope() {
+        format::scripted_editor_builder_slot().store(saved_builder);
         format::reset_editor_assets_for_testing();
         format::reset_registry_for_testing();
     }
@@ -1066,6 +1073,37 @@ TEST_CASE("ViewBridge builds the scripted editor the plug-in binary registers",
     const auto decision = format::decide_gpu_host(bridge);
     CHECK(std::string(decision.mode) == "scripted");
     CHECK(decision.wants_gpu);
+}
+
+TEST_CASE("A declared script without the scripted editor builder opens AutoUi and says why",
+          "[view_bridge][scripted-ui][editor-assets]") {
+    EditorAssetsScope scope;
+    const std::string script = write_editor_script("pulp-editor-assets-no-builder",
+                                                   "createLabel('status', 'unreachable', '');\n")
+                                   .string();
+    format::register_editor_assets({script.c_str(), nullptr, nullptr});
+
+    state::StateStore store;
+    StubProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    // Control: with the builder installed, the same declaration is scripted.
+    {
+        format::ViewBridge bridge(p, store);
+        REQUIRE(bridge.open());
+        CHECK(bridge.uses_script_ui());
+    }
+
+    // A binary that never calls install_scripted_editor_builder() does not
+    // link the script runtime, so it cannot build the session.
+    format::scripted_editor_builder_slot().store(nullptr);
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    CHECK_FALSE(bridge.uses_script_ui());
+    CHECK(bridge.scripted_ui() == nullptr);
+    CHECK(std::string(format::decide_gpu_host(bridge).mode) == "autoui");
+    CHECK(bridge.last_error().find("install_scripted_editor_builder") != std::string::npos);
 }
 
 TEST_CASE("A bundle entry's editor assets apply to its own plug-in only",

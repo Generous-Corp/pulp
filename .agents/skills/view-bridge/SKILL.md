@@ -3579,10 +3579,24 @@ same reason. A new direct call to a non-virtual `ScriptedUiSession` method (or
 any other view-script symbol) from glue pulls the whole runtime back into every
 plug-in; `plugin-module-no-script-runtime-PulpGain-*` (packaging label) fails
 when that happens, and `-Wl,-why_load` on the module link names the caller.
+The default editor's own scripted branch is the trap that broke this once:
+when the `UI_SCRIPT` selection became a runtime value, the inline
+`build_editor_ui_for_assets()` could no longer fold its
+`make_unique<ScriptedUiSession>` away, so every AutoUi plug-in linked the
+runtime again (PulpGain 18.7 -> 23.8 MB stripped) while the build stayed
+green. That branch now lives in `core/format/src/scripted_editor_builder.cpp`
+and is reached through `format::scripted_editor_builder_slot()`;
+`install_scripted_editor_builder()` fills the slot, and only the generated
+editor-assets source of a target with a script calls it. A runtime-valued
+choice in glue every plug-in links never removes code; only a reference that
+is absent at link time does.
 A processor that builds its own `ScriptedUiSession` needs no opt-in: its
 constructor call links the runtime, and that also installs the prewarm runner.
 That is also how a plug-in that loads a script at run time without declaring
 `UI_SCRIPT` opts back in; there is deliberately no CMake switch, because the
-link follows the reference. Reaching the runtime only by name (`dlsym`) cannot
+link follows the reference. A bundle whose scripts come only from keyed
+`PluginRegistration::ui_script` entries calls
+`install_scripted_editor_builder()` itself; without it ViewBridge logs the
+missing builder, reports it in `last_error()` and opens AutoUi. Reaching the runtime only by name (`dlsym`) cannot
 work: nothing links it. `docs/reference/cmake.md` "Shipped Module Size" is the
 user-facing version.
