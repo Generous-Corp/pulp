@@ -19,17 +19,28 @@ namespace pulp::gpu_audio {
 /// render::GpuCompute; not real-time-safe (blocks on readback) — for the worker
 /// / offline analysis, the foundation for spectral freeze / morph / paint.
 class GpuStft {
-public:
+  public:
     /// `shared_device` (optional) reuses an existing GpuCompute so this STFT and
     /// a sibling primitive don't each spin up a device (the prerequisite for
     /// cross-effect batching); it must already be initialized and must outlive
     /// this GpuStft. null = create + own a private device.
+    ///
+    /// prepare() records the device's `device_generation()`. From then on
+    /// analyze() and synthesize() refuse (return false, output zeroed) once the
+    /// device reports `device_lost()` or its generation differs from the one
+    /// recorded, because work prepared on the old device cannot run on a new
+    /// one. Prepare again against the re-acquired device to resume.
     bool prepare(uint32_t fft_size,
                  signal::WindowFunction::Type window = signal::WindowFunction::Type::hann,
                  float window_param = 0.0f,
                  render::GpuCompute* shared_device = nullptr);
 
     bool gpu_available() const { return gpu_ != nullptr; }
+
+    /// True while the prepared device can still run this STFT's work: present,
+    /// not lost, and on the generation recorded at prepare(). False is the
+    /// refusal state analyze()/synthesize() report.
+    bool device_usable() const;
     uint32_t fft_size() const { return fft_size_; }
     const std::vector<float>& window() const { return window_; }
 
@@ -53,6 +64,7 @@ private:
     render::GpuCompute* gpu_ = nullptr;             // borrowed or == owned_.get()
     std::unique_ptr<render::GpuCompute> owned_;     // when not sharing a device
     std::vector<float> scratch_;  // 2*fft_size interleaved-complex scratch
+    std::uint64_t device_generation_ = 0; // gpu_->device_generation() at prepare
 };
 
 } // namespace pulp::gpu_audio
