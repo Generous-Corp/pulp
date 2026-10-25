@@ -461,8 +461,11 @@ void GpuAudioTransport::release() noexcept {
     if (worker_.joinable())
         worker_.join();
     // No service step runs now. After the clearing call returns the provider
-    // never invokes notify_worker() for this transport again.
-    if (completion_notifier_installed_ && realtime_gpu_set_notifier_ != nullptr)
+    // never invokes notify_worker() for this transport again. A hosted
+    // pipelining node may be destroyed before its transport; its detached link
+    // says so, and its provider, notifier included, went with it.
+    const bool node_gone = diagnostics_->pipeline && !diagnostics_->pipeline->attached();
+    if (completion_notifier_installed_ && realtime_gpu_set_notifier_ != nullptr && !node_gone)
         (void)realtime_gpu_set_notifier_(realtime_gpu_context_, {});
     completion_notifier_installed_ = false;
     realtime_gpu_set_notifier_ = nullptr;
