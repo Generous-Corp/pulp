@@ -391,8 +391,10 @@ tell.
 
 **Behind `PULP_MACOS_PR_GATING`, default off.** Until the repository variable is
 exactly `true`, every pull request runs the full macOS lane, label events do
-nothing, and none of the rest of this section applies. It is switched on only
-once the arm side refuses a `deferred` green durably. Design, measurements,
+nothing, and none of the rest of this section applies. Do not set it until
+Shipyard #929 (queue-arm-guard refuses a head whose required `macos` check is
+tier `deferred`) is merged AND verified live, by arming a deferred head and
+seeing the refusal. Design, measurements,
 decision-row coverage and rollback: "macOS on a pull request waits for
 approval" in `docs/guides/local-ci.md`.
 

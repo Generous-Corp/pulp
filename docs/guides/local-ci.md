@@ -3635,7 +3635,10 @@ receipt.
 ## macOS on a pull request waits for approval
 
 **Off by default.** Everything in this section is behind the repository
-variable `PULP_MACOS_PR_GATING`. Unless it is exactly `true`, every pull request
+variable `PULP_MACOS_PR_GATING`. Do not set this variable until Shipyard #929
+(queue-arm-guard refuses a head whose required `macos` check is tier
+`deferred`) is merged AND verified live, by arming a deferred head and seeing
+the refusal. Unless it is exactly `true`, every pull request
 takes the full lane, label events start runs that do nothing, and
 `macos-ci-label-reset.yml` does nothing: today's behaviour. Switch it on only
 after the arm side refuses a `deferred` green durably (a Shipyard
