@@ -677,7 +677,13 @@ namespace myresources {
 stream is produced by the build host's Python zlib, so it is deterministic per
 zlib build: two hosts whose Python links different zlib builds (zlib 1.2.x and
 zlib-ng, for example) can embed different, equally valid streams, and they
-inflate to the same bytes. Text assets shrink the most: a materialized
+inflate to the same bytes. Leave `COMPRESS` off for a target whose binaries are
+byte-compared across hosts or built as a reproducible release. Switching
+`COMPRESS` on or off in an existing build directory needs no clean
+reconfigure: CMake reruns the encoder because its command line changed, with
+Makefile generators as well as Ninja. Verified with Unix Makefiles on CMake
+3.24.3 (the minimum Pulp supports) and 4.3.3;
+`cmake-pulp-add-binary-data-compress-toggle` checks it on every run. Text assets shrink the most: a materialized
 design's runtime bundle to about a tenth, its document JSON to about two
 fifths. Already-compressed formats (PNG, JPEG, WOFF2) gain nothing, so embed
 those in a separate call without `COMPRESS`. The symbols change, so code

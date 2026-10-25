@@ -58,7 +58,9 @@ include_guard(GLOBAL)
 # The trade is binary size against an inflate on use and a transient heap copy:
 # about 1 ms per MB of text on an M-series core. zlib_decompress allocates, so
 # never call it on the audio thread. The stream is deterministic per zlib
-# build of the host's Python (see encode_binary_data.py), not across builds.
+# build of the host's Python (see encode_binary_data.py), not across builds,
+# so leave COMPRESS off for a target whose artifacts are byte-compared across
+# hosts or built as a reproducible release.
 function(pulp_add_binary_data target)
     cmake_parse_arguments(DATA "COMPRESS" "NAMESPACE" "SOURCES" ${ARGN})
 

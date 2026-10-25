@@ -263,6 +263,14 @@ add_test(NAME cmake-ios-auv3-control-shipping
 set_tests_properties(cmake-ios-auv3-control-shipping PROPERTIES
     LABELS "cmake;ios;auv3;control"
     TIMEOUT 30)
+# Toggling pulp_add_binary_data(COMPRESS) in an existing Makefile build dir
+# regenerates the embedded source without a clean reconfigure.
+add_test(NAME cmake-pulp-add-binary-data-compress-toggle
+    COMMAND ${CMAKE_COMMAND} -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_add_binary_data_compress_toggle.cmake)
+set_tests_properties(cmake-pulp-add-binary-data-compress-toggle PROPERTIES
+    LABELS "cmake;binary-data"
+    TIMEOUT 120)
 # pulp_add_binary_data Python encoder smoke — guards the fix
 # (legacy CMake hex loop was O(n²) and pinned cmake configure for 10–22
 # minutes on a 1 MB asset). Verifies the encoder's output ABI, mtime
