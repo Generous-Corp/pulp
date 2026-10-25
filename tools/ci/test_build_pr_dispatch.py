@@ -227,7 +227,7 @@ class LinuxRoutingTest(unittest.TestCase):
             output.write_text("", encoding="utf-8")
             env["GITHUB_OUTPUT"] = str(output)
             proc = subprocess.run([sys.executable, "-c", self.resolver], cwd=ROOT, env=env,
-                                  capture_output=True, text=True, check=False)
+                                  capture_output=True, text=True, encoding="utf-8", check=False)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             for line in output.read_text(encoding="utf-8").splitlines():
                 if line.startswith("matrix_json="):
