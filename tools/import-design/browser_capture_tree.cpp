@@ -1639,8 +1639,8 @@ lower_painted_tree(const CapturedStyleIndex& index, double dx, double dy, double
                 attributes["native_theme"] = theme.empty() ? "unresolved" : theme;
                 if (theme == "native") {
                     ++counts.native_appearance_controls;
-                    if (tag == "input" && detail::record_ua_control_state(index, node.node_index,
-                                                                          computed, attributes))
+                    if (detail::record_ua_control_state(index, node.node_index, tag, computed,
+                                                        attributes))
                         detail::drop_theme_replaced_box_paint(slots.back().node.style);
                 }
             }
