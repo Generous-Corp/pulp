@@ -175,7 +175,13 @@ public:
         // Service drag-and-drop on our own X connection. The standalone host
         // repaints ~each frame, so this is the steady-state XDND pump; a
         // DAW-embedded driver can also call pump_x_events() directly.
-        pump_x_events();
+        drain_x_events();
+        paint_now();
+    }
+
+    // The paint half of repaint(), without the event pump, so the pump itself
+    // can repaint after a host-driven resize.
+    void paint_now() {
 #ifdef PULP_HAS_SKIA
         if (gpu_surface_ && skia_surface_) {
             render_frame_gpu(nullptr, nullptr, nullptr);
@@ -278,8 +284,25 @@ public:
     // call this — the standalone Linux GPU host pumps it each frame via
     // repaint(), and a DAW-embedded host can call it from its editor idle hook.
     // Honest no-op when display_/child_ are null (headless capture mode).
+    //
+    // It also reconciles a host-driven resize. A DAW that resizes the editor
+    // with XResizeWindow on its own connection never calls set_size(); the
+    // ConfigureNotify is the only signal. Until it is handled the surfaces
+    // stay at the old size, and the Vulkan swapchain keeps scaling that old
+    // size onto the window every frame, a stretch that lasts until something
+    // else resizes the editor. Only the last ConfigureNotify of a drain
+    // counts, so a burst of drag events costs one resize and one callback.
     void pump_x_events() override {
-        if (!display_ || !child_) return;
+        if (drain_x_events())
+            paint_now();
+    }
+
+    // The drain behind pump_x_events() and repaint(). Returns whether a
+    // host-driven resize was applied, so the caller can paint it.
+    bool drain_x_events() {
+        if (!display_ || !child_)
+            return false;
+        uint32_t configured_w = 0, configured_h = 0;
         while (XPending(display_) > 0) {
             XEvent ev;
             XNextEvent(display_, &ev);
@@ -290,10 +313,36 @@ public:
                 case SelectionNotify:
                     handle_selection_notify(ev.xselection);
                     break;
+                case ConfigureNotify:
+                    if (ev.xconfigure.window == child_) {
+                        configured_w = static_cast<uint32_t>(ev.xconfigure.width);
+                        configured_h = static_cast<uint32_t>(ev.xconfigure.height);
+                    }
+                    break;
                 default:
                     break;
             }
         }
+        return configured_w != 0 && configured_h != 0 &&
+               handle_configure(configured_w, configured_h);
+    }
+
+    // Mirror set_size()'s surface sizing for a size the host already applied
+    // to the window, without the XResizeWindow. Our own set_size() comes back
+    // as a ConfigureNotify at the size it set, which is a no-op here.
+    bool handle_configure(uint32_t width, uint32_t height) {
+        if (width == size_.width && height == size_.height)
+            return false;
+        size_ = {width, height};
+#ifdef PULP_HAS_SKIA
+        if (gpu_surface_)
+            gpu_surface_->resize(pixel_w(), pixel_h());
+        if (skia_surface_)
+            skia_surface_->resize(width, height, scale_);
+#endif
+        if (resize_cb_)
+            resize_cb_(width, height);
+        return true;
     }
 
     Point window_to_root_point(Point pt) const override {
