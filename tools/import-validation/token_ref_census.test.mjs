@@ -54,6 +54,8 @@ test("the cascade's winner is the last block that declares it, unless an earlier
 });
 
 test("a shorthand gives a longhand a reference only through that longhand's own component", () => {
+  assert.equal(shorthandComponent("border", "var(--pad) solid #ffffff", "border-top-color",
+                                  (name) => name === "--line"), null);
   const colour = (name) => name === "--line";
   assert.equal(shorthandComponent("border", "1px solid var(--line)", "border-top-color", colour),
                "--line");
@@ -96,6 +98,9 @@ test("the planted panel classifies every case, with no reference from coincident
     assert.equal(report.counts.radius["shorthand-ref"], 4);
     assert.equal(colour.coincidental, 1);   // #coincidental, equal to --accent, not a ref
     assert.equal(colour.fallback, 1);       // #fallback
+    // #mixedborder: `border: var(--pad) solid #ffffff` has a var(), but not in
+    // the colour component, so the four border colours are no reference.
+    assert.equal(colour.shorthand, 4);
     assert.equal(colour.derived, 1);        // #derived
     assert.equal(colour["scoped-ref"], 1);  // #scoped under #scope
     assert.equal(colour["inherited-ref"], 1); // the span inside #inherit

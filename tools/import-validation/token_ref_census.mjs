@@ -228,6 +228,36 @@ const PAGE_PROBE = `(() => {
   const tokenLengths = new Set(Object.values(tokens).filter(v => /^-?[\\d.]+px$/.test(v))
                                  .map(v => String(parseFloat(v))));
   probe.remove();
+  // The prefilter a capture could use to skip the CDP call: an element is a
+  // candidate when its inline style, or a readable rule that matches it,
+  // mentions var(); inherited properties also count a candidate ancestor.
+  // Unreadable (cross-origin) sheets make every element a candidate.
+  const varSelectors = [];
+  let unreadable = false;
+  const visit = (rules) => {
+    for (const rule of rules || []) {
+      try {
+        if (rule.selectorText && rule.style && rule.style.cssText.includes('var('))
+          varSelectors.push(rule.selectorText);
+        if (rule.cssRules) visit(rule.cssRules);
+      } catch { unreadable = true; }
+    }
+  };
+  for (const sheet of [...document.styleSheets, ...(document.adoptedStyleSheets || [])]) {
+    try { visit(sheet.cssRules); } catch { unreadable = true; }
+  }
+  const ownCandidate = new Map();
+  const isOwnCandidate = (el) => {
+    if (ownCandidate.has(el)) return ownCandidate.get(el);
+    let hit = unreadable || (el.getAttribute && (el.getAttribute('style') || '').includes('var('));
+    if (!hit) for (const sel of varSelectors) { try { if (el.matches(sel)) { hit = true; break; } } catch {} }
+    ownCandidate.set(el, hit);
+    return hit;
+  };
+  const ancestorCandidate = (el) => {
+    for (let a = el.parentElement; a; a = a.parentElement) if (isOwnCandidate(a)) return true;
+    return false;
+  };
   const rows = [];
   all.forEach((el, index) => {
     if (el === probe) return;
@@ -263,7 +293,8 @@ const PAGE_PROBE = `(() => {
       defined[name] = here !== '';
       scoped[name] = here !== '' && here !== tokens[name];
     }
-    rows.push({ index, tag: el.tagName.toLowerCase(), uses, defined, scoped });
+    rows.push({ index, tag: el.tagName.toLowerCase(), uses, defined, scoped,
+                candidate: isOwnCandidate(el), inheritCandidate: ancestorCandidate(el) });
   });
   const colourTokens = Object.keys(tokens).filter(name => norm(tokens[name]) !== null);
   return { rows, tokenCount: Object.keys(tokens).length, colourTokens,
@@ -299,7 +330,7 @@ class Cdp {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function censusOne(cdp, file, { width, height }) {
+export async function censusOne(cdp, file, { width, height, concurrency = 1 }) {
   await cdp.call("Emulation.setDeviceMetricsOverride",
     { width, height, deviceScaleFactor: 2, mobile: false });
   await cdp.call("Page.navigate", { url: pathToFileURL(file).href });
@@ -322,16 +353,21 @@ export async function censusOne(cdp, file, { width, height }) {
   const defaultsEqualToToken = Object.fromEntries(Object.keys(FAMILIES).map((f) => [f, 0]));
   const started = Date.now();
   let matchedCalls = 0;
+  // Keep `concurrency` requests in flight; the answers do not depend on order.
+  const matchedFor = new Map();
+  for (let i = 0; i < rows.length; i += concurrency) {
+    const batch = rows.slice(i, i + concurrency).filter((row) => nodeIds[row.index]);
+    const answers = await Promise.all(batch.map((row) =>
+      cdp.call("CSS.getMatchedStylesForNode", { nodeId: nodeIds[row.index] })
+        .then((m) => { matchedCalls += 1; return m; }, () => null)));
+    batch.forEach((row, j) => matchedFor.set(row, answers[j]));
+  }
+  const matchMs = Date.now() - started;
+  const prefilter = { candidates: 0, refs_outside_candidates: 0 };
   for (const row of rows) {
-    const nodeId = nodeIds[row.index];
-    if (!nodeId) continue;
-    let matched;
-    try {
-      matched = await cdp.call("CSS.getMatchedStylesForNode", { nodeId });
-      matchedCalls += 1;
-    } catch {
-      continue;
-    }
+    const matched = matchedFor.get(row);
+    if (!matched) continue;
+    if (row.candidate || row.inheritCandidate) prefilter.candidates += 1;
     const context = {
       defined: (name) => row.defined[name] === true,
       scoped: (name) => row.scoped[name] === true,
@@ -368,6 +404,10 @@ export async function censusOne(cdp, file, { width, height }) {
           if (equal && cls === "default") defaultsEqualToToken[family] += 1;
         }
         counts[family][cls] += 1;
+        const isRef = ["ref", "inherited-ref", "scoped-ref", "shorthand-ref", "fallback"]
+          .includes(cls);
+        const covered = row.candidate || (inherited && row.inheritCandidate);
+        if (isRef && !covered) prefilter.refs_outside_candidates += 1;
         if (examples.length < 400)
           examples.push({ tag: row.tag, property, cls, declared: found?.text ?? null,
                           computed: row.uses[property] });
@@ -379,7 +419,9 @@ export async function censusOne(cdp, file, { width, height }) {
     tokens: tokenCount,
     counts,
     defaults_equal_to_a_token: defaultsEqualToToken,
-    cdp: { matched_calls: matchedCalls, match_ms: Date.now() - started },
+    cdp: { matched_calls: matchedCalls, match_ms: matchMs, concurrency,
+           prefilter_calls: prefilter.candidates },
+    prefilter,
     examples,
   };
 }
@@ -401,6 +443,7 @@ async function main(argv) {
   const browser = value("--browser", process.env.PULP_DESIGN_BROWSER);
   const out = value("--out", "token-ref-census.json");
   const viewport = value("--viewport", "1280x800").split("x").map(Number);
+  const concurrency = Math.max(1, Number(value("--concurrency", "1")) || 1);
   if (!browser || argv.length === 0) {
     console.error("usage: token_ref_census.mjs --browser <chrome> --out <json> " +
                   "[--viewport WxH] [name=]panel.html[@WxH]...");
@@ -433,7 +476,7 @@ async function main(argv) {
       await cdp.call(method);
     for (const panel of panels) {
       const before = cdp.calls;
-      const result = await censusOne(cdp, panel.file, panel);
+      const result = await censusOne(cdp, panel.file, { ...panel, concurrency });
       result.cdp.total_calls = cdp.calls - before;
       result.viewport = `${panel.width}x${panel.height}`;
       result.summary = Object.fromEntries(
