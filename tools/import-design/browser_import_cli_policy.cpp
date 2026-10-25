@@ -4,6 +4,11 @@
 
 namespace pulp::import_design {
 
+bool browser_import_captures_materialized_document(bool materialized_runtime_emit,
+                                                   bool materialized_canvas_composition) {
+    return materialized_runtime_emit || materialized_canvas_composition;
+}
+
 std::optional<int>
 validate_browser_import_cli_options(bool fit_authored_frame, bool render_size_explicit,
                                     bool has_browser_interactions, bool offline, bool export_tokens,

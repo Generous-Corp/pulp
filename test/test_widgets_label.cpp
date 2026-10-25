@@ -251,6 +251,292 @@ TEST_CASE("painted_text_extents describes the captured lines paint draws",
     CHECK(extents.ink.height < 17.0f + 4.0f);
 }
 
+TEST_CASE("fixed-size Label text with its own layout slot still lays out",
+          "[view][widget][label][layout]") {
+    // Centred lone text gets an anonymous slot sized from the copy, so a
+    // pinned box alone does not make the text write layout-free.
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    auto owned = std::make_unique<Label>("BAND 1/64");
+    auto& label = *owned;
+    label.flex().dim_width = {240.0f, DimensionUnit::px};
+    label.flex().preferred_width = 240.0f;
+    label.flex().dim_height = {26.0f, DimensionUnit::px};
+    label.flex().preferred_height = 26.0f;
+    label.flex().justify_content = FlexJustify::center;
+    label.flex().align_items = FlexAlign::center;
+    root.add_child(std::move(owned));
+    root.layout_children_if_needed();
+    REQUIRE(label.has_own_text_box());
+    const float slot_before = label.own_text_box().width;
+    const auto generation = root.tree_layout_generation();
+
+    label.set_text("BAND 12/64 WITH A MUCH LONGER TAIL");
+
+    CHECK(root.tree_layout_generation() != generation);
+    root.layout_children_if_needed();
+    CHECK(label.own_text_box().width > slot_before);
+}
+
+namespace {
+
+// A captured design-import text box as the native materializer builds it:
+// both axes pinned, one captured line that wraps natively on a cache miss.
+Label& add_captured_label(View& root, float height) {
+    auto label = std::make_unique<Label>("Gain 1");
+    label->set_font_family("Inter");
+    label->set_font_size(12.0f);
+    label->flex().dim_width = {80.0f, DimensionUnit::px};
+    label->flex().preferred_width = 80.0f;
+    if (height > 0.0f) {
+        label->flex().dim_height = {height, DimensionUnit::px};
+        label->flex().preferred_height = height;
+    }
+    label->set_multi_line(true);
+    label->set_cached_line_boxes({{0, 0, 40, 15, 0, 6}}, 80.0f,
+                                 resolved_face_identity("Inter", 400.0f), true);
+    auto& ref = *label;
+    root.add_child(std::move(label));
+    return ref;
+}
+
+} // namespace
+
+TEST_CASE("Captured Label text writes into a pinned box leave layout current",
+          "[view][widget][label][layout][perf]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    auto& label = add_captured_label(root, 40.0f);
+    if (label.cached_line_boxes().empty()) {
+        SKIP("no resolvable face: the capture fails closed into native reflow");
+    }
+    root.layout_children_if_needed();
+    REQUIRE(root.layout_is_current());
+
+    const auto generation = root.tree_layout_generation();
+    const auto damage = View::damage_request_count();
+    const auto passes = View::layout_pass_count();
+    label.set_text("Gain 2");
+    label.set_text("a much longer readout that wraps across the captured box");
+    label.set_text("Gain 3");
+
+    CHECK(label.text() == "Gain 3");
+    CHECK(root.tree_layout_generation() == generation);
+    CHECK(root.layout_is_current());
+    CHECK(View::damage_request_count() >= damage + 3);
+    root.layout_children_if_needed();
+    CHECK(View::layout_pass_count() == passes);
+    CHECK(label.bounds().height == Catch::Approx(40.0f));
+}
+
+TEST_CASE("Captured Label text that can resize its box still lays out",
+          "[view][widget][label][layout]") {
+    SECTION("height follows the text") {
+        View root;
+        root.set_bounds({0, 0, 400, 200});
+        auto& label = add_captured_label(root, 0.0f);
+        if (label.cached_line_boxes().empty())
+            SKIP("no resolvable face");
+        root.layout_children_if_needed();
+        const float one_line = label.bounds().height;
+        const auto generation = root.tree_layout_generation();
+
+        label.set_text("a much longer readout that wraps across the captured box");
+
+        CHECK(root.tree_layout_generation() != generation);
+        CHECK_FALSE(root.layout_is_current());
+        root.layout_children_if_needed();
+        CHECK(label.bounds().height > one_line);
+    }
+
+    SECTION("baseline participant") {
+        View root;
+        root.set_bounds({0, 0, 400, 200});
+        root.flex().direction = FlexDirection::row;
+        root.flex().align_items = FlexAlign::baseline;
+        auto& label = add_captured_label(root, 40.0f);
+        if (label.cached_line_boxes().empty())
+            SKIP("no resolvable face");
+        root.layout_children_if_needed();
+        const auto generation = root.tree_layout_generation();
+
+        label.set_text("Gain 2");
+
+        CHECK(root.tree_layout_generation() != generation);
+    }
+
+    SECTION("percent width") {
+        View root;
+        root.set_bounds({0, 0, 400, 200});
+        auto& label = add_captured_label(root, 40.0f);
+        if (label.cached_line_boxes().empty())
+            SKIP("no resolvable face");
+        label.flex().dim_width = {50.0f, DimensionUnit::percent};
+        label.flex().preferred_width = 0.0f;
+        root.layout_children_if_needed();
+        const auto generation = root.tree_layout_generation();
+
+        label.set_text("Gain 2");
+
+        CHECK(root.tree_layout_generation() != generation);
+    }
+
+    SECTION("label with children") {
+        View root;
+        root.set_bounds({0, 0, 400, 200});
+        auto& label = add_captured_label(root, 40.0f);
+        if (label.cached_line_boxes().empty())
+            SKIP("no resolvable face");
+        label.add_child(std::make_unique<View>());
+        root.layout_children_if_needed();
+        const auto generation = root.tree_layout_generation();
+
+        label.set_text("Gain 2");
+
+        CHECK(root.tree_layout_generation() != generation);
+    }
+}
+
+TEST_CASE("Yoga places a point-pinned captured Label without reading its text",
+          "[view][widget][label][layout]") {
+    // The pinned-capture rule skips layout on a text write. These force the
+    // layout anyway and require identical geometry, which is what makes the
+    // skip safe. Each control shows the forced pass does re-measure text.
+    const std::string long_copy = "a much longer readout that wraps across the captured box";
+
+    SECTION("shrinking flex row") {
+        View root;
+        root.set_bounds({0, 0, 100, 200});
+        root.flex().direction = FlexDirection::row;
+        root.flex().align_items = FlexAlign::start;
+        auto& label = add_captured_label(root, 40.0f);
+        if (label.cached_line_boxes().empty())
+            SKIP("no resolvable face");
+        auto sibling = std::make_unique<View>();
+        sibling->flex().dim_width = {80.0f, DimensionUnit::px};
+        sibling->flex().preferred_width = 80.0f;
+        sibling->flex().dim_height = {10.0f, DimensionUnit::px};
+        sibling->flex().preferred_height = 10.0f;
+        auto& other = *sibling;
+        root.add_child(std::move(sibling));
+        root.layout_children();
+        const Rect label_before = label.bounds();
+        const Rect other_before = other.bounds();
+        REQUIRE(label_before.width < 80.0f); // the row really shrank it
+
+        label.set_text(long_copy);
+        root.layout_children();
+
+        CHECK(label.bounds().x == Catch::Approx(label_before.x));
+        CHECK(label.bounds().width == Catch::Approx(label_before.width));
+        CHECK(label.bounds().height == Catch::Approx(label_before.height));
+        CHECK(other.bounds().x == Catch::Approx(other_before.x));
+        CHECK(other.bounds().width == Catch::Approx(other_before.width));
+    }
+
+    SECTION("shrinking flex column") {
+        View root;
+        root.set_bounds({0, 0, 400, 50});
+        root.flex().align_items = FlexAlign::start;
+        auto& label = add_captured_label(root, 40.0f);
+        if (label.cached_line_boxes().empty())
+            SKIP("no resolvable face");
+        auto sibling = std::make_unique<View>();
+        sibling->flex().dim_height = {40.0f, DimensionUnit::px};
+        sibling->flex().preferred_height = 40.0f;
+        auto& other = *sibling;
+        root.add_child(std::move(sibling));
+        root.layout_children();
+        const Rect label_before = label.bounds();
+        const Rect other_before = other.bounds();
+        REQUIRE(label_before.height < 40.0f);
+
+        label.set_text(long_copy);
+        root.layout_children();
+
+        CHECK(label.bounds().height == Catch::Approx(label_before.height));
+        CHECK(other.bounds().y == Catch::Approx(other_before.y));
+        CHECK(other.bounds().height == Catch::Approx(other_before.height));
+    }
+
+    SECTION("auto-sized parent") {
+        View root;
+        root.set_bounds({0, 0, 400, 200});
+        root.flex().align_items = FlexAlign::start;
+        auto wrapper_owned = std::make_unique<View>();
+        auto& wrapper = *wrapper_owned;
+        wrapper.flex().direction = FlexDirection::row;
+        wrapper.flex().align_items = FlexAlign::start;
+        root.add_child(std::move(wrapper_owned));
+        auto& label = add_captured_label(wrapper, 40.0f);
+        if (label.cached_line_boxes().empty())
+            SKIP("no resolvable face");
+        root.layout_children();
+        const Rect wrapper_before = wrapper.bounds();
+        REQUIRE(wrapper_before.width == Catch::Approx(80.0f)); // sized from its child
+
+        label.set_text(long_copy);
+        root.layout_children();
+
+        CHECK(wrapper.bounds().width == Catch::Approx(wrapper_before.width));
+        CHECK(wrapper.bounds().height == Catch::Approx(wrapper_before.height));
+    }
+
+    SECTION("control: an auto-height capture does move") {
+        View root;
+        root.set_bounds({0, 0, 400, 200});
+        root.flex().align_items = FlexAlign::start;
+        auto& label = add_captured_label(root, 0.0f);
+        if (label.cached_line_boxes().empty())
+            SKIP("no resolvable face");
+        root.layout_children();
+        const float before = label.bounds().height;
+
+        label.set_text(long_copy);
+        root.layout_children();
+
+        CHECK(label.bounds().height > before);
+    }
+}
+
+TEST_CASE("A layout-free captured text write paints what a fresh layout paints",
+          "[view][widget][label][layout][label-cache]") {
+    // The new copy wraps onto more lines than the capture held. The Label
+    // that skipped layout must draw the same runs at the same places as one
+    // that laid out with the copy already in place.
+    const std::string long_copy = "a much longer readout that wraps across the captured box";
+    View written_root;
+    written_root.set_bounds({0, 0, 400, 200});
+    auto& written = add_captured_label(written_root, 40.0f);
+    if (written.cached_line_boxes().empty())
+        SKIP("no resolvable face");
+    written_root.layout_children_if_needed();
+    const auto generation = written_root.tree_layout_generation();
+    written.set_text(long_copy);
+    REQUIRE(written_root.tree_layout_generation() == generation);
+
+    View fresh_root;
+    fresh_root.set_bounds({0, 0, 400, 200});
+    auto& fresh = add_captured_label(fresh_root, 40.0f);
+    fresh.set_text(long_copy);
+    fresh_root.layout_children();
+
+    RecordingCanvas written_canvas;
+    written.paint(written_canvas);
+    RecordingCanvas fresh_canvas;
+    fresh.paint(fresh_canvas);
+    const auto written_runs = commands_of(written_canvas, DrawCommand::Type::fill_text);
+    const auto fresh_runs = commands_of(fresh_canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fresh_runs.size() > 1); // the copy really wraps
+    REQUIRE(written_runs.size() == fresh_runs.size());
+    for (std::size_t i = 0; i < fresh_runs.size(); ++i) {
+        INFO("run " << i);
+        CHECK(written_runs[i].text == fresh_runs[i].text);
+        CHECK(written_runs[i].f[0] == Catch::Approx(fresh_runs[i].f[0]));
+        CHECK(written_runs[i].f[1] == Catch::Approx(fresh_runs[i].f[1]));
+    }
+}
+
 TEST_CASE("Label text can be changed", "[view][widget]") {
     Label label("Initial");
     REQUIRE(label.text() == "Initial");

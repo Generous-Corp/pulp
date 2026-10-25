@@ -23,6 +23,19 @@ into `web_compat_preludes_gen.hpp` and evaluated in order by
 `WidgetBridge`. The current set covers everything React 18 dev (and most
 similar frameworks) feature-detect on construction:
 
+The preludes ship compressed. `embed_js.py` stores each one as a zlib stream
+(about 600 KB of text becomes about 160 KB in every scripted-UI binary), and
+`preludes::source(preludes::<name>)` inflates it at the `eval_or_throw` call,
+about 1.5 ms for the whole set on an M5. Two consequences:
+
+- The generated `web_compat_preludes_gen.cpp` holds byte arrays, not script
+  text, so grepping it for a JS change finds nothing. Grep the `.js` file, or
+  inflate with `preludes::source()` in a test (`test/test_js_preludes.cpp`
+  already proves every prelude round-trips to its file byte for byte).
+- Each `EmbeddedPrelude` carries the SHA-256 of its text. A cache keyed by
+  that digest can skip the inflate entirely; the bytecode cache today keys on
+  the full source, so every open still inflates.
+
 | Surface | Where | Why |
 |---------|-------|-----|
 | `Element.nodeType` (=1) / `nodeName` (=tagName) | `web-compat-element.js` | React reconciler walks every node and bails before first commit without DOM-compatible node identity. |
@@ -351,7 +364,11 @@ fork — the same pin/fetch/Find pattern as Skia:
 3. **Resolve:** `tools/cmake/FindV8.cmake` finds `external/v8-build/<key>`
    (or a baked `$V8_DIR`, or legacy overrides) and exposes the `v8::v8`
    imported target. The configure log prints
-   `-- Pulp V8 provider: <path> (platform key: ...)`.
+   `-- Pulp V8 provider: <path> (platform key: ...)`. The provider's
+   `manifest.json` `consumer_defines` ride on `v8::v8` as
+   `INTERFACE_COMPILE_DEFINITIONS` (printed as `-- Pulp V8 consumer defines:`);
+   V8's inline headers read them, so a missing or malformed manifest fails
+   configure rather than compiling against the header defaults.
 
 **Selecting V8 — that's all you need:**
 
@@ -423,7 +440,9 @@ required platform acceptance step:
    is MSVC cl.
 2. **`-DV8_COMPRESS_POINTERS`** — mandatory; without it the inline
    `v8-internal.h` tagged-field offsets mismatch the DLL and silently
-   corrupt the heap.
+   corrupt the heap. A sealed provider supplies it through its manifest
+   `consumer_defines` on `v8::v8`; `PulpV8Windows.cmake` adds it explicitly
+   only for the manifest-less legacy override.
 3. **Chromium-style libc++ headers** with `_LIBCPP_ABI_NAMESPACE=__Cr`
    (routed via clang-cl's `/clang:-nostdinc++ /clang:-isystem` — bare
    `-nostdinc++` is silently dropped by clang-cl, which is the trap that
@@ -825,8 +844,8 @@ tools/scripts/confirm_failure.sh \
 ```
 
 The `--object` flag is documented in the script's own header for exactly this
-case. Counting the changed text inside the generated file still works as a
-manual positive control, but it is no longer the only route to a verdict.
+case. The generated file holds compressed bytes, so counting changed text
+inside it is no longer a positive control.
 
 Note also that `core/view/js/web-compat.js` is a monolith that is **not**
 embedded. The embedded lane is the split `web-compat-*.js` set listed above,

@@ -1,40 +1,48 @@
 #!/usr/bin/env python3
-"""Generate a C++ source file that DEFINES the JS preludes as externally
-linkable string constants.
+"""Generate a C++ source file that DEFINES the JS preludes as compressed,
+externally linkable byte arrays.
 
-The preludes used to be emitted as `static const char*` definitions inside
-`web_compat_preludes_gen.hpp`, which was `#include`d directly by
-widget_bridge.cpp. Every JS-prelude edit therefore recompiled the bridge and
-re-tokenized hundreds of KB of raw-string literals.
+Each prelude is stored as a zlib (RFC 1950) stream, which shrinks the ~600 KB
+of prelude text in every scripted-UI binary to about a quarter. The bytes are
+inflated only when a prelude is evaluated (pulp::view::preludes::source), and
+the inflated text is a temporary the caller drops after evaluation.
 
-Now the definitions live in this generated `.cpp` (its own translation unit)
-and the matching `extern const char* const` declarations live in
-`web_compat_preludes_gen.hpp`, which is generated at CMake *configure* time
-from the same prelude file list (see core/view/CMakeLists.txt). Editing a
-prelude rebuilds only this generated `.cpp` + relink — not widget_bridge.cpp.
+The matching declarations live in `web_compat_preludes_gen.hpp`, generated at
+CMake *configure* time from the prelude file list (see
+core/view/cmake/PulpViewJsPreludes.cmake), so editing a prelude rebuilds only
+this generated `.cpp` + relink, never widget_bridge.cpp.
 
 The variable-name derivation here (file stem with '-' -> '_') MUST stay in
-sync with the header generator in core/view/CMakeLists.txt.
+sync with the header generator in core/view/cmake/PulpViewJsPreludes.cmake.
 """
 
 from __future__ import annotations
 
+import hashlib
 import pathlib
 import sys
+import zlib
 
-# Keep raw string chunks comfortably below MSVC's per-literal limit.
-# The generator preserves exact JS bytes, so smaller chunks are safe.
-# Slice on Python str, which is character-aware, so chunk boundaries never split
-# a UTF-8 multi-byte codepoint and corrupt the R"__JS__(...)" delimiter on MSVC.
-CHUNK_SIZE = 4000
+# Level 9 for the smallest stream; the work happens once per build.
+COMPRESSION_LEVEL = 9
+BYTES_PER_LINE = 20
 
 
 def var_name_for(path: pathlib.Path) -> str:
     return path.stem.replace("-", "_")
 
 
-def chunk_text(text: str, chunk_size: int) -> list[str]:
-    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)] or [""]
+def compress(data: bytes) -> bytes:
+    return zlib.compress(data, COMPRESSION_LEVEL)
+
+
+def byte_lines(data: bytes) -> list[str]:
+    if not data:
+        return ["    0"]
+    return [
+        "    " + ",".join(str(b) for b in data[i : i + BYTES_PER_LINE]) + ","
+        for i in range(0, len(data), BYTES_PER_LINE)
+    ]
 
 
 def main(argv: list[str]) -> int:
@@ -51,15 +59,25 @@ def main(argv: list[str]) -> int:
         "namespace pulp::view::preludes {\n\n",
     ]
 
+    names = []
     for input_path in input_paths:
-        text = input_path.read_text(encoding="utf-8")
-        parts.append(f"const char* const {var_name_for(input_path)} =\n")
-        for chunk in chunk_text(text, CHUNK_SIZE):
-            parts.append('R"__JS__(')
-            parts.append(chunk)
-            parts.append(')__JS__"\n')
-        parts.append(";\n\n")
+        source = input_path.read_bytes()
+        source.decode("utf-8")  # the preludes are UTF-8 text; fail the build otherwise
+        deflated = compress(source)
+        var = var_name_for(input_path)
+        names.append(var)
+        parts.append(f"static const unsigned char {var}_deflated[] = {{\n")
+        parts.append("\n".join(byte_lines(deflated)))
+        parts.append("\n};\n")
+        parts.append(
+            f"const EmbeddedPrelude {var}{{\"{input_path.name}\", {var}_deflated, "
+            f"{len(deflated)}, {len(source)}, \"{hashlib.sha256(source).hexdigest()}\"}};\n\n"
+        )
 
+    parts.append("const EmbeddedPrelude* const kAll[] = {\n")
+    parts.extend(f"    &{var},\n" for var in names)
+    parts.append("};\n")
+    parts.append(f"const std::size_t kAllCount = {len(names)};\n\n")
     parts.append("}  // namespace pulp::view::preludes\n")
     output_path.write_text("".join(parts), encoding="utf-8")
     return 0

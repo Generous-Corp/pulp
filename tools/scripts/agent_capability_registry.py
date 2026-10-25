@@ -446,7 +446,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             ),
         }
         for include, fingerprint in [
-            ("pulp/signal/compressor.hpp", "sha256:164c6d838338eecd2e144ca78eb1b3f35edda19e5eda84352dadde24ce2dd5bb"),
+            ("pulp/signal/compressor.hpp", "sha256:f75d915e4d7f6ac4fc70bcef81454146163aa5f647c80b185c563846e84fd8b3"),
             ("pulp/signal/diode_bridge_compressor.hpp", "sha256:2384a18231c9cfcff6b8823613050334776113aac5e6c7de76f6f3cd44e942a3"),
             ("pulp/signal/feedforward_compressor.hpp", "sha256:afcd1e63df356725f2256c0b449900c894e1120f016ac511512cc94b11263524"),
             ("pulp/signal/fet_compressor.hpp", "sha256:45e9524c1ca8d7a5e5a3c7e18c997710e0d5a13b05a5c3c2717f7640c5dd03ee"),
@@ -498,7 +498,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     ],
     {
         "include": "pulp/signal/fft.hpp",
-        "fingerprint": "sha256:2794461c6ba9fb79a274f86182439f40b0b003454c5c323f853b730ee7ad6083",
+        "fingerprint": "sha256:8e540807d1e39013586eec91a321b077bba48da22a903ce775314807327f6965",
         "disposition": "capability_support",
         "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
         "rationale": (
@@ -811,7 +811,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:d15ee5596c20887770bc8f6025d0db955b0ba25048afa6f943e669dcd85120f5",
+        "fingerprint": "sha256:06673a7b8a8b1609fa65ffb1143e637dd8e0b48adcedfdfa2e26df11369217b0",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -842,7 +842,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:57ae1a537b1ef14942fee81b63a99e5f5f6bed816e1d4fa11f1d7e76a7a1c73d",
+        "fingerprint": "sha256:7491f1683f2b88a0f5af8d160760e49ab429240fd07831f05961fcd0dd0db6a5",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (
@@ -862,7 +862,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/frequency_response.hpp",
-        "fingerprint": "sha256:0b571e77442e31ca61913ccbef792f1f775b691e730006bde351ca18f57581f8",
+        "fingerprint": "sha256:565a9cd6416db2a6cb57af4b49585a9715605ba516cbd76e6896a21b1bb08bea",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -894,7 +894,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:6d6c680ae9ce6f82cc796d8fcaab3d61d25f9c9eaea26318e698c0b85df0440d",
+        "fingerprint": "sha256:26407cd80b39ea50a5d842c23c91a7d0136f5efdad6be9a52a8f381c427df22b",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1355,7 +1355,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/classic_reverb.hpp",
-        "fingerprint": "sha256:260a528f11d3641e227e4cd301f91103d51a7aaeb40bdbf9994a5c4b58878fac",
+        "fingerprint": "sha256:ef4d852f267095f4e18a7ed2114640adaeaf8fbbd57087cc3a1aaa1d3a4c796f",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1366,7 +1366,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/detail/simd_lanes.hpp",
-        "fingerprint": "sha256:a03dec563cc1eb560335d4968e1d238dd80134ed1a501d713275b438404d09cb",
+        "fingerprint": "sha256:7f66643caad7bb5dea9e17c238067924f382681b2554f7c8a9deb517f9614e29",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1398,7 +1398,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fdn/frac_delay.hpp",
-        "fingerprint": "sha256:282c25e49387c19a1a278dac2fa72c1af65a24a19ef427b7a514092741a06836",
+        "fingerprint": "sha256:6ae028912b0f69c9698a23788caedee47f5dfd59edf292f7e1be01d80556f151",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1442,7 +1442,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fdn/multirate.hpp",
-        "fingerprint": "sha256:41420dc60ad30c20c5417c35adbc2cffff712cf5e5256b375a1a34de8dddafe6",
+        "fingerprint": "sha256:dfad7d64648cbd7e5ced29e8629fa6590b6911f8def641c58b5f5803bf006a2f",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1487,7 +1487,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/denormal.hpp",
-        "fingerprint": "sha256:a8a9433f0bd463d455260b3b1470571ce1f139722b4cb8acfe42f0e142ed56f4",
+        "fingerprint": "sha256:c139f6695a9b995b89dc3b9d00430bc0776391286bec850213c8e278bf67e099",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1537,7 +1537,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/oversampling_fir.hpp",
-        "fingerprint": "sha256:1d4c96fd0658021605e48294feba1fc8765266c8b1bd7bed6bf2fcc2fabe79c5",
+        "fingerprint": "sha256:2579a2a2e987d5fc1a960d91fd42ea3d645097fb5d5fd96ac85ba94373cfcef0",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1610,6 +1610,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/overlap_add_convolver.hpp",
+        "fingerprint": "sha256:a673761c3cbeb7eecaaea03f8f49a663cff7fe63f8e422b8538b6c66bafd3307",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "The single-partition overlap-add ConvolverT, moved out of fft.hpp (which still "
+            "includes it) with an unchanged interface. A one-block-latency convolution "
+            "utility that runs its spectra in split form internally; it carries no "
+            "capability claim of its own, PartitionedConvolver being the advertised engine."
+        ),
+    },
+    {
         "include": "pulp/signal/convolver_non_uniform.hpp",
         "fingerprint": "sha256:e36fe1a2424f6a0f64c30c3f0d395c6884633ebf78cce4b9b834369c2b6f3079",
         "disposition": "infrastructure",
@@ -1624,7 +1636,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/halfband_iir.hpp",
-        "fingerprint": "sha256:53cdf36221de5bc046af7a9627809126410cea863daeab56d66eb7757e31aa0d",
+        "fingerprint": "sha256:c47732fc56150293213d048f7ac113f3f3ac0341a83167eb40bae9c4f89ccdfc",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1636,7 +1648,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/oversampling.hpp",
-        "fingerprint": "sha256:9a716ddcb90581edd9a8f7214a02a604933bd6e355d46d88749c031908bd6568",
+        "fingerprint": "sha256:08bc7cb21e50cddb3cea2f9aa2405cbbf4e02ca6a2d790e03668e2e23f448760",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1702,6 +1714,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "Runs N state-variable-filter voices in lockstep structure-of-arrays lanes with a "
             "per-voice mode, each voice bit-identical to Svf. A voice-processing primitive for "
             "polyphonic processors; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/waveshaper.hpp",
+        "fingerprint": "sha256:414fae751de0700326a73c259418799514ef35bf134e15d2cf1f29a766719b53",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Static waveshaping curves (soft, hard, tanh, fold, sine fold) with a drive, as "
+            "per-sample and buffer paths that agree bit for bit. A bounded DSP primitive; it "
+            "makes no installed agent capability claim of its own."
         ),
     },
 ]

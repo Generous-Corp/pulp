@@ -1,0 +1,57 @@
+{
+  "id": "signal-classic-reverb-live-size-and-silent-tail",
+  "title": "Classic reverb follows automated size, snaps its comb writes, and reports when its comb bank is silent",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "signal-classic-reverb-live-size-and-silent-tail-20261023",
+  "owned_paths": [
+    "core/signal/include/pulp/signal/classic_reverb.hpp",
+    "docs/status/sequencer-exposure/rows/signal-classic-reverb-live-size-and-silent-tail.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/signal/include/pulp/signal/classic_reverb.hpp",
+      "needles": [
+        "bool combs_silent() const",
+        "if (smoothed(Param::size) != lengths_size_)"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "ClassicReverb now re-derives its comb and allpass lengths as an automated size control moves, snaps each comb write so a silent tail reaches exact zero without flush-to-zero, and adds the read-only combs_silent() inspector. This pending source receipt does not establish a released SDK artifact.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/signal/include/pulp/signal/classic_reverb.hpp",
+          "needles": [
+            "bool combs_silent() const"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "An in-process processor change adds no offline timeline command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "It adds no timeline MCP operation."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No remote control operation is added; size stays a baked node parameter driven like the reverb's other controls."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "classic_reverb.hpp is registered as reviewed infrastructure with no capability keys, so no installed agent capability is added or changed."
+    }
+  }
+}

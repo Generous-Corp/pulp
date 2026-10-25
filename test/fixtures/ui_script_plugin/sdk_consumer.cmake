@@ -89,6 +89,47 @@ if(NOT _clap_count EQUAL 1)
     message(FATAL_ERROR "expected one built .clap bundle, found: ${_clap_binaries}")
 endif()
 
+# The consumer configured without PULP_DEV_BUILD, so its image carries the
+# embedded script and no on-disk path: the script's console marker proves the
+# scan reads the right bytes, and the absolute source path must be absent.
+# The image is named after PLUGIN_NAME (the CLAP target's OUTPUT_NAME), as the
+# bundle is, not after the CMake target, and that name contains spaces.
+file(GLOB_RECURSE _clap_images "${_clap_binaries}/*")
+get_filename_component(_clap_image_name "${_clap_binaries}" NAME_WLE)
+set(_clap_image "")
+foreach(_candidate IN LISTS _clap_images)
+    get_filename_component(_name "${_candidate}" NAME)
+    if(_name STREQUAL _clap_image_name OR _name MATCHES "\\.(so|dll|clap)$")
+        set(_clap_image "${_candidate}")
+    endif()
+endforeach()
+if(NOT _clap_image)
+    message(FATAL_ERROR "no plug-in image found inside ${_clap_binaries}: ${_clap_images}")
+endif()
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+function(_image_contains image needle out_var)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -I -c
+            "import sys, pathlib; sys.exit(0 if sys.argv[2].encode() in pathlib.Path(sys.argv[1]).read_bytes() else 1)"
+            "${image}" "${needle}"
+        RESULT_VARIABLE _rv)
+    if(_rv EQUAL 0)
+        set(${out_var} TRUE PARENT_SCOPE)
+    else()
+        set(${out_var} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+_image_contains("${_clap_image}" "pulp-ui-script-fixture-mounted" _has_marker)
+_image_contains("${_clap_image}" "${_source}/ui/main.js" _has_path)
+if(NOT _has_marker)
+    message(FATAL_ERROR "${_clap_image} does not embed ui/main.js (the console marker is absent)")
+endif()
+if(_has_path)
+    message(FATAL_ERROR
+        "${_clap_image} names the on-disk script path ${_source}/ui/main.js in a release build")
+endif()
+message(STATUS "release image embeds the script and records no source path")
+
 set(FORMAT clap)
 set(BUNDLE "${_clap_binaries}")
 include("${FIXTURE_DIR}/check_editor_mode.cmake")

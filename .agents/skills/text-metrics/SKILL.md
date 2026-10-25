@@ -152,7 +152,65 @@ now consults `make_system_ui_font_manager` (`core/canvas/src/system_ui_typeface.
 first. Compare a family's paragraph face with its resolver face per weight,
 names and advances, before trusting either. A subclass of `SkFontMgr` (or of
 SkParagraph's `TypefaceFontProvider`) must live in a TU built with `-fno-rtti`:
-the prebuilt Skia exports no type info for them and the link fails.
+the prebuilt Skia exports no type info for them and the link fails. Keep that
+TU free of anything that can throw (`std::vector`, `std::string`, inline
+helpers that use them): a throw site compiled without RTTI emits hidden copies
+of `std::exception`'s type info, the linker binds the whole binary's catch
+clauses to them, and a `std::runtime_error` thrown anywhere else then escapes
+`catch (const std::exception&)`. Put such code in an ordinary TU, as
+`font_weight_match.cpp` does, and check with `nm -m <tu>.o | grep __ZTISt`.
+
+The weight a family resolves is the other half of the face. CoreText (and
+every platform manager's `matchFamilyStyle`) takes the NEAREST weight; CSS
+Fonts 4 searches in a fixed direction: from 400 to 500 it tries heavier faces
+up to 500, then lighter, then heavier; below 400 lighter first; above 500
+heavier first. Helvetica Neue ships Medium (500) and Bold (700), so at 600
+CoreText picks Medium and Chromium picks Bold. The import painted lighter and
+narrower (dx -0.54 CSS px, ink 0.858 against the capture) and, because the
+resolved face no longer matched the capture's recorded face, Label rejected the
+captured basis and placed the baseline natively (dy +0.45 at whole-pixel
+tops). `css_match_font_weight()` in `core/canvas/src/font_weight_match.hpp`
+is the one matcher: the resolver (and so `resolved_face_identity()`), the
+paragraph collection's default manager and bundled families all go through it.
+Never call `mgr->matchFamilyStyle()` directly for a named family; the face it
+returns is the face the captured-basis check will disagree with. When a weight
+looks wrong, ask the same question at 700 first: if 700 is exact and 600 is
+not, the family is missing the weight and the matcher is deciding.
+
+## The CoreGraphics host measures through the face CoreText paints
+
+The rule above has a second half that lives below the family name: the
+measuring backend must resolve the same *face* the painting backend draws.
+The CoreGraphics host paints text through CoreText. A lite editor (the macOS
+default; see the `view-bridge` skill's editor stack section) also measures
+through CoreText (`TextShaper`'s `PULP_TEXT_SHAPER_SKIA == 0` branch), so the
+line box comes from the glyphs actually drawn. That is a deliberate choice:
+measure equals paint.
+
+A full-stack build still measures through Skia's `SkFontMgr`, and for some
+families and weights Skia resolves a different face than CoreText paints:
+
+- "Helvetica Neue" 600 at 12 px: Skia ascent 13.92, width 116.7; the painted
+  face ascent 13.69, width 120.0.
+- JetBrains Mono at 9 px: Skia adds 0.12 px of leading the painted face lacks.
+
+Captured text is not affected: a Label reuses a capture's line breaks only
+when `resolved_face_identity()` matches the capture's face, and the lite stack
+answers that through CoreText (`coretext_face_postscript_name`), the face it
+paints. When the lite answer was empty, every captured label re-broke with its
+own measurement and the design panels moved by whole labels (0.31% and 0.47%
+of pixels on PulpDesignSynth and PulpDesignArp); with the answer they match the
+full build: 0 pixels on PulpDesignSynth, and on PulpDesignArp a bold 9 px "07"
+whose identical glyphs sit 1 capture px lower. That label asks for
+JetBrainsMono-Bold, which Pulp does not bundle; Skia falls back to Menlo-Bold
+and CoreText to the bundled Regular, so the full build places CoreText-painted
+glyphs with Menlo's metrics. A lite-vs-full diff on a design panel is a
+regression to chase unless the differing text resolves to a face Pulp does not
+bundle: check `resolved_face_identity()` on each stack against the capture's
+`lineBoxBasis.resolvedFace` before concluding either.
+`pulp-test-face-identity-full` and `-lite` hold the bundled faces' identities
+equal across the two stacks. Text measured without a capture can still differ
+by up to 1 logical px for the system families listed above.
 
 ## A Label with element children does not paint at its own origin
 
@@ -415,6 +473,35 @@ line on the captured box` in `test/test_widgets_label.cpp`.
   every sibling in the row. Check `text_direction_` before returning an advance
   from any width path.
 
+- **SkParagraph's `LineMetrics::fHeight` is ONE line's height, whatever
+  `Metrics.h` says.** The header documents it as the paragraph height through
+  the current line; `TextLine::getMetrics` assigns the line's own advance.
+  Reading it as a running total made every equal-height line after the first
+  contribute nothing, and a later fallback-face line (Thai then CJK, both 22px
+  at 16px) lose its descent. `paragraph_text_extents()` holds the max-over-lines
+  rule as a pure function; the `[skia]` control in `test_text_shaper.cpp` pins
+  the library's per-line semantics so a Skia bump that changes them fails
+  there, not in a layout. An all-Latin multi-line test cannot see this bug:
+  equal lines give the same max under both readings.
+
+- **A text write into a pinned captured box must not dirty layout.** The
+  materializer passes `wrap_on_cache_miss` for every non-nowrap single-line
+  capture, so `captured_wrap_fallback()` is true on most imported text, and
+  that alone used to send every `set_text` through `invalidate_layout()`. On the
+  example instrument and MIDI-effect panels, 34 of 44 and 59 of 68 slot writes
+  cost a full Yoga pass on each frame. `Label::set_text` now requests paint only
+  when width and height are both explicit, the Label is not a baseline
+  participant, it holds captured line boxes, and it has no children. The last
+  two conditions matter. Without captured boxes, a centred lone Label gets an
+  anonymous text slot from layout that is sized from its copy, so new copy
+  moves layout output inside a pinned box. The older single-line fast path
+  skipped that layout and painted into the stale slot (72 px wide for a
+  277 px string). Any Label with `has_own_text_box()` now lays out on a text
+  write. The benchmark's
+  reported `layout_passes` cannot see any of this, because its step and
+  `render_frame` lay out unconditionally. Count `tree_layout_generation()`
+  changes per write instead.
+
 ## Selection geometry is recorded at PAINT, and only paint can record it
 
 `Label` implements `SelectableText` (`core/view/include/pulp/view/selectable_text.hpp`)
@@ -494,6 +581,53 @@ reason. The two must agree: `pulp-test-selectable-text` walks the whole run
 asserting `selectable_index_at_point()` and `char_index_at_point()` return the
 same byte at every x. If you touch either hit-test, that is the test that
 notices.
+
+## SkiaCanvas paragraphs are cached, and the paint is not in the key
+
+`SkiaCanvas` text that goes through SkParagraph (`fill_text`, `stroke_text`,
+`measure_text`, `measure_text_full`, `text_x_for_byte`) looks its laid-out
+paragraph up in the process-wide `ParagraphCache`
+(`pulp/canvas/paragraph_cache.hpp`). It has to be process-wide: hosts build a
+new `SkiaCanvas` every frame, so a per-canvas cache never hits.
+
+- **Anything `build_paragraph` reads must be in `ParagraphKey`.** Adding an
+  input to the paragraph build without adding it to the key paints a stale
+  layout for every run that differed only in that input, and nothing fails
+  unless a test draws two runs that differ in exactly that input. The variant
+  cases in `test_paragraph_cache.cpp` do that per field; add one with the
+  field. Wrap width, text-align and line height are deliberately absent: the
+  paragraph is laid out at infinite width, left-aligned, and the caller aligns
+  the run.
+- **Key on the resolved family stack, not the CSS string.** Generic keywords
+  map to platform families through state that does not bump
+  `font_registration_generation()` (the test-only generic override), so the
+  same CSS string can resolve differently within one process.
+- **The generation is not redundant with the primary typeface.** A
+  registration can change only a fallback entry in the stack (a glyph the
+  primary lacks), leaving the primary face and every other key input equal.
+- **Never update a cached paragraph's foreground paint.**
+  `Paragraph::updateForegroundPaint` rewrites the text styles but not the
+  text-blob records `TextLine` fills on the first paint, which carry the paint
+  they were built with, so a second colour silently paints in the first. The
+  cache builds paragraphs with no foreground paint and draws them through a
+  `ParagraphPainter` that applies the caller's paint to each glyph run.
+- **Every use holds the entry's mutex** (`ParagraphUse`): SkParagraph mutates
+  itself on first paint and in queries such as `getRectsForRange`. Never hold
+  two uses at once; the same key twice on one thread waits on itself.
+- **Key floats must be canonical.** The key compares floats by value and
+  hashes them by bits, so a NaN letter spacing (script can send one through
+  `setTextRuns`) never found its own entry, piled one in per paint, and then
+  crashed eviction; `-0` and `+0` hashed apart. `make_paragraph` replaces
+  non-finite size and spacing and folds `-0` to `+0` before building the key.
+- **Eviction is a segmented LRU on purpose.** A meter readout is a new string
+  every frame; with plain LRU it flushes every label that is not repainted
+  each frame. New entries start on probation and are protected on a second
+  lookup. Admitting only on a second miss instead would shape every stable
+  label twice and fail the benchmark's zero-build steady-state frame.
+- **Unspaced text the primary face cannot cover never reaches SkParagraph.**
+  `fill_text` sends it to the per-run SkShaper fallback, so a cache test that
+  draws a missing glyph must add letter spacing (or a feature) to exercise the
+  cache at all.
 
 ## How to verify a change here
 

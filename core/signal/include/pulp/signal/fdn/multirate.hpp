@@ -145,9 +145,8 @@ private:
 };
 
 // An interleaved stereo ring addressed by absolute stream position, as
-// PositionRing is for one rail. Positions before the start of the stream read
-// as the silence reset() left there: the bridge only ever reads a few samples
-// before zero, while the ring is still far from wrapping.
+// PositionRing is for one rail, and like it reading positions outside the
+// written stream as silence.
 template <typename SampleType = float> class StereoPositionRing {
   public:
     void prepare(int capacity) {
@@ -186,10 +185,13 @@ template <typename SampleType = float> class StereoPositionRing {
         const double floor_pos = std::floor(position);
         const auto i = static_cast<std::int64_t>(floor_pos);
         const lanes::D2 t = lanes::splat(position - floor_pos);
-        const lanes::D2 y0 = at(i - 1);
-        const lanes::D2 y1 = at(i);
-        const lanes::D2 y2 = at(i + 1);
-        const lanes::D2 y3 = at(i + 2);
+        // Positions outside the written stream read as silence, as they do
+        // in PositionRing: before the start, and past the newest sample.
+        const bool inside = i >= 1 && i + 2 < written_;
+        const lanes::D2 y0 = inside ? at(i - 1) : guarded(i - 1);
+        const lanes::D2 y1 = inside ? at(i) : guarded(i);
+        const lanes::D2 y2 = inside ? at(i + 1) : guarded(i + 1);
+        const lanes::D2 y3 = inside ? at(i + 2) : guarded(i + 2);
         // Interpolator::hermite, both rails at once.
         const lanes::D2 c1 = lanes::splat(0.5) * (y2 - y0);
         const lanes::D2 c2 =
@@ -199,6 +201,10 @@ template <typename SampleType = float> class StereoPositionRing {
     }
 
   private:
+    lanes::D2 guarded(std::int64_t index) const {
+        return index < 0 || index >= written_ ? lanes::splat(0.0) : at(index);
+    }
+
     lanes::D2 at(std::int64_t index) const {
         const std::size_t slot = (static_cast<std::size_t>(index) & mask_) * 2;
         if constexpr (std::is_same_v<SampleType, float>)
@@ -353,13 +359,16 @@ public:
             std::fill(tank_in_[c].begin(), tank_in_[c].end(), SampleType{0});
             std::fill(tank_out_[c].begin(), tank_out_[c].end(), SampleType{0});
         }
+        tank_count_ = 0;
+        host_count_ = 0;
         next_tank_pos_ = 0.0;
         // Start the output leg behind the tank stream by enough that its
         // Hermite window is satisfied for every block size: three tank samples
         // for its own taps, plus the input leg's three-host-sample window
         // expressed in tank samples, plus a sample of slack for the floor() at
         // the boundary.
-        next_host_pos_ = -(4.0 * tank_per_host_ + 4.0);
+        host_origin_ = -(4.0 * tank_per_host_ + 4.0);
+        next_host_pos_ = host_origin_;
     }
 
     // Upper bound on the interpolation skew, in host samples, between an input
@@ -370,6 +379,16 @@ public:
     double interpolation_skew_samples() const {
         if (!resampling_) return 0.0;
         return 3.0 + (4.0 * tank_per_host_ + 4.0) * host_per_tank_;
+    }
+
+    // The next read positions of the two legs, on their stream clocks: the
+    // host-sample position of the next tank sample, and the tank-sample
+    // position of the next host sample.
+    double input_read_position() const {
+        return next_tank_pos_;
+    }
+    double output_read_position() const {
+        return next_host_pos_;
     }
 
     SampleType* tank_input(int rail) { return tank_in_[rail].data(); }
@@ -409,7 +428,7 @@ public:
                 tl[produced] = static_cast<SampleType>(lanes::lane(v, 0));
                 tr[produced] = static_cast<SampleType>(lanes::lane(v, 1));
                 ++produced;
-                next_tank_pos_ += host_per_tank_;
+                next_tank_pos_ = tank_position(++tank_count_);
             }
         }
         aa_in_ = aa;
@@ -438,16 +457,14 @@ public:
                                             static_cast<double>(finite_or_zero(tr[i])));
             out_ring_.push(downsampling ? v : aa.process(sections, v));
         }
-        double position = next_host_pos_;
         for (int i = 0; i < host_n; ++i) {
-            lanes::D2 v = out_ring_.read(position);
+            lanes::D2 v = out_ring_.read(next_host_pos_);
             if (downsampling)
                 v = aa.process(sections, v);
             left[i] = static_cast<SampleType>(lanes::lane(v, 0));
             right[i] = static_cast<SampleType>(lanes::lane(v, 1));
-            position += tank_per_host_;
+            next_host_pos_ = host_position(++host_count_);
         }
-        next_host_pos_ = position;
         aa_out_ = aa;
     }
 
@@ -465,6 +482,19 @@ public:
     double tank_rate_ = 20000.0;
     double host_per_tank_ = 1.0;
     double tank_per_host_ = 1.0;
+    // Read positions are derived from sample counts, not accumulated: adding
+    // an inexact rate ratio once per sample drifts by whole samples over a
+    // long session, until the output leg reads past what the tank wrote.
+    double tank_position(std::int64_t count) const {
+        return static_cast<double>(count) * host_rate_ / tank_rate_;
+    }
+    double host_position(std::int64_t count) const {
+        return host_origin_ + static_cast<double>(count) * tank_rate_ / host_rate_;
+    }
+
+    std::int64_t tank_count_ = 0;
+    std::int64_t host_count_ = 0;
+    double host_origin_ = 0.0;
     double next_tank_pos_ = 0.0;
     double next_host_pos_ = 0.0;
     int max_block_ = 0;

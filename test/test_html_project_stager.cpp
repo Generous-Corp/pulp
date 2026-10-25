@@ -3,17 +3,26 @@
 #include "tools/import-design/browser_capture_workspace.hpp"
 #include "tools/import-design/claude_html_dependencies.hpp"
 #include "tools/import-design/html_project_stager.hpp"
+#include "tools/import-design/html_reference_scan.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <regex>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace fs = std::filesystem;
-using pulp::import_design::stage_html_project;
-using pulp::import_design::commit_browser_capture_directory;
 using pulp::import_design::claude_html_dependency_roots;
+using pulp::import_design::commit_browser_capture_directory;
+using pulp::import_design::for_each_reference_match;
 using pulp::import_design::HtmlProjectStageOptions;
+using pulp::import_design::ReferencePattern;
+using pulp::import_design::stage_html_project;
 
 namespace {
 
@@ -33,7 +42,158 @@ struct TempTree {
     }
 };
 
+// Every match as offset, length and each group's state, so two match
+// sequences compare exactly.
+using MatchRecord = std::vector<std::string>;
+
+MatchRecord record(const std::string& text, const std::smatch& match) {
+    MatchRecord out{std::to_string(match[0].first - text.cbegin()),
+                    std::to_string(match.length(0))};
+    for (std::size_t group = 1; group < match.size(); ++group)
+        out.push_back(match[group].matched ? "+" + match[group].str() : "-");
+    return out;
+}
+
+std::vector<MatchRecord> iterator_matches(const std::string& text,
+                                          const ReferencePattern& reference) {
+    std::vector<MatchRecord> out;
+    for (std::sregex_iterator it(text.begin(), text.end(), reference.pattern), end; it != end; ++it)
+        out.push_back(record(text, *it));
+    return out;
+}
+
+std::vector<MatchRecord> scanned_matches(const std::string& text,
+                                         const ReferencePattern& reference) {
+    std::vector<MatchRecord> out;
+    for_each_reference_match(text, reference,
+                             [&](const std::smatch& match) { out.push_back(record(text, match)); });
+    return out;
+}
+
+const std::vector<const ReferencePattern*>& staging_patterns() {
+    static const std::vector<const ReferencePattern*> patterns{
+        &pulp::import_design::html_reference_pattern(),
+        &pulp::import_design::html_scannable_reference_pattern(),
+        &pulp::import_design::html_srcset_pattern()};
+    return patterns;
+}
+
 }  // namespace
+
+TEST_CASE("HTML reference scan yields exactly the regex iterator's matches",
+          "[import-design][browser-capture][staging]") {
+    // One reference per alternative of the three patterns, in lower, upper
+    // and mixed case, so a literal missing from a pattern's starts drops a
+    // match the iterator finds.
+    const std::vector<std::string> references{"src='a.js'",
+                                              "href=\"b.css\"",
+                                              "poster='p.png'",
+                                              "url(c.png)",
+                                              "url('d.png')",
+                                              "@import 'e.css'",
+                                              "@import url('f.css')",
+                                              "import('./g.js')",
+                                              "fetch('h.json')",
+                                              "new URL('i.wasm', import.meta.url)",
+                                              "import './j.js'",
+                                              "from './k.js'",
+                                              "<script type=module src='l.js'>",
+                                              "<link rel=stylesheet href='m.css'>",
+                                              "srcset='n.png 1x, o.png 2x'"};
+    std::size_t matched_references = 0;
+    for (const auto& reference : references) {
+        for (int variant = 0; variant < 3; ++variant) {
+            std::string cased = reference;
+            for (std::size_t i = 0; i < cased.size(); ++i) {
+                const auto c = static_cast<unsigned char>(cased[i]);
+                if (variant == 1 || (variant == 2 && i % 2 == 0))
+                    cased[i] = static_cast<char>(std::toupper(c));
+            }
+            const std::string text = "<p>x</p> " + cased + " tail";
+            bool matched = false;
+            for (const auto* pattern : staging_patterns()) {
+                const auto expected = iterator_matches(text, *pattern);
+                INFO("text: " << text);
+                CHECK(scanned_matches(text, *pattern) == expected);
+                matched = matched || !expected.empty();
+            }
+            if (matched)
+                ++matched_references;
+        }
+    }
+    CHECK(matched_references == 3 * references.size());
+
+    // Then random text: fragments of every alternative in mixed case, the
+    // punctuation and whitespace between them, word bytes that move a \b,
+    // and non-ASCII bytes.
+    constexpr std::string_view joined =
+        "src|SRC|Src|href|HREF|poster|url(|URL(|Url(|@import|@IMPORT|import|Import|IMPORT|"
+        "fetch|Fetch|new|NEW|URL|from|FROM|srcset|SrcSet|<script|<SCRIPT|<link|<LINK| |  |=|"
+        "\"|'|(|)|,|>|a.js|x/y.css|img@2x.png 2x|import.meta.url|\n|\t|b|_|-|/|\xc3\xa9|\xff|"
+        "imp|fro|sr";
+    std::vector<std::string_view> fragments;
+    for (std::size_t from = 0, bar = 0; bar != std::string_view::npos; from = bar + 1) {
+        bar = joined.find('|', from);
+        fragments.push_back(joined.substr(from, bar == std::string_view::npos ? bar : bar - from));
+    }
+    std::uint64_t state = 0x9e3779b97f4a7c15ull;
+    const auto next = [&state] {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        return state;
+    };
+    std::size_t matched_cases = 0;
+    for (int sample = 0; sample < 4000; ++sample) {
+        std::string text;
+        const auto pieces = 1 + next() % 48;
+        for (std::uint64_t i = 0; i < pieces; ++i)
+            text += fragments[next() % fragments.size()];
+        for (const auto* reference : staging_patterns()) {
+            const auto expected = iterator_matches(text, *reference);
+            INFO("text: " << text);
+            CHECK(scanned_matches(text, *reference) == expected);
+            if (!expected.empty())
+                ++matched_cases;
+        }
+    }
+    // The generator has to reach the matching paths, not only the misses.
+    CHECK(matched_cases > 1000);
+}
+
+TEST_CASE("HTML reference scan keeps the word boundary before an offset",
+          "[import-design][browser-capture][staging]") {
+    const auto& srcset = pulp::import_design::html_srcset_pattern();
+    for (const std::string text : {
+             std::string{"<img xsrcset='a.png 2x'>"},
+             std::string{"<img data-srcset='a.png 2x' srcset='b.png 1x'>"},
+             std::string{"srcset='first.png'"},
+             std::string{"_srcset='no.png' SRCSET=\"yes.png\""},
+         }) {
+        INFO("text: " << text);
+        CHECK(scanned_matches(text, srcset) == iterator_matches(text, srcset));
+    }
+    CHECK(scanned_matches("<img xsrcset='a.png'>", srcset).empty());
+}
+
+TEST_CASE("HTML reference scan runs the pattern only where a reference can begin",
+          "[import-design][browser-capture][staging]") {
+    // A minified-bundle shape: long runs of code with a reference every 4 KiB.
+    std::string text;
+    while (text.size() < (1u << 18)) {
+        text += std::string(4096, 'q');
+        text += "import x from './chunk.js';";
+    }
+    const auto& reference = pulp::import_design::html_reference_pattern();
+    std::size_t visited = 0;
+    const auto attempts =
+        for_each_reference_match(text, reference, [&](const std::smatch&) { ++visited; });
+    CHECK(visited == iterator_matches(text, reference).size());
+    // Each block holds two literal starts ("import", "from"), one of which the
+    // first match consumes; the iterator tries the engine at every offset.
+    CHECK(attempts <= 2 * (text.size() / 4096));
+    CHECK(attempts * 1000 < text.size());
+}
 
 TEST_CASE("HTML staging copies only the explicit contained dependency graph",
           "[import-design][browser-capture][staging]") {

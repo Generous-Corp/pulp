@@ -474,6 +474,15 @@ TEST_CASE("FFT and simple convolver hot paths are allocation-free after setup",
         complex_samples[i] = {real_samples[i], static_cast<float>(i % 3) * 0.1f};
     }
 
+    // Packed split spectra, on vDSP (float) and on the portable path that
+    // packs through FftT's own scratch (double).
+    Fft64 fft64(16);
+    std::array<double, 16> real64{};
+    for (std::size_t i = 0; i < real64.size(); ++i)
+        real64[i] = std::sin(static_cast<double>(i) * 0.2);
+    std::array<float, 8> split_re{}, split_im{}, acc_re{}, acc_im{};
+    std::array<double, 8> split_re64{}, split_im64{};
+
     Convolver convolver;
     const std::array<float, 4> impulse {0.5f, 0.25f, 0.125f, 0.0f};
     convolver.load_ir(impulse.data(), static_cast<int>(impulse.size()), 8);
@@ -489,6 +498,18 @@ TEST_CASE("FFT and simple convolver hot paths are allocation-free after setup",
         fft.magnitude(complex_samples.data(), magnitudes.data(), static_cast<int>(magnitudes.size()));
         fft.magnitude_db(complex_samples.data(), magnitudes_db.data(), static_cast<int>(magnitudes_db.size()));
         (void)fft.size();
+        detail::FftRealSplit::forward(fft, real_samples.data(), split_re.data(), split_im.data(),
+                                      1.0f);
+        detail::multiply_packed_split(split_re.data(), split_im.data(), split_re.data(),
+                                      split_im.data(), split_re.data(), split_im.data(), 8);
+        detail::multiply_accumulate_packed_split(split_re.data(), split_im.data(), split_re.data(),
+                                                 split_im.data(), acc_re.data(), acc_im.data(), 8);
+        detail::FftRealSplit::inverse(fft, acc_re.data(), acc_im.data(), real_samples.data(),
+                                      1.0f / 16.0f);
+        detail::FftRealSplit::forward(fft64, real64.data(), split_re64.data(), split_im64.data(),
+                                      1.0);
+        detail::FftRealSplit::inverse(fft64, split_re64.data(), split_im64.data(), real64.data(),
+                                      1.0 / 16.0);
 
         for (float sample : convolver_input)
             (void)convolver.process(sample);
