@@ -35,7 +35,14 @@
 # pulp-test-cli-shellout while the edited code is compiled into pulp-cpp.
 # Without it the loop fingerprints the wrong file, never sees the edit land,
 # and reports INCONCLUSIVE by construction - which reads as "the test does not
-# cover this" when the truth is "the wrong file was fingerprinted".
+# cover this" when the truth is "the wrong file was fingerprinted". With
+# --subject the test executable is left in place (it only drives the subject),
+# so --target may name the subject's target alone.
+#
+# A Catch2 test spec splits on commas, so a --test naming a test case whose
+# name contains a comma matches nothing and the baseline comes back
+# INCONCLUSIVE. Select such a case by a comma-free tag or a wildcard instead
+# ("[my-tag]", "Name up to the comma*").
 #
 #   confirm_failure.sh --file <path> --break <sed/perl cmd> \
 #                      --no-build --test <command>
@@ -291,8 +298,15 @@ bump_mtime() {
 # recreate, so the rest of the build dir ends as it began.
 invalidate() {
     [ "$NO_BUILD" -eq 1 ] && return 0
-    rm -f "$TEST_BINARY" 2>/dev/null || true
-    [ -z "$SUBJECT" ] || rm -f "$SUBJECT" 2>/dev/null || true
+    # With --subject the edit lands in the subject, and the test executable is
+    # only the driver that runs it. --target may build the subject alone, so a
+    # deleted driver would never come back; leave it and invalidate the
+    # subject instead.
+    if [ -n "$SUBJECT" ]; then
+        rm -f "$SUBJECT" 2>/dev/null || true
+    else
+        rm -f "$TEST_BINARY" 2>/dev/null || true
+    fi
     local objects="${OBJ_BASE}.o"
     # A header's dependents are unknown here, so every object goes.
     [ "$IS_HEADER" -eq 1 ] && objects='*.o'

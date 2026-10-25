@@ -81,7 +81,8 @@ std::optional<std::vector<uint8_t>> zlib_decompress(
 /// advance (an embedded asset that recorded it at build time) straight into a
 /// string of exactly that size, with no growth or second copy. Returns nullopt
 /// unless the stream inflates to exactly `expected_size` bytes, passes its
-/// Adler-32 check and consumes every input byte.
+/// Adler-32 check and consumes every input byte. It allocates its output, so it
+/// must never run on the audio thread.
 std::optional<std::string> zlib_decompress_exact(const uint8_t* data, size_t size,
                                                  size_t expected_size);
 
