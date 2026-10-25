@@ -3009,7 +3009,8 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
 
 // ── Public code generation ──────────────────────────────────────────────
 
-std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
+std::string generate_pulp_js_document(const DesignIR& ir, const CodeGenOptions& opts,
+                                      const std::vector<ShippedFontSegment>& captured_segments) {
     std::ostringstream ss;
 
     if (opts.include_comments) {
@@ -3068,10 +3069,27 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
     // instead of silently falling back to a same-named system font (or a
     // generic). resolved_path is the absolute .ttf/.otf path stamped by the
     // CLI's font asset-resolution pass; skip entries that didn't resolve.
+    // A captured @font-face family registers each unicode-range segment under
+    // its private alias, which the font stacks below already name.
     if (!ir.font_family_assets.empty()) {
         bool any = false;
+        for (const auto& segment : captured_segments) {
+            for (const auto* fa : segment.faces) {
+                if (fa->resolved_path.empty())
+                    continue;
+                if (!any && opts.include_comments)
+                    ss << "// Bundled fonts\n";
+                any = true;
+                const auto args = "'" + js_single_quote_escape(segment.alias) + "', '" +
+                                  js_single_quote_escape(fa->resolved_path) + "'";
+                ss << "if (typeof registerFontFace === 'function') registerFontFace(" << args
+                   << "); else registerFont(" << args << ");\n";
+            }
+        }
         for (const auto& fa : ir.font_family_assets) {
-            if (fa.family.empty() || fa.resolved_path.empty()) continue;
+            if (fa.family.empty() || fa.resolved_path.empty() ||
+                shipped_font_is_aliased(fa.family, captured_segments))
+                continue;
             if (!any && opts.include_comments) ss << "// Bundled fonts\n";
             any = true;
             ss << "registerFont('" << js_single_quote_escape(fa.family) << "', '"

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261025-uijs-captured-fonts-watch",
+  "created_at": "2026-10-25T02:20:44Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Generated ui.js registers a captured page's @font-face subsets under the same per-segment aliases the native materializer uses (plan_shipped_font_segments, shared with it) through a new Pulp-owned WidgetBridge function registerFontFace(family, path), which registers the file with the public pulp::canvas::register_font_woff2 / register_font, and writes the rewritten font stacks into setFontFamily; design-tool font entries keep registerFont(family, path). Bridge manifest, typings, mocks and reference docs regenerated. Pulp-owned paths only: no Vellum-transferred slice, capture or IR format, Chromium, packaging or framework authority moves.",
+  "tests": [
+    "build/test/pulp-test-design-import \"[native-fonts]\"",
+    "python3 tools/scripts/generate_widget_bridge_api.py --check",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

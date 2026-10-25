@@ -123,6 +123,10 @@ void rewrite_stack(std::optional<std::string>& stack,
         stack = std::move(out);
 }
 
+} // namespace
+
+namespace {
+
 void rewrite_tree(IRNode& node, const std::map<std::string, std::string>& aliases) {
     rewrite_stack(node.style.font_family, aliases);
     for (auto& run : node.text_runs)
@@ -135,12 +139,10 @@ void rewrite_tree(IRNode& node, const std::map<std::string, std::string>& aliase
 
 } // namespace
 
-DesignIR prepare_native_ir_with_fonts(const DesignIR& source, const IRAssetManifest& manifest,
-                                      const NativeMaterializeOptions& options) {
-    DesignIR ir = prepare_native_design_ir(source);
-    if (ir.font_family_assets.empty())
-        return ir;
-
+std::vector<ShippedFontSegment> plan_shipped_font_segments(const DesignIR& ir,
+                                                           const IRAssetManifest& manifest,
+                                                           const NativeMaterializeOptions& options,
+                                                           bool captured_rules_only) {
     // family (lowercased) → its unicode-range segments, and the family as written.
     std::map<std::string, std::vector<Segment>> families;
     std::map<std::string, std::string> spelling;
@@ -164,58 +166,90 @@ DesignIR prepare_native_ir_with_fonts(const DesignIR& source, const IRAssetManif
             it->asset_ids.push_back(face.asset_id);
     }
 
-    std::map<std::string, std::string> aliases; // family (lowercased) → alias stack
+    std::vector<ShippedFontSegment> plan;
     for (auto& [key, segments] : families) {
+        if (captured_rules_only) {
+            // A captured @font-face rule always records its CSS descriptors; a
+            // design-tool font entry never does.
+            const bool captured = std::any_of(
+                ir.font_family_assets.begin(), ir.font_family_assets.end(),
+                [&](const IRFontAsset& f) {
+                    return lowered(f.family) == key &&
+                           (!f.font_style.empty() || !f.unicode_range.empty() || f.weight_max > 0);
+                });
+            if (!captured)
+                continue;
+        }
         // CSS checks overlapping unicode-ranges from the last rule defined.
         std::stable_sort(segments.begin(), segments.end(), [](const Segment& a, const Segment& b) {
             return a.last_rule > b.last_rule;
         });
-        std::string stack;
         for (auto& segment : segments) {
-            std::vector<std::optional<std::vector<std::uint8_t>>> files;
             std::string identity = key + "\n" + segment.unicode_range;
+            ShippedFontSegment out;
+            out.family_key = key;
             for (const auto& id : segment.asset_ids) {
                 const auto face =
                     std::find_if(ir.font_family_assets.begin(), ir.font_family_assets.end(),
                                  [&](const IRFontAsset& f) { return f.asset_id == id; });
-                files.push_back(read_font(*face, manifest, options));
+                out.faces.push_back(&*face);
+                out.files.push_back(read_font(*face, manifest, options));
+                // The bytes name the segment: a rewritten file gets a new alias.
+                // A file this caller cannot read is named by the hash the
+                // manifest recorded, which is the hash of the bytes it accepts.
                 identity += "\n" + id;
-                if (const auto& bytes = files.back())
+                if (const auto& bytes = out.files.back())
                     identity += " " + pulp::runtime::sha256_hex(bytes->data(), bytes->size());
+                else if (const IRAssetRef* asset = manifest.resolve(id);
+                         asset && !asset->content_hash.empty())
+                    identity += " " + asset->content_hash;
             }
-            segment.alias =
+            out.alias =
                 spelling[key] + " [" + pulp::runtime::sha256_hex(identity).substr(0, 12) + "]";
-            bool registered = false;
-            for (std::size_t i = 0; i < segment.asset_ids.size(); ++i) {
-                const auto& id = segment.asset_ids[i];
-                const auto face =
-                    std::find_if(ir.font_family_assets.begin(), ir.font_family_assets.end(),
-                                 [&](const IRFontAsset& f) { return f.asset_id == id; });
-                const auto& bytes = files[i];
-                if (bytes && register_face(*bytes, segment.alias)) {
-                    registered = true;
-                } else if (options.diagnostics_out != nullptr) {
-                    ImportDiagnostic d;
-                    d.severity = ImportDiagnosticSeverity::warning;
-                    d.code = "font-asset-unavailable";
-                    d.kind = ImportDiagnosticKind::unresolved_asset;
-                    d.message = "shipped font " + id + " for '" + face->family +
-                                "' could not be read or registered; text naming it "
-                                "falls back to the host's faces";
-                    options.diagnostics_out->push_back(std::move(d));
-                }
-            }
-            if (!registered)
-                continue;
-            if (!stack.empty())
-                stack += ", ";
-            stack += "\"" + segment.alias + "\"";
+            plan.push_back(std::move(out));
         }
-        if (!stack.empty())
-            aliases.emplace(key, std::move(stack));
     }
-    if (!aliases.empty())
-        rewrite_tree(ir.root, aliases);
+    return plan;
+}
+
+void rewrite_shipped_font_stacks(IRNode& root, const std::map<std::string, std::string>& stacks) {
+    if (!stacks.empty())
+        rewrite_tree(root, stacks);
+}
+
+DesignIR prepare_native_ir_with_fonts(const DesignIR& source, const IRAssetManifest& manifest,
+                                      const NativeMaterializeOptions& options) {
+    DesignIR ir = prepare_native_design_ir(source);
+    if (ir.font_family_assets.empty())
+        return ir;
+
+    std::map<std::string, std::string> stacks; // family (lowercased) → alias stack
+    for (const auto& segment : plan_shipped_font_segments(ir, manifest, options, false)) {
+        bool registered = false;
+        for (std::size_t i = 0; i < segment.faces.size(); ++i) {
+            const auto* face = segment.faces[i];
+            const auto& bytes = segment.files[i];
+            if (bytes && register_face(*bytes, segment.alias)) {
+                registered = true;
+            } else if (options.diagnostics_out != nullptr) {
+                ImportDiagnostic d;
+                d.severity = ImportDiagnosticSeverity::warning;
+                d.code = "font-asset-unavailable";
+                d.kind = ImportDiagnosticKind::unresolved_asset;
+                d.message = "shipped font " + face->asset_id + " for '" + face->family +
+                            "' could not be read or registered; text naming it "
+                            "falls back to the host's faces";
+                options.diagnostics_out->push_back(std::move(d));
+            }
+        }
+        if (!registered)
+            continue;
+        auto& stack = stacks[segment.family_key];
+        if (!stack.empty())
+            stack += ", ";
+        stack += "\"" + segment.alias + "\"";
+    }
+    rewrite_shipped_font_stacks(ir.root, stacks);
     return ir;
 }
 

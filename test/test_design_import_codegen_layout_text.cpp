@@ -2,6 +2,10 @@
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/runtime/crypto.hpp>
+
+#include <fstream>
+#include <iterator>
 
 // Yoga-constrained audio widgets, container padding, multi-line text and font
 // lowering, knob tapers, and the web-compat parameter-gesture path.
@@ -1551,3 +1555,124 @@ TEST_CASE("generate_pulp_js web compat emits extended style and layout propertie
 // branch. Nothing errors — the boxes are the right size in the right place, they
 // just aren't faded / shadowed / filled. Each case below renders a node kind
 // through generate_pulp_js and asserts the property survives the lowering.
+
+namespace {
+
+std::string shipped_font_sha256(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(in),
+                                          std::istreambuf_iterator<char>()};
+    return pulp::runtime::sha256_hex(bytes.data(), bytes.size());
+}
+
+// A text node in a captured family split into two unicode-range subsets (two
+// files), plus a design-tool bundled font that keeps its plain registration.
+DesignIR captured_font_design() {
+    const std::filesystem::path root(PULP_REPO_ROOT);
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 200.0f;
+    ir.root.style.height = 40.0f;
+    IRNode text;
+    text.type = "text";
+    text.name = "caption";
+    text.text_content = "SPECTR";
+    text.style.font_family = "'Captured Mono', monospace";
+    text.style.font_size = 15.0f;
+    text.style.font_weight = 600;
+    text.style.width = 120.0f;
+    text.style.height = 20.0f;
+    ir.root.children.push_back(text);
+    const auto add = [&](const std::string& id, const std::filesystem::path& file,
+                         const std::string& range) {
+        IRAssetRef asset;
+        asset.asset_id = id;
+        asset.local_path = file.string();
+        asset.mime = "font/ttf";
+        asset.content_hash = shipped_font_sha256(file);
+        ir.asset_manifest.assets.push_back(asset);
+        IRFontAsset face;
+        face.family = "Captured Mono";
+        face.weight = 300;
+        face.weight_max = 800;
+        face.font_style = "normal";
+        face.unicode_range = range;
+        face.asset_id = id;
+        face.resolved_path = file.string();
+        ir.font_family_assets.push_back(face);
+    };
+    add("cm-cyrillic", root / "external/fonts/Inter-Regular.ttf", "U+0400-045F");
+    add("cm-latin", root / "external/fonts/FunnelDisplay-VariableFont_wght.ttf", "U+0000-00FF");
+    IRFontAsset tool;
+    tool.family = "Clash Grotesk";
+    tool.style = "Medium";
+    tool.weight = 500;
+    tool.asset_id = "userfont-1";
+    tool.resolved_path = "/x/clash.ttf";
+    ir.font_family_assets.push_back(tool);
+    return ir;
+}
+
+std::size_t occurrences(const std::string& haystack, const std::string& needle) {
+    std::size_t n = 0;
+    for (auto at = haystack.find(needle); at != std::string::npos;
+         at = haystack.find(needle, at + 1))
+        ++n;
+    return n;
+}
+
+} // namespace
+
+TEST_CASE("generated ui.js names captured fonts by the aliases the native tree uses",
+          "[design-import][font-assets][native-fonts][codegen]") {
+    const auto ir = captured_font_design();
+    const auto js = generate_pulp_js(ir);
+    INFO(js);
+    // One registration per captured subset file, under its alias, through the
+    // path that decodes WOFF2; the design-tool font keeps registerFont(family).
+    CHECK(occurrences(js, "registerFontFace('Captured Mono [") == 2);
+    CHECK(js.find("registerFont('Captured Mono',") == std::string::npos);
+    CHECK(js.find("registerFont('Clash Grotesk', '/x/clash.ttf');") != std::string::npos);
+    CHECK(js.find("registerFontFace('Clash Grotesk'") == std::string::npos);
+
+    // The stack the script sets is the stack the native materializer builds.
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root);
+    Label* label = nullptr;
+    const auto find = [&](auto&& self, View& view) -> void {
+        if (auto* l = dynamic_cast<Label*>(&view); l && l->text() == "SPECTR")
+            label = l;
+        for (std::size_t i = 0; i < view.child_count(); ++i)
+            if (auto* child = view.child_at(i))
+                self(self, *child);
+    };
+    find(find, *root);
+    REQUIRE(label != nullptr);
+    const auto native_stack = label->effective_font_family();
+    INFO("native stack " << native_stack);
+    CHECK(native_stack.find("Captured Mono [") != std::string::npos);
+    CHECK(js.find("', '" + native_stack + "');") != std::string::npos);
+}
+
+TEST_CASE("registerFontFace registers a font file under the given family",
+          "[design-import][font-assets][native-fonts][bridge]") {
+    const std::filesystem::path font = std::filesystem::path(PULP_REPO_ROOT) /
+                                       "external/fonts/FunnelDisplay-VariableFont_wght.ttf";
+    ScriptEngine engine;
+    View host;
+    host.set_bounds({0, 0, 200, 100});
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, host, store);
+    bridge.load_script("createLabel('ok', String(registerFontFace('Pulp Bridge Face', '" +
+                       font.generic_string() +
+                       "')), ''); createLabel('missing', String(registerFontFace('Pulp Bridge "
+                       "Missing', '/no/such/font.ttf')), '');");
+    auto* ok = dynamic_cast<Label*>(bridge.widget("ok"));
+    auto* missing = dynamic_cast<Label*>(bridge.widget("missing"));
+    REQUIRE(ok != nullptr);
+    REQUIRE(missing != nullptr);
+    CHECK(ok->text() == "true");
+    CHECK(missing->text() == "false");
+    CHECK(pulp::canvas::resolved_face_identity("\"Pulp Bridge Face\"", 400.0f)
+              .rfind("FunnelDisplay", 0) == 0);
+}

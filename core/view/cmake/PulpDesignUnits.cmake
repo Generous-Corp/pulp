@@ -99,6 +99,7 @@ add_library(pulp-design-import STATIC
     src/design_adherence.cpp
     src/design_ledger.cpp
     src/design_codegen.cpp
+    src/design_codegen_fonts.cpp
     src/design_fidelity.cpp
     src/design_fidelity_ledger.cpp
     src/design_variants.cpp

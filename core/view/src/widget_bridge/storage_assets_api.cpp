@@ -1,6 +1,7 @@
 // widget_bridge/storage_assets_api.cpp - storage and asset-loading registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/runtime/base64.hpp>
 #include "api_registry.hpp"
@@ -327,6 +328,31 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
         // the canvas font registry (Skia on GPU builds; no-op stub otherwise).
         AssetManager::instance().register_font_family(family, path);
         return choc::value::createBool(true);
+    });
+
+    // registerFontFace(family, path) - register one captured @font-face file
+    // (.ttf, .otf or .woff2) with the canvas font registry under `family`,
+    // decoding WOFF2 first. Generated ui.js calls it once per unicode-range
+    // segment of a captured family, each under that segment's private alias.
+    register_bridge_function(api, "registerFontFace", [&self](choc::javascript::ArgumentList args) {
+        auto family = args.get<std::string>(0, "");
+        auto path = args.get<std::string>(1, "");
+        if (family.empty() || path.empty())
+            return choc::value::createBool(false);
+        if (path.rfind("file://", 0) == 0)
+            path = path.substr(7);
+        path = self.resolve_script_relative(path);
+        std::ifstream in(path, std::ios::binary);
+        if (!in)
+            return choc::value::createBool(false);
+        const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(in),
+                                              std::istreambuf_iterator<char>()};
+        const bool woff2 = bytes.size() >= 4 && bytes[0] == 'w' && bytes[1] == 'O' &&
+                           bytes[2] == 'F' && bytes[3] == '2';
+        const bool ok = woff2
+                            ? pulp::canvas::register_font_woff2(bytes.data(), bytes.size(), family)
+                            : pulp::canvas::register_font(bytes.data(), bytes.size(), family);
+        return choc::value::createBool(ok);
     });
 }
 

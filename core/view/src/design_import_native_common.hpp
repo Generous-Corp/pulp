@@ -3,8 +3,10 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/canvas/attributed_string.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -163,6 +165,42 @@ PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
 // Canonical pre-resolution normalization shared by every native lane. Returns
 // a copy so callers never mutate the imported IR they were handed.
 DesignIR prepare_native_design_ir(const DesignIR& ir);
+
+// One unicode-range segment of a shipped font family, under its private
+// alias `<family> [<12 hex of its content>]`: the family, the range, and each
+// file's bytes. `faces` point into the IR's font_family_assets, one per
+// distinct asset, in page order; `files` holds each face's bytes, or nothing
+// when the file is missing, oversized, not a font, or not the recorded bytes.
+struct ShippedFontSegment {
+    std::string family_key; // the CSS family, lowercased
+    std::string alias;
+    std::vector<const IRFontAsset*> faces;
+    std::vector<std::optional<std::vector<std::uint8_t>>> files;
+};
+
+// Every shipped family's segments, each family's last-defined first (the order
+// CSS checks overlapping unicode-ranges), with the files read through
+// `manifest` and `options.asset_base_directory`. `captured_rules_only` keeps
+// only families that came from captured @font-face rules. Defined in
+// design_import_native_fonts.cpp, like the rewrite below.
+std::vector<ShippedFontSegment> plan_shipped_font_segments(const DesignIR& ir,
+                                                           const IRAssetManifest& manifest,
+                                                           const NativeMaterializeOptions& options,
+                                                           bool captured_rules_only);
+
+// Replace each family named in `stacks` (lowercased family → replacement
+// list) in every font-family stack under `root`.
+void rewrite_shipped_font_stacks(IRNode& root, const std::map<std::string, std::string>& stacks);
+
+// Whether `family` is one of `segments`' families (compared as CSS families,
+// case-insensitively); defined in design_codegen_fonts.cpp.
+bool shipped_font_is_aliased(const std::string& family,
+                             const std::vector<ShippedFontSegment>& segments);
+
+// generate_pulp_js for an IR whose captured font families are already rewritten
+// to `captured_segments`' aliases; defined in design_codegen.cpp.
+std::string generate_pulp_js_document(const DesignIR& ir, const CodeGenOptions& opts,
+                                      const std::vector<ShippedFontSegment>& captured_segments);
 
 // prepare_native_design_ir, then register the IR's shipped fonts under
 // private per-segment aliases and point every font-family stack naming them at

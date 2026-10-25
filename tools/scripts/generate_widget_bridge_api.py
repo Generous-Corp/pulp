@@ -163,6 +163,7 @@ export type PulpBridgeUnknownFunction = (...args: unknown[]) => unknown;
 
 
 SIGNATURE_OVERRIDES: dict[str, str] = {
+    "registerFontFace": "(family: string, path: string) => boolean",
     "__pulpRuntimeImport__": "(specifier: string, options?: unknown) => unknown",
     "__pulpRuntimeSettle__": "(rounds?: number) => void",
     "__requestFrame__": "(callbackName: string) => number",

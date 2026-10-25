@@ -143,6 +143,11 @@ imported Label's face, expect `effective_font_family()` to show aliases, not
 the CSS family. A face that can't be read or fails its manifest hash is
 skipped with `font-asset-unavailable`, and that family keeps resolving to host
 faces.
+Generated ui.js uses the same aliases. `generate_pulp_js` registers each
+captured subset with `registerFontFace(alias, path)`, the Pulp-owned path that
+decodes WOFF2 and falls back to `registerFont` on older runtimes, and writes the
+rewritten stacks into `setFontFamily`. A design-tool font entry (Figma), with
+no CSS descriptors, keeps the plain `registerFont(family, path)`.
 
 ### Imported text looks heavier than Chromium: check font smoothing first
 

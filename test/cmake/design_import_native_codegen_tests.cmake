@@ -16,7 +16,7 @@ catch_discover_tests(pulp-test-design-import
     PROPERTIES LABELS "bench")
 pulp_test_data(pulp-test-design-import NO_DEFINE
     SOURCES test_design_import_ir.cpp test_recognition_resolver.cpp
-        test_design_import_native_fonts.cpp
+        test_design_import_native_fonts.cpp test_design_import_codegen_layout_text.cpp
     PATHS test/fixtures/imports/claude/vite-assets.html
         external/fonts/FunnelDisplay-VariableFont_wght.ttf
         external/fonts/Inter-Regular.ttf
