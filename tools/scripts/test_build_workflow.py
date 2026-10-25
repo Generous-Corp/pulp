@@ -1018,13 +1018,14 @@ class MacosDeferredDisarmTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
 
-    def _fixture(self, tier: str, armed: str = "true", head: str = HEAD) -> dict[str, str]:
+    def _fixture(self, tier: str, armed: str = "true", head: str = HEAD,
+                 queued: str = "false") -> dict[str, str]:
         return {
             "actions/runs/99/jobs": "123\n",
             "check-runs/123/annotations": '{"schema":"shipyard-test-tier/v1","tier":"%s"}\n' % tier,
             "commits/": "7\n",
             "mutation(": "",
-            "query(": f"PR_NODE {head} {armed} false\n",
+            "query(": f"PR_NODE {head} {armed} {queued}\n",
         }
 
     @staticmethod
@@ -1035,6 +1036,17 @@ class MacosDeferredDisarmTest(unittest.TestCase):
         calls = self._run(self._fixture("deferred"))
         self.assertTrue(self._disarmed(calls))
         self.assertIn("id=PR_NODE", " ".join(" ".join(call) for call in calls))
+
+    def test_a_deferred_head_already_in_the_queue_is_dequeued(self) -> None:
+        # A queued pull request's arm reads as unarmed; the entry is what counts.
+        calls = self._run(self._fixture("deferred", armed="false", queued="true"))
+        dequeues = [call for call in calls if "dequeuePullRequest" in " ".join(call)]
+        self.assertEqual(len(dequeues), 1)
+        self.assertIn("id=PR_NODE", " ".join(dequeues[0]))
+        self.assertFalse(self._disarmed(calls), "control: an unarmed entry has nothing to disarm")
+        # Not deferred: a queued full-lane head is left in the queue.
+        self.assertFalse(any("dequeuePullRequest" in " ".join(call) for call in
+                             self._run(self._fixture("fast", armed="false", queued="true"))))
 
     def test_an_app_opened_pull_request_is_found_through_its_commit(self) -> None:
         calls = self._run(self._fixture("deferred"), run_prs="")
@@ -1063,6 +1075,12 @@ class ContractLaneArmedHeadTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.step = _build_steps()[cls.NAME]
+
+    def test_it_is_the_jobs_last_step(self) -> None:
+        # Anything after it, always() steps included, widens the window between
+        # this check and the job's conclusion.
+        steps = _workflow()["jobs"]["build"]["steps"]
+        self.assertEqual(steps[-1]["name"], self.NAME)
 
     def test_it_runs_only_on_the_gated_contract_lane(self) -> None:
         on = {"vars.PULP_MACOS_PR_GATING": "true", "github.event_name": "pull_request",
@@ -1129,6 +1147,82 @@ class ContractLaneArmedHeadTest(unittest.TestCase):
         proc = self._run(None)
         self.assertEqual(proc.returncode, 1, proc.stdout)
         self.assertIn("arm state unreadable", proc.stdout)
+
+
+class MacosArmRefusalTest(unittest.TestCase):
+    """An arm made before a full-lane macos success is refused at once.
+
+    Arm-on-open, or an arm while the full lane still runs, would otherwise let
+    native auto-merge enqueue the head on a contract-lane green.
+    """
+
+    PATH = Path(__file__).parents[2] / ".github/workflows/macos-ci-arm-refusal.yml"
+    HEAD = "e" * 40
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = yaml.safe_load(cls.PATH.read_text(encoding="utf-8"))
+        cls.job = cls.workflow["jobs"]["refuse"]
+        cls.step = cls.job["steps"][0]
+
+    def test_it_fires_on_auto_merge_enabled_from_main_without_a_checkout(self) -> None:
+        triggers = self.workflow.get("on", self.workflow.get(True, {}))
+        self.assertEqual(list(triggers), ["pull_request_target"])
+        self.assertEqual(triggers["pull_request_target"]["types"], ["auto_merge_enabled"])
+        self.assertEqual(self.workflow["permissions"],
+                         {"checks": "read", "pull-requests": "write"})
+        self.assertNotIn("actions/checkout", json.dumps(self.workflow))
+        self.assertEqual(self.job["if"], "vars.PULP_MACOS_PR_GATING == 'true'")
+
+    def _run(self, latest: str, tier: str = "") -> list[list[str]]:
+        fixture = {
+            "/annotations": ('{"schema":"shipyard-test-tier/v1","tier":"%s"}\n' % tier) if tier else "",
+            "mutation(": "",
+            "/comments": "",
+            "commits/": latest,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            gh.write_text(FAKE_GH, encoding="utf-8")
+            gh.chmod(0o755)
+            (Path(tmp) / "fixture.json").write_text(json.dumps(fixture), encoding="utf-8")
+            log = Path(tmp) / "log"
+            log.write_text("", encoding="utf-8")
+            env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                   "FAKE_GH_FIXTURE": str(Path(tmp) / "fixture.json"), "FAKE_GH_LOG": str(log),
+                   "GITHUB_REPOSITORY": "Generous-Corp/pulp", "PR_NUMBER": "7",
+                   "PR_NODE_ID": "PR_NODE", "HEAD_SHA": self.HEAD, "GH_TOKEN": "x"}
+            proc = subprocess.run(["bash", "-c", self.step["run"]], env=env, capture_output=True,
+                                  text=True, encoding="utf-8", check=False)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+    @staticmethod
+    def _refused(calls: list[list[str]]) -> bool:
+        text = [" ".join(call) for call in calls]
+        disarmed = any("disablePullRequestAutoMerge" in call and "id=PR_NODE" in call for call in text)
+        commented = any("issues/7/comments" in call for call in text)
+        assert disarmed == commented, text  # a refusal always says why
+        return disarmed
+
+    def test_an_arm_with_no_macos_check_yet_is_refused(self) -> None:
+        self.assertTrue(self._refused(self._run("")))
+
+    def test_an_arm_while_macos_still_runs_is_refused(self) -> None:
+        self.assertTrue(self._refused(self._run("5 in_progress null\n")))
+
+    def test_an_arm_on_a_failed_macos_is_refused(self) -> None:
+        self.assertTrue(self._refused(self._run("5 completed failure\n")))
+
+    def test_an_arm_on_a_deferred_green_is_refused(self) -> None:
+        self.assertTrue(self._refused(self._run("5 completed success\n", tier="deferred")))
+
+    def test_an_arm_on_a_full_lane_success_is_left_alone(self) -> None:
+        self.assertFalse(self._refused(self._run("5 completed success\n", tier="fast")))
+        # A skip-safe head's green ran no macOS by design and is not deferred.
+        self.assertFalse(self._refused(self._run("5 completed success\n", tier="not-required")))
 
 if __name__ == "__main__":
     unittest.main()

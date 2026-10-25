@@ -418,8 +418,9 @@ macOS.
   force the full lane, dispatch `build.yml` on the branch.
 - **Approve first, then the full lane, then arm.** A reviewer may APPROVE
   before the full macOS run. The sweep labels the approved head, and arms only
-  once the head's latest `macos` check run is no longer `deferred`. GitHub then
-  holds the auto-merge until that run succeeds. If the full lane fails, the PR
+  once the head's latest `macos` check run is a completed full-lane success
+  (not `deferred`). An earlier arm is disabled at once by
+  `macos-ci-arm-refusal.yml`, with a comment. If the full lane fails, the PR
   needs a fix, and the fix is a new head, which needs a new verdict.
 - **A push disarms and unlabels.** `macos-ci-label-reset.yml` disables
   auto-merge on `synchronize` (otherwise the new head's contract-lane green
@@ -430,7 +431,8 @@ macOS.
   present label fires no event. A PR armed (or queued) before approval fails
   its contract-lane `macos` ("armed before approval and a full macOS run");
   remove auto-merge and get a trusted APPROVE. `macos-ci-deferred-disarm.yml`
-  also disarms any PR still armed when a `deferred` run completes.
+  also disarms any PR still armed when a `deferred` run completes, and
+  dequeues it if it is already queued.
 - **A red contract lane is a real failure** of a pr-fast or pr-guard check.
   Fix it on the PR; it is exactly what would otherwise eject a batch. If the
   failing check needs a built target, add it to `PULP_PR_FAST_NEEDS_BUILD` in
