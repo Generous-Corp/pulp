@@ -2592,6 +2592,12 @@ Benchmark receipt (`pulp-design-import-benchmark-v2`) gotchas:
   than passing it. `paragraph_builds` is reported but never gated: SkiaCanvas
   shapes every label on every paint until it has a paragraph cache, so a
   gate on it would fail every text fixture today.
+- **`--ir` resolves manifest assets against the DesignIR's directory.** An
+  importer writes `local_path` relative to the DesignIR, and the IR-bound lanes
+  used to materialize without `asset_base_directory`, so they resolved those
+  paths against the process's working directory. Started anywhere but beside
+  the IR, the bench drew no images and its decode and image-cache counts read
+  zero: the steady-state gate was blind to images on imported panels.
 - **`--lane=live --ir` (optionally `--bundle`) is the production JS path over
   importer output.** The runtime's `__pulpRuntimeSettle__` called from
   `engine.evaluate` only records a budget; `WidgetBridge::load_script` drains

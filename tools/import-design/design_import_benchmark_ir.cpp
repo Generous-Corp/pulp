@@ -22,8 +22,10 @@ using namespace pulp::view;
 
 std::unique_ptr<View> materialize_checked(const DesignIR& ir, float width, float height,
                                           std::string_view lane,
-                                          std::vector<std::string>* warning_codes) {
+                                          std::vector<std::string>* warning_codes,
+                                          const std::filesystem::path& asset_base_directory) {
     NativeMaterializeOptions options;
+    options.asset_base_directory = asset_base_directory;
     std::vector<ImportDiagnostic> diagnostics;
     options.diagnostics_out = &diagnostics;
     auto root = build_native_view_tree(ir, ir.asset_manifest, options);
@@ -144,7 +146,8 @@ void IrBoundFixture::verify(int frame) {
 // lane keeps writing through the Labels resolved at construction;
 // `resolved_` always describes the current tree.
 void IrBoundFixture::materialize(const DesignIR& ir) {
-    root_ = materialize_checked(ir, loaded_.width, loaded_.height, "IR-bound", &warning_codes_);
+    root_ = materialize_checked(ir, loaded_.width, loaded_.height, "IR-bound", &warning_codes_,
+                                loaded_.base_dir);
     resolve_slots();
     // Only the retained lane writes through the Labels of its first tree; the
     // rebuild lane replaces that tree, so it keeps no such pointers.
