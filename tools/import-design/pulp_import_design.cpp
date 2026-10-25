@@ -20,6 +20,7 @@
 #include "envelope_merge.hpp"
 #include "figma_url.hpp"
 #include "browser_import_session.hpp"
+#include "browser_probe_cache.hpp"
 #include "browser_capture_limits.hpp"
 #include "node_runtime.hpp"
 #include "import_design_cli_help.hpp"
@@ -2756,21 +2757,20 @@ int main(int argc, char* argv[]) {
          .materialized_canvas_composition = cli.materialized_canvas_composition,
          .require_canvas_ink = cli.require_canvas_ink,
          .validate = validate,
-         .materialized_runtime_emit = artifact_emit == ArtifactEmit::materialized_runtime},
+         .materialized_runtime_emit = artifact_emit == ArtifactEmit::materialized_runtime,
+         .browser_probe_cache_directory =
+             pulp::import_design::browser_capture::default_browser_probe_cache_directory()},
         content);
     if (const auto* failure =
-            std::get_if<pulp::import_design::BrowserImportFailure>(
-                &browser_import)) {
+            std::get_if<pulp::import_design::BrowserImportFailure>(&browser_import)) {
         return failure->exit_code;
     }
     auto browser_import_session =
-        std::get<pulp::import_design::BrowserImportSession>(
-            std::move(browser_import));
+        std::get<pulp::import_design::BrowserImportSession>(std::move(browser_import));
     const auto import_preparation = browser_import_session.preparation_policy();
     std::optional<DesignIR> browser_capture_ir;
     std::optional<fs::path> materialized_document;
-    if (auto capture =
-            browser_import_session.take_capture_adoption()) {
+    if (auto capture = browser_import_session.take_capture_adoption()) {
         render_width = capture->render_width;
         render_height = capture->render_height;
         reference_image = std::move(capture->reference_image);

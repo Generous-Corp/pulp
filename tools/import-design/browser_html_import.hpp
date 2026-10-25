@@ -44,6 +44,11 @@ struct BrowserHtmlImportRequest {
     /// and nothing else; every other emit leaves it uncaptured rather than
     /// serializing, hashing and publishing megabytes nobody reads.
     bool capture_materialized_document = true;
+    /// Where browser discovery remembers compatible probe answers
+    /// (browser_probe_cache.hpp). Empty probes every time; the CLI passes
+    /// default_browser_probe_cache_directory(), library callers and tests do
+    /// not, so a test never writes into the user's Pulp home.
+    std::filesystem::path browser_probe_cache_directory;
 };
 
 struct BrowserHtmlNotApplicable {};
