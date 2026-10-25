@@ -6926,6 +6926,7 @@
   "importer-differential-lab": {
    "entry": "test/test_importer_differential_lab.py",
    "inputs": [
+    "test/fixtures",
     "test/fixtures/browser-capture-layout-rows",
     "test/test_importer_differential_lab.py",
     "tools/import-design/browser_capture/form_control_theme.mjs",
