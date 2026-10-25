@@ -20,7 +20,8 @@ using pulp::canvas::resolved_face_identity;
 #define PULP_FACE_IDENTITY_STACK "full"
 #endif
 
-TEST_CASE("bundled faces resolve to the expected identity in the " PULP_FACE_IDENTITY_STACK " stack",
+TEST_CASE("bundled faces resolve to the expected identity in the " PULP_FACE_IDENTITY_STACK
+          " stack",
           "[canvas][font-resolver][lite-editor]") {
     struct Row {
         const char* family;
