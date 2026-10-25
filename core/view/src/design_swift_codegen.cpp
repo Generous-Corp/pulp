@@ -482,14 +482,19 @@ void push_fidelity(const SwiftEmitCtx& ctx, const IRNode& node,
 // "filter.cutoff_hz"), a different concept from ParamInfo's human-readable
 // `name`, so it is only the last resort: a keyed, routed control with neither
 // label nor name (a captured fader often has none) would otherwise bind in
-// every lane except this one. A name mismatch still surfaces as a visible
-// missing/duplicate placeholder, never a silent mis-bind; B4's key→parameter
-// resolver retires the guess.
+// every lane except this one. A key-only meter (pulpMeterValueKey, no source or
+// channel) falls back to that key the same way: it names what the meter shows,
+// as the bridge's bindMeter(id, key) resolves it. A name mismatch still surfaces
+// as a visible missing/duplicate placeholder, never a silent mis-bind; B4's
+// key→parameter resolver retires the guess.
 std::string binding_resolve_name(const IRNode& node) {
     if (!node.audio_label.empty()) return node.audio_label;
     if (!node.name.empty())
         return node.name;
-    return NativeBindingMetadata::parse(node).param_key.value_or(std::string{});
+    const auto md = NativeBindingMetadata::parse(node);
+    if (md.param_key && !md.param_key->empty())
+        return *md.param_key;
+    return md.meter_value_key.value_or(std::string{});
 }
 
 bool is_bound_widget(NativeWidgetKind kind) {
