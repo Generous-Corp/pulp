@@ -467,7 +467,7 @@ THE SOFTWARE.
 ## ICU
 
 ICU (International Components for Unicode) 78.2, linked through Skia's prebuilt `libskunicode_icu.a` (Skia
-`chrome/m153`) for text segmentation (line, word, sentence and grapheme
+`chrome/m157`) for text segmentation (line, word, sentence and grapheme
 breaks), bidi, normalization and character properties. The license text below
 is from https://github.com/unicode-org/icu/blob/release-78.2/LICENSE (tag
 `release-78.2`).

@@ -74,6 +74,9 @@ struct Rig {
     std::uint64_t frame = 0;
     std::array<std::vector<float>, kChannels> output;
     std::size_t callback_allocations = 0;
+    // The mechanics tests pin the window to the ring (capacity - 1); zero
+    // selects the node's time-based default.
+    std::uint32_t watchdog_blocks = kLead + 2;
 
     explicit Rig(FamilyCase c, std::uint32_t block = kBlock, bool fail_backend = false,
                  bool skip_publish = false, std::uint32_t prewarm = 0)
@@ -86,11 +89,13 @@ struct Rig {
     struct GpuShadow {
         FamilyCase shadow;
         std::uint32_t max_inflight = 1;
+        std::uint32_t watchdog_blocks = kLead + 2;
     };
     explicit Rig(GpuShadow gpu)
         : which(kWaveNetGpu), fixture(NeuralFamily::WaveNet, kChannels, kBlock) {
         const auto shadow = gpu.shadow;
         const auto max_inflight = gpu.max_inflight;
+        watchdog_blocks = gpu.watchdog_blocks;
         if (shadow.family != NeuralFamily::WaveNet) {
             shadow_fixture =
                 std::make_unique<FamilyFixture>(shadow.family, kChannels, kBlock, shadow.nam_tcn);
@@ -119,7 +124,8 @@ struct Rig {
             .max_inflight = max_inflight,
             .prewarm_blocks = prewarm,
             .shadow_policy = GpuNeuralRealtimeNode::ShadowPolicy::Inline,
-            .shadow_model = shadow});
+            .shadow_model = shadow,
+            .watchdog_blocks = watchdog_blocks});
         detail::NeuralRealtimeTestAccess::skip_shadow_publish(*node, skip_publish);
     }
 
@@ -290,6 +296,21 @@ TEST_CASE("every neural family callback performs no allocations", "[gpu_audio][n
     CHECK(control > 0);
 }
 
+TEST_CASE("neural node registers its realtime path and CPU provider through the registry",
+          "[gpu_audio][neural][registry]") {
+    Rig rig(kTcn);
+    // Negative: an unprepared node still requires the realtime path (it has no
+    // staged fallback) but has no active path and no provider yet.
+    CHECK(detail::requires_realtime_gpu_path(rig.node.get()));
+    CHECK_FALSE(detail::realtime_gpu_node_path(rig.node.get()).active());
+    CHECK(detail::realtime_gpu_provider(rig.node.get()) == GpuAudioProvider::Unknown);
+    // Positive: once prepared it binds an active path and its CPU identity.
+    REQUIRE(rig.prepare());
+    CHECK(detail::realtime_gpu_node_path(rig.node.get()).active());
+    CHECK(detail::realtime_gpu_provider(rig.node.get()) == GpuAudioProvider::Cpu);
+    CHECK(detail::realtime_gpu_provider_identity(rig.node.get()).provider == GpuAudioProvider::Cpu);
+}
+
 TEST_CASE("CPU-only families report CPU execution and never open a GPU epoch",
           "[gpu_audio][neural][status]") {
     const auto c = GENERATE(kWaveNetCpu, kTcn, kNamTcn, kSsm, kLstm, kGru, kCustom);
@@ -394,6 +415,12 @@ TEST_CASE("WaveNet family reports its GPU backend truthfully", "[gpu_audio][neur
         CHECK(status.delivery_epoch_active);
         CHECK(status.fallback_available);
         CHECK(status.recovery_reason == GpuAudioRecoveryReason::None);
+        // The hosting transport's capability and status agree that a GPU
+        // kernel is prepared.
+        const auto hosted = rig.transport.capability_report();
+        CHECK(hosted.path != GpuAudioExecutionPath::Cpu);
+        CHECK(hosted.gpu_kernel_available);
+        CHECK(validated(rig.transport.status_snapshot()).gpu_kernel_available);
     }
     SECTION("provider unavailable degrades to the CPU-only contract") {
         Rig rig(kWaveNetGpu, kBlock, /*fail_backend=*/true);
@@ -415,6 +442,7 @@ TEST_CASE("WaveNet family reports its GPU backend truthfully", "[gpu_audio][neur
         const auto hosted = rig.transport.capability_report();
         CHECK(hosted.path == GpuAudioExecutionPath::Cpu);
         CHECK(hosted.provider == GpuAudioProvider::Cpu);
+        CHECK_FALSE(hosted.gpu_kernel_available);
         const auto hosted_status = validated(rig.transport.status_snapshot());
         CHECK(hosted_status.provider_state == GpuAudioProviderState::Degraded);
         CHECK(hosted_status.selected_engine == GpuAudioEngine::Cpu);
@@ -481,6 +509,46 @@ TEST_CASE("WaveNet family stays continuous across provider faults",
         CHECK(rig.node->recovery_reason() == expected_reason);
         CHECK(validated(rig.transport.status_snapshot()).recovery_reason == expected_reason);
     }
+}
+
+TEST_CASE("neural node whose GPU results all arrive late reads as not GPU-delivering",
+          "[gpu_audio][neural][realtime][status]") {
+    Rig rig(kWaveNetGpu);
+    REQUIRE(rig.prepare());
+    detail::NeuralRealtimeTestAccess::assume_authenticated(*rig.node);
+    // Priming blocks are no evidence: the window stays empty until delivery.
+    rig.render(kLead);
+    CHECK_FALSE(detail::NeuralRealtimeTestAccess::gpu_lagging(*rig.node));
+    // Positive control: a provider that keeps up delivers every block.
+    rig.render(40);
+    CHECK(rig.transport.delivery_snapshot().gpu_blocks > 0);
+    CHECK_FALSE(detail::NeuralRealtimeTestAccess::gpu_lagging(*rig.node));
+    auto healthy = validated(rig.node->status_snapshot());
+    CHECK(healthy.provider_state == GpuAudioProviderState::Ready);
+    CHECK(healthy.selected_engine == GpuAudioEngine::Gpu);
+    // Stuck late: it keeps completing, too late for every consumer, so the
+    // shadow carries the stream although no recovery cause latches.
+    rig.plan.late = true;
+    const auto gpu_before = rig.transport.delivery_snapshot().gpu_blocks;
+    rig.render(40);
+    // Only the blocks already completed in time when the delay began.
+    CHECK(rig.transport.delivery_snapshot().gpu_blocks <= gpu_before + kLead);
+    CHECK(rig.node->recovery_reason() == GpuAudioRecoveryReason::None);
+    CHECK(detail::NeuralRealtimeTestAccess::gpu_lagging(*rig.node));
+    auto status = validated(rig.node->status_snapshot());
+    CHECK(status.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(status.selected_engine == GpuAudioEngine::Cpu);
+    CHECK(validated(rig.transport.status_snapshot()).selected_engine != GpuAudioEngine::Gpu);
+    // Recovery: the GPU carries the window again.
+    rig.plan.late = false;
+    rig.render(40);
+    CHECK_FALSE(detail::NeuralRealtimeTestAccess::gpu_lagging(*rig.node));
+    CHECK(rig.node->recovery_reason() == GpuAudioRecoveryReason::None);
+    auto recovered = validated(rig.node->status_snapshot());
+    CHECK(recovered.provider_state == GpuAudioProviderState::Ready);
+    CHECK(recovered.selected_engine ==
+          GpuAudioEngine::Gpu); // The callback records each block without allocating.
+    CHECK(rig.callback_allocations == 0);
 }
 
 TEST_CASE("offline rendering fences the GPU and keeps the shadow timeline",
@@ -932,6 +1000,84 @@ TEST_CASE("the node's status projection keeps sustained deadline misses Degraded
     CHECK(detail::provider_state_for_health(health) == GpuAudioProviderState::Ready);
 }
 
+TEST_CASE("a degraded node delivers CPU only from a prepared fallback",
+          "[gpu_audio][neural][status]") {
+    using detail::project_node_state;
+    const auto none = GpuAudioRecoveryReason::None;
+    // Positive control: a Ready provider delivers GPU whatever the fallback.
+    auto ready = project_node_state(false, none, true, MissPolicy::CpuFallback, false);
+    CHECK(ready.provider_state == GpuAudioProviderState::Ready);
+    CHECK(ready.selected_engine == GpuAudioEngine::Gpu);
+    // Degraded with a prepared CPU fallback: the callback runs it.
+    auto prepared = project_node_state(false, none, false, MissPolicy::CpuFallback, true);
+    CHECK(prepared.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(prepared.selected_engine == GpuAudioEngine::Cpu);
+    // Declared but not prepared, or a silent policy: no engine delivers.
+    CHECK(project_node_state(false, none, false, MissPolicy::CpuFallback, false).selected_engine ==
+          GpuAudioEngine::Unknown);
+    CHECK(project_node_state(false, none, false, MissPolicy::Silence, true).selected_engine ==
+          GpuAudioEngine::Unknown);
+    // Loss outranks authentication.
+    auto lost = project_node_state(true, none, true, MissPolicy::CpuFallback, true);
+    CHECK(lost.provider_state == GpuAudioProviderState::Unavailable);
+    CHECK(lost.selected_engine == GpuAudioEngine::Cpu);
+    CHECK(detail::public_recovery_reason(detail::SharedIoRecoveryReason::ProviderLost) ==
+          GpuAudioRecoveryReason::ProviderLost);
+}
+
+TEST_CASE("a GPU the miss substitute carries reads Degraded on the substitute's engine",
+          "[gpu_audio][neural][status]") {
+    using detail::project_node_state;
+    using D = detail::SharedIoDeliveryDisposition;
+    const auto none = GpuAudioRecoveryReason::None;
+    detail::RecentGpuDelivery recent;
+    // Priming is never counted, so an empty window is no evidence.
+    for (int i = 0; i < 64; ++i)
+        recent.record(D::Priming);
+    CHECK_FALSE(recent.lagging());
+    // A counted block the GPU did not deliver, with none it did (a re-acquired
+    // epoch's warmup), is the substitute carrying the stream.
+    recent.record(D::CpuFallbackDelivered);
+    CHECK(recent.lagging());
+    // Too few counted blocks are no evidence of falling behind once the GPU
+    // delivered one of them.
+    recent.reset();
+    recent.record(D::GpuDelivered);
+    for (int i = 0; i < detail::RecentGpuDelivery::kMinBlocks - 2; ++i)
+        recent.record(D::CpuFallbackDelivered);
+    CHECK_FALSE(recent.lagging());
+    recent.record(D::CpuFallbackDelivered);
+    CHECK(recent.lagging());
+    // Half the window delivered by the GPU is not lagging; one block fewer is.
+    recent.reset();
+    for (int i = 0; i < 16; ++i)
+        recent.record(D::GpuDelivered);
+    for (int i = 0; i < 16; ++i)
+        recent.record(D::SilenceDelivered);
+    CHECK_FALSE(recent.lagging());
+    recent.record(D::PassthroughDelivered);
+    CHECK(recent.lagging());
+    // Recovery: the GPU carrying the window again.
+    for (int i = 0; i < 16; ++i)
+        recent.record(D::GpuDelivered);
+    CHECK_FALSE(recent.lagging());
+
+    // Positive control: an authenticated, healthy provider whose GPU delivers.
+    auto delivering = project_node_state(false, none, true, MissPolicy::CpuFallback, true, false);
+    CHECK(delivering.provider_state == GpuAudioProviderState::Ready);
+    CHECK(delivering.selected_engine == GpuAudioEngine::Gpu);
+    auto lagging = project_node_state(false, none, true, MissPolicy::CpuFallback, true, true);
+    CHECK(lagging.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(lagging.selected_engine == GpuAudioEngine::Cpu);
+    auto silent = project_node_state(false, none, true, MissPolicy::Silence, false, true);
+    CHECK(silent.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(silent.selected_engine == GpuAudioEngine::Unknown);
+    // Loss stays Unavailable.
+    CHECK(
+        project_node_state(true, none, true, MissPolicy::CpuFallback, true, true).provider_state ==
+        GpuAudioProviderState::Unavailable);
+}
+
 TEST_CASE("non-finite input reaches neither the GPU nor the shadow",
           "[gpu_audio][neural][realtime]") {
     const auto c = GENERATE(kWaveNetGpu, kLstm);
@@ -1100,6 +1246,50 @@ TEST_CASE("the watchdog counts a pump's completions before judging silence",
                                               : GpuAudioRecoveryReason::ProviderUnresponsive));
     validated(rig.node->status_snapshot());
     validated(rig.transport.status_snapshot());
+    CHECK(rig.callback_allocations == 0);
+}
+
+TEST_CASE("the default watchdog is 200 ms of callback blocks and outlasts the ring",
+          "[gpu_audio][neural][realtime][loss]") {
+    // 200 ms at 48 kHz in 64-frame blocks is 150 callback blocks, and the
+    // ring grows to hold them: a provider that stalls for 150 callbacks and
+    // then completes is slow; one more stalled callback is a hang, reported
+    // as ProviderUnresponsive rather than as a saturated ring.
+    // Positive control: the same rig with an explicit 4-block window latches
+    // after 5 stalled callbacks, so only the default's size is under test.
+    const auto stalled = GENERATE(150u, 151u, 5u);
+    CAPTURE(stalled);
+    Rig rig(Rig::GpuShadow{.shadow = kWaveNetGpu, .watchdog_blocks = stalled == 5 ? 4u : 0u});
+    REQUIRE(rig.prepare());
+    rig.render(8);
+    rig.plan.starve = true;
+    rig.render(stalled);
+    rig.plan.starve = false;
+    rig.render(8);
+    CHECK(rig.node->recovery_reason() == (stalled == 150
+                                              ? GpuAudioRecoveryReason::None
+                                              : GpuAudioRecoveryReason::ProviderUnresponsive));
+    validated(rig.node->status_snapshot());
+    validated(rig.transport.status_snapshot());
+    CHECK(rig.callback_allocations == 0);
+}
+
+TEST_CASE("a ring saturated behind a hung provider is reported as the hang",
+          "[gpu_audio][neural][realtime][loss]") {
+    // A window wider than the ring: the input ring fills while the oldest
+    // in-flight block has seen no completion since its admission.
+    const auto window = GENERATE(64u, 3u);
+    CAPTURE(window);
+    // 64 is wider than the ring; 3, inside it, is the positive control: the
+    // watchdog itself reports the same hang.
+    Rig rig(Rig::GpuShadow{.shadow = kWaveNetGpu, .watchdog_blocks = window});
+    REQUIRE(rig.prepare());
+    rig.render(8);
+    rig.plan.starve = true;
+    rig.render(16);
+    CHECK(rig.node->recovery_reason() == GpuAudioRecoveryReason::ProviderUnresponsive);
+    CHECK(rig.node->status_snapshot().provider_state == GpuAudioProviderState::Unavailable);
+    validated(rig.node->status_snapshot());
     CHECK(rig.callback_allocations == 0);
 }
 
@@ -1353,5 +1543,68 @@ TEST_CASE("a WaveNet node prepares its GPU backend when the session is created",
         REQUIRE(rig.prepared);
         CHECK_FALSE(rig.node->gpu_kernel_available());
         CHECK(MissingSession::created == 1);
+    }
+}
+
+TEST_CASE("the neural WaveNet node keeps two blocks in flight by default when it can",
+          "[gpu_audio][neural][depth]") {
+    // max_inflight = 0 resolves to two when the backend admits two and the
+    // ring holds two blocks past the lead, else one; an explicit value is
+    // kept. A backend left at zero takes two from the session's slots. The
+    // lead, and so the reported latency, does not change.
+    struct Case {
+        std::uint32_t node_inflight, backend_inflight, capacity;
+        std::uint64_t expected_depth;
+    };
+    for (const auto c :
+         {Case{0, 2, kLead + 3, 2}, Case{0, 0, kLead + 3, 2}, Case{0, 2, kLead + 1, 1},
+          Case{0, 1, kLead + 3, 1}, Case{1, 2, kLead + 3, 1}}) {
+        CAPTURE(c.node_inflight, c.backend_inflight, c.capacity);
+        FamilyFixture fixture(NeuralFamily::WaveNet, kChannels, kBlock);
+        ChannelPlan plan;
+        WaveNetShape shape;
+        auto request = fixture.request();
+        request.backend =
+            make_fake_wavenet_backend(plan, shape, kChannels, kBlock, c.backend_inflight);
+        auto build = detail::make_neural_model(std::move(request));
+        REQUIRE(build);
+        GpuNeuralRealtimeNode node({.family = NeuralFamily::WaveNet,
+                                    .model = build.model,
+                                    .channels = kChannels,
+                                    .lead_blocks = kLead,
+                                    .capacity = c.capacity,
+                                    .max_inflight = c.node_inflight,
+                                    .shadow_policy = GpuNeuralRealtimeNode::ShadowPolicy::Inline,
+                                    .watchdog_blocks = 64});
+        REQUIRE(node.prepare());
+        GpuAudioTransport transport;
+        REQUIRE(transport.prepare(&node, {}));
+        // Nothing completes, so the worker admits up to its depth and stops.
+        plan.starve = true;
+        std::array<std::vector<float>, kChannels> in, out;
+        std::array<const float*, kChannels> in_ptrs{};
+        std::array<float*, kChannels> out_ptrs{};
+        for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
+            in[ch].assign(kBlock, 0.25f);
+            out[ch].assign(kBlock, 0.0f);
+            in_ptrs[ch] = in[ch].data();
+            out_ptrs[ch] = out[ch].data();
+        }
+        audio::BufferView<const float> input(in_ptrs.data(), kChannels, kBlock);
+        audio::BufferView<float> result(out_ptrs.data(), kChannels, kBlock);
+        for (std::uint32_t b = 0; b + 1 < c.capacity; ++b) {
+            transport.process(input, result, kBlock);
+            transport.pump();
+            transport.pump();
+        }
+        CHECK(plan.submissions == c.expected_depth * kChannels);
+        CHECK(detail::NeuralRealtimeTestAccess::in_flight_high_water(node) == c.expected_depth);
+        const auto status = node.status_snapshot();
+        CHECK(validate_gpu_audio_status(status).accepted());
+        CHECK(validate_gpu_audio_status(transport.status_snapshot()).accepted());
+        CHECK(status.prepared_lead_blocks == kLead);
+        CHECK(status.latency_samples == kLead * kBlock);
+        transport.release();
+        REQUIRE(node.release());
     }
 }

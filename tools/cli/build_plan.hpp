@@ -17,7 +17,24 @@ struct BuildPlanConfig {
     bool build_all = false;
     std::vector<std::string> build_args;
     std::string command_kind;
+    // Link plug-in modules against the development-only shared Pulp runtime
+    // (PULP_DEV_SHARED_UI). The PULP_DEV_SHARED_UI environment value wins.
+    bool dev_shared = false;
 };
+
+// Whether `pulp dev` / `pulp loop` link plug-ins against the development-only
+// shared Pulp runtime: on by default for an SDK project on macOS, off with
+// `--no-dev-shared`. The Pulp source checkout keeps static links, because its
+// own tests inspect example and fixture modules as they ship.
+inline bool dev_shared_ui_default(bool no_dev_shared, bool sdk_project) {
+#if defined(__APPLE__)
+    return sdk_project && !no_dev_shared;
+#else
+    (void)no_dev_shared;
+    (void)sdk_project;
+    return false;
+#endif
+}
 
 // Shared orchestration for the long lived dev/loop build paths. The governor,
 // lease policy, target selection and shell command shape remain owned by their
@@ -57,6 +74,8 @@ class BuildPlan {
     // Configure through the existing cmd_build entry point when the build tree
     // is absent or incompatible. The flags are intentionally passed through
     // unchanged so bootstrap output and failure classification stay stable.
+    // An existing tree whose PULP_DEV_SHARED_UI differs from the plan's is
+    // reconfigured in place.
     int ensure_configured(bool allow_unsupported_sdk);
 
     // Select affected targets and execute the same initial build used by dev

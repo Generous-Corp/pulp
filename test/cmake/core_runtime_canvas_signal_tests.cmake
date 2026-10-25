@@ -3,6 +3,42 @@
 
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake)
 
+# GPU-audio hardware-evidence targets (PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF). The
+# required macOS gate compiles them but never runs them: their tests carry the
+# gpu-proof label, which every CI ctest selection excludes
+# (tools/ci/ctest_gate_args.py), and their executables carry PULP_GPU_PROOF so
+# the script-input inventory does not track them (tools/scripts/script_test_inputs.py).
+# Hardware receipts stay owner-run on a physical GPU. Bracket each proof block
+# with pulp_gpu_proof_begin() and pulp_gpu_proof_end().
+macro(pulp_gpu_proof_begin)
+    get_property(_pulp_gpu_proof_tests_before DIRECTORY PROPERTY TESTS)
+    get_property(_pulp_gpu_proof_targets_before DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+endmacro()
+function(pulp_gpu_proof_end)
+    if(NOT PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+        message(FATAL_ERROR "pulp_gpu_proof_end() outside an exact-provider proof block: "
+                            "only PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF targets are gpu-proof")
+    endif()
+    get_property(_tests DIRECTORY PROPERTY TESTS)
+    foreach(_test IN LISTS _tests)
+        if(_test IN_LIST _pulp_gpu_proof_tests_before)
+            continue()
+        endif()
+        set_property(TEST "${_test}" APPEND PROPERTY LABELS gpu-proof)
+        get_test_property("${_test}" SKIP_RETURN_CODE _skip)
+        get_test_property("${_test}" FIXTURES_SETUP _setup)
+        if(NOT _skip AND NOT _setup)
+            set_tests_properties("${_test}" PROPERTIES SKIP_RETURN_CODE 77)
+        endif()
+    endforeach()
+    get_property(_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_target IN LISTS _targets)
+        if(NOT _target IN_LIST _pulp_gpu_proof_targets_before)
+            set_property(TARGET "${_target}" PROPERTY PULP_GPU_PROOF TRUE)
+        endif()
+    endforeach()
+endfunction()
+
 if(TARGET pulp::inspect-control)
     add_executable(pulp-test-control-shipping-real-component
         control_shipping_real_component_fixture.cpp)
@@ -226,6 +262,17 @@ pulp_add_test_suite(pulp-test-safe-relative-path GROUP pulp-test-group-core-runt
 pulp_add_test_suite(pulp-test-xml-zip GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime)
 
+# pulp_add_binary_data(COMPRESS) round trip through zlib_decompress.
+pulp_add_binary_data(pulp-test-embed-compress-data
+    SOURCES ${CMAKE_SOURCE_DIR}/core/view/js/css-colors.js
+    NAMESPACE embed_compress_fixture
+    COMPRESS)
+pulp_add_test_suite(pulp-test-embed-compress
+    LIBRARIES pulp::runtime pulp-test-embed-compress-data
+    COMPILE_DEFINITIONS
+        "PULP_TEST_EMBED_COMPRESS_SOURCE=\"${CMAKE_SOURCE_DIR}/core/view/js/css-colors.js\"")
+pulp_test_data(pulp-test-embed-compress NO_DEFINE PATHS core/view/js/css-colors.js)
+
 # SIMD operations and aligned buffer tests
 pulp_add_test_suite(pulp-test-simd LIBRARIES pulp::runtime pulp::signal)
 
@@ -351,6 +398,8 @@ pulp_add_test_suite(pulp-test-signal-mod-voice GROUP pulp-test-group-core-signal
 # Alias/passband claims here are measured with the shared tone-projection
 # analyzers, hence the analysis lib alongside the DSP under test.
 pulp_add_test_suite(pulp-test-oversampling-quality GROUP pulp-test-group-core-analysis
+    LIBRARIES pulp::signal pulp::audio-analysis)
+pulp_add_test_suite(pulp-test-oversampling-polyphase GROUP pulp-test-group-core-analysis
     LIBRARIES pulp::signal pulp::audio-analysis)
 # True-peak look-ahead limiting: independent higher-rate reconstruction oracle,
 # latency, channel-link, deterministic partitioning, and realtime storage.
@@ -622,9 +671,25 @@ pulp_add_test_suite(pulp-test-convolver-non-uniform GROUP pulp-test-group-core-s
 # GPU audio runtime: real-time transport (fixed-latency proxy + non-RT worker
 # pump + lock-free rings + miss policy). GPU-agnostic scheduling logic, so it
 # runs on no-GPU CI too.
+# On UNIX the callback probe traps locks as well as allocations.
 pulp_add_test_suite(pulp-test-gpu-audio-transport
-    SOURCES test_gpu_audio_transport.cpp harness/rt_allocation_probe.cpp
+    SOURCES test_gpu_audio_transport.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
             ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/gpu_audio_transport.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/realtime_gpu_audio_path.cpp
+    LIBRARIES pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_test_spawns(pulp-test-gpu-audio-transport NONE REASON "forks itself without exec and loads nothing the tree builds")
+
+# Capability and program validators, plus the transport's refusal of a
+# shape those validators would reject. GPU-agnostic, like the transport suite.
+pulp_add_test_suite(pulp-test-gpu-audio-capability-validation
+    SOURCES test_gpu_audio_capability_validation.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/gpu_audio_transport.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/realtime_gpu_audio_path.cpp
     LIBRARIES pulp::audio pulp::runtime Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
                  ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
@@ -843,15 +908,6 @@ if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     target_compile_definitions(pulp-test-gpu-shared-io-wavenet-spec
         PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
 endif()
-
-# Dawn-free private reducer for exact lead-delivery and typed miss handling.
-# prepare() owns the only allocation; callback delivery is bounded and atomic.
-pulp_add_test_suite(pulp-test-gpu-audio-execution-controller
-    SOURCES test_gpu_audio_execution_controller.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::gpu-audio pulp::audio
-    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
-target_compile_definitions(pulp-test-gpu-audio-execution-controller
-    PRIVATE PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS=1)
 
 # Private fixed-slot lifecycle used by the shared-memory GPU-audio dispatcher.
 # Dawn-free and deterministic: compile the exact production source directly so
@@ -1225,6 +1281,7 @@ pulp_add_test_suite(pulp-test-search-index GROUP pulp-test-group-core-runtime
 # Explicit physical-provider gate; ordinary VM/GPU-off runs must not claim a
 # skipped hardware run as shared spectral correctness evidence.
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    pulp_gpu_proof_begin()
     add_executable(pulp-gpu-shared-spectral-probe test_gpu_shared_spectral_probe.cpp)
     target_link_libraries(pulp-gpu-shared-spectral-probe PRIVATE pulp::gpu-audio)
     target_compile_definitions(pulp-gpu-shared-spectral-probe PRIVATE
@@ -1234,10 +1291,12 @@ if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
         FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
         RESOURCE_LOCK pulp_gpu
         TIMEOUT 60)
+    pulp_gpu_proof_end()
 endif()
 
 # Opt-in same-device storage experiment. It is never an ordinary GPU-off pass.
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    pulp_gpu_proof_begin()
     add_executable(pulp-gpu-same-device-storage-probe test_gpu_same_device_storage_probe.cpp)
     target_include_directories(pulp-gpu-same-device-storage-probe PRIVATE
         ${PROJECT_SOURCE_DIR}/core/gpu_audio/src)
@@ -1248,9 +1307,11 @@ if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
     add_test(NAME pulp-gpu-same-device-storage-probe COMMAND pulp-gpu-same-device-storage-probe)
     set_tests_properties(pulp-gpu-same-device-storage-probe PROPERTIES
         FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity RESOURCE_LOCK pulp_gpu TIMEOUT 60)
+    pulp_gpu_proof_end()
 endif()
 
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    pulp_gpu_proof_begin()
     # Manual paired campaign: requires a fresh output directory and a reserved GPU.
     add_executable(pulp-gpu-same-device-paired-probe test_gpu_same_device_paired_probe.cpp)
     target_include_directories(pulp-gpu-same-device-paired-probe PRIVATE
@@ -1259,6 +1320,7 @@ if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
     get_target_property(_same_device_revision pulp-gpu-audio PULP_PROVIDER_expected_dawn_sha)
     target_compile_definitions(pulp-gpu-same-device-paired-probe PRIVATE
         PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_same_device_revision}")
+    pulp_gpu_proof_end()
 endif()
 
 if(Python3_Interpreter_FOUND)
@@ -1283,4 +1345,13 @@ pulp_add_test_suite(pulp-test-gpu-audio-header-standalone
             test_gpu_audio_header_standalone_capability.cpp
             test_gpu_audio_header_standalone_node.cpp
             test_gpu_audio_header_standalone_program.cpp
+            test_gpu_audio_header_standalone_provider_pool.cpp
     GROUP pulp-test-group-core-gpu-audio-private)
+
+# Host-memory shared-I/O provider: lifecycle, terminal contract, and the
+# convolution/WaveNet programs nulled against independent references. It needs
+# no GPU, so it runs in GPU-off configurations too.
+pulp_add_test_suite(pulp-test-gpu-cpu-shared-io-provider GROUP pulp-test-group-core-gpu-audio-private
+    SOURCES test_gpu_cpu_shared_io_provider.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)

@@ -15,7 +15,10 @@
 #
 # Outputs:
 #   PULP_V8_FOUND        — TRUE if headers + library resolved
-#   v8::v8               — IMPORTED target (includes + runtime lib + win implib)
+#   v8::v8               — IMPORTED target (includes + runtime lib + win implib,
+#                          plus the sealed provider's manifest consumer_defines
+#                          as INTERFACE_COMPILE_DEFINITIONS; see
+#                          PulpV8ConsumerDefines.cmake)
 #   V8_RUNTIME_LIBRARY   — the .dylib/.so/.dll to ship next to consumers
 #   V8_IMPORT_LIBRARY    — the .dll.lib (Windows only)
 #
@@ -27,6 +30,8 @@
 # how PulpWebGpuImportedTarget.cmake handles wgpu — see the migration plan.
 
 include_guard(GLOBAL)
+
+include("${CMAKE_CURRENT_LIST_DIR}/PulpV8ConsumerDefines.cmake")
 
 if(DEFINED PULP_ROOT_DIR AND PULP_ROOT_DIR)
     set(_v8_pulp_root "${PULP_ROOT_DIR}")
@@ -219,6 +224,9 @@ endif()
 set(_v8_inc "")
 set(_v8_lib "")
 set(_v8_implib "")
+# Root of the receipt-verified sealed provider; stays empty for the legacy
+# override, which has no manifest to read a consumer ABI from.
+set(_v8_sealed_root "")
 
 # Per-platform library file names.
 if(WIN32)
@@ -265,6 +273,7 @@ else()
         if(EXISTS "${_cand_lib}")
             set(_v8_inc "${_root}/include")
             set(_v8_lib "${_cand_lib}")
+            set(_v8_sealed_root "${_root}")
             if(WIN32 AND EXISTS "${_root}/lib/${_v8_implib_name}")
                 set(_v8_implib "${_root}/lib/${_v8_implib_name}")
             endif()
@@ -291,6 +300,11 @@ if(_v8_inc AND _v8_lib AND (NOT WIN32 OR _v8_implib))
             set_property(TARGET v8::v8 PROPERTY IMPORTED_IMPLIB "${_v8_implib}")
         elseif(UNIX AND NOT APPLE)
             set_property(TARGET v8::v8 PROPERTY IMPORTED_NO_SONAME TRUE)
+        endif()
+        # The sealed provider's headers must see the defines the library was
+        # built with; a missing or malformed manifest fails configure here.
+        if(_v8_sealed_root)
+            pulp_v8_apply_consumer_defines(v8::v8 "${_v8_sealed_root}/manifest.json")
         endif()
     endif()
 

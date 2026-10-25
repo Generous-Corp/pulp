@@ -70,6 +70,7 @@
 #include <pulp/format/au_factory_presets.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/detail/audio_buffer_list_validation.hpp>
+#include <pulp/format/detail/host_sample_position.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/parameter_text.hpp>
@@ -1553,13 +1554,14 @@ struct ScopedAuV3HostWriting {
                     (transport_flags & AUHostTransportStateRecording) != 0;
                 ctx.is_looping =
                     (transport_flags & AUHostTransportStateCycling) != 0;
-                ctx.position_samples =
-                    static_cast<int64_t>(current_sample_position);
                 ctx.transport_validity.set(pulp::format::TransportField::Playing);
                 ctx.transport_validity.set(pulp::format::TransportField::Recording);
                 ctx.transport_validity.set(pulp::format::TransportField::Looping);
-                ctx.transport_validity.set(
-                    pulp::format::TransportField::SamplePosition);
+                if (const auto position =
+                        pulp::format::detail::host_sample_position(current_sample_position)) {
+                    ctx.position_samples = *position;
+                    ctx.transport_validity.set(pulp::format::TransportField::SamplePosition);
+                }
                 if (ctx.is_looping) {
                     ctx.loop_start_beats = cycle_start_beat_position;
                     ctx.loop_end_beats = cycle_end_beat_position;

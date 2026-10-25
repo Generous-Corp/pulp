@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -631,6 +632,53 @@ TEST_CASE("shared session loss retires exact work but never reprimes the lost pr
     REQUIRE(fixture.session.release());
 }
 
+TEST_CASE("shared session latches a worker-observed fault at the block it refused",
+          "[gpu_audio][shared_io][session][recovery]") {
+    // Four healthy blocks first, so the faulted block is not the epoch's first.
+    constexpr std::uint64_t kFaulted = 4;
+    Fixture fixture;
+    fixture.prepare();
+    std::array<float, 2> output;
+    for (std::uint64_t block = 0; block < kFaulted; ++block) {
+        callback(fixture.session, a, output);
+        (void)fixture.session.service(block + 1);
+    }
+    REQUIRE(fixture.session.recovery_reason() == SharedIoRecoveryReason::None);
+    REQUIRE(fixture.session.next_sequence() == kFaulted);
+
+    auto expected = SharedIoRecoveryReason::ProviderFailure;
+    SECTION("a failed terminal") {
+        fixture.provider->terminal_status = SharedIoTerminalStatus::RetiredFailed;
+        callback(fixture.session, a, output);
+        (void)fixture.session.service(kFaulted + 1);
+    }
+    SECTION("a refused submission") {
+        fixture.provider->accept_submissions = false;
+        callback(fixture.session, a, output);
+        (void)fixture.session.service(kFaulted + 1);
+    }
+    SECTION("a provider lost with the block in flight") {
+        fixture.provider->complete_on_poll = false;
+        callback(fixture.session, a, output);
+        REQUIRE(fixture.session.service(kFaulted + 1).submitted == 1);
+        fixture.provider->lost = true;
+        fixture.provider->terminal_status = SharedIoTerminalStatus::RetiredFailed;
+        fixture.provider->complete_all();
+        (void)fixture.session.service(kFaulted + 2);
+        expected = SharedIoRecoveryReason::ProviderLost;
+    }
+    SECTION("an offline fence with the block in flight") {
+        fixture.provider->complete_on_poll = false;
+        callback(fixture.session, a, output);
+        REQUIRE(fixture.session.service(kFaulted + 1).submitted == 1);
+        REQUIRE(fixture.session.fence_for_offline());
+        expected = SharedIoRecoveryReason::OfflineFence;
+    }
+    CHECK(fixture.session.recovery_reason() == expected);
+    CHECK(fixture.session.recovery_sequence() == kFaulted);
+    REQUIRE(fixture.session.release());
+}
+
 TEST_CASE("shared session offline fence retires work and leaves future callbacks CPU-only",
           "[gpu_audio][shared_io][session][recovery]") {
     Fixture fixture;
@@ -707,7 +755,8 @@ TEST_CASE("shared session offline fence refuses reprime behind an earlier recove
     callback(fixture.session, a, output);
     REQUIRE(fixture.session.service(1).submitted == 1);
     // Recovery reasons latch first-wins, so the guard cannot key on the reason.
-    fixture.session.request_recovery(SharedIoRecoveryReason::SequenceGap);
+    fixture.session.request_recovery(SharedIoRecoveryReason::SequenceGap,
+                                     fixture.session.next_sequence());
     REQUIRE(fixture.session.fence_for_offline());
     CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::SequenceGap);
     CHECK_FALSE(fixture.session.fence_and_reprime());
@@ -719,7 +768,8 @@ TEST_CASE("shared session offline fence refuses reprime behind an earlier recove
     control.prepare();
     callback(control.session, a, output);
     REQUIRE(control.session.service(1).submitted == 1);
-    control.session.request_recovery(SharedIoRecoveryReason::SequenceGap);
+    control.session.request_recovery(SharedIoRecoveryReason::SequenceGap,
+                                     control.session.next_sequence());
     CHECK(control.session.fence_and_reprime());
     CHECK_FALSE(control.session.fenced());
     REQUIRE(control.session.release());
@@ -736,5 +786,81 @@ TEST_CASE("shared session requires affirmative provider resume proof before reop
     std::array<float, 2> output;
     CHECK(callback(fixture.session, a, output).stamp.epoch == 0);
     CHECK(fixture.session.service(1).submitted == 0);
+    REQUIRE(fixture.session.release());
+}
+
+namespace {
+
+std::uint64_t steady_ns() {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+}
+
+struct ServiceDeadlines {
+    std::vector<std::uint64_t> deadlines;
+    std::uint64_t before_ns = 0;
+    std::uint64_t after_ns = 0;
+};
+
+ServiceDeadlines service_deadlines_for(std::uint64_t completion_service_wait_ns) {
+    Fixture fixture;
+    auto owner = make_provider(fixture.state);
+    fixture.provider = owner.get();
+    fixture.provider->service_deadlines.reserve(16);
+    auto program = std::make_unique<FakeProgram>(*fixture.provider, fixture.state);
+    REQUIRE(fixture.session.prepare(
+        {std::move(owner), std::move(program)},
+        {.pipeline = {.capacity = 8, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
+         .slots = 2,
+         .completion_service_wait_ns = completion_service_wait_ns}));
+    fixture.provider->service_deadlines.clear();
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    const auto before = steady_ns();
+    (void)fixture.session.service(1'000'000);
+    const auto after = steady_ns();
+    auto deadlines = fixture.provider->service_deadlines;
+    REQUIRE(fixture.session.release());
+    return {deadlines, before, after};
+}
+
+} // namespace
+
+TEST_CASE("shared session waits for in-flight completions only after submitting",
+          "[gpu_audio][shared_io][session][wake]") {
+    // The first drain must not delay submitting new ingress; the drain after
+    // the submit may wait, bounded by the configured budget.
+    // The budget starts after the submit, on the steady clock.
+    const auto bounded = service_deadlines_for(250'000);
+    REQUIRE(bounded.deadlines.size() == 2);
+    CHECK(bounded.deadlines[0] == 0);
+    CHECK(bounded.deadlines[1] >= bounded.before_ns + 250'000);
+    CHECK(bounded.deadlines[1] <= bounded.after_ns + 250'000);
+
+    // Positive control: without a budget both drains stay nonblocking polls.
+    const auto polling = service_deadlines_for(0);
+    REQUIRE(polling.deadlines.size() == 2);
+    CHECK(polling.deadlines[0] == 0);
+    CHECK(polling.deadlines[1] == 0);
+}
+
+TEST_CASE("shared session routes the completion notifier to its provider",
+          "[gpu_audio][shared_io][session][wake]") {
+    Session unprepared;
+    const auto noop = [](void*) noexcept {};
+    int context = 0;
+    CHECK_FALSE(unprepared.set_completion_notifier({noop, &context}));
+
+    Fixture fixture;
+    fixture.prepare();
+    // Positive control: a provider without an event source refuses.
+    CHECK_FALSE(fixture.session.set_completion_notifier({noop, &context}));
+    fixture.provider->notifier_supported = true;
+    REQUIRE(fixture.session.set_completion_notifier({noop, &context}));
+    CHECK(fixture.provider->notifier.notify == +noop);
+    CHECK(fixture.provider->notifier.context == &context);
+    REQUIRE(fixture.session.set_completion_notifier({}));
+    CHECK(fixture.provider->notifier.notify == nullptr);
     REQUIRE(fixture.session.release());
 }
