@@ -49,6 +49,18 @@
       "reason": "SwiftUI resolves controls by display name and declares an entry with no param key for controls the other lanes leave unbound."
     },
     {
+      "lane": "swiftui",
+      "field": "binding",
+      "fixtures": [
+        "kelvin"
+      ],
+      "anchor": "capture:out:38",
+      "expected": "meter:out",
+      "actual": "param:",
+      "issue": "https://github.com/Generous-Corp/pulp/issues/10984",
+      "reason": "SwiftUI declares kelvin's key-only output meter as a param entry with no key, while the native, baked C++ and ui.js lanes bind it by its meter key."
+    },
+    {
       "lane": "js",
       "field": "binding",
       "fixtures": [
