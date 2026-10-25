@@ -52,11 +52,13 @@ include_guard(GLOBAL)
 #   extern const std::size_t   logo_json_zlib_size;
 #   extern const std::size_t   logo_json_size;        // inflated bytes
 # Inflate where the asset is used and drop the copy once it is consumed:
-#   auto bytes = pulp::runtime::zlib_decompress(
+#   auto text = pulp::runtime::zlib_decompress_exact(
 #       myresources::logo_json_zlib, myresources::logo_json_zlib_size,
-#       myresources::logo_json_size);   // std::optional<std::vector<uint8_t>>
+#       myresources::logo_json_size);   // std::optional<std::string>
+# zlib_decompress_exact inflates straight into a string of the recorded size and
+# returns nullopt unless the stream yields exactly that many bytes.
 # The trade is binary size against an inflate on use and a transient heap copy:
-# about 1 ms per MB of text on an M-series core. zlib_decompress allocates, so
+# about 1 ms per MB of text on an M-series core. It allocates, so
 # never call it on the audio thread. The stream is deterministic per zlib
 # build of the host's Python (see encode_binary_data.py), not across builds,
 # so leave COMPRESS off for a target whose artifacts are byte-compared across

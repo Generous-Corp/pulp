@@ -698,13 +698,15 @@ namespace myresources {
 }
 
 // Inflate where the asset is used, and drop the copy once it is consumed.
-auto bytes = pulp::runtime::zlib_decompress(myresources::runtime_js_zlib,
-                                            myresources::runtime_js_zlib_size,
-                                            myresources::runtime_js_size);
+// zlib_decompress_exact inflates into a string of exactly the recorded size,
+// and returns nullopt for a truncated, oversized or corrupt stream.
+auto text = pulp::runtime::zlib_decompress_exact(myresources::runtime_js_zlib,
+                                                 myresources::runtime_js_zlib_size,
+                                                 myresources::runtime_js_size);
 ```
 
 The trade is a smaller binary against an inflate on each use and a transient
-heap copy. `zlib_decompress` allocates its output, so never call it on the
+heap copy. `zlib_decompress_exact` allocates its output, so never call it on the
 audio thread: inflate on the message thread or a background thread and hand
 the result over. Inflating costs about 1 ms per megabyte of text on an Apple
 silicon core. `COMPRESS` is not the default: the raw array is a public

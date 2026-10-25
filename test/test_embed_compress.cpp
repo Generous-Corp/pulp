@@ -1,5 +1,5 @@
 // pulp_add_binary_data(... COMPRESS): the embedded zlib stream inflates through
-// pulp::runtime::zlib_decompress to the source file byte for byte, and is
+// pulp::runtime::zlib_decompress_exact to the source file byte for byte, and is
 // smaller than the file.
 
 #include <catch2/catch_test_macros.hpp>
@@ -21,11 +21,15 @@ TEST_CASE("a COMPRESS embed inflates to its source file", "[runtime][embed][comp
     REQUIRE(embed_compress_fixture::css_colors_js_size == source.size());
     CHECK(embed_compress_fixture::css_colors_js_zlib_size < source.size() / 2);
 
-    const auto inflated = pulp::runtime::zlib_decompress(
+    const auto inflated = pulp::runtime::zlib_decompress_exact(
         embed_compress_fixture::css_colors_js_zlib, embed_compress_fixture::css_colors_js_zlib_size,
         embed_compress_fixture::css_colors_js_size);
     REQUIRE(inflated);
-    REQUIRE(inflated->size() == source.size());
-    CHECK(std::equal(inflated->begin(), inflated->end(),
-                     reinterpret_cast<const std::uint8_t*>(source.data())));
+    CHECK(*inflated == std::string(source.begin(), source.end()));
+
+    // The recorded size is part of the contract: a caller that asks for any
+    // other size gets nothing rather than a truncated or padded document.
+    CHECK_FALSE(pulp::runtime::zlib_decompress_exact(
+        embed_compress_fixture::css_colors_js_zlib, embed_compress_fixture::css_colors_js_zlib_size,
+        embed_compress_fixture::css_colors_js_size - 1));
 }
