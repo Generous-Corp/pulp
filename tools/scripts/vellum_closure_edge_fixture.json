@@ -1,4 +1,5 @@
 {
+  "schema": "pulp.vellum.closure.v1",
   "source_root": ".",
   "targets": [
     {"name": "pulp-design-import", "link_targets": ["pulp::view-audio"]}

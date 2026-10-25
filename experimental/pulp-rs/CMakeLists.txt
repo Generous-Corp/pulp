@@ -187,6 +187,14 @@ add_custom_command(
 add_custom_target(pulp-rust-cli ALL
     DEPENDS "${_pulp_rs_cargo_bin}" "${_pulp_rs_dest_bin}")
 
+# The create shell-out suite drives this front end's native --ci scaffold. test/
+# is configured before this directory, so the binding is attached here.
+if(TARGET pulp-test-cli-create-shellout)
+    add_dependencies(pulp-test-cli-create-shellout pulp-rust-cli)
+    target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
+        PULP_RUST_CLI_BINARY="${_pulp_rs_dest_bin}")
+endif()
+
 # PulpDependencies deliberately forces BUILD_TESTING=OFF so dependency
 # subprojects do not register their own suites. PULP_BUILD_TESTS is Pulp's
 # authoritative switch, and the top-level project has already called

@@ -83,39 +83,51 @@ static bool can_write_wav(const AudioFileData& data) {
            data.num_frames() <= std::numeric_limits<uint32_t>::max();
 }
 
+static std::optional<AudioFileInfo>
+info_from_properties(const choc::audio::AudioFileProperties& props) {
+    if (!(props.sampleRate > 0) || props.numChannels == 0)
+        return std::nullopt;
+
+    AudioFileInfo info;
+    info.sample_rate = static_cast<uint32_t>(props.sampleRate);
+    info.num_channels = props.numChannels;
+    info.num_frames = props.numFrames;
+    info.bits_per_sample = choc::audio::getBytesPerSample(props.bitDepth) * 8;
+    info.format = props.formatName;
+    info.duration_seconds =
+        props.numFrames > 0 ? static_cast<double>(props.numFrames) / props.sampleRate : 0;
+    return info;
+}
+
 std::optional<AudioFileInfo> read_audio_file_info(const std::string& path) {
     try {
         auto formats = make_format_list();
         auto reader = formats.createReader(std::filesystem::path(path));
         if (!reader) return std::nullopt;
-
-        auto props = reader->getProperties();
-        if (!(props.sampleRate > 0) || props.numChannels == 0)
-            return std::nullopt;
-
-        AudioFileInfo info;
-        info.sample_rate = static_cast<uint32_t>(props.sampleRate);
-        info.num_channels = props.numChannels;
-        info.num_frames = props.numFrames;
-        info.bits_per_sample = choc::audio::getBytesPerSample(props.bitDepth) * 8;
-        info.format = props.formatName;
-        info.duration_seconds = props.numFrames > 0
-            ? static_cast<double>(props.numFrames) / props.sampleRate : 0;
-        return info;
+        return info_from_properties(reader->getProperties());
     } catch (...) {
         return std::nullopt;
     }
 }
 
 std::optional<AudioFileData> read_audio_file(const std::string& path) {
+    return read_audio_file(path, [](const AudioFileInfo&) { return true; });
+}
+
+std::optional<AudioFileData>
+read_audio_file(const std::string& path, const std::function<bool(const AudioFileInfo&)>& admit) {
     try {
         auto formats = make_format_list();
         auto reader = formats.createReader(std::filesystem::path(path));
         if (!reader) return std::nullopt;
 
         auto props = reader->getProperties();
-        if (!(props.sampleRate > 0) || props.numFrames == 0 || props.numChannels == 0 ||
-            props.numFrames > std::numeric_limits<uint32_t>::max())
+        const auto info = info_from_properties(props);
+        if (!info || props.numFrames == 0 || props.numFrames > std::numeric_limits<uint32_t>::max())
+            return std::nullopt;
+        // The decode below reads from this same reader, so what `admit` saw
+        // is what gets allocated and decoded.
+        if (!admit(*info))
             return std::nullopt;
 
         uint32_t frames = static_cast<uint32_t>(props.numFrames);

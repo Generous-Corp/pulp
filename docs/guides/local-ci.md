@@ -2216,7 +2216,40 @@ expected versions (exit 3), becomes a warning annotation, never a failed step.
 The build legs also set `RUSTUP_AUTO_INSTALL=0`: a rustup proxy would
 otherwise download, mid-build, whatever toolchain `rust-toolchain.toml` names
 when the runner lacks it. With it off, a missing toolchain fails the cargo step
-by name, and the image or the resolve step has to provide it.
+by name, and the image or the resolve step has to provide it. The
+"Provide the pinned Rust toolchain" step is that resolve step:
+`tools/ci/provide_pinned_rust.sh --fallback-to-default` runs before configure
+and logs which branch it took as `rust: branch=<name>`:
+
+- `present`: the image has the exact Rust the generated
+  `experimental/pulp-rs/rust-toolchain.toml` names, with its components and
+  targets. Nothing to do; the steady state once the golden bakes the pin by
+  name.
+- `stable-alias`: the image's `stable` is that same release with every pinned
+  part, so the job selects it by name (`RUSTUP_TOOLCHAIN=stable`) with no
+  download. rustup refuses to `toolchain link` an official release name, so
+  this is how an identical `stable` stands in for it.
+- `install`: rustup downloads the pin, before the build, with three spaced
+  retries.
+- `fallback`: the download failed on a GitHub-hosted leg. The step warns,
+  naming both versions, writes a step summary line, uploads its receipt as the
+  `rust-toolchain-fallback-<leg>` artifact, and sets `RUSTUP_TOOLCHAIN=stable`
+  (or the runner default) for the rest of the job.
+
+Every branch writes a JSON receipt (`$RUNNER_TEMP/pulp-rust-toolchain.json`:
+pinned, branch, toolchain, rustc, reason, attempts) and the step outputs
+`branch` and `receipt`. The fallback is refused, and the step fails, on a
+self-hosted leg (the required gate's VMs) and on a pull request that changes
+`experimental/pulp-rs`. The gate VMs reach the network through a proxy that
+refuses `static.rust-lang.org`, so they can never download the pin: their
+images must carry it by name (`present`) or as an identical `stable`
+(`stable-alias`), and a gate log showing `install` means the golden drifted.
+When tartci bakes the pin by name into the live golden, the next change
+removes `--fallback-to-default` from `build.yml` and every leg fails closed
+(decisions contract row 29). A cargo without rustup (Homebrew Rust) ignores
+`rust-toolchain.toml`; the step warns and receipts it as `no-rustup`. The
+release lanes (`release-cli.yml`, `release-path-pr-gate.yml`) run the same
+script without the fallback.
 
 ## Build-time Node dependencies are installed before the build, never inside it
 
@@ -2680,8 +2713,10 @@ last 60 push runs were cancelled with zero jobs started, and the Linux/Windows
 cache-save steps ran at most once per stuck window. With the leg omitted, a push
 run finishes on hosted runners and the caches publish on every merge.
 
-`a2t-protected-event`, the one other push-only job, runs on GitHub-hosted
-`macos-15` for the same reason: its verifier needs only macOS, git and python3.
+`a2t-protected-event`, a push-only job, runs on GitHub-hosted `macos-15` for the
+same reason: its verifier needs only macOS, git and python3. `a2t-headroom-issue`,
+the other push-only job, runs on `ubuntu-latest`; it only reads an artifact and
+calls the GitHub API.
 `tools/scripts/test_fork_pr_runner_routing.py` (run by `workflow-lint.yml`,
 which installs PyYAML) walks every `build.yml` job reachable on push and fails
 if any routes to a runner that is not a GitHub-hosted label or a hosted lane
@@ -2762,6 +2797,31 @@ its reason names the tip. The signal says which source it used and carries
 `main_head_sha`. Batches are judged the same way, newest head first, so a batch
 counts toward the streak when any required context failed on it.
 
+**main's push run is evidence too.** A push to main runs the Linux leg of
+`Build and Test` on main's exact commit (no macOS leg, and none of the other
+required contexts). When that leg's test step ran and it failed a test that the
+batch streak also shares, the verdict is `poisoned` with proof
+`main-push-linux-failure+batch-streak`, even when the merge group that landed
+the commit was green. That is the shape of a test that passes when its commit
+lands and fails on main afterwards: on 2026-10-23 main's tip `5489bbad` landed
+through a green merge group, its push run then failed
+`gpu-trace-overhead-acceptance-selftest` on Linux, and eleven consecutive
+batches failed the same test on macOS, while the detector read `healthy`.
+The failing names come from the leg's `ctest-logs-linux` artifact. The streak
+keeps a Linux-only failure out (the batches run macOS, so a test only Linux
+fails is never in their shared set), a leg that ran no test step is not
+evidence, and a green push run is never read as health. The signal carries
+`main_push_run_id`, `main_push_execution` and `main_push_failing_tests`.
+`tools/ci/fixtures/base_poison_2026-10-23.json` replays that night.
+
+**Shipyard reads the signal.** `.shipyard/config.toml` sets
+`[base_health] auto_jump = "dry-run"`: `shipyard base-health --act` records
+"would jump PR #n" once per poisoned episode that names a `candidate_fix_pr`,
+in `<state>/base-health/jump-decisions.jsonl` on the host that runs it, and
+changes nothing. `on` (dequeue the fix and re-enqueue its head with
+`jump: true`) stays off until it checks a trusted approval on the head it
+enqueues and survives a failed re-enqueue.
+
 Failing test names come from wherever the failing context records them: for
 `macos`, the `ctest-logs-macos` **artifact**
 (`Testing/Temporary/LastTestsFailed.log`); for a context that uploads no
@@ -2782,7 +2842,8 @@ and a `base-poison-signal` artifact. Fields: `status`, `proof`,
 `main_failing_contexts`, `main_contexts` (one `{context, state, conclusion,
 source, run_id, tests}` per required context), `batch_streak`,
 `batch_streak_tests`, `batch_streak_contexts`, `batch_streak_heads`,
-`batch_streak_runs`, `candidate_fix_pr`, `likely_culprits`,
+`batch_streak_runs`, `main_push_run_id`, `main_push_execution`,
+`main_push_failing_tests`, `candidate_fix_pr`, `likely_culprits`,
 `required_contexts_source`, `reason`. Fields are only ever added under
 `base-poison-signal/v1`; Shipyard's reader keys on `schema`, `status` and
 `safe_to_pause_queue`.
@@ -2801,7 +2862,7 @@ was judged, and `macos-only-fallback` when branch protection could not be read
 | `healthy` | every required context passed on main's tree and `macos` ran the suite | false |
 | `unproven` | a required context is still running, missing, or `macos` ran nothing — main's health is unmeasured | false |
 | `suspected` | a streak, or a main failure not shared by a streak (or naming no test) | false |
-| `poisoned` | a required context failed a test on main that a streak of consecutive executed batches also failed | **true** |
+| `poisoned` | a required context, or the executed Linux leg of main's push run, failed a test on main that a streak of consecutive executed batches also failed | **true** |
 
 `safe_to_pause_queue` is the only field a consumer should act on. It is true for
 `poisoned` and for nothing else.
@@ -3497,6 +3558,18 @@ measurement is missing after the suite ran. The fix is always the re-pin in
 decisions contract row 22: move only `A2T_SCOPE_HISTORY_BASE` on protected
 main, never the limit.
 
+An annotation is easy to miss, and main once reached the 75% failure with the
+warning printed and unread. So every push to main also keeps one tracking
+issue. The Linux leg uploads the measurement as the `a2t-scope-headroom`
+artifact, and the advisory `a2t-headroom-issue` job runs
+`tools/ci/a2t_headroom_annotation.py --reconcile-issue`. From the same 60% mark
+(headroom below 20% of the guard's budget), it opens the issue, or updates it in
+place. The title carries the check name, the count and limit, and the re-pin,
+and the body the full instruction. The job closes the issue on the first push
+after a re-pin brings the count back under. The issue is found by a hidden
+marker, so a hand-written issue with the same title is never touched, and a
+missing measurement never opens or closes it.
+
 ## A2T evidence receipts get a nonterminal required-job attestation
 
 When a pull-request head targeting `Generous-Corp/pulp` `main` adds or modifies the exact tracked
@@ -3668,6 +3741,30 @@ fetch of the base branch) fails the group with an error naming the pull request
 or group, the error and the fix (re-run the classify job, or re-queue). A
 stalled queue is the deliberate lesser harm. Only a base branch that does not
 carry the check yet passes, with a notice.
+
+After the HOLD check, the classify job runs the merge-queue circuit breaker,
+the protected base branch's copy of `tools/ci/queue_breaker.py check-group`.
+While the `PULP_QUEUE_BREAKER` repository variable holds
+`{"test": "<ctest name>", "fix_pr": <N>, "until": "<UTC ISO-8601>"}`, it fails
+every merge group that carries neither `fix_pr` nor a `queue-unblock` label
+last applied by the fleet App or a repository admin or maintainer, before any
+VM, through the same classify-fails-`macos`-closed path as the HOLD check. It
+fails the group rather than skipping it: a skipped required job reads as
+green, which would merge untested code. The breaker is inactive when the
+variable is unset, once `until` passes, once `fix_pr` has merged, and when
+`until` is more than three hours ahead (ignored, so a forgotten variable cannot
+hold the queue for long); deleting the variable lifts it at once. Anything it
+cannot read lets the group proceed, since the breaker only saves VMs. Up to two
+groups may already be past classify when the variable is set; they run and
+fail as before. The separate `queue-breaker-notify` job, which checks out only
+the protected base branch and holds the only `pull-requests: write` token,
+comments the reason on each blocked pull request once per breaker state. On
+pull_request events classify judges `PULP_QUEUE_BREAKER_CONTROL` the same way
+but report-only, against the pull request itself, so a run log proves the
+variable reaches the check. Shipyard's steward must not re-arm pull requests
+the breaker ejects while it is open; until it honours the breaker, a re-armed
+pull request costs a classify run, not a VM. Tests:
+`tools/ci/test_queue_breaker.py` (ctest `queue-breaker-selftest`).
 
 Who may sign the fleet App's approvals is set in `.shipyard/config.toml`:
 `[auto_merge] reviewer_signers = ["pulp-review", "infra-review2"]`. Every

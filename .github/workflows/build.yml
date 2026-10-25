@@ -980,6 +980,8 @@ jobs:
       a2t_receipt_verification_required: ${{ steps.classify.outputs.verify }}
       a2t_receipt_attestation_required: ${{ steps.classify.outputs.issue }}
       a2t_evidence_head: ${{ steps.classify.outputs.head }}
+      queue_breaker_blocked_prs: ${{ steps.queue_breaker.outputs.blocked_prs }}
+      queue_breaker_reason: ${{ steps.queue_breaker.outputs.reason }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -1024,6 +1026,47 @@ jobs:
           GH_TOKEN="${{ github.token }}" python3 "$hold_check" \
             --repo "$GITHUB_REPOSITORY" \
             --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+      # The merge-queue circuit breaker (tools/ci/queue_breaker.py). While the
+      # PULP_QUEUE_BREAKER repository variable names a test failing on main,
+      # fail every merge group that carries neither its fix nor a trusted
+      # `queue-unblock` label, before any VM: a failed classify fails `macos`
+      # closed. It never skips a group (skipped reads as green). Like the HOLD
+      # check it runs the protected base branch's copy, and it fails open: a
+      # variable or group it cannot read lets the group proceed. On a pull
+      # request, PULP_QUEUE_BREAKER_CONTROL is judged report-only against the
+      # pull request itself, the positive control that the variable reaches here.
+      - name: Merge-queue circuit breaker
+        id: queue_breaker
+        if: ${{ github.event_name == 'merge_group' || github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.event.merge_group.base_ref || format('refs/heads/{0}', github.event.pull_request.base.ref) }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          QUEUE_BREAKER: ${{ github.event_name == 'merge_group' && vars.PULP_QUEUE_BREAKER || vars.PULP_QUEUE_BREAKER_CONTROL }}
+        run: |
+          set -uo pipefail
+          title="queue-breaker"
+          if [ -z "$QUEUE_BREAKER" ]; then
+            echo "queue breaker: unset; proceeding"
+            exit 0
+          fi
+          if ! git fetch --no-tags --depth=1 origin "$BASE_REF" 2>/dev/null ||
+             ! git cat-file -e "FETCH_HEAD:tools/ci/queue_breaker.py" 2>/dev/null; then
+            echo "::warning title=$title::queue breaker: no protected copy on $BASE_REF; proceeding (fails open)"
+            exit 0
+          fi
+          breaker=$(mktemp)
+          trap 'rm -f "$breaker"' EXIT
+          git show "FETCH_HEAD:tools/ci/queue_breaker.py" >"$breaker"
+          if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            GH_TOKEN="${{ github.token }}" python3 "$breaker" check-group \
+              --repo "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT" \
+              --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+          else
+            GH_TOKEN="${{ github.token }}" python3 "$breaker" check-group \
+              --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --report-only
+          fi
       - id: classify
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
         # a push diffs the tip it moved away from. `origin/main` is correct for
@@ -1251,6 +1294,36 @@ jobs:
             echo "ios_compile_required=$ios_compile_required"
             echo "agent_capability_installed_sdk_required=$agent_capability_installed_sdk_required"
           } >> "$GITHUB_OUTPUT"
+
+  # Tells each pull request in a group the circuit breaker failed why, once
+  # per breaker state. A job of its own so the comment-writing token never
+  # shares a job with a queue entry's code: it checks out only the protected
+  # base branch, without persisted credentials.
+  queue-breaker-notify:
+    needs: classify
+    if: ${{ !inputs.local_proof && !cancelled() && github.event_name == 'merge_group' && needs.classify.outputs.queue_breaker_blocked_prs != '' }}
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.merge_group.base_ref }}
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+      - name: Comment on the blocked pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUEUE_BREAKER: ${{ vars.PULP_QUEUE_BREAKER }}
+          BLOCKED_PRS: ${{ needs.classify.outputs.queue_breaker_blocked_prs }}
+          REASON: ${{ needs.classify.outputs.queue_breaker_reason }}
+        run: |
+          python3 tools/ci/queue_breaker.py notify --repo "$GITHUB_REPOSITORY" \
+            --prs "$BLOCKED_PRS" --reason "$REASON"
 
   protected-receipt-reuse:
     if: ${{ github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true') }}
@@ -1882,6 +1955,29 @@ jobs:
           fi
           [ -x "$chrome" ] || { echo "Chrome executable missing after verified extraction" >&2; exit 1; }
           echo "PULP_DESIGN_BROWSER=$chrome" >> "$GITHUB_ENV"
+
+      # experimental/pulp-rs/rust-toolchain.toml (generated from
+      # tools/toolchain/manifest.toml) names an exact Rust, and RUSTUP_AUTO_INSTALL=0
+      # keeps cargo from fetching it mid-build. This provides it before the build:
+      # offline when the image has it by name or its stable is the same release,
+      # otherwise a download. Self-hosted legs (the required gate) fail closed;
+      # only GitHub-hosted legs may fall back, with a warning, a step summary line
+      # and the receipt uploaded below. Once tartci bakes the pin by name into the
+      # live golden, --fallback-to-default goes too (decisions contract row 29).
+      - name: Provide the pinned Rust toolchain
+        id: pinned-rust
+        timeout-minutes: 10
+        shell: bash
+        run: bash tools/ci/provide_pinned_rust.sh --fallback-to-default
+
+      - name: Upload the Rust fallback receipt
+        if: steps.pinned-rust.outputs.branch == 'fallback'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-toolchain-fallback-${{ matrix.key || runner.os }}
+          path: ${{ steps.pinned-rust.outputs.receipt }}
+          retention-days: 30
 
       - name: Fetch pulp-rs crates
         shell: bash
@@ -2710,6 +2806,21 @@ jobs:
         continue-on-error: true
         shell: bash
         run: python3 tools/ci/a2t_headroom_annotation.py "$RUNNER_TEMP/a2t-scope-headroom.json"
+
+      # On a push to main, hand the same measurement to a2t-headroom-issue
+      # below, which keeps the one tracking issue. Only the Linux leg runs the
+      # full suite on a push, and only it uploads, so the artifact name is unique.
+      - name: Upload A2T scope-history headroom
+        if: >-
+          always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+          && runner.os == 'Linux' && steps.ctest.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: a2t-scope-headroom
+          path: ${{ runner.temp }}/a2t-scope-headroom.json
+          if-no-files-found: warn
+          retention-days: 7
 
       # SHADOW instruments for the merge group, one step (tools/ci/
       # merge_group_shadows.py): binary identity vs the PR head's receipt,
@@ -3791,6 +3902,45 @@ jobs:
           echo "Windows leg ${conclusion:-not found} or MSVC=$msvc_ok — failing windows alias (advisory only; not required)"
           exit 1
 
+  # The A2T early warning as an issue, not only an annotation: on each push to
+  # main, open or update ONE tracking issue while the scope-history window is at
+  # or past the early-warning share, and close it once a re-pin brings it back
+  # under (tools/ci/a2t_headroom_annotation.py --reconcile-issue). Advisory: a
+  # missing measurement or an API failure warns and never fails the run.
+  a2t-headroom-issue:
+    name: a2t-headroom-issue (advisory)
+    needs: [build]
+    if: >-
+      (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
+      && !cancelled()
+      && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/a2t_headroom_annotation.py
+          sparse-checkout-cone-mode: false
+      - name: Download A2T scope-history headroom
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: a2t-scope-headroom
+          path: ${{ runner.temp }}/a2t
+      - name: Reconcile the A2T headroom tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 tools/ci/a2t_headroom_annotation.py --reconcile-issue
+          --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/a2t/a2t-scope-headroom.json"
+
   # Names the cause of each failed job in this run as a `ci.cause/v1` record,
   # printed as a `::notice title=ci-cause::` annotation. A job's own log can be
   # downloaded only once it has finished, so this job reads the failed jobs'
@@ -3801,9 +3951,12 @@ jobs:
   ci-cause:
     name: ci-cause (advisory)
     needs: [build, macos, macos-merge-group, linux, windows]
+    # Use GitHub's native post-failure hook as well as the explicit dependency
+    # result check. The latter documents exactly whose logs this job reads.
     if: >-
       (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
       && !cancelled()
+      && failure()
       && contains(needs.*.result, 'failure')
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     continue-on-error: true

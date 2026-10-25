@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "package_registry_trust.hpp"
+
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -129,14 +132,44 @@ bool write_project_targets(const fs::path& project_root,
 
 // ── Remote Registry ──
 
-// Fetch registry from remote URL, cache locally with TTL
-RegistryLoadResult load_remote_registry(const std::string& url,
-                                         const fs::path& cache_dir,
-                                         int ttl_hours = 24);
+// How a remote registry fetch treats the Ed25519 signature published beside
+// registry.json (see package_registry_trust.hpp). With a pinned signer key the
+// default refuses an unsigned or unverifiable registry; with no key pinned the
+// registry is used unsigned and the result carries a notice saying so.
+struct RegistryTrustPolicy {
+    bool allow_unsigned = false;
+    std::string pinned_public_key_hex{kPinnedRegistrySignerPublicKeyHex};
+};
+
+// A remote load: the registry plus what the signature check established.
+struct RemoteRegistryLoadResult : RegistryLoadResult {
+    // Set when the registry loaded without a verified signature under a
+    // policy that allows it; callers print it so the gap is never silent.
+    std::string warning;
+    // True when the bytes behind `registry` carried a signature that verified
+    // against the pinned key (now, or when they were cached).
+    bool verified = false;
+};
+
+// Fetch `url` into `dest`; true on success. The default shells out to curl
+// (PowerShell on Windows); tests inject a fake.
+using RegistryDownloader = std::function<bool(const std::string& url, const fs::path& dest)>;
+RegistryDownloader default_registry_downloader();
+
+// Fetch registry from remote URL and cache it locally with a TTL. A cached
+// copy is reused only while it is fresh and its cached registry.json.sig
+// still verifies against the pinned key (or the policy allows unsigned
+// registries). When the download fails, a stale cache is used under the same
+// rule.
+RemoteRegistryLoadResult load_remote_registry(const std::string& url, const fs::path& cache_dir,
+                                              int ttl_hours = 24,
+                                              const RegistryTrustPolicy& policy = {},
+                                              const RegistryDownloader& downloader = {});
 
 // Refresh the cached registry (ignore TTL)
-RegistryLoadResult refresh_remote_registry(const std::string& url,
-                                            const fs::path& cache_dir);
+RemoteRegistryLoadResult refresh_remote_registry(const std::string& url, const fs::path& cache_dir,
+                                                 const RegistryTrustPolicy& policy = {},
+                                                 const RegistryDownloader& downloader = {});
 
 // Default remote registry URL
 inline const char* default_remote_registry_url() {

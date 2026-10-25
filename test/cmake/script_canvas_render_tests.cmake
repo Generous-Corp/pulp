@@ -253,9 +253,13 @@ pulp_add_test_suite(pulp-test-canvas-fonts GROUP pulp-test-group-canvas
         "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\""
         # Deterministic variable font (wght axis 300-800) for the variable-font
         # weight-instancing regression tests. Test-only; not in bundled_blobs().
-        "PULP_TEST_VARIABLE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/FunnelDisplay-VariableFont_wght.ttf\"")
+        "PULP_TEST_VARIABLE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/FunnelDisplay-VariableFont_wght.ttf\""
+        # Self-authored opsz axis + AAT trak table with analytic expectations;
+        # regenerate with test/fixtures/fonts/make_opsz_trak_font.py.
+        "PULP_TEST_OPSZ_TRAK_FONT_PATH=\"${CMAKE_SOURCE_DIR}/test/fixtures/fonts/pulp-test-opsz-trak.ttf\"")
 pulp_test_data(pulp-test-canvas-fonts NO_DEFINE
-    PATHS external/fonts/Inter-Regular.ttf external/fonts/FunnelDisplay-VariableFont_wght.ttf)
+    PATHS external/fonts/Inter-Regular.ttf external/fonts/FunnelDisplay-VariableFont_wght.ttf
+          test/fixtures/fonts/pulp-test-opsz-trak.ttf)
 
 # CSS gradient strings judged by the pixels they produce. Every defect this
 # covers was a value the parser ACCEPTED and painted wrong, so a string
@@ -418,6 +422,12 @@ pulp_add_test_suite(pulp-test-view GROUP pulp-test-group-script-view
 # resolution, reflow-on-bounds-change, view border stroke + outline +
 # box-shadow honoring effective_corner_radius.
 pulp_add_test_suite(pulp-test-view-corner-radius GROUP pulp-test-group-script-view
+    LIBRARIES pulp::view)
+
+# View border paint, asserted against pixel spans and shades read off
+# Chrome's render: inside-the-box placement, per-side widths and colours,
+# dash cadence, and the shaded (inset/outset/groove/ridge) and double styles.
+pulp_add_test_suite(pulp-test-view-border-render GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
 
 # View z-index + overflow tests extracted from test_view.cpp. Covers

@@ -212,7 +212,9 @@ inline std::optional<std::vector<float>> read_impulse_response(
         }
     }
 
-    const auto data = FormatRegistry::instance().read(path);
+    // The path was chosen by the user or host; the duration preflight above and
+    // the decoded-data re-check below own the bound.
+    const auto data = FormatRegistry::instance().read(path, DecodeLimits::unbounded());
     if (!data || data->channels.empty() || data->num_frames() == 0) return std::nullopt;
     const double file_sr =
         data->sample_rate > 0 ? static_cast<double>(data->sample_rate) : session_sr;

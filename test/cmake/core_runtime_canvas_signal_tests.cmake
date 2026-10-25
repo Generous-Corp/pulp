@@ -330,6 +330,15 @@ pulp_add_test_suite(pulp-test-svg GROUP pulp-test-group-core-canvas
 pulp_add_test_suite(pulp-test-vector-scene GROUP pulp-test-group-core-canvas
     LIBRARIES pulp::canvas)
 
+# Coverage-guided lane over SVG ingest (nanosvg plus the scene lowering). Off
+# by default; the libFuzzer runtime probe lives in timeline_tests.cmake.
+if(PULP_ENABLE_FUZZING)
+    pulp_add_libfuzzer_target(pulp-fuzz-svg
+        SOURCES fuzz/svg_fuzz_target.cpp
+        LIBRARIES pulp::canvas
+        CORPUS "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fuzz/svg")
+endif()
+
 # Canvas image placement: affine transform, preserve-aspect fit, tiled fill.
 pulp_add_test_suite(pulp-test-canvas-image-fit GROUP pulp-test-group-core-canvas
     LIBRARIES pulp::canvas)
@@ -624,6 +633,16 @@ set_tests_properties(cmake-faust-rt-sdk-consumer PROPERTIES
 pulp_add_test_suite(pulp-test-convolver GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 
+# FixedIrConvolver's direct-engine table must be the one its committed
+# crossover receipts give (docs/validation/convolver-crossover/).
+if(Python3_Interpreter_FOUND)
+    add_test(NAME convolver-crossover-table
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/convolver_crossover_check.py"
+            --repo-root "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(convolver-crossover-table PROPERTIES LABELS "signal;convolver;docs")
+endif()
+
 # Background-IR-swap tests for PartitionedConvolver. Lock-free
 # pointer-shuttle hand-off from worker thread → audio thread, including
 # a concurrent stage/swap hammer test.
@@ -709,6 +728,24 @@ pulp_test_data(pulp-test-nam-tcn-adapter
     PATHS test/fixtures/neural/example.nam
     SOURCES test_nam_tcn_adapter.cpp)
 
+# Private SIMD neural CPU kernels: scalar-vs-NEON nulls per family, nulls
+# against the per-sample references, and the allocation/lock trap on the
+# adapter callback. "[neural-simd-perf]" prints the per-block cost receipt.
+pulp_add_test_suite(pulp-test-neural-cpu-simd
+    SOURCES test_neural_cpu_simd.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/audio/include
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_test_data(pulp-test-neural-cpu-simd
+    PATHS test/fixtures/neural/example.nam
+    SOURCES test_neural_cpu_simd.cpp)
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    target_compile_definitions(pulp-test-neural-cpu-simd PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
+endif()
+
 # Private synthetic LSTM/GRU CPU-family contract. This is deliberately separate
 # from provider capability and product-model registration.
 pulp_add_test_suite(pulp-test-recurrent-cpu-adapter
@@ -771,6 +808,23 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-realtime-node
 pulp_add_test_suite(pulp-test-gpu-neural-realtime-node
     SOURCES test_gpu_neural_realtime_node.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# The public neural model factory, through installed headers only.
+pulp_add_test_suite(pulp-test-gpu-neural-model-factory
+    SOURCES test_gpu_neural_model_factory.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio)
+
+# Shadow placement (Inline, Worker, None, Auto) for the neural node.
+pulp_add_test_suite(pulp-test-gpu-neural-shadow-policy
+    SOURCES test_gpu_neural_shadow_policy.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# The neural node with WP-S's SIMD CPU kernels as its shadow.
+pulp_add_test_suite(pulp-test-gpu-neural-shadow-simd
+    SOURCES test_gpu_neural_shadow_simd.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime pulp::signal Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
 # Plug-in-boundary continuity: a GPU-audio effect driven through the real CLAP
@@ -844,10 +898,54 @@ pulp_add_test_suite(pulp-test-gpu-shared-io-slot-ledger
     LIBRARIES Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Provider conformance kit (test/harness/shared_io_provider_conformance.hpp)
+# instantiated for the deterministic fake provider, with a planted violation
+# per scenario. Dawn-free so it runs on every CI lane; the Dawn instantiation
+# is the host-only pulp-test-gpu-dawn-shared-io-provider-conformance.
+pulp_add_test_suite(pulp-test-gpu-shared-io-provider-conformance
+    SOURCES test_gpu_shared_io_provider_conformance.cpp harness/rt_allocation_probe.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_arena.cpp
+    LIBRARIES Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+if(Python3_Interpreter_FOUND)
+    # The receipt the fake instantiation writes must pass the standalone
+    # verifier; the verifier's own planted negatives run in its self-test.
+    set(_provider_conformance_receipt
+        "${CMAKE_CURRENT_BINARY_DIR}/gpu-audio-provider-conformance-fake.json")
+    add_test(NAME gpu-audio-provider-conformance-fake-receipt
+        COMMAND ${CMAKE_COMMAND} -E env
+            "PULP_PROVIDER_CONFORMANCE_RECEIPT=${_provider_conformance_receipt}"
+            $<TARGET_FILE:pulp-test-gpu-shared-io-provider-conformance>
+            "fake shared IO provider passes the provider conformance kit")
+    set_tests_properties(gpu-audio-provider-conformance-fake-receipt PROPERTIES
+        FIXTURES_SETUP pulp_gpu_audio_provider_conformance_fake_receipt
+        TIMEOUT 60)
+    add_test(NAME gpu-audio-provider-conformance-fake-receipt-verify
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/verify_gpu_audio_provider_conformance.py"
+            "${_provider_conformance_receipt}" --forbid-skips --require-pair --require-kind fake)
+    set_tests_properties(gpu-audio-provider-conformance-fake-receipt-verify PROPERTIES
+        FIXTURES_REQUIRED pulp_gpu_audio_provider_conformance_fake_receipt
+        TIMEOUT 30)
+endif()
+
 pulp_add_test_suite(pulp-test-gpu-dawn-submission-tracker GROUP pulp-test-group-core-gpu-shared-io-private
     SOURCES test_gpu_dawn_submission_tracker.cpp
             ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/dawn_submission_tracker.cpp
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# Private consumer cursor for a future render-owner loss event. Header-only and
+# Dawn-free; the fixtures are Pulp-side inputs, and no producer exists yet.
+pulp_add_test_suite(pulp-test-gpu-render-loss-consumer
+    SOURCES test_gpu_render_loss_consumer.cpp harness/rt_allocation_probe.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+                 ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/audio/include
+                 ${choc_SOURCE_DIR}
+    COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-gpu-render-loss-consumer NO_DEFINE
+    PATHS test/fixtures/gpu_audio/render_loss_consumer
+          core/gpu_audio/src/detail/render_loss_consumer.hpp)
 
 # Separate full-library link check keeps the private production TU wired into
 # pulp::gpu-audio without burdening every focused lifecycle rebuild.
@@ -910,10 +1008,18 @@ pulp_add_test_suite(pulp-test-flow-pans GROUP pulp-test-group-core-gpu-audio-sig
 # contention that intermittently trips their numeric checks after a 2s readback
 # timeout leaves a stale frame. (The GPU-agnostic transport/flow-pans suites
 # above do NOT create devices and are intentionally left parallel.)
-set(_pulp_gpu_convolver_defs "")
+# With the GPU device layer present, the staged-path cases drive the real
+# process_block against test/support/fake_gpu_compute.hpp.
+set(_pulp_gpu_convolver_def_list "")
 if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
-    set(_pulp_gpu_convolver_defs
-        COMPILE_DEFINITIONS PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
+    list(APPEND _pulp_gpu_convolver_def_list PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
+endif()
+if(TARGET pulp::gpu-device)
+    list(APPEND _pulp_gpu_convolver_def_list PULP_TEST_HAS_GPU_COMPUTE=1)
+endif()
+set(_pulp_gpu_convolver_defs "")
+if(_pulp_gpu_convolver_def_list)
+    set(_pulp_gpu_convolver_defs COMPILE_DEFINITIONS ${_pulp_gpu_convolver_def_list})
 endif()
 pulp_add_test_suite(pulp-test-gpu-convolver GROUP pulp-test-group-core-gpu-audio-private
     SOURCES test_gpu_convolver.cpp harness/rt_allocation_probe.cpp

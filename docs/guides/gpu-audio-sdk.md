@@ -16,6 +16,10 @@ The callback contract is real-time-safe; GPU scheduling itself is not a hard
 real-time guarantee. This guide is the developer surface: the compute
 primitives, the real-time transport, and the ready-made processors.
 
+For what happens when the GPU is slow, hung or lost on macOS, how a host reads
+it, and what has been validated in real DAWs, see
+[GPU audio reliability on macOS](gpu-audio-macos-reliability.md).
+
 ## The model in one paragraph
 
 The runtime has two transport costs to manage: payload movement and scheduling.
@@ -217,11 +221,61 @@ handle is borrowed and must outlive the transport.
 
 `GpuConvolver` exposes a host-thread-only provider policy for experiments that
 need an explicit selection: `Auto` preserves staged execution, `StagedOnly`
-forces the staged provider, and `SharedRequired`
+forces the staged provider, `StagedBlocking` keeps the older blocking staged
+readback (see below), and `SharedRequired`
 fails `prepare()` unless the exact authenticated shared Dawn provider is ready.
 Set the policy before `prepare()`; changing it while prepared is rejected. This
 is a preparation capability contract, not a realtime scheduling guarantee, and
 it exposes no Dawn handles, queues, rings, or callback controls.
+
+**Staged convolver readback (behaviour change).** Under `Auto` and `StagedOnly`
+the staged `GpuConvolver` no longer blocks in `convolve_batch` until the map
+resolves, and its worker never waits on the GPU at all.
+
+- The worker submits block N with `GpuCompute::convolve_batch_async` and
+  returns. Block N's result counts only if it has landed by the time block N
+  is due, `latency_blocks - 1` worker calls later; a result that lands later is
+  discarded. The node declares that pipeline as
+  `GpuAudioNodeDescriptor::worker_pipeline_blocks` (1 at the default lead of
+  2), and `GpuAudioTransport` primes that many fewer blocks, so total latency,
+  the reported PDC and the callback's CPU-fallback alignment are unchanged. A
+  larger lead therefore tolerates a slower readback: with a lead of 3 a result
+  may take up to two block periods. A node with a one-block lead cannot
+  pipeline and instead waits inside the block, bounded to one period minus its
+  CPU cost.
+- The pipeline is used only while a `GpuAudioTransport` hosts the node; the
+  transport opts the node in at `prepare()` and out at `release()`. Called
+  directly, `process_block` still returns block N for input block N and
+  reports `worker_pipeline_blocks = 0`, deciding each block inside the call
+  with a wait bounded to one period minus its CPU cost (with the same CPU
+  routing and breaker). Because `release()` opts a pipelining convolver back
+  out, that node must outlive the transport's `release()` (or the transport
+  must be released first); a non-pipelining node is never touched there.
+- Every block's input goes to exactly one place: the GPU overlap-add carry when
+  its readback is on time, otherwise the worker's zero-latency CPU convolution.
+  The output is the carry plus whatever the CPU convolution still owes, so a
+  late, failed, non-finite or device-lost block is the exact continuation of
+  the convolution, never silence.
+- The CPU convolution runs only for a missed block and its IR-length tail
+  (`ceil((ir_length - 1) / block)` further blocks); a GPU hit costs no CPU
+  convolution. With a long IR one miss therefore costs a long CPU tail (a 2 s
+  IR at 64-sample blocks: about 1500 blocks), which is the price of an exact
+  seam.
+- A run of late results trips a circuit breaker (`GpuConvolverStagedBreaker`,
+  set with `configure_staged_breaker()` before `prepare()`; defaults: trip
+  after 8 consecutive misses, probe every 32 blocks, recover after 4 on-time
+  results). While tripped the worker submits only the probes.
+- The node latches the first cause since `prepare()`: `ProviderLost` (device
+  loss; replaces any other cause), `SustainedDeadlineMisses` (the breaker
+  tripped on a slow but alive GPU; reported as degraded), `ProviderFailure`
+  (failed map or non-finite readback). A single late block is a served miss
+  and latches nothing. `prepare()` now also rejects a zero sample rate.
+
+A caller that depends on the old unbounded, in-block wait can select
+`ProviderPolicy::StagedBlocking` before `prepare()` (no worker pipeline); it
+still routes failed or device-lost blocks to the CPU convolution.
+`StagedBlocking` is a transition escape hatch and is planned for removal in the
+next minor release.
 
 The Darwin arm64 SDK produced by `release-cli.yml` compiles the shared convolver
 and validates its pinned Dawn provider at configure and before library builds. Installed CMake
@@ -302,10 +356,66 @@ CPU only: their `capability_report()` reports the `Cpu` path and provider with
 `gpu_kernel_available` false, and `epoch()` stays zero because no GPU delivery
 epoch is ever opened. A WaveNet model whose provider cannot be prepared uses the same
 CPU-only contract. Its status reports a GPU request that was degraded to the
-CPU, and preparation still succeeds. Models are built by Pulp's private,
-host-only model factory from a verified neural model manifest, and each model
-binds to one node. The shadow runs on the audio thread for every block, even
-when the GPU delivers, so measure its cost for the model size you ship.
+CPU, and preparation still succeeds. Build a model with
+`make_gpu_neural_model()` from `<pulp/gpu_audio/gpu_neural_model.hpp>`. Pass
+it a provenance manifest, the family's shape, and one `GpuNeuralCpuKernel`
+per channel. For WaveNet you can also pass a GPU session configuration. The
+factory reports why it refused a request and never throws. Each model binds
+to one node.
+
+On the GPU path the node detects device loss through the provider's loss
+query, which outranks the failed completions the loss causes. It detects a
+hung provider with a completion watchdog: `Config::watchdog_blocks` callback
+blocks with nothing completed while work is in flight. Both report
+`Unavailable`, with `ProviderLost` or `ProviderUnresponsive` as the reason,
+and the CPU model carries the stream.
+
+Where the shadow runs is `Config::shadow_policy`. The policy governs only
+what happens on a realtime GPU miss:
+- `Inline` runs the CPU model on the audio thread for every block, even when
+  the GPU delivers.
+- `Worker` runs it on a dedicated non-realtime thread. The callback only copies
+  its input in and, on a GPU miss, copies the shadow's stamped result out. A
+  shadow result that arrives after its slot is dropped. A block that both the
+  GPU and the shadow miss is silent.
+- `None` makes a realtime GPU miss silent. The model is still kept running on
+  the shadow thread, so an offline render can continue it. It requires a
+  family with a GPU kernel. While it is in effect the node's own status and
+  capability report `fallback_policy = Silence` with no fallback available;
+  the transport's status still reports the descriptor's `CpuFallback`.
+- `Auto`, the default, times one block of the CPU model for one channel at
+  `prepare()`. It picks `Inline` when that cost times the channel count is at
+  most 15% of the block period, and `Worker` otherwise.
+
+Families without a GPU backend always run `Inline`, because the CPU model is
+their output. So does a GPU family whose provider could not be prepared.
+
+An offline render always uses the CPU model inline, whatever the policy. When
+an offline render starts, a `Worker` or `None` shadow finishes its queue and
+continues inline on the same timeline, so a bounce never goes silent. The
+first realtime callback after the bounce hands the model back to the shadow
+thread, so realtime runs with the placement chosen at `prepare()` again. That
+switch only copies the pending results, and it never allocates or waits.
+
+`status_snapshot()` reports the shadow in the public `shadow_*` fields of
+`GpuAudioStatus`: the mode, the total inline cost, and how many blocks were
+delivered, late or double-missed. `shadow_double_miss_blocks` is the
+authoritative count of silent blocks. The transport's `CpuFallbackDelivered`
+delivery label means only that the fallback path ran, which includes a
+double miss that emitted silence. `shadow_status()` adds the requested
+policy, the per-channel cost, queue drops, resyncs and workgroup membership.
+
+A cheaper `shadow_model` is allowed but never selected by default, and status
+reports `shadow_model_differs` when one is in use. Set
+`shadow_audio_workgroup` to the host audio thread's workgroup so the shadow
+thread joins it as a member doing audio-deadline work. Without one, the thread
+runs at `USER_INTERACTIVE` QoS.
+
+A `Worker` shadow for a large model can still miss blocks. Its result must
+arrive within the lead. For a model that costs about half the block period, a
+lead of two blocks leaves little slack, so a loaded host will see occasional
+double misses.
+
 A transport hosting a CPU-only family reports the `Cpu` path and provider and
 a `Ready` state. Because the CPU model is that node's primary path, its blocks
 count under `fallback_blocks` and never under `missed_blocks`. A WaveNet
@@ -377,10 +487,19 @@ compatibility.
 
 ## Layer 3 — ready-made processors (`pulp::gpu_audio`)
 
-- `GpuConvolver` — FFT overlap-add convolution with a fixed IR; a continuously-fed, zero-latency `signal::PartitionedConvolver` CPU fallback that stays latency-aligned so a GPU miss is filled seamlessly.
+- `GpuConvolver` — FFT overlap-add convolution with a fixed IR; a continuously-fed, zero-latency `signal::FixedIrConvolver` CPU fallback that stays latency-aligned so a GPU miss is filled seamlessly.
 - `GpuStft` — STFT/ISTFT (windowed analyze / synthesize) — the spectral toolkit base.
 - `GpuSpectralFreeze` — capture + sustain a spectral frame (infinite pad).
 - `GpuSpectralMorph` — blend between two captured spectra (t ∈ [0,1]).
+
+`GpuStft`, `GpuSpectralStack`, `GpuSpectralFreeze` and `GpuSpectralMorph` may
+borrow a shared `GpuCompute`. Each records the device's `device_generation()`
+at `prepare()` and refuses its GPU work (returns false and writes a silent
+frame) once that device reports `device_lost()` or a different generation;
+`device_usable()` (`available()` on the stack) reports the refusal. Prepare
+them again against the re-acquired device to resume. `GpuMultiConvolver`
+refuses a lost device the same way and keeps its declared `Silence` policy;
+`device_lost()` says why its blocks are silent.
 
 ## Authoring pattern
 
@@ -648,9 +767,11 @@ first latched `recovery_reason` and `recovery_sequence`, for example
 is `Degraded`, the callback continues on the prepared CPU fallback, or emits
 silence for a node that declared no fallback. A lost provider (`ProviderLost`, or
 `ProviderUnresponsive`) is `Unavailable`, because nothing in the current
-preparation can bring it back. A node that also latched an earlier cause still
-reports `Unavailable` and keeps the first cause. Whenever the state is not
-`Ready`, `selected_engine` names the engine that actually delivers. That is
+preparation can bring it back. A loss observed after the `ProviderFailure`,
+`ProviderUnresponsive` or `SustainedDeadlineMisses` it caused is reported as
+`ProviderLost`. A node that latched an independent earlier cause, such as
+`InputSaturated`, still reports `Unavailable` and keeps that cause. Whenever
+the state is not `Ready`, `selected_engine` names the engine that actually delivers. That is
 `Cpu` for a node with a CPU fallback, and `Unknown` for a node that emits
 silence; it is never `Gpu`. `provider` still names the provider that was
 prepared. `epoch`,
@@ -677,11 +798,18 @@ The convolver family reports the same status directly. `GpuConvolver`,
 `GpuMultiConvolver` and `GpuConvolutionReverb` each gain `status_snapshot()`,
 `recovery_reason()` and `fenced()`. A staged convolver reports `provider` and
 `selected_engine` as `Unknown`, because a live `GpuCompute` device identifies
-neither. Without a device, the engine is reported as `Cpu`. A lost staged device
-is `Unavailable` with `ProviderLost`. `GpuMultiConvolver` declares
+neither. Without a device, the engine is reported as `Cpu`, and so is a
+tripped breaker or a lost device, because the worker's CPU convolution then
+delivers every block. A lost staged device is `Unavailable` with `ProviderLost`,
+and `recovery_sequence` is the worker block at which the cause latched. `GpuMultiConvolver` declares
 `fallback_policy == Silence` and `fallback_available == false`, so a lost device
 explains silent blocks. `GpuConvolutionReverb::status_snapshot()` returns the
 least healthy lane, and `report().lanes[i].status` carries each lane.
+
+Check a quiescent snapshot with `validate_gpu_audio_status()`. The
+[reliability page](gpu-audio-macos-reliability.md#reading-health) lists which
+node produces each recovery reason today, and which values are reserved with no
+producer yet.
 
 ### Keep host controls separate from callback execution
 
@@ -699,6 +827,10 @@ with a stable producer lifetime. No such broker operation is supplied by these
 C++ reports. Include the counter's unit when presenting product-specific
 diagnostics: host callbacks and internal processing quantums are not
 interchangeable.
+
+A GPU-audio health read operation for the control protocol and MCP is planned
+but has not landed. Until it does, read `GpuAudioTransport::status_snapshot()`
+from the host.
 
 ### Interpret worker timing separately
 

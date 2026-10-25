@@ -12,6 +12,8 @@
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/gpu_audio/gpu_audio_program.hpp>
 
+#include "streaming_block_stamp.hpp"
+
 namespace pulp::gpu_audio::detail {
 
 /// Why a prepared streaming model's mutable causal state is being replaced.
@@ -98,13 +100,6 @@ constexpr bool valid_streaming_prepare_context(const StreamingPrepareContext& co
            !context.artifact_id.empty() && !context.artifact_hash.empty() &&
            context.max_frames >= context.spec->block_size;
 }
-
-struct StreamingBlockStamp {
-    std::uint64_t epoch = 0;
-    std::uint64_t sequence = 0;
-
-    friend constexpr bool operator==(StreamingBlockStamp, StreamingBlockStamp) noexcept = default;
-};
 
 struct StreamingBlock {
     StreamingBlockStamp stamp{};
@@ -244,6 +239,9 @@ class StreamingBackend {
             return StreamingAdmission::Rejected;
         return enqueue_validated(block);
     }
+    // Returns the number of provider completions observed, including partial
+    // completions of a block that is not yet terminal. A provider that keeps
+    // completing work is making progress even if its oldest block is slow.
     virtual std::size_t service_until(std::uint64_t deadline_ns) noexcept = 0;
     virtual bool receive(StreamingTerminal&) noexcept = 0;
     // Host/quiescent only: stop admission, fence/drain or cancel queued work,
@@ -252,6 +250,11 @@ class StreamingBackend {
     virtual bool reprepare_after_device_loss(std::uint64_t epoch) noexcept = 0;
     virtual bool quiesce() noexcept = 0;
     virtual bool release() noexcept = 0;
+    // Worker only: the provider's device is gone, so nothing admitted will
+    // complete successfully again. Latched until release().
+    virtual bool device_lost() const noexcept {
+        return false;
+    }
 
   protected:
     virtual StreamingAdmission enqueue_validated(const StreamingBlock&) noexcept = 0;

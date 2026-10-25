@@ -82,6 +82,22 @@ TEST_CASE("put + get round-trip on an existing file", "[scan_cache]") {
     REQUIRE(got->unique_id == "com.pulp.delay");
 }
 
+TEST_CASE("a bundle directory entry hits until the binary inside it changes", "[scan_cache]") {
+    TempFile bundle;
+    const auto binary = bundle.path / "Contents" / "MacOS" / "Plugin";
+    fs::create_directories(binary.parent_path());
+    std::ofstream(binary, std::ios::binary) << "original";
+    std::ofstream(bundle.path / "Contents" / "Info.plist", std::ios::binary) << "<plist/>";
+
+    HostScanCache cache;
+    cache.put(bundle.path.string(), sample_info());
+    REQUIRE(cache.get(bundle.path.string()).has_value());
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    std::ofstream(binary, std::ios::binary) << "rebuilt with very different content";
+    REQUIRE_FALSE(cache.get(bundle.path.string()).has_value());
+}
+
 TEST_CASE("get invalidates when file changes", "[scan_cache]") {
     TempFile f;
     f.write("original");
