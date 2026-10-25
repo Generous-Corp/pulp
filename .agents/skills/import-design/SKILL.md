@@ -2711,6 +2711,17 @@ Benchmark receipt (`pulp-design-import-benchmark-v2`) gotchas:
   `--paragraph-cache=off` is the uncached text path and the gate's planted
   negative; compare cached vs uncached with `--baseline-arg` /
   `--candidate-arg` on the same lane.
+- **`--ir` resolves manifest assets against the DesignIR's directory.** An
+  importer writes `local_path` relative to the DesignIR, and the IR-bound lanes
+  used to materialize without `asset_base_directory`, so they resolved those
+  paths against the process's working directory. Started anywhere but beside
+  the IR, the bench drew no images and its decode and image-cache counts read
+  zero: the steady-state gate was blind to images on imported panels. With
+  the real asset base the materializer's containment applies too: a manifest
+  path that climbs out of the IR's directory (`../x.png`) or names an absolute
+  file elsewhere is refused and drawn as a placeholder, even though the old
+  working-directory lookup used to load it. Keep a benchmarked IR's assets
+  beside it, as the importer writes them.
 - **`--lane=live --ir` (optionally `--bundle`) is the production JS path over
   importer output.** The runtime's `__pulpRuntimeSettle__` called from
   `engine.evaluate` only records a budget; `WidgetBridge::load_script` drains
