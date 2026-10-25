@@ -14,6 +14,7 @@
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
+#include "font_weight_match.hpp"
 
 #ifdef PULP_HAS_SKIA
 
@@ -87,7 +88,7 @@ std::span<const BundledBlob> bundled_blobs() {
 //
 // Pass 1 — exact weight + slant. The ideal path.
 //
-// Pass 2 — closest same-slant face within one approximate CSS weight step.
+// Pass 2 — the CSS-matched same-slant face within one approximate CSS weight step.
 // A family that ships several weights should satisfy a request from its own
 // members before the cascade abandons it for a system face. The bound is what
 // keeps that from overcorrecting: a family holding only a Regular must NOT
@@ -110,18 +111,27 @@ sk_sp<SkTypeface> best_style_match(const std::vector<sk_sp<SkTypeface>>& faces,
         }
     }
 
+    // Among the same-slant faces within the bound, the CSS weight rules pick,
+    // as they do for platform families, so a registered family weighs a
+    // missing weight the way the paragraph collection's provider does.
     constexpr int kMaxWeightGap = 200;
-    sk_sp<SkTypeface> best;
-    int best_gap = std::numeric_limits<int>::max();
+    std::vector<int> weights;
     for (const auto& f : faces) {
         if (!f) continue;
         SkFontStyle have = f->fontStyle();
         if (have.slant() != style.slant()) continue;
-        int gap = std::abs(have.weight() - style.weight());
-        if (gap > kMaxWeightGap) continue;
-        if (gap < best_gap) { best_gap = gap; best = f; }
+        if (std::abs(have.weight() - style.weight()) > kMaxWeightGap)
+            continue;
+        weights.push_back(have.weight());
     }
-    if (best) return best;
+    const int css_weight = css_match_font_weight(weights, style.weight());
+    for (const auto& f : faces) {
+        if (!f)
+            continue;
+        SkFontStyle have = f->fontStyle();
+        if (have.slant() == style.slant() && have.weight() == css_weight)
+            return f;
+    }
 
     for (const auto& f : faces) {
         if (!f) continue;
